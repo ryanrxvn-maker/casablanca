@@ -542,231 +542,170 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
   );
 }
 
-/* ────────── SLIDE HERÓI: FAKEPRINT (manchete de telejornal) ────────── */
+/* ────────── SLIDE HERÓI: FAKEPRINT (transmissão full-bleed) ────────── */
+/**
+ * O card INTEIRO é a transmissão: repórter na chuva (imagem em alta) que
+ * vira VÍDEO no hover. Zero coluna de texto — toda a copy vive no chyron
+ * estilo CNN (kicker vermelho + barra branca + sub-deck + ticker), com
+ * entrada animada de telejornal. O card todo é clicável → /tools/fakepass.
+ */
 function FakePrintSlide() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  function play() {
+    const v = videoRef.current;
+    if (!v) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    try { v.currentTime = 0; } catch { /* ignore */ }
+    const pr = v.play();
+    if (pr && typeof pr.catch === 'function') pr.catch(() => {});
+  }
+  function stop() {
+    const v = videoRef.current;
+    if (v) {
+      try { v.pause(); v.currentTime = 0; } catch { /* ignore */ }
+    }
+  }
+
   return (
-    <div
-      className="dark-island group relative overflow-hidden rounded-[26px] border border-line/60"
-      style={{ background: 'var(--banner-bg)' }}
+    <Link
+      href="/tools/fakepass"
+      onMouseEnter={play}
+      onMouseLeave={stop}
+      className="dark-island group relative block overflow-hidden rounded-[26px] border border-line/60"
+      style={{ boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)' }}
     >
-      {/* Estúdio de jornal: vermelho urgente + azul broadcast pulsando fora de fase */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            'radial-gradient(60% 90% at 0% 50%, rgba(239,68,68,0.26), transparent 60%)',
-          animation: 'promo-pulse-1 6s ease-in-out infinite',
-        }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            'radial-gradient(60% 90% at 100% 50%, rgba(59,130,246,0.22), transparent 60%)',
-          animation: 'promo-pulse-2 7s ease-in-out infinite',
-        }}
-      />
-      {/* Grid sutil de estúdio */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.05]"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
-          backgroundSize: '46px 46px',
-        }}
-      />
-
-      <Sparkle className="absolute top-6 right-[46%]" delay={0} />
-      <Sparkle className="absolute top-[64%] right-[40%]" delay={800} />
-      <Sparkle className="absolute top-[24%] left-[46%]" delay={1600} />
-
-      {/* TV com a manchete à direita */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 lg:block xl:right-12"
-        style={{ animation: 'promo-icon-float 6s ease-in-out infinite' }}
-      >
-        <NewsTvFrame />
-      </div>
-
-      <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:px-12 md:py-14 lg:max-w-[56%]">
-        <div>
-          {/* Chip AO VIVO */}
-          <div
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-red-500/50 bg-red-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-red-300 backdrop-blur-md"
-            style={{
-              fontFamily: 'var(--font-tech)',
-              boxShadow: '0 0 22px -6px rgba(239,68,68,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
-            }}
-          >
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-70" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.95)]" />
-            </span>
-            FakePrint · Zona de Notícias
-          </div>
-
-          <h3
-            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
-            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
-          >
-            Sua manchete no ar.
-            <br />
-            <span
-              style={{
-                background: 'linear-gradient(135deg, #f87171 0%, #fca5a5 45%, #ffffff 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              Em qualquer telejornal.
-            </span>
-          </h3>
-          <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
-            Headlines de canais de notícia fiéis ao que vai ao ar: você escreve
-            a manchete, o FakePrint monta o print do telejornal pronto pra
-            postar — além dos modelos de redes sociais.
-          </p>
-
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <Link
-              href="/tools/fakepass"
-              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-white"
-              style={{
-                background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 60%, #7f1d1d 100%)',
-                boxShadow:
-                  'inset 0 1px 0 rgba(255,255,255,0.35), 0 12px 32px -8px rgba(239,68,68,0.6), 0 2px 6px rgba(0,0,0,0.4)',
-              }}
-            >
-              <span className="relative z-10">Criar minha manchete</span>
-              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
-                →
-              </span>
-              <span
-                aria-hidden
-                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
-              />
-            </Link>
-            <Link
-              href="/tools/fakepass"
-              className="dark-island group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/20 bg-black/60 px-6 py-3 text-[13.5px] font-bold text-white backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-white/45 hover:bg-black/80"
-              style={{
-                boxShadow:
-                  'inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 28px -10px rgba(0,0,0,0.7)',
-              }}
-            >
-              <span className="relative z-10">Ver todos os modelos</span>
-            </Link>
-          </div>
-        </div>
-      </div>
-
-      <style jsx>{`
-        @keyframes promo-pulse-1 {
-          0%, 100% { opacity: 0.55; transform: scale(1); }
-          50% { opacity: 0.85; transform: scale(1.05); }
-        }
-        @keyframes promo-pulse-2 {
-          0%, 100% { opacity: 0.55; transform: scale(1.03); }
-          50% { opacity: 0.85; transform: scale(0.97); }
-        }
-        @keyframes promo-icon-float {
-          0%, 100% { transform: translateY(-50%) translateX(0); }
-          50% { transform: translateY(calc(-50% - 8px)) translateX(-3px); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/** TV do slide: jornalista IA + chyron estilo CNN com a manchete do produto. */
-function NewsTvFrame() {
-  return (
-    <div
-      className="w-[380px] xl:w-[440px]"
-      style={{
-        filter:
-          'drop-shadow(0 34px 64px rgba(0,0,0,0.65)) drop-shadow(0 0 44px rgba(239,68,68,0.3))',
-      }}
-    >
-      <div className="overflow-hidden rounded-[16px] border border-white/15 bg-black">
-        <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
-          {/* Âncora gerada por IA (asset real do produto) */}
+      <div className="relative aspect-[16/10] max-h-[480px] w-full sm:aspect-[16/8] lg:aspect-[21/9]">
+        {/* MÍDIA full-bleed com zoom lento no hover */}
+        <div
+          className="absolute inset-0 transition-transform duration-[1600ms] ease-out group-hover:scale-[1.05]"
+          style={{ transform: 'translateZ(0)', willChange: 'transform' }}
+        >
+          <video
+            ref={videoRef}
+            src="/hero/fakeprint-reporter.mp4"
+            poster="/hero/fakeprint-reporter.jpg"
+            muted
+            loop
+            playsInline
+            preload="none"
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: '50% 26%', transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+          />
+          {/* Poster em alta por cima — some no hover revelando o vídeo */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/cards/criar-avatar.jpg"
+            src="/hero/fakeprint-reporter.jpg"
             alt=""
             aria-hidden
             decoding="async"
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{
-              objectPosition: '50% 22%',
-              transform: 'scale(1.08) translateZ(0)',
-              filter: 'saturate(0.9) contrast(1.06) brightness(0.96)',
-            }}
+            className="absolute inset-0 h-full w-full object-cover opacity-100 transition-opacity duration-700 ease-out group-hover:opacity-0"
+            style={{ objectPosition: '50% 26%', transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
           />
-          {/* Vinheta broadcast (legibilidade do chyron) */}
-          <div
-            aria-hidden
-            className="absolute inset-0"
-            style={{
-              background:
-                'linear-gradient(to top, rgba(2,2,4,0.72) 0%, rgba(2,2,4,0.12) 34%, transparent 55%), radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(2,2,10,0.35) 100%)',
-            }}
-          />
+        </div>
 
-          {/* AO VIVO + relógio */}
-          <div className="absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-[4px] bg-black/70 px-2 py-1 backdrop-blur-sm">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-70" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
+        {/* Vinheta broadcast (legibilidade) + scanlines de transmissão */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(to top, rgba(2,2,6,0.88) 0%, rgba(2,2,6,0.35) 26%, transparent 48%), linear-gradient(to bottom, rgba(2,2,6,0.45) 0%, transparent 22%)',
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.07] mix-blend-overlay"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(to bottom, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0.5) 1px, transparent 1px, transparent 3px)',
+          }}
+        />
+
+        {/* Topo: AO VIVO + bug + relógio real */}
+        <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4 md:p-5">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-[5px] bg-[#cc0000] px-2 py-1 shadow-[0_4px_18px_-4px_rgba(204,0,0,0.8)]">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-80" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+              </span>
+              <span
+                className="text-[10px] font-black uppercase tracking-[0.18em] text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Ao vivo
+              </span>
             </span>
             <span
-              className="text-[9px] font-black uppercase tracking-[0.18em] text-white"
+              className="hidden rounded-[5px] bg-black/60 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur-sm sm:inline-flex"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              Ao vivo
+              FakePrint · Zona de Notícias
             </span>
           </div>
-          <div
-            className="num absolute right-2.5 top-2.5 rounded-[4px] bg-black/70 px-2 py-1 text-[9.5px] font-bold text-white/90 backdrop-blur-sm"
-            style={{ fontFamily: 'var(--font-mono)' }}
-          >
-            21:47
-          </div>
+          <BroadcastClock />
+        </div>
 
-          {/* Chyron estilo CNN: kicker vermelho + barra branca */}
-          <div className="absolute inset-x-0 bottom-0">
-            <div className="mx-2 mb-2 overflow-hidden rounded-[6px] shadow-[0_10px_28px_-10px_rgba(0,0,0,0.9)]">
-              <div className="flex items-stretch">
+        {/* CHYRON — todo o texto do card vive aqui */}
+        <div className="absolute inset-x-0 bottom-0 z-10 p-3 md:p-6">
+          <div className="fps-chyron">
+            {/* Tag PLANTÃO piscando */}
+            <span
+              className="fps-plantao mb-1.5 hidden items-center gap-1.5 rounded-[4px] sm:inline-flex bg-[#cc0000] px-2 py-0.5 text-[9.5px] font-black uppercase tracking-[0.22em] text-white"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Plantão
+            </span>
+
+            {/* Barra principal: kicker + manchete */}
+            <div className="flex items-stretch overflow-hidden rounded-t-[6px] shadow-[0_18px_44px_-12px_rgba(0,0,0,0.95)]">
+              <span
+                className="fps-kicker relative flex shrink-0 items-center overflow-hidden bg-[#cc0000] px-3 text-[13px] font-black uppercase tracking-[0.06em] text-white md:px-4 md:text-[16px]"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                <span className="relative z-10">Agora</span>
+                <span aria-hidden className="fps-kicker-sheen absolute inset-0" />
+              </span>
+              <span className="fps-headline-wrap relative flex-1 overflow-hidden bg-white">
                 <span
-                  className="flex shrink-0 items-center bg-[#cc0000] px-2.5 text-[11px] font-black uppercase tracking-[0.08em] text-white"
-                  style={{ fontFamily: 'var(--font-tech)' }}
+                  className="fps-headline block px-3 py-2 text-[14px] font-black uppercase leading-[1.08] tracking-tight text-[#0b0b0f] md:px-4 md:py-2.5 md:text-[21px] xl:text-[24px]"
+                  style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
                 >
-                  Agora
+                  AutoEdit lança manchetes de telejornal prontas pra postar
                 </span>
-                <span
-                  className="flex-1 bg-white px-2.5 py-1.5 text-[12px] font-black uppercase leading-[1.15] tracking-tight text-[#111]"
-                  style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
-                >
-                  AutoEdit lança headlines de telejornal prontas pra postar
-                </span>
-              </div>
-              {/* Ticker */}
-              <div className="relative overflow-hidden bg-[#0c0c10] py-1">
-                <div className="ntf-ticker flex w-max items-center whitespace-nowrap">
+              </span>
+            </div>
+
+            {/* Sub-deck */}
+            <div className="fps-subdeck hidden items-center overflow-hidden rounded-b-[6px] bg-black/70 backdrop-blur-sm sm:flex">
+              <span
+                className="truncate px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/85 md:px-4 md:text-[11.5px]"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Você escreve a notícia · o FakePrint monta o print fiel ao original
+              </span>
+            </div>
+
+            {/* Ticker rolando */}
+            <div className="fps-ticker-row mt-1.5 flex items-stretch overflow-hidden rounded-[5px]">
+              <span
+                className="flex shrink-0 items-center bg-[#cc0000] px-2.5 text-[9px] font-black uppercase tracking-[0.16em] text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Urgente
+              </span>
+              <div className="relative flex-1 overflow-hidden bg-[#0a0a0e]/90 py-1.5 backdrop-blur-sm">
+                <div className="fps-ticker flex w-max items-center whitespace-nowrap">
                   {[0, 1].map((i) => (
                     <span
                       key={i}
-                      className="px-3 text-[9px] font-bold uppercase tracking-[0.14em] text-white/75"
+                      className="px-3 text-[9.5px] font-bold uppercase tracking-[0.16em] text-white/80"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      Você escreve a manchete · o FakePrint monta o print fiel
-                      ao original · CNN, Globo, Record e + · pronto em segundos
-                      · sem Photoshop ·
+                      Manchetes de CNN, Globo, Record e + · fiéis ao que vai ao
+                      ar · prontas em segundos · sem Photoshop · clique pra
+                      criar a sua ·
                     </span>
                   ))}
                 </div>
@@ -777,18 +716,94 @@ function NewsTvFrame() {
       </div>
 
       <style jsx>{`
-        .ntf-ticker {
-          animation: ntf-ticker-run 18s linear infinite;
+        /* Entrada de telejornal: o bloco sobe, o kicker estala, a barra
+           branca abre da esquerda pra direita, decks entram em cascata. */
+        .fps-chyron {
+          animation: fps-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
-        @keyframes ntf-ticker-run {
+        @keyframes fps-rise {
+          from { opacity: 0; transform: translateY(26px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .fps-plantao {
+          animation: fps-blink 2.2s steps(1) infinite;
+        }
+        @keyframes fps-blink {
+          0%, 72%, 100% { opacity: 1; }
+          78%, 88% { opacity: 0.35; }
+        }
+        .fps-kicker {
+          animation: fps-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1) 180ms both;
+          transform-origin: left center;
+        }
+        @keyframes fps-pop {
+          from { transform: scaleX(0.4); opacity: 0; }
+          to { transform: scaleX(1); opacity: 1; }
+        }
+        .fps-kicker-sheen {
+          background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+          transform: translateX(-120%);
+          animation: fps-sheen 4.2s ease-in-out 1.2s infinite;
+        }
+        @keyframes fps-sheen {
+          0% { transform: translateX(-120%); }
+          32%, 100% { transform: translateX(120%); }
+        }
+        .fps-headline-wrap {
+          animation: fps-open 720ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
+        }
+        @keyframes fps-open {
+          from { clip-path: inset(0 100% 0 0); }
+          to { clip-path: inset(0 0 0 0); }
+        }
+        .fps-subdeck {
+          animation: fps-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both;
+        }
+        .fps-ticker-row {
+          animation: fps-rise 560ms cubic-bezier(0.22, 1, 0.36, 1) 560ms both;
+        }
+        .fps-ticker {
+          animation: fps-ticker-run 22s linear infinite;
+        }
+        @keyframes fps-ticker-run {
           from { transform: translateX(0); }
           to { transform: translateX(-50%); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .ntf-ticker { animation: none; }
+          .fps-chyron, .fps-plantao, .fps-kicker, .fps-kicker-sheen,
+          .fps-headline-wrap, .fps-subdeck, .fps-ticker-row, .fps-ticker {
+            animation: none !important;
+            clip-path: none !important;
+          }
         }
       `}</style>
-    </div>
+    </Link>
+  );
+}
+
+/** Relógio real da transmissão (HH:MM:SS ao vivo). */
+function BroadcastClock() {
+  const [now, setNow] = useState<string>('');
+  useEffect(() => {
+    const tick = () =>
+      setNow(
+        new Date().toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      );
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span
+      className="num rounded-[5px] bg-black/60 px-2 py-1 text-[11px] font-bold tabular-nums text-white/90 backdrop-blur-sm"
+      style={{ fontFamily: 'var(--font-mono)' }}
+    >
+      {now || '--:--:--'}
+    </span>
   );
 }
 
