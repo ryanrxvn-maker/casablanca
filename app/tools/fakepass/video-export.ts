@@ -363,7 +363,20 @@ export async function prepareStageVideo(
   return { width: base.width, height: base.height, renderFrame, animated: specs.length > 0 };
 }
 
-/** Grava `seconds` de animação e devolve o Blob .webm. */
+/** Grava `seconds` de animação e devolve o Blob .webm.
+ *
+ *  ⚠ NÃO usar requestAnimationFrame aqui: com a aba em segundo plano ou a
+ *  janela ocluída o Chrome SUSPENDE o rAF — o canvas para de repintar, o
+ *  captureStream não emite mais frames e o vídeo sai com 1-2s em vez dos 20s
+ *  (era exatamente o bug do export 9:16: gravação longa, usuário troca de
+ *  aba, frames morrem). O motor agora é imune a throttle:
+ *   • clock num WEB WORKER (thread própria, sem throttle de timer da página);
+ *   • captureStream(0) + track.requestFrame() — cada paint é EMPURRADO pro
+ *     encoder, sem depender do compositor;
+ *   • recorder.start(1000) com timeslice — falha no meio ainda entrega o que
+ *     já foi gravado;
+ *   • parada por tempo DECORRIDO medido no tick (nada de setTimeout solto).
+ */
 export async function recordStageVideo(
   node: HTMLElement,
   opts: { seconds: number; targetW: number; refW?: number },
@@ -378,7 +391,17 @@ export async function recordStageVideo(
   // gancho de inspeção (testes/dev): permite renderizar frames à mão
   (window as any).__fpVidLast = { prep, canvas: cv, ctx };
 
-  const stream = cv.captureStream(30);
+  // captura MANUAL (frameRequestRate 0): o frame só entra quando a gente chama
+  // track.requestFrame() — determinístico. Sem suporte (borda), cai pra 30fps.
+  let stream = cv.captureStream(0);
+  let track = stream.getVideoTracks()[0] as any;
+  const manualPush = typeof track?.requestFrame === 'function';
+  if (!manualPush) {
+    track?.stop?.();
+    stream = cv.captureStream(30);
+    track = stream.getVideoTracks()[0];
+  }
+
   let mime = 'video/webm;codecs=vp9';
   if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
   if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
@@ -391,18 +414,57 @@ export async function recordStageVideo(
     recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
   });
 
-  let raf = 0;
+  const FPS = 30;
+  const seconds = Math.max(1, opts.seconds);
   const t0 = performance.now();
-  const loop = () => {
-    const t = (performance.now() - t0) / 1000;
-    prep.renderFrame(ctx, t);
-    raf = requestAnimationFrame(loop);
+  let worker: Worker | null = null;
+  let fallbackId: ReturnType<typeof setInterval> | null = null;
+  let stopped = false;
+
+  const finish = () => {
+    if (stopped) return;
+    stopped = true;
+    try {
+      worker?.terminate();
+    } catch {}
+    if (fallbackId) clearInterval(fallbackId);
+    if (recorder.state !== 'inactive') recorder.stop();
   };
-  raf = requestAnimationFrame(loop);
-  recorder.start();
-  await new Promise((r) => setTimeout(r, Math.max(1, opts.seconds) * 1000));
-  recorder.stop();
+
+  const tick = () => {
+    if (stopped) return;
+    const t = (performance.now() - t0) / 1000;
+    // um frame com erro NÃO pode matar o loop (senão o vídeo congela ali)
+    try {
+      prep.renderFrame(ctx, Math.min(t, seconds));
+    } catch {}
+    try {
+      if (manualPush) track.requestFrame();
+    } catch {}
+    if (t >= seconds) finish();
+  };
+
+  // clock no Worker: postMessage chega como task normal mesmo com a aba de
+  // fundo (mesmo padrão do poll HeyGen). Se o Worker falhar, setInterval da
+  // página segura o export com a aba VISÍVEL (comportamento antigo).
+  try {
+    const src = `let id=0;onmessage=()=>{id=setInterval(()=>postMessage(0),${Math.round(1000 / FPS)})}`;
+    const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+    worker = new Worker(url);
+    URL.revokeObjectURL(url);
+    worker.onmessage = tick;
+    worker.postMessage('start');
+  } catch {
+    fallbackId = setInterval(tick, Math.round(1000 / FPS));
+  }
+
+  recorder.addEventListener('error', finish);
+  recorder.start(1000);
+  tick(); // 1º frame já dentro da captura
+  // backstop: se algo travar o clock, encerra e entrega o que tiver
+  setTimeout(finish, seconds * 1000 + 15_000);
+
   const blob = await done;
-  cancelAnimationFrame(raf);
+  finish();
   return blob;
 }

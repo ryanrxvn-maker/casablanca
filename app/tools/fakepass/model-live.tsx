@@ -733,6 +733,9 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
     };
     const loop = () => {
       tick();
+      // carimbo pro export de vídeo saber se o rAF está VIVO (aba de fundo
+      // suspende o rAF — aí o gravador avança a animação por conta própria)
+      (cv as any).__fpLastRaf = performance.now();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -760,9 +763,21 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
   const gravar = () => {
     const cv = liveCanvas[kind];
     if (!cv || gravando) return;
+    // ⚠ Mesma blindagem do video-export.ts: rAF morre com a aba em segundo
+    // plano — captura MANUAL (captureStream(0) + requestFrame) com clock num
+    // Worker, e a animação avança na mão quando o rAF do preview congela.
     let recorder: MediaRecorder;
+    let track: any = null;
+    let manualPush = false;
     try {
-      const stream = cv.captureStream(30);
+      let stream = cv.captureStream(0);
+      track = stream.getVideoTracks()[0];
+      manualPush = typeof track?.requestFrame === 'function';
+      if (!manualPush) {
+        track?.stop?.();
+        stream = cv.captureStream(30);
+        track = stream.getVideoTracks()[0];
+      }
       let mime = 'video/webm;codecs=vp9';
       if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8';
       if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
@@ -796,8 +811,45 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
         title: `Live ${kind === 'tiktok' ? 'TikTok' : 'Instagram'} — vídeo exportado`,
       });
     };
-    recorder.start();
-    setTimeout(() => recorder.stop(), Math.max(1, seconds) * 1000);
+
+    const t0 = performance.now();
+    let worker: Worker | null = null;
+    let fallbackId: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+    const finish = () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        worker?.terminate();
+      } catch {}
+      if (fallbackId) clearInterval(fallbackId);
+      if (recorder.state !== 'inactive') recorder.stop();
+    };
+    const tickRec = () => {
+      if (stopped) return;
+      const now = performance.now();
+      // rAF do preview parado (aba de fundo)? Avança 2 frames ≈ ritmo 60fps.
+      if (now - ((cv as any).__fpLastRaf || 0) > 120) (cv as any).__fpTick?.(2);
+      try {
+        if (manualPush) track.requestFrame();
+      } catch {}
+      if ((now - t0) / 1000 >= Math.max(1, seconds)) finish();
+    };
+    try {
+      const src = 'let id=0;onmessage=()=>{id=setInterval(()=>postMessage(0),33)}';
+      const wurl = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+      worker = new Worker(wurl);
+      URL.revokeObjectURL(wurl);
+      worker.onmessage = tickRec;
+      worker.postMessage('start');
+    } catch {
+      fallbackId = setInterval(tickRec, 33);
+    }
+    recorder.addEventListener('error', finish);
+    recorder.start(1000);
+    tickRec();
+    // backstop: se algo travar o clock, encerra e entrega o que tiver
+    setTimeout(finish, Math.max(1, seconds) * 1000 + 15_000);
   };
 
   return (
