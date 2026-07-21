@@ -3,14 +3,15 @@
 /**
  * HeroScene — o palco 3D da landing v2.
  *
- * Uma cena noturna de "estúdio rodando sozinho": piso em perspectiva que
- * esteira em direção ao viewer, aurora da marca, o coelho como núcleo de
- * energia e painéis de vidro flutuando em profundidades diferentes — fila de
- * lipsync, take vertical REAL (mp4 do produto), SRT alinhando e o ZIP caindo.
- * Tudo reage ao mouse via <Parallax> (CSS vars --px/--py), sem WebGL.
+ * Direção "Sobe o bruto. Baixa o pronto.": a bancada de ferramentas do
+ * editor. Piso em perspectiva que esteira em direção ao viewer, aurora da
+ * marca, o coelho como núcleo de energia e painéis de vidro flutuando em
+ * profundidades diferentes — fila de lipsync, clipe baixado pelo Downloader,
+ * SRT alinhando e o ZIP comprimido saindo. Tudo reage ao mouse via
+ * <Parallax> (CSS vars --px/--py), sem WebGL.
  *
  * Honestidade: os painéis são HUD ilustrativo do produto real — nada de
- * ferramenta interna (admin-only) aparece aqui.
+ * ferramenta interna (admin-only) e nada de "dormir enquanto entrega".
  */
 
 import Link from 'next/link';
@@ -64,7 +65,7 @@ export function HeroScene() {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-60" />
                   <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet shadow-[0_0_10px_rgba(167,139,250,0.9)]" />
                 </span>
-                Suíte de automação de edição
+                Suíte de ferramentas de edição
               </div>
             </Reveal>
 
@@ -73,12 +74,12 @@ export function HeroScene() {
               style={{ fontSize: 'clamp(3rem, 7.2vw, 5.6rem)', lineHeight: 0.98 }}
             >
               <Reveal as="span" className="block" delay={80} y={26}>
-                <SmokeText text="Você dorme." />
+                <SmokeText text="Sobe o bruto." />
               </Reveal>
               <Reveal as="span" className="block" delay={220} y={26} style={{ marginTop: '0.08em' }}>
                 {/* 0.75em: garante UMA linha na coluna e cria contraste editorial */}
                 <span className="hs-grad-line" style={{ fontSize: '0.75em' }}>
-                  O estúdio entrega.
+                  Baixa o pronto.
                 </span>
               </Reveal>
             </h1>
@@ -88,15 +89,15 @@ export function HeroScene() {
                 className="display-subtle mt-5 text-[19px] md:text-[22px]"
                 style={{ lineHeight: 1.35 }}
               >
-                Edição de vídeo no automático, direto do navegador.
+                O trabalho repetitivo da edição, resolvido no navegador.
               </p>
             </Reveal>
 
             <Reveal delay={470} y={16}>
               <p className="mt-4 max-w-[480px] text-[15.5px] leading-relaxed text-text-muted">
-                Decupagem automática, legenda alinhada à copy e processamento
-                em fila — você liga, vai fazer outra coisa e volta pra revisar
-                o que já saiu.
+                Decupagem que corta o silêncio sozinha, legenda alinhada à
+                copy palavra por palavra, lipsync, compressão e download em
+                lote — você fica só com o corte que importa.
               </p>
             </Reveal>
 
@@ -160,9 +161,9 @@ export function HeroScene() {
               </div>
             </div>
 
-            {/* HUD: relógio da madrugada */}
+            {/* HUD: contador de silêncio removido */}
             <div className="absolute right-0 top-0" style={depth(-24, -16)}>
-              <NightClock />
+              <SilenceMeter />
             </div>
 
             {/* Painel: fila de lipsync */}
@@ -175,13 +176,13 @@ export function HeroScene() {
               </div>
             </div>
 
-            {/* Painel: take vertical real (mp4 do produto) */}
+            {/* Painel: clipe vertical baixado pelo Downloader */}
             <div
               className="absolute left-0 top-[24%] md:left-2"
               style={depth(-18, -12, 6)}
             >
               <div className="hs-float" style={{ animationDuration: '6.2s', animationDelay: '0.6s' }}>
-                <BrollPanel />
+                <DownloadPanel />
               </div>
             </div>
 
@@ -436,18 +437,17 @@ export function HeroScene() {
   );
 }
 
-/* ────────────────────── HUD: relógio da madrugada ────────────────────── */
+/* ────────────────────── HUD: silêncio removido ────────────────────── */
 
-function NightClock() {
-  // Ficção ilustrativa: 03:47 e a fila segue rodando. Puramente decorativo.
+function SilenceMeter() {
+  // Ficção ilustrativa: o contador de silêncio cortado sobe. Puramente decorativo.
   const [sec, setSec] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setSec((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, []);
-  const total = 3 * 3600 + 47 * 60 + 12 + sec;
-  const hh = String(Math.floor(total / 3600) % 24).padStart(2, '0');
-  const mm = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const total = 6 * 60 + 12 + sec;
+  const mm = String(Math.floor(total / 60)).padStart(2, '0');
   const ss = String(total % 60).padStart(2, '0');
 
   return (
@@ -461,13 +461,13 @@ function NightClock() {
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgba(200,214,132,0.9)]" />
       </span>
       <span className="num text-[12px] text-white/90" style={{ fontFamily: 'var(--font-mono)' }}>
-        {hh}:{mm}:{ss}
+        −{mm}:{ss}
       </span>
       <span
         className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/45"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
-        fila rodando
+        silêncio removido
       </span>
     </div>
   );
@@ -580,9 +580,9 @@ function QueuePanel() {
   );
 }
 
-/* ────────────────────── Painel: take vertical real (9:16) ────────────────────── */
+/* ────────────────────── Painel: clipe baixado pelo Downloader (9:16) ────────────────────── */
 
-function BrollPanel() {
+function DownloadPanel() {
   return (
     <div
       className="relative w-[148px] overflow-hidden rounded-[16px] border border-lime/40 md:w-[160px]"
@@ -613,8 +613,12 @@ function BrollPanel() {
         className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded bg-black/65 px-1.5 py-0.5 backdrop-blur-sm"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
-        <span className="text-[7.5px] font-bold uppercase tracking-widest text-violet">Take</span>
-        <span className="num text-[7.5px] font-extrabold text-white">04</span>
+        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 3v12" />
+          <path d="M6 11l6 6 6-6" />
+          <path d="M4 21h16" />
+        </svg>
+        <span className="text-[7.5px] font-bold uppercase tracking-widest text-violet">Baixado</span>
       </div>
       <div
         className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-black/65 px-1.5 py-0.5 backdrop-blur-sm"
@@ -661,11 +665,11 @@ function SrtPanel() {
       <div className="mt-2.5 space-y-2">
         <div>
           <div className="num text-[8.5px] text-violet/85">00:12,480 → 00:13,020</div>
-          <div className="text-[10px] text-white/85">você liga a fila</div>
+          <div className="text-[10px] text-white/85">sobe o áudio e a copy</div>
         </div>
         <div>
           <div className="num text-[8.5px] text-violet/85">00:13,180 → 00:14,300</div>
-          <div className="srt-typing text-[10px] text-white/85">e vai dormir</div>
+          <div className="srt-typing text-[10px] text-white/85">a legenda sai alinhada</div>
         </div>
       </div>
       <style jsx>{`
@@ -710,14 +714,14 @@ function ZipChip() {
       </span>
       <div className="leading-tight">
         <div className="num text-[11px] font-bold text-white/95" style={{ fontFamily: 'var(--font-mono)' }}>
-          AD14_montado.zip
+          AD14_comprimido.zip
         </div>
         <div
           className="mt-0.5 flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-[0.16em] text-lime"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           <span className="h-1 w-1 rounded-full bg-lime shadow-[0_0_6px_rgba(200,214,132,0.9)]" />
-          3 arquivos · entregue
+          3 arquivos · pronto
         </div>
       </div>
     </div>

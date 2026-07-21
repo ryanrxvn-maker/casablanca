@@ -217,7 +217,7 @@ export default function PillarPage({ params }: { params: { slug: string } }) {
         {/* CTA final */}
         <section className="mt-14 rounded-[20px] border border-line/60 p-7 text-center md:p-9">
           <h2 className="text-[22px] font-bold tracking-tight text-white md:text-[28px]">
-            Liga a fila e vá dormir.
+            Sobe o bruto. Baixa o pronto.
           </h2>
           <p className="mx-auto mt-2 max-w-[460px] text-[14.5px] leading-relaxed text-text-muted">
             {p.keyword.charAt(0).toUpperCase() + p.keyword.slice(1)} e o resto do

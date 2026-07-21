@@ -3,9 +3,9 @@
 /**
  * LandingV2 — landing pública do Auto Edit (`/`), redesign 2026-07.
  *
- * Direção: "o estúdio que trabalha enquanto você dorme". Cena 3D em CSS puro
- * (parallax de ponteiro, piso em perspectiva, aurora), painéis HUD com o
- * produto REAL (mp4s de /cards) e copy 100% honesta:
+ * Direção: "sobe o bruto, baixa o pronto" — a bancada de ferramentas do
+ * editor. Cena 3D em CSS puro (parallax de ponteiro, piso em perspectiva,
+ * aurora), painéis HUD com o produto REAL (mp4s de /cards) e copy 100% honesta:
  *  • só ferramentas que o cliente usa hoje (nada admin-only ou interno);
  *  • dois planos: Free e Premium — nada de "em breve";
  *  • sem absolutos ("ilimitado", "100%", etc).

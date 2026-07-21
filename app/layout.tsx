@@ -67,7 +67,7 @@ const label = Inter({
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
-  'Automatize decupagem, lipsync e legendas. Ligue a fila e vá dormir — o estúdio entrega. Ferramentas de edição de vídeo no automático, direto no navegador.';
+  'Decupagem automática, lipsync, legenda alinhada à copy e compressão em lote — ferramentas de edição de vídeo direto no navegador. Sobe o bruto, baixa o pronto.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

@@ -352,7 +352,7 @@ export function HowSection() {
           <h2 className="section-title text-[38px] md:text-[54px]" style={{ lineHeight: 1.02 }}>
             <SmokeText text="Liga a fila." className="block" />
             <span className="display-subtle block">
-              <SmokeText text="O resto acontece sozinho." />
+              <SmokeText text="Volta pra baixar." />
             </span>
           </h2>
         </div>
@@ -678,15 +678,15 @@ export function FinalCta() {
               className="text-[42px] font-extrabold tracking-tight text-white md:text-[60px]"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.03em', lineHeight: 1.02 }}
             >
-              <SmokeText text="Liga a fila." className="block" />
+              <SmokeText text="Sobe o bruto." className="block" />
               <span className="display-subtle block text-[26px] md:text-[34px]">
-                <SmokeText text="O resto é com o estúdio." />
+                <SmokeText text="Baixa o pronto." />
               </span>
             </h2>
 
             <p className="mx-auto mt-5 max-w-[520px] text-[15.5px] leading-relaxed text-white/75">
-              Crie a conta, ligue a primeira ferramenta e veja o dia render sem
-              você no monitor.
+              Crie a conta grátis, suba o primeiro arquivo e veja o trabalho
+              repetitivo sair da sua frente.
             </p>
 
             <div className="mt-9 flex flex-wrap items-center justify-center gap-3.5">
@@ -784,7 +784,7 @@ export function LandingFooter() {
           className="text-[10px] uppercase tracking-[0.2em] text-text-dim"
           style={{ fontFamily: 'var(--font-label), var(--font-display)', fontWeight: 600 }}
         >
-          Você dorme · o estúdio entrega
+          Sobe o bruto · baixa o pronto
         </p>
       </div>
 

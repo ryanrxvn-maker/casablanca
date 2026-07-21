@@ -1,16 +1,17 @@
 import Link from 'next/link';
 import { Brand } from './Brand';
-import { SleepingRabbit } from './SleepingRabbit';
-import { SpaceMockup } from './SpaceMockup';
+import { SrtAlignCard, WaveCutCard } from './AuthScenes';
 import { SmokeText } from './SmokeText';
 
 /**
- * AuthShell v5 — login cinematográfico com 2 animações:
- *   1. Coelho dormindo com "Zzz" subindo (SleepingRabbit)
- *   2. Mockup tipo Space gerando imagem (SpaceMockup)
+ * AuthShell v6 — "Estúdio aberto."
  *
- * Tudo do lado esquerdo. Card do form à direita.
- * Copy nova: "Dormindo enquanto o Auto Edit trabalha".
+ * A era "dormindo/automação" saiu de cena: agora o lado esquerdo mostra as
+ * ferramentas REAIS trabalhando ao vivo:
+ *   1. Decupagem cortando silêncio numa waveform (WaveCutCard)
+ *   2. Gerador de SRT alinhando legenda à copy (SrtAlignCard)
+ *
+ * Card do form à direita, como antes.
  */
 export function AuthShell({
   title,
@@ -46,7 +47,7 @@ export function AuthShell({
 
       <section className="relative z-10 flex flex-1 items-center justify-center px-5 py-10 md:py-16">
         <div className="grid w-full max-w-[1180px] grid-cols-1 items-center gap-14 lg:grid-cols-[1.15fr_0.85fr]">
-          {/* LEFT — animação cinematográfica */}
+          {/* LEFT — as ferramentas trabalhando ao vivo */}
           <div
             className="order-2 fade-in-up lg:order-1"
             style={{ animationDelay: '120ms' }}
@@ -55,8 +56,8 @@ export function AuthShell({
               className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet/35 bg-violet/10 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-violet"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.85)]" />
-              ENQUANTO VOCÊ DORME
+              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,214,132,0.9)]" />
+              ESTÚDIO ABERTO
             </div>
             <h1
               className="hero-title"
@@ -65,23 +66,50 @@ export function AuthShell({
                 lineHeight: 1.05,
               }}
             >
-              <SmokeText text="Dormindo." className="block" />
+              <SmokeText text="Estúdio aberto." className="block" />
               <span className="display-subtle block">
-                <SmokeText text="O estúdio trabalha." />
+                <SmokeText text="Falta só você." />
               </span>
             </h1>
 
             {/* Cenas animadas em grid */}
             <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-[1.05fr_1fr]">
-              <SleepingRabbit />
-              <SpaceMockup />
+              <WaveCutCard />
+              <SrtAlignCard />
             </div>
 
             <p className="mt-6 max-w-[480px] text-[14.5px] leading-relaxed text-text-muted">
-              Você liga a automação, fecha o notebook e vai viver.
+              Decupagem, legenda alinhada à copy, lipsync e compressão em lote —
               <br />
-              O Auto Edit cuida do resto — silencioso e fiel ao briefing.
+              tudo direto no navegador, pronto pra quando você entrar.
             </p>
+
+            <div
+              className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-dim"
+              style={{ fontFamily: 'var(--font-label), var(--font-display)' }}
+            >
+              <span className="flex items-center gap-2">
+                <i
+                  className="inline-block h-[5px] w-[5px] rounded-full"
+                  style={{ background: 'rgb(var(--lime))', boxShadow: '0 0 8px rgb(var(--lime))' }}
+                />
+                Sem cartão pra começar
+              </span>
+              <span className="flex items-center gap-2">
+                <i
+                  className="inline-block h-[5px] w-[5px] rounded-full"
+                  style={{ background: 'rgb(var(--violet))', boxShadow: '0 0 8px rgb(var(--violet))' }}
+                />
+                Roda no navegador
+              </span>
+              <span className="flex items-center gap-2">
+                <i
+                  className="inline-block h-[5px] w-[5px] rounded-full"
+                  style={{ background: 'rgb(var(--cyan))', boxShadow: '0 0 8px rgb(var(--cyan))' }}
+                />
+                Cancela quando quiser
+              </span>
+            </div>
           </div>
 
           {/* RIGHT — card form */}

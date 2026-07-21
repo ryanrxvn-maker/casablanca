@@ -47,7 +47,7 @@ export default function OpengraphImage() {
             maxWidth: 1000,
           }}
         >
-          Edição de vídeo no automático.
+          Sobe o bruto. Baixa o pronto.
         </div>
         <div
           style={{
@@ -58,7 +58,7 @@ export default function OpengraphImage() {
             maxWidth: 940,
           }}
         >
-          Decupagem, lipsync e legendas — ligue a fila e vá dormir.
+          Decupagem, lipsync e legendas — direto no navegador.
         </div>
         <div
           style={{

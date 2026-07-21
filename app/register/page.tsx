@@ -132,7 +132,7 @@ export default function RegisterPage() {
   return (
     <AuthShell
       title="Criar conta grátis"
-      subtitle="Liga a fila e vai dormir."
+      subtitle="Sem cartão. Sobe o primeiro bruto em minutos."
       footer={
         <span className="text-text-muted">
           Já tem conta?{' '}
