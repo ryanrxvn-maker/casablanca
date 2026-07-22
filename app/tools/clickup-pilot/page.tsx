@@ -79,7 +79,7 @@ import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorC
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName, recallAvatarVoice, rememberAvatarVoice } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
-import { ToggleRound3D, WirelessIcon, ScissorsIcon } from '@/components/ToggleRound3D';
+import { ToggleRound3D, WirelessIcon, ScissorsIcon, ReviewEyeIcon } from '@/components/ToggleRound3D';
 import { IconClickUpPilot } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
@@ -206,6 +206,17 @@ const DEFAULT_EDIT_STATUSES = [
   'editando vídeo',
 ];
 const STATUS_FILTER_KEY = 'darkolab:clickup-pilot:statuses';
+
+// Status de REVISÃO — entram na listagem SÓ quando o toggle 3D (olho) tá ON.
+// Todas as variantes acento/sem-acento porque o match da API é exato;
+// variante que não existe no workspace simplesmente não casa com nada.
+const REVIEW_STATUSES = [
+  'revisao video',
+  'revisao vídeo',
+  'revisão video',
+  'revisão vídeo',
+];
+const INCLUDE_REVIEW_KEY = 'darkolab:clickup-pilot:includeReview';
 const DISPATCHED_KEY = 'darkolab:clickup-pilot:dispatched';
 
 /** Carrega map de tasks ja disparadas: {taskId: timestamp} */
@@ -1061,6 +1072,19 @@ function ClickUpPilotInner() {
     setStatusFilterRaw(v);
     if (typeof window !== 'undefined') localStorage.setItem(STATUS_FILTER_KEY, v);
   }
+
+  // Toggle 3D "incluir tasks em REVISÃO" — soma REVIEW_STATUSES ao filtro na
+  // hora de listar, SEM tocar no statusFilter salvo (o filtro custom do user
+  // em /configuracoes continua intacto). Persiste em localStorage.
+  const [includeReview, setIncludeReviewRaw] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try { setIncludeReviewRaw(localStorage.getItem(INCLUDE_REVIEW_KEY) === '1'); } catch {}
+  }, []);
+  function setIncludeReview(v: boolean) {
+    setIncludeReviewRaw(v);
+    try { localStorage.setItem(INCLUDE_REVIEW_KEY, v ? '1' : '0'); } catch {}
+  }
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
 
@@ -1245,7 +1269,10 @@ function ClickUpPilotInner() {
     return siblings.map((s) => s.id);
   }
 
-  async function loadTasks() {
+  /** @param includeReviewOverride passa o valor NOVO do toggle de revisão na
+   *  recarga imediata pós-toggle (setState é assíncrono — sem isso a primeira
+   *  recarga usaria o valor antigo). Sem argumento, usa o estado atual. */
+  async function loadTasks(includeReviewOverride?: boolean) {
     if (!selectedTeam || !selectedEditor) {
       setError('Escolhe team + editor primeiro.');
       return;
@@ -1253,7 +1280,12 @@ function ClickUpPilotInner() {
     setLoadingTasks(true);
     setError(null);
     try {
+      const withReview = typeof includeReviewOverride === 'boolean' ? includeReviewOverride : includeReview;
       const statuses = statusFilter.split(',').map((s) => s.trim()).filter(Boolean);
+      if (withReview) {
+        const seen = new Set(statuses.map((s) => s.toLowerCase()));
+        for (const st of REVIEW_STATUSES) if (!seen.has(st)) statuses.push(st);
+      }
       const r = await listTasks(selectedTeam, {
         assigneeIds: [selectedEditor],
         statuses,
@@ -7789,7 +7821,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={loadTasks}
+                    onClick={() => loadTasks()}
                     disabled={loadingTasks}
                     className="cp-load-cta group relative overflow-hidden rounded-[14px] border border-lime/60 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-70"
                     style={{
@@ -7822,6 +7854,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 group-hover:translate-x-full"
                     />
                   </button>
+                  {/* Toggle 3D (olho) — incluir tasks em REVISÃO na listagem.
+                   *  Ícone sem texto (pedido do user). Ao alternar, recarrega
+                   *  as tasks NA HORA com o valor novo (override explícito —
+                   *  setState é assíncrono). */}
+                  <ToggleRound3D
+                    on={includeReview}
+                    onChange={(next) => {
+                      setIncludeReview(next);
+                      void loadTasks(next);
+                    }}
+                    icon={<ReviewEyeIcon className="h-full w-full" />}
+                    title={includeReview ? 'Lendo tasks em REVISÃO também — clique pra voltar ao filtro normal' : 'Incluir tasks em REVISÃO na listagem'}
+                    variant="cyan"
+                    size="md"
+                    disabled={loadingTasks}
+                  />
                   <a
                     href="/configuracoes/clickup-pilot"
                     className="mono inline-flex items-center gap-2 rounded-full border border-line-strong px-3.5 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"

@@ -1410,7 +1410,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Carregue e selecione as tasks',
-        text: 'Clique em "Carregar tasks" e a lista aparece com o nome exato do ClickUp, ordenada por vencimento. Os filtros ajudam nos dias cheios: "Período" (Todas, Ontem, Hoje, Amanhã, Atrasadas, Próximos 7 dias ou uma data específica) e "Prioridade" (Urgente, Alta). Marque as que entram no disparo — uma, algumas ou todas. Tasks irmãs (G1/G2 do mesmo AD) são selecionadas e analisadas juntas, sem duplicar trabalho.',
+        text: 'Clique em "Carregar tasks" e a lista aparece com o nome exato do ClickUp, ordenada por vencimento. O botão redondo com o olho, ao lado, liga a leitura das tasks em REVISÃO: com ele aceso, as tasks com status de revisão entram na lista junto com as de edição — útil pra redisparar um ad que voltou da revisão. Os filtros ajudam nos dias cheios: "Período" (Todas, Ontem, Hoje, Amanhã, Atrasadas, Próximos 7 dias ou uma data específica) e "Prioridade" (Urgente, Alta). Marque as que entram no disparo — uma, algumas ou todas. Tasks irmãs (G1/G2 do mesmo AD) são selecionadas e analisadas juntas, sem duplicar trabalho.',
         visual: (
           <Shot label="Pilot · seleção">
             <MStack>
