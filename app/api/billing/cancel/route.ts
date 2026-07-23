@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { getStripe } from '@/lib/stripe';
+import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
 
 /**
  * POST /api/billing/cancel
@@ -31,11 +32,36 @@ export async function POST(req: Request) {
     const svc = serviceClient();
     const { data: profile } = await svc
       .from('profiles')
-      .select('stripe_subscription_id')
+      .select('stripe_subscription_id, stripe_customer_id')
       .eq('id', user.id)
       .maybeSingle();
-    const subId = (profile as { stripe_subscription_id?: string | null } | null)
-      ?.stripe_subscription_id;
+    const p = profile as {
+      stripe_subscription_id?: string | null;
+      stripe_customer_id?: string | null;
+    } | null;
+    let subId = p?.stripe_subscription_id ?? null;
+
+    // Vínculo perdido (webhook falhou / cortesia por cima)? Busca a assinatura
+    // VIVA direto no Stripe — cancelar TEM que funcionar mesmo assim (caso
+    // Fernando: "cancelava" e o cartão continuava sendo cobrado).
+    if (!subId) {
+      try {
+        const found = await findLiveStripeSubscription(p?.stripe_customer_id, user.email);
+        if (found) {
+          subId = found.sub.id;
+          await svc
+            .from('profiles')
+            .update({
+              stripe_customer_id: found.customerId,
+              stripe_subscription_id: subId,
+            })
+            .eq('id', user.id);
+        }
+      } catch {
+        /* Stripe indisponível — cai no erro padrão abaixo */
+      }
+    }
+
     if (!subId) {
       return NextResponse.json(
         { error: 'Você não tem uma assinatura ativa.' },

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
+import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
 
 /**
  * POST /api/admin/set-tier
@@ -30,13 +31,41 @@ export async function POST(req: Request) {
 
     const svc = serviceClient();
 
-    // Tier atual (pra auditoria from->to).
+    // Tier atual (pra auditoria from->to) + vínculo Stripe (guard abaixo).
     const { data: before } = await svc
       .from('profiles')
-      .select('tier')
+      .select('tier, email, stripe_customer_id')
       .eq('id', userId)
       .maybeSingle();
-    const fromTier = (before as { tier?: string | null } | null)?.tier ?? null;
+    const beforeP = before as {
+      tier?: string | null;
+      email?: string | null;
+      stripe_customer_id?: string | null;
+    } | null;
+    const fromTier = beforeP?.tier ?? null;
+
+    // ─── GUARD: cortesia JAMAIS por cima de assinatura VIVA no Stripe ───
+    // Caso Fernando: pagou (webhook falhou), admin liberou na mão → a conta
+    // virou "cortesia", a tela de assinatura parou de mostrar a assinatura
+    // real e o cartão CONTINUOU sendo cobrado sem o cliente conseguir
+    // cancelar. Se existe assinatura viva, esse cliente é PAGANTE — o caminho
+    // certo é "Sincronizar c/ Stripe" (reconcile), nunca admin_grant.
+    if (tier !== 'free') {
+      try {
+        const found = await findLiveStripeSubscription(
+          beforeP?.stripe_customer_id,
+          beforeP?.email,
+        );
+        if (found) {
+          return jsonError(
+            `Esse cliente tem assinatura ${found.sub.status.toUpperCase()} no Stripe — ele é PAGANTE, não cortesia. Use "Sincronizar c/ Stripe" pra aplicar o plano pago (cortesia por cima esconderia a cobrança do cartão dele). Se quiser cortesia de verdade, cancele a assinatura no Stripe primeiro.`,
+            409,
+          );
+        }
+      } catch {
+        /* Stripe fora do ar não pode travar liberação manual — segue */
+      }
+    }
 
     // Concessão MANUAL: marca admin_grant (distingue de pago e NÃO expira).
     // Pra free, limpa os campos de assinatura.

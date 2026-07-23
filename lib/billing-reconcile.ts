@@ -74,6 +74,58 @@ export function stripeSubPeriodEndISO(sub: unknown): string | null {
 }
 
 /**
+ * Acha a assinatura VIVA de um cliente no Stripe — mesmo quando o profile
+ * perdeu o vínculo (webhook falhou e stripe_subscription_id nunca foi salvo,
+ * o caso Fernando: pagava sem conseguir ver/cancelar a assinatura).
+ *
+ * Ordem: customerId salvo → busca de customers pelo EMAIL. "Viva" = qualquer
+ * status que não seja terminal (canceled/incomplete_expired) — inclui
+ * past_due/paused, que o cliente também precisa enxergar e poder cancelar.
+ */
+export async function findLiveStripeSubscription(
+  customerId: string | null | undefined,
+  email: string | null | undefined,
+): Promise<{ sub: Stripe.Subscription; customerId: string } | null> {
+  const stripe = getStripe();
+  const TERMINAL = new Set(['canceled', 'incomplete_expired']);
+
+  const pickLive = (subs: Stripe.Subscription[]): Stripe.Subscription | null => {
+    const live = subs
+      .filter((s) => !TERMINAL.has(s.status))
+      .sort((a, b) => (b.created ?? 0) - (a.created ?? 0));
+    return live[0] ?? null;
+  };
+
+  const candidates: string[] = [];
+  if (customerId) candidates.push(customerId);
+  if (email) {
+    try {
+      const found = await stripe.customers.list({ email: email.trim(), limit: 5 });
+      for (const c of found.data) {
+        if (!candidates.includes(c.id)) candidates.push(c.id);
+      }
+    } catch {
+      /* busca por email é best-effort */
+    }
+  }
+
+  for (const cid of candidates) {
+    try {
+      const subs = await stripe.subscriptions.list({
+        customer: cid,
+        status: 'all',
+        limit: 10,
+      });
+      const live = pickLive(subs.data);
+      if (live) return { sub: live, customerId: cid };
+    } catch {
+      /* customer inválido/deletado — tenta o próximo */
+    }
+  }
+  return null;
+}
+
+/**
  * Reconcilia o acesso pago de um usuário com o Stripe. Idempotente.
  * Retorna o que foi aplicado (ou por que não aplicou).
  */

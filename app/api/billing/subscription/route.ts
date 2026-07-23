@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { getStripe } from '@/lib/stripe';
+import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
 
 /**
  * GET /api/billing/subscription
@@ -44,11 +45,32 @@ export async function GET() {
       tier?: string | null;
     } | null;
 
-    const customerId = p?.stripe_customer_id ?? null;
-    const subId = p?.stripe_subscription_id ?? null;
+    let customerId = p?.stripe_customer_id ?? null;
+    let subId = p?.stripe_subscription_id ?? null;
+
+    // Profile SEM vínculo ≠ cliente sem assinatura. Se o webhook falhou no
+    // checkout (e o admin liberou cortesia por cima), o Stripe pode ter uma
+    // assinatura VIVA cobrando o cartão — e o cliente PRECISA vê-la e poder
+    // cancelar (caso Fernando: achava que estava cancelado e seguia pagando).
+    if (!subId) {
+      try {
+        const found = await findLiveStripeSubscription(customerId, user.email);
+        if (found) {
+          subId = found.sub.id;
+          customerId = found.customerId;
+          // Cura o vínculo pro resto do sistema (cancel, webhook por customer).
+          await svc
+            .from('profiles')
+            .update({ stripe_customer_id: customerId, stripe_subscription_id: subId })
+            .eq('id', user.id);
+        }
+      } catch {
+        /* Stripe indisponível — segue com o que o profile tem */
+      }
+    }
 
     if (!subId) {
-      // Pode ser acesso admin_grant ou nenhum — sem assinatura recorrente.
+      // Agora sim: sem assinatura em lugar NENHUM (cortesia ou free).
       return NextResponse.json({
         subscription: null,
         tier: p?.tier ?? 'free',

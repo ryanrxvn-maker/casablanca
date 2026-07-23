@@ -255,16 +255,62 @@ export default function AdminPage() {
   }, [users]);
 
   // ─── Financeiro (período) ───
+  // Linhas 'refunded'/'disputed' são pagamentos DEVOLVIDOS: aparecem na
+  // tabela (marcadas), mas ficam FORA do arrecadado — o número grande é
+  // sempre líquido. (O reembolso conta no período do pagamento original.)
   const finance = useMemo(() => {
-    const pays = (dash?.payments ?? []).filter((p) => p.status === 'paid' || p.status === 'succeeded');
     const start = periodStart(period);
-    const inPeriod = pays.filter((p) => (p.created_at ? new Date(p.created_at).getTime() >= start : false));
-    const total = inPeriod.reduce((s, p) => s + (p.amount || 0), 0);
+    const inPeriod = (dash?.payments ?? []).filter((p) =>
+      p.created_at ? new Date(p.created_at).getTime() >= start : false,
+    );
+    const isPaid = (p: Payment) => p.status === 'paid' || p.status === 'succeeded';
+    const isRefund = (p: Payment) => p.status === 'refunded' || p.status === 'disputed';
+    const paid = inPeriod.filter(isPaid);
+    const refunded = inPeriod.filter(isRefund);
+    const total = paid.reduce((s, p) => s + (p.amount || 0), 0);
+    const refundTotal = refunded.reduce((s, p) => s + (p.amount || 0), 0);
+
+    // Série diária (últimos 30 dias, independente do período dos chips).
+    const DAYS = 30;
+    const dayKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const byDay = new Map<string, { paid: number; refunded: number }>();
+    const today = new Date();
+    const days: Array<{ key: string; label: string; paid: number; refunded: number }> = [];
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+      const key = dayKey(d);
+      byDay.set(key, { paid: 0, refunded: 0 });
+      days.push({
+        key,
+        label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        paid: 0,
+        refunded: 0,
+      });
+    }
+    for (const p of dash?.payments ?? []) {
+      if (!p.created_at) continue;
+      const key = dayKey(new Date(p.created_at));
+      const slot = byDay.get(key);
+      if (!slot) continue;
+      if (isPaid(p)) slot.paid += p.amount || 0;
+      else if (isRefund(p)) slot.refunded += p.amount || 0;
+    }
+    for (const d of days) {
+      const slot = byDay.get(d.key)!;
+      d.paid = slot.paid;
+      d.refunded = slot.refunded;
+    }
+
     return {
       list: inPeriod,
       total,
-      count: inPeriod.length,
-      avg: inPeriod.length ? Math.round(total / inPeriod.length) : 0,
+      count: paid.length,
+      avg: paid.length ? Math.round(total / paid.length) : 0,
+      refundTotal,
+      refundCount: refunded.length,
+      days,
+      dayMax: Math.max(...days.map((d) => Math.max(d.paid, d.refunded)), 1),
     };
   }, [dash, period]);
 
@@ -654,84 +700,156 @@ export default function AdminPage() {
           }
         >
           {dash ? (
-            <div className="grid gap-5 lg:grid-cols-[240px_1fr]">
-              {/* Resumo do período */}
-              <div className="flex flex-col justify-center gap-4 rounded-[14px] border border-line bg-bg p-4">
-                <div>
-                  <div className="label-tech text-[10px] uppercase tracking-[0.16em] text-text-dim">
-                    Arrecadado · {PERIOD_LABEL[period]}
+            <div className="flex flex-col gap-4">
+              <div className="grid gap-4 lg:grid-cols-[250px_1fr]">
+                {/* Resumo do período */}
+                <div className="flex flex-col justify-center gap-3.5 rounded-[14px] border border-line bg-bg p-4">
+                  <div>
+                    <div className="label-tech text-[10px] uppercase tracking-[0.16em] text-text-dim">
+                      Arrecadado · {PERIOD_LABEL[period]}
+                    </div>
+                    <div
+                      className="font-tech mt-1 text-[28px] font-extrabold tracking-tight"
+                      style={{ color: accent('lime'), fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {brl(finance.total)}
+                    </div>
+                    {finance.refundCount > 0 ? (
+                      <div className="mt-0.5 text-[11.5px] font-semibold" style={{ color: accent('danger') }}>
+                        −{brl(finance.refundTotal)} reembolsado ({finance.refundCount})
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="font-tech mt-1 text-[28px] font-extrabold tracking-tight" style={{ color: accent('lime') }}>
-                    {brl(finance.total)}
+                  <div className="flex gap-6">
+                    <div>
+                      <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Pagamentos</div>
+                      <div className="font-tech mt-0.5 text-[17px] font-bold text-text">{finance.count}</div>
+                    </div>
+                    <div>
+                      <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Ticket médio</div>
+                      <div className="font-tech mt-0.5 text-[17px] font-bold text-text" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {finance.count ? brl(finance.avg) : '—'}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-6">
-                  <div>
-                    <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Pagamentos</div>
-                    <div className="font-tech mt-0.5 text-[17px] font-bold text-text">{finance.count}</div>
+
+                {/* Receita diária — últimos 30 dias */}
+                <div className="rounded-[14px] border border-line bg-bg p-4">
+                  <div className="label-tech mb-3 flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-text-dim">
+                    <span>Receita por dia · últimos 30 dias</span>
+                    <span className="flex items-center gap-3 normal-case tracking-normal">
+                      <span className="flex items-center gap-1">
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: accent('lime', 0.85) }} />
+                        pago
+                      </span>
+                      {finance.days.some((d) => d.refunded > 0) ? (
+                        <span className="flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full" style={{ background: accent('danger', 0.8) }} />
+                          reembolso
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
-                  <div>
-                    <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Ticket médio</div>
-                    <div className="font-tech mt-0.5 text-[17px] font-bold text-text">
-                      {finance.count ? brl(finance.avg) : '—'}
-                    </div>
+                  <div className="flex h-[92px] items-end gap-[3px]">
+                    {finance.days.map((d) => {
+                      const hPaid = d.paid ? Math.max((d.paid / finance.dayMax) * 100, 6) : 0;
+                      const hRef = d.refunded ? Math.max((d.refunded / finance.dayMax) * 100, 6) : 0;
+                      return (
+                        <div
+                          key={d.key}
+                          className="group relative flex h-full flex-1 flex-col items-stretch justify-end gap-[2px]"
+                          title={`${d.label} · pago ${brl(d.paid)}${d.refunded ? ` · reembolso ${brl(d.refunded)}` : ''}`}
+                        >
+                          {hRef > 0 ? (
+                            <div className="w-full rounded-[2px]" style={{ height: `${hRef}%`, background: accent('danger', 0.7) }} />
+                          ) : null}
+                          {hPaid > 0 ? (
+                            <div className="w-full rounded-[2px]" style={{ height: `${hPaid}%`, background: accent('lime', 0.8) }} />
+                          ) : (
+                            <div className="w-full rounded-[2px] bg-line/60" style={{ height: 2 }} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 flex justify-between text-[9.5px] text-text-dim">
+                    <span>{finance.days[0]?.label}</span>
+                    <span>{finance.days[Math.floor(finance.days.length / 2)]?.label}</span>
+                    <span>hoje</span>
                   </div>
                 </div>
               </div>
 
               {/* Pagamentos do período */}
               {finance.list.length ? (
-                <div className="max-h-[240px] overflow-y-auto pr-1">
+                <div className="max-h-[250px] overflow-y-auto rounded-[14px] border border-line bg-bg">
                   <table className="w-full text-left text-[12.5px]">
-                    <thead className="sticky top-0 bg-bg-soft">
+                    <thead className="sticky top-0 bg-bg">
                       <tr className="label-tech text-[9.5px] uppercase tracking-[0.14em] text-text-dim">
-                        <th className="pb-2 pr-3 font-bold">Cliente</th>
-                        <th className="pb-2 pr-3 font-bold">Plano</th>
-                        <th className="pb-2 pr-3 font-bold">Valor</th>
-                        <th className="pb-2 pr-3 font-bold">Data</th>
-                        <th className="pb-2 font-bold">Comprovante</th>
+                        <th className="px-3 py-2.5 font-bold">Cliente</th>
+                        <th className="px-3 py-2.5 font-bold">Plano</th>
+                        <th className="px-3 py-2.5 font-bold">Valor</th>
+                        <th className="px-3 py-2.5 font-bold">Status</th>
+                        <th className="px-3 py-2.5 font-bold">Data</th>
+                        <th className="px-3 py-2.5 font-bold">Comprovante</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {finance.list.map((p) => (
-                        <tr key={p.id} className="border-t border-line/60">
-                          <td className="max-w-[220px] truncate py-2 pr-3 text-text">{p.email || '—'}</td>
-                          <td className="py-2 pr-3 text-text-muted">
-                            {p.plan === 'basic' ? 'Premium' : (p.plan ?? '—')}
-                            {p.billing ? (p.billing === 'annual' ? ' · anual' : ' · mensal') : ''}
-                          </td>
-                          <td className="py-2 pr-3 font-bold" style={{ color: accent('lime') }}>{brl(p.amount)}</td>
-                          <td className="whitespace-nowrap py-2 pr-3 text-text-muted">
-                            {p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '—'}
-                          </td>
-                          <td className="py-2">
-                            {p.receipt_url ? (
-                              <a
-                                href={p.receipt_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
-                                style={{ color: accent('violet') }}
-                              >
-                                <IconReceipt /> abrir
-                              </a>
-                            ) : (
-                              <span className="text-text-dim">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {finance.list.map((p) => {
+                        const refunded = p.status === 'refunded' || p.status === 'disputed';
+                        return (
+                          <tr key={p.id} className="border-t border-line/60 transition hover:bg-line/15">
+                            <td className="max-w-[220px] truncate px-3 py-2 text-text">{p.email || '—'}</td>
+                            <td className="px-3 py-2 text-text-muted">
+                              {p.plan === 'basic' ? 'Premium' : (p.plan ?? '—')}
+                              {p.billing ? (p.billing === 'annual' ? ' · anual' : ' · mensal') : ''}
+                            </td>
+                            <td
+                              className={'px-3 py-2 font-bold ' + (refunded ? 'line-through opacity-60' : '')}
+                              style={{ color: refunded ? 'rgb(var(--text-muted))' : accent('lime'), fontVariantNumeric: 'tabular-nums' }}
+                            >
+                              {brl(p.amount)}
+                            </td>
+                            <td className="px-3 py-2">
+                              {refunded ? (
+                                <Badge a="danger">{p.status === 'disputed' ? 'Chargeback' : 'Reembolsado'}</Badge>
+                              ) : (
+                                <Badge a="lime">Pago</Badge>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-text-muted">
+                              {p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '—'}
+                            </td>
+                            <td className="px-3 py-2">
+                              {p.receipt_url ? (
+                                <a
+                                  href={p.receipt_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
+                                  style={{ color: accent('violet') }}
+                                >
+                                  <IconReceipt /> abrir
+                                </a>
+                              ) : (
+                                <span className="text-text-dim">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               ) : (
-                <div className="flex items-center justify-center rounded-[14px] border border-dashed border-line text-[12.5px] text-text-dim">
+                <div className="flex items-center justify-center rounded-[14px] border border-dashed border-line py-6 text-[12.5px] text-text-dim">
                   Nenhum pagamento em “{PERIOD_LABEL[period]}”.
                 </div>
               )}
             </div>
           ) : (
-            <div className="h-28 animate-pulse rounded-[12px] bg-line/30" />
+            <div className="h-40 animate-pulse rounded-[12px] bg-line/30" />
           )}
         </Panel>
       </section>

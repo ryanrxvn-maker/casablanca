@@ -91,8 +91,13 @@ export async function GET() {
     const tier = resolveTier(p);
     tiers[tier] += 1;
 
+    // Pagante ativo = assinatura recorrente (active/trialing) OU pagamento
+    // único vigente ('paid'). Antes só contava 'paid' → MRR ficava R$ 0
+    // mesmo com mensalistas ativos.
     const paidActive =
-      p.subscription_status === 'paid' &&
+      (p.subscription_status === 'paid' ||
+        p.subscription_status === 'active' ||
+        p.subscription_status === 'trialing') &&
       !isPaidExpired(p.subscription_status, p.current_period_end);
     if (paidActive && (p.subscription_plan === 'basic' || p.subscription_plan === 'pro')) {
       paying[p.subscription_plan] += 1;
@@ -175,7 +180,15 @@ export async function GET() {
     receipt_url: string | null;
     created_at: string | null;
   }>;
-  const revenueTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  // Líquido: linhas 'refunded'/'disputed' já foram devolvidas — não contam.
+  const revenueTotal = payments.reduce(
+    (s, p) => s + (p.status === 'paid' ? p.amount || 0 : 0),
+    0,
+  );
+  const refundedTotal = payments.reduce(
+    (s, p) => s + (p.status === 'refunded' || p.status === 'disputed' ? p.amount || 0 : 0),
+    0,
+  );
 
   return NextResponse.json({
     now: new Date(nowMs).toISOString(),
@@ -201,5 +214,6 @@ export async function GET() {
     trafficSources,
     payments,
     revenueTotal,
+    refundedTotal,
   });
 }
