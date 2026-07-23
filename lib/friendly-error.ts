@@ -66,5 +66,14 @@ export function toFriendlyMessage(
   if (/(extens[aã]o|extension|bridge|not connected|n[aã]o conectad|cookies)/.test(m)) {
     return 'A extensão do navegador não respondeu. Confira se ela está instalada e conectada, recarregue a página e tente de novo.';
   }
+  // Downloader: componente do Motor ausente (yt-dlp/ffmpeg). Backstop pra
+  // motores antigos que ainda emitem a mensagem técnica de PATH/Python.
+  if (/(yt-?dlp|garanta python|python_path|ytdlp_path)/.test(m)) {
+    return 'O Motor de download não está pronto neste computador. Abra o Auto Edit Downloader pelo menu Iniciar (ou reinstale no passo 1 da página) e tente de novo.';
+  }
+  // Downloader: códigos de interrupção do Chrome (download via Motor).
+  if (/(server_failed|server_bad_content|server_unauthorized|network_failed|file_failed|user_canceled|crash)/.test(m)) {
+    return 'O download falhou no meio do caminho. Confira se o vídeo está público e se o Motor está aberto (bolinha verde no passo 1), e tente de novo.';
+  }
   return fallback;
 }

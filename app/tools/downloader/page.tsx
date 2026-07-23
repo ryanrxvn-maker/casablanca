@@ -109,6 +109,70 @@ function downloadIgViaExtension(url: string): Promise<void> {
   });
 }
 
+// Erros do caminho extensão→Motor chegam como códigos do Chrome
+// ("SERVER_FAILED") ou frases curtas do service worker. Traduz pro cliente
+// SEMPRE em linguagem normal, com o que fazer em seguida.
+function friendlyEngineFail(raw: string): string {
+  const m = raw.toLowerCase();
+  if (!m.trim()) return 'O download falhou agora. Tenta de novo em instantes.';
+  if (/(unauthorized|forbidden|token)/.test(m))
+    return 'O Motor está reiniciando. Espera uns segundos e tenta de novo.';
+  if (/(nao esta rodando|não está rodando|abra o)/.test(m))
+    return 'O Motor não está aberto no seu computador. Abre o Auto Edit Downloader no menu Iniciar (ou reinstala no passo 1 acima) e tenta de novo.';
+  if (/(server_|network_|file_|user_canceled|crash|failed|interrupted|tempo esgotado)/.test(m))
+    return 'O download falhou no meio do caminho. Confere se o vídeo está público e se o Motor está aberto (bolinha verde no passo 1), e tenta de novo.';
+  return raw; // já veio como frase amigável do Motor
+}
+
+// Baixa QUALQUER link suportado pelo MOTOR local, via extensão (o service
+// worker fala com o Motor pareado em 127.0.0.1). É o caminho que sempre
+// funciona pra YouTube/Pinterest/TikTok: o servidor não baixa esses sites —
+// quem baixa é o Motor no computador do usuário. O arquivo cai direto na
+// barra de downloads do navegador.
+// legacy=true → extensão 1.6.x: usa o canal DL_IG_DOWNLOAD (o service
+// worker já manda qualquer link pro Motor, mas fixa vídeo/1080).
+function downloadViaEngine(
+  url: string,
+  mode: Mode,
+  quality: Quality,
+  legacy: boolean,
+): Promise<void> {
+  const type = legacy ? 'DL_IG_DOWNLOAD' : 'DL_ENGINE_DOWNLOAD';
+  const resultType = legacy ? 'DL_IG_RESULT' : 'DL_ENGINE_RESULT';
+  return new Promise((resolve, reject) => {
+    const reqId = `eng-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let done = false;
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data;
+      if (
+        !d ||
+        d.source !== 'darko-dl-ext' ||
+        d.type !== resultType ||
+        d.reqId !== reqId
+      )
+        return;
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMsg);
+      clearTimeout(timer);
+      if (d.ok) resolve();
+      else reject(new FriendlyError(friendlyEngineFail(String(d.error || ''))));
+    };
+    window.addEventListener('message', onMsg);
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMsg);
+      reject(
+        new FriendlyError(
+          'O Motor demorou demais pra responder. Confere se ele está aberto (bolinha verde no passo 1) e tenta de novo.',
+        ),
+      );
+    }, 600000);
+    window.postMessage({ source: 'darko-dl', type, url, mode, quality, reqId }, '*');
+  });
+}
+
 function detectSource(url: string): string {
   const u = url.toLowerCase();
   if (u.includes('tiktok')) return 'TikTok';
@@ -163,10 +227,10 @@ export default function DownloaderPage() {
     } catch {}
   }
 
-  // Versão MÍNIMA recomendada da extensão+motor. A v1.6.0 baixa Instagram
-  // colando o link (resolve pela sessão logada do próprio usuário, sem
-  // servidor/contas); versões anteriores só tinham o botão na página do IG.
-  const MIN_EXT_VERSION = [1, 6, 0];
+  // Versão MÍNIMA recomendada da extensão+motor. A v1.7.0 baixa QUALQUER
+  // link colado (YouTube/TikTok/Pinterest em qualquer formato) pelo Motor
+  // local; a v1.6.0 só repassava vídeo/1080 e Instagram.
+  const MIN_EXT_VERSION = [1, 7, 0];
   function isOutdatedVersion(v?: string): boolean {
     if (!v) return false; // sem info de versão → não alarma
     const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
@@ -386,6 +450,102 @@ export default function DownloaderPage() {
       }
     }
 
+    const source = detectSource(url);
+    const knownSource = source !== '—';
+    const engineOk = ext.connected && ext.engine === true;
+
+    // MOTOR CONECTADO: baixa pelo Motor no computador do usuário (via
+    // extensão). É o caminho que sempre funciona pra YouTube, TikTok e
+    // Pinterest — o servidor não baixa esses sites; o Motor baixa.
+    if (engineOk && knownSource && !(isAdmin && adult)) {
+      const modern = versionAtLeast(ext.version, [1, 7, 0]);
+      const legacyDefault = mode === 'video' && quality === '1080';
+      if (!modern && !legacyDefault) {
+        // Extensão antiga só repassa vídeo/1080 pro Motor.
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? {
+                  ...j,
+                  state: 'error',
+                  error:
+                    'Pra baixar áudio ou outra qualidade, atualiza a extensão (aviso amarelo no passo 1 — leva 1 minuto) e clica em Baixar de novo.',
+                  progress: null,
+                }
+              : j,
+          ),
+        );
+        return;
+      }
+      try {
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx ? { ...j, state: 'downloading', progress: null } : j,
+          ),
+        );
+        await downloadViaEngine(url, mode, quality, !modern);
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? {
+                  ...j,
+                  state: 'done',
+                  filename: 'Pronto — na barra de downloads do navegador',
+                  progress: null,
+                }
+              : j,
+          ),
+        );
+        logHistory({
+          tool: 'downloader',
+          kind: 'download',
+          title: `${source} baixado pelo Motor`,
+        });
+      } catch (e) {
+        console.error('[downloader] motor', e);
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? {
+                  ...j,
+                  state: 'error',
+                  error: toFriendlyMessage(
+                    e,
+                    'O download falhou agora. Tenta de novo em instantes.',
+                  ),
+                  progress: null,
+                }
+              : j,
+          ),
+        );
+      }
+      return;
+    }
+
+    // SEM MOTOR: o servidor só resolve TikTok em vídeo. Pro resto, o que
+    // resolve é instalar o Motor — orienta na hora, sem deixar o cliente
+    // esperando uma falha.
+    if (!engineOk && knownSource && !(isAdmin && adult)) {
+      const serverCan = source === 'TikTok' && mode === 'video';
+      if (!serverCan) {
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? {
+                  ...j,
+                  state: 'error',
+                  error: `Pra baixar ${
+                    mode === 'video' ? 'do ' + source : 'áudio'
+                  }, instala e conecta o Motor + Extensão (passo 1 acima — leva 1 minuto) e clica em Baixar de novo.`,
+                  progress: null,
+                }
+              : j,
+          ),
+        );
+        return;
+      }
+    }
+
     try {
       const res = await fetch('/api/downloader', {
         method: 'POST',
@@ -527,9 +687,9 @@ export default function DownloaderPage() {
     >
       <div className="flex flex-col gap-5">
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Instala uma vez, baixa em qualquer site" hue={HUE}>
-          {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — versão antiga não
-              baixa mais Instagram. v1.5.0 corrige (download pela aba logada).
-              Admin (você) já aplicou o fix manualmente, então não vê isso. */}
+          {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — a v1.7.0 repassa
+              qualquer link/formato pro Motor local (YouTube/TikTok/Pinterest
+              e áudios). Admin (você) atualiza manualmente, então não vê isso. */}
           {!isAdmin && ext.connected && isOutdatedVersion(ext.version) && (
             <div
               className="mb-3 rounded-[14px] border border-amber-400/50 bg-amber-400/[0.08] p-4"
@@ -550,19 +710,19 @@ export default function DownloaderPage() {
                     className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    Baixe Instagram colando o link — atualize a extensão
+                    Baixe tudo colando o link — atualize a extensão
                   </div>
                   <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
-                    A nova versão (<b className="text-white">v1.6.0</b>) baixa do
-                    Instagram <b className="text-white">colando o link aqui</b>,
-                    usando o seu próprio Instagram logado — sem precisar abrir o
-                    post. Sua versão atual (<b className="text-white">v{ext.version}</b>)
-                    só baixava pelo botão na página do Instagram.
+                    A nova versão (<b className="text-white">v1.7.0</b>) baixa{' '}
+                    <b className="text-white">YouTube, TikTok, Pinterest e áudios</b>{' '}
+                    colando o link aqui — tudo direto pelo Motor no seu computador
+                    (e mantém o Instagram pela sua conta logada). Sua versão atual
+                    (<b className="text-white">v{ext.version}</b>) não faz isso ainda.
                   </p>
                   <ol className="mono mt-2.5 list-decimal space-y-1 pl-5 text-[11.5px] leading-relaxed text-text-muted">
                     <li>Baixe a nova extensão no botão abaixo e descompacte.</li>
                     <li>Em <code className="text-white">chrome://extensions</code>, remova a extensão antiga e carregue a nova pasta.</li>
-                    <li>Pronto — cole o link do Instagram e baixe.</li>
+                    <li>Pronto — cole qualquer link e baixe.</li>
                   </ol>
                   <div className="mt-3">
                     <a
@@ -571,7 +731,7 @@ export default function DownloaderPage() {
                       className="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-400/15 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-amber-200 transition hover:bg-amber-400/25"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      ↓ Baixar extensão v1.6.0
+                      ↓ Baixar extensão v1.7.0
                     </a>
                   </div>
                 </div>

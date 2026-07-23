@@ -29,7 +29,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../lib/headless-grab.ts
+// lib/headless-grab.ts
 var headless_grab_exports = {};
 __export(headless_grab_exports, {
   grabMedia: () => grabMedia
@@ -165,7 +165,7 @@ async function grabMedia(pageUrl) {
 }
 var UA, JUNK, browserP;
 var init_headless_grab = __esm({
-  "../lib/headless-grab.ts"() {
+  "lib/headless-grab.ts"() {
     "use strict";
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
     JUNK = /(plyr\.io|blank\.mp4|sample\.mp4|placeholder|googletag|doubleclick|trafficjunky|adtng|histats|popads|\/ads?\/|\.vtt|\.jpg|\.jpeg|\.png|\.webp|sprite|thumb)/i;
@@ -173,7 +173,7 @@ var init_headless_grab = __esm({
   }
 });
 
-// server.ts
+// engine/server.ts
 var import_http = __toESM(require("http"));
 var import_fs = require("fs");
 var import_promises2 = require("fs/promises");
@@ -181,7 +181,7 @@ var import_crypto = __toESM(require("crypto"));
 var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
 
-// ../lib/downloader-core.ts
+// lib/downloader-core.ts
 var import_child_process = require("child_process");
 var import_promises = require("fs/promises");
 var import_os = __toESM(require("os"));
@@ -230,6 +230,7 @@ function safeName(title, ext) {
 }
 var ytDlpResolved = null;
 var ytDlpInflight = null;
+var ytDlpSelfHealTried = false;
 var ffmpegResolved = null;
 var aria2Resolved = void 0;
 async function fileExists(p) {
@@ -340,6 +341,31 @@ async function resolveYtDlp() {
         return healed;
       }
     }
+    const healPath = process.env.YTDLP_PATH;
+    if (healPath && process.platform === "win32" && !ytDlpSelfHealTried) {
+      ytDlpSelfHealTried = true;
+      try {
+        const r = await fetch(
+          "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
+          { signal: AbortSignal.timeout(18e4), redirect: "follow" }
+        );
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer());
+          if (buf.length > 5e6) {
+            await (0, import_promises.mkdir)(import_path.default.dirname(healPath), { recursive: true });
+            await (0, import_promises.writeFile)(healPath, buf);
+            const downloaded = await tryTool({ cmd: healPath, pre: [] });
+            if (downloaded) {
+              console.log("[downloader-core] yt-dlp auto-reparado em", healPath);
+              ytDlpResolved = downloaded;
+              return downloaded;
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[downloader-core] auto-reparo do yt-dlp falhou:", e);
+      }
+    }
     return null;
   })();
   try {
@@ -394,16 +420,22 @@ async function fetchTikTok(url, mode, workDir) {
       headers: { "user-agent": UA2, accept: "application/json" },
       signal: AbortSignal.timeout(2e4)
     });
-    if (!r.ok) return { error: `resolver HTTP ${r.status}` };
+    if (!r.ok) {
+      console.error("[downloader-core] tikwm HTTP", r.status);
+      return { error: "o servico do TikTok nao respondeu agora. Tenta de novo em instantes." };
+    }
     const j = await r.json();
-    if (j.code !== 0 || !j.data)
-      return { error: j.msg || "resolver sem dados (privado/removido?)" };
+    if (j.code !== 0 || !j.data) {
+      console.error("[downloader-core] tikwm sem dados:", j.msg);
+      return { error: "nao achei esse video no TikTok \u2014 ele pode ser privado ou ter sido removido. Confere o link no navegador." };
+    }
     data = j.data;
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "resolver falhou" };
+    console.error("[downloader-core] tikwm falhou:", e);
+    return { error: "a conexao com o TikTok falhou. Confere a internet e tenta de novo." };
   }
   const videoUrl = data.hdplay || data.play || data.wmplay;
-  if (!videoUrl) return { error: "sem stream de video" };
+  if (!videoUrl) return { error: "esse post do TikTok nao tem video pra baixar." };
   const title = data.title || data.id || "tiktok";
   if (mode === "video") {
     return {
@@ -420,18 +452,24 @@ async function fetchTikTok(url, mode, workDir) {
       signal: AbortSignal.timeout(12e4)
     });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "download falhou" };
+    console.error("[downloader-core] tiktok midia falhou:", e);
+    return { error: "a conexao caiu no meio do download. Tenta de novo." };
   }
-  if (!vr.ok) return { error: `download da midia HTTP ${vr.status}` };
+  if (!vr.ok) {
+    console.error("[downloader-core] tiktok midia HTTP", vr.status);
+    return { error: "o TikTok nao entregou o arquivo agora. Tenta de novo em instantes." };
+  }
   const buf = Buffer.from(await vr.arrayBuffer());
-  if (buf.length < 1024) return { error: "midia vazia" };
+  if (buf.length < 1024)
+    return { error: "o TikTok entregou um arquivo vazio. Tenta de novo em instantes." };
   const srcPath = import_path.default.join(workDir, "tt-src.mp4");
   await (0, import_promises.writeFile)(srcPath, buf);
   const ext = mode === "audio-wav" ? "wav" : "mp3";
   const outPath = import_path.default.join(workDir, `tt-out.${ext}`);
   const ffArgs = mode === "audio-wav" ? ["-y", "-i", srcPath, "-vn", outPath] : ["-y", "-i", srcPath, "-vn", "-b:a", "192k", outPath];
   const { code } = await run(await resolveFfmpeg(), ffArgs, workDir);
-  if (code !== 0) return { error: "ffmpeg falhou na extracao de audio" };
+  if (code !== 0)
+    return { error: "nao consegui converter o audio agora. Tenta de novo \u2014 se repetir, baixa como video." };
   return { file: outPath, name: safeName(title, ext) };
 }
 async function ytDlpArgs(mode, quality, provider) {
@@ -481,11 +519,30 @@ async function ytDlpArgs(mode, quality, provider) {
   );
   return v;
 }
+function friendlyYtDlpFail(stderr) {
+  const m = stderr.toLowerCase();
+  if (/(private|login|sign in|logged.?in|members.?only|subscriber|only available for registered)/.test(m))
+    return "esse video e privado ou exige login \u2014 so da pra baixar conteudo publico. Confere o link no navegador.";
+  if (/(age.?restrict|confirm your age|18\+)/.test(m))
+    return "esse video tem restricao de idade e o site nao libera o download direto.";
+  if (/(unavailable|removed|terminated|deleted|does not exist|no longer available|404)/.test(m))
+    return "esse video nao esta mais disponivel (foi removido ou saiu do ar). Confere o link no navegador.";
+  if (/(unsupported url|is not a valid url)/.test(m))
+    return "esse link nao parece ser de um video. Confere se copiou o link certo.";
+  if (/ffmpeg (is )?not (found|installed)/.test(m))
+    return "um componente do Motor sumiu deste computador (provavelmente o antivirus). Reinstala o Motor na pagina do Downloader (passo 1) que ele volta a funcionar.";
+  if (/(429|too many request|rate.?limit)/.test(m))
+    return "o site limitou os downloads agora (muitos pedidos seguidos). Espera alguns minutos e tenta de novo.";
+  if (/(timed?.?out|timeout|connection|network|getaddrinfo|resolve host|unreachable)/.test(m))
+    return "a conexao falhou no meio do download. Confere a internet e tenta de novo.";
+  return "nao consegui baixar esse link agora. Confere se o video esta publico e tenta de novo em instantes.";
+}
 async function fetchYtDlp(url, mode, quality, provider, workDir, referer) {
   const tool = await resolveYtDlp();
   if (!tool)
     return {
-      error: "yt-dlp indisponivel e auto-instalacao falhou. Garanta Python no PATH (ou defina PYTHON_PATH/YTDLP_PATH) e ffmpeg no PATH."
+      code: "YTDLP_MISSING",
+      error: "o componente que baixa os videos nao foi encontrado. Reinstala o Motor na pagina do Downloader (passo 1) \u2014 leva 1 minuto e volta a funcionar."
     };
   const refArgs = referer ? ["--add-header", `Referer:${referer}`] : [];
   const args = [
@@ -496,10 +553,8 @@ async function fetchYtDlp(url, mode, quality, provider, workDir, referer) {
   ];
   const { code, stderr } = await run(tool.cmd, args, workDir, 15e5);
   if (code !== 0) {
-    const clean = stderr.split("\n").filter((l) => /error|unsupported|unavailable|private|login/i.test(l)).slice(-3).join(" ").trim();
-    return {
-      error: clean || "Verifique se o link e publico (conteudo privado exige login)."
-    };
+    console.error("[downloader-core] yt-dlp falhou:", stderr.slice(-4e3));
+    return { error: friendlyYtDlpFail(stderr) };
   }
   const names = await (0, import_promises.readdir)(workDir);
   const files = (await Promise.all(
@@ -509,7 +564,8 @@ async function fetchYtDlp(url, mode, quality, provider, workDir, referer) {
       return s.isFile() ? { n, full, size: s.size } : null;
     })
   )).filter(Boolean);
-  if (files.length === 0) return { error: "nenhum arquivo gerado" };
+  if (files.length === 0)
+    return { error: "o download terminou sem gerar arquivo. Tenta de novo em instantes." };
   files.sort((a, b) => b.size - a.size);
   return { file: files[0].full, name: files[0].n };
 }
@@ -651,9 +707,8 @@ async function fetchAdult(url, mode, quality, workDir) {
     }
   } catch {
   }
-  return {
-    error: `nao foi possivel resolver a midia (site pode exigir login/assinatura, ou o Chromium do headless nao esta instalado). [${native.error}]`
-  };
+  console.error("[downloader-core] +18 esgotou fallbacks para", url);
+  return { error: `esse site nao liberou o video (pode exigir login ou assinatura). ${native.error}`, code: native.code };
 }
 async function processDownload(input) {
   const url = (input.url ?? "").trim();
@@ -694,7 +749,12 @@ async function processDownload(input) {
       built = await fetchTikTok(url, mode, workDir);
       if ("error" in built) {
         const fb = await fetchYtDlp(url, mode, quality, "generic", workDir);
-        built = "error" in fb ? { error: `TikTok: ${built.error}. Fallback yt-dlp: ${fb.error}` } : fb;
+        if ("error" in fb) {
+          console.error("[downloader-core] fallback yt-dlp do TikTok tambem falhou:", fb.error);
+          built = { error: built.error };
+        } else {
+          built = fb;
+        }
       }
     } else if (provider === "adult") {
       built = await fetchAdult(url, mode, quality, workDir);
@@ -706,7 +766,8 @@ async function processDownload(input) {
       return {
         ok: false,
         status: 502,
-        error: "Falha no download. " + built.error
+        error: "Falha no download. " + built.error,
+        code: built.code
       };
     }
     if ("remote" in built) {
@@ -731,16 +792,17 @@ async function processDownload(input) {
     };
   } catch (e) {
     await dispose();
+    console.error("[downloader-core] erro interno:", e);
     return {
       ok: false,
       status: 500,
-      error: "Erro interno no downloader: " + (e instanceof Error ? e.message : String(e))
+      error: "Deu um erro inesperado no download. Tenta de novo em instantes."
     };
   }
 }
 
-// server.ts
-var VERSION = "1.0.0";
+// engine/server.ts
+var VERSION = "1.1.0";
 var DEFAULT_PORT = 47923;
 function configDir() {
   const base = process.platform === "win32" ? process.env.LOCALAPPDATA || import_os2.default.homedir() : import_path2.default.join(import_os2.default.homedir(), ".config");
@@ -843,7 +905,7 @@ async function main() {
         res.writeHead(403, { "content-type": "application/json" });
         return res.end(
           JSON.stringify({
-            error: "Modo +18 desativado neste motor. Ative nas opcoes (allowAdult)."
+            error: "O modo +18 esta desativado neste Motor. Reinstale o Motor pela pagina do Downloader pra reativar."
           })
         );
       }

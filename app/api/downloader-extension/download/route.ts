@@ -62,8 +62,8 @@ export async function GET() {
     console.error('[downloader-extension/download]', e);
     return NextResponse.json(
       {
-        error: 'Falha ao empacotar a extensao.',
-        detail: e instanceof Error ? e.message : String(e),
+        error:
+          'Não consegui gerar o arquivo da extensão agora. Tenta de novo em 1 minuto — se seguir sem funcionar, chama a gente no WhatsApp.',
       },
       { status: 500 },
     );

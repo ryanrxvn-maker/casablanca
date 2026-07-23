@@ -45,6 +45,39 @@
     // usuário (o motor não consegue — IG exige login). Relaia pro service
     // worker, que resolve com os cookies do próprio usuário e baixa via
     // chrome.downloads. Devolve DL_IG_RESULT { reqId, ok, error } pro site.
+    // Site pede pra baixar QUALQUER link pelo Motor local (YouTube, TikTok,
+    // Pinterest... — o servidor do site nao baixa esses; o Motor baixa).
+    // Relaia pro service worker com modo/qualidade escolhidos na pagina e
+    // devolve DL_ENGINE_RESULT { reqId, ok, error } pro site. (v1.7.0+)
+    if (d.type === 'DL_ENGINE_DOWNLOAD' && d.url && d.reqId) {
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'darko-download',
+            url: d.url,
+            mode: d.mode || 'video',
+            quality: d.quality || '1080',
+            adult: false,
+          },
+          (resp) => {
+            const err = chrome.runtime.lastError;
+            toPage({
+              type: 'DL_ENGINE_RESULT',
+              reqId: d.reqId,
+              ok: !err && !!(resp && resp.ok),
+              error: err ? err.message : resp && resp.error,
+            });
+          },
+        );
+      } catch (e) {
+        toPage({
+          type: 'DL_ENGINE_RESULT',
+          reqId: d.reqId,
+          ok: false,
+          error: String(e && e.message),
+        });
+      }
+    }
     if (d.type === 'DL_IG_DOWNLOAD' && d.url && d.reqId) {
       try {
         chrome.runtime.sendMessage(

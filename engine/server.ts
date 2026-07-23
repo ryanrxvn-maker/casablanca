@@ -22,7 +22,7 @@ import os from 'os';
 import path from 'path';
 import { processDownload, type Mode, type Quality } from '../lib/downloader-core';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const DEFAULT_PORT = 47923;
 
 type Config = { token: string; port: number; allowAdult: boolean };
@@ -167,7 +167,7 @@ async function main() {
         return res.end(
           JSON.stringify({
             error:
-              'Modo +18 desativado neste motor. Ative nas opcoes (allowAdult).',
+              'O modo +18 esta desativado neste Motor. Reinstale o Motor pela pagina do Downloader pra reativar.',
           }),
         );
       }

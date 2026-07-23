@@ -78,11 +78,24 @@ export async function POST(req: NextRequest) {
     adult,
   });
 
-  if (!result.ok)
+  if (!result.ok) {
+    // Servidor sem yt-dlp (deploy serverless): quem baixa YouTube/Pinterest
+    // e o MOTOR no computador do cliente. A resposta orienta o caminho que
+    // resolve de verdade — nunca a mensagem tecnica interna.
+    if (result.code === 'YTDLP_MISSING') {
+      return NextResponse.json(
+        {
+          error:
+            'Esse download é feito pelo Motor no seu computador. Instala e conecta o Motor + Extensão (passo 1 da página — leva 1 minuto) e clica em Baixar de novo.',
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       { error: result.error },
       { status: result.status },
     );
+  }
 
   const cd = `attachment; filename="${result.name.replace(/"/g, '')}"`;
 

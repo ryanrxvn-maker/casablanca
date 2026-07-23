@@ -29,7 +29,6 @@
 /build
 /coverage
 /engine/dist/
-/engine/pkg.zip
 /node_modules
 /out/
 /scripts/_*.mjs

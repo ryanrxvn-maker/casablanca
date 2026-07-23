@@ -317,7 +317,7 @@ async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
     return {
       ok: false,
       authFail: false,
-      error: 'Motor local não está rodando. Abra o DarkoLab Downloader.',
+      error: 'O Motor não está aberto neste computador. Abra o Auto Edit Downloader pelo menu Iniciar e tente de novo.',
     };
   }
   const params = {

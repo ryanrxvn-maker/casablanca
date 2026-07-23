@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'child_process';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
@@ -88,6 +88,7 @@ function safeName(title: string, ext: string): string {
 type Tool = { cmd: string; pre: string[] };
 let ytDlpResolved: Tool | null = null;
 let ytDlpInflight: Promise<Tool | null> | null = null;
+let ytDlpSelfHealTried = false;
 let ffmpegResolved: string | null = null;
 let aria2Resolved: string | null | undefined = undefined;
 
@@ -218,6 +219,38 @@ async function resolveYtDlp(): Promise<Tool | null> {
         return healed;
       }
     }
+
+    // AUTO-REPARO (motor no PC do cliente): o launcher sempre define
+    // YTDLP_PATH -> se o binario sumiu (antivirus apagou/quarentenou,
+    // download original corrompeu), rebaixa o yt-dlp.exe STANDALONE
+    // (nao precisa de Python) direto pro caminho esperado. O cliente
+    // nao precisa mexer em nada — o proximo download ja funciona.
+    const healPath = process.env.YTDLP_PATH;
+    if (healPath && process.platform === 'win32' && !ytDlpSelfHealTried) {
+      ytDlpSelfHealTried = true;
+      try {
+        const r = await fetch(
+          'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
+          { signal: AbortSignal.timeout(180_000), redirect: 'follow' },
+        );
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer());
+          // yt-dlp.exe real tem ~18MB; menos que 5MB = pagina de erro/HTML
+          if (buf.length > 5_000_000) {
+            await mkdir(path.dirname(healPath), { recursive: true });
+            await writeFile(healPath, buf);
+            const downloaded = await tryTool({ cmd: healPath, pre: [] });
+            if (downloaded) {
+              console.log('[downloader-core] yt-dlp auto-reparado em', healPath);
+              ytDlpResolved = downloaded;
+              return downloaded;
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[downloader-core] auto-reparo do yt-dlp falhou:', e);
+      }
+    }
     return null;
   })();
   try {
@@ -281,10 +314,12 @@ function run(
 }
 
 // Built interno: arquivo em disco, midia remota (TikTok fast path) ou erro.
+// `code` e um marcador de maquina: quem chama (rota do site / motor) pode
+// trocar a mensagem pela orientacao certa do seu contexto.
 type Built =
   | { remote: string; headers: Record<string, string>; name: string; contentType: string }
   | { file: string; name: string }
-  | { error: string };
+  | { error: string; code?: 'YTDLP_MISSING' };
 
 async function fetchTikTok(
   url: string,
@@ -298,19 +333,25 @@ async function fetchTikTok(
       headers: { 'user-agent': UA, accept: 'application/json' },
       signal: AbortSignal.timeout(20_000),
     });
-    if (!r.ok) return { error: `resolver HTTP ${r.status}` };
+    if (!r.ok) {
+      console.error('[downloader-core] tikwm HTTP', r.status);
+      return { error: 'o servico do TikTok nao respondeu agora. Tenta de novo em instantes.' };
+    }
     const j = (await r.json()) as { code?: number; msg?: string; data?: any };
-    if (j.code !== 0 || !j.data)
-      return { error: j.msg || 'resolver sem dados (privado/removido?)' };
+    if (j.code !== 0 || !j.data) {
+      console.error('[downloader-core] tikwm sem dados:', j.msg);
+      return { error: 'nao achei esse video no TikTok — ele pode ser privado ou ter sido removido. Confere o link no navegador.' };
+    }
     data = j.data;
   } catch (e) {
-    return { error: e instanceof Error ? e.message : 'resolver falhou' };
+    console.error('[downloader-core] tikwm falhou:', e);
+    return { error: 'a conexao com o TikTok falhou. Confere a internet e tenta de novo.' };
   }
   const videoUrl =
     (data.hdplay as string) ||
     (data.play as string) ||
     (data.wmplay as string);
-  if (!videoUrl) return { error: 'sem stream de video' };
+  if (!videoUrl) return { error: 'esse post do TikTok nao tem video pra baixar.' };
   const title = (data.title as string) || (data.id as string) || 'tiktok';
 
   if (mode === 'video') {
@@ -329,11 +370,16 @@ async function fetchTikTok(
       signal: AbortSignal.timeout(120_000),
     });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : 'download falhou' };
+    console.error('[downloader-core] tiktok midia falhou:', e);
+    return { error: 'a conexao caiu no meio do download. Tenta de novo.' };
   }
-  if (!vr.ok) return { error: `download da midia HTTP ${vr.status}` };
+  if (!vr.ok) {
+    console.error('[downloader-core] tiktok midia HTTP', vr.status);
+    return { error: 'o TikTok nao entregou o arquivo agora. Tenta de novo em instantes.' };
+  }
   const buf = Buffer.from(await vr.arrayBuffer());
-  if (buf.length < 1024) return { error: 'midia vazia' };
+  if (buf.length < 1024)
+    return { error: 'o TikTok entregou um arquivo vazio. Tenta de novo em instantes.' };
   const srcPath = path.join(workDir, 'tt-src.mp4');
   await writeFile(srcPath, buf);
   const ext = mode === 'audio-wav' ? 'wav' : 'mp3';
@@ -343,7 +389,8 @@ async function fetchTikTok(
       ? ['-y', '-i', srcPath, '-vn', outPath]
       : ['-y', '-i', srcPath, '-vn', '-b:a', '192k', outPath];
   const { code } = await run(await resolveFfmpeg(), ffArgs, workDir);
-  if (code !== 0) return { error: 'ffmpeg falhou na extracao de audio' };
+  if (code !== 0)
+    return { error: 'nao consegui converter o audio agora. Tenta de novo — se repetir, baixa como video.' };
   return { file: outPath, name: safeName(title, ext) };
 }
 
@@ -399,6 +446,28 @@ async function ytDlpArgs(
   return v;
 }
 
+// Traduz o stderr do yt-dlp pra uma frase que o CLIENTE entende e consegue
+// agir. O stderr cru NUNCA chega na tela — vai pro console (engine.log no
+// motor / logs do servidor) pra diagnostico.
+function friendlyYtDlpFail(stderr: string): string {
+  const m = stderr.toLowerCase();
+  if (/(private|login|sign in|logged.?in|members.?only|subscriber|only available for registered)/.test(m))
+    return 'esse video e privado ou exige login — so da pra baixar conteudo publico. Confere o link no navegador.';
+  if (/(age.?restrict|confirm your age|18\+)/.test(m))
+    return 'esse video tem restricao de idade e o site nao libera o download direto.';
+  if (/(unavailable|removed|terminated|deleted|does not exist|no longer available|404)/.test(m))
+    return 'esse video nao esta mais disponivel (foi removido ou saiu do ar). Confere o link no navegador.';
+  if (/(unsupported url|is not a valid url)/.test(m))
+    return 'esse link nao parece ser de um video. Confere se copiou o link certo.';
+  if (/ffmpeg (is )?not (found|installed)/.test(m))
+    return 'um componente do Motor sumiu deste computador (provavelmente o antivirus). Reinstala o Motor na pagina do Downloader (passo 1) que ele volta a funcionar.';
+  if (/(429|too many request|rate.?limit)/.test(m))
+    return 'o site limitou os downloads agora (muitos pedidos seguidos). Espera alguns minutos e tenta de novo.';
+  if (/(timed?.?out|timeout|connection|network|getaddrinfo|resolve host|unreachable)/.test(m))
+    return 'a conexao falhou no meio do download. Confere a internet e tenta de novo.';
+  return 'nao consegui baixar esse link agora. Confere se o video esta publico e tenta de novo em instantes.';
+}
+
 async function fetchYtDlp(
   url: string,
   mode: Mode,
@@ -410,8 +479,9 @@ async function fetchYtDlp(
   const tool = await resolveYtDlp();
   if (!tool)
     return {
+      code: 'YTDLP_MISSING',
       error:
-        'yt-dlp indisponivel e auto-instalacao falhou. Garanta Python no PATH (ou defina PYTHON_PATH/YTDLP_PATH) e ffmpeg no PATH.',
+        'o componente que baixa os videos nao foi encontrado. Reinstala o Motor na pagina do Downloader (passo 1) — leva 1 minuto e volta a funcionar.',
     };
   const refArgs = referer ? ['--add-header', `Referer:${referer}`] : [];
   const args = [
@@ -424,17 +494,8 @@ async function fetchYtDlp(
   // realmente travado morre. --socket-timeout ja corta stalls de rede.
   const { code, stderr } = await run(tool.cmd, args, workDir, 1_500_000);
   if (code !== 0) {
-    const clean = stderr
-      .split('\n')
-      .filter((l) => /error|unsupported|unavailable|private|login/i.test(l))
-      .slice(-3)
-      .join(' ')
-      .trim();
-    return {
-      error:
-        clean ||
-        'Verifique se o link e publico (conteudo privado exige login).',
-    };
+    console.error('[downloader-core] yt-dlp falhou:', stderr.slice(-4_000));
+    return { error: friendlyYtDlpFail(stderr) };
   }
   const names = await readdir(workDir);
   const files = (
@@ -448,7 +509,8 @@ async function fetchYtDlp(
         }),
     )
   ).filter(Boolean) as { n: string; full: string; size: number }[];
-  if (files.length === 0) return { error: 'nenhum arquivo gerado' };
+  if (files.length === 0)
+    return { error: 'o download terminou sem gerar arquivo. Tenta de novo em instantes.' };
   files.sort((a, b) => b.size - a.size);
   return { file: files[0].full, name: files[0].n };
 }
@@ -628,9 +690,10 @@ async function fetchAdult(
     /* headless indisponivel */
   }
 
-  return {
-    error: `nao foi possivel resolver a midia (site pode exigir login/assinatura, ou o Chromium do headless nao esta instalado). [${native.error}]`,
-  };
+  // Devolve o motivo (ja amigavel) da primeira tentativa — e o mais
+  // representativo. Detalhe tecnico de headless/embed fica no console.
+  console.error('[downloader-core] +18 esgotou fallbacks para', url);
+  return { error: `esse site nao liberou o video (pode exigir login ou assinatura). ${native.error}`, code: native.code };
 }
 
 // --------------------------- API publica ---------------------------
@@ -660,7 +723,7 @@ export type DownloadResult =
       contentType: string;
       dispose: () => Promise<void>;
     }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: 'YTDLP_MISSING' };
 
 /**
  * Resolve e baixa a midia. NAO faz auth: quem chama deve ter validado
@@ -710,10 +773,14 @@ export async function processDownload(
       built = await fetchTikTok(url, mode, workDir);
       if ('error' in built) {
         const fb = await fetchYtDlp(url, mode, quality, 'generic', workDir);
-        built =
-          'error' in fb
-            ? { error: `TikTok: ${built.error}. Fallback yt-dlp: ${fb.error}` }
-            : fb;
+        // Duas rotas falharam: mostra pro cliente SO o motivo do caminho
+        // principal (ja amigavel); o detalhe da 2a rota vai pro console.
+        if ('error' in fb) {
+          console.error('[downloader-core] fallback yt-dlp do TikTok tambem falhou:', fb.error);
+          built = { error: built.error };
+        } else {
+          built = fb;
+        }
       }
     } else if (provider === 'adult') {
       built = await fetchAdult(url, mode, quality, workDir);
@@ -727,6 +794,7 @@ export async function processDownload(
         ok: false,
         status: 502,
         error: 'Falha no download. ' + built.error,
+        code: built.code,
       };
     }
     if ('remote' in built) {
@@ -751,12 +819,11 @@ export async function processDownload(
     };
   } catch (e) {
     await dispose();
+    console.error('[downloader-core] erro interno:', e);
     return {
       ok: false,
       status: 500,
-      error:
-        'Erro interno no downloader: ' +
-        (e instanceof Error ? e.message : String(e)),
+      error: 'Deu um erro inesperado no download. Tenta de novo em instantes.',
     };
   }
 }

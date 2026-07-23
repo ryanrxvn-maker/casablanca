@@ -56,12 +56,11 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e) {
+    console.error('[downloader-engine/download] arquivo ausente no deploy:', e);
     return NextResponse.json(
       {
-        error: wantZip
-          ? 'ZIP fallback indisponivel. Gere com: node engine/package.mjs (cria engine/pkg.zip).'
-          : 'Instalador indisponivel. Gere com: node engine/build.mjs && node engine/package.mjs.',
-        detail: e instanceof Error ? e.message : String(e),
+        error:
+          'O instalador está sendo atualizado neste momento. Tenta baixar de novo em 1 minuto — se seguir sem funcionar, chama a gente no WhatsApp.',
       },
       { status: 503 },
     );
