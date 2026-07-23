@@ -83,6 +83,28 @@ export async function GET() {
       }
     }
 
+    // Último comprovante (Stripe receipt) por usuário — botão direto no card.
+    const receiptByUser: Record<string, { url: string; at: string | null }> = {};
+    try {
+      const { data: pays } = await svc
+        .from('payments')
+        .select('user_id, receipt_url, created_at')
+        .not('receipt_url', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      for (const pay of (pays ?? []) as Array<{
+        user_id: string | null;
+        receipt_url: string | null;
+        created_at: string | null;
+      }>) {
+        if (pay.user_id && pay.receipt_url && !receiptByUser[pay.user_id]) {
+          receiptByUser[pay.user_id] = { url: pay.receipt_url, at: pay.created_at };
+        }
+      }
+    } catch {
+      /* tabela payments ausente (schema antigo) — segue sem comprovantes */
+    }
+
     const enriched = (profiles ?? []).map((p) => {
       const { plan, access } = classify(p);
       return {
@@ -92,6 +114,8 @@ export async function GET() {
         access,
         tool_unlocks: Array.isArray(p.tool_unlocks) ? p.tool_unlocks : [],
         static_unlocks: staticUnlocksForEmail(p.email),
+        receipt_url: receiptByUser[p.id]?.url ?? null,
+        last_payment_at: receiptByUser[p.id]?.at ?? null,
       };
     });
 

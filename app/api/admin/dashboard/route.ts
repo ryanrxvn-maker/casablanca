@@ -70,6 +70,10 @@ export async function GET() {
   const ONLINE_MS = 60_000;
   const TOOL_ACTIVE_MS = 90_000;
 
+  // Contas ADMIN são da casa: entram só na contagem de tiers — ranking de
+  // ferramentas, online, signups e tráfego mostram SÓ clientes.
+  const adminIds = new Set(profiles.filter((p) => p.is_admin).map((p) => p.id));
+
   const tiers = { free: 0, basic: 0, pro: 0, admin: 0 };
   const paying = { basic: 0, pro: 0 };
   const sources: Record<string, number> = {};
@@ -93,6 +97,8 @@ export async function GET() {
     if (paidActive && (p.subscription_plan === 'basic' || p.subscription_plan === 'pro')) {
       paying[p.subscription_plan] += 1;
     }
+
+    if (p.is_admin) continue; // métricas de comportamento = só clientes
 
     const src = (p.traffic_source || 'direct').toLowerCase();
     sources[src] = (sources[src] ?? 0) + 1;
@@ -120,24 +126,28 @@ export async function GET() {
   const mrr =
     paying.basic * PRICE_MONTHLY.basic + paying.pro * PRICE_MONTHLY.pro;
 
-  const recentSignups = profiles.slice(0, 10).map((p) => ({
-    id: p.id,
-    name: p.name,
-    email: p.email,
-    tier: resolveTier(p),
-    traffic_source: p.traffic_source,
-    created_at: p.created_at,
-  }));
+  const recentSignups = profiles
+    .filter((p) => !adminIds.has(p.id))
+    .slice(0, 10)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      email: p.email,
+      tier: resolveTier(p),
+      traffic_source: p.traffic_source,
+      created_at: p.created_at,
+    }));
 
-  // ─── Ranking de ferramentas (últimos 30 dias) ───
+  // ─── Ranking de ferramentas (últimos 30 dias, SÓ clientes) ───
   const since = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
   const { data: eventsData } = await svc
     .from('tool_events')
-    .select('tool, created_at')
+    .select('tool, user_id, created_at')
     .gte('created_at', since)
     .limit(20000);
   const toolCounts: Record<string, number> = {};
-  for (const ev of (eventsData ?? []) as Array<{ tool: string }>) {
+  for (const ev of (eventsData ?? []) as Array<{ tool: string; user_id: string }>) {
+    if (adminIds.has(ev.user_id)) continue; // uso da casa não conta
     toolCounts[ev.tool] = (toolCounts[ev.tool] ?? 0) + 1;
   }
   const toolRanking = Object.entries(toolCounts)
@@ -153,7 +163,7 @@ export async function GET() {
     .from('payments')
     .select('id, email, amount, currency, plan, billing, status, receipt_url, created_at')
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(500);
   const payments = (paymentsData ?? []) as Array<{
     id: number;
     email: string | null;

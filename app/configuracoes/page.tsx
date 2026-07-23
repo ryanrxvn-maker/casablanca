@@ -206,7 +206,7 @@ export default function ConfiguracoesPage() {
             {/* Dashboard (cérebro) — só admin */}
             {isAdmin ? (
               <section className="fade-in-up" style={{ animationDelay: '20ms' }}>
-                <a href="/admin/dashboard" className="brain-btn group relative block overflow-hidden rounded-[20px] p-[1.5px]">
+                <a href="/admin" className="brain-btn group relative block overflow-hidden rounded-[20px] p-[1.5px]">
                   <span aria-hidden className="brain-btn-border" />
                   <span className="dark-island relative flex items-center justify-between gap-4 rounded-[19px] bg-[#0c0c11] px-6 py-6">
                     <span className="flex items-center gap-4">
@@ -223,10 +223,10 @@ export default function ConfiguracoesPage() {
                           </span>
                         </span>
                         <span className="block text-[18px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>
-                          Dashboard
+                          Painel admin
                         </span>
                         <span className="mt-1 block text-[13px] text-text-muted">
-                          Online agora, acessos, origem, planos e ferramentas — tudo num lugar.
+                          Financeiro, usuários, online agora, origem e ferramentas — tudo num lugar.
                         </span>
                       </span>
                     </span>

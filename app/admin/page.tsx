@@ -4,17 +4,22 @@ import { useEffect, useMemo, useState } from 'react';
 import { UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
 
 /**
- * /admin — central de controle do dono.
+ * /admin — O painel do dono. ÚNICO dashboard (o /admin/dashboard redireciona
+ * pra cá).
  *
- * • Stats ao vivo: online agora, totais, pagantes (Stripe), liberados na mão,
- *   MRR e ferramentas mais usadas (30d).
- * • Filtros: pagante de verdade × liberado por você × free × BETA PRO ×
- *   online × inativos (+ anomalia, se existir).
- * • Planos: só FREE e PREMIUM (Pro morreu; legado pro/beta exibe PREMIUM).
- * • BETA PRO: libera ferramentas admin-only POR CONTA (profiles.tool_unlocks)
- *   sem dar admin — modal com o catálogo de lib/tool-unlocks.ts.
+ * • Stats ao vivo (poll 15s): online agora, totais, pagantes (Stripe),
+ *   liberados na mão, MRR.
+ * • Financeiro: arrecadado por período (hoje / 7 dias / mês / total) +
+ *   pagamentos com comprovante.
+ * • Usuários: filtros pagante×liberado×free×beta-pro×online×inativos,
+ *   busca, ordenação; ações com confirmação em 2 ETAPAS (modal) pra
+ *   rebaixar plano e deletar.
+ * • BETA PRO: ferramentas admin-only liberadas POR CONTA sem dar admin.
+ * • Métricas de comportamento (ferramentas mais usadas, origem) contam SÓ
+ *   clientes — uso da conta admin fica de fora (filtrado na API).
  *
- * Status online: last_seen_at < 60s. Poll: usuários 15s, métricas 60s.
+ * Tema: 100% tokens (bg/line/text/lime/violet/cyan/amber via CSS vars) —
+ * legível no escuro E no claro, sem hex fixo.
  */
 
 type AdminUser = {
@@ -24,7 +29,6 @@ type AdminUser = {
   is_admin: boolean;
   is_active: boolean;
   must_change_password: boolean;
-  activated_at: string | null;
   created_at: string;
   last_seen_at: string | null;
   last_ip: string | null;
@@ -33,7 +37,6 @@ type AdminUser = {
   tier?: string | null;
   phone?: string | null;
   phone_verified?: boolean | null;
-  legacy_no_phone?: boolean | null;
   subscription_status?: string | null;
   subscription_plan?: string | null;
   current_period_end?: string | null;
@@ -42,25 +45,28 @@ type AdminUser = {
   access: 'paid' | 'granted' | 'anomaly' | 'free';
   tool_unlocks: string[];
   static_unlocks: string[];
+  receipt_url: string | null;
+  last_payment_at: string | null;
+};
+
+type Payment = {
+  id: number;
+  email: string | null;
+  amount: number;
+  currency: string;
+  plan: string | null;
+  billing: string | null;
+  status: string;
+  receipt_url: string | null;
+  created_at: string | null;
 };
 
 type Dash = {
   totals: { users: number; online: number; paying: number; mrr: number };
   toolRanking: Array<{ tool: string; count: number }>;
-};
-
-type UserDetail = {
-  access: string;
-  current_period_end: string | null;
-  payments: Array<{
-    amount: number;
-    currency: string;
-    plan: string | null;
-    billing: string | null;
-    status: string;
-    receipt_url: string | null;
-    created_at: string | null;
-  }>;
+  trafficSources: Array<{ source: string; count: number }>;
+  payments: Payment[];
+  revenueTotal: number;
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -85,11 +91,8 @@ const TOOL_LABELS: Record<string, string> = {
   lipsync: 'Lipsync',
   historico: 'Histórico',
 };
-const toolLabel = (s: string | null) =>
-  s ? (TOOL_LABELS[s] ?? s) : null;
+const toolLabel = (s: string | null) => (s ? (TOOL_LABELS[s] ?? s) : null);
 
-// Só os paths do catálogo interessam pros badges (as rotas de apoio
-// expandidas — /tools/background etc. — não são "ferramentas").
 const CATALOG_PATHS = new Set(UNLOCKABLE_TOOLS.map((t) => t.path));
 const CATALOG_LABEL = new Map(UNLOCKABLE_TOOLS.map((t) => [t.path, t.label]));
 
@@ -110,7 +113,6 @@ function isUsingTool(u: AdminUser): boolean {
   return (Date.now() - new Date(u.last_tool_at).getTime()) / 1000 <= 90;
 }
 
-/** "há 3 min" / "há 2 h" / "12/07" — compacto pro meta do card. */
 function timeAgo(iso: string | null): string | null {
   if (!iso) return null;
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -119,46 +121,35 @@ function timeAgo(iso: string | null): string | null {
   if (s < 3600) return `há ${Math.floor(s / 60)} min`;
   if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
   if (s < 7 * 86400) return `há ${Math.floor(s / 86400)} d`;
-  return new Date(iso).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-  });
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
 function brl(centavos: number): string {
-  return (centavos / 100).toLocaleString('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-  });
+  return (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-// ─── Meta visual por origem de acesso ───────────────────────────────────────
-const ACCESS_META = {
-  paid: {
-    label: 'PREMIUM · PAGO',
-    color: '#c8e87c',
-    bg: 'rgba(200,232,124,0.12)',
-    dot: true,
-  },
-  granted: {
-    label: 'PREMIUM · LIBERADO',
-    color: '#67e8f9',
-    bg: 'rgba(103,232,249,0.12)',
-    dot: false,
-  },
-  anomaly: {
-    label: 'PREMIUM · ⚠ SEM ORIGEM',
-    color: '#fca5a5',
-    bg: 'rgba(244,63,94,0.15)',
-    dot: false,
-  },
-  free: {
-    label: 'FREE',
-    color: '#8b8b96',
-    bg: 'rgba(255,255,255,0.05)',
-    dot: false,
-  },
-} as const;
+/* Acesso → cor por TOKEN (adapta no modo claro sozinho). */
+type Accent = 'lime' | 'cyan' | 'violet' | 'amber' | 'neutral' | 'danger';
+const ACCENT_VAR: Record<Accent, string> = {
+  lime: 'var(--lime)',
+  cyan: 'var(--cyan)',
+  violet: 'var(--violet)',
+  amber: 'var(--amber)',
+  neutral: 'var(--text-dim)',
+  danger: '220 68 80',
+};
+const accent = (a: Accent, alpha?: number) =>
+  alpha == null ? `rgb(${ACCENT_VAR[a]})` : `rgb(${ACCENT_VAR[a]} / ${alpha})`;
+
+const ACCESS_META: Record<
+  AdminUser['access'],
+  { label: string; accent: Accent }
+> = {
+  paid: { label: 'PREMIUM · PAGO', accent: 'lime' },
+  granted: { label: 'PREMIUM · LIBERADO', accent: 'cyan' },
+  anomaly: { label: 'PREMIUM · SEM ORIGEM', accent: 'danger' },
+  free: { label: 'FREE', accent: 'neutral' },
+};
 
 type FilterKey =
   | 'all'
@@ -169,6 +160,22 @@ type FilterKey =
   | 'beta'
   | 'inactive'
   | 'anomaly';
+
+type Period = 'today' | 'week' | 'month' | 'all';
+const PERIOD_LABEL: Record<Period, string> = {
+  today: 'Hoje',
+  week: '7 dias',
+  month: 'Este mês',
+  all: 'Total',
+};
+
+function periodStart(p: Period): number {
+  const now = new Date();
+  if (p === 'today') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (p === 'week') return Date.now() - 7 * 24 * 60 * 60 * 1000;
+  if (p === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  return 0;
+}
 
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
@@ -181,16 +188,15 @@ export default function AdminPage() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<'recent' | 'seen' | 'name'>('recent');
+  const [period, setPeriod] = useState<Period>('month');
 
-  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
   const flash = (kind: 'ok' | 'err', msg: string, ms = 3500) => {
     setToast({ kind, msg });
     setTimeout(() => setToast(null), ms);
   };
 
-  // ─── Carregamento + polls ───
+  // ─── Data ───
   async function load(silent = false) {
     if (!silent) setLoading(true);
     try {
@@ -218,7 +224,7 @@ export default function AdminPage() {
       if (!res.ok) return;
       setDash((await res.json()) as Dash);
     } catch {
-      /* métrica secundária — sem drama */
+      /* métrica secundária */
     }
   }
 
@@ -233,58 +239,58 @@ export default function AdminPage() {
     };
   }, []);
 
-  // ─── Stats derivadas da própria lista ───
+  // ─── Stats ───
   const stats = useMemo(() => {
     const list = users ?? [];
-    const online = list.filter(isOnline).length;
-    const paid = list.filter((u) => u.access === 'paid').length;
-    const granted = list.filter((u) => u.access === 'granted').length;
-    const anomaly = list.filter((u) => u.access === 'anomaly').length;
-    const free = list.filter((u) => u.plan === 'free').length;
-    const beta = list.filter((u) => betaProTools(u).length > 0).length;
-    const inactive = list.filter((u) => !u.is_active).length;
-    return { total: list.length, online, paid, granted, anomaly, free, beta, inactive };
+    return {
+      total: list.length,
+      online: list.filter(isOnline).length,
+      paid: list.filter((u) => u.access === 'paid').length,
+      granted: list.filter((u) => u.access === 'granted').length,
+      anomaly: list.filter((u) => u.access === 'anomaly').length,
+      free: list.filter((u) => u.plan === 'free').length,
+      beta: list.filter((u) => betaProTools(u).length > 0).length,
+      inactive: list.filter((u) => !u.is_active).length,
+    };
   }, [users]);
+
+  // ─── Financeiro (período) ───
+  const finance = useMemo(() => {
+    const pays = (dash?.payments ?? []).filter((p) => p.status === 'paid' || p.status === 'succeeded');
+    const start = periodStart(period);
+    const inPeriod = pays.filter((p) => (p.created_at ? new Date(p.created_at).getTime() >= start : false));
+    const total = inPeriod.reduce((s, p) => s + (p.amount || 0), 0);
+    return {
+      list: inPeriod,
+      total,
+      count: inPeriod.length,
+      avg: inPeriod.length ? Math.round(total / inPeriod.length) : 0,
+    };
+  }, [dash, period]);
 
   // ─── Filtro + busca + ordenação ───
   const visible = useMemo(() => {
     let list = users ?? [];
     switch (filter) {
-      case 'online':
-        list = list.filter(isOnline);
-        break;
-      case 'paid':
-        list = list.filter((u) => u.access === 'paid');
-        break;
-      case 'granted':
-        list = list.filter((u) => u.access === 'granted');
-        break;
-      case 'free':
-        list = list.filter((u) => u.plan === 'free');
-        break;
-      case 'beta':
-        list = list.filter((u) => betaProTools(u).length > 0);
-        break;
-      case 'inactive':
-        list = list.filter((u) => !u.is_active);
-        break;
-      case 'anomaly':
-        list = list.filter((u) => u.access === 'anomaly');
-        break;
+      case 'online': list = list.filter(isOnline); break;
+      case 'paid': list = list.filter((u) => u.access === 'paid'); break;
+      case 'granted': list = list.filter((u) => u.access === 'granted'); break;
+      case 'free': list = list.filter((u) => u.plan === 'free'); break;
+      case 'beta': list = list.filter((u) => betaProTools(u).length > 0); break;
+      case 'inactive': list = list.filter((u) => !u.is_active); break;
+      case 'anomaly': list = list.filter((u) => u.access === 'anomaly'); break;
     }
     const query = q.trim().toLowerCase();
     if (query) {
-      list = list.filter((u) => {
-        return (
+      list = list.filter(
+        (u) =>
           (u.name ?? '').toLowerCase().includes(query) ||
           (u.email ?? '').toLowerCase().includes(query) ||
           (u.last_ip ?? '').toLowerCase().includes(query) ||
-          (toolLabel(u.last_tool) ?? '').toLowerCase().includes(query)
-        );
-      });
+          (toolLabel(u.last_tool) ?? '').toLowerCase().includes(query),
+      );
     }
-    const byDate = (v: string | null | undefined) =>
-      v ? new Date(v).getTime() : 0;
+    const byDate = (v: string | null | undefined) => (v ? new Date(v).getTime() : 0);
     list = [...list];
     if (sort === 'recent') list.sort((a, b) => byDate(b.created_at) - byDate(a.created_at));
     else if (sort === 'seen') list.sort((a, b) => byDate(b.last_seen_at) - byDate(a.last_seen_at));
@@ -295,25 +301,23 @@ export default function AdminPage() {
   // ─── Ações ───
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  async function changePlan(u: AdminUser, plan: 'free' | 'premium') {
-    if (u.plan === plan) return;
-    if (u.access === 'paid' && plan === 'free') {
-      if (
-        !window.confirm(
-          `${u.email || u.name} é PAGANTE (Stripe). Rebaixar pra FREE corta o acesso agora, mas NÃO cancela a assinatura no Stripe.\n\nContinuar?`,
-        )
-      )
-        return;
-    }
+  /** Confirmação em 2 ETAPAS — nada destrutivo acontece em 1 clique. */
+  const [confirmBox, setConfirmBox] = useState<{
+    title: string;
+    body: React.ReactNode;
+    confirmLabel: string;
+    accent: Accent;
+    run: () => Promise<void>;
+    running?: boolean;
+  } | null>(null);
+
+  async function doSetPlan(u: AdminUser, plan: 'free' | 'premium') {
     setBusyId(u.id);
     try {
       const res = await fetch('/api/admin/set-tier', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          userId: u.id,
-          tier: plan === 'premium' ? 'basic' : 'free',
-        }),
+        body: JSON.stringify({ userId: u.id, tier: plan === 'premium' ? 'basic' : 'free' }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
@@ -334,15 +338,40 @@ export default function AdminPage() {
     }
   }
 
-  async function toggleAction(u: AdminUser, action: 'activate' | 'deactivate' | 'delete') {
-    if (action === 'delete') {
-      if (
-        !window.confirm(
-          `Deletar PERMANENTEMENTE ${u.email || u.name}? Ação irreversível.`,
-        )
-      )
-        return;
+  function changePlan(u: AdminUser, plan: 'free' | 'premium') {
+    if (u.plan === plan) return;
+    if (plan === 'premium') {
+      // Liberar é seguro e reversível — direto.
+      void doSetPlan(u, 'premium');
+      return;
     }
+    // Rebaixar pra FREE → SEMPRE 2 etapas.
+    setConfirmBox({
+      title: 'Rebaixar pra FREE?',
+      accent: 'danger',
+      confirmLabel: 'Sim, rebaixar pra FREE',
+      body:
+        u.access === 'paid' ? (
+          <>
+            <span className="font-bold text-text">{u.email || u.name}</span> é{' '}
+            <span className="font-bold" style={{ color: accent('lime') }}>
+              PAGANTE (Stripe)
+            </span>
+            . Rebaixar corta o acesso Premium agora, mas{' '}
+            <span className="font-bold text-text">não cancela a assinatura no Stripe</span> — ele
+            pode continuar sendo cobrado.
+          </>
+        ) : (
+          <>
+            <span className="font-bold text-text">{u.email || u.name}</span> vai perder o acesso
+            Premium que você liberou. Dá pra liberar de novo depois.
+          </>
+        ),
+      run: () => doSetPlan(u, 'free'),
+    });
+  }
+
+  async function doToggle(u: AdminUser, action: 'activate' | 'deactivate' | 'delete') {
     setBusyId(u.id);
     try {
       const res = await fetch('/api/admin/toggle-user', {
@@ -371,34 +400,57 @@ export default function AdminPage() {
     }
   }
 
+  function askDelete(u: AdminUser) {
+    setConfirmBox({
+      title: 'Deletar usuário?',
+      accent: 'danger',
+      confirmLabel: 'Sim, deletar de vez',
+      body: (
+        <>
+          <span className="font-bold text-text">{u.email || u.name}</span> será removido{' '}
+          <span className="font-bold text-text">permanentemente</span> — conta, acesso e histórico.
+          Essa ação não tem volta.
+        </>
+      ),
+      run: () => doToggle(u, 'delete'),
+    });
+  }
+
   const [resetModal, setResetModal] = useState<{ email: string; password: string } | null>(null);
 
-  async function resetPassword(u: AdminUser) {
-    if (
-      !window.confirm(
-        `Gerar nova senha provisória pra ${u.email}?\n\nO usuário será forçado a trocar no próximo login.`,
-      )
-    )
-      return;
-    setBusyId(u.id);
-    try {
-      const res = await fetch('/api/admin/reset-password', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ userId: u.id }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        flash('err', json.error || 'Falha ao gerar senha.');
-        return;
-      }
-      setResetModal({ email: u.email || '', password: json.password });
-      await load(true);
-    } catch (e) {
-      flash('err', (e as Error).message || 'Erro inesperado.');
-    } finally {
-      setBusyId(null);
-    }
+  function askResetPassword(u: AdminUser) {
+    setConfirmBox({
+      title: 'Gerar nova senha provisória?',
+      accent: 'amber',
+      confirmLabel: 'Gerar senha',
+      body: (
+        <>
+          <span className="font-bold text-text">{u.email}</span> será forçado a trocar a senha no
+          próximo login. A senha atual dele deixa de valer.
+        </>
+      ),
+      run: async () => {
+        setBusyId(u.id);
+        try {
+          const res = await fetch('/api/admin/reset-password', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ userId: u.id }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.ok) {
+            flash('err', json.error || 'Falha ao gerar senha.');
+            return;
+          }
+          setResetModal({ email: u.email || '', password: json.password });
+          await load(true);
+        } catch (e) {
+          flash('err', (e as Error).message || 'Erro inesperado.');
+        } finally {
+          setBusyId(null);
+        }
+      },
+    });
   }
 
   async function reconcile(u: AdminUser) {
@@ -427,20 +479,12 @@ export default function AdminPage() {
     }
   }
 
-  // ─── BETA PRO (modal de desbloqueios) ───
+  // ─── BETA PRO ───
   const [betaModal, setBetaModal] = useState<{
     user: AdminUser;
     sel: Set<string>;
     saving: boolean;
   } | null>(null);
-
-  function openBetaModal(u: AdminUser) {
-    setBetaModal({
-      user: u,
-      sel: new Set(u.tool_unlocks.filter((p) => CATALOG_PATHS.has(p))),
-      saving: false,
-    });
-  }
 
   async function saveBetaModal() {
     if (!betaModal) return;
@@ -449,10 +493,7 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/set-tool-unlocks', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          userId: betaModal.user.id,
-          tools: Array.from(betaModal.sel),
-        }),
+        body: JSON.stringify({ userId: betaModal.user.id, tools: Array.from(betaModal.sel) }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) {
@@ -463,8 +504,8 @@ export default function AdminPage() {
       flash(
         'ok',
         betaModal.sel.size
-          ? `BETA PRO: ${betaModal.sel.size} ferramenta${betaModal.sel.size > 1 ? 's' : ''} liberada${betaModal.sel.size > 1 ? 's' : ''} pra ${betaModal.user.email}.`
-          : `BETA PRO removido de ${betaModal.user.email}.`,
+          ? `Beta Pro: ${betaModal.sel.size} ferramenta${betaModal.sel.size > 1 ? 's' : ''} pra ${betaModal.user.email}.`
+          : `Beta Pro removido de ${betaModal.user.email}.`,
       );
       setBetaModal(null);
       await load(true);
@@ -474,38 +515,8 @@ export default function AdminPage() {
     }
   }
 
-  // ─── Detalhe expandido (comprovantes) ───
+  // ─── Detalhe expandido ───
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [details, setDetails] = useState<Record<string, UserDetail | 'loading'>>({});
-
-  async function toggleExpand(u: AdminUser) {
-    if (expanded === u.id) {
-      setExpanded(null);
-      return;
-    }
-    setExpanded(u.id);
-    if (details[u.id] && details[u.id] !== 'loading') return;
-    setDetails((d) => ({ ...d, [u.id]: 'loading' }));
-    try {
-      const res = await fetch(
-        `/api/admin/user-search?q=${encodeURIComponent(u.email ?? '')}`,
-        { cache: 'no-store' },
-      );
-      const j = await res.json();
-      const found = res.ok
-        ? (j.users as Array<UserDetail & { id: string }>).find((x) => x.id === u.id)
-        : null;
-      setDetails((d) => ({
-        ...d,
-        [u.id]: found ?? { access: u.access, current_period_end: u.current_period_end ?? null, payments: [] },
-      }));
-    } catch {
-      setDetails((d) => ({
-        ...d,
-        [u.id]: { access: u.access, current_period_end: u.current_period_end ?? null, payments: [] },
-      }));
-    }
-  }
 
   // ─── Criar usuário ───
   const [createOpen, setCreateOpen] = useState(false);
@@ -541,58 +552,41 @@ export default function AdminPage() {
     }
   }
 
-  // ─── Chips de filtro ───
-  const chips: Array<{ key: FilterKey; label: string; count: number; hide?: boolean }> = [
-    { key: 'all', label: 'Todos', count: stats.total },
-    { key: 'online', label: '● Online', count: stats.online },
-    { key: 'paid', label: '💳 Pagantes', count: stats.paid },
-    { key: 'granted', label: '🎁 Liberados', count: stats.granted },
-    { key: 'free', label: 'Free', count: stats.free },
-    { key: 'beta', label: '⚡ Beta Pro', count: stats.beta },
-    { key: 'inactive', label: 'Inativos', count: stats.inactive },
-    { key: 'anomaly', label: '⚠ Anomalia', count: stats.anomaly, hide: stats.anomaly === 0 },
+  const chips: Array<{ key: FilterKey; label: string; count: number; accent: Accent; hide?: boolean }> = [
+    { key: 'all', label: 'Todos', count: stats.total, accent: 'neutral' },
+    { key: 'online', label: 'Online', count: stats.online, accent: 'lime' },
+    { key: 'paid', label: 'Pagantes', count: stats.paid, accent: 'lime' },
+    { key: 'granted', label: 'Liberados', count: stats.granted, accent: 'cyan' },
+    { key: 'free', label: 'Free', count: stats.free, accent: 'neutral' },
+    { key: 'beta', label: 'Beta Pro', count: stats.beta, accent: 'violet' },
+    { key: 'inactive', label: 'Inativos', count: stats.inactive, accent: 'danger' },
+    { key: 'anomaly', label: 'Anomalia', count: stats.anomaly, accent: 'danger', hide: stats.anomaly === 0 },
   ];
 
   return (
     <div className="mx-auto w-full max-w-[1240px] px-5 md:px-8">
-      {/* ───────── Header ───────── */}
+      {/* ═══════ Header ═══════ */}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div
-            className="inline-flex items-center gap-2 rounded-full border border-lime/40 bg-lime/10 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.2em] text-lime"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_10px_rgba(200,232,124,0.9)]" />
-            ADMIN · CONTROLE
+          <div className="label-tech flex items-center gap-2 text-[10.5px] uppercase tracking-[0.22em] text-text-dim">
+            <LiveDot />
+            Admin · Central de controle
           </div>
-          <h1
-            className="mt-3 text-[32px] font-extrabold tracking-tight text-white md:text-[40px]"
-            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.03em' }}
-          >
+          <h1 className="font-tech mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-text md:text-[38px]">
             Painel admin
           </h1>
-          <p className="mt-1 text-[13px] text-text-muted">
+          <p className="mt-1 text-[12.5px] text-text-muted">
             {updatedAt
-              ? `Atualizado ${updatedAt.toLocaleTimeString('pt-BR')} · auto a cada 15s`
+              ? `Atualizado ${updatedAt.toLocaleTimeString('pt-BR')} · automático a cada 15s`
               : 'Carregando…'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <a
-            href="/admin/dashboard"
-            className="rounded-full border border-violet/45 bg-violet/10 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-violet transition hover:bg-violet/20"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            Dashboard completo →
-          </a>
-          <button
-            onClick={() => setCreateOpen((v) => !v)}
-            className="rounded-full border border-lime/50 bg-lime/10 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-lime transition hover:bg-lime/20"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            {createOpen ? '× Fechar' : '+ Criar usuário'}
-          </button>
-        </div>
+        <button
+          onClick={() => setCreateOpen((v) => !v)}
+          className="btn-primary !px-5 !py-2.5 text-[12.5px]"
+        >
+          {createOpen ? 'Fechar' : 'Criar usuário'}
+        </button>
       </header>
 
       {error ? (
@@ -603,136 +597,197 @@ export default function AdminPage() {
         >
           <div>{error}</div>
           {errorDetail ? (
-            <div className="mono mt-2 text-[10px] text-red-300/70">detail: {errorDetail}</div>
+            <div className="mono mt-2 text-[10px] opacity-70">detail: {errorDetail}</div>
           ) : null}
         </div>
       ) : null}
 
-      {/* ───────── Criar usuário (colapsável) ───────── */}
+      {/* ═══════ Criar usuário ═══════ */}
       {createOpen ? (
         <section className="fade-in-up mt-6">
           <form
             onSubmit={createUser}
-            className="grid gap-3 rounded-[16px] border border-lime/25 bg-bg p-4 sm:grid-cols-[1fr_1.2fr_1fr_auto]"
+            className="grid gap-3 rounded-[16px] border border-line bg-bg-soft p-4 sm:grid-cols-[1fr_1.2fr_1fr_auto]"
           >
-            <input
-              type="text"
-              placeholder="Nome"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              required
-              className="input-field"
-              disabled={creating}
-              minLength={2}
-            />
-            <input
-              type="email"
-              placeholder="email@exemplo.com"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              required
-              className="input-field"
-              disabled={creating}
-            />
-            <input
-              type="text"
-              placeholder="Senha provisória (mín. 8)"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              required
-              className="input-field"
-              disabled={creating}
-              minLength={8}
-            />
-            <button
-              type="submit"
-              className="btn-primary whitespace-nowrap"
-              disabled={creating || !newEmail || !newPassword || !newName}
-            >
+            <input type="text" placeholder="Nome" value={newName} onChange={(e) => setNewName(e.target.value)} required className="input-field" disabled={creating} minLength={2} />
+            <input type="email" placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} required className="input-field" disabled={creating} />
+            <input type="text" placeholder="Senha provisória (mín. 8)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required className="input-field" disabled={creating} minLength={8} />
+            <button type="submit" className="btn-primary whitespace-nowrap" disabled={creating || !newEmail || !newPassword || !newName}>
               {creating ? 'Criando…' : 'Criar e ativar'}
             </button>
             <p className="text-[11px] text-text-muted sm:col-span-4">
-              Senha provisória — no primeiro login o cliente troca por uma senha pessoal e você
-              não tem mais acesso.
+              Senha provisória — no primeiro login o cliente troca por uma senha pessoal e você não tem mais acesso.
             </p>
           </form>
         </section>
       ) : null}
 
-      {/* ───────── Stat cards ───────── */}
-      <section className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-5">
-        <StatCard
-          label="Online agora"
-          value={users ? stats.online : '—'}
-          hue="rgba(200,232,124,0.6)"
-          live
-        />
-        <StatCard label="Usuários" value={users ? stats.total : '—'} hue="rgba(167,139,250,0.6)" />
-        <StatCard
-          label="Pagantes (Stripe)"
-          value={users ? stats.paid : '—'}
-          hue="rgba(200,232,124,0.45)"
-          onClick={() => setFilter('paid')}
-        />
-        <StatCard
-          label="Liberados por você"
-          value={users ? stats.granted : '—'}
-          hue="rgba(103,232,249,0.6)"
-          onClick={() => setFilter('granted')}
-        />
-        <StatCard
-          label="MRR estimado"
-          value={dash ? `R$ ${dash.totals.mrr.toLocaleString('pt-BR')}` : '—'}
-          hue="rgba(244,114,182,0.6)"
-        />
+      {/* ═══════ Stats ═══════ */}
+      <section className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-5">
+        <StatCard label="Online agora" value={users ? stats.online : '—'} a="lime" live />
+        <StatCard label="Usuários" value={users ? stats.total : '—'} a="violet" />
+        <StatCard label="Pagantes · Stripe" value={users ? stats.paid : '—'} a="lime" onClick={() => setFilter('paid')} />
+        <StatCard label="Liberados por você" value={users ? stats.granted : '—'} a="cyan" onClick={() => setFilter('granted')} />
+        <StatCard label="MRR estimado" value={dash ? `R$ ${dash.totals.mrr.toLocaleString('pt-BR')}` : '—'} a="amber" />
       </section>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
-        {/* ───────── Coluna principal: usuários ───────── */}
-        <section>
-          {/* Filtros */}
-          <div className="flex flex-wrap items-center gap-2">
-            {chips
-              .filter((c) => !c.hide)
-              .map((c) => (
+      {/* ═══════ Financeiro ═══════ */}
+      <section className="mt-6">
+        <Panel
+          title="Financeiro"
+          right={
+            <div className="flex overflow-hidden rounded-full border border-line">
+              {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
                 <button
-                  key={c.key}
-                  onClick={() => setFilter(c.key)}
+                  key={p}
+                  onClick={() => setPeriod(p)}
                   className={
-                    'rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] transition ' +
-                    (filter === c.key
-                      ? c.key === 'paid'
-                        ? 'border-lime/70 bg-lime/15 text-lime'
-                        : c.key === 'granted'
-                          ? 'border-cyan-300/70 bg-cyan-300/15 text-cyan-300'
-                          : c.key === 'beta'
-                            ? 'border-violet/70 bg-violet/15 text-violet'
-                            : c.key === 'anomaly' || c.key === 'inactive'
-                              ? 'border-red-400/70 bg-red-400/15 text-red-300'
-                              : 'border-white/70 bg-white/10 text-white'
-                      : 'border-line-strong text-text-muted hover:border-white/50 hover:text-white')
+                    'font-tech px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] transition ' +
+                    (period === p ? 'text-text' : 'text-text-dim hover:text-text-muted')
                   }
-                  style={{ fontFamily: 'var(--font-tech)' }}
+                  style={period === p ? { background: accent('lime', 0.16) } : undefined}
                 >
-                  {c.label}
-                  <span className="ml-1.5 opacity-70">{c.count}</span>
+                  {PERIOD_LABEL[p]}
                 </button>
               ))}
+            </div>
+          }
+        >
+          {dash ? (
+            <div className="grid gap-5 lg:grid-cols-[240px_1fr]">
+              {/* Resumo do período */}
+              <div className="flex flex-col justify-center gap-4 rounded-[14px] border border-line bg-bg p-4">
+                <div>
+                  <div className="label-tech text-[10px] uppercase tracking-[0.16em] text-text-dim">
+                    Arrecadado · {PERIOD_LABEL[period]}
+                  </div>
+                  <div className="font-tech mt-1 text-[28px] font-extrabold tracking-tight" style={{ color: accent('lime') }}>
+                    {brl(finance.total)}
+                  </div>
+                </div>
+                <div className="flex gap-6">
+                  <div>
+                    <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Pagamentos</div>
+                    <div className="font-tech mt-0.5 text-[17px] font-bold text-text">{finance.count}</div>
+                  </div>
+                  <div>
+                    <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Ticket médio</div>
+                    <div className="font-tech mt-0.5 text-[17px] font-bold text-text">
+                      {finance.count ? brl(finance.avg) : '—'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pagamentos do período */}
+              {finance.list.length ? (
+                <div className="max-h-[240px] overflow-y-auto pr-1">
+                  <table className="w-full text-left text-[12.5px]">
+                    <thead className="sticky top-0 bg-bg-soft">
+                      <tr className="label-tech text-[9.5px] uppercase tracking-[0.14em] text-text-dim">
+                        <th className="pb-2 pr-3 font-bold">Cliente</th>
+                        <th className="pb-2 pr-3 font-bold">Plano</th>
+                        <th className="pb-2 pr-3 font-bold">Valor</th>
+                        <th className="pb-2 pr-3 font-bold">Data</th>
+                        <th className="pb-2 font-bold">Comprovante</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {finance.list.map((p) => (
+                        <tr key={p.id} className="border-t border-line/60">
+                          <td className="max-w-[220px] truncate py-2 pr-3 text-text">{p.email || '—'}</td>
+                          <td className="py-2 pr-3 text-text-muted">
+                            {p.plan === 'basic' ? 'Premium' : (p.plan ?? '—')}
+                            {p.billing ? (p.billing === 'annual' ? ' · anual' : ' · mensal') : ''}
+                          </td>
+                          <td className="py-2 pr-3 font-bold" style={{ color: accent('lime') }}>{brl(p.amount)}</td>
+                          <td className="whitespace-nowrap py-2 pr-3 text-text-muted">
+                            {p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '—'}
+                          </td>
+                          <td className="py-2">
+                            {p.receipt_url ? (
+                              <a
+                                href={p.receipt_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
+                                style={{ color: accent('violet') }}
+                              >
+                                <IconReceipt /> abrir
+                              </a>
+                            ) : (
+                              <span className="text-text-dim">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center rounded-[14px] border border-dashed border-line text-[12.5px] text-text-dim">
+                  Nenhum pagamento em “{PERIOD_LABEL[period]}”.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="h-28 animate-pulse rounded-[12px] bg-line/30" />
+          )}
+        </Panel>
+      </section>
+
+      {/* ═══════ Usuários + lateral ═══════ */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_296px]">
+        <section>
+          {/* Filtros */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {chips
+              .filter((c) => !c.hide)
+              .map((c) => {
+                const active = filter === c.key;
+                return (
+                  <button
+                    key={c.key}
+                    onClick={() => setFilter(c.key)}
+                    className={
+                      'font-tech rounded-full border px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] transition ' +
+                      (active ? '' : 'border-line text-text-dim hover:border-line-strong hover:text-text-muted')
+                    }
+                    style={
+                      active
+                        ? {
+                            borderColor: accent(c.accent, 0.55),
+                            background: accent(c.accent, 0.13),
+                            color: c.accent === 'neutral' ? 'rgb(var(--text))' : accent(c.accent),
+                          }
+                        : undefined
+                    }
+                  >
+                    {c.key === 'online' ? <LiveDot className="mr-1.5 inline-block align-middle" /> : null}
+                    {c.label}
+                    <span className="ml-1.5 opacity-60">{c.count}</span>
+                  </button>
+                );
+              })}
           </div>
 
           {/* Busca + ordenação */}
           <div className="mt-3 flex gap-2">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar por nome, email, IP ou ferramenta…"
-              className="input-field flex-1"
-            />
+            <div className="relative flex-1">
+              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-dim">
+                <IconSearch />
+              </span>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar por nome, email, IP ou ferramenta…"
+                className="input-field w-full !pl-10"
+              />
+            </div>
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as typeof sort)}
-              className="rounded-[12px] border border-line-strong bg-bg-soft px-3 text-[12px] font-bold uppercase tracking-[0.1em] text-text-muted"
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className="font-tech rounded-[12px] border border-line bg-bg-soft px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-text-muted"
               title="Ordenar"
             >
               <option value="recent">Recentes</option>
@@ -751,362 +806,232 @@ export default function AdminPage() {
                 const usingNow = isUsingTool(u);
                 const tLabel = toolLabel(u.last_tool);
                 const isOpen = expanded === u.id;
-                const detail = details[u.id];
                 return (
                   <div
                     key={u.id}
-                    className={
-                      'rounded-[14px] border bg-bg transition ' +
-                      (online ? 'border-lime/25' : 'border-line') +
-                      (u.is_active ? '' : ' opacity-60')
-                    }
+                    className={'rounded-[14px] border bg-bg-soft transition ' + (u.is_active ? 'border-line' : 'border-line opacity-55')}
+                    style={online ? { borderColor: accent('lime', 0.35) } : undefined}
                   >
                     <div className="flex flex-wrap items-center gap-3 p-3">
-                      {/* Identidade */}
+                      {/* Identidade (clica → detalhes) */}
                       <button
-                        onClick={() => toggleExpand(u)}
+                        onClick={() => setExpanded(isOpen ? null : u.id)}
                         className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        title={isOpen ? 'Fechar detalhes' : 'Ver detalhes / comprovantes'}
+                        title={isOpen ? 'Fechar detalhes' : 'Ver detalhes'}
                       >
                         <span
-                          className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-[13px] font-extrabold uppercase"
+                          className="font-tech relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-[13px] font-extrabold uppercase"
                           style={{
-                            fontFamily: 'var(--font-tech)',
-                            color: meta.color,
-                            borderColor: `${meta.color}55`,
-                            background: meta.bg,
+                            color: accent(meta.accent),
+                            borderColor: accent(meta.accent, 0.4),
+                            background: accent(meta.accent, 0.1),
                           }}
                         >
                           {(u.name || u.email || '?').slice(0, 1)}
                           {online ? (
-                            <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                              <span className="relative inline-flex h-2.5 w-2.5 rounded-full border-2 border-bg bg-lime" />
-                            </span>
+                            <span
+                              className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg-soft"
+                              style={{ background: accent('lime') }}
+                            />
                           ) : null}
                         </span>
                         <span className="min-w-0">
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-[13.5px] font-bold text-white">
-                              {u.name || '(sem nome)'}
-                            </span>
-                            <span
-                              className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em]"
-                              style={{
-                                fontFamily: 'var(--font-tech)',
-                                color: meta.color,
-                                background: meta.bg,
-                                border: `1px solid ${meta.color}55`,
-                              }}
-                            >
-                              {meta.label}
-                            </span>
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <span className="truncate text-[13.5px] font-bold text-text">{u.name || '(sem nome)'}</span>
+                            <Badge a={meta.accent}>{meta.label}</Badge>
                             {beta.length > 0 ? (
-                              <span
-                                className="rounded-full border border-violet/55 bg-violet/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-violet"
-                                style={{ fontFamily: 'var(--font-tech)' }}
-                                title={beta.map((p) => CATALOG_LABEL.get(p) ?? p).join(' · ')}
-                              >
-                                ⚡ BETA PRO · {beta.length}
-                              </span>
+                              <Badge a="violet" title={beta.map((p) => CATALOG_LABEL.get(p) ?? p).join(' · ')}>
+                                <IconBolt /> BETA PRO {beta.length}
+                              </Badge>
                             ) : null}
-                            {!u.is_active ? (
-                              <span
-                                className="rounded-full border border-red-400/50 bg-red-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-red-300"
-                                style={{ fontFamily: 'var(--font-tech)' }}
-                              >
-                                INATIVO
-                              </span>
-                            ) : null}
-                            {u.must_change_password ? (
-                              <span
-                                className="rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-amber-300"
-                                style={{ fontFamily: 'var(--font-tech)' }}
-                              >
-                                SENHA PROVISÓRIA
-                              </span>
-                            ) : null}
+                            {!u.is_active ? <Badge a="danger">INATIVO</Badge> : null}
+                            {u.must_change_password ? <Badge a="amber">SENHA PROVISÓRIA</Badge> : null}
                           </span>
                           <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
                             <span className="mono truncate">{u.email || '(sem email)'}</span>
                             {usingNow && tLabel ? (
                               <span className="whitespace-nowrap">
-                                usando <span className="font-semibold text-lime">{tLabel}</span>
+                                usando <span className="font-semibold" style={{ color: accent('lime') }}>{tLabel}</span>
                               </span>
                             ) : tLabel ? (
                               <span className="whitespace-nowrap text-text-dim">{tLabel}</span>
                             ) : null}
                             {u.last_seen_at ? (
-                              <span className="whitespace-nowrap text-text-dim">
-                                visto {timeAgo(u.last_seen_at)}
-                              </span>
+                              <span className="whitespace-nowrap text-text-dim">visto {timeAgo(u.last_seen_at)}</span>
                             ) : null}
-                            {u.last_ip ? (
-                              <span className="mono whitespace-nowrap text-text-dim">{u.last_ip}</span>
-                            ) : null}
+                            {u.last_ip ? <span className="mono whitespace-nowrap text-text-dim">{u.last_ip}</span> : null}
                           </span>
                         </span>
                       </button>
 
                       {/* Ações */}
                       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                        {/* Plano: FREE | PREMIUM */}
-                        <div
-                          className="flex overflow-hidden rounded-full border border-line-strong"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
+                        {u.access === 'paid' && u.receipt_url ? (
+                          <a
+                            href={u.receipt_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-tech inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition hover:opacity-80"
+                            style={{ borderColor: accent('lime', 0.45), color: accent('lime') }}
+                            title={`Comprovante Stripe${u.last_payment_at ? ` · ${new Date(u.last_payment_at).toLocaleDateString('pt-BR')}` : ''}`}
+                          >
+                            <IconReceipt /> Comprovante
+                          </a>
+                        ) : null}
+                        <div className="font-tech flex overflow-hidden rounded-full border border-line">
                           {(['free', 'premium'] as const).map((p) => (
                             <button
                               key={p}
                               onClick={() => changePlan(u, p)}
                               disabled={busyId === u.id || u.plan === p}
                               className={
-                                'px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] transition disabled:cursor-default ' +
-                                (u.plan === p
-                                  ? p === 'premium'
-                                    ? u.access === 'paid'
-                                      ? 'bg-lime/20 text-lime'
-                                      : 'bg-cyan-300/20 text-cyan-300'
-                                    : 'bg-white/15 text-white'
-                                  : 'text-text-dim hover:bg-white/5 hover:text-white')
+                                'px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition disabled:cursor-default ' +
+                                (u.plan === p ? '' : 'text-text-dim hover:text-text-muted')
                               }
-                              title={
-                                p === 'premium'
-                                  ? 'Liberar Premium na mão (admin_grant — não expira)'
-                                  : 'Voltar pra Free'
+                              style={
+                                u.plan === p
+                                  ? {
+                                      background: accent(u.plan === 'premium' ? (u.access === 'paid' ? 'lime' : 'cyan') : 'neutral', 0.16),
+                                      color: p === 'premium' ? accent(u.access === 'paid' ? 'lime' : 'cyan') : 'rgb(var(--text))',
+                                    }
+                                  : undefined
                               }
+                              title={p === 'premium' ? 'Liberar Premium na mão (não expira)' : 'Rebaixar pra Free (pede confirmação)'}
                             >
-                              {p === 'free' ? 'FREE' : 'PREMIUM'}
+                              {p === 'free' ? 'Free' : 'Premium'}
                             </button>
                           ))}
                         </div>
-                        <button
-                          onClick={() => openBetaModal(u)}
-                          disabled={busyId === u.id}
-                          className={
-                            'rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] transition ' +
-                            (beta.length > 0
-                              ? 'border-violet/60 bg-violet/10 text-violet hover:bg-violet/20'
-                              : 'border-line-strong text-text-dim hover:border-violet/50 hover:text-violet')
-                          }
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                          title="BETA PRO — liberar ferramentas admin-only só pra esta conta"
-                        >
-                          ⚡ Beta Pro
-                        </button>
-                        <button
-                          onClick={() => resetPassword(u)}
-                          disabled={busyId === u.id}
-                          className="rounded-full border border-amber-500/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-amber-300 transition hover:bg-amber-500/10"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                          title="Gerar nova senha provisória"
-                        >
-                          Senha
-                        </button>
-                        <button
-                          onClick={() => toggleAction(u, u.is_active ? 'deactivate' : 'activate')}
-                          disabled={busyId === u.id}
-                          className="rounded-full border border-line-strong px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-text-muted transition hover:border-white/50 hover:text-white"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
+                        <IconBtn a="violet" onClick={() => setBetaModal({ user: u, sel: new Set(u.tool_unlocks.filter((p) => CATALOG_PATHS.has(p))), saving: false })} disabled={busyId === u.id} title="Beta Pro — liberar ferramentas internas só pra esta conta" solid={beta.length > 0}>
+                          <IconBolt /> Beta Pro
+                        </IconBtn>
+                        <IconBtn a="amber" onClick={() => askResetPassword(u)} disabled={busyId === u.id} title="Gerar nova senha provisória">
+                          <IconKey /> Senha
+                        </IconBtn>
+                        <IconBtn a="neutral" onClick={() => doToggle(u, u.is_active ? 'deactivate' : 'activate')} disabled={busyId === u.id} title={u.is_active ? 'Desativar (reversível)' : 'Reativar'}>
                           {u.is_active ? 'Desativar' : 'Ativar'}
-                        </button>
-                        <button
-                          onClick={() => toggleAction(u, 'delete')}
-                          disabled={busyId === u.id}
-                          className="rounded-full border border-red-500/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-red-300 transition hover:bg-red-500/10"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          Deletar
-                        </button>
+                        </IconBtn>
+                        <IconBtn a="danger" onClick={() => askDelete(u)} disabled={busyId === u.id} title="Deletar (pede confirmação)">
+                          <IconTrash />
+                        </IconBtn>
                       </div>
                     </div>
 
-                    {/* ─ Detalhe expandido ─ */}
+                    {/* Detalhes */}
                     {isOpen ? (
-                      <div className="fade-in-up border-t border-line/60 px-4 py-3">
-                        {detail === 'loading' || !detail ? (
-                          <div className="py-2 text-[12px] text-text-dim">Carregando detalhes…</div>
-                        ) : (
-                          <div className="flex flex-col gap-3">
-                            <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12px] text-text-muted">
-                              <span>
-                                Cadastro:{' '}
-                                <span className="text-white">
-                                  {new Date(u.created_at).toLocaleDateString('pt-BR')}
-                                </span>
-                              </span>
-                              {u.traffic_source ? (
-                                <span>
-                                  Origem: <span className="text-white">{u.traffic_source}</span>
-                                </span>
-                              ) : null}
-                              {u.phone ? (
-                                <span>
-                                  Tel: <span className="mono text-white">{u.phone}</span>
-                                  {u.phone_verified ? ' ✓' : ' (não verificado)'}
-                                </span>
-                              ) : null}
-                              {detail.current_period_end ? (
-                                <span>
-                                  Acesso pago até:{' '}
-                                  <span className="text-white">
-                                    {new Date(detail.current_period_end).toLocaleDateString('pt-BR')}
-                                  </span>
-                                </span>
-                              ) : null}
-                              {u.subscription_status ? (
-                                <span>
-                                  Status Stripe:{' '}
-                                  <span className="mono text-white">{u.subscription_status}</span>
-                                </span>
-                              ) : null}
-                            </div>
+                      <div className="fade-in-up border-t border-line/70 px-4 py-3">
+                        <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-[12px] text-text-muted">
+                          <span>
+                            Cadastro: <span className="text-text">{new Date(u.created_at).toLocaleDateString('pt-BR')}</span>
+                          </span>
+                          {u.traffic_source ? (
+                            <span>
+                              Origem: <span className="text-text">{u.traffic_source}</span>
+                            </span>
+                          ) : null}
+                          {u.phone ? (
+                            <span>
+                              Tel: <span className="mono text-text">{u.phone}</span>
+                              {u.phone_verified ? ' ✓' : ' (não verificado)'}
+                            </span>
+                          ) : null}
+                          {u.subscription_status ? (
+                            <span>
+                              Stripe: <span className="mono text-text">{u.subscription_status}</span>
+                            </span>
+                          ) : null}
+                          {u.current_period_end ? (
+                            <span>
+                              Acesso pago até: <span className="text-text">{new Date(u.current_period_end).toLocaleDateString('pt-BR')}</span>
+                            </span>
+                          ) : null}
+                          {u.last_payment_at ? (
+                            <span>
+                              Último pagamento: <span className="text-text">{new Date(u.last_payment_at).toLocaleDateString('pt-BR')}</span>
+                            </span>
+                          ) : null}
+                        </div>
 
-                            {beta.length > 0 ? (
-                              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                                <span className="label-tech uppercase tracking-[0.14em] text-text-dim">
-                                  Beta Pro:
-                                </span>
-                                {beta.map((p) => (
-                                  <span
-                                    key={p}
-                                    className="rounded-full border border-violet/40 bg-violet/10 px-2 py-0.5 text-[10px] font-semibold text-violet"
-                                  >
-                                    {CATALOG_LABEL.get(p) ?? p}
-                                    {u.static_unlocks.includes(p) && !u.tool_unlocks.includes(p)
-                                      ? ' (fixo)'
-                                      : ''}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-
-                            {detail.payments.length > 0 ? (
-                              <div>
-                                <div className="label-tech mb-1.5 text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
-                                  Comprovantes ({detail.payments.length})
-                                </div>
-                                <ul className="flex flex-col gap-1.5">
-                                  {detail.payments.slice(0, 8).map((p, i) => (
-                                    <li
-                                      key={i}
-                                      className="flex items-center justify-between gap-3 text-[12.5px]"
-                                    >
-                                      <span className="text-text-muted">
-                                        <span className="font-bold text-lime">{brl(p.amount)}</span>
-                                        {' · '}
-                                        {p.plan === 'basic' ? 'premium' : (p.plan ?? '—')}
-                                        {p.billing ? (p.billing === 'annual' ? ' · anual' : ' · mensal') : ''}
-                                        {p.created_at
-                                          ? ` · ${new Date(p.created_at).toLocaleDateString('pt-BR')}`
-                                          : ''}
-                                      </span>
-                                      {p.receipt_url ? (
-                                        <a
-                                          href={p.receipt_url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="shrink-0 text-violet underline-offset-2 hover:underline"
-                                        >
-                                          comprovante →
-                                        </a>
-                                      ) : (
-                                        <span className="text-text-dim">—</span>
-                                      )}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ) : u.access === 'anomaly' ? (
-                              <div className="text-[12px] text-rose-300">
-                                ⚠ Premium sem comprovante e sem concessão sua — investigar (ou usar
-                                “Sincronizar c/ Stripe”).
-                              </div>
-                            ) : u.access === 'granted' ? (
-                              <div className="text-[12px] text-cyan-300/80">
-                                Acesso liberado por você (admin_grant) — não expira e não passa pelo
-                                Stripe.
-                              </div>
-                            ) : (
-                              <div className="text-[12px] text-text-dim">Nenhum pagamento registrado.</div>
-                            )}
-
-                            <div>
-                              <button
-                                onClick={() => reconcile(u)}
-                                disabled={busyId === u.id}
-                                className="rounded-full border border-emerald-400/50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.1em] text-emerald-300 transition hover:bg-emerald-400/15 disabled:opacity-40"
-                                style={{ fontFamily: 'var(--font-tech)' }}
-                                title="Lê o estado REAL do Stripe e aplica o plano pago (conserta 'pagou e continuou free')"
-                              >
-                                Sincronizar c/ Stripe
-                              </button>
-                            </div>
+                        {beta.length > 0 ? (
+                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                            <span className="label-tech uppercase tracking-[0.14em] text-text-dim">Beta Pro:</span>
+                            {beta.map((p) => (
+                              <Badge key={p} a="violet">
+                                {CATALOG_LABEL.get(p) ?? p}
+                                {u.static_unlocks.includes(p) && !u.tool_unlocks.includes(p) ? ' · fixo' : ''}
+                              </Badge>
+                            ))}
                           </div>
-                        )}
+                        ) : null}
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          {u.access === 'granted' ? (
+                            <span className="text-[12px]" style={{ color: accent('cyan') }}>
+                              Premium liberado por você (não expira, não passa pelo Stripe).
+                            </span>
+                          ) : u.access === 'anomaly' ? (
+                            <span className="text-[12px] text-red-300">
+                              Premium sem comprovante e sem concessão sua — use “Sincronizar c/ Stripe”.
+                            </span>
+                          ) : null}
+                          <button
+                            onClick={() => reconcile(u)}
+                            disabled={busyId === u.id}
+                            className="font-tech ml-auto rounded-full border px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.08em] transition hover:opacity-80 disabled:opacity-40"
+                            style={{ borderColor: accent('cyan', 0.5), color: accent('cyan') }}
+                            title="Lê o estado REAL do Stripe e aplica o plano pago (conserta 'pagou e continuou free')"
+                          >
+                            Sincronizar c/ Stripe
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                   </div>
                 );
               })
             ) : loading && !users ? (
-              <div className="rounded-[14px] border border-line bg-bg p-8 text-center text-xs text-text-muted">
-                Carregando usuários…
-              </div>
+              <div className="rounded-[14px] border border-line bg-bg-soft p-8 text-center text-xs text-text-muted">Carregando usuários…</div>
             ) : (
-              <div className="rounded-[14px] border border-line bg-bg p-8 text-center text-xs text-text-muted">
-                {q || filter !== 'all'
-                  ? 'Nenhum usuário bate com esse filtro.'
-                  : 'Nenhum usuário ainda.'}
+              <div className="rounded-[14px] border border-line bg-bg-soft p-8 text-center text-xs text-text-muted">
+                {q || filter !== 'all' ? 'Nenhum usuário bate com esse filtro.' : 'Nenhum usuário ainda.'}
               </div>
             )}
           </div>
         </section>
 
-        {/* ───────── Coluna lateral: métricas ───────── */}
+        {/* ═══════ Lateral ═══════ */}
         <aside className="flex flex-col gap-4">
-          <SidePanel title="Distribuição">
+          <Panel title="Distribuição" compact>
             {users ? (
               <>
-                <div className="flex h-4 w-full overflow-hidden rounded-full border border-line/70">
+                <div className="flex h-3.5 w-full overflow-hidden rounded-full border border-line">
                   {(
                     [
-                      ['paid', stats.paid, '#c8e87c'],
-                      ['granted', stats.granted, '#67e8f9'],
-                      ['anomaly', stats.anomaly, '#fca5a5'],
-                      ['free', stats.free, '#5b5b66'],
-                    ] as const
-                  ).map(([k, n, color]) =>
+                      ['lime', stats.paid],
+                      ['cyan', stats.granted],
+                      ['danger', stats.anomaly],
+                      ['neutral', stats.free],
+                    ] as Array<[Accent, number]>
+                  ).map(([a, n], i) =>
                     n > 0 ? (
-                      <div
-                        key={k}
-                        style={{
-                          width: `${(n / Math.max(stats.total, 1)) * 100}%`,
-                          background: color,
-                          boxShadow: `0 0 10px ${color}66`,
-                        }}
-                        title={`${k}: ${n}`}
-                      />
+                      <div key={i} style={{ width: `${(n / Math.max(stats.total, 1)) * 100}%`, background: accent(a, a === 'neutral' ? 0.45 : 0.8) }} />
                     ) : null,
                   )}
                 </div>
                 <ul className="mt-3 flex flex-col gap-1.5 text-[12px]">
-                  <LegendRow color="#c8e87c" label="Premium pagante" n={stats.paid} />
-                  <LegendRow color="#67e8f9" label="Premium liberado" n={stats.granted} />
-                  {stats.anomaly > 0 ? (
-                    <LegendRow color="#fca5a5" label="⚠ Sem origem" n={stats.anomaly} />
-                  ) : null}
-                  <LegendRow color="#5b5b66" label="Free" n={stats.free} />
-                  <LegendRow color="#a78bfa" label="⚡ Beta Pro" n={stats.beta} />
+                  <LegendRow a="lime" label="Premium pagante" n={stats.paid} />
+                  <LegendRow a="cyan" label="Premium liberado" n={stats.granted} />
+                  {stats.anomaly > 0 ? <LegendRow a="danger" label="Sem origem" n={stats.anomaly} /> : null}
+                  <LegendRow a="neutral" label="Free" n={stats.free} />
+                  <LegendRow a="violet" label="Beta Pro" n={stats.beta} />
                 </ul>
               </>
             ) : (
-              <div className="h-16 animate-pulse rounded-[10px] bg-white/5" />
+              <div className="h-16 animate-pulse rounded-[10px] bg-line/30" />
             )}
-          </SidePanel>
+          </Panel>
 
-          <SidePanel title="Ferramentas mais usadas · 30d">
+          <Panel title="Ferramentas mais usadas" hint="30 dias · só clientes" compact>
             {dash ? (
               dash.toolRanking.length ? (
                 <ul className="flex flex-col gap-2">
@@ -1114,25 +1039,15 @@ export default function AdminPage() {
                     const max = dash.toolRanking[0]?.count ?? 1;
                     return (
                       <li key={t.tool} className="flex items-center gap-2">
-                        <span className="w-4 text-right text-[10px] font-bold text-text-dim">
-                          {i + 1}
-                        </span>
-                        <span className="w-[45%] truncate text-[12px] text-white">
-                          {toolLabel(t.tool)}
-                        </span>
-                        <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-black/40">
+                        <span className="w-4 shrink-0 text-right text-[10px] font-bold text-text-dim">{i + 1}</span>
+                        <span className="w-[44%] truncate text-[12px] text-text">{toolLabel(t.tool)}</span>
+                        <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-line/50">
                           <span
                             className="absolute inset-y-0 left-0 rounded-full"
-                            style={{
-                              width: `${Math.max((t.count / max) * 100, 5)}%`,
-                              background: 'rgba(192,132,252,0.85)',
-                              boxShadow: '0 0 8px rgba(192,132,252,0.7)',
-                            }}
+                            style={{ width: `${Math.max((t.count / max) * 100, 5)}%`, background: accent('violet', 0.75) }}
                           />
                         </span>
-                        <span className="w-8 text-right text-[11px] font-bold text-text-muted">
-                          {t.count}
-                        </span>
+                        <span className="w-8 shrink-0 text-right text-[11px] font-bold text-text-muted">{t.count}</span>
                       </li>
                     );
                   })}
@@ -1141,11 +1056,39 @@ export default function AdminPage() {
                 <div className="py-3 text-center text-[12px] text-text-dim">Sem uso registrado.</div>
               )
             ) : (
-              <div className="h-24 animate-pulse rounded-[10px] bg-white/5" />
+              <div className="h-24 animate-pulse rounded-[10px] bg-line/30" />
             )}
-          </SidePanel>
+          </Panel>
 
-          <SidePanel title="Online agora">
+          <Panel title="Por onde chegaram" hint="só clientes" compact>
+            {dash ? (
+              dash.trafficSources.length ? (
+                <ul className="flex flex-col gap-2">
+                  {dash.trafficSources.slice(0, 6).map((s) => {
+                    const max = dash.trafficSources[0]?.count ?? 1;
+                    return (
+                      <li key={s.source} className="flex items-center gap-2">
+                        <span className="w-[44%] truncate text-[12px] text-text">{s.source}</span>
+                        <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-line/50">
+                          <span
+                            className="absolute inset-y-0 left-0 rounded-full"
+                            style={{ width: `${Math.max((s.count / max) * 100, 5)}%`, background: accent('cyan', 0.75) }}
+                          />
+                        </span>
+                        <span className="w-8 shrink-0 text-right text-[11px] font-bold text-text-muted">{s.count}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div className="py-3 text-center text-[12px] text-text-dim">Sem dados de origem.</div>
+              )
+            ) : (
+              <div className="h-20 animate-pulse rounded-[10px] bg-line/30" />
+            )}
+          </Panel>
+
+          <Panel title="Online agora" compact>
             {users ? (
               stats.online > 0 ? (
                 <ul className="flex flex-col gap-2">
@@ -1154,13 +1097,10 @@ export default function AdminPage() {
                     .slice(0, 10)
                     .map((u) => (
                       <li key={u.id} className="flex items-center gap-2 text-[12px]">
-                        <span className="relative flex h-1.5 w-1.5 shrink-0">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
-                        </span>
-                        <span className="truncate text-white">{u.name || u.email}</span>
+                        <LiveDot />
+                        <span className="truncate text-text">{u.name || u.email}</span>
                         {isUsingTool(u) && u.last_tool ? (
-                          <span className="ml-auto shrink-0 text-[11px] text-lime">
+                          <span className="ml-auto shrink-0 text-[11px]" style={{ color: accent('lime') }}>
                             {toolLabel(u.last_tool)}
                           </span>
                         ) : null}
@@ -1168,218 +1108,196 @@ export default function AdminPage() {
                     ))}
                 </ul>
               ) : (
-                <div className="py-3 text-center text-[12px] text-text-dim">
-                  Ninguém online no momento.
-                </div>
+                <div className="py-3 text-center text-[12px] text-text-dim">Ninguém online no momento.</div>
               )
             ) : (
-              <div className="h-16 animate-pulse rounded-[10px] bg-white/5" />
+              <div className="h-16 animate-pulse rounded-[10px] bg-line/30" />
             )}
-          </SidePanel>
+          </Panel>
         </aside>
       </div>
 
       <div className="h-16" />
 
-      {/* ───────── Toast ───────── */}
+      {/* ═══════ Toast ═══════ */}
       {toast ? (
         <div
           role="status"
-          className={
-            'toast-pop fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] shadow-2xl backdrop-blur-xl ' +
-            (toast.kind === 'ok'
-              ? 'border-lime/50 bg-bg/85 text-lime shadow-[0_0_28px_-8px_rgba(200,232,124,0.6)]'
-              : 'border-red-500/50 bg-bg/85 text-red-300 shadow-[0_0_28px_-8px_rgba(248,113,113,0.6)]')
+          className="toast-pop font-tech fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border bg-bg-elev px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] shadow-2xl"
+          style={
+            toast.kind === 'ok'
+              ? { borderColor: accent('lime', 0.5), color: accent('lime') }
+              : { borderColor: accent('danger', 0.5), color: accent('danger') }
           }
-          style={{ fontFamily: 'var(--font-tech)' }}
         >
           {toast.msg}
         </div>
       ) : null}
 
-      {/* ───────── Modal BETA PRO ───────── */}
-      {betaModal ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => (betaModal.saving ? null : setBetaModal(null))}
-        >
-          <div
-            className="dropdown-pop relative w-full max-w-lg overflow-hidden rounded-[20px] border border-violet/45 bg-bg-soft p-6"
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              boxShadow:
-                '0 32px 64px -20px rgba(0,0,0,0.95), 0 0 60px -12px rgba(167,139,250,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
-            }}
-          >
-            <div
-              className="inline-flex items-center gap-2 rounded-full border border-violet/45 bg-violet/10 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.2em] text-violet"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet" />
-              ⚡ BETA PRO
-            </div>
-            <h3
-              className="mt-3 text-[20px] font-extrabold tracking-tight text-white"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              Ferramentas internas liberadas
-            </h3>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-text-muted">
-              Pra <span className="font-medium text-white">{betaModal.user.email}</span> — libera
-              SÓ as ferramentas marcadas. A conta{' '}
-              <span className="font-semibold text-white">não vira admin</span> e continua no plano
-              atual ({betaModal.user.plan === 'premium' ? 'Premium' : 'Free'}).
-            </p>
-
-            <div className="mt-4 flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-1">
-              {UNLOCKABLE_TOOLS.map((t) => {
-                const fixed = betaModal.user.static_unlocks.includes(t.path);
-                const on = fixed || betaModal.sel.has(t.path);
-                return (
-                  <button
-                    key={t.path}
-                    disabled={fixed || betaModal.saving}
-                    onClick={() => {
-                      const sel = new Set(betaModal.sel);
-                      if (sel.has(t.path)) sel.delete(t.path);
-                      else sel.add(t.path);
-                      setBetaModal({ ...betaModal, sel });
-                    }}
-                    className={
-                      'flex items-start gap-3 rounded-[12px] border p-3 text-left transition ' +
-                      (on
-                        ? 'border-violet/55 bg-violet/10'
-                        : 'border-line hover:border-line-strong hover:bg-white/[0.03]') +
-                      (fixed ? ' cursor-not-allowed opacity-80' : '')
-                    }
-                  >
-                    <span
-                      className={
-                        'mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border text-[11px] font-bold ' +
-                        (on
-                          ? 'border-violet bg-violet text-black'
-                          : 'border-line-strong text-transparent')
-                      }
-                    >
-                      ✓
-                    </span>
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-2 text-[13px] font-bold text-white">
-                        {t.label}
-                        {fixed ? (
-                          <span
-                            className="rounded-full border border-line-strong px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.1em] text-text-dim"
-                            style={{ fontFamily: 'var(--font-tech)' }}
-                            title="Desbloqueio fixo por email no código/env — não dá pra remover pelo painel"
-                          >
-                            FIXO
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">
-                        {t.desc}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-5 flex items-center justify-between gap-2">
-              <span className="text-[11px] text-text-dim">
-                {betaModal.sel.size} selecionada{betaModal.sel.size === 1 ? '' : 's'}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setBetaModal(null)}
-                  disabled={betaModal.saving}
-                  className="rounded-full border border-line-strong bg-bg-soft px-5 py-2 text-[12.5px] font-bold text-white transition hover:bg-bg"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={saveBetaModal}
-                  disabled={betaModal.saving}
-                  className="rounded-full border border-violet/55 bg-violet/15 px-5 py-2 text-[12.5px] font-bold text-violet transition hover:bg-violet/25 disabled:opacity-50"
-                >
-                  {betaModal.saving ? 'Salvando…' : 'Salvar desbloqueios'}
-                </button>
-              </div>
-            </div>
+      {/* ═══════ Modal de CONFIRMAÇÃO (2ª etapa) ═══════ */}
+      {confirmBox ? (
+        <Modal onClose={() => (confirmBox.running ? null : setConfirmBox(null))} accent={confirmBox.accent}>
+          <div className="label-tech text-[10.5px] uppercase tracking-[0.2em]" style={{ color: accent(confirmBox.accent) }}>
+            Confirmação
           </div>
-        </div>
+          <h3 className="font-tech mt-2 text-[20px] font-extrabold tracking-tight text-text">{confirmBox.title}</h3>
+          <p className="mt-2 text-[13px] leading-relaxed text-text-muted">{confirmBox.body}</p>
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button
+              onClick={() => setConfirmBox(null)}
+              disabled={confirmBox.running}
+              className="rounded-full border border-line bg-bg px-5 py-2 text-[12.5px] font-bold text-text transition hover:bg-bg-soft"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={async () => {
+                setConfirmBox((c) => (c ? { ...c, running: true } : c));
+                try {
+                  await confirmBox.run();
+                } finally {
+                  setConfirmBox(null);
+                }
+              }}
+              disabled={confirmBox.running}
+              className="rounded-full border px-5 py-2 text-[12.5px] font-bold transition hover:opacity-85 disabled:opacity-50"
+              style={{
+                borderColor: accent(confirmBox.accent, 0.55),
+                background: accent(confirmBox.accent, 0.14),
+                color: accent(confirmBox.accent),
+              }}
+            >
+              {confirmBox.running ? 'Executando…' : confirmBox.confirmLabel}
+            </button>
+          </div>
+        </Modal>
       ) : null}
 
-      {/* ───────── Modal senha provisória ───────── */}
-      {resetModal ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => setResetModal(null)}
-        >
-          <div
-            className="dropdown-pop relative w-full max-w-md overflow-hidden rounded-[20px] border border-amber-500/45 bg-bg-soft p-6"
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              boxShadow:
-                '0 32px 64px -20px rgba(0,0,0,0.95), 0 0 60px -12px rgba(251,191,36,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
-            }}
-          >
-            <div
-              className="mb-2 inline-flex items-center gap-2 rounded-full border border-amber-500/45 bg-amber-500/10 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.2em] text-amber-300"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-amber-400" />
-              SENHA PROVISÓRIA
-            </div>
-            <h3
-              className="mt-1 text-[20px] font-extrabold tracking-tight text-white"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              Nova senha gerada
-            </h3>
-            <p className="mt-1 text-[12.5px] text-text-muted">
-              Pra <span className="font-medium text-white">{resetModal.email}</span>
-            </p>
+      {/* ═══════ Modal BETA PRO ═══════ */}
+      {betaModal ? (
+        <Modal onClose={() => (betaModal.saving ? null : setBetaModal(null))} accent="violet" wide>
+          <div className="label-tech flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.2em]" style={{ color: accent('violet') }}>
+            <IconBolt /> Beta Pro
+          </div>
+          <h3 className="font-tech mt-2 text-[20px] font-extrabold tracking-tight text-text">Ferramentas internas liberadas</h3>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-text-muted">
+            Pra <span className="font-semibold text-text">{betaModal.user.email}</span> — libera só o que estiver marcado. A conta{' '}
+            <span className="font-semibold text-text">não vira admin</span> e continua {betaModal.user.plan === 'premium' ? 'Premium' : 'Free'}.
+          </p>
 
-            <div className="mt-4 rounded-[14px] border border-line-strong bg-bg p-4">
-              <div
-                className="text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                Senha
-              </div>
-              <div
-                className="mt-1 select-all text-center text-[24px] font-bold tracking-[0.06em] text-amber-300"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                {resetModal.password}
-              </div>
-            </div>
+          <div className="mt-4 flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-1">
+            {UNLOCKABLE_TOOLS.map((t) => {
+              const fixed = betaModal.user.static_unlocks.includes(t.path);
+              const on = fixed || betaModal.sel.has(t.path);
+              return (
+                <button
+                  key={t.path}
+                  disabled={fixed || betaModal.saving}
+                  onClick={() => {
+                    const sel = new Set(betaModal.sel);
+                    if (sel.has(t.path)) sel.delete(t.path);
+                    else sel.add(t.path);
+                    setBetaModal({ ...betaModal, sel });
+                  }}
+                  className={
+                    'flex items-start gap-3 rounded-[12px] border p-3 text-left transition ' +
+                    (on ? '' : 'border-line hover:border-line-strong') +
+                    (fixed ? ' cursor-not-allowed opacity-75' : '')
+                  }
+                  style={on ? { borderColor: accent('violet', 0.5), background: accent('violet', 0.08) } : undefined}
+                >
+                  <span
+                    className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border text-[11px] font-bold"
+                    style={
+                      on
+                        ? { borderColor: accent('violet'), background: accent('violet'), color: 'rgb(var(--bg))' }
+                        : { borderColor: 'rgb(var(--line-strong))', color: 'transparent' }
+                    }
+                  >
+                    ✓
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-[13px] font-bold text-text">
+                      {t.label}
+                      {fixed ? (
+                        <span
+                          className="font-tech rounded-full border border-line px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.1em] text-text-dim"
+                          title="Fixo por email no código/env — não dá pra remover pelo painel"
+                        >
+                          Fixo
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{t.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-            <p className="mt-3 text-[12px] leading-relaxed text-text-muted">
-              O usuário será forçado a trocar a senha no próximo login. Copie agora — depois que
-              fechar, essa senha não pode ser recuperada.
-            </p>
-
-            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+          <div className="mt-5 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-text-dim">
+              {betaModal.sel.size} selecionada{betaModal.sel.size === 1 ? '' : 's'}
+            </span>
+            <div className="flex gap-2">
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(resetModal.password);
-                  flash('ok', 'Senha copiada.', 2500);
-                }}
-                className="rounded-full border border-amber-500/45 bg-amber-500/10 px-5 py-2 text-[12.5px] font-bold text-amber-300 transition hover:bg-amber-500/20"
+                onClick={() => setBetaModal(null)}
+                disabled={betaModal.saving}
+                className="rounded-full border border-line bg-bg px-5 py-2 text-[12.5px] font-bold text-text transition hover:bg-bg-soft"
               >
-                Copiar senha
+                Cancelar
               </button>
               <button
-                onClick={() => setResetModal(null)}
-                className="rounded-full border border-line-strong bg-bg-soft px-5 py-2 text-[12.5px] font-bold text-white transition hover:bg-bg"
+                onClick={saveBetaModal}
+                disabled={betaModal.saving}
+                className="rounded-full border px-5 py-2 text-[12.5px] font-bold transition hover:opacity-85 disabled:opacity-50"
+                style={{ borderColor: accent('violet', 0.55), background: accent('violet', 0.14), color: accent('violet') }}
               >
-                Fechar
+                {betaModal.saving ? 'Salvando…' : 'Salvar desbloqueios'}
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
+      ) : null}
+
+      {/* ═══════ Modal senha provisória ═══════ */}
+      {resetModal ? (
+        <Modal onClose={() => setResetModal(null)} accent="amber">
+          <div className="label-tech text-[10.5px] uppercase tracking-[0.2em]" style={{ color: accent('amber') }}>
+            Senha provisória
+          </div>
+          <h3 className="font-tech mt-2 text-[20px] font-extrabold tracking-tight text-text">Nova senha gerada</h3>
+          <p className="mt-1 text-[12.5px] text-text-muted">
+            Pra <span className="font-medium text-text">{resetModal.email}</span>
+          </p>
+          <div className="mt-4 rounded-[14px] border border-line bg-bg p-4">
+            <div className="label-tech text-[10px] uppercase tracking-[0.18em] text-text-dim">Senha</div>
+            <div className="mono mt-1 select-all text-center text-[24px] font-bold tracking-[0.06em]" style={{ color: accent('amber') }}>
+              {resetModal.password}
+            </div>
+          </div>
+          <p className="mt-3 text-[12px] leading-relaxed text-text-muted">
+            O usuário será forçado a trocar no próximo login. Copie agora — depois de fechar, essa senha não pode ser recuperada.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(resetModal.password);
+                flash('ok', 'Senha copiada.', 2500);
+              }}
+              className="rounded-full border px-5 py-2 text-[12.5px] font-bold transition hover:opacity-85"
+              style={{ borderColor: accent('amber', 0.5), background: accent('amber', 0.12), color: accent('amber') }}
+            >
+              Copiar senha
+            </button>
+            <button
+              onClick={() => setResetModal(null)}
+              className="rounded-full border border-line bg-bg px-5 py-2 text-[12.5px] font-bold text-text transition hover:bg-bg-soft"
+            >
+              Fechar
+            </button>
+          </div>
+        </Modal>
       ) : null}
     </div>
   );
@@ -1387,16 +1305,25 @@ export default function AdminPage() {
 
 /* ───────────────────── Subcomponentes ───────────────────── */
 
+function LiveDot({ className = '' }: { className?: string }) {
+  return (
+    <span className={'relative flex h-1.5 w-1.5 shrink-0 ' + className}>
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-50" style={{ background: accent('lime') }} />
+      <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: accent('lime') }} />
+    </span>
+  );
+}
+
 function StatCard({
   label,
   value,
-  hue,
+  a,
   live,
   onClick,
 }: {
   label: string;
   value: string | number;
-  hue: string;
+  a: Accent;
   live?: boolean;
   onClick?: () => void;
 }) {
@@ -1405,69 +1332,173 @@ function StatCard({
     <Comp
       onClick={onClick}
       className={
-        'relative overflow-hidden rounded-[16px] border p-4 text-left transition ' +
-        (onClick ? 'hover:-translate-y-[1px] cursor-pointer' : '')
+        'relative overflow-hidden rounded-[16px] border border-line bg-bg-soft p-4 text-left transition ' +
+        (onClick ? 'cursor-pointer hover:-translate-y-[1px] hover:border-line-strong' : '')
       }
-      style={{
-        borderColor: hue.replace('0.6', '0.35').replace('0.45', '0.3'),
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.25)), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
-        boxShadow: `0 0 26px -14px ${hue}`,
-      }}
     >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-5 -top-5 h-16 w-16 rounded-full opacity-40 blur-2xl"
-        style={{ background: hue }}
-      />
-      <div
-        className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted"
-        style={{ fontFamily: 'var(--font-tech)' }}
-      >
-        {live ? (
-          <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.95)]" />
-        ) : null}
+      <span aria-hidden className="absolute inset-x-0 top-0 h-[2px]" style={{ background: accent(a, 0.55) }} />
+      <div className="label-tech flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-text-dim">
+        {live ? <LiveDot /> : null}
         {label}
       </div>
-      <div
-        className="mt-1.5 text-[26px] font-extrabold tracking-tight text-white"
-        style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
-      >
-        {value}
-      </div>
+      <div className="font-tech mt-1.5 text-[26px] font-extrabold tracking-[-0.02em] text-text">{value}</div>
     </Comp>
   );
 }
 
-function SidePanel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  hint,
+  right,
+  compact,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  right?: React.ReactNode;
+  compact?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div
-      className="rounded-[16px] border border-line/70 p-4"
-      style={{
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, #131318, var(--card-deep))',
-      }}
-    >
-      <h2
-        className="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-text-muted"
-        style={{ fontFamily: 'var(--font-tech)' }}
-      >
-        {title}
-      </h2>
+    <div className={'rounded-[16px] border border-line bg-bg-soft ' + (compact ? 'p-4' : 'p-4 md:p-5')}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="label-tech text-[11px] font-bold uppercase tracking-[0.18em] text-text-muted">
+          {title}
+          {hint ? <span className="ml-2 font-normal normal-case tracking-normal text-text-dim">{hint}</span> : null}
+        </h2>
+        {right}
+      </div>
       {children}
     </div>
   );
 }
 
-function LegendRow({ color, label, n }: { color: string; label: string; n: number }) {
+function Badge({ a, title, children }: { a: Accent; title?: string; children: React.ReactNode }) {
+  return (
+    <span
+      className="font-tech inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em]"
+      style={{ color: accent(a === 'neutral' ? 'neutral' : a), borderColor: accent(a, 0.45), background: accent(a, 0.09) }}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+function IconBtn({
+  a,
+  onClick,
+  disabled,
+  title,
+  solid,
+  children,
+}: {
+  a: Accent;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  solid?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="font-tech inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition hover:opacity-80 disabled:opacity-40"
+      style={
+        a === 'neutral'
+          ? { borderColor: 'rgb(var(--line-strong))', color: 'rgb(var(--text-muted))' }
+          : {
+              borderColor: accent(a, 0.45),
+              color: accent(a),
+              background: solid ? accent(a, 0.12) : undefined,
+            }
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+function LegendRow({ a, label, n }: { a: Accent; label: string; n: number }) {
   return (
     <li className="flex items-center gap-2">
-      <span
-        className="inline-block h-2 w-2 rounded-full"
-        style={{ background: color, boxShadow: `0 0 6px ${color}88` }}
-      />
+      <span className="inline-block h-2 w-2 rounded-full" style={{ background: accent(a, a === 'neutral' ? 0.5 : 0.85) }} />
       <span className="text-text-muted">{label}</span>
-      <span className="ml-auto font-bold text-white">{n}</span>
+      <span className="ml-auto font-bold text-text">{n}</span>
     </li>
+  );
+}
+
+function Modal({
+  onClose,
+  accent: a,
+  wide,
+  children,
+}: {
+  onClose: () => void;
+  accent: Accent;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className={'dropdown-pop relative w-full overflow-hidden rounded-[20px] border bg-bg-elev p-6 ' + (wide ? 'max-w-lg' : 'max-w-md')}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          borderColor: accent(a, 0.4),
+          boxShadow: '0 32px 64px -20px rgba(0,0,0,0.55), inset 0 1px 0 rgb(var(--line) / 0.6)',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────── Ícones (SVG, herdam a cor) ───────────────────── */
+
+function IconSearch() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
+function IconBolt() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M13 2 4.5 13.5H11L9.5 22 19 10.5h-6.5L13 2Z" />
+    </svg>
+  );
+}
+
+function IconReceipt() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21V3Z" />
+      <path d="M9 8h6M9 12h6" />
+    </svg>
+  );
+}
+
+function IconKey() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="15" r="4.5" />
+      <path d="m11.5 11.5 8-8M16 7l3 3" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" />
+    </svg>
   );
 }

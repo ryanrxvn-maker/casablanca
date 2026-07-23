@@ -15,8 +15,9 @@ import { useEffect } from 'react';
  * no layout cobre o primeiro paint.
  */
 const APP_PREFIXES = ['/tools', '/configuracoes', '/admin'];
-// Sempre escuras (como a landing): o Dashboard "cérebro" é dark por design.
-const FORCE_DARK = ['/admin/dashboard'];
+// Sempre escuras (como a landing). Vazio hoje: o painel /admin unificado é
+// 100% tema-aware (tokens), então respeita o claro/escuro do usuário.
+const FORCE_DARK: string[] = [];
 
 function isAccountPath(pathname: string, search: string): boolean {
   if (FORCE_DARK.some((p) => pathname === p || pathname.startsWith(p))) {
