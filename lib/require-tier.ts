@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isPaidExpired } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { cliMachineIdentity } from '@/lib/cli-auth';
-import { emailUnlocksAnyTool } from '@/lib/tool-unlocks';
+import { emailUnlocksAnyTool, pathUnlockedByList } from '@/lib/tool-unlocks';
 
 /**
  * Guard de tier server-side pra route handlers (/api/*).
@@ -66,11 +66,24 @@ export async function requireTier(
       };
     }
 
-    const { data: profile, error } = await supabase
+    let { data: profile, error } = await supabase
       .from('profiles')
-      .select('is_admin, is_active, tier, subscription_status, current_period_end')
+      .select(
+        'is_admin, is_active, tier, subscription_status, current_period_end, tool_unlocks',
+      )
       .eq('id', user.id)
       .maybeSingle();
+
+    if (error) {
+      // Coluna tool_unlocks ausente (migration 028 não rodou) → select sem ela.
+      const retry = await supabase
+        .from('profiles')
+        .select('is_admin, is_active, tier, subscription_status, current_period_end')
+        .eq('id', user.id)
+        .maybeSingle();
+      profile = retry.data as typeof profile;
+      error = retry.error;
+    }
 
     if (error) {
       return {
@@ -93,6 +106,7 @@ export async function requireTier(
       tier?: string | null;
       subscription_status?: string | null;
       current_period_end?: string | null;
+      tool_unlocks?: string[] | null;
     } | null;
     const isAdmin = profile?.is_admin === true;
     const raw = (p?.tier ?? '').toString();
@@ -107,10 +121,13 @@ export async function requireTier(
       tier = 'free';
     }
 
+    // Desbloqueio pontual (BETA PRO): banco (profiles.tool_unlocks, via
+    // painel /admin) OU email fixo (lib/tool-unlocks.ts).
     const unlocked =
       RANK[tier] < RANK[min] &&
       !!opts?.unlockTools?.length &&
-      emailUnlocksAnyTool(user.email, opts.unlockTools);
+      (opts.unlockTools.some((t) => pathUnlockedByList(p?.tool_unlocks, t)) ||
+        emailUnlocksAnyTool(user.email, opts.unlockTools));
 
     if (RANK[tier] < RANK[min] && !unlocked) {
       return {

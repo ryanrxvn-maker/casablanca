@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
-import { emailUnlocksPath } from '@/lib/tool-unlocks';
+import { emailUnlocksPath, setSessionToolUnlocks } from '@/lib/tool-unlocks';
 
 export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 
@@ -61,6 +61,7 @@ type RowShape = {
   tier?: string | null;
   is_admin?: boolean | null;
   is_active?: boolean | null;
+  tool_unlocks?: string[] | null;
 };
 
 // ─── Cache de tier por sessão ───────────────────────────────────────────────
@@ -76,6 +77,32 @@ const SS_KEY = 'autoedit:tier';
 // undefined = ainda não resolvido; null = deslogado/sem email.
 let memEmail: string | null | undefined = undefined;
 const SS_EMAIL_KEY = 'autoedit:email';
+
+// Desbloqueios BETA PRO (profiles.tool_unlocks) — cache espelho do banco.
+const SS_UNLOCKS_KEY = 'autoedit:unlocks';
+
+function applyUnlocks(list: string[] | null) {
+  setSessionToolUnlocks(list);
+  try {
+    if (list?.length) sessionStorage.setItem(SS_UNLOCKS_KEY, JSON.stringify(list));
+    else sessionStorage.removeItem(SS_UNLOCKS_KEY);
+  } catch {
+    /* sessionStorage indisponível — segue só com o set em memória */
+  }
+}
+
+function restoreUnlocksFromCache() {
+  try {
+    const raw = sessionStorage.getItem(SS_UNLOCKS_KEY);
+    if (!raw) return;
+    const list = JSON.parse(raw);
+    if (Array.isArray(list)) {
+      setSessionToolUnlocks(list.filter((p): p is string => typeof p === 'string'));
+    }
+  } catch {
+    /* cache inválido — ignora, a rede resolve */
+  }
+}
 
 function ssReadEmail(): string | null {
   try {
@@ -155,25 +182,41 @@ async function resolveTier(): Promise<Tier> {
   const full = await withTimeout(
     supabase
       .from('profiles')
-      .select('tier, is_admin, is_active')
+      .select('tier, is_admin, is_active, tool_unlocks')
       .eq('id', uid)
       .maybeSingle(),
     6000,
   );
   if (full.error) {
-    const basic = await withTimeout(
+    // tool_unlocks ausente (migration 028 não rodou) → tenta sem ela.
+    const noUnlocks = await withTimeout(
       supabase
         .from('profiles')
-        .select('is_admin, is_active')
+        .select('tier, is_admin, is_active')
         .eq('id', uid)
         .maybeSingle(),
       6000,
     );
-    if (basic.error) throw basic.error;
-    data = (basic.data ?? null) as unknown as RowShape | null;
+    if (noUnlocks.error) {
+      const basic = await withTimeout(
+        supabase
+          .from('profiles')
+          .select('is_admin, is_active')
+          .eq('id', uid)
+          .maybeSingle(),
+        6000,
+      );
+      if (basic.error) throw basic.error;
+      data = (basic.data ?? null) as unknown as RowShape | null;
+    } else {
+      data = (noUnlocks.data ?? null) as unknown as RowShape | null;
+    }
   } else {
     data = (full.data ?? null) as unknown as RowShape | null;
   }
+
+  // Injeta os desbloqueios BETA PRO na sessão da UI (hub, sidebars, TierGate).
+  applyUnlocks(Array.isArray(data?.tool_unlocks) ? data!.tool_unlocks! : null);
 
   const raw = (data?.tier ?? '').toString();
   // PRIORIDADE: is_admin sempre ganha — mesmo se tier for outro
@@ -239,6 +282,8 @@ export function useTier(): Tier | null {
       const cachedEmail = ssReadEmail();
       if (cachedEmail) memEmail = cachedEmail;
     }
+    // Restaura os desbloqueios BETA PRO do cache (a rede revalida em seguida).
+    restoreUnlocksFromCache();
 
     // Revalida sempre em background; com cache na tela, a lentidão fica
     // invisível. Só cai pra free se NUNCA houve cache (1º load de fato).
@@ -256,6 +301,7 @@ export function useTier(): Tier | null {
         memEmail = null;
         ssClear();
         ssWriteEmail(null);
+        applyUnlocks(null);
         apply('free');
         return;
       }

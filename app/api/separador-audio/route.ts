@@ -29,7 +29,7 @@ export const dynamic = 'force-dynamic';
 const BUCKET = 'separador-uploads';
 
 export async function POST(req: NextRequest) {
-  const gate = await requireTier('admin');
+  const gate = await requireTier('admin', { unlockTools: ['/tools/separador-audio'] });
   if (!gate.ok) return gate.response;
 
   let body: { audioUrl?: string; filename?: string };

@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requireTier } from '@/lib/require-tier';
 import {
   completeMultipart,
   processFromSourceUrl,
@@ -41,7 +41,7 @@ interface Body {
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requireTier('admin', { unlockTools: ['/tools/remover-elementos'] });
   if (!guard.ok) return guard.response;
 
   if (!isVmakeConfigured()) {

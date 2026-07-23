@@ -66,6 +66,15 @@ const TIER_COLOR: Record<string, string> = {
   admin: '#c2cf86',
 };
 
+// Exibição: Pro morreu — 'basic' é o Premium; 'pro' só existe como legado.
+const TIER_NAME: Record<string, string> = {
+  free: 'Free',
+  basic: 'Premium',
+  pro: 'Pro (legado)',
+  admin: 'Admin',
+};
+const tierName = (t: string) => TIER_NAME[t] ?? t;
+
 const TOOL_LABEL: Record<string, string> = {
   decupagem: 'Decupagem',
   'decupagem-copy': 'Decupagem Copy',
@@ -200,7 +209,7 @@ export default function DashboardPage() {
                       className="inline-block h-2.5 w-2.5 rounded-full"
                       style={{ background: TIER_COLOR[t], boxShadow: `0 0 8px ${TIER_COLOR[t]}` }}
                     />
-                    <span className="font-bold capitalize text-white">{t}</span>
+                    <span className="font-bold text-white">{tierName(t)}</span>
                     <span className="text-text-muted">
                       {data.tiers.counts[t]} · {data.tiers.pct[t]}%
                     </span>
@@ -287,7 +296,7 @@ export default function DashboardPage() {
                               border: `1px solid ${TIER_COLOR[u.tier]}`,
                             }}
                           >
-                            {u.tier}
+                            {tierName(u.tier)}
                           </span>
                         </td>
                         <td className="py-2 pr-4 text-text-muted">
@@ -402,7 +411,7 @@ export default function DashboardPage() {
                         className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
                         style={{ color: TIER_COLOR[s.tier], border: `1px solid ${TIER_COLOR[s.tier]}` }}
                       >
-                        {s.tier}
+                        {tierName(s.tier)}
                       </span>
                       <span className="text-[11.5px]">{s.traffic_source || 'direct'}</span>
                       <span className="text-[11px] text-text-dim">
@@ -563,7 +572,7 @@ const ACCESS_META: Record<
   { label: string; color: string; bg: string }
 > = {
   paid: { label: 'PAGO', color: '#c2cf86', bg: 'rgba(200,232,124,0.12)' },
-  comp: { label: 'ADMIN', color: '#67e8f9', bg: 'rgba(103,232,249,0.12)' },
+  comp: { label: 'LIBERADO', color: '#67e8f9', bg: 'rgba(103,232,249,0.12)' },
   anomaly: { label: '⚠ ANOMALIA', color: '#fca5a5', bg: 'rgba(244,63,94,0.15)' },
   free: { label: 'FREE', color: '#9c9ca6', bg: 'rgba(255,255,255,0.04)' },
 };
@@ -590,11 +599,12 @@ function UserControl() {
     }
   }
 
-  async function setTier(u: SearchUser, tier: 'free' | 'basic' | 'pro') {
+  async function setTier(u: SearchUser, tier: 'free' | 'basic') {
     if (u.tier === tier) return;
+    const label = tier === 'basic' ? 'PREMIUM' : 'FREE';
     const reason =
       window.prompt(
-        `Mudar ${u.email || u.name || 'usuário'} para ${tier.toUpperCase()}.\nMotivo (opcional, fica registrado na auditoria):`,
+        `Mudar ${u.email || u.name || 'usuário'} para ${label}.\nMotivo (opcional, fica registrado na auditoria):`,
         '',
       ) ?? '';
     setBusyId(u.id);
@@ -694,7 +704,7 @@ function UserControl() {
                       {meta.label}
                     </span>
                     <span className="rounded-full border border-line/70 px-2.5 py-1 text-[10px] font-bold uppercase text-text-muted">
-                      {u.tier}
+                      {tierName(u.tier)}
                     </span>
                   </div>
                 </div>
@@ -704,7 +714,7 @@ function UserControl() {
                   <span className="label-tech text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
                     Definir:
                   </span>
-                  {(['free', 'basic', 'pro'] as const).map((t) => (
+                  {(['free', 'basic'] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -717,7 +727,7 @@ function UserControl() {
                           : 'border-line-strong text-text-muted hover:border-white hover:text-white')
                       }
                     >
-                      {t}
+                      {t === 'basic' ? 'premium' : 'free'}
                     </button>
                   ))}
                   <button

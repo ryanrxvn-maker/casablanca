@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requireTier } from '@/lib/require-tier';
 
 /**
  * POST /api/remover-elementos/detect
@@ -81,7 +81,7 @@ export async function POST(req: Request) {
   try {
     // Ferramenta de remocao de legenda eh admin-only desde a migracao
     // pro motor local. Caller nao-admin nao tem acesso.
-    const guard = await requireAdmin();
+    const guard = await requireTier('admin', { unlockTools: ['/tools/remover-elementos'] });
     if (!guard.ok) return guard.response;
 
     const keyResult = await getUserKey('anthropic');

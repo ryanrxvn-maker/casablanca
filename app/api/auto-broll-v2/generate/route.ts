@@ -80,7 +80,7 @@ class Semaphore {
 }
 
 export async function POST(req: NextRequest) {
-  const gate = await requireTier('admin');
+  const gate = await requireTier('admin', { unlockTools: ['/tools/auto-broll'] });
   if (!gate.ok) return gate.response;
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();

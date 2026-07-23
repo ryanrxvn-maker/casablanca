@@ -9,7 +9,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requireTier } from '@/lib/require-tier';
 import { checkHealth, isVmakeConfigured } from '@/lib/vmake-api';
 import { vmakeQueueStats } from '@/lib/vmake-queue';
 
@@ -17,7 +17,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 export async function GET() {
-  const guard = await requireAdmin();
+  const guard = await requireTier('admin', { unlockTools: ['/tools/remover-elementos'] });
   if (!guard.ok) return guard.response;
 
   const configured = isVmakeConfigured();

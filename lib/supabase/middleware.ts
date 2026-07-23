@@ -2,7 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
-import { emailUnlocksPath } from '@/lib/tool-unlocks';
+import { emailUnlocksPath, pathUnlockedByList } from '@/lib/tool-unlocks';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -189,25 +189,39 @@ export async function updateSession(request: NextRequest) {
       legacy_no_phone?: boolean | null;
       subscription_status?: string | null;
       current_period_end?: string | null;
+      tool_unlocks?: string[] | null;
     };
     let profile: ProfileShape | null = null;
 
     const full = await adminClient
       .from('profiles')
       .select(
-        'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone, subscription_status, current_period_end',
+        'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone, subscription_status, current_period_end, tool_unlocks',
       )
       .eq('id', user.id)
       .maybeSingle();
 
     if (full.error) {
-      // Coluna ausente → cai pro select legado (assume tudo verificado)
-      const fallback = await adminClient
+      // tool_unlocks ausente (migration 028 não rodou) → tenta o select
+      // completo SEM ela — preserva tier/assinatura/phone.
+      const noUnlocks = await adminClient
         .from('profiles')
-        .select('is_active, is_admin, must_change_password')
+        .select(
+          'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone, subscription_status, current_period_end',
+        )
         .eq('id', user.id)
         .maybeSingle();
-      profile = (fallback.data ?? null) as unknown as ProfileShape | null;
+      if (noUnlocks.error) {
+        // Coluna ausente → cai pro select legado (assume tudo verificado)
+        const fallback = await adminClient
+          .from('profiles')
+          .select('is_active, is_admin, must_change_password')
+          .eq('id', user.id)
+          .maybeSingle();
+        profile = (fallback.data ?? null) as unknown as ProfileShape | null;
+      } else {
+        profile = (noUnlocks.data ?? null) as unknown as ProfileShape | null;
+      }
     } else {
       profile = (full.data ?? null) as unknown as ProfileShape | null;
     }
@@ -302,11 +316,17 @@ export async function updateSession(request: NextRequest) {
       return redir(url);
     }
 
+    // Desbloqueio pontual (BETA PRO): banco (profiles.tool_unlocks, via
+    // painel /admin) OU email fixo (lib/tool-unlocks.ts).
+    const hasUnlock = (path: string) =>
+      pathUnlockedByList(profile?.tool_unlocks, path) ||
+      emailUnlocksPath(user.email, path);
+
     // ─── Bloqueio admin-only (mesmo beta não acessa) ───
-    // Exceção: emails com desbloqueio pontual de ferramenta interna
-    // (lib/tool-unlocks.ts) passam SÓ nos paths desbloqueados.
+    // Exceção: contas com desbloqueio pontual de ferramenta interna
+    // passam SÓ nos paths desbloqueados.
     if (ADMIN_ONLY_PREFIXES.some((p) => pathname.startsWith(p))) {
-      if (!isAdmin && !emailUnlocksPath(user.email, pathname)) {
+      if (!isAdmin && !hasUnlock(pathname)) {
         return lockedRedirect('admin');
       }
     }
@@ -317,7 +337,7 @@ export async function updateSession(request: NextRequest) {
       const isAllowedTool =
         FREE_ALLOWED_TOOLS.some(
           (p) => pathname === p || pathname.startsWith(p + '/'),
-        ) || emailUnlocksPath(user.email, pathname);
+        ) || hasUnlock(pathname);
       const isAllowedPrefix = FREE_ALLOWED_PREFIXES.some((p) =>
         pathname.startsWith(p),
       );

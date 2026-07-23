@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requireTier } from '@/lib/require-tier';
 import { pollRecord, VMAKE_EFFECT, vmakeErrorToHttp, type VmakeMode } from '@/lib/vmake-api';
 import { verifyVmakeJob } from '@/lib/vmake-job-token';
 
@@ -22,7 +22,7 @@ export const maxDuration = 30;
 const VALID_MODES = new Set<string>(['smart', 'subtitle', 'watermark']);
 
 export async function GET(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requireTier('admin', { unlockTools: ['/tools/remover-elementos'] });
   if (!guard.ok) return guard.response;
 
   const url = new URL(req.url);
