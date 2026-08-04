@@ -47,7 +47,7 @@ export function useReduced(): boolean {
  */
 function watchVisible(el: HTMLElement, onVisible: () => void, margin = 0.94): () => void {
   let done = false;
-  let raf = 0;
+  let throttle: ReturnType<typeof setTimeout> | null = null;
 
   const finish = () => {
     if (done) return;
@@ -59,9 +59,14 @@ function watchVisible(el: HTMLElement, onVisible: () => void, margin = 0.94): ()
     const r = el.getBoundingClientRect();
     if (r.top < window.innerHeight * margin && r.bottom > 0) finish();
   };
+  // Throttle por setTimeout (NÃO rAF): rAF não roda em aba que não está
+  // compositando — e é exatamente nesses contextos que o IO também falha.
   const onScroll = () => {
-    cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(check);
+    if (throttle) return;
+    throttle = setTimeout(() => {
+      throttle = null;
+      check();
+    }, 120);
   };
 
   const io =
@@ -84,7 +89,7 @@ function watchVisible(el: HTMLElement, onVisible: () => void, margin = 0.94): ()
     window.removeEventListener('scroll', onScroll);
     window.removeEventListener('resize', onScroll);
     clearTimeout(t);
-    cancelAnimationFrame(raf);
+    if (throttle) clearTimeout(throttle);
   }
   return cleanup;
 }

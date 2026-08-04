@@ -53,18 +53,19 @@ export function LandingV3() {
       <Masthead />
       <Hero />
 
+      {/* Cada manchete assinada pela sua editoria — nada de claim solto. */}
       <Ticker
         className="mt-14 md:mt-20"
         tag="Plantão"
         items={[
-          'O silêncio sai sozinho',
-          'Duas trilhas no mesmo arquivo',
-          '40 modelos de print',
-          'Legenda alinhada palavra por palavra',
-          'Fila rodando em segundo plano',
-          'Tela verde pronta pra chroma',
-          'Lote em todas as ferramentas',
-          'Sem cartão pra começar',
+          'Decupagem — o silêncio sai sozinho',
+          'Camuflagem — duas trilhas no mesmo arquivo',
+          'FakePrint — 40 modelos de print',
+          'Gerador de SRT — legenda palavra por palavra',
+          'Fila — segue rodando em segundo plano',
+          'FakePrint — tela verde pronta pro chroma',
+          'Lote — vários arquivos de uma vez',
+          'Grátis — sem cartão pra começar',
         ]}
       />
 
@@ -231,9 +232,9 @@ function Hero() {
             </h1>
 
             <p className="mt-6 max-w-[54ch] text-[16px] leading-relaxed text-text-muted">
-              Decupagem que corta o silêncio sozinha, camuflagem de áudio com selo por
-              plataforma e 40 modelos de print de notícia — tudo no navegador, sem
-              instalar nada e sem sair do ritmo da entrega.
+              O silêncio do bruto some sozinho, o áudio do vídeo engana a transcrição
+              das plataformas e a manchete do telejornal sai do jeito que você
+              escreveu — tudo no navegador, sem instalar nada.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">

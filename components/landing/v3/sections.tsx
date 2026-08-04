@@ -101,11 +101,11 @@ const HIGHLIGHTS: Highlight[] = [
       </>
     ),
     lead:
-      'Telejornal, site de notícia, conversa de WhatsApp, chamada de vídeo, post e story do Instagram, notificação de celular e live. São 40 modelos: você preenche os campos, a prévia acompanha cada tecla e baixa em alta.',
+      'Telejornal, site de notícia, conversa de WhatsApp, chamada de vídeo, post e story do Instagram, notificação de celular e live. São 40 modelos: você preenche os campos e a manchete é sua.',
     bullets: [
-      '13 telejornais e 11 sites de notícia, com manchete, tag, hora, local e ticker editáveis',
-      'Fundo em tela verde: o cenário sai em chroma key e só o gráfico fica de pé',
-      'Telejornais e lives exportam .webm animado — relógio andando, ticker deslizando, reações subindo',
+      'Prévia ao vivo: o print muda a cada tecla, e o que você vê é o PNG que baixa',
+      'Tela verde em tudo que é cena — telejornal, site e live prontos pro chroma key',
+      'Telejornais e lives exportam .webm animado: relógio andando, reações subindo',
     ],
     note:
       'A barra de status do celular é editável até a bateria: 63% às 21:47 conta uma história, 100% às 9:00 conta outra.',

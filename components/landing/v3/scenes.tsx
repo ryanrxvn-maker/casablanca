@@ -20,7 +20,7 @@
  * plantão e o verde de chroma existirem.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useClock, useCycle, useInView, useReduced, useToday, useTypewriter, waveBars } from './kit';
 
 const UNSATURATE_FIX = 'saturate(1.39)';
@@ -32,11 +32,14 @@ const CHROMA = '#00b140';
 
 /* ══════════════════════════ 1. BREAKING (telejornal) ══════════════════════════ */
 
-/** Frases curtas de propósito — precisam caber no gerador sem truncar. */
+/**
+ * Chyron do gerador — copy SÓ de FakePrint (o card É um FakePrint).
+ * Frases curtas de propósito: precisam caber no gerador sem truncar.
+ */
 const CHYRON = [
-  'EDITOR ENTREGA 12 ANTES DO ALMOÇO',
-  'MANCHETE JÁ SAI PRONTA PRO CHROMA',
-  'RELÓGIO E TICKER VIVOS NO .WEBM',
+  'VOCÊ ESCREVE A MANCHETE DO DIA',
+  'SÓ O GRÁFICO FICA DE PÉ NO CHROMA',
+  'PNG EM ALTA OU .WEBM ANIMADO',
 ];
 
 export function BreakingCard({ className = '' }: { className?: string }) {
@@ -45,6 +48,20 @@ export function BreakingCard({ className = '' }: { className?: string }) {
   const clock = useClock();
   const { text } = useTypewriter(CHYRON, { active: inView });
   const wiping = inView && !reduced;
+  const vidRef = useRef<HTMLVideoElement | null>(null);
+
+  // O vídeo do repórter só roda quando o card está na tela (e sem
+  // reduced-motion). Fora disso fica no poster — 4 MB não descem à toa.
+  useEffect(() => {
+    const v = vidRef.current;
+    if (!v) return;
+    if (inView && !reduced) {
+      const p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } else {
+      v.pause();
+    }
+  }, [inView, reduced]);
 
   return (
     <div
@@ -71,56 +88,29 @@ export function BreakingCard({ className = '' }: { className?: string }) {
             '0 40px 90px -32px rgba(0,0,0,0.95), 0 0 0 1px rgba(255,255,255,0.04) inset',
         }}
       >
-        {/* cenário do estúdio */}
+        {/* a transmissão — o repórter de verdade, com o gráfico por cima */}
+        <video
+          ref={vidRef}
+          src="/hero/fakeprint-reporter.mp4"
+          poster="/hero/fakeprint-reporter.jpg"
+          muted
+          loop
+          playsInline
+          preload="none"
+          aria-hidden
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ objectPosition: '50% 26%' }}
+        />
+        {/* vinheta broadcast — legibilidade do gerador de caracteres */}
         <div
           aria-hidden
           className="absolute inset-0"
           style={{
             background:
-              'radial-gradient(90% 70% at 50% 8%, #1d2836 0%, #0e131a 55%, #07090c 100%),' +
-              'radial-gradient(28% 40% at 22% 78%, rgba(96,165,250,0.22), transparent 70%)',
+              'linear-gradient(to top, rgba(2,2,6,0.82) 0%, rgba(2,2,6,0.28) 24%, transparent 46%),' +
+              'linear-gradient(to bottom, rgba(2,2,6,0.5) 0%, transparent 20%)',
           }}
         />
-        {/* mobiliário do estúdio — telão, bancada e luz de recorte */}
-        <div aria-hidden className="absolute inset-0">
-          <div
-            className="absolute left-[7%] top-[26%] aspect-video w-[40%] overflow-hidden rounded-[6px] border border-white/10"
-            style={{
-              background:
-                'linear-gradient(150deg, #22344c 0%, #131e2e 55%, #0b1119 100%)',
-            }}
-          >
-            <span
-              className="absolute -bottom-2 -right-1 leading-none"
-              style={{
-                fontFamily: 'var(--font-serif)',
-                fontSize: '54px',
-                color: 'rgba(148,183,255,0.16)',
-              }}
-            >
-              AE
-            </span>
-            <span
-              className="absolute inset-x-0 top-0 h-px"
-              style={{ background: 'rgba(148,183,255,0.35)' }}
-            />
-          </div>
-          <div
-            className="absolute left-[16%] top-[16%] h-16 w-16 rounded-full blur-2xl"
-            style={{ background: 'rgba(96,165,250,0.30)' }}
-          />
-          <div
-            className="absolute inset-x-0 bottom-[21%] h-[15%]"
-            style={{
-              background: 'linear-gradient(180deg, rgba(36,48,66,0.95), rgba(10,14,20,0.98))',
-              borderTop: '1px solid rgba(148,163,184,0.28)',
-            }}
-          />
-          <div
-            className="absolute inset-x-0 bottom-[18%] h-[3%]"
-            style={{ background: 'rgba(5,7,10,0.85)' }}
-          />
-        </div>
         {/* tela verde entrando por cima, com o divisor deslizando */}
         <div
           aria-hidden
@@ -190,19 +180,19 @@ export function BreakingCard({ className = '' }: { className?: string }) {
           </div>
         </div>
 
-        {/* etiquetas dos dois fundos */}
+        {/* etiquetas dos dois lados do divisor */}
         <div className="absolute inset-x-3.5 top-14 flex items-center justify-between md:inset-x-4 md:top-16">
           <span
-            className="rounded-[4px] border border-white/15 bg-black/45 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/60 backdrop-blur-sm"
+            className="rounded-[4px] border border-white/15 bg-black/45 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/70 backdrop-blur-sm"
             style={{ fontFamily: 'var(--font-label)' }}
           >
-            Fundo estúdio
+            Seu vídeo por trás
           </span>
           <span
             className="rounded-[4px] border border-white/50 bg-black/35 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white backdrop-blur-sm"
             style={{ fontFamily: 'var(--font-label)' }}
           >
-            Tela verde
+            Como sai · tela verde
           </span>
         </div>
 
@@ -236,7 +226,7 @@ export function BreakingCard({ className = '' }: { className?: string }) {
               className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/45"
               style={{ fontFamily: 'var(--font-label)' }}
             >
-              Agora · da ilha de edição
+              Manchete, hora, local e ticker editáveis
             </span>
             <span className="h-px flex-1 bg-white/10" />
             <span
@@ -265,8 +255,8 @@ export function BreakingCard({ className = '' }: { className?: string }) {
         <span className="font-semibold" style={{ color: RED }}>
           FakePrint · telejornal
         </span>{' '}
-        — o mesmo gráfico com fundo de estúdio ou em chroma key, pra você encaixar o
-        vídeo por trás.
+        — o gráfico sai em tela verde; na ilha, você solta o seu vídeo por trás e o
+        plantão é seu.
       </p>
 
       <style jsx>{`
@@ -342,33 +332,37 @@ type Edition = {
   tone: string;
 };
 
+/**
+ * O jornal É um FakePrint — então toda edição fala de FakePrint.
+ * Cada capa destaca uma família de modelos: telejornal, sites, conversas/lives.
+ */
 const EDITIONS: Edition[] = [
   {
-    tag: 'Decupagem',
-    headline: 'Silêncio é cortado sozinho e ninguém dá falta',
+    tag: 'Telejornais',
+    headline: 'Você escreve a manchete do jornal da noite',
     deck:
-      'Bruto de 12 minutos volta com 8. Pausa morta, respiro no meio da frase e “deixa eu começar de novo” ficam de fora — a voz sai nivelada.',
+      '13 emissoras com manchete, tag do assunto, hora, local e ticker editáveis. Sai em PNG de alta ou em .webm com o relógio andando.',
     lede:
-      'O editor subiu o arquivo, escolheu quanto de pausa queria manter e foi tomar café. Voltou com a fila inteira decupada e nomeada.',
-    tone: '#7f9c2f',
-  },
-  {
-    tag: 'Camuflagem',
-    headline: 'Um áudio pro público, outro pra transcrição',
-    deck:
-      'As duas trilhas viajam no mesmo arquivo. Quem assiste ouve a sua; a transcrição automática lê a que você deixou por baixo.',
-    lede:
-      'Depois de processar, a própria ferramenta escuta o resultado do jeito que as plataformas escutam e devolve o selo por plataforma.',
-    tone: '#2f8f86',
-  },
-  {
-    tag: 'FakePrint',
-    headline: 'Manchete chega à ilha de edição já em tela verde',
-    deck:
-      'Telejornal, site de notícia, conversa, chamada de vídeo, post, story e live: 40 modelos com prévia ao vivo e download em alta.',
-    lede:
-      'No modo chroma key o cenário sai verde e só os gráficos ficam de pé — é arrastar pra cima do criativo e tirar o verde.',
+      'No modo tela verde o cenário inteiro sai em chroma key: só o gerador de caracteres fica de pé, pronto pra receber o seu vídeo por trás.',
     tone: '#b4413a',
+  },
+  {
+    tag: 'Sites de notícia',
+    headline: 'O portal publica a matéria que você escrever',
+    deck:
+      '11 layouts de portal com manchete, linha fina, autor e primeiro parágrafo editáveis — e a foto principal também sai em tela verde.',
+    lede:
+      'A prévia acompanha cada tecla: o que você vê na tela é exatamente o PNG que baixa, nítido o bastante pra ampliar dentro do vídeo.',
+    tone: '#2f5e8f',
+  },
+  {
+    tag: 'Conversas & lives',
+    headline: 'O print de WhatsApp sai do jeito que a história pede',
+    deck:
+      'Conversa, chamada de vídeo, post, story, notificação e live animada — 40 modelos no total, do sticker de story à tela de bloqueio.',
+    lede:
+      'As lives exportam .webm com comentários rolando e reações subindo. Com o fundo verde ligado, é sobrepor no criativo e tirar o chroma.',
+    tone: '#6d5a9e',
   },
 ];
 
