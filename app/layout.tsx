@@ -67,7 +67,7 @@ const label = Inter({
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
-  'Decupagem automática, lipsync, legenda alinhada à copy e compressão em lote — ferramentas de edição de vídeo direto no navegador. Sobe o bruto, baixa o pronto.';
+  'Decupagem automática, camuflagem de áudio com selo por plataforma, 40 modelos de print de notícia, lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -79,6 +79,10 @@ export const metadata: Metadata = {
   keywords: [
     'automação de edição de vídeo',
     'decupagem automática',
+    'camuflagem de áudio',
+    'print de telejornal',
+    'manchete de jornal para vídeo',
+    'gerador de print falso para criativo',
     'lipsync video to video',
     'editor de vídeo automático',
     'automação UGC',
@@ -183,6 +187,8 @@ const JSON_LD = {
       publisher: { '@id': `${SITE_URL}/#org` },
       featureList: [
         'Decupagem automática de vídeo',
+        'Camuflagem de áudio com verificação por plataforma',
+        'FakePrint — prints de telejornal, site de notícia e redes sociais',
         'Lipsync Video to Video',
         'Legendas (SRT) alinhadas à copy',
         'Compressão e ajuste de velocidade em lote',

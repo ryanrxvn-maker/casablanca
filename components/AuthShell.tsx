@@ -1,18 +1,25 @@
-import Link from 'next/link';
-import { Brand } from './Brand';
-import { SrtAlignCard, WaveCutCard } from './AuthScenes';
-import { SmokeText } from './SmokeText';
+'use client';
 
 /**
- * AuthShell v6 — "Estúdio aberto."
+ * AuthShell v7 — "A edição de hoje".
  *
- * A era "dormindo/automação" saiu de cena: agora o lado esquerdo mostra as
- * ferramentas REAIS trabalhando ao vivo:
- *   1. Decupagem cortando silêncio numa waveform (WaveCutCard)
- *   2. Gerador de SRT alinhando legenda à copy (SrtAlignCard)
+ * Mesma direção da landing v3 (components/landing/v3): tarja de edição no topo,
+ * cabeçalho de jornal e, do lado esquerdo, a CAPA IMPRESSA — a manchete troca
+ * sozinha e cada edição fala de uma ferramenta (Decupagem, Camuflagem,
+ * FakePrint). O formulário fica à direita, com fio vermelho de retranca.
  *
- * Card do form à direita, como antes.
+ * A API é a mesma de sempre (title, subtitle, children, footer), então todas as
+ * telas de auth — login, cadastro, recuperar senha, verificar email/telefone —
+ * herdam o novo visual sem mudar uma linha.
  */
+
+import Link from 'next/link';
+import { DarkoLogo } from './DarkoLogo';
+import { NewspaperCard } from './landing/v3/scenes';
+import { useClock, useToday } from './landing/v3/kit';
+
+const RED = '#e0483f';
+
 export function AuthShell({
   title,
   subtitle,
@@ -24,69 +31,73 @@ export function AuthShell({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  const today = useToday();
+  const clock = useClock();
+
   return (
     <main className="relative flex min-h-screen flex-col">
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 z-0"
-        style={{
-          background:
-            'radial-gradient(45% 35% at 18% 12%, rgba(167,139,250,0.15), transparent 65%),' +
-            'radial-gradient(40% 30% at 84% 90%, rgba(244,114,182,0.10), transparent 65%)',
-        }}
-      />
+      {/* tarja de edição */}
+      <div className="border-b border-white/8 bg-black/30">
+        <div
+          className="mx-auto flex h-8 max-w-[1180px] items-center justify-between px-5 text-[9.5px] uppercase tracking-[0.22em] text-white/35 md:px-8"
+          style={{ fontFamily: 'var(--font-label)', fontWeight: 600 }}
+        >
+          <span className="truncate">{today || 'Edição digital'}</span>
+          <span className="hidden md:inline">Acesso à suíte</span>
+          <span className="num tracking-[0.16em]" style={{ fontFamily: 'var(--font-mono)' }}>
+            {clock}
+          </span>
+        </div>
+      </div>
 
-      <header className="relative z-10 border-b border-line/50 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-5 md:px-8">
-          <Brand href="/" />
-          <Link href="/" className="btn-ghost">
+      {/* cabeçalho */}
+      <header className="border-b border-white/8">
+        <div className="mx-auto flex h-[62px] max-w-[1180px] items-center justify-between px-5 md:px-8">
+          <Link href="/" className="group flex items-center gap-2.5" aria-label="Auto Edit">
+            <span className="transition-transform duration-500 group-hover:-rotate-6 group-hover:scale-105">
+              <DarkoLogo size={30} />
+            </span>
+            <span
+              className="text-[19px] leading-none text-white"
+              style={{ fontFamily: 'var(--font-serif)', letterSpacing: '0.01em' }}
+            >
+              Auto Edit
+            </span>
+          </Link>
+          <Link
+            href="/"
+            className="rounded-[8px] px-3 py-2 text-[12.5px] font-semibold text-white/60 transition-colors hover:text-white"
+          >
             ← Voltar
           </Link>
         </div>
       </header>
 
-      <section className="relative z-10 flex flex-1 items-center justify-center px-5 py-10 md:py-16">
-        <div className="grid w-full max-w-[1180px] grid-cols-1 items-center gap-14 lg:grid-cols-[1.15fr_0.85fr]">
-          {/* LEFT — as ferramentas trabalhando ao vivo */}
-          <div
-            className="order-2 fade-in-up lg:order-1"
-            style={{ animationDelay: '120ms' }}
-          >
-            <div
-              className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet/35 bg-violet/10 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-violet"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,214,132,0.9)]" />
-              ESTÚDIO ABERTO
-            </div>
-            <h1
-              className="hero-title"
-              style={{
-                fontSize: 'clamp(2.25rem, 5vw, 3.5rem)',
-                lineHeight: 1.05,
-              }}
-            >
-              <SmokeText text="Estúdio aberto." className="block" />
-              <span className="display-subtle block">
-                <SmokeText text="Falta só você." />
+      <section className="relative flex flex-1 items-center justify-center px-5 py-10 md:px-8 md:py-14">
+        <div className="grid w-full max-w-[1180px] grid-cols-1 items-center gap-12 lg:grid-cols-[1fr_420px] lg:gap-16">
+          {/* ESQUERDA — a capa de hoje */}
+          <div className="order-2 lg:order-1">
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden
+                className="block h-[15px] w-[3px] rounded-[1px]"
+                style={{ background: RED, boxShadow: `0 0 14px -2px ${RED}` }}
+              />
+              <span
+                className="text-[10px] uppercase tracking-[0.26em] text-white/55"
+                style={{ fontFamily: 'var(--font-label)', fontWeight: 600 }}
+              >
+                A edição de hoje
               </span>
-            </h1>
-
-            {/* Cenas animadas em grid */}
-            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-[1.05fr_1fr]">
-              <WaveCutCard />
-              <SrtAlignCard />
             </div>
 
-            <p className="mt-6 max-w-[480px] text-[14.5px] leading-relaxed text-text-muted">
-              Decupagem, legenda alinhada à copy, lipsync e compressão em lote —
-              <br />
-              tudo direto no navegador, pronto pra quando você entrar.
-            </p>
+            <div className="mt-5 max-w-[640px]">
+              <NewspaperCard compact />
+            </div>
 
             <div
-              className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-dim"
-              style={{ fontFamily: 'var(--font-label), var(--font-display)' }}
+              className="mt-8 flex max-w-[640px] flex-wrap items-center gap-x-6 gap-y-2.5 text-[10px] uppercase tracking-[0.16em] text-text-dim"
+              style={{ fontFamily: 'var(--font-label)', fontWeight: 600 }}
             >
               <span className="flex items-center gap-2">
                 <i
@@ -112,38 +123,36 @@ export function AuthShell({
             </div>
           </div>
 
-          {/* RIGHT — card form */}
-          <div
-            className="order-1 lg:order-2 animate-fade-in-up"
-            style={{ animationDelay: '60ms' }}
-          >
+          {/* DIREITA — formulário */}
+          <div className="order-1 w-full lg:order-2">
             <div
-              className="auth-card relative overflow-hidden rounded-[24px] border border-line/70 p-7 md:p-9"
+              className="auth-card relative overflow-hidden rounded-[16px] border border-white/12 p-7 md:p-8"
               style={{
                 background:
-                  'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)) 0%, rgb(var(--bg-soft)) 100%)',
+                  'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.2)), linear-gradient(180deg, rgb(var(--bg-softer)) 0%, rgb(var(--bg-soft)) 100%)',
                 boxShadow:
-                  '0 1px 0 rgba(255,255,255,0.06) inset, 0 36px 72px -24px rgba(0,0,0,0.95), 0 0 64px -16px rgba(167,139,250,0.22)',
+                  '0 1px 0 rgba(255,255,255,0.06) inset, 0 40px 80px -30px rgba(0,0,0,0.95)',
               }}
             >
-              <div
+              <span
                 aria-hidden
-                className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full opacity-50 blur-3xl"
-                style={{ background: 'rgba(167,139,250,0.4)' }}
+                className="absolute inset-x-0 top-0 h-[3px]"
+                style={{ background: RED }}
               />
               <div className="relative">
-                <h2
-                  className="text-[28px] font-extrabold tracking-tight md:text-[32px]"
-                  style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+                <h1
+                  className="text-[27px] font-extrabold leading-tight tracking-[-0.02em] text-white md:text-[30px]"
+                  style={{ fontFamily: 'var(--font-tech)' }}
                 >
                   {title}
-                </h2>
+                </h1>
                 {subtitle && (
-                  <p className="mt-2 text-[14.5px] text-text-muted">{subtitle}</p>
+                  <p className="mt-2 text-[14px] leading-relaxed text-text-muted">{subtitle}</p>
                 )}
-                <div className="mt-6">{children}</div>
+                <div className="mt-7">{children}</div>
               </div>
             </div>
+
             {footer && (
               <div className="mt-5 text-center text-[13px] leading-relaxed text-text-muted">
                 {footer}

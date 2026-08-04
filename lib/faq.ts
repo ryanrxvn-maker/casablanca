@@ -27,6 +27,14 @@ export const FAQ: FaqItem[] = [
     a: 'Você sobe o vídeo e a decupagem automática remove os silêncios e cortes mortos sozinha, com o volume da voz nivelado. O que tomava uma tarde no manual sai em minutos, e dá pra processar vários vídeos na mesma fila — ideal pra editores e agências com volume alto.',
   },
   {
+    q: 'O que é a Camuflagem de áudio?',
+    a: 'A Camuflagem junta duas trilhas num arquivo só: o áudio original, que o público ouve normalmente, e um áudio escondido, que é o que a transcrição automática das plataformas lê no lugar. Existe também o modo mudo, em que a IA escuta silêncio. Depois de processar, a ferramenta escuta o arquivo pronto do mesmo jeito que a plataforma escuta e mostra um selo por plataforma (TikTok, Kwai, YouTube e Meta) — a recomendação é só publicar com o selo verde. O Descamuflar devolve qualquer uma das camadas depois.',
+  },
+  {
+    q: 'O que dá pra criar no FakePrint?',
+    a: 'O FakePrint tem 40 modelos de print para criativos: telejornais (13 emissoras), sites de notícia (11 layouts), conversa de WhatsApp e Instagram DM, chamada de vídeo, post do Instagram, tweet, comentários, stories, notificação de celular e lives. A prévia atualiza a cada tecla e o download sai em PNG de alta resolução. Telejornais e lives também exportam vídeo .webm animado, e o fundo pode sair em tela verde (chroma key) pra encaixar atrás no editor.',
+  },
+  {
     q: 'Como o Auto Edit gera legendas (SRT) alinhadas à copy?',
     a: 'Você cola a copy e sobe o áudio ou vídeo. O Gerador de SRT alinha o texto palavra por palavra com a fala e devolve o arquivo .srt pronto pra importar no CapCut — com os modelos e animações de legenda funcionando normalmente em cima dele.',
   },
