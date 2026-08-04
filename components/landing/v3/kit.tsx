@@ -219,8 +219,8 @@ export function Ticker({
   tone?: string;
   className?: string;
 }) {
-  const group = (
-    <div className="tk-group flex shrink-0 items-center">
+  const group = (hidden: boolean) => (
+    <div className="tk-group flex shrink-0 items-center" aria-hidden={hidden || undefined}>
       {items.map((t, i) => (
         <span key={i} className="flex items-center">
           <span className="whitespace-nowrap px-5 text-[11.5px] uppercase tracking-[0.18em] text-white/55">
@@ -252,8 +252,8 @@ export function Ticker({
       </span>
       <div className="tk-mask relative flex-1 overflow-hidden">
         <div className="tk-track flex w-max items-center" style={{ animationDuration: `${speed}s` }}>
-          {group}
-          {group}
+          {group(false)}
+          {group(true)}
         </div>
       </div>
 

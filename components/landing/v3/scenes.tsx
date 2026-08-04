@@ -32,10 +32,11 @@ const CHROMA = '#00b140';
 
 /* ══════════════════════════ 1. BREAKING (telejornal) ══════════════════════════ */
 
+/** Frases curtas de propósito — precisam caber no gerador sem truncar. */
 const CHYRON = [
-  'EDITOR ENTREGA 12 CRIATIVOS ANTES DO ALMOÇO',
-  'MANCHETE SAI EM TELA VERDE, PRONTA PRO CHROMA',
-  'RELÓGIO E TICKER CONTINUAM RODANDO NO .WEBM',
+  'EDITOR ENTREGA 12 ANTES DO ALMOÇO',
+  'MANCHETE JÁ SAI PRONTA PRO CHROMA',
+  'RELÓGIO E TICKER VIVOS NO .WEBM',
 ];
 
 export function BreakingCard({ className = '' }: { className?: string }) {
@@ -80,6 +81,46 @@ export function BreakingCard({ className = '' }: { className?: string }) {
               'radial-gradient(28% 40% at 22% 78%, rgba(96,165,250,0.22), transparent 70%)',
           }}
         />
+        {/* mobiliário do estúdio — telão, bancada e luz de recorte */}
+        <div aria-hidden className="absolute inset-0">
+          <div
+            className="absolute left-[7%] top-[26%] aspect-video w-[40%] overflow-hidden rounded-[6px] border border-white/10"
+            style={{
+              background:
+                'linear-gradient(150deg, #22344c 0%, #131e2e 55%, #0b1119 100%)',
+            }}
+          >
+            <span
+              className="absolute -bottom-2 -right-1 leading-none"
+              style={{
+                fontFamily: 'var(--font-serif)',
+                fontSize: '54px',
+                color: 'rgba(148,183,255,0.16)',
+              }}
+            >
+              AE
+            </span>
+            <span
+              className="absolute inset-x-0 top-0 h-px"
+              style={{ background: 'rgba(148,183,255,0.35)' }}
+            />
+          </div>
+          <div
+            className="absolute left-[16%] top-[16%] h-16 w-16 rounded-full blur-2xl"
+            style={{ background: 'rgba(96,165,250,0.30)' }}
+          />
+          <div
+            className="absolute inset-x-0 bottom-[21%] h-[15%]"
+            style={{
+              background: 'linear-gradient(180deg, rgba(36,48,66,0.95), rgba(10,14,20,0.98))',
+              borderTop: '1px solid rgba(148,163,184,0.28)',
+            }}
+          />
+          <div
+            className="absolute inset-x-0 bottom-[18%] h-[3%]"
+            style={{ background: 'rgba(5,7,10,0.85)' }}
+          />
+        </div>
         {/* tela verde entrando por cima, com o divisor deslizando */}
         <div
           aria-hidden
@@ -495,8 +536,15 @@ export function NewspaperCard({
           style={{ borderColor: 'rgba(20,20,15,0.3)', color: 'rgba(20,20,15,0.5)', fontFamily: 'var(--font-label)' }}
         >
           <span>FakePrint · modelo de impresso</span>
-          <span className="num" style={{ fontFamily: 'var(--font-mono)' }}>
-            {String(i + 1).padStart(2, '0')} / {String(EDITIONS.length).padStart(2, '0')}
+          <span className="flex items-center gap-2.5">
+            <span aria-hidden className="flex h-[11px] items-stretch gap-[1.5px]">
+              {[2, 1, 3, 1, 1, 2, 1, 3, 1, 2, 1, 1, 3, 1].map((w, k) => (
+                <span key={k} style={{ width: w, background: 'rgba(20,20,15,0.65)' }} />
+              ))}
+            </span>
+            <span className="num" style={{ fontFamily: 'var(--font-mono)' }}>
+              {String(i + 1).padStart(2, '0')} / {String(EDITIONS.length).padStart(2, '0')}
+            </span>
           </span>
         </div>
       </article>
@@ -893,10 +941,60 @@ export function DecupagemScene() {
             {cut ? 'voz nivelada, ataque das palavras preservado' : 'marcando pausa morta e respiro'}
           </span>
         </div>
+
+        {/* a fila em lote — o resto dos arquivos esperando a vez */}
+        <div className="mt-4">
+          <div
+            className="mb-1.5 text-[8.5px] uppercase tracking-[0.22em] text-white/35"
+            style={{ fontFamily: 'var(--font-label)' }}
+          >
+            Fila do lote
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {QUEUE.map((q) => (
+              <div
+                key={q.name}
+                className="flex items-center gap-2.5 rounded-[8px] border border-white/8 bg-black/25 px-2.5 py-1.5"
+              >
+                <span
+                  className="num shrink-0 text-[9.5px] text-white/60"
+                  style={{ fontFamily: 'var(--font-mono)' }}
+                >
+                  {q.name}
+                </span>
+                <span className="relative h-[3px] flex-1 overflow-hidden rounded-full bg-white/8">
+                  <span
+                    className="absolute inset-y-0 left-0 rounded-full"
+                    style={{
+                      width: `${q.pct}%`,
+                      background: q.pct === 100 ? LIME : 'rgba(255,255,255,0.45)',
+                    }}
+                  />
+                </span>
+                <span
+                  className="shrink-0 text-[8px] font-bold uppercase tracking-[0.14em]"
+                  style={{
+                    fontFamily: 'var(--font-label)',
+                    color: q.pct === 100 ? LIME : q.pct > 0 ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.3)',
+                  }}
+                >
+                  {q.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+/** Estado fixo da fila — a timeline acima é quem anima. */
+const QUEUE = [
+  { name: 'ad-hook-01.mp4', status: 'pronto · −28%', pct: 100 },
+  { name: 'ad-hook-02.mp4', status: 'cortando silêncios…', pct: 64 },
+  { name: 'ad-hook-03.mp4', status: 'na fila', pct: 0 },
+];
 
 function MiniWave({ seed }: { seed: number }) {
   const bars = waveBars(9, seed + 2);

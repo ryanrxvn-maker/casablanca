@@ -36,6 +36,16 @@ export function AuthShell({
 
   return (
     <main className="relative flex min-h-screen flex-col">
+      {/* calor ambiente — mesmo da landing, bem sutil */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            'radial-gradient(40% 32% at 12% 8%, rgba(224,72,63,0.06), transparent 65%),' +
+            'radial-gradient(34% 30% at 86% 92%, rgba(167,139,250,0.07), transparent 65%)',
+        }}
+      />
       {/* tarja de edição */}
       <div className="border-b border-white/8 bg-black/30">
         <div
@@ -141,8 +151,8 @@ export function AuthShell({
               />
               <div className="relative">
                 <h1
-                  className="text-[27px] font-extrabold leading-tight tracking-[-0.02em] text-white md:text-[30px]"
-                  style={{ fontFamily: 'var(--font-tech)' }}
+                  className="text-[30px] leading-[1.02] text-white md:text-[34px]"
+                  style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.005em' }}
                 >
                   {title}
                 </h1>

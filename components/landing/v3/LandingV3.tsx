@@ -38,6 +38,17 @@ const RED = '#e0483f';
 export function LandingV3() {
   return (
     <main className="relative min-h-screen overflow-x-clip">
+      {/* calor ambiente da redação — vermelho de plantão à esquerda, violeta da
+          marca à direita. Bem sutil; só tira o fundo do preto chapado. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[820px]"
+        style={{
+          background:
+            'radial-gradient(42% 32% at 10% 4%, rgba(224,72,63,0.07), transparent 65%),' +
+            'radial-gradient(36% 28% at 88% 8%, rgba(167,139,250,0.07), transparent 65%)',
+        }}
+      />
       <EditionBar />
       <Masthead />
       <Hero />
@@ -214,7 +225,7 @@ function Hero() {
               Menos horas
               <br />
               na timeline.
-              <span className="mt-1 block text-editorial font-normal tracking-[-0.01em] text-white/65">
+              <span className="mt-1 block text-editorial font-normal tracking-[-0.01em] text-white/70">
                 Mais criativo no ar.
               </span>
             </h1>
