@@ -22,7 +22,6 @@ import { DarkoLogo } from '../../DarkoLogo';
 import {
   IconAcelerador,
   IconAudioSplit,
-  IconCaixinhaPergunta,
   IconCalculadora,
   IconCamuflagem,
   IconCompressor,
@@ -238,7 +237,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'FakePrint',
-    desc: '40 modelos de print: telejornal, site, conversa, post, live.',
+    desc: '40 modelos de print: telejornal, site, conversa, post, story e live.',
     plan: 'free',
     icon: <IconFakePass size={20} />,
   },
@@ -253,12 +252,6 @@ const TOOLS: Tool[] = [
     desc: 'Baixa vídeo, áudio e imagem de YouTube, TikTok, Insta e Pinterest.',
     plan: 'free',
     icon: <IconDownloader size={20} />,
-  },
-  {
-    name: 'Caixinha de Pergunta',
-    desc: 'O sticker de pergunta do Instagram em PNG, igual ao nativo.',
-    plan: 'free',
-    icon: <IconCaixinhaPergunta size={20} />,
   },
   {
     name: 'Camuflagem',
@@ -519,7 +512,7 @@ export function PricingSection() {
               Pra sentir o corte. Sem cartão, sem prazo.
             </p>
             <ul className="mt-7 flex-1 space-y-2.5">
-              {['Decupagem', 'FakePrint (40 modelos)', 'Compressor', 'Downloader', 'Caixinha de Pergunta', 'Histórico'].map(
+              {['Decupagem', 'FakePrint (40 modelos, com Caixinha de Pergunta)', 'Compressor', 'Downloader', 'Histórico'].map(
                 (f) => (
                   <Feat key={f} text={f} tone="#c8d684" />
                 ),

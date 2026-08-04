@@ -205,7 +205,7 @@ function Masthead() {
 /* ────────────────────── herói ────────────────────── */
 
 const STATS = [
-  { n: '12', label: 'ferramentas no ar' },
+  { n: '11', label: 'ferramentas no ar' },
   { n: '40', label: 'modelos de print' },
   { n: 'R$ 0', label: 'pra começar' },
 ];
