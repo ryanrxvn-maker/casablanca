@@ -343,13 +343,19 @@ export function testHeygenSession(): Promise<{
       { source: 'darkolab', type: 'HG_TEST_SESSION', requestId },
       '*',
     );
+    // 45s, nao 8s: quando NAO ha aba do HeyGen aberta, a extensao precisa
+    // ABRIR uma (invisivel) e esperar o HeyGen carregar — isso sozinho passa
+    // de 8s facil. Com o timeout curto o teste acusava "extensao nao
+    // respondeu" mesmo estando tudo certo, e o user ia caçar problema que
+    // nao existia.
     setTimeout(() => {
       window.removeEventListener('message', handler);
       resolve({
         ok: false,
-        detail: 'Extensao nao respondeu em 8s.',
+        detail:
+          'Sem resposta em 45s. Deixe UMA aba do app.heygen.com aberta e logada e teste de novo.',
       });
-    }, 8000);
+    }, 45000);
   });
 }
 

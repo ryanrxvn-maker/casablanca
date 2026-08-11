@@ -28,21 +28,54 @@ async function findOrCreateHeyGenTab() {
   // Prefere uma aba INATIVA (background). Nunca mexer numa aba que o user
   // esteja olhando — nesse caso cria uma nova aba inativa exclusiva pra
   // automacao, pra todo o trabalho rodar invisivel.
-  const inactive = tabs.find((t) => t.active === false);
-  if (inactive) {
-    if (
-      inactive.url &&
-      (inactive.url.includes('/create-video') || inactive.url.includes('/404'))
-    ) {
-      await chrome.tabs.update(inactive.id, { url: HEYGEN_CREATE_URL });
+  //
+  // ABA ZUMBI (raiz de "nada funciona depois que troquei de conta"): uma aba
+  // de fundo pode aparecer na lista mas ser IMPOSSIVEL de automatizar —
+  // descartada pelo Memory Saver do Chrome (fica sem renderer), parada numa
+  // pagina de erro de rede, ou sobrando da sessao ANTIGA depois de trocar de
+  // conta no HeyGen. Nesses casos o injetar volta "Cannot access contents of
+  // the page" e ANTES tudo morria ali pra sempre: a zumbi era a primeira da
+  // fila, entao reinstalar a extensao / recarregar a pagina nao curava nada.
+  // Agora cada candidata e VALIDADA (acorda se estiver dormindo, injeta o
+  // content script) e a que nao servir e PULADA — no fim, cria uma aba nova.
+  const candidates = tabs.filter((t) => t.active === false);
+  for (const t of candidates) {
+    try {
+      if (t.discarded || t.status === 'unloaded') {
+        // Aba dormindo nao aceita script: acorda com reload e deixa o status
+        // virar 'loading' antes do waitForTabReady olhar.
+        console.log('[DARKO LAB BG] aba HeyGen', t.id, 'estava descartada — acordando');
+        await chrome.tabs.reload(t.id);
+        await new Promise((r) => setTimeout(r, 800));
+      }
+      if (
+        t.url &&
+        (t.url.includes('/create-video') || t.url.includes('/404'))
+      ) {
+        await chrome.tabs.update(t.id, { url: HEYGEN_CREATE_URL });
+      }
+      // PING + injeta o content script se faltar. Se essa aba for zumbi,
+      // joga — e a gente segue pra proxima candidata.
+      await waitForTabReady(t.id);
+      return t;
+    } catch (e) {
+      console.warn(
+        '[DARKO LAB BG] aba HeyGen',
+        t.id,
+        'inutilizavel, pulando pra proxima:',
+        e?.message ?? e,
+      );
     }
-    return inactive;
   }
-  // Se so existem abas ativas, NAO mexer nelas — cria uma fresh inativa
-  return await chrome.tabs.create({
+  // Nenhuma aba de fundo utilizavel (ou so existem abas ativas) — cria uma
+  // fresh inativa. Aba recem-criada sempre aceita o content script.
+  console.log('[DARKO LAB BG] nenhuma aba HeyGen reaproveitavel — criando uma nova (inativa)');
+  const fresh = await chrome.tabs.create({
     url: HEYGEN_CREATE_URL,
     active: false,
   });
+  await waitForTabReady(fresh.id);
+  return fresh;
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -1105,9 +1138,20 @@ async function ensureContentScriptLoaded(tabId) {
       );
     }
   } catch (e) {
+    const raw = e?.message ?? String(e);
+    // "Cannot access contents of the page / must request permission" NAO e
+    // falta de permissao no manifest: e aba descartada pelo Memory Saver,
+    // pagina de erro, ou aba sobrando de uma sessao antiga. Mensagem tecnica
+    // do Chrome nao ajuda ninguem — traduz pro que resolve de fato.
+    if (/cannot access contents|permission to access/i.test(raw)) {
+      throw new Error(
+        'Aba do HeyGen dormindo ou travada. Feche as abas do app.heygen.com e ' +
+          'deixe UMA aberta e logada, depois tente de novo.',
+      );
+    }
     throw new Error(
       'Falha ao injetar content script: ' +
-        (e?.message ?? e) +
+        raw +
         '. Recarregue a aba app.heygen.com manualmente.',
     );
   }

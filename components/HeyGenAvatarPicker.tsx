@@ -397,7 +397,25 @@ export function HeyGenAvatarPicker({
           {(() => {
             const raw = String(error || '');
             const looksAuth = /401|403|login|sign[\s-]?in|unauthor|session|logad|entrar/i.test(raw);
-            return looksAuth ? (
+            // Aba do HeyGen dormindo/travada (Memory Saver, pagina de erro, ou
+            // aba velha de outra conta). Aqui o user PRECISA da instrucao certa
+            // — o texto generico fazia ele reinstalar a extensao a toa.
+            const looksTab = /dormindo|travada|aba .*heygen|app\.heygen\.com/i.test(raw);
+            return looksTab && !looksAuth ? (
+              <div>
+                A aba do HeyGen está dormindo ou travada. Feche as abas do{' '}
+                <a
+                  href="https://app.heygen.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-amber-100"
+                >
+                  app.heygen.com
+                </a>
+                , deixe <strong>uma só</strong> aberta e logada e clique em{' '}
+                <strong>Recarregar</strong>.
+              </div>
+            ) : looksAuth ? (
               <div>
                 Você não está logado no HeyGen. Abra{' '}
                 <a
