@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ToolShell } from '@/components/ToolShell';
+import { getPilotTeamNames, shortWorkspaceLabel } from '@/lib/clickup-pilot-config';
 
 /**
  * Background Tasks — viewer dedicado dos batches do ClickUp Pilot.
@@ -71,6 +72,10 @@ type BatchTaskState = {
   taskId: string;
   taskName: string;
   baseAdId: string;
+  /** Empresa dona do disparo. Aqui NADA é escondido — este viewer existe
+   *  justamente pra você achar o que ficou rodando — mas o card ganha o
+   *  selo da empresa pra não confundir uma com a outra. */
+  teamId?: string;
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
   parts: Array<{ label: string; videoId: string | null; videoStatus?: string; error?: string | null; renamedTo: string }>;
   message?: string;
@@ -150,6 +155,9 @@ function percentForPhase(b: BatchTaskState): number {
 
 export default function BackgroundTasksPage() {
   const [batches, setBatches] = useState<Record<string, BatchTaskState>>({});
+  // id→nome das empresas, gravado pelo Pilot — só pro selo do card.
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
+  useEffect(() => setTeamNames(getPilotTeamNames()), []);
   const [cancelMap, setCancelMap] = useState<Record<string, number>>({});
   const [magnific, setMagnific] = useState<Record<string, MagnificJob>>({});
   const [tick, setTick] = useState(0);
@@ -346,7 +354,14 @@ export default function BackgroundTasksPage() {
                           </span>
                         ) : null}
                       </div>
-                      <div className="mt-1 text-[13px] text-white">{b.taskName}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-white">
+                        {b.taskName}
+                        {b.teamId ? (
+                          <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9.5px] uppercase tracking-widest text-text-muted">
+                            {shortWorkspaceLabel(teamNames[b.teamId] ?? b.teamId)}
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="mt-0.5 text-[11px] text-text-muted">{b.message || '—'}</div>
 
                       {/* Barra de progresso */}
