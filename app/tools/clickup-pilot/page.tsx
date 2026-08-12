@@ -93,6 +93,8 @@ import {
   resolveStatusExtras,
   mergeStatuses,
   shortWorkspaceLabel,
+  workspaceAccent,
+  sortWorkspacesForSwitch,
 } from '@/lib/clickup-pilot-config';
 import { WorkspaceSwitch3D } from '@/components/WorkspaceSwitch3D';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
@@ -7913,10 +7915,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 {teams.length > 1 ? (
                   <div className="relative mb-3.5 flex flex-wrap items-center gap-3">
                     <WorkspaceSwitch3D
-                      options={teams.map((t) => ({
+                      options={sortWorkspacesForSwitch(teams).map((t) => ({
                         id: t.id,
                         label: shortWorkspaceLabel(t.name),
                         fullName: t.name,
+                        accent: workspaceAccent(t.name),
                       }))}
                       value={selectedTeam}
                       onChange={(id) => void switchWorkspace(id)}

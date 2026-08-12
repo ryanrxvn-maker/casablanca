@@ -16,33 +16,34 @@
  * não uma fileira de divs clicáveis.
  */
 
+export type WorkspaceAccent = 'lime' | 'violet' | 'cyan';
+
 export type WorkspaceOption = {
   id: string;
   label: string;
   /** Nome completo do workspace — vai no title/tooltip. */
   fullName?: string;
+  /** Cor da empresa. Presa à identidade, nunca à posição na lista. */
+  accent?: WorkspaceAccent;
 };
 
-const ACCENTS = [
-  {
-    // lime — B2C
+const ACCENTS: Record<WorkspaceAccent, { rgb: string; text: string; grad: string }> = {
+  lime: {
     rgb: '200,232,124',
     text: '#0b0f07',
     grad: 'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
   },
-  {
-    // violeta — DR MILLION
+  violet: {
     rgb: '167,139,250',
     text: '#0b0713',
     grad: 'linear-gradient(135deg, #b9a5fb 0%, #8b6cf0 100%)',
   },
-  {
-    // ciano — terceiro workspace, se existir
+  cyan: {
     rgb: '34,211,238',
     text: '#04121a',
     grad: 'linear-gradient(135deg, #7fe4f5 0%, #22d3ee 100%)',
   },
-];
+};
 
 export function WorkspaceSwitch3D({
   options,
@@ -61,7 +62,8 @@ export function WorkspaceSwitch3D({
   if (options.length < 2) return null;
 
   const idx = Math.max(0, options.findIndex((o) => o.id === value));
-  const accent = ACCENTS[idx % ACCENTS.length];
+  const accentOf = (o: WorkspaceOption | undefined) => ACCENTS[o?.accent ?? 'cyan'];
+  const accent = accentOf(options[idx]);
   const pct = 100 / options.length;
   const locked = disabled || busy;
 
@@ -89,10 +91,13 @@ export function WorkspaceSwitch3D({
           (locked ? 'opacity-60' : '')
         }
         style={{
+          // Tema-aware: o trilho é o próprio fundo do app rebaixado, então
+          // funciona no escuro e no claro sem hex fixo. A profundidade vem da
+          // sombra interna, não de uma cor preta chapada.
           background:
-            'linear-gradient(180deg, rgba(0,0,0,0.34), rgba(0,0,0,0.14))',
+            'linear-gradient(180deg, rgb(var(--bg) / 0.85), rgb(var(--bg-soft) / 0.65))',
           boxShadow:
-            'inset 0 2px 5px rgba(0,0,0,0.55), inset 0 -1px 0 rgba(255,255,255,0.05)',
+            'inset 0 2px 5px rgb(0 0 0 / 0.30), inset 0 -1px 0 rgb(255 255 255 / 0.06)',
         }}
         onKeyDown={(e) => {
           if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
@@ -147,7 +152,7 @@ export function WorkspaceSwitch3D({
               style={{
                 fontFamily: 'var(--font-tech)',
                 minWidth: 96,
-                color: active ? ACCENTS[i % ACCENTS.length].text : undefined,
+                color: active ? accentOf(o).text : undefined,
                 textShadow: active
                   ? '0 1px 0 rgba(255,255,255,0.35)'
                   : undefined,

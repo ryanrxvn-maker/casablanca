@@ -150,14 +150,42 @@ export function mergeStatuses(base: string[], extras: string[]): string[] {
 /* ══════════════ Rótulo curto pro seletor ══════════════ */
 
 /** "B2c  Workspace" → "B2C" · "DR MILLION" → "DR MILLION".
- *  Qualquer outro: enxuga pra caber no botão sem virar sopa de letras. */
+ *  Workspace pessoal (nome de gente) vira só o primeiro nome — "Silas Ryan
+ *  Souza da Silva" truncado no botão fica ilegível e ocupa o dobro. */
 export function shortWorkspaceLabel(name: string | undefined | null): string {
   const n = (name || '').replace(/\s+/g, ' ').trim();
   if (!n) return 'Workspace';
   if (/b2c/i.test(n)) return 'B2C';
   if (/mil+i?on/i.test(n)) return 'DR MILLION';
-  const semSufixo = n.replace(/\bworkspace\b/i, '').trim();
-  const base = semSufixo || n;
+  const base = n.replace(/\bworkspace\b/i, '').trim() || n;
+  const palavras = base.split(' ');
+  if (palavras.length >= 3) return palavras[0].toUpperCase(); // nome de pessoa
   if (base.length <= 16) return base.toUpperCase();
   return base.slice(0, 15).trimEnd().toUpperCase() + '…';
+}
+
+/** Cor do workspace no seletor — presa à EMPRESA, não à posição na lista.
+ *  Sem isso o B2C mudava de cor conforme a ordem em que o ClickUp devolve
+ *  os workspaces, e o sinal periférico ("qual empresa estou?") se perde. */
+export function workspaceAccent(
+  name: string | undefined | null,
+): 'lime' | 'violet' | 'cyan' {
+  const n = (name || '').trim();
+  if (/b2c/i.test(n)) return 'lime';
+  if (/mil+i?on/i.test(n)) return 'violet';
+  return 'cyan';
+}
+
+/** Empresas primeiro (B2C, DR MILLION), workspace pessoal por último.
+ *  Estável: preserva a ordem original dentro de cada grupo. */
+export function sortWorkspacesForSwitch<T extends { name?: string }>(list: T[]): T[] {
+  const rank = (n: string | undefined) => {
+    if (/b2c/i.test(n || '')) return 0;
+    if (/mil+i?on/i.test(n || '')) return 1;
+    return 2;
+  };
+  return list
+    .map((item, i) => ({ item, i }))
+    .sort((a, b) => rank(a.item.name) - rank(b.item.name) || a.i - b.i)
+    .map(({ item }) => item);
 }

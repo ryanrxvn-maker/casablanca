@@ -14,8 +14,9 @@ import {
   type ClickUpUser,
 } from '@/lib/clickup-client';
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
+import { ClickUpPilotExtraStatusSection } from '@/components/ClickUpPilotExtraStatusSection';
 import { memoryCount } from '@/lib/voice-avatar-memory';
-import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
+import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditorForTeam } from '@/lib/clickup-pilot-config';
 
 /**
  * /configuracoes/clickup-pilot — central de config do Pilot.
@@ -42,7 +43,14 @@ export default function ClickUpPilotConfigPage() {
   const [selectedTeam, setSelectedTeamState] = useState<string | null>(null);
   const [selectedEditor, setSelectedEditorState] = useState<string | null>(null);
   function setSelectedTeam(v: string | null) { setSelectedTeamState(v); setPilotTeam(v); }
-  function setSelectedEditor(v: string | null) { setSelectedEditorState(v); setPilotEditor(v); }
+  /** Grava o editor NA EMPRESA certa. O Pilot lê a escolha por workspace —
+   *  salvar só no global faria a seleção daqui ser ignorada lá. `teamOverride`
+   *  existe porque o onChange do workspace troca os dois de uma vez e o state
+   *  do team ainda não propagou. */
+  function setSelectedEditor(v: string | null, teamOverride?: string | null) {
+    setSelectedEditorState(v);
+    setPilotEditorForTeam(teamOverride ?? selectedTeam, v);
+  }
   useEffect(() => {
     setSelectedTeamState(getPilotTeam());
     setSelectedEditorState(getPilotEditor());
@@ -176,7 +184,13 @@ export default function ClickUpPilotConfigPage() {
                 <div className="grid gap-2 sm:grid-cols-2">
                   <select
                     value={selectedTeam || ''}
-                    onChange={(e) => { setSelectedTeam(e.target.value); setSelectedEditor(null); }}
+                    onChange={(e) => {
+                      const novo = e.target.value;
+                      setSelectedTeam(novo);
+                      // Limpa o editor DA EMPRESA NOVA (não da que estava
+                      // selecionada) — o auto-pick abaixo repõe você.
+                      setSelectedEditor(null, novo);
+                    }}
                     disabled={loadingTeams}
                     className="input-field"
                   >
@@ -203,8 +217,15 @@ export default function ClickUpPilotConfigPage() {
               </section>
             ) : null}
 
-            {/* STATUS FILTER */}
+            {/* STATUS FILTER (global — vale pra todas as empresas) */}
             <ClickUpPilotStatusSection flash={flash} />
+
+            {/* STATUS EXTRAS (só da empresa selecionada acima) */}
+            <ClickUpPilotExtraStatusSection
+              teamId={selectedTeam}
+              teamName={currentTeam?.name ?? teams.find((t) => t.id === selectedTeam)?.name}
+              flash={flash}
+            />
 
             {/* VOICE MEMORY */}
             <section className="border-t border-line pt-6">
