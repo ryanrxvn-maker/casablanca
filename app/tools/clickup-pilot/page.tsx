@@ -102,6 +102,7 @@ import {
   isDrMillionFormat,
   parseDrMillionBriefing,
   idiomasDisponiveis,
+  adGroupOf,
   type DrMillionLang,
 } from '@/lib/drmillion-parser';
 import { LangSwitch3D } from '@/components/LangSwitch3D';
@@ -6029,6 +6030,50 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       return { ...prev, [taskId]: { ...a, roleSlots: newSlots, status: allHaveAvatar ? 'ready' : 'partial' } };
     });
+    // DR MILLION: hooks do mesmo AD são o MESMO anúncio, só muda o gancho —
+    // então o avatar vale pro grupo inteiro. Propaga aqui, senão você
+    // reescolheria avatar+voz task por task E, pior, o corpo deixaria de ser
+    // reaproveitado: a chave do reuso inclui avatar e voz, então avatar
+    // diferente entre irmãos faz o HeyGen gerar tudo de novo.
+    if ('avatarId' in patch && patch.avatarId) {
+      propagarAvatarNoGrupo(taskId, roleIdx);
+    }
+  }
+
+  /** Copia o avatar+voz escolhido pros hooks irmãos que ainda não têm.
+   *  Só DR MILLION, só sobrescreve quem está SEM avatar (escolha manual
+   *  em outro hook nunca é derrubada). */
+  function propagarAvatarNoGrupo(taskIdOrigem: string, roleIdx: number) {
+    setTaskAnalyses((prev) => {
+      const origem = prev[taskIdOrigem];
+      if (!origem?.drMillion) return prev;
+      const slot = origem.roleSlots?.[roleIdx];
+      if (!slot?.avatarId) return prev;
+      const grupo = adGroupOf(origem.baseAdId || origem.taskName);
+      if (!grupo) return prev;
+      const next = { ...prev };
+      let mudou = false;
+      for (const [tid, alvo] of Object.entries(prev)) {
+        if (tid === taskIdOrigem || !alvo?.drMillion) continue;
+        if (adGroupOf(alvo.baseAdId || alvo.taskName) !== grupo) continue;
+        const slots = alvo.roleSlots || [];
+        if (slots.some((s) => s.avatarId)) continue; // já tem escolha própria
+        const herdado: RoleSlot = {
+          ...slot,
+          role: slots[0]?.role || 'Avatar 1',
+          username: slots[0]?.username || 'manual1',
+          manual: true,
+          matchedBy: 'grupo',
+        };
+        next[tid] = {
+          ...alvo,
+          roleSlots: slots.length ? slots.map((s, i) => (i === 0 ? herdado : s)) : [herdado],
+          status: 'ready',
+        };
+        mudou = true;
+      }
+      return mudou ? next : prev;
+    });
   }
 
   /** Adiciona slot vazio pro user escolher manualmente avatar + voz.
@@ -6045,16 +6090,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const usados = new Set(slots.map((s) => s.role.toLowerCase()));
       while (usados.has(`avatar ${n}`)) n++;
       const role = `Avatar ${n}`;
+      // DR MILLION: se um hook irmão do mesmo AD já tem avatar escolhido, o
+      // novo slot já nasce com ele — é o mesmo anúncio, só muda o gancho.
+      // Também é o que mantém o corpo reaproveitado (a chave do reuso inclui
+      // avatar e voz).
+      const grupoAtual = a.drMillion ? adGroupOf(a.baseAdId || a.taskName) : null;
+      const doIrmao = grupoAtual
+        ? Object.values(prev).find(
+            (o) =>
+              o?.drMillion &&
+              o.taskId !== taskId &&
+              adGroupOf(o.baseAdId || o.taskName) === grupoAtual &&
+              (o.roleSlots || []).some((s) => s.avatarId),
+          )?.roleSlots?.find((s) => s.avatarId) ?? null
+        : null;
       const newSlot: RoleSlot = {
         role,
         username: `manual${n}`,
         briefingFileId: null,
-        avatarId: null,
-        avatarName: null,
-        avatarThumb: null,
-        avatarVoiceId: null,
-        voiceOverride: null,
-        matchedBy: null,
+        avatarId: doIrmao?.avatarId ?? null,
+        avatarName: doIrmao?.avatarName ?? null,
+        avatarThumb: doIrmao?.avatarThumb ?? null,
+        avatarVoiceId: doIrmao?.avatarVoiceId ?? null,
+        voiceOverride: doIrmao?.voiceOverride ?? null,
+        matchedBy: doIrmao ? 'grupo' : null,
         manual: true,
       };
       return {
@@ -6062,7 +6121,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         [taskId]: {
           ...a,
           roleSlots: [...slots, newSlot],
-          status: 'partial',
+          // Herdou avatar do irmão já entra pronta pra disparar; sem avatar
+          // continua 'partial' (falta você escolher).
+          status: [...slots, newSlot].every((s) => s.avatarId) ? 'ready' : 'partial',
         },
       };
     });
@@ -10355,6 +10416,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-red-300">
                                                 <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
                                                 Pendente
+                                              </span>
+                                            ) : slot.matchedBy === 'grupo' ? (
+                                              <span
+                                                className="ml-1 inline-flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-violet-200"
+                                                title="Mesmo avatar dos outros hooks deste AD — é o que permite reaproveitar o corpo já gerado. Trocar aqui vale só pra este hook."
+                                              >
+                                                mesmo avatar do AD
                                               </span>
                                             ) : null}
                                             {/* BOTAO 3D: preview da copy que vai pro HeyGen deste avatar.
