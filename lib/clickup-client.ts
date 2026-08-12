@@ -76,6 +76,9 @@ export type ClickUpTask = {
   name: string;
   status: ClickUpStatus;
   url: string;
+  /** Workspace dono da task. A API devolve em GET /task/{id} — é o que
+   *  permite dizer de qual EMPRESA um disparo antigo veio. */
+  team_id?: string;
   description?: string;
   text_content?: string;
   due_date?: string;

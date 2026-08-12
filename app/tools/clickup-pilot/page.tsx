@@ -95,6 +95,7 @@ import {
   shortWorkspaceLabel,
   workspaceAccent,
   sortWorkspacesForSwitch,
+  setPilotTeamNames,
 } from '@/lib/clickup-pilot-config';
 import { WorkspaceSwitch3D } from '@/components/WorkspaceSwitch3D';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
@@ -553,6 +554,12 @@ type BatchTaskState = {
   taskId: string;
   taskName: string;
   baseAdId: string;
+  /** EMPRESA dona do disparo (workspace do ClickUp). Existe pra fila de uma
+   *  empresa não aparecer enquanto você trabalha na outra. Ausente = batch
+   *  antigo (criado antes da troca de workspace existir): o backfill resolve
+   *  pelo `team_id` da própria task, e até lá ele continua visível — sumir
+   *  disparo em andamento seria pior que mostrar demais. */
+  teamId?: string;
   /** ISOLAÇÃO POR GERAÇÃO (fix 2026-07-08): id único do disparo/re-disparo DO
    *  ZERO que produziu os videoIds atuais. Namespaceia os artefatos por-parte
    *  no IDB (`pilot:<taskId>:g:<genId>:...`) pra que um RETOMAR NUNCA hidrate um
@@ -1014,6 +1021,9 @@ function ClickUpPilotInner() {
       ]);
       if (me) setAuthUser(me);
       setTeams(ts);
+      // Guarda id→nome pra outras telas (histórico) rotularem a empresa —
+      // só o Pilot chama listTeams().
+      setPilotTeamNames(Object.fromEntries(ts.map((t) => [t.id, t.name])));
       // Auto-pick: prefere team com nome que contem 'B2c' OU o que tem mais
       // membros visiveis OU o primeiro
       if (ts.length > 0 && (!selectedTeam || !ts.find(t => t.id === selectedTeam))) {
@@ -1392,11 +1402,13 @@ function ClickUpPilotInner() {
       setPilotEditorForTeam(selectedTeam, selectedEditor);
     }
     const editor = resolveEditorForTeam(teamId);
-    // Sem fila rodando, esvazia na hora: nada da empresa anterior fica na
-    // tela enquanto a nova carrega. COM fila, a lista é só substituída — o
-    // painel "Tasks em produção" mora dentro do bloco `tasks.length > 0` e
-    // sumiria no meio dos disparos.
-    const filaAtiva = Object.keys(batchStatesRef.current || {}).length > 0;
+    // A empresa de DESTINO tem fila? Se tem, a lista é só substituída (nunca
+    // esvaziada): o painel "Tasks em produção" mora dentro do bloco
+    // `tasks.length > 0` e sumiria no meio dos disparos DELA. Se não tem, dá
+    // pra esvaziar — nada da empresa anterior fica na tela enquanto carrega.
+    const filaAtiva = Object.values(batchStatesRef.current || {}).some(
+      (b) => b && (!b.teamId || b.teamId === teamId),
+    );
     setSwitchingTeam(true);
     setSelectedTeam(teamId);
     setSelectedEditor(editor);
@@ -2677,6 +2689,74 @@ function ClickUpPilotInner() {
   useEffect(() => {
     persistBatchStates(batchStates);
   }, [batchStates]);
+
+  /** Backfill da EMPRESA (workspace) nos cards da fila.
+   *
+   *  Cada card mostra um disparo, e disparo de uma empresa não pode aparecer
+   *  enquanto você trabalha na outra. Batches antigos não guardavam de quem
+   *  eram, então perguntamos ao ClickUp — GET /task/{id} devolve `team_id` —
+   *  uma vez por task, e carimbamos.
+   *
+   *  Enquanto não resolve, o card CONTINUA visível: sumir com um disparo em
+   *  andamento é bem pior do que mostrá-lo na empresa errada por um instante.
+   *  O ref de tentativas evita repetir request pra task que falhou/não
+   *  respondeu (o effect roda a cada mudança de batchStates). */
+  const teamBackfillTriedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!hasToken) return;
+    const pendentes = Object.values(batchStatesRef.current)
+      .filter(
+        (b) =>
+          b &&
+          b.taskId &&
+          !b.teamId &&
+          !b.taskId.startsWith('heygenauto:') &&
+          !teamBackfillTriedRef.current.has(b.taskId),
+      )
+      .slice(0, 12); // teto por rodada — histórico grande não vira enxurrada
+    if (!pendentes.length) return;
+    let vivo = true;
+    void (async () => {
+      for (const b of pendentes) {
+        teamBackfillTriedRef.current.add(b.taskId);
+        try {
+          const det = await getTask(b.taskId);
+          const tid = det?.team_id ? String(det.team_id) : null;
+          if (!tid || !vivo) continue;
+          setBatchStates((prev) =>
+            prev[b.taskId] && !prev[b.taskId].teamId
+              ? { ...prev, [b.taskId]: { ...prev[b.taskId], teamId: tid } }
+              : prev,
+          );
+        } catch {
+          /* sem carimbo: o card segue visível em qualquer empresa */
+        }
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [batchStates, hasToken]);
+
+  /** Fila da EMPRESA ativa — é ela que vai pra tela. Batch ainda sem carimbo
+   *  entra também (ver backfill acima). A EXECUÇÃO não é filtrada: disparo do
+   *  B2C continua rodando enquanto você olha o DR MILLION, só não aparece. */
+  const batchStatesDaEmpresa = useMemo(() => {
+    const out: Record<string, BatchTaskState> = {};
+    for (const [id, b] of Object.entries(batchStates)) {
+      if (!b.teamId || !selectedTeam || b.teamId === selectedTeam) out[id] = b;
+    }
+    return out;
+  }, [batchStates, selectedTeam]);
+
+  /** Disparos rodando NAS OUTRAS empresas — some da lista, mas você precisa
+   *  saber que continuam de pé. Vira um aviso discreto no painel. */
+  const batchesEmOutrasEmpresas = useMemo(() => {
+    if (!selectedTeam) return [] as BatchTaskState[];
+    return Object.values(batchStates).filter(
+      (b) => b.teamId && b.teamId !== selectedTeam && b.phase !== 'done' && b.phase !== 'failed',
+    );
+  }, [batchStates, selectedTeam]);
 
   /** Backfill do snapshot de CANAL nos cards da fila quando o board carrega.
    *  Cards criados antes do board (ou de versoes antigas) ficam sem
@@ -8474,7 +8554,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   ) : null}
 
                   {/* Painel batch — tasks rodando ou completas */}
-                  {Object.keys(batchStates).length > 0 ? (
+                  {Object.keys(batchStatesDaEmpresa).length > 0 ? (
                     <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
                       <div className="label-tech mb-3 flex items-center justify-between text-[10px] tracking-widest text-fuchsia-200">
                         <span className="inline-flex items-center gap-2">
@@ -8482,11 +8562,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
                             <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-300" />
                           </span>
-                          Tasks em produção · {Object.keys(batchStates).length}
+                          Tasks em produção · {Object.keys(batchStatesDaEmpresa).length}
                         </span>
+                        {batchesEmOutrasEmpresas.length ? (
+                          <span
+                            className="mono normal-case tracking-normal text-[10px] text-text-muted"
+                            title={batchesEmOutrasEmpresas.map((b) => b.taskName).join('\n')}
+                          >
+                            + {batchesEmOutrasEmpresas.length} rodando em outra empresa
+                          </span>
+                        ) : null}
                       </div>
                       <ul className="grid gap-3">
-                        {Object.values(batchStates).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
+                        {Object.values(batchStatesDaEmpresa).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
                           // "Tudo OK" = todas partes COM CONTEÚDO dispararam + renderizaram E

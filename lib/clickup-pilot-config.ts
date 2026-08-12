@@ -77,6 +77,33 @@ export function setPilotEditorForTeam(
   setPilotEditor(v);
 }
 
+/* ══════════════ Nomes dos workspaces ══════════════
+ * O Pilot é o único que chama listTeams(). Outras telas (histórico) só têm
+ * o id gravado no batch — sem este mapa elas mostrariam "9011541935" no
+ * lugar de "DR MILLION". */
+
+const KEY_TEAM_NAMES = 'darkolab:clickup-pilot:team-names';
+
+export function setPilotTeamNames(map: Record<string, string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(KEY_TEAM_NAMES, JSON.stringify(map));
+  } catch {
+    /* storage cheio — rótulo cai pro id, não quebra nada */
+  }
+}
+
+export function getPilotTeamNames(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(KEY_TEAM_NAMES);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
 /* ══════════════ Status extras por workspace ══════════════ */
 
 /** Variantes de "refação vídeo" — status que só o DR MILLION usa.

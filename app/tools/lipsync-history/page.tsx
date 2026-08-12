@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ToolShell } from '@/components/ToolShell';
 import { loadZip, listZipKeys, deleteZip as deleteZipFromStore } from '@/lib/zip-store';
 import { sendJobCommand, navigateToEngine } from '@/lib/job-commands';
+import { getPilotTeamNames, shortWorkspaceLabel } from '@/lib/clickup-pilot-config';
 
 /**
  * DARKO LAB Lipsync History — todos os lipsyncs feitos pela aplicacao,
@@ -42,6 +43,11 @@ type BatchTaskState = {
   montadoZipName?: string;
   camufladoZipUrl?: string;
   camufladoZipName?: string;
+  /** Empresa (workspace do ClickUp) dona do disparo — carimbada pelo Pilot.
+   *  Ausente em disparo do Hey Auto/VA (que não vem de task) e em batch
+   *  antigo ainda não carimbado: esses ficam como "sem empresa" e aparecem
+   *  em qualquer filtro. */
+  teamId?: string;
 };
 
 type VAHistoryEntry = {
@@ -57,6 +63,9 @@ type VAHistoryEntry = {
 
 type Entry = {
   kind: 'batch' | 'va';
+  /** Empresa dona do disparo; undefined = não pertence a nenhuma (Hey
+   *  Auto/VA) ou é anterior à separação por empresa. */
+  teamId?: string;
   id: string;
   taskName: string;
   baseAdId: string;
@@ -121,6 +130,7 @@ function toEntries(): Entry[] {
     else if (b.camufladoZipName) zipsLost.push('camuflado');
     out.push({
       kind: 'batch',
+      teamId: b.teamId,
       id: `batch:${b.taskId}`,
       taskName: b.taskName,
       baseAdId: b.baseAdId,
@@ -168,6 +178,19 @@ type StatusFilter = 'all' | 'done' | 'failed' | 'in_progress';
 export default function LipsyncHistoryPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [search, setSearch] = useState('');
+  // Empresa: começa na que está ativa no Pilot, pra não misturar o histórico
+  // de duas empresas na mesma tela. 'all' mostra tudo quando você quiser.
+  const [teamFilter, setTeamFilter] = useState<string>('active');
+  const [activeTeam, setActiveTeam] = useState<string | null>(null);
+  const [teamNames, setTeamNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    try {
+      setActiveTeam(localStorage.getItem('darkolab:clickup-pilot:teamId'));
+      setTeamNames(getPilotTeamNames());
+    } catch {
+      /* sem localStorage: mostra tudo, rótulo cai pro id */
+    }
+  }, []);
   const [period, setPeriod] = useState<Period>('all');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -199,12 +222,24 @@ export default function LipsyncHistoryPage() {
     const q = search.trim().toLowerCase();
     return entries.filter((e) => {
       if (e.startedAt < cutoff) return false;
+      // Empresa: entrada SEM teamId (Hey Auto, VA, batch antigo) nunca é
+      // escondida — ela não pertence a nenhuma empresa, sumir seria perder
+      // histórico real.
+      if (teamFilter === 'active' && activeTeam && e.teamId && e.teamId !== activeTeam) return false;
+      if (teamFilter !== 'active' && teamFilter !== 'all' && e.teamId !== teamFilter) return false;
       if (kindFilter !== 'all' && e.kind !== kindFilter) return false;
       if (statusFilter !== 'all' && e.status !== statusFilter) return false;
       if (q && !e.taskName.toLowerCase().includes(q) && !e.baseAdId.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [entries, period, kindFilter, statusFilter, search]);
+  }, [entries, period, kindFilter, statusFilter, search, teamFilter, activeTeam]);
+
+  /** Empresas presentes no histórico — alimenta o seletor sem hardcode. */
+  const empresasNoHistorico = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of entries) if (e.teamId) ids.add(e.teamId);
+    return [...ids];
+  }, [entries]);
 
   function removeEntry(e: Entry) {
     if (!confirm(`Remover "${e.taskName}" do histórico?`)) return;
@@ -316,6 +351,25 @@ export default function LipsyncHistoryPage() {
               <option value="failed">Falha</option>
             </select>
           </div>
+          {/* Empresa — só aparece quando há disparo de mais de uma. Começa
+           *  na empresa ativa no Pilot pra não misturar os históricos. */}
+          {empresasNoHistorico.length > 1 ? (
+            <select
+              value={teamFilter}
+              onChange={(e) => setTeamFilter(e.target.value)}
+              className="input-field text-xs"
+            >
+              <option value="active">
+                Empresa ativa{activeTeam ? ` (${shortWorkspaceLabel(teamNames[activeTeam] ?? activeTeam)})` : ''}
+              </option>
+              <option value="all">Empresa: todas</option>
+              {empresasNoHistorico.map((id) => (
+                <option key={id} value={id}>
+                  {shortWorkspaceLabel(teamNames[id] ?? id)}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
