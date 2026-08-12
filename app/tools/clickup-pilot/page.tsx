@@ -98,6 +98,13 @@ import {
   setPilotTeamNames,
 } from '@/lib/clickup-pilot-config';
 import { WorkspaceSwitch3D } from '@/components/WorkspaceSwitch3D';
+import {
+  isDrMillionFormat,
+  parseDrMillionBriefing,
+  idiomasDisponiveis,
+  type DrMillionLang,
+} from '@/lib/drmillion-parser';
+import { LangSwitch3D } from '@/components/LangSwitch3D';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -706,6 +713,11 @@ type TaskAnalysis = {
   hookCount?: number;
   bodyPartsCount?: number;
   totalParts?: number;
+  /** Copy no formato DR MILLION (bilíngue PT/PL, body do grupo). Liga o
+   *  seletor de idioma na tela — no B2C fica sempre undefined. */
+  drMillion?: boolean;
+  /** Quais idiomas ESTE ad realmente tem no doc. */
+  drLangs?: { pt: boolean; pl: boolean };
   /** Cada avatar do briefing — usuario controla individualmente */
   roleSlots: RoleSlot[];
   /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
@@ -1384,6 +1396,48 @@ function ClickUpPilotInner() {
    *   • Se a carga falhar, a lista é limpa — melhor vazio do que mostrar
    *     task da empresa errada. */
   const [switchingTeam, setSwitchingTeam] = useState(false);
+
+  /* ========== Idioma da copy (DR MILLION) ==========
+   *  O DR MILLION dispara em POLONÊS — o português vem no doc só pra guiar.
+   *  Por isso o default é 'pl'. O seletor troca quando você quiser conferir
+   *  ou disparar em português. Vale só pros docs bilíngues; o B2C não passa
+   *  por aqui. `ref` porque analyzeSelected lê fora do ciclo de render. */
+  const DR_LANG_KEY = 'darkolab:clickup-pilot:dr-lang';
+  const [drLang, setDrLangState] = useState<DrMillionLang>('pl');
+  const drLangRef = useRef<DrMillionLang>('pl');
+  drLangRef.current = drLang;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const salvo = localStorage.getItem(DR_LANG_KEY);
+    if (salvo === 'pt' || salvo === 'pl') setDrLangState(salvo);
+  }, []);
+  function setDrLang(v: DrMillionLang) {
+    setDrLangState(v);
+    try {
+      localStorage.setItem(DR_LANG_KEY, v);
+    } catch {
+      /* sem storage: vale só nesta sessão */
+    }
+  }
+
+  /** Mostra o seletor de idioma quando a empresa ativa é a do doc bilíngue
+   *  (DR MILLION) ou quando alguma análise já veio bilíngue. No B2C, nunca. */
+  const mostrarSeletorIdioma = useMemo(() => {
+    const nome = teams.find((t) => t.id === selectedTeam)?.name || '';
+    if (/mil+i?on/i.test(nome)) return true;
+    return Object.values(taskAnalyses).some((a) => a?.drMillion);
+  }, [teams, selectedTeam, taskAnalyses]);
+
+  /** Idiomas presentes nos ADs analisados — o que faltar aparece travado.
+   *  Sem análise ainda, deixa os dois livres. */
+  const idiomasDaSelecao = useMemo(() => {
+    const analisadas = Object.values(taskAnalyses).filter((a) => a?.drMillion && a.drLangs);
+    if (!analisadas.length) return { pt: true, pl: true };
+    return {
+      pt: analisadas.some((a) => a.drLangs!.pt),
+      pl: analisadas.some((a) => a.drLangs!.pl),
+    };
+  }, [taskAnalyses]);
 
   function resolveEditorForTeam(teamId: string): string | null {
     // ESTRITO de propósito: sem escolha própria pra essa empresa, o certo é
@@ -2125,7 +2179,23 @@ function ClickUpPilotInner() {
           // driveLinks agora carrega tambem links de YouTube (url, fileId null)
           // — passa pro parser pra ele identificar avatar por smart-chip de
           // YouTube ("Doutora: 🎥 O IMPACTO DO ESTRESSE...") e montar a thumb.
-          const briefing = parseDarkoBriefing(docR.text, baseAdId, variantToken, docR.driveLinks || []);
+          // DR MILLION: doc bilíngue PT/PL, com o "Body" DEPOIS dos hooks e
+          // compartilhado pelo grupo (AD07G1/G2/G3 → mesmo corpo). O parser
+          // padrão fecha a seção no próximo heading e por isso não achava o
+          // corpo, além de ler os dois idiomas grudados. Só entra aqui quando
+          // o doc TEM essa estrutura — doc do B2C nunca tem, então o fluxo de
+          // sempre segue idêntico.
+          const ehDrMillion = isDrMillionFormat(docR.text, baseAdId);
+          const briefing = ehDrMillion
+            ? parseDrMillionBriefing(docR.text, baseAdId, drLangRef.current)
+            : parseDarkoBriefing(docR.text, baseAdId, variantToken, docR.driveLinks || []);
+          if (ehDrMillion) {
+            const langs = idiomasDisponiveis(docR.text, baseAdId);
+            setTaskAnalyses((prev) => ({
+              ...prev,
+              [task.id]: { ...prev[task.id], drMillion: true, drLangs: langs },
+            }));
+          }
           if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
@@ -8060,6 +8130,30 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       <span className="mono text-[10px] uppercase tracking-widest text-violet-300">
                         trocando…
                       </span>
+                    ) : null}
+                    {/* IDIOMA — só pra empresa com copy bilíngue (DR MILLION).
+                     *  Trocar re-analisa as tasks marcadas, porque a copy sai
+                     *  do doc já no idioma escolhido. */}
+                    {mostrarSeletorIdioma ? (
+                      <>
+                        <span aria-hidden className="hidden h-6 w-px bg-line sm:block" />
+                        <LangSwitch3D
+                          value={drLang}
+                          disabled={analyzing || switchingTeam}
+                          disponivel={idiomasDaSelecao}
+                          onChange={(v) => {
+                            setDrLang(v);
+                            // Re-analisa o que estiver marcado pra copy vir no
+                            // idioma novo (o texto é extraído do doc no parse).
+                            if (selectedTaskIds.size > 0) void analyzeSelected();
+                          }}
+                        />
+                        {analyzing ? (
+                          <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                            relendo copy…
+                          </span>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
                 ) : null}
