@@ -690,6 +690,12 @@ type RoleSlot = {
   voiceOverride: { id: string; name: string } | null;
   /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | 'visual' | null */
   matchedBy: string | null;
+  /** Slot criado NA MÃO pelo usuário (o doc não trazia "Avatar: @fulano").
+   *  Caso típico do DR MILLION: a copy vem sem avatar porque o avatar é o do
+   *  anúncio que está sendo modelado. Só slots manuais ligam a UI de repartir
+   *  a copy entre avatares — no B2C, onde o parser acha os roles, a tela
+   *  continua exatamente como era. */
+  manual?: boolean;
 };
 
 type TaskAnalysis = {
@@ -5830,11 +5836,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const a = prev[taskId];
       if (!a) return prev;
       const slots = a.roleSlots || [];
-      const idx = slots.length + 1;
-      const role = `Avatar ${idx}`;
+      // Role único mesmo depois de remover/adicionar (não reaproveita nome de
+      // slot que saiu — senão as parts atribuídas ao antigo grudavam no novo).
+      let n = slots.length + 1;
+      const usados = new Set(slots.map((s) => s.role.toLowerCase()));
+      while (usados.has(`avatar ${n}`)) n++;
+      const role = `Avatar ${n}`;
       const newSlot: RoleSlot = {
         role,
-        username: `manual${idx}`,
+        username: `manual${n}`,
         briefingFileId: null,
         avatarId: null,
         avatarName: null,
@@ -5842,6 +5852,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         avatarVoiceId: null,
         voiceOverride: null,
         matchedBy: null,
+        manual: true,
       };
       return {
         ...prev,
@@ -5884,6 +5895,39 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         ...prev,
         [taskId]: { ...a, partTemplates: newParts, totalParts: newParts.length, hookCount, bodyPartsCount },
       };
+    });
+  }
+
+  /** QUEM FALA CADA PART — fonte única, a MESMA regra do buildPlan.
+   *
+   *  buildPlan resolve `slotsByRole[pt.matchByRole] || firstSlot`: part sem
+   *  role (ou com role que não existe mais) é falada pelo PRIMEIRO avatar.
+   *  O preview filtrava só por igualdade de role e por isso mentia justamente
+   *  no caso do DR MILLION — dizia "nenhuma parte atribuída" enquanto o
+   *  disparo mandava a copy inteira pro avatar 1. Agora os dois leem daqui.
+   *
+   *  Devolve o índice do slot dono de cada part (-1 = sem slot nenhum). */
+  function ownerSlotIdx(a: TaskAnalysis, pt: { matchByRole?: string | null }): number {
+    const slots = a.roleSlots || [];
+    if (!slots.length) return -1;
+    if (pt.matchByRole) {
+      const i = slots.findIndex((s) => s.role.toLowerCase() === pt.matchByRole);
+      if (i >= 0) return i;
+    }
+    return 0; // fallback do buildPlan: primeiro avatar fala o resto
+  }
+
+  /** Atribui uma part a um avatar (só faz sentido com 2+ slots). Grava o role
+   *  em matchByRole — mesmo campo que o parser usa, então o disparo respeita
+   *  sem nenhuma regra extra. */
+  function assignPartToRole(taskId: string, partIdx: number, role: string) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.partTemplates) return prev;
+      const parts = a.partTemplates.map((p, i) =>
+        i === partIdx ? { ...p, matchByRole: role.toLowerCase() } : p,
+      );
+      return { ...prev, [taskId]: { ...a, partTemplates: parts } };
     });
   }
 
@@ -10119,9 +10163,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 preview do texto pro HeyGen ({slot.role}) — editavel
                                               </div>
                                               {(() => {
+                                                // MESMA regra do disparo (ownerSlotIdx): inclui as
+                                                // parts órfãs que caem no 1º avatar. Sem isso o
+                                                // preview dizia "nenhuma parte" e o HeyGen recebia
+                                                // a copy inteira mesmo assim.
                                                 const matched = (a.partTemplates || [])
                                                   .map((pt, idx) => ({ pt, idx }))
-                                                  .filter(({ pt }) => pt.matchByRole === slot.role.toLowerCase());
+                                                  .filter(({ pt }) => ownerSlotIdx(a, pt) === sIdx);
                                                 if (matched.length === 0) {
                                                   return (
                                                     <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
@@ -10152,6 +10200,24 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                             </span>
                                                           </div>
                                                           <div className="flex shrink-0 items-center gap-1.5">
+                                                            {/* TROCAR QUEM FALA — só com avatar adicionado
+                                                              * na mão E 2+ avatares. No B2C (roles vindos do
+                                                              * parser) nada disso aparece. */}
+                                                            {(a.roleSlots || []).length > 1 &&
+                                                            (a.roleSlots || []).some((s) => s.manual) ? (
+                                                              <select
+                                                                value={slot.role.toLowerCase()}
+                                                                onChange={(e) => assignPartToRole(a.taskId, idx, e.target.value)}
+                                                                title="Quem fala esse trecho"
+                                                                className="mono rounded border border-lime/35 bg-bg/70 px-1.5 py-0.5 text-[9px] normal-case tracking-normal text-lime focus:border-lime focus:outline-none"
+                                                              >
+                                                                {(a.roleSlots || []).map((s) => (
+                                                                  <option key={s.role} value={s.role.toLowerCase()}>
+                                                                    {s.avatarName || s.role}
+                                                                  </option>
+                                                                ))}
+                                                              </select>
+                                                            ) : null}
                                                             <span className="text-text-muted">{pt.text.length}c · {pt.text.split(/\s+/).filter(Boolean).length}p</span>
                                                             {/* EXCLUIR esse card/trecho — nao vai gerar take */}
                                                             <button
@@ -10308,9 +10374,47 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         </div>
                                       );
                                     })}
-                                    {/* Botao "adicionar avatar manualmente" REMOVIDO — user pediu:
-                                     *  "ELE NUNCA VAI BATER COM TEXTO NENHUM" (avatares manuais nao
-                                     *  tem briefing pra parsear matchByRole, ficavam orfaos). */}
+                                    {/* ADICIONAR AVATAR NA MÃO.
+                                      *  Já existiu e foi removido porque avatar manual ficava ÓRFÃO
+                                      *  ("nunca vai bater com texto nenhum"): as parts do doc não
+                                      *  tinham role pra casar com ele. A causa era o preview filtrar
+                                      *  só por role igual — o disparo (buildPlan) SEMPRE mandou o
+                                      *  órfão pro 1º avatar. Agora os dois leem de ownerSlotIdx,
+                                      *  então: 1 avatar = fala a copy inteira; 2+ = cada trecho ganha
+                                      *  seletor de quem fala. Volta a fazer sentido — e é o caso
+                                      *  normal do DR MILLION, onde o avatar não vem no doc porque é
+                                      *  o do anúncio que está sendo modelado. */}
+                                    <button
+                                      type="button"
+                                      onClick={() => addManualRoleSlot(a.taskId)}
+                                      className="group relative mt-1 inline-flex items-center gap-2 self-start rounded-[12px] border border-lime/55 px-3.5 py-2 text-[10.5px] font-bold uppercase tracking-[0.16em] text-black transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                      style={{
+                                        fontFamily: 'var(--font-tech)',
+                                        background: 'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
+                                        boxShadow:
+                                          '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(200,232,124,0.65), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                      }}
+                                      title={
+                                        a.roleSlots.length === 0
+                                          ? 'Adiciona um avatar na mão — ele fala a copy inteira'
+                                          : 'Adiciona outro avatar — aí você escolhe o que cada um fala'
+                                      }
+                                    >
+                                      <span className="text-[13px] leading-none">+</span>
+                                      {a.roleSlots.length === 0
+                                        ? 'Adicionar avatar'
+                                        : 'Adicionar outro avatar'}
+                                    </button>
+                                    {a.roleSlots.length === 1 && a.roleSlots[0]?.manual ? (
+                                      <div className="mono text-[9.5px] uppercase tracking-widest text-lime/80">
+                                        ✓ esse avatar fala a copy inteira ({(a.partTemplates || []).length} trechos)
+                                      </div>
+                                    ) : null}
+                                    {a.roleSlots.length > 1 && a.roleSlots.some((s) => s.manual) ? (
+                                      <div className="mono text-[9.5px] normal-case tracking-normal text-text-muted">
+                                        Abra o 👁 de cada avatar pra escolher, trecho a trecho, quem fala o quê.
+                                      </div>
+                                    ) : null}
                                   </div>
                                   )}
                                 </div>
