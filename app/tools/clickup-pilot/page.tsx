@@ -2462,6 +2462,36 @@ function ClickUpPilotInner() {
     }
     const workers = Array.from({ length: PARALLEL }, () => worker());
     await Promise.all(workers);
+
+    // DR MILLION: os hooks do mesmo AD viram UM card só.
+    // Eles são o mesmo anúncio — muda só o gancho — e ver um card por hook
+    // levava a escolher avatar diferente em cada um, o que além de confundir
+    // MATA o reuso do corpo (a chave inclui avatar+voz). As tasks continuam
+    // existindo e sendo disparadas uma a uma, com o nome de arquivo de cada
+    // uma; some apenas o card repetido. Mesmo mecanismo que o B2C já usa pra
+    // agrupar G1+G2 (sharedWithPrimaryId) — aqui só ensinamos a enxergar o
+    // padrão do DR MILLION, onde a variante vive DENTRO do código (AD07G1GL).
+    setTaskAnalyses((prev) => {
+      const next = { ...prev };
+      const liderDoGrupo = new Map<string, string>();
+      let mudou = false;
+      for (const t of allSelected) {
+        const a = next[t.id];
+        if (!a?.drMillion || a.status === 'error') continue;
+        const grupo = adGroupOf(a.baseAdId || a.taskName);
+        if (!grupo) continue;
+        const lider = liderDoGrupo.get(grupo);
+        if (!lider) {
+          liderDoGrupo.set(grupo, t.id);
+          if (a.sharedWithPrimaryId) { next[t.id] = { ...a, sharedWithPrimaryId: undefined }; mudou = true; }
+        } else if (a.sharedWithPrimaryId !== lider) {
+          next[t.id] = { ...a, sharedWithPrimaryId: lider };
+          mudou = true;
+        }
+      }
+      return mudou ? next : prev;
+    });
+
     setAnalyzing(false);
   }
 
@@ -9430,20 +9460,31 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           );
                           // Extrai a parte G1/G2/etc do nome de cada sibling pra mostrar agrupado
                           const allGSuffixes = [a, ...sharedSiblings].map((s) => {
-                            const m = s.taskName.match(/G(\d+)\s*$/i);
-                            return m ? `G${m[1]}` : null;
+                            // B2C: sufixo " - G1" no FIM do nome da task
+                            const fim = s.taskName.match(/G(\d+)\s*$/i);
+                            if (fim) return `G${fim[1]}`;
+                            // DR MILLION: a variante vive DENTRO do código (AD07G1GL → G1)
+                            const dentro = (s.baseAdId || s.taskName).match(/^AD\d+(G\d+)/i);
+                            return dentro ? dentro[1].toUpperCase() : null;
                           }).filter(Boolean);
-                          const displayName = sharedSiblings.length > 0
-                            ? a.taskName.replace(/\s*[-–—]\s*G\d+\s*$/i, '').trim()
-                            : a.taskName;
+                          const displayName = sharedSiblings.length === 0
+                            ? a.taskName
+                            : a.drMillion
+                              ? `${adGroupOf(a.baseAdId || a.taskName) || a.taskName} · ${1 + sharedSiblings.length} hooks`
+                              : a.taskName.replace(/\s*[-–—]\s*G\d+\s*$/i, '').trim();
                           return (
                             <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="mono text-xs text-white flex items-center gap-2 flex-wrap">
                                   {sym} {displayName}
                                   {sharedSiblings.length > 0 ? (
-                                    <span className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200" title="Task agrupada — G1 + G2 sao a mesma task no ClickUp, gerada 1x com 2 hooks + 1 body">
-                                      {allGSuffixes.join(' + ')} · 1 task
+                                    <span
+                                      className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
+                                      title={a.drMillion
+                                        ? `Mesmo anúncio, ${1 + sharedSiblings.length} ganchos: ${[a, ...sharedSiblings].map((s) => s.taskName).join(' · ')}\nO corpo é gerado UMA vez e usado nos ${1 + sharedSiblings.length} vídeos. Cada um sai com o nome da sua task.`
+                                        : 'Task agrupada — G1 + G2 sao a mesma task no ClickUp, gerada 1x com 2 hooks + 1 body'}
+                                    >
+                                      {allGSuffixes.join(' + ')} · {a.drMillion ? `${1 + sharedSiblings.length} vídeos` : '1 task'}
                                     </span>
                                   ) : null}
                                 </span>
@@ -10351,7 +10392,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               ) : a.status === 'ready' || a.status === 'partial' ? (
                                 <div className="mt-1 grid gap-1 text-text-muted">
                                   <div className="mono text-[10px] flex flex-wrap items-center gap-2">
+                                    {a.drMillion && sharedSiblings.length > 0 ? (
+                                      <span title="Cada gancho vira um vídeo; o corpo é gerado uma vez só e entra nos três.">
+                                        {1 + sharedSiblings.length} ganchos + {a.bodyPartsCount} take{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'} de corpo
+                                        <span className="text-lime"> · corpo gerado 1x</span>
+                                        {onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}
+                                      </span>
+                                    ) : (
                                     <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}){onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}</span>
+                                    )}
                                   </div>
                                   {/* Only Magnific: nao gera lipsync — avatares ignorados,
                                    *  so a copy do doc importa. RoleSlots escondidos. */}
