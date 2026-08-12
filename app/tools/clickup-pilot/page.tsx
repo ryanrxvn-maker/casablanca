@@ -82,7 +82,19 @@ import { Toggle3D } from '@/components/Toggle3D';
 import { ToggleRound3D, WirelessIcon, ScissorsIcon, ReviewEyeIcon } from '@/components/ToggleRound3D';
 import { IconClickUpPilot } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
-import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
+import {
+  getPilotTeam,
+  setPilotTeam,
+  getPilotEditor,
+  setPilotEditor,
+  getPilotEditorForTeam,
+  getPilotEditorForTeamStrict,
+  setPilotEditorForTeam,
+  resolveStatusExtras,
+  mergeStatuses,
+  shortWorkspaceLabel,
+} from '@/lib/clickup-pilot-config';
+import { WorkspaceSwitch3D } from '@/components/WorkspaceSwitch3D';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -1272,22 +1284,34 @@ function ClickUpPilotInner() {
   /** @param includeReviewOverride passa o valor NOVO do toggle de revisão na
    *  recarga imediata pós-toggle (setState é assíncrono — sem isso a primeira
    *  recarga usaria o valor antigo). Sem argumento, usa o estado atual. */
-  async function loadTasks(includeReviewOverride?: boolean) {
-    if (!selectedTeam || !selectedEditor) {
+  async function loadTasks(
+    includeReviewOverride?: boolean,
+    /** Troca de workspace: o state ainda não propagou quando chamamos daqui,
+     *  então o alvo vem explícito. Sem isso a primeira carga após a troca
+     *  buscaria as tasks da empresa ANTERIOR. */
+    target?: { teamId?: string | null; editorId?: string | null },
+  ): Promise<boolean> {
+    const teamId = target?.teamId ?? selectedTeam;
+    const editorId = target?.editorId ?? selectedEditor;
+    if (!teamId || !editorId) {
       setError('Escolhe team + editor primeiro.');
-      return;
+      return false;
     }
     setLoadingTasks(true);
     setError(null);
     try {
       const withReview = typeof includeReviewOverride === 'boolean' ? includeReviewOverride : includeReview;
-      const statuses = statusFilter.split(',').map((s) => s.trim()).filter(Boolean);
+      const base = statusFilter.split(',').map((s) => s.trim()).filter(Boolean);
+      // Extras do workspace ativo (ex.: "refação vídeo" no DR MILLION).
+      // No B2C a lista é vazia → `statuses` sai idêntico ao de sempre.
+      const teamName = teams.find((t) => t.id === teamId)?.name;
+      const statuses = mergeStatuses(base, resolveStatusExtras(teamId, teamName));
       if (withReview) {
         const seen = new Set(statuses.map((s) => s.toLowerCase()));
         for (const st of REVIEW_STATUSES) if (!seen.has(st)) statuses.push(st);
       }
-      const r = await listTasks(selectedTeam, {
-        assigneeIds: [selectedEditor],
+      const r = await listTasks(teamId, {
+        assigneeIds: [editorId],
         statuses,
         page: 0,
         subtasks: false,
@@ -1296,8 +1320,8 @@ function ClickUpPilotInner() {
       if (r.tasks.length === 0) {
         // Tenta sem filtro de status — talvez o editor tenha tasks mas com
         // status fora dos defaults
-        const r2 = await listTasks(selectedTeam, {
-          assigneeIds: [selectedEditor],
+        const r2 = await listTasks(teamId, {
+          assigneeIds: [editorId],
           page: 0,
           subtasks: false,
         });
@@ -1316,13 +1340,78 @@ function ClickUpPilotInner() {
             `0 tasks com filtros atuais, mas o editor TEM ${r2.tasks.length} tasks sem filtro. Status disponiveis: ${breakdown}. Edita o filtro acima OU usa esses status.`,
           );
         } else {
-          setError(`Editor sem tasks neste workspace. Confira se selecionou o workspace certo (atual: ${currentTeam?.name}).`);
+          setError(`Editor sem tasks neste workspace. Confira se selecionou o workspace certo (atual: ${teamName ?? currentTeam?.name}).`);
         }
       }
+      return true;
     } catch (e) {
       setError(toFriendlyMessage(e, 'Não consegui listar suas tasks agora. Tenta de novo em instantes.'));
+      return false;
     } finally {
       setLoadingTasks(false);
+    }
+  }
+
+  /* ========== Troca de EMPRESA (workspace) ==========
+   *  Você atende duas empresas com o mesmo login do ClickUp. Trocar aqui
+   *  muda de onde as tasks vêm, sem passar por /configuracoes.
+   *
+   *  Cuidados que este fluxo respeita:
+   *   • A FILA em produção (batchStates) NÃO é tocada — ela é por taskId e o
+   *     painel dela vive dentro do bloco de tasks, então a lista é
+   *     SUBSTITUÍDA (nunca esvaziada antes) pra fila não sumir da tela.
+   *   • A task aberta é fechada: é de outra empresa, seria pedir confusão.
+   *   • Editor: cada workspace lembra o seu. Se o editor salvo não existir
+   *     no destino, cai pra você mesmo (authUser) em vez de listar 0 tasks.
+   *   • Se a carga falhar, a lista é limpa — melhor vazio do que mostrar
+   *     task da empresa errada. */
+  const [switchingTeam, setSwitchingTeam] = useState(false);
+
+  function resolveEditorForTeam(teamId: string): string | null {
+    // ESTRITO de propósito: sem escolha própria pra essa empresa, o certo é
+    // "minhas tasks" (authUser) — nunca herdar o editor da outra empresa.
+    const saved = getPilotEditorForTeamStrict(teamId);
+    const team = teams.find((t) => t.id === teamId);
+    const members = team?.members || [];
+    // Sem membros visíveis (o B2C responde assim) não dá pra validar —
+    // confia no salvo, e cai pro authUser quando não houver nada.
+    if (saved && (members.length === 0 || members.some((m) => String(m.user?.id) === String(saved)))) {
+      return saved;
+    }
+    if (authUser) return String(authUser.id);
+    return getPilotEditorForTeam(teamId);
+  }
+
+  async function switchWorkspace(teamId: string) {
+    if (!teamId || teamId === selectedTeam || switchingTeam || loadingTasks) return;
+    // Carimba a escolha da empresa que está saindo, pra ela voltar exatamente
+    // como estava (inclusive se o editor era outra pessoa).
+    if (selectedTeam && selectedEditor) {
+      setPilotEditorForTeam(selectedTeam, selectedEditor);
+    }
+    const editor = resolveEditorForTeam(teamId);
+    // Sem fila rodando, esvazia na hora: nada da empresa anterior fica na
+    // tela enquanto a nova carrega. COM fila, a lista é só substituída — o
+    // painel "Tasks em produção" mora dentro do bloco `tasks.length > 0` e
+    // sumiria no meio dos disparos.
+    const filaAtiva = Object.keys(batchStatesRef.current || {}).length > 0;
+    setSwitchingTeam(true);
+    setSelectedTeam(teamId);
+    setSelectedEditor(editor);
+    setPilotEditorForTeam(teamId, editor);
+    // Fecha o que era da empresa anterior (a FILA continua intacta).
+    setSelectedTask(null);
+    setTaskDetail(null);
+    setError(null);
+    if (!filaAtiva) setTasks([]);
+    try {
+      const ok = await loadTasks(undefined, { teamId, editorId: editor });
+      // Falhou (rede/token): não deixa a lista da empresa anterior no ar
+      // fingindo ser a nova. Com fila ativa, mantém pra não matar o painel —
+      // o erro fica visível logo acima.
+      if (!ok && !filaAtiva) setTasks([]);
+    } finally {
+      setSwitchingTeam(false);
     }
   }
 
@@ -7818,6 +7907,29 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                  *  Estados onlyMagnificMode/moreMagnificMode permanecem em
                  *  useToolState (sempre false agora) por compat com handlers
                  *  que checavam — sem UI exposta. */}
+                {/* Seletor de EMPRESA — só aparece quando o token enxerga
+                 *  mais de um workspace. Trocar aqui recarrega as tasks da
+                 *  outra empresa na hora. */}
+                {teams.length > 1 ? (
+                  <div className="relative mb-3.5 flex flex-wrap items-center gap-3">
+                    <WorkspaceSwitch3D
+                      options={teams.map((t) => ({
+                        id: t.id,
+                        label: shortWorkspaceLabel(t.name),
+                        fullName: t.name,
+                      }))}
+                      value={selectedTeam}
+                      onChange={(id) => void switchWorkspace(id)}
+                      busy={switchingTeam}
+                      disabled={loadingTasks && !switchingTeam}
+                    />
+                    {switchingTeam ? (
+                      <span className="mono text-[10px] uppercase tracking-widest text-violet-300">
+                        trocando…
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
