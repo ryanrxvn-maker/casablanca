@@ -6,6 +6,66 @@ import Link from 'next/link';
 import { AuthShell } from '@/components/AuthShell';
 import { createClient } from '@/lib/supabase/client';
 
+/** Campo de senha com olhinho — mesmo comportamento do /login. */
+function PasswordField({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  show,
+  onToggle,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  show: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div>
+      <label className="label-field" htmlFor={id}>
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          type={show ? 'text' : 'password'}
+          required
+          minLength={6}
+          className="input-field !pr-11"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+        />
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}
+          title={show ? 'Ocultar senha' : 'Mostrar senha'}
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-text-dim transition-colors hover:text-white"
+        >
+          {show ? (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+              <path d="M14.12 14.12A3 3 0 1 1 9.88 9.88" />
+              <path d="M1 1l22 22" />
+            </svg>
+          ) : (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * /register — cadastro público pro tier 'free'.
  *
@@ -19,6 +79,10 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  // Olhinho por campo — quem confere a senha que digitou erra menos, e erro
+  // de senha aqui só aparece depois, na hora de entrar.
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,13 +177,38 @@ export default function RegisterPage() {
 
       // ── Email JÁ CADASTRADO ──────────────────────────────────────────
       // Com anti-enumeração ligada (padrão do Supabase), cadastrar um email
-      // que já existe devolve SUCESSO falso: um user fake, sem identities, e
-      // NENHUM email é enviado. Sem tratar isso, mandávamos a pessoa pra tela
-      // de código esperar um email que nunca ia sair — que é exatamente o
-      // "não chega em canto nenhum" relatado. Agora ela é mandada pro login.
+      // que já existe devolve SUCESSO falso: um user fake, sem identities.
+      // Sem tratar isso, mandávamos a pessoa pra tela de código esperar um
+      // email que nunca ia sair — o "não chega em canto nenhum" relatado.
       if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        // Duas situações MUITO diferentes escondidas atrás do mesmo retorno:
+        //   • conta pendente → o signUp acima JÁ reenviou o código; a pessoa
+        //     só precisa da tela pra digitar (caso do cliente que reclamou).
+        //   • conta confirmada → nada foi enviado; tem que usar outro email
+        //     ou entrar com esse.
+        // Quem sabe a diferença é o /api/auth/diagnose (service-role).
+        let pendente = false;
+        try {
+          const res = await fetch('/api/auth/diagnose', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: cleanEmail }),
+          });
+          const diag = (await res.json()) as { reason?: string };
+          pendente = diag?.reason === 'unconfirmed';
+        } catch {
+          /* diagnóstico indisponível → trata como conta existente */
+        }
+        if (pendente) {
+          router.replace(
+            `/verify?email=${encodeURIComponent(cleanEmail)}&reenviado=1`,
+          );
+          return;
+        }
         setAlreadyExists(true);
-        setError('Esse email já tem conta no Auto Edit.');
+        setError(
+          'Esse email já tem conta no Auto Edit. Use outro email — ou entre com esse.',
+        );
         return;
       }
 
@@ -233,37 +322,26 @@ export default function RegisterPage() {
           </p>
         </div>
 
-        <div>
-          <label className="label-field" htmlFor="password">
-            Senha
-          </label>
-          <input
-            id="password"
-            type="password"
-            required
-            minLength={6}
-            className="input-field"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Mínimo 6 caracteres"
-          />
-        </div>
+        <PasswordField
+          id="password"
+          label="Senha"
+          value={password}
+          onChange={setPassword}
+          placeholder="Mínimo 6 caracteres"
+          show={showPassword}
+          onToggle={() => setShowPassword((v) => !v)}
+        />
 
-        <div>
-          <label className="label-field" htmlFor="confirm">
-            Confirmar senha
-          </label>
-          <input
-            id="confirm"
-            type="password"
-            required
-            minLength={6}
-            className="input-field"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="Repete a senha"
-          />
-        </div>
+        <PasswordField
+          id="confirm"
+          label="Confirmar senha"
+          value={confirm}
+          onChange={setConfirm}
+          placeholder="Repete a senha"
+          show={showConfirm}
+          onToggle={() => setShowConfirm((v) => !v)}
+        />
+
 
         <label className="flex items-start gap-2.5 text-[12.5px] leading-snug text-text-muted">
           <input

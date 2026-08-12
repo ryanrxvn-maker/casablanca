@@ -22,7 +22,14 @@ export default function VerifyClient() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const [resentMsg, setResentMsg] = useState<string | null>(null);
+  // ?reenviado=1 → veio do /register tentando cadastrar um email que já
+  // tinha cadastro PENDENTE. O signUp reenvia o código nesse caso, então a
+  // pessoa precisa saber que o email novo é o que vale.
+  const [resentMsg, setResentMsg] = useState<string | null>(() =>
+    params.get('reenviado') === '1'
+      ? 'Esse email já tinha um cadastro esperando confirmação. Mandamos um código novo agora — use o do email MAIS RECENTE.'
+      : null,
+  );
   // Cooldown do reenvio (Supabase limita o intervalo). Começa contando se o
   // usuário chegou do cadastro (um código acabou de ser enviado).
   const [cooldown, setCooldown] = useState<number>(() =>
