@@ -2702,40 +2702,46 @@ function ClickUpPilotInner() {
    *  O ref de tentativas evita repetir request pra task que falhou/não
    *  respondeu (o effect roda a cada mudança de batchStates). */
   const teamBackfillTriedRef = useRef<Set<string>>(new Set());
+  /** Trava de execução única. O effect depende de `batchStates`, e carimbar
+   *  MUDA batchStates — sem esta trava (e com um cleanup abortando o loop) a
+   *  rotina se cancelava na primeira volta e, como as tasks já estavam
+   *  marcadas como tentadas, nunca mais voltava. */
+  const teamBackfillRunningRef = useRef(false);
   useEffect(() => {
-    if (!hasToken) return;
-    const pendentes = Object.values(batchStatesRef.current)
-      .filter(
-        (b) =>
-          b &&
-          b.taskId &&
-          !b.teamId &&
-          !b.taskId.startsWith('heygenauto:') &&
-          !teamBackfillTriedRef.current.has(b.taskId),
-      )
-      .slice(0, 12); // teto por rodada — histórico grande não vira enxurrada
-    if (!pendentes.length) return;
-    let vivo = true;
+    if (!hasToken || teamBackfillRunningRef.current) return;
+    const pendente = (b: BatchTaskState | undefined) =>
+      !!b &&
+      !!b.taskId &&
+      !b.teamId &&
+      !b.taskId.startsWith('heygenauto:') &&
+      !teamBackfillTriedRef.current.has(b.taskId);
+    if (!Object.values(batchStatesRef.current).some(pendente)) return;
+    teamBackfillRunningRef.current = true;
     void (async () => {
-      for (const b of pendentes) {
-        teamBackfillTriedRef.current.add(b.taskId);
-        try {
-          const det = await getTask(b.taskId);
-          const tid = det?.team_id ? String(det.team_id) : null;
-          if (!tid || !vivo) continue;
-          setBatchStates((prev) =>
-            prev[b.taskId] && !prev[b.taskId].teamId
-              ? { ...prev, [b.taskId]: { ...prev[b.taskId], teamId: tid } }
-              : prev,
-          );
-        } catch {
-          /* sem carimbo: o card segue visível em qualquer empresa */
+      try {
+        // Relê o ref a cada volta (não uma lista congelada): batches que
+        // chegarem no meio do caminho entram nesta mesma passada.
+        for (let i = 0; i < 40; i++) {
+          const alvo = Object.values(batchStatesRef.current).find(pendente);
+          if (!alvo) break;
+          teamBackfillTriedRef.current.add(alvo.taskId);
+          try {
+            const det = await getTask(alvo.taskId);
+            const tid = det?.team_id ? String(det.team_id) : null;
+            if (!tid) continue;
+            setBatchStates((prev) =>
+              prev[alvo.taskId] && !prev[alvo.taskId].teamId
+                ? { ...prev, [alvo.taskId]: { ...prev[alvo.taskId], teamId: tid } }
+                : prev,
+            );
+          } catch {
+            /* sem carimbo: o card segue visível em qualquer empresa */
+          }
         }
+      } finally {
+        teamBackfillRunningRef.current = false;
       }
     })();
-    return () => {
-      vivo = false;
-    };
   }, [batchStates, hasToken]);
 
   /** Fila da EMPRESA ativa — é ela que vai pra tela. Batch ainda sem carimbo
