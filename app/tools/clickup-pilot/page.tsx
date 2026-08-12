@@ -105,6 +105,7 @@ import {
   type DrMillionLang,
 } from '@/lib/drmillion-parser';
 import { LangSwitch3D } from '@/components/LangSwitch3D';
+import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -1134,6 +1135,10 @@ function ClickUpPilotInner() {
   const [bulkMode, setBulkMode] = useToolState<boolean>('clickup:bulkMode', false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [taskAnalyses, setTaskAnalyses] = useState<Record<string, TaskAnalysis>>({});
+  /** Espelho pra leitura SÍNCRONA dentro da análise (que roda fora do ciclo
+   *  de render) — usado pra não perder o avatar escolhido na mão ao reanalisar. */
+  const taskAnalysesRef = useRef<Record<string, TaskAnalysis>>({});
+  taskAnalysesRef.current = taskAnalyses;
 
   // Motor config por task (III/IV/V — global, %, individual)
   const [motorConfigs, setMotorConfigs] = useState<Record<string, MotorConfig>>({});
@@ -1396,6 +1401,15 @@ function ClickUpPilotInner() {
    *   • Se a carga falhar, a lista é limpa — melhor vazio do que mostrar
    *     task da empresa errada. */
   const [switchingTeam, setSwitchingTeam] = useState(false);
+
+  /** Reservas de geração por CONTEÚDO (texto+avatar+voz) — DR MILLION.
+   *  Hooks irmãos do mesmo AD dividem o corpo; a primeira task que precisa de
+   *  uma fala reserva a chave e as outras esperam o mesmo vídeo em vez de
+   *  gerar de novo no HeyGen. Vive na sessão (não persiste): depois de um F5
+   *  o RETOMAR regenera normal, que é o comportamento seguro. */
+  const drDedupRef = useRef<
+    Map<string, { promise: Promise<string | null>; resolve: (v: string | null) => void }>
+  >(new Map());
 
   /* ========== Idioma da copy (DR MILLION) ==========
    *  O DR MILLION dispara em POLONÊS — o português vem no doc só pra guiar.
@@ -2223,6 +2237,14 @@ function ClickUpPilotInner() {
           //    c) voiceLibrary lookup: voz `@x` existe no HeyGen mas user nao pareou
           //       ainda — usa como voiceOverride pro slot (avatar ainda pendente)
           //    d) pendente sem voz
+          // AVATAR ESCOLHIDO NA MÃO SOBREVIVE À RE-ANÁLISE.
+          // Re-analisar recria a análise do zero. Sem isto, trocar o idioma
+          // (que reanalisa pra copy vir em PL/PT) apagava o avatar que você
+          // acabou de escolher — e o DR MILLION SEMPRE depende desse avatar
+          // manual, porque o doc não traz nenhum. Só repõe quando o parser
+          // não achou avatar sozinho; no B2C, onde ele acha, nada muda.
+          const slotsManuaisAnteriores = (taskAnalysesRef.current[task.id]?.roleSlots || [])
+            .filter((s) => s.manual);
           const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
             const briefingFileId = av.videoFileId || null;
@@ -2304,6 +2326,12 @@ function ClickUpPilotInner() {
               voiceOverride: voiceFromLib,
               matchedBy: null,
             });
+          }
+          // Parser não achou avatar nenhum e você já tinha escolhido um na
+          // mão? Ele volta — com avatar e voz. É o que faz trocar de idioma
+          // no DR MILLION não jogar sua escolha fora.
+          if (roleSlots.length === 0 && slotsManuaisAnteriores.length > 0) {
+            roleSlots.push(...slotsManuaisAnteriores);
           }
           // partTemplates: cada parte tem um 'matchByRole' — qual role preencher
           // na hora de gerar o plan final.
@@ -3064,14 +3092,59 @@ function ClickUpPilotInner() {
         setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
         return;
       }
-      const jobs = plan.parts.map((p: any, i: number) => ({
-        label: p.label,
-        copy: p.text,
-        avatarId: p.avatarId!,
-        voiceId: p.voiceId,
-        motor: motorsPerPart[i], // <-- override per job
-      }));
-      const results = await runHeyGenJobs(jobs, {
+      // ══ REUSO DO BODY ENTRE HOOKS IRMÃOS (só DR MILLION) ══
+      // AD07G1/G2/G3 são 3 tasks com hooks diferentes e o MESMO corpo. Sem
+      // isto, disparar as três geraria o corpo 3x — e o corpo tem ~20 takes,
+      // então seriam ~60 gerações no HeyGen em vez de ~20 + 3 hooks.
+      //
+      // O dedup é por CONTEÚDO (texto+avatar+voz), não por "grupo": mesma
+      // fala, mesmo avatar e mesma voz = mesmo vídeo, então dá pra reusar com
+      // segurança. Como rodam até 2 tasks em paralelo, a primeira que pede
+      // uma fala RESERVA a chave com uma promessa; as irmãs esperam essa
+      // promessa em vez de disparar de novo.
+      //
+      // B2C: dedupOn=false → minhasIdx vira [0,1,2,...] e todo o resto abaixo
+      // se comporta exatamente como antes (resultsFull === results).
+      const dedupOn = !!a?.drMillion;
+      const plano = planejarDisparo(plan.parts as any, {
+        ativo: dedupOn,
+        reservadas: new Set(drDedupRef.current.keys()),
+      });
+      const minhasIdx = plano.minhasIdx;
+      // Falas que outra task já está gerando → espero a promessa dela.
+      const herdadas = new Map<number, Promise<string | null>>();
+      for (const i of plano.herdadasIdx) {
+        const dono = drDedupRef.current.get(chaveConteudo(plan.parts[i] as any));
+        if (dono) herdadas.set(i, dono.promise);
+        else minhasIdx.push(i); // sumiu do mapa (F5/limpeza) → gera normal
+      }
+      minhasIdx.sort((x, y) => x - y);
+      // Falas que EU vou gerar e as irmãs vão esperar.
+      const minhasReservas = new Map<number, (v: string | null) => void>();
+      for (const [i, k] of plano.novasChaves) {
+        let resolver: (v: string | null) => void = () => {};
+        const promise = new Promise<string | null>((res) => { resolver = res; });
+        drDedupRef.current.set(k, { promise, resolve: resolver });
+        minhasReservas.set(i, resolver);
+      }
+      if (herdadas.size > 0) {
+        setBatchStates((prev) => prev[taskId] ? {
+          ...prev,
+          [taskId]: { ...prev[taskId], message: `Reaproveitando ${herdadas.size} take(s) do corpo já gerado…` },
+        } : prev);
+      }
+
+      const jobs = minhasIdx.map((i) => {
+        const p: any = plan.parts[i];
+        return {
+          label: p.label,
+          copy: p.text,
+          avatarId: p.avatarId!,
+          voiceId: p.voiceId,
+          motor: motorsPerPart[i], // <-- override per job
+        };
+      });
+      const resultsEnviados = await runHeyGenJobs(jobs, {
         parallel: 3,
         mode: 'copy',
         avatarId: plan!.parts[0]?.avatarId || '',
@@ -3081,14 +3154,66 @@ function ClickUpPilotInner() {
         isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: () => {},
         onResult: (r) => {
+          // r.index é 1-based na lista ENVIADA; traduz pro índice da part.
+          // Sem dedup, minhasIdx[i] === i (comportamento de sempre).
+          const orig = minhasIdx[r.index - 1];
+          if (orig === undefined) return;
           setBatchStates((prev) => {
             const s = prev[taskId];
             if (!s) return prev;
-            const newParts = s.parts.map((p, i) => i + 1 === r.index ? { ...p, videoId: r.videoId, error: r.error } : p);
+            const newParts = s.parts.map((p, i) => i === orig ? { ...p, videoId: r.videoId, error: r.error } : p);
             return { ...prev, [taskId]: { ...s, parts: newParts } };
           });
         },
       });
+
+      // Libera as reservas: quem esperava por estas falas recebe o videoId
+      // (ou null, e aí a irmã mostra a parte como faltando — o RETOMAR
+      // re-dispara). O finally garante que ninguém fica esperando pra sempre.
+      const resolvidas = new Set<number>();
+      for (const r of resultsEnviados) {
+        const orig = minhasIdx[r.index - 1];
+        if (orig === undefined) continue;
+        const res = minhasReservas.get(orig);
+        if (res) { res(r.videoId || null); resolvidas.add(orig); }
+      }
+      for (const [i, res] of minhasReservas) {
+        if (!resolvidas.has(i)) res(null); // job que nem voltou
+      }
+
+      // Espera o corpo que a task irmã está gerando. Teto de 25min pra nunca
+      // travar a fila se a dona morrer no meio.
+      const herdados = new Map<number, string | null>();
+      if (herdadas.size > 0) {
+        await Promise.all(
+          [...herdadas].map(async ([i, pr]) => {
+            const v = await Promise.race([
+              pr,
+              new Promise<null>((res) => setTimeout(() => res(null), 25 * 60 * 1000)),
+            ]);
+            herdados.set(i, v);
+            if (v) {
+              setBatchStates((prev) => {
+                const s = prev[taskId];
+                if (!s) return prev;
+                const newParts = s.parts.map((p, idx) => idx === i ? { ...p, videoId: v, error: undefined } : p);
+                return { ...prev, [taskId]: { ...s, parts: newParts } };
+              });
+            }
+          }),
+        );
+      }
+
+      // Resultado alinhado 1:1 com plan.parts — é o que todo o resto (falhas,
+      // download, zip, montagem) consome. SEM dedup devolve exatamente o mesmo
+      // array de antes, então o B2C não muda em nada.
+      const results = montarResultados(
+        plan.parts.length,
+        minhasIdx,
+        resultsEnviados as any,
+        herdados,
+        dedupOn,
+      ) as typeof resultsEnviados;
 
       const failed = results.filter((r) => r.error);
       const validIds = results.filter((r) => r.videoId).map((r) => r.videoId!);
