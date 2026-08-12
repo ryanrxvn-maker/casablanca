@@ -1852,6 +1852,15 @@ function ClickUpPilotInner() {
         siblingMap.set(t.id, siblings);
       }
     }
+    // AVATAR ESCOLHIDO NA MÃO: guarda ANTES do reset abaixo, que troca o
+    // estado inteiro por análises zeradas. Sem isto, reanalisar (o que
+    // acontece ao trocar o idioma no DR MILLION) jogava fora o avatar que
+    // você acabou de escolher — e lá ele é obrigatório, porque o doc não traz.
+    const manuaisAntes = new Map<string, RoleSlot[]>();
+    for (const t of allSelected) {
+      const anteriores = (taskAnalysesRef.current[t.id]?.roleSlots || []).filter((s) => s.manual);
+      if (anteriores.length) manuaisAntes.set(t.id, anteriores);
+    }
     // Init status pendente pra TODAS (inclui siblings nao-primary pra UI mostrar consistente)
     setTaskAnalyses(() => {
       const init: Record<string, TaskAnalysis> = {};
@@ -2243,8 +2252,7 @@ function ClickUpPilotInner() {
           // acabou de escolher — e o DR MILLION SEMPRE depende desse avatar
           // manual, porque o doc não traz nenhum. Só repõe quando o parser
           // não achou avatar sozinho; no B2C, onde ele acha, nada muda.
-          const slotsManuaisAnteriores = (taskAnalysesRef.current[task.id]?.roleSlots || [])
-            .filter((s) => s.manual);
+          const slotsManuaisAnteriores = manuaisAntes.get(task.id) || [];
           const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
             const briefingFileId = av.videoFileId || null;
