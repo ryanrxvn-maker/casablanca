@@ -22,6 +22,26 @@ export default function RegisterPage() {
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Email já cadastrado: em vez de mandar pra tela de código (email que nunca
+  // vem), mostra os caminhos de saída — entrar ou recuperar a senha.
+  const [alreadyExists, setAlreadyExists] = useState(false);
+
+  /**
+   * Valida o endereço de verdade — o `type="email"` do browser aceita coisa
+   * que nenhum servidor de email entrega. Caso real em produção: alguém
+   * copiou o endereço MASCARADO ("gu***@gmail.com") de uma tela de
+   * recuperação e se cadastrou com ele. O Supabase aceitou, o Resend mandou,
+   * deu hard bounce e o endereço entrou na lista de supressão — a partir daí
+   * NENHUM email chega, e a conta fica presa pra sempre.
+   */
+  function isRealEmail(v: string): boolean {
+    if (/[*\s(),<>[\]\\;:"]/.test(v)) return false; // mascarado ou colado torto
+    if (v.includes('..') || v.startsWith('.') || v.endsWith('.')) return false;
+    const [local, domain, ...rest] = v.split('@');
+    if (rest.length || !local || !domain) return false;
+    if (!/^[a-z0-9._%+-]+$/.test(local)) return false;
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain);
+  }
 
   function normalizePhone(raw: string): string {
     // Tira tudo que não é dígito, deixa só BR (+55) por padrão se não
@@ -36,6 +56,16 @@ export default function RegisterPage() {
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setAlreadyExists(false);
+    // Email SEMPRE normalizado (igual ao /login). Sem isso, " Fulano@Gmail.com "
+    // vira uma conta diferente da que o usuário tenta confirmar depois.
+    const cleanEmail = email.trim().toLowerCase();
+    if (!isRealEmail(cleanEmail)) {
+      setError(
+        'Esse email não parece válido. Digite o endereço completo, sem asteriscos nem espaços (ex: voce@gmail.com).',
+      );
+      return;
+    }
     // SMS opcional: telefone só é OBRIGATÓRIO se SMS_REQUIRED estiver ativo.
     // Caso contrário, aceita qualquer string (incluindo vazia).
     const smsRequired = process.env.NEXT_PUBLIC_SMS_REQUIRED === '1';
@@ -66,7 +96,7 @@ export default function RegisterPage() {
         process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
         (typeof window !== 'undefined' ? window.location.origin : '');
       const { data, error: signUpErr } = await supabase.auth.signUp({
-        email,
+        email: cleanEmail,
         password,
         options: {
           data: { name: name.trim() || null, phone: phoneNorm },
@@ -78,6 +108,18 @@ export default function RegisterPage() {
       });
       if (signUpErr) {
         setError(signUpErr.message);
+        return;
+      }
+
+      // ── Email JÁ CADASTRADO ──────────────────────────────────────────
+      // Com anti-enumeração ligada (padrão do Supabase), cadastrar um email
+      // que já existe devolve SUCESSO falso: um user fake, sem identities, e
+      // NENHUM email é enviado. Sem tratar isso, mandávamos a pessoa pra tela
+      // de código esperar um email que nunca ia sair — que é exatamente o
+      // "não chega em canto nenhum" relatado. Agora ela é mandada pro login.
+      if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        setAlreadyExists(true);
+        setError('Esse email já tem conta no Auto Edit.');
         return;
       }
 
@@ -121,7 +163,9 @@ export default function RegisterPage() {
       }
 
       // Vai IMEDIATAMENTE pra tela de confirmação por código (email).
-      router.replace(`/verify?email=${encodeURIComponent(email)}`);
+      // cleanEmail (não o cru): a /verify precisa mandar pro verifyOtp
+      // EXATAMENTE o endereço com que a conta foi criada.
+      router.replace(`/verify?email=${encodeURIComponent(cleanEmail)}`);
     } catch (e) {
       setError((e as Error).message ?? 'Falha ao criar conta.');
     } finally {
@@ -248,6 +292,22 @@ export default function RegisterPage() {
             className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300"
           >
             {error}
+            {alreadyExists ? (
+              <div className="mt-2 flex flex-wrap gap-3 text-[12px] font-semibold">
+                <Link
+                  href={`/login?email=${encodeURIComponent(email.trim().toLowerCase())}`}
+                  className="text-violet hover:text-white"
+                >
+                  Entrar
+                </Link>
+                <Link
+                  href={`/forgot-password?email=${encodeURIComponent(email.trim().toLowerCase())}`}
+                  className="text-violet hover:text-white"
+                >
+                  Esqueci a senha
+                </Link>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

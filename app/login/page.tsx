@@ -33,7 +33,11 @@ function LoginInner() {
   const betaClosed = params.get('beta') === 'closed';
   const justConfirmed = params.get('confirmed') === '1';
 
-  const [email, setEmail] = useState('');
+  // ?email= chega do /register quando a pessoa tentou criar conta com um
+  // endereço que já existe — não faz ela digitar de novo.
+  const [email, setEmail] = useState(
+    () => params.get('email')?.trim().toLowerCase() ?? '',
+  );
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);

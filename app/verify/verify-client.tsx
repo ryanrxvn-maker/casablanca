@@ -84,7 +84,9 @@ export default function VerifyClient() {
     // 'signup' = token do email "Confirm signup". Se a conta já existia e
     // o código veio de um reenvio de confirmação, 'signup' também resolve.
     const { data, error: vErr } = await supabase.auth.verifyOtp({
-      email,
+      // Normaliza igual ao cadastro — email digitado com maiúscula ou espaço
+      // não bate com o endereço da conta e volta como "código inválido".
+      email: email.trim().toLowerCase(),
       token,
       type: 'signup',
     });
@@ -146,7 +148,7 @@ export default function VerifyClient() {
     const supabase = createClient();
     const { error: rErr } = await supabase.auth.resend({
       type: 'signup',
-      email,
+      email: email.trim().toLowerCase(),
     });
     setResending(false);
     if (rErr) {
@@ -161,7 +163,12 @@ export default function VerifyClient() {
       return;
     }
     setCooldown(60);
-    setResentMsg('Novo código enviado. Confira seu email (e o spam).');
+    // Aviso explícito: pedir reenvio INVALIDA o código anterior. Sem isso a
+    // pessoa digita o do primeiro email (o que está mais visível na caixa) e
+    // leva "código inválido" achando que o sistema quebrou.
+    setResentMsg(
+      'Novo código enviado. Use o do email MAIS RECENTE — o anterior deixou de valer. Confira também o spam.',
+    );
   }
 
   return (
