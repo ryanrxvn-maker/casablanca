@@ -1575,6 +1575,21 @@ const LEVEL_SAFE = 'dynaudnorm=f=200:g=17:p=0.9:m=8:r=0.6:s=6';
 // este, fica em +13dB (ruído limpo bem abaixo da fala). Sem fade/swell.
 const LEVEL_NATURAL = 'dynaudnorm=f=200:g=17:p=0.9:m=4:r=0.9:s=0';
 
+// --- Reforço pra caso EXTREMO (só o perfil 'full' do Normalizador) ----------
+// Se APÓS o leveling padrão a medição da passada 1 ainda acusar LRA alto
+// (oscilação macro residual — ex.: 2 vozes MUITO díspares alternando, tipo
+// -22dB↔0dB), encadeia um 2º dynaudnorm RÁPIDO (janela g=7×f=100 ≈ 0.7s vs
+// 3.4s do 1º estágio) COM GATE: t=0.02 (≈-34dBFS) impede que pausas/ruído
+// sejam amplificados — só FALA é nivelada. Medido (voz TTS real, blocos
+// -22dB↔0dB, LRA de entrada 22.2 LU): cadeia padrão sozinha → LRA 11.8 e
+// piso -48.8; + este estágio → LRA 3.5 com piso -52.4 (intacto). Variantes
+// sem o gate t chegavam ao mesmo LRA mas BOMBEAVAM o piso pra -33 ("ET").
+// s=0 (sem compressão extra) → não robotiza; o ganho final segue ESTÁTICO
+// (re-medido com a cadeia reforçada). Arquivo normal nunca entra aqui —
+// caminho padrão intocado.
+const EXTREME_LRA_LU = 8;
+const LEVEL_EXTREME_STAGE2 = 'dynaudnorm=f=100:g=7:p=0.95:m=10:r=0.8:s=0:t=0.02';
+
 // Alvo de loudness final (padrão broadcast/streaming pra voz).
 const LOUDNORM_TARGET = 'I=-16:TP=-1.5:LRA=11';
 
@@ -1607,15 +1622,23 @@ const TRUE_PEAK_LIMITER =
  *   ganho = min( alvoLUFS − I ,  (alvoTP − TP) + headroom )
  * Sem medição (raro) cai no loudnorm de sempre — não pior que hoje.
  */
-function buildFinalGain(stats: LoudnormStats | null, withLimiter: boolean): string {
-  if (!stats) return `loudnorm=${LOUDNORM_TARGET}`;
+function computeStaticGainDb(
+  stats: LoudnormStats | null,
+  withLimiter: boolean,
+): number | null {
+  if (!stats) return null;
   const inI = parseFloat(stats.input_i);
   const inTP = parseFloat(stats.input_tp);
   const gainToTarget = LOUDNESS_TARGET_LUFS - (Number.isFinite(inI) ? inI : LOUDNESS_TARGET_LUFS);
   const headroom = withLimiter ? LIMITER_HEADROOM_DB : 0;
   const gainNoClip =
     TRUE_PEAK_TARGET_DB - (Number.isFinite(inTP) ? inTP : TRUE_PEAK_TARGET_DB) + headroom;
-  const gainDb = Math.min(gainToTarget, gainNoClip, MAX_STATIC_GAIN_DB);
+  return Math.min(gainToTarget, gainNoClip, MAX_STATIC_GAIN_DB);
+}
+
+function buildFinalGain(stats: LoudnormStats | null, withLimiter: boolean): string {
+  const gainDb = computeStaticGainDb(stats, withLimiter);
+  if (gainDb === null) return `loudnorm=${LOUDNORM_TARGET}`;
   const vol = `volume=${gainDb.toFixed(2)}dB`;
   return withLimiter ? `${vol},${TRUE_PEAK_LIMITER}` : vol;
 }
@@ -1652,12 +1675,20 @@ function buildPrefilter(denoise: string, level: string): string {
   return parts.join(',');
 }
 
+// Uma falha de init do arnndn (modelo corrompido/instalação estranha) vem
+// como ABORT do ffmpeg — e cada abort degrada a instância WASM (single
+// thread; abortos repetidos terminam em "memory access out of bounds").
+// Depois da 1ª falha, paramos de insistir no arnndn NESTA sessão: cai direto
+// pro afftdn, sem novos aborts.
+let arnndnFailedThisSession = false;
+
 /**
  * Tenta carregar o modelo RNNoise (public/models/denoise.rnnn) no FS do
  * FFmpeg. Retorna a string do filtro `arnndn` se conseguir, senão null —
  * nesse caso o pipeline cai pro `afftdn`, que não precisa de modelo.
  */
 async function loadDenoiseModel(ff: FFmpeg): Promise<string | null> {
+  if (arnndnFailedThisSession) return null;
   try {
     // TIMEOUT curto (8s): sem teto, se o Service Worker/rede travar (típico quando a
     // aba volta do background e o SW re-registra) este fetch consumia os 150s do
@@ -1669,8 +1700,19 @@ async function loadDenoiseModel(ff: FFmpeg): Promise<string | null> {
     try {
       const res = await fetch('/models/denoise.rnnn', { signal: ac.signal });
       if (!res.ok) return null;
-      const buf = new Uint8Array(await res.arrayBuffer());
+      let buf = new Uint8Array(await res.arrayBuffer());
       if (buf.length < 1024) return null; // arquivo vazio/erro de rota
+      // VALIDA que é mesmo um modelo RNNoise: o header canônico começa com
+      // "rnnoise". Sem isso, uma resposta 200 que NÃO é o modelo (redirect de
+      // auth devolvendo HTML do login, página de erro de CDN) ia direto pro
+      // arnndn → abort do ffmpeg → instância WASM degradada (a raiz do
+      // "memory access out of bounds" em lote).
+      const head = String.fromCharCode(...buf.slice(0, 7)).toLowerCase();
+      if (head !== 'rnnoise') return null;
+      // O modelo é TEXTO ASCII parseado byte-exato pelo arnndn: um \r de CRLF
+      // (autocrlf do git no Windows, proxy que reescreve, etc.) quebra o
+      // "Error initializing filter 'arnndn'". Normaliza pra LF sempre.
+      if (buf.includes(13)) buf = buf.filter((b) => b !== 13);
       await ff.writeFile('denoise.rnnn', buf);
       return DENOISE_ARNNDN;
     } finally {
@@ -1682,6 +1724,26 @@ async function loadDenoiseModel(ff: FFmpeg): Promise<string | null> {
 }
 
 export type NormalizeOutFormat = 'mp4' | 'mp3' | 'wav';
+
+/**
+ * O que o motor DECIDIU nesse arquivo — alimenta o relatório do Normalizador
+ * (badges "IA denoise", "reforço extremo", ganho aplicado). Só informativo:
+ * nenhum caller é obrigado a consumir.
+ */
+export type NormalizeEngineInfo = {
+  /** Denoise usado: rede neural (rnnoise), espectral (afftdn) ou nenhum. */
+  denoise: 'rnnoise' | 'afftdn' | 'none';
+  /** true quando o 2º estágio de caso extremo entrou na cadeia. */
+  extremeMode: boolean;
+  /** Ganho estático final aplicado (dB); null se a medição da passada 1 falhou. */
+  gainDb: number | null;
+  /** true se o brickwall de true-peak (−1.5 dBTP) ficou na saída final. */
+  limiterOn: boolean;
+  /** Medição EBU R128 do sinal pré-filtrado (passada 1). */
+  measuredLufs: number | null;
+  measuredLra: number | null;
+  measuredTruePeakDb: number | null;
+};
 
 type LoudnormStats = {
   input_i: string;
@@ -1759,7 +1821,11 @@ export type NormalizeProfile = 'full' | 'natural';
 
 export async function normalizeVolume(
   file: Blob,
-  params: { output: NormalizeOutFormat; profile?: NormalizeProfile },
+  params: {
+    output: NormalizeOutFormat;
+    profile?: NormalizeProfile;
+    onEngineInfo?: (info: NormalizeEngineInfo) => void;
+  },
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
@@ -1803,14 +1869,30 @@ export async function normalizeVolume(
       };
       try {
         ff.on('log', logHandler);
+        let rc = -1;
         try {
-          await ff.exec([
+          rc = await ff.exec([
             '-i', inputName,
             '-af', `${buildPrefilter(cand.denoise, cand.level)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
             '-f', 'null', '-',
           ]);
         } finally {
           ff.off('log', logHandler);
+        }
+        // CRÍTICO: o exec do ffmpeg-wasm NÃO lança quando o ffmpeg falha —
+        // resolve com rc≠0. Sem esta checagem, um filtro indisponível
+        // "vencia" a escada (combinação quebrada ia pra passada 2, que
+        // gerava saída truncada de 1KB como se fosse sucesso).
+        if (rc !== 0) {
+          console.warn(
+            `[ffmpeg-worker] normalizeVolume: combinação de filtros falhou (rc=${rc}) — tentando a próxima.`,
+            logLines.slice(-8).join('\n'),
+          );
+          // arnndn quebrado aborta o ffmpeg e degrada a instância — não
+          // insiste nele pelo resto da sessão (próximos jobs vão direto
+          // pro afftdn, sem acumular aborts).
+          if (cand.denoise === DENOISE_ARNNDN) arnndnFailedThisSession = true;
+          continue;
         }
         // Exec rodou → essa combinação é válida. Usa ela na passada 2.
         denoiseUsed = cand.denoise;
@@ -1827,6 +1909,47 @@ export async function normalizeVolume(
       } catch (e) {
         if (isCancellationError(e)) throw e;
         // Combinação falhou (ex.: filtro indisponível) — tenta a próxima.
+        if (cand.denoise === DENOISE_ARNNDN) arnndnFailedThisSession = true;
+      }
+    }
+
+    // -------- Escalada pra caso EXTREMO (só perfil 'full') ---------------
+    // A medição da passada 1 é do sinal JÁ nivelado: se o LRA ainda passa do
+    // teto, o leveling padrão não deu conta (oscilação brutal no original).
+    // Re-mede com o 2º estágio encadeado; só troca a cadeia se a nova medição
+    // parsear (senão segue exatamente como está — nunca pior que hoje).
+    let extremeMode = false;
+    if (params.profile !== 'natural' && measured) {
+      const lraAfterLevel = parseFloat(measured.input_lra);
+      if (Number.isFinite(lraAfterLevel) && lraAfterLevel > EXTREME_LRA_LU) {
+        opts.onStage?.('Oscilação alta detectada — reforçando nivelamento...');
+        const escalatedLevel = `${levelUsed},${LEVEL_EXTREME_STAGE2}`;
+        const logLines: string[] = [];
+        const logHandler = ({ message }: { message: string }) => {
+          logLines.push(message);
+        };
+        try {
+          ff.on('log', logHandler);
+          let rc = -1;
+          try {
+            rc = await ff.exec([
+              '-i', inputName,
+              '-af', `${buildPrefilter(denoiseUsed, escalatedLevel)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
+              '-f', 'null', '-',
+            ]);
+          } finally {
+            ff.off('log', logHandler);
+          }
+          const reMeasured = rc === 0 ? parseLoudnormStats(logLines.join('\n')) : null;
+          if (reMeasured) {
+            measured = reMeasured;
+            levelUsed = escalatedLevel;
+            extremeMode = true;
+          }
+        } catch (e) {
+          if (isCancellationError(e)) throw e;
+          // Reforço indisponível → segue com a cadeia padrão já medida.
+        }
       }
     }
 
@@ -1841,6 +1964,14 @@ export async function normalizeVolume(
 
     const progressHandler = wireProgress(ff, opts.onProgress);
     try {
+      // exec com rc virando ERRO: o exec do wasm resolve com rc≠0 em falha
+      // (não lança) — sem converter, a escada de fallback daqui nunca
+      // dispararia e uma saída truncada passaria como sucesso.
+      const execStrict = async (args: string[]) => {
+        const rc = await ff.exec(args);
+        if (rc !== 0) throw new Error(`ffmpeg falhou (rc=${rc}) na aplicação do ganho`);
+      };
+
       const runApply = async (filter: string) => {
         if (params.output === 'mp4') {
           opts.onStage?.('Normalizando + remontando vídeo (2/2)...');
@@ -1855,13 +1986,13 @@ export async function normalizeVolume(
             outputName,
           ];
           try {
-            await ff.exec(copyArgs);
+            await execStrict(copyArgs);
           } catch (e) {
             if (isCancellationError(e)) throw e;
             // Stream de vídeo incompatível com mp4 (ex.: webm/vp9). Reencoda.
             opts.onStage?.('Stream incompatível — remontando vídeo (2/2)...');
             await safeDelete(ff, outputName);
-            await ff.exec([
+            await execStrict([
               '-i', inputName,
               '-af', filter,
               '-c:v', 'libx264',
@@ -1876,7 +2007,7 @@ export async function normalizeVolume(
           }
         } else if (params.output === 'mp3') {
           opts.onStage?.('Normalizando e exportando MP3 (2/2)...');
-          await ff.exec([
+          await execStrict([
             '-i', inputName, '-af', filter,
             '-vn', '-c:a', 'libmp3lame', '-q:a', '0',
             outputName,
@@ -1885,7 +2016,7 @@ export async function normalizeVolume(
           opts.onStage?.('Normalizando e exportando WAV (2/2)...');
           // pcm 24-bit, sem forçar sample-rate (preserva o do source → sem
           // resample desnecessário).
-          await ff.exec([
+          await execStrict([
             '-i', inputName, '-af', filter,
             '-vn', '-c:a', 'pcm_s24le',
             outputName,
@@ -1893,6 +2024,7 @@ export async function normalizeVolume(
         }
       };
 
+      let limiterOn = true;
       try {
         await runApply(filterFor(true));
       } catch (e) {
@@ -1901,6 +2033,32 @@ export async function normalizeVolume(
         // caminho sem-limiter já é no-clip, então segue seguro.
         await safeDelete(ff, outputName);
         await runApply(filterFor(false));
+        limiterOn = false;
+      }
+
+      // Telemetria pro relatório (nunca derruba o processamento).
+      if (params.onEngineInfo) {
+        try {
+          const inI = measured ? parseFloat(measured.input_i) : NaN;
+          const inTP = measured ? parseFloat(measured.input_tp) : NaN;
+          const inLRA = measured ? parseFloat(measured.input_lra) : NaN;
+          params.onEngineInfo({
+            denoise:
+              denoiseUsed === DENOISE_ARNNDN
+                ? 'rnnoise'
+                : denoiseUsed === DENOISE_AFFTDN
+                  ? 'afftdn'
+                  : 'none',
+            extremeMode,
+            gainDb: computeStaticGainDb(measured, limiterOn),
+            limiterOn,
+            measuredLufs: Number.isFinite(inI) ? inI : null,
+            measuredLra: Number.isFinite(inLRA) ? inLRA : null,
+            measuredTruePeakDb: Number.isFinite(inTP) ? inTP : null,
+          });
+        } catch {
+          /* callback do caller não pode quebrar o processamento */
+        }
       }
     } finally {
       if (progressHandler) ff.off('progress', progressHandler);
@@ -1912,6 +2070,11 @@ export async function normalizeVolume(
     // ORIGINAL em vez de levar um clipe quebrado pro concat da montagem (que
     // corromperia/derrubaria a montagem inteira de forma silenciosa).
     if (params.output === 'mp4') assertValidMp4(data as Uint8Array, 'vídeo nivelado');
+    // Mesma garantia pra áudio: um mp3/wav de <1KB é lixo de exec abortado
+    // (nem 0.1s de áudio cabe nisso) — erro honesto em vez de entrega muda.
+    if (params.output !== 'mp4' && (data as Uint8Array).byteLength < 1024) {
+      throw new Error('A saída de áudio veio truncada — tenta processar de novo.');
+    }
     const mime =
       params.output === 'mp4'
         ? 'video/mp4'
@@ -1942,6 +2105,114 @@ export async function normalizeVolume(
  *
  * `format`: 'mp4' mantém o vídeo (`-c:v copy`); 'wav'/'mp3' só áudio.
  */
+// ---------- Relatório antes × depois do Normalizador ----------------------
+
+/** Sample-rate do PCM de análise do relatório (mono, s16le). */
+export const REPORT_PCM_RATE = 8000;
+
+export type ReportPcm = {
+  /** PCM mono 16-bit (cópia própria, desacoplada do FS do WASM). */
+  pcm: Int16Array;
+  sampleRate: number;
+  /** Medição EBU R128 REAL desse áudio (loudnorm print_format=json), se parseou. */
+  loudnorm: LoudnormStats | null;
+};
+
+/**
+ * Extrai os dados de análise pro relatório do Normalizador em UMA passada:
+ * duas saídas no mesmo exec — (1) loudnorm em modo medição jogado no muxer
+ * null (LUFS/true-peak/LRA reais do arquivo, sem alterar nada) e (2) PCM
+ * mono 8kHz s16le pro desenho das ondas/curvas no navegador.
+ *
+ * 8kHz mono é de sobra pra envelope visual e métricas de janela (fala vive
+ * abaixo de 4kHz), e mantém a memória pequena (~1MB/min). Se a passada
+ * combinada falhar (muxer/filtro indisponível), cai num decode simples sem a
+ * medição — o relatório usa então só as métricas calculadas em JS.
+ */
+export async function extractReportPcm(
+  file: Blob,
+  opts: RunOptions = {},
+): Promise<ReportPcm> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'rep_in.' + guessExt(file, 'mp4');
+  const outputName = 'rep_out.pcm';
+
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    let loudnorm: LoudnormStats | null = null;
+    let gotPcm = false;
+
+    const logLines: string[] = [];
+    const logHandler = ({ message }: { message: string }) => {
+      logLines.push(message);
+    };
+    ff.on('log', logHandler);
+    try {
+      // -vn nas DUAS saídas: sem ele, um mp4 decodaria o vídeo inteiro só
+      // pra jogar fora no muxer null (lento à toa em vídeo longo).
+      const rc = await ff.exec([
+        '-i', inputName,
+        '-vn', '-af', `loudnorm=${LOUDNORM_TARGET}:print_format=json`, '-f', 'null', '-',
+        '-vn', '-af', `aresample=${REPORT_PCM_RATE}`, '-ac', '1', '-c:a', 'pcm_s16le', '-f', 's16le', outputName,
+      ]);
+      if (rc === 0) {
+        gotPcm = true;
+        loudnorm = parseLoudnormStats(logLines.join('\n'));
+      } else {
+        console.warn(
+          '[ffmpeg-worker] extractReportPcm: passada combinada rc=' + rc,
+          logLines.slice(-25).join('\n'),
+        );
+      }
+    } catch (e) {
+      if (isCancellationError(e)) throw e;
+      console.warn('[ffmpeg-worker] extractReportPcm: passada combinada lançou:', e, logLines.slice(-25).join('\n'));
+    } finally {
+      ff.off('log', logHandler);
+    }
+
+    if (!gotPcm) {
+      // Fallback: só o PCM (relatório sai sem a medição EBU, nunca sem gráfico).
+      await safeDelete(ff, outputName);
+      const fbLines: string[] = [];
+      const fbHandler = ({ message }: { message: string }) => {
+        fbLines.push(message);
+      };
+      ff.on('log', fbHandler);
+      let rc = -1;
+      try {
+        rc = await ff.exec([
+          '-i', inputName,
+          '-vn', '-ac', '1', '-ar', String(REPORT_PCM_RATE),
+          '-c:a', 'pcm_s16le', '-f', 's16le', outputName,
+        ]);
+      } finally {
+        ff.off('log', fbHandler);
+      }
+      if (rc !== 0) {
+        console.warn(
+          '[ffmpeg-worker] extractReportPcm: fallback rc=' + rc,
+          fbLines.slice(-25).join('\n'),
+        );
+        throw new Error('Não consegui decodar o áudio pro relatório.');
+      }
+    }
+
+    const data = (await ff.readFile(outputName)) as Uint8Array;
+    // Cópia alinhada (byteOffset do FS pode não ser múltiplo de 2).
+    const bytes = new Uint8Array(data.byteLength);
+    bytes.set(data);
+    const pcm = new Int16Array(bytes.buffer, 0, Math.floor(bytes.byteLength / 2));
+    return { pcm, sampleRate: REPORT_PCM_RATE, loudnorm };
+  } finally {
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 export async function prepareVoiceForDecupagem(
   file: Blob,
   opts: RunOptions = {},

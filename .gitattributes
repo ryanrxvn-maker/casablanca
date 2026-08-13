@@ -1,0 +1,4 @@
+
+# Modelos RNNoise sao texto ASCII parseado byte-exato pelo arnndn do ffmpeg:
+# CRLF do autocrlf no Windows quebra o "Error initializing filter arnndn".
+*.rnnn -text
