@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireTier } from '@/lib/require-tier';
 import { serviceClient } from '@/app/api/admin/_helpers';
-import { isPaidExpired } from '@/lib/plan-prices';
+import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 
 /**
  * GET /api/admin/dashboard — métricas agregadas pro painel do dono.
@@ -38,6 +38,8 @@ function resolveTier(p: ProfileRow): 'free' | 'basic' | 'pro' | 'admin' {
   if (p.is_admin) return 'admin';
   // Acesso pago vencido conta como free.
   if (isPaidExpired(p.subscription_status, p.current_period_end)) return 'free';
+  // Renovação não paga = acesso suspenso (política 13.08) → conta como free.
+  if (isPaymentBlocked(p.subscription_status)) return 'free';
   const t = (p.tier ?? '').toString();
   if (t === 'pro' || t === 'beta') return 'pro';
   if (t === 'basic') return 'basic';
