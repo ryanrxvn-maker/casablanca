@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { isPaidExpired } from '@/lib/plan-prices';
+import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { cliMachineIdentity } from '@/lib/cli-auth';
 import { emailUnlocksAnyTool, pathUnlockedByList } from '@/lib/tool-unlocks';
@@ -118,6 +118,13 @@ export async function requireTier(
 
     // Acesso pago vencido → cai pra free (admin nunca expira).
     if (!isAdmin && isPaidExpired(p?.subscription_status, p?.current_period_end)) {
+      tier = 'free';
+    }
+
+    // Renovação tentada e NÃO paga (past_due/unpaid) → acesso SUSPENSO na
+    // hora, até o pagamento entrar (retry/troca de cartão na tela de
+    // assinatura). Ninguém usa sem pagar; cortesia (admin_grant) não cai aqui.
+    if (!isAdmin && isPaymentBlocked(p?.subscription_status)) {
       tier = 'free';
     }
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
+import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 import { emailUnlocksPath, setSessionToolUnlocks } from '@/lib/tool-unlocks';
 
 export type Tier = 'free' | 'basic' | 'pro' | 'admin';
@@ -62,6 +63,8 @@ type RowShape = {
   is_admin?: boolean | null;
   is_active?: boolean | null;
   tool_unlocks?: string[] | null;
+  subscription_status?: string | null;
+  current_period_end?: string | null;
 };
 
 // ─── Cache de tier por sessão ───────────────────────────────────────────────
@@ -80,6 +83,26 @@ const SS_EMAIL_KEY = 'autoedit:email';
 
 // Desbloqueios BETA PRO (profiles.tool_unlocks) — cache espelho do banco.
 const SS_UNLOCKS_KEY = 'autoedit:unlocks';
+
+// ── Suspensão por pagamento pendente (past_due/unpaid) ─────────────────────
+// true = a conta TEM assinatura mas a renovação não foi paga → o servidor já
+// está negando o acesso; aqui só guardamos o estado pra UI pintar o aviso
+// (banner nas ferramentas) sem precisar de outra query. Mesmo padrão de cache
+// do tier: memória (SPA) + sessionStorage (F5).
+let memPayBlocked = false;
+const SS_PAYBLOCK_KEY = 'autoedit:payblock';
+const payBlockListeners = new Set<(b: boolean) => void>();
+
+function setPayBlocked(b: boolean) {
+  memPayBlocked = b;
+  try {
+    if (b) sessionStorage.setItem(SS_PAYBLOCK_KEY, '1');
+    else sessionStorage.removeItem(SS_PAYBLOCK_KEY);
+  } catch {
+    /* sessionStorage indisponível — segue só em memória */
+  }
+  payBlockListeners.forEach((fn) => fn(b));
+}
 
 function applyUnlocks(list: string[] | null) {
   setSessionToolUnlocks(list);
@@ -182,7 +205,7 @@ async function resolveTier(): Promise<Tier> {
   const full = await withTimeout(
     supabase
       .from('profiles')
-      .select('tier, is_admin, is_active, tool_unlocks')
+      .select('tier, is_admin, is_active, tool_unlocks, subscription_status, current_period_end')
       .eq('id', uid)
       .maybeSingle(),
     6000,
@@ -192,22 +215,36 @@ async function resolveTier(): Promise<Tier> {
     const noUnlocks = await withTimeout(
       supabase
         .from('profiles')
-        .select('tier, is_admin, is_active')
+        .select('tier, is_admin, is_active, subscription_status, current_period_end')
         .eq('id', uid)
         .maybeSingle(),
       6000,
     );
     if (noUnlocks.error) {
-      const basic = await withTimeout(
+      // Colunas de billing ausentes (schema antigo) → tenta SÓ o tier, pra
+      // nunca perder a resolução do plano por causa do status de assinatura.
+      const noBilling = await withTimeout(
         supabase
           .from('profiles')
-          .select('is_admin, is_active')
+          .select('tier, is_admin, is_active')
           .eq('id', uid)
           .maybeSingle(),
         6000,
       );
-      if (basic.error) throw basic.error;
-      data = (basic.data ?? null) as unknown as RowShape | null;
+      if (noBilling.error) {
+        const basic = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('is_admin, is_active')
+            .eq('id', uid)
+            .maybeSingle(),
+          6000,
+        );
+        if (basic.error) throw basic.error;
+        data = (basic.data ?? null) as unknown as RowShape | null;
+      } else {
+        data = (noBilling.data ?? null) as unknown as RowShape | null;
+      }
     } else {
       data = (noUnlocks.data ?? null) as unknown as RowShape | null;
     }
@@ -219,8 +256,23 @@ async function resolveTier(): Promise<Tier> {
   applyUnlocks(Array.isArray(data?.tool_unlocks) ? data!.tool_unlocks! : null);
 
   const raw = (data?.tier ?? '').toString();
+  const isAdmin = data?.is_admin === true;
+  const paidRaw = raw === 'basic' || raw === 'pro' || raw === 'beta';
+
+  // Mesma política do servidor (require-tier/middleware): renovação NÃO paga
+  // (past_due/unpaid) suspende o acesso na hora; período pago vencido expira.
+  // O servidor é quem BLOQUEIA de verdade — aqui é só o paint honesto da UI.
+  const blocked =
+    !isAdmin && paidRaw && isPaymentBlocked(data?.subscription_status);
+  setPayBlocked(blocked);
+  const expired =
+    !isAdmin &&
+    paidRaw &&
+    isPaidExpired(data?.subscription_status, data?.current_period_end);
+
   // PRIORIDADE: is_admin sempre ganha — mesmo se tier for outro
-  if (data?.is_admin) return 'admin';
+  if (isAdmin) return 'admin';
+  if (blocked || expired) return 'free';
   if (raw === 'pro' || raw === 'beta') return 'pro';
   if (raw === 'basic') return 'basic';
   if (raw === 'free') return 'free';
@@ -302,6 +354,7 @@ export function useTier(): Tier | null {
         ssClear();
         ssWriteEmail(null);
         applyUnlocks(null);
+        setPayBlocked(false);
         apply('free');
         return;
       }
@@ -317,6 +370,56 @@ export function useTier(): Tier | null {
   }, []);
 
   return tier;
+}
+
+/**
+ * Hook: true quando a conta está com o acesso pago SUSPENSO por pagamento
+ * pendente (renovação falhou — past_due/unpaid). Alimenta o aviso global nas
+ * ferramentas. Pinta do cache (sessionStorage) e revalida junto do tier.
+ */
+export function usePaymentBlocked(): boolean {
+  const [blocked, setBlocked] = useState<boolean>(memPayBlocked);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Paint imediato do cache (F5 não pisca o aviso).
+    if (!memPayBlocked) {
+      try {
+        if (sessionStorage.getItem(SS_PAYBLOCK_KEY) === '1') {
+          memPayBlocked = true;
+          setBlocked(true);
+        }
+      } catch {
+        /* sem cache — a revalidação resolve */
+      }
+    } else {
+      setBlocked(true);
+    }
+    const listener = (b: boolean) => {
+      if (!cancelled) setBlocked(b);
+    };
+    payBlockListeners.add(listener);
+    // Garante uma revalidação (dedupe via inflight — sem query extra se o
+    // useTier da tela já disparou).
+    loadTier(true).catch(() => {});
+    return () => {
+      cancelled = true;
+      payBlockListeners.delete(listener);
+    };
+  }, []);
+
+  return blocked;
+}
+
+/**
+ * Zera o cache de tier/suspensão e re-resolve na hora. Chame depois de um
+ * evento que MUDA o plano no servidor (ex.: pagamento pendente aprovado no
+ * retry) — sem isso a UI seguiria pintando o estado antigo até o próximo F5.
+ */
+export function refreshTier(): Promise<Tier> {
+  memTier = null;
+  ssClear();
+  return loadTier(true);
 }
 
 export function tierAllowsTool(tier: Tier | null, toolHref: string): boolean {

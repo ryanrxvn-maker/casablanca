@@ -31,12 +31,15 @@ type Profile = {
   last_ip: string | null;
 };
 
-function accessSource(p: Profile): 'paid' | 'comp' | 'anomaly' | 'free' {
+function accessSource(p: Profile): 'paid' | 'comp' | 'pending' | 'anomaly' | 'free' {
   const tier = (p.tier ?? '').toString();
   if (tier !== 'basic' && tier !== 'pro') return 'free';
   const s = p.subscription_status ?? '';
   if (s === 'active' || s === 'trialing' || s === 'paid') return 'paid';
   if (s === 'admin_grant') return 'comp';
+  // Renovação não paga → acesso suspenso pelos gates (assinatura viva no
+  // Stripe aguardando o pagamento entrar).
+  if (s === 'past_due' || s === 'unpaid') return 'pending';
   return 'anomaly';
 }
 

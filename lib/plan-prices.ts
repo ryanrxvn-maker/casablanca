@@ -69,6 +69,19 @@ export function isPaidExpired(
   return false;
 }
 
+/** SUSPENSÃO por pagamento pendente (política 13.08): o Stripe TENTOU cobrar
+ *  a renovação e não conseguiu ('past_due') ou esgotou as tentativas
+ *  ('unpaid'). O acesso pago SUSPENDE NA HORA — a assinatura continua viva no
+ *  Stripe (dunning re-tenta sozinho e o cliente resolve na tela "Minha
+ *  assinatura": tentar cobrar de novo / trocar o cartão), mas ninguém usa sem
+ *  pagar. Quando o pagamento entra (webhook invoice.paid ou o botão de
+ *  retry), o acesso volta sozinho. NÃO afeta: 'active'/'trialing' (em dia),
+ *  'paid' (avulso vigente), 'admin_grant' (cortesia — só o admin dá/tira) e
+ *  admins (checagem sempre atrás de !isAdmin nos gates). */
+export function isPaymentBlocked(status: string | null | undefined): boolean {
+  return status === 'past_due' || status === 'unpaid';
+}
+
 export function isPaidTier(v: string): v is PaidTier {
   return v === 'basic' || v === 'pro';
 }

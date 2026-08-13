@@ -393,6 +393,19 @@ export async function POST(req: Request) {
         await applySubscription(event.data.object as SubLike);
         break;
       }
+      case 'invoice.payment_failed': {
+        // Renovação tentada e NÃO paga → espelha o status real da assinatura
+        // (past_due) NA HORA. É o gatilho da SUSPENSÃO imediata do acesso
+        // (isPaymentBlocked nos gates); redundante com o subscription.updated
+        // de propósito — se um dos dois eventos se perder, o outro suspende.
+        const invoice = event.data.object as InvoiceLike;
+        const subId = invoiceSubId(invoice);
+        if (subId) {
+          const sub = (await stripe.subscriptions.retrieve(subId)) as SubLike;
+          await applySubscription(sub);
+        }
+        break;
+      }
       case 'customer.subscription.deleted': {
         const sub = event.data.object as SubLike;
         const customerId =

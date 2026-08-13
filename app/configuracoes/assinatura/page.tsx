@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { CardUpdate } from '@/components/CardUpdate';
 import { displayTierOf, type AccessTier } from '@/lib/launch-flags';
+import { isPaymentBlocked } from '@/lib/plan-prices';
+import { refreshTier } from '@/lib/use-tier';
 
 /**
  * /configuracoes/assinatura — gestão de assinatura 100% nativa (sem portal
@@ -66,6 +68,8 @@ export default function AssinaturaPage() {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [editCard, setEditCard] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -118,7 +122,44 @@ export default function AssinaturaPage() {
     }
   }
 
+  /** Tenta cobrar a fatura em aberto AGORA (renovação que falhou). */
+  async function retryPayment() {
+    setRetrying(true);
+    setRetryError(null);
+    setToast(null);
+    try {
+      const res = await fetch('/api/billing/retry-payment', { method: 'POST' });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        paid?: boolean;
+        already?: boolean;
+        error?: string;
+        code?: string;
+      };
+      if (res.ok && j.ok) {
+        setToast(
+          j.paid
+            ? 'Pagamento aprovado! Seu acesso Premium voltou agora.'
+            : 'Tudo certo — sua assinatura já está em dia e o acesso está liberado.',
+        );
+        await refreshTier().catch(() => {});
+        await load();
+        return;
+      }
+      setRetryError(j.error || 'Não consegui concluir a cobrança agora.');
+      // Cartão recusado / banco pediu validação → abre a troca de cartão.
+      if (j.code === 'card_declined' || j.code === 'requires_action') {
+        setEditCard(true);
+      }
+    } catch {
+      setRetryError('Sem conexão agora. Tenta de novo em instantes.');
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   const sub = data?.subscription ?? null;
+  const pendingPayment = !!sub && isPaymentBlocked(sub.status);
   // Rótulo/cor de exibição: o tier interno 'basic' exibe PREMIUM; um Pro
   // legado vira BETA PRO (ciano). Valor, status e cobrança seguem 100% reais
   // do Stripe — só o nome de exibição muda.
@@ -178,6 +219,117 @@ export default function AssinaturaPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-5">
+          {/* PAGAMENTO PENDENTE — renovação falhou, acesso suspenso */}
+          {pendingPayment ? (
+            <div
+              className="relative overflow-hidden rounded-[20px] border p-6 md:p-7"
+              style={{
+                borderColor: 'rgb(var(--pink) / 0.5)',
+                background:
+                  'linear-gradient(135deg, rgb(var(--pink) / 0.12), transparent 55%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
+                boxShadow: '0 0 44px -22px rgb(var(--pink) / 0.8)',
+              }}
+            >
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -left-10 -top-10 h-32 w-32 rounded-full opacity-35 blur-3xl"
+                style={{ background: 'rgb(var(--pink))' }}
+              />
+              <div
+                className="text-[11px] font-bold uppercase tracking-[0.2em]"
+                style={{ fontFamily: 'var(--font-tech)', color: 'rgb(var(--pink))' }}
+              >
+                Pagamento pendente
+              </div>
+              <h2
+                className="mt-1.5 text-[20px] font-extrabold leading-tight text-white"
+                style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+              >
+                A renovação não foi aprovada — seu acesso está suspenso
+              </h2>
+              <p className="mt-2 max-w-[520px] text-[13.5px] leading-relaxed text-text-muted">
+                Tentamos cobrar
+                {sub?.amount != null ? <strong> {brl(sub.amount)}</strong> : ''} no
+                cartão
+                {sub?.card ? (
+                  <strong>
+                    {' '}
+                    {sub.card.brand.toUpperCase()} •••• {sub.card.last4}
+                  </strong>
+                ) : (
+                  ' cadastrado'
+                )}{' '}
+                e o pagamento não passou. Sua assinatura continua aqui — assim que
+                o pagamento entrar, o acesso Premium volta na hora.
+              </p>
+              <div className="mt-5 flex flex-wrap items-center gap-4">
+                <button
+                  type="button"
+                  onClick={retryPayment}
+                  disabled={retrying}
+                  className="retry-3d"
+                >
+                  {retrying ? 'Cobrando…' : 'Tentar cobrar de novo'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditCard(true)}
+                  className="text-[13.5px] font-semibold text-violet hover:text-white"
+                >
+                  Trocar o cartão →
+                </button>
+              </div>
+              {retryError ? (
+                <div
+                  className="mt-4 rounded-[12px] border px-4 py-3 text-[13px]"
+                  style={{
+                    borderColor: 'rgb(var(--pink) / 0.4)',
+                    background: 'rgb(var(--pink) / 0.1)',
+                    color: 'rgb(var(--text))',
+                  }}
+                >
+                  {retryError}
+                </div>
+              ) : null}
+              <style jsx>{`
+                .retry-3d {
+                  position: relative;
+                  border-radius: 14px;
+                  padding: 14px 26px;
+                  font-family: var(--font-tech);
+                  font-size: 14px;
+                  font-weight: 800;
+                  letter-spacing: 0.06em;
+                  text-transform: uppercase;
+                  color: #fff;
+                  background: linear-gradient(180deg, #b79bfc, #7c3aed 55%, #6d28d9);
+                  box-shadow:
+                    inset 0 1.5px 0 rgba(255, 255, 255, 0.4),
+                    inset 0 -2px 4px rgba(0, 0, 0, 0.25),
+                    0 6px 0 #4c1d95,
+                    0 14px 28px -10px rgba(124, 58, 237, 0.65);
+                  transform: translateY(0);
+                  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.2s ease;
+                }
+                .retry-3d:hover:not(:disabled) {
+                  filter: brightness(1.08);
+                }
+                .retry-3d:active:not(:disabled) {
+                  transform: translateY(5px);
+                  box-shadow:
+                    inset 0 1.5px 0 rgba(255, 255, 255, 0.35),
+                    inset 0 -1px 3px rgba(0, 0, 0, 0.25),
+                    0 1px 0 #4c1d95,
+                    0 6px 14px -8px rgba(124, 58, 237, 0.6);
+                }
+                .retry-3d:disabled {
+                  opacity: 0.75;
+                  cursor: wait;
+                }
+              `}</style>
+            </div>
+          ) : null}
+
           {/* Card do plano */}
           <div
             className="relative overflow-hidden rounded-[20px] border p-6 md:p-7"
@@ -240,7 +392,14 @@ export default function AssinaturaPage() {
                   <CardUpdate
                     onDone={() => {
                       setEditCard(false);
-                      setToast('Cartão atualizado com sucesso.');
+                      if (pendingPayment) {
+                        // Cartão novo salvo com cobrança pendente → já tenta
+                        // cobrar nele, sem o cliente precisar de outro clique.
+                        setToast('Cartão atualizado — tentando a cobrança nele agora…');
+                        void retryPayment();
+                      } else {
+                        setToast('Cartão atualizado com sucesso.');
+                      }
                       load();
                     }}
                     onCancel={() => setEditCard(false)}
@@ -407,8 +566,15 @@ function PoweredByStripe() {
 
 function StatusBadge({ sub, hue }: { sub: Sub; hue: string }) {
   const canceling = sub.cancel_at_period_end;
+  const pending = isPaymentBlocked(sub.status);
   const label = canceling ? 'Cancela em breve' : STATUS_LABEL[sub.status] ?? sub.status;
-  const color = canceling ? '#fbbf24' : sub.status === 'active' ? '#c2cf86' : hue;
+  const color = pending
+    ? '#fb7185'
+    : canceling
+      ? '#fbbf24'
+      : sub.status === 'active'
+        ? '#c2cf86'
+        : hue;
   return (
     <span
       className="rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide"

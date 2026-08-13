@@ -42,7 +42,7 @@ type AdminUser = {
   current_period_end?: string | null;
   traffic_source?: string | null;
   plan: 'premium' | 'free';
-  access: 'paid' | 'granted' | 'anomaly' | 'free';
+  access: 'paid' | 'granted' | 'pending' | 'anomaly' | 'free';
   tool_unlocks: string[];
   static_unlocks: string[];
   receipt_url: string | null;
@@ -147,6 +147,9 @@ const ACCESS_META: Record<
 > = {
   paid: { label: 'PREMIUM · PAGO', accent: 'lime' },
   granted: { label: 'PREMIUM · LIBERADO', accent: 'cyan' },
+  // Renovação falhou → acesso SUSPENSO até o pagamento entrar (assinatura
+  // continua viva no Stripe; o cliente resolve na tela de assinatura).
+  pending: { label: 'PAGAMENTO PENDENTE', accent: 'amber' },
   anomaly: { label: 'PREMIUM · SEM ORIGEM', accent: 'danger' },
   free: { label: 'FREE', accent: 'neutral' },
 };
@@ -155,6 +158,7 @@ type FilterKey =
   | 'all'
   | 'online'
   | 'paid'
+  | 'pending'
   | 'granted'
   | 'free'
   | 'beta'
@@ -247,6 +251,7 @@ export default function AdminPage() {
       online: list.filter(isOnline).length,
       paid: list.filter((u) => u.access === 'paid').length,
       granted: list.filter((u) => u.access === 'granted').length,
+      pending: list.filter((u) => u.access === 'pending').length,
       anomaly: list.filter((u) => u.access === 'anomaly').length,
       free: list.filter((u) => u.plan === 'free').length,
       beta: list.filter((u) => betaProTools(u).length > 0).length,
@@ -324,6 +329,7 @@ export default function AdminPage() {
       case 'free': list = list.filter((u) => u.plan === 'free'); break;
       case 'beta': list = list.filter((u) => betaProTools(u).length > 0); break;
       case 'inactive': list = list.filter((u) => !u.is_active); break;
+      case 'pending': list = list.filter((u) => u.access === 'pending'); break;
       case 'anomaly': list = list.filter((u) => u.access === 'anomaly'); break;
     }
     const query = q.trim().toLowerCase();
@@ -606,6 +612,7 @@ export default function AdminPage() {
     { key: 'free', label: 'Free', count: stats.free, accent: 'neutral' },
     { key: 'beta', label: 'Beta Pro', count: stats.beta, accent: 'violet' },
     { key: 'inactive', label: 'Inativos', count: stats.inactive, accent: 'danger' },
+    { key: 'pending', label: 'Pgto pendente', count: stats.pending, accent: 'amber', hide: stats.pending === 0 },
     { key: 'anomaly', label: 'Anomalia', count: stats.anomaly, accent: 'danger', hide: stats.anomaly === 0 },
   ];
 

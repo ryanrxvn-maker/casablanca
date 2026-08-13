@@ -46,7 +46,7 @@ const BASIC_SELECT =
 
 function classify(p: Row): {
   plan: 'premium' | 'free';
-  access: 'paid' | 'granted' | 'anomaly' | 'free';
+  access: 'paid' | 'granted' | 'pending' | 'anomaly' | 'free';
 } {
   const tier = (p.tier ?? '').toString();
   const isPaidTier = tier === 'basic' || tier === 'pro' || tier === 'beta';
@@ -56,6 +56,10 @@ function classify(p: Row): {
   if (s === 'active' || s === 'trialing' || s === 'paid')
     return { plan: 'premium', access: 'paid' };
   if (s === 'admin_grant') return { plan: 'premium', access: 'granted' };
+  // Renovação tentada e NÃO paga → acesso SUSPENSO pelos gates (política
+  // 13.08). Assinatura segue viva no Stripe; o cliente resolve na tela de
+  // assinatura (retry/troca de cartão). Plano EFETIVO agora é free.
+  if (s === 'past_due' || s === 'unpaid') return { plan: 'free', access: 'pending' };
   return { plan: 'premium', access: 'anomaly' };
 }
 

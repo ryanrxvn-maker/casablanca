@@ -27,12 +27,17 @@ const isLive = key.startsWith('sk_live_');
 
 const base = (process.argv[2] || 'https://www.darkoautoedit.com').replace(/\/$/, '');
 const url = `${base}/api/billing/webhook`;
-// Assinatura recorrente: criação, cobranças (1a + renovações) e mudanças de status.
+// Assinatura recorrente: criação, cobranças (1a + renovações), mudanças de
+// status, FALHA de renovação (suspensão imediata do acesso) e reembolso/
+// chargeback (o handler já tratava; garante que o endpoint recebe).
 const EVENTS = [
   'checkout.session.completed',
   'invoice.paid',
+  'invoice.payment_failed',
   'customer.subscription.updated',
   'customer.subscription.deleted',
+  'charge.refunded',
+  'charge.dispute.created',
 ];
 
 const stripe = new Stripe(key);

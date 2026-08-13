@@ -1,6 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { isPaidExpired } from '@/lib/plan-prices';
+import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { emailUnlocksPath, pathUnlockedByList } from '@/lib/tool-unlocks';
 
@@ -243,6 +243,12 @@ export async function updateSession(request: NextRequest) {
       !isAdmin &&
       isPaidExpired(profile?.subscription_status, profile?.current_period_end)
     ) {
+      tier = 'free';
+    }
+
+    // Renovação tentada e NÃO paga (past_due/unpaid) → acesso SUSPENSO na
+    // hora, até o cliente resolver o pagamento na tela de assinatura.
+    if (!isAdmin && isPaymentBlocked(profile?.subscription_status)) {
       tier = 'free';
     }
 
