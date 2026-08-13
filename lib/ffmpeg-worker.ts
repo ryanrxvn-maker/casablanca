@@ -226,6 +226,20 @@ export type RunOptions = {
   onLog?: FFLog;
 };
 
+/**
+ * exec com rc virando ERRO. O exec do @ffmpeg/ffmpeg 0.12 NÃO lança quando o
+ * ffmpeg falha — resolve normalmente com rc≠0 (descoberto no Normalizador,
+ * 13.08). Sem esta conversão, todo helper tratava falha como sucesso e podia
+ * ler/entregar uma saída truncada ou cair num erro críptico do readFile
+ * (família do bug "montado 1KB"). Use em todo exec cuja SAÍDA será lida;
+ * probes que toleram rc≠0 por design (readDurationFromLogs, silencedetect)
+ * chamam ff.exec direto e tratam o rc no local.
+ */
+async function execOrThrow(ff: FFmpeg, args: string[], ctx: string): Promise<void> {
+  const rc = await ff.exec(args);
+  if (rc !== 0) throw new Error(`ffmpeg falhou (rc=${rc}) em ${ctx}`);
+}
+
 function atempoChain(speed: number): string {
   const s = Math.max(0.5, Math.min(4, speed));
   if (s <= 2) return `atempo=${s.toFixed(3)}`;
@@ -267,7 +281,7 @@ export async function speedUpVideo(
       outputName,
     ];
     try {
-      await ff.exec(encodeArgs(true));
+      await execOrThrow(ff, encodeArgs(true), 'aceleração do vídeo');
       const data = await ff.readFile(outputName);
       assertValidMp4(data as Uint8Array, 'vídeo acelerado');
       return toBlob(data, 'video/mp4');
@@ -278,7 +292,7 @@ export async function speedUpVideo(
       // Vídeo SEM trilha de áudio: o -filter:a derruba o exec inteiro. Uma
       // re-tentativa sem áudio salva o job em vez de falhar com erro cru.
       await safeDelete(ff, outputName);
-      await ff.exec(encodeArgs(false));
+      await execOrThrow(ff, encodeArgs(false), 'aceleração do vídeo (sem áudio)');
       const data = await ff.readFile(outputName);
       assertValidMp4(data as Uint8Array, 'vídeo acelerado');
       return toBlob(data, 'video/mp4');
@@ -313,7 +327,7 @@ export async function speedUpAudio(
       args.push('-c:a', 'libmp3lame', '-q:a', '2');
     }
     args.push(outputName);
-    await ff.exec(args);
+    await execOrThrow(ff, args, 'aceleração do áudio');
     const data = await ff.readFile(outputName);
     const mime = format === 'wav' ? 'audio/wav' : 'audio/mpeg';
     return toBlob(data, mime);
@@ -360,7 +374,7 @@ export async function extractAudioAs(
       args.push('-c:a', 'libmp3lame', '-q:a', '2');
     }
     args.push(outputName);
-    await ff.exec(args);
+    await execOrThrow(ff, args, 'extração do áudio');
     const data = await ff.readFile(outputName);
     return toBlob(data, format === 'wav' ? 'audio/wav' : 'audio/mpeg');
   } finally {
@@ -423,7 +437,7 @@ export async function compressVideoOn(
       '-movflags', '+faststart',
       outputName,
     );
-    await ff.exec(args);
+    await execOrThrow(ff, args, 'compressão do vídeo');
     const data = await ff.readFile(outputName);
     // Sem isto, um encode que estourou a memória do wasm entregava MP4
     // truncado (sem moov) como job "done" — o cliente baixava arquivo morto.
@@ -609,7 +623,7 @@ export async function muxAudioIntoVideo(
       ff.writeFile(videoName, await fetchFile(video)),
       ff.writeFile(audioName, await fetchFile(audio)),
     ]);
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', videoName,
       '-i', audioName,
       '-map', '0:v:0',
@@ -621,7 +635,7 @@ export async function muxAudioIntoVideo(
       '-shortest',
       '-movflags', '+faststart',
       outputName,
-    ]);
+    ], 'troca do áudio do vídeo');
     const data = await ff.readFile(outputName);
     // GARANTIA (mesma política do concat/corte, fix 2026-07-03): instância
     // zumbi/OOM pode "terminar" com a saída TRUNCADA — valida ANTES de
@@ -680,7 +694,7 @@ export async function cutVideoSegments(
       concatInputs.push(`[v${i}][a${i}]`);
     });
     filterLines.push(`${concatInputs.join('')}concat=n=${segs.length}:v=1:a=1[outv][outa]`);
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', inputName,
       '-filter_complex', filterLines.join(';'),
       '-map', '[outv]',
@@ -699,7 +713,7 @@ export async function cutVideoSegments(
       '-ac', '2',
       '-movflags', '+faststart',
       outName,
-    ]);
+    ], 'corte dos segmentos');
   }
 
   const batchOutputs: string[] = [];
@@ -736,7 +750,7 @@ export async function cutVideoSegments(
     const list = batchOutputs.map((n) => `file '${n}'`).join('\n');
     await ff.writeFile(listName, new TextEncoder().encode(list));
     opts.onStage?.(`Juntando ${numBatches} lotes decupados...`);
-    await ff.exec([
+    await execOrThrow(ff, [
       '-fflags', '+genpts',
       '-f', 'concat',
       '-safe', '0',
@@ -745,7 +759,7 @@ export async function cutVideoSegments(
       '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
       'out.mp4',
-    ]);
+    ], 'junção dos lotes decupados');
     const data = await ff.readFile('out.mp4');
     await safeDelete(ff, listName);
     await safeDelete(ff, 'out.mp4');
@@ -1059,7 +1073,7 @@ export async function extractAudioForTranscription(
     await ff.writeFile(inputName, await fetchFile(file));
 
     opts.onStage?.(`Extraindo audio (${kbps}kbps) pra transcricao...`);
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', inputName,
       '-vn',
       '-c:a', 'libopus',
@@ -1069,7 +1083,7 @@ export async function extractAudioForTranscription(
       '-application', application,
       '-vbr', 'on',
       outputName,
-    ]);
+    ], 'extração do áudio pra transcrição');
     const data = await ff.readFile(outputName);
     return toBlob(data, 'audio/ogg');
   } finally {
@@ -1104,7 +1118,7 @@ export async function extractAudioForDiarization(
     await ff.writeFile(inputName, await fetchFile(file));
 
     opts.onStage?.('Extraindo...');
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', inputName,
       '-vn',
       '-c:a', 'libopus',
@@ -1114,7 +1128,7 @@ export async function extractAudioForDiarization(
       '-application', 'audio',
       '-vbr', 'on',
       outputName,
-    ]);
+    ], 'extração do áudio pra diarização');
     const data = await ff.readFile(outputName);
     return toBlob(data, 'audio/ogg');
   } finally {
@@ -1146,7 +1160,7 @@ export async function extractStereoAudioForTranscription(
   try {
     opts.onStage?.('Extraindo...');
     await ff.writeFile(inputName, await fetchFile(file));
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', inputName,
       '-vn',
       '-c:a', 'libopus',
@@ -1155,7 +1169,7 @@ export async function extractStereoAudioForTranscription(
       '-ar', '16000',
       '-application', 'audio',
       outputName,
-    ]);
+    ], 'extração do áudio estéreo');
     const data = await ff.readFile(outputName);
     return toBlob(data, 'audio/ogg');
   } finally {
@@ -1297,13 +1311,16 @@ export async function splitVideoByScenes(
     // so luminance diff. Threshold scdet vai de 0-100 (default 10).
     // Mapeamos nosso 0.05-0.95 (compat com UI antiga) → 5-95.
     const scdetThreshold = Math.round(threshold * 100);
-    await ff.exec([
+    // rc≠0 aqui = scan que nem rodou (decode/filtro quebrado) — sem esta
+    // checagem o resultado era "0 cortes" e o vídeo inteiro voltava como 1
+    // take único, parecendo sucesso.
+    await execOrThrow(ff, [
       '-i', inputName,
       '-filter:v', `scdet=threshold=${scdetThreshold}`,
       '-an',
       '-f', 'null',
       '-',
-    ]);
+    ], 'scan de cortes de cena');
 
     if (durationSec <= 0) {
       durationSec =
@@ -1385,7 +1402,7 @@ export async function splitVideoByScenes(
       const outName = `take_${String(i + 1).padStart(3, '0')}.mp4`;
       // -c copy: sem re-encode. Cuts caem no keyframe mais proximo, ai
       // a duracao real pode variar levemente. Pra documentario isso e ok.
-      await ff.exec([
+      await execOrThrow(ff, [
         '-ss', seg.start.toFixed(3),
         '-to', seg.end.toFixed(3),
         '-i', inputName,
@@ -1393,7 +1410,7 @@ export async function splitVideoByScenes(
         '-avoid_negative_ts', 'make_zero',
         '-movflags', '+faststart',
         outName,
-      ]);
+      ], `extração do take ${i + 1}`);
       const data = await ff.readFile(outName);
       takes.push({
         index: i + 1,
@@ -1464,7 +1481,7 @@ export async function removeRegions(
     await ff.writeFile(inputName, await fetchFile(file));
 
     opts.onStage?.('Aplicando...');
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', inputName,
       '-vf', vfilter,
       '-c:v', 'libx264',
@@ -1479,7 +1496,7 @@ export async function removeRegions(
       ...(preserveAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k']),
       '-movflags', '+faststart',
       outputName,
-    ]);
+    ], 'remoção das regiões');
     const data = await ff.readFile(outputName);
     return toBlob(data, 'video/mp4');
   } finally {
@@ -1508,14 +1525,14 @@ export async function extractFrameAt(
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
-    await ff.exec([
+    await execOrThrow(ff, [
       '-ss', timeSec.toFixed(2),
       '-i', inputName,
       '-vframes', '1',
       '-vf', `scale=${maxW}:-2:flags=fast_bilinear`,
       '-q:v', String(q),
       outputName,
-    ]);
+    ], 'extração do frame');
     const data = await ff.readFile(outputName);
     return toBlob(data, 'image/jpeg');
   } finally {
@@ -2368,7 +2385,7 @@ export async function concatAvatarParts(
     );
 
     opts.onStage?.(`Concatenando ${inputNames.length} partes do avatar...`);
-    await ff.exec([
+    await execOrThrow(ff, [
       ...inputFlags,
       '-filter_complex',
       filterParts.join(';'),
@@ -2386,7 +2403,7 @@ export async function concatAvatarParts(
       '-ac', '2',
       '-movflags', '+faststart',
       outputName,
-    ]);
+    ], 'concat das partes do avatar');
     const data = await ff.readFile(outputName);
     // GARANTIA (fix 2026-07-03): valida a saída ANTES de devolver. Se a instância
     // ffmpeg estava zumbi/travou, o readFile pode voltar vazio/parcial — sem isto
@@ -2419,7 +2436,7 @@ export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Pro
   const progressHandler = wireProgress(ff, opts.onProgress);
   try {
     await ff.writeFile(inputName, await fetchFile(file));
-    await ff.exec([
+    await execOrThrow(ff, [
       '-i', inputName,
       '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setpts=PTS-STARTPTS',
       '-af', 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS',
@@ -2429,7 +2446,7 @@ export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Pro
       '-c:a', 'aac', '-b:a', '256k', '-ar', '48000', '-ac', '2',
       '-movflags', '+faststart',
       outputName,
-    ]);
+    ], 'normalização da parte pro concat');
     const data = await ff.readFile(outputName);
     // GARANTIA (fix 2026-07-03): saída de instância zumbi vira erro, não parte
     // fantasma que corrompe o fast-concat seguinte (que copia sem re-encodar).
@@ -2493,7 +2510,9 @@ export async function concatVideosFast(
     // qualidade. Video continua -c copy (rápido).
     //
     // -fflags +genpts: regenera timestamps (Web Audio API decode no decupagem)
-    await ff.exec([
+    // rc≠0 vira throw → o caller cai no concatAvatarParts (re-encode), que é
+    // exatamente a escada documentada acima pra partes divergentes.
+    await execOrThrow(ff, [
       '-fflags', '+genpts',
       '-f', 'concat',
       '-safe', '0',
@@ -2507,7 +2526,7 @@ export async function concatVideosFast(
       '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
       outputName,
-    ]);
+    ], 'concat rápido');
     const data = await ff.readFile(outputName);
     // GARANTIA (fix 2026-07-03): o fast-concat (-c:v copy) sobre instância zumbi
     // podia produzir MP4 sem moov/vazio e devolver "sucesso" → validamos aqui.
@@ -2541,14 +2560,14 @@ async function extractSmallFrameAt(
   timeSec: number,
   outName: string,
 ): Promise<Blob> {
-  await ff.exec([
+  await execOrThrow(ff, [
     '-ss', timeSec.toFixed(2),
     '-i', inputName,
     '-vframes', '1',
     '-vf', 'scale=384:-2:flags=fast_bilinear',
     '-q:v', '6',
     outName,
-  ]);
+  ], 'extração do frame pra IA');
   const data = await ff.readFile(outName);
   await safeDelete(ff, outName);
   return toBlob(data, 'image/jpeg');
@@ -2715,8 +2734,11 @@ export async function overlaySegmentsOnVideo(
       '-y', outputName,
     );
 
-    await ff.exec(args);
+    await execOrThrow(ff, args, 'overlay dos segmentos lipsync');
     const data = await ff.readFile(outputName);
+    // Saída truncada (OOM/instância zumbi) vira erro → o vaFFmpegRetry do
+    // caller re-tenta com instância limpa em vez de entregar vídeo quebrado.
+    assertValidMp4(data as Uint8Array, 'vídeo com lipsync aplicado');
     return toBlob(data as Uint8Array, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
@@ -2794,15 +2816,25 @@ export async function removeAvatarSilences(
     await ff.writeFile(inputName, await fetchFile(file));
 
     ff.on('log', logHandler);
+    let scanRc = -1;
     try {
       // -32dB = ruido ambiente; d = duracao minima do silencio pra contar.
-      await ff.exec([
+      scanRc = await ff.exec([
         '-i', inputName,
         '-af', `silencedetect=noise=-32dB:d=${toleranceSec.toFixed(3)}`,
         '-f', 'null', '-',
       ]);
     } finally {
       ff.off('log', logHandler);
+    }
+    // Scan que falhou (rc≠0) pode ter parado no MEIO do arquivo — a lista de
+    // silêncios estaria incompleta e o corte comeria fala válida. Fallback
+    // real: devolve o original SEM cortar (remoção de silêncio é melhoria,
+    // não requisito) — mesmo degrade já usado quando não há silêncio nenhum.
+    if (scanRc !== 0) {
+      console.warn(`[ffmpeg-worker] removeAvatarSilences: silencedetect falhou (rc=${scanRc}) — devolvendo o vídeo sem corte de silêncios.`);
+      await safeDelete(ff, inputName);
+      return file;
     }
 
     // Sem duracao confiavel ou sem silencios → nada a cortar, devolve original.
@@ -2903,7 +2935,7 @@ export async function mindAdsMontage(
 
       if (take.type === 'avatar') {
         // Recorte direto do avatar
-        await ff.exec([
+        await execOrThrow(ff, [
           '-ss', take.startSec.toFixed(3),
           '-to', take.endSec.toFixed(3),
           '-i', avatarName,
@@ -2918,7 +2950,7 @@ export async function mindAdsMontage(
           '-r', '30',
           '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
           segName,
-        ]);
+        ], `recorte do take ${take.n}`);
       } else {
         // Broll: video da broll, audio do avatar nesse range
         if (!take.brollVideo) {
@@ -2938,7 +2970,7 @@ export async function mindAdsMontage(
           `tpad=stop_mode=clone:stop_duration=${dur.toFixed(3)},` +
           `trim=duration=${dur.toFixed(3)},setpts=PTS-STARTPTS`;
 
-        await ff.exec([
+        await execOrThrow(ff, [
           // Input 0: broll video (sem audio)
           '-i', brollName,
           // Input 1: avatar — vamos extrair audio do range
@@ -2960,7 +2992,7 @@ export async function mindAdsMontage(
           '-b:a', '160k',
           '-r', '30',
           segName,
-        ]);
+        ], `montagem do take broll ${take.n}`);
       }
     }
 
@@ -2974,14 +3006,14 @@ export async function mindAdsMontage(
     tempFiles.push(concatedName);
 
     opts.onStage?.('Concatenando segmentos...');
-    await ff.exec([
+    await execOrThrow(ff, [
       '-f', 'concat',
       '-safe', '0',
       '-i', concatName,
       '-c', 'copy',
       '-movflags', '+faststart',
       concatedName,
-    ]);
+    ], 'concat dos segmentos');
 
     // 3) Hook video opcional no inicio (so suporta fullscreen por enquanto;
     //    split/react ficam no proximo round — precisa de overlay timing)
@@ -2996,7 +3028,7 @@ export async function mindAdsMontage(
       await ff.writeFile(hookName, await fetchFile(input.hookVideo));
 
       // Padroniza hook video pra mesmo formato dos segmentos
-      await ff.exec([
+      await execOrThrow(ff, [
         '-i', hookName,
         '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
         '-c:v', 'libx264',
@@ -3007,7 +3039,7 @@ export async function mindAdsMontage(
         '-b:a', '160k',
         '-r', '30',
         hookProcessed,
-      ]);
+      ], 'processamento do hook');
 
       // Concat hook + concated
       const concatList2 = `file '${hookProcessed}'\nfile '${concatedName}'`;
@@ -3015,14 +3047,14 @@ export async function mindAdsMontage(
       tempFiles.push(concatName2);
       await ff.writeFile(concatName2, new TextEncoder().encode(concatList2));
 
-      await ff.exec([
+      await execOrThrow(ff, [
         '-f', 'concat',
         '-safe', '0',
         '-i', concatName2,
         '-c', 'copy',
         '-movflags', '+faststart',
         finalWithHook,
-      ]);
+      ], 'concat do hook');
 
       withHookName = finalWithHook;
     }
@@ -3038,7 +3070,7 @@ export async function mindAdsMontage(
       await ff.writeFile(bgName, await fetchFile(input.bgMusic));
       const bgVol = Math.max(0, Math.min(100, input.bgVolume ?? 20)) / 100;
 
-      await ff.exec([
+      await execOrThrow(ff, [
         '-i', withHookName,
         '-stream_loop', '-1', // loop pra cobrir o video se a musica for menor
         '-i', bgName,
@@ -3053,7 +3085,7 @@ export async function mindAdsMontage(
         '-shortest',
         '-movflags', '+faststart',
         finalWithBg,
-      ]);
+      ], 'mix da música de fundo');
       outputName = finalWithBg;
     }
 
