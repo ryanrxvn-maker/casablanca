@@ -226,6 +226,8 @@ export type TypoPreset = {
     firstLineOnly?: boolean;
   };
   karaoke?: KaraokeMode;
+  /** karaokê: alpha das palavras INATIVAS (0.3 = holofote na ativa) */
+  karaokeDim?: number;
   /** como palavras destacadas manualmente aparecem */
   highlightStyle?: 'color' | 'box' | 'underline';
   /** escala extra das palavras destacadas (1 = igual) */
@@ -1823,7 +1825,9 @@ export function drawCaptions(
               Math.min(be, 1.15) * extraS,
             );
             ctx.restore();
-            if (preset.box.autoText) fill = contrastColor(boxFill);
+            // destaque vira caixa accent → o texto SEMPRE contrasta (fix
+            // "chip cobrindo o texto": accent sobre accent sumia a palavra)
+            if (preset.box.autoText || isHi) fill = contrastColor(boxFill);
           }
         }
 
@@ -1855,7 +1859,15 @@ export function drawCaptions(
           fill = contrastColor(accent);
         }
 
-        drawWord(d, block, layout, wi, wx, baseY, fill, fx, loopSpec, tMs, seedBase, outAlpha, unitIdx, extraS);
+        // holofote do karaokê: palavras inativas esmaecem
+        const dimMul =
+          preset.karaokeDim !== undefined &&
+          karaoke !== 'none' &&
+          karaoke !== 'fill' &&
+          !isActive
+            ? preset.karaokeDim
+            : 1;
+        drawWord(d, block, layout, wi, wx, baseY, fill, fx, loopSpec, tMs, seedBase, outAlpha * dimMul, unitIdx, extraS);
 
         // sublinhados
         if (pass === 'base') {
@@ -2210,6 +2222,60 @@ function drawCaret(
     ctx.fillRect(x, y - lineH * 0.62, fontPx * 0.52, lineH * 0.72);
   }
   ctx.restore();
+}
+
+/**
+ * BBox da legenda no tempo t (coordenadas do canvas) — hit-test pro editor:
+ * clicar seleciona, arrastar move, alça redimensiona, duplo clique edita.
+ * Usa exatamente a mesma geometria do drawCaptions.
+ */
+export function captionBBoxAt(
+  ctx: CanvasRenderingContext2D,
+  blocks: Block[],
+  basePreset: TypoPreset,
+  style: StyleState,
+  tMs: number,
+  W: number,
+  H: number,
+): { x: number; y: number; w: number; h: number; blockId: string } | null {
+  const preset =
+    style.fontOverride && style.fontOverride !== basePreset.font
+      ? { ...basePreset, font: style.fontOverride }
+      : basePreset;
+  let block: Block | null = null;
+  for (const b of blocks) {
+    if (tMs >= b.start && tMs < b.end) {
+      block = b;
+      break;
+    }
+    if (b.start > tMs) break;
+  }
+  if (!block || block.words.length === 0) return null;
+  let hiList = style.highlights[block.id] ?? [];
+  if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
+    const auto = autoEmphasisIndex(block);
+    if (auto !== null) hiList = [auto];
+  }
+  const highlights = new Set(hiList);
+  const layout = measureLayout(ctx, block, preset, style, W, highlights);
+  const isSolo = (preset.karaoke ?? 'none') === 'solo';
+  const blockH = isSolo ? layout.lineH : layout.totalH;
+  let topY = style.posY * H - blockH / 2;
+  topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
+  const blockWmax = isSolo
+    ? Math.max(...layout.words.map((w) => w.w))
+    : Math.max(...layout.lines.map((l) => l.width * l.scale));
+  let cx = (style.posX ?? 0.5) * W;
+  const halfW = blockWmax / 2 + W * 0.02;
+  cx = halfW * 2 >= W ? W / 2 : Math.min(Math.max(cx, halfW), W - halfW);
+  const pad = layout.fontPx * 0.45;
+  return {
+    x: cx - blockWmax / 2 - pad,
+    y: topY - pad,
+    w: blockWmax + pad * 2,
+    h: blockH + pad * 2,
+    blockId: block.id,
+  };
 }
 
 // ─── Demo (galeria de modelos) ──────────────────────────────────────────────

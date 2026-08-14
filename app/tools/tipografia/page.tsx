@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from 'react';
 import { TierGate } from '@/components/TierGate';
-import { ToolShell } from '@/components/ToolShell';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -27,6 +26,7 @@ import {
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
 import {
+  ToolHero,
   ToolStep,
   ToolDropzone,
   ToolAction,
@@ -44,6 +44,7 @@ import {
 import {
   drawCaptions,
   drawPresetDemo,
+  captionBBoxAt,
   DEFAULT_STYLE,
   type Block,
   type StyleState,
@@ -567,17 +568,20 @@ function TipografiaInner() {
   const totalWords = words.length;
 
   return (
-    <ToolShell
-      title="Tipografia Automática"
-      eyebrow="Letterings animados"
-      description="Sobe o vídeo e a fala vira lettering animado profissional, no tempo exato do áudio — escolhe o modelo, edita o texto e baixa com a legenda queimada."
-      hue={HUE}
-      icon={<IconTipografia size={30} />}
-    >
+    <div className="mx-auto w-full max-w-[1720px] px-5 pt-6 md:px-8">
+      <ToolHero
+        title="Tipografia Automática"
+        eyebrow="Letterings animados"
+        subtitle="Sobe o vídeo e a fala vira lettering animado profissional, no tempo exato do áudio — escolhe o modelo, edita direto no preview e baixa com a legenda queimada."
+        hue={HUE}
+        icon={<IconTipografia size={30} />}
+      />
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-6">
       <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['groq']} />
 
-        {/* ── Passo 1: arquivo ── */}
+        {/* ── Passos 1 e 2 lado a lado (economia vertical) ── */}
+        <div className="grid gap-5 lg:grid-cols-2">
         <ToolStep
           n={1}
           icon={<IconStepMic size={18} />}
@@ -653,6 +657,7 @@ function TipografiaInner() {
             ) : null}
           </div>
         </ToolStep>
+        </div>
 
         {/* ── Passo 3: editor ── */}
         {blocks.length > 0 && videoUrl ? (
@@ -663,19 +668,30 @@ function TipografiaInner() {
             hint="Clica no modelo pra ver ao vivo — o preview é exatamente o que sai no MP4"
             hue={HUE}
           >
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
-              <PreviewPane
-                videoUrl={videoUrl}
-                videoRef={videoRef}
-                blocks={blocks}
-                preset={preset}
-                style={style}
-                onTimeBlock={setActiveBlockId}
-                onPosChange={(x, y) => {
-                  setPosX(x);
-                  setPosY(y);
-                }}
-              />
+            <div className="grid gap-6 xl:grid-cols-[minmax(380px,500px)_minmax(0,1fr)]">
+              <div className="min-w-0">
+                <PreviewPane
+                  videoUrl={videoUrl}
+                  videoRef={videoRef}
+                  blocks={blocks}
+                  preset={preset}
+                  style={style}
+                  fontScale={fontScale}
+                  onFontScale={setFontScale}
+                  onTimeBlock={setActiveBlockId}
+                  onPosChange={(x, y) => {
+                    setPosX(x);
+                    setPosY(y);
+                  }}
+                  onSelectBlock={(id) => setSelBlockId(id)}
+                  onEditText={editBlockText}
+                />
+                <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
+                  Arrasta a legenda pra posicionar (snap no centro) · clique
+                  seleciona e mostra a alça de tamanho · duplo clique edita o
+                  texto ali mesmo
+                </p>
+              </div>
               <div className="min-w-0 flex flex-col gap-5">
                 <PresetGallery
                   presetId={presetId}
@@ -841,7 +857,8 @@ function TipografiaInner() {
           </div>
         ) : null}
       </div>
-    </ToolShell>
+      </div>
+    </div>
   );
 }
 
@@ -853,16 +870,24 @@ function PreviewPane({
   blocks,
   preset,
   style,
+  fontScale,
+  onFontScale,
   onTimeBlock,
   onPosChange,
+  onSelectBlock,
+  onEditText,
 }: {
   videoUrl: string;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
   blocks: Block[];
   preset: ReturnType<typeof getPreset>;
   style: StyleState;
+  fontScale: number;
+  onFontScale: (v: number) => void;
   onTimeBlock: (id: string | null) => void;
   onPosChange: (x: number, y: number) => void;
+  onSelectBlock: (id: string) => void;
+  onEditText: (id: string, text: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -871,11 +896,29 @@ function PreviewPane({
   const [dur, setDur] = useState(0);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   // drag da legenda: estado vivo pro rAF desenhar as guias sem re-render
-  const dragRef = useRef<{ moved: boolean; snapX: boolean; snapY: boolean } | null>(null);
+  const dragRef = useRef<{
+    mode: 'move' | 'scale';
+    moved: boolean;
+    snapX: boolean;
+    snapY: boolean;
+    dist0: number;
+    scale0: number;
+  } | null>(null);
+  // seleção (caixa + alça) e bbox vivos pro rAF
+  const selRef = useRef(false);
+  const bboxRef = useRef<{ x: number; y: number; w: number; h: number; blockId: string } | null>(null);
+  const dprRef = useRef(1);
+  const [editing, setEditing] = useState<{
+    id: string;
+    value: string;
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
 
   // refs pros valores vivos dentro do rAF (evita recriar o loop a cada edição)
-  const liveRef = useRef({ blocks, preset, style });
-  liveRef.current = { blocks, preset, style };
+  const liveRef = useRef({ blocks, preset, style, fontScale });
+  liveRef.current = { blocks, preset, style, fontScale };
 
   useEffect(() => {
     let raf = 0;
@@ -898,9 +941,29 @@ function PreviewPane({
           ctx.clearRect(0, 0, W, H);
           const { blocks: b, preset: p, style: s } = liveRef.current;
           drawCaptions(ctx, b, p, s, v.currentTime * 1000, W, H);
+          dprRef.current = dpr;
+          // bbox viva pro hit-test (clicar/arrastar/alça/duplo clique)
+          bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, W, H);
+          // caixa de seleção estilo CapCut (só preview, nunca no export)
+          const bb = bboxRef.current;
+          if (selRef.current && bb) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(251,191,36,0.95)';
+            ctx.lineWidth = Math.max(1.5, dpr);
+            ctx.setLineDash([7 * dpr, 5 * dpr]);
+            ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
+            ctx.setLineDash([]);
+            // alça de redimensionar (canto inferior direito)
+            const hs = 9 * dpr;
+            ctx.fillStyle = '#fbbf24';
+            ctx.strokeStyle = '#1a1a1a';
+            ctx.fillRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
+            ctx.strokeRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
+            ctx.restore();
+          }
           // réguas de centralização (só no preview, nunca no export)
           const drag = dragRef.current;
-          if (drag) {
+          if (drag && drag.mode === 'move' && drag.moved) {
             ctx.save();
             ctx.lineWidth = Math.max(1, dpr);
             ctx.setLineDash(drag.snapX ? [] : [6 * dpr, 6 * dpr]);
@@ -969,19 +1032,62 @@ function PreviewPane({
         style={dims ? { aspectRatio: `${dims.w} / ${dims.h}` } : { minHeight: 220 }}
         onPointerDown={(e) => {
           const wrap = wrapRef.current;
-          if (!wrap) return;
+          if (!wrap || editing) return;
           wrap.setPointerCapture(e.pointerId);
-          dragRef.current = { moved: false, snapX: false, snapY: false };
+          const rect = wrap.getBoundingClientRect();
+          const dpr = dprRef.current;
+          const px = (e.clientX - rect.left) * dpr;
+          const py = (e.clientY - rect.top) * dpr;
+          const bb = bboxRef.current;
+          const handleR = 14 * dpr;
+          const onHandle =
+            !!bb &&
+            selRef.current &&
+            Math.abs(px - (bb.x + bb.w)) < handleR &&
+            Math.abs(py - (bb.y + bb.h)) < handleR;
+          if (onHandle && bb) {
+            const cxB = bb.x + bb.w / 2;
+            const cyB = bb.y + bb.h / 2;
+            dragRef.current = {
+              mode: 'scale',
+              moved: false,
+              snapX: false,
+              snapY: false,
+              dist0: Math.max(12, Math.hypot(px - cxB, py - cyB)),
+              scale0: liveRef.current.fontScale,
+            };
+          } else {
+            dragRef.current = {
+              mode: 'move',
+              moved: false,
+              snapX: false,
+              snapY: false,
+              dist0: 0,
+              scale0: 1,
+            };
+          }
         }}
         onPointerMove={(e) => {
           const wrap = wrapRef.current;
           const drag = dragRef.current;
           if (!wrap || !drag) return;
           const rect = wrap.getBoundingClientRect();
-          let nx = (e.clientX - rect.left) / rect.width;
-          let ny = (e.clientY - rect.top) / rect.height;
           if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) drag.moved = true;
           if (!drag.moved) return;
+          if (drag.mode === 'scale') {
+            const bb = bboxRef.current;
+            if (!bb) return;
+            const dpr = dprRef.current;
+            const px = (e.clientX - rect.left) * dpr;
+            const py = (e.clientY - rect.top) * dpr;
+            const dist = Math.hypot(px - (bb.x + bb.w / 2), py - (bb.y + bb.h / 2));
+            onFontScale(
+              Math.min(2, Math.max(0.45, drag.scale0 * (dist / drag.dist0))),
+            );
+            return;
+          }
+          let nx = (e.clientX - rect.left) / rect.width;
+          let ny = (e.clientY - rect.top) / rect.height;
           // snap no centro (régua acende sólida quando encaixa)
           drag.snapX = Math.abs(nx - 0.5) < 0.03;
           drag.snapY = Math.abs(ny - 0.5) < 0.03;
@@ -996,10 +1102,53 @@ function PreviewPane({
           const drag = dragRef.current;
           dragRef.current = null;
           wrapRef.current?.releasePointerCapture(e.pointerId);
-          if (drag && !drag.moved) togglePlay();
+          if (!drag || drag.moved) return;
+          // clique seco: dentro da legenda = selecionar; fora = play/deselect
+          const wrap = wrapRef.current;
+          const bb = bboxRef.current;
+          if (wrap && bb) {
+            const rect = wrap.getBoundingClientRect();
+            const dpr = dprRef.current;
+            const px = (e.clientX - rect.left) * dpr;
+            const py = (e.clientY - rect.top) * dpr;
+            const inside =
+              px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h;
+            if (inside) {
+              selRef.current = true;
+              onSelectBlock(bb.blockId);
+              return;
+            }
+          }
+          if (selRef.current) {
+            selRef.current = false;
+          } else {
+            togglePlay();
+          }
         }}
         onPointerCancel={() => {
           dragRef.current = null;
+        }}
+        onDoubleClick={(e) => {
+          const wrap = wrapRef.current;
+          const bb = bboxRef.current;
+          const v = videoRef.current;
+          if (!wrap || !bb || !v) return;
+          const rect = wrap.getBoundingClientRect();
+          const dpr = dprRef.current;
+          const px = (e.clientX - rect.left) * dpr;
+          const py = (e.clientY - rect.top) * dpr;
+          if (px < bb.x || px > bb.x + bb.w || py < bb.y || py > bb.y + bb.h) return;
+          v.pause();
+          const block = liveRef.current.blocks.find((x) => x.id === bb.blockId);
+          if (!block) return;
+          selRef.current = true;
+          setEditing({
+            id: bb.blockId,
+            value: blockText(block),
+            left: bb.x / dpr,
+            top: bb.y / dpr,
+            width: Math.max(160, bb.w / dpr),
+          });
         }}
       >
         <video
@@ -1009,7 +1158,32 @@ function PreviewPane({
           className="pointer-events-none absolute inset-0 h-full w-full"
         />
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
-        {!playing ? (
+        {editing ? (
+          <input
+            autoFocus
+            value={editing.value}
+            onChange={(e) => setEditing({ ...editing, value: e.target.value })}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const v = editing.value.trim();
+                if (v) onEditText(editing.id, v);
+                setEditing(null);
+              } else if (e.key === 'Escape') {
+                setEditing(null);
+              }
+            }}
+            onBlur={() => {
+              const v = editing.value.trim();
+              if (v) onEditText(editing.id, v);
+              setEditing(null);
+            }}
+            className="absolute z-30 rounded-[8px] border border-amber-400/80 bg-black/85 px-2 py-1.5 text-center text-[14px] font-semibold text-white outline-none shadow-[0_0_18px_-4px_rgba(251,191,36,0.7)]"
+            style={{ left: editing.left, top: editing.top, width: editing.width }}
+          />
+        ) : null}
+        {!playing && !editing ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur-sm">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1211,6 +1385,7 @@ function Timeline({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [pps, setPps] = useState(0); // px por segundo (0 = ainda não ajustou)
   const dragRef = useRef<{
     id: string;
@@ -1284,7 +1459,11 @@ function Timeline({
       >
         <div
           className="relative select-none"
-          style={{ width: trackW, height: 74 }}
+          style={{
+            width: trackW,
+            height: 136,
+            backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) ${effPps}px, transparent ${effPps}px, transparent ${effPps * 2}px)`,
+          }}
           onPointerDown={(e) => {
             // clique na área vazia = seek
             if (disabled) return;
@@ -1296,7 +1475,7 @@ function Timeline({
           }}
         >
           {/* régua */}
-          <div className="absolute inset-x-0 top-0 h-[18px] border-b border-line/60">
+          <div className="absolute inset-x-0 top-0 h-[22px] border-b border-line/60 bg-black/40">
             {ticks.map((t) => (
               <div
                 key={t}
@@ -1304,7 +1483,7 @@ function Timeline({
                 style={{ left: t * effPps }}
               >
                 {t % (step * 5) === 0 ? (
-                  <span className="mono absolute left-1 top-[1px] text-[9px] text-text-muted">
+                  <span className="mono absolute left-1.5 top-[3px] text-[10px] text-text-muted">
                     {fmt(t)}
                   </span>
                 ) : null}
@@ -1322,10 +1501,10 @@ function Timeline({
                 key={b.id}
                 data-block="1"
                 className={
-                  'absolute top-[24px] h-[42px] cursor-grab overflow-hidden rounded-[8px] border px-1.5 py-0.5 transition-colors active:cursor-grabbing ' +
+                  'absolute top-[30px] h-[96px] cursor-grab overflow-hidden rounded-[10px] border px-2 py-1.5 transition-colors active:cursor-grabbing ' +
                   (sel
-                    ? 'z-10 border-amber-400/80 bg-amber-400/25'
-                    : 'border-violet/40 bg-violet/15 hover:border-amber-400/50')
+                    ? 'z-10 border-amber-400/90 bg-gradient-to-b from-amber-400/35 to-amber-400/10 shadow-[0_0_16px_-4px_rgba(251,191,36,0.6)]'
+                    : 'border-violet/50 bg-gradient-to-b from-violet/30 to-violet/[0.07] hover:border-amber-400/60')
                 }
                 style={{ left, width }}
                 onPointerDown={(e) => {
@@ -1352,31 +1531,48 @@ function Timeline({
                 onPointerMove={(e) => {
                   const drag = dragRef.current;
                   if (!drag || drag.id !== b.id) return;
-                  const deltaMs = ((e.clientX - drag.startX) / effPps) * 1000;
+                  // snap de 50ms = precisão previsível
+                  const deltaMs =
+                    Math.round((((e.clientX - drag.startX) / effPps) * 1000) / 50) * 50;
+                  let ns = drag.origStart;
+                  let ne = drag.origEnd;
                   if (drag.mode === 'move') {
-                    onRetime(b.id, drag.origStart + deltaMs, drag.origEnd + deltaMs, 'move');
+                    ns = drag.origStart + deltaMs;
+                    ne = drag.origEnd + deltaMs;
+                    onRetime(b.id, ns, ne, 'move');
                   } else if (drag.mode === 'trim-start') {
-                    onRetime(b.id, drag.origStart + deltaMs, drag.origEnd, 'trim');
+                    ns = drag.origStart + deltaMs;
+                    onRetime(b.id, ns, ne, 'trim');
                   } else {
-                    onRetime(b.id, drag.origStart, drag.origEnd + deltaMs, 'trim');
+                    ne = drag.origEnd + deltaMs;
+                    onRetime(b.id, ns, ne, 'trim');
+                  }
+                  const tip = tooltipRef.current;
+                  if (tip) {
+                    tip.style.display = 'block';
+                    tip.style.left = `${e.clientX + 14}px`;
+                    tip.style.top = `${e.clientY - 34}px`;
+                    tip.textContent = `${(ns / 1000).toFixed(2)}s → ${(ne / 1000).toFixed(2)}s`;
                   }
                 }}
                 onPointerUp={(e) => {
                   dragRef.current = null;
+                  if (tooltipRef.current) tooltipRef.current.style.display = 'none';
                   (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
                 }}
                 onPointerCancel={() => {
                   dragRef.current = null;
+                  if (tooltipRef.current) tooltipRef.current.style.display = 'none';
                 }}
               >
                 {/* alças de corte */}
-                <span className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-l-[8px] bg-white/30" />
-                <span className="pointer-events-none absolute inset-y-0 right-0 w-[3px] rounded-r-[8px] bg-white/30" />
-                <span className="pointer-events-none block truncate text-[10px] leading-tight text-white/85">
+                <span className="pointer-events-none absolute inset-y-0 left-0 w-[5px] rounded-l-[10px] bg-white/40" />
+                <span className="pointer-events-none absolute inset-y-0 right-0 w-[5px] rounded-r-[10px] bg-white/40" />
+                <span className="pointer-events-none block truncate text-[11px] font-semibold leading-snug text-white/90">
                   {blockText(b)}
                 </span>
-                <span className="pointer-events-none mono block text-[8.5px] text-white/50">
-                  {((b.end - b.start) / 1000).toFixed(1)}s
+                <span className="pointer-events-none mono mt-0.5 block text-[9.5px] text-white/55">
+                  {(b.start / 1000).toFixed(1)}s · {((b.end - b.start) / 1000).toFixed(1)}s
                 </span>
               </div>
             );
@@ -1391,6 +1587,12 @@ function Timeline({
           </div>
         </div>
       </div>
+      {/* tooltip de precisão durante o arrasto */}
+      <div
+        ref={tooltipRef}
+        className="mono pointer-events-none fixed z-50 hidden rounded-[7px] border border-amber-400/60 bg-black/90 px-2 py-1 text-[11px] text-amber-200 shadow-lg"
+        style={{ display: 'none' }}
+      />
     </div>
   );
 }
@@ -1732,7 +1934,7 @@ function BlockList({
           clica na palavra pra pintar de destaque
         </span>
       </div>
-      <div className="max-h-[420px] overflow-y-auto rounded-[14px] border border-line">
+      <div className="max-h-[280px] overflow-y-auto rounded-[14px] border border-line">
         {blocks.map((b, i) => {
           const sel = b.id === selId;
           const isActive = b.id === activeId;
