@@ -1827,8 +1827,15 @@ export function drawCaptions(
           }
         }
 
-        // highlight manual estilo box/underline
-        if (pass === 'base' && isHi && preset.highlightStyle === 'box' && !preset.box) {
+        // highlight manual estilo box/underline (caixa de PALAVRA convive com
+        // caixa de linha/bloco — ref callout: palavra em caixa vermelha DENTRO
+        // da pílula branca; só conflita com box mode 'word')
+        if (
+          pass === 'base' &&
+          isHi &&
+          preset.highlightStyle === 'box' &&
+          (!preset.box || preset.box.mode !== 'word')
+        ) {
           const padX = fontPx * 0.18;
           ctx.save();
           ctx.globalAlpha = outAlpha * (fx?.alpha ?? 1);
