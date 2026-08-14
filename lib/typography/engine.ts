@@ -197,6 +197,12 @@ export type TypoPreset = {
   highlightScale?: number;
   /** cor do destaque manual quando 'accent' não contrasta (ex.: texto sobre caixa accent) */
   highlightColor?: PresetColor;
+  /** gradiente PRÓPRIO da palavra destacada (ouro no "2026", roxo no "DINÂMICOS") */
+  highlightGradient?: Array<[number, PresetColor]>;
+  /** a palavra destacada quebra pra PRÓPRIA linha ("hoje / VOCÊ VAI / aprender") */
+  emphasisBreak?: boolean;
+  /** pirâmide: CADA palavra na própria linha (ref "Comenta PACK") */
+  stack?: boolean;
   unit: Unit;
   in: AnimSpec;
   out: { kind: OutKind; dur: number; ease?: EaseName };
@@ -377,7 +383,7 @@ function measureLayout(
   const upper = style.uppercase ?? preset.uppercase ?? false;
   const hlScale = preset.highlightScale ?? 1;
   const hlKey =
-    hlScale !== 1 || preset.sizeCycle || preset.mix
+    hlScale !== 1 || preset.sizeCycle || preset.mix || preset.emphasisBreak || preset.stack
       ? Array.from(highlights).sort((a, b) => a - b).join('.')
       : '';
   const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${style.fontScale}|${upper}|${W}|${hlKey}`;
@@ -420,23 +426,36 @@ function measureLayout(
   ctx.font = fontCss(preset.font, fontPx);
   const spaceW = ctx.measureText(' ').width + (preset.spacing ?? 0) * fontPx;
 
-  // Wrap greedy
+  // Wrap greedy + quebras estruturais (stack = pirâmide; emphasisBreak = a
+  // palavra forte ganha a PRÓPRIA linha, como nas composições de título)
   const lines: LineLayout[] = [];
   let cur: number[] = [];
   let curW = 0;
-  words.forEach((w, i) => {
-    const tryW = cur.length === 0 ? w.w : curW + spaceW + w.w;
-    if (cur.length > 0 && tryW > maxLineW) {
+  const flushLine = () => {
+    if (cur.length > 0) {
       lines.push({ wordIdx: cur, width: curW, scale: 1 });
       cur = [];
       curW = 0;
     }
+  };
+  words.forEach((w, i) => {
+    const ownLine =
+      preset.stack || (preset.emphasisBreak && highlights.has(i));
+    if (ownLine) {
+      flushLine();
+      w.line = lines.length;
+      w.x = 0;
+      lines.push({ wordIdx: [i], width: w.w, scale: 1 });
+      return;
+    }
+    const tryW = cur.length === 0 ? w.w : curW + spaceW + w.w;
+    if (cur.length > 0 && tryW > maxLineW) flushLine();
     w.line = lines.length;
     w.x = cur.length === 0 ? 0 : curW + spaceW;
     curW = cur.length === 0 ? w.w : curW + spaceW + w.w;
     cur.push(i);
   });
-  if (cur.length > 0) lines.push({ wordIdx: cur, width: curW, scale: 1 });
+  flushLine();
 
   // Linha com uma palavra gigante: encolhe só aquela linha
   for (const line of lines) {
@@ -1385,9 +1404,12 @@ export function drawCaptions(
         let fill: Paint;
         if (preset.mix) {
           // tipografia mista: a destacada mantém o look principal do preset
-          // (gradiente/accent); as de apoio usam a cor do mix
+          // (gradiente/accent — ou o gradiente PRÓPRIO do destaque); as de
+          // apoio usam a cor do mix
           if (isHi) {
-            fill = resolveFill(d, lineH);
+            fill = preset.highlightGradient
+              ? resolveHighlightFill(d, lineH)
+              : resolveFill(d, lineH);
           } else {
             fill = resolveColor(preset.mix.color ?? 'primary', primary, accent);
             if (preset.mix.accentLast && wi === block.words.length - 1) fill = accent;
@@ -1403,7 +1425,7 @@ export function drawCaptions(
           ) {
             fill = accent;
           }
-          if (isHi) fill = resolveColor(preset.highlightColor ?? 'accent', primary, accent);
+          if (isHi) fill = resolveHighlightFill(d, lineH);
         }
         if (karaoke === 'word-color' && isActive) fill = accent;
         if (isFill) fill = pass === 'base' ? fill : accent;
@@ -1638,6 +1660,19 @@ function getTrippyPattern(d: DrawCtx): Paint {
       .scaleSelf(s, s),
   );
   return pat;
+}
+
+/** Fill da palavra DESTACADA: gradiente próprio quando o preset define. */
+function resolveHighlightFill(d: DrawCtx, lineH: number): Paint {
+  const p = d.preset;
+  if (p.highlightGradient) {
+    const g = d.ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
+    for (const [o, c] of p.highlightGradient) {
+      g.addColorStop(o, resolveColor(c, d.primary, d.accent));
+    }
+    return g;
+  }
+  return resolveColor(p.highlightColor ?? 'accent', d.primary, d.accent);
 }
 
 function resolveFill(d: DrawCtx, lineH: number): Paint {
