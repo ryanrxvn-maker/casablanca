@@ -21,6 +21,16 @@
 
 import { fontCss, type FontKey } from './fonts';
 
+// Negrito/italico SINTETICOS do editor (setados por drawCaptions/captionBBoxAt
+// a partir do estilo efetivo — o italic oblique o navegador sintetiza no
+// canvas; o negrito e um stroke fino da propria cor no fillWordText).
+let FAUX_ITALIC = false;
+let FAUX_BOLD = false;
+function fs(key: FontKey, px: number): string {
+  const base = fontCss(key, px);
+  return FAUX_ITALIC && !base.startsWith('italic') ? 'italic ' + base : base;
+}
+
 // ─── Tipos base ─────────────────────────────────────────────────────────────
 
 export type TWord = { text: string; start: number; end: number };
@@ -268,7 +278,33 @@ export type StyleState = {
   fontOverride?: FontKey | null;
   /** posição horizontal do centro da legenda (0..1; default 0.5 = centro) */
   posX?: number;
+  /** caixa estilo CapCut: TT (upper) / tt (lower) / Tt (original) / null = do modelo */
+  textCase?: 'upper' | 'lower' | 'original' | null;
+  /** negrito sintético (engrossa com stroke da própria cor) */
+  bold?: boolean;
+  /** itálico sintético (oblique do navegador) */
+  italic?: boolean;
+  /**
+   * "Aplicar a todas" DESLIGADO: overrides por bloco — o merge acontece
+   * dentro do drawCaptions, então preview E export honram igual.
+   */
+  perBlock?: Record<string, PerBlockStyle>;
 };
+
+export type PerBlockStyle = Partial<
+  Pick<
+    StyleState,
+    | 'fontScale'
+    | 'primary'
+    | 'accent'
+    | 'posX'
+    | 'posY'
+    | 'textCase'
+    | 'bold'
+    | 'italic'
+    | 'fontOverride'
+  >
+>;
 
 export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   fontScale: 1,
@@ -438,7 +474,17 @@ function measureLayout(
   W: number,
   highlights: ReadonlySet<number>,
 ): BlockLayout {
-  const upper = style.uppercase ?? preset.uppercase ?? false;
+  // caixa estilo CapCut: TT / tt / Tt(original) — null cai no modelo
+  const tcase: 'upper' | 'lower' | 'original' =
+    style.textCase === 'upper'
+      ? 'upper'
+      : style.textCase === 'lower'
+        ? 'lower'
+        : style.textCase === 'original'
+          ? 'original'
+          : (style.uppercase ?? preset.uppercase ?? false)
+            ? 'upper'
+            : 'original';
   const hlScale = preset.highlightScale ?? 1;
   const hlKey =
     hlScale !== 1 ||
@@ -449,7 +495,7 @@ function measureLayout(
     preset.highlightFont
       ? Array.from(highlights).sort((a, b) => a - b).join('.')
       : '';
-  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${upper}|${W}|${hlKey}`;
+  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
   if (layoutCache.size > 300) layoutCache.clear();
@@ -472,13 +518,15 @@ function measureLayout(
       ? fontPx * preset.mix!.scale
       : fontPx * cyc * (isHi ? hlScale : 1);
     const sp = ((mixed ? preset.mix!.spacing ?? preset.spacing : preset.spacing) ?? 0) * fpx;
-    ctx.font = fontCss(fk, fpx);
+    ctx.font = fs(fk, fpx);
     const text =
       mixed && preset.mix!.lowercase
         ? w.text.toLowerCase()
-        : upper
+        : tcase === 'upper'
           ? w.text.toUpperCase()
-          : w.text;
+          : tcase === 'lower'
+            ? w.text.toLowerCase()
+            : w.text;
     const chars: CharLayout[] = [];
     let x = 0;
     for (const ch of Array.from(text)) {
@@ -490,7 +538,7 @@ function measureLayout(
     return { text, line: 0, x: 0, w: w0, fpx, fk, mixed, chars };
   });
 
-  ctx.font = fontCss(preset.font, fontPx);
+  ctx.font = fs(preset.font, fontPx);
   const spaceW = ctx.measureText(' ').width + (preset.spacing ?? 0) * fontPx;
 
   // Wrap greedy + quebras estruturais (stack = pirâmide; emphasisBreak = a
@@ -789,7 +837,7 @@ function applyTextStyle(
   noGlow = false,
 ) {
   const { ctx, preset } = d;
-  ctx.font = fontCss(fk, fpx);
+  ctx.font = fs(fk, fpx);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
   ctx.fillStyle = fill;
@@ -827,7 +875,7 @@ function fillWordText(
   plain = false,
 ) {
   const { ctx, preset } = d;
-  ctx.font = fontCss(fk, fpx);
+  ctx.font = fs(fk, fpx);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 
@@ -846,6 +894,13 @@ function fillWordText(
     }
     applyTextStyle(d, fill, fpx, fk, true);
     ctx.fillText(text, x, y);
+    if (FAUX_BOLD) {
+      clearShadow(ctx);
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(1, fpx * 0.035);
+      ctx.strokeStyle = fill;
+      ctx.strokeText(text, x, y);
+    }
     return;
   }
 
@@ -936,6 +991,15 @@ function fillWordText(
     ctx.fillText(text, x, y);
   }
   ctx.fillText(text, x, y);
+
+  // negrito sintético: stroke fino da própria cor engrossa os glifos
+  if (FAUX_BOLD) {
+    clearShadow(ctx);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1, fpx * 0.035);
+    ctx.strokeStyle = fill;
+    ctx.strokeText(text, x, y);
+  }
 
   // shine sweep: banda de brilho diagonal varrendo os glifos em loop
   if (preset.shine) {
@@ -1107,18 +1171,11 @@ export function drawCaptions(
   realCtx: CanvasRenderingContext2D,
   blocks: Block[],
   basePreset: TypoPreset,
-  style: StyleState,
+  styleIn: StyleState,
   tMs: number,
   W: number,
   H: number,
 ): void {
-  // troca de fonte pelo editor: só a fonte PRINCIPAL muda; o apoio do mix
-  // mantém a dele (a composição é parte do modelo)
-  const preset =
-    style.fontOverride && style.fontOverride !== basePreset.font
-      ? { ...basePreset, font: style.fontOverride }
-      : basePreset;
-
   let block: Block | null = null;
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -1129,6 +1186,19 @@ export function drawCaptions(
     if (b.start > tMs) break;
   }
   if (!block || block.words.length === 0) return;
+
+  // estilo EFETIVO: "aplicar a todas" desligado grava overrides por bloco
+  const ov = styleIn.perBlock?.[block.id];
+  const style: StyleState = ov ? { ...styleIn, ...ov } : styleIn;
+  FAUX_ITALIC = style.italic === true;
+  FAUX_BOLD = style.bold === true;
+
+  // troca de fonte pelo editor: só a fonte PRINCIPAL muda; o apoio do mix
+  // mantém a dele (a composição é parte do modelo)
+  const preset =
+    style.fontOverride && style.fontOverride !== basePreset.font
+      ? { ...basePreset, font: style.fontOverride }
+      : basePreset;
 
   const primary = style.primary ?? preset.defaultPrimary;
   const accent = style.accent ?? preset.defaultAccent;
@@ -1307,7 +1377,7 @@ export function drawCaptions(
         }
         for (const wi of line.wordIdx) {
           const wl = layout.words[wi];
-          ctx.font = fontCss(wl.fk, wl.fpx);
+          ctx.font = fs(wl.fk, wl.fpx);
           if (ec.outline) {
             ctx.strokeStyle = col;
             ctx.lineWidth = Math.max(1.5, fontPx * 0.035);
@@ -1340,7 +1410,7 @@ export function drawCaptions(
     const w = block.words[activeIdx];
     const wl = layout.words[activeIdx];
     const text = wl.text;
-    ctx.font = fontCss(preset.font, wl.fpx);
+    ctx.font = fs(preset.font, wl.fpx);
     const ww = wl.w;
     const fitScale = Math.min(1, (W * 0.82) / Math.max(ww, 1));
     const fx = computeInFx(preset.in, 0, tMs, w.start, fontPx, seedBase + activeIdx * 977);
@@ -1426,7 +1496,7 @@ export function drawCaptions(
         const by = lineBaseY(li);
         for (const wi of line.wordIdx) {
           const wl = layout.words[wi];
-          fx2.font = fontCss(wl.fk, wl.fpx);
+          fx2.font = fs(wl.fk, wl.fpx);
           fx2.fillStyle = '#ffffff';
           fx2.fillText(wl.text, x0 + wl.x, by);
         }
@@ -1441,7 +1511,7 @@ export function drawCaptions(
         const by = lineBaseY(li);
         for (const wi of line.wordIdx) {
           const wl = layout.words[wi];
-          fx2.font = fontCss(wl.fk, wl.fpx);
+          fx2.font = fs(wl.fk, wl.fpx);
           fx2.strokeText(wl.text, x0 + wl.x, by);
         }
       });
@@ -2097,7 +2167,7 @@ function drawWord(
         prand(seedBase * 13 + gi * 47) < preset.charOutlineRatio;
       if (outlineChar) {
         clearShadow(ctx);
-        ctx.font = fontCss(wl.fk, wl.fpx);
+        ctx.font = fs(wl.fk, wl.fpx);
         ctx.strokeStyle = typeof chFill === 'string' ? chFill : d.primary;
         ctx.lineWidth = Math.max(1.5, wl.fpx * 0.045);
         ctx.lineJoin = 'round';
@@ -2131,7 +2201,7 @@ function drawWord(
       ctx.globalAlpha *= 0.55;
       clearShadow(ctx);
       ctx.fillStyle = 'rgba(255,45,85,0.9)';
-      ctx.font = fontCss(wl.fk, wl.fpx);
+      ctx.font = fs(wl.fk, wl.fpx);
       ctx.fillText(wl.text, -wl.w / 2 + ox, lineH * 0.3);
       ctx.fillStyle = 'rgba(0,229,255,0.9)';
       ctx.fillText(wl.text, -wl.w / 2 - ox, lineH * 0.3);
@@ -2233,15 +2303,11 @@ export function captionBBoxAt(
   ctx: CanvasRenderingContext2D,
   blocks: Block[],
   basePreset: TypoPreset,
-  style: StyleState,
+  styleArg: StyleState,
   tMs: number,
   W: number,
   H: number,
 ): { x: number; y: number; w: number; h: number; blockId: string } | null {
-  const preset =
-    style.fontOverride && style.fontOverride !== basePreset.font
-      ? { ...basePreset, font: style.fontOverride }
-      : basePreset;
   let block: Block | null = null;
   for (const b of blocks) {
     if (tMs >= b.start && tMs < b.end) {
@@ -2251,6 +2317,17 @@ export function captionBBoxAt(
     if (b.start > tMs) break;
   }
   if (!block || block.words.length === 0) return null;
+
+  // mesmo merge por-bloco do drawCaptions (o bbox tem que bater com o draw)
+  const ov = styleArg.perBlock?.[block.id];
+  const style: StyleState = ov ? { ...styleArg, ...ov } : styleArg;
+  FAUX_ITALIC = style.italic === true;
+  FAUX_BOLD = style.bold === true;
+
+  const preset =
+    style.fontOverride && style.fontOverride !== basePreset.font
+      ? { ...basePreset, font: style.fontOverride }
+      : basePreset;
   let hiList = style.highlights[block.id] ?? [];
   if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
     const auto = autoEmphasisIndex(block);

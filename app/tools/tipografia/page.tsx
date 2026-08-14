@@ -48,6 +48,7 @@ import {
   DEFAULT_STYLE,
   type Block,
   type StyleState,
+  type PerBlockStyle,
   type TWord,
 } from '@/lib/typography/engine';
 import { TYPO_PRESETS, TYPO_CATEGORIES, getPreset } from '@/lib/typography/presets';
@@ -83,7 +84,8 @@ const HUE = 'rgba(255,159,10,0.45)';
 
 type Phase = 'idle' | 'transcribing' | 'ready' | 'rendering';
 type Language = 'pt' | 'en' | 'es' | 'auto';
-type UpperMode = 'auto' | 'on' | 'off';
+type UpperMode = 'auto' | 'on' | 'off'; // legado (migração de sessões antigas)
+type CaseMode = 'auto' | 'upper' | 'lower' | 'original';
 
 type ResultState = {
   url: string;
@@ -112,6 +114,10 @@ type SavedSession = {
   autoEmph?: boolean;
   fontOv?: FontKey | null;
   posX?: number;
+  textCase?: CaseMode;
+  bold?: boolean;
+  italic?: boolean;
+  blockStyles?: Record<string, PerBlockStyle>;
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -160,7 +166,14 @@ function TipografiaInner() {
   const [posY, setPosY] = useToolState<number>('tipografia:posy', DEFAULT_STYLE.posY);
   const [primary, setPrimary] = useToolState<string | null>('tipografia:cor1', null);
   const [accent, setAccent] = useToolState<string | null>('tipografia:cor2', null);
-  const [upper, setUpper] = useToolState<UpperMode>('tipografia:upper', 'auto');
+  const [textCase, setTextCase] = useToolState<CaseMode>('tipografia:case', 'auto');
+  const [bold, setBold] = useToolState<boolean>('tipografia:bold', false);
+  const [italic, setItalic] = useToolState<boolean>('tipografia:italic', false);
+  const [applyAll, setApplyAll] = useToolState<boolean>('tipografia:applyall', true);
+  const [blockStyles, setBlockStyles] = useToolState<Record<string, PerBlockStyle>>(
+    'tipografia:blockstyles',
+    {},
+  );
   const [pace, setPace] = useToolState<GroupPace>('tipografia:pace', 'equilibrado');
   const [language, setLanguage] = useToolState<Language>('tipografia:lang', 'pt');
   const [highlights, setHighlights] = useToolState<Record<string, number[]>>(
@@ -176,6 +189,75 @@ function TipografiaInner() {
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // ── Ctrl+Z: histórico de edição (até 40 passos) ──────────────────────────
+  type Snapshot = {
+    blocks: Block[];
+    highlights: Record<string, number[]>;
+    blockStyles: Record<string, PerBlockStyle>;
+    presetId: string;
+    fontScale: number;
+    posX: number;
+    posY: number;
+    primary: string | null;
+    accent: string | null;
+    textCase: CaseMode;
+    bold: boolean;
+    italic: boolean;
+    fontOv: FontKey | null;
+  };
+  const historyRef = useRef<Snapshot[]>([]);
+  const snapRef = useRef<Snapshot | null>(null);
+  snapRef.current = {
+    blocks,
+    highlights,
+    blockStyles,
+    presetId,
+    fontScale,
+    posX,
+    posY,
+    primary,
+    accent,
+    textCase,
+    bold,
+    italic,
+    fontOv,
+  };
+  const pushHistory = useCallback(() => {
+    const s = snapRef.current;
+    if (!s) return;
+    historyRef.current.push(s);
+    if (historyRef.current.length > 40) historyRef.current.shift();
+  }, []);
+  const undo = useCallback(() => {
+    const s = historyRef.current.pop();
+    if (!s) return;
+    setBlocks(s.blocks);
+    setHighlights(s.highlights);
+    setBlockStyles(s.blockStyles);
+    setPresetId(s.presetId);
+    setFontScale(s.fontScale);
+    setPosX(s.posX);
+    setPosY(s.posY);
+    setPrimary(s.primary);
+    setAccent(s.accent);
+    setTextCase(s.textCase);
+    setBold(s.bold);
+    setItalic(s.italic);
+    setFontOv(s.fontOv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      e.preventDefault();
+      undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo]);
+
   const preset = useMemo(() => getPreset(presetId), [presetId]);
   const style = useMemo<StyleState>(
     () => ({
@@ -184,13 +266,53 @@ function TipografiaInner() {
       posY,
       primary,
       accent,
-      uppercase: upper === 'auto' ? null : upper === 'on',
+      uppercase: null,
+      textCase: textCase === 'auto' ? null : textCase,
+      bold,
+      italic,
       highlights,
       autoEmphasis: autoEmph,
       fontOverride: fontOv,
       posX,
+      perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, upper, highlights, autoEmph, fontOv, posX],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, highlights, autoEmph, fontOv, posX, blockStyles],
+  );
+
+  // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
+  // ligado: mexeu, mexeu em todas (estados globais). desligado + bloco
+  // selecionado: o ajuste vira override SÓ daquele bloco (perBlock do engine).
+  const editingBlockId = !applyAll && selBlockId ? selBlockId : null;
+  const smartSet = useCallback(
+    (patch: PerBlockStyle) => {
+      if (!editingBlockId) {
+        if (patch.fontScale !== undefined) setFontScale(patch.fontScale);
+        if (patch.primary !== undefined) setPrimary(patch.primary);
+        if (patch.accent !== undefined) setAccent(patch.accent);
+        if (patch.posX !== undefined) setPosX(patch.posX);
+        if (patch.posY !== undefined) setPosY(patch.posY);
+        if (patch.textCase !== undefined) setTextCase(patch.textCase ?? 'auto');
+        if (patch.bold !== undefined) setBold(patch.bold);
+        if (patch.italic !== undefined) setItalic(patch.italic);
+        if (patch.fontOverride !== undefined) setFontOv(patch.fontOverride ?? null);
+        return;
+      }
+      setBlockStyles((prev) => ({
+        ...prev,
+        [editingBlockId]: { ...prev[editingBlockId], ...patch },
+      }));
+    },
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setFontOv, setBlockStyles],
+  );
+  const effOf = useCallback(
+    <K extends keyof PerBlockStyle>(k: K, global: PerBlockStyle[K]): PerBlockStyle[K] => {
+      if (editingBlockId) {
+        const ov = blockStyles[editingBlockId];
+        if (ov && ov[k] !== undefined) return ov[k];
+      }
+      return global;
+    },
+    [editingBlockId, blockStyles],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -226,7 +348,14 @@ function TipografiaInner() {
         setPosY(saved.posY);
         setPrimary(saved.primary);
         setAccent(saved.accent);
-        setUpper(saved.upper);
+        // migração de sessões antigas (upper) → textCase novo
+        setTextCase(
+          saved.textCase ??
+            (saved.upper === 'on' ? 'upper' : saved.upper === 'off' ? 'original' : 'auto'),
+        );
+        setBold(saved.bold ?? false);
+        setItalic(saved.italic ?? false);
+        setBlockStyles(saved.blockStyles ?? {});
         setPace(saved.pace);
         setLanguage(saved.language);
         setHighlights(saved.highlights ?? {});
@@ -254,15 +383,19 @@ function TipografiaInner() {
       posY,
       primary,
       accent,
-      upper,
+      upper: 'auto',
       pace,
       language,
       highlights,
       autoEmph,
       fontOv,
       posX,
+      textCase,
+      bold,
+      italic,
+      blockStyles,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights, autoEmph, fontOv, posX]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -464,6 +597,7 @@ function TipografiaInner() {
   );
 
   function editBlockText(id: string, text: string) {
+    pushHistory();
     updateBlock(id, (b) => {
       const nb = retimeBlockText(b, text);
       if (nb.id === b.id && nb.words.length !== b.words.length) {
@@ -478,6 +612,7 @@ function TipografiaInner() {
   }
 
   function doSplit(id: string) {
+    pushHistory();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx < 0) return prev;
@@ -491,6 +626,7 @@ function TipografiaInner() {
   }
 
   function doMerge(id: string) {
+    pushHistory();
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === id);
       if (idx < 0 || idx >= prev.length - 1) return prev;
@@ -503,6 +639,7 @@ function TipografiaInner() {
   }
 
   function nudge(id: string, edge: 'start' | 'end', delta: number) {
+    pushHistory();
     updateBlock(id, (b) => {
       if (edge === 'start') {
         const start = Math.max(0, Math.min(b.start + delta, b.end - 120));
@@ -543,6 +680,7 @@ function TipografiaInner() {
   }
 
   function toggleHighlight(blockId: string, wordIdx: number) {
+    pushHistory();
     setHighlights((h) => {
       const cur = new Set(h[blockId] ?? []);
       if (cur.has(wordIdx)) cur.delete(wordIdx);
@@ -552,6 +690,7 @@ function TipografiaInner() {
   }
 
   function regroup(newPace: GroupPace) {
+    pushHistory();
     setPace(newPace);
     if (words.length > 0) {
       setBlocks(groupWords(words, newPace));
@@ -568,7 +707,7 @@ function TipografiaInner() {
   const totalWords = words.length;
 
   return (
-    <div className="mx-auto w-full max-w-[1720px] px-5 pt-6 md:px-8">
+    <div className="mx-auto w-full max-w-[1920px] px-5 pt-6 md:px-8">
       <ToolHero
         title="Tipografia Automática"
         eyebrow="Letterings animados"
@@ -676,13 +815,11 @@ function TipografiaInner() {
                   blocks={blocks}
                   preset={preset}
                   style={style}
-                  fontScale={fontScale}
-                  onFontScale={setFontScale}
+                  fontScale={effOf('fontScale', fontScale) ?? fontScale}
+                  onFontScale={(v) => smartSet({ fontScale: v })}
                   onTimeBlock={setActiveBlockId}
-                  onPosChange={(x, y) => {
-                    setPosX(x);
-                    setPosY(y);
-                  }}
+                  onPosChange={(x, y) => smartSet({ posX: x, posY: y })}
+                  onInteractStart={pushHistory}
                   onSelectBlock={(id) => setSelBlockId(id)}
                   onEditText={editBlockText}
                 />
@@ -695,26 +832,41 @@ function TipografiaInner() {
               <div className="min-w-0 flex flex-col gap-5">
                 <PresetGallery
                   presetId={presetId}
-                  onPick={setPresetId}
+                  onPick={(id) => {
+                    pushHistory();
+                    setPresetId(id);
+                  }}
                   disabled={processing}
                 />
                 <FontPicker
-                  value={fontOv}
+                  value={effOf('fontOverride', fontOv) ?? null}
                   presetFont={preset.font}
-                  onPick={setFontOv}
+                  onPick={(k) => {
+                    pushHistory();
+                    smartSet({ fontOverride: k });
+                  }}
                   disabled={processing}
                 />
                 <StylePanel
-                  fontScale={fontScale}
-                  setFontScale={setFontScale}
-                  posY={posY}
-                  setPosY={setPosY}
-                  primary={primary}
-                  setPrimary={setPrimary}
-                  accent={accent}
-                  setAccent={setAccent}
-                  upper={upper}
-                  setUpper={setUpper}
+                  fontScale={effOf('fontScale', fontScale) ?? fontScale}
+                  posY={effOf('posY', posY) ?? posY}
+                  primary={effOf('primary', primary) ?? null}
+                  accent={effOf('accent', accent) ?? null}
+                  textCase={(effOf('textCase', textCase === 'auto' ? null : textCase) ?? null) as CaseMode | null}
+                  bold={effOf('bold', bold) ?? false}
+                  italic={effOf('italic', italic) ?? false}
+                  onSlide={smartSet}
+                  onSet={(patch) => {
+                    pushHistory();
+                    smartSet(patch);
+                  }}
+                  applyAll={applyAll}
+                  setApplyAll={setApplyAll}
+                  editingLabel={
+                    editingBlockId
+                      ? blockText(blocks.find((b) => b.id === editingBlockId) ?? blocks[0]).slice(0, 28)
+                      : null
+                  }
                   autoEmph={autoEmph}
                   setAutoEmph={setAutoEmph}
                   pace={pace}
@@ -733,6 +885,7 @@ function TipografiaInner() {
               selId={selBlockId}
               onSelect={(id) => setSelBlockId(id)}
               onRetime={retimeBounds}
+              onDragStart={pushHistory}
               disabled={processing}
             />
 
@@ -748,7 +901,10 @@ function TipografiaInner() {
               onEditText={editBlockText}
               onSplit={doSplit}
               onMerge={doMerge}
-              onDelete={(id) => updateBlock(id, () => null)}
+              onDelete={(id) => {
+                pushHistory();
+                updateBlock(id, () => null);
+              }}
               onNudge={nudge}
               onToggleWord={toggleHighlight}
               disabled={processing}
@@ -874,6 +1030,7 @@ function PreviewPane({
   onFontScale,
   onTimeBlock,
   onPosChange,
+  onInteractStart,
   onSelectBlock,
   onEditText,
 }: {
@@ -886,6 +1043,7 @@ function PreviewPane({
   onFontScale: (v: number) => void;
   onTimeBlock: (id: string | null) => void;
   onPosChange: (x: number, y: number) => void;
+  onInteractStart: () => void;
   onSelectBlock: (id: string) => void;
   onEditText: (id: string, text: string) => void;
 }) {
@@ -1028,7 +1186,7 @@ function PreviewPane({
     <div className="min-w-0">
       <div
         ref={wrapRef}
-        className="relative w-full cursor-grab touch-none overflow-hidden rounded-[14px] border border-line bg-black active:cursor-grabbing"
+        className="relative w-full touch-none overflow-hidden rounded-[14px] border border-line bg-black"
         style={dims ? { aspectRatio: `${dims.w} / ${dims.h}` } : { minHeight: 220 }}
         onPointerDown={(e) => {
           const wrap = wrapRef.current;
@@ -1046,6 +1204,8 @@ function PreviewPane({
             Math.abs(px - (bb.x + bb.w)) < handleR &&
             Math.abs(py - (bb.y + bb.h)) < handleR;
           if (onHandle && bb) {
+            onInteractStart();
+            wrap.style.cursor = 'nwse-resize';
             const cxB = bb.x + bb.w / 2;
             const cyB = bb.y + bb.h / 2;
             dragRef.current = {
@@ -1070,9 +1230,44 @@ function PreviewPane({
         onPointerMove={(e) => {
           const wrap = wrapRef.current;
           const drag = dragRef.current;
-          if (!wrap || !drag) return;
+          if (!wrap) return;
+          if (!drag) {
+            // hover: cursor certo em cada zona (alça = redimensionar,
+            // legenda = mover, resto = padrão) — igual CapCut
+            const rect0 = wrap.getBoundingClientRect();
+            const dpr0 = dprRef.current;
+            const hx = (e.clientX - rect0.left) * dpr0;
+            const hy = (e.clientY - rect0.top) * dpr0;
+            const bb0 = bboxRef.current;
+            const hr = 14 * dpr0;
+            if (
+              bb0 &&
+              selRef.current &&
+              Math.abs(hx - (bb0.x + bb0.w)) < hr &&
+              Math.abs(hy - (bb0.y + bb0.h)) < hr
+            ) {
+              wrap.style.cursor = 'nwse-resize';
+            } else if (
+              bb0 &&
+              hx >= bb0.x &&
+              hx <= bb0.x + bb0.w &&
+              hy >= bb0.y &&
+              hy <= bb0.y + bb0.h
+            ) {
+              wrap.style.cursor = 'move';
+            } else {
+              wrap.style.cursor = 'default';
+            }
+            return;
+          }
           const rect = wrap.getBoundingClientRect();
-          if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) drag.moved = true;
+          if (!drag.moved && Math.abs(e.movementX) + Math.abs(e.movementY) > 1) {
+            drag.moved = true;
+            if (drag.mode === 'move') {
+              onInteractStart();
+              wrap.style.cursor = 'grabbing';
+            }
+          }
           if (!drag.moved) return;
           if (drag.mode === 'scale') {
             const bb = bboxRef.current;
@@ -1245,10 +1440,32 @@ function PresetGallery({
   disabled?: boolean;
 }) {
   const [cat, setCat] = useState<string>(TYPO_CATEGORIES[0]);
-  const [visible, setVisible] = useState(24);
   const canvasesRef = useRef(new Map<string, HTMLCanvasElement>());
-  const fullList = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
-  const list = useMemo(() => fullList.slice(0, visible), [fullList, visible]);
+  const scrollBoxRef = useRef<HTMLDivElement | null>(null);
+  // só os cards VISÍVEIS na rolagem animam (IntersectionObserver)
+  const visRef = useRef(new Set<string>());
+  const ioRef = useRef<IntersectionObserver | null>(null);
+  const list = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
+
+  useEffect(() => {
+    visRef.current.clear();
+    if (scrollBoxRef.current) scrollBoxRef.current.scrollTop = 0;
+  }, [cat]);
+
+  useEffect(() => {
+    ioRef.current = new IntersectionObserver(
+      (entries) => {
+        for (const en of entries) {
+          const id = (en.target as HTMLElement).dataset.pid;
+          if (!id) continue;
+          if (en.isIntersecting) visRef.current.add(id);
+          else visRef.current.delete(id);
+        }
+      },
+      { root: scrollBoxRef.current, rootMargin: '140px' },
+    );
+    return () => ioRef.current?.disconnect();
+  }, []);
 
   useEffect(() => {
     void ensureTypoFonts();
@@ -1257,6 +1474,7 @@ function PresetGallery({
     const tick = () => {
       const now = performance.now() - t0;
       for (const preset of list) {
+        if (!visRef.current.has(preset.id)) continue;
         const c = canvasesRef.current.get(preset.id);
         if (!c) continue;
         const ctx = c.getContext('2d');
@@ -1286,10 +1504,7 @@ function PresetGallery({
         {TYPO_CATEGORIES.map((c) => (
           <button
             key={c}
-            onClick={() => {
-              setCat(c);
-              setVisible(24);
-            }}
+            onClick={() => setCat(c)}
             className={
               'rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ' +
               (c === cat
@@ -1305,7 +1520,11 @@ function PresetGallery({
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div
+        ref={scrollBoxRef}
+        className="max-h-[560px] overflow-y-auto pr-1.5"
+      >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
         {list.map((preset) => {
           const active = preset.id === presetId;
           return (
@@ -1313,6 +1532,10 @@ function PresetGallery({
               key={preset.id}
               type="button"
               disabled={disabled}
+              data-pid={preset.id}
+              ref={(el) => {
+                if (el && ioRef.current) ioRef.current.observe(el);
+              }}
               onClick={() => onPick(preset.id)}
               className={
                 'group overflow-hidden rounded-[12px] border text-left transition-all duration-200 active:scale-[0.97] ' +
@@ -1351,20 +1574,15 @@ function PresetGallery({
           );
         })}
       </div>
-      {fullList.length > visible ? (
-        <button
-          onClick={() => setVisible((v) => v + 24)}
-          disabled={disabled}
-          className="btn-secondary mt-3 w-full !py-2 text-[12px]"
-        >
-          Mostrar mais {Math.min(24, fullList.length - visible)} de {fullList.length - visible} restantes
-        </button>
-      ) : null}
+      </div>
     </div>
   );
 }
 
 /* ───────────────────────── Timeline ───────────────────────── */
+
+// cada bloco de legenda ganha uma cor própria (identificação instantânea)
+const TL_PALETTE = ['#a78bfa', '#22d3ee', '#f472b6', '#ffd60a', '#2eff4f', '#ff9f0a', '#ff5d7e', '#4f7dff'];
 
 function Timeline({
   blocks,
@@ -1373,6 +1591,7 @@ function Timeline({
   selId,
   onSelect,
   onRetime,
+  onDragStart,
   disabled,
 }: {
   blocks: Block[];
@@ -1381,6 +1600,7 @@ function Timeline({
   selId: string | null;
   onSelect: (id: string) => void;
   onRetime: (id: string, start: number, end: number, mode: 'move' | 'trim') => void;
+  onDragStart: () => void;
   disabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1403,18 +1623,23 @@ function Timeline({
     }
   }, [duration, pps]);
 
-  // playhead segue o vídeo sem re-render (transform via ref)
+  // playhead + relógio seguem o vídeo sem re-render (via refs)
+  const timeReadRef = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
     let raf = 0;
+    const fmtClock = (s: number) =>
+      `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}.${String(Math.floor((s % 1) * 10))}`;
     const tick = () => {
       const v = videoRef.current;
       const ph = playheadRef.current;
       if (v && ph && pps > 0) ph.style.transform = `translateX(${v.currentTime * pps}px)`;
+      const tr = timeReadRef.current;
+      if (v && tr) tr.textContent = `${fmtClock(v.currentTime)} / ${fmtClock(duration)}`;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [videoRef, pps]);
+  }, [videoRef, pps, duration]);
 
   if (duration <= 0) return null;
   const effPps = pps || 40;
@@ -1436,7 +1661,13 @@ function Timeline({
         style={{ fontFamily: 'var(--font-tech)' }}
       >
         <span>Timeline — arrasta pra mover · puxa as bordas pra cortar</span>
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-3">
+          <span
+            ref={timeReadRef}
+            className="mono rounded-[8px] border border-line bg-black/40 px-2.5 py-1 text-[13px] normal-case tracking-normal text-amber-200"
+          >
+            0:00.0
+          </span>
           <button
             onClick={() => setPps((v) => Math.max(10, (v || 40) / 1.5))}
             className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-line text-[13px] text-text-muted transition-colors hover:border-amber-400/50 hover:text-amber-200"
@@ -1492,24 +1723,31 @@ function Timeline({
           </div>
 
           {/* blocos */}
-          {blocks.map((b) => {
+          {blocks.map((b, bi) => {
             const left = (b.start / 1000) * effPps;
-            const width = Math.max(8, ((b.end - b.start) / 1000) * effPps);
+            const width = Math.max(10, ((b.end - b.start) / 1000) * effPps);
             const sel = b.id === selId;
+            const col = TL_PALETTE[bi % TL_PALETTE.length];
             return (
               <div
                 key={b.id}
                 data-block="1"
+                title={blockText(b)}
                 className={
-                  'absolute top-[30px] h-[96px] cursor-grab overflow-hidden rounded-[10px] border px-2 py-1.5 transition-colors active:cursor-grabbing ' +
-                  (sel
-                    ? 'z-10 border-amber-400/90 bg-gradient-to-b from-amber-400/35 to-amber-400/10 shadow-[0_0_16px_-4px_rgba(251,191,36,0.6)]'
-                    : 'border-violet/50 bg-gradient-to-b from-violet/30 to-violet/[0.07] hover:border-amber-400/60')
+                  'absolute top-[30px] h-[96px] cursor-grab overflow-hidden rounded-[10px] border-2 transition-shadow active:cursor-grabbing ' +
+                  (sel ? 'z-10' : 'hover:brightness-125')
                 }
-                style={{ left, width }}
+                style={{
+                  left,
+                  width,
+                  backgroundImage: `linear-gradient(180deg, ${col}59 0%, ${col}24 100%)`,
+                  borderColor: sel ? '#fbbf24' : `${col}aa`,
+                  boxShadow: sel ? '0 0 18px -4px rgba(251,191,36,0.7)' : undefined,
+                }}
                 onPointerDown={(e) => {
                   if (disabled) return;
                   e.stopPropagation();
+                  onDragStart();
                   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
                   const off = e.clientX - rect.left;
@@ -1565,15 +1803,9 @@ function Timeline({
                   if (tooltipRef.current) tooltipRef.current.style.display = 'none';
                 }}
               >
-                {/* alças de corte */}
-                <span className="pointer-events-none absolute inset-y-0 left-0 w-[5px] rounded-l-[10px] bg-white/40" />
-                <span className="pointer-events-none absolute inset-y-0 right-0 w-[5px] rounded-r-[10px] bg-white/40" />
-                <span className="pointer-events-none block truncate text-[11px] font-semibold leading-snug text-white/90">
-                  {blockText(b)}
-                </span>
-                <span className="pointer-events-none mono mt-0.5 block text-[9.5px] text-white/55">
-                  {(b.start / 1000).toFixed(1)}s · {((b.end - b.start) / 1000).toFixed(1)}s
-                </span>
+                {/* alças de corte — barras limpas, só cor (hover mostra o texto) */}
+                <span className="pointer-events-none absolute inset-y-0 left-0 w-[6px] rounded-l-[8px] bg-white/45" />
+                <span className="pointer-events-none absolute inset-y-0 right-0 w-[6px] rounded-r-[8px] bg-white/45" />
               </div>
             );
           })}
@@ -1699,17 +1931,109 @@ function FontPicker({
 
 /* ───────────────────────── Painel de ajustes ───────────────────────── */
 
+const SWATCHES = [
+  '#ffffff', '#0f0f10', '#ffd60a', '#ff9f0a', '#ff2d55', '#e8192c',
+  '#f472b6', '#ff5db1', '#a78bfa', '#7c5cff', '#22d3ee', '#31c4ff',
+  '#2eff4f', '#c8e87c', '#e8b04c', '#bde0fe',
+];
+
+function ColorDot({
+  label,
+  value,
+  fallback,
+  onPick,
+  disabled,
+}: {
+  label: string;
+  value: string | null;
+  fallback: string;
+  onPick: (v: string | null) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hex, setHex] = useState('');
+  const cur = value ?? fallback;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className="flex items-center gap-2 rounded-[10px] border border-line px-2.5 py-1.5 transition-colors hover:border-amber-400/50"
+      >
+        <span
+          className="h-5 w-5 rounded-[6px] border border-white/25 shadow-inner"
+          style={{ background: cur }}
+        />
+        <span className="text-[11px] font-semibold text-text-muted">{label}</span>
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-[196px] rounded-[14px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
+          <div className="grid grid-cols-6 gap-1.5">
+            {SWATCHES.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  onPick(c);
+                  setOpen(false);
+                }}
+                className={
+                  'h-6 w-6 rounded-[7px] border transition-transform hover:scale-110 ' +
+                  (cur.toLowerCase() === c ? 'border-amber-400' : 'border-white/15')
+                }
+                style={{ background: c }}
+                title={c}
+              />
+            ))}
+          </div>
+          <div className="mt-2.5 flex items-center gap-1.5">
+            <input
+              value={hex}
+              onChange={(e) => setHex(e.target.value)}
+              placeholder={cur}
+              className="mono w-full rounded-[8px] border border-line bg-black/30 px-2 py-1 text-[11px] text-text outline-none focus:border-amber-400/50"
+            />
+            <button
+              onClick={() => {
+                const v = hex.trim();
+                if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
+                  onPick(v.startsWith('#') ? v : '#' + v);
+                  setOpen(false);
+                  setHex('');
+                }
+              }}
+              className="rounded-[8px] border border-amber-400/50 px-2 py-1 text-[11px] font-bold text-amber-200"
+            >
+              OK
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              onPick(null);
+              setOpen(false);
+            }}
+            className="mt-2 w-full rounded-[8px] border border-line px-2 py-1 text-[10.5px] text-text-muted hover:text-text"
+          >
+            Padrão do modelo
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function StylePanel({
   fontScale,
-  setFontScale,
   posY,
-  setPosY,
   primary,
-  setPrimary,
   accent,
-  setAccent,
-  upper,
-  setUpper,
+  textCase,
+  bold,
+  italic,
+  onSlide,
+  onSet,
+  applyAll,
+  setApplyAll,
+  editingLabel,
   autoEmph,
   setAutoEmph,
   pace,
@@ -1719,15 +2043,17 @@ function StylePanel({
   disabled,
 }: {
   fontScale: number;
-  setFontScale: (v: number) => void;
   posY: number;
-  setPosY: (v: number) => void;
   primary: string | null;
-  setPrimary: (v: string | null) => void;
   accent: string | null;
-  setAccent: (v: string | null) => void;
-  upper: UpperMode;
-  setUpper: (v: UpperMode) => void;
+  textCase: CaseMode | null;
+  bold: boolean;
+  italic: boolean;
+  onSlide: (patch: PerBlockStyle) => void;
+  onSet: (patch: PerBlockStyle) => void;
+  applyAll: boolean;
+  setApplyAll: (v: boolean) => void;
+  editingLabel: string | null;
   autoEmph: boolean;
   setAutoEmph: (v: boolean) => void;
   pace: GroupPace;
@@ -1736,28 +2062,70 @@ function StylePanel({
   defaultAccent: string;
   disabled?: boolean;
 }) {
+  const caseBtn = (mode: 'upper' | 'lower' | 'original', label: string, title: string) => (
+    <button
+      key={mode}
+      onClick={() => onSet({ textCase: textCase === mode ? null : mode })}
+      disabled={disabled}
+      title={title}
+      className={
+        'flex h-8 min-w-[38px] items-center justify-center rounded-[9px] border px-2 text-[13px] font-bold transition-colors ' +
+        (textCase === mode
+          ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+          : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
+      }
+    >
+      {label}
+    </button>
+  );
   return (
     <div className="grid gap-4 rounded-[14px] border border-line bg-bg-soft/40 p-4 md:grid-cols-2">
+      {/* aplicar a todas × só o bloco selecionado */}
+      <div className="md:col-span-2 flex flex-wrap items-center gap-3 rounded-[10px] border border-line/70 bg-black/20 px-3 py-2">
+        <label className="flex cursor-pointer items-center gap-2 text-[12px] font-semibold text-text">
+          <input
+            type="checkbox"
+            checked={applyAll}
+            onChange={(e) => setApplyAll(e.target.checked)}
+            disabled={disabled}
+            className="h-4 w-4 accent-amber-400"
+          />
+          Aplicar a todas as legendas
+        </label>
+        {!applyAll ? (
+          editingLabel ? (
+            <span className="rounded-[8px] border border-amber-400/50 bg-amber-400/10 px-2 py-0.5 text-[10.5px] font-semibold text-amber-200">
+              editando só: “{editingLabel}”
+            </span>
+          ) : (
+            <span className="text-[10.5px] text-text-muted">
+              seleciona um bloco (clique na legenda ou na timeline) pra editar só ele
+            </span>
+          )
+        ) : null}
+      </div>
+
       <ToolSlider
         label="Tamanho"
-        min={0.6}
-        max={1.7}
+        min={0.45}
+        max={2}
         step={0.05}
         value={fontScale}
-        onChange={setFontScale}
+        onChange={(v) => onSlide({ fontScale: v })}
         display={(v) => `${Math.round(v * 100)}%`}
         disabled={disabled}
       />
       <ToolSlider
         label="Altura na tela"
-        min={0.12}
-        max={0.92}
+        min={0.08}
+        max={0.94}
         step={0.01}
         value={posY}
-        onChange={setPosY}
+        onChange={(v) => onSlide({ posY: v })}
         display={(v) => `${Math.round(v * 100)}%`}
         disabled={disabled}
       />
+
       <div>
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -1765,73 +2133,65 @@ function StylePanel({
         >
           Cores
         </div>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 text-[11px] text-text-muted">
-            <input
-              type="color"
-              value={primary ?? defaultPrimary}
-              onChange={(e) => setPrimary(e.target.value)}
-              disabled={disabled}
-              className="h-7 w-9 cursor-pointer rounded border border-line bg-transparent"
-            />
-            Texto
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px] text-text-muted">
-            <input
-              type="color"
-              value={accent ?? defaultAccent}
-              onChange={(e) => setAccent(e.target.value)}
-              disabled={disabled}
-              className="h-7 w-9 cursor-pointer rounded border border-line bg-transparent"
-            />
-            Destaque
-          </label>
-          {(primary || accent) ? (
-            <button
-              onClick={() => {
-                setPrimary(null);
-                setAccent(null);
-              }}
-              className="text-[11px] font-semibold text-amber-300 hover:underline"
-              disabled={disabled}
-            >
-              Padrão do modelo
-            </button>
-          ) : null}
+        <div className="flex items-center gap-2">
+          <ColorDot
+            label="Texto"
+            value={primary}
+            fallback={defaultPrimary}
+            onPick={(v) => onSet({ primary: v })}
+            disabled={disabled}
+          />
+          <ColorDot
+            label="Destaque"
+            value={accent}
+            fallback={defaultAccent}
+            onPick={(v) => onSet({ accent: v })}
+            disabled={disabled}
+          />
         </div>
       </div>
+
       <div>
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          Caixa alta
+          Estilo e caixa
         </div>
-        <div className="flex gap-1.5">
-          {(
-            [
-              ['auto', 'Auto'],
-              ['on', 'SEMPRE'],
-              ['off', 'nunca'],
-            ] as const
-          ).map(([v, label]) => (
-            <button
-              key={v}
-              onClick={() => setUpper(v)}
-              disabled={disabled}
-              className={
-                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
-                (upper === v
-                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                  : 'border-line text-text-muted hover:text-text')
-              }
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => onSet({ bold: !bold })}
+            disabled={disabled}
+            title="Negrito"
+            className={
+              'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-black transition-colors ' +
+              (bold
+                ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+                : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
+            }
+          >
+            B
+          </button>
+          <button
+            onClick={() => onSet({ italic: !italic })}
+            disabled={disabled}
+            title="Itálico"
+            className={
+              'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-bold italic transition-colors ' +
+              (italic
+                ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+                : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
+            }
+          >
+            I
+          </button>
+          <span className="mx-1 h-5 w-px bg-line" />
+          {caseBtn('upper', 'TT', 'Tudo maiúsculo')}
+          {caseBtn('lower', 'tt', 'Tudo minúsculo')}
+          {caseBtn('original', 'Tt', 'Como foi falado')}
         </div>
       </div>
+
       <div className="md:col-span-2">
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -1862,11 +2222,11 @@ function StylePanel({
             </button>
           ))}
           <span className="text-[10.5px] text-text-muted">
-            a palavra forte de cada bloco ganha o tratamento de destaque do modelo
-            sozinha — clicar nas palavras da lista substitui a escolha
+            a palavra forte de cada bloco ganha o tratamento do modelo sozinha
           </span>
         </div>
       </div>
+
       <div className="md:col-span-2">
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -1887,7 +2247,7 @@ function StylePanel({
         />
         <p className="mt-1.5 text-[10.5px] text-text-muted">
           Trocar o ritmo remonta os blocos a partir da transcrição — edições de texto
-          feitas na lista abaixo são perdidas.
+          feitas na lista abaixo são perdidas (Ctrl+Z desfaz).
         </p>
       </div>
     </div>
