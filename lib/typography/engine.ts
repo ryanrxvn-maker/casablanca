@@ -94,6 +94,8 @@ export type KaraokeMode =
 
 export type BoxMode = 'none' | 'block' | 'line' | 'word';
 export type PresetColor = string; // literal ou os tokens 'primary' / 'accent'
+/** o que o canvas aceita como fillStyle */
+type Paint = string | CanvasGradient | CanvasPattern;
 
 export type TypoPreset = {
   id: string;
@@ -150,9 +152,21 @@ export type TypoPreset = {
     lowercase?: boolean;
     color?: PresetColor;
     accentLast?: boolean;
+    /** offset vertical das palavras de apoio (fração do fontSize; script "sobreposto") */
+    dy?: number;
   };
   /** última LINHA inteira na cor de destaque (ref "não é mais um / CURSO DE COPY") */
   lineAccent?: 'last';
+  /** linhas finas de moldura acima/abaixo do bloco (ref "poucos minutos") */
+  frameLines?: { color: PresetColor; thickness: number; gap: number };
+  /** risco desenhado atrás do texto (ref "na sua edição", swoosh vermelho) */
+  swoosh?: { color: PresetColor; width: number };
+  /** preenchimento psicodélico animado (ref "TRIPPY TITLES") */
+  patternFill?: { colors: [string, string]; scale: number; speed: number };
+  /** fumaça procedural atrás do bloco */
+  smoke?: { alpha: number };
+  /** eco do texto abaixo, menor e com glow (ref "Smooth opacity") */
+  subEcho?: { scale: number; gap: number; color: PresetColor; glow: number };
   /** rotação fixa da composição (graus) */
   blockRotate?: number;
   /** jitter de rotação POR BLOCO, carimbado (graus máx) */
@@ -215,18 +229,58 @@ export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   autoEmphasis: true,
 };
 
-/** Palavra "forte" do bloco (mais longa; empate = a primeira). Determinístico. */
+// Palavras vazias que NUNCA merecem destaque (PT/EN/ES). A palavra forte é
+// conteúdo: substantivo, número, valor — não conectivo.
+const STOPWORDS = new Set([
+  // pt
+  'de', 'da', 'do', 'das', 'dos', 'a', 'o', 'as', 'os', 'um', 'uma', 'uns',
+  'umas', 'e', 'é', 'que', 'pra', 'pro', 'para', 'com', 'sem', 'em', 'na',
+  'no', 'nas', 'nos', 'por', 'se', 'sua', 'seu', 'suas', 'seus', 'te', 'me',
+  'nem', 'mas', 'ou', 'ja', 'já', 'ao', 'aos', 'à', 'às', 'como', 'mais',
+  'menos', 'muito', 'muita', 'isso', 'isto', 'esse', 'essa', 'este', 'esta',
+  'aqui', 'ali', 'la', 'lá', 'ela', 'ele', 'elas', 'eles', 'voce', 'você',
+  'vai', 'ser', 'ter', 'foi', 'tem', 'uns', 'era', 'são', 'sao', 'está',
+  'esta', 'tá', 'ta', 'não', 'nao', 'sim', 'dia', 'até', 'ate',
+  // en
+  'the', 'an', 'of', 'to', 'in', 'on', 'and', 'or', 'is', 'are', 'was',
+  'for', 'with', 'your', 'you', 'this', 'that', 'it', 'at', 'be', 'so',
+  'we', 'my', 'me', 'do', 'did', 'not', 'but', 'by', 'from', 'as', 'if',
+  // es
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'es', 'en',
+  'del', 'al', 'tu', 'su', 'lo', 'este', 'esta', 'eso', 'esa', 'con',
+  'sin', 'por', 'para', 'que', 'como', 'muy',
+]);
+
+/**
+ * Palavra "forte" do bloco — INTELIGÊNCIA do destaque automático:
+ * stopword nunca ganha; número/dinheiro/percentual ganha bônus pesado
+ * ("500", "20 MIL", "97%"); no empate vence a mais longa. Determinístico
+ * e sempre editável (clique na lista substitui a escolha).
+ */
 export function autoEmphasisIndex(block: Block): number | null {
   let best = -1;
-  let bestLen = 0;
+  let bestScore = -Infinity;
+  let longest = -1;
+  let longestLen = 0;
   for (let i = 0; i < block.words.length; i++) {
-    const len = block.words[i].text.length;
-    if (len > bestLen) {
-      bestLen = len;
+    const raw = block.words[i].text;
+    const t = raw.toLowerCase();
+    let score = t.length;
+    if (/\d/.test(t)) score += 10;
+    if (/[%$€]|^mil$|^milhão$|^milhao$|^milhões$|^k$/.test(t)) score += 6;
+    if (STOPWORDS.has(t)) score -= 12;
+    if (score > bestScore) {
+      bestScore = score;
       best = i;
     }
+    if (t.length > longestLen) {
+      longestLen = t.length;
+      longest = i;
+    }
   }
-  return best >= 0 && bestLen >= 3 ? best : null;
+  // bloco só de stopwords: cai pra mais longa (melhor que nada)
+  if (bestScore < 3) return longestLen >= 4 ? longest : null;
+  return best >= 0 ? best : null;
 }
 
 // ─── Easings ────────────────────────────────────────────────────────────────
@@ -597,7 +651,7 @@ function clearShadow(ctx: CanvasRenderingContext2D) {
 
 function applyTextStyle(
   d: DrawCtx,
-  fill: string,
+  fill: Paint,
   fpx: number,
   fk: FontKey = d.preset.font,
   noGlow = false,
@@ -631,7 +685,7 @@ function fillWordText(
   text: string,
   x: number,
   y: number,
-  fill: string,
+  fill: Paint,
   fpx = d.fontPx,
   fk: FontKey = d.preset.font,
   // palavra de apoio do mix: só sombra, sem stroke/glow/extrude/aura/chroma/shine
@@ -1097,6 +1151,37 @@ export function drawCaptions(
     return;
   }
 
+  // ── fumaça procedural (atrás de tudo) ──
+  if (preset.smoke) {
+    const gate = outAlpha * clamp01(pBlock * 2);
+    const alpha = preset.smoke.alpha * gate;
+    if (alpha > 0.01) {
+      ctx.save();
+      clearShadow(ctx);
+      for (let i = 0; i < 7; i++) {
+        const rx = fontPx * (1.3 + prand(seedBase + i * 31) * 1.6);
+        const bx =
+          cx +
+          (prand(seedBase + i * 17) - 0.5) * W * 0.55 +
+          Math.sin((tMs / 1000) * 0.35 + i * 1.9) * fontPx * 0.9;
+        const by =
+          topY +
+          blockH * (0.1 + prand(seedBase + i * 23) * 0.95) +
+          Math.sin((tMs / 1000) * 0.22 + i * 2.6) * fontPx * 0.5;
+        const g = ctx.createRadialGradient(bx, by, 0, bx, by, rx);
+        const a = alpha * (0.5 + 0.5 * prand(seedBase + i * 41));
+        g.addColorStop(0, `rgba(255,255,255,${(a * 0.85).toFixed(3)})`);
+        g.addColorStop(0.55, `rgba(205,205,215,${(a * 0.4).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(180,180,190,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(bx, by, rx, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   // ── caixas de fundo (block/line) ──
   const blockBox = preset.box;
   if (blockBox && (blockBox.mode === 'block' || blockBox.mode === 'line')) {
@@ -1164,6 +1249,56 @@ export function drawCaptions(
       ctx.fillRect(-lw / 2, -th / 2, lw, th);
       ctx.restore();
     });
+    ctx.restore();
+  }
+
+  // ── linhas de moldura acima/abaixo (ref "poucos minutos") ──
+  if (preset.frameLines) {
+    const fl = preset.frameLines;
+    const wMax = Math.max(...layout.lines.map((l) => l.width * l.scale));
+    const lw = wMax * 1.06 * clamp01(eBlock * 1.1);
+    const th = Math.max(1, fl.thickness * fontPx);
+    const gap = fl.gap * fontPx;
+    ctx.save();
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2.5);
+    clearShadow(ctx);
+    ctx.fillStyle = resolveColor(fl.color, primary, accent);
+    ctx.fillRect(cx - lw / 2, topY - gap - th, lw, th);
+    ctx.fillRect(cx - lw / 2, topY + blockH + gap, lw, th);
+    ctx.restore();
+  }
+
+  // ── risco/swoosh desenhando atrás do texto (ref "na sua edição") ──
+  if (preset.swoosh) {
+    const wMax = Math.max(...layout.lines.map((l) => l.width * l.scale));
+    const y0 = topY + blockH * 0.88;
+    const pts: Array<[number, number]> = [];
+    const N = 64;
+    for (let i = 0; i <= N; i++) {
+      const u = i / N;
+      const x = cx - wMax * 0.62 + wMax * 1.3 * u;
+      const y =
+        y0 +
+        Math.sin(u * Math.PI) * fontPx * 0.55 -
+        u * u * fontPx * 1.15 +
+        Math.sin(u * Math.PI * 2.2 + 1.1) * fontPx * 0.18;
+      pts.push([x, y]);
+    }
+    const vis = Math.max(2, Math.floor(clamp01(eBlock * 1.15) * pts.length));
+    ctx.save();
+    ctx.globalAlpha = outAlpha;
+    clearShadow(ctx);
+    ctx.strokeStyle = resolveColor(preset.swoosh.color, primary, accent);
+    ctx.lineWidth = Math.max(2, preset.swoosh.width * fontPx);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < vis; i++) {
+      const [x, y] = pts[i];
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1247,7 +1382,7 @@ export function drawCaptions(
               );
 
         // cor da palavra nesta passada
-        let fill: string;
+        let fill: Paint;
         if (preset.mix) {
           // tipografia mista: a destacada mantém o look principal do preset
           // (gradiente/accent); as de apoio usam a cor do mix
@@ -1407,6 +1542,41 @@ export function drawCaptions(
     drawPass('base');
   }
 
+  // ── eco do texto abaixo, menor e com glow (ref "Smooth opacity") ──
+  if (preset.subEcho) {
+    const se = preset.subEcho;
+    const echoTop = topY + blockH + se.gap * fontPx;
+    const col = resolveColor(se.color, primary, accent);
+    ctx.save();
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2) * 0.95;
+    ctx.translate(cx, echoTop);
+    ctx.scale(se.scale, se.scale);
+    ctx.translate(-cx, -topY);
+    layout.lines.forEach((line, li) => {
+      const x0 = lineOriginX(li);
+      const by = lineBaseY(li);
+      ctx.save();
+      if (line.scale !== 1) {
+        ctx.translate(cx, by);
+        ctx.scale(line.scale, line.scale);
+        ctx.translate(-cx, -by);
+      }
+      for (const wi of line.wordIdx) {
+        const wl = layout.words[wi];
+        ctx.font = fontCss(wl.fk, wl.fpx);
+        ctx.shadowColor = col;
+        ctx.shadowBlur = se.glow * fontPx;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = col;
+        ctx.fillText(wl.text, x0 + wl.x, by);
+        ctx.fillText(wl.text, x0 + wl.x, by);
+      }
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+
   finishDraw();
 
   function finishDraw() {
@@ -1428,8 +1598,51 @@ export function drawCaptions(
   }
 }
 
-function resolveFill(d: DrawCtx, lineH: number): string {
+// tile do preenchimento psicodélico (cache por preset)
+let patternTile: HTMLCanvasElement | null = null;
+let patternKey = '';
+
+function getTrippyPattern(d: DrawCtx): Paint {
+  const pf = d.preset.patternFill!;
+  const key = d.preset.id + '|' + pf.colors.join();
+  if (typeof document === 'undefined') return pf.colors[0];
+  if (!patternTile || patternKey !== key) {
+    patternTile = document.createElement('canvas');
+    patternTile.width = 96;
+    patternTile.height = 96;
+    const c = patternTile.getContext('2d');
+    if (!c) return pf.colors[0];
+    c.fillStyle = pf.colors[0];
+    c.fillRect(0, 0, 96, 96);
+    c.strokeStyle = pf.colors[1];
+    c.lineWidth = 7;
+    c.lineCap = 'round';
+    for (let k = -1; k < 9; k++) {
+      c.beginPath();
+      for (let x = -8; x <= 104; x += 6) {
+        const y = k * 13 + Math.sin(x * 0.11 + k * 1.7) * 5;
+        if (x === -8) c.moveTo(x, y);
+        else c.lineTo(x, y);
+      }
+      c.stroke();
+    }
+    patternKey = key;
+  }
+  const pat = d.ctx.createPattern(patternTile, 'repeat');
+  if (!pat) return pf.colors[0];
+  const s = (d.fontPx / 60) * pf.scale;
+  const off = (d.tMs * pf.speed) / 1000;
+  pat.setTransform(
+    new DOMMatrix()
+      .translateSelf((off * 14) % 96, (off * 9) % 96)
+      .scaleSelf(s, s),
+  );
+  return pat;
+}
+
+function resolveFill(d: DrawCtx, lineH: number): Paint {
   const { preset, ctx } = d;
+  if (preset.patternFill) return getTrippyPattern(d);
   if (preset.fill === 'gradient') {
     const g = ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
     const stops: Array<[number, string]> =
@@ -1444,7 +1657,7 @@ function resolveFill(d: DrawCtx, lineH: number): string {
             [1, '#d0d0d0'],
           ]);
     for (const [o, c] of stops) g.addColorStop(o, resolveColor(c, d.primary, d.accent));
-    return g as unknown as string;
+    return g;
   }
   return resolveColor(preset.fill, d.primary, d.accent);
 }
@@ -1463,7 +1676,7 @@ function drawWord(
   wi: number,
   wx: number,
   baseY: number,
-  fill: string,
+  fill: Paint,
   fxWord: UnitFx | null,
   loopSpec: LoopSpec | undefined,
   tMs: number,
@@ -1478,6 +1691,8 @@ function drawWord(
   const wordJitterRot = preset.wordRotateJitter
     ? (prand(seedBase * 3 + wi * 61) - 0.5) * 2 * preset.wordRotateJitter * DEG
     : 0;
+  // script de apoio pode sentar mais baixo/sobreposto (ref "1 Click text")
+  const mixDy = wl.mixed && preset.mix?.dy ? preset.mix.dy * fontPx : 0;
 
   if (preset.unit === 'char' || preset.in.kind === 'tracking-in' || loopSpec?.kind === 'wave') {
     // por CARACTERE
@@ -1498,7 +1713,7 @@ function drawWord(
       }
       ctx.save();
       ctx.globalAlpha = outAlpha * fx.alpha * loop.alphaMul;
-      ctx.translate(cxx + cl.w / 2 + fx.dx + loop.dx, baseY - lineH * 0.3 + fx.dy + loop.dy);
+      ctx.translate(cxx + cl.w / 2 + fx.dx + loop.dx, baseY - lineH * 0.3 + fx.dy + loop.dy + mixDy);
       ctx.scale(fx.sx * loop.s * extraS, fx.sy * loop.s * extraS);
       if (fx.rot || loop.rot || wordJitterRot) ctx.rotate(fx.rot + loop.rot + wordJitterRot);
       if (fx.skew) ctx.transform(1, 0, Math.tan(fx.skew), 1, 0, 0);
@@ -1514,7 +1729,7 @@ function drawWord(
   const loop = computeLoopFx(loopSpec, wi, tMs, fx.p, fontPx, seedBase);
   ctx.save();
   ctx.globalAlpha = outAlpha * fx.alpha * loop.alphaMul;
-  ctx.translate(wx + wl.w / 2 + fx.dx + loop.dx, baseY - lineH * 0.3 + fx.dy + loop.dy);
+  ctx.translate(wx + wl.w / 2 + fx.dx + loop.dx, baseY - lineH * 0.3 + fx.dy + loop.dy + mixDy);
   ctx.scale(fx.sx * loop.s * extraS, fx.sy * loop.s * extraS);
   if (fx.rot || loop.rot || wordJitterRot) ctx.rotate(fx.rot + loop.rot + wordJitterRot);
   if (fx.skew) ctx.transform(1, 0, Math.tan(fx.skew), 1, 0, 0);
