@@ -229,5 +229,70 @@ maior parte do benefício sem esse custo.
 
 O maior buraco de **cobertura** do pentest é a área autenticada: SSRF nas
 ferramentas de vídeo, injeção de comando no ffmpeg, IDOR e billing ficaram todos
-sem teste por falta de conta confirmada. Auditei esses vetores diretamente no
-código-fonte — resultado registrado na seção seguinte.
+sem teste por falta de conta confirmada. Auditei esses vetores direto no
+código-fonte, que é uma visão que o teste de caixa-preta não tinha.
+
+**Resultado: um achado real, corrigido. O resto está sólido.**
+
+### 4.1 — SSRF de 2ª ordem no downloader · **CORRIGIDO**
+
+`app/api/downloader/route.ts` validava a URL do CDN com `assertPublicHttpUrl` e
+logo depois buscava com `fetch` cru. O problema é que **a validação era feita no
+endereço errado**: `fetch` segue redirect sozinho, então bastava o CDN responder
+`302` apontando pra `169.254.169.254` (endpoint de metadados da nuvem) que o
+servidor seguia o salto — sem revalidar — e **transmitia o conteúdo de volta pro
+cliente**. Credencial de infraestrutura sai por aí.
+
+Trocado por `safeFetch`, que revalida **cada salto** de redirect. As outras
+quatro rotas que baixam URL (`lipsync`, `separador-audio`, `avatar-visual-match`,
+`docs/fetch`) já usavam o `safeFetch` corretamente.
+
+O helper `lib/safe-fetch.ts` em si está muito bem feito: bloqueia faixa privada,
+loopback, link-local e CGNAT, decodifica IPv4 mapeado em IPv6 (`::ffff:127.0.0.1`)
+e recusa protocolo que não seja http/https. A limitação que resta é *DNS
+rebinding* puro (o DNS é resolvido na validação e de novo no `fetch`); fechar
+isso exigiria fixar o IP resolvido na conexão, e o risco prático é baixo.
+
+### 4.2 — Autorização / IDOR · **sem achado**
+
+- 73 rotas de API; só **7** usam `service_role` (que ignora RLS) — superfície pequena.
+- As **9 rotas de admin** têm guarda. `requireAdmin` confere sessão real, `is_admin` **e** `is_active`.
+- A autenticação de máquina do CLI (`x-autoedit-key`), que concede admin, está correta: desligada sem a env, exige chave de 24+ caracteres e compara em **tempo constante** sobre digest. Sem ela configurada, o caminho é inerte.
+- As rotas de upload montam o caminho no servidor como `${userId}/arquivo` — o cliente não controla o prefixo, então ninguém escreve na pasta de outro.
+- O webhook do Stripe valida assinatura com `constructEvent` sobre o corpo cru e recusa se faltar o secret.
+
+### 4.3 — Injeção de comando · **sem achado**
+
+Só existe um `spawn` com `shell: true`, e ele recebe **nome de binário fixo**
+(`yt-dlp`, `ffmpeg`, `python`, `aria2c`) — nada de input do usuário. Os demais
+`spawn` passam argumentos como **array**, que o Node entrega direto ao processo
+sem interpretação de shell; então nem uma URL maliciosa como argumento injeta
+comando.
+
+### 4.4 — RLS e escalonamento de privilégio · **sem achado**
+
+As **12** tabelas das migrations têm `ENABLE ROW LEVEL SECURITY`. E a armadilha
+clássica do Supabase está fechada: uma policy de UPDATE do tipo
+`auth.uid() = id` deixaria o usuário mudar *qualquer* coluna da própria linha —
+inclusive virar admin ou premium. As migrations 027 e 028 revogam o UPDATE das
+colunas de privilégio (`is_admin`, `is_active`, `tier`, as de Stripe e
+`tool_unlocks`) de `anon` e `authenticated`.
+
+> ⚠ **Confira se as migrations 028 e 029 foram aplicadas em produção.** A 028 é a
+> que revoga `tool_unlocks` (e já constava como pendente); a 029 é o índice novo
+> do teto de SMS. Rode-as pelo SQL Editor do Supabase.
+
+### 4.5 — XSS · **sem achado**
+
+Os três usos de `dangerouslySetInnerHTML` são JSON-LD montado com conteúdo
+estático do próprio app. Em `/recursos/[slug]`, o slug da URL é validado contra a
+lista de pilares (`notFound()` se não existir) e o JSON-LD usa o valor canônico,
+não o da URL — então não dá pra escapar do `<script>` com um `</script>` no slug,
+que seria o furo esperado ali (`JSON.stringify` escapa aspas, mas **não** escapa
+`</script>`).
+
+### 4.6 — Segredos versionados · **sem achado**
+
+Varredura no que está sob controle de versão: nenhuma chave real. Os padrões que
+casaram em `.env.local.example` e no script do Stripe são placeholder e texto de
+documentação. O `.env.local` está devidamente ignorado.

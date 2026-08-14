@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/api/admin/_helpers';
 import { createClient } from '@/lib/supabase/server';
-import { assertPublicHttpUrl } from '@/lib/safe-fetch';
+import { safeFetch } from '@/lib/safe-fetch';
 import {
   processDownload,
   classify,
@@ -105,8 +105,14 @@ export async function POST(req: NextRequest) {
       // A URL vem da resposta do resolver (tikwm), não direto do usuário —
       // mas validamos contra destino interno (anti-SSRF de 2ª ordem) antes de
       // buscar/streamar de volta pro cliente.
-      await assertPublicHttpUrl(result.url);
-      const upstream = await fetch(result.url, { headers: result.headers });
+      //
+      // safeFetch, e não assertPublicHttpUrl + fetch: validar só a URL inicial
+      // deixava passar o salto seguinte. O fetch cru segue redirect sozinho,
+      // então bastava o CDN responder 302 pra 169.254.169.254 (metadados da
+      // nuvem) que a gente buscava e streamava o segredo de volta pro cliente,
+      // com a validação toda feita no endereço errado. O safeFetch revalida
+      // CADA salto.
+      const upstream = await safeFetch(result.url, { headers: result.headers });
       if (!upstream.ok || !upstream.body) {
         await result.dispose();
         return NextResponse.json(
