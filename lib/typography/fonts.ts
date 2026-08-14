@@ -19,7 +19,8 @@ export type FontKey =
   | 'marker'
   | 'jetbrains700'
   | 'nunito900'
-  | 'oswald600';
+  | 'oswald600'
+  | 'caveat700';
 
 export type TypoFont = {
   family: string; // nome único registrado no document.fonts
@@ -43,6 +44,7 @@ export const TYPO_FONTS: Record<FontKey, TypoFont> = {
   jetbrains700: { family: 'TipoJetBrains', file: 'jetbrains-700.woff2', weight: 700, label: 'JetBrains Mono' },
   nunito900: { family: 'TipoNunito', file: 'nunito-900.woff2', weight: 900, label: 'Nunito Black' },
   oswald600: { family: 'TipoOswald', file: 'oswald-600.woff2', weight: 600, label: 'Oswald' },
+  caveat700: { family: 'TipoCaveat', file: 'caveat-700.woff2', weight: 700, label: 'Caveat' },
 };
 
 const loaded = new Map<FontKey, Promise<void>>();

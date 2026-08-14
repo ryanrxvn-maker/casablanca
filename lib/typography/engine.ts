@@ -137,6 +137,22 @@ export type TypoPreset = {
    * variação de cor e tamanho sem o user clicar em nada.
    */
   autoEmphasis?: boolean;
+  /**
+   * TIPOGRAFIA MISTA (estilo "hoje VOCÊ VAI aprender"): a palavra destacada
+   * usa a fonte/estilo principal do preset em tamanho cheio; as DEMAIS usam
+   * esta fonte de apoio (serif itálica/script) menor, renderizadas "limpas"
+   * (sem stroke/glow/extrude). accentLast pinta a última palavra de apoio
+   * na cor de destaque (ref "essa forma AQUI.").
+   */
+  mix?: {
+    font: FontKey;
+    scale: number;
+    lowercase?: boolean;
+    color?: PresetColor;
+    accentLast?: boolean;
+  };
+  /** última LINHA inteira na cor de destaque (ref "não é mais um / CURSO DE COPY") */
+  lineAccent?: 'last';
   /** rotação fixa da composição (graus) */
   blockRotate?: number;
   /** jitter de rotação POR BLOCO, carimbado (graus máx) */
@@ -277,8 +293,12 @@ type WordLayout = {
   /** x do início da palavra, relativo ao início da LINHA */
   x: number;
   w: number;
-  /** fontPx desta palavra (highlightScale muda por palavra) */
+  /** fontPx desta palavra (highlightScale/sizeCycle/mix mudam por palavra) */
   fpx: number;
+  /** fonte desta palavra (tipografia mista) */
+  fk: FontKey;
+  /** palavra de APOIO do mix (renderiza limpa, sem stroke/glow/extrude) */
+  mixed: boolean;
   chars: CharLayout[];
 };
 type LineLayout = { wordIdx: number[]; width: number; scale: number };
@@ -303,7 +323,7 @@ function measureLayout(
   const upper = style.uppercase ?? preset.uppercase ?? false;
   const hlScale = preset.highlightScale ?? 1;
   const hlKey =
-    hlScale !== 1 || preset.sizeCycle
+    hlScale !== 1 || preset.sizeCycle || preset.mix
       ? Array.from(highlights).sort((a, b) => a - b).join('.')
       : '';
   const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${style.fontScale}|${upper}|${W}|${hlKey}`;
@@ -317,11 +337,21 @@ function measureLayout(
   const sizeCycle = preset.sizeCycle;
 
   const words: WordLayout[] = block.words.map((w, wi) => {
+    const isHi = highlights.has(wi);
+    const mixed = !!(preset.mix && !isHi);
+    const fk = mixed ? preset.mix!.font : preset.font;
     const cyc = sizeCycle ? sizeCycle[wi % sizeCycle.length] : 1;
-    const fpx = fontPx * cyc * (highlights.has(wi) ? hlScale : 1);
+    const fpx = mixed
+      ? fontPx * preset.mix!.scale
+      : fontPx * cyc * (isHi ? hlScale : 1);
     const sp = (preset.spacing ?? 0) * fpx;
-    ctx.font = fontCss(preset.font, fpx);
-    const text = upper ? w.text.toUpperCase() : w.text;
+    ctx.font = fontCss(fk, fpx);
+    const text =
+      mixed && preset.mix!.lowercase
+        ? w.text.toLowerCase()
+        : upper
+          ? w.text.toUpperCase()
+          : w.text;
     const chars: CharLayout[] = [];
     let x = 0;
     for (const ch of Array.from(text)) {
@@ -330,7 +360,7 @@ function measureLayout(
       x += cw + sp;
     }
     const w0 = chars.length > 0 ? x - sp : 0;
-    return { text, line: 0, x: 0, w: w0, fpx, chars };
+    return { text, line: 0, x: 0, w: w0, fpx, fk, mixed, chars };
   });
 
   ctx.font = fontCss(preset.font, fontPx);
@@ -565,9 +595,15 @@ function clearShadow(ctx: CanvasRenderingContext2D) {
   ctx.shadowOffsetY = 0;
 }
 
-function applyTextStyle(d: DrawCtx, fill: string, fpx: number) {
+function applyTextStyle(
+  d: DrawCtx,
+  fill: string,
+  fpx: number,
+  fk: FontKey = d.preset.font,
+  noGlow = false,
+) {
   const { ctx, preset } = d;
-  ctx.font = fontCss(preset.font, fpx);
+  ctx.font = fontCss(fk, fpx);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
   ctx.fillStyle = fill;
@@ -576,7 +612,7 @@ function applyTextStyle(d: DrawCtx, fill: string, fpx: number) {
     ctx.shadowBlur = preset.shadow.blur * fpx;
     ctx.shadowOffsetX = preset.shadow.x * fpx;
     ctx.shadowOffsetY = preset.shadow.y * fpx;
-  } else if (preset.glow) {
+  } else if (preset.glow && !noGlow) {
     ctx.shadowColor = resolveColor(preset.glow.color, d.primary, d.accent);
     ctx.shadowBlur = (preset.glow.blur ?? 0) * fpx;
     ctx.shadowOffsetX = 0;
@@ -597,9 +633,12 @@ function fillWordText(
   y: number,
   fill: string,
   fpx = d.fontPx,
+  fk: FontKey = d.preset.font,
+  // palavra de apoio do mix: só sombra, sem stroke/glow/extrude/aura/chroma/shine
+  plain = false,
 ) {
   const { ctx, preset } = d;
-  ctx.font = fontCss(preset.font, fpx);
+  ctx.font = fontCss(fk, fpx);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 
@@ -608,6 +647,18 @@ function fillWordText(
     ctx.miterLimit = 2;
     ctx.lineWidth = (preset.stroke?.width ?? 0) * fpx;
   };
+
+  if (plain) {
+    // sombra dura entra mesmo no plain (legibilidade sobre o vídeo)
+    if (preset.hardShadow) {
+      clearShadow(ctx);
+      ctx.fillStyle = resolveColor(preset.hardShadow.color, d.primary, d.accent);
+      ctx.fillText(text, x + preset.hardShadow.x * fpx, y + preset.hardShadow.y * fpx);
+    }
+    applyTextStyle(d, fill, fpx, fk, true);
+    ctx.fillText(text, x, y);
+    return;
+  }
 
   // aura de neon (anéis de contorno atrás de tudo)
   if (preset.aura) {
@@ -683,7 +734,7 @@ function fillWordText(
   }
 
   // camada principal
-  applyTextStyle(d, fill, fpx);
+  applyTextStyle(d, fill, fpx, fk);
   if (preset.stroke) {
     strokeSetup();
     ctx.strokeStyle = resolveColor(preset.stroke.color, d.primary, d.accent);
@@ -1040,7 +1091,7 @@ export function drawCaptions(
         : isHi
           ? resolveColor(preset.highlightColor ?? 'accent', primary, accent)
           : resolveFill(d, lineH);
-    fillWordText(d, text, -ww / 2, lineH * 0.3, fill, wl.fpx);
+    fillWordText(d, text, -ww / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
     ctx.restore();
     finishDraw();
     return;
@@ -1196,10 +1247,29 @@ export function drawCaptions(
               );
 
         // cor da palavra nesta passada
-        let fill = preset.colorCycle
-          ? resolveColor(preset.colorCycle[wi % preset.colorCycle.length], primary, accent)
-          : resolveFill(d, lineH);
-        if (isHi) fill = resolveColor(preset.highlightColor ?? 'accent', primary, accent);
+        let fill: string;
+        if (preset.mix) {
+          // tipografia mista: a destacada mantém o look principal do preset
+          // (gradiente/accent); as de apoio usam a cor do mix
+          if (isHi) {
+            fill = resolveFill(d, lineH);
+          } else {
+            fill = resolveColor(preset.mix.color ?? 'primary', primary, accent);
+            if (preset.mix.accentLast && wi === block.words.length - 1) fill = accent;
+          }
+        } else {
+          fill = preset.colorCycle
+            ? resolveColor(preset.colorCycle[wi % preset.colorCycle.length], primary, accent)
+            : resolveFill(d, lineH);
+          if (
+            preset.lineAccent === 'last' &&
+            layout.lines.length > 1 &&
+            wl.line === layout.lines.length - 1
+          ) {
+            fill = accent;
+          }
+          if (isHi) fill = resolveColor(preset.highlightColor ?? 'accent', primary, accent);
+        }
         if (karaoke === 'word-color' && isActive) fill = accent;
         if (isFill) fill = pass === 'base' ? fill : accent;
 
@@ -1433,7 +1503,7 @@ function drawWord(
       if (fx.rot || loop.rot || wordJitterRot) ctx.rotate(fx.rot + loop.rot + wordJitterRot);
       if (fx.skew) ctx.transform(1, 0, Math.tan(fx.skew), 1, 0, 0);
       if (fx.blur > 0.4) ctx.filter = `blur(${fx.blur.toFixed(1)}px)`;
-      fillWordText(d, cl.ch, -cl.w / 2, lineH * 0.3, fill, wl.fpx);
+      fillWordText(d, cl.ch, -cl.w / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
       ctx.restore();
     }
     return;
@@ -1450,7 +1520,7 @@ function drawWord(
   if (fx.skew) ctx.transform(1, 0, Math.tan(fx.skew), 1, 0, 0);
   if (fx.blur > 0.4) ctx.filter = `blur(${fx.blur.toFixed(1)}px)`;
 
-  if (preset.in.kind === 'glitch' && fx.p < 1) {
+  if (preset.in.kind === 'glitch' && fx.p < 1 && !wl.mixed) {
     // fantasmas RGB extras durante a entrada glitch
     const m = (1 - fx.e) * (preset.in.amp ?? 1) * fontPx * 0.4;
     if (m > 0.5) {
@@ -1460,7 +1530,7 @@ function drawWord(
       ctx.globalAlpha *= 0.55;
       clearShadow(ctx);
       ctx.fillStyle = 'rgba(255,45,85,0.9)';
-      ctx.font = fontCss(preset.font, wl.fpx);
+      ctx.font = fontCss(wl.fk, wl.fpx);
       ctx.fillText(wl.text, -wl.w / 2 + ox, lineH * 0.3);
       ctx.fillStyle = 'rgba(0,229,255,0.9)';
       ctx.fillText(wl.text, -wl.w / 2 - ox, lineH * 0.3);
@@ -1468,7 +1538,7 @@ function drawWord(
     }
   }
 
-  fillWordText(d, wl.text, -wl.w / 2, lineH * 0.3, fill, wl.fpx);
+  fillWordText(d, wl.text, -wl.w / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
   ctx.restore();
 }
 
@@ -1517,7 +1587,7 @@ function drawTypewriter(
         }
         const cl = wl.chars[ci];
         ctx.globalAlpha = outAlpha;
-        fillWordText(d, cl.ch, x0 + wl.x + cl.x, baseY, fill, wl.fpx);
+        fillWordText(d, cl.ch, x0 + wl.x + cl.x, baseY, fill, wl.fpx, wl.fk, wl.mixed);
         drawn++;
         caretX = x0 + wl.x + cl.x + cl.w;
         caretY = baseY;
@@ -1589,7 +1659,8 @@ export function drawPresetDemo(
     };
     demoCache.set(cacheKey, demo);
   }
-  const hiIdx = demo.words.length > 1 ? 1 : 0;
+  // SEM destaque manual forçado: a demo mostra exatamente o comportamento
+  // real (autoEmphasis do preset, quando existir) — galeria = vídeo.
   const style: StyleState = {
     presetId: preset.id,
     fontScale: 1.02,
@@ -1597,7 +1668,8 @@ export function drawPresetDemo(
     primary: null,
     accent: null,
     uppercase: null,
-    highlights: { [demo.id]: [hiIdx] },
+    highlights: {},
+    autoEmphasis: true,
   };
   drawCaptions(ctx, [demo], preset, style, t, W, H);
 }

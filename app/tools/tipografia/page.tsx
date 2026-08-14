@@ -965,7 +965,11 @@ function PresetGallery({
         const ctx = c.getContext('2d');
         if (!ctx) continue;
         ctx.clearRect(0, 0, c.width, c.height);
-        drawPresetDemo(ctx, preset, now, c.width, c.height, 'SUA LEGENDA AQUI');
+        // presets de linha colorida precisam de 2+ linhas pra demo mostrar o efeito
+        const demoText = preset.lineAccent
+          ? 'SABE QUE NÃO É MAIS UM CURSO DE COPY'
+          : 'SUA LEGENDA AQUI';
+        drawPresetDemo(ctx, preset, now, c.width, c.height, demoText);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -998,7 +1002,7 @@ function PresetGallery({
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {list.map((preset) => {
           const active = preset.id === presetId;
           return (
@@ -1015,13 +1019,13 @@ function PresetGallery({
               }
             >
               <canvas
-                width={336}
-                height={150}
+                width={520}
+                height={240}
                 ref={(el) => {
                   if (el) canvasesRef.current.set(preset.id, el);
                   else canvasesRef.current.delete(preset.id);
                 }}
-                className="block aspect-[336/150] w-full"
+                className="block aspect-[520/240] w-full"
                 style={{
                   background:
                     'linear-gradient(145deg, #17181d 0%, #101116 55%, #191a20 100%)',

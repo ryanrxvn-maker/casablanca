@@ -42,6 +42,154 @@ function p(base: P): TypoPreset {
 }
 
 export const TYPO_PRESETS: TypoPreset[] = [
+  // ─── VIRAL (tipografia mista, refs validadas pelo user) ──────────────────
+  p({
+    id: 'titulo-viral',
+    name: 'Título Viral',
+    cat: 'Viral',
+    font: 'anton',
+    size: 0.08,
+    lineHeight: 1.0,
+    fill: 'accent',
+    stroke: { color: '#ffffff', width: 0.045 },
+    hardShadow: { color: 'rgba(0,0,0,0.45)', x: 0.045, y: 0.06 },
+    mix: { font: 'playfair900i', scale: 0.44, lowercase: true },
+    in: { kind: 'rise', dur: 300, ease: 'outQuint', stagger: 90, amp: 0.6 },
+    autoEmphasis: true,
+    defaultAccent: YELLOW,
+  }),
+  p({
+    id: 'titulo-ouro',
+    name: 'Título Ouro',
+    cat: 'Viral',
+    font: 'anton',
+    size: 0.08,
+    lineHeight: 1.0,
+    fill: 'gradient',
+    gradientStops: [
+      [0, '#fff3c4'],
+      [0.4, '#ffcd3c'],
+      [0.62, '#c98a12'],
+      [0.75, '#f2b02c'],
+      [1, '#8f5e00'],
+    ],
+    shine: { period: 2600, alpha: 0.75 },
+    hardShadow: { color: 'rgba(0,0,0,0.5)', x: 0.05, y: 0.06 },
+    mix: { font: 'playfair900i', scale: 0.42, lowercase: true },
+    in: { kind: 'rise', dur: 320, ease: 'outQuint', stagger: 100, amp: 0.6 },
+    autoEmphasis: true,
+    defaultAccent: '#ffcd3c',
+  }),
+  p({
+    id: 'viral-clean',
+    name: 'Essa Forma',
+    cat: 'Viral',
+    font: 'archivo',
+    size: 0.074,
+    lineHeight: 1.02,
+    hardShadow: { color: 'rgba(0,0,0,0.4)', x: 0.04, y: 0.05 },
+    mix: { font: 'caveat700', scale: 0.72, lowercase: true, accentLast: true },
+    in: { kind: 'pop', dur: 280, ease: 'outBackSoft', stagger: 110 },
+    autoEmphasis: true,
+    defaultAccent: ORANGE,
+  }),
+  p({
+    id: 'neon-viral',
+    name: 'Neon Viral',
+    cat: 'Viral',
+    font: 'bebas',
+    size: 0.086,
+    lineHeight: 1.0,
+    spacing: 0.02,
+    glow: { color: 'accent', blur: 0.55 },
+    hardShadow: { color: 'rgba(0,0,0,0.4)', x: 0.03, y: 0.04 },
+    mix: { font: 'playfair900i', scale: 0.42, lowercase: true },
+    in: { kind: 'fade', dur: 260, ease: 'outQuad', stagger: 90 },
+    autoEmphasis: true,
+    defaultAccent: PINK,
+  }),
+  p({
+    id: 'contraste',
+    name: 'Contraste',
+    cat: 'Viral',
+    font: 'montserrat900',
+    size: 0.07,
+    lineHeight: 1.04,
+    hardShadow: { color: 'rgba(0,0,0,0.45)', x: 0.04, y: 0.06 },
+    mix: { font: 'playfair900i', scale: 0.52, lowercase: true, color: 'accent' },
+    in: { kind: 'pop', dur: 260, ease: 'outBack', stagger: 90 },
+    autoEmphasis: true,
+    defaultAccent: '#e8c66b',
+  }),
+  p({
+    id: 'revista',
+    name: 'Revista',
+    cat: 'Viral',
+    font: 'playfair900',
+    size: 0.072,
+    lineHeight: 1.04,
+    uppercase: false,
+    shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.14, x: 0, y: 0.04 },
+    mix: { font: 'oswald600', scale: 0.46 },
+    in: { kind: 'mask-up', dur: 400, ease: 'outQuint', stagger: 110 },
+    autoEmphasis: true,
+    defaultAccent: '#e8c66b',
+  }),
+  p({
+    id: 'linha-destaque',
+    name: 'Linha Rosa',
+    cat: 'Viral',
+    font: 'oswald600',
+    size: 0.064,
+    lineHeight: 1.12,
+    lineAccent: 'last',
+    hardShadow: { color: 'rgba(0,0,0,0.45)', x: 0.03, y: 0.04 },
+    unit: 'block',
+    in: { kind: 'mask-up', dur: 340, ease: 'outQuint', stagger: 110 },
+    autoEmphasis: false,
+    defaultAccent: PINK,
+  }),
+  p({
+    id: 'manuscrito',
+    name: 'Manuscrito',
+    cat: 'Viral',
+    font: 'caveat700',
+    size: 0.078,
+    uppercase: false,
+    hardShadow: { color: 'rgba(0,0,0,0.4)', x: 0.03, y: 0.05 },
+    in: { kind: 'rise', dur: 340, ease: 'outBackSoft', stagger: 100, amp: 0.5 },
+    autoEmphasis: true,
+    highlightScale: 1.25,
+    defaultAccent: YELLOW,
+  }),
+  p({
+    id: 'escada',
+    name: 'Escada',
+    cat: 'Viral',
+    font: 'anton',
+    size: 0.06,
+    lineHeight: 1.05,
+    sizeCycle: [0.78, 1.02, 1.34],
+    colorCycle: ['primary', 'primary', 'accent'],
+    hardShadow: { color: 'rgba(0,0,0,0.5)', x: 0.05, y: 0.06 },
+    unit: 'block',
+    in: { kind: 'mask-up', dur: 340, ease: 'outQuint', stagger: 100 },
+    defaultAccent: YELLOW,
+  }),
+  p({
+    id: 'esmagado',
+    name: 'Esmagado',
+    cat: 'Viral',
+    font: 'archivo',
+    size: 0.06,
+    lineHeight: 1.04,
+    sizeCycle: [1.42, 0.74],
+    colorCycle: ['accent', 'primary'],
+    hardShadow: { color: 'rgba(0,0,0,0.5)', x: 0.05, y: 0.07 },
+    in: { kind: 'squash', dur: 280, ease: 'outBack', stagger: 100 },
+    defaultAccent: ORANGE,
+  }),
+
   // ─── PREMIUM ──────────────────────────────────────────────────────────────
   p({
     id: 'auto-hype',
@@ -362,6 +510,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'zoom-crush',
+    autoEmphasis: true,
     name: 'Zoom Crush',
     cat: 'Impacto',
     font: 'anton',
@@ -374,6 +523,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'slam-giro',
+    autoEmphasis: true,
     name: 'Slam Giro',
     cat: 'Impacto',
     font: 'archivo',
@@ -383,6 +533,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'soco-alternado',
+    autoEmphasis: true,
     name: 'Soco Alternado',
     cat: 'Impacto',
     font: 'montserrat900',
@@ -504,6 +655,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'glitch-rgb',
+    autoEmphasis: true,
     name: 'Glitch RGB',
     cat: 'Glitch',
     font: 'archivo',
@@ -515,6 +667,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'glitch-digital',
+    autoEmphasis: true,
     name: 'Glitch Digital',
     cat: 'Glitch',
     font: 'anton',
@@ -543,6 +696,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'static-pop',
+    autoEmphasis: true,
     name: 'Static Pop',
     cat: 'Glitch',
     font: 'montserrat900',
@@ -586,6 +740,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'caixa-branca',
+    autoEmphasis: true,
     name: 'Caixa Branca',
     cat: 'Destaque',
     font: 'inter800',
@@ -626,6 +781,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'tarja-preta',
+    autoEmphasis: true,
     name: 'Tarja Preta',
     cat: 'Destaque',
     font: 'oswald600',
@@ -637,6 +793,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'chip-palavra',
+    autoEmphasis: true,
     name: 'Chip Palavra',
     cat: 'Destaque',
     font: 'poppins800',
@@ -660,6 +817,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'marca-texto',
+    autoEmphasis: true,
     name: 'Marca-Texto',
     cat: 'Destaque',
     font: 'inter800',
@@ -672,6 +830,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'sublinhado-forte',
+    autoEmphasis: true,
     name: 'Sublinhado',
     cat: 'Destaque',
     font: 'montserrat800',
@@ -686,6 +845,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   // ─── MINIMAL ──────────────────────────────────────────────────────────────
   p({
     id: 'fade-limpo',
+    autoEmphasis: true,
     name: 'Fade Limpo',
     cat: 'Minimal',
     font: 'inter800',
@@ -698,6 +858,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'sobe-suave',
+    autoEmphasis: true,
     name: 'Sobe Suave',
     cat: 'Minimal',
     font: 'poppins800',
@@ -709,6 +870,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'tracking-aberto',
+    autoEmphasis: true,
     name: 'Tracking Aberto',
     cat: 'Minimal',
     font: 'montserrat800',
@@ -721,6 +883,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'oswald-clean',
+    autoEmphasis: true,
     name: 'Alto e Limpo',
     cat: 'Minimal',
     font: 'oswald600',
@@ -735,6 +898,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   // ─── BOUNCE ───────────────────────────────────────────────────────────────
   p({
     id: 'bounce-elastico',
+    autoEmphasis: true,
     name: 'Bounce Elástico',
     cat: 'Bounce',
     font: 'poppins800',
@@ -746,6 +910,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'jelly',
+    autoEmphasis: true,
     name: 'Jelly',
     cat: 'Bounce',
     font: 'nunito900',
@@ -756,6 +921,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'quica-letra',
+    autoEmphasis: true,
     name: 'Quica Letra',
     cat: 'Bounce',
     font: 'montserrat900',
@@ -769,6 +935,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   // ─── MÁQUINA ──────────────────────────────────────────────────────────────
   p({
     id: 'maquina',
+    autoEmphasis: true,
     name: 'Máquina',
     cat: 'Máquina',
     font: 'jetbrains700',
@@ -782,6 +949,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'terminal',
+    autoEmphasis: true,
     name: 'Terminal',
     cat: 'Máquina',
     font: 'jetbrains700',
@@ -797,6 +965,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'digitada',
+    autoEmphasis: true,
     name: 'Digitada',
     cat: 'Máquina',
     font: 'inter800',
@@ -812,6 +981,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   // ─── FOCO ─────────────────────────────────────────────────────────────────
   p({
     id: 'blur-reveal',
+    autoEmphasis: true,
     name: 'Blur Reveal',
     cat: 'Foco',
     font: 'poppins800',
@@ -822,6 +992,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'foco-cine',
+    autoEmphasis: true,
     name: 'Foco Cine',
     cat: 'Foco',
     font: 'playfair900',
@@ -834,6 +1005,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'motion-slide',
+    autoEmphasis: true,
     name: 'Motion Slide',
     cat: 'Foco',
     font: 'inter800',
@@ -846,6 +1018,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   // ─── REVEAL ───────────────────────────────────────────────────────────────
   p({
     id: 'mask-up',
+    autoEmphasis: true,
     name: 'Mask Up',
     cat: 'Reveal',
     font: 'montserrat900',
@@ -857,6 +1030,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'cortina',
+    autoEmphasis: true,
     name: 'Cortina',
     cat: 'Reveal',
     font: 'anton',
@@ -868,6 +1042,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'flip-belt',
+    autoEmphasis: true,
     name: 'Flip 3D',
     cat: 'Reveal',
     font: 'montserrat900',
@@ -878,6 +1053,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'stretch-impact',
+    autoEmphasis: true,
     name: 'Stretch',
     cat: 'Reveal',
     font: 'anton',
@@ -888,6 +1064,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'skew-kinetic',
+    autoEmphasis: true,
     name: 'Skew Kinetic',
     cat: 'Reveal',
     font: 'poppins800',
@@ -900,6 +1077,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   // ─── NEON ─────────────────────────────────────────────────────────────────
   p({
     id: 'neon-brutal',
+    autoEmphasis: true,
     name: 'Neon Brutal',
     cat: 'Neon',
     font: 'bebas',
@@ -915,6 +1093,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'eco-neon',
+    autoEmphasis: true,
     name: 'Eco Neon',
     cat: 'Neon',
     font: 'bebas',
@@ -944,6 +1123,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'neon-pulse',
+    autoEmphasis: true,
     name: 'Neon Pulse',
     cat: 'Neon',
     font: 'bebas',
@@ -957,6 +1137,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'neon-rosa',
+    autoEmphasis: true,
     name: 'Neon Rosa',
     cat: 'Neon',
     font: 'bebas',
@@ -969,6 +1150,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'luz-de-palco',
+    autoEmphasis: true,
     name: 'Luz de Palco',
     cat: 'Neon',
     font: 'anton',
@@ -994,6 +1176,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'chroma-wave',
+    autoEmphasis: true,
     name: 'Chroma Wave',
     cat: 'Kinetic',
     font: 'archivo',
@@ -1006,6 +1189,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'onda',
+    autoEmphasis: true,
     name: 'Onda',
     cat: 'Kinetic',
     font: 'nunito900',
@@ -1018,6 +1202,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'shake-hype',
+    autoEmphasis: true,
     name: 'Shake Hype',
     cat: 'Kinetic',
     font: 'archivo',
@@ -1031,6 +1216,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'float-suave',
+    autoEmphasis: true,
     name: 'Float Suave',
     cat: 'Kinetic',
     font: 'poppins800',
@@ -1044,6 +1230,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'letra-viva',
+    autoEmphasis: true,
     name: 'Letra Viva',
     cat: 'Kinetic',
     font: 'montserrat900',
@@ -1073,6 +1260,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'editorial-serif',
+    autoEmphasis: true,
     name: 'Editorial',
     cat: 'Editorial',
     font: 'playfair900',
@@ -1085,6 +1273,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'vogue-mask',
+    autoEmphasis: true,
     name: 'Vogue',
     cat: 'Editorial',
     font: 'playfair900',
@@ -1098,6 +1287,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'citacao',
+    autoEmphasis: true,
     name: 'Citação',
     cat: 'Editorial',
     font: 'playfair900i',
@@ -1109,6 +1299,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
   }),
   p({
     id: 'rabisco',
+    autoEmphasis: true,
     name: 'Rabisco',
     cat: 'Editorial',
     font: 'marker',
