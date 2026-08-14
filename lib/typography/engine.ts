@@ -223,6 +223,8 @@ export type StyleState = {
   highlights: Record<string, number[]>;
   /** desliga o destaque automático dos presets (default: ligado) */
   autoEmphasis?: boolean;
+  /** troca a fonte PRINCIPAL do modelo (o apoio do mix mantém a dele) */
+  fontOverride?: FontKey | null;
 };
 
 export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
@@ -233,6 +235,7 @@ export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   uppercase: null,
   highlights: {},
   autoEmphasis: true,
+  fontOverride: null,
 };
 
 // Palavras vazias que NUNCA merecem destaque (PT/EN/ES). A palavra forte é
@@ -361,12 +364,23 @@ type WordLayout = {
   mixed: boolean;
   chars: CharLayout[];
 };
-type LineLayout = { wordIdx: number[]; width: number; scale: number };
+type LineLayout = {
+  wordIdx: number[];
+  width: number;
+  scale: number;
+  /** offset do topo do bloco até o topo desta linha */
+  y0: number;
+  /** altura DESTA linha (maior palavra dela × lineHeight — o lineHeight <1
+   *  dos presets empilhados dá o "tuck" de sobreposição leve das refs) */
+  h: number;
+};
 type BlockLayout = {
   words: WordLayout[];
   lines: LineLayout[];
   fontPx: number;
   lineH: number;
+  /** altura total do bloco (soma das linhas) */
+  totalH: number;
   totalChars: number;
 };
 
@@ -386,7 +400,7 @@ function measureLayout(
     hlScale !== 1 || preset.sizeCycle || preset.mix || preset.emphasisBreak || preset.stack
       ? Array.from(highlights).sort((a, b) => a - b).join('.')
       : '';
-  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${style.fontScale}|${upper}|${W}|${hlKey}`;
+  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${upper}|${W}|${hlKey}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
   if (layoutCache.size > 300) layoutCache.clear();
@@ -433,7 +447,7 @@ function measureLayout(
   let curW = 0;
   const flushLine = () => {
     if (cur.length > 0) {
-      lines.push({ wordIdx: cur, width: curW, scale: 1 });
+      lines.push({ wordIdx: cur, width: curW, scale: 1, y0: 0, h: 0 });
       cur = [];
       curW = 0;
     }
@@ -445,7 +459,7 @@ function measureLayout(
       flushLine();
       w.line = lines.length;
       w.x = 0;
-      lines.push({ wordIdx: [i], width: w.w, scale: 1 });
+      lines.push({ wordIdx: [i], width: w.w, scale: 1, y0: 0, h: 0 });
       return;
     }
     const tryW = cur.length === 0 ? w.w : curW + spaceW + w.w;
@@ -462,8 +476,20 @@ function measureLayout(
     if (line.width > maxLineW) line.scale = maxLineW / line.width;
   }
 
+  // Altura POR LINHA: maior palavra da linha × lineHeight. Palavra gigante
+  // empurra a própria linha (sem engolir a de cima); presets empilhados com
+  // lineHeight ~0.92-1.0 mantêm o "tuck" de sobreposição leve das refs.
+  const lhFactor = preset.lineHeight ?? 1.16;
+  let accY = 0;
+  for (const line of lines) {
+    const maxF = Math.max(...line.wordIdx.map((i) => words[i].fpx * line.scale));
+    line.h = maxF * lhFactor;
+    line.y0 = accY;
+    accY += line.h;
+  }
+
   const totalChars = words.reduce((s, w) => s + w.chars.length, 0);
-  const layout: BlockLayout = { words, lines, fontPx, lineH, totalChars };
+  const layout: BlockLayout = { words, lines, fontPx, lineH, totalH: accY, totalChars };
   layoutCache.set(key, layout);
   return layout;
 }
@@ -686,8 +712,11 @@ function applyTextStyle(
     ctx.shadowOffsetX = preset.shadow.x * fpx;
     ctx.shadowOffsetY = preset.shadow.y * fpx;
   } else if (preset.glow && !noGlow) {
+    // palavra menor (apoio/mix) recebe glow proporcionalmente mais suave —
+    // sem isso o brilho da grande "engole" o texto pequeno do lado
+    const glowScale = Math.min(1, Math.max(0.45, fpx / d.fontPx));
     ctx.shadowColor = resolveColor(preset.glow.color, d.primary, d.accent);
-    ctx.shadowBlur = (preset.glow.blur ?? 0) * fpx;
+    ctx.shadowBlur = (preset.glow.blur ?? 0) * fpx * glowScale;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
   } else {
@@ -813,8 +842,9 @@ function fillWordText(
     ctx.strokeStyle = resolveColor(preset.stroke.color, d.primary, d.accent);
     ctx.strokeText(text, x, y);
   }
-  if (preset.glow) {
-    // passada dupla engrossa o glow (canvas soma shadows por draw)
+  if (preset.glow && fpx >= d.fontPx * 0.7) {
+    // passada dupla engrossa o glow (canvas soma shadows por draw) —
+    // SÓ na palavra grande; na pequena o glow duplo apaga a letra
     ctx.fillText(text, x, y);
   }
   ctx.fillText(text, x, y);
@@ -974,12 +1004,19 @@ function compositeGlitchBands(
 export function drawCaptions(
   realCtx: CanvasRenderingContext2D,
   blocks: Block[],
-  preset: TypoPreset,
+  basePreset: TypoPreset,
   style: StyleState,
   tMs: number,
   W: number,
   H: number,
 ): void {
+  // troca de fonte pelo editor: só a fonte PRINCIPAL muda; o apoio do mix
+  // mantém a dele (a composição é parte do modelo)
+  const preset =
+    style.fontOverride && style.fontOverride !== basePreset.font
+      ? { ...basePreset, font: style.fontOverride }
+      : basePreset;
+
   let block: Block | null = null;
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
@@ -1064,8 +1101,7 @@ export function drawCaptions(
   // Geometria do bloco
   const karaoke = preset.karaoke ?? 'none';
   const isSolo = karaoke === 'solo';
-  const nLines = isSolo ? 1 : layout.lines.length;
-  const blockH = nLines * lineH;
+  const blockH = isSolo ? lineH : layout.totalH;
   let topY = style.posY * H - blockH / 2;
   topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
   const cx = W / 2;
@@ -1109,7 +1145,10 @@ export function drawCaptions(
     const line = layout.lines[li];
     return cx - (line.width * line.scale) / 2;
   };
-  const lineBaseY = (li: number) => topY + li * lineH + lineH * 0.78;
+  const lineBaseY = (li: number) => {
+    const line = layout.lines[li];
+    return topY + line.y0 + line.h * 0.78;
+  };
   const wordAbsX = (wi: number) => {
     const w = layout.words[wi];
     const line = layout.lines[w.line];
@@ -1231,13 +1270,13 @@ export function drawCaptions(
         s,
       );
     } else {
-      layout.lines.forEach((line, li) => {
+      layout.lines.forEach((line) => {
         const bw = line.width * line.scale + padX * 2;
-        const bh = lineH * 0.92 + padY * 2;
+        const bh = line.h * 0.92 + padY * 2;
         drawFxBox(
           d,
           cx,
-          topY + li * lineH + lineH * 0.52,
+          topY + line.y0 + line.h * 0.52,
           bw,
           bh,
           blockBox.radius * fontPx,
@@ -1351,31 +1390,25 @@ export function drawCaptions(
             ? 1
             : clamp01((tMs - (block.start + li * (preset.in.stagger ?? 90))) / preset.in.dur);
         const le = EASE[preset.in.ease ?? 'outCubic'](lp);
-        // headroom extra pra palavra em escala maior (destaque OU sizeCycle) não clipar
-        const maxUnitScale = Math.max(
-          preset.highlightScale ?? 1,
-          ...(preset.sizeCycle ?? [1]),
-        );
-        const hlPad = maxUnitScale > 1 ? fontPx * (maxUnitScale - 1) * 1.15 : 0;
         ctx.beginPath();
         if (isMask) {
           ctx.rect(
             x0 - fontPx,
-            topY + li * lineH - lineH * 0.12 - hlPad,
+            topY + line.y0 - line.h * 0.14,
             line.width + fontPx * 2,
-            lineH * 1.18 + hlPad,
+            line.h * 1.24,
           );
         } else {
           ctx.rect(
             x0 - fontPx * 0.2,
-            topY + li * lineH - lineH * 0.3 - hlPad,
+            topY + line.y0 - line.h * 0.3,
             (line.width + fontPx * 0.4) * le,
-            lineH * 1.5 + hlPad,
+            line.h * 1.5,
           );
         }
         ctx.clip();
         if (isMask) {
-          const dyLine = (1 - le) * lineH;
+          const dyLine = (1 - le) * line.h;
           ctx.translate(0, dyLine);
         }
       }
@@ -1550,11 +1583,11 @@ export function drawCaptions(
     ctx.save();
     ctx.beginPath();
     layout.lines.forEach((line, li) => {
-      const y0 = topY + li * lineH - lineH * 0.2;
+      const y0 = topY + line.y0 - line.h * 0.2;
       if (li < aw.line) {
-        ctx.rect(0, y0, W, lineH * 1.4);
+        ctx.rect(0, y0, W, line.h * 1.4);
       } else if (li === aw.line) {
-        ctx.rect(0, y0, fillX, lineH * 1.4);
+        ctx.rect(0, y0, fillX, line.h * 1.4);
       }
     });
     ctx.clip();
@@ -1814,7 +1847,7 @@ function drawTypewriter(
   for (let li = 0; li < layout.lines.length; li++) {
     const line = layout.lines[li];
     const x0 = cx - (line.width * line.scale) / 2;
-    const baseY = topY + li * lineH + lineH * 0.78;
+    const baseY = topY + line.y0 + line.h * 0.78;
     ctx.save();
     if (line.scale !== 1) {
       ctx.translate(cx, baseY);

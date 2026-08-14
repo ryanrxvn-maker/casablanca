@@ -50,7 +50,12 @@ import {
   type TWord,
 } from '@/lib/typography/engine';
 import { TYPO_PRESETS, TYPO_CATEGORIES, getPreset } from '@/lib/typography/presets';
-import { ensureTypoFonts } from '@/lib/typography/fonts';
+import {
+  ensureTypoFonts,
+  TYPO_FONTS,
+  FONT_GROUPS,
+  type FontKey,
+} from '@/lib/typography/fonts';
 import {
   groupWords,
   blockText,
@@ -104,6 +109,7 @@ type SavedSession = {
   language: Language;
   highlights: Record<string, number[]>;
   autoEmph?: boolean;
+  fontOv?: FontKey | null;
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -160,6 +166,7 @@ function TipografiaInner() {
     {},
   );
   const [autoEmph, setAutoEmph] = useToolState<boolean>('tipografia:autoemph', true);
+  const [fontOv, setFontOv] = useToolState<FontKey | null>('tipografia:fontov', null);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
@@ -177,8 +184,9 @@ function TipografiaInner() {
       uppercase: upper === 'auto' ? null : upper === 'on',
       highlights,
       autoEmphasis: autoEmph,
+      fontOverride: fontOv,
     }),
-    [presetId, fontScale, posY, primary, accent, upper, highlights, autoEmph],
+    [presetId, fontScale, posY, primary, accent, upper, highlights, autoEmph, fontOv],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -219,6 +227,7 @@ function TipografiaInner() {
         setLanguage(saved.language);
         setHighlights(saved.highlights ?? {});
         setAutoEmph(saved.autoEmph ?? true);
+        setFontOv(saved.fontOv ?? null);
         setPhase('ready');
         setRestored(true);
       }
@@ -245,8 +254,9 @@ function TipografiaInner() {
       language,
       highlights,
       autoEmph,
+      fontOv,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights, autoEmph]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights, autoEmph, fontOv]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -632,6 +642,12 @@ function TipografiaInner() {
                 <PresetGallery
                   presetId={presetId}
                   onPick={setPresetId}
+                  disabled={processing}
+                />
+                <FontPicker
+                  value={fontOv}
+                  presetFont={preset.font}
+                  onPick={setFontOv}
                   disabled={processing}
                 />
                 <StylePanel
@@ -1048,6 +1064,106 @@ function PresetGallery({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── Seletor de fontes ───────────────────────── */
+
+function FontPicker({
+  value,
+  presetFont,
+  onPick,
+  disabled,
+}: {
+  value: FontKey | null;
+  presetFont: FontKey;
+  onPick: (v: FontKey | null) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = value ?? presetFont;
+  const activeFont = TYPO_FONTS[active];
+  return (
+    <div className="rounded-[14px] border border-line bg-bg-soft/40 p-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div
+          className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Fonte — {Object.keys(TYPO_FONTS).length} disponíveis
+        </div>
+        <div className="flex items-center gap-2">
+          {value ? (
+            <button
+              onClick={() => onPick(null)}
+              disabled={disabled}
+              className="text-[11px] font-semibold text-amber-300 hover:underline"
+            >
+              Padrão do modelo
+            </button>
+          ) : null}
+          <button
+            onClick={() => setOpen((v) => !v)}
+            disabled={disabled}
+            className="rounded-[9px] border border-line px-3 py-1.5 text-[13px] text-text transition-colors hover:border-amber-400/50"
+            style={{
+              fontFamily: `${activeFont.family}, sans-serif`,
+              fontWeight: activeFont.weight,
+              fontStyle: activeFont.italic ? 'italic' : 'normal',
+            }}
+          >
+            {activeFont.label} {open ? '▴' : '▾'}
+          </button>
+        </div>
+      </div>
+      {open ? (
+        <div className="mt-3 max-h-[260px] overflow-y-auto pr-1">
+          {FONT_GROUPS.map((group) => {
+            const keys = (Object.keys(TYPO_FONTS) as FontKey[]).filter(
+              (k) => TYPO_FONTS[k].group === group,
+            );
+            if (keys.length === 0) return null;
+            return (
+              <div key={group} className="mb-2.5">
+                <div
+                  className="mb-1.5 text-[9.5px] font-bold uppercase tracking-[0.2em] text-text-muted"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  {group}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {keys.map((k) => {
+                    const f = TYPO_FONTS[k];
+                    const isActive = k === active;
+                    return (
+                      <button
+                        key={k}
+                        onClick={() => onPick(k === presetFont ? null : k)}
+                        disabled={disabled}
+                        className={
+                          'rounded-[9px] border px-2.5 py-1 text-[14px] leading-tight transition-colors ' +
+                          (isActive
+                            ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+                            : 'border-line text-text hover:border-amber-400/40')
+                        }
+                        style={{
+                          fontFamily: `${f.family}, sans-serif`,
+                          fontWeight: f.weight,
+                          fontStyle: f.italic ? 'italic' : 'normal',
+                        }}
+                        title={f.label}
+                      >
+                        {f.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }
