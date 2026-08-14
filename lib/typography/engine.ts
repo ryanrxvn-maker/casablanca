@@ -112,6 +112,8 @@ export type TypoPreset = {
   gradient?: [string, string];
   /** gradiente multi-stop (ouro/chrome/duotone) — offsets 0..1, aceita tokens */
   gradientStops?: Array<[number, PresetColor]>;
+  /** direção do gradiente (diagonal = ref "BRAND DESIGN") */
+  gradientDir?: 'vertical' | 'diagonal';
   stroke?: { color: PresetColor; width: number };
   /** sombra suave (blur) */
   shadow?: { color: string; blur: number; x: number; y: number };
@@ -124,8 +126,8 @@ export type TypoPreset = {
   shine?: { period: number; alpha: number };
   /** anéis de contorno atrás do texto (aura de neon) */
   aura?: { color: PresetColor; count: number; width: number; alpha: number; pulse?: boolean };
-  /** aberração cromática RGB persistente (fantasma red/cyan) */
-  chroma?: { amp: number; flicker?: boolean };
+  /** aberração cromática RGB persistente (cores customizáveis; default red/cyan) */
+  chroma?: { amp: number; flicker?: boolean; colors?: [string, string] };
   /** fatias horizontais deslocadas (durante a entrada e, com loop glitch, em bursts) */
   glitchBands?: boolean;
   /** cores do texto alternando por palavra */
@@ -154,6 +156,8 @@ export type TypoPreset = {
     accentLast?: boolean;
     /** offset vertical das palavras de apoio (fração do fontSize; script "sobreposto") */
     dy?: number;
+    /** letter-spacing extra das palavras de apoio (ref subtítulo espaçadinho) */
+    spacing?: number;
   };
   /** última LINHA inteira na cor de destaque (ref "não é mais um / CURSO DE COPY") */
   lineAccent?: 'last';
@@ -161,12 +165,37 @@ export type TypoPreset = {
   frameLines?: { color: PresetColor; thickness: number; gap: number };
   /** risco desenhado atrás do texto (ref "na sua edição", swoosh vermelho) */
   swoosh?: { color: PresetColor; width: number };
-  /** preenchimento psicodélico animado (ref "TRIPPY TITLES") */
-  patternFill?: { colors: [string, string]; scale: number; speed: number };
+  /** preenchimento animado dentro das letras (trippy = ondas; stripes = estêncil listrado) */
+  patternFill?: { colors: [string, string]; scale: number; speed: number; style?: 'trippy' | 'stripes' };
   /** fumaça procedural atrás do bloco */
   smoke?: { alpha: number };
-  /** eco do texto abaixo, menor e com glow (ref "Smooth opacity") */
-  subEcho?: { scale: number; gap: number; color: PresetColor; glow: number };
+  /**
+   * ECOS DO TEXTO: cópias da própria frase em outra escala/posição/estilo —
+   * a base dos letterings "frase pequena branca + gigante colorida",
+   * do fantasma vazado gigante atrás e do empilhado repetido.
+   * Ecos 'above'/'below' empilham na ordem do array.
+   */
+  echoes?: Array<{
+    pos: 'above' | 'below' | 'behind';
+    scale: number;
+    color: PresetColor;
+    alpha?: number;
+    /** só contorno (vazado) */
+    outline?: boolean;
+    /** risco atravessado (ref eco triplo) */
+    strike?: boolean;
+    dx?: number;
+    gap?: number;
+    glow?: number;
+  }>;
+  /** elipse desenhada ao redor do texto (ref "circulado dourado") */
+  circle?: { color: PresetColor; width: number };
+  /** post-it: retângulo sólido rotacionado atrás/abaixo do texto */
+  sticky?: { color: string; rotate: number };
+  /** cores do texto alternando por LETRA (ref "FUN TEXT") */
+  charColorCycle?: PresetColor[];
+  /** fração de letras renderizadas SÓ CONTORNO (ref "VIBRANT FLICKER") */
+  charOutlineRatio?: number;
   /** rotação fixa da composição (graus) */
   blockRotate?: number;
   /** jitter de rotação POR BLOCO, carimbado (graus máx) */
@@ -189,6 +218,12 @@ export type TypoPreset = {
     autoText?: boolean;
     /** sombra sólida da caixa (segunda caixa deslocada atrás) */
     shadow?: { color: PresetColor; x: number; y: number };
+    /** borda fina (ref pílula dourada) */
+    border?: { color: PresetColor; width: number };
+    /** preenchimento em gradiente vertical (ref botão CTA laranja) */
+    gradient?: Array<[number, PresetColor]>;
+    /** caixa só na primeira linha (ref "Most Businesses") */
+    firstLineOnly?: boolean;
   };
   karaoke?: KaraokeMode;
   /** como palavras destacadas manualmente aparecem */
@@ -229,6 +264,8 @@ export type StyleState = {
   autoEmphasis?: boolean;
   /** troca a fonte PRINCIPAL do modelo (o apoio do mix mantém a dele) */
   fontOverride?: FontKey | null;
+  /** posição horizontal do centro da legenda (0..1; default 0.5 = centro) */
+  posX?: number;
 };
 
 export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
@@ -240,6 +277,7 @@ export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   highlights: {},
   autoEmphasis: true,
   fontOverride: null,
+  posX: 0.5,
 };
 
 // Palavras vazias que NUNCA merecem destaque (PT/EN/ES). A palavra forte é
@@ -431,7 +469,7 @@ function measureLayout(
     const fpx = mixed
       ? fontPx * preset.mix!.scale
       : fontPx * cyc * (isHi ? hlScale : 1);
-    const sp = (preset.spacing ?? 0) * fpx;
+    const sp = ((mixed ? preset.mix!.spacing ?? preset.spacing : preset.spacing) ?? 0) * fpx;
     ctx.font = fontCss(fk, fpx);
     const text =
       mixed && preset.mix!.lowercase
@@ -483,6 +521,40 @@ function measureLayout(
     cur.push(i);
   });
   flushLine();
+
+  // lineAccent precisa de 2+ linhas pra última linha colorida EXISTIR —
+  // bloco de uma linha só é quebrado perto de 55% dos caracteres
+  // (fix do "Linha Rosa não aparece o rosa")
+  if (preset.lineAccent === 'last' && lines.length === 1 && words.length >= 2) {
+    const totalW = lines[0].width;
+    let cut = 1;
+    let accW = 0;
+    for (let i = 0; i < words.length - 1; i++) {
+      accW += words[i].w + spaceW;
+      if (accW >= totalW * 0.55) {
+        cut = i + 1;
+        break;
+      }
+      cut = i + 1;
+    }
+    lines.length = 0;
+    const rebuild = (idxs: number[]) => {
+      let x = 0;
+      idxs.forEach((wi, k) => {
+        words[wi].line = lines.length;
+        words[wi].x = k === 0 ? 0 : x;
+        x += (k === 0 ? 0 : 0) + words[wi].w + spaceW;
+        if (k === 0) x = words[wi].w + spaceW;
+      });
+      const width = idxs.reduce((s, wi, k) => s + words[wi].w + (k > 0 ? spaceW : 0), 0);
+      lines.push({ wordIdx: idxs, width, scale: 1, y0: 0, h: 0 });
+    };
+    rebuild(words.map((_, i) => i).slice(0, cut));
+    rebuild(words.map((_, i) => i).slice(cut));
+    for (const line of lines) {
+      if (line.width > maxLineW) line.scale = maxLineW / line.width;
+    }
+  }
 
   // Linha com uma palavra gigante: encolhe só aquela linha
   for (const line of lines) {
@@ -841,9 +913,10 @@ function fillWordText(
     }
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = prevAlpha * 0.85;
-    ctx.fillStyle = '#ff1f4b';
+    const [cA, cB] = preset.chroma.colors ?? ['#ff1f4b', '#00e5ff'];
+    ctx.fillStyle = cA;
     ctx.fillText(text, x - dch, y);
-    ctx.fillStyle = '#00e5ff';
+    ctx.fillStyle = cB;
     ctx.fillText(text, x + dch, y);
     ctx.globalAlpha = prevAlpha;
   }
@@ -904,10 +977,12 @@ function drawFxBox(
   w: number,
   h: number,
   radius: number,
-  fill: string,
+  fill: Paint,
   skewDeg: number,
   boxShadow: { color: PresetColor; x: number; y: number } | undefined,
   scale: number,
+  border?: { color: PresetColor; width: number },
+  gradientStops?: Array<[number, PresetColor]>,
 ) {
   const { ctx } = d;
   ctx.save();
@@ -927,9 +1002,21 @@ function drawFxBox(
     );
     ctx.fill();
   }
-  ctx.fillStyle = fill;
+  if (gradientStops) {
+    const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+    for (const [o, c] of gradientStops) g.addColorStop(o, resolveColor(c, d.primary, d.accent));
+    ctx.fillStyle = g;
+  } else {
+    ctx.fillStyle = fill;
+  }
   roundRect(ctx, -w / 2, -h / 2, w, h, radius);
   ctx.fill();
+  if (border) {
+    ctx.strokeStyle = resolveColor(border.color, d.primary, d.accent);
+    ctx.lineWidth = Math.max(1, border.width * d.fontPx);
+    roundRect(ctx, -w / 2, -h / 2, w, h, radius);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1117,7 +1204,11 @@ export function drawCaptions(
   const blockH = isSolo ? lineH : layout.totalH;
   let topY = style.posY * H - blockH / 2;
   topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
-  const cx = W / 2;
+  // posição horizontal arrastável (clamp mantém o bloco dentro do frame)
+  const blockWmax = Math.max(...layout.lines.map((l) => l.width * l.scale));
+  let cx = (style.posX ?? 0.5) * W;
+  const halfW = blockWmax / 2 + W * 0.02;
+  cx = halfW * 2 >= W ? W / 2 : Math.min(Math.max(cx, halfW), W - halfW);
 
   // Palavra ativa (karaokê)
   let activeIdx = 0;
@@ -1168,6 +1259,80 @@ export function drawCaptions(
     return lineOriginX(w.line) + w.x * line.scale;
   };
 
+  // Cópias da própria frase (pequena branca em cima, fantasma vazado atrás,
+  // riscada embaixo...) — 'above'/'below' empilham na ordem do array.
+  const drawEchoes = (phase: 'behind' | 'front') => {
+    if (!preset.echoes || isSolo) return;
+    let aboveOff = 0;
+    let belowOff = 0;
+    for (const ec of preset.echoes) {
+      const s = ec.scale;
+      const scaledH = blockH * s;
+      const gap = (ec.gap ?? 0.3) * fontPx;
+      let y: number;
+      if (ec.pos === 'above') {
+        aboveOff += scaledH + gap;
+        y = topY - aboveOff;
+      } else if (ec.pos === 'below') {
+        y = topY + blockH + belowOff + gap;
+        belowOff += scaledH + gap;
+      } else {
+        y = topY + blockH / 2 - scaledH / 2;
+      }
+      if ((phase === 'behind') !== (ec.pos === 'behind')) continue;
+      const col = resolveColor(ec.color, primary, accent);
+      ctx.save();
+      ctx.globalAlpha = outAlpha * clamp01(pBlock * 2) * (ec.alpha ?? 1);
+      ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
+      ctx.scale(s, s);
+      ctx.translate(-cx, -topY);
+      if (ec.glow) {
+        ctx.shadowColor = col;
+        ctx.shadowBlur = ec.glow * fontPx;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      } else {
+        clearShadow(ctx);
+      }
+      layout.lines.forEach((line, li) => {
+        const x0 = lineOriginX(li);
+        const by = lineBaseY(li);
+        ctx.save();
+        if (line.scale !== 1) {
+          ctx.translate(cx, by);
+          ctx.scale(line.scale, line.scale);
+          ctx.translate(-cx, -by);
+        }
+        for (const wi of line.wordIdx) {
+          const wl = layout.words[wi];
+          ctx.font = fontCss(wl.fk, wl.fpx);
+          if (ec.outline) {
+            ctx.strokeStyle = col;
+            ctx.lineWidth = Math.max(1.5, fontPx * 0.035);
+            ctx.lineJoin = 'round';
+            ctx.strokeText(wl.text, x0 + wl.x, by);
+          } else {
+            ctx.fillStyle = col;
+            ctx.fillText(wl.text, x0 + wl.x, by);
+            if (ec.glow) ctx.fillText(wl.text, x0 + wl.x, by);
+          }
+        }
+        if (ec.strike) {
+          ctx.fillStyle = col;
+          const lw = line.width * line.scale;
+          ctx.fillRect(
+            x0 - fontPx * 0.1,
+            by - line.h * 0.28,
+            lw + fontPx * 0.2,
+            Math.max(2, fontPx * 0.06),
+          );
+        }
+        ctx.restore();
+      });
+      ctx.restore();
+    }
+  };
+
   // ── modo SOLO (uma palavra por vez, estilo viral) ──
   if (isSolo) {
     const w = block.words[activeIdx];
@@ -1208,6 +1373,8 @@ export function drawCaptions(
         preset.box.skew ?? 0,
         preset.box.shadow,
         1,
+        preset.box.border,
+        preset.box.gradient,
       );
     }
     const fill =
@@ -1322,6 +1489,25 @@ export function drawCaptions(
     }
   }
 
+  // ── post-it (retângulo sólido rotacionado atrás do texto) ──
+  if (preset.sticky) {
+    const wMax = Math.max(...layout.lines.map((l) => l.width * l.scale));
+    ctx.save();
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2.5);
+    clearShadow(ctx);
+    ctx.translate(cx + wMax * 0.12, topY + blockH * 0.92);
+    ctx.rotate(preset.sticky.rotate * DEG);
+    const es = 0.85 + 0.15 * Math.min(eBlock, 1.1);
+    ctx.scale(es, es);
+    const sw = wMax * 0.85;
+    const sh = blockH * 0.9 + fontPx * 0.9;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(-sw / 2 + fontPx * 0.06, -sh / 2 + fontPx * 0.08, sw, sh);
+    ctx.fillStyle = preset.sticky.color;
+    ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+    ctx.restore();
+  }
+
   // ── caixas de fundo (block/line) ──
   const blockBox = preset.box;
   if (blockBox && (blockBox.mode === 'block' || blockBox.mode === 'line')) {
@@ -1350,9 +1536,12 @@ export function drawCaptions(
         blockBox.skew ?? 0,
         blockBox.shadow,
         s,
+        blockBox.border,
+        blockBox.gradient,
       );
     } else {
-      layout.lines.forEach((line) => {
+      layout.lines.forEach((line, li) => {
+        if (blockBox.firstLineOnly && li > 0) return;
         const bw = line.width * line.scale + padX * 2;
         const bh = line.h * 0.92 + padY * 2;
         drawFxBox(
@@ -1366,6 +1555,8 @@ export function drawCaptions(
           blockBox.skew ?? 0,
           blockBox.shadow,
           s,
+          blockBox.border,
+          blockBox.gradient,
         );
       });
     }
@@ -1442,9 +1633,33 @@ export function drawCaptions(
     ctx.restore();
   }
 
+  // ── círculo/elipse desenhando ao redor do texto (ref "circulado") ──
+  if (preset.circle) {
+    const wMax = Math.max(...layout.lines.map((l) => l.width * l.scale));
+    const rx = wMax * 0.62 + fontPx * 0.5;
+    const ry = blockH * 0.72 + fontPx * 0.55;
+    const e2 = clamp01(eBlock * 1.1);
+    ctx.save();
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2);
+    clearShadow(ctx);
+    ctx.strokeStyle = resolveColor(preset.circle.color, primary, accent);
+    ctx.lineWidth = Math.max(2, preset.circle.width * fontPx);
+    ctx.lineCap = 'round';
+    ctx.translate(cx, topY + blockH / 2);
+    ctx.rotate(-4 * DEG);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, -0.6 * Math.PI, -0.6 * Math.PI + e2 * 2.35 * Math.PI);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── ecos ATRÁS do texto (fantasma vazado gigante) ──
+  drawEchoes('behind');
+
   // ── typewriter (caminho próprio) ──
   if (preset.in.kind === 'typewriter') {
     drawTypewriter(d, block, layout, tMs, cx, topY, highlights, outAlpha);
+    drawEchoes('front');
     finishDraw();
     return;
   }
@@ -1679,40 +1894,8 @@ export function drawCaptions(
     drawPass('base');
   }
 
-  // ── eco do texto abaixo, menor e com glow (ref "Smooth opacity") ──
-  if (preset.subEcho) {
-    const se = preset.subEcho;
-    const echoTop = topY + blockH + se.gap * fontPx;
-    const col = resolveColor(se.color, primary, accent);
-    ctx.save();
-    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2) * 0.95;
-    ctx.translate(cx, echoTop);
-    ctx.scale(se.scale, se.scale);
-    ctx.translate(-cx, -topY);
-    layout.lines.forEach((line, li) => {
-      const x0 = lineOriginX(li);
-      const by = lineBaseY(li);
-      ctx.save();
-      if (line.scale !== 1) {
-        ctx.translate(cx, by);
-        ctx.scale(line.scale, line.scale);
-        ctx.translate(-cx, -by);
-      }
-      for (const wi of line.wordIdx) {
-        const wl = layout.words[wi];
-        ctx.font = fontCss(wl.fk, wl.fpx);
-        ctx.shadowColor = col;
-        ctx.shadowBlur = se.glow * fontPx;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-        ctx.fillStyle = col;
-        ctx.fillText(wl.text, x0 + wl.x, by);
-        ctx.fillText(wl.text, x0 + wl.x, by);
-      }
-      ctx.restore();
-    });
-    ctx.restore();
-  }
+  // ── ecos NA FRENTE (frase pequena em cima/embaixo, riscada...) ──
+  drawEchoes('front');
 
   finishDraw();
 
@@ -1749,19 +1932,28 @@ function getTrippyPattern(d: DrawCtx): Paint {
     patternTile.height = 96;
     const c = patternTile.getContext('2d');
     if (!c) return pf.colors[0];
-    c.fillStyle = pf.colors[0];
-    c.fillRect(0, 0, 96, 96);
-    c.strokeStyle = pf.colors[1];
-    c.lineWidth = 7;
-    c.lineCap = 'round';
-    for (let k = -1; k < 9; k++) {
-      c.beginPath();
-      for (let x = -8; x <= 104; x += 6) {
-        const y = k * 13 + Math.sin(x * 0.11 + k * 1.7) * 5;
-        if (x === -8) c.moveTo(x, y);
-        else c.lineTo(x, y);
+    c.clearRect(0, 0, 96, 96);
+    if (pf.style === 'stripes') {
+      // estêncil listrado (ref "TEXT COMES ALIVE"): barras verticais
+      c.fillStyle = pf.colors[0];
+      c.fillRect(0, 0, 96, 96);
+      c.fillStyle = pf.colors[1];
+      for (let x = 0; x < 96; x += 12) c.fillRect(x, 0, 6, 96);
+    } else {
+      c.fillStyle = pf.colors[0];
+      c.fillRect(0, 0, 96, 96);
+      c.strokeStyle = pf.colors[1];
+      c.lineWidth = 7;
+      c.lineCap = 'round';
+      for (let k = -1; k < 9; k++) {
+        c.beginPath();
+        for (let x = -8; x <= 104; x += 6) {
+          const y = k * 13 + Math.sin(x * 0.11 + k * 1.7) * 5;
+          if (x === -8) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        }
+        c.stroke();
       }
-      c.stroke();
     }
     patternKey = key;
   }
@@ -1794,7 +1986,10 @@ function resolveFill(d: DrawCtx, lineH: number): Paint {
   const { preset, ctx } = d;
   if (preset.patternFill) return getTrippyPattern(d);
   if (preset.fill === 'gradient') {
-    const g = ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
+    const g =
+      preset.gradientDir === 'diagonal'
+        ? ctx.createLinearGradient(-lineH * 1.6, -lineH * 0.75, lineH * 1.6, lineH * 0.35)
+        : ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
     const stops: Array<[number, string]> =
       preset.gradientStops ??
       (preset.gradient
@@ -1868,7 +2063,29 @@ function drawWord(
       if (fx.rot || loop.rot || wordJitterRot) ctx.rotate(fx.rot + loop.rot + wordJitterRot);
       if (fx.skew) ctx.transform(1, 0, Math.tan(fx.skew), 1, 0, 0);
       if (fx.blur > 0.4) ctx.filter = `blur(${fx.blur.toFixed(1)}px)`;
-      fillWordText(d, cl.ch, -cl.w / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
+      // cores por LETRA + letras vazadas (refs "FUN TEXT" / "VIBRANT FLICKER")
+      let chFill: Paint = fill;
+      if (preset.charColorCycle && !wl.mixed) {
+        chFill = resolveColor(
+          preset.charColorCycle[gi % preset.charColorCycle.length],
+          d.primary,
+          d.accent,
+        );
+      }
+      const outlineChar =
+        !!preset.charOutlineRatio &&
+        !wl.mixed &&
+        prand(seedBase * 13 + gi * 47) < preset.charOutlineRatio;
+      if (outlineChar) {
+        clearShadow(ctx);
+        ctx.font = fontCss(wl.fk, wl.fpx);
+        ctx.strokeStyle = typeof chFill === 'string' ? chFill : d.primary;
+        ctx.lineWidth = Math.max(1.5, wl.fpx * 0.045);
+        ctx.lineJoin = 'round';
+        ctx.strokeText(cl.ch, -cl.w / 2, lineH * 0.3);
+      } else {
+        fillWordText(d, cl.ch, -cl.w / 2, lineH * 0.3, chFill, wl.fpx, wl.fk, wl.mixed);
+      }
       ctx.restore();
     }
     return;

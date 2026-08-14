@@ -516,4 +516,178 @@ GRADS.forEach((gr) =>
   });
 });
 
+/* ── LEVA CRIATIVA (rodada 8): 10 estruturas × 13 categorias ────────────────
+   Estruturas derivadas das refs novas (ecos, fantasma, riscado, circulado,
+   pílula, letras duo, vazado, listrado, diagonal, eco sub) — cada categoria
+   instancia com SUA fonte/animação/tamanho, então cada um é outro lettering. */
+
+type CatCfg = {
+  cat: string;
+  slug: string;
+  font: FontKey;
+  size: number;
+  upper: boolean;
+  anim: TypoPreset['in'];
+  glow?: boolean;
+};
+const CATS8: CatCfg[] = [
+  { cat: 'Impacto', slug: 'impacto', font: 'archivo', size: 0.068, upper: true, anim: { kind: 'zoom-out', dur: 280, ease: 'outQuint', amp: 1 } },
+  { cat: 'Destaque', slug: 'destaque', font: 'montserrat900', size: 0.06, upper: true, anim: { kind: 'pop', dur: 260, ease: 'outBack', stagger: 70 } },
+  { cat: 'Minimal', slug: 'minimal', font: 'dmsans900', size: 0.054, upper: false, anim: { kind: 'fade', dur: 300, ease: 'outQuad', stagger: 60 } },
+  { cat: 'Bounce', slug: 'bounce', font: 'baloo800', size: 0.062, upper: true, anim: { kind: 'pop', dur: 500, ease: 'elastic', stagger: 90 } },
+  { cat: 'Foco', slug: 'foco', font: 'abril', size: 0.06, upper: false, anim: { kind: 'blur', dur: 380, ease: 'outCubic', stagger: 80, amp: 1 } },
+  { cat: 'Reveal', slug: 'reveal', font: 'staatliches', size: 0.064, upper: true, anim: { kind: 'mask-up', dur: 360, ease: 'outQuint', stagger: 100 } },
+  { cat: 'Neon', slug: 'neon', font: 'bebas', size: 0.074, upper: true, anim: { kind: 'fade', dur: 260, ease: 'outQuad' }, glow: true },
+  { cat: 'Kinetic', slug: 'kinetic', font: 'fugaz', size: 0.06, upper: true, anim: { kind: 'slide-left', dur: 280, ease: 'outExpo', stagger: 55, amp: 1 } },
+  { cat: 'Editorial', slug: 'editorial', font: 'playfair900', size: 0.058, upper: false, anim: { kind: 'fade', dur: 400, ease: 'outQuad' } },
+  { cat: 'Premium', slug: 'premium', font: 'cinzel800', size: 0.062, upper: true, anim: { kind: 'zoom-out', dur: 340, ease: 'outQuint', amp: 0.8 } },
+  { cat: 'Cor', slug: 'cor', font: 'passion700', size: 0.066, upper: true, anim: { kind: 'pop', dur: 280, ease: 'outBack', stagger: 90 } },
+  { cat: 'Cartoon', slug: 'cartoon', font: 'luckiest', size: 0.064, upper: true, anim: { kind: 'pop', dur: 380, ease: 'elastic', stagger: 95 } },
+  { cat: 'Estilo', slug: 'estilo', font: 'kaushan', size: 0.074, upper: false, anim: { kind: 'rise', dur: 340, ease: 'outQuint', amp: 0.4 } },
+];
+
+const TPL8: Array<{
+  id: string;
+  nome: string;
+  make: (c: CatCfg, i: number) => Partial<TypoPreset>;
+}> = [
+  {
+    id: 'ecoduo',
+    nome: 'Eco Duplo',
+    make: () => ({
+      fill: 'accent',
+      unit: 'block',
+      echoes: [{ pos: 'above', scale: 0.42, color: 'primary', gap: 0.35 }],
+      shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'fantasma',
+    nome: 'Fantasma',
+    make: () => ({
+      unit: 'block',
+      echoes: [{ pos: 'behind', scale: 1.5, color: 'accent', outline: true, alpha: 0.5 }],
+      shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'riscado',
+    nome: 'Riscado',
+    make: () => ({
+      fill: 'accent',
+      unit: 'block',
+      echoes: [
+        { pos: 'above', scale: 0.36, color: 'primary', gap: 0.25 },
+        { pos: 'below', scale: 0.36, color: 'primary', gap: 0.25, strike: true },
+      ],
+      shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'circulado',
+    nome: 'Circulado',
+    make: () => ({
+      unit: 'block',
+      circle: { color: 'accent', width: 0.065 },
+      hardShadow: { color: 'rgba(0,0,0,0.45)', x: 0.03, y: 0.04 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'pilula',
+    nome: 'Pílula',
+    make: () => ({
+      unit: 'block',
+      box: {
+        mode: 'line',
+        fill: 'rgba(10,10,14,0.72)',
+        radius: 0.6,
+        padX: 0.5,
+        padY: 0.24,
+        border: { color: 'accent', width: 0.035 },
+      },
+      autoEmphasis: true,
+    }),
+  },
+  {
+    id: 'letrasduo',
+    nome: 'Letras Duo',
+    make: (c) => ({
+      unit: 'char',
+      in: { kind: 'pop', dur: 260, ease: 'outBack', stagger: 22 },
+      charColorCycle: ['accent', 'primary'],
+      hardShadow: { color: 'rgba(0,0,0,0.5)', x: 0.04, y: 0.06 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'vazado',
+    nome: 'Vazado',
+    make: (c) => ({
+      unit: 'char',
+      in: { kind: 'pop', dur: 240, ease: 'outBackSoft', stagger: 24 },
+      charOutlineRatio: 0.45,
+      hardShadow: { color: 'rgba(0,0,0,0.4)', x: 0.03, y: 0.05 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'listrado',
+    nome: 'Listrado',
+    make: () => ({
+      unit: 'block',
+      patternFill: { colors: ['rgba(0,0,0,0)', '#ffffff'], scale: 0.9, speed: 0.6, style: 'stripes' },
+      shadow: { color: 'rgba(0,0,0,0.45)', blur: 0.1, x: 0, y: 0.03 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'diagonal',
+    nome: 'Diagonal',
+    make: () => ({
+      unit: 'block',
+      fill: 'gradient',
+      gradientDir: 'diagonal',
+      gradientStops: [
+        [0, 'accent'],
+        [1, 'primary'],
+      ],
+      shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
+      autoEmphasis: false,
+    }),
+  },
+  {
+    id: 'ecosub',
+    nome: 'Eco Sub',
+    make: () => ({
+      unit: 'block',
+      echoes: [{ pos: 'below', scale: 0.4, color: 'accent', gap: 0.4, glow: 0.5 }],
+      shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
+      autoEmphasis: false,
+    }),
+  },
+];
+
+CATS8.forEach((c, ci) =>
+  TPL8.forEach((t, ti) => {
+    const extra = t.make(c, ci);
+    g({
+      id: `g8-${t.id}-${c.slug}`,
+      name: `${t.nome} · ${c.cat}`,
+      cat: c.cat,
+      font: c.font,
+      size: c.size,
+      uppercase: c.upper,
+      lineHeight: 1.05,
+      glow: c.glow && !extra.patternFill ? { color: 'accent', blur: 0.32 } : undefined,
+      in: c.anim,
+      defaultAccent: acc(ci + ti),
+      ...extra,
+    });
+  }),
+);
+
 export const GENERATED_PRESETS: TypoPreset[] = OUT;

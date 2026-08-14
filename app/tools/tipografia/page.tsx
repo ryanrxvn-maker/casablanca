@@ -110,6 +110,7 @@ type SavedSession = {
   highlights: Record<string, number[]>;
   autoEmph?: boolean;
   fontOv?: FontKey | null;
+  posX?: number;
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -167,6 +168,7 @@ function TipografiaInner() {
   );
   const [autoEmph, setAutoEmph] = useToolState<boolean>('tipografia:autoemph', true);
   const [fontOv, setFontOv] = useToolState<FontKey | null>('tipografia:fontov', null);
+  const [posX, setPosX] = useToolState<number>('tipografia:posx', 0.5);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
@@ -185,8 +187,9 @@ function TipografiaInner() {
       highlights,
       autoEmphasis: autoEmph,
       fontOverride: fontOv,
+      posX,
     }),
-    [presetId, fontScale, posY, primary, accent, upper, highlights, autoEmph, fontOv],
+    [presetId, fontScale, posY, primary, accent, upper, highlights, autoEmph, fontOv, posX],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -228,6 +231,7 @@ function TipografiaInner() {
         setHighlights(saved.highlights ?? {});
         setAutoEmph(saved.autoEmph ?? true);
         setFontOv(saved.fontOv ?? null);
+        setPosX(saved.posX ?? 0.5);
         setPhase('ready');
         setRestored(true);
       }
@@ -255,8 +259,9 @@ function TipografiaInner() {
       highlights,
       autoEmph,
       fontOv,
+      posX,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights, autoEmph, fontOv]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights, autoEmph, fontOv, posX]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -507,6 +512,35 @@ function TipografiaInner() {
     });
   }
 
+  // mover/cortar pela TIMELINE: move desloca o bloco inteiro (palavras junto,
+  // pro karaokê não descolar); trim só mexe a janela de exibição
+  function retimeBounds(id: string, start: number, end: number, mode: 'move' | 'trim') {
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === id);
+      if (idx < 0) return prev;
+      const b = prev[idx];
+      const minStart = idx > 0 ? prev[idx - 1].end + 20 : 0;
+      const maxEnd = idx < prev.length - 1 ? prev[idx + 1].start - 20 : Number.MAX_SAFE_INTEGER;
+      if (mode === 'move') {
+        const len = b.end - b.start;
+        let s = Math.max(minStart, Math.min(start, maxEnd - len));
+        if (!isFinite(s) || s < 0) s = 0;
+        const delta = Math.round(s - b.start);
+        if (delta === 0) return prev;
+        const words = b.words.map((w) => ({ ...w, start: w.start + delta, end: w.end + delta }));
+        const next = [...prev];
+        next[idx] = { ...b, start: b.start + delta, end: b.end + delta, words };
+        return next;
+      }
+      const s = Math.max(minStart, Math.min(start, end - 120));
+      const e = Math.min(maxEnd, Math.max(end, s + 120));
+      if (e - s < 120) return prev;
+      const next = [...prev];
+      next[idx] = { ...b, start: Math.round(s), end: Math.round(e) };
+      return next;
+    });
+  }
+
   function toggleHighlight(blockId: string, wordIdx: number) {
     setHighlights((h) => {
       const cur = new Set(h[blockId] ?? []);
@@ -637,6 +671,10 @@ function TipografiaInner() {
                 preset={preset}
                 style={style}
                 onTimeBlock={setActiveBlockId}
+                onPosChange={(x, y) => {
+                  setPosX(x);
+                  setPosY(y);
+                }}
               />
               <div className="min-w-0 flex flex-col gap-5">
                 <PresetGallery
@@ -671,6 +709,16 @@ function TipografiaInner() {
                 />
               </div>
             </div>
+
+            <Timeline
+              blocks={blocks}
+              duration={duration ?? 0}
+              videoRef={videoRef}
+              selId={selBlockId}
+              onSelect={(id) => setSelBlockId(id)}
+              onRetime={retimeBounds}
+              disabled={processing}
+            />
 
             <BlockList
               blocks={blocks}
@@ -806,6 +854,7 @@ function PreviewPane({
   preset,
   style,
   onTimeBlock,
+  onPosChange,
 }: {
   videoUrl: string;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
@@ -813,6 +862,7 @@ function PreviewPane({
   preset: ReturnType<typeof getPreset>;
   style: StyleState;
   onTimeBlock: (id: string | null) => void;
+  onPosChange: (x: number, y: number) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -820,6 +870,8 @@ function PreviewPane({
   const [cur, setCur] = useState(0);
   const [dur, setDur] = useState(0);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  // drag da legenda: estado vivo pro rAF desenhar as guias sem re-render
+  const dragRef = useRef<{ moved: boolean; snapX: boolean; snapY: boolean } | null>(null);
 
   // refs pros valores vivos dentro do rAF (evita recriar o loop a cada edição)
   const liveRef = useRef({ blocks, preset, style });
@@ -846,6 +898,25 @@ function PreviewPane({
           ctx.clearRect(0, 0, W, H);
           const { blocks: b, preset: p, style: s } = liveRef.current;
           drawCaptions(ctx, b, p, s, v.currentTime * 1000, W, H);
+          // réguas de centralização (só no preview, nunca no export)
+          const drag = dragRef.current;
+          if (drag) {
+            ctx.save();
+            ctx.lineWidth = Math.max(1, dpr);
+            ctx.setLineDash(drag.snapX ? [] : [6 * dpr, 6 * dpr]);
+            ctx.strokeStyle = drag.snapX ? 'rgba(251,191,36,0.95)' : 'rgba(255,255,255,0.45)';
+            ctx.beginPath();
+            ctx.moveTo(W / 2, 0);
+            ctx.lineTo(W / 2, H);
+            ctx.stroke();
+            ctx.setLineDash(drag.snapY ? [] : [6 * dpr, 6 * dpr]);
+            ctx.strokeStyle = drag.snapY ? 'rgba(251,191,36,0.95)' : 'rgba(255,255,255,0.45)';
+            ctx.beginPath();
+            ctx.moveTo(0, H / 2);
+            ctx.lineTo(W, H / 2);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       }
       raf = requestAnimationFrame(tick);
@@ -894,19 +965,52 @@ function PreviewPane({
     <div className="min-w-0">
       <div
         ref={wrapRef}
-        className="relative w-full cursor-pointer overflow-hidden rounded-[14px] border border-line bg-black"
+        className="relative w-full cursor-grab touch-none overflow-hidden rounded-[14px] border border-line bg-black active:cursor-grabbing"
         style={dims ? { aspectRatio: `${dims.w} / ${dims.h}` } : { minHeight: 220 }}
-        onClick={togglePlay}
+        onPointerDown={(e) => {
+          const wrap = wrapRef.current;
+          if (!wrap) return;
+          wrap.setPointerCapture(e.pointerId);
+          dragRef.current = { moved: false, snapX: false, snapY: false };
+        }}
+        onPointerMove={(e) => {
+          const wrap = wrapRef.current;
+          const drag = dragRef.current;
+          if (!wrap || !drag) return;
+          const rect = wrap.getBoundingClientRect();
+          let nx = (e.clientX - rect.left) / rect.width;
+          let ny = (e.clientY - rect.top) / rect.height;
+          if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) drag.moved = true;
+          if (!drag.moved) return;
+          // snap no centro (régua acende sólida quando encaixa)
+          drag.snapX = Math.abs(nx - 0.5) < 0.03;
+          drag.snapY = Math.abs(ny - 0.5) < 0.03;
+          if (drag.snapX) nx = 0.5;
+          if (drag.snapY) ny = 0.5;
+          onPosChange(
+            Math.min(0.95, Math.max(0.05, nx)),
+            Math.min(0.95, Math.max(0.05, ny)),
+          );
+        }}
+        onPointerUp={(e) => {
+          const drag = dragRef.current;
+          dragRef.current = null;
+          wrapRef.current?.releasePointerCapture(e.pointerId);
+          if (drag && !drag.moved) togglePlay();
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null;
+        }}
       >
         <video
           ref={videoRef}
           src={videoUrl}
           playsInline
-          className="absolute inset-0 h-full w-full"
+          className="pointer-events-none absolute inset-0 h-full w-full"
         />
-        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+        <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
         {!playing ? (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-black/55 backdrop-blur-sm">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path d="M8 5.5v13l11-6.5-11-6.5z" fill="#fff" />
@@ -943,6 +1047,7 @@ function PreviewPane({
           }}
           className="w-full"
           style={{
+            accentColor: '#fbbf24',
             ['--range-fill' as string]: `${dur > 0 ? (cur / dur) * 100 : 0}%`,
           }}
         />
@@ -1081,6 +1186,211 @@ function PresetGallery({
           Mostrar mais {Math.min(24, fullList.length - visible)} de {fullList.length - visible} restantes
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/* ───────────────────────── Timeline ───────────────────────── */
+
+function Timeline({
+  blocks,
+  duration,
+  videoRef,
+  selId,
+  onSelect,
+  onRetime,
+  disabled,
+}: {
+  blocks: Block[];
+  duration: number;
+  videoRef: MutableRefObject<HTMLVideoElement | null>;
+  selId: string | null;
+  onSelect: (id: string) => void;
+  onRetime: (id: string, start: number, end: number, mode: 'move' | 'trim') => void;
+  disabled?: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const playheadRef = useRef<HTMLDivElement | null>(null);
+  const [pps, setPps] = useState(0); // px por segundo (0 = ainda não ajustou)
+  const dragRef = useRef<{
+    id: string;
+    mode: 'move' | 'trim-start' | 'trim-end';
+    startX: number;
+    origStart: number;
+    origEnd: number;
+  } | null>(null);
+
+  // zoom inicial: caber o vídeo inteiro na faixa
+  useEffect(() => {
+    if (pps === 0 && duration > 0 && scrollRef.current) {
+      const w = scrollRef.current.clientWidth;
+      setPps(Math.min(120, Math.max(14, (w - 20) / duration)));
+    }
+  }, [duration, pps]);
+
+  // playhead segue o vídeo sem re-render (transform via ref)
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const v = videoRef.current;
+      const ph = playheadRef.current;
+      if (v && ph && pps > 0) ph.style.transform = `translateX(${v.currentTime * pps}px)`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [videoRef, pps]);
+
+  if (duration <= 0) return null;
+  const effPps = pps || 40;
+  const trackW = Math.max(200, duration * effPps);
+
+  // régua: passo escolhido pra no máx ~240 ticks
+  const stepOptions = [1, 2, 5, 10, 30, 60];
+  const step = stepOptions.find((s) => duration / s <= 240) ?? 120;
+  const ticks: number[] = [];
+  for (let t = 0; t <= duration; t += step) ticks.push(t);
+
+  const fmt = (s: number) =>
+    `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  return (
+    <div className="mt-5">
+      <div
+        className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        <span>Timeline — arrasta pra mover · puxa as bordas pra cortar</span>
+        <span className="flex items-center gap-1.5">
+          <button
+            onClick={() => setPps((v) => Math.max(10, (v || 40) / 1.5))}
+            className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-line text-[13px] text-text-muted transition-colors hover:border-amber-400/50 hover:text-amber-200"
+            title="Diminuir zoom"
+          >
+            −
+          </button>
+          <button
+            onClick={() => setPps((v) => Math.min(240, (v || 40) * 1.5))}
+            className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-line text-[13px] text-text-muted transition-colors hover:border-amber-400/50 hover:text-amber-200"
+            title="Aumentar zoom"
+          >
+            +
+          </button>
+        </span>
+      </div>
+      <div
+        ref={scrollRef}
+        className="overflow-x-auto rounded-[14px] border border-line bg-black/30"
+      >
+        <div
+          className="relative select-none"
+          style={{ width: trackW, height: 74 }}
+          onPointerDown={(e) => {
+            // clique na área vazia = seek
+            if (disabled) return;
+            const target = e.target as HTMLElement;
+            if (target.dataset.block) return;
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const v = videoRef.current;
+            if (v) v.currentTime = Math.max(0, (e.clientX - rect.left) / effPps);
+          }}
+        >
+          {/* régua */}
+          <div className="absolute inset-x-0 top-0 h-[18px] border-b border-line/60">
+            {ticks.map((t) => (
+              <div
+                key={t}
+                className="absolute top-0 h-full border-l border-line/50"
+                style={{ left: t * effPps }}
+              >
+                {t % (step * 5) === 0 ? (
+                  <span className="mono absolute left-1 top-[1px] text-[9px] text-text-muted">
+                    {fmt(t)}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
+          {/* blocos */}
+          {blocks.map((b) => {
+            const left = (b.start / 1000) * effPps;
+            const width = Math.max(8, ((b.end - b.start) / 1000) * effPps);
+            const sel = b.id === selId;
+            return (
+              <div
+                key={b.id}
+                data-block="1"
+                className={
+                  'absolute top-[24px] h-[42px] cursor-grab overflow-hidden rounded-[8px] border px-1.5 py-0.5 transition-colors active:cursor-grabbing ' +
+                  (sel
+                    ? 'z-10 border-amber-400/80 bg-amber-400/25'
+                    : 'border-violet/40 bg-violet/15 hover:border-amber-400/50')
+                }
+                style={{ left, width }}
+                onPointerDown={(e) => {
+                  if (disabled) return;
+                  e.stopPropagation();
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const off = e.clientX - rect.left;
+                  const mode: 'move' | 'trim-start' | 'trim-end' =
+                    width > 26 && off < 9
+                      ? 'trim-start'
+                      : width > 26 && off > rect.width - 9
+                        ? 'trim-end'
+                        : 'move';
+                  dragRef.current = {
+                    id: b.id,
+                    mode,
+                    startX: e.clientX,
+                    origStart: b.start,
+                    origEnd: b.end,
+                  };
+                  onSelect(b.id);
+                }}
+                onPointerMove={(e) => {
+                  const drag = dragRef.current;
+                  if (!drag || drag.id !== b.id) return;
+                  const deltaMs = ((e.clientX - drag.startX) / effPps) * 1000;
+                  if (drag.mode === 'move') {
+                    onRetime(b.id, drag.origStart + deltaMs, drag.origEnd + deltaMs, 'move');
+                  } else if (drag.mode === 'trim-start') {
+                    onRetime(b.id, drag.origStart + deltaMs, drag.origEnd, 'trim');
+                  } else {
+                    onRetime(b.id, drag.origStart, drag.origEnd + deltaMs, 'trim');
+                  }
+                }}
+                onPointerUp={(e) => {
+                  dragRef.current = null;
+                  (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                }}
+                onPointerCancel={() => {
+                  dragRef.current = null;
+                }}
+              >
+                {/* alças de corte */}
+                <span className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-l-[8px] bg-white/30" />
+                <span className="pointer-events-none absolute inset-y-0 right-0 w-[3px] rounded-r-[8px] bg-white/30" />
+                <span className="pointer-events-none block truncate text-[10px] leading-tight text-white/85">
+                  {blockText(b)}
+                </span>
+                <span className="pointer-events-none mono block text-[8.5px] text-white/50">
+                  {((b.end - b.start) / 1000).toFixed(1)}s
+                </span>
+              </div>
+            );
+          })}
+
+          {/* playhead */}
+          <div
+            ref={playheadRef}
+            className="pointer-events-none absolute top-0 z-20 h-full w-[2px] bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]"
+          >
+            <div className="absolute -left-[4px] top-0 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent border-t-red-500" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
