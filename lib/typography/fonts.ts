@@ -94,7 +94,73 @@ export type FontKey =
   | 'alexbrush'
   | 'cookie'
   | 'berkshire'
-  | 'norican';
+  | 'norican'
+  | 'roboto900'
+  | 'opensans800'
+  | 'lato900'
+  | 'raleway900'
+  | 'worksans800'
+  | 'rubik900'
+  | 'kanit800'
+  | 'manrope800'
+  | 'josefin700'
+  | 'comfortaa700'
+  | 'quicksand700'
+  | 'exo2900'
+  | 'dmsans900'
+  | 'outfit800'
+  | 'karla800'
+  | 'mulish900'
+  | 'cabin700'
+  | 'dosis800'
+  | 'catamaran900'
+  | 'signika700'
+  | 'syne800'
+  | 'unbounded800'
+  | 'secular'
+  | 'merriweather900'
+  | 'lora700'
+  | 'robotoslab900'
+  | 'zillaslab700'
+  | 'arvo700'
+  | 'ebgaramond800'
+  | 'librebaskerville700'
+  | 'spectral800'
+  | 'bitter900'
+  | 'domine700'
+  | 'amatic700'
+  | 'indieflower'
+  | 'shadowslight'
+  | 'patrickhand'
+  | 'gloria'
+  | 'rocksalt'
+  | 'courgette'
+  | 'satisfy'
+  | 'tangerine700'
+  | 'pinyon'
+  | 'niconne'
+  | 'grandhotel'
+  | 'leckerli'
+  | 'badscript'
+  | 'marckscript'
+  | 'neucha'
+  | 'gochihand'
+  | 'kalam700'
+  | 'oleo700'
+  | 'comicneue700'
+  | 'londrina'
+  | 'fugaz'
+  | 'racing'
+  | 'bungeeshade'
+  | 'rye'
+  | 'specialelite'
+  | 'graduate'
+  | 'goldman700'
+  | 'silkscreen700'
+  | 'dotgothic'
+  | 'majormono'
+  | 'archivonarrow700'
+  | 'antonsc';
 
 export type TypoFont = {
   family: string; // nome único registrado no document.fonts
@@ -199,6 +265,73 @@ export const TYPO_FONTS: Record<FontKey, TypoFont> = {
   cookie: { family: 'TipoCookie', file: 'cookie.woff2', weight: 400, label: 'Cookie', group: 'Script' },
   berkshire: { family: 'TipoBerkshire', file: 'berkshire.woff2', weight: 400, label: 'Berkshire Swash', group: 'Script' },
   norican: { family: 'TipoNorican', file: 'norican.woff2', weight: 400, label: 'Norican', group: 'Script' },
+  // ── Leva 3 (cobertura estilo CapCut) ──
+  roboto900: { family: 'TipoRoboto', file: 'roboto-900.woff2', weight: 900, label: 'Roboto Black', group: 'Clean' },
+  opensans800: { family: 'TipoOpenSans', file: 'opensans-800.woff2', weight: 800, label: 'Open Sans', group: 'Clean' },
+  lato900: { family: 'TipoLato', file: 'lato-900.woff2', weight: 900, label: 'Lato Black', group: 'Clean' },
+  raleway900: { family: 'TipoRaleway', file: 'raleway-900.woff2', weight: 900, label: 'Raleway Black', group: 'Clean' },
+  worksans800: { family: 'TipoWorkSans', file: 'worksans-800.woff2', weight: 800, label: 'Work Sans', group: 'Clean' },
+  rubik900: { family: 'TipoRubik', file: 'rubik-900.woff2', weight: 900, label: 'Rubik Black', group: 'Clean' },
+  kanit800: { family: 'TipoKanit', file: 'kanit-800.woff2', weight: 800, label: 'Kanit', group: 'Clean' },
+  manrope800: { family: 'TipoManrope', file: 'manrope-800.woff2', weight: 800, label: 'Manrope', group: 'Clean' },
+  josefin700: { family: 'TipoJosefin', file: 'josefin-700.woff2', weight: 700, label: 'Josefin Sans', group: 'Clean' },
+  comfortaa700: { family: 'TipoComfortaa', file: 'comfortaa-700.woff2', weight: 700, label: 'Comfortaa', group: 'Clean' },
+  quicksand700: { family: 'TipoQuicksand', file: 'quicksand-700.woff2', weight: 700, label: 'Quicksand', group: 'Clean' },
+  exo2900: { family: 'TipoExo2', file: 'exo2-900.woff2', weight: 900, label: 'Exo 2', group: 'Clean' },
+  dmsans900: { family: 'TipoDMSans', file: 'dmsans-900.woff2', weight: 900, label: 'DM Sans', group: 'Clean' },
+  outfit800: { family: 'TipoOutfit', file: 'outfit-800.woff2', weight: 800, label: 'Outfit', group: 'Clean' },
+  karla800: { family: 'TipoKarla', file: 'karla-800.woff2', weight: 800, label: 'Karla', group: 'Clean' },
+  mulish900: { family: 'TipoMulish', file: 'mulish-900.woff2', weight: 900, label: 'Mulish', group: 'Clean' },
+  cabin700: { family: 'TipoCabin', file: 'cabin-700.woff2', weight: 700, label: 'Cabin', group: 'Clean' },
+  dosis800: { family: 'TipoDosis', file: 'dosis-800.woff2', weight: 800, label: 'Dosis', group: 'Clean' },
+  catamaran900: { family: 'TipoCatamaran', file: 'catamaran-900.woff2', weight: 900, label: 'Catamaran', group: 'Clean' },
+  signika700: { family: 'TipoSignika', file: 'signika-700.woff2', weight: 700, label: 'Signika', group: 'Clean' },
+  syne800: { family: 'TipoSyne', file: 'syne-800.woff2', weight: 800, label: 'Syne', group: 'Clean' },
+  unbounded800: { family: 'TipoUnbounded', file: 'unbounded-800.woff2', weight: 800, label: 'Unbounded', group: 'Clean' },
+  secular: { family: 'TipoSecular', file: 'secular.woff2', weight: 400, label: 'Secular One', group: 'Clean' },
+  merriweather900: { family: 'TipoMerriweather', file: 'merriweather-900.woff2', weight: 900, label: 'Merriweather', group: 'Serifada' },
+  lora700: { family: 'TipoLora', file: 'lora-700.woff2', weight: 700, label: 'Lora', group: 'Serifada' },
+  robotoslab900: { family: 'TipoRobotoSlab', file: 'robotoslab-900.woff2', weight: 900, label: 'Roboto Slab', group: 'Serifada' },
+  zillaslab700: { family: 'TipoZillaSlab', file: 'zillaslab-700.woff2', weight: 700, label: 'Zilla Slab', group: 'Serifada' },
+  arvo700: { family: 'TipoArvo', file: 'arvo-700.woff2', weight: 700, label: 'Arvo', group: 'Serifada' },
+  ebgaramond800: { family: 'TipoGaramond', file: 'ebgaramond-800.woff2', weight: 800, label: 'EB Garamond', group: 'Serifada' },
+  librebaskerville700: { family: 'TipoBaskerville', file: 'librebaskerville-700.woff2', weight: 700, label: 'Libre Baskerville', group: 'Serifada' },
+  spectral800: { family: 'TipoSpectral', file: 'spectral-800.woff2', weight: 800, label: 'Spectral', group: 'Serifada' },
+  bitter900: { family: 'TipoBitter', file: 'bitter-900.woff2', weight: 900, label: 'Bitter', group: 'Serifada' },
+  domine700: { family: 'TipoDomine', file: 'domine-700.woff2', weight: 700, label: 'Domine', group: 'Serifada' },
+  amatic700: { family: 'TipoAmatic', file: 'amatic-700.woff2', weight: 700, label: 'Amatic SC', group: 'Script' },
+  indieflower: { family: 'TipoIndie', file: 'indieflower.woff2', weight: 400, label: 'Indie Flower', group: 'Script' },
+  shadowslight: { family: 'TipoShadows', file: 'shadows-light.woff2', weight: 400, label: 'Shadows Into Light', group: 'Script' },
+  patrickhand: { family: 'TipoPatrick', file: 'patrickhand.woff2', weight: 400, label: 'Patrick Hand', group: 'Script' },
+  gloria: { family: 'TipoGloria', file: 'gloria.woff2', weight: 400, label: 'Gloria Hallelujah', group: 'Script' },
+  rocksalt: { family: 'TipoRockSalt', file: 'rocksalt.woff2', weight: 400, label: 'Rock Salt', group: 'Script' },
+  courgette: { family: 'TipoCourgette', file: 'courgette.woff2', weight: 400, label: 'Courgette', group: 'Script' },
+  satisfy: { family: 'TipoSatisfy', file: 'satisfy.woff2', weight: 400, label: 'Satisfy', group: 'Script' },
+  tangerine700: { family: 'TipoTangerine', file: 'tangerine-700.woff2', weight: 700, label: 'Tangerine', group: 'Script' },
+  pinyon: { family: 'TipoPinyon', file: 'pinyon.woff2', weight: 400, label: 'Pinyon Script', group: 'Script' },
+  niconne: { family: 'TipoNiconne', file: 'niconne.woff2', weight: 400, label: 'Niconne', group: 'Script' },
+  grandhotel: { family: 'TipoGrandHotel', file: 'grandhotel.woff2', weight: 400, label: 'Grand Hotel', group: 'Script' },
+  leckerli: { family: 'TipoLeckerli', file: 'leckerli.woff2', weight: 400, label: 'Leckerli One', group: 'Script' },
+  badscript: { family: 'TipoBadScript', file: 'badscript.woff2', weight: 400, label: 'Bad Script', group: 'Script' },
+  marckscript: { family: 'TipoMarck', file: 'marckscript.woff2', weight: 400, label: 'Marck Script', group: 'Script' },
+  neucha: { family: 'TipoNeucha', file: 'neucha.woff2', weight: 400, label: 'Neucha', group: 'Script' },
+  gochihand: { family: 'TipoGochi', file: 'gochihand.woff2', weight: 400, label: 'Gochi Hand', group: 'Script' },
+  kalam700: { family: 'TipoKalam', file: 'kalam-700.woff2', weight: 700, label: 'Kalam', group: 'Script' },
+  oleo700: { family: 'TipoOleo', file: 'oleo-700.woff2', weight: 700, label: 'Oleo Script', group: 'Script' },
+  comicneue700: { family: 'TipoComicNeue', file: 'comicneue-700.woff2', weight: 700, label: 'Comic Neue', group: 'Cartoon' },
+  londrina: { family: 'TipoLondrina', file: 'londrina.woff2', weight: 400, label: 'Londrina Solid', group: 'Cartoon' },
+  fugaz: { family: 'TipoFugaz', file: 'fugaz.woff2', weight: 400, label: 'Fugaz One', group: 'Tech' },
+  racing: { family: 'TipoRacing', file: 'racing.woff2', weight: 400, label: 'Racing Sans', group: 'Tech' },
+  bungeeshade: { family: 'TipoBungeeShade', file: 'bungeeshade.woff2', weight: 400, label: 'Bungee Shade', group: 'Tech' },
+  rye: { family: 'TipoRye', file: 'rye.woff2', weight: 400, label: 'Rye (western)', group: 'Tech' },
+  specialelite: { family: 'TipoElite', file: 'specialelite.woff2', weight: 400, label: 'Special Elite', group: 'Tech' },
+  graduate: { family: 'TipoGraduate', file: 'graduate.woff2', weight: 400, label: 'Graduate', group: 'Tech' },
+  goldman700: { family: 'TipoGoldman', file: 'goldman-700.woff2', weight: 700, label: 'Goldman', group: 'Tech' },
+  silkscreen700: { family: 'TipoSilkscreen', file: 'silkscreen-700.woff2', weight: 700, label: 'Silkscreen (pixel)', group: 'Tech' },
+  dotgothic: { family: 'TipoDotGothic', file: 'dotgothic.woff2', weight: 400, label: 'DotGothic (pixel)', group: 'Tech' },
+  majormono: { family: 'TipoMajorMono', file: 'majormono.woff2', weight: 400, label: 'Major Mono', group: 'Tech' },
+  archivonarrow700: { family: 'TipoArchivoNarrow', file: 'archivonarrow-700.woff2', weight: 700, label: 'Archivo Narrow', group: 'Condensada' },
+  antonsc: { family: 'TipoAntonSC', file: 'antonsc.woff2', weight: 400, label: 'Anton SC', group: 'Condensada' },
 };
 
 export const FONT_GROUPS = ['Impacto', 'Cartoon', 'Script', 'Condensada', 'Tech', 'Serifada', 'Clean'] as const;

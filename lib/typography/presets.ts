@@ -12,6 +12,7 @@
  */
 
 import type { TypoPreset } from './engine';
+import { GENERATED_PRESETS } from './presets-gen';
 
 const WHITE = '#ffffff';
 const INK = '#0f0f10';
@@ -41,7 +42,7 @@ function p(base: P): TypoPreset {
   } as TypoPreset;
 }
 
-export const TYPO_PRESETS: TypoPreset[] = [
+const MANUAL_PRESETS: TypoPreset[] = [
   // ─── VIRAL (tipografia mista, refs validadas pelo user) ──────────────────
   p({
     id: 'titulo-viral',
@@ -253,7 +254,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
     fill: '#2eff4f',
     extrude: { color: '#0b6b1d', x: 0.05, y: 0.06, steps: 6 },
     stroke: { color: '#052e0d', width: 0.06 },
-    glow: { color: '#2eff4f', blur: 0.2 },
+    glow: { color: '#2eff4f', blur: 0.14 },
     hardShadow: { color: 'rgba(0,0,0,0.5)', x: 0.05, y: 0.07 },
     highlightScale: 1.24,
     mix: { font: 'oswald600', scale: 0.42 },
@@ -478,6 +479,18 @@ export const TYPO_PRESETS: TypoPreset[] = [
     defaultAccent: '#ffb59e',
   }),
   p({
+    id: 'mascara',
+    name: 'Máscara',
+    cat: 'Viral',
+    font: 'anton',
+    size: 0.082,
+    knockout: { dim: 0.55, pad: 0.55 },
+    unit: 'block',
+    in: { kind: 'zoom-out', dur: 340, ease: 'outQuint', amp: 0.6 },
+    autoEmphasis: false,
+    defaultAccent: WHITE,
+  }),
+  p({
     id: 'tricolor',
     name: 'Tricolor',
     cat: 'Viral',
@@ -574,7 +587,7 @@ export const TYPO_PRESETS: TypoPreset[] = [
     fill: '#31c4ff',
     extrude: { color: '#0a4a73', x: 0.05, y: 0.06, steps: 6 },
     stroke: { color: '#062b44', width: 0.06 },
-    glow: { color: '#31c4ff', blur: 0.2 },
+    glow: { color: '#31c4ff', blur: 0.14 },
     hardShadow: { color: 'rgba(0,0,0,0.5)', x: 0.05, y: 0.07 },
     emphasisBreak: true,
     highlightScale: 1.24,
@@ -2074,6 +2087,10 @@ export const TYPO_PRESETS: TypoPreset[] = [
     defaultAccent: YELLOW,
   }),
 ];
+
+// Manuais primeiro (curadoria fina), depois as variantes geradas — os IDs
+// gerados têm prefixo 'g-' e nunca colidem com os manuais.
+export const TYPO_PRESETS: TypoPreset[] = [...MANUAL_PRESETS, ...GENERATED_PRESETS];
 
 export const TYPO_CATEGORIES: string[] = Array.from(
   new Set(TYPO_PRESETS.map((pr) => pr.cat)),

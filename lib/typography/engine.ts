@@ -199,6 +199,10 @@ export type TypoPreset = {
   highlightColor?: PresetColor;
   /** gradiente PRÓPRIO da palavra destacada (ouro no "2026", roxo no "DINÂMICOS") */
   highlightGradient?: Array<[number, PresetColor]>;
+  /** FONTE própria da palavra destacada (ex.: texto clean + destaque cartoon) */
+  highlightFont?: FontKey;
+  /** máscara: painel escurecido com o texto VAZADO mostrando o vídeo através das letras */
+  knockout?: { dim: number; pad: number };
   /** a palavra destacada quebra pra PRÓPRIA linha ("hoje / VOCÊ VAI / aprender") */
   emphasisBreak?: boolean;
   /** pirâmide: CADA palavra na própria linha (ref "Comenta PACK") */
@@ -397,7 +401,12 @@ function measureLayout(
   const upper = style.uppercase ?? preset.uppercase ?? false;
   const hlScale = preset.highlightScale ?? 1;
   const hlKey =
-    hlScale !== 1 || preset.sizeCycle || preset.mix || preset.emphasisBreak || preset.stack
+    hlScale !== 1 ||
+    preset.sizeCycle ||
+    preset.mix ||
+    preset.emphasisBreak ||
+    preset.stack ||
+    preset.highlightFont
       ? Array.from(highlights).sort((a, b) => a - b).join('.')
       : '';
   const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${upper}|${W}|${hlKey}`;
@@ -413,7 +422,11 @@ function measureLayout(
   const words: WordLayout[] = block.words.map((w, wi) => {
     const isHi = highlights.has(wi);
     const mixed = !!(preset.mix && !isHi);
-    const fk = mixed ? preset.mix!.font : preset.font;
+    const fk = isHi
+      ? (preset.highlightFont ?? preset.font)
+      : mixed
+        ? preset.mix!.font
+        : preset.font;
     const cyc = sizeCycle ? sizeCycle[wi % sizeCycle.length] : 1;
     const fpx = mixed
       ? fontPx * preset.mix!.scale
@@ -1205,6 +1218,75 @@ export function drawCaptions(
           : resolveFill(d, lineH);
     fillWordText(d, text, -ww / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
     ctx.restore();
+    finishDraw();
+    return;
+  }
+
+  // ── MÁSCARA (knockout): painel escurecido com o texto vazado — o vídeo
+  // aparece ATRAVÉS das letras. Caminho próprio (substitui o render normal).
+  if (preset.knockout && !isSolo && !fxCtx) {
+    const ko = preset.knockout;
+    const fx2 = getFxCtx(W, H);
+    if (fx2 && fxCanvas) {
+      const padX = ko.pad * fontPx;
+      const padY = ko.pad * fontPx * 0.8;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      layout.lines.forEach((line, li) => {
+        const x0 = lineOriginX(li);
+        minX = Math.min(minX, x0);
+        maxX = Math.max(maxX, x0 + line.width * line.scale);
+      });
+      fx2.save();
+      fx2.fillStyle = `rgba(0,0,0,${ko.dim})`;
+      roundRect(
+        fx2,
+        minX - padX,
+        topY - padY,
+        maxX - minX + padX * 2,
+        blockH + padY * 2,
+        fontPx * 0.25,
+      );
+      fx2.fill();
+      // vaza as letras (o vídeo aparece por elas)
+      fx2.globalCompositeOperation = 'destination-out';
+      fx2.textBaseline = 'alphabetic';
+      fx2.textAlign = 'left';
+      layout.lines.forEach((line, li) => {
+        const x0 = lineOriginX(li);
+        const by = lineBaseY(li);
+        for (const wi of line.wordIdx) {
+          const wl = layout.words[wi];
+          fx2.font = fontCss(wl.fk, wl.fpx);
+          fx2.fillStyle = '#ffffff';
+          fx2.fillText(wl.text, x0 + wl.x, by);
+        }
+      });
+      fx2.globalCompositeOperation = 'source-over';
+      // contorno fino define as letras sobre vídeo claro
+      fx2.strokeStyle = `rgba(255,255,255,0.55)`;
+      fx2.lineWidth = Math.max(1, fontPx * 0.018);
+      fx2.lineJoin = 'round';
+      layout.lines.forEach((line, li) => {
+        const x0 = lineOriginX(li);
+        const by = lineBaseY(li);
+        for (const wi of line.wordIdx) {
+          const wl = layout.words[wi];
+          fx2.font = fontCss(wl.fk, wl.fpx);
+          fx2.strokeText(wl.text, x0 + wl.x, by);
+        }
+      });
+      fx2.restore();
+
+      ctx.save();
+      ctx.globalAlpha = outAlpha * clamp01(pBlock * 2.2);
+      const s2 = 0.94 + 0.06 * Math.min(eBlock, 1);
+      ctx.translate(cx, topY + blockH / 2);
+      ctx.scale(s2, s2);
+      ctx.translate(-cx, -(topY + blockH / 2));
+      ctx.drawImage(fxCanvas, 0, 0);
+      ctx.restore();
+    }
     finishDraw();
     return;
   }

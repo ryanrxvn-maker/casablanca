@@ -966,8 +966,10 @@ function PresetGallery({
   disabled?: boolean;
 }) {
   const [cat, setCat] = useState<string>(TYPO_CATEGORIES[0]);
+  const [visible, setVisible] = useState(24);
   const canvasesRef = useRef(new Map<string, HTMLCanvasElement>());
-  const list = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
+  const fullList = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
+  const list = useMemo(() => fullList.slice(0, visible), [fullList, visible]);
 
   useEffect(() => {
     void ensureTypoFonts();
@@ -1005,7 +1007,10 @@ function PresetGallery({
         {TYPO_CATEGORIES.map((c) => (
           <button
             key={c}
-            onClick={() => setCat(c)}
+            onClick={() => {
+              setCat(c);
+              setVisible(24);
+            }}
             className={
               'rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ' +
               (c === cat
@@ -1015,6 +1020,9 @@ function PresetGallery({
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             {c}
+            <span className="ml-1 opacity-60">
+              {TYPO_PRESETS.filter((p) => p.cat === c).length}
+            </span>
           </button>
         ))}
       </div>
@@ -1064,6 +1072,15 @@ function PresetGallery({
           );
         })}
       </div>
+      {fullList.length > visible ? (
+        <button
+          onClick={() => setVisible((v) => v + 24)}
+          disabled={disabled}
+          className="btn-secondary mt-3 w-full !py-2 text-[12px]"
+        >
+          Mostrar mais {Math.min(24, fullList.length - visible)} de {fullList.length - visible} restantes
+        </button>
+      ) : null}
     </div>
   );
 }
