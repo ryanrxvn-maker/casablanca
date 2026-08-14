@@ -4,197 +4,231 @@ import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/diagnose
- *  Body: { email: string }
- *  Resp: { reason: 'not_found' | 'unconfirmed' | 'banned' | 'revoked'
- *                | 'must_change_password' | 'wrong_password' | 'unknown',
+ *  Body: { email: string, password: string }
+ *  Resp: { reason: 'invalid_credentials' | 'unconfirmed' | 'banned' | 'revoked'
+ *                | 'must_change_password' | 'ok' | 'unknown',
  *          message: string,
  *          canResend: boolean }
  *
  * Diagnóstico de "por que não consigo entrar?" — chamado quando o
- * signInWithPassword devolve erro genérico (Supabase mascara propositais).
- * Faz lookup admin no auth.users + check no `profiles`.
+ * signInWithPassword devolve erro genérico (o Supabase mascara de propósito).
  *
- * Segurança: NÃO devolve se o email existe ou não pra evitar enumeração;
- * sempre retorna mensagem útil mas semanticamente neutra ('Email não
- * cadastrado' = mesma resposta de 'usuário sem signup'). Mantém o canal
- * 'unconfirmed' como ÚNICA exceção (necessário pra UX 'reenviar email').
+ * ── ANTI-ENUMERAÇÃO (pentest 13.08, achado 3.1) ────────────────────────────
+ * A versão antiga respondia pelo EMAIL sozinho, então `not_found` vs
+ * `unconfirmed` virava um oráculo: um curl sem credencial nenhuma dizia se um
+ * email qualquer tinha conta aqui (munição pra phishing dirigido e credential
+ * stuffing). Agora o endpoint só abre o estado da conta pra quem PROVA que é
+ * dono dela: a senha vem junto e é verificada de verdade contra o Supabase.
+ *
+ *   • senha confere  → devolve o motivo real (unconfirmed / revoked /
+ *                      must_change_password / ok). Zero perda de UX: no login
+ *                      e no cadastro a pessoa SEMPRE acabou de digitar a senha.
+ *   • senha não confere, ou email não existe
+ *                    → 'invalid_credentials', a MESMA resposta pros dois casos.
+ *                      Sem oráculo.
+ *
+ * Exceção consciente: 'banned'. O GoTrue devolve `user_banned` sem garantir que
+ * a senha foi conferida, então em tese ele revela "essa conta existe e está
+ * banida". Mantido de propósito — conta banida é bloqueio deliberado nosso e a
+ * pessoa precisa saber que tem que falar com o suporte; contas normais seguem
+ * indistinguíveis de email inexistente, que é o que importa.
  */
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
 
+type Reason =
+  | 'invalid_credentials'
+  | 'unconfirmed'
+  | 'banned'
+  | 'revoked'
+  | 'must_change_password'
+  | 'ok'
+  | 'unknown';
+
 type DiagnoseResp = {
-  reason:
-    | 'not_found'
-    | 'unconfirmed'
-    | 'banned'
-    | 'revoked'
-    | 'must_change_password'
-    | 'wrong_password'
-    | 'unknown';
+  reason: Reason;
   message: string;
   canResend: boolean;
 };
 
+/** Resposta de auth nunca pode ficar em cache (CDN, proxy ou browser). */
+function json(body: DiagnoseResp, status = 200) {
+  return NextResponse.json<DiagnoseResp>(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store, private' },
+  });
+}
+
+/**
+ * Resposta única pra "não provou nada": email inexistente e senha errada saem
+ * IGUAIS daqui. O texto cobre os dois casos sem confirmar nenhum.
+ */
+function generic(): DiagnoseResp {
+  return {
+    reason: 'invalid_credentials',
+    message:
+      'Email ou senha incorretos. Confira os dados — se ainda não tem conta, é só criar uma.',
+    canResend: false,
+  };
+}
+
 export async function POST(req: Request) {
-  // Rate-limit anti-enumeração/abuso: 8 req/min por IP.
+  // Rate-limit anti-enumeração/brute-force: 8 req/min por IP.
   if (!rateLimit(`diagnose:${clientIp(req)}`, 8, 60_000)) {
-    return NextResponse.json<DiagnoseResp>(
+    return json(
       {
         reason: 'unknown',
         message: 'Muitas tentativas. Aguarde um minuto e tente de novo.',
         canResend: false,
       },
-      { status: 429 },
+      429,
     );
   }
+
   try {
-    const { email } = (await req.json()) as { email?: string };
+    const { email, password } = (await req.json()) as {
+      email?: string;
+      password?: string;
+    };
     const cleanEmail = String(email || '').trim().toLowerCase();
+    const pass = String(password || '');
+
     if (!cleanEmail || !/.+@.+\..+/.test(cleanEmail)) {
-      return NextResponse.json<DiagnoseResp>({
+      return json({
         reason: 'unknown',
         message: 'Informe um email válido.',
         canResend: false,
       });
     }
 
-    // Teto POR EMAIL (além do por-IP acima): estrangula enumeração em massa
-    // mesmo se o atacante rotacionar IP. Diagnóstico legítimo de 1 usuário
-    // cabe folgado em 5/10min.
+    // Teto POR EMAIL (além do por-IP acima): estrangula tanto a enumeração
+    // quanto o brute-force de senha mesmo se o atacante rotacionar IP.
+    // Diagnóstico legítimo de 1 usuário cabe folgado em 5/10min.
     if (!rateLimit('diagnose-email:' + cleanEmail, 5, 600_000)) {
-      return NextResponse.json<DiagnoseResp>(
+      return json(
         {
           reason: 'unknown',
-          message: 'Muitas verificações pra esse email. Aguarde um pouco.',
+          message: 'Muitas tentativas pra esse email. Aguarde um pouco.',
           canResend: false,
         },
-        { status: 429 },
+        429,
       );
     }
 
+    // Sem senha não há prova de posse — responde o genérico e para aqui.
+    // (Também é o caminho de bundles antigos em cache, que não mandavam senha:
+    // degrada a mensagem, nunca vaza.)
+    if (!pass) return json(generic());
+
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    if (!url || !serviceKey) {
-      return NextResponse.json<DiagnoseResp>({
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    if (!url || !anonKey) {
+      return json({
         reason: 'unknown',
         message: 'Não consegui verificar agora. Tente em alguns segundos.',
         canResend: false,
       });
     }
 
-    const admin = createClient(url, serviceKey, {
+    // ── Prova de posse: confere a senha de verdade ────────────────────────
+    const auth = createClient(url, anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    const { data: signIn, error: signInErr } = await auth.auth.signInWithPassword({
+      email: cleanEmail,
+      password: pass,
+    });
 
-    // 1) Resolve o id pelo public.profiles.email (indexável, SEM o teto de
-    //    200 do admin.listUsers — que passava a dar 'not_found' pra contas
-    //    reais além do 200º usuário). Só depois busca os campos de auth
-    //    (email_confirmed_at/banned_until) desse id específico.
-    let userRow: {
-      id: string;
-      email_confirmed_at: string | null;
-      banned_until: string | null;
-    } | null = null;
+    if (signInErr) {
+      const code = String((signInErr as { code?: string }).code || '');
+      const msg = (signInErr.message || '').toLowerCase();
 
-    try {
-      const { data: profs } = await admin
-        .from('profiles')
-        .select('id')
-        .ilike('email', cleanEmail)
-        .limit(1);
-      const pid = (profs?.[0]?.id as string | undefined) ?? undefined;
-      if (pid) {
-        const { data: got } = await admin.auth.admin.getUserById(pid);
-        const u = got?.user;
-        if (u) {
-          userRow = {
-            id: u.id,
-            email_confirmed_at: (u.email_confirmed_at as string | null) || null,
-            banned_until: (u.banned_until as string | null) || null,
-          };
-        }
+      // Senha CORRETA + email pendente: o GoTrue confere a senha antes de
+      // checar a confirmação, então esse erro já é prova de posse.
+      if (code === 'email_not_confirmed' || msg.includes('not confirmed')) {
+        return json({
+          reason: 'unconfirmed',
+          message:
+            'Você ainda não confirmou o email. Te mandamos um novo link agora — confira a caixa de entrada (e o spam).',
+          canResend: true,
+        });
       }
-    } catch {
-      // se a busca falhar (rate limit / role), cai pro not_found/unknown
-    }
 
-    if (!userRow) {
-      return NextResponse.json<DiagnoseResp>({
-        reason: 'not_found',
-        message:
-          'Não encontrei uma conta com esse email. Confira a grafia ou cadastre-se.',
-        canResend: false,
-      });
-    }
-
-    // 2) Email não confirmado?
-    if (!userRow.email_confirmed_at) {
-      return NextResponse.json<DiagnoseResp>({
-        reason: 'unconfirmed',
-        message:
-          'Você ainda não confirmou o email. Te mandamos um novo link agora — confira a caixa de entrada (e o spam).',
-        canResend: true,
-      });
-    }
-
-    // 3) Banido pelo Supabase?
-    if (userRow.banned_until) {
-      const bannedUntil = new Date(userRow.banned_until).getTime();
-      if (!isNaN(bannedUntil) && bannedUntil > Date.now()) {
-        return NextResponse.json<DiagnoseResp>({
+      if (code === 'user_banned' || msg.includes('banned')) {
+        return json({
           reason: 'banned',
           message:
             'Esta conta está bloqueada temporariamente. Entre em contato pra liberar.',
           canResend: false,
         });
       }
+
+      // invalid_credentials, email inexistente, qualquer outra coisa:
+      // uma resposta só, sem distinguir os casos.
+      return json(generic());
     }
 
-    // 4) Acesso revogado no profile (is_active=false) ou must_change_password
-    type ProfileRow = {
-      is_active: boolean | null;
-      must_change_password: boolean | null;
-    };
-    let profile: ProfileRow | null = null;
+    // ── Senha confere. A partir daqui pode abrir o estado real da conta. ──
+    const userId = signIn.user?.id;
+
+    // Encerra JÁ a sessão que acabamos de criar. scope 'local' derruba só
+    // este token — 'global' (o default do supabase-js) deslogaria a pessoa
+    // de todos os aparelhos dela só por ter pedido um diagnóstico.
     try {
-      const { data } = await admin
-        .from('profiles')
-        .select('is_active, must_change_password')
-        .eq('id', userRow.id)
-        .maybeSingle();
-      profile = (data as unknown as ProfileRow | null) || null;
+      await auth.auth.signOut({ scope: 'local' });
     } catch {
-      // profile não acessível: assume default ok
+      /* token órfão expira sozinho; não vale falhar o diagnóstico por isso */
     }
 
-    if (profile?.is_active === false) {
-      return NextResponse.json<DiagnoseResp>({
-        reason: 'revoked',
-        message:
-          'Acesso revogado pela administração. Entre em contato pra reativar.',
-        canResend: false,
-      });
+    // Estados que só existem no NOSSO banco (o Supabase Auth não conhece):
+    // acesso revogado pelo admin e senha provisória a trocar.
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (userId && serviceKey) {
+      try {
+        const admin = createClient(url, serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+        const { data: profile } = await admin
+          .from('profiles')
+          .select('is_active, must_change_password')
+          .eq('id', userId)
+          .maybeSingle<{
+            is_active: boolean | null;
+            must_change_password: boolean | null;
+          }>();
+
+        if (profile?.is_active === false) {
+          return json({
+            reason: 'revoked',
+            message:
+              'Acesso revogado pela administração. Entre em contato pra reativar.',
+            canResend: false,
+          });
+        }
+        if (profile?.must_change_password === true) {
+          return json({
+            reason: 'must_change_password',
+            message:
+              'Você precisa trocar a senha provisória antes de entrar. Vá pra "Trocar senha".',
+            canResend: false,
+          });
+        }
+      } catch {
+        /* profile inacessível: assume default ok */
+      }
     }
 
-    if (profile?.must_change_password === true) {
-      return NextResponse.json<DiagnoseResp>({
-        reason: 'must_change_password',
-        message:
-          'Você precisa trocar a senha provisória antes de entrar. Vá pra "Trocar senha".',
-        canResend: false,
-      });
-    }
-
-    // 5) User existe, confirmado, ativo → erro era senha errada
-    return NextResponse.json<DiagnoseResp>({
-      reason: 'wrong_password',
-      message: 'Senha incorreta. Confira ou peça pra trocar.',
+    // Credencial boa e nada bloqueando — o login do cliente deve funcionar
+    // numa nova tentativa (estado velho de sessão, corrida de cookie etc).
+    return json({
+      reason: 'ok',
+      message: 'Suas credenciais estão certas. Tente entrar de novo.',
       canResend: false,
     });
   } catch (e) {
     console.error('[auth/diagnose]', e);
-    return NextResponse.json<DiagnoseResp>({
+    return json({
       reason: 'unknown',
       message:
         'Não consegui identificar o motivo agora. Tente em alguns segundos.',

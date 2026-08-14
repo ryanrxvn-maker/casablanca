@@ -186,13 +186,17 @@ export default function RegisterPage() {
         //     só precisa da tela pra digitar (caso do cliente que reclamou).
         //   • conta confirmada → nada foi enviado; tem que usar outro email
         //     ou entrar com esse.
-        // Quem sabe a diferença é o /api/auth/diagnose (service-role).
+        // Quem sabe a diferença é o /api/auth/diagnose — que só responde pra
+        // quem PROVA posse da conta, por isso a senha vai junto (anti-
+        // enumeração; sem ela o endpoint diria a qualquer um se o email tem
+        // cadastro aqui). Re-cadastro de conta pendente atualiza a senha no
+        // Supabase, então a que a pessoa acabou de digitar é a válida.
         let pendente = false;
         try {
           const res = await fetch('/api/auth/diagnose', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail }),
+            body: JSON.stringify({ email: cleanEmail, password }),
           });
           const diag = (await res.json()) as { reason?: string };
           pendente = diag?.reason === 'unconfirmed';

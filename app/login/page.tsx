@@ -8,12 +8,12 @@ import { createClient } from '@/lib/supabase/client';
 
 type DiagnoseResp = {
   reason:
-    | 'not_found'
+    | 'invalid_credentials'
     | 'unconfirmed'
     | 'banned'
     | 'revoked'
     | 'must_change_password'
-    | 'wrong_password'
+    | 'ok'
     | 'unknown';
   message: string;
   canResend: boolean;
@@ -45,12 +45,19 @@ function LoginInner() {
   const [resending, setResending] = useState(false);
   const [resentMsg, setResentMsg] = useState<string | null>(null);
 
-  async function diagnose(emailToCheck: string): Promise<DiagnoseResp | null> {
+  // A senha vai junto de propósito: o /diagnose só revela o estado da conta
+  // pra quem prova que é dono dela (senão o endpoint viraria um consultor
+  // público de "esse email tem conta aqui?"). Mesma origem, mesma senha que
+  // acabou de ir pro Supabase — não abre exposição nova.
+  async function diagnose(
+    emailToCheck: string,
+    passwordUsed: string,
+  ): Promise<DiagnoseResp | null> {
     try {
       const res = await fetch('/api/auth/diagnose', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: emailToCheck }),
+        body: JSON.stringify({ email: emailToCheck, password: passwordUsed }),
       });
       if (!res.ok) return null;
       return (await res.json()) as DiagnoseResp;
@@ -81,16 +88,17 @@ function LoginInner() {
     }
 
     // ── Erro genérico do Supabase — chama nosso diagnóstico server-side
-    const diag = await diagnose(cleanEmail);
+    const diag = await diagnose(cleanEmail, password);
 
     if (diag) {
       // Monta erro com CTA específico por motivo
       let cta: { href?: string; label?: string } = {};
       if (diag.reason === 'must_change_password') {
         cta = { href: '/trocar-senha', label: 'Ir trocar senha' };
-      } else if (diag.reason === 'not_found') {
-        cta = { href: '/register', label: 'Criar conta' };
-      } else if (diag.reason === 'wrong_password') {
+      } else if (diag.reason === 'invalid_credentials') {
+        // Email inexistente e senha errada caem os DOIS aqui (anti-enumeração),
+        // então o CTA tem que servir pros dois: redefinir senha resolve quem
+        // esqueceu, e "criar conta grátis" já está fixo no rodapé da tela.
         cta = {
           href: `/forgot-password${cleanEmail ? `?email=${encodeURIComponent(cleanEmail)}` : ''}`,
           label: 'Redefinir senha por email',
@@ -301,8 +309,6 @@ function LoginInner() {
 
 function reasonLabel(reason?: DiagnoseResp['reason']): string {
   switch (reason) {
-    case 'not_found':
-      return 'Email não cadastrado';
     case 'unconfirmed':
       return 'Email não confirmado';
     case 'banned':
@@ -311,8 +317,10 @@ function reasonLabel(reason?: DiagnoseResp['reason']): string {
       return 'Acesso revogado';
     case 'must_change_password':
       return 'Trocar senha provisória';
-    case 'wrong_password':
-      return 'Senha incorreta';
+    case 'invalid_credentials':
+      return 'Email ou senha incorretos';
+    case 'ok':
+      return 'Tente de novo';
     default:
       return 'Não consegui entrar';
   }

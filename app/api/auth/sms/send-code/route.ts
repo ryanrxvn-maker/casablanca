@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { randomInt } from 'crypto';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 /**
@@ -20,10 +21,15 @@ export const runtime = 'nodejs';
 export const maxDuration = 15;
 
 function genCode(): string {
-  // 6 dígitos, primeiro nunca é 0 pra ficar visível em SMS
-  let s = String(Math.floor(1 + Math.random() * 9));
-  for (let i = 0; i < 5; i++) s += String(Math.floor(Math.random() * 10));
-  return s;
+  // 6 dígitos (100000–999999: o primeiro nunca é 0, fica legível no SMS).
+  //
+  // randomInt do crypto, NÃO Math.random(): o Math.random() do V8 é um PRNG
+  // não-criptográfico (xorshift128+) cujo estado interno dá pra reconstruir a
+  // partir de algumas saídas observadas. Como o atacante consegue ver saídas à
+  // vontade (é só pedir código pro telefone dele), um OTP em Math.random() é
+  // PREVISÍVEL — dava pra verificar o telefone de outra pessoa sem nunca ver o
+  // SMS dela, o que é pior que força bruta porque nem esbarra nos limites.
+  return String(randomInt(100_000, 1_000_000));
 }
 
 async function sendTwilio(phone: string, body: string): Promise<boolean> {
@@ -105,6 +111,44 @@ export async function POST(req: Request) {
         ok: true,
         throttled: true,
         message: 'Limite diário de códigos atingido. Tente novamente amanhã.',
+      });
+    }
+
+    // Cap por NÚMERO DE DESTINO (não só por conta): sem isso, criar várias
+    // contas grátis — o cadastro é aberto — dava um SMS bombing na mesma
+    // vítima, cada conta gastando a cota dela nos 10 do cap acima. O teto
+    // agora acompanha o telefone, então o custo total por vítima é fixo.
+    const PHONE_DAILY_MAX = 5;
+    const { count: sentToPhone } = await admin
+      .from('phone_otp_codes')
+      .select('id', { count: 'exact', head: true })
+      .eq('phone', normalizedPhone)
+      .gte('created_at', since24h);
+    if ((sentToPhone ?? 0) >= PHONE_DAILY_MAX) {
+      return NextResponse.json({
+        ok: true,
+        throttled: true,
+        message: 'Limite diário de códigos atingido. Tente novamente amanhã.',
+      });
+    }
+
+    // Cooldown por NÚMERO (60s), independente de qual conta pediu — fecha o
+    // rodízio de contas pra furar o cooldown de 30s por conta abaixo.
+    const { data: lastToPhone } = await admin
+      .from('phone_otp_codes')
+      .select('created_at')
+      .eq('phone', normalizedPhone)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (
+      lastToPhone?.created_at &&
+      Date.now() - new Date(lastToPhone.created_at as string).getTime() < 60_000
+    ) {
+      return NextResponse.json({
+        ok: true,
+        throttled: true,
+        message: 'Aguarde um minuto pra pedir outro código.',
       });
     }
 

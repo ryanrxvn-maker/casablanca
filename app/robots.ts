@@ -2,22 +2,13 @@ import type { MetadataRoute } from 'next';
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 
-// Rotas privadas (app/admin/auth/api) — fora do índice de busca E de IA.
-const DISALLOW = [
-  '/tools',
-  '/admin',
-  '/configuracoes',
-  '/api',
-  '/login',
-  '/register',
-  '/verify',
-  '/verify-phone',
-  '/trocar-senha',
-  '/reset-password',
-  '/forgot-password',
-  '/access-revoked',
-  '/auth',
-];
+// ATENÇÃO: não liste rota privada aqui (pentest 13.08, achado 3.7).
+// `Disallow` NÃO é controle de acesso — não bloqueia ninguém e ainda publica,
+// pra qualquer um que abra /robots.txt, o mapa exato de onde ficam admin, api
+// e as telas de auth. Quem tira essas rotas do índice agora é o header
+// `X-Robots-Tag: noindex` (definido em next.config.js → PRIVATE_ROUTES), que
+// é o mecanismo que de fato impede indexação. Acesso, quem barra é o
+// middleware de sessão.
 
 // Crawlers de IA que queremos EXPLICITAMENTE liberar nas páginas públicas —
 // é assim que o site vira fonte citável no ChatGPT, Perplexity, Claude e nas
@@ -35,18 +26,14 @@ const AI_BOTS = [
 
 /**
  * /robots.txt — libera o marketing público (landing/planos/termos/política)
- * pra busca tradicional E pra crawlers de IA, e mantém app/admin/auth/api fora
- * do índice. Aponta o sitemap.
+ * pra busca tradicional E pra crawlers de IA, e aponta o sitemap. As rotas
+ * privadas saem do índice pelo X-Robots-Tag (ver nota acima), não daqui.
  */
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
-      { userAgent: '*', allow: '/', disallow: DISALLOW },
-      ...AI_BOTS.map((userAgent) => ({
-        userAgent,
-        allow: '/',
-        disallow: DISALLOW,
-      })),
+      { userAgent: '*', allow: '/' },
+      ...AI_BOTS.map((userAgent) => ({ userAgent, allow: '/' })),
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,
     host: SITE_URL,
