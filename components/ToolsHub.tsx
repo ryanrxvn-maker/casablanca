@@ -21,6 +21,7 @@ import {
   IconClickUpPilot,
   IconCompressor,
   IconCopySRT,
+  IconTipografia,
   IconDecupageCopy,
   IconDecupagem,
   IconDownloader,
@@ -201,6 +202,15 @@ const TOOLS: ToolEntry[] = [
     icon: <IconCopySRT size={26} />,
     hue: 'rgba(196, 181, 253, 0.42)',
     badge: 'IA',
+  },
+  {
+    href: '/tools/tipografia',
+    label: 'Tipografia Automática',
+    description: 'A fala vira lettering animado, no tempo exato do áudio.',
+    icon: <IconTipografia size={26} />,
+    hue: 'rgba(251, 191, 36, 0.42)',
+    badge: 'ADMIN',
+    adminOnly: true,
   },
   {
     href: '/tools/heygen-auto',

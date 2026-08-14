@@ -19,6 +19,7 @@ export const GUIDE_PATHS = new Set<string>([
   '/tools/clickup-pilot',
   '/tools/compressor',
   '/tools/copy-srt',
+  '/tools/tipografia',
   '/tools/decupagem',
   '/tools/decupagem-copy',
   '/tools/downloader',

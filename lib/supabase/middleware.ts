@@ -73,6 +73,8 @@ const ADMIN_ONLY_PREFIXES = [
   '/tools/auto-broll',        // uso interno — some pra conta não-admin
   '/tools/heygen-auto',       // uso interno — some pra conta não-admin
   '/tools/clickup-pilot',     // uso interno — some pra conta não-admin
+  '/tools/tipografia',        // Tipografia Automática — admin-only até liberar
+
   '/tools/background',        // viewer da fila do Pilot — uso interno
   '/tools/lipsync-history',   // histórico dos batches Pilot/VA — uso interno
   '/pilot',                   // página de pitch do Pilot — uso interno

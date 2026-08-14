@@ -477,6 +477,7 @@ const TOOL_PATHS = [
   '/tools/remover-elementos',
   '/tools/decupagem-copy',
   '/tools/copy-srt',
+  '/tools/tipografia',
   '/tools/heygen-auto',
 ];
 

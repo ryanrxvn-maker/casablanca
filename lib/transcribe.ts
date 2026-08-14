@@ -24,9 +24,15 @@ export type TranscribeResult = {
 
 export async function transcribeAudio(
   audio: File,
-  opts: { vocab?: string[]; provider?: TranscribeProvider } = {},
+  opts: {
+    vocab?: string[];
+    provider?: TranscribeProvider;
+    /** ISO 639-1 ('pt' default) ou 'auto' pro Whisper detectar sozinho. */
+    language?: string;
+  } = {},
 ): Promise<TranscribeResult> {
   const vocab = opts.vocab ?? [];
+  const language = opts.language ?? 'pt';
   const requested = opts.provider ?? 'auto';
   const order: Array<'assemblyai' | 'groq'> =
     requested === 'groq' ? ['groq', 'assemblyai'] : ['assemblyai', 'groq'];
@@ -40,8 +46,8 @@ export async function transcribeAudio(
     try {
       words =
         p === 'assemblyai'
-          ? await transcribeViaAssemblyAI(audio, vocab)
-          : await transcribeViaGroq(audio, vocab);
+          ? await transcribeViaAssemblyAI(audio, vocab, language)
+          : await transcribeViaGroq(audio, vocab, language);
       if (words.length > 0) provider = p;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -53,7 +59,11 @@ export async function transcribeAudio(
   return { words, provider, errors };
 }
 
-async function transcribeViaGroq(audio: File, vocab: string[]): Promise<Word[]> {
+async function transcribeViaGroq(
+  audio: File,
+  vocab: string[],
+  language = 'pt',
+): Promise<Word[]> {
   const keyResult = await getUserKey('groq');
   if ('response' in keyResult) throw new Error('Groq key ausente.');
   const apiKey = keyResult.key;
@@ -63,7 +73,8 @@ async function transcribeViaGroq(audio: File, vocab: string[]): Promise<Word[]> 
   fd.append('model', 'whisper-large-v3');
   fd.append('response_format', 'verbose_json');
   fd.append('timestamp_granularities[]', 'word');
-  fd.append('language', 'pt');
+  // 'auto' = Whisper detecta o idioma sozinho (omite o parâmetro)
+  if (language !== 'auto') fd.append('language', language);
   if (vocab.length > 0) {
     fd.append('prompt', `Termos do roteiro: ${vocab.join(', ')}.`);
   }
@@ -92,6 +103,7 @@ async function transcribeViaGroq(audio: File, vocab: string[]): Promise<Word[]> 
 async function transcribeViaAssemblyAI(
   audio: File,
   vocab: string[],
+  language = 'pt',
 ): Promise<Word[]> {
   const keyResult = await getUserKey('assemblyai');
   if ('response' in keyResult) throw new Error('AAI key ausente.');
@@ -114,7 +126,9 @@ async function transcribeViaAssemblyAI(
     headers: { authorization: apiKey, 'content-type': 'application/json' },
     body: JSON.stringify({
       audio_url: upload_url,
-      language_code: 'pt',
+      ...(language === 'auto'
+        ? { language_detection: true }
+        : { language_code: language }),
       punctuate: true,
       format_text: true,
       // ATENCAO: `disfluencies` NAO e' suportado em pt pela AssemblyAI — manda-lo

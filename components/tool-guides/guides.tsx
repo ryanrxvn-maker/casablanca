@@ -734,6 +734,67 @@ export const GUIDES: Record<string, ToolGuide> = {
     ],
   },
 
+  '/tools/tipografia': {
+    title: 'Tipografia Automática',
+    tagline: 'A fala do vídeo vira lettering animado profissional, no tempo exato do áudio — e sai queimado no MP4.',
+    steps: [
+      {
+        title: 'Envie o vídeo',
+        text: 'Solte o arquivo na área de upload — MP4, MOV ou WEBM, até 800 MB e 20 minutos. A página mostra o tamanho e a duração detectados. O vídeo não sai do seu navegador: só o áudio comprimido sobe pra transcrição.',
+        visual: (
+          <Shot label="Tipografia · vídeo">
+            <MDrop label="Arraste ou clique pra subir" sub="MP4, MOV, WEBM — até 800MB e 20min" />
+          </Shot>
+        ),
+      },
+      {
+        title: 'Gere as legendas automáticas',
+        text: 'Escolha o idioma da fala (ou "Detectar") e clique em "Gerar legendas". A ferramenta transcreve palavra por palavra e monta os blocos no ritmo da fala — como a legenda automática do CapCut, só que já com timing word-level pros letterings baterem certinho.',
+        visual: (
+          <Shot label="Tipografia · transcrição">
+            <MRow>
+              <MChip tone="violet">PORTUGUÊS</MChip>
+              <MBtn tone="primary">Gerar legendas</MBtn>
+              <MChip tone="lime">PALAVRAS · 214</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Escolha o modelo e edite',
+        text: 'A galeria tem dezenas de letterings animados (karaokê, glitch, neon, bounce, máquina de escrever...) com preview ao vivo — o que você vê no player é EXATAMENTE o que sai no MP4. Ajuste tamanho, altura na tela, cores e ritmo dos blocos. Na lista de blocos dá pra corrigir texto, dividir, juntar, ajustar o tempo e clicar numa palavra pra pintá-la na cor de destaque.',
+        visual: (
+          <Shot label="Tipografia · editor">
+            <MRow>
+              <MChip tone="violet">KARAOKÊ</MChip>
+              <MChip tone="dim">GLITCH</MChip>
+              <MChip tone="dim">NEON</MChip>
+              <MChip tone="dim">BOUNCE</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Queime os letterings no vídeo',
+        text: 'Clique em "Queimar letterings no vídeo". O render roda no SEU navegador (frame a frame, com o áudio original de volta no final) — um vídeo de 1 minuto leva por volta de 1 a 2 minutos. Deixe a aba aberta até o card "PRONTO" aparecer, aí é só "Baixar MP4". Se preferir levar pro CapCut/Premiere, o "Baixar .SRT" exporta os mesmos blocos como legenda.',
+        visual: (
+          <Shot label="Tipografia · render">
+            <MRow>
+              <MBtn tone="primary">Queimar letterings no vídeo</MBtn>
+              <MBtn tone="lime">Baixar MP4</MBtn>
+            </MRow>
+          </Shot>
+        ),
+      },
+    ],
+    tips: [
+      'A transcrição usa a chave Groq (Whisper) de /configuracoes/api — se faltar, o banner "Chave pendente" aponta o caminho.',
+      'O render local precisa de Chrome ou Edge atualizados no computador (WebCodecs). Não feche a aba durante o render.',
+      'F5 no meio da edição não perde nada: selecionando o MESMO arquivo de novo, a edição anterior é restaurada.',
+      'Trocar o "Ritmo dos blocos" remonta tudo a partir da transcrição — faça isso ANTES de corrigir textos na lista.',
+    ],
+  },
+
   '/tools/decupagem-copy': {
     title: 'Decupagem Inteligente',
     tagline: 'A IA lê a sua copy, escolhe o melhor take de cada frase no vídeo bruto e audita o resultado.',

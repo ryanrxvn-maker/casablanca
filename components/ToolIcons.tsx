@@ -789,3 +789,25 @@ export function IconClickUpPilot(p: IconProps) {
     </svg>
   );
 }
+
+/** Tipografia Automática — "Aa" com traços de movimento (lettering animado). */
+export function IconTipografia(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  return (
+    <svg {...baseProps(p, `url(#${id})`)}>
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#f97316" />
+        </linearGradient>
+      </defs>
+      <path d="M4 18L9 6l5 12" />
+      <path d="M5.7 14h6.6" />
+      <path d="M15.5 12.5c2-1.4 4.5-0.6 4.5 1.5v4" opacity="0.85" />
+      <path d="M20 14.8c-1.6-0.3-4.5-0.2-4.5 1.9 0 2 3 2 4.5 0.6" opacity="0.85" />
+      <path d="M3 21h13" opacity="0.4" strokeDasharray="2 2.4" />
+      <path d="M20.5 3l0.4 1 1 0.4-1 0.4-0.4 1-0.4-1L19 4.4l1-0.4 0.5-1z" fill={`url(#${id})`} stroke="none" />
+    </svg>
+  );
+}
