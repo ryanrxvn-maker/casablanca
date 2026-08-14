@@ -103,6 +103,7 @@ type SavedSession = {
   pace: GroupPace;
   language: Language;
   highlights: Record<string, number[]>;
+  autoEmph?: boolean;
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -158,6 +159,7 @@ function TipografiaInner() {
     'tipografia:hl',
     {},
   );
+  const [autoEmph, setAutoEmph] = useToolState<boolean>('tipografia:autoemph', true);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
@@ -174,8 +176,9 @@ function TipografiaInner() {
       accent,
       uppercase: upper === 'auto' ? null : upper === 'on',
       highlights,
+      autoEmphasis: autoEmph,
     }),
-    [presetId, fontScale, posY, primary, accent, upper, highlights],
+    [presetId, fontScale, posY, primary, accent, upper, highlights, autoEmph],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -215,6 +218,7 @@ function TipografiaInner() {
         setPace(saved.pace);
         setLanguage(saved.language);
         setHighlights(saved.highlights ?? {});
+        setAutoEmph(saved.autoEmph ?? true);
         setPhase('ready');
         setRestored(true);
       }
@@ -240,8 +244,9 @@ function TipografiaInner() {
       pace,
       language,
       highlights,
+      autoEmph,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, upper, pace, language, highlights, autoEmph]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -640,6 +645,8 @@ function TipografiaInner() {
                   setAccent={setAccent}
                   upper={upper}
                   setUpper={setUpper}
+                  autoEmph={autoEmph}
+                  setAutoEmph={setAutoEmph}
                   pace={pace}
                   regroup={regroup}
                   defaultPrimary={preset.defaultPrimary}
@@ -1054,6 +1061,8 @@ function StylePanel({
   setAccent,
   upper,
   setUpper,
+  autoEmph,
+  setAutoEmph,
   pace,
   regroup,
   defaultPrimary,
@@ -1070,6 +1079,8 @@ function StylePanel({
   setAccent: (v: string | null) => void;
   upper: UpperMode;
   setUpper: (v: UpperMode) => void;
+  autoEmph: boolean;
+  setAutoEmph: (v: boolean) => void;
   pace: GroupPace;
   regroup: (p: GroupPace) => void;
   defaultPrimary: string;
@@ -1170,6 +1181,41 @@ function StylePanel({
               {label}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="md:col-span-2">
+        <div
+          className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Destaque automático
+        </div>
+        <div className="flex items-center gap-2.5">
+          {(
+            [
+              [true, 'Ligado'],
+              [false, 'Desligado'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={label}
+              onClick={() => setAutoEmph(v)}
+              disabled={disabled}
+              className={
+                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
+                (autoEmph === v
+                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                  : 'border-line text-text-muted hover:text-text')
+              }
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="text-[10.5px] text-text-muted">
+            a palavra forte de cada bloco ganha o tratamento de destaque do modelo
+            sozinha — clicar nas palavras da lista substitui a escolha
+          </span>
         </div>
       </div>
       <div className="md:col-span-2">

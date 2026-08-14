@@ -108,20 +108,35 @@ export type TypoPreset = {
   lineHeight?: number;
   fill: PresetColor | 'gradient';
   gradient?: [string, string];
+  /** gradiente multi-stop (ouro/chrome/duotone) — offsets 0..1, aceita tokens */
+  gradientStops?: Array<[number, PresetColor]>;
   stroke?: { color: PresetColor; width: number };
   /** sombra suave (blur) */
   shadow?: { color: string; blur: number; x: number; y: number };
   /** sombra DURA de pôster (cópia sólida deslocada, sem blur) */
   hardShadow?: { color: PresetColor; x: number; y: number };
-  /** texto 3D: pilha de cópias deslocadas atrás do fill */
-  extrude?: { color: PresetColor; x: number; y: number; steps: number };
+  /** texto 3D: pilha de cópias deslocadas atrás do fill; fade esvanece a cauda */
+  extrude?: { color: PresetColor; x: number; y: number; steps: number; fade?: boolean };
   glow?: { color: PresetColor; blur: number };
+  /** brilho metálico varrendo o texto em loop (shine sweep) */
+  shine?: { period: number; alpha: number };
+  /** anéis de contorno atrás do texto (aura de neon) */
+  aura?: { color: PresetColor; count: number; width: number; alpha: number; pulse?: boolean };
   /** aberração cromática RGB persistente (fantasma red/cyan) */
   chroma?: { amp: number; flicker?: boolean };
   /** fatias horizontais deslocadas (durante a entrada e, com loop glitch, em bursts) */
   glitchBands?: boolean;
   /** cores do texto alternando por palavra */
   colorCycle?: PresetColor[];
+  /** escala do texto alternando por palavra (variação de tamanho automática) */
+  sizeCycle?: number[];
+  /**
+   * DESTAQUE AUTOMÁTICO: sem destaque manual no bloco, o engine escolhe a
+   * palavra mais forte (mais longa) e aplica o tratamento de destaque do
+   * preset (highlightStyle/Scale/Color). É o que faz cada bloco sair com
+   * variação de cor e tamanho sem o user clicar em nada.
+   */
+  autoEmphasis?: boolean;
   /** rotação fixa da composição (graus) */
   blockRotate?: number;
   /** jitter de rotação POR BLOCO, carimbado (graus máx) */
@@ -170,6 +185,8 @@ export type StyleState = {
   uppercase: boolean | null;
   /** blockId → índices de palavras destacadas na cor de destaque */
   highlights: Record<string, number[]>;
+  /** desliga o destaque automático dos presets (default: ligado) */
+  autoEmphasis?: boolean;
 };
 
 export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
@@ -179,7 +196,22 @@ export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   accent: null,
   uppercase: null,
   highlights: {},
+  autoEmphasis: true,
 };
+
+/** Palavra "forte" do bloco (mais longa; empate = a primeira). Determinístico. */
+export function autoEmphasisIndex(block: Block): number | null {
+  let best = -1;
+  let bestLen = 0;
+  for (let i = 0; i < block.words.length; i++) {
+    const len = block.words[i].text.length;
+    if (len > bestLen) {
+      bestLen = len;
+      best = i;
+    }
+  }
+  return best >= 0 && bestLen >= 3 ? best : null;
+}
 
 // ─── Easings ────────────────────────────────────────────────────────────────
 
@@ -270,7 +302,10 @@ function measureLayout(
 ): BlockLayout {
   const upper = style.uppercase ?? preset.uppercase ?? false;
   const hlScale = preset.highlightScale ?? 1;
-  const hlKey = hlScale !== 1 ? Array.from(highlights).sort((a, b) => a - b).join('.') : '';
+  const hlKey =
+    hlScale !== 1 || preset.sizeCycle
+      ? Array.from(highlights).sort((a, b) => a - b).join('.')
+      : '';
   const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${style.fontScale}|${upper}|${W}|${hlKey}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
@@ -279,9 +314,11 @@ function measureLayout(
   const fontPx = preset.size * W * style.fontScale;
   const lineH = fontPx * (preset.lineHeight ?? 1.16);
   const maxLineW = W * 0.86;
+  const sizeCycle = preset.sizeCycle;
 
   const words: WordLayout[] = block.words.map((w, wi) => {
-    const fpx = fontPx * (highlights.has(wi) ? hlScale : 1);
+    const cyc = sizeCycle ? sizeCycle[wi % sizeCycle.length] : 1;
+    const fpx = fontPx * cyc * (highlights.has(wi) ? hlScale : 1);
     const sp = (preset.spacing ?? 0) * fpx;
     ctx.font = fontCss(preset.font, fpx);
     const text = upper ? w.text.toUpperCase() : w.text;
@@ -572,10 +609,29 @@ function fillWordText(
     ctx.lineWidth = (preset.stroke?.width ?? 0) * fpx;
   };
 
-  // extrude 3D (pilha de cópias — a mais funda primeiro)
+  // aura de neon (anéis de contorno atrás de tudo)
+  if (preset.aura) {
+    clearShadow(ctx);
+    const col = resolveColor(preset.aura.color, d.primary, d.accent);
+    const pulse = preset.aura.pulse
+      ? 1 + 0.22 * Math.sin((2 * Math.PI * d.tMs) / 1400)
+      : 1;
+    const baseAlpha = ctx.globalAlpha;
+    ctx.strokeStyle = col;
+    ctx.lineJoin = 'round';
+    for (let k = preset.aura.count; k >= 1; k--) {
+      ctx.lineWidth = preset.aura.width * fpx * (k / preset.aura.count) * pulse;
+      ctx.globalAlpha = baseAlpha * preset.aura.alpha * (1 - (k - 1) / (preset.aura.count + 1));
+      ctx.strokeText(text, x, y);
+    }
+    ctx.globalAlpha = baseAlpha;
+  }
+
+  // extrude 3D (pilha de cópias — a mais funda primeiro; fade esvanece a cauda)
   if (preset.extrude) {
     clearShadow(ctx);
     const col = resolveColor(preset.extrude.color, d.primary, d.accent);
+    const baseAlpha = ctx.globalAlpha;
     ctx.fillStyle = col;
     if (preset.stroke) {
       strokeSetup();
@@ -584,9 +640,13 @@ function fillWordText(
     for (let i = preset.extrude.steps; i >= 1; i--) {
       const ox = (preset.extrude.x * fpx * i) / preset.extrude.steps;
       const oy = (preset.extrude.y * fpx * i) / preset.extrude.steps;
+      if (preset.extrude.fade) {
+        ctx.globalAlpha = baseAlpha * (1 - (i / (preset.extrude.steps + 1)) * 0.8);
+      }
       if (preset.stroke) ctx.strokeText(text, x + ox, y + oy);
       ctx.fillText(text, x + ox, y + oy);
     }
+    ctx.globalAlpha = baseAlpha;
   }
 
   // sombra dura (silhueta sólida deslocada, inclui o contorno)
@@ -634,6 +694,21 @@ function fillWordText(
     ctx.fillText(text, x, y);
   }
   ctx.fillText(text, x, y);
+
+  // shine sweep: banda de brilho diagonal varrendo os glifos em loop
+  if (preset.shine) {
+    clearShadow(ctx);
+    const ph = (d.tMs % preset.shine.period) / preset.shine.period;
+    const w = ctx.measureText(text).width;
+    const bw = Math.max(w * 0.4, fpx * 0.45);
+    const start = x - bw + (w + 2 * bw) * ph;
+    const g = ctx.createLinearGradient(start, y - fpx * 0.9, start + bw, y + fpx * 0.22);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, `rgba(255,255,255,${preset.shine.alpha})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillText(text, x, y);
+  }
 }
 
 function roundRect(
@@ -794,7 +869,18 @@ export function drawCaptions(
 
   const primary = style.primary ?? preset.defaultPrimary;
   const accent = style.accent ?? preset.defaultAccent;
-  const highlights = new Set(style.highlights[block.id] ?? []);
+  // destaque manual do user vence; sem ele, o preset com autoEmphasis escolhe
+  // a palavra forte do bloco sozinho (variação de cor/tamanho automática)
+  let hiList = style.highlights[block.id] ?? [];
+  if (
+    hiList.length === 0 &&
+    preset.autoEmphasis &&
+    style.autoEmphasis !== false
+  ) {
+    const auto = autoEmphasisIndex(block);
+    if (auto !== null) hiList = [auto];
+  }
+  const highlights = new Set(hiList);
   const layout = measureLayout(realCtx, block, preset, style, W, highlights);
   const { fontPx, lineH } = layout;
   const seedBase = hashStr(block.id);
@@ -1060,9 +1146,12 @@ export function drawCaptions(
             ? 1
             : clamp01((tMs - (block.start + li * (preset.in.stagger ?? 90))) / preset.in.dur);
         const le = EASE[preset.in.ease ?? 'outCubic'](lp);
-        // headroom extra pra palavra destacada em escala maior não clipar
-        const hlPad =
-          (preset.highlightScale ?? 1) > 1 ? fontPx * ((preset.highlightScale ?? 1) - 1) * 1.15 : 0;
+        // headroom extra pra palavra em escala maior (destaque OU sizeCycle) não clipar
+        const maxUnitScale = Math.max(
+          preset.highlightScale ?? 1,
+          ...(preset.sizeCycle ?? [1]),
+        );
+        const hlPad = maxUnitScale > 1 ? fontPx * (maxUnitScale - 1) * 1.15 : 0;
         ctx.beginPath();
         if (isMask) {
           ctx.rect(
@@ -1271,10 +1360,20 @@ export function drawCaptions(
 
 function resolveFill(d: DrawCtx, lineH: number): string {
   const { preset, ctx } = d;
-  if (preset.fill === 'gradient' && preset.gradient) {
-    const g = ctx.createLinearGradient(0, -lineH, 0, lineH * 0.4);
-    g.addColorStop(0, preset.gradient[0]);
-    g.addColorStop(1, preset.gradient[1]);
+  if (preset.fill === 'gradient') {
+    const g = ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
+    const stops: Array<[number, string]> =
+      preset.gradientStops ??
+      (preset.gradient
+        ? [
+            [0, preset.gradient[0]],
+            [1, preset.gradient[1]],
+          ]
+        : [
+            [0, '#ffffff'],
+            [1, '#d0d0d0'],
+          ]);
+    for (const [o, c] of stops) g.addColorStop(o, resolveColor(c, d.primary, d.accent));
     return g as unknown as string;
   }
   return resolveColor(preset.fill, d.primary, d.accent);
