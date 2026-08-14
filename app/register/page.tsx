@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AuthShell } from '@/components/AuthShell';
 import { createClient } from '@/lib/supabase/client';
+import { isDisposableEmail } from '@/lib/disposable-email';
 
 /** Campo de senha com olhinho — mesmo comportamento do /login. */
 function PasswordField({
@@ -127,6 +128,16 @@ export default function RegisterPage() {
     if (!isRealEmail(cleanEmail)) {
       setError(
         'Esse email não parece válido. Digite o endereço completo, sem asteriscos nem espaços (ex: voce@gmail.com).',
+      );
+      return;
+    }
+    // Descartável (mailinator/tempmail/etc): quem barra de verdade é o trigger
+    // no banco (migration 030) — o cadastro vai do browser direto pro Supabase,
+    // então checagem só aqui não impede ninguém. Este check existe pra pessoa
+    // ver o motivo claro em vez do erro genérico do banco.
+    if (isDisposableEmail(cleanEmail)) {
+      setError(
+        'Não aceitamos email temporário/descartável. Use seu email de verdade (Gmail, Outlook, o da sua empresa) — é pra lá que vai o código de confirmação e o acesso.',
       );
       return;
     }

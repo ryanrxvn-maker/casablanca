@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
+import { isDisposableEmail } from '@/lib/disposable-email';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -26,6 +27,14 @@ export async function POST(req: Request) {
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return jsonError('Email invalido.', 400);
+    }
+    // O trigger do banco (migration 030) recusaria de qualquer jeito, mas com
+    // erro cru de Postgres. Aqui o admin vê o motivo em texto claro.
+    if (isDisposableEmail(email)) {
+      return jsonError(
+        'Email temporario/descartavel nao e aceito. Use o email real do cliente.',
+        400,
+      );
     }
     if (password.length < 8) {
       return jsonError('Senha precisa ter no minimo 8 caracteres.', 400);
