@@ -1040,71 +1040,45 @@ async function probeHasAudio(ff: FFmpeg, path: string): Promise<boolean> {
   return hasAudio;
 }
 
-/** Re-encoda + segmenta UM trecho em pedaços EXATOS ≤targetSec (fallback pra
- *  vídeos de GOP longo, onde o corte por keyframe geraria pedaços > limite). */
-async function resplitReencode(
-  ff: FFmpeg,
-  blob: Blob,
-  targetSec: number,
-  opts: RunOptions,
-): Promise<File[]> {
-  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-  const inName = `resin_${uniq}.mp4`;
-  const { fetchFile } = await import('@ffmpeg/util');
-  await ff.writeFile(inName, await fetchFile(blob));
-  const made: string[] = [];
-  try {
-    opts.onStage?.('Otimizando o vídeo...');
-    // Re-encode + segment: o corte cai EXATO no tempo (não depende de keyframe).
-    await execOrThrow(
-      ff,
-      [
-        '-i', inName,
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '160k',
-        '-f', 'segment', '-segment_time', String(targetSec), '-reset_timestamps', '1',
-        '-force_key_frames', `expr:gte(t,n_forced*${targetSec})`,
-        `reseg_${uniq}_%03d.mp4`,
-      ],
-      're-split preciso',
-    );
-    const parts: File[] = [];
-    for (let i = 0; ; i++) {
-      const name = `reseg_${uniq}_${String(i).padStart(3, '0')}.mp4`;
-      let data: Uint8Array | string;
-      try {
-        data = await ff.readFile(name);
-      } catch {
-        break;
-      }
-      made.push(name);
-      parts.push(new File([toBlob(data, 'video/mp4')], name, { type: 'video/mp4' }));
-      await safeDelete(ff, name);
-    }
-    return parts;
-  } finally {
-    await safeDelete(ff, inName);
-    for (const n of made) await safeDelete(ff, n);
-  }
-}
+/** Overlap (s) entre trechos vizinhos: cada trecho leva um pedacinho do começo
+ *  do próximo pro motor, pra o crossfade na junção ter conteúdo dos DOIS lados
+ *  do mesmo instante (é o que apaga o salto de reconstrução na emenda). */
+export const SEG_OVERLAP_SEC = 1.0;
+/** Duração do crossfade na junção (s). Curto = imperceptível, mas suaviza o
+ *  salto. Precisa caber no overlap com folga. */
+export const SEG_XFADE_SEC = 0.4;
+
+export type SplitResult = {
+  /** Trechos na ORDEM, cada um com ~SEG_OVERLAP_SEC a mais no fim (menos o último). */
+  parts: File[];
+  /** offsets[i] = duração NOMINAL do trecho i (ponto onde começa o overlap com
+   *  o trecho i+1). Um valor por emenda (parts.length-1 no total). O join usa
+   *  a soma acumulada como offset do xfade — alinhamento EXATO, sem depender de
+   *  onde os keyframes caíram. */
+  offsets: number[];
+};
 
 /**
- * Pica um vídeo em trechos de ~maxSec (por keyframe, `-c copy` = rápido, sem
- * re-encode, sem perda), garantindo que NENHUM trecho passe de hardLimitSec (se
- * o GOP for longo e um pedaço estourar, esse pedaço é re-encodado em cortes
- * exatos). Os cortes são distribuídos UNIFORMEMENTE (nº mínimo de trechos, sem
- * sobrar um pedaço minúsculo no fim → menos chamadas ao motor, menos emendas).
- * Trechos ≥1 arquivo, em ordem. Nunca ocupa o heap com o vídeo inteiro
- * (WORKERFS). Se o vídeo cabe num trecho só, devolve ele inteiro.
+ * Pica um vídeo em trechos de ~maxSec com OVERLAP entre vizinhos, tudo por
+ * keyframe (`-c copy` = rápido, sem re-encode, sem perda). Estratégia:
+ *   1. Segment muxer contíguo (cortes EXATOS em keyframe) → mede as durações
+ *      reais → conhece os pontos de junção com precisão (offsets).
+ *   2. A cada trecho (menos o último) ANEXA a cabeça (~overlap s) do trecho
+ *      seguinte. Como os segmentos vêm do MESMO encode do original, esse concat
+ *      é `-c copy` limpo. Assim o overlap existe SEM re-encodar nada.
+ * O motor reconstrói cada trecho (incluindo o overlap); na junção, o crossfade
+ * funde as duas reconstruções do mesmo instante → emenda imperceptível.
+ * Distribui uniforme (nº mínimo de trechos). Vídeo ≤ teto → 1 trecho, sem overlap.
  */
 export async function splitVideoByTime(
   file: Blob,
-  maxSec = 27,
+  maxSec = 25,
   hardLimitSec = 29,
   opts: RunOptions = {},
-): Promise<File[]> {
+): Promise<SplitResult> {
   const srcExt = guessExt(file, 'mp4');
   const { ext: chunkExt, format: chunkFormat } = chunkContainerFor(srcExt);
+  const overlap = SEG_OVERLAP_SEC;
 
   let durationSec = (await probeVideoMetadata(file))?.durationSec || 0;
 
@@ -1117,14 +1091,14 @@ export async function splitVideoByTime(
     if (durationSec <= 0) durationSec = await readDurationFromLogs(ff, inputPath);
     if (durationSec <= 0) throw new Error('Não consegui ler a duração do vídeo (arquivo corrompido?).');
 
-    // Cabe num trecho só → nada a picar.
+    // Cabe num trecho só → nada a picar (sem overlap, sem emenda).
     if (durationSec <= hardLimitSec + 0.5) {
-      return [new File([file], `seg_000.${srcExt}`, { type: file.type || undefined })];
+      return { parts: [new File([file], `seg_000.${srcExt}`, { type: file.type || undefined })], offsets: [] };
     }
 
-    // Distribui uniforme: menor nº de trechos que respeita maxSec, todos ~iguais
-    // (evita o pedaço minúsculo que um segment_time fixo deixaria no fim).
-    const numParts = Math.max(2, Math.ceil(durationSec / maxSec));
+    // Distribui uniforme; o nominal por trecho deixa folga pro overlap caber no teto.
+    const usable = Math.max(6, maxSec - overlap);
+    const numParts = Math.max(2, Math.ceil(durationSec / usable));
     const segTime = durationSec / numParts;
 
     opts.onStage?.('Preparando o vídeo...');
@@ -1141,7 +1115,9 @@ export async function splitVideoByTime(
     if (rc !== 0) throw new Error('Não consegui preparar esse vídeo (formato não suportado).');
 
     const mimeOut = chunkExt === 'mp4' ? 'video/mp4' : chunkExt === 'webm' ? 'video/webm' : chunkExt === 'mkv' ? 'video/x-matroska' : 'video/mp4';
-    const raw: File[] = [];
+    // Coleta os nomes dos segmentos contíguos (ficam no FS) e mede as durações.
+    const segNames: string[] = [];
+    const segDurs: number[] = [];
     for (let i = 0; ; i++) {
       const name = `seg_${String(i).padStart(3, '0')}.${chunkExt}`;
       let data: Uint8Array | string;
@@ -1151,22 +1127,46 @@ export async function splitVideoByTime(
         break;
       }
       made.push(name);
-      raw.push(new File([toBlob(data, mimeOut)], name, { type: mimeOut }));
-      await safeDelete(ff, name);
+      segNames.push(name);
+      const d = data instanceof Uint8Array ? data : new Uint8Array();
+      segDurs.push((await probeVideoMetadata(new Blob([toBlob(d, mimeOut)])))?.durationSec || segTime);
     }
-    if (raw.length === 0) throw new Error('A preparação do vídeo não produziu trechos.');
+    if (segNames.length === 0) throw new Error('A preparação do vídeo não produziu trechos.');
 
-    // Blindagem: qualquer trecho acima do teto (GOP longo) é re-cortado exato.
-    const out: File[] = [];
-    for (const seg of raw) {
-      const segDur = (await probeVideoMetadata(seg))?.durationSec || 0;
-      if (segDur > hardLimitSec + 0.4) {
-        out.push(...(await resplitReencode(ff, seg, maxSec, opts)));
-      } else {
-        out.push(seg);
+    // Monta cada trecho = segmento + cabeça (overlap) do próximo. O último vai
+    // sem overlap. Concat -c copy (mesmo encode → limpo). offsets = durações
+    // nominais dos trechos que têm emenda depois (todos menos o último).
+    const parts: File[] = [];
+    const offsets: number[] = [];
+    for (let i = 0; i < segNames.length; i++) {
+      if (i === segNames.length - 1) {
+        const data = await ff.readFile(segNames[i]);
+        parts.push(new File([toBlob(data as Uint8Array, mimeOut)], `part_${i}.${chunkExt}`, { type: mimeOut }));
+        break;
       }
+      // cabeça (~overlap) do próximo segmento
+      const headName = `head_${i}.${chunkExt}`;
+      await ff.exec(['-i', segNames[i + 1], '-t', String(overlap + 0.5), '-c', 'copy', '-y', headName]);
+      // concat segmento + cabeça
+      const listName = `cl_${i}.txt`;
+      const outName = `part_${i}.${chunkExt}`;
+      await ff.writeFile(listName, new TextEncoder().encode(`file '${segNames[i]}'\nfile '${headName}'\n`));
+      const crc = await ff.exec(['-f', 'concat', '-safe', '0', '-i', listName, '-c', 'copy', '-y', outName]);
+      let partData: Uint8Array;
+      if (crc === 0) {
+        partData = (await ff.readFile(outName)) as Uint8Array;
+      } else {
+        // fallback raríssimo: manda o segmento sem overlap (a junção cai no
+        // concat simples pra essa emenda, mas nunca falha).
+        partData = (await ff.readFile(segNames[i])) as Uint8Array;
+      }
+      parts.push(new File([toBlob(partData, mimeOut)], outName, { type: mimeOut }));
+      offsets.push(segDurs[i]);
+      await safeDelete(ff, headName);
+      await safeDelete(ff, listName);
+      await safeDelete(ff, outName);
     }
-    return out;
+    return { parts, offsets };
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     for (const n of made) await safeDelete(ff, n);
@@ -1175,48 +1175,88 @@ export async function splitVideoByTime(
 }
 
 /**
- * Junta os trechos limpos num só e re-muxa o ÁUDIO ORIGINAL por cima. O áudio
- * original é contínuo (zero clique de emenda) e ancorado em t=0; se a soma do
- * vídeo divergir levemente da duração do áudio (drift do re-encode do motor),
- * o áudio é esticado/comprimido por um fator imperceptível (atempo) pra bater
- * EXATO — sync perfeito de ponta a ponta. Vídeo sem áudio → devolve só o vídeo.
+ * Junta os trechos limpos e re-muxa o ÁUDIO ORIGINAL. Quando há overlap
+ * (offsets preenchidos), a junção é um CROSSFADE encadeado nos pontos exatos —
+ * apaga o salto de reconstrução do motor na emenda (imperceptível), mantendo a
+ * duração e a sincronia. 1 trecho só (vídeo curto) → sem re-encode do vídeo
+ * (qualidade intacta), só troca o áudio. O áudio original é contínuo (zero
+ * clique de emenda), ancorado em t=0; drift residual vira um atempo imperceptível.
  */
 export async function joinCleanedWithOriginalAudio(
   cleanedParts: Blob[],
   original: Blob,
+  offsets: number[] = [],
   opts: RunOptions = {},
 ): Promise<Blob> {
-  // 1. Concatena os trechos limpos (mesmo encode do motor → `-c copy` junta liso).
-  const videoOnly = await concatDecupChunks(cleanedParts, 'mp4', opts);
-
-  // 2. Re-muxa o áudio original.
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const srcExt = guessExt(original, 'mp4');
-  const entries = [
-    { name: 'clean.mp4', data: videoOnly },
-    { name: `orig.${srcExt}`, data: original },
-  ];
+
+  // ── monta o VÍDEO final (xfade se houver overlap; senão o trecho único) ──
+  const useXfade = cleanedParts.length > 1 && offsets.length === cleanedParts.length - 1;
+
+  const entries: Array<{ name: string; data: Blob }> = cleanedParts.map((p, i) => ({ name: `cp_${i}.mp4`, data: p }));
+  entries.push({ name: `orig.${srcExt}`, data: original });
   const { dir, cleanup } = await makeInputsAvailable(ff, entries);
   const progressHandler = wireProgress(ff, opts.onProgress);
-  const cleanPath = `${dir}/clean.mp4`;
   const origPath = `${dir}/orig.${srcExt}`;
-  const outName = 'final_muxed.mp4';
+  const outName = 'final_join.mp4';
   try {
     const hasAudio = await probeHasAudio(ff, origPath);
-    if (!hasAudio) return videoOnly; // vídeo mudo → nada a re-muxar
-
-    const V = (await probeVideoMetadata(videoOnly))?.durationSec || 0;
     const A = (await probeVideoMetadata(original))?.durationSec || 0;
-    const factor = V > 0 && A > 0 ? A / V : 1;
-    // Só estica o áudio se o drift passar de ~0,05% (senão é ruído numérico).
-    const useTempo = Number.isFinite(factor) && Math.abs(factor - 1) > 0.0005 && factor >= 0.5 && factor <= 2;
 
+    if (!useXfade) {
+      // 1 trecho: vídeo intacto (copy), só re-muxa o áudio original.
+      if (cleanedParts.length === 1) {
+        const vPath = `${dir}/cp_0.mp4`;
+        if (!hasAudio) return cleanedParts[0];
+        const V = (await probeVideoMetadata(cleanedParts[0]))?.durationSec || 0;
+        const factor = V > 0 && A > 0 ? A / V : 1;
+        const useTempo = Number.isFinite(factor) && Math.abs(factor - 1) > 0.0005 && factor >= 0.5 && factor <= 2;
+        const args = ['-i', vPath, '-i', origPath, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy'];
+        if (useTempo) args.push('-af', atempoChain(factor));
+        args.push('-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-shortest', '-y', outName);
+        await execOrThrow(ff, args, 'mux do áudio (trecho único)');
+        const data = await ff.readFile(outName);
+        assertValidMp4(data as Uint8Array, 'vídeo final');
+        return toBlob(data, 'video/mp4');
+      }
+      // fallback (offsets ausentes): concat simples + mux.
+      const videoOnly = await concatDecupChunks(cleanedParts, 'mp4', opts);
+      return muxAudioOnly(ff, dir, videoOnly, origPath, hasAudio, A, outName, opts);
+    }
+
+    // ── CROSSFADE encadeado nos offsets acumulados ──
     opts.onStage?.('Finalizando...');
-    const args = ['-i', cleanPath, '-i', origPath, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy'];
-    if (useTempo) args.push('-af', atempoChain(factor));
-    args.push('-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-shortest', '-y', outName);
-    await execOrThrow(ff, args, 'mux do áudio original');
+    const n = cleanedParts.length;
+    const inputs: string[] = [];
+    for (let i = 0; i < n; i++) { inputs.push('-i', `${dir}/cp_${i}.mp4`); }
+    inputs.push('-i', origPath);
 
+    // filtro: encadeia xfade; offset acumulado = soma das durações nominais.
+    let acc = 0;
+    const chain: string[] = [];
+    let prev = '0:v';
+    for (let i = 1; i < n; i++) {
+      acc += offsets[i - 1];
+      const out = i === n - 1 ? 'vout' : `vx${i}`;
+      chain.push(`[${prev}][${i}:v]xfade=transition=fade:duration=${SEG_XFADE_SEC}:offset=${acc.toFixed(3)}[${out}]`);
+      prev = out;
+    }
+    chain.push(`[vout]format=yuv420p[vf]`);
+    const filter = chain.join(';');
+
+    const audioIdx = n; // o áudio original é o último input
+    const args = [
+      ...inputs,
+      '-filter_complex', filter,
+      '-map', '[vf]',
+    ];
+    if (hasAudio) args.push('-map', `${audioIdx}:a:0`, '-c:a', 'aac', '-b:a', '160k');
+    args.push(
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart', '-shortest', '-y', outName,
+    );
+    await execOrThrow(ff, args, 'crossfade das emendas + mux');
     const data = await ff.readFile(outName);
     assertValidMp4(data as Uint8Array, 'vídeo final');
     return toBlob(data, 'video/mp4');
@@ -1225,6 +1265,33 @@ export async function joinCleanedWithOriginalAudio(
     await safeDelete(ff, outName);
     await cleanup();
   }
+}
+
+/** Mux só do áudio original num vídeo já montado (fallback do concat simples). */
+async function muxAudioOnly(
+  ff: FFmpeg,
+  dir: string,
+  videoOnly: Blob,
+  origPath: string,
+  hasAudio: boolean,
+  audioDur: number,
+  outName: string,
+  opts: RunOptions,
+): Promise<Blob> {
+  if (!hasAudio) return videoOnly;
+  await ff.writeFile('vonly.mp4', await (await import('@ffmpeg/util')).fetchFile(videoOnly));
+  const V = (await probeVideoMetadata(videoOnly))?.durationSec || 0;
+  const factor = V > 0 && audioDur > 0 ? audioDur / V : 1;
+  const useTempo = Number.isFinite(factor) && Math.abs(factor - 1) > 0.0005 && factor >= 0.5 && factor <= 2;
+  opts.onStage?.('Finalizando...');
+  const args = ['-i', 'vonly.mp4', '-i', origPath, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy'];
+  if (useTempo) args.push('-af', atempoChain(factor));
+  args.push('-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-shortest', '-y', outName);
+  await execOrThrow(ff, args, 'mux do áudio original');
+  const data = await ff.readFile(outName);
+  assertValidMp4(data as Uint8Array, 'vídeo final');
+  await safeDelete(ff, 'vonly.mp4');
+  return toBlob(data, 'video/mp4');
 }
 
 // ---------- Normalizador de Volume --------------------------------------

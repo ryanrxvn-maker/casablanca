@@ -27,9 +27,13 @@ import { withFFLock } from '@/lib/lipsync-pipeline';
 // 800MB / 20min — a pré-produção pica pra caber no motor (≤30s/≤100MB por trecho).
 const MAX_VIDEO_BYTES = 800 * 1024 * 1024;
 const MAX_DURATION_SEC = 20 * 60 + 5; // 20min (folga de 5s)
-const SEGMENT_MAX_SEC = 27; // máximo por trecho (distribuído uniforme; folga sob os 30s do motor)
+const SEGMENT_MAX_SEC = 25; // nominal por trecho (deixa folga pro overlap sob os 30s do motor)
 const SEGMENT_HARD_LIMIT_SEC = 29; // nenhum trecho pode passar disso
-const SEGMENT_CONCURRENCY = 3; // trechos processados em paralelo
+// Fan-out: submete vários trechos "ao mesmo tempo" (como abrir várias abas) e
+// depois colhe todos. O motor renderiza todos em paralelo → muito mais rápido
+// que 1 por 1. O pool do servidor auto-regula os STARTs (503 → espera e re-tenta).
+const START_CONCURRENCY = 4; // uploads + submissões simultâneas
+const HARVEST_CONCURRENCY = 8; // polls + downloads simultâneos (leves)
 
 const UPLOAD_BUCKET = 'subtitle-uploads';
 
@@ -193,19 +197,17 @@ export default function RemoverLegendaTool() {
     }, { tries: 4 });
   }
 
-  // ── processa UM trecho: upload → START → POLL → download → Blob limpo ─────────
-  async function processSegment(
+  // ── FASE A (fan-out): sobe UM trecho + START → devolve o token de job ─────────
+  // NÃO espera o render — só submete (como abrir uma aba). Vários rodam juntos.
+  async function startSegment(
     jobId: string,
     seg: Blob,
     isFirst: boolean,
     meta?: { w: number; h: number },
-  ): Promise<Blob> {
+  ): Promise<string> {
     const publicUrl = await uploadSegment(seg, isFirst);
-
-    // START — submete e volta com um token; 503 = fila cheia no instante (espera e re-POSTa).
     type StartData = { job?: string; status?: string; error?: unknown } | null;
-    let job = '';
-    for (let busy = 0; busy < 6; busy++) {
+    for (let busy = 0; busy < 8; busy++) {
       if (cancelledRef.current.has(jobId)) throw new Error('cancelado');
       const r = await withRetry(async () => {
         const res = await fetch('/api/tools/remove-subtitle', {
@@ -216,19 +218,21 @@ export default function RemoverLegendaTool() {
         const json = (await res.json().catch(() => null)) as StartData;
         return { status: res.status, ok: res.ok, data: json };
       }, { tries: 3, baseDelayMs: 1200 });
-      if (r.status === 503) { await sleep(Math.min(8000, 2000 * 2 ** busy) + Math.random() * 400); continue; }
+      // 503 = pool cheio NESTE instante → espera e re-POSTa (sem re-subir nada).
+      if (r.status === 503) { await sleep(Math.min(9000, 1500 * 2 ** busy) + Math.random() * 500); continue; }
       if (!r.ok || !r.data?.job) {
         throw new Error(
           (r.data && (typeof r.data.error === 'string' ? r.data.error : r.data.error ? errMsg(r.data.error) : null)) ||
             `O servidor respondeu erro ${r.status}.`,
         );
       }
-      job = r.data.job;
-      break;
+      return r.data.job;
     }
-    if (!job) throw new Error('O serviço está ocupado agora. Tenta de novo em instantes.');
+    throw new Error('O serviço está ocupado agora. Tenta de novo em instantes.');
+  }
 
-    // POLL — acompanha o processamento (blip de rede não derruba o job).
+  // ── FASE B: poll de UM job até o trecho limpo ficar pronto → baixa ───────────
+  async function pollAndDownload(jobId: string, job: string): Promise<Blob> {
     type StatusData = { status?: string; output_video_url?: string; error?: unknown } | null;
     const startedAt = Date.now();
     const MAX_WAIT_MS = 20 * 60 * 1000;
@@ -255,8 +259,6 @@ export default function RemoverLegendaTool() {
         throw new Error((typeof st.error === 'string' && st.error) || 'Falha ao processar um trecho.');
       }
     }
-
-    // Download do trecho limpo (idempotente).
     return withRetry(async () => {
       const r = await fetch(outUrl);
       if (!r.ok) throw new Error(`Falha ao baixar um trecho (HTTP ${r.status}).`);
@@ -264,42 +266,64 @@ export default function RemoverLegendaTool() {
     }, { tries: 4 });
   }
 
+  /** Roda fn(0..n-1) com no máximo `conc` em paralelo, preservando o índice. */
+  async function runPool(n: number, conc: number, fn: (i: number) => Promise<void>): Promise<void> {
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= n) return;
+        await fn(i);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(conc, n) }, () => worker()));
+  }
+
   // ── pipeline de UM disparo ────────────────────────────────────────────────────
   async function runJob(jobId: string, file: File, meta?: { w: number; h: number; dur: number }) {
     try {
-      // 1. Pré-produção: pica o vídeo em trechos (serializa o ffmpeg entre jobs).
+      // 1. Pré-produção: pica o vídeo em trechos COM overlap (serializa o ffmpeg).
       patchJob(jobId, { stage: 'preparing', pct: 3 });
-      const segments = await withFFLock(() =>
+      const { parts, offsets } = await withFFLock(() =>
         splitVideoByTime(file, SEGMENT_MAX_SEC, SEGMENT_HARD_LIMIT_SEC, {
           onStage: () => patchJob(jobId, { stage: 'preparing' }),
         }),
       );
       if (cancelledRef.current.has(jobId)) return;
-      patchJob(jobId, { stage: 'processing', pct: 12 });
+      const total = parts.length;
+      patchJob(jobId, { stage: 'processing', pct: 10 });
 
-      // 2. Processa os trechos (paralelismo limitado). Progresso 12→85%.
-      const cleaned: Blob[] = new Array(segments.length);
-      let doneCount = 0;
-      let nextIdx = 0;
-      const total = segments.length;
-      const worker = async () => {
-        for (;;) {
-          const i = nextIdx++;
-          if (i >= total) return;
-          if (cancelledRef.current.has(jobId)) throw new Error('cancelado');
-          cleaned[i] = await processSegment(jobId, segments[i], i === 0, meta);
-          doneCount++;
-          patchJob(jobId, { pct: 12 + (doneCount / total) * 73 });
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(SEGMENT_CONCURRENCY, total) }, () => worker()));
+      // 2A. FAN-OUT: submete TODOS os trechos (não 1 por 1). Ordem preservada
+      //     pelo índice. Progresso 10→40% conforme submete.
+      const jobs: string[] = new Array(total);
+      let submitted = 0;
+      await runPool(total, START_CONCURRENCY, async (i) => {
+        if (cancelledRef.current.has(jobId)) throw new Error('cancelado');
+        jobs[i] = await startSegment(jobId, parts[i], i === 0, meta);
+        submitted++;
+        patchJob(jobId, { pct: 10 + (submitted / total) * 30 });
+      });
       if (cancelledRef.current.has(jobId)) return;
 
-      // 3. Pós-produção: junta os trechos limpos + re-muxa o áudio original.
+      // 2B. COLHE todos (rodaram em paralelo no motor). Progresso 40→85%.
+      const cleaned: Blob[] = new Array(total);
+      let harvested = 0;
+      await runPool(total, HARVEST_CONCURRENCY, async (i) => {
+        if (cancelledRef.current.has(jobId)) throw new Error('cancelado');
+        cleaned[i] = await pollAndDownload(jobId, jobs[i]);
+        harvested++;
+        patchJob(jobId, { pct: 40 + (harvested / total) * 45 });
+      });
+      if (cancelledRef.current.has(jobId)) return;
+
+      // 3. Pós-produção: junta com CROSSFADE nas emendas (emenda imperceptível)
+      //    + re-muxa o áudio original. Ordem/offsets garantem a montagem certa.
+      //    A barra acompanha o re-encode (0→1) pra a espera ficar transparente.
       patchJob(jobId, { stage: 'finalizing', pct: 88 });
       const finalBlob = await withFFLock(() =>
-        joinCleanedWithOriginalAudio(cleaned, file, {
+        joinCleanedWithOriginalAudio(cleaned, file, offsets, {
           onStage: () => patchJob(jobId, { stage: 'finalizing' }),
+          onProgress: (p) => patchJob(jobId, { pct: 88 + Math.max(0, Math.min(1, p.ratio)) * 11 }),
         }),
       );
       if (cancelledRef.current.has(jobId)) return;
