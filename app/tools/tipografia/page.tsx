@@ -84,7 +84,56 @@ const MAX_DURATION_SEC = 20 * 60;
 const HUE = 'rgba(255,159,10,0.45)';
 
 type Phase = 'idle' | 'transcribing' | 'ready' | 'rendering';
-type Language = 'pt' | 'en' | 'es' | 'auto';
+type Language = string; // ISO-639-1 ('pt', 'en'...) ou 'auto'
+
+// idiomas do Whisper (Groq) — os mais usados primeiro, resto alfabético
+const LANGS: Array<{ code: string; label: string }> = [
+  { code: 'pt', label: 'Português' },
+  { code: 'en', label: 'Inglês' },
+  { code: 'es', label: 'Espanhol' },
+  { code: 'pl', label: 'Polonês' },
+  { code: 'cs', label: 'Tcheco' },
+  { code: 'fr', label: 'Francês' },
+  { code: 'de', label: 'Alemão' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'ar', label: 'Árabe' },
+  { code: 'bg', label: 'Búlgaro' },
+  { code: 'zh', label: 'Chinês' },
+  { code: 'ko', label: 'Coreano' },
+  { code: 'hr', label: 'Croata' },
+  { code: 'da', label: 'Dinamarquês' },
+  { code: 'sk', label: 'Eslovaco' },
+  { code: 'sl', label: 'Esloveno' },
+  { code: 'fi', label: 'Finlandês' },
+  { code: 'el', label: 'Grego' },
+  { code: 'he', label: 'Hebraico' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'nl', label: 'Holandês' },
+  { code: 'hu', label: 'Húngaro' },
+  { code: 'id', label: 'Indonésio' },
+  { code: 'ja', label: 'Japonês' },
+  { code: 'ms', label: 'Malaio' },
+  { code: 'no', label: 'Norueguês' },
+  { code: 'ro', label: 'Romeno' },
+  { code: 'ru', label: 'Russo' },
+  { code: 'sr', label: 'Sérvio' },
+  { code: 'sv', label: 'Sueco' },
+  { code: 'th', label: 'Tailandês' },
+  { code: 'tl', label: 'Tagalo (Filipinas)' },
+  { code: 'tr', label: 'Turco' },
+  { code: 'uk', label: 'Ucraniano' },
+  { code: 'ur', label: 'Urdu' },
+  { code: 'vi', label: 'Vietnamita' },
+];
+
+function langLabel(code: Language): string {
+  if (code === 'auto') return 'Identificar automaticamente';
+  return LANGS.find((l) => l.code === code)?.label ?? code.toUpperCase();
+}
+
+// botões com relevo 3D (hover levanta, clique afunda) — usado em todo o editor
+const T3D =
+  ' shadow-[0_2px_0_rgba(0,0,0,0.16),0_6px_12px_-6px_rgba(0,0,0,0.25)] hover:-translate-y-[1.5px] hover:shadow-[0_3.5px_0_rgba(0,0,0,0.16),0_10px_18px_-8px_rgba(0,0,0,0.3)] active:translate-y-[1px] active:shadow-[inset_0_2px_5px_rgba(0,0,0,0.28)] transition-all duration-150 will-change-transform';
 type UpperMode = 'auto' | 'on' | 'off'; // legado (migração de sessões antigas)
 type CaseMode = 'auto' | 'upper' | 'lower' | 'original';
 
@@ -184,7 +233,7 @@ function TipografiaInner() {
     {},
   );
   const [pace, setPace] = useToolState<GroupPace>('tipografia:pace', 'equilibrado');
-  const [language, setLanguage] = useToolState<Language>('tipografia:lang', 'pt');
+  const [language, setLanguage] = useToolState<Language>('tipografia:lang', 'auto');
   const [highlights, setHighlights] = useToolState<Record<string, number[]>>(
     'tipografia:hl',
     {},
@@ -205,6 +254,30 @@ function TipografiaInner() {
   const [wordSel, setWordSel] = useState<{ blockId: string; a: number; b: number } | null>(null);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  // ⭐ favoritos da galeria — persistem no aparelho (localStorage)
+  const [favs, setFavs] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('tipografia:favs');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) setFavs(arr.filter((x) => typeof x === 'string'));
+      }
+    } catch {
+      /* sem favoritos salvos */
+    }
+  }, []);
+  const toggleFav = useCallback((id: string) => {
+    setFavs((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem('tipografia:favs', JSON.stringify(next));
+      } catch {
+        /* storage cheio — favorito vale só na sessão */
+      }
+      return next;
+    });
+  }, []);
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -682,7 +755,11 @@ function TipografiaInner() {
         height: out.height,
         audioOk: out.audioOk,
       });
-      logHistory({ tool: 'tipografia', title: `Letterings queimados em ${file.name}` });
+      logHistory({
+        tool: 'tipografia',
+        title: `Letterings queimados em ${file.name}`,
+        meta: `${blocks.length} blocos · modelo ${preset.name} — o projeto continua editável: reabra a ferramenta e selecione o MESMO arquivo`,
+      });
       // FLUXO: renderizou = baixou. O download começa sozinho; o card ainda
       // tem "Baixar de novo" caso o navegador segure o primeiro.
       try {
@@ -919,19 +996,8 @@ function TipografiaInner() {
           hint="Transcreve a fala palavra por palavra e monta os blocos no ritmo certo"
           hue={HUE}
         >
-          <div className="mb-3 max-w-[420px]">
-            <ToolChoice
-              value={language}
-              onChange={(v) => setLanguage(v)}
-              disabled={processing}
-              hue={HUE}
-              options={[
-                { value: 'pt', label: 'Português' },
-                { value: 'en', label: 'Inglês' },
-                { value: 'es', label: 'Espanhol' },
-                { value: 'auto', label: 'Detectar', sub: 'auto' },
-              ]}
-            />
+          <div className="mb-3">
+            <LangPicker value={language} onChange={setLanguage} disabled={processing} />
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {phase === 'transcribing' ? (
@@ -998,6 +1064,8 @@ function TipografiaInner() {
                     pushHistory();
                     setPresetId(id);
                   }}
+                  favs={favs}
+                  onToggleFav={toggleFav}
                   disabled={processing}
                 />
                 <FontPicker
@@ -1277,10 +1345,11 @@ function PreviewPane({
   const [editing, setEditing] = useState<{
     id: string;
     value: string;
+    caret: number;
     left: number;
     top: number;
     width: number;
-    fontSize: number;
+    height: number;
   } | null>(null);
   const editingRef = useRef<typeof editing>(null);
   editingRef.current = editing;
@@ -1309,11 +1378,38 @@ function PreviewPane({
         if (ctx) {
           ctx.clearRect(0, 0, W, H);
           const { blocks: b0, preset: p, style: s, wordSel: wSel } = liveRef.current;
-          // em edição de texto o bloco some do canvas (o input assume o lugar
-          // — sem legenda dobrada atrás da caixa de digitação)
+          // edição AO VIVO: o texto digitado renderiza com o lettering REAL
+          // (mesmo engine), atualizando a cada tecla — estilo CapCut
           const ed = editingRef.current;
-          const b = ed ? b0.filter((x) => x.id !== ed.id) : b0;
+          const b = ed
+            ? b0.map((x) =>
+                x.id === ed.id ? retimeBlockText(x, ed.value.trim() || '…') : x,
+              )
+            : b0;
           drawCaptions(ctx, b, p, s, v.currentTime * 1000, W, H);
+          // caret piscando na posição do cursor do input invisível
+          if (ed) {
+            const wbEd = wordBoxesAt(ctx, b, p, s, v.currentTime * 1000, W, H);
+            if (wbEd && wbEd.blockId === ed.id && Math.floor(performance.now() / 530) % 2 === 0) {
+              const val = ed.value;
+              const caret = Math.max(0, Math.min(ed.caret, val.length));
+              const before = val.slice(0, caret).split(' ');
+              const wIdx = Math.min(before.length - 1, wbEd.boxes.length - 1);
+              const inWord = before[before.length - 1]?.length ?? 0;
+              const wordLen = (val.split(' ')[wIdx] ?? '').length;
+              const box = wbEd.boxes.find((x) => x.i === wIdx) ?? wbEd.boxes[wbEd.boxes.length - 1];
+              if (box) {
+                const frac = wordLen > 0 ? Math.min(1, inWord / wordLen) : 1;
+                const cxr = box.x + box.w * frac;
+                ctx.save();
+                ctx.fillStyle = '#fbbf24';
+                ctx.shadowColor = 'rgba(0,0,0,0.6)';
+                ctx.shadowBlur = 4;
+                ctx.fillRect(cxr, box.y + box.h * 0.06, Math.max(2, 2 * dpr), box.h * 0.88);
+                ctx.restore();
+              }
+            }
+          }
           dprRef.current = dpr;
           // bbox viva pro hit-test (clicar/arrastar/alça/duplo clique)
           bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, W, H);
@@ -1645,22 +1741,17 @@ function PreviewPane({
           if (!block) return;
           selRef.current = true;
           onWordSel(null);
-          // input do TAMANHO da legenda, centrado nela — o bloco some do
-          // canvas enquanto digita (sem legenda dobrada atrás da caixa)
-          const fontSize = Math.min(42, Math.max(16, (bb.h / dpr) * 0.34));
-          const width = Math.min(
-            (wrap.clientWidth || 600) - 12,
-            Math.max(220, bb.w / dpr + 56),
-          );
-          const cxCss = (bb.x + bb.w / 2) / dpr;
-          const cyCss = (bb.y + bb.h / 2) / dpr;
+          // input INVISÍVEL cobrindo a legenda: o texto digitado renderiza
+          // AO VIVO com o lettering real no canvas (o input só captura teclas)
+          const txt = blockText(block);
           setEditing({
             id: bb.blockId,
-            value: blockText(block),
-            left: Math.max(6, cxCss - width / 2),
-            top: Math.max(6, cyCss - (fontSize * 1.9) / 2),
-            width,
-            fontSize,
+            value: txt,
+            caret: txt.length,
+            left: bb.x / dpr,
+            top: bb.y / dpr,
+            width: Math.max(120, bb.w / dpr),
+            height: Math.max(36, bb.h / dpr),
           });
         }}
       >
@@ -1674,9 +1765,21 @@ function PreviewPane({
         {editing ? (
           <input
             autoFocus
-            onFocus={(e) => e.currentTarget.select()}
             value={editing.value}
-            onChange={(e) => setEditing({ ...editing, value: e.target.value })}
+            onChange={(e) =>
+              setEditing({
+                ...editing,
+                value: e.target.value,
+                caret: e.target.selectionStart ?? e.target.value.length,
+              })
+            }
+            onSelect={(e) =>
+              setEditing((ed) =>
+                ed
+                  ? { ...ed, caret: (e.target as HTMLInputElement).selectionStart ?? ed.caret }
+                  : ed,
+              )
+            }
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
@@ -1693,13 +1796,17 @@ function PreviewPane({
               if (v) onEditText(editing.id, v);
               setEditing(null);
             }}
-            className="absolute z-30 rounded-[10px] border-2 border-amber-400/90 bg-black/60 px-3 py-1.5 text-center font-bold text-white outline-none backdrop-blur-[2px] shadow-[0_0_24px_-4px_rgba(251,191,36,0.8)]"
+            // INVISÍVEL de propósito: só captura teclado/caret — quem mostra o
+            // texto é o canvas, com o lettering real do modelo em tempo real
+            className="absolute z-30 cursor-text opacity-0 outline-none"
             style={{
               left: editing.left,
               top: editing.top,
               width: editing.width,
-              fontSize: editing.fontSize,
-              lineHeight: 1.4,
+              height: editing.height,
+              caretColor: 'transparent',
+              background: 'transparent',
+              color: 'transparent',
             }}
           />
         ) : null}
@@ -1755,13 +1862,19 @@ function PreviewPane({
 
 /* ───────────────────────── Galeria de modelos ───────────────────────── */
 
+const FAV_CAT = '⭐ Favoritos';
+
 function PresetGallery({
   presetId,
   onPick,
+  favs,
+  onToggleFav,
   disabled,
 }: {
   presetId: string;
   onPick: (id: string) => void;
+  favs: string[];
+  onToggleFav: (id: string) => void;
   disabled?: boolean;
 }) {
   const [cat, setCat] = useState<string>(TYPO_CATEGORIES[0]);
@@ -1773,7 +1886,14 @@ function PresetGallery({
   // canvases que já receberam AO MENOS um frame (WeakSet: card remontado volta virgem)
   const drawnRef = useRef(new WeakSet<HTMLCanvasElement>());
   const fontsReadyRef = useRef(false);
-  const list = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
+  const favSet = useMemo(() => new Set(favs), [favs]);
+  const list = useMemo(
+    () =>
+      cat === FAV_CAT
+        ? TYPO_PRESETS.filter((p) => favSet.has(p.id))
+        : TYPO_PRESETS.filter((p) => p.cat === cat),
+    [cat, favSet],
+  );
 
   useEffect(() => {
     visRef.current.clear();
@@ -1846,6 +1966,22 @@ function PresetGallery({
         Modelos — {TYPO_PRESETS.length} letterings
       </div>
       <div className="mb-3 flex flex-wrap gap-1.5">
+        <button
+          onClick={() => setCat(FAV_CAT)}
+          className={
+            'rounded-full border px-3 py-1 text-[11px] font-bold transition-colors' +
+            T3D +
+            ' ' +
+            (cat === FAV_CAT
+              ? 'border-violet/70 bg-violet/20 text-violet'
+              : 'border-violet/35 bg-violet/5 text-violet/80 hover:border-violet/60 hover:text-violet')
+          }
+          style={{ fontFamily: 'var(--font-tech)' }}
+          title="Seus modelos favoritos (estrela roxa nos cards)"
+        >
+          ⭐ Favoritos
+          <span className="ml-1 opacity-70">{favs.length}</span>
+        </button>
         {TYPO_CATEGORIES.map((c) => (
           <button
             key={c}
@@ -1869,9 +2005,16 @@ function PresetGallery({
         ref={scrollBoxRef}
         className="max-h-[560px] overflow-y-auto pr-1.5"
       >
+      {cat === FAV_CAT && list.length === 0 ? (
+        <div className="rounded-[14px] border border-dashed border-violet/40 bg-violet/5 px-4 py-8 text-center text-[12.5px] text-text-muted">
+          Nenhum favorito ainda — clica na <span className="text-violet">estrela roxa</span> de
+          qualquer modelo pra ele aparecer aqui.
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
         {list.map((preset) => {
           const active = preset.id === presetId;
+          const isFav = favSet.has(preset.id);
           return (
             <button
               key={preset.id}
@@ -1883,7 +2026,7 @@ function PresetGallery({
               }}
               onClick={() => onPick(preset.id)}
               className={
-                'group overflow-hidden rounded-[12px] border text-left transition-all duration-200 active:scale-[0.97] ' +
+                'group relative overflow-hidden rounded-[12px] border text-left transition-all duration-200 active:scale-[0.97] ' +
                 (active
                   ? 'border-amber-400/70 shadow-[0_0_20px_-6px_rgba(255,159,10,0.5)]'
                   : 'border-line-strong hover:-translate-y-[1px] hover:border-amber-400/40')
@@ -1902,6 +2045,36 @@ function PresetGallery({
                     'linear-gradient(145deg, #17181d 0%, #101116 55%, #191a20 100%)',
                 }}
               />
+              {/* estrela roxa de favoritar (não seleciona o modelo) */}
+              <span
+                role="button"
+                tabIndex={-1}
+                title={isFav ? 'Tirar dos favoritos' : 'Favoritar'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFav(preset.id);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className={
+                  'absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur-sm transition-all duration-200 hover:scale-110 ' +
+                  (isFav
+                    ? 'border-violet/70 bg-violet/25 opacity-100'
+                    : 'border-white/20 bg-black/45 opacity-0 group-hover:opacity-100')
+                }
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill={isFav ? '#a78bfa' : 'none'}
+                  stroke={isFav ? '#a78bfa' : 'rgba(255,255,255,0.85)'}
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z" />
+                </svg>
+              </span>
               <div className="flex items-center justify-between px-2.5 py-1.5">
                 <span
                   className={
@@ -1911,9 +2084,16 @@ function PresetGallery({
                 >
                   {preset.name}
                 </span>
-                {active ? (
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]" />
-                ) : null}
+                <span className="flex items-center gap-1.5">
+                  {isFav ? (
+                    <span className="text-[10px] text-violet" aria-hidden>
+                      ★
+                    </span>
+                  ) : null}
+                  {active ? (
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]" />
+                  ) : null}
+                </span>
               </div>
             </button>
           );
@@ -2118,14 +2298,14 @@ function Timeline({
           </span>
           <button
             onClick={() => setPps((v) => Math.max(10, (v || 40) / 1.5))}
-            className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-line text-[13px] text-text-muted transition-colors hover:border-amber-400/50 hover:text-amber-200"
+            className={'flex h-6 w-6 items-center justify-center rounded-[7px] border border-line bg-bg-soft text-[13px] text-text-muted hover:border-amber-400/50 hover:text-amber-200' + T3D}
             title="Diminuir zoom"
           >
             −
           </button>
           <button
             onClick={() => setPps((v) => Math.min(400, (v || 40) * 1.5))}
-            className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-line text-[13px] text-text-muted transition-colors hover:border-amber-400/50 hover:text-amber-200"
+            className={'flex h-6 w-6 items-center justify-center rounded-[7px] border border-line bg-bg-soft text-[13px] text-text-muted hover:border-amber-400/50 hover:text-amber-200' + T3D}
             title="Aumentar zoom"
           >
             +
@@ -2440,10 +2620,120 @@ function FontPicker({
 /* ───────────────────────── Painel de ajustes ───────────────────────── */
 
 const SWATCHES = [
-  '#ffffff', '#0f0f10', '#ffd60a', '#ff9f0a', '#ff2d55', '#e8192c',
-  '#f472b6', '#ff5db1', '#a78bfa', '#7c5cff', '#22d3ee', '#31c4ff',
-  '#2eff4f', '#c8e87c', '#e8b04c', '#bde0fe',
+  '#ffffff', '#d9dbe0', '#8a8f99', '#3a3d45', '#0f0f10', '#000000',
+  '#ffd60a', '#ffb300', '#ff9f0a', '#ff6b00', '#e8b04c', '#b8860b',
+  '#ff2d55', '#e8192c', '#b00020', '#ff5db1', '#f472b6', '#ffb3c6',
+  '#a78bfa', '#7c5cff', '#5b2fd6', '#c9bcf2', '#31c4ff', '#22d3ee',
+  '#0aa2c0', '#bde0fe', '#2eff4f', '#2edb84', '#0f9d58', '#c8e87c',
+  '#d4fc79', '#f5f0e1', '#ffdab9', '#8b5a2b', '#5c3a21', '#2b1d0e',
 ];
+
+/* ───────────────────────── Seletor de idioma ───────────────────────── */
+
+function LangPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Language;
+  onChange: (v: Language) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [open]);
+  const list = q.trim()
+    ? LANGS.filter((l) => l.label.toLowerCase().includes(q.trim().toLowerCase()))
+    : LANGS;
+  return (
+    <div ref={wrapRef} className="relative inline-block">
+      <div
+        className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        Idioma da fala
+      </div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className={
+          'flex min-w-[260px] items-center justify-between gap-3 rounded-[12px] border border-line bg-bg-soft px-3.5 py-2.5 text-[13px] font-semibold text-text hover:border-amber-400/50' +
+          T3D
+        }
+      >
+        <span className="flex items-center gap-2">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-text-muted" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3.5 12h17M12 3.2c2.6 2.4 3.9 5.4 3.9 8.8s-1.3 6.4-3.9 8.8c-2.6-2.4-3.9-5.4-3.9-8.8S9.4 5.6 12 3.2z" />
+          </svg>
+          {langLabel(value)}
+        </span>
+        <span className="text-text-muted">▾</span>
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[300px] overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl">
+          <button
+            onClick={() => {
+              onChange('auto');
+              setOpen(false);
+            }}
+            className={
+              'flex w-full items-center gap-2 border-b border-line px-3.5 py-2.5 text-left text-[12.5px] font-bold transition-colors ' +
+              (value === 'auto'
+                ? 'bg-amber-400/15 text-amber-600'
+                : 'text-text hover:bg-black/5')
+            }
+          >
+            ✨ Identificar automaticamente
+          </button>
+          <div className="border-b border-line p-2">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar idioma..."
+              className="w-full rounded-[9px] border border-line bg-bg px-2.5 py-1.5 text-[12px] text-text outline-none focus:border-amber-400/50"
+            />
+          </div>
+          <div className="max-h-[260px] overflow-y-auto py-1">
+            {list.map((l) => (
+              <button
+                key={l.code}
+                onClick={() => {
+                  onChange(l.code);
+                  setOpen(false);
+                  setQ('');
+                }}
+                className={
+                  'flex w-full items-center justify-between px-3.5 py-2 text-left text-[12.5px] font-semibold transition-colors ' +
+                  (value === l.code
+                    ? 'bg-amber-400/15 text-amber-600'
+                    : 'text-text-muted hover:bg-black/5 hover:text-text')
+                }
+              >
+                {l.label}
+                <span className="mono text-[10px] uppercase opacity-50">{l.code}</span>
+              </button>
+            ))}
+            {list.length === 0 ? (
+              <div className="px-3.5 py-3 text-[12px] text-text-muted">
+                Nenhum idioma com esse nome.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function ColorDot({
   label,
@@ -2466,7 +2756,10 @@ function ColorDot({
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        className="flex items-center gap-2 rounded-[10px] border border-line px-2.5 py-1.5 transition-colors hover:border-amber-400/50"
+        className={
+          'flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft px-2.5 py-1.5 hover:border-amber-400/50' +
+          T3D
+        }
       >
         <span
           className="h-5 w-5 rounded-[6px] border border-white/25 shadow-inner"
@@ -2475,7 +2768,7 @@ function ColorDot({
         <span className="text-[11px] font-semibold text-text-muted">{label}</span>
       </button>
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-[196px] rounded-[14px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
+        <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-[236px] rounded-[14px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
           <div className="grid grid-cols-6 gap-1.5">
             {SWATCHES.map((c) => (
               <button
@@ -2485,7 +2778,7 @@ function ColorDot({
                   setOpen(false);
                 }}
                 className={
-                  'h-6 w-6 rounded-[7px] border transition-transform hover:scale-110 ' +
+                  'h-[26px] w-[26px] rounded-[7px] border transition-transform hover:scale-110 ' +
                   (cur.toLowerCase() === c ? 'border-amber-400' : 'border-white/15')
                 }
                 style={{ background: c }}
@@ -2493,6 +2786,37 @@ function ColorDot({
               />
             ))}
           </div>
+          {typeof window !== 'undefined' && 'EyeDropper' in window ? (
+            <button
+              onClick={async () => {
+                try {
+                  // conta-gotas do navegador: clica em QUALQUER pixel da tela
+                  // (inclusive o preview do vídeo) e a cor vem identificada
+                  const picker = new (
+                    window as unknown as {
+                      EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> };
+                    }
+                  ).EyeDropper();
+                  const r = await picker.open();
+                  if (r?.sRGBHex) {
+                    onPick(r.sRGBHex);
+                    setOpen(false);
+                  }
+                } catch {
+                  /* user cancelou o conta-gotas */
+                }
+              }}
+              className={
+                'mt-2.5 flex w-full items-center justify-center gap-2 rounded-[9px] border border-line bg-bg-soft px-2 py-1.5 text-[11px] font-bold text-text hover:border-amber-400/50' +
+                T3D
+              }
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <path d="m2 22 1-1h3l9-9M3 21v-3l9-9m0 0 3.5-3.5M15 6l3 3m-3-3 2.3-2.3a2.4 2.4 0 0 1 3.4 3.4L18 9" />
+              </svg>
+              Pegar cor da tela (conta-gotas)
+            </button>
+          ) : null}
           <div className="mt-2.5 flex items-center gap-1.5">
             <input
               value={hex}
@@ -2613,7 +2937,7 @@ function StylePanel({
       disabled={disabled}
       title={title}
       className={
-        'flex h-8 min-w-[38px] items-center justify-center rounded-[9px] border px-2 text-[13px] font-bold transition-colors ' +
+        'flex h-8 min-w-[38px] items-center justify-center rounded-[9px] border bg-bg-soft px-2 text-[13px] font-bold' + T3D + ' ' +
         (selCase === mode
           ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
           : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
@@ -2650,21 +2974,27 @@ function StylePanel({
       </div>
 
       {sel ? (
-        <div className="md:col-span-2 flex flex-wrap items-center gap-2.5 rounded-[10px] border border-blue-400/50 bg-blue-400/10 px-3 py-2">
-          <span className="text-[11.5px] font-bold text-blue-200">
+        <div className="md:col-span-2 flex flex-wrap items-center gap-2.5 rounded-[10px] border-2 border-blue-500/60 bg-blue-500/10 px-3 py-2">
+          <span className="text-[11.5px] font-bold text-blue-600">
             ✂ {sel.count} palavra{sel.count > 1 ? 's' : ''} selecionada
             {sel.count > 1 ? 's' : ''} — Tamanho, cor do Texto, B/U/I, Caixa e
             Fonte agem SÓ nelas
           </span>
           <button
             onClick={sel.clear}
-            className="rounded-[8px] border border-blue-400/50 px-2 py-0.5 text-[10.5px] font-semibold text-blue-200 hover:bg-blue-400/15"
+            className={
+              'rounded-[8px] border border-blue-500/60 bg-blue-500/15 px-2.5 py-1 text-[10.5px] font-bold text-blue-600 hover:bg-blue-500/25' +
+              T3D
+            }
           >
             concluir seleção
           </button>
           <button
             onClick={sel.reset}
-            className="rounded-[8px] border border-line px-2 py-0.5 text-[10.5px] font-semibold text-text-muted hover:text-text"
+            className={
+              'rounded-[8px] border border-line bg-bg-soft px-2.5 py-1 text-[10.5px] font-semibold text-text-muted hover:text-text' +
+              T3D
+            }
           >
             remover estilos do trecho
           </button>
@@ -2674,7 +3004,7 @@ function StylePanel({
       <ToolSlider
         label={sel ? 'Tamanho da seleção' : 'Tamanho'}
         min={0.3}
-        max={3}
+        max={4}
         step={0.05}
         value={sel ? (sel.cur.scale ?? 1) : fontScale}
         onChange={(v) => (sel ? sel.set({ scale: v }) : onSlide({ fontScale: v }))}
@@ -2730,7 +3060,7 @@ function StylePanel({
             disabled={disabled}
             title="Negrito"
             className={
-              'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-black transition-colors ' +
+              'flex h-8 w-9 items-center justify-center rounded-[9px] border bg-bg-soft text-[14px] font-black' + T3D + ' ' +
               (selBold
                 ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                 : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
@@ -2745,7 +3075,7 @@ function StylePanel({
             disabled={disabled}
             title="Sublinhado"
             className={
-              'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-bold underline transition-colors ' +
+              'flex h-8 w-9 items-center justify-center rounded-[9px] border bg-bg-soft text-[14px] font-bold underline' + T3D + ' ' +
               (selUnderline
                 ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                 : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
@@ -2758,7 +3088,7 @@ function StylePanel({
             disabled={disabled}
             title="Itálico"
             className={
-              'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-bold italic transition-colors ' +
+              'flex h-8 w-9 items-center justify-center rounded-[9px] border bg-bg-soft text-[14px] font-bold italic' + T3D + ' ' +
               (selItalic
                 ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                 : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
@@ -2853,7 +3183,7 @@ function StylePanel({
               onClick={() => onSet({ autoFit: v })}
               disabled={disabled}
               className={
-                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
+                'rounded-[9px] border bg-bg-soft px-3 py-1.5 text-[11px] font-bold' + T3D + ' ' +
                 (autoFit === v
                   ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
                   : 'border-line text-text-muted hover:text-text')
@@ -2890,7 +3220,7 @@ function StylePanel({
               onClick={() => onSet({ bgMode: v })}
               disabled={disabled}
               className={
-                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
+                'rounded-[9px] border bg-bg-soft px-3 py-1.5 text-[11px] font-bold' + T3D + ' ' +
                 (bgMode === v
                   ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
                   : 'border-line text-text-muted hover:text-text')
@@ -2949,7 +3279,7 @@ function StylePanel({
               onClick={() => setAutoEmph(v)}
               disabled={disabled}
               className={
-                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
+                'rounded-[9px] border bg-bg-soft px-3 py-1.5 text-[11px] font-bold' + T3D + ' ' +
                 (autoEmph === v
                   ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
                   : 'border-line text-text-muted hover:text-text')
@@ -3063,7 +3393,7 @@ function BlockList({
                 <button
                   onClick={() => onSelect(b)}
                   className={
-                    'mono shrink-0 rounded-[7px] border px-2 py-1 text-[10.5px] transition-colors ' +
+                    'mono shrink-0 rounded-full border bg-bg-soft px-2.5 py-1 text-[10.5px]' + T3D + ' ' +
                     (isActive
                       ? 'border-lime/50 text-lime'
                       : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
@@ -3093,7 +3423,7 @@ function BlockList({
                     }
                     disabled={disabled}
                     className={
-                      'flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] transition-colors disabled:opacity-30 ' +
+                      'flex h-6 w-6 items-center justify-center rounded-[7px] border bg-bg-soft text-[11px] disabled:opacity-30' + T3D + ' ' +
                       (isLocked
                         ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                         : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
@@ -3178,7 +3508,7 @@ function RowBtn({
       title={title}
       disabled={disabled}
       className={
-        'flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] transition-colors disabled:opacity-30 ' +
+        'flex h-6 w-6 items-center justify-center rounded-[7px] border bg-bg-soft text-[11px] disabled:opacity-30' + T3D + ' ' +
         (danger
           ? 'border-line text-text-muted hover:border-red-500/50 hover:text-red-300'
           : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
