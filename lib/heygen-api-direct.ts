@@ -20,6 +20,15 @@
  */
 
 import { sleepUnthrottled } from './unthrottled-clock';
+import {
+  getHeyGenHealth,
+  computePatienceBudget,
+  decideRedispatch,
+  noteRenderCompleted,
+  noteWaiting,
+  clearWaiting,
+  type HeyGenHealth,
+} from './heygen-health';
 
 const API_BASE = 'https://api2.heygen.com';
 
@@ -930,11 +939,19 @@ export async function createVideoWithText(
 
 /* ============= Polling + download de videos prontos ============= */
 
+/**
+ * `failed`  = o HEYGEN disse que falhou (moderação negou, input inválido). É
+ *             definitivo: re-disparar faz sentido.
+ * `stalled` = NÓS cansamos de esperar. O render pode estar VIVO no servidor —
+ *             re-disparar é proibido sem antes re-checar. Ver [[heygen-health]].
+ */
 export type VideoStatus = {
   videoId: string;
-  status: 'completed' | 'pending' | 'failed' | 'unknown';
+  status: 'completed' | 'pending' | 'failed' | 'stalled' | 'unknown';
   videoUrl: string | null;
   error?: string;
+  /** true quando o status foi cunhado pelo NOSSO poll, não pelo HeyGen. */
+  synthetic?: boolean;
 };
 
 /**
@@ -1103,120 +1120,334 @@ export async function findCompletedVideosByName(
   return map;
 }
 
+let _pollSeq = 0;
+
 /**
- * Polla repetidamente ate todos os videoIds estarem 'completed' ou 'failed'
- * ou ate timeout. Chama onStatus a cada poll.
+ * Polla repetidamente ate todos os videoIds terminarem (completed/failed) ou
+ * ate a paciencia acabar. Chama onStatus a cada poll.
  *
- * ZOMBIE DETECTION (fix 2026-05-30): cada videoId tem seu proprio relogio
- * de "quanto tempo ja estou pending". Se passar de maxPendingMsPerId
- * (default 15min — HeyGen normal leva 2-8min), promove status pra 'failed'
- * com erro descritivo. Isso DESTRAVA batches onde 1-2 videos zumbis prendem
- * o pipeline inteiro.
+ * ══ PACIÊNCIA ADAPTATIVA (fix 2026-08-14) ═══════════════════════════════════
+ * Antes, o teto era FIXO: 15min por vídeo, 30min por batch, e ao estourar a
+ * parte virava 'failed' — que a auto-cura lia como "re-dispare". No dia em que
+ * o HeyGen degradou e passou a levar ~2h por render, isso virou uma máquina de
+ * queimar cota: cada parte lenta era re-disparada enquanto o render original
+ * seguia vivo, e o limite diário morreu com metade dos vídeos duplicados.
  *
- * TIMEOUT GRACEFUL (fix 2026-05-30): se atingir o deadline global, em vez
- * de jogar throw (que abortava todo o pipeline), retorna o que tem e marca
- * os que sobraram como 'failed'. Pipeline pos-producao roda com partial
- * result, gera _NAO_RENDERIZOU.txt nas vagas.
+ * Agora o teto é FUNÇÃO DA EVIDÊNCIA. A cada tick o poll pergunta:
+ *
+ *   1. A MAIORIA dos irmãos deste batch já completou?
+ *      SIM  → quem ficou pra trás é anomalia ISOLADA (zumbi de verdade). Teto
+ *             curto: 3x o irmão mais lento, com piso no teto normal.
+ *      NÃO  → o batch INTEIRO está parado; isso não é defeito de um vídeo, é o
+ *             dia da plataforma. Teto estica pelo multiplicador de saúde.
+ *   2. O que diz o monitor global ([[heygen-health]], que atravessa abas e F5)?
+ *      'slow' multiplica por 4, 'degraded' por 10, até o teto duro (4h).
+ *
+ * ══ NUNCA MAIS 'failed' SINTÉTICO ══════════════════════════════════════════
+ * Quando a paciência acaba de verdade, o status vira 'stalled' — NÃO 'failed'.
+ * 'failed' passou a significar exclusivamente "o HeyGen recusou" (moderação,
+ * input inválido), que é o único caso em que re-disparar é a resposta certa.
+ * 'stalled' significa "não sei, e o render pode estar vivo" — quem for
+ * re-disparar TEM que passar por classifyForRedispatch() antes.
  */
 export async function pollVideosUntilReady(
   videoIds: string[],
   opts: {
     onStatus?: (statuses: Record<string, VideoStatus>) => void;
+    /** Diagnóstico da plataforma a cada tick — pra UI mostrar "HeyGen lento, esperando". */
+    onHealth?: (h: HeyGenHealth & { waitingCount: number; oldestStuckMs: number; budgetMs: number }) => void;
     intervalMs?: number;
-    /** Timeout TOTAL — depois disso, retorna marcando o que sobrou como failed. Default 30min. */
+    /** Teto TOTAL em plataforma SAUDÁVEL. Estica junto com a paciência. Default 30min. */
     timeoutMs?: number;
     /**
-     * Max tempo POR ID em 'pending'/'unknown' antes de virar zombie.
-     * Default 15min: HeyGen video normal leva 2-8min; 15min eh folga 2x
-     * pra cobrir picos de carga. Stuck >15min eh fatal pra esse render.
+     * Teto por ID em 'pending'/'unknown' em plataforma SAUDÁVEL (default 15min:
+     * render normal leva 2-8min). Estica até `hardCapMsPerId` quando o monitor
+     * de saúde acusa lentidão — ver o bloco de paciência adaptativa acima.
      */
     maxPendingMsPerId?: number;
+    /** Teto DURO por ID, mesmo com a plataforma nas últimas. Default 4h. */
+    hardCapMsPerId?: number;
     isCancelled?: () => boolean;
   } = {},
 ): Promise<Record<string, VideoStatus>> {
-  const interval = opts.intervalMs ?? 8000;
-  const deadline = Date.now() + (opts.timeoutMs ?? 30 * 60 * 1000);
+  const baseInterval = opts.intervalMs ?? 8000;
+  const baseTimeout = opts.timeoutMs ?? 30 * 60 * 1000;
   const maxPendingPerId = opts.maxPendingMsPerId ?? 15 * 60 * 1000;
+  const hardCapPerId = opts.hardCapMsPerId ?? 4 * 60 * 60 * 1000;
+  const hardCapTotal = Math.max(hardCapPerId, baseTimeout);
+
+  const pollId = `poll#${++_pollSeq}`;
+  const startedAt = Date.now();
 
   // Relogio por ID — quando vi este ID em pending/unknown pela 1a vez?
   const firstPendingAt: Record<string, number> = {};
+  /** Quanto CADA irmão deste batch levou pra completar. É a régua local de
+   *  "quanto o HeyGen está levando AGORA", melhor que qualquer constante. */
+  const completedElapsed: number[] = [];
+  const alreadyCounted = new Set<string>();
   let lastStatuses: Record<string, VideoStatus> = {};
 
-  while (true) {
-    if (opts.isCancelled?.()) {
-      throw new Error('Polling cancelado pelo user.');
-    }
-
-    const statuses = await getVideosStatus(videoIds);
-    const now = Date.now();
-
-    // ZOMBIE PASS: pra cada ID ainda pending/unknown, conta o tempo.
-    // Se ja passou do limit, promove pra 'failed' com erro descritivo.
-    for (const id of videoIds) {
-      const s = statuses[id];
-      if (!s) continue;
-      if (s.status === 'pending' || s.status === 'unknown') {
-        if (!firstPendingAt[id]) firstPendingAt[id] = now;
-        const stuckFor = now - firstPendingAt[id];
-        if (stuckFor > maxPendingPerId) {
-          const min = Math.round(stuckFor / 60000);
-          statuses[id] = {
-            ...s,
-            status: 'failed',
-            error: s.status === 'unknown'
-              ? `Video sumiu do historico HeyGen apos ${min}min — render perdido. Re-dispare essa parte.`
-              : `Render travado ${min}min sem progresso (zombie HeyGen). Pulando essa parte — re-dispare se precisar.`,
-          };
-          console.warn(`[poll] zombie killed: ${id} (stuck ${min}min)`);
-        }
-      } else {
-        // Saiu de pending — limpa o relogio
-        delete firstPendingAt[id];
+  try {
+    while (true) {
+      if (opts.isCancelled?.()) {
+        throw new Error('Polling cancelado pelo user.');
       }
-    }
 
-    lastStatuses = statuses;
-    opts.onStatus?.(statuses);
+      const statuses = await getVideosStatus(videoIds);
+      const now = Date.now();
 
-    const allDone = videoIds.every((id) => {
-      const s = statuses[id]?.status;
-      return s === 'completed' || s === 'failed';
-    });
-    if (allDone) return statuses;
-
-    if (Date.now() > deadline) {
-      // GRACEFUL TIMEOUT: marca todos os que ainda nao terminaram como failed
-      // e retorna. Pipeline pos-producao roda com partial result.
-      console.warn(`[poll] global timeout — marcando ${videoIds.length} restantes como failed`);
+      // Alimenta o monitor global com as conclusões deste batch.
+      // SÓ conta quem a gente VIU pendente antes: um vídeo que já chegou pronto
+      // no primeiro tick (típico do RETOMAR) terminou sabe-se lá quando, e
+      // registrá-lo como "levou 0ms" envenenaria a mediana — o monitor passaria
+      // a jurar que o HeyGen está rápido justamente no dia em que está lento.
       for (const id of videoIds) {
-        const s = lastStatuses[id];
-        if (s && s.status !== 'completed' && s.status !== 'failed') {
-          lastStatuses[id] = {
-            ...s,
-            status: 'failed',
-            error: 'Timeout global do polling (30min). Render ainda pode terminar no HeyGen — re-dispare se quiser tentar de novo.',
-          };
-        }
+        const s = statuses[id];
+        if (!s || s.status !== 'completed' || alreadyCounted.has(id)) continue;
+        alreadyCounted.add(id);
+        const startedWaitingAt = firstPendingAt[id];
+        if (!startedWaitingAt) continue; // já estava pronto quando chegamos
+        const elapsed = now - startedWaitingAt;
+        completedElapsed.push(elapsed);
+        noteRenderCompleted(elapsed);
       }
-      return lastStatuses;
-    }
 
-    // Espera NÃO-estrangulada (Web Worker): em aba de segundo plano o setTimeout
-    // da janela cai pra ~1x/min e travava o poll (render "RENDERIZANDO" eterno +
-    // contador congelado + montagem que não disparava). Ver [[unthrottled-clock]].
-    await sleepUnthrottled(interval);
+      const total = videoIds.length;
+      const completedCount = videoIds.filter((id) => statuses[id]?.status === 'completed').length;
+      const waitingIds = videoIds.filter((id) => {
+        const st = statuses[id]?.status;
+        return st === 'pending' || st === 'unknown';
+      });
+
+      // Abre o relógio de espera de quem ainda não terminou. NUNCA zera o de
+      // quem já terminou: o registro é o que mede quanto o render levou.
+      for (const id of waitingIds) {
+        if (!firstPendingAt[id]) firstPendingAt[id] = now;
+      }
+
+      const stuckMs = (id: string) => now - (firstPendingAt[id] ?? now);
+      const oldestStuckMs = waitingIds.reduce((mx, id) => Math.max(mx, stuckMs(id)), 0);
+      noteWaiting(pollId, waitingIds.length, oldestStuckMs);
+      const health = getHeyGenHealth();
+
+      // ── ORÇAMENTO DE PACIÊNCIA ────────────────────────────────────────────
+      // Maioria terminou → o retardatário é anomalia isolada (zumbi real).
+      // Maioria parada  → é a plataforma; estica pelo diagnóstico de saúde.
+      // A regra em si mora em [[heygen-health]] (pura e coberta por teste).
+      const budget = computePatienceBudget({
+        baseBudgetMs: maxPendingPerId,
+        hardCapMs: hardCapPerId,
+        total,
+        completedCount,
+        waitingCount: waitingIds.length,
+        peerMaxMs: completedElapsed.length > 0 ? Math.max(...completedElapsed) : 0,
+        healthMultiplier: health.budgetMultiplier,
+      });
+      const globalDeadline = startedAt + Math.min(
+        baseTimeout * Math.max(1, budget / maxPendingPerId),
+        hardCapTotal,
+      );
+
+      // ── DESISTÊNCIA (só depois do orçamento inteiro) ──────────────────────
+      for (const id of waitingIds) {
+        const s = statuses[id];
+        const stuckFor = stuckMs(id);
+        if (stuckFor <= budget) continue;
+        const min = Math.round(stuckFor / 60000);
+        const bmin = Math.round(budget / 60000);
+        statuses[id] = {
+          ...s,
+          status: 'stalled',
+          synthetic: true,
+          error: s.status === 'unknown'
+            ? `Vídeo sumiu do histórico do HeyGen há ${min}min (esperei ${bmin}min). Pode ter voltado desde então — RETOMAR re-checa antes de gastar cota.`
+            : `Ainda renderizando no HeyGen depois de ${min}min (esperei ${bmin}min). NÃO re-disparei pra não queimar cota — clique RETOMAR mais tarde que eu pego o vídeo pronto.`,
+        };
+        console.warn(`[poll] ${id} parou de ser esperado após ${min}min (orçamento ${bmin}min, saúde=${health.state})`);
+      }
+
+      lastStatuses = statuses;
+      opts.onStatus?.(statuses);
+      opts.onHealth?.({ ...health, waitingCount: waitingIds.length, oldestStuckMs, budgetMs: budget });
+
+      const allDone = videoIds.every((id) => {
+        const s = statuses[id]?.status;
+        return s === 'completed' || s === 'failed' || s === 'stalled';
+      });
+      if (allDone) return statuses;
+
+      if (now > globalDeadline) {
+        // TETO GLOBAL: devolve o que tem, marcando o resto como 'stalled' (NÃO
+        // failed — o render pode estar vivo lá). Pipeline pós-produção roda com
+        // resultado parcial e o RETOMAR resgata sem re-gerar.
+        const waited = Math.round((now - startedAt) / 60000);
+        console.warn(`[poll] teto global de ${waited}min — ${waitingIds.length} render(s) ficaram como 'stalled' (saúde=${health.state})`);
+        for (const id of videoIds) {
+          const s = lastStatuses[id];
+          if (s && s.status !== 'completed' && s.status !== 'failed' && s.status !== 'stalled') {
+            lastStatuses[id] = {
+              ...s,
+              status: 'stalled',
+              synthetic: true,
+              error: `Parei de acompanhar depois de ${waited}min. O render pode terminar no HeyGen — clique RETOMAR que eu re-checo antes de gastar cota.`,
+            };
+          }
+        }
+        return lastStatuses;
+      }
+
+      // BACKOFF EM PLATAFORMA RUIM: bater de 8 em 8s numa API que já está
+      // engasgada só piora. Depois de 15min de espera o intervalo abre até 30s.
+      const elapsedTotal = now - startedAt;
+      const interval = health.state === 'ok' && elapsedTotal < 15 * 60 * 1000
+        ? baseInterval
+        : Math.min(30_000, baseInterval * (elapsedTotal > 15 * 60 * 1000 ? 3 : 2));
+
+      // Espera NÃO-estrangulada (Web Worker): em aba de segundo plano o setTimeout
+      // da janela cai pra ~1x/min e travava o poll (render "RENDERIZANDO" eterno +
+      // contador congelado + montagem que não disparava). Ver [[unthrottled-clock]].
+      await sleepUnthrottled(interval);
+    }
+  } finally {
+    clearWaiting(pollId);
   }
+}
+
+/* ============= Gate anti-disparo-à-toa ============= */
+
+export type RedispatchVerdict =
+  /** Pode re-disparar: nunca disparou, ou o HeyGen recusou de verdade. */
+  | { action: 'redispatch'; reason: string; rejectedVideoId?: string | null }
+  /** PROIBIDO re-disparar: o render está VIVO no HeyGen agora. */
+  | { action: 'wait'; reason: string; videoId: string }
+  /** Nem precisa: o vídeo ficou pronto — é só baixar. */
+  | { action: 'rescue'; reason: string; videoId: string; videoUrl: string };
+
+/**
+ * PORTEIRO OBRIGATÓRIO ANTES DE QUALQUER RE-DISPARO (fix 2026-08-14).
+ *
+ * O bug que isto mata: a parte era marcada 'failed' pelo NOSSO timeout, a
+ * auto-cura re-disparava, e o render original — que estava só lento — terminava
+ * depois. Dois vídeos gerados, duas fatias da cota diária, uma delas jogada
+ * fora. O user viu isso acontecer no AD70GL com o HeyGen levando ~2h por parte.
+ *
+ * A regra: re-disparar é uma decisão que precisa de PROVA de que não há render
+ * vivo. Esta função busca a prova, com status FRESCO na hora (não o do poll que
+ * pode ter minutos de idade):
+ *
+ *   completed → 'rescue'     (baixa; não gasta nada)
+ *   pending   → 'wait'       (está VIVO — re-disparar seria duplicar)
+ *   failed    → 'redispatch' (o HeyGen recusou; aí sim, e apaga o negado antes)
+ *   unknown   → tenta achar por TÍTULO no histórico; só re-dispara se nem
+ *               assim aparecer (aí é render perdido de verdade)
+ *   sem id    → 'redispatch' (nunca chegou a disparar)
+ *
+ * Uma chamada de rede pro lote inteiro (getVideosStatus é batch) + no máximo
+ * uma varredura de histórico por título. Se a rede falhar, o veredito é 'wait',
+ * NUNCA 'redispatch' — na dúvida, não gasta cota (o RETOMAR tenta de novo).
+ */
+export async function classifyForRedispatch(
+  entries: Array<{ videoId?: string | null; title?: string | null; error?: string | null }>,
+): Promise<RedispatchVerdict[]> {
+  const out: RedispatchVerdict[] = new Array(entries.length);
+  const idsToCheck = entries.map((e) => e.videoId).filter((v): v is string => !!v);
+
+  let fresh: Record<string, VideoStatus> = {};
+  if (idsToCheck.length > 0) {
+    try {
+      fresh = await getVideosStatus(idsToCheck);
+    } catch (e) {
+      console.warn('[classifyForRedispatch] status fresco falhou — segurando o re-disparo (na dúvida, não gasta cota):', e);
+      // Sem prova nenhuma: só libera quem nunca disparou.
+      return entries.map((e) =>
+        e.videoId
+          ? { action: 'wait' as const, reason: 'Não consegui confirmar o estado do render no HeyGen agora — não vou re-disparar às cegas.', videoId: e.videoId }
+          : { action: 'redispatch' as const, reason: 'Nunca chegou a disparar no HeyGen.' },
+      );
+    }
+  }
+
+  // Resgate por TÍTULO só pros 'unknown' — uma varredura serve pra todos.
+  const unknownTitles = entries
+    .filter((e) => e.videoId && fresh[e.videoId]?.status === 'unknown' && e.title)
+    .map((e) => e.title!);
+  let byTitle = new Map<string, string>();
+  if (unknownTitles.length > 0) {
+    // Prefixo comum (ex.: "AD70GL_") pega todas as partes numa varredura só.
+    const prefix = commonPrefix(unknownTitles);
+    try {
+      byTitle = await findCompletedVideosByName(prefix.length >= 3 ? prefix : unknownTitles[0]);
+    } catch { /* best-effort: sem resgate por título, cai no caminho normal */ }
+  }
+
+  entries.forEach((e, i) => {
+    const s = e.videoId ? fresh[e.videoId] : undefined;
+    const urlByTitle = e.title ? byTitle.get(e.title) : undefined;
+    // A decisão em si é pura e coberta por teste — ver [[heygen-health]].
+    const action = decideRedispatch({
+      hasVideoId: !!e.videoId,
+      status: s?.status,
+      hasVideoUrl: !!s?.videoUrl,
+      foundByTitle: !!urlByTitle,
+    });
+
+    if (action === 'rescue') {
+      const url = (s?.status === 'completed' && s.videoUrl) ? s.videoUrl : urlByTitle!;
+      out[i] = {
+        action: 'rescue',
+        reason: s?.status === 'completed'
+          ? 'O render ficou pronto no HeyGen — resgatado sem gastar cota.'
+          : 'Achei o vídeo pronto no histórico pelo título — resgatado sem gastar cota.',
+        videoId: e.videoId!,
+        videoUrl: url,
+      };
+      return;
+    }
+    if (action === 'wait') {
+      out[i] = { action: 'wait', reason: 'O HeyGen AINDA está renderizando esse take — re-disparar duplicaria o gasto.', videoId: e.videoId! };
+      return;
+    }
+    if (!e.videoId) {
+      out[i] = { action: 'redispatch', reason: 'Nunca chegou a disparar no HeyGen.' };
+      return;
+    }
+    out[i] = s?.status === 'failed'
+      ? { action: 'redispatch', reason: `O HeyGen recusou esse take (${(s.error || 'falha reportada pelo HeyGen').slice(0, 120)}).`, rejectedVideoId: e.videoId }
+      : { action: 'redispatch', reason: 'O vídeo sumiu do histórico do HeyGen e não apareceu pronto — render perdido.', rejectedVideoId: e.videoId };
+  });
+
+  return out;
+}
+
+function commonPrefix(items: string[]): string {
+  if (items.length === 0) return '';
+  let p = items[0];
+  for (const s of items.slice(1)) {
+    let k = 0;
+    while (k < p.length && k < s.length && p[k] === s[k]) k++;
+    p = p.slice(0, k);
+    if (!p) break;
+  }
+  return p;
 }
 
 /* ============= Exclusão de vídeo NEGADO (anti-memória de moderação) ============= */
 
-/** Falha SINTÉTICA cunhada pelo NOSSO poll client-side (zombie/timeout), em
+/** Falha SINTÉTICA cunhada pelo NOSSO poll client-side (paciência esgotada), em
  *  oposição a uma falha REAL reportada pelo HeyGen (ex: moderação negou o
- *  texto). Um zombie ainda PODE completar no servidor — o vídeo dele NÃO deve
- *  ser excluído (a recuperação por título ainda pode aproveitá-lo). Os
- *  marcadores casam com as mensagens mintadas em pollVideosUntilReady. */
+ *  texto). Um render sintético ainda PODE completar no servidor — o vídeo dele
+ *  NÃO deve ser excluído (o resgate por título ainda pode aproveitá-lo) NEM
+ *  re-disparado sem passar por classifyForRedispatch(). Os marcadores casam com
+ *  as mensagens mintadas em pollVideosUntilReady — inclusive as antigas, que
+ *  seguem vivas no localStorage de disparos já persistidos. */
 export function isSyntheticPollError(msg?: string | null): boolean {
-  return /Render travado|sumiu do historico|Timeout global do polling/i.test(msg || '');
+  return /Render travado|sumiu do hist[oó]rico|Timeout global do polling|Ainda renderizando no HeyGen|Parei de acompanhar/i.test(msg || '');
+}
+
+/** Terminal pro poll, mas NÃO é veredito do HeyGen: o render pode estar vivo.
+ *  Todo caminho de re-disparo tem que tratar 'stalled' como "re-checa antes". */
+export function isStalledStatus(s?: VideoStatus['status'] | null): boolean {
+  return s === 'stalled';
 }
 
 let _deleteWorkingIdx: number | null = null;

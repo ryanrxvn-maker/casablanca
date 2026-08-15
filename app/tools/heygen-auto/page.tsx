@@ -862,7 +862,9 @@ function HeyGenAutoInner() {
     if (ids.length === 0) return;
     const pending = ids.filter((id) => {
       const s = downloadStatuses[id]?.status;
-      return s !== 'completed' && s !== 'failed';
+      // 'stalled' também encerra o acompanhamento — senão o effect reiniciava o
+      // poll pra sempre num take que a gente decidiu só esperar.
+      return s !== 'completed' && s !== 'failed' && s !== 'stalled';
     });
     if (pending.length === 0) return;
     let cancelled = false;
@@ -960,7 +962,10 @@ function HeyGenAutoInner() {
         const status = final[part.videoId!];
         setDownloadStage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`);
         if (status?.status !== 'completed' || !status.videoUrl) {
-          zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
+          zip.file(
+          status?.status === 'stalled' ? `${part.label}_AINDA_RENDERIZANDO.txt` : `${part.label}_FAILED.txt`,
+          `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`,
+        );
           partBlobs.push({ label: part.label, blob: null });
           continue;
         }
@@ -1384,7 +1389,10 @@ function HeyGenAutoInner() {
    *  mescla os novos videoIds no results. Depois o auto-poll repega. --------- */
   function partIsBad(r: PartResult): boolean {
     if (!r.videoId) return true; // não disparou (cota/limite)
-    return downloadStatuses[r.videoId]?.status === 'failed'; // render falhou
+    // SÓ falha REAL do HeyGen conta. 'stalled' = a gente cansou de esperar, mas
+    // o render pode estar VIVO lá — re-disparar duplicaria o gasto de cota (foi
+    // o que queimou o limite diário no dia lento do HeyGen). Ver [[heygen-health]].
+    return downloadStatuses[r.videoId]?.status === 'failed';
   }
 
   async function retryFailedParts() {
@@ -2250,7 +2258,10 @@ function HeyGenAutoInner() {
       const status = final[part.videoId];
       stage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`, 75 + Math.round((15 * (i + 1)) / ready.length));
       if (status?.status !== 'completed' || !status.videoUrl) {
-        zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
+        zip.file(
+          status?.status === 'stalled' ? `${part.label}_AINDA_RENDERIZANDO.txt` : `${part.label}_FAILED.txt`,
+          `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`,
+        );
         partBlobs.push({ label: part.label, blob: null, expected: true });
         failedParts.push(part.label);
         continue;
@@ -3608,11 +3619,17 @@ function HeyGenAutoInner() {
               const renderFailed = results.filter(
                 (r) => r.videoId && downloadStatuses[r.videoId]?.status === 'failed',
               ).length;
+              // AGUARDANDO ≠ FALHOU: 'stalled' é take que o HeyGen ainda está
+              // renderizando e a gente parou de acompanhar. Nunca entra na conta
+              // de falha nem vira card vermelho. Ver [[heygen-health]].
+              const waitingHeyGen = results.filter(
+                (r) => r.videoId && downloadStatuses[r.videoId]?.status === 'stalled',
+              ).length;
               const anyFailed = dispatchFailed > 0 || renderFailed > 0;
               const pendingRender = results.some((r) => {
                 if (!r.videoId) return false;
                 const s = downloadStatuses[r.videoId]?.status;
-                return s !== 'completed' && s !== 'failed';
+                return s !== 'completed' && s !== 'failed' && s !== 'stalled';
               });
               let phase: BatchJob3DPhase;
               if (processing) phase = 'dispatching';
@@ -3624,6 +3641,7 @@ function HeyGenAutoInner() {
               } else if (dispatchedCount === 0) phase = 'failed';
               else if (anyFailed && !pendingRender) phase = 'failed'; // tudo assentou e sobrou falha
               else if (montadoDone) phase = 'done';
+              else if (waitingHeyGen > 0 && !pendingRender) phase = 'waiting-heygen';
               else phase = 'rendering'; // disparado → HeyGen renderizando; clique Baixar
               // Mensagem de falha HONESTA: distingue LIMITE DIÁRIO do HeyGen
               // (terminal — Retomar NÃO cura até o reset ~24h ou outra conta)
