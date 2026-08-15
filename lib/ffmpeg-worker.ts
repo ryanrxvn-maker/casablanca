@@ -1023,6 +1023,28 @@ export async function concatDecupChunks(
 // (o áudio de cada pedaço tem micro-gap nas emendas; o original é contínuo).
 // Tudo com WORKERFS pra aguentar arquivos grandes fora do heap.
 
+/** Lê o frame rate (fps) do vídeo pelo log do ffmpeg. 0 se não achar. */
+async function probeFps(ff: FFmpeg, path: string): Promise<number> {
+  let fps = 0;
+  const h = ({ message }: { message: string }) => {
+    // "... 30 fps, 30 tbr ..." — pega o "fps" (não o tbr).
+    const m = /(\d+(?:\.\d+)?)\s*fps\b/.exec(message);
+    if (m) {
+      const v = parseFloat(m[1]);
+      if (v > 0 && v <= 240) fps = v;
+    }
+  };
+  ff.on('log', h);
+  try {
+    await ff.exec(['-hide_banner', '-i', path]);
+  } catch {
+    /* rc≠0 esperado (sem output) — o log já saiu */
+  } finally {
+    ff.off('log', h);
+  }
+  return fps;
+}
+
 /** Detecta se o arquivo tem faixa de áudio (via log do ffmpeg). */
 async function probeHasAudio(ff: FFmpeg, path: string): Promise<boolean> {
   let hasAudio = false;
@@ -1232,14 +1254,21 @@ export async function joinCleanedWithOriginalAudio(
     for (let i = 0; i < n; i++) { inputs.push('-i', `${dir}/cp_${i}.mp4`); }
     inputs.push('-i', origPath);
 
+    // O motor devolve trechos com FPS levemente diferentes entre si (ex.: 30 vs
+    // 29.97) e o xfade EXIGE fps idêntico nos dois lados → normaliza TODOS pro
+    // fps do vídeo original antes de cruzar (settb=AVTB alinha o timebase junto).
+    const fps = (await probeFps(ff, origPath)) || 30;
+    const norm: string[] = [];
+    for (let i = 0; i < n; i++) norm.push(`[${i}:v]fps=${fps},settb=AVTB[n${i}]`);
+
     // filtro: encadeia xfade; offset acumulado = soma das durações nominais.
     let acc = 0;
-    const chain: string[] = [];
-    let prev = '0:v';
+    const chain: string[] = [...norm];
+    let prev = 'n0';
     for (let i = 1; i < n; i++) {
       acc += offsets[i - 1];
       const out = i === n - 1 ? 'vout' : `vx${i}`;
-      chain.push(`[${prev}][${i}:v]xfade=transition=fade:duration=${SEG_XFADE_SEC}:offset=${acc.toFixed(3)}[${out}]`);
+      chain.push(`[${prev}][n${i}]xfade=transition=fade:duration=${SEG_XFADE_SEC}:offset=${acc.toFixed(3)}[${out}]`);
       prev = out;
     }
     chain.push(`[vout]format=yuv420p[vf]`);
