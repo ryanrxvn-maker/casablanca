@@ -31,8 +31,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Áudio ausente.' }, { status: 400 });
   }
 
+  // aceita 'pt-br'/'pt-pt' etc — o Whisper só conhece o idioma base, então a
+  // região é descartada ('pt-br' → 'pt'); 'auto' passa direto
   const langRaw = String(form.get('language') ?? 'pt').toLowerCase();
-  const language = /^(auto|[a-z]{2})$/.test(langRaw) ? langRaw : 'pt';
+  const language = /^(auto|[a-z]{2}(-[a-z]{2})?)$/.test(langRaw)
+    ? langRaw.split('-')[0] === 'auto'
+      ? 'auto'
+      : langRaw.split('-')[0]
+    : 'pt';
 
   const { words, provider, errors } = await transcribeAudio(audio, {
     provider: 'groq',

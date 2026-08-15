@@ -51,6 +51,7 @@ const FREE_ALLOWED_TOOLS = [
   '/tools/caixinha-pergunta',
   '/tools/fakepass',
   '/tools/compressor',
+  '/tools/normalizador', // liberado pra TODOS em 14.08.2026 (roda no navegador, custo zero)
   '/tools/historico', // histórico geral — todo tier vê o próprio trabalho
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
@@ -68,7 +69,6 @@ const ADMIN_ONLY_PREFIXES = [
   '/admin',
   '/tools/ltx-video',
   '/tools/points', // sistema de pontos é interno
-  '/tools/normalizador',      // uso interno — some pra conta não-admin
   '/tools/separador-audio',   // uso interno — some pra conta não-admin
   '/tools/remover-elementos', // Smart Remover (legenda + marca d'água) — admin-only
   '/tools/auto-broll',        // uso interno — some pra conta não-admin

@@ -199,6 +199,10 @@ export type TypoPreset = {
     outline?: boolean;
     /** risco atravessado (ref eco triplo) */
     strike?: boolean;
+    /** REFLEXO espelhado (só faz sentido com pos 'below'): texto de cabeça
+     *  pra baixo com alpha baixo, tipo reflexo no chão — nunca parece
+     *  "mesmo texto repetido", parece acabamento */
+    flipY?: boolean;
     dx?: number;
     gap?: number;
     glow?: number;
@@ -309,10 +313,37 @@ export type StyleState = {
   fxGlow?: number;
   fxSmoke?: number;
   /**
+   * Ajuste automático de largura (default LIGADO): re-quebra as linhas
+   * conforme o tamanho muda e encolhe a linha pra NUNCA sair do frame.
+   * Desligado: as quebras congelam como no tamanho 100% e o texto cresce
+   * LIVRE (pode sair do frame de propósito, estilo CapCut).
+   */
+  autoFit?: boolean;
+  /** fundo: 'preset' segue o modelo; 'on' força caixa (mesmo sem no modelo); 'off' remove caixa+barra */
+  bgMode?: 'preset' | 'on' | 'off';
+  /** cor do fundo (null = a do modelo) */
+  bgColor?: string | null;
+  /** opacidade do fundo 0..1 (default 1) */
+  bgOpacity?: number;
+  /** estilo POR PALAVRA (seleção parcial estilo CapCut): blockId → índice → estilo */
+  wordStyles?: Record<string, Record<number, WordStyle>>;
+  /**
    * "Aplicar a todas" DESLIGADO: overrides por bloco — o merge acontece
    * dentro do drawCaptions, então preview E export honram igual.
    */
   perBlock?: Record<string, PerBlockStyle>;
+};
+
+/** Overrides de UMA palavra (seleção parcial no preview). */
+export type WordStyle = {
+  color?: string | null;
+  /** multiplicador de tamanho relativo ao resto do bloco (1 = igual) */
+  scale?: number;
+  font?: FontKey | null;
+  wcase?: 'upper' | 'lower' | 'original' | null;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
 };
 
 export type PerBlockStyle = Partial<
@@ -332,6 +363,10 @@ export type PerBlockStyle = Partial<
     | 'fxShadow'
     | 'fxGlow'
     | 'fxSmoke'
+    | 'autoFit'
+    | 'bgMode'
+    | 'bgColor'
+    | 'bgOpacity'
   >
 >;
 
@@ -345,6 +380,10 @@ export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   autoEmphasis: true,
   fontOverride: null,
   posX: 0.5,
+  autoFit: true,
+  bgMode: 'preset',
+  bgColor: null,
+  bgOpacity: 1,
 };
 
 // Palavras vazias que NUNCA merecem destaque (PT/EN/ES). A palavra forte é
@@ -524,7 +563,11 @@ function measureLayout(
     preset.highlightFont
       ? Array.from(highlights).sort((a, b) => a - b).join('.')
       : '';
-  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}`;
+  // seleção parcial: estilos POR PALAVRA mudam fonte/tamanho/caixa → layout
+  const ws = style.wordStyles?.[block.id];
+  const wsKey = ws ? hashStr(JSON.stringify(ws)) : 0;
+  const fit = style.autoFit !== false;
+  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}|${fit ? 1 : 0}|${wsKey}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
   if (layoutCache.size > 300) layoutCache.clear();
@@ -532,28 +575,39 @@ function measureLayout(
   const fontPx = preset.size * W * style.fontScale;
   const lineH = fontPx * (preset.lineHeight ?? 1.16);
   const maxLineW = W * 0.86;
+  // ajuste automático DESLIGADO: quebras congeladas como no tamanho 100%
+  // (limiar de quebra escala junto com a fonte → mesmos pontos de quebra)
+  const wrapW = fit ? maxLineW : maxLineW * Math.max(0.05, style.fontScale);
   const sizeCycle = preset.sizeCycle;
 
   const words: WordLayout[] = block.words.map((w, wi) => {
+    const wst = ws?.[wi];
     const isHi = highlights.has(wi);
     const mixed = !!(preset.mix && !isHi);
-    const fk = isHi
-      ? (preset.highlightFont ?? preset.font)
-      : mixed
-        ? preset.mix!.font
-        : preset.font;
+    const fk =
+      wst?.font ??
+      (isHi
+        ? (preset.highlightFont ?? preset.font)
+        : mixed
+          ? preset.mix!.font
+          : preset.font);
     const cyc = sizeCycle ? sizeCycle[wi % sizeCycle.length] : 1;
-    const fpx = mixed
-      ? fontPx * preset.mix!.scale
-      : fontPx * cyc * (isHi ? hlScale : 1);
+    const fpx =
+      (mixed
+        ? fontPx * preset.mix!.scale
+        : fontPx * cyc * (isHi ? hlScale : 1)) * (wst?.scale ?? 1);
     const sp = ((mixed ? preset.mix!.spacing ?? preset.spacing : preset.spacing) ?? 0) * fpx;
+    // itálico por palavra muda a métrica — seta o flag só nesta medição
+    const prevItal = FAUX_ITALIC;
+    if (wst?.italic !== undefined) FAUX_ITALIC = wst.italic;
     ctx.font = fs(fk, fpx);
+    const effCase = wst?.wcase ?? tcase;
     const text =
       mixed && preset.mix!.lowercase
         ? w.text.toLowerCase()
-        : tcase === 'upper'
+        : effCase === 'upper'
           ? w.text.toUpperCase()
-          : tcase === 'lower'
+          : effCase === 'lower'
             ? w.text.toLowerCase()
             : w.text;
     const chars: CharLayout[] = [];
@@ -563,6 +617,7 @@ function measureLayout(
       chars.push({ ch, x, w: cw });
       x += cw + sp;
     }
+    FAUX_ITALIC = prevItal;
     const w0 = chars.length > 0 ? x - sp : 0;
     return { text, line: 0, x: 0, w: w0, fpx, fk, mixed, chars };
   });
@@ -593,7 +648,7 @@ function measureLayout(
       return;
     }
     const tryW = cur.length === 0 ? w.w : curW + spaceW + w.w;
-    if (cur.length > 0 && tryW > maxLineW) flushLine();
+    if (cur.length > 0 && tryW > wrapW) flushLine();
     w.line = lines.length;
     w.x = cur.length === 0 ? 0 : curW + spaceW;
     curW = cur.length === 0 ? w.w : curW + spaceW + w.w;
@@ -630,14 +685,19 @@ function measureLayout(
     };
     rebuild(words.map((_, i) => i).slice(0, cut));
     rebuild(words.map((_, i) => i).slice(cut));
-    for (const line of lines) {
-      if (line.width > maxLineW) line.scale = maxLineW / line.width;
+    if (fit) {
+      for (const line of lines) {
+        if (line.width > maxLineW) line.scale = maxLineW / line.width;
+      }
     }
   }
 
-  // Linha com uma palavra gigante: encolhe só aquela linha
-  for (const line of lines) {
-    if (line.width > maxLineW) line.scale = maxLineW / line.width;
+  // Linha maior que o frame: encolhe só aquela linha (ajuste automático).
+  // Com o ajuste DESLIGADO o texto cresce livre — pode vazar de propósito.
+  if (fit) {
+    for (const line of lines) {
+      if (line.width > maxLineW) line.scale = maxLineW / line.width;
+    }
   }
 
   // Altura POR LINHA: maior palavra da linha × lineHeight. Palavra gigante
@@ -852,6 +912,8 @@ type DrawCtx = {
   /** multiplicadores dos FX ajustáveis do editor (1 = padrão do modelo) */
   fx: { stroke: number; shadow: number; glow: number; smoke: number };
   underline: boolean;
+  /** estilos por palavra do bloco atual (seleção parcial) */
+  wordStyles?: Record<number, WordStyle>;
 };
 
 function clearShadow(ctx: CanvasRenderingContext2D) {
@@ -1232,10 +1294,30 @@ export function drawCaptions(
 
   // troca de fonte pelo editor: só a fonte PRINCIPAL muda; o apoio do mix
   // mantém a dele (a composição é parte do modelo)
-  const preset =
+  let preset =
     style.fontOverride && style.fontOverride !== basePreset.font
       ? { ...basePreset, font: style.fontOverride }
       : basePreset;
+
+  // Fundo configurável: 'off' remove caixa+barra do modelo; 'on' garante uma
+  // caixa mesmo em modelo sem; cor custom recolore a caixa que existir.
+  const bgMode = style.bgMode ?? 'preset';
+  const bgAlpha = Math.min(1, Math.max(0, style.bgOpacity ?? 1));
+  if (bgMode !== 'preset' || style.bgColor) {
+    let box = bgMode === 'off' ? undefined : preset.box;
+    if (bgMode === 'on' && (!box || box.mode === 'none')) {
+      box = {
+        mode: 'block',
+        fill: style.bgColor ?? '#111111',
+        padX: 0.45,
+        padY: 0.3,
+        radius: 0.16,
+        autoText: true,
+      };
+    }
+    if (box && style.bgColor) box = { ...box, fill: style.bgColor };
+    preset = { ...preset, box, bar: bgMode === 'off' ? undefined : preset.bar };
+  }
 
   const primary = style.primary ?? preset.defaultPrimary;
   const accent = style.accent ?? preset.defaultAccent;
@@ -1284,6 +1366,7 @@ export function drawCaptions(
       smoke: style.fxSmoke ?? 1,
     },
     underline: style.underline === true,
+    wordStyles: style.wordStyles?.[block.id],
   };
 
   // Saída
@@ -1400,9 +1483,17 @@ export function drawCaptions(
       const col = resolveColor(ec.color, primary, accent);
       ctx.save();
       ctx.globalAlpha = outAlpha * clamp01(pBlock * 2) * (ec.alpha ?? 1);
-      ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
-      ctx.scale(s, s);
-      ctx.translate(-cx, -topY);
+      if (ec.flipY && ec.pos === 'below') {
+        // REFLEXO: espelha verticalmente ancorado na junção com o texto —
+        // a borda de baixo do original (topY+blockH) rende no topo do eco (y)
+        ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
+        ctx.scale(s, -s);
+        ctx.translate(-cx, -(topY + blockH));
+      } else {
+        ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
+        ctx.scale(s, s);
+        ctx.translate(-cx, -topY);
+      }
       if (ec.glow) {
         ctx.shadowColor = col;
         ctx.shadowBlur = ec.glow * fontPx;
@@ -1416,9 +1507,10 @@ export function drawCaptions(
         const by = lineBaseY(li);
         ctx.save();
         if (line.scale !== 1) {
-          ctx.translate(cx, by);
+          // pivô na borda esquerda (mesmo fix do drawPass)
+          ctx.translate(x0, by);
           ctx.scale(line.scale, line.scale);
-          ctx.translate(-cx, -by);
+          ctx.translate(-x0, -by);
         }
         for (const wi of line.wordIdx) {
           const wl = layout.words[wi];
@@ -1436,7 +1528,8 @@ export function drawCaptions(
         }
         if (ec.strike) {
           ctx.fillStyle = col;
-          const lw = line.width * line.scale;
+          // dentro do transform da linha a largura entra SEM escala
+          const lw = line.width;
           ctx.fillRect(
             x0 - fontPx * 0.1,
             by - line.h * 0.28,
@@ -1631,7 +1724,7 @@ export function drawCaptions(
     const padX = blockBox.padX * fontPx;
     const padY = blockBox.padY * fontPx;
     ctx.save();
-    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2.5);
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2.5) * bgAlpha;
     const s = 0.85 + 0.15 * Math.min(eBlock, 1.12);
     const boxFill = resolveColor(blockBox.fill, primary, accent);
     if (blockBox.mode === 'block') {
@@ -1685,7 +1778,7 @@ export function drawCaptions(
   if (preset.bar) {
     const barW = clamp01(eBlock * 1.15);
     ctx.save();
-    ctx.globalAlpha = outAlpha * clamp01(pBlock * 3);
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 3) * bgAlpha;
     clearShadow(ctx);
     ctx.fillStyle = resolveColor(preset.bar.color, primary, accent);
     layout.lines.forEach((line, li) => {
@@ -1813,9 +1906,13 @@ export function drawCaptions(
 
       ctx.save();
       if (lscale !== 1) {
-        ctx.translate(cx, baseY);
+        // pivô na BORDA ESQUERDA da linha (x0 já é a origem escalada): um
+        // ponto x0+wl.x rende em x0+wl.x·s — exatamente a geometria global
+        // dos boxes/karaokê. Pivô no cx dobrava a escala da origem e a linha
+        // comprimida DESLIZAVA pra direita (bug "legenda escapa e volta").
+        ctx.translate(x0, baseY);
         ctx.scale(lscale, lscale);
-        ctx.translate(-cx, -baseY);
+        ctx.translate(-x0, -baseY);
       }
 
       if (isMask || isWipe) {
@@ -1913,28 +2010,36 @@ export function drawCaptions(
         }
 
         if (pass === 'base' && isActive && karaoke === 'word-box') {
-          const wp = clamp01((tMs - word.start) / 160);
-          const we = EASE.outBack(wp);
-          const padX = fontPx * 0.22;
-          const padY = fontPx * 0.14;
-          ctx.save();
-          ctx.globalAlpha = outAlpha * clamp01(wp * 3) * (fx?.alpha ?? 1);
-          drawFxBox(
-            d,
-            wx + wl.w / 2,
-            baseY - lineH * 0.3,
-            wl.w + padX * 2,
-            lineH * 0.82 + padY * 2,
-            fontPx * 0.18,
-            accent,
-            preset.box?.skew ?? 0,
-            preset.box?.shadow,
-            0.7 + 0.3 * we,
-          );
-          ctx.restore();
-          fill = contrastColor(accent);
+          if (bgMode === 'off') {
+            // fundo desligado: a caixa do karaokê some e a palavra ativa
+            // colore em accent (vira um word-color)
+            fill = accent;
+          } else {
+            const wp = clamp01((tMs - word.start) / 160);
+            const we = EASE.outBack(wp);
+            const padX = fontPx * 0.22;
+            const padY = fontPx * 0.14;
+            const kbFill = style.bgColor ?? accent;
+            ctx.save();
+            ctx.globalAlpha = outAlpha * clamp01(wp * 3) * (fx?.alpha ?? 1) * bgAlpha;
+            drawFxBox(
+              d,
+              wx + wl.w / 2,
+              baseY - lineH * 0.3,
+              wl.w + padX * 2,
+              lineH * 0.82 + padY * 2,
+              fontPx * 0.18,
+              kbFill,
+              preset.box?.skew ?? 0,
+              preset.box?.shadow,
+              0.7 + 0.3 * we,
+            );
+            ctx.restore();
+            fill = contrastColor(kbFill);
+          }
         }
-        if (karaoke === 'word-box' && isActive && pass !== 'base') fill = contrastColor(accent);
+        if (karaoke === 'word-box' && isActive && pass !== 'base')
+          fill = bgMode === 'off' ? accent : contrastColor(style.bgColor ?? accent);
 
         // caixa por palavra (preset.box mode word) — com ciclo de cores
         if (pass === 'base' && preset.box && preset.box.mode === 'word') {
@@ -2008,7 +2113,16 @@ export function drawCaptions(
           !isActive
             ? preset.karaokeDim
             : 1;
+        // seleção parcial: cor/negrito/itálico POR PALAVRA vencem tudo
+        const wStyle = d.wordStyles?.[wi];
+        if (wStyle?.color) fill = wStyle.color;
+        const pFauxB = FAUX_BOLD;
+        const pFauxI = FAUX_ITALIC;
+        if (wStyle?.bold !== undefined) FAUX_BOLD = wStyle.bold;
+        if (wStyle?.italic !== undefined) FAUX_ITALIC = wStyle.italic;
         drawWord(d, block, layout, wi, wx, baseY, fill, fx, loopSpec, tMs, seedBase, outAlpha * dimMul, unitIdx, extraS);
+        FAUX_BOLD = pFauxB;
+        FAUX_ITALIC = pFauxI;
 
         // sublinhados
         if (pass === 'base') {
@@ -2319,7 +2433,7 @@ function drawWord(
       }
       ctx.restore();
     }
-    if (d.underline && !wl.mixed) {
+    if ((d.wordStyles?.[wi]?.underline ?? d.underline) && !wl.mixed) {
       ctx.save();
       ctx.globalAlpha = outAlpha;
       clearShadow(ctx);
@@ -2360,7 +2474,7 @@ function drawWord(
   }
 
   fillWordText(d, wl.text, -wl.w / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
-  if (d.underline && !wl.mixed) {
+  if ((d.wordStyles?.[wi]?.underline ?? d.underline) && !wl.mixed) {
     clearShadow(ctx);
     ctx.fillStyle = fill;
     ctx.fillRect(-wl.w / 2, lineH * 0.42, wl.w, Math.max(1.5, wl.fpx * 0.055));
@@ -2393,9 +2507,10 @@ function drawTypewriter(
     const baseY = topY + line.y0 + line.h * 0.78;
     ctx.save();
     if (line.scale !== 1) {
-      ctx.translate(cx, baseY);
+      // pivô na borda esquerda (mesmo fix do drawPass — sem deslize lateral)
+      ctx.translate(x0, baseY);
       ctx.scale(line.scale, line.scale);
-      ctx.translate(-cx, -baseY);
+      ctx.translate(-x0, -baseY);
     }
     for (const wi of line.wordIdx) {
       const wl = layout.words[wi];
@@ -2508,6 +2623,89 @@ export function captionBBoxAt(
     h: blockH + pad * 2,
     blockId: block.id,
   };
+}
+
+/**
+ * Caixas POR PALAVRA do bloco ativo em tMs (geometria estática, mesma do
+ * draw) — pro preview selecionar palavras com o mouse estilo CapCut.
+ */
+export function wordBoxesAt(
+  ctx: CanvasRenderingContext2D,
+  blocks: Block[],
+  basePreset: TypoPreset,
+  styleArg: StyleState,
+  tMs: number,
+  W: number,
+  H: number,
+): {
+  blockId: string;
+  boxes: Array<{ i: number; x: number; y: number; w: number; h: number }>;
+} | null {
+  let block: Block | null = null;
+  for (const b of blocks) {
+    if (tMs >= b.start && tMs < b.end) {
+      block = b;
+      break;
+    }
+    if (b.start > tMs) break;
+  }
+  if (!block || block.words.length === 0) return null;
+
+  const ov = styleArg.perBlock?.[block.id];
+  const style: StyleState = ov ? { ...styleArg, ...ov } : styleArg;
+  FAUX_ITALIC = style.italic === true;
+  FAUX_BOLD = style.bold === true;
+  const preset =
+    style.fontOverride && style.fontOverride !== basePreset.font
+      ? { ...basePreset, font: style.fontOverride }
+      : basePreset;
+  let hiList = style.highlights[block.id] ?? [];
+  if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
+    const auto = autoEmphasisIndex(block);
+    if (auto !== null) hiList = [auto];
+  }
+  const highlights = new Set(hiList);
+  const layout = measureLayout(ctx, block, preset, style, W, highlights);
+  const isSolo = (preset.karaoke ?? 'none') === 'solo';
+  const blockH = isSolo ? layout.lineH : layout.totalH;
+  let topY = style.posY * H - blockH / 2;
+  topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
+  const blockWmax = isSolo
+    ? Math.max(...layout.words.map((w) => w.w))
+    : Math.max(...layout.lines.map((l) => l.width * l.scale));
+  let cx = (style.posX ?? 0.5) * W;
+  const halfW = blockWmax / 2 + W * 0.02;
+  cx = halfW * 2 >= W ? W / 2 : Math.min(Math.max(cx, halfW), W - halfW);
+
+  const boxes: Array<{ i: number; x: number; y: number; w: number; h: number }> = [];
+  if (isSolo) {
+    // solo mostra uma palavra por vez — a caixa do bloco vira a da ativa
+    let active = 0;
+    for (let i = block.words.length - 1; i >= 0; i--) {
+      if (tMs >= block.words[i].start) {
+        active = i;
+        break;
+      }
+    }
+    boxes.push({ i: active, x: cx - blockWmax / 2, y: topY, w: blockWmax, h: blockH });
+  } else {
+    for (let wi = 0; wi < layout.words.length; wi++) {
+      const wl = layout.words[wi];
+      const line = layout.lines[wl.line];
+      const x0 =
+        preset.align === 'left'
+          ? cx - blockWmax / 2
+          : cx - (line.width * line.scale) / 2;
+      boxes.push({
+        i: wi,
+        x: x0 + wl.x * line.scale,
+        y: topY + line.y0,
+        w: wl.w * line.scale,
+        h: line.h,
+      });
+    }
+  }
+  return { blockId: block.id, boxes };
 }
 
 // ─── Demo (galeria de modelos) ──────────────────────────────────────────────

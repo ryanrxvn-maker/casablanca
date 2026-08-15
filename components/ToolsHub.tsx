@@ -9,6 +9,7 @@ import { emailUnlocksPath } from '@/lib/tool-unlocks';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 import { HeroSlideBg } from './HeroSlideBg';
+import { TipoShowcase } from './TipoShowcase';
 
 /** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
 type MaintMode = 'blocked' | 'admin' | undefined;
@@ -70,16 +71,6 @@ const FEATURED: ToolEntry[] = [
     badge: 'IA',
     video: '/cards/criar-avatar.mp4',
     poster: '/cards/criar-avatar.jpg',
-  },
-  {
-    href: '/tools/decupagem-copy',
-    label: 'Decupagem Inteligente',
-    description: 'A IA lê a copy, escolhe o melhor take de cada frase e monta o corte — você diz o que precisa ser dito, ela entrega.',
-    icon: <IconDecupageCopy size={28} />,
-    hue: 'rgba(232, 121, 249, 0.45)',
-    badge: 'IA',
-    video: '/cards/decupagem-inteligente.mp4',
-    poster: '/cards/decupagem-inteligente.jpg',
   },
   {
     href: '/tools/copy-srt',
@@ -148,10 +139,9 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/normalizador',
     label: 'Normalizador',
-    description: 'Iguala o volume de vários arquivos.',
+    description: 'Iguala o volume da voz e limpa o chiado. Com relatório antes × depois.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
-    adminOnly: true,
   },
   {
     href: '/tools/separador-audio',
@@ -335,6 +325,7 @@ export function ToolsHub() {
           </div>
         </div>
         <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:-mx-6 2xl:-mx-10">
+          <TipografiaFeaturedCard delay={120} />
           {featured.map((it, i) =>
             it.video ? (
               <FeaturedVideoCard
@@ -446,10 +437,12 @@ function PromoBanner({
   isAdmin: boolean;
 }) {
   const canStartAutomation = isAdmin || tierCanAutomate(tier);
-  // FakePrint é o herói de TODOS (ferramenta free). As automações internas
-  // (Pilot / Auto B-roll) só existem no carrossel do admin.
+  // FakePrint e Tipografia Automática são os heróis de TODOS (ferramentas
+  // free) — arrastou o FakePrint pro lado, a Tipografia assume. As automações
+  // internas (Pilot / Auto B-roll) só existem no carrossel do admin.
   const slides = [
     <FakePrintSlide key="fakeprint" />,
+    <TipografiaSlide key="tipografia" />,
     ...(isAdmin
       ? [
           <PilotSlide key="pilot" canStartAutomation={canStartAutomation} />,
@@ -548,6 +541,188 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
         }
       `}</style>
     </div>
+  );
+}
+
+/* ────────── SLIDE HERÓI: TIPOGRAFIA AUTOMÁTICA (engine ao vivo) ────────── */
+/**
+ * O card roda o ENGINE REAL da ferramenta: um canvas cicla modelos de
+ * lettering com frases de copy — o que aparece é exatamente o que a
+ * ferramenta cospe no MP4. Mesmo tamanho/estrutura do slide do FakePrint.
+ */
+function TipografiaSlide() {
+  const wrapRef = useRef<HTMLAnchorElement | null>(null);
+
+  // fundo REAGE ao mouse: vars --mx/--my alimentam o holofote e o parallax
+  function onMove(e: React.PointerEvent) {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${(((e.clientX - r.left) / r.width) * 100).toFixed(2)}%`);
+    el.style.setProperty('--my', `${(((e.clientY - r.top) / r.height) * 100).toFixed(2)}%`);
+    el.style.setProperty('--px', `${((e.clientX - r.left) / r.width - 0.5).toFixed(3)}`);
+    el.style.setProperty('--py', `${((e.clientY - r.top) / r.height - 0.5).toFixed(3)}`);
+  }
+
+  return (
+    <Link
+      ref={wrapRef}
+      href="/tools/tipografia"
+      onPointerMove={onMove}
+      className="dark-island group relative block overflow-hidden rounded-[26px] border border-line/60"
+      style={
+        {
+          boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)',
+          '--mx': '50%',
+          '--my': '40%',
+          '--px': '0',
+          '--py': '0',
+        } as React.CSSProperties
+      }
+    >
+      <div className="relative aspect-[16/10] max-h-[480px] w-full sm:aspect-[16/8] lg:aspect-[21/9]">
+        {/* Fundo cinema profundo */}
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(120% 90% at 18% 0%, rgba(109,78,232,0.3), transparent 55%), radial-gradient(110% 80% at 88% 100%, rgba(251,191,36,0.14), transparent 50%), linear-gradient(165deg, #0b0a12 0%, #060509 55%, #0d0a14 100%)',
+          }}
+        />
+        {/* holofote que segue o mouse */}
+        <div
+          aria-hidden
+          className="absolute inset-0 opacity-60 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background:
+              'radial-gradient(34% 42% at var(--mx) var(--my), rgba(167,139,250,0.28), transparent 70%)',
+          }}
+        />
+        {/* feixes de luz varrendo por trás dos letterings */}
+        <div aria-hidden className="tgs-beams absolute inset-0" />
+        <div aria-hidden className="tgs-blob tgs-blob-a" />
+        <div aria-hidden className="tgs-blob tgs-blob-b" />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+            backgroundSize: '44px 44px',
+          }}
+        />
+
+        {/* O ENGINE ao vivo, com parallax sutil do mouse + zoom no hover */}
+        <div
+          className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.05]"
+          style={{
+            transform:
+              'translate(calc(var(--px) * 14px), calc(var(--py) * 10px))',
+          }}
+        >
+          <TipoShowcase variant="hero" />
+        </div>
+
+        {/* Vinheta de legibilidade (mais leve — os letterings são a estrela) */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(to top, rgba(2,2,6,0.72) 0%, rgba(2,2,6,0.16) 20%, transparent 38%), linear-gradient(to bottom, rgba(2,2,6,0.45) 0%, transparent 18%)',
+          }}
+        />
+
+        {/* Topo: NOVO + nome + liberada pra todos */}
+        <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4 md:p-5">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-[5px] bg-[#6d4ee8] px-2 py-1 shadow-[0_4px_18px_-4px_rgba(109,78,232,0.9)]">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-80" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+              </span>
+              <span
+                className="text-[10px] font-black uppercase tracking-[0.18em] text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Novo
+              </span>
+            </span>
+            <span
+              className="hidden rounded-[5px] bg-black/60 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur-sm sm:inline-flex"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Tipografia Automática · 491 letterings
+            </span>
+          </div>
+          <span
+            className="rounded-full border border-violet/40 bg-black/55 px-2.5 py-1 text-[9.5px] font-bold uppercase tracking-[0.2em] text-violet backdrop-blur-sm"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Liberada pra todos
+          </span>
+        </div>
+
+        {/* Só o CTA — os letterings falam por si */}
+        <div className="absolute inset-x-0 bottom-0 z-10 flex justify-center p-4 md:p-6">
+          <span
+            className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-black/45 px-6 py-3 text-[11.5px] font-bold uppercase tracking-[0.2em] text-white backdrop-blur-md transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-violet/70 group-hover:bg-black/60 group-hover:shadow-[0_0_34px_-6px_rgba(167,139,250,0.9)]"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Criar legendas agora
+            <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
+          </span>
+        </div>
+      </div>
+      <style jsx>{`
+        .tgs-blob {
+          position: absolute;
+          width: 46%;
+          aspect-ratio: 1;
+          border-radius: 9999px;
+          filter: blur(70px);
+          opacity: 0.5;
+          pointer-events: none;
+        }
+        .tgs-blob-a {
+          left: -8%;
+          top: -20%;
+          background: radial-gradient(circle, rgba(109, 78, 232, 0.55), transparent 65%);
+          animation: tgs-float-a 9s ease-in-out infinite alternate;
+          transform: translate(calc(var(--px) * -22px), calc(var(--py) * -16px));
+        }
+        .tgs-blob-b {
+          right: -10%;
+          bottom: -28%;
+          background: radial-gradient(circle, rgba(251, 191, 36, 0.32), transparent 65%);
+          animation: tgs-float-b 11s ease-in-out infinite alternate;
+          transform: translate(calc(var(--px) * 26px), calc(var(--py) * 18px));
+        }
+        .tgs-beams {
+          pointer-events: none;
+          opacity: 0.5;
+          background:
+            linear-gradient(115deg, transparent 42%, rgba(167, 139, 250, 0.16) 47%, rgba(255, 255, 255, 0.05) 50%, rgba(167, 139, 250, 0.16) 53%, transparent 58%),
+            linear-gradient(115deg, transparent 68%, rgba(251, 191, 36, 0.1) 74%, transparent 80%);
+          background-size: 260% 100%;
+          animation: tgs-sweep 7.5s ease-in-out infinite;
+        }
+        @keyframes tgs-sweep {
+          0% { background-position: 120% 0; }
+          55% { background-position: -30% 0; }
+          100% { background-position: -30% 0; }
+        }
+        @keyframes tgs-float-a {
+          from { opacity: 0.4; }
+          to { opacity: 0.65; }
+        }
+        @keyframes tgs-float-b {
+          from { opacity: 0.35; }
+          to { opacity: 0.6; }
+        }
+      `}</style>
+    </Link>
   );
 }
 
@@ -1182,6 +1357,95 @@ function Sparkle({ className, delay = 0 }: { className?: string; delay?: number 
  * revela a copy da ferramenta + o CTA. O vídeo fica em /public/cards/.
  * Antes do vídeo existir, mostra um gradiente bonito (fallback).
  */
+/**
+ * Card de DESTAQUE da Tipografia Automática — em vez de vídeo gravado, o
+ * card roda o engine real (canvas ciclando letterings com copy). Mesmo
+ * visual dos FeaturedVideoCard: título sobre a mídia, painel no hover,
+ * borda conic acesa.
+ */
+function TipografiaFeaturedCard({ delay }: { delay: number }) {
+  return (
+    <div
+      className="dark-island featured-card-wrap fade-in-up relative z-0 hover:z-20"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <Link
+        href="/tools/tipografia"
+        className="group relative block overflow-hidden rounded-[20px] border border-line/60 bg-[#0b0b0f]"
+      >
+        <div className="relative aspect-video w-full overflow-hidden">
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(130% 90% at 20% 0%, rgba(109,78,232,0.35), transparent 55%), radial-gradient(120% 80% at 85% 100%, rgba(251,191,36,0.14), transparent 55%), linear-gradient(170deg, #0d0b14 0%, #060509 60%, #0b0912 100%)',
+            }}
+          />
+          <TipoShowcase variant="card" />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{ background: 'linear-gradient(to top, rgba(4,4,6,0.88) 2%, rgba(4,4,6,0.18) 38%, transparent 62%)' }}
+          />
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3.5">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-110"
+              style={{ boxShadow: '0 0 26px -4px rgba(251,191,36,0.5)' }}
+            >
+              <IconTipografia size={28} />
+            </span>
+            <span
+              className="rounded-full border border-violet/35 bg-black/45 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Novo · IA
+            </span>
+          </div>
+          <h3
+            className="absolute bottom-0 left-0 z-10 p-4 text-[19px] font-bold leading-tight tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)] transition-transform duration-300 group-hover:-translate-y-0.5"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+          >
+            Tipografia Automática
+          </h3>
+        </div>
+        <div
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
+          style={{ background: '#0b0b0f' }}
+        >
+          <div className="px-4 pb-4 pt-3.5">
+            <p className="text-[12.5px] leading-relaxed text-white/80">
+              A fala do vídeo vira lettering animado de agência — transcrição
+              palavra por palavra, 491 modelos, editor estilo CapCut e o MP4
+              renderizado no seu navegador.
+            </p>
+            <span
+              className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Abrir ferramenta
+              <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
+            </span>
+          </div>
+        </div>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            padding: '1px',
+            background:
+              'conic-gradient(from var(--angle, 0deg), transparent 0%, rgba(251,191,36,0.5) 22%, transparent 50%, rgba(167,139,250,0.55) 78%, transparent 100%)',
+            WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+            WebkitMaskComposite: 'xor',
+            maskComposite: 'exclude',
+            animation: 'card-border-spin 6s linear infinite',
+          }}
+        />
+      </Link>
+    </div>
+  );
+}
+
 function FeaturedVideoCard({
   entry,
   delay,

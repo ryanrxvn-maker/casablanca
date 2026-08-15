@@ -26,9 +26,9 @@ type Tool = {
 
 /** Lista única de TODAS as ferramentas visíveis ao cliente.
  * ⚠ SÓ ferramentas REAIS e acessíveis ao cliente. Espelha o acesso de
- * lib/use-tier.ts. NÃO listar admin-only (Normalizador, Separador de Áudio,
- * Removedor de Legenda, automações internas) nem tools inexistentes —
- * isso vira propaganda enganosa. */
+ * lib/use-tier.ts. NÃO listar admin-only (Separador de Áudio, Removedor de
+ * Legenda, automações internas) nem tools inexistentes — isso vira
+ * propaganda enganosa. */
 const ALL_TOOLS: Tool[] = [
   { key: 'lipsync', label: 'Lipsync Video to Video' },
   { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
@@ -37,6 +37,8 @@ const ALL_TOOLS: Tool[] = [
   { key: 'camuflagem', label: 'Camuflagem' },
   { key: 'mixer-velocidade', label: 'Mixer de Velocidade' },
   { key: 'separar-audios', label: 'Dividir áudios' },
+  { key: 'normalizador', label: 'Normalizador' },
+  { key: 'tipografia', label: 'Tipografia Automática' },
   { key: 'compressor', label: 'Compressor' },
   { key: 'downloader', label: 'Downloader' },
   { key: 'fakepass', label: 'FakePrint' },
@@ -45,7 +47,7 @@ const ALL_TOOLS: Tool[] = [
 /** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS).
  *  Espelha EXATAMENTE o acesso real de lib/use-tier.ts (TIER_PATHS). */
 const UNLOCKED: Record<'free' | 'basic', Set<string>> = {
-  free: new Set(['decupagem', 'downloader', 'fakepass', 'compressor']),
+  free: new Set(['decupagem', 'downloader', 'fakepass', 'compressor', 'normalizador', 'tipografia']),
   // basic = plano PREMIUM (nome de exibição) — libera a suíte inteira.
   basic: new Set(ALL_TOOLS.map((t) => t.key)),
 };
@@ -953,6 +955,22 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(34,211,238,0.5)',
     desc: 'Divide um áudio longo em pedaços, sempre respeitando as pausas.',
     win: 'Cada fala vira um arquivo. Sem cortar palavra no meio.',
+  },
+  {
+    key: 'normalizador',
+    name: 'Normalizador',
+    cat: 'Áudio',
+    hue: 'rgba(94,234,212,0.5)',
+    desc: 'Iguala o volume da voz e limpa o chiado de fundo, sem você mexer em nada.',
+    win: 'Sai com relatório antes × depois: você vê e ouve a diferença.',
+  },
+  {
+    key: 'tipografia',
+    name: 'Tipografia Automática',
+    cat: 'Vídeo',
+    hue: 'rgba(251,191,36,0.5)',
+    desc: 'Letterings animados no tempo do áudio, com centenas de modelos prontos.',
+    win: 'Você escolhe o estilo, ele acerta a palavra certa no tempo certo.',
   },
   {
     key: 'compressor',

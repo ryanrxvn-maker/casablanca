@@ -553,11 +553,11 @@ const TPL8: Array<{
 }> = [
   {
     id: 'ecoduo',
-    nome: 'Eco Duplo',
+    nome: 'Reflexo',
     make: () => ({
       fill: 'accent',
       unit: 'block',
-      echoes: [{ pos: 'above', scale: 0.42, color: 'primary', gap: 0.35 }],
+      echoes: [{ pos: 'below', scale: 0.9, gap: 0.06, color: 'accent', alpha: 0.25, flipY: true }],
       shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
       autoEmphasis: false,
     }),
@@ -574,14 +574,11 @@ const TPL8: Array<{
   },
   {
     id: 'riscado',
-    nome: 'Riscado',
+    nome: 'Fantasma Riscado',
     make: () => ({
       fill: 'accent',
       unit: 'block',
-      echoes: [
-        { pos: 'above', scale: 0.36, color: 'primary', gap: 0.25 },
-        { pos: 'below', scale: 0.36, color: 'primary', gap: 0.25, strike: true },
-      ],
+      echoes: [{ pos: 'behind', scale: 1.42, color: 'primary', outline: true, alpha: 0.4, strike: true }],
       shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
       autoEmphasis: false,
     }),
@@ -661,10 +658,10 @@ const TPL8: Array<{
   },
   {
     id: 'ecosub',
-    nome: 'Eco Sub',
+    nome: 'Base Forte',
     make: () => ({
       unit: 'block',
-      echoes: [{ pos: 'below', scale: 0.4, color: 'accent', gap: 0.4, glow: 0.5 }],
+      bar: { color: 'accent', thickness: 0.14, skew: -6 },
       shadow: { color: 'rgba(0,0,0,0.5)', blur: 0.12, x: 0, y: 0.04 },
       autoEmphasis: false,
     }),
