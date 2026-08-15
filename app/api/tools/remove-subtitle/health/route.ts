@@ -1,53 +1,54 @@
 /**
- * /api/tools/remove-subtitle/health — diagnóstico admin do motor vmake.
+ * /api/tools/remove-subtitle/health — diagnóstico admin do POOL de contas
+ * do motor de remoção (mesmo pool do lipsync).
  *
- * Diz se o Access-Token está válido, se o proxy de IP fixo está configurado
- * e o estado da fila serial. Útil pra saber na hora se o VMAKE_ACCESS_TOKEN
- * caiu (precisa renovar pelo browser logado).
+ * Diz quantas contas existem, quantas estão SAUDÁVEIS e o estado de cada uma,
+ * sem NUNCA expor cookie/IDs. Útil pra saber na hora se alguma conta caiu.
  *
  * Admin-only.
  */
 
 import { NextResponse } from 'next/server';
-import { requireTier } from '@/lib/require-tier';
-import { checkHealth, isVmakeConfigured } from '@/lib/vmake-api';
-import { vmakeQueueStats } from '@/lib/vmake-queue';
+import { requireAdmin } from '@/app/api/admin/_helpers';
+import { checkPoolHealth, poolStats, hasAccounts } from '@/lib/dreamface-pool';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 export async function GET() {
-  const guard = await requireTier('admin', { unlockTools: ['/tools/remover-elementos'] });
+  const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
-  const configured = isVmakeConfigured();
-  const proxyConfigured = Boolean(process.env.VMAKE_PROXY_URL);
-  const gidConfigured = Boolean(process.env.VMAKE_GID);
+  const proxyConfigured = Boolean(process.env.DREAMFACE_PROXY_URL);
 
-  if (!configured) {
+  if (!hasAccounts()) {
     return NextResponse.json({
       ok: false,
       configured: false,
+      accounts: 0,
       proxyConfigured,
-      gidConfigured,
       reason: 'config_missing',
-      hint: 'Defina VMAKE_ACCESS_TOKEN (localStorage vmake-auth-store.data.state.accessToken do browser logado) e VMAKE_GID (track-store.gid).',
-      queue: vmakeQueueStats(),
+      hint:
+        'Nenhuma conta configurada. Defina DREAMFACE_ACCOUNTS (JSON array) ou os envs únicos ' +
+        'DREAMFACE_ACCOUNT_ID/USER_ID.',
+      pool: poolStats(),
     });
   }
 
-  const health = await checkHealth();
+  const health = await checkPoolHealth();
   return NextResponse.json({
-    ok: health.ok,
+    ok: health.healthy > 0,
     configured: true,
+    accounts: health.accounts,
+    healthy: health.healthy,
     proxyConfigured,
-    gidConfigured,
-    reason: health.reason ?? null,
-    hint: health.ok
-      ? proxyConfigured
-        ? 'Tudo certo. vmake acessível e proxy de IP fixo ativo.'
-        : 'vmake acessível. ATENÇÃO: sem VMAKE_PROXY_URL — em produção (Vercel) configure um proxy de IP fixo pra evitar bloqueio.'
-      : 'vmake indisponível ou Access-Token expirado — renove o VMAKE_ACCESS_TOKEN pelo browser logado.',
-    queue: vmakeQueueStats(),
+    hint:
+      health.healthy === 0
+        ? 'TODAS as contas estão fora. Renove os cookies em DREAMFACE_ACCOUNTS.'
+        : health.healthy < health.accounts
+          ? `${health.healthy}/${health.accounts} contas OK — as demais caíram.`
+          : `Todas as ${health.accounts} conta(s) OK.`,
+    accountsDetail: health.details,
+    pool: poolStats(),
   });
 }

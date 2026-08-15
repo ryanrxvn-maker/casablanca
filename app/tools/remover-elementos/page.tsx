@@ -6,11 +6,13 @@ import RemoverLegendaTool from '@/components/tools/RemoverLegendaTool';
 /**
  * /tools/remover-elementos — Removedor de Legenda / Marca d'Água.
  *
- * AGORA: vmake Smart (server-side, conta do admin). SEM instalador, SEM
- * motor local. Mesmo modelo do lipsync — liberado pra Pro + Admin
- * (profiles.tier = 'pro'/'beta' OU profiles.is_admin = true).
+ * Motor na nuvem (server-side, conta do admin). SEM instalador, SEM motor
+ * local. Vídeos longos entram inteiros: por baixo dos panos são picados em
+ * trechos, limpos e costurados de volta — invisível pro cliente. Mesmo
+ * modelo do lipsync — liberado pra Pro + Admin (profiles.tier = 'pro'/'beta'
+ * OU profiles.is_admin = true).
  *
- * O bloqueio real é em camadas: middleware (PRO_ONLY_TOOLS) + requirePro()
+ * O bloqueio real é em camadas: middleware (PRO_ONLY_TOOLS) + requireTier
  * nas rotas /api/tools/remove-subtitle/*. Esta checagem é defesa extra.
  */
 

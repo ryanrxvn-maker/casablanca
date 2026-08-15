@@ -1015,6 +1015,211 @@ export async function concatDecupChunks(
   }
 }
 
+// ---------- Corte por TEMPO + mux de áudio (removedor de legenda) --------
+//
+// O motor de remoção de legenda só aceita trechos curtos, então o vídeo é
+// picado em pedaços ≤~alvo (por keyframe, SEM re-encode = rápido/grande),
+// cada pedaço é limpo e no fim tudo é juntado + o ÁUDIO ORIGINAL é re-muxado
+// (o áudio de cada pedaço tem micro-gap nas emendas; o original é contínuo).
+// Tudo com WORKERFS pra aguentar arquivos grandes fora do heap.
+
+/** Detecta se o arquivo tem faixa de áudio (via log do ffmpeg). */
+async function probeHasAudio(ff: FFmpeg, path: string): Promise<boolean> {
+  let hasAudio = false;
+  const h = ({ message }: { message: string }) => {
+    if (/Stream #\d+:\d+.*: Audio:/.test(message)) hasAudio = true;
+  };
+  ff.on('log', h);
+  try {
+    await ff.exec(['-hide_banner', '-i', path]);
+  } catch {
+    /* rc≠0 esperado (sem output) — o log já saiu */
+  } finally {
+    ff.off('log', h);
+  }
+  return hasAudio;
+}
+
+/** Re-encoda + segmenta UM trecho em pedaços EXATOS ≤targetSec (fallback pra
+ *  vídeos de GOP longo, onde o corte por keyframe geraria pedaços > limite). */
+async function resplitReencode(
+  ff: FFmpeg,
+  blob: Blob,
+  targetSec: number,
+  opts: RunOptions,
+): Promise<File[]> {
+  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const inName = `resin_${uniq}.mp4`;
+  const { fetchFile } = await import('@ffmpeg/util');
+  await ff.writeFile(inName, await fetchFile(blob));
+  const made: string[] = [];
+  try {
+    opts.onStage?.('Otimizando o vídeo...');
+    // Re-encode + segment: o corte cai EXATO no tempo (não depende de keyframe).
+    await execOrThrow(
+      ff,
+      [
+        '-i', inName,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '160k',
+        '-f', 'segment', '-segment_time', String(targetSec), '-reset_timestamps', '1',
+        '-force_key_frames', `expr:gte(t,n_forced*${targetSec})`,
+        `reseg_${uniq}_%03d.mp4`,
+      ],
+      're-split preciso',
+    );
+    const parts: File[] = [];
+    for (let i = 0; ; i++) {
+      const name = `reseg_${uniq}_${String(i).padStart(3, '0')}.mp4`;
+      let data: Uint8Array | string;
+      try {
+        data = await ff.readFile(name);
+      } catch {
+        break;
+      }
+      made.push(name);
+      parts.push(new File([toBlob(data, 'video/mp4')], name, { type: 'video/mp4' }));
+      await safeDelete(ff, name);
+    }
+    return parts;
+  } finally {
+    await safeDelete(ff, inName);
+    for (const n of made) await safeDelete(ff, n);
+  }
+}
+
+/**
+ * Pica um vídeo em trechos de ~targetSec (por keyframe, `-c copy` = rápido,
+ * sem re-encode, sem perda), garantindo que NENHUM trecho passe de hardLimitSec
+ * (se o GOP for longo e um pedaço estourar, esse pedaço é re-encodado em cortes
+ * exatos). Trechos ≥1 arquivo, em ordem. Nunca ocupa o heap com o vídeo inteiro
+ * (WORKERFS). Se o vídeo cabe num trecho só, devolve ele inteiro.
+ */
+export async function splitVideoByTime(
+  file: Blob,
+  targetSec = 24,
+  hardLimitSec = 29,
+  opts: RunOptions = {},
+): Promise<File[]> {
+  const srcExt = guessExt(file, 'mp4');
+  const { ext: chunkExt, format: chunkFormat } = chunkContainerFor(srcExt);
+
+  let durationSec = (await probeVideoMetadata(file))?.durationSec || 0;
+
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { dir, cleanup } = await makeInputsAvailable(ff, [{ name: `in.${srcExt}`, data: file }]);
+  const inputPath = `${dir}/in.${srcExt}`;
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  const made: string[] = [];
+  try {
+    if (durationSec <= 0) durationSec = await readDurationFromLogs(ff, inputPath);
+    if (durationSec <= 0) throw new Error('Não consegui ler a duração do vídeo (arquivo corrompido?).');
+
+    // Cabe num trecho só → nada a picar.
+    if (durationSec <= hardLimitSec + 0.5) {
+      return [new File([file], `seg_000.${srcExt}`, { type: file.type || undefined })];
+    }
+
+    opts.onStage?.('Preparando o vídeo...');
+    const rc = await ff.exec([
+      '-i', inputPath,
+      '-map', '0:v?', '-map', '0:a?', '-dn', '-sn',
+      '-c', 'copy',
+      '-f', 'segment',
+      '-segment_time', String(targetSec),
+      '-reset_timestamps', '1',
+      '-segment_format', chunkFormat,
+      `seg_%03d.${chunkExt}`,
+    ]);
+    if (rc !== 0) throw new Error('Não consegui preparar esse vídeo (formato não suportado).');
+
+    const mimeOut = chunkExt === 'mp4' ? 'video/mp4' : chunkExt === 'webm' ? 'video/webm' : chunkExt === 'mkv' ? 'video/x-matroska' : 'video/mp4';
+    const raw: File[] = [];
+    for (let i = 0; ; i++) {
+      const name = `seg_${String(i).padStart(3, '0')}.${chunkExt}`;
+      let data: Uint8Array | string;
+      try {
+        data = await ff.readFile(name);
+      } catch {
+        break;
+      }
+      made.push(name);
+      raw.push(new File([toBlob(data, mimeOut)], name, { type: mimeOut }));
+      await safeDelete(ff, name);
+    }
+    if (raw.length === 0) throw new Error('A preparação do vídeo não produziu trechos.');
+
+    // Blindagem: qualquer trecho acima do teto (GOP longo) é re-cortado exato.
+    const out: File[] = [];
+    for (const seg of raw) {
+      const segDur = (await probeVideoMetadata(seg))?.durationSec || 0;
+      if (segDur > hardLimitSec + 0.4) {
+        out.push(...(await resplitReencode(ff, seg, targetSec, opts)));
+      } else {
+        out.push(seg);
+      }
+    }
+    return out;
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    for (const n of made) await safeDelete(ff, n);
+    await cleanup();
+  }
+}
+
+/**
+ * Junta os trechos limpos num só e re-muxa o ÁUDIO ORIGINAL por cima. O áudio
+ * original é contínuo (zero clique de emenda) e ancorado em t=0; se a soma do
+ * vídeo divergir levemente da duração do áudio (drift do re-encode do motor),
+ * o áudio é esticado/comprimido por um fator imperceptível (atempo) pra bater
+ * EXATO — sync perfeito de ponta a ponta. Vídeo sem áudio → devolve só o vídeo.
+ */
+export async function joinCleanedWithOriginalAudio(
+  cleanedParts: Blob[],
+  original: Blob,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  // 1. Concatena os trechos limpos (mesmo encode do motor → `-c copy` junta liso).
+  const videoOnly = await concatDecupChunks(cleanedParts, 'mp4', opts);
+
+  // 2. Re-muxa o áudio original.
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const srcExt = guessExt(original, 'mp4');
+  const entries = [
+    { name: 'clean.mp4', data: videoOnly },
+    { name: `orig.${srcExt}`, data: original },
+  ];
+  const { dir, cleanup } = await makeInputsAvailable(ff, entries);
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  const cleanPath = `${dir}/clean.mp4`;
+  const origPath = `${dir}/orig.${srcExt}`;
+  const outName = 'final_muxed.mp4';
+  try {
+    const hasAudio = await probeHasAudio(ff, origPath);
+    if (!hasAudio) return videoOnly; // vídeo mudo → nada a re-muxar
+
+    const V = (await probeVideoMetadata(videoOnly))?.durationSec || 0;
+    const A = (await probeVideoMetadata(original))?.durationSec || 0;
+    const factor = V > 0 && A > 0 ? A / V : 1;
+    // Só estica o áudio se o drift passar de ~0,05% (senão é ruído numérico).
+    const useTempo = Number.isFinite(factor) && Math.abs(factor - 1) > 0.0005 && factor >= 0.5 && factor <= 2;
+
+    opts.onStage?.('Finalizando...');
+    const args = ['-i', cleanPath, '-i', origPath, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy'];
+    if (useTempo) args.push('-af', atempoChain(factor));
+    args.push('-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-shortest', '-y', outName);
+    await execOrThrow(ff, args, 'mux do áudio original');
+
+    const data = await ff.readFile(outName);
+    assertValidMp4(data as Uint8Array, 'vídeo final');
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, outName);
+    await cleanup();
+  }
+}
+
 // ---------- Normalizador de Volume --------------------------------------
 //
 // A implementacao real (motor de duas passadas) esta mais abaixo, junto de

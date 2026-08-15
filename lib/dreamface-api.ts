@@ -617,6 +617,171 @@ export async function generateLipsync(
   }
 }
 
+// ═══════════════ Remoção de Legenda / Marca d'água ═══════════════
+//
+// MESMO motor do lipsync (task/v2/submit), com work_type diferente. O
+// motor detecta a legenda/marca QUEIMADA, remove e reconstrói o fundo —
+// preservando resolução, duração e ÁUDIO. Diferente do lipsync: NÃO
+// registra avatar (pula avatar/add + avatar/list) e NÃO sobe áudio; só
+// sobe o vídeo e submete. Limite do motor: 30s · 100MB · máx 1920×1080
+// (por isso a UI pica vídeos longos em trechos ≤~28s antes de mandar).
+
+const WATERMARK_TEMPLATE_ID = 'WEB-VIDEO_WATERMARK_REMOVER';
+const WATERMARK_WORK_TYPE = 'VIDEO_WATERMARK_REMOVER';
+// Versão FIXA no submit da remoção (a validada E2E na engenharia reversa). É
+// independente do DREAMFACE_APP_VERSION (que o lipsync usa em 4.7.1) — assim o
+// submit da remoção nunca depende de um env não-setado. O poll
+// (checkLipsyncStatus) segue usando c.appVersion e acha o work do mesmo jeito
+// (o get_recent_creation_list não filtra por versão — verificado).
+const WATERMARK_APP_VERSION = '5.3.0';
+
+/**
+ * Sobe UM vídeo pro OSS do motor e devolve a URL uss3 (SEM registrar avatar).
+ * Mesmo esquema de upload do lipsync (put_url presigned + PUT com o header
+ * x-oss-storage-class:Standard, que faz parte da assinatura).
+ */
+export async function uploadVideoForRemoval(
+  c: DreamFaceConfig,
+  videoBuffer: Buffer | Uint8Array,
+  fileName = 'clip.mp4',
+  contentType = 'video/mp4',
+): Promise<string> {
+  const { putUrl, fileUrl, contentType: ct } = await ossPutUrl(c, fileName, contentType);
+  const putRes = await rawFetch(
+    putUrl,
+    {
+      method: 'PUT',
+      headers: { 'content-type': ct, 'x-oss-storage-class': 'Standard' },
+      body: videoBuffer as unknown as BodyInit,
+    },
+    c.proxyUrl,
+  );
+  if (!putRes.ok) {
+    throw new DreamFaceError('upload_failed', `Falha no upload do vídeo pro motor (HTTP ${putRes.status}).`);
+  }
+  return fileUrl;
+}
+
+/** Lê dimensões/duração do vídeo já subido (só pra montar o output do submit). */
+async function getVideoDetail(
+  c: DreamFaceConfig,
+  url: string,
+): Promise<{ width: number; height: number; duration: number }> {
+  const j = await dfPostJson<{ width?: number; height?: number; duration?: number }>(
+    c,
+    '/dw-server/media_opt/get_video_detail',
+    { url },
+  );
+  const d = j.data || {};
+  return { width: d.width || 0, height: d.height || 0, duration: d.duration || 0 };
+}
+
+/** Submete a remoção de legenda/marca. Retorna animate_image_id. */
+export async function submitWatermarkRemoval(
+  c: DreamFaceConfig,
+  args: { fileUrl: string; width: number; height: number; duration: number; fileName?: string },
+): Promise<string> {
+  const { fileUrl } = args;
+  const width = args.width || 1080;
+  const height = args.height || 1080;
+  const durationSec = Math.max(1, Math.ceil(args.duration || 5));
+  const body = {
+    media: { images: [], videos: [{ url: fileUrl }], texts: [], audios: [] },
+    user: {
+      account_id: c.accountId,
+      app_version: WATERMARK_APP_VERSION,
+      platform_type: 'WEB',
+      user_id: c.userId,
+    },
+    template: { template_id: WATERMARK_TEMPLATE_ID, play_types: [WATERMARK_WORK_TYPE], project_id: '' },
+    output: { width, height, ratio: '', duration: durationSec, resolution: '', vertical: height >= width },
+    ext_info: {
+      sing_title: 'Video Watermark Remover',
+      is_sound_effect: false,
+      animate_channel: '',
+      route_url: '',
+      timbre_id: '',
+      cover: '',
+      video_id: '',
+      genders: [],
+    },
+    work_type: WATERMARK_WORK_TYPE,
+    create_work_session: false,
+    asset_info: { asset_id: '', original_video_url: '', file_name: args.fileName || '' },
+  };
+  // RETRY no submit: throttle/risk-control do motor é transitório (ver submitLipsync).
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const j = await dfPostJson<{ animate_image_id?: string }>(c, '/dw-server/task/v2/submit', body);
+      const animateId = j.data?.animate_image_id;
+      if (!animateId) throw new DreamFaceError('submit_failed', 'Motor não retornou animate_image_id no submit.');
+      return animateId;
+    } catch (e) {
+      lastErr = e;
+      const transient =
+        e instanceof DreamFaceError && (e.code === 'api_error' || e.code === 'submit_failed' || e.code === 'bad_response');
+      if (!transient || attempt === 2) throw e;
+      await sleep(2500 * (attempt + 1) + Math.floor(Math.random() * 1200));
+    }
+  }
+  throw lastErr;
+}
+
+export type StartRemovalInput = {
+  videoBuffer: Buffer | Uint8Array;
+  videoName?: string;
+  videoType?: string;
+  /** Dimensões/duração já conhecidas (do client) — evita 1 round-trip. */
+  width?: number;
+  height?: number;
+  durationSec?: number;
+};
+
+/**
+ * START (rápido) da remoção: sobe o vídeo e submete — NÃO espera o render.
+ * Volta com o animate_image_id assim que o motor aceita o job. O caller
+ * acompanha o render com checkLipsyncStatus (mesmo poll do lipsync — o work
+ * aparece em get_recent_creation_list mapeado pelo animate_id) + resolveMp4.
+ */
+export async function startWatermarkRemoval(
+  input: StartRemovalInput,
+  config?: DreamFaceConfig,
+): Promise<{ animateId: string }> {
+  const c = config ?? cfg();
+  const fileUrl = await uploadVideoForRemoval(
+    c,
+    input.videoBuffer,
+    input.videoName || 'clip.mp4',
+    input.videoType || 'video/mp4',
+  );
+
+  let width = input.width || 0;
+  let height = input.height || 0;
+  let duration = input.durationSec || 0;
+  if (!width || !height || !duration) {
+    // Fallback: pergunta ao motor (não é crítico — o output é cosmético; o
+    // motor processa o vídeo inteiro subido de qualquer jeito).
+    try {
+      const d = await getVideoDetail(c, fileUrl);
+      width = width || d.width;
+      height = height || d.height;
+      duration = duration || d.duration;
+    } catch {
+      /* segue com defaults */
+    }
+  }
+
+  const animateId = await submitWatermarkRemoval(c, {
+    fileUrl,
+    width,
+    height,
+    duration,
+    fileName: input.videoName,
+  });
+  return { animateId };
+}
+
 // ───────────────────────────── Health ─────────────────────────────
 
 /**
