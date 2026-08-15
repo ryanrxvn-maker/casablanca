@@ -157,6 +157,26 @@
       return;
     }
 
+    /* ─────────────── ElevenLabs (voz pela sessao do user) ─────────────── */
+
+    if (data.type === 'EL_API_FETCH') {
+      const requestId = data.requestId;
+      relayToBg(
+        { type: 'EL_API_FETCH', requestId, req: data.req },
+        (message) => ({ type: 'EL_API_RESULT', requestId, status: 0, ok: false, body: { message } }),
+      );
+      return;
+    }
+
+    if (data.type === 'EL_TEST_SESSION') {
+      const requestId = data.requestId;
+      relayToBg(
+        { type: 'EL_TEST_SESSION', requestId },
+        (detail) => ({ type: 'EL_TEST_RESULT', requestId, ok: false, detail }),
+      );
+      return;
+    }
+
     if (data.type === 'HG_CLONE_VOICE') {
       const requestId = data.requestId;
       relayToBg(

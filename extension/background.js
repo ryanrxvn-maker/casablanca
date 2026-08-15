@@ -369,6 +369,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  /* ══════════════════════ ELEVENLABS (voz) ══════════════════════
+   * Mesmo desenho do HeyGen: o trabalho de verdade acontece no content
+   * script da aba do elevenlabs.io, que tem a sessao do user. O background
+   * so acha/abre a aba e leva o recado. Nada aqui usa credito de API. */
+
+  if (msg.type === 'EL_API_FETCH') {
+    const requestId = msg.requestId;
+    handleElevenApiFetch(requestId, msg.req, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'EL_API_RESULT', {
+        status: 0,
+        ok: false,
+        body: { message: err?.message ?? String(err) },
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
+  if (msg.type === 'EL_TEST_SESSION') {
+    const requestId = msg.requestId;
+    handleElevenTestSession(requestId, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'EL_TEST_RESULT', {
+        ok: false,
+        detail: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   // ===== CDP: cliques confiaveis (isTrusted=true) via Chrome DevTools =====
   // Necessario pra alguns botoes do create-v4 (Add audio, linha biblioteca,
   // pilula Use avatar voice) que so respondem a eventos confiaveis.
@@ -1177,6 +1207,168 @@ async function handleApiFetch(requestId, req, bridgeTabId) {
   } catch (e) {
     reportToPage(bridgeTabId, requestId, 'HG_API_RESULT', {
       status: 0, ok: false, body: { message: 'Aba HeyGen nao respondeu: ' + (e?.message ?? '') },
+    });
+  }
+}
+
+/* ════════════════════════ ELEVENLABS — aba + proxy ════════════════════════
+ * Espelho do que ja existe pro HeyGen. A diferenca de fundo: a sessao do
+ * ElevenLabs nao mora so no cookie — o app manda um cabecalho proprio que
+ * nasce dentro do bundle. Quem ve isso e o elevenlabs-inject.js (MAIN world,
+ * document_start). Por isso, aba que subiu ANTES da extensao existir nao tem
+ * captura nenhuma: nesse caso a gente recarrega a aba UMA vez e o boot do app
+ * entrega a sessao sozinho. E o mesmo remedio do "F5 na aba" — so que
+ * automatico, o user nao precisa saber disso. */
+
+const ELEVEN_APP_URL = 'https://elevenlabs.io/app/home';
+
+async function findOrCreateElevenTab() {
+  const tabs = await chrome.tabs.query({ url: ['https://elevenlabs.io/*'] });
+  // Mesma politica do HeyGen: nunca mexer numa aba que o user esta olhando.
+  const candidates = tabs.filter((t) => t.active === false);
+  for (const t of candidates) {
+    try {
+      if (t.discarded || t.status === 'unloaded') {
+        console.log('[DARKO LAB BG] aba ElevenLabs', t.id, 'descartada — acordando');
+        await chrome.tabs.reload(t.id);
+        await new Promise((r) => setTimeout(r, 800));
+      }
+      await waitForElevenTabReady(t.id);
+      return t;
+    } catch (e) {
+      console.warn(
+        '[DARKO LAB BG] aba ElevenLabs',
+        t.id,
+        'inutilizavel, pulando:',
+        e?.message ?? e,
+      );
+    }
+  }
+  console.log('[DARKO LAB BG] nenhuma aba ElevenLabs reaproveitavel — criando uma nova (inativa)');
+  const fresh = await chrome.tabs.create({ url: ELEVEN_APP_URL, active: false });
+  await waitForElevenTabReady(fresh.id);
+  return fresh;
+}
+
+/** Ping no content script do ElevenLabs. Retorna a resposta ou null. */
+async function elevenPing(tabId, timeoutMs = 1500) {
+  try {
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'EL_PING' }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('EL_PING timeout')), timeoutMs)),
+    ]);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function waitForElevenTabReady(tabId) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === 'complete') break;
+    } catch {
+      throw new Error('Aba do ElevenLabs foi fechada.');
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  let pong = await elevenPing(tabId);
+  if (!pong?.ok) {
+    // Content script ausente (aba anterior a instalacao/update) — injeta.
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['elevenlabs-content.js'] });
+      await new Promise((r) => setTimeout(r, 800));
+      pong = await elevenPing(tabId, 2500);
+    } catch (e) {
+      const raw = e?.message ?? String(e);
+      if (/cannot access contents|permission to access/i.test(raw)) {
+        throw new Error(
+          'Aba do ElevenLabs dormindo ou travada. Feche as abas do elevenlabs.io, deixe UMA aberta e logada, e tente de novo.',
+        );
+      }
+      throw new Error('Falha ao injetar o script do ElevenLabs: ' + raw);
+    }
+  }
+  if (!pong?.ok) {
+    throw new Error(
+      'O script do ElevenLabs não respondeu. Recarregue a aba do elevenlabs.io (F5) e tente de novo.',
+    );
+  }
+
+  // Sem sessao capturada: o interceptor do MAIN world so entra em
+  // document_start, entao um F5 resolve — e o boot do app publica a sessao.
+  // Uma vez so por aba, pra nunca virar loop de reload.
+  if (!pong.hasSession && !elevenReloaded.has(tabId)) {
+    elevenReloaded.add(tabId);
+    console.log('[DARKO LAB BG] aba ElevenLabs', tabId, 'sem sessao capturada — recarregando 1x');
+    await chrome.tabs.reload(tabId);
+    await new Promise((r) => setTimeout(r, 1200));
+    const deadline2 = Date.now() + 25000;
+    while (Date.now() < deadline2) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.status === 'complete') break;
+      } catch {
+        throw new Error('Aba do ElevenLabs foi fechada durante o reload.');
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    // Da um tempo pro app fazer a primeira chamada autenticada do boot.
+    for (let i = 0; i < 12; i++) {
+      const p = await elevenPing(tabId, 1200);
+      if (p?.hasSession) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+}
+
+/** Abas que ja levaram o reload de recuperacao (1x por aba). */
+const elevenReloaded = new Set();
+chrome.tabs.onRemoved.addListener((tabId) => elevenReloaded.delete(tabId));
+
+async function handleElevenApiFetch(requestId, req, bridgeTabId) {
+  console.log('[DARKO LAB BG] EL_API_FETCH', req?.method || 'GET', String(req?.url || '').slice(0, 90));
+  const tab = await findOrCreateElevenTab();
+  try {
+    // TTS de copy longa demora — o teto aqui e generoso de proposito.
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'EL_API_FETCH', req });
+    reportToPage(bridgeTabId, requestId, 'EL_API_RESULT', {
+      status: res?.status ?? 0,
+      ok: !!res?.ok,
+      body: res?.body ?? null,
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'EL_API_RESULT', {
+      status: 0,
+      ok: false,
+      body: { message: 'A aba do ElevenLabs não respondeu: ' + (e?.message ?? '') },
+    });
+  }
+}
+
+async function handleElevenTestSession(requestId, bridgeTabId) {
+  let tab;
+  try {
+    tab = await findOrCreateElevenTab();
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'EL_TEST_RESULT', {
+      ok: false,
+      detail: e?.message ?? String(e),
+    });
+    return;
+  }
+  try {
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'EL_TEST_SESSION' });
+    reportToPage(bridgeTabId, requestId, 'EL_TEST_RESULT', {
+      ok: !!res?.ok,
+      detail: res?.detail ?? '',
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'EL_TEST_RESULT', {
+      ok: false,
+      detail: 'A aba do ElevenLabs não respondeu: ' + (e?.message ?? ''),
     });
   }
 }

@@ -109,6 +109,13 @@ import {
   type DrMillionLang,
 } from '@/lib/drmillion-parser';
 import { LangSwitch3D } from '@/components/LangSwitch3D';
+import { ElevenToggle3D } from '@/components/ElevenToggle3D';
+import { ElevenAdPanel } from '@/components/ElevenAdPanel';
+import {
+  teamSupportsEleven,
+  isElevenModeOn,
+  setElevenMode as persistElevenMode,
+} from '@/lib/eleven-pilot-config';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
@@ -1514,6 +1521,59 @@ function ClickUpPilotInner() {
       pl: analisadas.some((a) => a.drLangs!.pl),
     };
   }, [taskAnalyses]);
+
+  /* ══════════════════ MODO ELEVEN (voz no ElevenLabs) ══════════════════
+   *  Ligado, o disparo deixa de ser vídeo no HeyGen e passa a ser ÁUDIO
+   *  gerado na conta do ElevenLabs do user (pela sessão, via extensão — nunca
+   *  por crédito de API). Só existe no DR MILLION: é lá que o formato é
+   *  "um corpo + N ganchos", que é o que o painel de voz sabe montar.
+   *
+   *  O estado é POR WORKSPACE ([[eleven-pilot-config]]): trocar pro B2C não
+   *  pode arrastar o modo junto — lá o fluxo continua exatamente o de sempre. */
+  const [elevenMode, setElevenModeState] = useState(false);
+
+  const nomeDoWorkspace = useMemo(
+    () => teams.find((t) => t.id === selectedTeam)?.name || '',
+    [teams, selectedTeam],
+  );
+
+  /** O toggle só aparece na empresa que usa voz. */
+  const mostrarToggleEleven = useMemo(
+    () => teamSupportsEleven(nomeDoWorkspace),
+    [nomeDoWorkspace],
+  );
+
+  // Relê a escolha salva a cada troca de empresa. Se a empresa não suporta,
+  // o modo cai pra desligado — sem isso um id herdado ligaria voz no B2C.
+  useEffect(() => {
+    if (!mostrarToggleEleven) {
+      setElevenModeState(false);
+      return;
+    }
+    setElevenModeState(isElevenModeOn(selectedTeam));
+  }, [selectedTeam, mostrarToggleEleven]);
+
+  function setElevenMode(on: boolean) {
+    setElevenModeState(on);
+    persistElevenMode(selectedTeam, on);
+  }
+
+  /** Modo EFETIVO — o que o resto da tela consulta. */
+  const elevenAtivo = mostrarToggleEleven && elevenMode;
+
+  /** Extensão conectada (o painel de voz depende dela). Checa 1x no mount e
+   *  de novo quando o modo liga, porque o user pode instalar/atualizar a
+   *  extensão com a página já aberta. */
+  const [extConectada, setExtConectada] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    void detectExtension().then((r) => {
+      if (vivo) setExtConectada(r.connected);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [elevenAtivo]);
 
   function resolveEditorForTeam(teamId: string): string | null {
     // ESTRITO de propósito: sem escolha própria pra essa empresa, o certo é
@@ -8670,6 +8730,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         ) : null}
                       </>
                     ) : null}
+                    {/* MODO ELEVEN — troca o disparo de vídeo (HeyGen) por voz
+                     *  (ElevenLabs). Só na empresa que usa voz. */}
+                    {mostrarToggleEleven ? (
+                      <>
+                        <span aria-hidden className="hidden h-6 w-px bg-line sm:block" />
+                        <ElevenToggle3D
+                          on={elevenMode}
+                          onChange={setElevenMode}
+                          disabled={analyzing || switchingTeam}
+                          hint={
+                            elevenMode && !extConectada
+                              ? 'Modo ElevenLabs ligado, mas a extensão Hey Auto não está conectada — sem ela a voz não gera.'
+                              : undefined
+                          }
+                        />
+                        {elevenMode ? (
+                          <span className="mono text-[10px] uppercase tracking-widest text-white/70">
+                            disparo gera ÁUDIO
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center gap-3">
@@ -9766,6 +9848,50 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             : a.drMillion
                               ? `${adGroupOf(a.baseAdId || a.taskName) || a.taskName} · ${1 + sharedSiblings.length} hooks`
                               : a.taskName.replace(/\s*[-–—]\s*G\d+\s*$/i, '').trim();
+
+                          /* ══ MODO ELEVEN neste card ══
+                           * Vale só pro formato do DR MILLION (um corpo + N
+                           * ganchos). Uma task que caiu aqui sem esse formato
+                           * continua no fluxo normal — melhor render de vídeo
+                           * do que um painel de voz que não sabe montar nada. */
+                          const elevenNoCard = elevenAtivo && !!a.drMillion &&
+                            (a.status === 'ready' || a.status === 'partial');
+                          /** Um gancho por task do grupo, em ordem de G. O texto
+                           *  passa pelo MESMO sanitizador do disparo — o que o
+                           *  ElevenLabs fala é só a copy falada, sem marcação
+                           *  de cena nem link. */
+                          const elevenHooks = elevenNoCard
+                            ? [a, ...sharedSiblings]
+                                .map((s) => ({
+                                  taskId: s.taskId,
+                                  adId: (s.baseAdId || s.taskName).trim(),
+                                  taskName: s.taskName,
+                                  text: extractSpokenBody(
+                                    (s.partTemplates || [])
+                                      .filter((p) => /^HOOK/i.test(p.label.trim()))
+                                      .map((p) => p.text.trim())
+                                      .filter(Boolean)
+                                      .join('\n\n'),
+                                  ),
+                                }))
+                                .sort((x, y) => {
+                                  const g = (id: string) => {
+                                    const m = id.match(/G(\d+)/i);
+                                    return m ? parseInt(m[1], 10) : 999;
+                                  };
+                                  return g(x.adId) - g(y.adId) || x.adId.localeCompare(y.adId);
+                                })
+                            : [];
+                          const elevenBody = elevenNoCard
+                            ? extractSpokenBody(
+                                a.bodyRaw ||
+                                  (a.partTemplates || [])
+                                    .filter((p) => /^(BODY|PARTE)\b/i.test(p.label.trim()))
+                                    .map((p) => p.text.trim())
+                                    .filter(Boolean)
+                                    .join('\n\n'),
+                              )
+                            : '';
                           return (
                             <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
                               <div className="flex items-center justify-between gap-2">
@@ -9792,12 +9918,26 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 </button>
                               </div>
 
+                              {/* ═══ PAINEL DE VOZ (modo Eleven) ═══
+                               *  Substitui todo o fluxo de vídeo: aqui você
+                               *  escolhe a VOZ, marca quais ganchos entram e
+                               *  dispara. O corpo é gerado uma vez só e entra
+                               *  em todos ([[planElevenDispatch]]). */}
+                              {elevenNoCard ? (
+                                <ElevenAdPanel
+                                  groupId={adGroupOf(a.baseAdId || a.taskName) || a.baseAdId || a.taskName}
+                                  hooks={elevenHooks}
+                                  bodyText={elevenBody}
+                                  extensionConnected={extConectada}
+                                />
+                              ) : null}
+
                               {/* MOTOR CONFIG — Avatar III/IV/V picker.
                                   ESCONDIDO quando ONLY MAGNIFIC tá ligado:
                                   esse modo pula HeyGen totalmente (só dispara
                                   Auto B-rolls), então não há avatar pra
                                   escolher. Limpa a UI e elimina dúvida. */}
-                              {!onlyMagnificMode && !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
+                              {!elevenNoCard && !onlyMagnificMode && !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
                                 <div className="mt-2">
                                   <MotorConfigPicker
                                     config={getMotorConfig(a.taskId)}
@@ -9810,6 +9950,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 </div>
                               ) : null}
 
+                              {elevenNoCard ? null : (
                               <div className="mt-1 flex items-center justify-between gap-2">
                                 <span></span>
                                 {a.vaBriefing ? (
@@ -9959,9 +10100,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   </div>
                                 ) : null}
                               </div>
+                              )}
 
                               {/* CAMUFLAGEM PANEL INLINE — so aparece quando toggle ON */}
-                              {!onlyMagnificMode && !a.trocaBriefing && (taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? (
+                              {!elevenNoCard && !onlyMagnificMode && !a.trocaBriefing && (taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? (
                                 <div className="mt-2 rounded-[12px] border border-fuchsia-500/40 bg-gradient-to-br from-fuchsia-500/[0.08] via-fuchsia-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                                   <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
                                     <span className="inline-flex items-center gap-1.5">
@@ -10018,7 +10160,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 </div>
                               ) : null}
                               {/* CAIXA INLINE de JSON Auto B-roll (Magnific) por task — abre/fecha pelo botão 3D ✨ */}
-                              {!a.vaBriefing && !a.trocaBriefing && magnificEditorOpen[a.taskId] ? (
+                              {!elevenNoCard && !a.vaBriefing && !a.trocaBriefing && magnificEditorOpen[a.taskId] ? (
                                 <div className="mt-2 rounded-[12px] border border-violet-400/45 bg-gradient-to-br from-violet-500/[0.08] via-violet-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                                   <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-violet-200">
                                     <span className="inline-flex items-center gap-1.5">
@@ -10081,7 +10223,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 </div>
                               ) : null}
                               {/* RENDER TROCA DE ÁUDIO — pipeline proprio (sem HeyGen) */}
-                              {a.trocaBriefing ? (() => {
+                              {elevenNoCard ? null : a.trocaBriefing ? (() => {
                                 const detectedDriveId = a.trocaBriefing!.driveId || extractDriveFileId(trocaAdUrl[a.taskId] || '');
                                 const pastedFolderId = extractDriveFolderId(trocaAdUrl[a.taskId] || '');
                                 const folderUrl = a.trocaBriefing!.driveFolderUrl;
