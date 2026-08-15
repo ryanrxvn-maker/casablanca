@@ -22,6 +22,9 @@ export type BatchJob3DPhase =
   | 'rendering'
   | 'downloading'
   | 'post'
+  /** Takes ainda RENDERIZANDO no HeyGen (plataforma lenta). Não é falha e não
+   *  re-dispara nada — o watcher fecha sozinho. Ver [[heygen-health]]. */
+  | 'waiting-heygen'
   | 'done'
   | 'failed';
 
@@ -327,6 +330,7 @@ const PHASE_MAP: Record<BatchJob3DPhase, { label: string; icon: React.ReactNode;
   rendering: { label: 'Renderizando', icon: <IconClock size={12} />, tone: 'progress', barFrom: 'from-cyan-400', barTo: 'to-cyan-200' },
   downloading: { label: 'Baixando', icon: <IconDownload size={12} />, tone: 'progress', barFrom: 'from-cyan-300', barTo: 'to-lime' },
   post: { label: 'Montando', icon: <IconStack size={12} />, tone: 'progress', barFrom: 'from-lime/80', barTo: 'to-lime' },
+  'waiting-heygen': { label: 'Aguardando HeyGen', icon: <IconClock size={12} />, tone: 'warn', barFrom: 'from-amber-400', barTo: 'to-amber-200' },
   done: { label: 'Pronto', icon: <IconCheck size={12} />, tone: 'success', barFrom: 'from-lime/80', barTo: 'to-lime' },
   failed: { label: 'Falhou', icon: <IconAlert size={12} />, tone: 'error', barFrom: 'from-rose-400', barTo: 'to-rose-300' },
 };
@@ -373,7 +377,7 @@ const IconHourglass = ({ size = 13 }: { size?: number }) => (
   </svg>
 );
 
-type MsgBanner = { kind: 'quota' | 'fail'; title: string; hint?: string };
+type MsgBanner = { kind: 'quota' | 'wait' | 'fail'; title: string; hint?: string };
 
 /** Mensagem ESPECIAL com visual próprio (banner no card): limite diário do
  *  HeyGen (âmbar, ⏳) e falha (rosa). SEMPRE curta e sem termo técnico — user
@@ -390,6 +394,16 @@ function classifyBanner(raw: string | undefined, phase: BatchJob3DPhase): MsgBan
       kind: 'quota',
       title: 'Limite diário do HeyGen atingido',
       hint: 'Renova em até 24h — depois clica em Retomar (⟳) que eu continuo sozinho. Não é erro do app.',
+    };
+  }
+  // ESPERANDO O HEYGEN — âmbar, nunca vermelho. O take está VIVO renderizando
+  // lá; re-disparar duplicaria gasto de cota, então o sistema só espera. Ver
+  // [[heygen-health]].
+  if (phase === 'waiting-heygen') {
+    return {
+      kind: 'wait',
+      title: 'O HeyGen ainda está renderizando esses takes',
+      hint: 'Não é falha e não re-gerei nada (economiza cota). Eu re-checo sozinho e fecho a montagem assim que ficarem prontos.',
     };
   }
   if (phase !== 'failed') return null;
@@ -468,12 +482,15 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     showAsWarn ? 'border-amber-400/35'
     : phase === 'done' ? 'border-lime/35'
     : phase === 'failed' ? 'border-rose-400/35'
+    // Esperar o HeyGen é aviso âmbar, nunca o vermelho de falha.
+    : phase === 'waiting-heygen' ? 'border-amber-400/35'
     : isRunning ? 'border-fuchsia-400/30'
     : 'border-white/8';
   const bgGradient =
     showAsWarn ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
     : phase === 'done' ? 'from-lime/[0.07] via-lime/[0.02] to-transparent'
     : phase === 'failed' ? 'from-rose-500/[0.07] via-rose-500/[0.02] to-transparent'
+    : phase === 'waiting-heygen' ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
     : isRunning ? 'from-fuchsia-500/[0.07] via-fuchsia-500/[0.02] to-transparent'
     : 'from-white/[0.04] to-transparent';
 
@@ -858,20 +875,20 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
           {banner ? (
             <div
               className={`mt-2.5 flex items-start gap-2.5 rounded-[12px] border px-3 py-2.5 ${
-                banner.kind === 'quota'
+                banner.kind !== 'fail'
                   ? 'border-amber-400/40 bg-gradient-to-br from-amber-400/[0.14] via-amber-400/[0.05] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                   : 'border-rose-400/35 bg-gradient-to-br from-rose-500/[0.12] via-rose-500/[0.04] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
               }`}
             >
               <span
                 className={`mt-[1px] flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                  banner.kind === 'quota' ? 'bg-amber-400/15 text-amber-300' : 'bg-rose-400/15 text-rose-300'
+                  banner.kind !== 'fail' ? 'bg-amber-400/15 text-amber-300' : 'bg-rose-400/15 text-rose-300'
                 }`}
               >
-                {banner.kind === 'quota' ? <IconHourglass size={13} /> : <IconAlert size={13} />}
+                {banner.kind !== 'fail' ? <IconHourglass size={13} /> : <IconAlert size={13} />}
               </span>
               <div className="min-w-0">
-                <div className={`text-[11.5px] font-semibold leading-snug ${banner.kind === 'quota' ? 'text-amber-100' : 'text-rose-100'}`}>
+                <div className={`text-[11.5px] font-semibold leading-snug ${banner.kind !== 'fail' ? 'text-amber-100' : 'text-rose-100'}`}>
                   {banner.title}
                 </div>
                 {banner.hint ? (

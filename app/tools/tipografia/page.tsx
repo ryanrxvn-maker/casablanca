@@ -60,7 +60,6 @@ import {
 import {
   groupWords,
   blockText,
-  blocksToSrt,
   retimeBlockText,
   splitBlock,
   mergeBlocks,
@@ -554,6 +553,14 @@ function TipografiaInner() {
         audioOk: out.audioOk,
       });
       logHistory({ tool: 'tipografia', title: `Letterings queimados em ${file.name}` });
+      // FLUXO: renderizou = baixou. O download começa sozinho; o card ainda
+      // tem "Baixar de novo" caso o navegador segure o primeiro.
+      try {
+        const base = file.name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
+        await downloadBlob(out.blob, `${base}_letterings.mp4`);
+      } catch {
+        /* botão do card cobre */
+      }
       setStage(null);
       setProgress(null);
       setPhase('ready');
@@ -579,13 +586,6 @@ function TipografiaInner() {
     const blob = await res.blob();
     const base = file.name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
     await downloadBlob(blob, `${base}_letterings.mp4`);
-  }
-
-  async function downloadSrt() {
-    if (blocks.length === 0 || !file) return;
-    const base = file.name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
-    const blob = new Blob([blocksToSrt(blocks)], { type: 'application/x-subrip' });
-    await downloadBlob(blob, `${base}.srt`);
   }
 
   // ── edição de blocos ──
@@ -938,16 +938,13 @@ function TipografiaInner() {
                 <CancelButton onClick={handleCancel} label="Cancelar render" />
               ) : (
                 <ToolAction onClick={renderFinal} disabled={processing || !file}>
-                  Queimar letterings no vídeo
+                  Renderizar vídeo
                 </ToolAction>
               )}
-              <button onClick={downloadSrt} className="btn-secondary" disabled={processing}>
-                Baixar .SRT
-              </button>
             </div>
             <p className="mt-2 text-[11.5px] text-text-muted">
-              O render roda no seu navegador — vídeo de 1min leva por volta de 1 a 2min.
-              Deixa a aba aberta até terminar.
+              O render roda no seu navegador, acelerado por hardware — quando
+              terminar, o download começa sozinho. Deixa a aba aberta até o fim.
             </p>
           </ToolStep>
         ) : null}
@@ -1021,11 +1018,11 @@ function TipografiaInner() {
                 playsInline
                 className="max-h-[420px] w-full rounded-[12px] border border-line bg-black"
               />
-              <div className="mt-4 flex flex-wrap gap-3">
-                <ToolAction onClick={downloadMp4}>Baixar MP4</ToolAction>
-                <button onClick={downloadSrt} className="btn-secondary">
-                  Baixar .SRT
-                </button>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <ToolAction onClick={downloadMp4}>Baixar de novo</ToolAction>
+                <span className="text-[11px] text-text-muted">
+                  O download começou sozinho — se o navegador segurou, usa o botão.
+                </span>
               </div>
             </ToolResultCard>
           </div>
@@ -1463,6 +1460,9 @@ function PresetGallery({
   // só os cards VISÍVEIS na rolagem animam (IntersectionObserver)
   const visRef = useRef(new Set<string>());
   const ioRef = useRef<IntersectionObserver | null>(null);
+  // canvases que já receberam AO MENOS um frame (WeakSet: card remontado volta virgem)
+  const drawnRef = useRef(new WeakSet<HTMLCanvasElement>());
+  const fontsReadyRef = useRef(false);
   const list = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
 
   useEffect(() => {
@@ -1470,31 +1470,49 @@ function PresetGallery({
     if (scrollBoxRef.current) scrollBoxRef.current.scrollTop = 0;
   }, [cat]);
 
-  useEffect(() => {
-    ioRef.current = new IntersectionObserver(
-      (entries) => {
-        for (const en of entries) {
-          const id = (en.target as HTMLElement).dataset.pid;
-          if (!id) continue;
-          if (en.isIntersecting) visRef.current.add(id);
-          else visRef.current.delete(id);
-        }
-      },
-      { root: scrollBoxRef.current, rootMargin: '140px' },
-    );
-    return () => ioRef.current?.disconnect();
+  // Observer criado SOB DEMANDA: os refs dos cards disparam ANTES dos
+  // useEffect no primeiro mount — criar o IO num effect deixava a galeria
+  // inteira sem observação (cards pretos até um clique re-renderizar).
+  const obtainIO = useCallback(() => {
+    if (!ioRef.current && typeof IntersectionObserver !== 'undefined') {
+      ioRef.current = new IntersectionObserver(
+        (entries) => {
+          for (const en of entries) {
+            const id = (en.target as HTMLElement).dataset.pid;
+            if (!id) continue;
+            if (en.isIntersecting) visRef.current.add(id);
+            else visRef.current.delete(id);
+          }
+        },
+        // root = viewport: o IO já clipa pelo scroll-box ancestral
+        { rootMargin: '160px' },
+      );
+    }
+    return ioRef.current;
   }, []);
 
+  useEffect(() => () => ioRef.current?.disconnect(), []);
+
   useEffect(() => {
-    void ensureTypoFonts();
+    void ensureTypoFonts().then(() => {
+      fontsReadyRef.current = true;
+    });
     let raf = 0;
     const t0 = performance.now();
     const tick = () => {
       const now = performance.now() - t0;
+      // cards fora da viewport ganham 1 frame estático (nunca preto ao rolar);
+      // no máx 3 por tick e só com fontes prontas pra não carimbar fallback
+      let prepaint = 3;
       for (const preset of list) {
-        if (!visRef.current.has(preset.id)) continue;
         const c = canvasesRef.current.get(preset.id);
         if (!c) continue;
+        const vis = ioRef.current ? visRef.current.has(preset.id) : true;
+        if (!vis) {
+          if (!fontsReadyRef.current || prepaint <= 0 || drawnRef.current.has(c))
+            continue;
+          prepaint--;
+        }
         const ctx = c.getContext('2d');
         if (!ctx) continue;
         ctx.clearRect(0, 0, c.width, c.height);
@@ -1503,6 +1521,7 @@ function PresetGallery({
           ? 'SABE QUE NÃO É MAIS UM CURSO DE COPY'
           : 'SUA LEGENDA AQUI';
         drawPresetDemo(ctx, preset, now, c.width, c.height, demoText);
+        drawnRef.current.add(c);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -1552,7 +1571,7 @@ function PresetGallery({
               disabled={disabled}
               data-pid={preset.id}
               ref={(el) => {
-                if (el && ioRef.current) ioRef.current.observe(el);
+                if (el) obtainIO()?.observe(el);
               }}
               onClick={() => onPick(preset.id)}
               className={
@@ -1649,6 +1668,7 @@ function Timeline({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const scrubRef = useRef(false); // arrastando a agulha (fora dos blocos)
   const [pps, setPps] = useState(0); // px por segundo (0 = ainda não ajustou)
   const dragRef = useRef<{
     id: string;
@@ -1749,7 +1769,7 @@ function Timeline({
         className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
-        <span>Timeline — arrasta pra mover · puxa as bordas pra cortar</span>
+        <span>Timeline — blocos movem · bordas cortam · arrasta a agulha pra navegar</span>
         <span className="flex items-center gap-3">
           <span
             ref={timeReadRef}
@@ -1785,13 +1805,48 @@ function Timeline({
             backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) ${effPps}px, transparent ${effPps}px, transparent ${effPps * 2}px)`,
           }}
           onPointerDown={(e) => {
-            // clique na área vazia = seek
+            // clique/arrasto fora dos blocos = scrub da agulha (estilo CapCut)
             if (disabled) return;
             const target = e.target as HTMLElement;
             if (target.dataset.block) return;
+            const el = e.currentTarget as HTMLElement;
+            try {
+              el.setPointerCapture(e.pointerId);
+            } catch {
+              /* browsers antigos seguem só com o clique */
+            }
+            scrubRef.current = true;
+            const rect = el.getBoundingClientRect();
+            const v = videoRef.current;
+            if (v) {
+              v.pause();
+              v.currentTime = Math.min(
+                Math.max(0, (e.clientX - rect.left) / effPps),
+                Math.max(0, duration - 0.03),
+              );
+            }
+          }}
+          onPointerMove={(e) => {
+            if (!scrubRef.current) return;
             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
             const v = videoRef.current;
-            if (v) v.currentTime = Math.max(0, (e.clientX - rect.left) / effPps);
+            if (v)
+              v.currentTime = Math.min(
+                Math.max(0, (e.clientX - rect.left) / effPps),
+                Math.max(0, duration - 0.03),
+              );
+          }}
+          onPointerUp={(e) => {
+            if (!scrubRef.current) return;
+            scrubRef.current = false;
+            try {
+              (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+            } catch {
+              /* já solto */
+            }
+          }}
+          onPointerCancel={() => {
+            scrubRef.current = false;
           }}
         >
           {/* régua */}
@@ -1920,12 +1975,16 @@ function Timeline({
             </div>
           ) : null}
 
-          {/* playhead */}
+          {/* playhead — a zona de pega (12px) reenvia o pointer pro track = scrub */}
           <div
             ref={playheadRef}
             className="pointer-events-none absolute top-0 z-20 h-full w-[2px] bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]"
           >
             <div className="absolute -left-[4px] top-0 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent border-t-red-500" />
+            <div
+              className="pointer-events-auto absolute -left-[5px] top-0 h-full w-[12px] cursor-ew-resize"
+              title="Arrasta pra navegar"
+            />
           </div>
         </div>
       </div>

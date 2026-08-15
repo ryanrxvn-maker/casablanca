@@ -48,8 +48,11 @@ import {
   isQuotaError,
   deleteVideo,
   isSyntheticPollError,
+  classifyForRedispatch,
+  getVideosStatus,
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
+import { getHeyGenHealth } from '@/lib/heygen-health';
 import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
 import {
   getLibrarySnapshot,
@@ -203,6 +206,56 @@ async function purgeRejectedVideosBeforeRedispatch(
       new Promise((r) => setTimeout(r, 25_000)),
     ]);
   } catch { /* best-effort — nunca bloqueia o re-disparo */ }
+}
+
+/** Veredito do porteiro traduzido pra índices de parte do plano. */
+type RedispatchPlan = {
+  /** Liberados: nunca dispararam OU o HeyGen recusou de verdade. */
+  redispatch: number[];
+  /** PROIBIDOS: o HeyGen ainda está renderizando esses. */
+  waiting: Array<{ idx: number; videoId: string }>;
+  /** Já ficaram prontos — só baixar, cota zero. */
+  rescue: Array<{ idx: number; videoId: string; videoUrl: string }>;
+  /** Falhas REAIS a excluir antes de re-submeter (anti-memória de moderação). */
+  rejected: Array<{ videoId?: string | null; error?: string | null }>;
+};
+
+/**
+ * PORTEIRO DO RE-DISPARO (fix 2026-08-14) — o remédio pro caso que o user
+ * pegou no AD70GL: o HeyGen degradou pra ~2h por parte, o nosso poll cansou,
+ * marcou 'falha' e a auto-cura re-disparou take que estava VIVO renderizando.
+ * Cada parte lenta comeu dois pedaços da cota diária e o disparo ainda saiu
+ * incompleto.
+ *
+ * Regra: nenhum re-disparo sem status FRESCO na hora. Quem está pendente vira
+ * espera (não falha), quem já ficou pronto é resgatado de graça, e só quem o
+ * HeyGen realmente recusou — ou nunca chegou a disparar — vai pro submit.
+ */
+async function planRedispatch(
+  idxs: number[],
+  describe: (i: number) => { videoId?: string | null; title: string; error?: string | null },
+  ctx: string,
+): Promise<RedispatchPlan> {
+  const plan: RedispatchPlan = { redispatch: [], waiting: [], rescue: [], rejected: [] };
+  if (idxs.length === 0) return plan;
+  const verdicts = await classifyForRedispatch(idxs.map((i) => describe(i)));
+  idxs.forEach((idx, k) => {
+    const v = verdicts[k];
+    if (!v) { plan.redispatch.push(idx); return; }
+    if (v.action === 'rescue') {
+      plan.rescue.push({ idx, videoId: v.videoId, videoUrl: v.videoUrl });
+    } else if (v.action === 'wait') {
+      plan.waiting.push({ idx, videoId: v.videoId });
+    } else {
+      plan.redispatch.push(idx);
+      if (v.rejectedVideoId) plan.rejected.push({ videoId: v.rejectedVideoId, error: describe(idx).error });
+    }
+  });
+  console.log(
+    `[${ctx}] porteiro do re-disparo: ${plan.redispatch.length} liberada(s), ` +
+    `${plan.waiting.length} ainda renderizando (NÃO re-disparo), ${plan.rescue.length} resgatada(s) pronta(s)`,
+  );
+  return plan;
 }
 
 /**
@@ -592,8 +645,10 @@ type BatchTaskState = {
    *  whiteScore alto + blackScore baixo = a IA escuta o novo WHITE. */
   trocaWhiteScore?: number;
   trocaBlackScore?: number;
-  /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed */
-  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
+  /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed
+   *  waiting-heygen = takes ainda RENDERIZANDO no HeyGen (plataforma lenta). NÃO
+   *  é falha e NÃO re-dispara — o watcher retoma sozinho quando ficarem prontos. */
+  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed' | 'waiting-heygen';
   /** Per-part status durante dispatch (parteN: error|null) */
   parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; videoUrl?: string | null; error?: string | null; renamedTo: string }>;
   message?: string;
@@ -630,6 +685,12 @@ type BatchTaskState = {
    *  a auto-cura re-tenta e o card não mente "Pronto". Ausente em batches
    *  antigos (undefined) → tratado como legado, não força aviso. */
   deliveryOk?: boolean;
+  /** ESPERANDO O HEYGEN (fix 2026-08-14): videoIds que continuam RENDERIZANDO
+   *  lá quando o run terminou. Não são falha — o watcher re-checa em silêncio e
+   *  chama o RETOMAR sozinho quando ficam prontos, sem gastar cota nenhuma. */
+  waitingVideoIds?: string[];
+  /** Instante da última re-checagem do watcher (evita martelar a API). */
+  waitingCheckedAt?: number;
   /** VA: quantos avatares saíram montados vs esperados. BLINDAGEM: o card só
    *  mostra "PRONTO" verde quando okAvas === expectedAvas. Se faltou avatar
    *  (ex: 1/2 — mount morreu, cota, etc.), o card vira AVISO (não verde) com a
@@ -3276,14 +3337,16 @@ function ClickUpPilotInner() {
 
       // 2. Poll status ate todos prontos (ou alguns falharem)
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'rendering', message: `Aguardando renderizacao no HeyGen (${validIds.length} videos)...` } }));
+      let renderHealthNote = '';
       const finalStatuses = await pollVideosUntilReady(validIds, {
         intervalMs: 8000,
         timeoutMs: 30 * 60 * 1000,
-        // Zombie killer: HeyGen video normal leva 2-8min. Travado >15min sem
-        // progresso = falha definitiva pra esse render. Pipeline finaliza com
-        // partial result; user pode RETOMAR pra re-disparar so as zumbis.
+        // Teto em plataforma SAUDÁVEL. Quando o monitor acusa lentidão, o poll
+        // estica sozinho (até 4h) em vez de cunhar falso negativo — era isso que
+        // fazia a auto-cura re-disparar take que estava só demorando.
         maxPendingMsPerId: 15 * 60 * 1000,
         isCancelled: () => !!batchCancelRef.current[taskId],
+        onHealth: (h) => { renderHealthNote = h.state === 'ok' ? '' : ` — ${h.reason}`; },
         onStatus: (st) => {
           const done = Object.values(st).filter((s) => s.status === 'completed').length;
           setBatchStates((prev) => {
@@ -3293,7 +3356,7 @@ function ClickUpPilotInner() {
               const ps = p.videoId ? st[p.videoId] : null;
               return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
             });
-            return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
+            return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos${renderHealthNote}` } };
           });
         },
       });
@@ -3320,7 +3383,11 @@ function ClickUpPilotInner() {
         }
         const status = finalStatuses[r.videoId];
         if (status?.status !== 'completed' || !status.videoUrl) {
-          zip.file(`${fnameBase}_NAO_RENDERIZOU.txt`, `Status: ${status?.status || '?'}\n${status?.error || ''}`);
+          // 'stalled' não é "não renderizou" — é "ainda renderizando lá".
+          zip.file(
+            status?.status === 'stalled' ? `${fnameBase}_AINDA_RENDERIZANDO.txt` : `${fnameBase}_NAO_RENDERIZOU.txt`,
+            `Status: ${status?.status || '?'}\n${status?.error || ''}`,
+          );
           return;
         }
         try {
@@ -3369,6 +3436,9 @@ function ClickUpPilotInner() {
           .filter(({ pb }) => pb.expected && !pb.blob)
           .map(({ i }) => i);
 
+      /** Takes que o HeyGen ainda está renderizando quando o run acaba. Não são
+       *  falha: o batch fecha em 'waiting-heygen' e o watcher retoma sozinho. */
+      let stillRenderingIds: string[] = [];
       let healMissing = expectedMissing();
       if (healMissing.length > 0 && !batchCancelRef.current[taskId]) {
         console.warn(`[clickup-pilot] AUTO-CURA: ${healMissing.length} parte(s) esperada(s) sem blob:`, healMissing.map((i) => plan!.parts[i].label));
@@ -3400,39 +3470,93 @@ function ClickUpPilotInner() {
           }
         }
 
-        // (b) re-dispatch das que nao tem video bom (sem videoId OU render failed)
+        // (b) re-dispatch das que nao tem video bom — SEMPRE atrás do porteiro
         const MAX_HEAL_ROUNDS = 2;
         for (let round = 1; round <= MAX_HEAL_ROUNDS; round++) {
           if (batchCancelRef.current[taskId]) break;
           healMissing = expectedMissing();
           if (healMissing.length === 0) break;
 
-          const redispatchIdxs = healMissing.filter((i) => {
-            const vid = results[i]?.videoId;
-            const st = vid ? finalStatuses[vid] : null;
-            const neverDispatched = !vid;
-            const renderFailed = st?.status === 'failed' || st?.status === 'unknown' || (st?.status === 'completed' && !st.videoUrl);
+          const candidateIdxs = healMissing.filter((i) => {
             // COTA (fix 2026-07-03): não re-dispara parte que falhou por LIMITE
             // DIÁRIO — a cota continua morta, só queimaria as 2 rodadas em segundos
             // (AD47GL). O gate de completude abaixo já monta a msg ⏳ certa.
             if (isQuotaError(results[i]?.error || '')) return false;
-            return (neverDispatched || renderFailed) && !!plan!.parts[i].avatarId;
+            return !!plan!.parts[i].avatarId;
           });
-          if (redispatchIdxs.length === 0) break;
+          if (candidateIdxs.length === 0) break;
 
-          console.warn(`[clickup-pilot] AUTO-CURA rodada ${round}/${MAX_HEAL_ROUNDS}: re-disparando ${redispatchIdxs.length} parte(s):`, redispatchIdxs.map((i) => plan!.parts[i].label));
-          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'dispatching', message: `Auto-cura: re-disparando ${redispatchIdxs.length} parte(s) travada(s) (rodada ${round}/${MAX_HEAL_ROUNDS})...` } }));
-
-          // EXCLUI os vídeos NEGADOS antes do re-disparo — sem isso o HeyGen
-          // "lembra" do registro negado e nega o MESMO texto de novo (loop).
-          await purgeRejectedVideosBeforeRedispatch(
-            redispatchIdxs.map((i) => {
-              const vid = results[i]?.videoId;
-              const st = vid ? finalStatuses[vid] : null;
-              return { videoId: vid, error: st?.error || results[i]?.error };
+          // ═══ PORTEIRO (fix 2026-08-14) ═══════════════════════════════════
+          // Antes de gastar UM take de cota, confere o estado REAL de cada
+          // render agora. Pendente = ainda vivo (proibido re-disparar); pronto =
+          // resgata de graça; só falha REAL do HeyGen vira novo submit.
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Conferindo no HeyGen o que realmente falhou (${candidateIdxs.length} take(s))...` } }));
+          const gate = await planRedispatch(
+            candidateIdxs,
+            (i) => ({
+              videoId: results[i]?.videoId,
+              title: `${adNameClean}_${plan!.parts[i].label}`,
+              error: (results[i]?.videoId ? finalStatuses[results[i].videoId!]?.error : null) || results[i]?.error,
             }),
             'clickup-pilot auto-cura',
           );
+
+          // RESGATE: renderizou enquanto a gente desistia de esperar. Baixa e
+          // pronto — zero cota queimada.
+          if (gate.rescue.length > 0) {
+            setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `${gate.rescue.length} take(s) ficaram prontos no HeyGen — baixando sem re-gerar...` } }));
+            for (const r of gate.rescue) {
+              if (batchCancelRef.current[taskId]) break;
+              try {
+                const bytes = await downloadVideoBytes(r.videoUrl);
+                const part = plan!.parts[r.idx];
+                zip.file(labelToFilename(part.label), bytes);
+                const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+                partBlobs[r.idx] = { label: part.label, blob: partBlob, expected: partBlobs[r.idx].expected };
+                results[r.idx] = { ...results[r.idx], videoId: r.videoId, error: null };
+                finalStatuses[r.videoId] = { videoId: r.videoId, status: 'completed', videoUrl: r.videoUrl };
+                setBatchStates((prev) => {
+                  const s = prev[taskId];
+                  if (!s) return prev;
+                  const newParts = s.parts.map((p, i) => i === r.idx ? { ...p, videoId: r.videoId, videoStatus: 'completed' as const, videoUrl: r.videoUrl, error: undefined } : p);
+                  return { ...prev, [taskId]: { ...s, parts: newParts } };
+                });
+                try {
+                  const { saveBlob } = await import('@/lib/zip-store');
+                  await saveBlob(pilotPartKey(taskId, genId, part.label), partBlob, 'video/mp4');
+                } catch {}
+              } catch (e) { console.warn(`[clickup-pilot] resgate de ${plan!.parts[r.idx].label} falhou:`, (e as Error)?.message); }
+            }
+          }
+
+          // AINDA RENDERIZANDO: guarda pra fechar depois. NUNCA re-dispara.
+          stillRenderingIds = gate.waiting.map((w) => w.videoId);
+          if (gate.waiting.length > 0) {
+            console.warn(
+              `[clickup-pilot] ${gate.waiting.length} take(s) AINDA renderizando no HeyGen — re-disparo BLOQUEADO (evita gastar cota à toa):`,
+              gate.waiting.map((w) => plan!.parts[w.idx].label),
+            );
+            setBatchStates((prev) => {
+              const s = prev[taskId];
+              if (!s) return prev;
+              const newParts = s.parts.map((p, i) =>
+                gate.waiting.some((w) => w.idx === i)
+                  ? { ...p, videoStatus: 'stalled' as const, error: 'O HeyGen ainda está renderizando esse take — não re-disparei pra não gastar cota à toa.' }
+                  : p,
+              );
+              return { ...prev, [taskId]: { ...s, parts: newParts } };
+            });
+          }
+
+          const redispatchIdxs = gate.redispatch;
+          if (redispatchIdxs.length === 0) break;
+
+          console.warn(`[clickup-pilot] AUTO-CURA rodada ${round}/${MAX_HEAL_ROUNDS}: re-disparando ${redispatchIdxs.length} parte(s) com falha REAL:`, redispatchIdxs.map((i) => plan!.parts[i].label));
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'dispatching', message: `Auto-cura: re-disparando ${redispatchIdxs.length} take(s) que o HeyGen recusou (rodada ${round}/${MAX_HEAL_ROUNDS})...` } }));
+
+          // EXCLUI os vídeos NEGADOS antes do re-disparo — sem isso o HeyGen
+          // "lembra" do registro negado e nega o MESMO texto de novo (loop).
+          await purgeRejectedVideosBeforeRedispatch(gate.rejected, 'clickup-pilot auto-cura');
 
           const healJobs = redispatchIdxs.map((i) => {
             const p = plan!.parts[i] as any; // plan parts carregam voiceId em runtime (mesmo padrao do dispatch original)
@@ -3525,6 +3649,29 @@ function ClickUpPilotInner() {
             const cur = prev[taskId];
             const labels = miss.map((i) => cur?.parts?.[i]?.label || plan!.parts[i]?.label).filter(Boolean);
             const is429 = miss.some((i) => /429|daily limit|exceeded the maximum|quota/i.test(cur?.parts?.[i]?.error || ''));
+            // ESPERANDO ≠ FALHOU (fix 2026-08-14): se o que falta é take que o
+            // HeyGen AINDA está renderizando, o batch não fecha como incompleto —
+            // fica em 'waiting-heygen' e o watcher retoma sozinho quando ficar
+            // pronto. Nada de cota gasta, nada de card vermelho mentindo "falha".
+            if (stillRenderingIds.length > 0 && !is429) {
+              const h = getHeyGenHealth();
+              return {
+                ...prev,
+                [taskId]: {
+                  ...cur,
+                  phase: 'waiting-heygen',
+                  message: `⏳ ${stillRenderingIds.length} take(s) ainda renderizando no HeyGen (${labels.join(', ')}). ${h.state === 'ok' ? 'Não é falha' : h.reason} — não re-disparei nada. Eu re-checo sozinho e fecho quando ficarem prontos.`,
+                  waitingVideoIds: stillRenderingIds,
+                  waitingCheckedAt: Date.now(),
+                  finishedAt: undefined,
+                  zipBlobUrl: takesUrl,
+                  zipFilename: takesFilename,
+                  montadoZipUrl: undefined,
+                  montadoZipName: undefined,
+                  pipeStats: undefined,
+                },
+              };
+            }
             const msg = is429
               ? `⏳ Limite diário do HeyGen — faltam ${miss.length} parte(s). NÃO montei (evita vídeo incompleto). Retome após o reset (~24h): ${labels.join(', ')}`
               : `Incompleto — faltam ${miss.length} parte(s) que o HeyGen não gerou (${labels.join(', ')}). NÃO montei. Clica RETOMAR pra tentar essas.`;
@@ -3845,6 +3992,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         return !!rp && (rp.text || '').trim().length > 0 && !!rp.avatarId;
       });
 
+      /** Takes que o HeyGen ainda está renderizando quando o RETOMAR acaba —
+       *  não são falha; o batch fecha em 'waiting-heygen' e o watcher retoma. */
+      let resumeStillRenderingIds: string[] = [];
+
       // Entra no bloco se faltam renders (nao-cacheados) OU ha partes nunca
       // disparadas. So `!allCached` nao basta: a parte que nunca disparou nao
       // conta em validParts, entao allCached pode ser `true` faltando 1 corte.
@@ -3857,12 +4008,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             ...prev,
             [taskId]: { ...prev[taskId], phase: 'rendering', message: `Re-checando ${validIds.length} videos no HeyGen (${cachedCount} já em cache)...` },
           }));
+          let resumeHealthNote = '';
           finalStatuses = await pollVideosUntilReady(validIds, {
             intervalMs: 8000,
             timeoutMs: 30 * 60 * 1000,
-            // Zombie detection: video stuck >15min vira 'failed' automatico
+            // Teto em plataforma saudável — estica sozinho quando o monitor de
+            // saúde acusa lentidão, em vez de cunhar falso negativo.
             maxPendingMsPerId: 15 * 60 * 1000,
             isCancelled: () => !!batchCancelRef.current[taskId],
+            onHealth: (h) => { resumeHealthNote = h.state === 'ok' ? '' : ` — ${h.reason}`; },
             onStatus: (st) => {
               const done = Object.values(st).filter((s) => s.status === 'completed').length;
               setBatchStates((prev) => {
@@ -3872,59 +4026,100 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                   const ps = p.videoId ? st[p.videoId] : null;
                   return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
                 });
-                return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
+                return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos${resumeHealthNote}` } };
               });
             },
           });
         }
 
-        // ═══ AUTO RE-DISPATCH DE ZOMBIES + NUNCA-DISPARADAS (fix 2026-05-30 / 2026-06-08) ═══
-        // Se algumas parts vieram 'failed' do polling (zombie killed ou timeout)
-        // E nao temos blob cacheado dela E temos replan → re-dispara via
-        // runHeyGenJobs em uma rodada. Maximo 2 rodadas pra cap loop infinito.
+        // ═══ RE-DISPATCH DE FALHA REAL + NUNCA-DISPARADAS (fix 2026-05-30 / 2026-06-08) ═══
+        // Só re-dispara o que o PORTEIRO liberar (fix 2026-08-14): o que ainda
+        // está renderizando no HeyGen fica esperando, o que já ficou pronto é
+        // resgatado de graça, e só falha REAL do HeyGen vira submit novo.
         const MAX_REDISPATCH_ROUNDS = 2;
         for (let round = 1; round <= MAX_REDISPATCH_ROUNDS; round++) {
           if (batchCancelRef.current[taskId]) break;
           if (!state.replan?.parts?.length) break;
 
-          // Coleta parts q ainda nao tem video bom: (a) zombie = TEM videoId mas
-          // render veio 'failed'; (b) nunca-disparada = SEM videoId mas o replan
-          // diz que deveria gerar (texto + avatar). Ambas precisam re-disparar.
-          // Parte VAZIA legitima ("(vazio)") tem text vazio → fica de fora.
-          const zombieIdxs: number[] = [];
+          // Candidatas: parte sem blob cacheado cujo replan diz que deveria
+          // gerar (texto + avatar). Parte VAZIA legitima ("(vazio)") tem text
+          // vazio → fica de fora. 'stalled' NÃO é motivo de re-disparo por si só
+          // — quem decide é o porteiro, com status fresco.
+          const candidateIdxs: number[] = [];
           for (let i = 0; i < state.parts.length; i++) {
             if (cachedIdxs.has(i)) continue;
             const rp = state.replan.parts[i];
             if (!rp || !(rp.text || '').trim() || !rp.avatarId) continue;
             const p = state.parts[i];
             const st = p.videoId ? finalStatuses[p.videoId] : null;
-            const neverDispatched = !p.videoId;        // dispatch falhou de vez
-            const renderFailed = st?.status === 'failed'; // zombie classico
-            if (neverDispatched || renderFailed) zombieIdxs.push(i);
+            const hasGoodVideo = st?.status === 'completed' && !!st.videoUrl;
+            if (!hasGoodVideo) candidateIdxs.push(i);
           }
+          if (candidateIdxs.length === 0) break;
+
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Conferindo no HeyGen o que realmente falhou (${candidateIdxs.length} take(s))...` } }));
+          const gate = await planRedispatch(
+            candidateIdxs,
+            (i) => {
+              const p = state.parts[i];
+              const st = p.videoId ? finalStatuses[p.videoId] : null;
+              return { videoId: p.videoId, title: `${adNameClean}_${p.label}`, error: st?.error || p.error };
+            },
+            'pilot resume',
+          );
+
+          // RESGATE: ficou pronto no HeyGen. Só alimenta finalStatuses — o loop
+          // de download logo abaixo baixa normalmente, sem gastar cota.
+          for (const r of gate.rescue) {
+            finalStatuses[r.videoId] = { videoId: r.videoId, status: 'completed', videoUrl: r.videoUrl };
+            state.parts[r.idx] = { ...state.parts[r.idx], videoId: r.videoId };
+            setBatchStates((prev) => {
+              const s = prev[taskId];
+              if (!s) return prev;
+              const newParts = s.parts.map((p, i) => i === r.idx ? { ...p, videoId: r.videoId, videoStatus: 'completed' as const, videoUrl: r.videoUrl, error: undefined } : p);
+              return { ...prev, [taskId]: { ...s, parts: newParts } };
+            });
+          }
+          if (gate.rescue.length > 0) {
+            console.log(`[pilot resume] ${gate.rescue.length} take(s) resgatado(s) prontos do HeyGen — nenhuma cota gasta`);
+          }
+
+          // AINDA RENDERIZANDO: proibido re-disparar. Registra pro fecho honesto.
+          resumeStillRenderingIds = gate.waiting.map((w) => w.videoId);
+          if (gate.waiting.length > 0) {
+            console.warn(
+              `[pilot resume] ${gate.waiting.length} take(s) AINDA renderizando no HeyGen — re-disparo BLOQUEADO:`,
+              gate.waiting.map((w) => state.parts[w.idx].label),
+            );
+            setBatchStates((prev) => {
+              const s = prev[taskId];
+              if (!s) return prev;
+              const newParts = s.parts.map((p, i) =>
+                gate.waiting.some((w) => w.idx === i)
+                  ? { ...p, videoStatus: 'stalled' as const, error: 'O HeyGen ainda está renderizando esse take — não re-disparei pra não gastar cota à toa.' }
+                  : p,
+              );
+              return { ...prev, [taskId]: { ...s, parts: newParts } };
+            });
+          }
+
+          const zombieIdxs = gate.redispatch;
           if (zombieIdxs.length === 0) break;
 
-          console.warn(`[pilot resume] round ${round}: re-disparando ${zombieIdxs.length} zombies:`, zombieIdxs.map((i) => state.parts[i].label));
+          console.warn(`[pilot resume] round ${round}: re-disparando ${zombieIdxs.length} parte(s) com falha REAL:`, zombieIdxs.map((i) => state.parts[i].label));
           setBatchStates((prev) => ({
             ...prev,
             [taskId]: {
               ...prev[taskId],
               phase: 'dispatching',
-              message: `Re-disparando ${zombieIdxs.length} parts travadas (rodada ${round}/${MAX_REDISPATCH_ROUNDS})...`,
+              message: `Re-disparando ${zombieIdxs.length} take(s) que o HeyGen recusou (rodada ${round}/${MAX_REDISPATCH_ROUNDS})...`,
             },
           }));
 
           // EXCLUI os vídeos NEGADOS antes do re-disparo (anti-memória de
           // moderação): re-submeter o MESMO texto com o registro negado vivo
           // era negado de novo — RETOMAR ficava em loop de FALHA eterno.
-          await purgeRejectedVideosBeforeRedispatch(
-            zombieIdxs.map((i) => {
-              const p = state.parts[i];
-              const st = p.videoId ? finalStatuses[p.videoId] : null;
-              return { videoId: p.videoId, error: st?.error || p.error };
-            }),
-            'pilot resume',
-          );
+          await purgeRejectedVideosBeforeRedispatch(gate.rejected, 'pilot resume');
 
           const jobsToRedispatch = zombieIdxs.map((i) => {
             const rp = state.replan!.parts[i];
@@ -4074,7 +4269,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }
         const status = finalStatuses[part.videoId];
         if (status?.status !== 'completed' || !status.videoUrl) {
-          zip.file(`${part.renamedTo.replace('.mp4', '')}_NAO_RENDERIZOU.txt`, `Status: ${status?.status || '?'}\n${status?.error || ''}`);
+          const base = part.renamedTo.replace('.mp4', '');
+          zip.file(
+            status?.status === 'stalled' ? `${base}_AINDA_RENDERIZANDO.txt` : `${base}_NAO_RENDERIZOU.txt`,
+            `Status: ${status?.status || '?'}\n${status?.error || ''}`,
+          );
           return;
         }
         try {
@@ -4129,6 +4328,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             const cur = prev[taskId];
             const labels = miss.map((i) => cur?.parts?.[i]?.label || state.parts[i]?.label).filter(Boolean);
             const is429 = miss.some((i) => /429|daily limit|exceeded the maximum|quota/i.test(cur?.parts?.[i]?.error || state.parts[i]?.error || ''));
+            // ESPERANDO ≠ FALHOU: o que o HeyGen ainda está renderizando não
+            // fecha o batch como incompleto — o watcher re-checa e retoma.
+            if (resumeStillRenderingIds.length > 0 && !is429) {
+              const h = getHeyGenHealth();
+              return {
+                ...prev,
+                [taskId]: {
+                  ...cur,
+                  phase: 'waiting-heygen',
+                  message: `⏳ ${resumeStillRenderingIds.length} take(s) ainda renderizando no HeyGen (${labels.join(', ')}). ${h.state === 'ok' ? 'Não é falha' : h.reason} — não re-disparei nada. Eu re-checo sozinho e fecho quando ficarem prontos.`,
+                  waitingVideoIds: resumeStillRenderingIds,
+                  waitingCheckedAt: Date.now(),
+                  finishedAt: undefined,
+                  zipBlobUrl: takesUrl,
+                  zipFilename: takesFilename,
+                  montadoZipUrl: undefined,
+                  montadoZipName: undefined,
+                  pipeStats: undefined,
+                },
+              };
+            }
             const msg = is429
               ? `⏳ Limite diário do HeyGen — faltam ${miss.length} parte(s). NÃO montei (evita vídeo incompleto). Retome após o reset (~24h): ${labels.join(', ')}`
               : `Incompleto — faltam ${miss.length} parte(s) que o HeyGen não gerou (${labels.join(', ')}). NÃO montei. Clica RETOMAR pra tentar essas.`;
@@ -5055,6 +5275,71 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchStates]);
 
+  /** WATCHER DE ESPERA DO HEYGEN (fix 2026-08-14).
+   *
+   *  Batch em 'waiting-heygen' = os takes que faltam AINDA estão renderizando lá
+   *  (dia de instabilidade — o user pegou ~2h por parte). Não é falha, não gasta
+   *  slot e ninguém re-dispara. Este watcher só fica cutucando o status a cada
+   *  2min (GET leve, custo zero de cota) e, no instante em que os renders
+   *  terminam, chama o RETOMAR sozinho — que resgata os vídeos prontos e fecha a
+   *  montagem. O user não precisa ficar vigiando nem clicar em nada.
+   *
+   *  Se o HeyGen der falha REAL em algum, o RETOMAR também roda: aí o porteiro
+   *  libera o re-disparo daquele take específico, que é o comportamento certo. */
+  useEffect(() => {
+    const CHECK_EVERY_MS = 2 * 60 * 1000;
+    let busy = false;
+    const id = setInterval(() => {
+      if (busy) return;
+      const waiting = Object.values(batchStatesRef.current).filter(
+        (b) => b.phase === 'waiting-heygen' && (b.waitingVideoIds?.length || 0) > 0 && !heygenPendingRef.current[b.taskId],
+      );
+      if (waiting.length === 0) return;
+      const due = waiting.filter((b) => Date.now() - (b.waitingCheckedAt || 0) >= CHECK_EVERY_MS);
+      if (due.length === 0) return;
+      busy = true;
+      void (async () => {
+        try {
+          for (const b of due) {
+            const ids = b.waitingVideoIds || [];
+            let statuses: Record<string, VideoStatus>;
+            try {
+              statuses = await getVideosStatus(ids);
+            } catch (e) {
+              console.warn(`[waiting-heygen] re-check de ${b.taskId} falhou (tento no próximo tick):`, e);
+              continue;
+            }
+            const done = ids.filter((i) => statuses[i]?.status === 'completed').length;
+            const failed = ids.filter((i) => statuses[i]?.status === 'failed').length;
+            const settled = done + failed >= ids.length;
+            setBatchStates((prev) => {
+              const cur = prev[b.taskId];
+              if (!cur || cur.phase !== 'waiting-heygen') return prev;
+              return {
+                ...prev,
+                [b.taskId]: {
+                  ...cur,
+                  waitingCheckedAt: Date.now(),
+                  message: settled
+                    ? `✓ O HeyGen terminou — retomando pra baixar e montar (nenhum take re-gerado).`
+                    : `⏳ ${done}/${ids.length} take(s) prontos no HeyGen. Continuo esperando sem re-disparar — fecho sozinho quando terminarem.`,
+                },
+              };
+            });
+            if (settled) {
+              console.log(`[waiting-heygen] ${b.taskId}: HeyGen concluiu (${done} pronto(s), ${failed} recusado(s)) — retomando automaticamente`);
+              void runHeyGenGated(b.taskId, 'resume');
+            }
+          }
+        } finally {
+          busy = false;
+        }
+      })();
+    }, 20_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** WATCHDOG (a cada 3s) — GARANTIA de que a fila NUNCA congela:
    *
    *  1) AUTO-CURA do contador: o `heygenSlotsRef` e in-memory e pode VAZAR
@@ -5396,8 +5681,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ...prev,
           [taskId]: {
             ...cur,
+            // "Ainda renderizando" NÃO vira falha: o HeyGen está lento, o render
+            // segue vivo e o card mostra âmbar em vez do ⚠ vermelho.
             parts: cur.parts.map((p, i) => i === partIdx
-              ? { ...p, videoStatus: 'failed' as const, error: `Re-gerar falhou: ${msg}` }
+              ? isSyntheticPollError(msg)
+                ? { ...p, videoStatus: 'stalled' as const, error: msg }
+                : { ...p, videoStatus: 'failed' as const, error: `Re-gerar falhou: ${msg}` }
               : p),
           },
         };
@@ -5537,7 +5826,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           [taskId]: {
             ...cur,
             parts: cur.parts.map((p, i) => i === partIdx
-              ? { ...p, videoStatus: 'failed' as const, error: `áudio: ${msg}` }
+              ? isSyntheticPollError(msg)
+                ? { ...p, videoStatus: 'stalled' as const, error: msg }
+                : { ...p, videoStatus: 'failed' as const, error: `áudio: ${msg}` }
               : p),
           },
         };
@@ -9126,9 +9417,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         // Editar texto: nos prontos (trocar script/voz) E nos que
                                         // FALHARAM (contornar a falha do HeyGen re-gerando a parte).
                                         onEdit={canEdit && (t.status === 'completed' || t.status === 'failed') ? () => openEditPart(b.taskId, originalIdx) : undefined}
-                                        // Usar áudio: só faz sentido oferecer na parte que FALHOU —
-                                        // sobe um áudio e o avatar dá lipsync (pula o TTS quebrado).
-                                        onUploadAudio={canEdit && t.status === 'failed' ? (file) => void regenerateSinglePartFromAudio(b.taskId, originalIdx, file) : undefined}
+                                        // Usar áudio: saída pra parte que FALHOU (sobe um áudio e o
+                                        // avatar dá lipsync, pulando o TTS quebrado) e também pra que
+                                        // está AGUARDANDO o HeyGen — aí é escolha EXPLÍCITA do user
+                                        // de não esperar o render lento. O sistema sozinho nunca
+                                        // re-dispara um take que ainda está gerando.
+                                        onUploadAudio={canEdit && (t.status === 'failed' || t.status === 'stalled') ? (file) => void regenerateSinglePartFromAudio(b.taskId, originalIdx, file) : undefined}
                                       />
                                     );
                                   })}

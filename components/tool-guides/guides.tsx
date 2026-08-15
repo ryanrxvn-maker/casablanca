@@ -775,13 +775,13 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Queime os letterings no vídeo',
-        text: 'Clique em "Queimar letterings no vídeo". O render roda no SEU navegador (frame a frame, com o áudio original de volta no final) — um vídeo de 1 minuto leva por volta de 1 a 2 minutos. Deixe a aba aberta até o card "PRONTO" aparecer, aí é só "Baixar MP4". Se preferir levar pro CapCut/Premiere, o "Baixar .SRT" exporta os mesmos blocos como legenda.',
+        title: 'Renderize — o download vem sozinho',
+        text: 'Clique em "Renderizar vídeo". O render roda no SEU navegador, acelerado por hardware (o áudio original volta no final) — bem mais rápido que o vídeo em tempo real. Deixe a aba aberta até o fim: quando terminar, o MP4 baixa automaticamente. Se o navegador segurar o download, o card do resultado tem o "Baixar de novo".',
         visual: (
           <Shot label="Tipografia · render">
             <MRow>
-              <MBtn tone="primary">Queimar letterings no vídeo</MBtn>
-              <MBtn tone="lime">Baixar MP4</MBtn>
+              <MBtn tone="primary">Renderizar vídeo</MBtn>
+              <MBtn tone="lime">Baixar de novo</MBtn>
             </MRow>
           </Shot>
         ),
