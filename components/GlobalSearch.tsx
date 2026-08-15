@@ -71,7 +71,7 @@ const ENTRIES: Entry[] = [
   { id: 'compressor', group: 'Ferramentas', label: 'Compressor', hint: 'Reduz peso do arquivo', href: '/tools/compressor', icon: <IconCompressor size={20} />, keywords: ['comprimir', 'reduzir', 'tamanho'] },
   { id: 'audio-split', group: 'Ferramentas', label: 'Dividir áudios', hint: 'Divide pelo silêncio', href: '/tools/audio-split', icon: <IconAudioSplit size={20} />, keywords: ['split', 'dividir', 'separar'] },
   { id: 'acelerador', group: 'Ferramentas', label: 'Mixer de Velocidade', hint: 'Acelera/desacelera sem ficar robótico', href: '/tools/acelerador', icon: <IconAcelerador size={20} />, keywords: ['velocidade', 'speed', 'rápido', 'lento'] },
-  { id: 'normalizador', group: 'Ferramentas', label: 'Normalizador', hint: 'Iguala volume de vários arquivos', href: '/tools/normalizador', icon: <IconNormalizador size={20} />, keywords: ['volume', 'loudness', 'lufs', 'normalizar'], adminOnly: true },
+  { id: 'normalizador', group: 'Ferramentas', label: 'Normalizador', hint: 'Iguala o volume da voz e limpa o chiado', href: '/tools/normalizador', icon: <IconNormalizador size={20} />, keywords: ['volume', 'loudness', 'lufs', 'normalizar', 'ruído', 'chiado'] },
   { id: 'separador-audio', group: 'Ferramentas', label: 'Separador de Áudio', hint: 'Separa voz, instrumental e SFX', href: '/tools/separador-audio', icon: <IconSeparadorAudio size={20} />, keywords: ['stem', 'spleeter', 'demucs', 'voz', 'instrumental', 'sfx', 'karaoke'], adminOnly: true },
   { id: 'calculadora', group: 'Ferramentas', label: 'Calculadora', hint: 'Cálculo de preço por minuto', href: '/tools/calculadora', icon: <IconCalculadora size={20} />, keywords: ['valor', 'preço', 'orçamento'] },
 

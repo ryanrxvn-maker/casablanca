@@ -9,7 +9,7 @@
  * Pra tirar uma ferramenta de manutenção, basta remover o path daqui.
  */
 export const MAINTENANCE_TOOLS: readonly string[] = [
-  '/tools/normalizador',
+  // '/tools/normalizador' — SAIU da manutenção em 14.08.2026 (liberado pra todos, incl. free)
   '/tools/separador-audio',
   '/tools/remover-elementos', // EM manutenção: bloqueado pra clientes, só admin acessa
 ];

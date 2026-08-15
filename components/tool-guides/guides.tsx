@@ -1089,13 +1089,31 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Normalize e baixe',
-        text: 'Clique em "Normalizar N". Cada arquivo passa por duas fases (limpeza de ruído + análise, depois normalização) e o banner mostra qual item está rodando. No fim, todas as vozes saem no mesmo nível, sem estouro nos picos e com o chiado atenuado. Baixe por arquivo ("Baixar MP4/MP3/WAV" — sai nomeado "_normalizado") ou tudo com "Baixar ZIP (N)".',
+        title: 'Normalize',
+        text: 'Clique em "Normalizar N". Cada arquivo passa por duas fases (limpeza de ruído + análise, depois normalização) e o banner mostra qual item está rodando. Se a voz oscila MUITO (um trecho sussurrado, outro gritado), o motor detecta sozinho e reforça o nivelamento — sem inflar o ruído das pausas. No fim, todas as vozes saem no mesmo nível, sem estouro nos picos e com o chiado atenuado.',
         visual: (
           <Shot label="Normalizador · fila">
             <MStack>
               <MQueueItem name="locutor-a_normalizado.mp3" status="OK" pct={100} tone="lime" />
               <MQueueItem name="locutor-b.mp3" status="44%" pct={44} />
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Confira o relatório antes × depois e baixe',
+        text: 'Cada arquivo pronto ganha um relatório: a ONDA SONORA antes (cinza) e depois (verde-água) na mesma escala; a CURVA DE VOLUME DA VOZ, com o "antes" oscilando e o "depois" reto dentro da faixa nivelada (passe o mouse pra ler os dois valores em qualquer ponto); as MÉTRICAS medidas de verdade no resultado — volume médio, oscilação da voz, pico e ruído de fundo, cada uma antes → depois; e o player "Comparar de ouvido", que troca ANTES/DEPOIS no mesmo ponto do áudio. Depois baixe por arquivo ("Baixar MP4/MP3/WAV" — sai nomeado "_normalizado") ou tudo com "Baixar ZIP (N)".',
+        visual: (
+          <Shot label="Normalizador · relatório">
+            <MStack>
+              <MRow>
+                <MChip tone="dim">Oscilação ±12.6</MChip>
+                <MChip tone="lime">→ ±6.9 dB · −45%</MChip>
+              </MRow>
+              <MRow>
+                <MChip tone="dim">ANTES</MChip>
+                <MChip tone="violet">DEPOIS</MChip>
+              </MRow>
               <MBtn tone="lime">Baixar ZIP (2)</MBtn>
             </MStack>
           </Shot>

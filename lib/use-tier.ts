@@ -17,6 +17,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/caixinha-pergunta',
     '/tools/fakepass',
     '/tools/compressor',
+    '/tools/normalizador', // liberado pra TODOS em 14.08.2026 (roda no navegador, custo zero)
     '/tools/historico',
   ]),
   // basic = plano PREMIUM (nome de exibição). Tier interno continua 'basic'
@@ -31,19 +32,21 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/compressor',
     '/tools/audio-split',
     '/tools/acelerador',
+    '/tools/normalizador',
     '/tools/calculadora',
     '/tools/copy-srt',
     '/tools/decupagem-copy',
     '/tools/lipsync',
     '/tools/historico',
     // ⚠ NÃO inclui as ferramentas de uso interno (admin-only): auto-broll,
-    // heygen-auto, clickup-pilot, remover-elementos, normalizador,
-    // separador-audio, ltx-video
+    // heygen-auto, clickup-pilot, remover-elementos, separador-audio,
+    // ltx-video
   ]),
   // pro (legado, não vendido) = mesmo conjunto do Premium. As ferramentas de
   // automação interna (auto-broll, heygen-auto, clickup-pilot) são admin-only.
   pro: new Set([
     '/tools/decupagem',
+    '/tools/tipografia',
     '/tools/downloader',
     '/tools/caixinha-pergunta',
     '/tools/fakepass',
@@ -51,6 +54,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/compressor',
     '/tools/audio-split',
     '/tools/acelerador',
+    '/tools/normalizador',
     '/tools/calculadora',
     '/tools/copy-srt',
     '/tools/decupagem-copy',

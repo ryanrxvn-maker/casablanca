@@ -279,7 +279,7 @@ export default function NormalizadorPage() {
   return (
     <ToolShell
       title="Normalizador"
-      eyebrow="ÁUDIO · MULTI-AVATAR"
+      eyebrow="ÁUDIO · VOLUME"
       description="Tem 2 ou mais vozes no mesmo vídeo, uma alta e outra baixa? Ele resolve. Todas as vozes saem no mesmo nível confortável de ouvir — e ainda limpa o chiado de fundo, sem você mexer em nada. Cada arquivo sai com um relatório antes × depois: onda sonora, curva de volume, métricas e player pra comparar de ouvido."
       hue={HUE}
       icon={<IconNormalizador size={56} />}

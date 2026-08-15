@@ -148,10 +148,9 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/normalizador',
     label: 'Normalizador',
-    description: 'Iguala o volume de vários arquivos.',
+    description: 'Iguala o volume da voz e limpa o chiado. Com relatório antes × depois.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
-    adminOnly: true,
   },
   {
     href: '/tools/separador-audio',

@@ -31,6 +31,8 @@ import {
   IconDownloader,
   IconFakePass,
   IconLipsync,
+  IconNormalizador,
+  IconTipografia,
 } from '../../ToolIcons';
 import { Kicker, Reveal, Ticker } from './kit';
 import { CamuflagemScene, DecupagemScene, MiniPrints, NewspaperCard } from './scenes';
@@ -252,6 +254,18 @@ const TOOLS: Tool[] = [
     desc: 'Baixa vídeo, áudio e imagem de YouTube, TikTok, Insta e Pinterest.',
     plan: 'free',
     icon: <IconDownloader size={20} />,
+  },
+  {
+    name: 'Normalizador',
+    desc: 'Iguala o volume da voz e limpa o chiado, com relatório antes × depois.',
+    plan: 'free',
+    icon: <IconNormalizador size={20} />,
+  },
+  {
+    name: 'Tipografia Automática',
+    desc: 'Letterings animados no tempo do áudio, com centenas de modelos prontos.',
+    plan: 'free',
+    icon: <IconTipografia size={20} />,
   },
   {
     name: 'Camuflagem',
