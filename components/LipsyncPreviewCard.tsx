@@ -30,8 +30,11 @@ function RegenOverlay({ label = 'Re-gerando…' }: { label?: string }) {
  * Reutilizável por HeyGen Auto e ClickUp Pilot — recebe só os dados do take.
  */
 export type LipsyncTake = {
+  /** 'stalled' = o HeyGen AINDA está renderizando e a gente parou de acompanhar.
+   *  NÃO é falha: o card mostra "aguardando", nunca o ⚠ vermelho, porque
+   *  re-disparar esse take duplicaria gasto de cota. Ver [[heygen-health]]. */
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stalled' | string;
   label: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | string;
   videoUrl: string | null;
   error?: string | null;
 };
@@ -73,8 +76,11 @@ export function LipsyncPreviewCard({
 
   const ready = take.status === 'completed' && !!take.videoUrl;
   const failed = take.status === 'failed';
+  /** Esperando o HeyGen terminar — âmbar, não vermelho. */
+  const waitingHeyGen = take.status === 'stalled';
   const videoUrl = ready ? take.videoUrl : null;
-  const tone: 'ready' | 'err' | 'loading' = ready ? 'ready' : failed ? 'err' : 'loading';
+  const tone: 'ready' | 'err' | 'wait' | 'loading' =
+    ready ? 'ready' : failed ? 'err' : waitingHeyGen ? 'wait' : 'loading';
 
   const safeLabel = take.label.replace(/[^a-z0-9_-]/gi, '_');
 
@@ -155,6 +161,8 @@ export function LipsyncPreviewCard({
           ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-600/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(16,185,129,0.45),0_0_36px_-12px_rgba(16,185,129,0.35)] hover:border-emerald-500/70'
           : tone === 'err'
           ? 'border-red-500/40 bg-gradient-to-b from-red-500/[0.05] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(239,68,68,0.25)] hover:border-red-500/70'
+          : tone === 'wait'
+          ? 'border-amber-400/45 bg-gradient-to-b from-amber-400/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(251,191,36,0.25)] hover:border-amber-400/75'
           : 'border-violet/30 bg-gradient-to-b from-violet/[0.03] to-bg-soft/40 hover:border-violet/60 hover:shadow-[0_16px_32px_-16px_rgba(167,139,250,0.45)]')
       }
       style={{
@@ -320,6 +328,49 @@ export function LipsyncPreviewCard({
               </button>
             ) : null}
             {/* Mesmo overlay de re-geração quando essa parte falha está re-rodando */}
+            {isRegenerating ? <RegenOverlay /> : null}
+          </div>
+        ) : waitingHeyGen ? (
+          /* AGUARDANDO O HEYGEN — o render está VIVO lá, só demorando. Esse
+             estado existe pra nunca mais mostrar "FALHA" num take que está
+             gerando: era o falso negativo que fazia o sistema re-disparar e
+             queimar cota diária em dobro. Ver [[heygen-health]]. */
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center">
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-amber-200/[0.06] to-transparent" style={{ animation: 'lcShimmer 2.4s ease-in-out infinite' }} />
+            </div>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="relative z-10 text-amber-300" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+            </svg>
+            <span className="label-tech relative z-10 text-[10px] font-bold uppercase tracking-widest text-amber-200">
+              Aguardando HeyGen
+            </span>
+            <p className="relative z-10 line-clamp-3 text-[10px] leading-relaxed text-amber-200/75" title={take.error || undefined}>
+              Ainda renderizando lá — não re-gerei pra não gastar cota à toa. Fecho sozinho quando ficar pronto.
+            </p>
+            {onUploadAudio ? (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); audioInputRef.current?.click(); }}
+                  title="Não quer esperar? Suba um áudio e o avatar faz lipsync nele"
+                  className="label-tech relative z-10 mt-1 inline-flex items-center justify-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-400/10 px-3 py-1.5 text-[9px] uppercase tracking-widest text-amber-100 transition-all hover:-translate-y-[1px] hover:border-amber-400/80 hover:bg-amber-400/20 active:scale-95"
+                >
+                  Não esperar · usar áudio
+                </button>
+                <input
+                  ref={audioInputRef}
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (f) onUploadAudio(f);
+                  }}
+                />
+              </>
+            ) : null}
             {isRegenerating ? <RegenOverlay /> : null}
           </div>
         ) : (
