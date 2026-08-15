@@ -792,6 +792,9 @@ export const GUIDES: Record<string, ToolGuide> = {
       'O render local precisa de Chrome ou Edge atualizados no computador (WebCodecs). Não feche a aba durante o render.',
       'F5 no meio da edição não perde nada: selecionando o MESMO arquivo de novo, a edição anterior é restaurada.',
       'Trocar o "Ritmo dos blocos" remonta tudo a partir da transcrição — faça isso ANTES de corrigir textos na lista.',
+      'Com a legenda selecionada, clique numa palavra e arraste pra marcar um trecho: cor, caixa, tamanho e fonte agem só nele (estilo CapCut).',
+      'O cadeado 🔒 na lista congela um bloco — o "aplicar a todas" não mexe mais nele.',
+      'Na timeline, o scroll do mouse dá zoom ancorado no cursor; a agulha vermelha arrasta pra navegar.',
     ],
   },
 

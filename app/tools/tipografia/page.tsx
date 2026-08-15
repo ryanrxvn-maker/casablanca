@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -44,10 +45,12 @@ import {
   drawCaptions,
   drawPresetDemo,
   captionBBoxAt,
+  wordBoxesAt,
   DEFAULT_STYLE,
   type Block,
   type StyleState,
   type PerBlockStyle,
+  type WordStyle,
   type TWord,
 } from '@/lib/typography/engine';
 import { TYPO_PRESETS, TYPO_CATEGORIES, getPreset } from '@/lib/typography/presets';
@@ -116,6 +119,12 @@ type SavedSession = {
   bold?: boolean;
   italic?: boolean;
   blockStyles?: Record<string, PerBlockStyle>;
+  wordStyles?: Record<string, Record<number, WordStyle>>;
+  lockedBlocks?: string[];
+  autoFit?: boolean;
+  bgMode?: 'preset' | 'on' | 'off';
+  bgColor?: string | null;
+  bgOpacity?: number;
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -183,6 +192,17 @@ function TipografiaInner() {
   const [autoEmph, setAutoEmph] = useToolState<boolean>('tipografia:autoemph', true);
   const [fontOv, setFontOv] = useToolState<FontKey | null>('tipografia:fontov', null);
   const [posX, setPosX] = useToolState<number>('tipografia:posx', 0.5);
+  const [autoFitG, setAutoFitG] = useToolState<boolean>('tipografia:autofit', true);
+  const [bgModeG, setBgModeG] = useToolState<'preset' | 'on' | 'off'>('tipografia:bgmode', 'preset');
+  const [bgColorG, setBgColorG] = useToolState<string | null>('tipografia:bgcolor', null);
+  const [bgOpacityG, setBgOpacityG] = useToolState<number>('tipografia:bgopacity', 1);
+  // estilos POR PALAVRA (seleção parcial no preview) + blocos BLOQUEADOS
+  const [wordStyles, setWordStyles] = useToolState<Record<string, Record<number, WordStyle>>>(
+    'tipografia:wordstyles',
+    {},
+  );
+  const [lockedBlocks, setLockedBlocks] = useToolState<string[]>('tipografia:locked', []);
+  const [wordSel, setWordSel] = useState<{ blockId: string; a: number; b: number } | null>(null);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
 
@@ -194,6 +214,8 @@ function TipografiaInner() {
     blocks: Block[];
     highlights: Record<string, number[]>;
     blockStyles: Record<string, PerBlockStyle>;
+    wordStyles: Record<string, Record<number, WordStyle>>;
+    lockedBlocks: string[];
     presetId: string;
     fontScale: number;
     posX: number;
@@ -211,6 +233,8 @@ function TipografiaInner() {
     blocks,
     highlights,
     blockStyles,
+    wordStyles,
+    lockedBlocks,
     presetId,
     fontScale,
     posX,
@@ -234,6 +258,8 @@ function TipografiaInner() {
     setBlocks(s.blocks);
     setHighlights(s.highlights);
     setBlockStyles(s.blockStyles);
+    setWordStyles(s.wordStyles);
+    setLockedBlocks(s.lockedBlocks);
     setPresetId(s.presetId);
     setFontScale(s.fontScale);
     setPosX(s.posX);
@@ -248,6 +274,10 @@ function TipografiaInner() {
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setWordSel(null);
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
@@ -279,9 +309,14 @@ function TipografiaInner() {
       autoEmphasis: autoEmph,
       fontOverride: fontOv,
       posX,
+      autoFit: autoFitG,
+      bgMode: bgModeG,
+      bgColor: bgColorG,
+      bgOpacity: bgOpacityG,
+      wordStyles,
       perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, blockStyles],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, bgModeG, bgColorG, bgOpacityG, wordStyles, blockStyles],
   );
 
   // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
@@ -305,6 +340,10 @@ function TipografiaInner() {
         if (patch.fxGlow !== undefined) setFxGlowG(patch.fxGlow);
         if (patch.fxSmoke !== undefined) setFxSmokeG(patch.fxSmoke);
         if (patch.fontOverride !== undefined) setFontOv(patch.fontOverride ?? null);
+        if (patch.autoFit !== undefined) setAutoFitG(patch.autoFit !== false);
+        if (patch.bgMode !== undefined) setBgModeG(patch.bgMode ?? 'preset');
+        if (patch.bgColor !== undefined) setBgColorG(patch.bgColor ?? null);
+        if (patch.bgOpacity !== undefined) setBgOpacityG(patch.bgOpacity ?? 1);
         return;
       }
       setBlockStyles((prev) => ({
@@ -312,7 +351,7 @@ function TipografiaInner() {
         [editingBlockId]: { ...prev[editingBlockId], ...patch },
       }));
     },
-    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setBlockStyles],
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setBgModeG, setBgColorG, setBgOpacityG, setBlockStyles],
   );
   const effOf = useCallback(
     <K extends keyof PerBlockStyle>(k: K, global: PerBlockStyle[K]): PerBlockStyle[K] => {
@@ -323,6 +362,81 @@ function TipografiaInner() {
       return global;
     },
     [editingBlockId, blockStyles],
+  );
+
+  // ── seleção PARCIAL (palavras marcadas no preview) ───────────────────────
+  // painel aplica cor/caixa/tamanho/fonte/B-U-I SÓ nas palavras marcadas
+  const setWordStylePatch = useCallback(
+    (patch: WordStyle) => {
+      if (!wordSel) return;
+      pushHistory();
+      const { blockId, a, b } = wordSel;
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      setWordStyles((prev) => {
+        const forBlock = { ...(prev[blockId] ?? {}) };
+        for (let i = lo; i <= hi; i++) {
+          forBlock[i] = { ...forBlock[i], ...patch };
+        }
+        return { ...prev, [blockId]: forBlock };
+      });
+    },
+    [wordSel, pushHistory, setWordStyles],
+  );
+  const clearWordSelStyles = useCallback(() => {
+    if (!wordSel) return;
+    pushHistory();
+    const { blockId, a, b } = wordSel;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    setWordStyles((prev) => {
+      const forBlock = { ...(prev[blockId] ?? {}) };
+      for (let i = lo; i <= hi; i++) delete forBlock[i];
+      const next = { ...prev };
+      if (Object.keys(forBlock).length === 0) delete next[blockId];
+      else next[blockId] = forBlock;
+      return next;
+    });
+  }, [wordSel, pushHistory, setWordStyles]);
+
+  // ── BLOQUEADO: congela o visual atual do bloco e sai do "aplicar a todas" ─
+  // Congelar = copiar o estilo global EFETIVO pro override do bloco; como o
+  // perBlock vence o global no engine, mudanças globais futuras não pegam.
+  const toggleLock = useCallback(
+    (blockId: string) => {
+      pushHistory();
+      if (lockedBlocks.includes(blockId)) {
+        setLockedBlocks((prev) => prev.filter((id) => id !== blockId));
+        return;
+      }
+      setBlockStyles((prev) => ({
+        ...prev,
+        [blockId]: {
+          fontScale,
+          primary,
+          accent,
+          posX,
+          posY,
+          textCase: textCase === 'auto' ? null : textCase,
+          bold,
+          italic,
+          underline: underlineG,
+          fontOverride: fontOv,
+          fxStroke: fxStrokeG,
+          fxShadow: fxShadowG,
+          fxGlow: fxGlowG,
+          fxSmoke: fxSmokeG,
+          autoFit: autoFitG,
+          bgMode: bgModeG,
+          bgColor: bgColorG,
+          bgOpacity: bgOpacityG,
+          // o que o user já tinha ajustado neste bloco continua valendo
+          ...prev[blockId],
+        },
+      }));
+      setLockedBlocks((prev) => [...prev, blockId]);
+    },
+    [pushHistory, lockedBlocks, setLockedBlocks, setBlockStyles, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -366,6 +480,12 @@ function TipografiaInner() {
         setBold(saved.bold ?? false);
         setItalic(saved.italic ?? false);
         setBlockStyles(saved.blockStyles ?? {});
+        setWordStyles(saved.wordStyles ?? {});
+        setLockedBlocks(saved.lockedBlocks ?? []);
+        setAutoFitG(saved.autoFit ?? true);
+        setBgModeG(saved.bgMode ?? 'preset');
+        setBgColorG(saved.bgColor ?? null);
+        setBgOpacityG(saved.bgOpacity ?? 1);
         setPace(saved.pace);
         setLanguage(saved.language);
         setHighlights(saved.highlights ?? {});
@@ -404,8 +524,14 @@ function TipografiaInner() {
       bold,
       italic,
       blockStyles,
+      wordStyles,
+      lockedBlocks,
+      autoFit: autoFitG,
+      bgMode: bgModeG,
+      bgColor: bgColorG,
+      bgOpacity: bgOpacityG,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, bgModeG, bgColorG, bgOpacityG]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -492,6 +618,10 @@ function TipografiaInner() {
       setWords(json.words);
       setBlocks(groupWords(json.words, pace));
       setHighlights({});
+      setWordStyles({});
+      setLockedBlocks([]);
+      setBlockStyles({});
+      setWordSel(null);
       setStage(null);
       setProgress(null);
       setPhase('ready');
@@ -617,6 +747,14 @@ function TipografiaInner() {
           if (!cur) return h;
           return { ...h, [b.id]: cur.filter((i) => i < nb.words.length) };
         });
+        // texto mudou de tamanho → os índices dos estilos por palavra já eram
+        setWordStyles((prev) => {
+          if (!prev[b.id]) return prev;
+          const next = { ...prev };
+          delete next[b.id];
+          return next;
+        });
+        setWordSel((w) => (w && w.blockId === b.id ? null : w));
       }
       return nb;
     });
@@ -706,6 +844,12 @@ function TipografiaInner() {
     if (words.length > 0) {
       setBlocks(groupWords(words, newPace));
       setHighlights({});
+      // ids de bloco novos → estilos por palavra/bloqueios antigos não apontam
+      // mais pra nada (mesma regra já avisada na UI pro texto editado)
+      setWordStyles({});
+      setLockedBlocks([]);
+      setBlockStyles({});
+      setWordSel(null);
     }
   }
 
@@ -831,12 +975,19 @@ function TipografiaInner() {
                   onTimeBlock={setActiveBlockId}
                   onPosChange={(x, y) => smartSet({ posX: x, posY: y })}
                   onInteractStart={pushHistory}
-                  onSelectBlock={(id) => setSelBlockId(id)}
+                  onSelectBlock={(id) => {
+                    setSelBlockId(id);
+                    setWordSel((w) => (w && w.blockId !== id ? null : w));
+                  }}
                   onEditText={editBlockText}
+                  wordSel={wordSel}
+                  onWordSel={setWordSel}
                 />
                 <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
                   Arrasta a legenda pra posicionar (snap no centro) · clique
-                  seleciona e mostra a alça de tamanho · duplo clique edita o
+                  seleciona e mostra a alça de tamanho · com ela selecionada,
+                  clica numa palavra e arrasta pra marcar um trecho (cor,
+                  caixa, tamanho e fonte agem só nele) · duplo clique edita o
                   texto ali mesmo
                 </p>
               </div>
@@ -850,9 +1001,18 @@ function TipografiaInner() {
                   disabled={processing}
                 />
                 <FontPicker
-                  value={effOf('fontOverride', fontOv) ?? null}
+                  value={
+                    wordSel
+                      ? (wordStyles[wordSel.blockId]?.[Math.min(wordSel.a, wordSel.b)]?.font ??
+                        (effOf('fontOverride', fontOv) ?? null))
+                      : (effOf('fontOverride', fontOv) ?? null)
+                  }
                   presetFont={preset.font}
                   onPick={(k) => {
+                    if (wordSel) {
+                      setWordStylePatch({ font: k });
+                      return;
+                    }
                     pushHistory();
                     smartSet({ fontOverride: k });
                   }}
@@ -889,6 +1049,27 @@ function TipografiaInner() {
                   regroup={regroup}
                   defaultPrimary={preset.defaultPrimary}
                   defaultAccent={preset.defaultAccent}
+                  autoFit={effOf('autoFit', autoFitG) ?? true}
+                  bgMode={effOf('bgMode', bgModeG) ?? 'preset'}
+                  bgColor={effOf('bgColor', bgColorG) ?? null}
+                  bgOpacity={effOf('bgOpacity', bgOpacityG) ?? 1}
+                  sel={
+                    wordSel
+                      ? {
+                          count: Math.abs(wordSel.b - wordSel.a) + 1,
+                          cur:
+                            wordStyles[wordSel.blockId]?.[
+                              Math.min(wordSel.a, wordSel.b)
+                            ] ?? {},
+                          set: setWordStylePatch,
+                          clear: () => setWordSel(null),
+                          reset: () => {
+                            clearWordSelStyles();
+                            setWordSel(null);
+                          },
+                        }
+                      : null
+                  }
                   disabled={processing}
                 />
               </div>
@@ -912,6 +1093,7 @@ function TipografiaInner() {
               selId={selBlockId}
               activeId={activeBlockId}
               highlights={highlights}
+              locked={lockedBlocks}
               onSelect={(b) => {
                 setSelBlockId(b.id);
                 seekTo(b.start);
@@ -925,6 +1107,7 @@ function TipografiaInner() {
               }}
               onNudge={nudge}
               onToggleWord={toggleHighlight}
+              onToggleLock={toggleLock}
               disabled={processing}
             />
           </ToolStep>
@@ -1048,6 +1231,8 @@ function PreviewPane({
   onInteractStart,
   onSelectBlock,
   onEditText,
+  wordSel,
+  onWordSel,
 }: {
   videoUrl: string;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
@@ -1061,6 +1246,8 @@ function PreviewPane({
   onInteractStart: () => void;
   onSelectBlock: (id: string) => void;
   onEditText: (id: string, text: string) => void;
+  wordSel: { blockId: string; a: number; b: number } | null;
+  onWordSel: (sel: { blockId: string; a: number; b: number } | null) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1070,16 +1257,22 @@ function PreviewPane({
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   // drag da legenda: estado vivo pro rAF desenhar as guias sem re-render
   const dragRef = useRef<{
-    mode: 'move' | 'scale';
+    mode: 'move' | 'scale' | 'wordsel';
     moved: boolean;
     snapX: boolean;
     snapY: boolean;
     dist0: number;
     scale0: number;
+    /** âncora da seleção de palavras (modo wordsel) */
+    wordAnchor: number;
   } | null>(null);
   // seleção (caixa + alça) e bbox vivos pro rAF
   const selRef = useRef(false);
   const bboxRef = useRef<{ x: number; y: number; w: number; h: number; blockId: string } | null>(null);
+  const wordBoxesRef = useRef<{
+    blockId: string;
+    boxes: Array<{ i: number; x: number; y: number; w: number; h: number }>;
+  } | null>(null);
   const dprRef = useRef(1);
   const [editing, setEditing] = useState<{
     id: string;
@@ -1087,11 +1280,14 @@ function PreviewPane({
     left: number;
     top: number;
     width: number;
+    fontSize: number;
   } | null>(null);
+  const editingRef = useRef<typeof editing>(null);
+  editingRef.current = editing;
 
   // refs pros valores vivos dentro do rAF (evita recriar o loop a cada edição)
-  const liveRef = useRef({ blocks, preset, style, fontScale });
-  liveRef.current = { blocks, preset, style, fontScale };
+  const liveRef = useRef({ blocks, preset, style, fontScale, wordSel });
+  liveRef.current = { blocks, preset, style, fontScale, wordSel };
 
   useEffect(() => {
     let raf = 0;
@@ -1112,11 +1308,36 @@ function PreviewPane({
         const ctx = c.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, W, H);
-          const { blocks: b, preset: p, style: s } = liveRef.current;
+          const { blocks: b0, preset: p, style: s, wordSel: wSel } = liveRef.current;
+          // em edição de texto o bloco some do canvas (o input assume o lugar
+          // — sem legenda dobrada atrás da caixa de digitação)
+          const ed = editingRef.current;
+          const b = ed ? b0.filter((x) => x.id !== ed.id) : b0;
           drawCaptions(ctx, b, p, s, v.currentTime * 1000, W, H);
           dprRef.current = dpr;
           // bbox viva pro hit-test (clicar/arrastar/alça/duplo clique)
           bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, W, H);
+          // caixas por PALAVRA vivas (seleção parcial estilo CapCut)
+          wordBoxesRef.current = selRef.current
+            ? wordBoxesAt(ctx, b, p, s, v.currentTime * 1000, W, H)
+            : null;
+          // realce da seleção de palavras (só preview, nunca no export)
+          const wb = wordBoxesRef.current;
+          if (wSel && wb && wb.blockId === wSel.blockId) {
+            const lo = Math.min(wSel.a, wSel.b);
+            const hi = Math.max(wSel.a, wSel.b);
+            ctx.save();
+            ctx.fillStyle = 'rgba(96,165,250,0.28)';
+            ctx.strokeStyle = 'rgba(96,165,250,0.9)';
+            ctx.lineWidth = Math.max(1, dpr);
+            for (const box of wb.boxes) {
+              if (box.i < lo || box.i > hi) continue;
+              const px = 4 * dpr;
+              ctx.fillRect(box.x - px, box.y, box.w + px * 2, box.h);
+              ctx.strokeRect(box.x - px, box.y, box.w + px * 2, box.h);
+            }
+            ctx.restore();
+          }
           // caixa de seleção estilo CapCut (só preview, nunca no export)
           const bb = bboxRef.current;
           if (selRef.current && bb) {
@@ -1230,31 +1451,72 @@ function PreviewPane({
               snapY: false,
               dist0: Math.max(12, Math.hypot(px - cxB, py - cyB)),
               scale0: liveRef.current.fontScale,
+              wordAnchor: -1,
             };
-          } else {
-            dragRef.current = {
-              mode: 'move',
-              moved: false,
-              snapX: false,
-              snapY: false,
-              dist0: 0,
-              scale0: 1,
-            };
+            return;
           }
+          // legenda JÁ selecionada + clique EM CIMA de uma palavra = seleção
+          // parcial (arrasta pra marcar o trecho — estilo CapCut). Clicar no
+          // respiro ao redor continua movendo a legenda.
+          const wb = wordBoxesRef.current;
+          if (selRef.current && wb && bb && wb.blockId === bb.blockId) {
+            const hitWord = wb.boxes.find(
+              (bx) =>
+                px >= bx.x - 4 * dpr &&
+                px <= bx.x + bx.w + 4 * dpr &&
+                py >= bx.y &&
+                py <= bx.y + bx.h,
+            );
+            if (hitWord) {
+              onWordSel({ blockId: wb.blockId, a: hitWord.i, b: hitWord.i });
+              dragRef.current = {
+                mode: 'wordsel',
+                moved: false,
+                snapX: false,
+                snapY: false,
+                dist0: 0,
+                scale0: 1,
+                wordAnchor: hitWord.i,
+              };
+              return;
+            }
+          }
+          dragRef.current = {
+            mode: 'move',
+            moved: false,
+            snapX: false,
+            snapY: false,
+            dist0: 0,
+            scale0: 1,
+            wordAnchor: -1,
+          };
         }}
         onPointerMove={(e) => {
           const wrap = wrapRef.current;
           const drag = dragRef.current;
           if (!wrap) return;
           if (!drag) {
-            // hover: cursor certo em cada zona (alça = redimensionar,
-            // legenda = mover, resto = padrão) — igual CapCut
+            // hover: cursor certo em cada zona (alça = redimensionar, palavra
+            // do bloco selecionado = texto, legenda = mover) — igual CapCut
             const rect0 = wrap.getBoundingClientRect();
             const dpr0 = dprRef.current;
             const hx = (e.clientX - rect0.left) * dpr0;
             const hy = (e.clientY - rect0.top) * dpr0;
             const bb0 = bboxRef.current;
+            const wb0 = wordBoxesRef.current;
             const hr = 14 * dpr0;
+            const overWord =
+              selRef.current &&
+              wb0 &&
+              bb0 &&
+              wb0.blockId === bb0.blockId &&
+              wb0.boxes.some(
+                (bx) =>
+                  hx >= bx.x - 4 * dpr0 &&
+                  hx <= bx.x + bx.w + 4 * dpr0 &&
+                  hy >= bx.y &&
+                  hy <= bx.y + bx.h,
+              );
             if (
               bb0 &&
               selRef.current &&
@@ -1262,6 +1524,8 @@ function PreviewPane({
               Math.abs(hy - (bb0.y + bb0.h)) < hr
             ) {
               wrap.style.cursor = 'nwse-resize';
+            } else if (overWord) {
+              wrap.style.cursor = 'text';
             } else if (
               bb0 &&
               hx >= bb0.x &&
@@ -1272,6 +1536,33 @@ function PreviewPane({
               wrap.style.cursor = 'move';
             } else {
               wrap.style.cursor = 'default';
+            }
+            return;
+          }
+          if (drag.mode === 'wordsel') {
+            // arrastando a seleção: estende o range até a palavra sob o mouse
+            const rectW = wrap.getBoundingClientRect();
+            const dprW = dprRef.current;
+            const sx = (e.clientX - rectW.left) * dprW;
+            const sy = (e.clientY - rectW.top) * dprW;
+            const wbW = wordBoxesRef.current;
+            if (wbW) {
+              let best = -1;
+              let bestDist = Infinity;
+              for (const bx of wbW.boxes) {
+                const inY = sy >= bx.y - bx.h * 0.4 && sy <= bx.y + bx.h * 1.4;
+                if (!inY) continue;
+                const cxW = bx.x + bx.w / 2;
+                const dist = Math.abs(sx - cxW);
+                if (dist < bestDist) {
+                  bestDist = dist;
+                  best = bx.i;
+                }
+              }
+              if (best >= 0) {
+                drag.moved = true;
+                onWordSel({ blockId: wbW.blockId, a: drag.wordAnchor, b: best });
+              }
             }
             return;
           }
@@ -1292,7 +1583,7 @@ function PreviewPane({
             const py = (e.clientY - rect.top) * dpr;
             const dist = Math.hypot(px - (bb.x + bb.w / 2), py - (bb.y + bb.h / 2));
             onFontScale(
-              Math.min(2, Math.max(0.45, drag.scale0 * (dist / drag.dist0))),
+              Math.min(4, Math.max(0.3, drag.scale0 * (dist / drag.dist0))),
             );
             return;
           }
@@ -1312,7 +1603,7 @@ function PreviewPane({
           const drag = dragRef.current;
           dragRef.current = null;
           wrapRef.current?.releasePointerCapture(e.pointerId);
-          if (!drag || drag.moved) return;
+          if (!drag || drag.mode === 'wordsel' || drag.moved) return;
           // clique seco: dentro da legenda = selecionar; fora = play/deselect
           const wrap = wrapRef.current;
           const bb = bboxRef.current;
@@ -1329,6 +1620,7 @@ function PreviewPane({
               return;
             }
           }
+          onWordSel(null);
           if (selRef.current) {
             selRef.current = false;
           } else {
@@ -1352,12 +1644,23 @@ function PreviewPane({
           const block = liveRef.current.blocks.find((x) => x.id === bb.blockId);
           if (!block) return;
           selRef.current = true;
+          onWordSel(null);
+          // input do TAMANHO da legenda, centrado nela — o bloco some do
+          // canvas enquanto digita (sem legenda dobrada atrás da caixa)
+          const fontSize = Math.min(42, Math.max(16, (bb.h / dpr) * 0.34));
+          const width = Math.min(
+            (wrap.clientWidth || 600) - 12,
+            Math.max(220, bb.w / dpr + 56),
+          );
+          const cxCss = (bb.x + bb.w / 2) / dpr;
+          const cyCss = (bb.y + bb.h / 2) / dpr;
           setEditing({
             id: bb.blockId,
             value: blockText(block),
-            left: bb.x / dpr,
-            top: bb.y / dpr,
-            width: Math.max(160, bb.w / dpr),
+            left: Math.max(6, cxCss - width / 2),
+            top: Math.max(6, cyCss - (fontSize * 1.9) / 2),
+            width,
+            fontSize,
           });
         }}
       >
@@ -1371,6 +1674,7 @@ function PreviewPane({
         {editing ? (
           <input
             autoFocus
+            onFocus={(e) => e.currentTarget.select()}
             value={editing.value}
             onChange={(e) => setEditing({ ...editing, value: e.target.value })}
             onPointerDown={(e) => e.stopPropagation()}
@@ -1389,8 +1693,14 @@ function PreviewPane({
               if (v) onEditText(editing.id, v);
               setEditing(null);
             }}
-            className="absolute z-30 rounded-[8px] border border-amber-400/80 bg-black/85 px-2 py-1.5 text-center text-[14px] font-semibold text-white outline-none shadow-[0_0_18px_-4px_rgba(251,191,36,0.7)]"
-            style={{ left: editing.left, top: editing.top, width: editing.width }}
+            className="absolute z-30 rounded-[10px] border-2 border-amber-400/90 bg-black/60 px-3 py-1.5 text-center font-bold text-white outline-none backdrop-blur-[2px] shadow-[0_0_24px_-4px_rgba(251,191,36,0.8)]"
+            style={{
+              left: editing.left,
+              top: editing.top,
+              width: editing.width,
+              fontSize: editing.fontSize,
+              lineHeight: 1.4,
+            }}
           />
         ) : null}
         {!playing && !editing ? (
@@ -1516,11 +1826,9 @@ function PresetGallery({
         const ctx = c.getContext('2d');
         if (!ctx) continue;
         ctx.clearRect(0, 0, c.width, c.height);
-        // presets de linha colorida precisam de 2+ linhas pra demo mostrar o efeito
-        const demoText = preset.lineAccent
-          ? 'SABE QUE NÃO É MAIS UM CURSO DE COPY'
-          : 'SUA LEGENDA AQUI';
-        drawPresetDemo(ctx, preset, now, c.width, c.height, demoText);
+        // TODA demo mostra "SUA LEGENDA AQUI" (lineAccent quebra em 2 linhas
+        // sozinho pro efeito de linha colorida aparecer)
+        drawPresetDemo(ctx, preset, now, c.width, c.height);
         drawnRef.current.add(c);
       }
       raf = requestAnimationFrame(tick);
@@ -1732,6 +2040,37 @@ function Timeline({
     }
   }, [duration, pps]);
 
+  // zoom com o SCROLL do mouse (estilo CapCut) — o tempo sob o cursor fica
+  // parado no lugar enquanto a régua estica/encolhe
+  const pendingScrollRef = useRef<number | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setPps((prev) => {
+        const cur = prev || 40;
+        const factor = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+        const next = Math.min(400, Math.max(6, cur * factor));
+        if (next !== cur) {
+          const rect = el.getBoundingClientRect();
+          const cursorX = e.clientX - rect.left;
+          const t = (el.scrollLeft + cursorX) / cur;
+          pendingScrollRef.current = t * next - cursorX;
+        }
+        return next;
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+  useLayoutEffect(() => {
+    if (pendingScrollRef.current != null && scrollRef.current) {
+      scrollRef.current.scrollLeft = Math.max(0, pendingScrollRef.current);
+      pendingScrollRef.current = null;
+    }
+  }, [pps]);
+
   // playhead + relógio seguem o vídeo sem re-render (via refs)
   const timeReadRef = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
@@ -1769,7 +2108,7 @@ function Timeline({
         className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
-        <span>Timeline — blocos movem · bordas cortam · arrasta a agulha pra navegar</span>
+        <span>Timeline — blocos movem · bordas cortam · agulha navega · scroll do mouse = zoom</span>
         <span className="flex items-center gap-3">
           <span
             ref={timeReadRef}
@@ -1785,7 +2124,7 @@ function Timeline({
             −
           </button>
           <button
-            onClick={() => setPps((v) => Math.min(240, (v || 40) * 1.5))}
+            onClick={() => setPps((v) => Math.min(400, (v || 40) * 1.5))}
             className="flex h-6 w-6 items-center justify-center rounded-[7px] border border-line text-[13px] text-text-muted transition-colors hover:border-amber-400/50 hover:text-amber-200"
             title="Aumentar zoom"
           >
@@ -1801,7 +2140,7 @@ function Timeline({
           className="relative select-none"
           style={{
             width: trackW,
-            height: 122,
+            height: 150,
             backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) ${effPps}px, transparent ${effPps}px, transparent ${effPps * 2}px)`,
           }}
           onPointerDown={(e) => {
@@ -1879,7 +2218,7 @@ function Timeline({
                 data-block="1"
                 title={blockText(b)}
                 className={
-                  'absolute top-[27px] h-[36px] cursor-grab overflow-hidden rounded-[8px] border-2 transition-shadow active:cursor-grabbing ' +
+                  'absolute top-[27px] h-[44px] cursor-grab overflow-hidden rounded-[8px] border-2 transition-shadow active:cursor-grabbing ' +
                   (sel ? 'z-10' : 'hover:brightness-125')
                 }
                 style={{
@@ -1948,9 +2287,9 @@ function Timeline({
                   if (tooltipRef.current) tooltipRef.current.style.display = 'none';
                 }}
               >
-                {/* alças de corte — barras limpas, só cor (hover mostra o texto) */}
-                <span className="pointer-events-none absolute inset-y-0 left-0 w-[5px] rounded-l-[6px] bg-white/50" />
-                <span className="pointer-events-none absolute inset-y-0 right-0 w-[5px] rounded-r-[6px] bg-white/50" />
+                {/* alças de corte — o cursor de corte (↔) avisa que ali corta */}
+                <span className="absolute inset-y-0 left-0 w-[7px] cursor-col-resize rounded-l-[6px] bg-white/50" />
+                <span className="absolute inset-y-0 right-0 w-[7px] cursor-col-resize rounded-r-[6px] bg-white/50" />
               </div>
             );
           })}
@@ -1958,7 +2297,7 @@ function Timeline({
           {/* filmstrip (só visual — vídeo não é editável) */}
           {thumbs.length > 0 ? (
             <div
-              className="pointer-events-none absolute left-0 top-[68px] flex h-[48px] overflow-hidden rounded-[8px] border border-line/60"
+              className="pointer-events-none absolute left-0 top-[76px] flex h-[64px] overflow-hidden rounded-[8px] border border-line/60"
               style={{ width: trackW }}
             >
               {thumbs.map((t, i) => (
@@ -2214,6 +2553,11 @@ function StylePanel({
   regroup,
   defaultPrimary,
   defaultAccent,
+  autoFit,
+  bgMode,
+  bgColor,
+  bgOpacity,
+  sel,
   disabled,
 }: {
   fontScale: number;
@@ -2239,17 +2583,38 @@ function StylePanel({
   regroup: (p: GroupPace) => void;
   defaultPrimary: string;
   defaultAccent: string;
+  autoFit: boolean;
+  bgMode: 'preset' | 'on' | 'off';
+  bgColor: string | null;
+  bgOpacity: number;
+  /** seleção PARCIAL ativa: os controles de texto agem só nas palavras marcadas */
+  sel: {
+    count: number;
+    cur: WordStyle;
+    set: (patch: WordStyle) => void;
+    clear: () => void;
+    reset: () => void;
+  } | null;
   disabled?: boolean;
 }) {
+  // com seleção parcial, os controles de TEXTO mostram e gravam o trecho
+  const selBold = sel ? (sel.cur.bold ?? bold) : bold;
+  const selItalic = sel ? (sel.cur.italic ?? italic) : italic;
+  const selUnderline = sel ? (sel.cur.underline ?? underline) : underline;
+  const selCase = sel ? (sel.cur.wcase ?? textCase) : textCase;
   const caseBtn = (mode: 'upper' | 'lower' | 'original', label: string, title: string) => (
     <button
       key={mode}
-      onClick={() => onSet({ textCase: textCase === mode ? null : mode })}
+      onClick={() =>
+        sel
+          ? sel.set({ wcase: selCase === mode ? null : mode })
+          : onSet({ textCase: textCase === mode ? null : mode })
+      }
       disabled={disabled}
       title={title}
       className={
         'flex h-8 min-w-[38px] items-center justify-center rounded-[9px] border px-2 text-[13px] font-bold transition-colors ' +
-        (textCase === mode
+        (selCase === mode
           ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
           : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
       }
@@ -2284,13 +2649,35 @@ function StylePanel({
         ) : null}
       </div>
 
+      {sel ? (
+        <div className="md:col-span-2 flex flex-wrap items-center gap-2.5 rounded-[10px] border border-blue-400/50 bg-blue-400/10 px-3 py-2">
+          <span className="text-[11.5px] font-bold text-blue-200">
+            ✂ {sel.count} palavra{sel.count > 1 ? 's' : ''} selecionada
+            {sel.count > 1 ? 's' : ''} — Tamanho, cor do Texto, B/U/I, Caixa e
+            Fonte agem SÓ nelas
+          </span>
+          <button
+            onClick={sel.clear}
+            className="rounded-[8px] border border-blue-400/50 px-2 py-0.5 text-[10.5px] font-semibold text-blue-200 hover:bg-blue-400/15"
+          >
+            concluir seleção
+          </button>
+          <button
+            onClick={sel.reset}
+            className="rounded-[8px] border border-line px-2 py-0.5 text-[10.5px] font-semibold text-text-muted hover:text-text"
+          >
+            remover estilos do trecho
+          </button>
+        </div>
+      ) : null}
+
       <ToolSlider
-        label="Tamanho"
-        min={0.45}
-        max={2}
+        label={sel ? 'Tamanho da seleção' : 'Tamanho'}
+        min={0.3}
+        max={3}
         step={0.05}
-        value={fontScale}
-        onChange={(v) => onSlide({ fontScale: v })}
+        value={sel ? (sel.cur.scale ?? 1) : fontScale}
+        onChange={(v) => (sel ? sel.set({ scale: v }) : onSlide({ fontScale: v }))}
         display={(v) => `${Math.round(v * 100)}%`}
         disabled={disabled}
       />
@@ -2314,10 +2701,10 @@ function StylePanel({
         </div>
         <div className="flex items-center gap-2">
           <ColorDot
-            label="Texto"
-            value={primary}
+            label={sel ? 'Texto (seleção)' : 'Texto'}
+            value={sel ? (sel.cur.color ?? primary) : primary}
             fallback={defaultPrimary}
-            onPick={(v) => onSet({ primary: v })}
+            onPick={(v) => (sel ? sel.set({ color: v }) : onSet({ primary: v }))}
             disabled={disabled}
           />
           <ColorDot
@@ -2339,12 +2726,12 @@ function StylePanel({
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <button
-            onClick={() => onSet({ bold: !bold })}
+            onClick={() => (sel ? sel.set({ bold: !selBold }) : onSet({ bold: !bold }))}
             disabled={disabled}
             title="Negrito"
             className={
               'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-black transition-colors ' +
-              (bold
+              (selBold
                 ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                 : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
             }
@@ -2352,12 +2739,14 @@ function StylePanel({
             B
           </button>
           <button
-            onClick={() => onSet({ underline: !underline })}
+            onClick={() =>
+              sel ? sel.set({ underline: !selUnderline }) : onSet({ underline: !underline })
+            }
             disabled={disabled}
             title="Sublinhado"
             className={
               'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-bold underline transition-colors ' +
-              (underline
+              (selUnderline
                 ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                 : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
             }
@@ -2365,12 +2754,12 @@ function StylePanel({
             U
           </button>
           <button
-            onClick={() => onSet({ italic: !italic })}
+            onClick={() => (sel ? sel.set({ italic: !selItalic }) : onSet({ italic: !italic }))}
             disabled={disabled}
             title="Itálico"
             className={
               'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-bold italic transition-colors ' +
-              (italic
+              (selItalic
                 ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                 : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
             }
@@ -2445,6 +2834,102 @@ function StylePanel({
         </p>
       </div>
 
+      <div>
+        <div
+          className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Ajuste automático
+        </div>
+        <div className="flex items-center gap-2">
+          {(
+            [
+              [true, 'Ligado'],
+              [false, 'Livre'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={label}
+              onClick={() => onSet({ autoFit: v })}
+              disabled={disabled}
+              className={
+                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
+                (autoFit === v
+                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                  : 'border-line text-text-muted hover:text-text')
+              }
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-text-muted">
+          ligado: re-organiza as linhas e nunca sai da tela · livre: quebras
+          congeladas e o texto cresce sem limite
+        </p>
+      </div>
+
+      <div>
+        <div
+          className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Fundo
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {(
+            [
+              ['preset', 'Do modelo'],
+              ['on', 'Ligado'],
+              ['off', 'Desligado'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              onClick={() => onSet({ bgMode: v })}
+              disabled={disabled}
+              className={
+                'rounded-[9px] border px-3 py-1.5 text-[11px] font-bold transition-colors ' +
+                (bgMode === v
+                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                  : 'border-line text-text-muted hover:text-text')
+              }
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {label}
+            </button>
+          ))}
+          {bgMode !== 'off' ? (
+            <ColorDot
+              label="Cor"
+              value={bgColor}
+              fallback="#111111"
+              onPick={(v) => onSet({ bgColor: v })}
+              disabled={disabled}
+            />
+          ) : null}
+        </div>
+        {bgMode !== 'off' ? (
+          <div className="mt-2">
+            <ToolSlider
+              label="Opacidade do fundo"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={bgOpacity}
+              onChange={(v) => onSlide({ bgOpacity: v })}
+              display={(v) => `${Math.round(v * 100)}%`}
+              disabled={disabled}
+            />
+          </div>
+        ) : (
+          <p className="mt-1 text-[10px] text-text-muted">
+            caixa e barra do modelo somem (o texto continua com os efeitos)
+          </p>
+        )}
+      </div>
+
       <div className="md:col-span-2">
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -2493,6 +2978,7 @@ function StylePanel({
           disabled={disabled}
           hue={HUE}
           options={[
+            { value: 'palavra', label: 'Palavra', sub: '1 por vez' },
             { value: 'rapido', label: 'Rápido', sub: '1-3 palavras' },
             { value: 'equilibrado', label: 'Equilibrado', sub: '3-5 palavras' },
             { value: 'frases', label: 'Frases', sub: 'blocos longos' },
@@ -2514,6 +3000,7 @@ function BlockList({
   selId,
   activeId,
   highlights,
+  locked,
   onSelect,
   onEditText,
   onSplit,
@@ -2521,12 +3008,14 @@ function BlockList({
   onDelete,
   onNudge,
   onToggleWord,
+  onToggleLock,
   disabled,
 }: {
   blocks: Block[];
   selId: string | null;
   activeId: string | null;
   highlights: Record<string, number[]>;
+  locked: string[];
   onSelect: (b: Block) => void;
   onEditText: (id: string, text: string) => void;
   onSplit: (id: string) => void;
@@ -2534,8 +3023,10 @@ function BlockList({
   onDelete: (id: string) => void;
   onNudge: (id: string, edge: 'start' | 'end', delta: number) => void;
   onToggleWord: (id: string, wordIdx: number) => void;
+  onToggleLock: (id: string) => void;
   disabled?: boolean;
 }) {
+  const lockedSet = new Set(locked);
   return (
     <div className="mt-5">
       <div
@@ -2544,7 +3035,8 @@ function BlockList({
       >
         <span>Blocos de legenda — {blocks.length}</span>
         <span className="normal-case tracking-normal font-normal">
-          clica na palavra pra pintar de destaque
+          clica na palavra pra pintar de destaque · 🔒 congela o bloco (o
+          “aplicar a todas” não pega nele)
         </span>
       </div>
       <div className="max-h-[280px] overflow-y-auto rounded-[14px] border border-line">
@@ -2552,6 +3044,7 @@ function BlockList({
           const sel = b.id === selId;
           const isActive = b.id === activeId;
           const hl = new Set(highlights[b.id] ?? []);
+          const isLocked = lockedSet.has(b.id);
           return (
             <div
               key={b.id}
@@ -2561,7 +3054,8 @@ function BlockList({
                   ? 'bg-amber-400/[0.07]'
                   : isActive
                     ? 'bg-lime/[0.05]'
-                    : 'hover:bg-white/[0.02]')
+                    : 'hover:bg-white/[0.02]') +
+                (isLocked ? ' opacity-95' : '')
               }
               style={{ contentVisibility: 'auto' } as CSSProperties}
             >
@@ -2589,6 +3083,24 @@ function BlockList({
                   className="w-full min-w-0 rounded-[8px] border border-transparent bg-transparent px-2 py-1 text-[13px] text-text outline-none transition-colors focus:border-amber-400/40 focus:bg-black/20"
                 />
                 <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onToggleLock(b.id)}
+                    title={
+                      isLocked
+                        ? 'Desbloquear (volta a receber o "aplicar a todas")'
+                        : 'Bloquear: congela o visual atual — o "aplicar a todas" não pega mais neste bloco'
+                    }
+                    disabled={disabled}
+                    className={
+                      'flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] transition-colors disabled:opacity-30 ' +
+                      (isLocked
+                        ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+                        : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
+                    }
+                  >
+                    {isLocked ? '🔒' : '🔓'}
+                  </button>
                   <RowBtn title="Dividir bloco" onClick={() => onSplit(b.id)} disabled={disabled || b.words.length < 2}>
                     ✂
                   </RowBtn>

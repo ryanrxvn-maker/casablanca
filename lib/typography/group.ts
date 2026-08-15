@@ -6,7 +6,7 @@
 
 import type { TWord, Block } from './engine';
 
-export type GroupPace = 'rapido' | 'equilibrado' | 'frases';
+export type GroupPace = 'palavra' | 'rapido' | 'equilibrado' | 'frases';
 
 type PaceCfg = {
   maxWords: number;
@@ -16,6 +16,9 @@ type PaceCfg = {
 };
 
 const PACES: Record<GroupPace, PaceCfg> = {
+  // 1 palavra = 1 bloco (estilo word-by-word viral; cada palavra vira o
+  // destaque do próprio bloco quando o modelo tem autoEmphasis)
+  palavra: { maxWords: 1, maxChars: 99, gapMs: 500, holdMs: 160 },
   rapido: { maxWords: 3, maxChars: 15, gapMs: 600, holdMs: 700 },
   equilibrado: { maxWords: 5, maxChars: 24, gapMs: 700, holdMs: 900 },
   frases: { maxWords: 9, maxChars: 38, gapMs: 800, holdMs: 1400 },
