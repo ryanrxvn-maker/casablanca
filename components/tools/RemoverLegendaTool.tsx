@@ -27,7 +27,7 @@ import { withFFLock } from '@/lib/lipsync-pipeline';
 // 800MB / 20min — a pré-produção pica pra caber no motor (≤30s/≤100MB por trecho).
 const MAX_VIDEO_BYTES = 800 * 1024 * 1024;
 const MAX_DURATION_SEC = 20 * 60 + 5; // 20min (folga de 5s)
-const SEGMENT_TARGET_SEC = 24; // alvo por trecho (folga sob o teto de 30s do motor)
+const SEGMENT_MAX_SEC = 27; // máximo por trecho (distribuído uniforme; folga sob os 30s do motor)
 const SEGMENT_HARD_LIMIT_SEC = 29; // nenhum trecho pode passar disso
 const SEGMENT_CONCURRENCY = 3; // trechos processados em paralelo
 
@@ -270,7 +270,7 @@ export default function RemoverLegendaTool() {
       // 1. Pré-produção: pica o vídeo em trechos (serializa o ffmpeg entre jobs).
       patchJob(jobId, { stage: 'preparing', pct: 3 });
       const segments = await withFFLock(() =>
-        splitVideoByTime(file, SEGMENT_TARGET_SEC, SEGMENT_HARD_LIMIT_SEC, {
+        splitVideoByTime(file, SEGMENT_MAX_SEC, SEGMENT_HARD_LIMIT_SEC, {
           onStage: () => patchJob(jobId, { stage: 'preparing' }),
         }),
       );

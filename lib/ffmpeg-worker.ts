@@ -1089,15 +1089,17 @@ async function resplitReencode(
 }
 
 /**
- * Pica um vídeo em trechos de ~targetSec (por keyframe, `-c copy` = rápido,
- * sem re-encode, sem perda), garantindo que NENHUM trecho passe de hardLimitSec
- * (se o GOP for longo e um pedaço estourar, esse pedaço é re-encodado em cortes
- * exatos). Trechos ≥1 arquivo, em ordem. Nunca ocupa o heap com o vídeo inteiro
+ * Pica um vídeo em trechos de ~maxSec (por keyframe, `-c copy` = rápido, sem
+ * re-encode, sem perda), garantindo que NENHUM trecho passe de hardLimitSec (se
+ * o GOP for longo e um pedaço estourar, esse pedaço é re-encodado em cortes
+ * exatos). Os cortes são distribuídos UNIFORMEMENTE (nº mínimo de trechos, sem
+ * sobrar um pedaço minúsculo no fim → menos chamadas ao motor, menos emendas).
+ * Trechos ≥1 arquivo, em ordem. Nunca ocupa o heap com o vídeo inteiro
  * (WORKERFS). Se o vídeo cabe num trecho só, devolve ele inteiro.
  */
 export async function splitVideoByTime(
   file: Blob,
-  targetSec = 24,
+  maxSec = 27,
   hardLimitSec = 29,
   opts: RunOptions = {},
 ): Promise<File[]> {
@@ -1120,13 +1122,18 @@ export async function splitVideoByTime(
       return [new File([file], `seg_000.${srcExt}`, { type: file.type || undefined })];
     }
 
+    // Distribui uniforme: menor nº de trechos que respeita maxSec, todos ~iguais
+    // (evita o pedaço minúsculo que um segment_time fixo deixaria no fim).
+    const numParts = Math.max(2, Math.ceil(durationSec / maxSec));
+    const segTime = durationSec / numParts;
+
     opts.onStage?.('Preparando o vídeo...');
     const rc = await ff.exec([
       '-i', inputPath,
       '-map', '0:v?', '-map', '0:a?', '-dn', '-sn',
       '-c', 'copy',
       '-f', 'segment',
-      '-segment_time', String(targetSec),
+      '-segment_time', segTime.toFixed(3),
       '-reset_timestamps', '1',
       '-segment_format', chunkFormat,
       `seg_%03d.${chunkExt}`,
@@ -1154,7 +1161,7 @@ export async function splitVideoByTime(
     for (const seg of raw) {
       const segDur = (await probeVideoMetadata(seg))?.durationSec || 0;
       if (segDur > hardLimitSec + 0.4) {
-        out.push(...(await resplitReencode(ff, seg, targetSec, opts)));
+        out.push(...(await resplitReencode(ff, seg, maxSec, opts)));
       } else {
         out.push(seg);
       }
