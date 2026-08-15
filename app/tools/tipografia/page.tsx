@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { CancelButton } from '@/components/CancelButton';
 import { createClient } from '@/lib/supabase/client';
+import { Popover } from '@/components/Popover';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory } from '@/lib/history';
@@ -2835,39 +2836,15 @@ function LangPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  // popover em position:FIXED — sai do fluxo do card (nada de ser cortado
-  // pelo overflow/borda do passo, que era o bug de "caixa dentro da caixa")
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
+  // menu por PORTAL (components/Popover): o card do passo tem overflow-hidden
+  // E ganha transform no hover — os dois cortam/deslocam popover ancorado
   const btnRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onScroll = () => setOpen(false);
-    window.addEventListener('pointerdown', onDown);
-    window.addEventListener('scroll', onScroll, true);
-    return () => {
-      window.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('scroll', onScroll, true);
-    };
-  }, [open]);
-  const toggleOpen = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({
-        left: Math.min(r.left, Math.max(8, window.innerWidth - 316)),
-        top: Math.min(r.bottom + 6, window.innerHeight - 380),
-      });
-    }
-    setOpen((v) => !v);
-  };
+  const closeMenu = useCallback(() => setOpen(false), []);
   const list = q.trim()
     ? LANGS.filter((l) => l.label.toLowerCase().includes(q.trim().toLowerCase()))
     : LANGS;
   return (
-    <div ref={wrapRef} className="relative inline-block">
+    <div className="inline-block">
       <div
         className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
@@ -2876,7 +2853,7 @@ function LangPicker({
       </div>
       <button
         ref={btnRef}
-        onClick={toggleOpen}
+        onClick={() => setOpen((v) => !v)}
         disabled={disabled}
         className={
           'flex min-w-[260px] items-center justify-between gap-3 rounded-[12px] border border-line bg-bg-soft px-3.5 py-2.5 text-[13px] font-semibold text-text hover:border-amber-400/50' +
@@ -2892,11 +2869,8 @@ function LangPicker({
         </span>
         <span className="text-text-muted">▾</span>
       </button>
-      {open && pos ? (
-        <div
-          className="fixed z-[80] w-[300px] overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl"
-          style={{ left: pos.left, top: pos.top }}
-        >
+      <Popover open={open} anchorRef={btnRef} onClose={closeMenu} width={300}>
+        <div className="overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl">
           <button
             onClick={() => {
               onChange('auto');
@@ -2947,7 +2921,7 @@ function LangPicker({
             ) : null}
           </div>
         </div>
-      ) : null}
+      </Popover>
     </div>
   );
 }
@@ -2972,6 +2946,9 @@ function ColorDot({
   const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>({ h: 45, s: 1, v: 1 });
   const svRef = useRef<HTMLDivElement | null>(null);
   const hueRef = useRef<HTMLDivElement | null>(null);
+  // gatilho + menu por PORTAL (o card do passo corta/desloca popover ancorado)
+  const dotBtnRef = useRef<HTMLButtonElement | null>(null);
+  const closeDot = useCallback(() => setOpen(false), []);
   const openPicker = () => {
     if (!open) {
       const fromCur = hexToHsv(cur);
@@ -3001,6 +2978,7 @@ function ColorDot({
   return (
     <div className="relative">
       <button
+        ref={dotBtnRef}
         onClick={openPicker}
         disabled={disabled}
         className={
@@ -3014,8 +2992,8 @@ function ColorDot({
         />
         <span className="text-[11px] font-semibold text-text-muted">{label}</span>
       </button>
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-[60] w-[248px] rounded-[16px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
+      <Popover open={open} anchorRef={dotBtnRef} onClose={closeDot} width={248}>
+        <div className="rounded-[16px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
           {/* topo: cor atual grande + hex + conta-gotas (só ícone) */}
           <div className="mb-2.5 flex items-center gap-2">
             <span
@@ -3156,7 +3134,7 @@ function ColorDot({
             </button>
           </div>
         </div>
-      ) : null}
+      </Popover>
     </div>
   );
 }
