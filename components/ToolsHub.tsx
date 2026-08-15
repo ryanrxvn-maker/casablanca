@@ -73,16 +73,6 @@ const FEATURED: ToolEntry[] = [
     poster: '/cards/criar-avatar.jpg',
   },
   {
-    href: '/tools/decupagem-copy',
-    label: 'Decupagem Inteligente',
-    description: 'A IA lê a copy, escolhe o melhor take de cada frase e monta o corte — você diz o que precisa ser dito, ela entrega.',
-    icon: <IconDecupageCopy size={28} />,
-    hue: 'rgba(232, 121, 249, 0.45)',
-    badge: 'IA',
-    video: '/cards/decupagem-inteligente.mp4',
-    poster: '/cards/decupagem-inteligente.jpg',
-  },
-  {
     href: '/tools/copy-srt',
     label: 'Gerador de SRT',
     description: 'Cole a copy, suba o áudio e a legenda sai alinhada palavra por palavra — pronta pra importar no editor.',
@@ -561,22 +551,56 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
  * ferramenta cospe no MP4. Mesmo tamanho/estrutura do slide do FakePrint.
  */
 function TipografiaSlide() {
+  const wrapRef = useRef<HTMLAnchorElement | null>(null);
+
+  // fundo REAGE ao mouse: vars --mx/--my alimentam o holofote e o parallax
+  function onMove(e: React.PointerEvent) {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${(((e.clientX - r.left) / r.width) * 100).toFixed(2)}%`);
+    el.style.setProperty('--my', `${(((e.clientY - r.top) / r.height) * 100).toFixed(2)}%`);
+    el.style.setProperty('--px', `${((e.clientX - r.left) / r.width - 0.5).toFixed(3)}`);
+    el.style.setProperty('--py', `${((e.clientY - r.top) / r.height - 0.5).toFixed(3)}`);
+  }
+
   return (
     <Link
+      ref={wrapRef}
       href="/tools/tipografia"
+      onPointerMove={onMove}
       className="dark-island group relative block overflow-hidden rounded-[26px] border border-line/60"
-      style={{ boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)' }}
+      style={
+        {
+          boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)',
+          '--mx': '50%',
+          '--my': '40%',
+          '--px': '0',
+          '--py': '0',
+        } as React.CSSProperties
+      }
     >
       <div className="relative aspect-[16/10] max-h-[480px] w-full sm:aspect-[16/8] lg:aspect-[21/9]">
-        {/* Fundo cinema: gradiente profundo + brilhos animados + grade sutil */}
+        {/* Fundo cinema profundo */}
         <div
           aria-hidden
           className="absolute inset-0"
           style={{
             background:
-              'radial-gradient(120% 90% at 18% 0%, rgba(109,78,232,0.34), transparent 55%), radial-gradient(110% 80% at 88% 100%, rgba(251,191,36,0.16), transparent 50%), linear-gradient(165deg, #0b0a12 0%, #070609 55%, #0d0a14 100%)',
+              'radial-gradient(120% 90% at 18% 0%, rgba(109,78,232,0.3), transparent 55%), radial-gradient(110% 80% at 88% 100%, rgba(251,191,36,0.14), transparent 50%), linear-gradient(165deg, #0b0a12 0%, #060509 55%, #0d0a14 100%)',
           }}
         />
+        {/* holofote que segue o mouse */}
+        <div
+          aria-hidden
+          className="absolute inset-0 opacity-60 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background:
+              'radial-gradient(34% 42% at var(--mx) var(--my), rgba(167,139,250,0.28), transparent 70%)',
+          }}
+        />
+        {/* feixes de luz varrendo por trás dos letterings */}
+        <div aria-hidden className="tgs-beams absolute inset-0" />
         <div aria-hidden className="tgs-blob tgs-blob-a" />
         <div aria-hidden className="tgs-blob tgs-blob-b" />
         <div
@@ -589,18 +613,24 @@ function TipografiaSlide() {
           }}
         />
 
-        {/* O ENGINE ao vivo (zoom lento no hover, igual o slide vizinho) */}
-        <div className="absolute inset-0 transition-transform duration-[1600ms] ease-out group-hover:scale-[1.04]">
-          <TipoShowcase />
+        {/* O ENGINE ao vivo, com parallax sutil do mouse + zoom no hover */}
+        <div
+          className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.05]"
+          style={{
+            transform:
+              'translate(calc(var(--px) * 14px), calc(var(--py) * 10px))',
+          }}
+        >
+          <TipoShowcase variant="hero" />
         </div>
 
-        {/* Vinheta de legibilidade */}
+        {/* Vinheta de legibilidade (mais leve — os letterings são a estrela) */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'linear-gradient(to top, rgba(2,2,6,0.9) 0%, rgba(2,2,6,0.3) 24%, transparent 44%), linear-gradient(to bottom, rgba(2,2,6,0.5) 0%, transparent 20%)',
+              'linear-gradient(to top, rgba(2,2,6,0.72) 0%, rgba(2,2,6,0.16) 20%, transparent 38%), linear-gradient(to bottom, rgba(2,2,6,0.45) 0%, transparent 18%)',
           }}
         />
 
@@ -634,20 +664,10 @@ function TipografiaSlide() {
           </span>
         </div>
 
-        {/* Copy + CTA */}
-        <div className="absolute inset-x-0 bottom-0 z-10 p-4 md:p-6">
-          <h3
-            className="max-w-[620px] text-[20px] font-black leading-[1.06] tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)] md:text-[30px] xl:text-[34px]"
-            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
-          >
-            Sua fala vira <span className="text-[#ffd60a]">lettering animado</span> — sozinha.
-          </h3>
-          <p className="mt-1.5 hidden max-w-[560px] text-[12.5px] leading-relaxed text-white/75 sm:block md:text-[13.5px]">
-            Transcreve palavra por palavra, aplica tipografia de agência e queima
-            no vídeo em segundos. 491 modelos, editor estilo CapCut, grátis.
-          </p>
+        {/* Só o CTA — os letterings falam por si */}
+        <div className="absolute inset-x-0 bottom-0 z-10 flex justify-center p-4 md:p-6">
           <span
-            className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.08] px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white backdrop-blur-sm transition-all duration-300 group-hover:border-violet/60 group-hover:bg-white/[0.14] group-hover:shadow-[0_0_28px_-6px_rgba(167,139,250,0.8)]"
+            className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-black/45 px-6 py-3 text-[11.5px] font-bold uppercase tracking-[0.2em] text-white backdrop-blur-md transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-violet/70 group-hover:bg-black/60 group-hover:shadow-[0_0_34px_-6px_rgba(167,139,250,0.9)]"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             Criar legendas agora
@@ -670,20 +690,36 @@ function TipografiaSlide() {
           top: -20%;
           background: radial-gradient(circle, rgba(109, 78, 232, 0.55), transparent 65%);
           animation: tgs-float-a 9s ease-in-out infinite alternate;
+          transform: translate(calc(var(--px) * -22px), calc(var(--py) * -16px));
         }
         .tgs-blob-b {
           right: -10%;
           bottom: -28%;
-          background: radial-gradient(circle, rgba(251, 191, 36, 0.3), transparent 65%);
+          background: radial-gradient(circle, rgba(251, 191, 36, 0.32), transparent 65%);
           animation: tgs-float-b 11s ease-in-out infinite alternate;
+          transform: translate(calc(var(--px) * 26px), calc(var(--py) * 18px));
+        }
+        .tgs-beams {
+          pointer-events: none;
+          opacity: 0.5;
+          background:
+            linear-gradient(115deg, transparent 42%, rgba(167, 139, 250, 0.16) 47%, rgba(255, 255, 255, 0.05) 50%, rgba(167, 139, 250, 0.16) 53%, transparent 58%),
+            linear-gradient(115deg, transparent 68%, rgba(251, 191, 36, 0.1) 74%, transparent 80%);
+          background-size: 260% 100%;
+          animation: tgs-sweep 7.5s ease-in-out infinite;
+        }
+        @keyframes tgs-sweep {
+          0% { background-position: 120% 0; }
+          55% { background-position: -30% 0; }
+          100% { background-position: -30% 0; }
         }
         @keyframes tgs-float-a {
-          from { transform: translate(0, 0) scale(1); }
-          to { transform: translate(6%, 10%) scale(1.15); }
+          from { opacity: 0.4; }
+          to { opacity: 0.65; }
         }
         @keyframes tgs-float-b {
-          from { transform: translate(0, 0) scale(1.1); }
-          to { transform: translate(-8%, -8%) scale(0.95); }
+          from { opacity: 0.35; }
+          to { opacity: 0.6; }
         }
       `}</style>
     </Link>
@@ -1346,7 +1382,7 @@ function TipografiaFeaturedCard({ delay }: { delay: number }) {
                 'radial-gradient(130% 90% at 20% 0%, rgba(109,78,232,0.35), transparent 55%), radial-gradient(120% 80% at 85% 100%, rgba(251,191,36,0.14), transparent 55%), linear-gradient(170deg, #0d0b14 0%, #060509 60%, #0b0912 100%)',
             }}
           />
-          <TipoShowcase />
+          <TipoShowcase variant="card" />
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"

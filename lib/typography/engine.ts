@@ -199,6 +199,10 @@ export type TypoPreset = {
     outline?: boolean;
     /** risco atravessado (ref eco triplo) */
     strike?: boolean;
+    /** REFLEXO espelhado (só faz sentido com pos 'below'): texto de cabeça
+     *  pra baixo com alpha baixo, tipo reflexo no chão — nunca parece
+     *  "mesmo texto repetido", parece acabamento */
+    flipY?: boolean;
     dx?: number;
     gap?: number;
     glow?: number;
@@ -1479,9 +1483,17 @@ export function drawCaptions(
       const col = resolveColor(ec.color, primary, accent);
       ctx.save();
       ctx.globalAlpha = outAlpha * clamp01(pBlock * 2) * (ec.alpha ?? 1);
-      ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
-      ctx.scale(s, s);
-      ctx.translate(-cx, -topY);
+      if (ec.flipY && ec.pos === 'below') {
+        // REFLEXO: espelha verticalmente ancorado na junção com o texto —
+        // a borda de baixo do original (topY+blockH) rende no topo do eco (y)
+        ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
+        ctx.scale(s, -s);
+        ctx.translate(-cx, -(topY + blockH));
+      } else {
+        ctx.translate(cx + (ec.dx ?? 0) * fontPx, y);
+        ctx.scale(s, s);
+        ctx.translate(-cx, -topY);
+      }
       if (ec.glow) {
         ctx.shadowColor = col;
         ctx.shadowBlur = ec.glow * fontPx;

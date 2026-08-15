@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from 'react';
 import { CancelButton } from '@/components/CancelButton';
+import { createClient } from '@/lib/supabase/client';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory } from '@/lib/history';
@@ -72,6 +73,7 @@ import {
   renderTypographyVideo,
   type RenderProgress,
 } from '@/lib/typography/export';
+import { correctBlocksByCopy } from '@/lib/typography/copy-fix';
 
 /**
  * TIPOGRAFIA AUTOMÁTICA — sobe o vídeo, a transcrição vira legenda com
@@ -88,7 +90,8 @@ type Language = string; // ISO-639-1 ('pt', 'en'...) ou 'auto'
 
 // idiomas do Whisper (Groq) — os mais usados primeiro, resto alfabético
 const LANGS: Array<{ code: string; label: string }> = [
-  { code: 'pt', label: 'Português' },
+  { code: 'pt-br', label: 'Português (Brasil)' },
+  { code: 'pt', label: 'Português (Portugal)' },
   { code: 'en', label: 'Inglês' },
   { code: 'es', label: 'Espanhol' },
   { code: 'pl', label: 'Polonês' },
@@ -254,9 +257,12 @@ function TipografiaInner() {
   const [wordSel, setWordSel] = useState<{ blockId: string; a: number; b: number } | null>(null);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
-  // ⭐ favoritos da galeria — persistem no aparelho (localStorage)
+  // ⭐ favoritos POR CONTA: a verdade mora no banco (user_tool_prefs, RLS);
+  // localStorage é cache instantâneo + fallback enquanto a migração 031 não
+  // roda / sem internet
   const [favs, setFavs] = useState<string[]>([]);
   useEffect(() => {
+    let cancelled = false;
     try {
       const raw = localStorage.getItem('tipografia:favs');
       if (raw) {
@@ -264,8 +270,38 @@ function TipografiaInner() {
         if (Array.isArray(arr)) setFavs(arr.filter((x) => typeof x === 'string'));
       }
     } catch {
-      /* sem favoritos salvos */
+      /* sem cache local */
     }
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid || cancelled) return;
+        const { data, error } = await supabase
+          .from('user_tool_prefs')
+          .select('tipografia_favs')
+          .eq('user_id', uid)
+          .maybeSingle();
+        if (error || cancelled) return; // tabela ainda não migrada → local segura
+        if (data && Array.isArray(data.tipografia_favs)) {
+          const server = (data.tipografia_favs as unknown[]).filter(
+            (x): x is string => typeof x === 'string',
+          );
+          setFavs(server);
+          try {
+            localStorage.setItem('tipografia:favs', JSON.stringify(server));
+          } catch {
+            /* cache local é best-effort */
+          }
+        }
+      } catch {
+        /* offline — o cache local vale */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
   const toggleFav = useCallback((id: string) => {
     setFavs((prev) => {
@@ -273,8 +309,23 @@ function TipografiaInner() {
       try {
         localStorage.setItem('tipografia:favs', JSON.stringify(next));
       } catch {
-        /* storage cheio — favorito vale só na sessão */
+        /* storage cheio — segue só em memória */
       }
+      void (async () => {
+        try {
+          const supabase = createClient();
+          const { data: u } = await supabase.auth.getUser();
+          const uid = u.user?.id;
+          if (!uid) return;
+          await supabase.from('user_tool_prefs').upsert({
+            user_id: uid,
+            tipografia_favs: next,
+            updated_at: new Date().toISOString(),
+          });
+        } catch {
+          /* servidor indisponível — localStorage segurou */
+        }
+      })();
       return next;
     });
   }, []);
@@ -1177,6 +1228,28 @@ function TipografiaInner() {
               onToggleWord={toggleHighlight}
               onToggleLock={toggleLock}
               disabled={processing}
+            />
+
+            <CopyFixPanel
+              disabled={processing}
+              onFix={(copyText) => {
+                try {
+                  const r = correctBlocksByCopy(blocks, copyText);
+                  pushHistory();
+                  setBlocks(r.blocks);
+                  return {
+                    ok: true,
+                    msg:
+                      r.corrected === 0 && r.added === 0
+                        ? 'A legenda já estava idêntica à copy — nada pra corrigir.'
+                        : `${r.corrected} palavra${r.corrected === 1 ? '' : 's'} corrigida${r.corrected === 1 ? '' : 's'}` +
+                          (r.added > 0 ? ` e ${r.added} que o áudio tinha comido devolvida${r.added === 1 ? '' : 's'}` : '') +
+                          ' — blocos e tempos intactos (Ctrl+Z desfaz).',
+                  };
+                } catch (e) {
+                  return { ok: false, msg: (e as Error).message };
+                }
+              }}
             />
           </ToolStep>
         ) : null}
@@ -2619,6 +2692,46 @@ function FontPicker({
 
 /* ───────────────────────── Painel de ajustes ───────────────────────── */
 
+// HSV ↔ hex (pro seletor de tom arrastável estilo CapCut)
+function hsvToHex(h: number, s: number, v: number): string {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const to2 = (n: number) =>
+    Math.round((n + m) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${to2(r)}${to2(g)}${to2(b)}`;
+}
+function hexToHsv(hex: string): { h: number; s: number; v: number } | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  }
+  if (h < 0) h += 360;
+  return { h, s: max === 0 ? 0 : d / max, v: max };
+}
+
 const SWATCHES = [
   '#ffffff', '#d9dbe0', '#8a8f99', '#3a3d45', '#0f0f10', '#000000',
   '#ffd60a', '#ffb300', '#ff9f0a', '#ff6b00', '#e8b04c', '#b8860b',
@@ -2627,6 +2740,87 @@ const SWATCHES = [
   '#0aa2c0', '#bde0fe', '#2eff4f', '#2edb84', '#0f9d58', '#c8e87c',
   '#d4fc79', '#f5f0e1', '#ffdab9', '#8b5a2b', '#5c3a21', '#2b1d0e',
 ];
+
+/* ───────────────────── Corrigir legenda pela copy ───────────────────── */
+
+function CopyFixPanel({
+  onFix,
+  disabled,
+}: {
+  onFix: (copyText: string) => { ok: boolean; msg: string };
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  return (
+    <div className="mt-5 rounded-[14px] border border-line bg-bg-soft/40 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div
+            className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Corrigir legenda pela copy
+          </div>
+          <p className="mt-0.5 text-[11px] text-text-muted">
+            Cola o texto da copy e a legenda inteira é corrigida por ela — só
+            palavras erradas e pontuação. Blocos, tempos e separação ficam
+            exatamente como foram gerados.
+          </p>
+        </div>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          disabled={disabled}
+          className={
+            'rounded-[10px] border border-amber-400/60 bg-amber-400/10 px-4 py-2 text-[11.5px] font-bold text-amber-600 hover:bg-amber-400/20' +
+            T3D
+          }
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          {open ? 'Fechar' : 'Colar copy'}
+        </button>
+      </div>
+      {open ? (
+        <div className="mt-3">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Cola aqui o texto exato da copy narrada no vídeo..."
+            rows={5}
+            disabled={disabled}
+            className="w-full rounded-[10px] border border-line bg-black/20 px-3 py-2.5 text-[13px] leading-relaxed text-text outline-none focus:border-amber-400/50"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => setFeedback(onFix(text))}
+              disabled={disabled || text.trim().length < 20}
+              className={
+                'rounded-[10px] border border-amber-400/70 bg-amber-400/20 px-5 py-2 text-[12px] font-bold text-amber-600 hover:bg-amber-400/30 disabled:opacity-40' +
+                T3D
+              }
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Corrigir pela copy →
+            </button>
+            {feedback ? (
+              <span
+                className={
+                  'rounded-[9px] border px-3 py-1.5 text-[11px] font-semibold ' +
+                  (feedback.ok
+                    ? 'border-lime/40 bg-lime/10 text-lime'
+                    : 'border-red-500/40 bg-red-500/10 text-red-400')
+                }
+              >
+                {feedback.msg}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /* ───────────────────────── Seletor de idioma ───────────────────────── */
 
@@ -2641,15 +2835,34 @@ function LangPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  // popover em position:FIXED — sai do fluxo do card (nada de ser cortado
+  // pelo overflow/borda do passo, que era o bug de "caixa dentro da caixa")
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     };
+    const onScroll = () => setOpen(false);
     window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('scroll', onScroll, true);
+    };
   }, [open]);
+  const toggleOpen = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({
+        left: Math.min(r.left, Math.max(8, window.innerWidth - 316)),
+        top: Math.min(r.bottom + 6, window.innerHeight - 380),
+      });
+    }
+    setOpen((v) => !v);
+  };
   const list = q.trim()
     ? LANGS.filter((l) => l.label.toLowerCase().includes(q.trim().toLowerCase()))
     : LANGS;
@@ -2662,7 +2875,8 @@ function LangPicker({
         Idioma da fala
       </div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        ref={btnRef}
+        onClick={toggleOpen}
         disabled={disabled}
         className={
           'flex min-w-[260px] items-center justify-between gap-3 rounded-[12px] border border-line bg-bg-soft px-3.5 py-2.5 text-[13px] font-semibold text-text hover:border-amber-400/50' +
@@ -2678,8 +2892,11 @@ function LangPicker({
         </span>
         <span className="text-text-muted">▾</span>
       </button>
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[300px] overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl">
+      {open && pos ? (
+        <div
+          className="fixed z-[80] w-[300px] overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl"
+          style={{ left: pos.left, top: pos.top }}
+        >
           <button
             onClick={() => {
               onChange('auto');
@@ -2751,10 +2968,40 @@ function ColorDot({
   const [open, setOpen] = useState(false);
   const [hex, setHex] = useState('');
   const cur = value ?? fallback;
+  // seletor de TOM arrastável (CapCut): quadrado saturação×brilho + barra de matiz
+  const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>({ h: 45, s: 1, v: 1 });
+  const svRef = useRef<HTMLDivElement | null>(null);
+  const hueRef = useRef<HTMLDivElement | null>(null);
+  const openPicker = () => {
+    if (!open) {
+      const fromCur = hexToHsv(cur);
+      if (fromCur) setHsv(fromCur);
+    }
+    setOpen((v) => !v);
+  };
+  const dragSv = (e: React.PointerEvent) => {
+    const el = svRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const s = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const v = 1 - Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    const next = { ...hsv, s, v };
+    setHsv(next);
+    onPick(hsvToHex(next.h, next.s, next.v));
+  };
+  const dragHue = (e: React.PointerEvent) => {
+    const el = hueRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const h = Math.min(359.9, Math.max(0, ((e.clientX - r.left) / r.width) * 360));
+    const next = { ...hsv, h };
+    setHsv(next);
+    onPick(hsvToHex(next.h, next.s, next.v));
+  };
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={openPicker}
         disabled={disabled}
         className={
           'flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft px-2.5 py-1.5 hover:border-amber-400/50' +
@@ -2768,17 +3015,115 @@ function ColorDot({
         <span className="text-[11px] font-semibold text-text-muted">{label}</span>
       </button>
       {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-[236px] rounded-[14px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
-          <div className="grid grid-cols-6 gap-1.5">
+        <div className="absolute left-0 top-[calc(100%+6px)] z-[60] w-[248px] rounded-[16px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
+          {/* topo: cor atual grande + hex + conta-gotas (só ícone) */}
+          <div className="mb-2.5 flex items-center gap-2">
+            <span
+              className="h-8 w-8 shrink-0 rounded-[9px] border border-white/20 shadow-[inset_0_1px_2px_rgba(255,255,255,0.25),0_2px_6px_rgba(0,0,0,0.35)]"
+              style={{ background: cur }}
+            />
+            <input
+              value={hex}
+              onChange={(e) => {
+                setHex(e.target.value);
+                const v = e.target.value.trim();
+                if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
+                  onPick(v.startsWith('#') ? v : '#' + v);
+                }
+              }}
+              placeholder={cur}
+              className="mono w-full min-w-0 rounded-[8px] border border-line bg-black/25 px-2 py-1.5 text-[11px] text-text outline-none focus:border-amber-400/50"
+            />
+            {typeof window !== 'undefined' && 'EyeDropper' in window ? (
+              <button
+                title="Pegar cor da tela — clica em qualquer pixel do preview"
+                onClick={async () => {
+                  try {
+                    const picker = new (
+                      window as unknown as {
+                        EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> };
+                      }
+                    ).EyeDropper();
+                    const r = await picker.open();
+                    if (r?.sRGBHex) {
+                      onPick(r.sRGBHex);
+                      const fromPick = hexToHsv(r.sRGBHex);
+                      if (fromPick) setHsv(fromPick);
+                    }
+                  } catch {
+                    /* user cancelou o conta-gotas */
+                  }
+                }}
+                className={
+                  'flex h-8 w-9 shrink-0 items-center justify-center rounded-[9px] border border-line bg-bg-soft text-text hover:border-amber-400/60 hover:text-amber-400' +
+                  T3D
+                }
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="m2 22 1-1h3l9-9M3 21v-3l9-9m0 0 3.5-3.5M15 6l3 3m-3-3 2.3-2.3a2.4 2.4 0 0 1 3.4 3.4L18 9" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
+
+          {/* quadrado de TOM (saturação × brilho) — arrasta igual CapCut */}
+          <div
+            ref={svRef}
+            onPointerDown={(e) => {
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              dragSv(e);
+            }}
+            onPointerMove={(e) => {
+              if (e.buttons === 1) dragSv(e);
+            }}
+            className="relative h-[130px] w-full cursor-crosshair touch-none rounded-[10px] border border-white/15"
+            style={{
+              background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hsvToHex(hsv.h, 1, 1)})`,
+            }}
+          >
+            <span
+              className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.6)]"
+              style={{
+                left: `${hsv.s * 100}%`,
+                top: `${(1 - hsv.v) * 100}%`,
+                background: hsvToHex(hsv.h, hsv.s, hsv.v),
+              }}
+            />
+          </div>
+          {/* barra de matiz */}
+          <div
+            ref={hueRef}
+            onPointerDown={(e) => {
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              dragHue(e);
+            }}
+            onPointerMove={(e) => {
+              if (e.buttons === 1) dragHue(e);
+            }}
+            className="relative mt-2 h-[14px] w-full cursor-pointer touch-none rounded-full border border-white/15"
+            style={{
+              background:
+                'linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%)',
+            }}
+          >
+            <span
+              className="pointer-events-none absolute top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.6)]"
+              style={{ left: `${(hsv.h / 360) * 100}%`, background: hsvToHex(hsv.h, 1, 1) }}
+            />
+          </div>
+
+          {/* paleta rápida */}
+          <div className="mt-2.5 grid grid-cols-9 gap-1">
             {SWATCHES.map((c) => (
               <button
                 key={c}
                 onClick={() => {
                   onPick(c);
-                  setOpen(false);
+                  const fromSw = hexToHsv(c);
+                  if (fromSw) setHsv(fromSw);
                 }}
                 className={
-                  'h-[26px] w-[26px] rounded-[7px] border transition-transform hover:scale-110 ' +
+                  'h-[19px] w-[19px] rounded-[5px] border transition-transform hover:scale-125 ' +
                   (cur.toLowerCase() === c ? 'border-amber-400' : 'border-white/15')
                 }
                 style={{ background: c }}
@@ -2786,67 +3131,30 @@ function ColorDot({
               />
             ))}
           </div>
-          {typeof window !== 'undefined' && 'EyeDropper' in window ? (
+
+          <div className="mt-2.5 flex items-center gap-1.5">
             <button
-              onClick={async () => {
-                try {
-                  // conta-gotas do navegador: clica em QUALQUER pixel da tela
-                  // (inclusive o preview do vídeo) e a cor vem identificada
-                  const picker = new (
-                    window as unknown as {
-                      EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> };
-                    }
-                  ).EyeDropper();
-                  const r = await picker.open();
-                  if (r?.sRGBHex) {
-                    onPick(r.sRGBHex);
-                    setOpen(false);
-                  }
-                } catch {
-                  /* user cancelou o conta-gotas */
-                }
+              onClick={() => {
+                onPick(null);
+                setOpen(false);
               }}
               className={
-                'mt-2.5 flex w-full items-center justify-center gap-2 rounded-[9px] border border-line bg-bg-soft px-2 py-1.5 text-[11px] font-bold text-text hover:border-amber-400/50' +
+                'w-full rounded-[8px] border border-line bg-bg-soft px-2 py-1.5 text-[10.5px] font-semibold text-text-muted hover:text-text' +
                 T3D
               }
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                <path d="m2 22 1-1h3l9-9M3 21v-3l9-9m0 0 3.5-3.5M15 6l3 3m-3-3 2.3-2.3a2.4 2.4 0 0 1 3.4 3.4L18 9" />
-              </svg>
-              Pegar cor da tela (conta-gotas)
+              Padrão do modelo
             </button>
-          ) : null}
-          <div className="mt-2.5 flex items-center gap-1.5">
-            <input
-              value={hex}
-              onChange={(e) => setHex(e.target.value)}
-              placeholder={cur}
-              className="mono w-full rounded-[8px] border border-line bg-black/30 px-2 py-1 text-[11px] text-text outline-none focus:border-amber-400/50"
-            />
             <button
-              onClick={() => {
-                const v = hex.trim();
-                if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
-                  onPick(v.startsWith('#') ? v : '#' + v);
-                  setOpen(false);
-                  setHex('');
-                }
-              }}
-              className="rounded-[8px] border border-amber-400/50 px-2 py-1 text-[11px] font-bold text-amber-200"
+              onClick={() => setOpen(false)}
+              className={
+                'shrink-0 rounded-[8px] border border-amber-400/60 bg-amber-400/15 px-3 py-1.5 text-[10.5px] font-bold text-amber-600' +
+                T3D
+              }
             >
               OK
             </button>
           </div>
-          <button
-            onClick={() => {
-              onPick(null);
-              setOpen(false);
-            }}
-            className="mt-2 w-full rounded-[8px] border border-line px-2 py-1 text-[10.5px] text-text-muted hover:text-text"
-          >
-            Padrão do modelo
-          </button>
         </div>
       ) : null}
     </div>
@@ -3423,7 +3731,7 @@ function BlockList({
                     }
                     disabled={disabled}
                     className={
-                      'flex h-6 w-6 items-center justify-center rounded-[7px] border bg-bg-soft text-[11px] disabled:opacity-30' + T3D + ' ' +
+                      'flex h-7 w-7 items-center justify-center rounded-[8px] border bg-bg-soft text-[12.5px] disabled:opacity-30' + T3D + ' ' +
                       (isLocked
                         ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
                         : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
@@ -3508,7 +3816,7 @@ function RowBtn({
       title={title}
       disabled={disabled}
       className={
-        'flex h-6 w-6 items-center justify-center rounded-[7px] border bg-bg-soft text-[11px] disabled:opacity-30' + T3D + ' ' +
+        'flex h-7 w-7 items-center justify-center rounded-[8px] border bg-bg-soft text-[12.5px] disabled:opacity-30' + T3D + ' ' +
         (danger
           ? 'border-line text-text-muted hover:border-red-500/50 hover:text-red-300'
           : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')

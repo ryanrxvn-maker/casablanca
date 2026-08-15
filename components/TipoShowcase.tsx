@@ -16,20 +16,36 @@ import { drawPresetDemo } from '@/lib/typography/engine';
 import { TYPO_PRESETS } from '@/lib/typography/presets';
 import { ensureTypoFonts, type FontKey } from '@/lib/typography/fonts';
 
-// modelo × copy — pares curados pra mostrar a variedade real (mix viral,
-// glow, karaokê com caixa, 3D, empilhado, linha colorida...)
-const SHOW: Array<{ id: string; text: string }> = [
-  { id: 'titulo-viral', text: 'hoje voce vai LUCRAR' },
+// modelo × copy — pares curados pra mostrar a variedade real.
+// HERO = os mais insanos (fumaça, ouro, 3D, glitch, neon) pro carrossel;
+// CARD = ciclo diferente (mix viral, karaokê, linha) pro destaque menor.
+const SHOW_HERO: Array<{ id: string; text: string }> = [
+  { id: 'ouro-fumaca', text: 'FATUROU 20 MIL' },
   { id: 'verde-dinheiro', text: 'GANHE 500 POR DIA' },
-  { id: 'neon-viral', text: 'ISSO MUDA TUDO' },
+  { id: 'fumaca', text: 'O SEGREDO DELES' },
+  { id: 'glitch-viral', text: 'ISSO MUDA TUDO' },
+  { id: 'davinci-3d', text: 'SEM EDITAR NADA' },
+  { id: 'epico', text: 'VIRALIZA HOJE' },
+  { id: 'neon-viral', text: 'PRESTA ATENCAO' },
+  { id: 'extrude-slam', text: 'PRONTO PRA POSTAR' },
+];
+const SHOW_CARD: Array<{ id: string; text: string }> = [
+  { id: 'titulo-viral', text: 'hoje voce vai LUCRAR' },
   { id: 'palavra-box', text: 'LEGENDA EM 1 CLIQUE' },
-  { id: 'esmagado', text: 'SEM EDITAR NADA' },
-  { id: 'linha-destaque', text: 'DIRETO DO SEU VIDEO' },
-  { id: 'titulo-ouro', text: 'PRONTO PRA POSTAR' },
+  { id: 'esmagado', text: 'DIRETO DO VIDEO' },
+  { id: 'linha-destaque', text: 'SUA COPY VIVA' },
+  { id: 'titulo-ouro', text: 'ESTILO DE AGENCIA' },
+  { id: 'cyber', text: 'MODO TURBO' },
 ];
 const STEP_MS = 2600; // mesmo ciclo da demo do engine
 
-export function TipoShowcase({ className }: { className?: string }) {
+export function TipoShowcase({
+  className,
+  variant = 'hero',
+}: {
+  className?: string;
+  variant?: 'hero' | 'card';
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const visRef = useRef(true);
 
@@ -37,7 +53,8 @@ export function TipoShowcase({ className }: { className?: string }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const items = SHOW.map((s) => ({
+    const show = variant === 'card' ? SHOW_CARD : SHOW_HERO;
+    const items = show.map((s) => ({
       preset: TYPO_PRESETS.find((p) => p.id === s.id),
       text: s.text,
     })).filter((x) => !!x.preset);
@@ -91,7 +108,7 @@ export function TipoShowcase({ className }: { className?: string }) {
       cancelAnimationFrame(raf);
       io?.disconnect();
     };
-  }, []);
+  }, [variant]);
 
   return (
     <canvas

@@ -19,6 +19,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { FAQ } from '@/lib/faq';
 import { DarkoLogo } from '../../DarkoLogo';
+import { TipoShowcase } from '../../TipoShowcase';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -54,6 +55,24 @@ type Highlight = {
 };
 
 const HIGHLIGHTS: Highlight[] = [
+  {
+    tag: 'Tipografia Automática',
+    tone: '#ffd60a',
+    title: (
+      <>
+        Sua fala vira <span className="text-editorial">lettering animado</span>.
+      </>
+    ),
+    lead:
+      'Sobe o vídeo, a transcrição sai palavra por palavra e cada bloco ganha tipografia de agência — fumaça, ouro 3D, neon, karaokê. Você edita como no CapCut e o MP4 renderiza no seu navegador.',
+    bullets: [
+      '491 modelos de lettering, com destaque automático da palavra forte',
+      'Editor no preview: arrasta, redimensiona, edita o texto e marca trechos',
+      'O que você vê é o que sai — preview e MP4 usam o mesmo motor',
+    ],
+    note: 'Grátis pra qualquer conta — a animação aqui do lado é o motor real rodando, não um vídeo.',
+    scene: <TipografiaScene />,
+  },
   {
     tag: 'Camuflagem de áudio',
     tone: '#3ec7bb',
@@ -119,6 +138,46 @@ const HIGHLIGHTS: Highlight[] = [
   },
 ];
 
+/** Cena da Tipografia: o ENGINE REAL ciclando letterings (não é vídeo). */
+function TipografiaScene() {
+  return (
+    <div
+      className="relative overflow-hidden rounded-[18px] border border-white/10"
+      style={{
+        aspectRatio: '16/10',
+        background:
+          'radial-gradient(120% 90% at 18% 0%, rgba(109,78,232,0.3), transparent 55%), radial-gradient(110% 80% at 88% 100%, rgba(255,214,10,0.12), transparent 50%), linear-gradient(165deg, #0b0a12 0%, #060509 55%, #0d0a14 100%)',
+        boxShadow: '0 30px 70px -30px rgba(0,0,0,0.9)',
+      }}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.05]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
+        }}
+      />
+      <TipoShowcase variant="hero" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(to top, rgba(2,2,6,0.55) 0%, transparent 26%)',
+        }}
+      />
+      <span
+        className="absolute bottom-3 left-3 rounded-[5px] bg-black/60 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm"
+        style={{ fontFamily: 'var(--font-label)' }}
+      >
+        Motor real · 491 letterings
+      </span>
+    </div>
+  );
+}
+
 export function HighlightsSection() {
   return (
     <section id="destaques" className="mx-auto mt-20 max-w-[1200px] px-5 md:mt-28 md:px-8">
@@ -126,7 +185,7 @@ export function HighlightsSection() {
         <div className="max-w-[760px]">
           <Kicker index="01" label="Em destaque" />
           <h2 className="section-title mt-5 text-[36px] md:text-[52px]">
-            Três ferramentas que resolvem
+            Quatro ferramentas que resolvem
             <br />
             <span className="text-editorial text-white/70">o gargalo do dia.</span>
           </h2>
