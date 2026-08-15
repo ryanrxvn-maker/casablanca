@@ -1463,6 +1463,9 @@ function PresetGallery({
   // só os cards VISÍVEIS na rolagem animam (IntersectionObserver)
   const visRef = useRef(new Set<string>());
   const ioRef = useRef<IntersectionObserver | null>(null);
+  // canvases que já receberam AO MENOS um frame (WeakSet: card remontado volta virgem)
+  const drawnRef = useRef(new WeakSet<HTMLCanvasElement>());
+  const fontsReadyRef = useRef(false);
   const list = useMemo(() => TYPO_PRESETS.filter((p) => p.cat === cat), [cat]);
 
   useEffect(() => {
@@ -1470,31 +1473,49 @@ function PresetGallery({
     if (scrollBoxRef.current) scrollBoxRef.current.scrollTop = 0;
   }, [cat]);
 
-  useEffect(() => {
-    ioRef.current = new IntersectionObserver(
-      (entries) => {
-        for (const en of entries) {
-          const id = (en.target as HTMLElement).dataset.pid;
-          if (!id) continue;
-          if (en.isIntersecting) visRef.current.add(id);
-          else visRef.current.delete(id);
-        }
-      },
-      { root: scrollBoxRef.current, rootMargin: '140px' },
-    );
-    return () => ioRef.current?.disconnect();
+  // Observer criado SOB DEMANDA: os refs dos cards disparam ANTES dos
+  // useEffect no primeiro mount — criar o IO num effect deixava a galeria
+  // inteira sem observação (cards pretos até um clique re-renderizar).
+  const obtainIO = useCallback(() => {
+    if (!ioRef.current && typeof IntersectionObserver !== 'undefined') {
+      ioRef.current = new IntersectionObserver(
+        (entries) => {
+          for (const en of entries) {
+            const id = (en.target as HTMLElement).dataset.pid;
+            if (!id) continue;
+            if (en.isIntersecting) visRef.current.add(id);
+            else visRef.current.delete(id);
+          }
+        },
+        // root = viewport: o IO já clipa pelo scroll-box ancestral
+        { rootMargin: '160px' },
+      );
+    }
+    return ioRef.current;
   }, []);
 
+  useEffect(() => () => ioRef.current?.disconnect(), []);
+
   useEffect(() => {
-    void ensureTypoFonts();
+    void ensureTypoFonts().then(() => {
+      fontsReadyRef.current = true;
+    });
     let raf = 0;
     const t0 = performance.now();
     const tick = () => {
       const now = performance.now() - t0;
+      // cards fora da viewport ganham 1 frame estático (nunca preto ao rolar);
+      // no máx 3 por tick e só com fontes prontas pra não carimbar fallback
+      let prepaint = 3;
       for (const preset of list) {
-        if (!visRef.current.has(preset.id)) continue;
         const c = canvasesRef.current.get(preset.id);
         if (!c) continue;
+        const vis = ioRef.current ? visRef.current.has(preset.id) : true;
+        if (!vis) {
+          if (!fontsReadyRef.current || prepaint <= 0 || drawnRef.current.has(c))
+            continue;
+          prepaint--;
+        }
         const ctx = c.getContext('2d');
         if (!ctx) continue;
         ctx.clearRect(0, 0, c.width, c.height);
@@ -1503,6 +1524,7 @@ function PresetGallery({
           ? 'SABE QUE NÃO É MAIS UM CURSO DE COPY'
           : 'SUA LEGENDA AQUI';
         drawPresetDemo(ctx, preset, now, c.width, c.height, demoText);
+        drawnRef.current.add(c);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -1552,7 +1574,7 @@ function PresetGallery({
               disabled={disabled}
               data-pid={preset.id}
               ref={(el) => {
-                if (el && ioRef.current) ioRef.current.observe(el);
+                if (el) obtainIO()?.observe(el);
               }}
               onClick={() => onPick(preset.id)}
               className={
