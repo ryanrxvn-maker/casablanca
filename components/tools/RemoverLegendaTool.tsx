@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { createClient } from '@/lib/supabase/client';
-import { splitVideoByTime, joinCleanedWithOriginalAudio } from '@/lib/ffmpeg-worker';
+import { splitVideoByTime } from '@/lib/ffmpeg-worker';
+import { joinCleanedSmart } from '@/lib/webcodecs-join';
 import { withFFLock } from '@/lib/lipsync-pipeline';
 
 /**
@@ -318,14 +319,14 @@ export default function RemoverLegendaTool() {
 
       // 3. Pós-produção: junta com CROSSFADE nas emendas (emenda imperceptível)
       //    + re-muxa o áudio original. Ordem/offsets garantem a montagem certa.
-      //    A barra acompanha o re-encode (0→1) pra a espera ficar transparente.
+      //    joinCleanedSmart usa o acelerador de vídeo do navegador (WebCodecs)
+      //    quando dá — muito mais rápido — e cai pro ffmpeg se precisar. A barra
+      //    acompanha o encode (0→1) pra a espera ficar transparente.
       patchJob(jobId, { stage: 'finalizing', pct: 88 });
-      const finalBlob = await withFFLock(() =>
-        joinCleanedWithOriginalAudio(cleaned, file, offsets, {
-          onStage: () => patchJob(jobId, { stage: 'finalizing' }),
-          onProgress: (p) => patchJob(jobId, { pct: 88 + Math.max(0, Math.min(1, p.ratio)) * 11 }),
-        }),
-      );
+      const finalBlob = await joinCleanedSmart(cleaned, file, offsets, {
+        onStage: () => patchJob(jobId, { stage: 'finalizing' }),
+        onProgress: (p) => patchJob(jobId, { pct: 88 + Math.max(0, Math.min(1, p.ratio)) * 11 }),
+      });
       if (cancelledRef.current.has(jobId)) return;
 
       const resultUrl = URL.createObjectURL(finalBlob);
