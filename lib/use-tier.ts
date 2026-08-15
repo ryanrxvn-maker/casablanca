@@ -12,6 +12,7 @@ export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
   free: new Set([
     '/tools/decupagem',
+    '/tools/tipografia',
     '/tools/downloader',
     '/tools/caixinha-pergunta',
     '/tools/fakepass',
@@ -22,6 +23,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
   // — Stripe e banco intocados.
   basic: new Set([
     '/tools/decupagem',
+    '/tools/tipografia',
     '/tools/downloader',
     '/tools/caixinha-pergunta',
     '/tools/fakepass',

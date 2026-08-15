@@ -209,8 +209,7 @@ const TOOLS: ToolEntry[] = [
     description: 'A fala vira lettering animado, no tempo exato do áudio.',
     icon: <IconTipografia size={26} />,
     hue: 'rgba(251, 191, 36, 0.42)',
-    badge: 'ADMIN',
-    adminOnly: true,
+    badge: 'IA',
   },
   {
     href: '/tools/heygen-auto',

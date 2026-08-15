@@ -68,11 +68,6 @@ export const UNLOCKABLE_TOOLS: ReadonlyArray<{
     label: 'LTX Video',
     desc: 'Geração de vídeo IA (quota da casa no HuggingFace).',
   },
-  {
-    path: '/tools/tipografia',
-    label: 'Tipografia Automática',
-    desc: 'Letterings animados no tempo do áudio (transcreve com a chave Groq do cliente; render no navegador).',
-  },
 ];
 
 // Desbloqueios fixos (commitados). Pode somar mais via env.

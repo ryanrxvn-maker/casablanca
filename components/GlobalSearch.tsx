@@ -80,7 +80,7 @@ const ENTRIES: Entry[] = [
   { id: 'remover', group: 'Ferramentas', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'], adminOnly: true },
   { id: 'decupagem-copy', group: 'Ferramentas', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
   { id: 'copy-srt', group: 'Ferramentas', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
-  { id: 'tipografia', group: 'Ferramentas', label: 'Tipografia Automática', hint: 'Letterings animados no tempo do áudio', href: '/tools/tipografia', icon: <IconTipografia size={20} />, keywords: ['lettering', 'legenda animada', 'caption', 'texto', 'kinetic'], adminOnly: true },
+  { id: 'tipografia', group: 'Ferramentas', label: 'Tipografia Automática', hint: 'Letterings animados no tempo do áudio', href: '/tools/tipografia', icon: <IconTipografia size={20} />, keywords: ['lettering', 'legenda animada', 'caption', 'texto', 'kinetic'] },
   { id: 'heygen-auto', group: 'Ferramentas', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'], adminOnly: true },
 
   // Atalhos

@@ -13,7 +13,7 @@ export const maxDuration = 300;
  * e o render são 100% client-side.
  */
 export async function POST(req: Request) {
-  const gate = await requireTier('admin', { unlockTools: ['/tools/tipografia'] });
+  const gate = await requireTier('free');
   if (!gate.ok) return gate.response;
 
   let form: FormData;

@@ -10,7 +10,6 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from 'react';
-import { TierGate } from '@/components/TierGate';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -141,11 +140,8 @@ function loadSession(file: File): SavedSession | null {
 }
 
 export default function TipografiaPage() {
-  return (
-    <TierGate require="admin" toolName="Tipografia Automática" toolPath="/tools/tipografia">
-      <TipografiaInner />
-    </TierGate>
-  );
+  // Liberada pra TODOS os tiers (incl. free) — o middleware só exige login.
+  return <TipografiaInner />;
 }
 
 function TipografiaInner() {
@@ -169,6 +165,11 @@ function TipografiaInner() {
   const [textCase, setTextCase] = useToolState<CaseMode>('tipografia:case', 'auto');
   const [bold, setBold] = useToolState<boolean>('tipografia:bold', false);
   const [italic, setItalic] = useToolState<boolean>('tipografia:italic', false);
+  const [underlineG, setUnderlineG] = useToolState<boolean>('tipografia:underline', false);
+  const [fxStrokeG, setFxStrokeG] = useToolState<number>('tipografia:fxstroke', 1);
+  const [fxShadowG, setFxShadowG] = useToolState<number>('tipografia:fxshadow', 1);
+  const [fxGlowG, setFxGlowG] = useToolState<number>('tipografia:fxglow', 1);
+  const [fxSmokeG, setFxSmokeG] = useToolState<number>('tipografia:fxsmoke', 1);
   const [applyAll, setApplyAll] = useToolState<boolean>('tipografia:applyall', true);
   const [blockStyles, setBlockStyles] = useToolState<Record<string, PerBlockStyle>>(
     'tipografia:blockstyles',
@@ -270,13 +271,18 @@ function TipografiaInner() {
       textCase: textCase === 'auto' ? null : textCase,
       bold,
       italic,
+      underline: underlineG,
+      fxStroke: fxStrokeG,
+      fxShadow: fxShadowG,
+      fxGlow: fxGlowG,
+      fxSmoke: fxSmokeG,
       highlights,
       autoEmphasis: autoEmph,
       fontOverride: fontOv,
       posX,
       perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, highlights, autoEmph, fontOv, posX, blockStyles],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, blockStyles],
   );
 
   // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
@@ -294,6 +300,11 @@ function TipografiaInner() {
         if (patch.textCase !== undefined) setTextCase(patch.textCase ?? 'auto');
         if (patch.bold !== undefined) setBold(patch.bold);
         if (patch.italic !== undefined) setItalic(patch.italic);
+        if (patch.underline !== undefined) setUnderlineG(patch.underline);
+        if (patch.fxStroke !== undefined) setFxStrokeG(patch.fxStroke);
+        if (patch.fxShadow !== undefined) setFxShadowG(patch.fxShadow);
+        if (patch.fxGlow !== undefined) setFxGlowG(patch.fxGlow);
+        if (patch.fxSmoke !== undefined) setFxSmokeG(patch.fxSmoke);
         if (patch.fontOverride !== undefined) setFontOv(patch.fontOverride ?? null);
         return;
       }
@@ -302,7 +313,7 @@ function TipografiaInner() {
         [editingBlockId]: { ...prev[editingBlockId], ...patch },
       }));
     },
-    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setFontOv, setBlockStyles],
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setBlockStyles],
   );
   const effOf = useCallback(
     <K extends keyof PerBlockStyle>(k: K, global: PerBlockStyle[K]): PerBlockStyle[K] => {
@@ -855,6 +866,11 @@ function TipografiaInner() {
                   textCase={(effOf('textCase', textCase === 'auto' ? null : textCase) ?? null) as CaseMode | null}
                   bold={effOf('bold', bold) ?? false}
                   italic={effOf('italic', italic) ?? false}
+                  underline={effOf('underline', underlineG) ?? false}
+                  fxStroke={effOf('fxStroke', fxStrokeG) ?? 1}
+                  fxShadow={effOf('fxShadow', fxShadowG) ?? 1}
+                  fxGlow={effOf('fxGlow', fxGlowG) ?? 1}
+                  fxSmoke={effOf('fxSmoke', fxSmokeG) ?? 1}
                   onSlide={smartSet}
                   onSet={(patch) => {
                     pushHistory();
@@ -882,6 +898,8 @@ function TipografiaInner() {
               blocks={blocks}
               duration={duration ?? 0}
               videoRef={videoRef}
+              videoUrl={videoUrl}
+              presetCat={preset.cat}
               selId={selBlockId}
               onSelect={(id) => setSelBlockId(id)}
               onRetime={retimeBounds}
@@ -1584,10 +1602,33 @@ function PresetGallery({
 // cada bloco de legenda ganha uma cor própria (identificação instantânea)
 const TL_PALETTE = ['#a78bfa', '#22d3ee', '#f472b6', '#ffd60a', '#2eff4f', '#ff9f0a', '#ff5d7e', '#4f7dff'];
 
+// cor por CATEGORIA do modelo (Karaokê = uma cor, Viral = outra...)
+const CAT_COLORS: Record<string, string> = {
+  Viral: '#f472b6',
+  Premium: '#e8b04c',
+  Cor: '#ff9f0a',
+  Impacto: '#ff5d7e',
+  'Karaokê': '#22d3ee',
+  Glitch: '#a78bfa',
+  Destaque: '#ffd60a',
+  Minimal: '#9aa5b1',
+  Bounce: '#2edb84',
+  Máquina: '#4ade80',
+  Foco: '#bde0fe',
+  Reveal: '#c9bcf2',
+  Neon: '#31c4ff',
+  Kinetic: '#ff8a5c',
+  Editorial: '#e8dcc0',
+  Cartoon: '#f9a8d4',
+  Estilo: '#dda15e',
+};
+
 function Timeline({
   blocks,
   duration,
   videoRef,
+  videoUrl,
+  presetCat,
   selId,
   onSelect,
   onRetime,
@@ -1597,6 +1638,8 @@ function Timeline({
   blocks: Block[];
   duration: number;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
+  videoUrl: string | null;
+  presetCat: string;
   selId: string | null;
   onSelect: (id: string) => void;
   onRetime: (id: string, start: number, end: number, mode: 'move' | 'trim') => void;
@@ -1614,6 +1657,52 @@ function Timeline({
     origStart: number;
     origEnd: number;
   } | null>(null);
+
+  // filmstrip estilo CapCut: thumbs geradas 1x por vídeo (só visual/seek —
+  // o vídeo NÃO é editável, só as legendas)
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  useEffect(() => {
+    if (!videoUrl || duration <= 0) return;
+    let cancelled = false;
+    (async () => {
+      const N = Math.max(16, Math.min(72, Math.round(duration / 2)));
+      const v = document.createElement('video');
+      v.muted = true;
+      v.preload = 'auto';
+      v.src = videoUrl;
+      await new Promise<void>((res) => {
+        v.onloadedmetadata = () => res();
+        v.onerror = () => res();
+      });
+      if (!v.videoWidth) return;
+      const c = document.createElement('canvas');
+      c.width = 96;
+      c.height = 54;
+      const cctx = c.getContext('2d');
+      if (!cctx) return;
+      const out: string[] = [];
+      for (let i = 0; i < N; i++) {
+        if (cancelled) return;
+        const t = ((i + 0.5) * duration) / N;
+        await new Promise<void>((res) => {
+          const timer = setTimeout(res, 1500);
+          v.onseeked = () => {
+            clearTimeout(timer);
+            res();
+          };
+          v.currentTime = Math.min(t, duration - 0.05);
+        });
+        cctx.drawImage(v, 0, 0, 96, 54);
+        out.push(c.toDataURL('image/jpeg', 0.5));
+      }
+      if (!cancelled) setThumbs(out);
+      v.removeAttribute('src');
+      v.load();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [videoUrl, duration]);
 
   // zoom inicial: caber o vídeo inteiro na faixa
   useEffect(() => {
@@ -1692,7 +1781,7 @@ function Timeline({
           className="relative select-none"
           style={{
             width: trackW,
-            height: 136,
+            height: 122,
             backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) ${effPps}px, transparent ${effPps}px, transparent ${effPps * 2}px)`,
           }}
           onPointerDown={(e) => {
@@ -1727,14 +1816,15 @@ function Timeline({
             const left = (b.start / 1000) * effPps;
             const width = Math.max(10, ((b.end - b.start) / 1000) * effPps);
             const sel = b.id === selId;
-            const col = TL_PALETTE[bi % TL_PALETTE.length];
+            const col = CAT_COLORS[presetCat] ?? TL_PALETTE[0];
+            void bi;
             return (
               <div
                 key={b.id}
                 data-block="1"
                 title={blockText(b)}
                 className={
-                  'absolute top-[30px] h-[96px] cursor-grab overflow-hidden rounded-[10px] border-2 transition-shadow active:cursor-grabbing ' +
+                  'absolute top-[27px] h-[36px] cursor-grab overflow-hidden rounded-[8px] border-2 transition-shadow active:cursor-grabbing ' +
                   (sel ? 'z-10' : 'hover:brightness-125')
                 }
                 style={{
@@ -1804,11 +1894,31 @@ function Timeline({
                 }}
               >
                 {/* alças de corte — barras limpas, só cor (hover mostra o texto) */}
-                <span className="pointer-events-none absolute inset-y-0 left-0 w-[6px] rounded-l-[8px] bg-white/45" />
-                <span className="pointer-events-none absolute inset-y-0 right-0 w-[6px] rounded-r-[8px] bg-white/45" />
+                <span className="pointer-events-none absolute inset-y-0 left-0 w-[5px] rounded-l-[6px] bg-white/50" />
+                <span className="pointer-events-none absolute inset-y-0 right-0 w-[5px] rounded-r-[6px] bg-white/50" />
               </div>
             );
           })}
+
+          {/* filmstrip (só visual — vídeo não é editável) */}
+          {thumbs.length > 0 ? (
+            <div
+              className="pointer-events-none absolute left-0 top-[68px] flex h-[48px] overflow-hidden rounded-[8px] border border-line/60"
+              style={{ width: trackW }}
+            >
+              {thumbs.map((t, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={t}
+                  alt=""
+                  className="h-full object-cover"
+                  style={{ width: trackW / thumbs.length }}
+                  draggable={false}
+                />
+              ))}
+            </div>
+          ) : null}
 
           {/* playhead */}
           <div
@@ -2029,6 +2139,11 @@ function StylePanel({
   textCase,
   bold,
   italic,
+  underline,
+  fxStroke,
+  fxShadow,
+  fxGlow,
+  fxSmoke,
   onSlide,
   onSet,
   applyAll,
@@ -2049,6 +2164,11 @@ function StylePanel({
   textCase: CaseMode | null;
   bold: boolean;
   italic: boolean;
+  underline: boolean;
+  fxStroke: number;
+  fxShadow: number;
+  fxGlow: number;
+  fxSmoke: number;
   onSlide: (patch: PerBlockStyle) => void;
   onSet: (patch: PerBlockStyle) => void;
   applyAll: boolean;
@@ -2156,7 +2276,7 @@ function StylePanel({
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          Estilo e caixa
+          Padrão
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <button
@@ -2173,6 +2293,19 @@ function StylePanel({
             B
           </button>
           <button
+            onClick={() => onSet({ underline: !underline })}
+            disabled={disabled}
+            title="Sublinhado"
+            className={
+              'flex h-8 w-9 items-center justify-center rounded-[9px] border text-[14px] font-bold underline transition-colors ' +
+              (underline
+                ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
+                : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
+            }
+          >
+            U
+          </button>
+          <button
             onClick={() => onSet({ italic: !italic })}
             disabled={disabled}
             title="Itálico"
@@ -2185,11 +2318,72 @@ function StylePanel({
           >
             I
           </button>
-          <span className="mx-1 h-5 w-px bg-line" />
+        </div>
+        <div
+          className="mb-1.5 mt-3 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Caixa
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           {caseBtn('upper', 'TT', 'Tudo maiúsculo')}
           {caseBtn('lower', 'tt', 'Tudo minúsculo')}
           {caseBtn('original', 'Tt', 'Como foi falado')}
         </div>
+      </div>
+
+      <div className="md:col-span-2">
+        <div
+          className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Efeitos do modelo
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <ToolSlider
+            label="Traço"
+            min={0}
+            max={2}
+            step={0.05}
+            value={fxStroke}
+            onChange={(v) => onSlide({ fxStroke: v })}
+            display={(v) => `${Math.round(v * 100)}%`}
+            disabled={disabled}
+          />
+          <ToolSlider
+            label="Sombra"
+            min={0}
+            max={2}
+            step={0.05}
+            value={fxShadow}
+            onChange={(v) => onSlide({ fxShadow: v })}
+            display={(v) => `${Math.round(v * 100)}%`}
+            disabled={disabled}
+          />
+          <ToolSlider
+            label="Brilho"
+            min={0}
+            max={2}
+            step={0.05}
+            value={fxGlow}
+            onChange={(v) => onSlide({ fxGlow: v })}
+            display={(v) => `${Math.round(v * 100)}%`}
+            disabled={disabled}
+          />
+          <ToolSlider
+            label="Fumaça"
+            min={0}
+            max={2}
+            step={0.05}
+            value={fxSmoke}
+            onChange={(v) => onSlide({ fxSmoke: v })}
+            display={(v) => `${Math.round(v * 100)}%`}
+            disabled={disabled}
+          />
+        </div>
+        <p className="mt-1 text-[10px] text-text-muted">
+          intensidade sobre o que o modelo já tem (100% = padrão · 0% desliga) — só age nos modelos que têm o efeito
+        </p>
       </div>
 
       <div className="md:col-span-2">

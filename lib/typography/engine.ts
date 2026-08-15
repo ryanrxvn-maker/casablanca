@@ -175,8 +175,13 @@ export type TypoPreset = {
   frameLines?: { color: PresetColor; thickness: number; gap: number };
   /** risco desenhado atrás do texto (ref "na sua edição", swoosh vermelho) */
   swoosh?: { color: PresetColor; width: number };
-  /** preenchimento animado dentro das letras (trippy = ondas; stripes = estêncil listrado) */
-  patternFill?: { colors: [string, string]; scale: number; speed: number; style?: 'trippy' | 'stripes' };
+  /** preenchimento animado dentro das letras (trippy/stripes/tijolos/grunge) */
+  patternFill?: {
+    colors: [string, string];
+    scale: number;
+    speed: number;
+    style?: 'trippy' | 'stripes' | 'bricks' | 'grunge';
+  };
   /** fumaça procedural atrás do bloco */
   smoke?: { alpha: number };
   /**
@@ -200,6 +205,14 @@ export type TypoPreset = {
   }>;
   /** elipse desenhada ao redor do texto (ref "circulado dourado") */
   circle?: { color: PresetColor; width: number };
+  /** rabiscos/faíscas desenhados ao redor (ref "Como FAZER ESSA LEGENDA") */
+  doodles?: { color: PresetColor };
+  /** barra VERTICAL à esquerda do bloco (ref "| HIGHLIGHT KEY PHRASES") */
+  sideBar?: { color: PresetColor; width: number };
+  /** palavras NÃO destacadas saem riscadas (ref "NEITHER ~FORGES NOR~ GRINDS") */
+  strikeOthers?: boolean;
+  /** alinhamento do bloco (esquerda = pôster tipográfico) */
+  align?: 'left';
   /** post-it: retângulo sólido rotacionado atrás/abaixo do texto */
   sticky?: { color: string; rotate: number };
   /** cores do texto alternando por LETRA (ref "FUN TEXT") */
@@ -234,6 +247,10 @@ export type TypoPreset = {
     gradient?: Array<[number, PresetColor]>;
     /** caixa só na primeira linha (ref "Most Businesses") */
     firstLineOnly?: boolean;
+    /** caixa de linha atravessando o frame inteiro (ref "REPRESENTA" verde) */
+    fullBleed?: boolean;
+    /** caixa só na(s) linha(s) com palavra destacada */
+    emphasisLineOnly?: boolean;
   };
   karaoke?: KaraokeMode;
   /** karaokê: alpha das palavras INATIVAS (0.3 = holofote na ativa) */
@@ -284,6 +301,13 @@ export type StyleState = {
   bold?: boolean;
   /** itálico sintético (oblique do navegador) */
   italic?: boolean;
+  /** sublinhado (linha sob cada palavra na cor do texto) */
+  underline?: boolean;
+  /** FX ajustáveis (multiplicadores sobre o que o modelo já tem; 1 = padrão, 0 = desliga) */
+  fxStroke?: number;
+  fxShadow?: number;
+  fxGlow?: number;
+  fxSmoke?: number;
   /**
    * "Aplicar a todas" DESLIGADO: overrides por bloco — o merge acontece
    * dentro do drawCaptions, então preview E export honram igual.
@@ -302,7 +326,12 @@ export type PerBlockStyle = Partial<
     | 'textCase'
     | 'bold'
     | 'italic'
+    | 'underline'
     | 'fontOverride'
+    | 'fxStroke'
+    | 'fxShadow'
+    | 'fxGlow'
+    | 'fxSmoke'
   >
 >;
 
@@ -820,6 +849,9 @@ type DrawCtx = {
   glowPx: number;
   tMs: number;
   seedBase: number;
+  /** multiplicadores dos FX ajustáveis do editor (1 = padrão do modelo) */
+  fx: { stroke: number; shadow: number; glow: number; smoke: number };
+  underline: boolean;
 };
 
 function clearShadow(ctx: CanvasRenderingContext2D) {
@@ -841,17 +873,17 @@ function applyTextStyle(
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
   ctx.fillStyle = fill;
-  if (preset.shadow) {
+  if (preset.shadow && d.fx.shadow > 0) {
     ctx.shadowColor = preset.shadow.color;
-    ctx.shadowBlur = preset.shadow.blur * fpx;
-    ctx.shadowOffsetX = preset.shadow.x * fpx;
-    ctx.shadowOffsetY = preset.shadow.y * fpx;
-  } else if (preset.glow && !noGlow) {
+    ctx.shadowBlur = preset.shadow.blur * fpx * d.fx.shadow;
+    ctx.shadowOffsetX = preset.shadow.x * fpx * d.fx.shadow;
+    ctx.shadowOffsetY = preset.shadow.y * fpx * d.fx.shadow;
+  } else if (preset.glow && !noGlow && d.fx.glow > 0) {
     // palavra menor (apoio/mix) recebe glow proporcionalmente mais suave —
     // sem isso o brilho da grande "engole" o texto pequeno do lado
     const glowScale = Math.min(1, Math.max(0.45, fpx / d.fontPx));
     ctx.shadowColor = resolveColor(preset.glow.color, d.primary, d.accent);
-    ctx.shadowBlur = (preset.glow.blur ?? 0) * fpx * glowScale;
+    ctx.shadowBlur = (preset.glow.blur ?? 0) * fpx * glowScale * d.fx.glow;
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
   } else {
@@ -879,18 +911,23 @@ function fillWordText(
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 
+  const hasStroke = !!preset.stroke && d.fx.stroke > 0;
   const strokeSetup = () => {
     ctx.lineJoin = 'round';
     ctx.miterLimit = 2;
-    ctx.lineWidth = (preset.stroke?.width ?? 0) * fpx;
+    ctx.lineWidth = (preset.stroke?.width ?? 0) * fpx * d.fx.stroke;
   };
 
   if (plain) {
     // sombra dura entra mesmo no plain (legibilidade sobre o vídeo)
-    if (preset.hardShadow) {
+    if (preset.hardShadow && d.fx.shadow > 0) {
       clearShadow(ctx);
       ctx.fillStyle = resolveColor(preset.hardShadow.color, d.primary, d.accent);
-      ctx.fillText(text, x + preset.hardShadow.x * fpx, y + preset.hardShadow.y * fpx);
+      ctx.fillText(
+        text,
+        x + preset.hardShadow.x * fpx * d.fx.shadow,
+        y + preset.hardShadow.y * fpx * d.fx.shadow,
+      );
     }
     applyTextStyle(d, fill, fpx, fk, true);
     ctx.fillText(text, x, y);
@@ -928,7 +965,7 @@ function fillWordText(
     const col = resolveColor(preset.extrude.color, d.primary, d.accent);
     const baseAlpha = ctx.globalAlpha;
     ctx.fillStyle = col;
-    if (preset.stroke) {
+    if (hasStroke) {
       strokeSetup();
       ctx.strokeStyle = col;
     }
@@ -938,20 +975,20 @@ function fillWordText(
       if (preset.extrude.fade) {
         ctx.globalAlpha = baseAlpha * (1 - (i / (preset.extrude.steps + 1)) * 0.8);
       }
-      if (preset.stroke) ctx.strokeText(text, x + ox, y + oy);
+      if (hasStroke) ctx.strokeText(text, x + ox, y + oy);
       ctx.fillText(text, x + ox, y + oy);
     }
     ctx.globalAlpha = baseAlpha;
   }
 
   // sombra dura (silhueta sólida deslocada, inclui o contorno)
-  if (preset.hardShadow) {
+  if (preset.hardShadow && d.fx.shadow > 0) {
     clearShadow(ctx);
     const col = resolveColor(preset.hardShadow.color, d.primary, d.accent);
-    const ox = preset.hardShadow.x * fpx;
-    const oy = preset.hardShadow.y * fpx;
+    const ox = preset.hardShadow.x * fpx * d.fx.shadow;
+    const oy = preset.hardShadow.y * fpx * d.fx.shadow;
     ctx.fillStyle = col;
-    if (preset.stroke) {
+    if (hasStroke) {
       strokeSetup();
       ctx.strokeStyle = col;
       ctx.strokeText(text, x + ox, y + oy);
@@ -980,12 +1017,12 @@ function fillWordText(
 
   // camada principal
   applyTextStyle(d, fill, fpx, fk);
-  if (preset.stroke) {
+  if (hasStroke) {
     strokeSetup();
-    ctx.strokeStyle = resolveColor(preset.stroke.color, d.primary, d.accent);
+    ctx.strokeStyle = resolveColor(preset.stroke!.color, d.primary, d.accent);
     ctx.strokeText(text, x, y);
   }
-  if (preset.glow && fpx >= d.fontPx * 0.7) {
+  if (preset.glow && d.fx.glow > 0 && fpx >= d.fontPx * 0.7) {
     // passada dupla engrossa o glow (canvas soma shadows por draw) —
     // SÓ na palavra grande; na pequena o glow duplo apaga a letra
     ctx.fillText(text, x, y);
@@ -1240,6 +1277,13 @@ export function drawCaptions(
     glowPx: (preset.glow?.blur ?? 0) * fontPx,
     tMs,
     seedBase,
+    fx: {
+      stroke: style.fxStroke ?? 1,
+      shadow: style.fxShadow ?? 1,
+      glow: style.fxGlow ?? 1,
+      smoke: style.fxSmoke ?? 1,
+    },
+    underline: style.underline === true,
   };
 
   // Saída
@@ -1319,6 +1363,7 @@ export function drawCaptions(
   // Helpers de geometria
   const lineOriginX = (li: number) => {
     const line = layout.lines[li];
+    if (preset.align === 'left') return cx - blockWmax / 2;
     return cx - (line.width * line.scale) / 2;
   };
   const lineBaseY = (li: number) => {
@@ -1533,7 +1578,7 @@ export function drawCaptions(
   // ── fumaça procedural (atrás de tudo) ──
   if (preset.smoke) {
     const gate = outAlpha * clamp01(pBlock * 2);
-    const alpha = preset.smoke.alpha * gate;
+    const alpha = preset.smoke.alpha * gate * (style.fxSmoke ?? 1);
     if (alpha > 0.01) {
       ctx.save();
       clearShadow(ctx);
@@ -1614,11 +1659,12 @@ export function drawCaptions(
     } else {
       layout.lines.forEach((line, li) => {
         if (blockBox.firstLineOnly && li > 0) return;
-        const bw = line.width * line.scale + padX * 2;
+        if (blockBox.emphasisLineOnly && !line.wordIdx.some((wi) => highlights.has(wi))) return;
+        const bw = blockBox.fullBleed ? W + 8 : line.width * line.scale + padX * 2;
         const bh = line.h * 0.92 + padY * 2;
         drawFxBox(
           d,
-          cx,
+          blockBox.fullBleed ? W / 2 : cx,
           topY + line.y0 + line.h * 0.52,
           bw,
           bh,
@@ -1652,6 +1698,18 @@ export function drawCaptions(
       ctx.fillRect(-lw / 2, -th / 2, lw, th);
       ctx.restore();
     });
+    ctx.restore();
+  }
+
+  // ── barra vertical à esquerda (ref "| HIGHLIGHT KEY PHRASES") ──
+  if (preset.sideBar) {
+    ctx.save();
+    ctx.globalAlpha = outAlpha * clamp01(pBlock * 2.5);
+    clearShadow(ctx);
+    ctx.fillStyle = resolveColor(preset.sideBar.color, primary, accent);
+    const sbw = Math.max(2, preset.sideBar.width * fontPx);
+    const sbh = blockH * clamp01(eBlock * 1.1);
+    ctx.fillRect(cx - blockWmax / 2 - fontPx * 0.45 - sbw, topY + (blockH - sbh) / 2, sbw, sbh);
     ctx.restore();
   }
 
@@ -1739,6 +1797,13 @@ export function drawCaptions(
   const isMask = preset.in.kind === 'mask-up';
   const isWipe = preset.in.kind === 'wipe';
   const isFill = karaoke === 'fill';
+
+  // caixa de LINHA/BLOCO com autoText: o texto contrasta com a caixa
+  // (fix "branco sobre branco" nos lower-thirds)
+  const lineBoxText =
+    blockBox && blockBox.mode !== 'word' && blockBox.autoText
+      ? contrastColor(resolveColor(blockBox.fill, primary, accent))
+      : null;
 
   const drawPass = (pass: 'base' | 'accent') => {
     layout.lines.forEach((line, li) => {
@@ -1828,6 +1893,12 @@ export function drawCaptions(
             fill = accent;
           }
           if (isHi) fill = resolveHighlightFill(d, lineH);
+        }
+        if (lineBoxText) {
+          fill =
+            isHi && (preset.highlightColor || preset.highlightGradient)
+              ? fill
+              : lineBoxText;
         }
         if (karaoke === 'word-color' && isActive) fill = accent;
         if (isFill) fill = pass === 'base' ? fill : accent;
@@ -1954,6 +2025,15 @@ export function drawCaptions(
             ctx.fillRect(wx + (wl.w - uw) / 2, baseY + lineH * 0.1, uw, Math.max(2, fontPx * 0.07));
             ctx.restore();
           }
+          // palavras NÃO destacadas riscadas (ref "NEITHER ~FORGES NOR~")
+          if (preset.strikeOthers && !isHi) {
+            ctx.save();
+            ctx.globalAlpha = outAlpha * (fx?.alpha ?? 1);
+            clearShadow(ctx);
+            ctx.fillStyle = primary;
+            ctx.fillRect(wx - fontPx * 0.04, baseY - lineH * 0.3, wl.w + fontPx * 0.08, Math.max(2, fontPx * 0.07));
+            ctx.restore();
+          }
         }
       }
       ctx.restore();
@@ -1985,6 +2065,39 @@ export function drawCaptions(
 
   // ── ecos NA FRENTE (frase pequena em cima/embaixo, riscada...) ──
   drawEchoes('front');
+
+  // ── rabiscos/faíscas ao redor (ref "Como FAZER ESSA LEGENDA") ──
+  if (preset.doodles) {
+    const dcol = resolveColor(preset.doodles.color, primary, accent);
+    const e2 = clamp01(eBlock * 1.2);
+    ctx.save();
+    ctx.globalAlpha = outAlpha * e2;
+    clearShadow(ctx);
+    ctx.strokeStyle = dcol;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2, fontPx * 0.06);
+    const spots: Array<[number, number, number]> = [
+      [cx - blockWmax / 2 - fontPx * 0.8, topY - fontPx * 0.2, -0.4],
+      [cx + blockWmax / 2 + fontPx * 0.8, topY + fontPx * 0.1, 0.5],
+      [cx + blockWmax / 2 + fontPx * 0.6, topY + blockH + fontPx * 0.1, 0.2],
+      [cx - blockWmax / 2 - fontPx * 0.6, topY + blockH - fontPx * 0.2, -0.2],
+    ];
+    spots.forEach(([sx, sy, rot], i) => {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(rot + prand(seedBase + i * 7) * 0.6);
+      const L = fontPx * (0.28 + prand(seedBase + i * 13) * 0.18) * e2;
+      for (let k = 0; k < 3; k++) {
+        const ang = (k - 1) * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang) * L * 0.35, Math.sin(ang) * L * 0.35);
+        ctx.lineTo(Math.cos(ang) * L, Math.sin(ang) * L);
+        ctx.stroke();
+      }
+      ctx.restore();
+    });
+    ctx.restore();
+  }
 
   finishDraw();
 
@@ -2022,7 +2135,36 @@ function getTrippyPattern(d: DrawCtx): Paint {
     const c = patternTile.getContext('2d');
     if (!c) return pf.colors[0];
     c.clearRect(0, 0, 96, 96);
-    if (pf.style === 'stripes') {
+    if (pf.style === 'bricks') {
+      // tijolos (ref "CLAUDE CODE"): fiadas com rejunte escuro
+      c.fillStyle = pf.colors[1];
+      c.fillRect(0, 0, 96, 96);
+      c.fillStyle = pf.colors[0];
+      for (let row = 0; row < 6; row++) {
+        const off = row % 2 === 0 ? 0 : 24;
+        for (let col = -1; col < 3; col++) {
+          c.fillRect(col * 48 + off + 2, row * 16 + 2, 44, 12);
+        }
+      }
+    } else if (pf.style === 'grunge') {
+      // carimbo corroído (ref "SUBTITLE OVERLAY"): cor cheia + mordidas
+      c.fillStyle = pf.colors[0];
+      c.fillRect(0, 0, 96, 96);
+      c.fillStyle = pf.colors[1];
+      let s = 12345;
+      const rnd = () => {
+        s = (s * 16807) % 2147483647;
+        return s / 2147483647;
+      };
+      for (let i = 0; i < 90; i++) {
+        const x = rnd() * 96;
+        const y = rnd() * 96;
+        const r = rnd() * 3.2 + 0.6;
+        c.beginPath();
+        c.arc(x, y, r, 0, Math.PI * 2);
+        c.fill();
+      }
+    } else if (pf.style === 'stripes') {
       // estêncil listrado (ref "TEXT COMES ALIVE"): barras verticais
       c.fillStyle = pf.colors[0];
       c.fillRect(0, 0, 96, 96);
@@ -2177,6 +2319,14 @@ function drawWord(
       }
       ctx.restore();
     }
+    if (d.underline && !wl.mixed) {
+      ctx.save();
+      ctx.globalAlpha = outAlpha;
+      clearShadow(ctx);
+      ctx.fillStyle = typeof fill === 'string' ? fill : d.primary;
+      ctx.fillRect(wx, baseY + lineH * 0.12, wl.w, Math.max(1.5, wl.fpx * 0.055));
+      ctx.restore();
+    }
     return;
   }
 
@@ -2210,6 +2360,11 @@ function drawWord(
   }
 
   fillWordText(d, wl.text, -wl.w / 2, lineH * 0.3, fill, wl.fpx, wl.fk, wl.mixed);
+  if (d.underline && !wl.mixed) {
+    clearShadow(ctx);
+    ctx.fillStyle = fill;
+    ctx.fillRect(-wl.w / 2, lineH * 0.42, wl.w, Math.max(1.5, wl.fpx * 0.055));
+  }
   ctx.restore();
 }
 
