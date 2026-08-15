@@ -613,11 +613,19 @@ export async function renderTypographyVideo(opts: {
     const W = even(srcW * scale);
     const H = even(srcH * scale);
 
-    // bitrate por bpp com teto de orçamento de MEMFS
+    // bitrate: régua por bpp, mas ACOMPANHA a fonte quando ela é mais pesada
+    // que a régua (re-encodar acima do bitrate original não deixa nada na
+    // mesa). Teto de 20M + orçamento de MEMFS seguram arquivo e memória; a
+    // régua nunca desce abaixo do próprio piso (legenda nítida mesmo com
+    // fonte fraca). srcRate inclui áudio/container (~5-10% a mais) — inócuo.
     const bppRate = W * H * FPS * 0.12;
+    const srcRate = (file.size * 8) / durationSec;
     const budgetRate = (RENDER_BYTES_BUDGET * 8) / durationSec;
     const bitrate = Math.round(
-      Math.min(Math.max(bppRate, 2_500_000), 12_000_000, budgetRate),
+      Math.min(
+        Math.max(bppRate, Math.min(srcRate, 20_000_000), 2_500_000),
+        budgetRate,
+      ),
     );
 
     const codec = await pickCodec(W, H, bitrate);
