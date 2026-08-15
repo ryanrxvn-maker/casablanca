@@ -453,6 +453,21 @@ function PromoBanner({
   return <PromoCarousel slides={slides} />;
 }
 
+/**
+ * CAIXA CANÔNICA DOS HERÓIS — medida ÚNICA de todos os slides do carrossel.
+ *
+ * O carrossel é um flex-row: a linha assume a altura do slide MAIS ALTO e os
+ * outros ficam com sobra embaixo (aquela "borda" solta). Fixando a caixa aqui
+ * (e mandando todo slide preencher com h-full via `[&>*]:h-full`), Pilot e
+ * Auto B-roll passam a ter EXATAMENTE o tamanho do FakePrint/Tipografia — não
+ * existe mais espaço órfão em nenhum dos quatro.
+ *
+ * O `min-h` é o piso pros heróis de TEXTO (Pilot / Auto B-roll), que empilham
+ * título + copy + botões no mobile e não cabem num 16/10 magro.
+ */
+const HERO_BOX =
+  'aspect-[16/10] min-h-[440px] max-h-[480px] sm:aspect-[16/8] sm:min-h-[400px] lg:aspect-[21/9] lg:min-h-0';
+
 /* ────────── CAROUSEL WRAPPER ────────── */
 function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
   const [idx, setIdx] = useState(0);
@@ -485,7 +500,10 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
         style={{ scrollbarWidth: 'none' }}
       >
         {slides.map((s, i) => (
-          <div key={i} className="w-full shrink-0 snap-center">
+          <div
+            key={i}
+            className={`w-full shrink-0 snap-center [&>*]:h-full ${HERO_BOX}`}
+          >
             {s}
           </div>
         ))}
@@ -580,7 +598,8 @@ function TipografiaSlide() {
         } as React.CSSProperties
       }
     >
-      <div className="relative aspect-[16/10] max-h-[480px] w-full sm:aspect-[16/8] lg:aspect-[21/9]">
+      {/* A medida vem da caixa canônica do carrossel (HERO_BOX) */}
+      <div className="relative h-full w-full">
         {/* Fundo cinema profundo */}
         <div
           aria-hidden
@@ -759,7 +778,8 @@ function FakePrintSlide() {
       className="dark-island group relative block overflow-hidden rounded-[26px] border border-line/60"
       style={{ boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)' }}
     >
-      <div className="relative aspect-[16/10] max-h-[480px] w-full sm:aspect-[16/8] lg:aspect-[21/9]">
+      {/* A medida vem da caixa canônica do carrossel (HERO_BOX) */}
+      <div className="relative h-full w-full">
         {/* MÍDIA full-bleed com zoom lento no hover */}
         <div
           className="absolute inset-0 transition-transform duration-[1600ms] ease-out group-hover:scale-[1.05]"
@@ -995,7 +1015,7 @@ function BroadcastClock() {
 function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
   return (
     <div
-      className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60"
+      className="promo-banner group relative h-full overflow-hidden rounded-[26px] border border-line/60"
       style={{
         background: 'var(--banner-bg)',
       }}
@@ -1028,10 +1048,11 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
       <Sparkle className="absolute top-[60%] right-[18%]" delay={800} />
       <Sparkle className="absolute top-[28%] right-[8%]" delay={1600} />
 
-      {/* Ícone piloto grande à direita, com motion 3D */}
+      {/* Ícone piloto grande à direita, com motion 3D.
+          No lg ele dá lugar à mini fila (que conta a história melhor). */}
       <div
         aria-hidden
-        className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 md:block"
+        className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 md:block lg:hidden"
         style={{
           filter:
             'drop-shadow(0 0 36px rgba(200,232,124,0.42)) drop-shadow(0 0 18px rgba(167,139,250,0.38))',
@@ -1043,10 +1064,18 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
         </div>
       </div>
 
-      <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
+      {/* Mini fila do Pilot — tasks do ClickUp virando lipsync (só lg+) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-16 top-1/2 hidden -translate-y-1/2 lg:block"
+      >
+        <PilotMiniQueue />
+      </div>
+
+      <div className="relative z-[2] flex h-full flex-col items-start justify-center gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
         <div className="max-w-[600px]">
           <h3
-            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
+            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px] lg:text-[44px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
           >
             Sua equipe edita<br />
@@ -1140,7 +1169,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
 function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
   return (
     <div
-      className="group relative overflow-hidden rounded-[26px] border border-violet/30"
+      className="group relative h-full overflow-hidden rounded-[26px] border border-violet/30"
       style={{
         background: 'var(--banner-bg-2)',
       }}
@@ -1175,15 +1204,15 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
       {/* Mini take cards animados à direita — simula B-rolls sendo gerados */}
       <div
         aria-hidden
-        className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 lg:block"
+        className="pointer-events-none absolute right-16 top-1/2 hidden -translate-y-1/2 lg:block"
       >
         <BrollMiniGrid />
       </div>
 
-      <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
+      <div className="relative z-[2] flex h-full flex-col items-start justify-center gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
         <div className="max-w-[600px]">
           <h3
-            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
+            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px] lg:text-[44px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
           >
             B-rolls saem prontos<br />
@@ -1254,6 +1283,145 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Mini fila do Pilot — painel ambient que mostra o que a ferramenta faz:
+ * task do ClickUp entra na esteira, vira lipsync e sai pronta. Decorativo
+ * (aria-hidden), sem clique, e marcado como .dark-island pro painel escuro
+ * continuar escuro (com texto claro) também no modo claro.
+ */
+function PilotMiniQueue() {
+  const rows: { code: string; state: 'done' | 'run' | 'wait' }[] = [
+    { code: 'PRPB · AD07', state: 'done' },
+    { code: 'VRWA · AD12', state: 'done' },
+    { code: 'MEPB · AD03', state: 'run' },
+    { code: 'GTWA · AD09', state: 'wait' },
+  ];
+  const STATE_LABEL = { done: 'Pronto', run: 'Gerando', wait: 'Na fila' };
+
+  return (
+    <div
+      className="dark-island w-[272px] rounded-[16px] border border-white/12 bg-black/45 p-3 backdrop-blur-md"
+      style={{ boxShadow: '0 26px 60px -24px rgba(0,0,0,0.9)' }}
+    >
+      {/* Cabeçalho: ClickUp conectado + contagem */}
+      <div className="mb-2.5 flex items-center justify-between px-0.5">
+        <span className="flex items-center gap-1.5">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-70" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
+          </span>
+          <span
+            className="text-[9.5px] font-bold uppercase tracking-[0.2em] text-white/75"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Fila do Pilot
+          </span>
+        </span>
+        <span
+          className="num text-[9.5px] font-bold tabular-nums text-white/45"
+          style={{ fontFamily: 'var(--font-mono)' }}
+        >
+          2/4
+        </span>
+      </div>
+
+      {/* Tasks */}
+      <div className="flex flex-col gap-1.5">
+        {rows.map((r, i) => (
+          <div
+            key={r.code}
+            className="relative flex items-center gap-2.5 overflow-hidden rounded-[10px] border px-2.5 py-2"
+            style={{
+              borderColor:
+                r.state === 'done'
+                  ? 'rgba(200,232,124,0.34)'
+                  : r.state === 'run'
+                    ? 'rgba(167,139,250,0.4)'
+                    : 'rgba(255,255,255,0.1)',
+              background:
+                r.state === 'done'
+                  ? 'linear-gradient(100deg, rgba(200,232,124,0.14), rgba(0,0,0,0.35))'
+                  : r.state === 'run'
+                    ? 'linear-gradient(100deg, rgba(167,139,250,0.16), rgba(0,0,0,0.35))'
+                    : 'rgba(255,255,255,0.03)',
+              animation: `pilotRow 620ms cubic-bezier(0.22,1,0.36,1) ${240 + i * 130}ms backwards`,
+            }}
+          >
+            {/* Glifo de status */}
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+              {r.state === 'done' ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#c8e87c" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              ) : r.state === 'run' ? (
+                <span
+                  className="block h-3 w-3 rounded-full border-[2px] border-violet/35"
+                  style={{
+                    borderTopColor: 'rgba(167,139,250,0.95)',
+                    animation: 'pilotSpin 900ms linear infinite',
+                  }}
+                />
+              ) : (
+                <span className="block h-1.5 w-1.5 rounded-full bg-white/30" />
+              )}
+            </span>
+
+            <span
+              className="num flex-1 truncate text-[10.5px] font-bold tracking-[0.08em] text-white/85"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            >
+              {r.code}
+            </span>
+
+            <span
+              className="shrink-0 text-[8.5px] font-bold uppercase tracking-[0.16em]"
+              style={{
+                fontFamily: 'var(--font-tech)',
+                color:
+                  r.state === 'done'
+                    ? 'rgba(200,232,124,0.9)'
+                    : r.state === 'run'
+                      ? 'rgba(186,166,255,0.95)'
+                      : 'rgba(255,255,255,0.4)',
+              }}
+            >
+              {STATE_LABEL[r.state]}
+            </span>
+
+            {/* Barra de progresso só na task que está gerando */}
+            {r.state === 'run' ? (
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/8">
+                <span
+                  className="block h-full bg-gradient-to-r from-violet via-violet-deep to-lime"
+                  style={{ animation: 'pilotProgress 3.4s ease-in-out infinite' }}
+                />
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      <style jsx>{`
+        @keyframes pilotRow {
+          from { opacity: 0; transform: translateX(16px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes pilotSpin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes pilotProgress {
+          0% { width: 8%; }
+          70% { width: 78%; }
+          100% { width: 92%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          div, span { animation: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
