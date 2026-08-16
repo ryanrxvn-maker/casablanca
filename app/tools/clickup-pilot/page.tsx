@@ -447,7 +447,7 @@ function loadPersistedBatchStates(): Record<string, unknown> {
 function loadPersistedReplan(taskId: string): {
   taskName: string;
   baseAdId: string;
-  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null }>;
+  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V' }>;
 } | null {
   try {
     const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
@@ -615,6 +615,8 @@ type DispatchPlan = {
     imageDataUrl?: string | null;
     /** Chave IDB da mesma imagem — é o que sobrevive ao F5. */
     imageKey?: string | null;
+    /** Motor escolhido na mão pra esta cena (ausente = automático). */
+    engine?: 'III' | 'IV' | 'V';
   }>;
   unmatchedAvatars: string[];
 };
@@ -715,7 +717,7 @@ type BatchTaskState = {
   replan?: {
     taskName: string;
     baseAdId: string;
-    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null }>;
+    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V' }>;
   };
   /** Parts re-geradas via EditPartModal — labels que ficaram "dirty" depois
    *  do montadoZipUrl ter sido gerado. Quando array > 0, UI mostra botao
@@ -785,6 +787,12 @@ type RoleSlot = {
    *  que o caminho normal morre no 0x0 / "missing image dimensions".
    *  Cada slot tem a SUA imagem, então dá pra ter vários avatares por AD e
    *  juntar depois normalmente. */
+  /** MOTOR DESTA CENA, escolhido na mão. Ausente = automático (III, ou IV se
+   *  tiver movimento). Existe porque nem toda decisão de motor vem do gesto:
+   *  às vezes você quer o V numa cena de rosto, ou o IV numa parada. A escolha
+   *  não fura a regra do movimento — cena com gesto marcada como III sobe pro
+   *  IV no runner de qualquer jeito, senão o take voltaria parado. */
+  engine?: 'III' | 'IV' | 'V';
   imageMode?: boolean;
   /** Data URL da imagem — vive em memória (taskAnalyses) e vai pro runner.
    *  NÃO entra no replan: base64 de imagem no localStorage estoura a quota e
@@ -3123,6 +3131,7 @@ function ClickUpPilotInner() {
           motionPrompt: p.motionPrompt ?? null,
           // só a CHAVE: base64 aqui estouraria a quota do localStorage.
           imageKey: p.imageKey ?? null,
+          engine: p.engine,
         })),
       };
     } else {
@@ -3155,6 +3164,7 @@ function ClickUpPilotInner() {
           motionPrompt: p.motionPrompt ?? null,
           // dataUrl não sobrevive ao reload; os bytes vêm do IDB por esta chave.
           imageKey: p.imageKey ?? null,
+          engine: p.engine,
         })),
         unmatchedAvatars: [],
       } as any;
@@ -3283,7 +3293,8 @@ function ClickUpPilotInner() {
           motionPrompt: p.motionPrompt || undefined,
           // Modo imagem: sem avatar — o runner sobe pela variante `image`.
           imageDataUrl: p.imageDataUrl || undefined,
-          motor: motorsPerPart[i], // <-- override per job
+          // motor escolhido na cena vence o motorConfig global
+          motor: p.engine || motorsPerPart[i],
         };
       });
       const resultsEnviados = await runHeyGenJobs(jobs, {
@@ -4791,6 +4802,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             voiceId: p.voiceId ?? null,
             motionPrompt: p.motionPrompt ?? null,
             imageKey: p.imageKey ?? null,
+            engine: p.engine,
           })),
         } : undefined;
         next[id] = {
@@ -6654,6 +6666,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           matchedBy: 'plano',
           manual: true,
           motionPrompt: c.motionPrompt || null,
+          engine: (c as { motor?: 'III' | 'IV' | 'V' }).motor,
           imageMode: !!c.modoImagem,
           imageDataUrl: c.modoImagem ? planoImagens[c.cena] || null : null,
           imageName: c.modoImagem ? `${c.cena}.jpg` : null,
@@ -6753,6 +6766,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
         imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
         imageKey: slot?.imageMode ? (slot.imageKey || null) : null,
+        engine: slot?.engine,
         _slotRole: slot?.role?.toLowerCase() || '',
         _imageMode: !!slot?.imageMode,
       };
@@ -11394,19 +11408,42 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       <path d="M13 2L4.09 12.97a1 1 0 0 0 .77 1.64H11l-1 7.39 8.91-10.97a1 1 0 0 0-.77-1.64H12l1-7.39z" />
                                                     </svg>
                                                     Apply Custom Motion
-                                                    <span
-                                                      className={
-                                                        'ml-auto rounded-full border px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-widest ' +
-                                                        (on
-                                                          ? 'border-violet-400/60 bg-violet-500/20 text-violet-200'
-                                                          : 'border-white/10 bg-white/5 text-text-muted')
-                                                      }
-                                                      title={on
-                                                        ? 'Com prompt de movimento a cena sobe pro Avatar IV — e o unico que anima o gesto'
-                                                        : 'Sem prompt a cena vai no Avatar III (mais barato, sem gesto inventado)'}
-                                                    >
-                                                      {on ? 'Avatar IV' : 'Avatar III'}
-                                                    </span>
+                                                    {/* MOTOR DESTA CENA. "auto" = III, ou IV se tiver
+                                                      * gesto. Escolher na mão vence — mas cena com
+                                                      * gesto nunca desce pro III (o runner sobe), senão
+                                                      * o take voltaria parado. */}
+                                                    <div className="ml-auto flex items-center gap-1">
+                                                      {(['auto', 'III', 'IV', 'V'] as const).map((op) => {
+                                                        const sel = (slot.engine || 'auto') === op;
+                                                        // o que sai de fato quando está em auto
+                                                        const efetivo = slot.engine || (on ? 'IV' : 'III');
+                                                        const subiu = op === 'auto' && on;
+                                                        return (
+                                                          <button
+                                                            key={op}
+                                                            type="button"
+                                                            onClick={() => updateRoleSlot(a.taskId, sIdx, {
+                                                              engine: op === 'auto' ? undefined : op,
+                                                            })}
+                                                            className={
+                                                              'mono rounded-full border px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
+                                                              (sel
+                                                                ? 'border-violet-400/60 bg-violet-500/25 text-violet-100'
+                                                                : 'border-white/10 bg-white/5 text-text-muted hover:border-violet-400/40')
+                                                            }
+                                                            title={
+                                                              op === 'auto'
+                                                                ? `Automático: ${efetivo} (sem gesto = III; com gesto sobe pro IV)`
+                                                                : op === 'III'
+                                                                  ? 'Avatar III — mais barato, NÃO anima gesto'
+                                                                  : `Avatar ${op} — anima o movimento`
+                                                            }
+                                                          >
+                                                            {op === 'auto' ? (subiu ? 'auto·IV' : 'auto·III') : op}
+                                                          </button>
+                                                        );
+                                                      })}
+                                                    </div>
                                                   </div>
                                                   <textarea
                                                     value={motion}
