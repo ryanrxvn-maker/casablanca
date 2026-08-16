@@ -146,13 +146,17 @@ eq(parseDrMillionBriefing(DOC, 'AD99XX', 'pl'), null, 'AD que não existe devolv
     'Eu perdi trinta quilos com essa receita.',
     'Clique no botao abaixo e me conte. PL',
     'Moje koleżanki śmiały się ze mnie.',
-    'Ja sama straciłam trzydzieści kilogramów.',
+    // marcador colado no COMEÇO da linha — a forma mais comum no doc real
+    'PT Minhas amigas riram de mim quando contei sobre a receita.',
+    'PL Ja sama straciłam trzydzieści kilogramów.',
   ].join('\n');
   const so_pl = parseDrMillionBriefing(DOC_GRUDADO, 'AD90GL', 'pl');
   const texto = (so_pl?.hooks || []).map((h) => h.text).join(' ') + ' ' + (so_pl?.body || '');
   ok(/koleżanki/.test(texto), 'polonês entrou');
   ok(!/gelatina mudou tudo/.test(texto), 'português NÃO vaza pro disparo em PL');
-  ok(!/Clique no botao abaixo/.test(texto), 'a linha que carrega o marcador fica no PT');
+  ok(!/Clique no botao abaixo/.test(texto), 'a linha que carrega o marcador no FIM fica no PT');
+  ok(!/Minhas amigas riram/.test(texto), 'marcador no COMEÇO: português não vaza pro PL');
+  ok(/straciłam trzydzieści/.test(texto), 'marcador no COMEÇO: a fala depois dele entra no PL');
   const so_pt = parseDrMillionBriefing(DOC_GRUDADO, 'AD90GL', 'pt');
   const tpt = (so_pt?.hooks || []).map((h) => h.text).join(' ') + ' ' + (so_pt?.body || '');
   ok(/Clique no botao abaixo/.test(tpt), 'a fala antes do marcador continua sendo PT');

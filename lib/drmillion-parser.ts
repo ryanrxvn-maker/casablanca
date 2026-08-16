@@ -48,6 +48,17 @@ const LANG_RE = /^\s*(PT|PL)\s*$/i;
  * uma frase polonesa não vira marcador.
  */
 const LANG_FIM_RE = /^(.*?[^\s])[\s.,;:—–-]+(PT|PL)\s*$/;
+/**
+ * O mesmo marcador colado no COMEÇO da primeira linha do idioma novo —
+ * `"PT Minhas amigas riram de mim..."`. É a forma mais comum no doc do WL PL, e
+ * ela engana duas vezes: não casa com LANG_RE (que exige a linha inteira) nem
+ * com LANG_FIM_RE (que olha o fim). Sem tratar, a troca nunca acontece e o
+ * disparo sai bilíngue.
+ *
+ * Exige maiúscula e um separador depois, pra "PL" iniciando frase polonesa de
+ * verdade não virar marcador.
+ */
+const LANG_INI_RE = /^\s*(PT|PL)[\s.,;:—–-]+(\S.*)$/;
 
 /** "AD07G1GL" → "AD07" (o grupo). É o que decide de quem é o Body. */
 export function adGroupOf(adId: string): string | null {
@@ -92,6 +103,13 @@ function separarIdiomas(linhas: string[]): { pt: string[]; pl: string[] } {
     if (mf) {
       empurrar(mf[1]);
       atual = mf[2].toLowerCase() as 'pt' | 'pl';
+      continue;
+    }
+    // marcador no começo: a troca vale JÁ para o resto desta linha.
+    const mi = raw.match(LANG_INI_RE);
+    if (mi) {
+      atual = mi[1].toLowerCase() as 'pt' | 'pl';
+      empurrar(mi[2]);
       continue;
     }
     empurrar(raw);
