@@ -447,7 +447,7 @@ function loadPersistedBatchStates(): Record<string, unknown> {
 function loadPersistedReplan(taskId: string): {
   taskName: string;
   baseAdId: string;
-  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null }>;
+  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null }>;
 } | null {
   try {
     const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
@@ -611,6 +611,10 @@ type DispatchPlan = {
     matchedBy?: string;
     /** Apply Custom Motion herdado do slot dono da parte. */
     motionPrompt?: string | null;
+    /** Modo imagem: data URL da imagem que o HeyGen vai animar (sem avatar). */
+    imageDataUrl?: string | null;
+    /** Chave IDB da mesma imagem — é o que sobrevive ao F5. */
+    imageKey?: string | null;
   }>;
   unmatchedAvatars: string[];
 };
@@ -711,7 +715,7 @@ type BatchTaskState = {
   replan?: {
     taskName: string;
     baseAdId: string;
-    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null }>;
+    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null }>;
   };
   /** Parts re-geradas via EditPartModal — labels que ficaram "dirty" depois
    *  do montadoZipUrl ter sido gerado. Quando array > 0, UI mostra botao
@@ -774,6 +778,22 @@ type RoleSlot = {
    *  AD37_2 mexe a gelatina, AD37_1 e AD37_3 só falam. Preenchido, a cena sobe
    *  pro Avatar IV (o III descarta motion); vazio, segue no III. */
   motionPrompt?: string | null;
+  /** MODO IMAGEM — em vez de escolher avatar da biblioteca, sobe a imagem
+   *  (frame inicial da cena) e o HeyGen anima ela pela variante `image` do
+   *  /v3/videos, que não precisa de `avatar_id`. Serve pro avatar que não
+   *  existe na biblioteca — inclusive rosto que a moderação reprovou, caso em
+   *  que o caminho normal morre no 0x0 / "missing image dimensions".
+   *  Cada slot tem a SUA imagem, então dá pra ter vários avatares por AD e
+   *  juntar depois normalmente. */
+  imageMode?: boolean;
+  /** Data URL da imagem — vive em memória (taskAnalyses) e vai pro runner.
+   *  NÃO entra no replan: base64 de imagem no localStorage estoura a quota e
+   *  derruba a persistência de TODAS as tasks. Os bytes vão pro IndexedDB. */
+  imageDataUrl?: string | null;
+  /** Chave dos bytes no IndexedDB (`pilot:<taskId>:img:<slot>`). É isso que
+   *  entra no replan — string curta — pra o RETOMAR pós-F5 reachar a imagem. */
+  imageKey?: string | null;
+  imageName?: string | null;
 };
 
 type TaskAnalysis = {
@@ -2490,7 +2510,7 @@ function ClickUpPilotInner() {
             }
           }
           const bodyPartsCount = bodyIdx;
-          const allHaveAvatar = roleSlots.every((s) => s.avatarId);
+          const allHaveAvatar = roleSlots.every(slotPronto);
           // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
           // (compartilham o doc — ja analisamos uma vez).
           const siblings = siblingMap.get(task.id) || [task.id];
@@ -3101,6 +3121,8 @@ function ClickUpPilotInner() {
           avatarId: p.avatarId ?? null,
           voiceId: p.voiceId ?? null,
           motionPrompt: p.motionPrompt ?? null,
+          // só a CHAVE: base64 aqui estouraria a quota do localStorage.
+          imageKey: p.imageKey ?? null,
         })),
       };
     } else {
@@ -3131,6 +3153,8 @@ function ClickUpPilotInner() {
           voiceId: p.voiceId,
           // Sem isto o RETOMAR pós-F5 re-disparava a cena SEM o gesto.
           motionPrompt: p.motionPrompt ?? null,
+          // dataUrl não sobrevive ao reload; os bytes vêm do IDB por esta chave.
+          imageKey: p.imageKey ?? null,
         })),
         unmatchedAvatars: [],
       } as any;
@@ -3257,6 +3281,8 @@ function ClickUpPilotInner() {
           voiceId: p.voiceId,
           // Cena com gesto: o runner sobe pro Avatar IV sozinho (motorEfetivo).
           motionPrompt: p.motionPrompt || undefined,
+          // Modo imagem: sem avatar — o runner sobe pela variante `image`.
+          imageDataUrl: p.imageDataUrl || undefined,
           motor: motorsPerPart[i], // <-- override per job
         };
       });
@@ -4764,6 +4790,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             avatarId: p.avatarId ?? null,
             voiceId: p.voiceId ?? null,
             motionPrompt: p.motionPrompt ?? null,
+            imageKey: p.imageKey ?? null,
           })),
         } : undefined;
         next[id] = {
@@ -6349,7 +6376,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           };
         }
       }
-      const allHaveAvatar = newSlots.every((s) => s.avatarId);
+      const allHaveAvatar = newSlots.every(slotPronto);
       const updated = newSlots[roleIdx];
       // Salva memoria: voz usada (override OU padrao do avatar) → avatarId
       const effectiveVoiceId = updated.voiceOverride?.id || updated.avatarVoiceId;
@@ -6462,7 +6489,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           roleSlots: [...slots, newSlot],
           // Herdou avatar do irmão já entra pronta pra disparar; sem avatar
           // continua 'partial' (falta você escolher).
-          status: [...slots, newSlot].every((s) => s.avatarId) ? 'ready' : 'partial',
+          status: [...slots, newSlot].every(slotPronto) ? 'ready' : 'partial',
         },
       };
     });
@@ -6544,7 +6571,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const a = prev[taskId];
       if (!a?.roleSlots) return prev;
       const newSlots = a.roleSlots.filter((_, i) => i !== roleIdx);
-      const allHaveAvatar = newSlots.length > 0 && newSlots.every((s) => s.avatarId);
+      const allHaveAvatar = newSlots.length > 0 && newSlots.every(slotPronto);
       return {
         ...prev,
         [taskId]: {
@@ -6554,6 +6581,51 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       };
     });
+  }
+
+  /** MODO IMAGEM — recebe o arquivo, guarda a data URL em memória (pro disparo
+   *  desta sessão) e grava os BYTES no IndexedDB (pro RETOMAR pós-F5). O
+   *  localStorage nunca vê a imagem: base64 lá estoura a quota e derruba a
+   *  persistência de todas as tasks. Ver [[feedback_blindagem_fluxos]]. */
+  async function subirImagemDoSlot(taskId: string, roleIdx: number, file: File) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      setError(`Formato não suportado (${file.type || '?'}). Use JPEG, PNG ou WebP.`);
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError(`Imagem muito grande (${(file.size / 1e6).toFixed(1)}MB). Máximo 8MB.`);
+      return;
+    }
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result || ''));
+      fr.onerror = () => rej(new Error('Falha ao ler a imagem.'));
+      fr.readAsDataURL(file);
+    });
+    const imageKey = `pilot:${taskId}:img:${roleIdx}`;
+    try {
+      const { saveBlob } = await import('@/lib/zip-store');
+      await saveBlob(imageKey, file, file.type);
+    } catch (e) {
+      // Não trava o disparo desta sessão — só avisa que um F5 perderia a imagem.
+      console.warn('[clickup-pilot] imagem não foi pro IDB (F5 perderia):', e);
+    }
+    updateRoleSlot(taskId, roleIdx, {
+      imageDataUrl: dataUrl,
+      imageKey,
+      imageName: file.name,
+    });
+    setError(null);
+  }
+
+  /** Slot pronto pra disparar: avatar escolhido OU, no modo imagem, imagem
+   *  subida (a imagem substitui o avatar — não existe avatarId nesse caminho). */
+  function slotPronto(s: RoleSlot): boolean {
+    // Modo imagem exige a voz TAMBÉM: sem avatar não há voz padrão pra herdar,
+    // e o /v3 recusa `script` sem `voice_id`. Sem esta checagem a task ficaria
+    // 'ready' e só quebraria no disparo.
+    if (s.imageMode) return !!(s.imageDataUrl && s.voiceOverride?.id);
+    return !!s.avatarId;
   }
 
   /** Constroi DispatchPlan a partir dos roleSlots + partTemplates da task */
@@ -6576,10 +6648,37 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         voiceId: slot?.voiceOverride?.id || slot?.avatarVoiceId || null,
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
+        imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
+        imageKey: slot?.imageMode ? (slot.imageKey || null) : null,
+        _slotRole: slot?.role?.toLowerCase() || '',
+        _imageMode: !!slot?.imageMode,
       };
     });
-    const unmatchedAvatars = a.roleSlots.filter(s => !s.avatarId).map(s => `${s.role}: @${s.username}`);
-    return { adName, parts: parts as any, unmatchedAvatars };
+    // MODO IMAGEM = TAKE ÚNICO por slot. Sem avatar persistente cada geração
+    // re-envia a imagem, então picotar o body em ~20s só multiplica upload e
+    // corte à toa. As partes do slot viram UMA fala só, na ordem original.
+    // Slots normais não são tocados — continuam picotados como sempre.
+    const colapsado: typeof parts = [];
+    const jaFeito = new Set<string>();
+    for (const p of parts as any[]) {
+      if (!p._imageMode) { colapsado.push(p); continue; }
+      if (jaFeito.has(p._slotRole)) continue;
+      jaFeito.add(p._slotRole);
+      const irmas = (parts as any[]).filter(
+        (q) => q._imageMode && q._slotRole === p._slotRole,
+      );
+      colapsado.push({
+        ...p,
+        label: irmas.length > 1 ? `${p.label}+${irmas.length - 1}` : p.label,
+        text: irmas.map((q) => String(q.text || '').trim()).filter(Boolean).join('\n\n'),
+      } as any);
+    }
+    for (const p of colapsado as any[]) { delete p._slotRole; delete p._imageMode; }
+    // Slot em modo imagem não precisa de avatarId — a imagem substitui.
+    const unmatchedAvatars = a.roleSlots
+      .filter((s) => !s.avatarId && !(s.imageMode && s.imageDataUrl))
+      .map((s) => `${s.role}: @${s.username}`);
+    return { adName, parts: colapsado as any, unmatchedAvatars };
   }
 
   /** Dispara UMA task pra HeyGen Auto Dynamic */
@@ -6609,7 +6708,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return;
     }
     const plan = buildPlan(a);
-    if (!plan || plan.parts.some((p: any) => !p.avatarId)) {
+    if (!plan || plan.parts.some((p: any) => !p.avatarId && !p.imageDataUrl)) {
       setError(`Tem avatar sem selecionar. Click no slot e escolhe.`);
       return;
     }
@@ -10814,7 +10913,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         voiceId: candFull.voiceId,
                                         voiceName: candFull.voiceName,
                                       } : null;
-                                      const noVoice = slot.avatarId && !slot.avatarVoiceId && !slot.voiceOverride;
+                                      const noVoice = slot.imageMode
+                                        ? !slot.voiceOverride   // modo imagem: sem avatar, a voz TEM que ser escolhida
+                                        : slot.avatarId && !slot.avatarVoiceId && !slot.voiceOverride;
                                       const effectiveVoiceLabel = slot.voiceOverride?.name || (slot.avatarVoiceId ? 'voz padrao do avatar' : noVoice ? 'sem voz' : '?');
                                       const visualKey = `${a.taskId}:${sIdx}`;
                                       const isVisualSearching = visualMatching[visualKey];
@@ -11044,6 +11145,90 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           </div>
                                           {/* ═══ SELETORES (Avatar + Voz) — grid limpo ═══ */}
                                           <div className="mt-2.5 grid gap-2">
+                                            {/* BOTÃO 3D — MODO IMAGEM. Liga quando o avatar não existe
+                                              * na biblioteca (inclusive rosto que a moderação reprovou,
+                                              * caso em que o caminho normal morre no 0x0). Aí em vez de
+                                              * escolher avatar, sobe a imagem: o HeyGen anima ela pela
+                                              * variante `image`, que dispensa avatar_id. Cada slot tem a
+                                              * SUA imagem, então N avatares por AD continuam valendo e a
+                                              * montagem junta igual. */}
+                                            <button
+                                              type="button"
+                                              onClick={() => updateRoleSlot(a.taskId, sIdx, { imageMode: !slot.imageMode })}
+                                              className="group relative inline-flex items-center gap-2 self-start rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                              style={
+                                                slot.imageMode
+                                                  ? {
+                                                      fontFamily: 'var(--font-tech)',
+                                                      color: '#12040f',
+                                                      borderColor: 'rgba(232,121,249,0.55)',
+                                                      background: 'linear-gradient(135deg, #f0abfc 0%, #e879f9 100%)',
+                                                      boxShadow:
+                                                        '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(232,121,249,0.7), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                    }
+                                                  : {
+                                                      fontFamily: 'var(--font-tech)',
+                                                      color: 'rgba(255,255,255,0.55)',
+                                                      borderColor: 'rgba(255,255,255,0.12)',
+                                                      background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                                                      boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+                                                    }
+                                              }
+                                              title={
+                                                slot.imageMode
+                                                  ? 'Ligado: sobe a imagem e o HeyGen anima ela (sem avatar da biblioteca). A fala desta cena sai num take único.'
+                                                  : 'Ligue quando o avatar não existir na biblioteca — aí você sobe a imagem em vez de escolher avatar.'
+                                              }
+                                            >
+                                              <span className="text-[12px] leading-none">🖼</span>
+                                              Modo imagem
+                                              <span
+                                                className={
+                                                  'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
+                                                  (slot.imageMode ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                                                }
+                                              >
+                                                {slot.imageMode ? 'ON' : 'OFF'}
+                                              </span>
+                                            </button>
+                                            {slot.imageMode ? (
+                                              <div className="rounded-[12px] border border-fuchsia-400/35 bg-fuchsia-500/[0.07] p-2.5">
+                                                <div className="label-tech mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-fuchsia-200">
+                                                  Imagem desta cena (frame inicial)
+                                                </div>
+                                                <div className="flex items-start gap-2.5">
+                                                  {slot.imageDataUrl ? (
+                                                    /* eslint-disable-next-line @next/next/no-img-element */
+                                                    <img
+                                                      src={slot.imageDataUrl}
+                                                      alt={slot.imageName || 'frame'}
+                                                      className="h-[74px] w-[42px] shrink-0 rounded-[6px] border border-white/15 object-cover"
+                                                    />
+                                                  ) : null}
+                                                  <div className="min-w-0 flex-1">
+                                                    <input
+                                                      type="file"
+                                                      accept="image/jpeg,image/png,image/webp"
+                                                      onChange={(e) => {
+                                                        const f = e.target.files?.[0];
+                                                        if (f) void subirImagemDoSlot(a.taskId, sIdx, f);
+                                                        e.target.value = '';
+                                                      }}
+                                                      className="block w-full text-[10.5px] text-text-muted file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-fuchsia-400/45 file:bg-fuchsia-500/12 file:px-2.5 file:py-1 file:text-[9.5px] file:font-bold file:uppercase file:tracking-widest file:text-fuchsia-200 hover:file:bg-fuchsia-500/22"
+                                                    />
+                                                    <div className="mt-1 text-[9.5px] leading-tight text-text-muted">
+                                                      {slot.imageName ? (
+                                                        <span className="text-fuchsia-200">{slot.imageName}</span>
+                                                      ) : (
+                                                        'JPEG, PNG ou WebP · até 8MB · 9:16'
+                                                      )}
+                                                      {' · '}a fala desta cena sai em <b>take único</b> (sem picotar)
+                                                      {' · '}roda no <b>Avatar IV</b> (essa variante não aceita III)
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            ) : (
                                             <div>
                                               <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -11067,7 +11252,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 />
                                               </div>
                                             </div>
-                                            {slot.avatarId ? (
+                                            )}
+                                            {slot.avatarId || slot.imageMode ? (
                                               <div>
                                                 <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -11095,7 +11281,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 o gesto é por avatar: preenchido, ESTA cena sobe pro
                                                 Avatar IV (o III descarta motion); vazio, segue no III,
                                                 que é mais barato e não inventa gesto. */}
-                                            {slot.avatarId ? (() => {
+                                            {slot.avatarId || slot.imageMode ? (() => {
                                               const motion = slot.motionPrompt || '';
                                               const on = !!motion.trim();
                                               return (

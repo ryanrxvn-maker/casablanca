@@ -30,6 +30,13 @@ export type RunnerJob = {
    *  sozinho: o Avatar III ignora motion, entao mandar gesto nele seria
    *  gerar um take parado sem avisar ninguem. Ver motorEfetivo(). */
   motionPrompt?: string | null;
+  /** MODO IMAGEM — data URL da imagem a animar. Quando presente, este job NÃO
+   *  usa avatar da biblioteca: sobe pela variante `image` do /v3/videos, que
+   *  não precisa de `avatar_id`. O `videoId` que volta é pollável e baixável
+   *  pelo MESMO pipeline (confirmado: aparece em /v1/project/items com
+   *  video_url), então só o submit muda — poll, download e montagem seguem
+   *  iguais. Exige `voiceId`: sem avatar não há voz padrão pra herdar. */
+  imageDataUrl?: string | null;
 };
 
 export type RunnerResult = {
@@ -102,6 +109,34 @@ export async function runHeyGenJobs(
           opts.mode === 'audio' &&
           !!(job.voiceMirroring ?? opts.voiceMirroring) &&
           !!effectiveVoiceId;
+        // ===== MODO IMAGEM: variante `image` do /v3/videos, sem avatar =====
+        // Sai por uma rota de servidor porque o /v3 exige X-Api-Key (medido:
+        // cookie de sessão devolve 401), e key nunca vai pro browser.
+        if (job.imageDataUrl) {
+          if (!effectiveVoiceId) {
+            throw new Error(
+              `${label}: modo imagem exige uma voz escolhida — sem avatar não há voz padrão pra herdar.`,
+            );
+          }
+          opts.onProgress(
+            `${label}: modo imagem${motion ? ' + movimento' : ''} — anima a imagem (sem avatar)`,
+          );
+          const blob = await (await fetch(job.imageDataUrl)).blob();
+          const fd = new FormData();
+          fd.append('image', blob, 'frame.jpg');
+          fd.append('script', job.copy || '');
+          fd.append('voiceId', effectiveVoiceId);
+          if (motion) fd.append('motionPrompt', motion);
+          fd.append('title', `${opts.adNameSafe}_${label}`);
+          fd.append('aspectRatio', '9:16');
+          const r = await fetch('/api/heygen/image-video', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => null);
+          if (!r.ok || !j?.videoId) {
+            throw new Error(j?.error || `Falha no modo imagem (HTTP ${r.status}).`);
+          }
+          results[idx] = { index: idx + 1, label, videoId: j.videoId, error: null };
+        } else {
+
         const input: ProcessJobInput = {
           file: opts.mode === 'audio' ? job.audio : undefined,
           text: opts.mode === 'copy' ? job.copy : undefined,
@@ -129,6 +164,7 @@ export async function runHeyGenJobs(
           videoId: result.videoId,
           error: null,
         };
+        }
       } catch (e) {
         const msg = (e as Error)?.message || String(e);
         // Cota diária estourada → sinaliza pros outros workers pararem de pegar
