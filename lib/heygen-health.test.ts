@@ -164,5 +164,24 @@ ok(
   );
 }
 
+// (2.10) MODERAÇÃO EM REVISÃO — o take volta como 'failed', mas o HeyGen só
+//        mandou pra fila humana. Re-disparar o MESMO texto cai na MESMA fila e
+//        queima cota: foi o "loop infinito" do AD53/AD57 no lote WL PL.
+{
+  ok(
+    decideRedispatch({ hasVideoId: true, status: 'failed', moderationPending: true }) === 'wait',
+    'moderação em revisão NÃO re-dispara (não é falha de render)',
+  );
+  ok(
+    decideRedispatch({ hasVideoId: true, status: 'failed', moderationPending: false }) === 'redispatch',
+    'falha de render de verdade continua re-disparando',
+  );
+  // vídeo pronto vence a moderação: se tem URL, é resgate e ponto
+  ok(
+    decideRedispatch({ hasVideoId: true, status: 'completed', hasVideoUrl: true, moderationPending: true }) === 'rescue',
+    'take que ficou pronto é resgatado mesmo com flag de moderação',
+  );
+}
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

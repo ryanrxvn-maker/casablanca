@@ -952,6 +952,12 @@ export type VideoStatus = {
   error?: string;
   /** true quando o status foi cunhado pelo NOSSO poll, não pelo HeyGen. */
   synthetic?: boolean;
+  /**
+   * O take caiu na REVISÃO DE MODERAÇÃO do HeyGen (`moderation_status`
+   * 'pending'/'in_review'). Vem junto com status 'failed', mas não é falha de
+   * render — é fila humana, e re-disparar o mesmo texto cai na mesma fila.
+   */
+  moderationPending?: boolean;
 };
 
 /**
@@ -984,11 +990,13 @@ export async function getVideosStatus(
       if (st === 'completed' || st === 'done' || st === 'success') mapped = 'completed';
       else if (st === 'failed' || st === 'error') mapped = 'failed';
       else if (st === '' || st === 'pending' || st === 'processing' || st === 'rendering' || it.status == null) mapped = 'pending';
+      const moder = String(it.moderation_status || '').toLowerCase();
       out[id] = {
         videoId: id,
         status: mapped,
         videoUrl: it.video_url || null,
-        error: it.error || it.failed_reason || undefined,
+        error: it.error || it.failed_reason || it.error_message || undefined,
+        moderationPending: moder === 'pending' || moder === 'in_review' || moder === 'reviewing',
       };
     }
   }
@@ -1389,6 +1397,7 @@ export async function classifyForRedispatch(
       status: s?.status,
       hasVideoUrl: !!s?.videoUrl,
       foundByTitle: !!urlByTitle,
+      moderationPending: !!s?.moderationPending,
     });
 
     if (action === 'rescue') {
@@ -1404,7 +1413,13 @@ export async function classifyForRedispatch(
       return;
     }
     if (action === 'wait') {
-      out[i] = { action: 'wait', reason: 'O HeyGen AINDA está renderizando esse take — re-disparar duplicaria o gasto.', videoId: e.videoId! };
+      out[i] = {
+        action: 'wait',
+        reason: s?.moderationPending
+          ? 'O HeyGen mandou esse take pra REVISÃO DE MODERAÇÃO. Não é falha de render e re-disparar o mesmo texto cai na mesma fila — ou a revisão libera, ou o texto precisa ser quebrado/ajustado.'
+          : 'O HeyGen AINDA está renderizando esse take — re-disparar duplicaria o gasto.',
+        videoId: e.videoId!,
+      };
       return;
     }
     if (!e.videoId) {

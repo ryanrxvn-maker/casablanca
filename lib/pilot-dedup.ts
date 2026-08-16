@@ -24,6 +24,11 @@ export type ParteDedup = {
    *  avatar e voz, mas com gesto diferente, é OUTRO vídeo — sem isso o hook
    *  irmão que pediu movimento herdaria o take parado da irmã. */
   motionPrompt?: string | null;
+  /** Modo imagem: QUAL imagem. Sem isto duas cenas de imagem diferentes com a
+   *  mesma fala e a mesma voz teriam a mesma chave, e uma herdaria o vídeo da
+   *  outra — com o rosto errado. O avatarId, que separa esses casos no fluxo
+   *  normal, é null aqui pras duas. */
+  imageKey?: string | null;
 };
 
 export type ResultadoDisparo = {
@@ -35,7 +40,7 @@ export type ResultadoDisparo = {
 
 /** Chave de conteúdo. Texto vazio nunca casa (parte vazia não vira take). */
 export function chaveConteudo(p: ParteDedup): string {
-  return `${p.avatarId || ''}|${p.voiceId || ''}|${String(p.motionPrompt || '').trim()}|${String(p.text || '').trim()}`;
+  return `${p.avatarId || ''}|${p.imageKey || ''}|${p.voiceId || ''}|${String(p.motionPrompt || '').trim()}|${String(p.text || '').trim()}`;
 }
 
 /**

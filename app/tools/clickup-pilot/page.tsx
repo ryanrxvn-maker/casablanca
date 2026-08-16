@@ -3589,7 +3589,10 @@ function ClickUpPilotInner() {
             // DIÁRIO — a cota continua morta, só queimaria as 2 rodadas em segundos
             // (AD47GL). O gate de completude abaixo já monta a msg ⏳ certa.
             if (isQuotaError(results[i]?.error || '')) return false;
-            return !!plan!.parts[i].avatarId;
+            // Cena em MODO IMAGEM não tem avatarId — sem esta segunda condição
+            // ela nunca era curada e a task fechava incompleta pra sempre.
+            const p: any = plan!.parts[i];
+            return !!p.avatarId || !!p.imageDataUrl || !!p.imageKey;
           });
           if (candidateIdxs.length === 0) break;
 
@@ -3667,7 +3670,14 @@ function ClickUpPilotInner() {
 
           const healJobs = redispatchIdxs.map((i) => {
             const p = plan!.parts[i] as any; // plan parts carregam voiceId em runtime (mesmo padrao do dispatch original)
-            return { label: p.label, copy: p.text, avatarId: p.avatarId!, voiceId: p.voiceId || undefined, motor: motorsPerPart[i] };
+            return {
+              label: p.label, copy: p.text, avatarId: p.avatarId!, voiceId: p.voiceId || undefined,
+              // A cura tem que re-disparar a cena de imagem COM a imagem e o
+              // gesto — senão volta um take de avatar vazio no lugar dela.
+              imageDataUrl: p.imageDataUrl || (p.imageKey ? imagensPorChave.get(p.imageKey) : undefined) || undefined,
+              motionPrompt: p.motionPrompt || undefined,
+              motor: p.engine || motorsPerPart[i],
+            };
           });
 
           let healResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
@@ -4095,8 +4105,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // Parte VAZIA legitima ("(vazio)") tem text vazio → NUNCA entra aqui.
       const hasUndispatched = !!state.replan?.parts?.length && state.parts.some((p, i) => {
         if (cachedIdxs.has(i) || p.videoId) return false;
-        const rp = state.replan!.parts[i];
-        return !!rp && (rp.text || '').trim().length > 0 && !!rp.avatarId;
+        const rp: any = state.replan!.parts[i];
+        // Cena de imagem entra aqui também: sem isso o RETOMAR nem via que
+        // faltava a parte, e a task ficava incompleta em silêncio.
+        return !!rp && (rp.text || '').trim().length > 0 && (!!rp.avatarId || !!rp.imageKey);
       });
 
       /** Takes que o HeyGen ainda está renderizando quando o RETOMAR acaba —
@@ -4155,8 +4167,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const candidateIdxs: number[] = [];
           for (let i = 0; i < state.parts.length; i++) {
             if (cachedIdxs.has(i)) continue;
-            const rp = state.replan.parts[i];
-            if (!rp || !(rp.text || '').trim() || !rp.avatarId) continue;
+            const rp: any = state.replan.parts[i];
+            if (!rp || !(rp.text || '').trim()) continue;
+            if (!rp.avatarId && !rp.imageKey) continue; // nem avatar nem imagem: não dá
             const p = state.parts[i];
             const st = p.videoId ? finalStatuses[p.videoId] : null;
             const hasGoodVideo = st?.status === 'completed' && !!st.videoUrl;
@@ -4228,6 +4241,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           // era negado de novo — RETOMAR ficava em loop de FALHA eterno.
           await purgeRejectedVideosBeforeRedispatch(gate.rejected, 'pilot resume');
 
+          // Pós-F5 só a CHAVE sobrevive (base64 estouraria o localStorage) —
+          // os bytes voltam do IndexedDB aqui.
+          const imgsResume = new Map<string, string>();
+          for (const i of zombieIdxs) {
+            const rp: any = state.replan!.parts[i];
+            if (!rp?.imageKey || imgsResume.has(rp.imageKey)) continue;
+            try {
+              const { loadBlob } = await import('@/lib/zip-store');
+              const blob = await loadBlob(rp.imageKey, 'image/jpeg');
+              if (blob) {
+                imgsResume.set(rp.imageKey, await new Promise<string>((res, rej) => {
+                  const fr = new FileReader();
+                  fr.onload = () => res(String(fr.result || ''));
+                  fr.onerror = () => rej(new Error('falha lendo a imagem do IDB'));
+                  fr.readAsDataURL(blob);
+                }));
+              }
+            } catch (e) {
+              console.warn(`[pilot resume] imagem ${rp.imageKey} não voltou do IDB:`, e);
+            }
+          }
           const jobsToRedispatch = zombieIdxs.map((i) => {
             const rp: any = state.replan!.parts[i];
             return {
@@ -4238,7 +4272,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               // Sem isto o RETOMAR re-disparava a cena de imagem como take vazio
               // — e o filtro abaixo a descartava calado, deixando o AD sem a
               // parte pra sempre.
-              imageDataUrl: rp.imageDataUrl || undefined,
+              imageDataUrl: rp.imageDataUrl || (rp.imageKey ? imgsResume.get(rp.imageKey) : undefined) || undefined,
               motionPrompt: rp.motionPrompt || undefined,
               motor: rp.engine || ('III' as const),
             };
@@ -5665,9 +5699,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setRegenError('Sem dados de replan — refaz a analise da task.');
       return;
     }
-    // Avatar pode vir do picker (editAvatar) OU do replan antigo. Se NENHUM, erro.
+    // Avatar pode vir do picker (editAvatar) OU do replan antigo. Cena em MODO
+    // IMAGEM não tem avatar nenhum — a imagem faz esse papel —, então só é erro
+    // quando não há NEM avatar NEM imagem guardada.
+    const imageKeyDaParte = (replanPart as any).imageKey || null;
     const effectiveAvatarId = editAvatar?.id || replanPart.avatarId;
-    if (!effectiveAvatarId) {
+    if (!effectiveAvatarId && !imageKeyDaParte) {
       setRegenError('Escolha um avatar — sem avatar nao da pra disparar.');
       return;
     }
@@ -5697,7 +5734,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const cur = prev[taskId];
         if (!cur || !cur.replan) return prev;
         const newReplanParts = cur.replan.parts.map((p, i) => i === partIdx
-          ? { ...p, text: newText, avatarId: effectiveAvatarId, voiceId: effectiveVoiceId }
+          ? { ...p, text: newText, avatarId: effectiveAvatarId || null, voiceId: effectiveVoiceId }
           : p);
         return {
           ...prev,
@@ -5719,18 +5756,41 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         await purgeRejectedVideosBeforeRedispatch([{ videoId: rejectedVideoId, error: prevPart?.error }], 'edit-part');
       }
 
-      // 2) Dispara processJob com novo texto + (talvez) novo avatar + (talvez) nova voz
-      const { processJob } = await import('@/lib/heygen-api-direct');
+      // 2) Dispara com novo texto + (talvez) novo avatar + (talvez) nova voz
       const adNameSafe = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
-      const job = await processJob({
-        text: newText,
-        voiceId: effectiveVoiceId || undefined,
-        title: `${adNameSafe}_${label}_edit`,
-        avatarId: effectiveAvatarId,
-        engine: 'iii',
-        orientation: 'portrait',
-      });
-      if (!job.videoId) throw new Error('processJob nao retornou videoId.');
+      let job: { videoId: string | null };
+      if (!effectiveAvatarId && imageKeyDaParte) {
+        // MODO IMAGEM: sem avatar, a imagem é o sujeito. Mesmo caminho do
+        // disparo (runHeyGenJobs → /api/heygen/image-video), senão editar o
+        // texto de uma cena de imagem era impossível.
+        const { loadBlob } = await import('@/lib/zip-store');
+        const blob = await loadBlob(imageKeyDaParte, 'image/jpeg');
+        if (!blob) throw new Error('A imagem dessa cena não está mais guardada — reaplica o plano com o frame.');
+        if (!effectiveVoiceId) throw new Error('Modo imagem exige uma voz escolhida (sem avatar não há voz padrão).');
+        const fd = new FormData();
+        fd.append('image', blob, 'frame.jpg');
+        fd.append('script', newText);
+        fd.append('voiceId', effectiveVoiceId);
+        const motionDaParte = (replanPart as any).motionPrompt;
+        if (motionDaParte) fd.append('motionPrompt', String(motionDaParte));
+        fd.append('title', `${adNameSafe}_${label}_edit`);
+        fd.append('aspectRatio', '9:16');
+        const r = await fetch('/api/heygen/image-video', { method: 'POST', body: fd });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.videoId) throw new Error(j?.error || `Falha no modo imagem (HTTP ${r.status}).`);
+        job = { videoId: j.videoId };
+      } else {
+        const { processJob } = await import('@/lib/heygen-api-direct');
+        job = await processJob({
+          text: newText,
+          voiceId: effectiveVoiceId || undefined,
+          title: `${adNameSafe}_${label}_edit`,
+          avatarId: effectiveAvatarId!,
+          engine: 'iii',
+          orientation: 'portrait',
+        });
+      }
+      if (!job.videoId) throw new Error('O disparo nao retornou videoId.');
 
       // 3) Atualiza state com novo videoId (overwrite o antigo)
       setBatchStates((prev) => {

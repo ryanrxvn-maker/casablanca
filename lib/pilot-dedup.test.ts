@@ -156,5 +156,19 @@ const reservadas = new Set<string>();
   eq(!!r[1].error, true, 'e traz erro em vez de sumir');
 }
 
+// MODO IMAGEM: sem avatarId pra separar, a IMAGEM é a identidade. Duas cenas
+// com a mesma fala e a mesma voz, mas frames diferentes, são vídeos DIFERENTES.
+{
+  const a = { text: 'Mesma fala.', avatarId: null, voiceId: 'v1', imageKey: 'img:cena1' };
+  const b = { text: 'Mesma fala.', avatarId: null, voiceId: 'v1', imageKey: 'img:cena2' };
+  eq(chaveConteudo(a) !== chaveConteudo(b), true, 'frames diferentes = takes diferentes');
+  const p = planejarDisparo([a, b], { ativo: true, reservadas: new Set() });
+  eq(p.minhasIdx.length, 2, 'as duas cenas de imagem disparam (nenhuma herda a outra)');
+  eq(p.herdadasIdx.length, 0, 'nenhuma vira herança');
+  // mesma imagem + mesma fala + mesma voz continua sendo o MESMO vídeo
+  const c = { ...a };
+  eq(chaveConteudo(a), chaveConteudo(c), 'mesma imagem e mesma fala = mesma chave');
+}
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
 process.exit(fails ? 1 : 0);

@@ -2226,8 +2226,12 @@ function HeyGenAutoInner() {
       }
       stage(`Retomando ${ready.length} takes (sem re-disparar)...`, 40, 'rendering');
     } else {
-      if (!fallbackAvatar && item.parts.some((p) => !p.avatarId)) {
-        throw new Error('Sem avatar resolvido pra alguma parte (cria o avatar no HeyGen ou ajusta a copy).');
+      // MODO IMAGEM não tem avatar por definição — a imagem de cada parte faz
+      // esse papel. Sem a segunda condição, o disparo por imagem morria aqui,
+      // antes de chegar no runner que sabe tratá-lo.
+      const semAvatarNemImagem = item.parts.some((p) => !p.avatarId && !p.imageDataUrl);
+      if (!fallbackAvatar && semAvatarNemImagem) {
+        throw new Error('Sem avatar resolvido pra alguma parte (cria o avatar no HeyGen, liga o modo imagem ou ajusta a copy).');
       }
       upsertSharedBatch(batchId, {
         taskName: safe,
@@ -3441,7 +3445,9 @@ function HeyGenAutoInner() {
                             : 'border-line bg-bg-soft/30';
                     const sym =
                       item.status === 'done' ? '✓' : item.status === 'running' ? '◷' : item.status === 'failed' ? '✗' : '•';
-                    const missingAvatar = item.parts.some((p) => !p.avatarId);
+                    // No modo imagem a parte não tem avatar de propósito — sem
+                    // isso o card acusava "sem avatar" num disparo perfeito.
+                    const missingAvatar = item.parts.some((p) => !p.avatarId && !p.imageDataUrl);
                     // Material visual do card (igual analise do ClickUp Pilot):
                     // thumb do avatar (resolvido por id na library), nome do avatar,
                     // voz e a 1a linha do hook.

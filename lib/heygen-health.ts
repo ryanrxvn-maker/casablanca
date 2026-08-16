@@ -247,9 +247,17 @@ export function decideRedispatch(args: {
   hasVideoUrl?: boolean;
   /** Vídeo pronto encontrado no histórico pelo título (resgate do 'unknown'). */
   foundByTitle?: boolean;
+  /**
+   * O HeyGen mandou ESTE take pra revisão de moderação (`moderation_status`
+   * 'pending'/'in_review'). Vem com `status: 'failed'`, mas não é falha de
+   * render: é uma fila humana. Re-disparar o MESMO texto cai na MESMA fila e
+   * só queima cota — foi o que fez AD53/AD57 parecerem em loop.
+   */
+  moderationPending?: boolean;
 }): RedispatchAction {
   if (!args.hasVideoId) return 'redispatch';        // nunca chegou a disparar
   if (args.status === 'completed' && args.hasVideoUrl) return 'rescue';
+  if (args.moderationPending) return 'wait';        // fila de revisão, não falha
   if (args.status === 'failed') return 'redispatch'; // o HeyGen recusou de fato
   // 'pending' e 'stalled' são a MESMA coisa pro bolso: pode haver render vivo.
   if (args.status === 'pending' || args.status === 'stalled') return 'wait';
