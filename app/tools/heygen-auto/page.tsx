@@ -250,6 +250,12 @@ function HeyGenAutoInner() {
   // tem o seu gesto). Vazio/null = cena parada. Quem tem gesto sobe pro
   // Avatar IV sozinho no runner — ver motorEfetivo() em heygen-job-runner.
   const [partMotions, setPartMotions] = useState<(string | null)[]>([]);
+  // MODO IMAGEM — anima a imagem em vez de usar avatar da biblioteca. Serve pro
+  // avatar que não existe lá (inclusive rosto que a moderação reprovou, caso em
+  // que o caminho normal morre no 0x0). Uma imagem POR PARTE: assim vários
+  // "avatares" convivem no mesmo AD e a montagem junta igual.
+  const [imageMode, setImageMode] = useToolState<boolean>('hgauto:imageMode', false);
+  const [partImages, setPartImages] = useState<(string | null)[]>([]);
   // Permutacao dos audios em modo dinamico (audioParts mantem ordem original
   // do upload; audioOrder vira a permutacao de indices). Default = identidade.
   const [audioOrder, setAudioOrder] = useState<number[]>([]);
@@ -345,6 +351,8 @@ function HeyGenAutoInner() {
     /** Apply Custom Motion desta cena. Preenchido, o take sobe pro Avatar IV
      *  mesmo com o item da fila em motor III. */
     motionPrompt?: string | null;
+    /** Modo imagem: data URL do frame a animar (sem avatar da biblioteca). */
+    imageDataUrl?: string | null;
   };
   type QueueItem = {
     id: string;
@@ -662,10 +670,15 @@ function HeyGenAutoInner() {
     return {
       ...item,
       parts: item.parts.map((p, i) => {
-        const { audio, ...rest } = p;
+        // A imagem do modo imagem NÃO vai pro localStorage: uma data URL de
+        // frame tem centenas de KB e estouraria a quota, derrubando a
+        // persistência da fila INTEIRA. Guardamos só a marca de que existia,
+        // pra o card avisar que precisa re-subir depois de um F5.
+        const { audio, imageDataUrl, ...rest } = p;
+        const base = imageDataUrl ? { ...rest, tinhaImagem: true } : rest;
         return audio
-          ? { ...rest, audioKey: queueAudioKey(item.id, i), audioName: audio.name, audioType: audio.type || 'audio/mpeg' }
-          : rest;
+          ? { ...base, audioKey: queueAudioKey(item.id, i), audioName: audio.name, audioType: audio.type || 'audio/mpeg' }
+          : base;
       }),
     };
   }
@@ -1206,6 +1219,7 @@ function HeyGenAutoInner() {
               ? (selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
               : undefined,
             motionPrompt: partMotions[i] || undefined,
+            imageDataUrl: imageMode ? partImages[i] || undefined : undefined,
           };
         }),
       };
@@ -1251,8 +1265,9 @@ function HeyGenAutoInner() {
       );
       return;
     }
-    if (!selectedAvatar) {
-      setError('Selecione um avatar primeiro.');
+    // No modo imagem nao existe avatar: a imagem de cada parte substitui.
+    if (!selectedAvatar && !imageMode) {
+      setError('Selecione um avatar primeiro (ou ligue o modo imagem).');
       return;
     }
 
@@ -1415,8 +1430,9 @@ function HeyGenAutoInner() {
       setError('Extensão Hey Auto não detectada.');
       return;
     }
-    if (!selectedAvatar) {
-      setError('Selecione um avatar primeiro.');
+    // No modo imagem nao existe avatar: a imagem de cada parte substitui.
+    if (!selectedAvatar && !imageMode) {
+      setError('Selecione um avatar primeiro (ou ligue o modo imagem).');
       return;
     }
     const badLabels = new Set(results.filter(partIsBad).map((r) => r.label));
@@ -1983,11 +1999,37 @@ function HeyGenAutoInner() {
     return `BODY ${bodyIdx + 1}`;
   }
 
+  /** MODO IMAGEM — lê o arquivo da parte e guarda a data URL. O runner converte
+   *  em blob e manda pra rota de servidor, que anima pela variante `image`. */
+  async function subirImagemDaParte(i: number, file: File) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      setError(`Formato não suportado (${file.type || '?'}). Use JPEG, PNG ou WebP.`);
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError(`Imagem muito grande (${(file.size / 1e6).toFixed(1)}MB). Máximo 8MB.`);
+      return;
+    }
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result || ''));
+      fr.onerror = () => rej(new Error('Falha ao ler a imagem.'));
+      fr.readAsDataURL(file);
+    });
+    setPartImages((prev) => {
+      const next = [...prev];
+      next[i] = dataUrl;
+      return next;
+    });
+    setError(null);
+  }
+
   /** Captura a configuracao atual (avatar + copy/audios + modos) como 1 item
    *  da fila, sem disparar agora. Permite empilhar varios ADs manualmente. */
   function addCurrentToQueue() {
-    if (!selectedAvatar) {
-      setError('Selecione um avatar antes de adicionar à fila.');
+    // No modo imagem nao existe avatar: a imagem de cada parte substitui.
+    if (!selectedAvatar && !imageMode) {
+      setError('Selecione um avatar antes de adicionar à fila (ou ligue o modo imagem).');
       return;
     }
     const qparts: QueuePart[] = [];
@@ -2001,17 +2043,18 @@ function HeyGenAutoInner() {
           ? forcedParts.filter((p) => /^HOOK/i.test(p.label)).length
           : structuredHooks.filter((h) => h.text.trim()).length;
       const fixedVoice =
-        selectedVoice ? selectedVoice.id : selectedAvatar.voiceId || null;
+        selectedVoice ? selectedVoice.id : selectedAvatar?.voiceId || null;
       parts.forEach((text, i) => {
         const av = dynamicMode ? partAvatars[i] || selectedAvatar : selectedAvatar;
         qparts.push({
           label: labelForQueueIndex(i, hookCount, parts.length),
           text,
-          avatarId: av?.id || selectedAvatar.id,
-          avatarName: av?.name || selectedAvatar.name,
+          avatarId: av?.id || selectedAvatar?.id || null,
+          avatarName: av?.name || selectedAvatar?.name || null,
           // Voz escolhida (global) vale pra todas; senão a voz do avatar da parte.
           voiceId: dynamicMode && !selectedVoice ? av?.voiceId || null : fixedVoice,
           motionPrompt: partMotions[i] || null,
+          imageDataUrl: imageMode ? partImages[i] || null : null,
         });
       });
     } else {
@@ -2028,8 +2071,8 @@ function HeyGenAutoInner() {
         qparts.push({
           label: `HOOK ${i + 1}`,
           audio: file,
-          avatarId: selectedAvatar.id,
-          avatarName: selectedAvatar.name,
+          avatarId: selectedAvatar?.id || null,
+          avatarName: selectedAvatar?.name || null,
           voiceId: audioVoiceId,
           voiceMirror: audioMirror,
         }),
@@ -2038,8 +2081,8 @@ function HeyGenAutoInner() {
         qparts.push({
           label: bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${i + 1}`,
           audio: file,
-          avatarId: selectedAvatar.id,
-          avatarName: selectedAvatar.name,
+          avatarId: selectedAvatar?.id || null,
+          avatarName: selectedAvatar?.name || null,
           voiceId: audioVoiceId,
           voiceMirror: audioMirror,
         }),
@@ -2154,6 +2197,7 @@ function HeyGenAutoInner() {
       // Cena com gesto sobe pro Avatar IV sozinha (motorEfetivo no runner),
       // mesmo com o item da fila em III.
       motionPrompt: p.motionPrompt || undefined,
+      imageDataUrl: p.imageDataUrl || undefined,
       motor: item.motor,
     }));
 
@@ -3132,10 +3176,65 @@ function HeyGenAutoInner() {
                 </div>
               </label>
 
+              {/* BOTÃO 3D — MODO IMAGEM. Liga quando o avatar não existe na
+                * biblioteca (inclusive rosto que a moderação reprovou). Aí cada
+                * parte sobe a SUA imagem em vez de escolher avatar, e o HeyGen
+                * anima ela pela variante `image`, que dispensa avatar_id. */}
+              {mode === 'copy' ? (
+                <button
+                  type="button"
+                  onClick={() => setImageMode(!imageMode)}
+                  disabled={processing}
+                  className="group relative mt-4 inline-flex items-center gap-2 self-start rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px] disabled:opacity-50"
+                  style={
+                    imageMode
+                      ? {
+                          fontFamily: 'var(--font-tech)',
+                          color: '#12040f',
+                          borderColor: 'rgba(232,121,249,0.55)',
+                          background: 'linear-gradient(135deg, #f0abfc 0%, #e879f9 100%)',
+                          boxShadow:
+                            '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(232,121,249,0.7), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                        }
+                      : {
+                          fontFamily: 'var(--font-tech)',
+                          color: 'rgba(255,255,255,0.55)',
+                          borderColor: 'rgba(255,255,255,0.12)',
+                          background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                          boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+                        }
+                  }
+                  title={
+                    imageMode
+                      ? 'Ligado: cada parte sobe a sua imagem e o HeyGen anima ela (sem avatar da biblioteca). Roda no Avatar IV.'
+                      : 'Ligue quando o avatar não existir na biblioteca — aí você sobe a imagem em vez de escolher avatar.'
+                  }
+                >
+                  <span className="text-[12px] leading-none">🖼</span>
+                  Modo imagem
+                  <span
+                    className={
+                      'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
+                      (imageMode ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                    }
+                  >
+                    {imageMode ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              ) : null}
+              {imageMode && mode === 'copy' ? (
+                <div className="mt-2 rounded-[10px] border border-fuchsia-400/30 bg-fuchsia-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-fuchsia-100/90">
+                  Cada parte anima a <b>sua própria imagem</b> — dá pra ter vários avatares
+                  no mesmo AD e a montagem junta igual. <b>Escolha uma voz acima</b>: sem
+                  avatar não existe voz padrão pra herdar. Sai no <b>Avatar IV</b> (essa
+                  variante não aceita III) e cobra do crédito do plano.
+                </div>
+              ) : null}
+
               {dynamicMode && mode === 'copy' && parts.length > 0 ? (
                 <div className="mt-4 space-y-2">
                   <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
-                    Avatar por parte ({parts.length} take
+                    {imageMode ? 'Imagem' : 'Avatar'} por parte ({parts.length} take
                     {parts.length === 1 ? '' : 's'})
                   </div>
                   {parts.map((p, i) => (
@@ -3151,6 +3250,34 @@ function HeyGenAutoInner() {
                           {p.slice(0, 140)}
                           {p.length > 140 ? '…' : ''}
                         </div>
+                        {imageMode ? (
+                          <div className="mt-2 flex items-start gap-2 rounded-[10px] border border-fuchsia-400/35 bg-fuchsia-500/[0.07] p-2">
+                            {partImages[i] ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                src={partImages[i] as string}
+                                alt={`frame ${i + 1}`}
+                                className="h-[62px] w-[35px] shrink-0 rounded-[5px] border border-white/15 object-cover"
+                              />
+                            ) : null}
+                            <div className="min-w-0 flex-1">
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                disabled={processing}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) void subirImagemDaParte(i, f);
+                                  e.target.value = '';
+                                }}
+                                className="block w-full text-[10px] text-text-muted file:mr-2 file:cursor-pointer file:rounded file:border file:border-fuchsia-400/45 file:bg-fuchsia-500/12 file:px-2 file:py-0.5 file:text-[9px] file:font-bold file:uppercase file:tracking-widest file:text-fuchsia-200"
+                              />
+                              <div className="mt-1 text-[9px] leading-tight text-text-muted">
+                                {partImages[i] ? 'frame carregado' : 'suba o frame desta cena'} · roda no Avatar IV
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
                         <div className="mt-2 max-w-[320px]">
                           <CompactAvatarPicker
                             selected={partAvatars[i] ?? null}
@@ -3166,6 +3293,7 @@ function HeyGenAutoInner() {
                             label={`Avatar pra parte ${i + 1}`}
                           />
                         </div>
+                        )}
                       </div>
                     </div>
                   ))}

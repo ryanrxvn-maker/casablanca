@@ -39,6 +39,10 @@ export type PersistedQueuePart = {
   /** Apply Custom Motion desta cena — persistido junto do resto pra um F5 na
    *  fila não devolver o take parado. */
   motionPrompt?: string | null;
+  /** Modo imagem: a data URL do frame NÃO é persistida (centenas de KB
+   *  estourariam a quota do localStorage e derrubariam a fila inteira). Fica só
+   *  esta marca, pra o card avisar que a imagem precisa ser re-subida. */
+  tinhaImagem?: boolean;
   /** Modo audio: bytes no IndexedDB (zip-store) sob esta chave. */
   audioKey?: string;
   audioName?: string;
