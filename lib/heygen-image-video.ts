@@ -29,6 +29,11 @@ const API_BASE = 'https://api.heygen.com';
  *  que ele mora na **api2** — mesmo host da extensão — enquanto a geração em si
  *  mora na api.heygen.com. */
 const OAUTH_TOKEN_URL = 'https://api2.heygen.com/v1/oauth/token';
+/** O endpoint exige `client_id` — sem ele devolve `invalid_client` (401), e não
+ *  "refresh token inválido", o que manda o diagnóstico pro lado errado. Valor
+ *  extraído do binário do CLI oficial, que é quem emitiu o refresh token: o
+ *  client do token e o da renovação têm que ser o mesmo. */
+const OAUTH_CLIENT_ID = 'heygen-cli';
 
 /** Cache do access token em memória do processo. `expires_in` costuma ser ~10
  *  dias, então isto poupa uma ida ao HeyGen por disparo sem risco de servir
@@ -50,7 +55,11 @@ export async function accessTokenDoRefresh(refreshToken: string): Promise<string
   const r = await fetch(OAUTH_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: OAUTH_CLIENT_ID,
+    }),
   });
   const j = await r.json().catch(() => null);
   if (!r.ok || !j?.access_token) {
