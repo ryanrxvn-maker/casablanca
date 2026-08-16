@@ -4,7 +4,8 @@
   "buildCommand": "next build",
   "installCommand": "npm install",
   "crons": [
-    { "path": "/api/cron/reconcile-billing", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/reconcile-billing", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/heygen-oauth", "schedule": "0 5 * * *" }
   ],
   "headers": [
     {
