@@ -163,5 +163,57 @@ eq(parseDrMillionBriefing(DOC, 'AD99XX', 'pl'), null, 'AD que não existe devolv
   ok(!/koleżanki/.test(tpt), 'polonês não vaza pro PT');
 }
 
+// ---------------------------------------------------------------------------
+// Forma REAL do doc WL PL (16.08). Cada caso aqui custou um disparo errado.
+{
+  const DOC_WLPL = [
+    'AD41 a 42',                              // capa de bloco: nao e um AD
+    'Instrucoes gerais para edicao:',
+    'AD41GL - COD WL PL',                     // secao de BRIEFING (sem fala)
+    'BRIEFING PARA O COPY: Copy do AD15G1GL mudando o avatar.',
+    'Avatar e Vozes:',
+    'Mulher UGC: AD minerado no organico 1',
+    'AD41G1GL - COD WL PL',                   // o hook de verdade
+    'PT',
+    '',
+    'Ela me disse que eu nao ia caber na porta.',
+    'PL',
+    '',
+    'Powiedziala mi, ze nie zmieszcze sie w drzwiach.',
+    'Body',
+    'PT',
+    'Minhas amigas riram de mim.',
+    'PL',
+    'Marek Skoczylas:',                       // rotulo de quem fala, nao e fala
+    'Moje kolezanki smialy sie ze mnie.',
+    'P',                                      // resto de marcador quebrado
+    'Marek Skoczylas + Anita Werner',         // rotulo de dupla, sem dois-pontos
+    'Kliknij przycisk teraz.',
+    'AD42 a 52',                              // capa do proximo lote
+    'Instrucoes gerais para edicao:',
+    'Os criativos sao para META, YOUTUBE, TIKTOK E KWAI.',
+    'FAZER CAMUFLAGEM DE AUDIOS SOMENTE NAS VERSOES DO YOUTUBE E KWAI',
+    'LINK DA PASTA DOS ARQUIVOS PARA OS CRIATIVOS:',
+    'CRIATIVOS',
+  ].join('\n');
+
+  // A task no ClickUp se chama "AD41 - GL - COD WL PL" -> o Pilot extrai "AD41",
+  // que no doc NAO existe como heading. Sem o fallback por grupo o parser
+  // devolvia null, o Pilot caia no parser comum e o avatar falava PT+PL.
+  ok(isDrMillionFormat(DOC_WLPL, 'AD41'), 'id do grupo ("AD41") acha o hook AD41G1GL');
+  const bWl = parseDrMillionBriefing(DOC_WLPL, 'AD41', 'pl')!;
+  const falado = [bWl.hooks.map((h) => h.text).join(' '), bWl.body || ''].join(' ');
+  ok(/Powiedziala mi/.test(falado), 'hook PL entrou pelo id do grupo');
+  ok(!/BRIEFING PARA O COPY/.test(falado), 'secao de briefing nao vira fala');
+  ok(!/Avatar e Vozes/.test(falado), 'rotulo de briefing nao vira fala');
+  ok(!/Ela me disse/.test(falado), 'hook PT nao vaza');
+  ok(!/Minhas amigas/.test(falado), 'body PT nao vaza');
+  ok(/Moje kolezanki/.test(falado), 'body PL entrou');
+  ok(!/Marek Skoczylas/.test(falado), 'rotulo de quem fala nao vira fala');
+  ok(!/(^|\s)P(\s|$)/.test(falado), 'resto de marcador ("P") nao vira fala');
+  ok(!/Instrucoes gerais/.test(falado), 'capa do proximo lote fecha o body');
+  ok(!/CRIATIVOS/.test(falado), 'capa de entrega nao vaza pro fim do body');
+}
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
 process.exit(fails ? 1 : 0);

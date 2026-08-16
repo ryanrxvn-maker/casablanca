@@ -34,6 +34,55 @@ export type DrMillionLang = 'pl' | 'pt';
 const AD_HEADING_RE = /^\s*(AD\d+[A-Z0-9]*)\s*[-–—]/i;
 /** Heading do corpo compartilhado. */
 const BODY_HEADING_RE = /^\s*body\s*$/i;
+/**
+ * Cabeçalho de BLOCO de ADs — "AD42 a 52", "AD01 à 06". Não é um AD: é a capa
+ * do lote, seguida das instruções gerais de edição em português. Como não casa
+ * com AD_HEADING_RE (não tem hífen), o Body do AD anterior seguia por cima dela
+ * e o avatar terminava lendo "Instruções gerais para edição:" em voz alta.
+ */
+const BLOCO_HEADING_RE = /^\s*AD\d+\s*(?:a|à|até|-|–|—)\s*\d+\s*$/i;
+/**
+ * Linhas de ESTRUTURA do doc (sempre em português, nunca fala): rótulos de
+ * briefing, separadores e a capa de entrega. Descartadas em qualquer posição —
+ * é o cinto de segurança pra ruído que apareça no meio de um bloco.
+ */
+const LINHA_ESTRUTURAL_RE = new RegExp(
+  [
+    '^_{5,}$',
+    '^\\s*criativos\\s*$',
+    '^\\s*link da pasta',
+    '^\\s*os criativos são para',
+    '^\\s*fazer camuflagem',
+    '^\\s*(?:instruções gerais para edição|instruções para edição|briefing para o copy',
+    '|avatar e vozes|música de fundo|tipo de legenda|observações|edição|referência',
+    '|atenção na voz|se atentar se a voz|referência de um áudio natural)\\b',
+  ].join(''),
+  'i',
+);
+
+/** Uma linha que fecha a seção corrente (AD, Body ou capa de bloco). */
+function ehFimDeSecao(linha: string): boolean {
+  return AD_HEADING_RE.test(linha) || BODY_HEADING_RE.test(linha) || BLOCO_HEADING_RE.test(linha);
+}
+/**
+ * Rótulo de QUEM FALA, nos ADs em diálogo — "Marek Skoczylas:",
+ * "Agnieszka Kotońska:", "Marek Skoczylas + Anita Werner". Aparece igual nos
+ * dois idiomas, então não é filtrado pela troca PT/PL: sem isto o avatar lê o
+ * nome do outro avatar em voz alta antes de cada bloco.
+ *
+ * Só nomes próprios (toda palavra capitalizada), no máximo 6 palavras, e sem
+ * pontuação de frase — fala de verdade termina em . ! ? … ou vírgula.
+ */
+const ROTULO_FALANTE_RE =
+  /^\s*\p{Lu}[\p{L}.'’-]*(?:\s+\p{Lu}[\p{L}.'’-]*){0,3}(?:\s*\+\s*\p{Lu}[\p{L}.'’-]*(?:\s+\p{Lu}[\p{L}.'’-]*){0,3})?\s*:?\s*$/u;
+
+/** Linha que existe no doc mas não é fala. */
+function ehLinhaNaoFalada(linha: string): boolean {
+  if (linha.length <= 2) return true; // resto de marcador ("P" solto no hook vazio)
+  if (LINHA_ESTRUTURAL_RE.test(linha)) return true;
+  if (/[.!?…,]\s*$/.test(linha)) return false; // tem pontuação de frase: é fala
+  return ROTULO_FALANTE_RE.test(linha);
+}
 /** Marcador de idioma isolado na linha. */
 const LANG_RE = /^\s*(PT|PL)\s*$/i;
 /**
@@ -66,6 +115,14 @@ export function adGroupOf(adId: string): string | null {
   return m ? m[1].toUpperCase() : null;
 }
 
+/** Um heading de briefing ("AD37GL") não tem fala: é a seção de instruções de
+ *  edição do grupo. O heading que interessa é o do hook ("AD37G1GL"), o único
+ *  seguido dos marcadores PT/PL. */
+function secaoTemFala(linhas: string[], ini: number, fim: number): boolean {
+  const { pt, pl } = separarIdiomas(linhas.slice(ini, fim));
+  return pt.length > 0 || pl.length > 0;
+}
+
 /**
  * Limpa o que não pode ser falado:
  *  • número de CENA no começo ("2 Quando vi..." → "Quando vi...") — indica
@@ -87,7 +144,7 @@ function separarIdiomas(linhas: string[]): { pt: string[]; pl: string[] } {
   let atual: 'pt' | 'pl' | null = null;
   const empurrar = (texto: string) => {
     const limpa = limparLinhaFalada(texto);
-    if (!limpa) return;
+    if (!limpa || ehLinhaNaoFalada(limpa)) return;
     if (atual === 'pt') pt.push(limpa);
     else if (atual === 'pl') pl.push(limpa);
   };
@@ -139,20 +196,47 @@ export function extrairBlocos(
   const linhas = String(docText || '').split(/\r?\n/);
 
   // 1. Heading do AD pedido.
+  //
+  // Casamento EXATO primeiro. Mas a task do WL PL se chama "AD37 - GL - COD WL
+  // PL" — o Pilot tira dela o id "AD37", e no doc não existe heading "AD37":
+  // existem "AD37GL" (briefing do grupo) e "AD37G1GL" (o hook). Sem o fallback
+  // abaixo, extrairBlocos devolvia null, isDrMillionFormat dava false e a
+  // análise caía no parser comum — que lê PT e PL grudados e manda o avatar
+  // falar as duas línguas. Era essa a origem dos 319 takes bilíngues, não o
+  // formato do marcador.
+  //
+  // O fallback só vale quando o id pedido é o GRUPO puro ("AD37"): id com
+  // sufixo ("AD07G1GL") continua exigindo casamento exato, senão um hook
+  // pegaria a copy do irmão.
+  const candidatos: number[] = [];
   let iAd = -1;
   for (let i = 0; i < linhas.length; i++) {
     const m = linhas[i].match(AD_HEADING_RE);
-    if (m && m[1].toUpperCase() === alvo) {
+    if (!m) continue;
+    const id = m[1].toUpperCase();
+    if (id === alvo) {
       iAd = i;
       break;
     }
+    if (alvo === grupo && adGroupOf(id) === grupo) candidatos.push(i);
+  }
+  if (iAd < 0 && candidatos.length) {
+    // Entre os headings do grupo, fica o primeiro que realmente tem fala —
+    // pular o de briefing é o ponto todo do fallback.
+    const proxHeading = (i: number) => {
+      for (let j = i + 1; j < linhas.length; j++) {
+        if (ehFimDeSecao(linhas[j])) return j;
+      }
+      return linhas.length;
+    };
+    iAd = candidatos.find((i) => secaoTemFala(linhas, i + 1, proxHeading(i))) ?? candidatos[0];
   }
   if (iAd < 0) return null;
 
   // 2. Hook = do heading até o próximo heading (outro AD ou o Body).
   let iFimHook = linhas.length;
   for (let i = iAd + 1; i < linhas.length; i++) {
-    if (AD_HEADING_RE.test(linhas[i]) || BODY_HEADING_RE.test(linhas[i])) {
+    if (ehFimDeSecao(linhas[i])) {
       iFimHook = i;
       break;
     }
@@ -176,7 +260,7 @@ export function extrairBlocos(
   if (iBody >= 0) {
     let iFimBody = linhas.length;
     for (let i = iBody + 1; i < linhas.length; i++) {
-      if (AD_HEADING_RE.test(linhas[i]) || BODY_HEADING_RE.test(linhas[i])) {
+      if (ehFimDeSecao(linhas[i])) {
         iFimBody = i;
         break;
       }
