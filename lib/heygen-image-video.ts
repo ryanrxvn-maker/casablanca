@@ -47,6 +47,17 @@ const OAUTH_CLIENT_ID = 'q2A2QRSke2LrFTPJhoDbHtXh';
  *  token vencido (guardamos 60s de folga). */
 let tokenCache: { access: string; expiraEm: number } | null = null;
 
+export type RefreshResult = {
+  access: string;
+  /** ⚠ O HeyGen ROTACIONA o refresh token: cada renovação devolve um novo e
+   *  INVALIDA o anterior. Medido — depois que o app renovou, o CLI que segurava
+   *  o token antigo passou a responder "OAuth session expired or rejected" com
+   *  o arquivo de credencial intacto. Quem chama TEM que persistir este valor,
+   *  senão funciona uma vez e quebra no próximo cold start (o cache acima
+   *  esconde o problema enquanto o processo vive). */
+  novoRefresh: string | null;
+};
+
 /**
  * Troca o refresh token por um access token.
  *
@@ -55,9 +66,11 @@ let tokenCache: { access: string; expiraEm: number } | null = null;
  * you are billed under the API tier" (saldo USD à parte), enquanto o OAuth usa
  * subscription credits. Como o Silas não quer saldo em API, o caminho é este.
  */
-export async function accessTokenDoRefresh(refreshToken: string): Promise<string> {
+export async function accessTokenDoRefresh(refreshToken: string): Promise<RefreshResult> {
   const agora = Date.now();
-  if (tokenCache && tokenCache.expiraEm > agora + 60_000) return tokenCache.access;
+  if (tokenCache && tokenCache.expiraEm > agora + 60_000) {
+    return { access: tokenCache.access, novoRefresh: null };
+  }
 
   const r = await fetch(OAUTH_TOKEN_URL, {
     method: 'POST',
@@ -79,7 +92,11 @@ export async function accessTokenDoRefresh(refreshToken: string): Promise<string
 
   const ttl = Number(j.expires_in) > 0 ? Number(j.expires_in) * 1000 : 3600_000;
   tokenCache = { access: j.access_token, expiraEm: agora + ttl };
-  return j.access_token;
+  const rotacionado =
+    typeof j.refresh_token === 'string' && j.refresh_token && j.refresh_token !== refreshToken
+      ? j.refresh_token
+      : null;
+  return { access: j.access_token, novoRefresh: rotacionado };
 }
 
 export type ImageInput =

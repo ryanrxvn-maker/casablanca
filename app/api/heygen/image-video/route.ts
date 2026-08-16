@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { encryptSecret, lastFour } from '@/lib/secrets';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
 import {
@@ -38,6 +40,35 @@ function jsonError(message: string, status = 500) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/**
+ * Persiste o refresh token rotacionado.
+ *
+ * O HeyGen invalida o refresh anterior a cada renovação. Sem gravar o novo, o
+ * modo imagem funcionaria UMA vez e quebraria no próximo cold start — e o
+ * cache em memória esconderia o problema enquanto o processo vivesse, o que é
+ * o pior tipo de bug: some no teste e volta em produção.
+ *
+ * Falha aqui NÃO derruba o disparo em andamento (o access token já é válido);
+ * só registra, porque a próxima renovação é que vai sofrer.
+ */
+async function guardarRefreshRotacionado(novo: string) {
+  try {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('user_api_keys').upsert(
+      {
+        user_id: user.id,
+        heygen_oauth_refresh: encryptSecret(novo),
+        heygen_oauth_last4: lastFour(novo),
+      },
+      { onConflict: 'user_id' },
+    );
+  } catch (e) {
+    console.error('[image-video] falhei ao gravar o refresh rotacionado:', e);
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const gate = await requireTier('admin', {
@@ -46,7 +77,8 @@ export async function POST(req: Request) {
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen_oauth');
     if ('response' in keyResult) return keyResult.response;
-    const accessToken = await accessTokenDoRefresh(keyResult.key);
+    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key);
+    if (novoRefresh) await guardarRefreshRotacionado(novoRefresh);
 
     let form: FormData;
     try {
@@ -117,7 +149,8 @@ export async function GET(req: Request) {
     const videoId = new URL(req.url).searchParams.get('videoId');
     if (!videoId) return jsonError('Falta videoId.', 400);
 
-    const accessToken = await accessTokenDoRefresh(keyResult.key);
+    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key);
+    if (novoRefresh) await guardarRefreshRotacionado(novoRefresh);
     const st = await getImageVideoStatus(accessToken, videoId);
     return NextResponse.json(st);
   } catch (e) {
