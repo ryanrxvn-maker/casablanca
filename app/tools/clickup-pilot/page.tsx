@@ -111,6 +111,7 @@ import {
 } from '@/lib/drmillion-parser';
 import { LangSwitch3D } from '@/components/LangSwitch3D';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
+import { takeUnicoPorLook } from '@/lib/heygen-motion-motor';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -6921,8 +6922,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         };
         const criterio = porFalante ? ' POR FALANTE' : porAncora ? ' POR ÂNCORA' : '';
         const semTake = slots.filter((s) => !novasPartes.some((p) => p.matchByRole === s.role.toLowerCase()));
+        // CUSTO ANTES DE CLICAR. Cena fora do III vira UM take (take único por
+        // look) e cobra ~6; o III cobra ~1 por pedaço. Sem esta conta, a
+        // diferença entre um lote de 90 e um de 350 créditos só aparecia na
+        // fatura. Estimativa, não promessa — por isso o "~".
+        const custo = slots.reduce((tot, s) => {
+          const unico = takeUnicoPorLook({ engine: s.engine, motionPrompt: s.motionPrompt, imageMode: s.imageMode });
+          const meus = novasPartes.filter((p) => p.matchByRole === s.role.toLowerCase()).length;
+          if (!meus) return tot;
+          return tot + (unico ? 6 : meus);
+        }, 0);
+        const cenasCaras = slots.filter((s) =>
+          takeUnicoPorLook({ engine: s.engine, motionPrompt: s.motionPrompt, imageMode: s.imageMode }),
+        ).length;
         relato.push(
           `${ad}: ${slots.length} cenas · ${novasPartes.length} takes repartidos${criterio}` +
+            ` · ~${custo} créditos` +
+            (cenasCaras ? ` (${cenasCaras} cena(s) IV/imagem = 1 take inteiro cada)` : '') +
             (descartados ? ` · ${descartados} take(s) DESCARTADO(s) (falante sem cena)` : '') +
             (slots.some((s) => s.motionPrompt) ? ` · ${slots.filter((s) => s.motionPrompt).length} c/ movimento` : '') +
             (semTake.length ? ` · ⚠ sem fala: ${semTake.map((s) => s.username).join(', ')}` : '') +
@@ -7005,20 +7021,35 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         engine: slot?.engine,
         _slotRole: slot?.role?.toLowerCase() || '',
         _imageMode: !!slot?.imageMode,
+        // Cena que NÃO roda no Avatar III: motion sobe pro IV sozinho
+        // (motorEfetivo), e IV/V escolhido na mão manda direto.
+        _takeUnico: takeUnicoPorLook({
+          engine: (slot?.engine as 'III' | 'IV' | 'V') || 'III',
+          motionPrompt: (slot?.motionPrompt || '').trim() || null,
+          imageMode: !!slot?.imageMode,
+        }),
       };
     });
-    // MODO IMAGEM = TAKE ÚNICO por slot. Sem avatar persistente cada geração
-    // re-envia a imagem, então picotar o body em ~20s só multiplica upload e
-    // corte à toa. As partes do slot viram UMA fala só, na ordem original.
-    // Slots normais não são tocados — continuam picotados como sempre.
+    // TAKE ÚNICO por slot quando a cena NÃO é Avatar III.
+    //
+    // Dois motivos, e os dois custam:
+    //  • DINHEIRO — o IV/V e o modo imagem cobram POR GERAÇÃO (~6 créditos cada,
+    //    contra 1 do III). Picotar o corpo em 5 takes multiplica isso por 5 pelo
+    //    mesmo look. Medido no lote WL PL: as 8 cenas com movimento dariam 27
+    //    takes picotadas e dão 8 inteiras — 114 créditos de diferença.
+    //  • QUALIDADE — o gesto é pedido por geração, então cada pedaço REFAZ o
+    //    movimento do zero. Picotado, o avatar mexe a colher a cada corte.
+    // O III continua picotado como sempre: lá o take é barato e o corte curto
+    // ajuda a montagem.
     const colapsado: typeof parts = [];
     const jaFeito = new Set<string>();
     for (const p of parts as any[]) {
-      if (!p._imageMode) { colapsado.push(p); continue; }
+      const takeUnico = p._takeUnico;
+      if (!takeUnico) { colapsado.push(p); continue; }
       if (jaFeito.has(p._slotRole)) continue;
       jaFeito.add(p._slotRole);
       const irmas = (parts as any[]).filter(
-        (q) => q._imageMode && q._slotRole === p._slotRole,
+        (q) => q._takeUnico && q._slotRole === p._slotRole,
       );
       colapsado.push({
         ...p,
@@ -7026,7 +7057,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         text: irmas.map((q) => String(q.text || '').trim()).filter(Boolean).join('\n\n'),
       } as any);
     }
-    for (const p of colapsado as any[]) { delete p._slotRole; delete p._imageMode; }
+    for (const p of colapsado as any[]) { delete p._slotRole; delete p._imageMode; delete p._takeUnico; }
     // Slot em modo imagem não precisa de avatarId — a imagem substitui.
     const unmatchedAvatars = a.roleSlots
       .filter((s) => !s.avatarId && !(s.imageMode && s.imageDataUrl))

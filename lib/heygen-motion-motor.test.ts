@@ -6,7 +6,7 @@
  * gesto continua no motor que o user escolheu — o III é mais barato e o
  * disparo do B2C não pode encarecer sozinho.
  */
-import { motorEfetivo } from './heygen-motion-motor';
+import { motorEfetivo, takeUnicoPorLook } from './heygen-motion-motor';
 
 let fails = 0;
 function eq(actual: unknown, expected: unknown, label: string) {
@@ -33,6 +33,22 @@ eq(motorEfetivo('V', null), 'V', 'sem gesto respeita o V escolhido pelo user');
 
 // ── prompt com espaço nas pontas ainda é gesto de verdade ──
 eq(motorEfetivo('III', `  ${MOTION}  `), 'IV', 'prompt com espaço nas pontas ainda sobe pro IV');
+
+// ── TAKE ÚNICO POR LOOK: fora do III, picotar cobra 6 créditos POR pedaço e
+//    faz o avatar refazer o gesto a cada corte. No lote WL PL (16/08) isso era
+//    a diferença entre 27 e 8 gerações no mesmo material.
+{
+  const takeUnico = takeUnicoPorLook;
+  eq(takeUnico({ engine: 'III' }), false, 'III puro continua picotado (take barato, corte ajuda a montagem)');
+  eq(takeUnico({ engine: 'III', motionPrompt: MOTION }), true, 'gesto sobe pro IV → take único');
+  eq(takeUnico({ engine: 'IV' }), true, 'IV escolhido na mão → take único mesmo sem gesto');
+  eq(takeUnico({ engine: 'V' }), true, 'V → take único');
+  eq(takeUnico({ imageMode: true }), true, 'modo imagem → take único (cada geração re-envia a imagem)');
+  eq(takeUnico({ engine: 'III', imageMode: true }), true, 'modo imagem vence o III');
+  // espaço em branco não é gesto: não pode encarecer a cena à toa
+  eq(takeUnico({ engine: 'III', motionPrompt: '   ' }), false, 'prompt vazio NÃO vira take único');
+  eq(takeUnico({}), false, 'sem nada declarado = III = picotado (default seguro)');
+}
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
 process.exit(fails ? 1 : 0);
