@@ -54,9 +54,45 @@ export type RefreshResult = {
    *  o token antigo passou a responder "OAuth session expired or rejected" com
    *  o arquivo de credencial intacto. Quem chama TEM que persistir este valor,
    *  senão funciona uma vez e quebra no próximo cold start (o cache acima
-   *  esconde o problema enquanto o processo vive). */
+   *  esconde o problema enquanto o processo vive).
+   *
+   *  Vem no formato de GUARDAR (ver empacotarCredencial): traz junto o access
+   *  e a validade, pra próxima instância não precisar renovar de novo. */
   novoRefresh: string | null;
 };
+
+/**
+ * O que fica gravado no campo `heygen_oauth_refresh`.
+ *
+ * Era só o refresh token, e isso obrigava CADA instância fria a renovar — e
+ * cada renovação queima o refresh anterior. Medido no arquivo do CLI: o access
+ * vale ~10 dias (`expires_at` 10 dias à frente). Guardando access + validade
+ * junto, a renovação acontece uma vez a cada 10 dias em vez de a cada cold
+ * start, e o risco de perder o refresh some junto.
+ *
+ * Compatível com o que já está gravado: string pura = refresh sozinho, que é
+ * também o que o usuário cola na mão em /configuracoes/api.
+ */
+type Credencial = { refresh: string; access?: string; exp?: number };
+
+export function lerCredencial(guardado: string): Credencial {
+  const s = (guardado || '').trim();
+  if (!s.startsWith('{')) return { refresh: s };
+  try {
+    const j = JSON.parse(s);
+    return {
+      refresh: String(j.refresh || j.refresh_token || ''),
+      access: typeof j.access === 'string' ? j.access : undefined,
+      exp: Number(j.exp) > 0 ? Number(j.exp) : undefined,
+    };
+  } catch {
+    return { refresh: s };
+  }
+}
+
+export function empacotarCredencial(c: Credencial): string {
+  return JSON.stringify({ refresh: c.refresh, access: c.access, exp: c.exp });
+}
 
 /**
  * Troca o refresh token por um access token.
@@ -67,9 +103,9 @@ export type RefreshResult = {
  * subscription credits. Como o Silas não quer saldo em API, o caminho é este.
  */
 export async function accessTokenDoRefresh(
-  refreshToken: string,
+  guardado: string,
   /**
-   * Relê o refresh token da fonte da verdade (o banco). Serve pro caso de OUTRA
+   * Relê a credencial da fonte da verdade (o banco). Serve pro caso de OUTRA
    * instância ter rotacionado enquanto esta segurava o valor antigo: em vez de
    * mandar o usuário refazer o login à toa, tenta uma vez com o token fresco.
    */
@@ -79,6 +115,16 @@ export async function accessTokenDoRefresh(
   if (tokenCache && tokenCache.expiraEm > agora + 60_000) {
     return { access: tokenCache.access, novoRefresh: null };
   }
+
+  const cred = lerCredencial(guardado);
+  // ACCESS AINDA VÁLIDO (dura ~10 dias): usa e não encosta no refresh. É o que
+  // impede o token de ser queimado a cada instância fria — a causa de "tenho
+  // que fazer login toda vez". Margem de 5min pra não servir token na virada.
+  if (cred.access && cred.exp && cred.exp > agora + 5 * 60_000) {
+    tokenCache = { access: cred.access, expiraEm: cred.exp };
+    return { access: cred.access, novoRefresh: null };
+  }
+  const refreshToken = cred.refresh;
 
   const trocar = (rt: string) =>
     fetch(OAUTH_TOKEN_URL, {
@@ -99,9 +145,15 @@ export async function accessTokenDoRefresh(
   // serverless quem trocou pode ter sido outra instância há segundos. Relê e
   // tenta UMA vez com o que está gravado agora.
   if ((!r.ok || !j?.access_token) && relerDoBanco) {
-    const fresco = await relerDoBanco().catch(() => null);
-    if (fresco && fresco !== usado) {
-      usado = fresco;
+    const frescoRaw = await relerDoBanco().catch(() => null);
+    const fresco = frescoRaw ? lerCredencial(frescoRaw) : null;
+    // outra instância pode ter renovado e deixado um access válido pronto
+    if (fresco?.access && fresco.exp && fresco.exp > agora + 5 * 60_000) {
+      tokenCache = { access: fresco.access, expiraEm: fresco.exp };
+      return { access: fresco.access, novoRefresh: null };
+    }
+    if (fresco?.refresh && fresco.refresh !== usado) {
+      usado = fresco.refresh;
       r = await trocar(usado);
       j = await r.json().catch(() => null);
     }
@@ -116,12 +168,16 @@ export async function accessTokenDoRefresh(
   }
 
   const ttl = Number(j.expires_in) > 0 ? Number(j.expires_in) * 1000 : 3600_000;
-  tokenCache = { access: j.access_token, expiraEm: agora + ttl };
-  const rotacionado =
-    typeof j.refresh_token === 'string' && j.refresh_token && j.refresh_token !== usado
-      ? j.refresh_token
-      : null;
-  return { access: j.access_token, novoRefresh: rotacionado };
+  const exp = agora + ttl;
+  tokenCache = { access: j.access_token, expiraEm: exp };
+  const refreshFinal =
+    typeof j.refresh_token === 'string' && j.refresh_token ? j.refresh_token : usado;
+  // Grava SEMPRE que renovou — mesmo sem rotação do refresh — pra guardar o
+  // access novo e as próximas instâncias não precisarem renovar nada.
+  return {
+    access: j.access_token,
+    novoRefresh: empacotarCredencial({ refresh: refreshFinal, access: j.access_token, exp }),
+  };
 }
 
 export type ImageInput =

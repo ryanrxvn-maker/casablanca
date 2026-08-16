@@ -7,6 +7,7 @@ import {
   createImageVideo,
   getImageVideoStatus,
   accessTokenDoRefresh,
+  lerCredencial,
   type ImageInput,
 } from '@/lib/heygen-image-video';
 
@@ -41,18 +42,7 @@ function jsonError(message: string, status = 500) {
 }
 
 /**
- * Persiste o refresh token rotacionado.
- *
- * O HeyGen invalida o refresh anterior a cada renovação. Sem gravar o novo, o
- * modo imagem funcionaria UMA vez e quebraria no próximo cold start — e o
- * cache em memória esconderia o problema enquanto o processo vivesse, o que é
- * o pior tipo de bug: some no teste e volta em produção.
- *
- * Falha aqui NÃO derruba o disparo em andamento (o access token já é válido);
- * só registra, porque a próxima renovação é que vai sofrer.
- */
-/**
- * Relê o refresh token gravado AGORA.
+ * Relê a credencial gravada AGORA.
  *
  * Serverless: duas instâncias podem entrar na renovação com o mesmo token; a
  * primeira rotaciona e invalida o da segunda. Sem esta releitura, a segunda
@@ -64,12 +54,26 @@ async function relerRefreshDoBanco(): Promise<string | null> {
   return 'response' in r ? null : r.key;
 }
 
+/**
+ * Persiste a credencial renovada (refresh + access + validade).
+ *
+ * O HeyGen invalida o refresh anterior a cada renovação. Sem gravar o novo, o
+ * modo imagem funciona UMA vez e quebra na próxima instância fria — e o cache
+ * em memória esconde o problema enquanto o processo vive, o pior tipo de bug:
+ * some no teste e volta em produção. Foi o que aconteceu em 16.08.
+ *
+ * Devolve `null` quando gravou de verdade (confirmado por leitura) ou o motivo
+ * da falha. Falha aqui NÃO derruba o disparo em andamento — o access já é
+ * válido —, mas precisa aparecer: é a próxima renovação que morre.
+ */
 async function guardarRefreshRotacionado(novo: string): Promise<string | null> {
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return 'sem sessão de usuário na rota — não deu pra gravar o token novo';
-    const last4 = lastFour(novo);
+    // O valor gravado é um pacote (refresh + access + validade); o rótulo da
+    // tela tem que mostrar o REFRESH, que é o que o usuário cola e reconhece.
+    const last4 = lastFour(lerCredencial(novo).refresh);
     // ⚠ supabase-js NÃO lança em erro de banco: devolve { error }. Sem checar,
     // a gravação falhava 100% calada — o try/catch nunca disparava e o token
     // rotacionado se perdia. Era isso que fazia o modo imagem funcionar UMA vez
