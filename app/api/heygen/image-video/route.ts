@@ -64,21 +64,45 @@ async function relerRefreshDoBanco(): Promise<string | null> {
   return 'response' in r ? null : r.key;
 }
 
-async function guardarRefreshRotacionado(novo: string) {
+async function guardarRefreshRotacionado(novo: string): Promise<string | null> {
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('user_api_keys').upsert(
+    if (!user) return 'sem sessão de usuário na rota — não deu pra gravar o token novo';
+    const last4 = lastFour(novo);
+    // ⚠ supabase-js NÃO lança em erro de banco: devolve { error }. Sem checar,
+    // a gravação falhava 100% calada — o try/catch nunca disparava e o token
+    // rotacionado se perdia. Era isso que fazia o modo imagem funcionar UMA vez
+    // e depois exigir login novo: o HeyGen matava o refresh anterior e o novo
+    // nunca chegava ao banco.
+    const { error } = await supabase.from('user_api_keys').upsert(
       {
         user_id: user.id,
         heygen_oauth_refresh: encryptSecret(novo),
-        heygen_oauth_last4: lastFour(novo),
+        heygen_oauth_last4: last4,
       },
       { onConflict: 'user_id' },
     );
+    if (error) {
+      console.error('[image-video] upsert do refresh rotacionado falhou:', error.message);
+      return `não consegui gravar o token novo (${error.message})`;
+    }
+    // Confirma LENDO: gravar sem erro e não persistir é o pior dos mundos.
+    const { data: conf } = await supabase
+      .from('user_api_keys')
+      .select('heygen_oauth_last4')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (conf?.heygen_oauth_last4 !== last4) {
+      console.error('[image-video] gravei o refresh mas a leitura não confirmou', {
+        esperado: last4, veio: conf?.heygen_oauth_last4,
+      });
+      return 'gravei o token novo mas a releitura não confirmou — a próxima renovação vai falhar';
+    }
+    return null;
   } catch (e) {
     console.error('[image-video] falhei ao gravar o refresh rotacionado:', e);
+    return `erro ao gravar o token novo: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 
@@ -91,7 +115,9 @@ export async function POST(req: Request) {
     const keyResult = await getUserKey('heygen_oauth');
     if ('response' in keyResult) return keyResult.response;
     const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
-    if (novoRefresh) await guardarRefreshRotacionado(novoRefresh);
+    // Um aviso aqui NAO derruba o disparo em andamento (o access ja e valido),
+    // mas tem que chegar em quem esta olhando: e a proxima renovacao que morre.
+    const avisoToken = novoRefresh ? await guardarRefreshRotacionado(novoRefresh) : null;
 
     let form: FormData;
     try {
@@ -144,7 +170,7 @@ export async function POST(req: Request) {
       title: title || 'Video por imagem',
       aspectRatio: aspectRatio as '9:16',
     });
-    return NextResponse.json({ videoId });
+    return NextResponse.json(avisoToken ? { videoId, avisoToken } : { videoId });
   } catch (e) {
     return jsonError((e as Error)?.message || 'Erro inesperado no modo imagem.');
   }
@@ -163,9 +189,11 @@ export async function GET(req: Request) {
     if (!videoId) return jsonError('Falta videoId.', 400);
 
     const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
-    if (novoRefresh) await guardarRefreshRotacionado(novoRefresh);
+    // Um aviso aqui NAO derruba o disparo em andamento (o access ja e valido),
+    // mas tem que chegar em quem esta olhando: e a proxima renovacao que morre.
+    const avisoToken = novoRefresh ? await guardarRefreshRotacionado(novoRefresh) : null;
     const st = await getImageVideoStatus(accessToken, videoId);
-    return NextResponse.json(st);
+    return NextResponse.json(avisoToken ? { ...st, avisoToken } : st);
   } catch (e) {
     return jsonError((e as Error)?.message || 'Erro ao consultar o vídeo.');
   }

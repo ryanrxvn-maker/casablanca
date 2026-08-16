@@ -155,8 +155,14 @@ export async function runHeyGenJobs(
             if (!r.ok || !body?.videoId) {
               throw new Error(body?.error || `Falha no modo imagem (HTTP ${r.status}).`);
             }
-            return body as { videoId: string };
+            return body as { videoId: string; avisoToken?: string };
           });
+          // O take saiu, mas o token novo não foi guardado: a PRÓXIMA renovação
+          // morre. Grita agora, enquanto dá pra consertar sem perder disparo.
+          if (j.avisoToken) {
+            console.error('[HeyGen Runner] OAuth:', j.avisoToken);
+            opts.onProgress(`⚠ OAuth do modo imagem: ${j.avisoToken}`);
+          }
           results[idx] = { index: idx + 1, label, videoId: j.videoId, error: null };
         } else {
 
