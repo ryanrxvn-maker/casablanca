@@ -19,6 +19,7 @@ type Service =
   | 'assemblyai'
   | 'elevenlabs'
   | 'heygen'
+  | 'heygen_oauth'
   | 'replicate'
   | 'groq';
 
@@ -27,6 +28,7 @@ type SecretsStatus = {
   assemblyai: { configured: boolean; last4: string | null };
   elevenlabs: { configured: boolean; last4: string | null };
   heygen: { configured: boolean; last4: string | null };
+  heygen_oauth: { configured: boolean; last4: string | null };
   replicate: { configured: boolean; last4: string | null };
   groq: { configured: boolean; last4: string | null };
   updatedAt: string | null;
@@ -56,6 +58,14 @@ const META: Array<{
     usedBy: 'Seletor de avatares e vozes · Clonagem de voz (HeyGen)',
   },
   {
+    id: 'heygen_oauth',
+    label: 'HeyGen OAuth (modo imagem)',
+    helper:
+      'NÃO é a API key acima — é o refresh token do OAuth, e a diferença é de cobrança: a key cai no tier de API (saldo USD à parte) e o OAuth sai do crédito do plano, que você já paga. Pegue rodando `heygen auth login --oauth` e copiando o campo oauth.refresh_token de ~/.heygen/credentials. Renova sozinho.',
+    link: 'https://developers.heygen.com/docs/cli',
+    usedBy: 'ClickUp Pilot — MODO IMAGEM (animar imagem sem avatar da biblioteca)',
+  },
+  {
     id: 'groq',
     label: 'Groq (Whisper barato)',
     helper:
@@ -70,6 +80,7 @@ const INIT_DRAFTS: Record<Service, string> = {
   assemblyai: '',
   elevenlabs: '',
   heygen: '',
+  heygen_oauth: '',
   replicate: '',
   groq: '',
 };
@@ -78,6 +89,7 @@ const INIT_BUSY: Record<Service, boolean> = {
   assemblyai: false,
   elevenlabs: false,
   heygen: false,
+  heygen_oauth: false,
   replicate: false,
   groq: false,
 };
