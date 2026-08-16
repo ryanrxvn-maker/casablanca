@@ -4276,9 +4276,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               motionPrompt: rp.motionPrompt || undefined,
               motor: rp.engine || ('III' as const),
             };
-          }).filter((j) => j.avatarId || j.imageDataUrl); // sanity: sem avatar E sem imagem não dá
-
-          if (jobsToRedispatch.length === 0) break;
+          });
+          // Sem avatar E sem imagem não dá pra disparar. Mas descartar calado
+          // faz o RETOMAR "rodar" e não fazer nada — foi assim que a faxina do
+          // IndexedDB comendo o frame passou despercebida por horas. Fala qual
+          // cena e por quê.
+          const semInsumo = jobsToRedispatch.filter((j) => !j.avatarId && !j.imageDataUrl);
+          const prontos = jobsToRedispatch.filter((j) => j.avatarId || j.imageDataUrl);
+          if (semInsumo.length) {
+            const quais = semInsumo.map((j) => j.label).join(', ');
+            console.error(`[pilot resume] sem imagem no IDB pra re-disparar: ${quais}`);
+            setBatchStates((prev) => ({
+              ...prev,
+              [taskId]: {
+                ...prev[taskId],
+                message: `Cena(s) em modo imagem sem o frame guardado: ${quais}. Reaplica o plano com os frames e dispara de novo.`,
+              },
+            }));
+          }
+          if (prontos.length === 0) break;
+          jobsToRedispatch.length = 0;
+          jobsToRedispatch.push(...prontos);
 
           let newResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
           try {

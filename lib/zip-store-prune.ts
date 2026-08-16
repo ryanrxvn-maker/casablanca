@@ -47,8 +47,14 @@ export function zipGroupId(key: string): string {
   // removido como unidade e protegível (via protect) enquanto não entregue.
   m = /^hgaq:(.+):audio:\d+$/.exec(key);
   if (m) return m[1];
-  // pilot:<taskId>[:g:<genId>]:(part|leveled|decupado):<label>[@k<sec>]
-  m = /^pilot:(.+?):(?:g:[^:]+:)?(?:part|leveled|decupado):/.exec(key);
+  // pilot:<taskId>[:g:<genId>]:(part|leveled|decupado|img):<label|idx>[@k<sec>]
+  //
+  // ⚠ `img` é o FRAME do modo imagem — insumo do disparo, não resultado dele.
+  // Ficou de fora desta lista até 16/08 e caía no grupo " misc <key>": como
+  // grupo próprio, competia sozinho pelos keepGroups e a faxina varria os
+  // frames enquanto o disparo seguia vivo. Sem o frame, a cena de imagem não
+  // tem o que re-disparar e o RETOMAR não fecha o AD nunca.
+  m = /^pilot:(.+?):(?:g:[^:]+:)?(?:part|leveled|decupado|img):/.exec(key);
   if (m) return m[1];
   // Auto B-roll: o MP4 individual de um take é `brollvid:<zipKey>:<idx>` e o
   // ZIP do batch fica na própria zipKey (`broll:<jobId>:<ts>:zip`). Ambos caem

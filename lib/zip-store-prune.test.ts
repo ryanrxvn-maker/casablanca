@@ -31,6 +31,10 @@ console.log('\nGARANTIA — faxina do zip-store (nunca apaga disparo ativo/recen
     `pilot:${t}:decupado:BODY 1@k0.04`,
     `pilot:${t}:g:abc123:part:HOOK 1`,
     `pilot:${t}:leveled:BODY 2`,
+    // frame do MODO IMAGEM: é insumo do disparo. Fora do grupo, virava " misc "
+    // e a faxina levava o frame com o disparo ainda vivo — aí a cena de imagem
+    // não tinha o que re-disparar e o AD nunca fechava (medido 16/08).
+    `pilot:${t}:img:2`,
     `va:${t}:zip`,
     `va:${t}:part:1`,
     `troca:white:${t}`,
