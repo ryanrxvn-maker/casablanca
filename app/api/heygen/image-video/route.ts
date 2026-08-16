@@ -51,6 +51,19 @@ function jsonError(message: string, status = 500) {
  * Falha aqui NÃO derruba o disparo em andamento (o access token já é válido);
  * só registra, porque a próxima renovação é que vai sofrer.
  */
+/**
+ * Relê o refresh token gravado AGORA.
+ *
+ * Serverless: duas instâncias podem entrar na renovação com o mesmo token; a
+ * primeira rotaciona e invalida o da segunda. Sem esta releitura, a segunda
+ * devolvia "invalid_grant" e mandava refazer o login — com o token bom já
+ * gravado no banco. Ver [[project_heygen_oauth_no_app]].
+ */
+async function relerRefreshDoBanco(): Promise<string | null> {
+  const r = await getUserKey('heygen_oauth');
+  return 'response' in r ? null : r.key;
+}
+
 async function guardarRefreshRotacionado(novo: string) {
   try {
     const supabase = createClient();
@@ -77,7 +90,7 @@ export async function POST(req: Request) {
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen_oauth');
     if ('response' in keyResult) return keyResult.response;
-    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key);
+    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
     if (novoRefresh) await guardarRefreshRotacionado(novoRefresh);
 
     let form: FormData;
@@ -149,7 +162,7 @@ export async function GET(req: Request) {
     const videoId = new URL(req.url).searchParams.get('videoId');
     if (!videoId) return jsonError('Falta videoId.', 400);
 
-    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key);
+    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
     if (novoRefresh) await guardarRefreshRotacionado(novoRefresh);
     const st = await getImageVideoStatus(accessToken, videoId);
     return NextResponse.json(st);

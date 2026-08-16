@@ -66,22 +66,47 @@ export type RefreshResult = {
  * you are billed under the API tier" (saldo USD à parte), enquanto o OAuth usa
  * subscription credits. Como o Silas não quer saldo em API, o caminho é este.
  */
-export async function accessTokenDoRefresh(refreshToken: string): Promise<RefreshResult> {
+export async function accessTokenDoRefresh(
+  refreshToken: string,
+  /**
+   * Relê o refresh token da fonte da verdade (o banco). Serve pro caso de OUTRA
+   * instância ter rotacionado enquanto esta segurava o valor antigo: em vez de
+   * mandar o usuário refazer o login à toa, tenta uma vez com o token fresco.
+   */
+  relerDoBanco?: () => Promise<string | null>,
+): Promise<RefreshResult> {
   const agora = Date.now();
   if (tokenCache && tokenCache.expiraEm > agora + 60_000) {
     return { access: tokenCache.access, novoRefresh: null };
   }
 
-  const r = await fetch(OAUTH_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_id: OAUTH_CLIENT_ID,
-    }),
-  });
-  const j = await r.json().catch(() => null);
+  const trocar = (rt: string) =>
+    fetch(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: rt,
+        client_id: OAUTH_CLIENT_ID,
+      }),
+    });
+
+  let usado = refreshToken;
+  let r = await trocar(usado);
+  let j = await r.json().catch(() => null);
+
+  // invalid_grant costuma significar "esse refresh já foi trocado" — e em
+  // serverless quem trocou pode ter sido outra instância há segundos. Relê e
+  // tenta UMA vez com o que está gravado agora.
+  if ((!r.ok || !j?.access_token) && relerDoBanco) {
+    const fresco = await relerDoBanco().catch(() => null);
+    if (fresco && fresco !== usado) {
+      usado = fresco;
+      r = await trocar(usado);
+      j = await r.json().catch(() => null);
+    }
+  }
+
   if (!r.ok || !j?.access_token) {
     throw new Error(
       'Não consegui renovar o OAuth do HeyGen: ' +
@@ -93,7 +118,7 @@ export async function accessTokenDoRefresh(refreshToken: string): Promise<Refres
   const ttl = Number(j.expires_in) > 0 ? Number(j.expires_in) * 1000 : 3600_000;
   tokenCache = { access: j.access_token, expiraEm: agora + ttl };
   const rotacionado =
-    typeof j.refresh_token === 'string' && j.refresh_token && j.refresh_token !== refreshToken
+    typeof j.refresh_token === 'string' && j.refresh_token && j.refresh_token !== usado
       ? j.refresh_token
       : null;
   return { access: j.access_token, novoRefresh: rotacionado };

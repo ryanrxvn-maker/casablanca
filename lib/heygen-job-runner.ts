@@ -82,6 +82,25 @@ export async function runHeyGenJobs(
   // pickNext para de entregar jobs; os não-disparados são marcados com o MESMO
   // erro de cota (não podem ficar undefined — o caller faz results.filter(r=>...)).
   let quotaHit = false;
+  /**
+   * FILA DE UM PRO MODO IMAGEM.
+   *
+   * O modo imagem é o único caminho que autentica por OAuth, e o HeyGen
+   * ROTACIONA o refresh a cada renovação: a primeira chamada troca o token e
+   * INVALIDA o anterior. Com os 3 workers submetendo ao mesmo tempo, as outras
+   * duas chegam com um refresh já morto — `invalid_grant` — e ainda podem
+   * gravar por cima do token bom, deixando a conta sem credencial válida.
+   * Isso derrubou AD39/AD43 inteiros no lote WL PL.
+   *
+   * Serializar SÓ o modo imagem: os takes de avatar continuam 3 em paralelo,
+   * porque vão pela extensão e não tocam no OAuth.
+   */
+  let filaImagem: Promise<unknown> = Promise.resolve();
+  function emSerie<T>(fn: () => Promise<T>): Promise<T> {
+    const proxima = filaImagem.then(fn, fn);
+    filaImagem = proxima.catch(() => {});
+    return proxima;
+  }
 
   function pickNext(): number {
     if (opts.isCancelled() || quotaHit) return -1;
@@ -129,11 +148,15 @@ export async function runHeyGenJobs(
           if (motion) fd.append('motionPrompt', motion);
           fd.append('title', `${opts.adNameSafe}_${label}`);
           fd.append('aspectRatio', '9:16');
-          const r = await fetch('/api/heygen/image-video', { method: 'POST', body: fd });
-          const j = await r.json().catch(() => null);
-          if (!r.ok || !j?.videoId) {
-            throw new Error(j?.error || `Falha no modo imagem (HTTP ${r.status}).`);
-          }
+          // uma de cada vez: a rotação do refresh não tolera concorrência
+          const j = await emSerie(async () => {
+            const r = await fetch('/api/heygen/image-video', { method: 'POST', body: fd });
+            const body = await r.json().catch(() => null);
+            if (!r.ok || !body?.videoId) {
+              throw new Error(body?.error || `Falha no modo imagem (HTTP ${r.status}).`);
+            }
+            return body as { videoId: string };
+          });
           results[idx] = { index: idx + 1, label, videoId: j.videoId, error: null };
         } else {
 
