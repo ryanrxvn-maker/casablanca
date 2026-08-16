@@ -129,5 +129,35 @@ eq(pl.hooks.length, 1, 'cada task tem 1 hook');
 // ── AD inexistente ──
 eq(parseDrMillionBriefing(DOC, 'AD99XX', 'pl'), null, 'AD que não existe devolve null');
 
+// ── MARCADOR DE IDIOMA GRUDADO NO FIM DA LINHA (regressão do WL PL) ──
+// O doc real escreve "...você comprou. PL" em vez de deixar o PL sozinho na
+// linha. Sem tratar isso o parser nunca troca de idioma: o polonês inteiro cai
+// no balde do português, o balde `pl` fica vazio e o fallback devolve AS DUAS
+// línguas — metade do disparo sairia em português, caro e inútil.
+{
+  const DOC_GRUDADO = [
+    'AD90GL - COD WL PL',
+    'PT',
+    'Essa gelatina mudou tudo pra mim.',
+    'PL',
+    'Ta galaretka wszystko u mnie zmieniła.',
+    'Body',
+    'PT',
+    'Eu perdi trinta quilos com essa receita.',
+    'Clique no botao abaixo e me conte. PL',
+    'Moje koleżanki śmiały się ze mnie.',
+    'Ja sama straciłam trzydzieści kilogramów.',
+  ].join('\n');
+  const so_pl = parseDrMillionBriefing(DOC_GRUDADO, 'AD90GL', 'pl');
+  const texto = (so_pl?.hooks || []).map((h) => h.text).join(' ') + ' ' + (so_pl?.body || '');
+  ok(/koleżanki/.test(texto), 'polonês entrou');
+  ok(!/gelatina mudou tudo/.test(texto), 'português NÃO vaza pro disparo em PL');
+  ok(!/Clique no botao abaixo/.test(texto), 'a linha que carrega o marcador fica no PT');
+  const so_pt = parseDrMillionBriefing(DOC_GRUDADO, 'AD90GL', 'pt');
+  const tpt = (so_pt?.hooks || []).map((h) => h.text).join(' ') + ' ' + (so_pt?.body || '');
+  ok(/Clique no botao abaixo/.test(tpt), 'a fala antes do marcador continua sendo PT');
+  ok(!/koleżanki/.test(tpt), 'polonês não vaza pro PT');
+}
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
 process.exit(fails ? 1 : 0);

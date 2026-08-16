@@ -36,6 +36,18 @@ const AD_HEADING_RE = /^\s*(AD\d+[A-Z0-9]*)\s*[-–—]/i;
 const BODY_HEADING_RE = /^\s*body\s*$/i;
 /** Marcador de idioma isolado na linha. */
 const LANG_RE = /^\s*(PT|PL)\s*$/i;
+/**
+ * O mesmo marcador, mas GRUDADO no fim da última linha do idioma anterior —
+ * `"...quais roupas tamanho XS você comprou. PL"`. É como o doc do WL PL vem
+ * escrito, e sem isto o parser nunca troca de idioma: despeja o polonês inteiro
+ * no balde do português, o balde `pl` fica vazio, e o `escolher()` cai no
+ * fallback devolvendo AS DUAS línguas juntas. O disparo então gera metade dos
+ * takes em português — caro e inútil.
+ *
+ * Exige MAIÚSCULA e fim de linha pra não confundir com texto: "PL" no meio de
+ * uma frase polonesa não vira marcador.
+ */
+const LANG_FIM_RE = /^(.*?[^\s])[\s.,;:—–-]+(PT|PL)\s*$/;
 
 /** "AD07G1GL" → "AD07" (o grupo). É o que decide de quem é o Body. */
 export function adGroupOf(adId: string): string | null {
@@ -62,16 +74,27 @@ function separarIdiomas(linhas: string[]): { pt: string[]; pl: string[] } {
   const pt: string[] = [];
   const pl: string[] = [];
   let atual: 'pt' | 'pl' | null = null;
+  const empurrar = (texto: string) => {
+    const limpa = limparLinhaFalada(texto);
+    if (!limpa) return;
+    if (atual === 'pt') pt.push(limpa);
+    else if (atual === 'pl') pl.push(limpa);
+  };
   for (const raw of linhas) {
     const m = raw.match(LANG_RE);
     if (m) {
       atual = m[1].toLowerCase() as 'pt' | 'pl';
       continue;
     }
-    const limpa = limparLinhaFalada(raw);
-    if (!limpa) continue;
-    if (atual === 'pt') pt.push(limpa);
-    else if (atual === 'pl') pl.push(limpa);
+    // marcador grudado no fim da linha: a fala ANTES dele ainda é do idioma
+    // corrente; a troca vale da próxima linha em diante.
+    const mf = raw.match(LANG_FIM_RE);
+    if (mf) {
+      empurrar(mf[1]);
+      atual = mf[2].toLowerCase() as 'pt' | 'pl';
+      continue;
+    }
+    empurrar(raw);
   }
   return { pt, pl };
 }
