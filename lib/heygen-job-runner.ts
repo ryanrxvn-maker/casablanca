@@ -8,6 +8,7 @@ import {
   type EngineKey,
   type ProcessJobInput,
 } from './heygen-api-direct';
+import { motorEfetivo } from './heygen-motion-motor';
 
 export type RunnerJob = {
   label: string;
@@ -24,6 +25,11 @@ export type RunnerJob = {
    *  alvo (voiceId) via STS. Vence opts.voiceMirroring. Usado pela FILA, que
    *  define o flag por parte. */
   voiceMirroring?: boolean;
+  /** APPLY CUSTOM MOTION — prompt de movimento desta cena (mexer a gelatina,
+   *  espremer o limao, ninar o bebe). Preenchido, o job SOBE de motor
+   *  sozinho: o Avatar III ignora motion, entao mandar gesto nele seria
+   *  gerar um take parado sem avisar ninguem. Ver motorEfetivo(). */
+  motionPrompt?: string | null;
 };
 
 export type RunnerResult = {
@@ -86,7 +92,9 @@ export async function runHeyGenJobs(
         // Per-job override (modo dinamico) > opts global > undefined (lookup auto)
         const effectiveAvatarId = job.avatarId || opts.avatarId;
         const effectiveVoiceId = job.voiceId || opts.voiceId;
-        const effectiveMotor = job.motor || opts.motor;
+        const motion = (job.motionPrompt || '').trim();
+        // Cena com gesto sobe pro Avatar IV sozinha (o III descarta motion).
+        const effectiveMotor = motorEfetivo(job.motor || opts.motor, motion);
         // ESPELHAMENTO DE VOZ (modo audio): liga SÓ quando pedido E há voz alvo.
         // Sem isso o audio vai como está (voz original). Em copy o voiceId é a
         // voz do TTS (sem mirror).
@@ -107,7 +115,11 @@ export async function runHeyGenJobs(
           avatarId: effectiveAvatarId,
           engine: motorToEngine(effectiveMotor),
           orientation: 'portrait',
+          motionPrompt: motion || undefined,
         };
+        if (motion) {
+          opts.onProgress(`${label}: movimento ligado — Avatar ${effectiveMotor}`);
+        }
         const result = await processJob(input, {
           onProgress: (stage) => opts.onProgress(`${label}: ${stage}`),
         });

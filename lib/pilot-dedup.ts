@@ -20,6 +20,10 @@ export type ParteDedup = {
   text?: string | null;
   avatarId?: string | null;
   voiceId?: string | null;
+  /** Apply Custom Motion. Entra na chave porque a MESMA fala com o MESMO
+   *  avatar e voz, mas com gesto diferente, é OUTRO vídeo — sem isso o hook
+   *  irmão que pediu movimento herdaria o take parado da irmã. */
+  motionPrompt?: string | null;
 };
 
 export type ResultadoDisparo = {
@@ -31,7 +35,7 @@ export type ResultadoDisparo = {
 
 /** Chave de conteúdo. Texto vazio nunca casa (parte vazia não vira take). */
 export function chaveConteudo(p: ParteDedup): string {
-  return `${p.avatarId || ''}|${p.voiceId || ''}|${String(p.text || '').trim()}`;
+  return `${p.avatarId || ''}|${p.voiceId || ''}|${String(p.motionPrompt || '').trim()}|${String(p.text || '').trim()}`;
 }
 
 /**

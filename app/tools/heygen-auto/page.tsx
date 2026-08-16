@@ -246,6 +246,10 @@ function HeyGenAutoInner() {
   // Per-part avatar override (null = usa selectedAvatar global). Indexado
   // pela posicao da parte (text: ordem do split; audio: ordem do array).
   const [partAvatars, setPartAvatars] = useState<(AvatarOption | null)[]>([]);
+  // APPLY CUSTOM MOTION por parte (vem do ClickUp Pilot, onde cada cena do AD
+  // tem o seu gesto). Vazio/null = cena parada. Quem tem gesto sobe pro
+  // Avatar IV sozinho no runner — ver motorEfetivo() em heygen-job-runner.
+  const [partMotions, setPartMotions] = useState<(string | null)[]>([]);
   // Permutacao dos audios em modo dinamico (audioParts mantem ordem original
   // do upload; audioOrder vira a permutacao de indices). Default = identidade.
   const [audioOrder, setAudioOrder] = useState<number[]>([]);
@@ -338,6 +342,9 @@ function HeyGenAutoInner() {
     voiceId?: string | null;
     /** Modo audio: espelhar a voz (trocar a voz do audio pela voiceId via STS). */
     voiceMirror?: boolean;
+    /** Apply Custom Motion desta cena. Preenchido, o take sobe pro Avatar IV
+     *  mesmo com o item da fila em motor III. */
+    motionPrompt?: string | null;
   };
   type QueueItem = {
     id: string;
@@ -464,6 +471,9 @@ function HeyGenAutoInner() {
         /** ClickUp Pilot pode enviar voiceId por parte (override). Se any
          *  parte tem voiceId !== null, usa override mode no Hey Auto. */
         partVoiceIds?: (string | null)[];
+        /** Apply Custom Motion por parte — a cena que pede gesto sobe pro
+         *  Avatar IV sozinha, independente do motor global do handoff. */
+        partMotionPrompts?: (string | null)[];
       };
       if (h.adName) setAdName(h.adName);
       if (h.motor) setMotor(h.motor);
@@ -479,6 +489,9 @@ function HeyGenAutoInner() {
             text,
           })),
         );
+      }
+      if (h.partMotionPrompts && h.partMotionPrompts.length > 0) {
+        setPartMotions(h.partMotionPrompts.map((m) => (m && m.trim()) || null));
       }
       // Pre-popula partAvatars depois que groups loadarem (precisa do snapshot)
       if (h.partAvatarIds && h.partAvatarIds.length > 0) {
@@ -1158,6 +1171,7 @@ function HeyGenAutoInner() {
     audio?: File;
     avatarId?: string;
     voiceId?: string;
+    motionPrompt?: string;
   };
 
   /** Label coerente (HOOK 1, BODY, BODY 2...) pro pipeline pos-prod saber
@@ -1191,6 +1205,7 @@ function HeyGenAutoInner() {
             voiceId: dynamicMode
               ? (selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
               : undefined,
+            motionPrompt: partMotions[i] || undefined,
           };
         }),
       };
@@ -1529,7 +1544,8 @@ function HeyGenAutoInner() {
       });
       const voiceId = selectedVoice ? selectedVoice.id : av.voiceId || undefined;
       const res = await runHeyGenJobs(
-        [{ label: editPart.label, copy: newText, avatarId: av.id, voiceId, motor: motorsPerPart[idx] || motor }],
+        // Mantém o gesto da cena — re-gerar o texto não pode devolver o take parado.
+        [{ label: editPart.label, copy: newText, avatarId: av.id, voiceId, motionPrompt: partMotions[idx] || undefined, motor: motorsPerPart[idx] || motor }],
         {
           parallel: 1,
           mode: 'copy',
@@ -1995,6 +2011,7 @@ function HeyGenAutoInner() {
           avatarName: av?.name || selectedAvatar.name,
           // Voz escolhida (global) vale pra todas; senão a voz do avatar da parte.
           voiceId: dynamicMode && !selectedVoice ? av?.voiceId || null : fixedVoice,
+          motionPrompt: partMotions[i] || null,
         });
       });
     } else {
@@ -2134,6 +2151,9 @@ function HeyGenAutoInner() {
       voiceId: p.voiceId || undefined,
       // Modo audio: espelha a voz quando a parte foi enfileirada com voz escolhida.
       voiceMirroring: item.mode === 'audio' ? !!p.voiceMirror : undefined,
+      // Cena com gesto sobe pro Avatar IV sozinha (motorEfetivo no runner),
+      // mesmo com o item da fila em III.
+      motionPrompt: p.motionPrompt || undefined,
       motor: item.motor,
     }));
 
@@ -2973,10 +2993,20 @@ function HeyGenAutoInner() {
                   <div className="mt-3 flex items-center justify-between rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
                     <span className="text-fuchsia-200">
                       ⚙ Partes vindas do <strong>ClickUp Pilot</strong> ({forcedParts.map(p => p.label).join(', ')}) — sobrescreveram os inputs estruturados
+                      {partMotions.some((m) => m) ? (
+                        <>
+                          {' · '}
+                          <strong className="text-violet-200">
+                            {partMotions.filter((m) => m).length} cena(s) com movimento → Avatar IV
+                          </strong>
+                        </>
+                      ) : null}
                     </span>
                     <button
                       type="button"
-                      onClick={() => setForcedParts(null)}
+                      // Os prompts de movimento são indexados pela posição da parte;
+                      // largar o override sem limpá-los grudaria o gesto na parte errada.
+                      onClick={() => { setForcedParts(null); setPartMotions([]); }}
                       className="mono shrink-0 rounded border border-fuchsia-500/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-200 hover:border-red-500/60 hover:text-red-300"
                       disabled={processing}
                     >
@@ -3321,6 +3351,20 @@ function HeyGenAutoInner() {
                               <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
                                 {item.source === 'doc' ? 'docs' : 'manual'} · {item.mode} · motor {item.motor}
                               </span>
+                              {/* Cenas com Apply Custom Motion — o motor do item diz III,
+                                  mas essas sobem pro IV no disparo. Sem o selo, o card
+                                  mentiria sobre o que vai ser gerado. */}
+                              {item.parts.some((p) => p.motionPrompt) ? (
+                                <span
+                                  className="label-tech rounded-full border border-violet-400/50 bg-violet-500/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-violet-200"
+                                  title={item.parts
+                                    .filter((p) => p.motionPrompt)
+                                    .map((p) => `${p.label}: ${p.motionPrompt}`)
+                                    .join('\n')}
+                                >
+                                  ⚡ {item.parts.filter((p) => p.motionPrompt).length} c/ movimento · Avatar IV
+                                </span>
+                              ) : null}
                               {item.decupagem ? (
                                 <span className="label-tech rounded-full bg-cyan-400/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-300">
                                   ✂️ decupa · {(item.decupIntensity ?? DEFAULT_KEEP_SILENCE).toFixed(2)}s

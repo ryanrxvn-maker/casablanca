@@ -447,7 +447,7 @@ function loadPersistedBatchStates(): Record<string, unknown> {
 function loadPersistedReplan(taskId: string): {
   taskName: string;
   baseAdId: string;
-  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null }>;
+  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null }>;
 } | null {
   try {
     const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
@@ -609,6 +609,8 @@ type DispatchPlan = {
     avatarName: string | null;
     avatarThumb?: string | null;
     matchedBy?: string;
+    /** Apply Custom Motion herdado do slot dono da parte. */
+    motionPrompt?: string | null;
   }>;
   unmatchedAvatars: string[];
 };
@@ -709,7 +711,7 @@ type BatchTaskState = {
   replan?: {
     taskName: string;
     baseAdId: string;
-    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null }>;
+    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null }>;
   };
   /** Parts re-geradas via EditPartModal — labels que ficaram "dirty" depois
    *  do montadoZipUrl ter sido gerado. Quando array > 0, UI mostra botao
@@ -767,6 +769,11 @@ type RoleSlot = {
    *  a copy entre avatares — no B2C, onde o parser acha os roles, a tela
    *  continua exatamente como era. */
   manual?: boolean;
+  /** APPLY CUSTOM MOTION — prompt de movimento desta cena. No DR MILLION cada
+   *  cena do AD é um avatar (foto) próprio, então o movimento é por slot:
+   *  AD37_2 mexe a gelatina, AD37_1 e AD37_3 só falam. Preenchido, a cena sobe
+   *  pro Avatar IV (o III descarta motion); vazio, segue no III. */
+  motionPrompt?: string | null;
 };
 
 type TaskAnalysis = {
@@ -3093,6 +3100,7 @@ function ClickUpPilotInner() {
           text: p.text,
           avatarId: p.avatarId ?? null,
           voiceId: p.voiceId ?? null,
+          motionPrompt: p.motionPrompt ?? null,
         })),
       };
     } else {
@@ -3121,6 +3129,8 @@ function ClickUpPilotInner() {
           avatarName: null,
           avatarThumb: null,
           voiceId: p.voiceId,
+          // Sem isto o RETOMAR pós-F5 re-disparava a cena SEM o gesto.
+          motionPrompt: p.motionPrompt ?? null,
         })),
         unmatchedAvatars: [],
       } as any;
@@ -3184,7 +3194,7 @@ function ClickUpPilotInner() {
       console.log(
         `[clickup-pilot] DISPATCH task=${taskId} ad=${rBaseAdId} name=${rTaskName}\n` +
         plan.parts.map((p: any, i: number) =>
-          `  part ${i + 1} [${p.label}] avatar=${p.avatarId} (${p.avatarName || '?'}) voice=${p.voiceId || 'default'} text="${(p.text || '').slice(0, 60).replace(/\n/g, ' ')}..."`
+          `  part ${i + 1} [${p.label}] avatar=${p.avatarId} (${p.avatarName || '?'}) voice=${p.voiceId || 'default'}${p.motionPrompt ? ' motion=ON (Avatar IV)' : ''} text="${(p.text || '').slice(0, 60).replace(/\n/g, ' ')}..."`
         ).join('\n')
       );
       // Sanity check: se algum part vai SEM avatar, aborta antes de torrar
@@ -3245,6 +3255,8 @@ function ClickUpPilotInner() {
           copy: p.text,
           avatarId: p.avatarId!,
           voiceId: p.voiceId,
+          // Cena com gesto: o runner sobe pro Avatar IV sozinho (motorEfetivo).
+          motionPrompt: p.motionPrompt || undefined,
           motor: motorsPerPart[i], // <-- override per job
         };
       });
@@ -4751,6 +4763,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             text: p.text,
             avatarId: p.avatarId ?? null,
             voiceId: p.voiceId ?? null,
+            motionPrompt: p.motionPrompt ?? null,
           })),
         } : undefined;
         next[id] = {
@@ -6561,6 +6574,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         matchedBy: slot?.matchedBy || undefined,
         // voiceId: override > avatar default
         voiceId: slot?.voiceOverride?.id || slot?.avatarVoiceId || null,
+        // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
+        motionPrompt: (slot?.motionPrompt || '').trim() || null,
       };
     });
     const unmatchedAvatars = a.roleSlots.filter(s => !s.avatarId).map(s => `${s.role}: @${s.username}`);
@@ -6607,6 +6622,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       partLabels: plan.parts.map((p: any) => p.label),
       partAvatarIds: plan.parts.map((p: any) => p.avatarId),
       partVoiceIds: plan.parts.map((p: any) => p.voiceId), // NOVO: voz por parte
+      // Apply Custom Motion por parte. O `motor: 'III'` acima continua sendo o
+      // default do disparo: quem tem gesto sobe pro IV sozinho no runner.
+      partMotionPrompts: plan.parts.map((p: any) => p.motionPrompt || null),
       copy: plan.parts.map((p: any) => p.text).join('\n\n'),
     };
     sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
@@ -11072,6 +11090,50 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 />
                                               </div>
                                             ) : null}
+                                            {/* APPLY CUSTOM MOTION — o campo de movimento do HeyGen.
+                                                No DR MILLION cada cena do AD é um avatar próprio, então
+                                                o gesto é por avatar: preenchido, ESTA cena sobe pro
+                                                Avatar IV (o III descarta motion); vazio, segue no III,
+                                                que é mais barato e não inventa gesto. */}
+                                            {slot.avatarId ? (() => {
+                                              const motion = slot.motionPrompt || '';
+                                              const on = !!motion.trim();
+                                              return (
+                                                <div>
+                                                  <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                      <path d="M13 2L4.09 12.97a1 1 0 0 0 .77 1.64H11l-1 7.39 8.91-10.97a1 1 0 0 0-.77-1.64H12l1-7.39z" />
+                                                    </svg>
+                                                    Apply Custom Motion
+                                                    <span
+                                                      className={
+                                                        'ml-auto rounded-full border px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-widest ' +
+                                                        (on
+                                                          ? 'border-violet-400/60 bg-violet-500/20 text-violet-200'
+                                                          : 'border-white/10 bg-white/5 text-text-muted')
+                                                      }
+                                                      title={on
+                                                        ? 'Com prompt de movimento a cena sobe pro Avatar IV — e o unico que anima o gesto'
+                                                        : 'Sem prompt a cena vai no Avatar III (mais barato, sem gesto inventado)'}
+                                                    >
+                                                      {on ? 'Avatar IV' : 'Avatar III'}
+                                                    </span>
+                                                  </div>
+                                                  <textarea
+                                                    value={motion}
+                                                    onChange={(e) => updateRoleSlot(a.taskId, sIdx, { motionPrompt: e.target.value })}
+                                                    rows={2}
+                                                    placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
+                                                    className="w-full resize-y rounded-[8px] border border-white/10 bg-black/30 px-2.5 py-2 text-[11px] leading-snug text-text placeholder:text-text-muted/60 focus:border-violet-400/50 focus:outline-none"
+                                                  />
+                                                  <div className="mt-1 text-[9.5px] leading-tight text-text-muted">
+                                                    So pra cena com acao (mexer, despejar, espremer, ninar). Em acao curta,
+                                                    peca o gesto <b>uma vez no comeco</b> e a fala solta depois — senao o avatar
+                                                    repete o movimento o video inteiro.
+                                                  </div>
+                                                </div>
+                                              );
+                                            })() : null}
                                           </div>
                                         </div>
                                       );

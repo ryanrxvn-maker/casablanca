@@ -105,6 +105,37 @@ const reservadas = new Set<string>();
   eq(p.minhasIdx, [0], 'voz diferente gera de novo');
 }
 
+// ── mesma fala com MOVIMENTO diferente NÃO reusa ──
+// Apply Custom Motion: o hook irmão que pede gesto não pode herdar o take
+// parado da irmã. Mesmo texto, mesmo avatar, mesma voz — vídeo diferente.
+{
+  const r1 = new Set<string>([chaveConteudo({ text: 'Corpo A', avatarId: AV, voiceId: VOZ })]);
+  const p = planejarDisparo(
+    [{ text: 'Corpo A', avatarId: AV, voiceId: VOZ, motionPrompt: 'mexe a gelatina 2x' }],
+    { ativo: true, reservadas: r1 },
+  );
+  eq(p.minhasIdx, [0], 'movimento diferente gera de novo (não herda o take parado)');
+}
+
+// ── mesmo movimento CONTINUA reusando (o dedup do corpo não pode morrer) ──
+{
+  const parte = { text: 'Corpo A', avatarId: AV, voiceId: VOZ, motionPrompt: 'mexe a gelatina 2x' };
+  const r1 = new Set<string>([chaveConteudo(parte)]);
+  const p = planejarDisparo([{ ...parte }], { ativo: true, reservadas: r1 });
+  eq(p.herdadasIdx, [0], 'mesmo gesto ainda reusa o take da irmã');
+}
+
+// ── motionPrompt ausente e vazio são a MESMA coisa ──
+// Senão a cena sem gesto do Pilot (null) e a do replan antigo (undefined)
+// gerariam o mesmo take duas vezes.
+{
+  eq(
+    chaveConteudo({ text: 'Corpo A', avatarId: AV, voiceId: VOZ }),
+    chaveConteudo({ text: 'Corpo A', avatarId: AV, voiceId: VOZ, motionPrompt: null }),
+    'sem gesto: null e ausente dão a mesma chave (replan antigo segue reusando)',
+  );
+}
+
 // ── ordem preservada mesmo com herança no meio ──
 {
   const reserv = new Set<string>([chaveConteudo(corpo[1])]); // só o "Corpo B" já existe

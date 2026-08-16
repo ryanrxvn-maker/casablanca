@@ -36,6 +36,9 @@ export type PersistedQueuePart = {
   avatarName?: string | null;
   voiceId?: string | null;
   voiceMirror?: boolean;
+  /** Apply Custom Motion desta cena — persistido junto do resto pra um F5 na
+   *  fila não devolver o take parado. */
+  motionPrompt?: string | null;
   /** Modo audio: bytes no IndexedDB (zip-store) sob esta chave. */
   audioKey?: string;
   audioName?: string;
