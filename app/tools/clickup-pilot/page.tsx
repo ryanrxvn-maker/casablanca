@@ -6583,6 +6583,109 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
+  /* ═══════════ CARREGAR PLANO (DR MILLION) ═══════════
+   *
+   * Montar 47 cenas na mão é inviável e ERRA: cada cena é um slot com avatar,
+   * voz, movimento e (às vezes) modo imagem, e os rótulos do seletor se repetem
+   * o suficiente pra clicar no lugar errado — foi assim que AD45/AD47/AD53
+   * saíram cruzados numa tentativa manual. Aqui a montagem vem de DADOS.
+   *
+   * O plano é `{ "AD37": [cena, cena, ...], ... }` gerado fora (frames.json +
+   * auditoria dos avatares + vozes clonadas). Cada cena vira UM slot. */
+  type CenaDoPlano = {
+    cena: string;
+    n: number;
+    titulo?: string;
+    avatarNome?: string | null;
+    avatarId?: string | null;
+    modoImagem?: boolean;
+    voiceId?: string | null;
+    vozNome?: string | null;
+    motionPrompt?: string | null;
+  };
+
+  const [planoTexto, setPlanoTexto] = useState('');
+  const [planoImagens, setPlanoImagens] = useState<Record<string, string>>({});
+  const [planoAberto, setPlanoAberto] = useState(false);
+  const [planoRelato, setPlanoRelato] = useState<string[] | null>(null);
+
+  /** Reparte as parts de uma task entre as cenas, na ordem.
+   *  O hook fica na cena 1 e o corpo é dividido por igual entre as cenas —
+   *  ponto de partida revisável, não palpite disfarçado de certeza: você abre
+   *  o 👁 de cada cena e ajusta o corte antes de disparar. */
+  function repartirPartes(total: number, cenas: number): number[] {
+    const dono = new Array(total).fill(0);
+    if (cenas <= 1 || total === 0) return dono;
+    const corpo = Math.max(0, total - 1); // parte 0 = hook, fica na cena 1
+    const porCena = Math.ceil(corpo / cenas);
+    for (let i = 1; i < total; i++) dono[i] = Math.min(cenas - 1, Math.floor((i - 1) / porCena));
+    return dono;
+  }
+
+  function aplicarPlano() {
+    let plano: Record<string, CenaDoPlano[]>;
+    try {
+      plano = JSON.parse(planoTexto);
+    } catch (e) {
+      setError('Plano inválido (não é JSON): ' + (e as Error).message);
+      return;
+    }
+    const relato: string[] = [];
+    setTaskAnalyses((prev) => {
+      const next = { ...prev };
+      for (const [ad, cenas] of Object.entries(plano)) {
+        if (!Array.isArray(cenas) || cenas.length === 0) continue;
+        // casa o AD com a task analisada (nome tipo "AD37 - GL - COD WL PL")
+        const alvo = Object.values(next).find((a) =>
+          new RegExp(`\\b${ad}\\b`).test(a?.baseAdId || a?.taskName || ''),
+        );
+        if (!alvo) { relato.push(`⚠ ${ad}: nenhuma task analisada com esse nome`); continue; }
+
+        const ordenadas = [...cenas].sort((x, y) => (x.n || 0) - (y.n || 0));
+        const slots: RoleSlot[] = ordenadas.map((c, i) => ({
+          role: `Cena ${c.n ?? i + 1}`,
+          username: c.cena,
+          briefingFileId: null,
+          avatarId: c.modoImagem ? null : c.avatarId || null,
+          avatarName: c.modoImagem ? null : c.avatarNome || null,
+          avatarThumb: null,
+          avatarVoiceId: null,
+          voiceOverride: c.voiceId ? { id: c.voiceId, name: c.vozNome || c.cena } : null,
+          matchedBy: 'plano',
+          manual: true,
+          motionPrompt: c.motionPrompt || null,
+          imageMode: !!c.modoImagem,
+          imageDataUrl: c.modoImagem ? planoImagens[c.cena] || null : null,
+          imageName: c.modoImagem ? `${c.cena}.jpg` : null,
+        }));
+
+        // reparte as parts entre as cenas (matchByRole é o que o disparo lê)
+        const partes = alvo.partTemplates || [];
+        const donos = repartirPartes(partes.length, slots.length);
+        const novasPartes = partes.map((p, i) => ({
+          ...p,
+          matchByRole: slots[donos[i]].role.toLowerCase(),
+        }));
+
+        const faltamImagens = slots.filter((s) => s.imageMode && !s.imageDataUrl).map((s) => s.username);
+        next[alvo.taskId] = {
+          ...alvo,
+          roleSlots: slots,
+          partTemplates: novasPartes,
+          status: slots.every(slotPronto) ? 'ready' : 'partial',
+        };
+        relato.push(
+          `${ad}: ${slots.length} cenas · ${partes.length} takes repartidos` +
+            (slots.some((s) => s.motionPrompt) ? ` · ${slots.filter((s) => s.motionPrompt).length} c/ movimento` : '') +
+            (faltamImagens.length ? ` · ⚠ falta a imagem de ${faltamImagens.join(', ')}` : ''),
+        );
+      }
+      return next;
+    });
+    setPlanoRelato(relato);
+    setError(null);
+  }
+
   /** MODO IMAGEM — recebe o arquivo, guarda a data URL em memória (pro disparo
    *  desta sessão) e grava os BYTES no IndexedDB (pro RETOMAR pós-F5). O
    *  localStorage nunca vê a imagem: base64 lá estoura a quota e derruba a
@@ -11379,6 +11482,84 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           );
                         })}
                       </ul>
+                      {/* ═══ CARREGAR PLANO — monta as cenas por DADOS ═══
+                        * Existe porque montar 47 cenas clicando erra: os rótulos
+                        * do seletor se repetem e já cruzaram avatar entre ADs. */}
+                      <div className="mt-3 rounded-[14px] border border-cyan-500/35 bg-cyan-500/[0.06] p-3">
+                        <button
+                          type="button"
+                          onClick={() => setPlanoAberto((v) => !v)}
+                          className="mono flex w-full items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200"
+                        >
+                          <span className="text-[13px] leading-none">{planoAberto ? '▾' : '▸'}</span>
+                          Carregar plano de cenas
+                          <span className="ml-auto normal-case tracking-normal text-text-muted">
+                            monta avatar + voz + movimento de uma vez
+                          </span>
+                        </button>
+                        {planoAberto ? (
+                          <div className="mt-2.5 grid gap-2">
+                            <textarea
+                              value={planoTexto}
+                              onChange={(e) => setPlanoTexto(e.target.value)}
+                              rows={5}
+                              placeholder='Cole o JSON do plano — {"AD37":[{"cena":"AD37_1","n":1,"avatarId":"...","voiceId":"...","motionPrompt":null,"modoImagem":false}, ...]}'
+                              className="w-full resize-y rounded-[8px] border border-white/10 bg-black/30 px-2.5 py-2 font-mono text-[10.5px] leading-snug text-text placeholder:text-text-muted/60 focus:border-cyan-400/50 focus:outline-none"
+                            />
+                            <div>
+                              <div className="label-tech mb-1 text-[9px] uppercase tracking-[0.16em] text-text-muted">
+                                Frames das cenas em modo imagem (opcional — só as bloqueadas)
+                              </div>
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={async (e) => {
+                                  const fs = Array.from(e.target.files || []);
+                                  const novo: Record<string, string> = {};
+                                  for (const f of fs) {
+                                    // casa pelo nome do arquivo: AD39_1.jpg -> cena AD39_1
+                                    const cena = f.name.replace(/\.[^.]+$/, '');
+                                    novo[cena] = await new Promise<string>((res) => {
+                                      const fr = new FileReader();
+                                      fr.onload = () => res(String(fr.result || ''));
+                                      fr.readAsDataURL(f);
+                                    });
+                                  }
+                                  setPlanoImagens((p) => ({ ...p, ...novo }));
+                                  e.target.value = '';
+                                }}
+                                className="block w-full text-[10.5px] text-text-muted file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-cyan-500/45 file:bg-cyan-500/12 file:px-2.5 file:py-1 file:text-[9.5px] file:font-bold file:uppercase file:tracking-widest file:text-cyan-200"
+                              />
+                              {Object.keys(planoImagens).length > 0 ? (
+                                <div className="mono mt-1 text-[9.5px] text-cyan-200">
+                                  {Object.keys(planoImagens).length} frame(s): {Object.keys(planoImagens).sort().join(', ')}
+                                </div>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={aplicarPlano}
+                              disabled={!planoTexto.trim()}
+                              className="mono self-start rounded-full border border-cyan-500/50 bg-cyan-500/15 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100 transition hover:bg-cyan-500/25 disabled:opacity-40"
+                            >
+                              Aplicar plano
+                            </button>
+                            {planoRelato ? (
+                              <div className="rounded-[8px] border border-line bg-bg/60 p-2 text-[10.5px] leading-relaxed text-text-muted">
+                                {planoRelato.map((l, i) => (
+                                  <div key={i} className={/⚠/.test(l) ? 'text-yellow-200' : ''}>{l}</div>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className="text-[9.5px] leading-tight text-text-muted">
+                              Reparte os takes entre as cenas na ordem (hook na cena 1) — é um
+                              ponto de partida: abra o 👁 de cada cena pra ajustar o corte antes de disparar.
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
                       {/* Start batch — abaixo da lista, mais perto das tasks ready (CTA principal).
                        *  Usa selectedTaskIds porque startBatch filtra por isso — UI tem que bater. */}
                       {(() => {
