@@ -105,6 +105,7 @@ import {
   isDrMillionFormat,
   parseDrMillionBriefing,
   idiomasDisponiveis,
+  conferirCoberturaDaCopy,
   adGroupOf,
   type DrMillionLang,
 } from '@/lib/drmillion-parser';
@@ -817,6 +818,9 @@ type TaskAnalysis = {
   drMillion?: boolean;
   /** Quais idiomas ESTE ad realmente tem no doc. */
   drLangs?: { pt: boolean; pl: boolean };
+  /** Linhas da copy do idioma escolhido que NÃO entraram em nenhum take.
+   *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
+  copyFaltando?: string[];
   /** Cada avatar do briefing — usuario controla individualmente */
   roleSlots: RoleSlot[];
   /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
@@ -2521,6 +2525,13 @@ function ClickUpPilotInner() {
             }
           }
           const bodyPartsCount = bodyIdx;
+          // REDE DE SEGURANÇA: a copy do idioma escolhido saiu inteira nos
+          // takes? Os filtros do parser tiram o que não é fala, e um filtro
+          // errado comeria copy sem que contagem, avatar ou voz denunciassem.
+          // Se faltar, a task mostra o trecho perdido em vermelho.
+          const copyFaltando = ehDrMillion
+            ? conferirCoberturaDaCopy(docR.text, baseAdId, drLangRef.current, partTemplates.map((p) => p.text)).faltando
+            : [];
           const allHaveAvatar = roleSlots.every(slotPronto);
           // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
           // (compartilham o doc — ja analisamos uma vez).
@@ -2539,6 +2550,7 @@ function ClickUpPilotInner() {
                 totalParts: partTemplates.length,
                 roleSlots,
                 partTemplates,
+                copyFaltando,
                 bodyRaw: briefing.body || undefined,
                 dispatchedAt: getDispatchedAt(sid),
                 // Marca siblings como "compartilhada com primary"
@@ -11077,6 +11089,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}){onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}</span>
                                     )}
                                   </div>
+                                  {/* A copy saiu INTEIRA? Um filtro do parser comendo fala
+                                   *  não aparece na contagem nem no avatar — só lendo. Aqui
+                                   *  o que ficou de fora aparece sozinho, antes do disparo. */}
+                                  {a.copyFaltando && a.copyFaltando.length > 0 ? (
+                                    <div className="mt-1.5 rounded-[10px] border border-red-500/45 bg-red-500/10 px-3 py-2 text-[10.5px] leading-relaxed text-red-200">
+                                      <div className="mono text-[9.5px] uppercase tracking-widest">
+                                        ⚠ {a.copyFaltando.length} trecho(s) da copy NÃO entraram em nenhum take
+                                      </div>
+                                      {a.copyFaltando.slice(0, 3).map((l, i) => (
+                                        <div key={i} className="mt-1 opacity-90">“{l.slice(0, 120)}”</div>
+                                      ))}
+                                      {a.copyFaltando.length > 3 ? (
+                                        <div className="mt-1 opacity-70">…e mais {a.copyFaltando.length - 3}</div>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                   {/* Only Magnific: nao gera lipsync — avatares ignorados,
                                    *  so a copy do doc importa. RoleSlots escondidos. */}
                                   {onlyMagnificMode ? (

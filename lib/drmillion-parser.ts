@@ -376,6 +376,37 @@ export function parseDrMillionBriefing(
   };
 }
 
+/**
+ * A copy do idioma escolhido saiu INTEIRA nos takes?
+ *
+ * Todo filtro deste arquivo (número de cena, rótulo de falante, linha de
+ * estrutura, marcador de idioma) existe pra tirar o que não é fala — e todo
+ * filtro pode um dia comer uma fala de verdade. Esta função é a rede: cobra
+ * cada linha do idioma na concatenação dos takes gerados e devolve o que ficou
+ * de fora. Contagem, avatar e voz não pegam isso; só a leitura pega, e é isso
+ * que ela automatiza.
+ *
+ * A linha é cobrada na CONCATENAÇÃO (não em um take específico) porque o split
+ * por duração pode partir uma linha longa entre dois takes — o que é legítimo.
+ */
+export function conferirCoberturaDaCopy(
+  docText: string,
+  adId: string,
+  lang: DrMillionLang,
+  textosGerados: string[],
+): { total: number; faltando: string[] } {
+  const blocos = extrairBlocosComFalante(docText, adId);
+  if (!blocos) return { total: 0, faltando: [] };
+  const escolher = (b: { pt: Fala[]; pl: Fala[] }) => {
+    const preferido = lang === 'pl' ? b.pl : b.pt;
+    return preferido.length ? preferido : lang === 'pl' ? b.pt : b.pl;
+  };
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const tudo = norm(textosGerados.join(' '));
+  const linhas = [...escolher(blocos.hook), ...escolher(blocos.body)].map((f) => norm(f.texto));
+  return { total: linhas.length, faltando: linhas.filter((l) => l && !tudo.includes(l)) };
+}
+
 /** Qual idioma esse AD realmente tem? Alimenta o seletor PT/PL da tela. */
 export function idiomasDisponiveis(
   docText: string,

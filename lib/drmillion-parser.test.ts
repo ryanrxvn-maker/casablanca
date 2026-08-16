@@ -7,6 +7,7 @@ import {
   extrairBlocos,
   isDrMillionFormat,
   idiomasDisponiveis,
+  conferirCoberturaDaCopy,
   limparLinhaFalada,
   adGroupOf,
 } from './drmillion-parser';
@@ -213,6 +214,47 @@ eq(parseDrMillionBriefing(DOC, 'AD99XX', 'pl'), null, 'AD que não existe devolv
   ok(!/(^|\s)P(\s|$)/.test(falado), 'resto de marcador ("P") nao vira fala');
   ok(!/Instrucoes gerais/.test(falado), 'capa do proximo lote fecha o body');
   ok(!/CRIATIVOS/.test(falado), 'capa de entrega nao vaza pro fim do body');
+}
+
+// ---------------------------------------------------------------------------
+// Rede de seguranca: a copy do idioma saiu INTEIRA nos takes?
+{
+  const DOC_C = [
+    'AD70G1GL - COD WL PL',
+    'PT',
+    'Gancho em portugues.',
+    'PL',
+    'Hak po polsku.',
+    'Body',
+    'PT',
+    'Corpo em portugues.',
+    'PL',
+    'Pierwsze zdanie ciala.',
+    'Drugie zdanie ciala.',
+    'Trzecie zdanie ciala.',
+  ].join('\n');
+
+  const b = parseDrMillionBriefing(DOC_C, 'AD70G1GL', 'pl')!;
+  const takes = [b.hooks[0].text, ...b.bodySegments.map((s) => s.text)];
+  eq(conferirCoberturaDaCopy(DOC_C, 'AD70G1GL', 'pl', takes).faltando.length, 0,
+     'copy inteira nos takes = nada faltando');
+
+  // take some -> a linha dele tem que ser apontada
+  const semUm = conferirCoberturaDaCopy(DOC_C, 'AD70G1GL', 'pl', [b.hooks[0].text]);
+  ok(semUm.faltando.some((l) => /Drugie zdanie/.test(l)), 'fala perdida e apontada pelo texto');
+  eq(semUm.faltando.length, 3, 'aponta as 3 linhas do corpo que ficaram de fora');
+
+  // o split por duracao pode PARTIR uma linha entre dois takes — isso e legitimo
+  const partido = conferirCoberturaDaCopy(DOC_C, 'AD70G1GL', 'pl', [
+    'Hak po polsku.',
+    'Pierwsze zdanie ciala. Drugie',
+    'zdanie ciala. Trzecie zdanie ciala.',
+  ]);
+  eq(partido.faltando.length, 0, 'linha partida entre dois takes nao conta como perda');
+
+  // e o idioma cobrado e o ESCOLHIDO
+  eq(conferirCoberturaDaCopy(DOC_C, 'AD70G1GL', 'pt', takes).faltando.length, 2,
+     'em PT, cobra a copy portuguesa (que nao esta nos takes de PL)');
 }
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
