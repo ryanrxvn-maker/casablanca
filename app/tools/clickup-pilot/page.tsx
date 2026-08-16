@@ -3248,9 +3248,15 @@ function ClickUpPilotInner() {
       );
       // Sanity check: se algum part vai SEM avatar, aborta antes de torrar
       // chamadas TTS em vao.
-      const missingAv = plan.parts.findIndex((p: any) => !p.avatarId);
+      // MODO IMAGEM nao tem avatarId por definicao — a imagem ENTRA no lugar do
+      // avatar (variante `image` do /v3, que nem aceita avatar_id). Sem esta
+      // excecao a task inteira falhava aqui: foi o que derrubou o AD43 do WL PL,
+      // 100% modo imagem, antes de disparar um take sequer.
+      const missingAv = plan.parts.findIndex(
+        (p: any) => !p.avatarId && !p.imageDataUrl && !p.imageKey,
+      );
       if (missingAv >= 0) {
-        const errMsg = `Part ${missingAv + 1} (${plan.parts[missingAv].label}) sem avatarId. NUNCA dispara sem avatar — refaz a analise.`;
+        const errMsg = `Part ${missingAv + 1} (${plan.parts[missingAv].label}) sem avatarId nem imagem. NUNCA dispara sem avatar — refaz a analise.`;
         console.error(`[clickup-pilot] ${errMsg}`);
         setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
         return;
@@ -3297,6 +3303,27 @@ function ClickUpPilotInner() {
         } : prev);
       }
 
+      // Pós-F5 a data URL não existe mais — só a chave. Rebusca os bytes no
+      // IndexedDB, senão o RETOMAR mandaria a cena de imagem sem imagem.
+      const imagensPorChave = new Map<string, string>();
+      for (const i of minhasIdx) {
+        const p: any = plan.parts[i];
+        if (!p.imageKey || p.imageDataUrl || imagensPorChave.has(p.imageKey)) continue;
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          const blob = await loadBlob(p.imageKey, 'image/jpeg');
+          if (blob) {
+            imagensPorChave.set(p.imageKey, await new Promise<string>((res, rej) => {
+              const fr = new FileReader();
+              fr.onload = () => res(String(fr.result || ''));
+              fr.onerror = () => rej(new Error('falha lendo a imagem do IDB'));
+              fr.readAsDataURL(blob);
+            }));
+          }
+        } catch (e) {
+          console.warn(`[clickup-pilot] imagem ${p.imageKey} não voltou do IDB:`, e);
+        }
+      }
       const jobs = minhasIdx.map((i) => {
         const p: any = plan.parts[i];
         return {
@@ -3307,11 +3334,23 @@ function ClickUpPilotInner() {
           // Cena com gesto: o runner sobe pro Avatar IV sozinho (motorEfetivo).
           motionPrompt: p.motionPrompt || undefined,
           // Modo imagem: sem avatar — o runner sobe pela variante `image`.
-          imageDataUrl: p.imageDataUrl || undefined,
+          imageDataUrl: p.imageDataUrl || (p.imageKey ? imagensPorChave.get(p.imageKey) : undefined) || undefined,
           // motor escolhido na cena vence o motorConfig global
           motor: p.engine || motorsPerPart[i],
         };
       });
+      // Cena de imagem cuja imagem não voltou do IDB: falha AGORA, com nome, em
+      // vez de gerar um take mudo que só apareceria na revisão do montado.
+      const semImagem = minhasIdx.filter((i) => {
+        const p: any = plan.parts[i];
+        return !p.avatarId && !jobs[minhasIdx.indexOf(i)].imageDataUrl;
+      });
+      if (semImagem.length) {
+        const errMsg = `Cena(s) em modo imagem sem a imagem: ${semImagem.map((i) => plan!.parts[i].label).join(', ')}. Suba o frame de novo no plano e dispare.`;
+        console.error(`[clickup-pilot] ${errMsg}`);
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
+        return;
+      }
       const resultsEnviados = await runHeyGenJobs(jobs, {
         parallel: 3,
         mode: 'copy',
@@ -4190,15 +4229,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           await purgeRejectedVideosBeforeRedispatch(gate.rejected, 'pilot resume');
 
           const jobsToRedispatch = zombieIdxs.map((i) => {
-            const rp = state.replan!.parts[i];
+            const rp: any = state.replan!.parts[i];
             return {
               label: rp.label,
               copy: rp.text,
               avatarId: rp.avatarId || '',
               voiceId: rp.voiceId || undefined,
-              motor: 'III' as const,
+              // Sem isto o RETOMAR re-disparava a cena de imagem como take vazio
+              // — e o filtro abaixo a descartava calado, deixando o AD sem a
+              // parte pra sempre.
+              imageDataUrl: rp.imageDataUrl || undefined,
+              motionPrompt: rp.motionPrompt || undefined,
+              motor: rp.engine || ('III' as const),
             };
-          }).filter((j) => j.avatarId); // sanity: descarta sem avatar
+          }).filter((j) => j.avatarId || j.imageDataUrl); // sanity: sem avatar E sem imagem não dá
 
           if (jobsToRedispatch.length === 0) break;
 
@@ -6745,8 +6789,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           engine: (c as { motor?: 'III' | 'IV' | 'V' }).motor,
           imageMode: !!c.modoImagem,
           imageDataUrl: c.modoImagem ? planoImagens[c.cena] || null : null,
+          // A chave é o que sobrevive ao F5 (os bytes vão pro IDB logo abaixo).
+          // Sem ela, recarregar a página perdia os frames e o RETOMAR não tinha
+          // como re-disparar a cena de imagem.
+          imageKey: c.modoImagem && planoImagens[c.cena] ? `pilot:${alvo.taskId}:img:${i}` : null,
           imageName: c.modoImagem ? `${c.cena}.jpg` : null,
         }));
+        // Grava os bytes das imagens no IndexedDB — fora do setState, porque é
+        // assíncrono e o localStorage não aguenta base64.
+        for (const [i, c] of ordenadas.entries()) {
+          const dataUrl = c.modoImagem ? planoImagens[c.cena] : null;
+          if (!dataUrl) continue;
+          void (async () => {
+            try {
+              const { saveBlob } = await import('@/lib/zip-store');
+              const blob = await (await fetch(dataUrl)).blob();
+              await saveBlob(`pilot:${alvo.taskId}:img:${i}`, blob, blob.type || 'image/jpeg');
+            } catch (e) {
+              console.warn(`[clickup-pilot] frame de ${c.cena} não foi pro IDB (F5 perderia):`, e);
+            }
+          })();
+        }
 
         // reparte as parts entre as cenas (matchByRole é o que o disparo lê)
         const partes = alvo.partTemplates || [];
