@@ -76,12 +76,18 @@ function ehFimDeSecao(linha: string): boolean {
 const ROTULO_FALANTE_RE =
   /^\s*\p{Lu}[\p{L}.'’-]*(?:\s+\p{Lu}[\p{L}.'’-]*){0,3}(?:\s*\+\s*\p{Lu}[\p{L}.'’-]*(?:\s+\p{Lu}[\p{L}.'’-]*){0,3})?\s*:?\s*$/u;
 
+/** A linha é o rótulo de um falante, e não fala? */
+function ehRotuloFalante(linha: string): boolean {
+  if (LINHA_ESTRUTURAL_RE.test(linha)) return false;
+  if (/[.!?…,]\s*$/.test(linha)) return false; // tem pontuação de frase: é fala
+  return ROTULO_FALANTE_RE.test(linha);
+}
+
 /** Linha que existe no doc mas não é fala. */
 function ehLinhaNaoFalada(linha: string): boolean {
   if (linha.length <= 2) return true; // resto de marcador ("P" solto no hook vazio)
   if (LINHA_ESTRUTURAL_RE.test(linha)) return true;
-  if (/[.!?…,]\s*$/.test(linha)) return false; // tem pontuação de frase: é fala
-  return ROTULO_FALANTE_RE.test(linha);
+  return ehRotuloFalante(linha);
 }
 /** Marcador de idioma isolado na linha. */
 const LANG_RE = /^\s*(PT|PL)\s*$/i;
@@ -137,16 +143,27 @@ export function limparLinhaFalada(linha: string): string {
     .trim();
 }
 
-/** Fatia um bloco de linhas em { pt, pl } pelos marcadores PT/PL. */
-function separarIdiomas(linhas: string[]): { pt: string[]; pl: string[] } {
-  const pt: string[] = [];
-  const pl: string[] = [];
+/** Uma linha de fala e de quem ela é (nos ADs em diálogo). */
+type Fala = { texto: string; falante: string | null };
+
+/** Fatia um bloco de linhas em { pt, pl }, guardando de quem é cada fala. */
+function separarIdiomasComFalante(linhas: string[]): { pt: Fala[]; pl: Fala[] } {
+  const pt: Fala[] = [];
+  const pl: Fala[] = [];
   let atual: 'pt' | 'pl' | null = null;
+  // O rótulo vale até o próximo — e é o MESMO nos dois idiomas, então cada
+  // balde carrega o seu para não embaralhar quando as línguas se alternam.
+  const falante: { pt: string | null; pl: string | null } = { pt: null, pl: null };
   const empurrar = (texto: string) => {
     const limpa = limparLinhaFalada(texto);
-    if (!limpa || ehLinhaNaoFalada(limpa)) return;
-    if (atual === 'pt') pt.push(limpa);
-    else if (atual === 'pl') pl.push(limpa);
+    if (!limpa) return;
+    if (atual && ehRotuloFalante(limpa)) {
+      falante[atual] = limpa.replace(/\s*:\s*$/, '');
+      return;
+    }
+    if (ehLinhaNaoFalada(limpa)) return;
+    if (atual === 'pt') pt.push({ texto: limpa, falante: falante.pt });
+    else if (atual === 'pl') pl.push({ texto: limpa, falante: falante.pl });
   };
   for (const raw of linhas) {
     const m = raw.match(LANG_RE);
@@ -174,21 +191,45 @@ function separarIdiomas(linhas: string[]): { pt: string[]; pl: string[] } {
   return { pt, pl };
 }
 
-/** O doc tem a estrutura bilíngue do DR MILLION para ESTE ad? */
+/** A mesma fatia, só com o texto — é o que quase todo mundo aqui precisa. */
+function separarIdiomas(linhas: string[]): { pt: string[]; pl: string[] } {
+  const r = separarIdiomasComFalante(linhas);
+  return { pt: r.pt.map((f) => f.texto), pl: r.pl.map((f) => f.texto) };
+}
+
+/** Agrupa falas consecutivas do mesmo falante — vira um bodySegment cada. */
+function agruparPorFalante(falas: Fala[]): Array<{ role: string | null; text: string }> {
+  const blocos: Array<{ role: string | null; text: string[] }> = [];
+  for (const f of falas) {
+    const ultimo = blocos[blocos.length - 1];
+    if (ultimo && ultimo.role === f.falante) ultimo.text.push(f.texto);
+    else blocos.push({ role: f.falante, text: [f.texto] });
+  }
+  return blocos.map((b) => ({ role: b.role, text: b.text.join('\n\n') }));
+}
+
+/**
+ * O doc tem a estrutura bilíngue do DR MILLION para ESTE ad?
+ *
+ * Basta ter hook OU body: nada entra nesses baldes sem um marcador PT/PL ter
+ * aparecido antes (ver separarIdiomasComFalante), então qualquer conteúdo aqui
+ * já prova o formato — e doc do B2C, que não tem marcador, segue caindo fora.
+ * Exigir os dois derrubava justo o AD49 e o AD67, cujo hook o doc deixou vazio:
+ * eles voltavam pro parser comum e saíam bilíngues.
+ */
 export function isDrMillionFormat(docText: string, adId: string): boolean {
   const r = extrairBlocos(docText, adId);
   if (!r) return false;
   const { hook, body } = r;
-  const temHook = hook.pt.length > 0 || hook.pl.length > 0;
-  const temBody = body.pt.length > 0 || body.pl.length > 0;
-  return temHook && temBody;
+  return hook.pt.length > 0 || hook.pl.length > 0 || body.pt.length > 0 || body.pl.length > 0;
 }
 
-/** Coração: acha o hook DO AD e o body DO GRUPO, já separados por idioma. */
-export function extrairBlocos(
+/** Coração: acha o hook DO AD e o body DO GRUPO, já separados por idioma —
+ *  e por FALANTE, que é o que impede um take de cruzar duas pessoas. */
+function extrairBlocosComFalante(
   docText: string,
   adId: string,
-): { hook: { pt: string[]; pl: string[] }; body: { pt: string[]; pl: string[] } } | null {
+): { hook: { pt: Fala[]; pl: Fala[] }; body: { pt: Fala[]; pl: Fala[] } } | null {
   const alvo = String(adId || '').toUpperCase();
   const grupo = adGroupOf(alvo);
   if (!alvo || !grupo) return null;
@@ -241,7 +282,7 @@ export function extrairBlocos(
       break;
     }
   }
-  const hook = separarIdiomas(linhas.slice(iAd + 1, iFimHook));
+  const hook = separarIdiomasComFalante(linhas.slice(iAd + 1, iFimHook));
 
   // 3. Body = o primeiro "Body" a partir daqui, desde que ainda seja do MESMO
   //    grupo. Se aparecer um AD de outro grupo antes, esse AD não tem body
@@ -252,11 +293,12 @@ export function extrairBlocos(
       iBody = i;
       break;
     }
+    if (BLOCO_HEADING_RE.test(linhas[i])) break; // capa do próximo lote
     const m = linhas[i].match(AD_HEADING_RE);
     if (m && adGroupOf(m[1]) !== grupo) break; // entrou no próximo grupo
   }
 
-  let body = { pt: [] as string[], pl: [] as string[] };
+  let body = { pt: [] as Fala[], pl: [] as Fala[] };
   if (iBody >= 0) {
     let iFimBody = linhas.length;
     for (let i = iBody + 1; i < linhas.length; i++) {
@@ -265,10 +307,24 @@ export function extrairBlocos(
         break;
       }
     }
-    body = separarIdiomas(linhas.slice(iBody + 1, iFimBody));
+    body = separarIdiomasComFalante(linhas.slice(iBody + 1, iFimBody));
   }
 
   return { hook, body };
+}
+
+/** Só os textos — a forma pública, que o resto do app já consome. */
+export function extrairBlocos(
+  docText: string,
+  adId: string,
+): { hook: { pt: string[]; pl: string[] }; body: { pt: string[]; pl: string[] } } | null {
+  const r = extrairBlocosComFalante(docText, adId);
+  if (!r) return null;
+  const so = (f: Fala[]) => f.map((x) => x.texto);
+  return {
+    hook: { pt: so(r.hook.pt), pl: so(r.hook.pl) },
+    body: { pt: so(r.body.pt), pl: so(r.body.pl) },
+  };
 }
 
 /**
@@ -284,21 +340,26 @@ export function parseDrMillionBriefing(
   adId: string,
   lang: DrMillionLang = 'pl',
 ): ParsedDarkoBriefing | null {
-  const blocos = extrairBlocos(docText, adId);
+  const blocos = extrairBlocosComFalante(docText, adId);
   if (!blocos) return null;
 
-  const escolher = (b: { pt: string[]; pl: string[] }) => {
+  const escolher = (b: { pt: Fala[]; pl: Fala[] }) => {
     const preferido = lang === 'pl' ? b.pl : b.pt;
     if (preferido.length) return preferido;
     return lang === 'pl' ? b.pt : b.pl; // fallback: melhor a outra língua que nada
   };
 
-  const hookLinhas = escolher(blocos.hook);
-  const bodyLinhas = escolher(blocos.body);
-  if (!hookLinhas.length && !bodyLinhas.length) return null;
+  const hookFalas = escolher(blocos.hook);
+  const bodyFalas = escolher(blocos.body);
+  if (!hookFalas.length && !bodyFalas.length) return null;
 
-  const hookText = hookLinhas.join('\n').trim();
-  const bodyText = bodyLinhas.join('\n\n').trim();
+  const hookText = hookFalas.map((f) => f.texto).join('\n').trim();
+  const bodyText = bodyFalas.map((f) => f.texto).join('\n\n').trim();
+  // Um segmento por FALANTE: o Pilot divide cada segmento separadamente e não
+  // deixa um take cruzar duas pessoas. Nos ADs de diálogo (AD49, AD67) é o que
+  // impede a Agnieszka de dizer a fala do médico. AD sem rótulo continua com um
+  // segmento só — igual a antes.
+  const segmentos = agruparPorFalante(bodyFalas);
 
   return {
     baseAdId: String(adId).toUpperCase(),
@@ -310,7 +371,7 @@ export function parseDrMillionBriefing(
       : [],
     body: bodyText || null,
     bodyRole: null,
-    bodySegments: bodyText ? [{ role: null, text: bodyText }] : [],
+    bodySegments: segmentos,
     gSiblings: [],
   };
 }

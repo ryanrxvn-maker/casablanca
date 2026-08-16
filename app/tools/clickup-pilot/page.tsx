@@ -820,7 +820,7 @@ type TaskAnalysis = {
   /** Cada avatar do briefing — usuario controla individualmente */
   roleSlots: RoleSlot[];
   /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
-  partTemplates: Array<{ label: string; text: string; matchByRole: string | null }>;
+  partTemplates: Array<{ label: string; text: string; matchByRole: string | null; speaker?: string | null }>;
   /** Body cru do parser (antes do split) — fonte pro botao "copiar body" */
   bodyRaw?: string;
   error?: string;
@@ -2514,6 +2514,9 @@ function ClickUpPilotInner() {
                 label,
                 text: segParts[pi],
                 matchByRole: pickRoleForText(segParts[pi], label, seg.role, (seg as any).username ?? null),
+                // De QUEM é essa fala — o "Carregar plano" usa pra dar cada
+                // bloco à cena da pessoa certa (ver repartirPorFalante).
+                speaker: seg.role ?? null,
               });
             }
           }
@@ -6614,6 +6617,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     voiceId?: string | null;
     vozNome?: string | null;
     motionPrompt?: string | null;
+    /** Quem fala nesta cena, com o NOME do rótulo do doc ("Marek Skoczylas").
+     *  Só nos ADs em diálogo. Com isto o corte segue o roteiro em vez de
+     *  dividir por igual — senão a Agnieszka recita a fala do médico. */
+    falante?: string | null;
+    /** Trecho da copy onde ESTA cena começa (corte editorial: a fala casa com
+     *  o que o frame mostra). Não vale na cena 1, que sempre começa no início. */
+    ancora?: string | null;
   };
 
   const [planoTexto, setPlanoTexto] = useState('');
@@ -6632,6 +6642,60 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const porCena = Math.ceil(corpo / cenas);
     for (let i = 1; i < total; i++) dono[i] = Math.min(cenas - 1, Math.floor((i - 1) / porCena));
     return dono;
+  }
+
+  /** Reparte seguindo QUEM FALA, quando o plano declara o falante de cada cena.
+   *  Anda pelas partes na ordem do roteiro e só avança de cena quando a fala
+   *  muda de dono — o vídeo é a concatenação das cenas, então a ordem tem que
+   *  ser respeitada. Devolve null quando a sequência de cenas não comporta a
+   *  sequência de falas (ex.: a pessoa volta a falar e não há cena pra ela):
+   *  aí o chamador cai no corte por igual e AVISA, em vez de montar errado. */
+  function repartirPorFalante(
+    partes: Array<{ speaker?: string | null }>,
+    cenas: CenaDoPlano[],
+  ): number[] | null {
+    const mesma = (a?: string | null, b?: string | null) =>
+      !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+    const dono: number[] = [];
+    let atual = 0;
+    for (const p of partes) {
+      if (!p.speaker) { dono.push(atual); continue; } // hook e afins: cena corrente
+      // Falante sem NENHUMA cena = fala que o plano deixou de fora de propósito
+      // (ex.: os frames de dupla do AD67). Marca -1: o take não é gerado, e o
+      // relatório diz quantos sairam — descarte declarado, não silencioso.
+      if (!cenas.some((c) => mesma(c.falante, p.speaker))) { dono.push(-1); continue; }
+      if (mesma(cenas[atual]?.falante, p.speaker)) { dono.push(atual); continue; }
+      const prox = cenas.findIndex((c, i) => i > atual && mesma(c.falante, p.speaker));
+      if (prox < 0) return null; // a pessoa volta a falar e não há cena: não force
+      atual = prox;
+      dono.push(atual);
+    }
+    return dono;
+  }
+
+  /** Reparte por ÂNCORA: cada cena declara o trecho da copy onde ela começa,
+   *  então o corte segue o que o frame mostra em vez de cair no meio por
+   *  aritmética. Devolve null se alguma âncora não for achada — melhor cair no
+   *  corte por igual com aviso do que fingir que casou. */
+  function repartirPorAncora(
+    partes: Array<{ text: string }>,
+    cenas: CenaDoPlano[],
+  ): number[] | null {
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+    const inicio: number[] = [0];
+    for (let ci = 1; ci < cenas.length; ci++) {
+      const alvo = norm(cenas[ci].ancora || '');
+      if (!alvo) return null;
+      const de = inicio[ci - 1] + 1; // cada cena tem que ficar com pelo menos 1 take
+      const j = partes.findIndex((p, i) => i >= de && norm(p.text).includes(alvo));
+      if (j < 0) return null;
+      inicio.push(j);
+    }
+    return partes.map((_, i) => {
+      let dono = 0;
+      for (let ci = 0; ci < inicio.length; ci++) if (i >= inicio[ci]) dono = ci;
+      return dono;
+    });
   }
 
   function aplicarPlano() {
@@ -6674,22 +6738,41 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
         // reparte as parts entre as cenas (matchByRole é o que o disparo lê)
         const partes = alvo.partTemplates || [];
-        const donos = repartirPartes(partes.length, slots.length);
-        const novasPartes = partes.map((p, i) => ({
-          ...p,
-          matchByRole: slots[donos[i]].role.toLowerCase(),
-        }));
+        // Ordem de preferência: quem fala (diálogo) → âncora (corte editorial)
+        // → por igual. Sempre que o declarado não fecha, avisa e cai no de
+        // baixo: nunca monta errado calado.
+        const querFalante = ordenadas.every((c) => c.falante);
+        const querAncora = !querFalante && ordenadas.slice(1).every((c) => c.ancora);
+        const porFalante = querFalante ? repartirPorFalante(partes, ordenadas) : null;
+        const porAncora = querAncora ? repartirPorAncora(partes, ordenadas) : null;
+        if (querFalante && !porFalante) {
+          relato.push(`⚠ ${ad}: as cenas não cobrem a ordem das falas — corte por igual, CONFIRA no 👁`);
+        }
+        if (querAncora && !porAncora) {
+          relato.push(`⚠ ${ad}: âncora do plano não bateu com nenhum take — corte por igual, CONFIRA no 👁`);
+        }
+        const donos = porFalante || porAncora || repartirPartes(partes.length, slots.length);
+        const novasPartes = partes
+          .map((p, i) => ({ p, dono: donos[i] }))
+          .filter((x) => x.dono >= 0)
+          .map((x) => ({ ...x.p, matchByRole: slots[x.dono].role.toLowerCase() }));
+        const descartados = partes.length - novasPartes.length;
 
         const faltamImagens = slots.filter((s) => s.imageMode && !s.imageDataUrl).map((s) => s.username);
         next[alvo.taskId] = {
           ...alvo,
           roleSlots: slots,
           partTemplates: novasPartes,
+          totalParts: novasPartes.length,
           status: slots.every(slotPronto) ? 'ready' : 'partial',
         };
+        const criterio = porFalante ? ' POR FALANTE' : porAncora ? ' POR ÂNCORA' : '';
+        const semTake = slots.filter((s) => !novasPartes.some((p) => p.matchByRole === s.role.toLowerCase()));
         relato.push(
-          `${ad}: ${slots.length} cenas · ${partes.length} takes repartidos` +
+          `${ad}: ${slots.length} cenas · ${novasPartes.length} takes repartidos${criterio}` +
+            (descartados ? ` · ${descartados} take(s) DESCARTADO(s) (falante sem cena)` : '') +
             (slots.some((s) => s.motionPrompt) ? ` · ${slots.filter((s) => s.motionPrompt).length} c/ movimento` : '') +
+            (semTake.length ? ` · ⚠ sem fala: ${semTake.map((s) => s.username).join(', ')}` : '') +
             (faltamImagens.length ? ` · ⚠ falta a imagem de ${faltamImagens.join(', ')}` : ''),
         );
       }
