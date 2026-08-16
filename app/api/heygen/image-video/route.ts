@@ -118,7 +118,7 @@ export async function POST(req: Request) {
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen_oauth');
     if ('response' in keyResult) return keyResult.response;
-    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
+    const { access: accessToken, novoRefresh, origem } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
     // Um aviso aqui NAO derruba o disparo em andamento (o access ja e valido),
     // mas tem que chegar em quem esta olhando: e a proxima renovacao que morre.
     const avisoToken = novoRefresh ? await guardarRefreshRotacionado(novoRefresh) : null;
@@ -192,7 +192,7 @@ export async function GET(req: Request) {
     const videoId = new URL(req.url).searchParams.get('videoId');
     if (!videoId) return jsonError('Falta videoId.', 400);
 
-    const { access: accessToken, novoRefresh } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
+    const { access: accessToken, novoRefresh, origem } = await accessTokenDoRefresh(keyResult.key, relerRefreshDoBanco);
     // Um aviso aqui NAO derruba o disparo em andamento (o access ja e valido),
     // mas tem que chegar em quem esta olhando: e a proxima renovacao que morre.
     const avisoToken = novoRefresh ? await guardarRefreshRotacionado(novoRefresh) : null;
@@ -206,11 +206,16 @@ export async function GET(req: Request) {
      * engolia o aviso junto. Aqui nada é gerado e nada é cobrado.
      */
     if (videoId === '__diag') {
+      // O que está gravado: pacote (refresh+access) ou refresh puro? É a
+      // diferença entre "vai renovar toda instância fria" e "renova a cada 10
+      // dias". Nada aqui expõe o token — só forma e validade.
+      const cred = lerCredencial(keyResult.key);
       return NextResponse.json({
         autenticou: true,
-        renovouAgora: !!novoRefresh,
+        origemDoAccess: origem, // cache | banco | renovou
+        gravadoComoPacote: !!cred.access,
+        accessValeAte: cred.exp ? new Date(cred.exp).toISOString() : null,
         gravacaoDoTokenNovo: novoRefresh ? (avisoToken ? `FALHOU — ${avisoToken}` : 'ok') : 'não precisou renovar',
-        usandoAccessGuardado: !novoRefresh,
       });
     }
 

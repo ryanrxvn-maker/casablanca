@@ -49,6 +49,10 @@ let tokenCache: { access: string; expiraEm: number } | null = null;
 
 export type RefreshResult = {
   access: string;
+  /** De ONDE veio o access. Sem isto, "não renovou" era ambíguo: podia ser o
+   *  cache da instância quente OU o access gravado no banco — e a diferença é
+   *  justamente o que se quer medir quando o token some. */
+  origem: 'cache' | 'banco' | 'renovou';
   /** ⚠ O HeyGen ROTACIONA o refresh token: cada renovação devolve um novo e
    *  INVALIDA o anterior. Medido — depois que o app renovou, o CLI que segurava
    *  o token antigo passou a responder "OAuth session expired or rejected" com
@@ -113,7 +117,7 @@ export async function accessTokenDoRefresh(
 ): Promise<RefreshResult> {
   const agora = Date.now();
   if (tokenCache && tokenCache.expiraEm > agora + 60_000) {
-    return { access: tokenCache.access, novoRefresh: null };
+    return { access: tokenCache.access, novoRefresh: null, origem: 'cache' };
   }
 
   const cred = lerCredencial(guardado);
@@ -122,7 +126,7 @@ export async function accessTokenDoRefresh(
   // que fazer login toda vez". Margem de 5min pra não servir token na virada.
   if (cred.access && cred.exp && cred.exp > agora + 5 * 60_000) {
     tokenCache = { access: cred.access, expiraEm: cred.exp };
-    return { access: cred.access, novoRefresh: null };
+    return { access: cred.access, novoRefresh: null, origem: 'banco' };
   }
   const refreshToken = cred.refresh;
 
@@ -150,7 +154,7 @@ export async function accessTokenDoRefresh(
     // outra instância pode ter renovado e deixado um access válido pronto
     if (fresco?.access && fresco.exp && fresco.exp > agora + 5 * 60_000) {
       tokenCache = { access: fresco.access, expiraEm: fresco.exp };
-      return { access: fresco.access, novoRefresh: null };
+      return { access: fresco.access, novoRefresh: null, origem: 'banco' };
     }
     if (fresco?.refresh && fresco.refresh !== usado) {
       usado = fresco.refresh;
@@ -177,6 +181,7 @@ export async function accessTokenDoRefresh(
   return {
     access: j.access_token,
     novoRefresh: empacotarCredencial({ refresh: refreshFinal, access: j.access_token, exp }),
+    origem: 'renovou',
   };
 }
 
