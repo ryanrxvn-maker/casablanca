@@ -196,6 +196,24 @@ export async function GET(req: Request) {
     // Um aviso aqui NAO derruba o disparo em andamento (o access ja e valido),
     // mas tem que chegar em quem esta olhando: e a proxima renovacao que morre.
     const avisoToken = novoRefresh ? await guardarRefreshRotacionado(novoRefresh) : null;
+
+    /**
+     * `videoId=__diag`: responde o estado da CREDENCIAL sem falar com o HeyGen.
+     *
+     * Existe porque o único jeito de ver se a gravação do token funcionou era
+     * disparar um take de verdade — e cada tentativa queimava um refresh e um
+     * crédito. Pior: com um videoId inexistente, a consulta lançava e o `catch`
+     * engolia o aviso junto. Aqui nada é gerado e nada é cobrado.
+     */
+    if (videoId === '__diag') {
+      return NextResponse.json({
+        autenticou: true,
+        renovouAgora: !!novoRefresh,
+        gravacaoDoTokenNovo: novoRefresh ? (avisoToken ? `FALHOU — ${avisoToken}` : 'ok') : 'não precisou renovar',
+        usandoAccessGuardado: !novoRefresh,
+      });
+    }
+
     const st = await getImageVideoStatus(accessToken, videoId);
     return NextResponse.json(avisoToken ? { ...st, avisoToken } : st);
   } catch (e) {
