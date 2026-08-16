@@ -241,7 +241,7 @@ export function BreakingCard({ className = '' }: { className?: string }) {
 
       {/* legenda do card */}
       <div className="mt-3.5 flex flex-wrap items-center gap-1.5 px-0.5">
-        {['PNG em alta', '.webm animado', '16:9 e 9:16', '13 emissoras'].map((c) => (
+        {['PNG em alta', '.webm animado', '16:9 e 9:16', '14 emissoras'].map((c) => (
           <span
             key={c}
             className="rounded-[4px] border border-white/12 bg-white/[0.03] px-2 py-1 text-[9.5px] uppercase tracking-[0.14em] text-white/50"
@@ -341,7 +341,7 @@ const EDITIONS: Edition[] = [
     tag: 'Telejornais',
     headline: 'Você escreve a manchete do jornal da noite',
     deck:
-      '13 emissoras com manchete, tag do assunto, hora, local e ticker editáveis. Sai em PNG de alta ou em .webm com o relógio andando.',
+      '14 emissoras com manchete, tag do assunto, hora, local e ticker editáveis. Sai em PNG de alta ou em .webm com o relógio andando.',
     lede:
       'No modo tela verde o cenário inteiro sai em chroma key: só o gerador de caracteres fica de pé, pronto pra receber o seu vídeo por trás.',
     tone: '#b4413a',
@@ -359,7 +359,7 @@ const EDITIONS: Edition[] = [
     tag: 'Conversas & lives',
     headline: 'O print de WhatsApp sai do jeito que a história pede',
     deck:
-      'Conversa, chamada de vídeo, post, story, notificação e live animada — 40 modelos no total, do sticker de story à tela de bloqueio.',
+      'Conversa, chamada de vídeo, post, story, notificação e live animada — 41 modelos no total, do sticker de story à tela de bloqueio.',
     lede:
       'As lives exportam .webm com comentários rolando e reações subindo. Com o fundo verde ligado, é sobrepor no criativo e tirar o chroma.',
     tone: '#6d5a9e',

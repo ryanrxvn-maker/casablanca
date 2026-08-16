@@ -28,6 +28,7 @@ import NEWS_MSNBC from './model-news-msnbc';
 import NEWS_CNBC from './model-news-cnbc';
 import NEWS_GLOBAL from './model-news-global';
 import NEWS_NNN from './model-news-nnn';
+import NEWS_TVN24 from './model-news-tvn24';
 import NEWS_GLOBONEWS from './model-news-globonews';
 import NEWS_BANDNEWS from './model-news-bandnews';
 import NEWS_RECORD from './model-news-record';
@@ -80,6 +81,7 @@ export const MODELS: FakeModel[] = [
   ...NEWS_CNBC,
   ...NEWS_GLOBAL,
   ...NEWS_NNN,
+  ...NEWS_TVN24,
   // Brasil
   ...NEWS_CNNBR,
   ...NEWS_GLOBONEWS,

@@ -60,7 +60,7 @@ export function LandingV3() {
         items={[
           'Decupagem — o silêncio sai sozinho',
           'Camuflagem — duas trilhas no mesmo arquivo',
-          'FakePrint — 40 modelos de print',
+          'FakePrint — 41 modelos de print',
           'Gerador de SRT — legenda palavra por palavra',
           'Fila — segue rodando em segundo plano',
           'FakePrint — tela verde pronta pro chroma',
@@ -206,7 +206,7 @@ function Masthead() {
 
 const STATS = [
   { n: '11', label: 'ferramentas no ar' },
-  { n: '40', label: 'modelos de print' },
+  { n: '41', label: 'modelos de print' },
   { n: 'R$ 0', label: 'pra começar' },
 ];
 

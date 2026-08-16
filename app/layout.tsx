@@ -67,7 +67,7 @@ const label = Inter({
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
-  'Decupagem automática, camuflagem de áudio com selo por plataforma, 40 modelos de print de notícia, lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.';
+  'Decupagem automática, camuflagem de áudio com selo por plataforma, 41 modelos de print de notícia, lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

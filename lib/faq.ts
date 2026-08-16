@@ -32,7 +32,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'O que dá pra criar no FakePrint?',
-    a: 'O FakePrint tem 40 modelos de print para criativos: telejornais (13 emissoras), sites de notícia (11 layouts), conversa de WhatsApp e Instagram DM, chamada de vídeo, post do Instagram, tweet, comentários, stories, notificação de celular e lives. A prévia atualiza a cada tecla e o download sai em PNG de alta resolução. Telejornais e lives também exportam vídeo .webm animado, e o fundo pode sair em tela verde (chroma key) pra encaixar atrás no editor.',
+    a: 'O FakePrint tem 41 modelos de print para criativos: telejornais (14 emissoras), sites de notícia (11 layouts), conversa de WhatsApp e Instagram DM, chamada de vídeo, post do Instagram, tweet, comentários, stories, notificação de celular e lives. A prévia atualiza a cada tecla e o download sai em PNG de alta resolução. Telejornais e lives também exportam vídeo .webm animado, e o fundo pode sair em tela verde (chroma key) pra encaixar atrás no editor.',
   },
   {
     q: 'Como o Auto Edit gera legendas (SRT) alinhadas à copy?',

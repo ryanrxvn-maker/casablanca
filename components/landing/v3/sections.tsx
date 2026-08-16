@@ -121,7 +121,7 @@ const HIGHLIGHTS: Highlight[] = [
       </>
     ),
     lead:
-      'Telejornal, site de notícia, conversa de WhatsApp, chamada de vídeo, post e story do Instagram, notificação de celular e live. São 40 modelos: você preenche os campos e a manchete é sua.',
+      'Telejornal, site de notícia, conversa de WhatsApp, chamada de vídeo, post e story do Instagram, notificação de celular e live. São 41 modelos: você preenche os campos e a manchete é sua.',
     bullets: [
       'Prévia ao vivo: o print muda a cada tecla, e o que você vê é o PNG que baixa',
       'Tela verde em tudo que é cena — telejornal, site e live prontos pro chroma key',
@@ -298,7 +298,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'FakePrint',
-    desc: '40 modelos de print: telejornal, site, conversa, post, story e live.',
+    desc: '41 modelos de print: telejornal, site, conversa, post, story e live.',
     plan: 'free',
     icon: <IconFakePass size={20} />,
   },
@@ -585,7 +585,7 @@ export function PricingSection() {
               Pra sentir o corte. Sem cartão, sem prazo.
             </p>
             <ul className="mt-7 flex-1 space-y-2.5">
-              {['Decupagem', 'FakePrint (40 modelos, com Caixinha de Pergunta)', 'Compressor', 'Downloader', 'Histórico'].map(
+              {['Decupagem', 'FakePrint (41 modelos, com Caixinha de Pergunta)', 'Compressor', 'Downloader', 'Histórico'].map(
                 (f) => (
                   <Feat key={f} text={f} tone="#c8d684" />
                 ),
@@ -835,7 +835,7 @@ export function LandingFooter() {
         items={[
           'Decupagem automática',
           'Camuflagem de áudio',
-          'FakePrint · 40 modelos',
+          'FakePrint · 41 modelos',
           'Gerador de SRT',
           'Lipsync Video to Video',
           'Compressor',

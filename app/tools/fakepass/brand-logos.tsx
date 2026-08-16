@@ -203,6 +203,8 @@ export function BrandMark({ brand, size = 26 }: { brand: string; size?: number }
       return <Chip bg="#0a3a70" t="GN" size={size} />;
     case 'nnn':
       return <Chip bg="#12294d" t="NNN" size={size} />;
+    case 'tvn24':
+      return <Chip bg="#134a9e" t="tvn24" size={size} radius={size * 0.28} />;
     case 'globonews':
       return <GloboMark size={size} />;
     case 'band':
@@ -243,6 +245,7 @@ const GROUP_TO_BRAND: Record<string, string> = {
   CNBC: 'cnbc',
   'Global News': 'global',
   NNN: 'nnn',
+  TVN24: 'tvn24',
   'CNN Brasil': 'cnnbr',
   GloboNews: 'globonews',
   'Band News': 'band',
