@@ -42,9 +42,9 @@ const OAUTH_TOKEN_URL = 'https://api2.heygen.com/v1/oauth/token';
  *  não é segredo. O client do refresh tem que ser o MESMO que emitiu o token. */
 const OAUTH_CLIENT_ID = 'q2A2QRSke2LrFTPJhoDbHtXh';
 
-/** Cache do access token em memória do processo. `expires_in` costuma ser ~10
- *  dias, então isto poupa uma ida ao HeyGen por disparo sem risco de servir
- *  token vencido (guardamos 60s de folga). */
+/** Cache do access token em memória do processo. Medido: o refresh grant devolve
+ *  ~1h de validade (o `expires_at` de 10 dias do arquivo do CLI é do login
+ *  inicial, não da renovação). Guardamos 60s de folga. */
 let tokenCache: { access: string; expiraEm: number } | null = null;
 
 export type RefreshResult = {
@@ -69,10 +69,9 @@ export type RefreshResult = {
  * O que fica gravado no campo `heygen_oauth_refresh`.
  *
  * Era só o refresh token, e isso obrigava CADA instância fria a renovar — e
- * cada renovação queima o refresh anterior. Medido no arquivo do CLI: o access
- * vale ~10 dias (`expires_at` 10 dias à frente). Guardando access + validade
- * junto, a renovação acontece uma vez a cada 10 dias em vez de a cada cold
- * start, e o risco de perder o refresh some junto.
+ * cada renovação queima o refresh anterior (rotação com uso ÚNICO). Guardando
+ * o access junto, todas as instâncias reusam o mesmo enquanto ele vale (~1h),
+ * em vez de cada uma queimar um refresh no cold start.
  *
  * Compatível com o que já está gravado: string pura = refresh sozinho, que é
  * também o que o usuário cola na mão em /configuracoes/api.
@@ -98,6 +97,12 @@ export function empacotarCredencial(c: Credencial): string {
   return JSON.stringify({ refresh: c.refresh, access: c.access, exp: c.exp });
 }
 
+/** Quanto o access vale de verdade. Medido: o refresh grant devolve ~1h — o
+ *  `expires_at` de 10 dias que aparece no arquivo do CLI é do login inicial,
+ *  não da renovação. Confundir os dois faz o app achar que tem folga de dias
+ *  quando tem de minutos. */
+export const MARGEM_ACCESS_MS = 5 * 60_000;
+
 /**
  * Troca o refresh token por um access token.
  *
@@ -121,10 +126,10 @@ export async function accessTokenDoRefresh(
   }
 
   const cred = lerCredencial(guardado);
-  // ACCESS AINDA VÁLIDO (dura ~10 dias): usa e não encosta no refresh. É o que
-  // impede o token de ser queimado a cada instância fria — a causa de "tenho
-  // que fazer login toda vez". Margem de 5min pra não servir token na virada.
-  if (cred.access && cred.exp && cred.exp > agora + 5 * 60_000) {
+  // ACCESS AINDA VÁLIDO (~1h): usa e não encosta no refresh. É o que impede o
+  // token de ser queimado a cada instância fria — a causa de "tenho que fazer
+  // login toda vez". Margem de 5min pra não servir token na virada.
+  if (cred.access && cred.exp && cred.exp > agora + MARGEM_ACCESS_MS) {
     tokenCache = { access: cred.access, expiraEm: cred.exp };
     return { access: cred.access, novoRefresh: null, origem: 'banco' };
   }
@@ -145,21 +150,28 @@ export async function accessTokenDoRefresh(
   let r = await trocar(usado);
   let j = await r.json().catch(() => null);
 
-  // invalid_grant costuma significar "esse refresh já foi trocado" — e em
-  // serverless quem trocou pode ter sido outra instância há segundos. Relê e
-  // tenta UMA vez com o que está gravado agora.
+  // invalid_grant = "esse refresh já foi trocado". O HeyGen usa ROTAÇÃO com uso
+  // ÚNICO, e em serverless várias instâncias acordam juntas quando o access
+  // (~1h) vence: uma troca e as outras chegam com papel velho. Quem perdeu a
+  // corrida não pode desistir — a vencedora já gravou um access bom há
+  // segundos. Relê com espera crescente antes de dizer que o login morreu.
   if ((!r.ok || !j?.access_token) && relerDoBanco) {
-    const frescoRaw = await relerDoBanco().catch(() => null);
-    const fresco = frescoRaw ? lerCredencial(frescoRaw) : null;
-    // outra instância pode ter renovado e deixado um access válido pronto
-    if (fresco?.access && fresco.exp && fresco.exp > agora + 5 * 60_000) {
-      tokenCache = { access: fresco.access, expiraEm: fresco.exp };
-      return { access: fresco.access, novoRefresh: null, origem: 'banco' };
-    }
-    if (fresco?.refresh && fresco.refresh !== usado) {
-      usado = fresco.refresh;
-      r = await trocar(usado);
-      j = await r.json().catch(() => null);
+    for (const espera of [0, 1500, 3000]) {
+      if (espera) await new Promise((res) => setTimeout(res, espera));
+      const frescoRaw = await relerDoBanco().catch(() => null);
+      const fresco = frescoRaw ? lerCredencial(frescoRaw) : null;
+      // a vencedora deixou um access pronto: usa e nem renova
+      if (fresco?.access && fresco.exp && fresco.exp > Date.now() + MARGEM_ACCESS_MS) {
+        tokenCache = { access: fresco.access, expiraEm: fresco.exp };
+        return { access: fresco.access, novoRefresh: null, origem: 'banco' };
+      }
+      // ou pelo menos um refresh diferente do que já queimou
+      if (fresco?.refresh && fresco.refresh !== usado) {
+        usado = fresco.refresh;
+        r = await trocar(usado);
+        j = await r.json().catch(() => null);
+        if (r.ok && j?.access_token) break;
+      }
     }
   }
 
