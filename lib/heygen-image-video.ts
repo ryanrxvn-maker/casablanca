@@ -14,16 +14,56 @@
  *    escolhe, e como a variante aceita `motion_prompt` (que o Avatar III não
  *    suporta) ela roda em IV+. Ou seja: não dá pra pedir III, e toda cena paga a
  *    faixa mais cara — inclusive as que só falam pra câmera.
- * 2. **Cobra do tier de API**, não do plano. A doc oficial de pricing: "When you
- *    authenticate with an API Key you are billed under the API tier" — saldo USD
- *    pay-as-you-go, à parte, e o crédito do plano não migra. O resto do
- *    Pilot/Hey Auto roda pela sessão do Chrome justamente pra queimar o plano.
+ * 2. **Autentica por OAuth (Bearer), de propósito.** A doc de pricing separa os
+ *    tiers: "when you authenticate with an API Key you are billed under the API
+ *    tier" (saldo USD à parte, top-up mín. $5), enquanto o OAuth usa
+ *    subscription credits. Como a regra aqui é nunca pôr dinheiro em saldo de
+ *    API, este caminho vai de Bearer. O `refresh_token` renova sozinho.
  * 3. **Take único.** Sem avatar persistente, cada geração re-envia a imagem. Por
  *    isso o modo gera a copy inteira de uma vez em vez de picotar em ~20s —
  *    menos corte, menos overhead e menos re-upload.
  */
 
 const API_BASE = 'https://api.heygen.com';
+/** Endpoint de renovação do OAuth (extraído do binário do CLI oficial). Note
+ *  que ele mora na **api2** — mesmo host da extensão — enquanto a geração em si
+ *  mora na api.heygen.com. */
+const OAUTH_TOKEN_URL = 'https://api2.heygen.com/v1/oauth/token';
+
+/** Cache do access token em memória do processo. `expires_in` costuma ser ~10
+ *  dias, então isto poupa uma ida ao HeyGen por disparo sem risco de servir
+ *  token vencido (guardamos 60s de folga). */
+let tokenCache: { access: string; expiraEm: number } | null = null;
+
+/**
+ * Troca o refresh token por um access token.
+ *
+ * É isto que faz o modo imagem cobrar do **crédito do plano** em vez do tier de
+ * API: a doc da HeyGen separa os dois — "when you authenticate with an API Key
+ * you are billed under the API tier" (saldo USD à parte), enquanto o OAuth usa
+ * subscription credits. Como o Silas não quer saldo em API, o caminho é este.
+ */
+export async function accessTokenDoRefresh(refreshToken: string): Promise<string> {
+  const agora = Date.now();
+  if (tokenCache && tokenCache.expiraEm > agora + 60_000) return tokenCache.access;
+
+  const r = await fetch(OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j?.access_token) {
+    throw new Error(
+      'Não consegui renovar o OAuth do HeyGen: ' +
+        describeError(r.status, j) +
+        '. Rode `heygen auth login --oauth` e cole o novo refresh token em /configuracoes/api.',
+    );
+  }
+  const ttl = Number(j.expires_in) > 0 ? Number(j.expires_in) * 1000 : 3600_000;
+  tokenCache = { access: j.access_token, expiraEm: agora + ttl };
+  return j.access_token;
+}
 
 export type ImageInput =
   | { type: 'url'; url: string }
@@ -52,8 +92,10 @@ export type ImageVideoStatus = {
   error: string | null;
 };
 
-function headers(apiKey: string): Record<string, string> {
-  return { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' };
+/** Bearer do OAuth — NÃO `X-Api-Key`. A escolha é de cobrança: key cai no tier
+ *  de API (saldo USD à parte) e bearer cai no crédito do plano. */
+function headers(accessToken: string): Record<string, string> {
+  return { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 }
 
 /** Erro da API em texto legível — sem isto o usuário via "[object Object]". */
@@ -69,7 +111,7 @@ function describeError(status: number, body: any): string {
 }
 
 export async function createImageVideo(
-  apiKey: string,
+  accessToken: string,
   p: CreateImageVideoParams,
 ): Promise<{ videoId: string }> {
   if (!p.voiceId) {
@@ -95,7 +137,7 @@ export async function createImageVideo(
 
   const r = await fetch(`${API_BASE}/v3/videos`, {
     method: 'POST',
-    headers: headers(apiKey),
+    headers: headers(accessToken),
     body: JSON.stringify(body),
   });
   const json = await r.json().catch(() => null);
@@ -107,12 +149,12 @@ export async function createImageVideo(
 }
 
 export async function getImageVideoStatus(
-  apiKey: string,
+  accessToken: string,
   videoId: string,
 ): Promise<ImageVideoStatus> {
   const r = await fetch(`${API_BASE}/v3/videos/${encodeURIComponent(videoId)}`, {
     method: 'GET',
-    headers: headers(apiKey),
+    headers: headers(accessToken),
   });
   const json = await r.json().catch(() => null);
   if (!r.ok) throw new Error('Falha ao consultar o vídeo: ' + describeError(r.status, json));

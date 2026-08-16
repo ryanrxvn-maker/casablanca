@@ -19,6 +19,7 @@ type Service =
   | 'assemblyai'
   | 'elevenlabs'
   | 'heygen'
+  | 'heygen_oauth'
   | 'replicate'
   | 'groq';
 const VALID_SERVICES: Service[] = [
@@ -26,6 +27,7 @@ const VALID_SERVICES: Service[] = [
   'assemblyai',
   'elevenlabs',
   'heygen',
+  'heygen_oauth',
   'replicate',
   'groq',
 ];
@@ -35,6 +37,7 @@ const COL_KEY: Record<Service, string> = {
   assemblyai: 'assemblyai_key',
   elevenlabs: 'elevenlabs_key',
   heygen: 'heygen_key',
+  heygen_oauth: 'heygen_oauth_refresh',
   replicate: 'replicate_key',
   groq: 'groq_key',
 };
@@ -43,6 +46,7 @@ const COL_LAST4: Record<Service, string> = {
   assemblyai: 'assemblyai_last4',
   elevenlabs: 'elevenlabs_last4',
   heygen: 'heygen_last4',
+  heygen_oauth: 'heygen_oauth_last4',
   replicate: 'replicate_last4',
   groq: 'groq_last4',
 };
@@ -65,7 +69,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from('user_api_keys')
       .select(
-        'anthropic_last4, assemblyai_last4, elevenlabs_last4, heygen_last4, replicate_last4, groq_last4, updated_at, anthropic_key, assemblyai_key, elevenlabs_key, heygen_key, replicate_key, groq_key',
+        'anthropic_last4, assemblyai_last4, elevenlabs_last4, heygen_last4, heygen_oauth_last4, replicate_last4, groq_last4, updated_at, anthropic_key, assemblyai_key, elevenlabs_key, heygen_key, heygen_oauth_refresh, replicate_key, groq_key',
       )
       .eq('user_id', user.id)
       .maybeSingle();
@@ -88,6 +92,12 @@ export async function GET() {
       heygen: {
         configured: !!data?.heygen_key,
         last4: data?.heygen_last4 ?? null,
+      },
+      // OAuth do HeyGen — usado SÓ pelo modo imagem (cobra do crédito do
+      // plano, ao contrário da key acima, que cobra do tier de API).
+      heygen_oauth: {
+        configured: !!data?.heygen_oauth_refresh,
+        last4: data?.heygen_oauth_last4 ?? null,
       },
       replicate: {
         configured: !!data?.replicate_key,

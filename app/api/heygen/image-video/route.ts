@@ -4,6 +4,7 @@ import { requireTier } from '@/lib/require-tier';
 import {
   createImageVideo,
   getImageVideoStatus,
+  accessTokenDoRefresh,
   type ImageInput,
 } from '@/lib/heygen-image-video';
 
@@ -13,11 +14,18 @@ import {
  * POST /api/heygen/image-video   → cria o vídeo, devolve { videoId }
  * GET  /api/heygen/image-video?videoId=...  → status + url quando pronto
  *
- * Por que é rota de SERVIDOR e não vai pela extensão como o resto: a variante
- * `image` só existe na API pública (`/v3/videos`), que autentica por
- * `X-Api-Key` — e a key nunca pode ir pro browser. O preço disso está no
- * cabeçalho de lib/heygen-image-video.ts: cobra do tier de API (saldo USD à
- * parte), não do plano.
+ * Por que é rota de SERVIDOR e não vai pela extensão como TODO o resto: medido,
+ * a api2 (onde a extensão autentica) NÃO tem endpoint de animar imagem — 404 em
+ * /v3/videos, /v1/talking_photo e /v2/photo_avatar/*; o único submit de lá exige
+ * `avatar_id`. E a API pública recusa cookie de sessão (401). Não é escolha de
+ * arquitetura: a variante só existe fora do alcance da extensão.
+ *
+ * Autentica por **OAuth (Bearer)**, não por API key: a key cobra do tier de API
+ * (saldo USD à parte) e o OAuth cobra do crédito do plano. Guardamos o refresh
+ * token; o access renova sozinho.
+ *
+ * ⚠ Isto vale SÓ pro modo imagem. O disparo normal do Pilot/Hey Auto continua
+ * inteiro na extensão, como sempre — nada daquele caminho foi tocado.
  */
 
 export const runtime = 'nodejs';
@@ -36,8 +44,9 @@ export async function POST(req: Request) {
       unlockTools: ['/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
-    const keyResult = await getUserKey('heygen');
+    const keyResult = await getUserKey('heygen_oauth');
     if ('response' in keyResult) return keyResult.response;
+    const accessToken = await accessTokenDoRefresh(keyResult.key);
 
     let form: FormData;
     try {
@@ -82,7 +91,7 @@ export async function POST(req: Request) {
       return jsonError('Suba uma imagem (ou informe uma URL HTTPS).', 400);
     }
 
-    const { videoId } = await createImageVideo(keyResult.key, {
+    const { videoId } = await createImageVideo(accessToken, {
       image,
       voiceId,
       script,
@@ -102,13 +111,14 @@ export async function GET(req: Request) {
       unlockTools: ['/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
-    const keyResult = await getUserKey('heygen');
+    const keyResult = await getUserKey('heygen_oauth');
     if ('response' in keyResult) return keyResult.response;
 
     const videoId = new URL(req.url).searchParams.get('videoId');
     if (!videoId) return jsonError('Falta videoId.', 400);
 
-    const st = await getImageVideoStatus(keyResult.key, videoId);
+    const accessToken = await accessTokenDoRefresh(keyResult.key);
+    const st = await getImageVideoStatus(accessToken, videoId);
     return NextResponse.json(st);
   } catch (e) {
     return jsonError((e as Error)?.message || 'Erro ao consultar o vídeo.');

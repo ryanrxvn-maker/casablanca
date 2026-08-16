@@ -22,6 +22,7 @@ type Service =
   | 'assemblyai'
   | 'elevenlabs'
   | 'heygen'
+  | 'heygen_oauth'
   | 'replicate'
   | 'groq';
 
@@ -30,6 +31,7 @@ const COLUMN_BY_SERVICE: Record<Service, string> = {
   assemblyai: 'assemblyai_key',
   elevenlabs: 'elevenlabs_key',
   heygen: 'heygen_key',
+  heygen_oauth: 'heygen_oauth_refresh',
   replicate: 'replicate_key',
   groq: 'groq_key',
 };
@@ -39,6 +41,7 @@ const LABEL_BY_SERVICE: Record<Service, string> = {
   assemblyai: 'AssemblyAI',
   elevenlabs: 'ElevenLabs',
   heygen: 'HeyGen',
+  heygen_oauth: 'HeyGen OAuth (refresh token)',
   replicate: 'Replicate',
   groq: 'Groq (Whisper)',
 };
