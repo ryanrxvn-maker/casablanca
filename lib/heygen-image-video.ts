@@ -29,11 +29,18 @@ const API_BASE = 'https://api.heygen.com';
  *  que ele mora na **api2** — mesmo host da extensão — enquanto a geração em si
  *  mora na api.heygen.com. */
 const OAUTH_TOKEN_URL = 'https://api2.heygen.com/v1/oauth/token';
-/** O endpoint exige `client_id` — sem ele devolve `invalid_client` (401), e não
- *  "refresh token inválido", o que manda o diagnóstico pro lado errado. Valor
- *  extraído do binário do CLI oficial, que é quem emitiu o refresh token: o
- *  client do token e o da renovação têm que ser o mesmo. */
-const OAUTH_CLIENT_ID = 'heygen-cli';
+/** O endpoint exige `client_id` — sem ele devolve `invalid_client`, e não
+ *  "refresh token inválido", o que manda o diagnóstico pro lado errado.
+ *
+ *  Este valor NÃO estava no binário como string legível: veio da URL que o
+ *  próprio CLI monta em `heygen auth login --oauth` ("Open this URL manually to
+ *  continue: .../oauth/authorize?client_id=..."). Palpites tipo `heygen-cli`
+ *  são recusados com "The client does not exist on this server". Confirmado
+ *  contra /v1/oauth/device_authorization, que devolveu device_code com ele.
+ *
+ *  É um client PÚBLICO (PKCE) — aparece na barra do navegador durante o login,
+ *  não é segredo. O client do refresh tem que ser o MESMO que emitiu o token. */
+const OAUTH_CLIENT_ID = 'q2A2QRSke2LrFTPJhoDbHtXh';
 
 /** Cache do access token em memória do processo. `expires_in` costuma ser ~10
  *  dias, então isto poupa uma ida ao HeyGen por disparo sem risco de servir
@@ -52,56 +59,24 @@ export async function accessTokenDoRefresh(refreshToken: string): Promise<string
   const agora = Date.now();
   if (tokenCache && tokenCache.expiraEm > agora + 60_000) return tokenCache.access;
 
-  // O endpoint não é documentado, então a forma exata do corpo veio do binário
-  // do CLI. `client_id` sozinho devolveu `invalid_client`, e as candidatas
-  // (`heygen-cli`, `heygen-cli/dev`) ficam coladas no binário só por terem o
-  // mesmo tamanho — adjacência ali não prova nada. Em vez de um deploy por
-  // palpite, tentamos as formas plausíveis em ordem e paramos na primeira que
-  // autenticar. Só o corpo muda; nada aqui reenvia geração.
-  const tentativas: Array<{ rotulo: string; corpo: Record<string, string> }> = [
-    { rotulo: 'form+client_id', corpo: { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID } },
-    { rotulo: 'form+client_id=dev', corpo: { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: 'heygen-cli/dev' } },
-    { rotulo: 'form sem client_id', corpo: { grant_type: 'refresh_token', refresh_token: refreshToken } },
-  ];
-  let r: Response | null = null;
-  let j: any = null;
-  const falhas: string[] = [];
-  for (const t of tentativas) {
-    r = await fetch(OAUTH_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'heygen-cli/dev' },
-      body: new URLSearchParams(t.corpo),
-    });
-    j = await r.json().catch(() => null);
-    if (r.ok && j?.access_token) {
-      console.log(`[heygen-oauth] refresh OK via "${t.rotulo}"`);
-      break;
-    }
-    falhas.push(`${t.rotulo}: ${describeError(r.status, j)}`);
-    j = null;
-  }
-  // JSON puro como última tentativa (alguns servidores só aceitam assim).
-  if (!j?.access_token) {
-    r = await fetch(OAUTH_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'heygen-cli/dev' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: OAUTH_CLIENT_ID }),
-    });
-    const jj = await r.json().catch(() => null);
-    if (r.ok && jj?.access_token) {
-      console.log('[heygen-oauth] refresh OK via "json+client_id"');
-      j = jj;
-    } else {
-      falhas.push(`json+client_id: ${describeError(r.status, jj)}`);
-    }
-  }
-  if (!j?.access_token) {
+  const r = await fetch(OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: OAUTH_CLIENT_ID,
+    }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j?.access_token) {
     throw new Error(
-      'Não consegui renovar o OAuth do HeyGen. Tentativas — ' +
-        falhas.join(' | ') +
-        '. Se todas deram invalid_client, o refresh token pode ter sido emitido por outro client: rode `heygen auth login --oauth` de novo e recole o token em /configuracoes/api.',
+      'Não consegui renovar o OAuth do HeyGen: ' +
+        describeError(r.status, j) +
+        '. Rode `heygen auth login --oauth` e cole o novo refresh token em /configuracoes/api.',
     );
   }
+
   const ttl = Number(j.expires_in) > 0 ? Number(j.expires_in) * 1000 : 3600_000;
   tokenCache = { access: j.access_token, expiraEm: agora + ttl };
   return j.access_token;
