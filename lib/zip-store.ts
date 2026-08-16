@@ -296,8 +296,20 @@ export async function pruneZipStore(opts: {
   }
 }
 
-/** Limpa todos os blobs de um taskId (cleanup após batch completar). */
-export async function deletePrefix(prefix: string): Promise<number> {
+/**
+ * Limpa todos os blobs de um taskId (cleanup após batch completar).
+ *
+ * ⚠ `preservar` existe porque nem tudo sob `pilot:<taskId>:` é RESULTADO. O
+ * frame do modo imagem (`:img:<i>`) é INSUMO — é ele que a cena anima. A purga
+ * por geração apagava o frame junto com os takes velhos e, logo em seguida, o
+ * disparo não achava a imagem e a cena morria "sem imagem" (medido 16/08 no
+ * AD43: os três frames sumiam entre o clique e o submit). Take velho tem que
+ * sumir mesmo; o frame, não.
+ */
+export async function deletePrefix(
+  prefix: string,
+  opts: { preservar?: RegExp } = {},
+): Promise<number> {
   const db = await openDB();
   return runTx<number>(db, 'readwrite', (store, resolve, reject) => {
     let count = 0;
@@ -306,7 +318,8 @@ export async function deletePrefix(prefix: string): Promise<number> {
       const c = (e.target as IDBRequest).result as IDBCursorWithValue | null;
       if (c) {
         const v = c.value as ZipRecord;
-        if (v.key.startsWith(prefix)) { c.delete(); count++; }
+        const guardar = opts.preservar?.test(v.key) ?? false;
+        if (v.key.startsWith(prefix) && !guardar) { c.delete(); count++; }
         c.continue();
       } else {
         resolve(count);
@@ -315,3 +328,7 @@ export async function deletePrefix(prefix: string): Promise<number> {
     cur.onerror = () => reject(cur.error);
   });
 }
+
+/** O que a purga por GERAÇÃO nunca pode levar: insumo do disparo, não
+ *  resultado dele. Hoje é só o frame do modo imagem. */
+export const INSUMO_DO_DISPARO = /:img:/;

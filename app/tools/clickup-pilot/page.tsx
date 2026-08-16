@@ -3205,8 +3205,9 @@ function ClickUpPilotInner() {
     // então nunca mais mistura. Ver [[project_disparo_genid_isolacao]].
     const genId = newPilotGenId();
     try {
-      const { deletePrefix } = await import('@/lib/zip-store');
-      const purged = await deletePrefix(`pilot:${taskId}:`);
+      const { deletePrefix, INSUMO_DO_DISPARO } = await import('@/lib/zip-store');
+      // preserva o FRAME do modo imagem: é insumo da cena, não take velho
+      const purged = await deletePrefix(`pilot:${taskId}:`, { preservar: INSUMO_DO_DISPARO });
       if (purged > 0) console.log(`[clickup-pilot] geração nova ${genId} (task=${taskId}): limpei ${purged} artefato(s) por-parte de gerações anteriores (isolação de avatar)`);
     } catch (e) { console.warn('[clickup-pilot] purge de geração anterior falhou (segue mesmo assim — a geração nova escreve em namespace próprio):', e); }
 
@@ -4040,8 +4041,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!genId) {
       genId = newPilotGenId();
       try {
-        const { deletePrefix } = await import('@/lib/zip-store');
-        const purged = await deletePrefix(`pilot:${taskId}:`);
+        const { deletePrefix, INSUMO_DO_DISPARO } = await import('@/lib/zip-store');
+        // preserva o FRAME do modo imagem: é insumo da cena, não take velho
+        const purged = await deletePrefix(`pilot:${taskId}:`, { preservar: INSUMO_DO_DISPARO });
         console.warn(`[pilot resume] batch LEGADO sem genId — purguei ${purged} artefato(s) por-parte possivelmente contaminado(s) e vou RE-BAIXAR do HeyGen pelos videoIds atuais (avatar certo) sob genId ${genId}`);
       } catch (e) { console.warn('[pilot resume] purge do cache legado falhou (segue re-baixando do HeyGen mesmo assim):', e); }
       // Grava o genId no state pra sobreviver F5 e blindar os próximos RETOMAR.
