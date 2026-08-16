@@ -480,6 +480,7 @@ type VAResumeSnapshot = {
   usesTextEngine?: boolean;          // congela o roteamento (tasks[] some no restart)
   avatarChoices?: Record<string, unknown>;  // chaves vaRoleKey desta task
   voiceChoices?: Record<string, unknown>;
+  motionPrompts?: Record<string, unknown>;  // APPLY CUSTOM MOTION (liga Avatar IV)
   transcript?: unknown;              // vaTranscript[fileId] (multi-papel)
   roleTexts?: Record<string, string>;       // vaRoleText[`${fileId}:${ri}`]
   fileId?: string | null;            // linkAdFileId (chave do transcript/roleText)
@@ -2718,6 +2719,7 @@ function ClickUpPilotInner() {
       const taPatch: Record<string, any> = {};
       const avChoices: Record<string, unknown> = {};
       const voChoices: Record<string, unknown> = {};
+      const moPrompts: Record<string, unknown> = {};
       const adUrls: Record<string, string> = {};
       const transcripts: Record<string, unknown> = {};
       const rTexts: Record<string, string> = {};
@@ -2734,6 +2736,7 @@ function ClickUpPilotInner() {
         };
         Object.assign(avChoices, snap.avatarChoices || {});
         Object.assign(voChoices, snap.voiceChoices || {});
+        Object.assign(moPrompts, snap.motionPrompts || {});
         if (snap.adUrl) adUrls[taskId] = snap.adUrl;
         if (snap.fileId && snap.transcript) transcripts[snap.fileId] = snap.transcript;
         Object.assign(rTexts, snap.roleTexts || {});
@@ -2746,6 +2749,7 @@ function ClickUpPilotInner() {
         setTaskAnalyses((prev) => ({ ...taPatch, ...prev }) as typeof prev);
         setVaAvatarChoice((prev) => ({ ...(avChoices as typeof prev), ...prev }));
         setVaVoiceChoice((prev) => ({ ...(voChoices as typeof prev), ...prev }));
+        setVaMotionPrompt((prev) => ({ ...(moPrompts as typeof prev), ...prev }));
         setVaAdUrl((prev) => ({ ...adUrls, ...prev }));
         setVaTranscript((prev) => ({ ...(transcripts as typeof prev), ...prev }));
         setVaRoleText((prev) => ({ ...rTexts, ...prev }));
@@ -4817,6 +4821,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             usesTextEngine: vaUsesTextEngine(id),
             avatarChoices: pick(vaAvatarChoice as Record<string, unknown>, `${id}:`),
             voiceChoices: pick(vaVoiceChoice as Record<string, unknown>, `${id}:`),
+            motionPrompts: pick(vaMotionPrompt as Record<string, unknown>, `${id}:`),
             fileId,
             transcript: fileId ? vaTranscript[fileId] : undefined,
             roleTexts: fileId
@@ -7017,6 +7022,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA (Studio): voz custom por avatar. Key: `${taskId}:${avaCode}` →
    *  {id,name} ou null = usar a voz do proprio avatar (Mirror voice). */
   const [vaVoiceChoice, setVaVoiceChoice] = useState<Record<string, { id: string; name: string } | null>>({});
+  /** VA: APPLY CUSTOM MOTION — prompt de movimento por avatar/papel (o campo do
+   *  HeyGen). Preenchido = a cena vai no **Avatar IV** (o III nao tem motion);
+   *  vazio = Avatar III normal. Mesma key das outras escolhas (vaRoleKey). */
+  const [vaMotionPrompt, setVaMotionPrompt] = useState<Record<string, string>>({});
   /** VA MULTI-LOCUTOR: inverte o mapeamento locutor↔papel de uma variacao
    *  (caso a heuristica 'quem fala mais = principal' erre).
    *  Key: `${taskId}:${avaCode}` → true = invertido. */
@@ -7420,6 +7429,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         usesTextEngine: vaUsesTextEngine(taskId),  // congela o roteamento (tasks[] some no restart)
         avatarChoices: pick(vaAvatarChoice as Record<string, unknown>, tid),
         voiceChoices: pick(vaVoiceChoice as Record<string, unknown>, tid),
+        motionPrompts: pick(vaMotionPrompt as Record<string, unknown>, tid),
         fileId,
         transcript: fileId ? vaTranscript[fileId] : undefined,
         roleTexts,
@@ -7599,13 +7609,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const voiceId = roleVoiceId !== undefined && roleVoiceId !== null
             ? roleVoiceId
             : (avFromId ? voiceByAva[avFromId.avaCode] : null);
-          console.log(`[VA dispatch ${label}] avatarId=${avatarId} voiceId=${voiceId || '(default)'}`);
+          // APPLY CUSTOM MOTION: mesma regra da rota de texto — prompt preenchido
+          // sobe pro Avatar IV, que e o unico que aceita motion.
+          const motionPrompt = avFromId ? (vaMotionPrompt[`${taskId}:${avFromId.avaCode}`] || '').trim() : '';
+          console.log(`[VA dispatch ${label}] avatarId=${avatarId} voiceId=${voiceId || '(default)'}${motionPrompt ? ' motion=ON (Avatar IV)' : ''}`);
           let job;
           try {
             job = await processJob({
               file, avatarId,
               title: `${adNameClean}_${label}`,
-              engine: 'iii', orientation: 'portrait',
+              engine: motionPrompt ? 'iv' : 'iii', orientation: 'portrait',
+              motionPrompt: motionPrompt || undefined,
               voiceMirroring: true,
               voiceId: voiceId || undefined,
             }, { onProgress: (stage: string) => console.log(`[VA dispatch ${label}] ${stage}`) });
@@ -7839,6 +7853,11 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         if (batchCancelRef.current[taskId]) throw new Error('cancelado');
         const choice = vaAvatarChoice[`${taskId}:${av.avaCode}`]!;
         const voiceId = vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id || undefined;
+        // APPLY CUSTOM MOTION: prompt preenchido => a cena precisa de movimento
+        // (mexer a gelatina, espremer o limao...) e so o Avatar IV/V faz isso.
+        // Vazio => Avatar III, que e mais barato e nao inventa gesto.
+        const motionPrompt = (vaMotionPrompt[`${taskId}:${av.avaCode}`] || '').trim();
+        const engineKey: 'iii' | 'iv' = motionPrompt ? 'iv' : 'iii';
         const filename = `${adNameClean}-${av.avaCode}.mp4`;
         const partBlobs: Blob[] = [];
         let avError: string | null = null;
@@ -7852,7 +7871,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
             // só acontece pra MESMO avatar/voz/texto. Disparo com AVATAR DIFERENTE
             // = hash diferente = título diferente = NÃO casa com o antigo = gera o
             // novo. Cada disparo fica isolado, sem misturar avatares de runs antigas.
-            const partHash = shortHash(`${part.text}|${choice.id}|${voiceId || ''}`);
+            // motionPrompt entra no hash: mudar o movimento tem que gerar de novo,
+            // senao o cache/recuperacao devolve o video ANTIGO sem o gesto.
+            const partHash = shortHash(`${part.text}|${choice.id}|${voiceId || ''}|${motionPrompt}`);
             const heygenTitle = `${adNameClean}_${av.avaCode}_${part.label}_${partHash}`;
             const partCacheKey = `va:${taskId}:part:${label}@${partHash}`;
             let partBytes: Uint8Array | null = null;
@@ -7905,7 +7926,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     avatarId: choice.id,
                     voiceId,
                     title: heygenTitle,
-                    engine: 'iii', orientation: 'portrait',
+                    engine: engineKey, orientation: 'portrait',
+                    motionPrompt: motionPrompt || undefined,
                   }, { onProgress: (stage: string) => console.log(`[VA-texto ${label} t${attempt}] ${stage}`) });
                   if (!job.videoId) throw new Error('processJob nao retornou videoId');
                   upsertPart(label, { videoId: job.videoId, videoStatus: 'pending', error: null });
@@ -10464,6 +10486,48 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     />
                                                   </div>
                                                 </div>
+                                                {/* APPLY CUSTOM MOTION — o campo de movimento do HeyGen.
+                                                    Preenchido = a cena vai no Avatar IV (o III nao aceita
+                                                    motion). Vazio = Avatar III, mais barato. */}
+                                                {(() => {
+                                                  const motion = vaMotionPrompt[choiceKey] || '';
+                                                  const on = !!motion.trim();
+                                                  return (
+                                                    <div className="mt-2">
+                                                      <div className="mb-1 flex items-center gap-2">
+                                                        <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">
+                                                          Apply Custom Motion
+                                                        </div>
+                                                        <span
+                                                          className={
+                                                            'mono rounded-full border px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest ' +
+                                                            (on
+                                                              ? 'border-violet-400/60 bg-violet-500/20 text-violet-200'
+                                                              : 'border-white/10 bg-white/5 text-text-muted')
+                                                          }
+                                                          title={on
+                                                            ? 'Com prompt de movimento a cena sobe pro Avatar IV — e o unico que anima o gesto'
+                                                            : 'Sem prompt a cena vai no Avatar III (mais barato, sem gesto inventado)'}
+                                                        >
+                                                          {on ? 'Avatar IV' : 'Avatar III'}
+                                                        </span>
+                                                      </div>
+                                                      <textarea
+                                                        value={motion}
+                                                        onChange={(e) => setVaMotionPrompt((prev) => ({ ...prev, [choiceKey]: e.target.value }))}
+                                                        disabled={pickersLocked}
+                                                        rows={2}
+                                                        placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
+                                                        className="w-full resize-y rounded-[8px] border border-white/10 bg-black/30 px-2.5 py-2 text-[11px] leading-snug text-text placeholder:text-text-muted/60 focus:border-violet-400/50 focus:outline-none disabled:opacity-50"
+                                                      />
+                                                      <div className="mt-1 text-[9.5px] leading-tight text-text-muted">
+                                                        So pra cena com acao (mexer, despejar, espremer, ninar). Em acao curta,
+                                                        peca o gesto <b>uma vez no comeco</b> e a fala solta depois — senao o avatar
+                                                        repete o movimento o video inteiro.
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })()}
                                                 {/* PAINEL 👁 ROXO — transcrição SÓ das falas deste papel */}
                                                 {vaTranscriptOpen[`${a.taskId}:${av.avaCode}#${ri}`] ? (() => {
                                                   const trFileId = a.vaBriefing!.linkAdFileId;
