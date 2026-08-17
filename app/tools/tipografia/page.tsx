@@ -532,6 +532,15 @@ function TipografiaInner() {
       pushHistory();
       if (lockedBlocks.includes(blockId)) {
         setLockedBlocks((prev) => prev.filter((id) => id !== blockId));
+        // DESCONGELAR de verdade: sem apagar o override, o bloco continuava
+        // preso ao estilo congelado pra sempre — o perBlock vence o global, e
+        // nenhum "aplicar a todas" conseguia mais alcançá-lo. O cadeado virava
+        // via de mão única.
+        setBlockStyles((prev) => {
+          if (!prev[blockId]) return prev;
+          const { [blockId]: _descartado, ...resto } = prev;
+          return resto;
+        });
         return;
       }
       setBlockStyles((prev) => ({
