@@ -1348,14 +1348,20 @@ const TRANSCRIBE_AUDIO_BUDGET_BYTES = 3_800_000;
 /**
  * Calcula o MAIOR bitrate de audio (kbps) que ainda cabe no budget pra dada
  * duracao. Audio melhor = ASR mais preciso (menos erro de marca, timestamps
- * mais confiaveis). Vai de 12kbps (videos longos, ~40min) ate 128kbps
+ * mais confiaveis). Vai de 12kbps (videos longos, ~40min) ate 64kbps
  * (videos curtos), onde a qualidade ja e' excelente pra fala.
+ *
+ * ⚠ O teto e' 64, nao 128: o encode roda com `-vbr on`, entao o `-b:a` e' uma
+ * MEDIA, nao um limite — audio denso estoura o nominal. Um AD de 3:46 saiu com
+ * 4.3MB pedindo 128k (nominal 3.6MB) e bateu no limite de 4.4MB do servidor.
+ * Em mono 16kHz, opus ja e' transparente pra fala bem antes de 64k, entao
+ * baixar o teto nao custa precisao de ASR nenhuma — so' tira o risco de estouro.
  */
 export function pickTranscribeBitrateKbps(durationSec?: number): number {
   if (!durationSec || durationSec <= 0) return 64;
   const maxBps = (TRANSCRIBE_AUDIO_BUDGET_BYTES * 8) / durationSec;
   const kbps = Math.floor(maxBps / 1000);
-  return Math.max(12, Math.min(128, kbps));
+  return Math.max(12, Math.min(64, kbps));
 }
 
 export async function extractAudioForTranscription(
