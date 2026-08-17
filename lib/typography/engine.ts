@@ -20,6 +20,23 @@
  */
 
 import { fontCss, type FontKey } from './fonts';
+// presets.ts importa só o TIPO daqui, então não há ciclo em runtime.
+import { getPreset } from './presets';
+
+/**
+ * Modelo EFETIVO do bloco. O bloco bloqueado (🔒) congela o proprio `presetId`
+ * no override; sem isso, trocar o modelo no painel repintava ate os blocos
+ * travados — e nao dava pra ter hook num lettering e body em outro.
+ */
+function presetDoBloco(style: StyleState, basePreset: TypoPreset): TypoPreset {
+  const alvo =
+    style.presetId && style.presetId !== basePreset.id
+      ? getPreset(style.presetId)
+      : basePreset;
+  return style.fontOverride && style.fontOverride !== alvo.font
+    ? { ...alvo, font: style.fontOverride }
+    : alvo;
+}
 
 // Negrito/italico SINTETICOS do editor (setados por drawCaptions/captionBBoxAt
 // a partir do estilo efetivo — o italic oblique o navegador sintetiza no
@@ -349,6 +366,11 @@ export type WordStyle = {
 export type PerBlockStyle = Partial<
   Pick<
     StyleState,
+    // 'presetId' entra aqui porque o cadeado precisa congelar o MODELO também.
+    // Sem ele, bloquear um bloco segurava cor/tamanho/posição mas o clique num
+    // card de modelo passava por cima — que é justamente o caso de hook com um
+    // lettering e body com outro no mesmo vídeo.
+    | 'presetId'
     | 'fontScale'
     | 'primary'
     | 'accent'
@@ -1294,10 +1316,7 @@ export function drawCaptions(
 
   // troca de fonte pelo editor: só a fonte PRINCIPAL muda; o apoio do mix
   // mantém a dele (a composição é parte do modelo)
-  let preset =
-    style.fontOverride && style.fontOverride !== basePreset.font
-      ? { ...basePreset, font: style.fontOverride }
-      : basePreset;
+  let preset = presetDoBloco(style, basePreset);
 
   // Fundo configurável: 'off' remove caixa+barra do modelo; 'on' garante uma
   // caixa mesmo em modelo sem; cor custom recolore a caixa que existir.
@@ -2594,10 +2613,7 @@ export function captionBBoxAt(
   FAUX_ITALIC = style.italic === true;
   FAUX_BOLD = style.bold === true;
 
-  const preset =
-    style.fontOverride && style.fontOverride !== basePreset.font
-      ? { ...basePreset, font: style.fontOverride }
-      : basePreset;
+  const preset = presetDoBloco(style, basePreset);
   let hiList = style.highlights[block.id] ?? [];
   if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
     const auto = autoEmphasisIndex(block);
@@ -2655,10 +2671,7 @@ export function wordBoxesAt(
   const style: StyleState = ov ? { ...styleArg, ...ov } : styleArg;
   FAUX_ITALIC = style.italic === true;
   FAUX_BOLD = style.bold === true;
-  const preset =
-    style.fontOverride && style.fontOverride !== basePreset.font
-      ? { ...basePreset, font: style.fontOverride }
-      : basePreset;
+  const preset = presetDoBloco(style, basePreset);
   let hiList = style.highlights[block.id] ?? [];
   if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
     const auto = autoEmphasisIndex(block);

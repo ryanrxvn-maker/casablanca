@@ -537,6 +537,9 @@ function TipografiaInner() {
       setBlockStyles((prev) => ({
         ...prev,
         [blockId]: {
+          // o MODELO entra no congelamento junto com o resto — sem ele, clicar
+          // num card de modelo repintava o bloco travado
+          presetId,
           fontScale,
           primary,
           accent,
@@ -561,7 +564,7 @@ function TipografiaInner() {
       }));
       setLockedBlocks((prev) => [...prev, blockId]);
     },
-    [pushHistory, lockedBlocks, setLockedBlocks, setBlockStyles, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG],
+    [pushHistory, lockedBlocks, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
