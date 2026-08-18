@@ -1,3 +1,4 @@
+import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
@@ -65,7 +66,14 @@ const PREMIUM_ONLY_TOOLS = [
 ];
 
 // Rotas exclusivamente do admin (mesmo Pro legado não acessa)
+// Famous Hey fica FORA do gate enquanto a janela grátis estiver aberta; quando
+// ela fecha sozinha (lib/famous-hey-trial.ts), o path volta pra lista abaixo.
+const ADMIN_ONLY_PREFIXES_BASE = [
+  ...(famousHeyGratis() ? [] : ['/tools/famous-hey']),
+];
+
 const ADMIN_ONLY_PREFIXES = [
+  ...ADMIN_ONLY_PREFIXES_BASE,
   '/admin',
   '/tools/ltx-video',
   '/tools/points', // sistema de pontos é interno
@@ -74,7 +82,6 @@ const ADMIN_ONLY_PREFIXES = [
   '/tools/auto-broll',        // uso interno — some pra conta não-admin
   '/tools/heygen-auto',       // uso interno — some pra conta não-admin
   '/tools/clickup-pilot',     // uso interno — some pra conta não-admin
-  '/tools/famous-hey',        // modo imagem do HeyGen — uso interno
 
   '/tools/background',        // viewer da fila do Pilot — uso interno
   '/tools/lipsync-history',   // histórico dos batches Pilot/VA — uso interno

@@ -35,7 +35,9 @@ import {
   IconNormalizador,
   IconTipografia,
 } from '../../ToolIcons';
+import { useEffect, useRef, useState } from 'react';
 import { Kicker, Reveal, Ticker } from './kit';
+import { famousHeyGratis, famousHeyDiasRestantes } from '@/lib/famous-hey-trial';
 import { CamuflagemScene, DecupagemScene, MiniPrints, NewspaperCard } from './scenes';
 
 const RED = '#e0483f';
@@ -175,6 +177,194 @@ function TipografiaScene() {
         Motor real · 491 letterings
       </span>
     </div>
+  );
+}
+
+/* ────────────────────── Famous Hey — abertura do corpo ──────────────────── */
+
+/**
+ * Painel cinematográfico do Famous Hey, logo depois do Hero.
+ *
+ * É o bloco mais "caro" da página de propósito: vídeo em loop no quadro
+ * inteiro, inclinação 3D seguindo o cursor e brilho acompanhando o mouse. O
+ * resto da landing é editorial (jornal); aqui a linguagem vira cinema porque o
+ * produto É movimento — mostrar parado seria vender errado.
+ *
+ * A janela grátis some sozinha na data (lib/famous-hey-trial.ts): fechada, o
+ * selo e a contagem desaparecem e o CTA vira convite normal.
+ */
+export function FamousHeySection() {
+  const caixaRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [semVideo, setSemVideo] = useState(false);
+  const gratis = famousHeyGratis();
+  const dias = famousHeyDiasRestantes();
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const p = v.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  }, []);
+
+  function mover(e: React.MouseEvent<HTMLElement>) {
+    const el = caixaRef.current;
+    if (!el) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const r = el.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    el.style.setProperty('--rx', `${(-py * 5).toFixed(2)}deg`);
+    el.style.setProperty('--ry', `${(px * 5).toFixed(2)}deg`);
+    el.style.setProperty('--mx', `${((px + 0.5) * 100).toFixed(1)}%`);
+    el.style.setProperty('--my', `${((py + 0.5) * 100).toFixed(1)}%`);
+  }
+
+  function sair() {
+    const el = caixaRef.current;
+    if (!el) return;
+    el.style.setProperty('--rx', '0deg');
+    el.style.setProperty('--ry', '0deg');
+  }
+
+  return (
+    <section id="famous-hey" className="mx-auto mt-20 max-w-[1200px] px-5 md:mt-28 md:px-8">
+      <Reveal>
+        <div className="max-w-[760px]">
+          <Kicker index="00" label="Novo no estúdio" />
+          <h2 className="section-title mt-5 text-[36px] md:text-[52px]">
+            Qualquer foto
+            <br />
+            <span
+              style={{
+                background: 'linear-gradient(100deg,#fbbf24,#f472b6 58%,#a78bfa)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              vira avatar que fala.
+            </span>
+          </h2>
+          <p className="mt-4 max-w-[56ch] text-[15.5px] leading-relaxed text-text-muted">
+            Você sobe uma imagem, escreve a fala ou manda um áudio, e sai o take pronto —
+            sem cadastrar avatar na biblioteca do HeyGen.
+          </p>
+        </div>
+      </Reveal>
+
+      <Reveal delay={120}>
+        <div
+          ref={caixaRef}
+          onMouseMove={mover}
+          onMouseLeave={sair}
+          className="group relative mt-10 [perspective:1600px]"
+          style={{ ['--rx' as string]: '0deg', ['--ry' as string]: '0deg' }}
+        >
+          <div
+            className="dark-island relative aspect-[16/10] overflow-hidden rounded-[28px] border border-white/10 transition-transform duration-300 ease-out will-change-transform sm:aspect-[16/8] lg:aspect-[21/9]"
+            style={{
+              transform: 'rotateX(var(--rx)) rotateY(var(--ry))',
+              transformStyle: 'preserve-3d',
+              boxShadow: '0 50px 110px -40px rgba(0,0,0,0.95), 0 0 90px -50px rgba(244,114,182,0.5)',
+            }}
+          >
+            <div className="absolute inset-0 transition-transform duration-[2000ms] ease-out group-hover:scale-[1.07]">
+              {!semVideo ? (
+                <video
+                  ref={videoRef}
+                  src="/hero/famous-hey.mp4"
+                  poster="/hero/famous-hey.jpg"
+                  muted
+                  loop
+                  autoPlay
+                  playsInline
+                  preload="metadata"
+                  onError={() => setSemVideo(true)}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+                />
+              ) : (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src="/hero/famous-hey.jpg"
+                  alt=""
+                  aria-hidden
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              )}
+            </div>
+
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+              style={{
+                background:
+                  'radial-gradient(520px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.18), transparent 62%)',
+              }}
+            />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background:
+                  'linear-gradient(to top, rgba(3,2,8,0.94) 0%, rgba(3,2,8,0.5) 32%, transparent 62%)',
+              }}
+            />
+
+            <div
+              className="absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-end justify-between gap-4 p-6 md:p-9"
+              style={{ transform: 'translateZ(46px)' }}
+            >
+              <div>
+                {gratis ? (
+                  <span
+                    className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-lime/50 bg-lime/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-lime backdrop-blur-md"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Grátis por mais {dias} dia{dias === 1 ? '' : 's'}
+                  </span>
+                ) : null}
+                <p className="max-w-[38ch] text-[13px] leading-relaxed text-white/75 md:text-[14.5px]">
+                  Um take, uma fala. Sai o vídeo cru pra você levar pra edição.
+                </p>
+              </div>
+
+              <Link
+                href="/register"
+                className="relative inline-flex shrink-0 items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[14px] font-bold text-white transition-transform duration-300 hover:-translate-y-[2px]"
+                style={{
+                  background: 'linear-gradient(140deg,#fbbf24 0%,#f472b6 55%,#a78bfa 100%)',
+                  boxShadow:
+                    'inset 0 1px 0 rgba(255,255,255,0.42), inset 0 -2px 0 rgba(0,0,0,0.22), 0 18px 40px -14px rgba(244,114,182,0.9)',
+                }}
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 -translate-x-[130%] bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-[130%]"
+                />
+                <span className="relative">Clique agora</span>
+                <svg
+                  className="relative transition-transform duration-300 group-hover:translate-x-1"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M5 12h13" />
+                  <path d="m12 5 7 7-7 7" />
+                </svg>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </Reveal>
+    </section>
   );
 }
 

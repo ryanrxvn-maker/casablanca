@@ -1,3 +1,4 @@
+import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
@@ -20,7 +21,7 @@ export const maxDuration = 300;
 
 export async function GET(req: Request) {
   try {
-    const gate = await requireTier('admin', {
+    const gate = await requireTier(famousHeyGratis() ? 'free' : 'admin', {
       unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;

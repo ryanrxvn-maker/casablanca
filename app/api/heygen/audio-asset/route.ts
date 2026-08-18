@@ -1,3 +1,4 @@
+import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
@@ -68,7 +69,7 @@ async function subir(headers: Record<string, string>, bytes: Uint8Array, mime: s
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireTier('admin', {
+    const gate = await requireTier(famousHeyGratis() ? 'free' : 'admin', {
       unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;

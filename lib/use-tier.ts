@@ -1,4 +1,5 @@
 'use client';
+import { famousHeyLiberaPath } from '@/lib/famous-hey-trial';
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -429,6 +430,8 @@ export function refreshTier(): Promise<Tier> {
 }
 
 export function tierAllowsTool(tier: Tier | null, toolHref: string): boolean {
+  // Janela grátis por tempo — some sozinha na data (lib/famous-hey-trial.ts).
+  if (famousHeyLiberaPath(toolHref)) return true;
   if (emailUnlocksPath(memEmail, toolHref)) return true; // desbloqueio pontual
   if (!tier) return false;
   if (tier === 'admin') return true; // admin acessa tudo

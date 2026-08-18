@@ -1,4 +1,5 @@
 'use client';
+import { famousHeyGratis, famousHeyDiasRestantes } from '@/lib/famous-hey-trial';
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
@@ -454,7 +455,8 @@ function PromoBanner({
     // Famous Hey abre o carrossel (pedido em 18.08). Fica atras do mesmo gate
     // do Pilot/Auto B-roll: e ferramenta interna, e herói que leva pra tela
     // bloqueada e pior que herói nenhum.
-    ...(isAdmin ? [<FamousHeySlide key="famoushey" />] : []),
+    // Na janela grátis o herói é pra todo mundo; fechada, volta a ser interno.
+    ...(isAdmin || famousHeyGratis() ? [<FamousHeySlide key="famoushey" />] : []),
     <FakePrintSlide key="fakeprint" />,
     <TipografiaSlide key="tipografia" />,
     ...(isAdmin
@@ -927,6 +929,18 @@ function FamousHeySlide() {
             <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
             Famous Hey
           </span>
+
+          {/* Contagem real, não "por tempo limitado" genérico: o número vem da
+              mesma constante que abre e fecha o acesso, então nunca mente. */}
+          {famousHeyGratis() ? (
+            <span
+              className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full border border-lime/50 bg-lime/15 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.18em] text-lime backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Grátis por mais {famousHeyDiasRestantes()} dia
+              {famousHeyDiasRestantes() === 1 ? '' : 's'}
+            </span>
+          ) : null}
 
           <h3 className="max-w-[16ch] text-[26px] font-black leading-[1.02] tracking-tight text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.9)] sm:text-[34px] lg:text-[42px]">
             Qualquer foto
