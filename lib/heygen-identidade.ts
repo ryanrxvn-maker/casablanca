@@ -131,7 +131,9 @@ export async function identidadeOAuth(
       valida: false,
       conta: null,
       expiraEm: null,
-      erro: 'OAuth do HeyGen não configurado — o modo imagem não vai disparar.',
+      erro:
+        'OAuth do HeyGen não configurado — o modo imagem não vai disparar. ' +
+        'Clique em "Conectar HeyGen agora" pra resolver em dois cliques.',
     };
   }
   let access: string;
@@ -145,9 +147,13 @@ export async function identidadeOAuth(
       valida: false,
       conta: null,
       expiraEm: null,
+      // ⚠ NÃO mandar pro CLI aqui. Colar o token do CLI é justamente o que cria
+      // a disputa pela mesma corrente de refresh (uso único + rotação): quem
+      // renovar primeiro derruba o outro. O botão "Conectar HeyGen agora" tira
+      // um login PRÓPRIO do app, que o CLI não encosta.
       erro:
-        'O OAuth do modo imagem EXPIROU. Rode `heygen auth login --oauth`, copie o ' +
-        'oauth.refresh_token de ~/.heygen/credentials e cole em /configuracoes/api. ' +
+        'Clique em "Conectar HeyGen agora" aqui embaixo: abre o HeyGen, você aprova ' +
+        'com um código e pronto. ' +
         (e instanceof Error ? e.message.slice(0, 160) : ''),
     };
   }
@@ -184,7 +190,7 @@ export function montarDiagnostico(
       titulo: 'O login do modo imagem expirou',
       texto:
         oauth.erro ??
-        'Rode `heygen auth login --oauth` e cole o refresh token novo em /configuracoes/api.',
+        'Clique em "Conectar HeyGen agora" aqui embaixo — abre o HeyGen e você aprova com um código.',
     };
   } else if (conflito) {
     aviso = {

@@ -82,7 +82,7 @@ export function HeyGenContaAviso() {
 
           {/* Consertar ONDE o problema aparece. Mandar o usuário pra outra
               tela (e de lá pro terminal) era o que fazia isso virar ritual. */}
-          {aviso.titulo.includes('expirou') ? <HeyGenConectar /> : null}
+          {/oauth|expirou|configurar/i.test(aviso.titulo) ? <HeyGenConectar /> : null}
 
           <a
             href="/configuracoes/api"
