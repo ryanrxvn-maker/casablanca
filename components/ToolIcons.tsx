@@ -436,6 +436,29 @@ export function IconHeyGenAuto(p: IconProps) {
   );
 }
 
+/** FAMOUS HEY — retrato numa moldura + estrela + ondas de fala. A moldura é o
+ *  ponto: aqui a fala nasce de uma IMAGEM solta, não de um avatar da biblioteca. */
+export function IconFamousHey(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  return (
+    <svg {...baseProps(p, `url(#${id})`)}>
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#fbbf24" />
+          <stop offset="100%" stopColor="#f472b6" />
+        </linearGradient>
+      </defs>
+      <rect x="3" y="3.5" width="12" height="17" rx="2.5" />
+      <circle cx="9" cy="9.5" r="2.4" />
+      <path d="M5.2 17.6a4 4 0 017.6 0" />
+      <path d="M17.5 9c1.5 1.6 1.5 4.4 0 6" opacity="0.65" />
+      <path d="M20.2 7c2.4 2.4 2.4 7.6 0 10" opacity="0.4" />
+      <path d="M18.6 2.2l0.5 1.3 1.3 0.5-1.3 0.5-0.5 1.3-0.5-1.3-1.3-0.5 1.3-0.5 0.5-1.3z" fill={`url(#${id})`} stroke="none" />
+    </svg>
+  );
+}
+
 /** LipSync — rosto + ondas de fala (avatar falando). */
 export function IconLipsync(p: IconProps) {
   const raw = useId();

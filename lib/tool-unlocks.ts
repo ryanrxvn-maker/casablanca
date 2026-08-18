@@ -65,6 +65,11 @@ export const UNLOCKABLE_TOOLS: ReadonlyArray<{
     label: 'LTX Video',
     desc: 'Geração de vídeo IA (quota da casa no HuggingFace).',
   },
+  {
+    path: '/tools/famous-hey',
+    label: 'FAMOUS HEY',
+    desc: 'Anima uma imagem no HeyGen sem criar avatar (crédito do plano do cliente).',
+  },
 ];
 
 // Desbloqueios fixos (commitados). Pode somar mais via env.

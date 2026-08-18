@@ -64,8 +64,31 @@ export function zipGroupId(key: string): string {
   m = /^brollvid:(.+):\d+$/.exec(key);
   if (m) return m[1];
   if (key.startsWith('broll:')) return key;
+  // FAMOUS HEY: `famousHey:<jobId>:(mp4|img)`. O mp4 e a imagem do mesmo job
+  // caem no mesmo grupo pra serem mantidos/removidos como unidade.
+  m = /^(famousHey:[^:]+):/.exec(key);
+  if (m) return m[1];
   // desconhecida → grupo próprio (só é tocada sob as MESMAS regras: velho + fora da janela)
   return ` misc ${key}`;
+}
+
+/**
+ * Grupos com CICLO DE VIDA PRÓPRIO — a faxina global nunca os remove.
+ *
+ * A FAMOUS HEY promete "baixar de novo" pra sempre: o mp4 fica no IndexedDB
+ * porque a URL do HeyGen expira em horas. Como chave desconhecida vira grupo
+ * próprio, ela caía na regra normal (velho + fora dos keepGroups) e a faxina do
+ * boot varria os vídeos depois de 12h — o histórico continuava listando tudo e
+ * o botão de baixar não trazia nada, que é pior do que não ter histórico.
+ *
+ * Isto NÃO deixa o store crescer sem teto: o lib/famous-hey-store.ts guarda no
+ * máximo 30 jobs e apaga os blobs dos que saem da lista. Quem cria o namespace
+ * é que responde pelo tamanho dele.
+ *
+ * ⚠ Os bytes continuam contando no total — só a REMOÇÃO é que não os alcança.
+ */
+export function grupoAutogerido(groupId: string): boolean {
+  return groupId.startsWith('famousHey:');
 }
 
 export interface ZipMeta {
@@ -142,7 +165,7 @@ export function planZipEviction(records: ZipMeta[], opts: PruneOptions = {}): Pr
     const isProtected = protect.has(g.id);
     const isRecent = now - g.newest < minAgeMs;
     const isTopN = idx < keepGroups;
-    if (isProtected || isRecent || isTopN) pinned.add(g.id);
+    if (isProtected || isRecent || isTopN || grupoAutogerido(g.id)) pinned.add(g.id);
   });
 
   // Fase 1: remove tudo que NÃO é intocável (velho, concluído, além da janela)
@@ -165,6 +188,7 @@ export function planZipEviction(records: ZipMeta[], opts: PruneOptions = {}): Pr
     for (let i = survivors.length - 1; i >= 0 && keptBytes > maxBytes; i--) {
       const g = survivors[i];
       if (protect.has(g.id)) continue;
+      if (grupoAutogerido(g.id)) continue;
       if (now - g.newest < minAgeMs) continue;
       for (const k of g.keys) evictKeys.push(k);
       freedBytes += g.size;

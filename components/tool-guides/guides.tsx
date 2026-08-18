@@ -1697,4 +1697,76 @@ export const GUIDES: Record<string, ToolGuide> = {
       'Take que não sai nem depois das rodadas de retry costuma ser prompt vetado pela política do Magnific — ajuste o texto e retome.',
     ],
   },
+  '/tools/famous-hey': {
+    title: 'FAMOUS HEY',
+    tagline:
+      'Uma foto fala. Sem criar avatar na biblioteca do HeyGen — por isso passa onde a moderação de rosto barra.',
+    steps: [
+      {
+        title: 'Suba a imagem',
+        text: 'JPEG, PNG ou WebP até 4MB. Rosto de frente, bem iluminado e sem nada cobrindo a boca é o que rende melhor. Não precisa cadastrar avatar nenhum — a imagem é enviada direto na geração, e como não existe objeto de avatar, não existe likeness pra moderação reprovar. É exatamente por isso que rosto reprovado no caminho normal funciona aqui.',
+        visual: (
+          <Shot label="FAMOUS HEY · imagem">
+            <MRow>
+              <MChip tone="lime">IMAGEM CARREGADA</MChip>
+              <MChip tone="dim">SEM AVATAR NA BIBLIOTECA</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Escolha de onde vem a fala',
+        text: '"Escrever o texto" — você digita e escolhe uma voz da sua conta HeyGen; ele sintetiza. "Usar um áudio" — seu arquivo entra como está e a boca sincroniza com ele, mantendo a voz original. Os dois nunca vão juntos: o HeyGen recusa o disparo quando recebe texto e áudio na mesma chamada.',
+        visual: (
+          <Shot label="FAMOUS HEY · a fala">
+            <MRow>
+              <MBtn tone="primary">Escrever o texto</MBtn>
+              <MBtn tone="ghost">Usar um áudio</MBtn>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Espelhar voz — o que ela faz de verdade',
+        text: 'Marcando "Espelhar voz" no modo áudio, a ferramenta transcreve o arquivo, mostra o texto pra VOCÊ REVISAR, e a voz escolhida fala. As palavras são as mesmas; a cadência passa a ser a da voz nova, não a do áudio original. O Mirror Voice speech-to-speech do HeyGen exige um avatar cadastrado — ele não alcança o modo imagem, e é justamente a ausência de avatar que faz esta ferramenta existir. Revise nomes próprios e números antes de gerar: é o texto que vai ao ar.',
+        visual: (
+          <Shot label="FAMOUS HEY · espelhar voz">
+            <MRow>
+              <MBtn tone="ghost">Transcrever o áudio</MBtn>
+              <MChip tone="amber">REVISE ANTES DE GERAR</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Gere um por vez e acompanhe',
+        text: 'A ferramenta gera UM vídeo por vez de propósito: a renovação do login do HeyGen não tolera disparos em paralelo — duas gerações juntas derrubam a sessão. Enquanto roda, o card mostra o tempo decorrido; pode trocar de aba, porque o relógio do acompanhamento roda em Worker e o navegador não o estrangula. F5 no meio também não perde nada: ao voltar, a ferramenta retoma o acompanhamento sozinha.',
+        visual: (
+          <Shot label="FAMOUS HEY · gerando">
+            <MStack>
+              <MQueueItem name="AD77 · hook" status="gerando" pct={60} tone="amber" />
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Baixe, refaça, repita',
+        text: 'Quando fica pronto, o vídeo é baixado pro seu navegador na hora — por isso "Baixar" continua funcionando depois, mesmo quando o link do HeyGen já saiu do ar. "Ver" abre o player ali mesmo. "Refazer" recarrega a ficha inteira no formulário (imagem inclusive) pra você corrigir o texto, trocar a voz ou só gerar de novo com outro ajuste.',
+        visual: (
+          <Shot label="FAMOUS HEY · histórico">
+            <MRow>
+              <MBtn tone="lime">Baixar</MBtn>
+              <MBtn tone="ghost">Ver</MBtn>
+              <MBtn tone="dark">Refazer</MBtn>
+            </MRow>
+          </Shot>
+        ),
+      },
+    ],
+    tips: [
+      'O histórico fica NESTE navegador (os 30 mais recentes). Trocou de máquina, não vai ver — baixe o que importa.',
+      'A geração cobra do crédito do PLANO (login OAuth), não do saldo de API.',
+      'O banner no topo avisa antes de disparar quando o login do HeyGen expirou ou quando as vozes e a geração estão em contas diferentes.',
+    ],
+  },
 };

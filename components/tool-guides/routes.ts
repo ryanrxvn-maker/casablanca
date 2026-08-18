@@ -24,6 +24,7 @@ export const GUIDE_PATHS = new Set<string>([
   '/tools/decupagem-copy',
   '/tools/downloader',
   '/tools/fakepass',
+  '/tools/famous-hey',
   '/tools/heygen-auto',
   '/tools/historico',
   '/tools/lipsync',

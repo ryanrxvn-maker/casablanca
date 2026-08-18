@@ -205,9 +205,20 @@ export type ImageInput =
 export type CreateImageVideoParams = {
   image: ImageInput;
   /** Voz da biblioteca do HeyGen. Obrigatória quando se manda `script` —
-   *  aqui não existe avatar de onde herdar voz padrão. */
-  voiceId: string;
-  script: string;
+   *  aqui não existe avatar de onde herdar voz padrão. Ignorada no caminho
+   *  de áudio pronto: lá a voz JÁ está gravada no arquivo. */
+  voiceId?: string;
+  script?: string;
+  /** ÁUDIO PRONTO — a fala vem de um arquivo em vez de TTS.
+   *
+   *  Mutuamente exclusivo com `script`/`voiceId`: o schema oficial marca
+   *  `script` e `audio_*` como alternativas, e mandar os dois faz o HeyGen
+   *  recusar em vez de escolher um. Quem chama decide ANTES qual caminho usa.
+   *
+   *  `audioAssetId` tem precedência sobre `audioUrl` quando os dois vêm — o
+   *  asset é do próprio HeyGen e não depende de a URL continuar no ar. */
+  audioUrl?: string;
+  audioAssetId?: string;
   /** Apply Custom Motion. A variante `image` aceita (confirmado no schema). */
   motionPrompt?: string | null;
   title?: string;
@@ -246,20 +257,39 @@ export async function createImageVideo(
   accessToken: string,
   p: CreateImageVideoParams,
 ): Promise<{ videoId: string }> {
-  if (!p.voiceId) {
-    // Sem avatar não há voz padrão pra cair: falha clara em vez de 400 cru.
-    throw new Error('Modo imagem exige uma voz escolhida — não existe avatar de onde herdar a voz padrão.');
+  const audio = p.audioAssetId?.trim() || p.audioUrl?.trim() || '';
+  const script = p.script?.trim() || '';
+
+  // A fala tem que vir de UMA fonte só. Mandar as duas não faz o HeyGen
+  // escolher: faz ele recusar — e o erro cru não diz qual sobrou.
+  if (audio && script) {
+    throw new Error(
+      'Escolha UMA fonte de fala: ou o texto (com voz), ou o áudio pronto. Os dois juntos o HeyGen recusa.',
+    );
   }
-  if (!p.script?.trim()) throw new Error('Modo imagem exige o texto da fala.');
+  if (!audio) {
+    if (!p.voiceId) {
+      // Sem avatar não há voz padrão pra cair: falha clara em vez de 400 cru.
+      throw new Error('Modo imagem exige uma voz escolhida — não existe avatar de onde herdar a voz padrão.');
+    }
+    if (!script) throw new Error('Modo imagem exige o texto da fala (ou um áudio pronto).');
+  }
 
   const body: Record<string, unknown> = {
     type: 'image',
     image: p.image,
-    voice_id: p.voiceId,
-    script: p.script,
     aspect_ratio: p.aspectRatio || '9:16',
     title: p.title || 'Video por imagem',
   };
+  if (audio) {
+    // asset_id ganha da url: é do próprio HeyGen e não depende de link externo
+    // continuar no ar até a fila chegar na vez dele.
+    if (p.audioAssetId?.trim()) body.audio_asset_id = p.audioAssetId.trim();
+    else body.audio_url = audio;
+  } else {
+    body.voice_id = p.voiceId;
+    body.script = script;
+  }
   if (p.resolution) body.resolution = p.resolution;
   if (p.expressiveness) body.expressiveness = p.expressiveness;
   // NÃO existe `engine` nesta variante — mandar seria ignorado em silêncio e

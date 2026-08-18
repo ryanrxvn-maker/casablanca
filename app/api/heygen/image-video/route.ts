@@ -113,7 +113,7 @@ async function guardarRefreshRotacionado(novo: string): Promise<string | null> {
 export async function POST(req: Request) {
   try {
     const gate = await requireTier('admin', {
-      unlockTools: ['/tools/heygen-auto', '/tools/clickup-pilot'],
+      unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen_oauth');
@@ -137,13 +137,32 @@ export async function POST(req: Request) {
     const aspectRatio = String(form.get('aspectRatio') || '9:16');
     const imageUrl = String(form.get('imageUrl') || '').trim();
     const file = form.get('image');
+    // Áudio pronto: chega como URL já subida pelo /api/heygen/audio-asset —
+    // nunca como arquivo aqui, senão imagem + áudio no mesmo multipart estouram
+    // o teto de ~4,5MB do Vercel.
+    const audioUrl = String(form.get('audioUrl') || '').trim();
+    const audioAssetId = String(form.get('audioAssetId') || '').trim();
+    const resolution = String(form.get('resolution') || '').trim();
+    const expressiveness = String(form.get('expressiveness') || '').trim();
+    const temAudio = !!(audioUrl || audioAssetId);
 
-    if (!script) return jsonError('Falta o texto da fala.', 400);
-    if (!voiceId) {
+    if (audioUrl && !/^https:\/\//i.test(audioUrl)) {
+      return jsonError('A URL do áudio precisa ser HTTPS.', 400);
+    }
+    if (temAudio && script) {
       return jsonError(
-        'Escolha uma voz. No modo imagem não existe avatar de onde herdar a voz padrão.',
+        'Mandou texto E áudio. A fala vem de um dos dois — o HeyGen recusa os dois juntos.',
         400,
       );
+    }
+    if (!temAudio) {
+      if (!script) return jsonError('Falta o texto da fala (ou um áudio pronto).', 400);
+      if (!voiceId) {
+        return jsonError(
+          'Escolha uma voz. No modo imagem não existe avatar de onde herdar a voz padrão.',
+          400,
+        );
+      }
     }
 
     let image: ImageInput;
@@ -166,13 +185,26 @@ export async function POST(req: Request) {
       return jsonError('Suba uma imagem (ou informe uma URL HTTPS).', 400);
     }
 
+    const RESOLUCOES = new Set(['720p', '1080p', '4k']);
+    const EXPRESSIVIDADES = new Set(['low', 'medium', 'high']);
+
     const { videoId } = await createImageVideo(accessToken, {
       image,
-      voiceId,
-      script,
+      // No caminho de áudio os dois vão vazios de propósito: mandar `script`
+      // junto com `audio_url` faz o HeyGen recusar o request inteiro.
+      voiceId: temAudio ? undefined : voiceId,
+      script: temAudio ? undefined : script,
+      audioUrl: audioUrl || undefined,
+      audioAssetId: audioAssetId || undefined,
       motionPrompt: motionPrompt || null,
       title: title || 'Video por imagem',
       aspectRatio: aspectRatio as '9:16',
+      // Valor fora da lista é DESCARTADO em silêncio pelo HeyGen. Filtrando
+      // aqui, um typo do client não vira um vídeo caro na resolução errada.
+      resolution: RESOLUCOES.has(resolution) ? (resolution as '1080p') : undefined,
+      expressiveness: EXPRESSIVIDADES.has(expressiveness)
+        ? (expressiveness as 'high')
+        : undefined,
     });
     return NextResponse.json(avisoToken ? { videoId, avisoToken } : { videoId });
   } catch (e) {
@@ -183,7 +215,7 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   try {
     const gate = await requireTier('admin', {
-      unlockTools: ['/tools/heygen-auto', '/tools/clickup-pilot'],
+      unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen_oauth');

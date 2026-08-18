@@ -479,6 +479,7 @@ const TOOL_PATHS = [
   '/tools/copy-srt',
   '/tools/tipografia',
   '/tools/heygen-auto',
+  '/tools/famous-hey',
 ];
 
 /* ─── Ícones grandes (gradientes) ─── */
