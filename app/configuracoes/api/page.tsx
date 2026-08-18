@@ -40,6 +40,12 @@ const META: Array<{
   helper: string;
   link: string;
   usedBy: string;
+  /** Rotulo do CTA quando o card tem passo a passo. */
+  linkLabel?: string;
+  /** Passo a passo de onde tirar a chave — some atras de um <details>. */
+  steps?: Array<{ t: string; d: string }>;
+  /** Recado que evita o erro classico do servico (ex.: achar que precisa de saldo). */
+  warn?: string;
 }> = [
   {
     id: 'assemblyai',
@@ -53,8 +59,33 @@ const META: Array<{
     id: 'heygen',
     label: 'HeyGen',
     helper:
-      'De graça — não precisa pôr saldo. No painel, seção “API Keys” → botão “Create API Key”, copie e cole aqui. O “Add balance” que aparece em cima na MESMA tela não é obrigatório: esse saldo só é debitado por quem GERA VÍDEO pela API. Aqui a chave só LÊ a sua biblioteca (avatares e vozes), então funciona com saldo zerado — a única coisa desta lista que pode consumir saldo é a clonagem de voz.',
+      'E a chave que liga a SUA biblioteca de avatares e vozes ao AutoEdit. Criar e de graça e leva 1 minuto — você NÃO precisa comprar saldo de API.',
     link: 'https://app.heygen.com/developers/api',
+    linkLabel: 'Abrir a tela da chave ↗',
+    steps: [
+      {
+        t: 'Entre na conta certa.',
+        d: 'Abra o HeyGen e confira que você está logado na conta (e no workspace) onde estão os SEUS avatares — a chave só enxerga a biblioteca dessa conta.',
+      },
+      {
+        t: 'Vá pra área Developers.',
+        d: 'O botão verde aqui embaixo já abre a tela certa. No HeyGen ela fica no ícone </>, no pé da barra lateral esquerda.',
+      },
+      {
+        t: 'Passe direto pelo topo.',
+        d: 'O aviso amarelo de créditos e o botão azul “Add balance” são pra quem gera vídeo pela API. Não clique — desça a página.',
+      },
+      {
+        t: 'Clique em “Create API Key”.',
+        d: 'Fica na linha da seção “API Keys”, no canto direito. Dê um nome qualquer (autoedit serve) e confirme.',
+      },
+      {
+        t: 'Copie e cole aqui em cima.',
+        d: 'A chave aparece uma vez só. Copie na hora, cole no campo deste card e clique em Salvar — o selo vermelho vira CONFIGURADA.',
+      },
+    ],
+    warn:
+      'Saldo não entra nessa história: o Balance da tela só é debitado por quem GERA VÍDEO pela API, e aqui a chave só LÊ sua biblioteca — funciona com US$ 0,00. Já tinha criado uma chave e não anotou? O HeyGen não mostra de novo: clique em “Regenerate” na linha dela (a antiga para de funcionar na hora).',
     usedBy: 'Seletor de avatares e vozes · Clonagem de voz (HeyGen)',
   },
   {
@@ -265,17 +296,74 @@ export default function ApiKeysPage() {
                     </button>
                   </div>
 
-                  <p className="mt-2 text-[11px] text-text-muted">
-                    {m.helper}{' '}
-                    <a
-                      href={m.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-lime hover:underline"
-                    >
-                      Abrir painel ↗
-                    </a>
+                  <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
+                    {m.helper}
+                    {m.steps ? null : (
+                      <>
+                        {' '}
+                        <a
+                          href={m.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-lime hover:underline"
+                        >
+                          Abrir painel ↗
+                        </a>
+                      </>
+                    )}
                   </p>
+
+                  {m.steps ? (
+                    <details
+                      // Quem ainda nao configurou ja abre no passo a passo;
+                      // quem tem chave ve o bloco recolhido.
+                      open={!s?.configured}
+                      className="group mt-3 overflow-hidden rounded-[12px] border border-line bg-bg-soft/60"
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted transition hover:text-white">
+                        <span>Onde eu pego essa chave? · passo a passo</span>
+                        <span
+                          aria-hidden
+                          className="text-lime transition-transform duration-300 group-open:rotate-180"
+                        >
+                          ▾
+                        </span>
+                      </summary>
+
+                      <ol className="flex flex-col gap-2.5 border-t border-line px-3 py-3">
+                        {m.steps.map((st, i) => (
+                          <li key={st.t} className="flex gap-2.5">
+                            <span className="label-tech mt-[2px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-lime/15 text-[9px] text-lime">
+                              {i + 1}
+                            </span>
+                            <p className="text-[11px] leading-relaxed text-text-muted">
+                              <span className="font-semibold text-white">
+                                {st.t}
+                              </span>{' '}
+                              {st.d}
+                            </p>
+                          </li>
+                        ))}
+                      </ol>
+
+                      {m.warn ? (
+                        <p className="mx-3 rounded-[10px] border border-amber/30 bg-amber-soft px-3 py-2 text-[11px] leading-relaxed text-amber">
+                          {m.warn}
+                        </p>
+                      ) : null}
+
+                      <div className="p-3">
+                        <a
+                          href={m.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn-primary !py-1.5 text-xs"
+                        >
+                          {m.linkLabel ?? 'Abrir painel ↗'}
+                        </a>
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
               );
             })}
