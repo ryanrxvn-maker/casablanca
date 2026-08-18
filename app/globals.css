@@ -1651,6 +1651,27 @@ html[data-theme='light'] .text-fuchsia-300,
 html[data-theme='light'] .text-pink-200,
 html[data-theme='light'] .text-pink-300,
 html[data-theme='light'] .text-rose-300,
+/* Tons -100 (os mais claros que aparecem em banner de alerta) entram na
+   mesma rede. Faltavam: o banner "o login do modo imagem expirou" nascia
+   text-red-100 e ficava branco sobre fundo claro — o aviso existia e nao
+   dava pra ler, que e o pior estado possivel pra um aviso. */
+html[data-theme='light'] .text-red-100,
+html[data-theme='light'] .text-rose-100,
+html[data-theme='light'] .text-pink-100,
+html[data-theme='light'] .text-fuchsia-100,
+html[data-theme='light'] .text-purple-100,
+html[data-theme='light'] .text-violet-100,
+html[data-theme='light'] .text-indigo-100,
+html[data-theme='light'] .text-blue-100,
+html[data-theme='light'] .text-sky-100,
+html[data-theme='light'] .text-cyan-100,
+html[data-theme='light'] .text-teal-100,
+html[data-theme='light'] .text-emerald-100,
+html[data-theme='light'] .text-green-100,
+html[data-theme='light'] .text-lime-100,
+html[data-theme='light'] .text-yellow-100,
+html[data-theme='light'] .text-amber-100,
+html[data-theme='light'] .text-orange-100,
 html[data-theme='light'] .text-red-300 {
   color: rgb(var(--text)) !important;
 }
@@ -1685,6 +1706,23 @@ html[data-theme='light'] [class*='text-fuchsia-300/'],
 html[data-theme='light'] [class*='text-pink-200/'],
 html[data-theme='light'] [class*='text-pink-300/'],
 html[data-theme='light'] [class*='text-rose-300/'],
+html[data-theme='light'] [class*='text-red-100/'],
+html[data-theme='light'] [class*='text-rose-100/'],
+html[data-theme='light'] [class*='text-pink-100/'],
+html[data-theme='light'] [class*='text-fuchsia-100/'],
+html[data-theme='light'] [class*='text-purple-100/'],
+html[data-theme='light'] [class*='text-violet-100/'],
+html[data-theme='light'] [class*='text-indigo-100/'],
+html[data-theme='light'] [class*='text-blue-100/'],
+html[data-theme='light'] [class*='text-sky-100/'],
+html[data-theme='light'] [class*='text-cyan-100/'],
+html[data-theme='light'] [class*='text-teal-100/'],
+html[data-theme='light'] [class*='text-emerald-100/'],
+html[data-theme='light'] [class*='text-green-100/'],
+html[data-theme='light'] [class*='text-lime-100/'],
+html[data-theme='light'] [class*='text-yellow-100/'],
+html[data-theme='light'] [class*='text-amber-100/'],
+html[data-theme='light'] [class*='text-orange-100/'],
 html[data-theme='light'] [class*='text-red-300/'] {
   color: rgb(var(--text)) !important;
 }
