@@ -83,7 +83,7 @@ const ENTRIES: Entry[] = [
   { id: 'copy-srt', group: 'Ferramentas', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
   { id: 'tipografia', group: 'Ferramentas', label: 'Tipografia Automática', hint: 'Letterings animados no tempo do áudio', href: '/tools/tipografia', icon: <IconTipografia size={20} />, keywords: ['lettering', 'legenda animada', 'caption', 'texto', 'kinetic'] },
   { id: 'heygen-auto', group: 'Ferramentas', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'], adminOnly: true },
-  { id: 'famous-hey', group: 'Ferramentas', label: 'FAMOUS HEY', hint: 'Uma foto fala, sem criar avatar', href: '/tools/famous-hey', icon: <IconFamousHey size={20} />, keywords: ['imagem', 'foto', 'famoso', 'moderacao', 'moderação', 'avatar'], adminOnly: true },
+  { id: 'famous-hey', group: 'Ferramentas', label: 'Famous Hey', hint: 'Anima uma foto sem cadastrar avatar', href: '/tools/famous-hey', icon: <IconFamousHey size={20} />, keywords: ['imagem', 'foto', 'famoso', 'moderacao', 'moderação', 'avatar'], adminOnly: true },
 
   // Atalhos
   { id: 'home', group: 'Atalhos', label: 'Início', hint: 'Hub principal', href: '/tools', icon: <IconSearch size={20} />, keywords: ['hub', 'home'] },

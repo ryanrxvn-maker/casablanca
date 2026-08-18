@@ -222,8 +222,8 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/famous-hey',
-    label: 'FAMOUS HEY',
-    description: 'Uma foto fala. Sem criar avatar — passa onde a moderação barra.',
+    label: 'Famous Hey',
+    description: 'Anima uma foto no HeyGen, sem cadastrar avatar na biblioteca.',
     icon: <IconFamousHey size={26} />,
     hue: 'rgba(251, 191, 36, 0.42)',
     badge: 'ADMIN',

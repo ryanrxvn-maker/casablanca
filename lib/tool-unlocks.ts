@@ -67,8 +67,8 @@ export const UNLOCKABLE_TOOLS: ReadonlyArray<{
   },
   {
     path: '/tools/famous-hey',
-    label: 'FAMOUS HEY',
-    desc: 'Anima uma imagem no HeyGen sem criar avatar (crédito do plano do cliente).',
+    label: 'Famous Hey',
+    desc: 'Anima uma imagem no HeyGen sem cadastrar avatar (crédito do plano do cliente).',
   },
 ];
 

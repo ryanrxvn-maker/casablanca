@@ -38,7 +38,7 @@ const TITLES: Record<string, string> = {
   '/tools/historico': 'Histórico geral',
   '/tools/lipsync-history': 'Histórico de avatares',
   '/tools/clickup-pilot': 'ClickUp Pilot',
-  '/tools/famous-hey': 'FAMOUS HEY',
+  '/tools/famous-hey': 'Famous Hey',
   '/tools/voice-test': 'Isolar voz',
   '/configuracoes': 'Configurações',
   '/configuracoes/api': 'Chaves de IA',

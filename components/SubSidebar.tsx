@@ -53,7 +53,7 @@ const TOOL_ITEMS: Item[] = [
   { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
   { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)', adminOnly: true },
   { href: '/tools/heygen-auto', label: 'Hey Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)', adminOnly: true },
-  { href: '/tools/famous-hey', label: 'FAMOUS HEY', icon: <IconFamousHey size={20} />, hue: 'rgba(251,191,36,0.45)', adminOnly: true },
+  { href: '/tools/famous-hey', label: 'Famous Hey', icon: <IconFamousHey size={20} />, hue: 'rgba(251,191,36,0.45)', adminOnly: true },
 ];
 
 const TOOL_PATHS = TOOL_ITEMS.map((i) => i.href);
