@@ -75,6 +75,20 @@ const EXPRESSIVIDADES = [
 /** Intervalo do poll. O HeyGen leva minutos; abaixo disto é só barulho. */
 const POLL_MS = 8000;
 
+/** Teto do upload. O Vercel corta o request em ~4,5MB ANTES de a rota rodar, e
+ *  o que volta é "Falha ao ler o upload" — que não diz o tamanho nem o culpado.
+ *  Barrando aqui, o usuário lê o número real do arquivo dele. */
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+function grandeDemais(f: File, oQue: string): string | null {
+  return f.size > MAX_UPLOAD_BYTES
+    ? `${oQue} tem ${(f.size / 1e6).toFixed(1)}MB e o limite é 4MB. ` +
+        (oQue === 'A imagem'
+          ? 'Reduza a resolução ou salve em JPEG de qualidade 85.'
+          : 'Exporte em MP3 128kbps — cobre uns 4 minutos de fala.')
+    : null;
+}
+
 type Voz = {
   id: string;
   name: string;
@@ -652,8 +666,9 @@ export default function FamousHeyPage() {
               hint="JPEG, PNG ou WebP · até 4MB · rosto de frente e bem iluminado funciona melhor"
               value={imagem}
               onChange={(f) => {
-                setImagem(f);
-                setErro(null);
+                const grande = f ? grandeDemais(f, 'A imagem') : null;
+                setErro(grande);
+                setImagem(grande ? null : f);
               }}
             />
             <input
@@ -723,9 +738,10 @@ export default function FamousHeyPage() {
               hint="MP3, WAV, M4A ou OGG · até 4MB (MP3 128kbps cobre ~4 minutos)"
               value={audio}
               onChange={(f) => {
-                setAudio(f);
+                const grande = f ? grandeDemais(f, 'O áudio') : null;
+                setErro(grande);
+                setAudio(grande ? null : f);
                 setTranscricao('');
-                setErro(null);
               }}
             />
 
