@@ -451,6 +451,10 @@ function PromoBanner({
   // free) — arrastou o FakePrint pro lado, a Tipografia assume. As automações
   // internas (Pilot / Auto B-roll) só existem no carrossel do admin.
   const slides = [
+    // Famous Hey abre o carrossel (pedido em 18.08). Fica atras do mesmo gate
+    // do Pilot/Auto B-roll: e ferramenta interna, e herói que leva pra tela
+    // bloqueada e pior que herói nenhum.
+    ...(isAdmin ? [<FamousHeySlide key="famoushey" />] : []),
     <FakePrintSlide key="fakeprint" />,
     <TipografiaSlide key="tipografia" />,
     ...(isAdmin
@@ -481,7 +485,35 @@ const HERO_BOX =
 /* ────────── CAROUSEL WRAPPER ────────── */
 function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
   const [idx, setIdx] = useState(0);
+  const [pausado, setPausado] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * AVANÇO SOZINHO a cada 10s.
+   *
+   * O timer depende de `idx`: mexeu no carrossel (seta, bolinha ou arrastando),
+   * a contagem RECOMEÇA. Sem isso, trocar de card na mão podia ser seguido de
+   * um pulo automático meio segundo depois — parece que a página tem vontade
+   * própria e briga com quem está usando.
+   *
+   * Pausa no hover e enquanto o dedo está na tela: ninguém quer o slide fugindo
+   * enquanto lê ou arrasta. E `prefers-reduced-motion` desliga de vez.
+   */
+  useEffect(() => {
+    if (slides.length < 2 || pausado) return;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const t = setTimeout(() => {
+      const el = scrollerRef.current;
+      if (!el) return;
+      // Aba oculta: não adianta girar pra ninguém, e o Chrome estrangula o
+      // timer de qualquer jeito — melhor esperar a volta.
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const proximo = (idx + 1) % slides.length;
+      setIdx(proximo);
+      el.scrollTo({ left: el.clientWidth * proximo, behavior: 'smooth' });
+    }, 10_000);
+    return () => clearTimeout(t);
+  }, [idx, pausado, slides.length]);
 
   function go(n: number) {
     const safe = ((n % slides.length) + slides.length) % slides.length;
@@ -502,7 +534,15 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
   }
 
   return (
-    <div className="relative fade-in-up" style={{ animationDelay: '80ms' }}>
+    <div
+      className="relative fade-in-up"
+      style={{ animationDelay: '80ms' }}
+      onMouseEnter={() => setPausado(true)}
+      onMouseLeave={() => setPausado(false)}
+      onPointerDown={() => setPausado(true)}
+      onPointerUp={() => setPausado(false)}
+      onPointerCancel={() => setPausado(false)}
+    >
       <div
         ref={scrollerRef}
         onScroll={onScroll}
@@ -762,6 +802,186 @@ function TipografiaSlide() {
  * estilo CNN (kicker vermelho + barra branca + sub-deck + ticker), com
  * entrada animada de telejornal. O card todo é clicável → /tools/fakepass.
  */
+/**
+ * HERÓI DO FAMOUS HEY — vídeo em loop + inclinação 3D que segue o mouse.
+ *
+ * Duas diferenças de propósito em relação ao slide do FakePrint:
+ *  - o vídeo roda SEMPRE, não só no hover. Aqui o movimento é o produto: um
+ *    cartaz parado não mostra que a foto ganha vida.
+ *  - a inclinação segue o cursor de verdade (rotateX/rotateY por variável CSS).
+ *    Um `scale` no hover é barato demais pro card de abertura da página.
+ *
+ * `prefers-reduced-motion` desliga a inclinação: quem pediu menos movimento não
+ * pode justo receber o card que mais se mexe.
+ */
+function FamousHeySlide() {
+  const caixaRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [semVideo, setSemVideo] = useState(false);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    // O catch existe porque política de autoplay varia por navegador — sem ele
+    // o erro vaza no console de quem tem autoplay bloqueado.
+    const p = v.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  }, []);
+
+  function mover(e: React.MouseEvent<HTMLElement>) {
+    const el = caixaRef.current;
+    if (!el) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const r = el.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    // Teto de 6°: acima disso o texto sobre o vídeo escorrega e a leitura
+    // sofre — o efeito serve o card, não rouba a cena.
+    el.style.setProperty('--rx', `${(-py * 6).toFixed(2)}deg`);
+    el.style.setProperty('--ry', `${(px * 6).toFixed(2)}deg`);
+    el.style.setProperty('--mx', `${((px + 0.5) * 100).toFixed(1)}%`);
+    el.style.setProperty('--my', `${((py + 0.5) * 100).toFixed(1)}%`);
+  }
+
+  function sair() {
+    const el = caixaRef.current;
+    if (!el) return;
+    el.style.setProperty('--rx', '0deg');
+    el.style.setProperty('--ry', '0deg');
+  }
+
+  return (
+    <div
+      ref={caixaRef}
+      onMouseMove={mover}
+      onMouseLeave={sair}
+      className="group relative h-full [perspective:1400px]"
+      style={{ ['--rx' as string]: '0deg', ['--ry' as string]: '0deg' }}
+    >
+      <Link
+        href="/tools/famous-hey"
+        className="dark-island relative block h-full overflow-hidden rounded-[26px] border border-line/60 transition-transform duration-300 ease-out will-change-transform"
+        style={{
+          transform: 'rotateX(var(--rx)) rotateY(var(--ry))',
+          transformStyle: 'preserve-3d',
+          boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)',
+        }}
+      >
+        <div className="absolute inset-0 transition-transform duration-[1800ms] ease-out group-hover:scale-[1.06]">
+          {!semVideo ? (
+            <video
+              ref={videoRef}
+              src="/hero/famous-hey.mp4"
+              poster="/hero/famous-hey.jpg"
+              muted
+              loop
+              autoPlay
+              playsInline
+              preload="metadata"
+              onError={() => setSemVideo(true)}
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+            />
+          ) : (
+            /* Sem o arquivo, o card segue de pé com o pôster — hero quebrado na
+               primeira dobra é pior que hero parado. */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src="/hero/famous-hey.jpg"
+              alt=""
+              aria-hidden
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          )}
+        </div>
+
+        {/* Brilho seguindo o cursor — sensação de superfície física */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background:
+              'radial-gradient(420px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.16), transparent 62%)',
+          }}
+        />
+
+        {/* Vinheta: o texto tem que ficar legível sobre QUALQUER frame */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(to top, rgba(3,2,8,0.92) 0%, rgba(3,2,8,0.55) 30%, rgba(3,2,8,0.12) 56%, transparent 74%), linear-gradient(105deg, rgba(3,2,8,0.72) 0%, transparent 58%)',
+          }}
+        />
+
+        {/* CONTEÚDO — pouco texto, empurrado à frente no eixo Z */}
+        <div
+          className="absolute inset-0 z-10 flex flex-col justify-end p-5 md:p-8"
+          style={{ transform: 'translateZ(38px)' }}
+        >
+          <span
+            className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-300/45 bg-amber-300/10 px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.22em] text-amber-200 backdrop-blur-md"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+            Famous Hey
+          </span>
+
+          <h3 className="max-w-[16ch] text-[26px] font-black leading-[1.02] tracking-tight text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.9)] sm:text-[34px] lg:text-[42px]">
+            Qualquer foto
+            <br />
+            <span
+              style={{
+                background: 'linear-gradient(100deg,#fbbf24,#f472b6 60%,#a78bfa)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              vira avatar que fala
+            </span>
+          </h3>
+
+          <p className="mt-2 max-w-[42ch] text-[12.5px] leading-relaxed text-white/70 md:text-[13.5px]">
+            Sem cadastrar avatar na biblioteca do HeyGen.
+          </p>
+
+          <span
+            className="relative mt-4 inline-flex w-fit items-center gap-2 overflow-hidden rounded-full px-5 py-2.5 text-[13px] font-bold text-white transition-transform duration-300 group-hover:-translate-y-[2px]"
+            style={{
+              background: 'linear-gradient(140deg,#fbbf24 0%,#f472b6 55%,#a78bfa 100%)',
+              boxShadow:
+                'inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2), 0 14px 34px -12px rgba(244,114,182,0.85)',
+            }}
+          >
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 -translate-x-[130%] bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-[130%]"
+            />
+            <span className="relative">Clique agora</span>
+            <svg
+              className="relative transition-transform duration-300 group-hover:translate-x-1"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M5 12h13" />
+              <path d="m12 5 7 7-7 7" />
+            </svg>
+          </span>
+        </div>
+      </Link>
+    </div>
+  );
+}
+
 function FakePrintSlide() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
