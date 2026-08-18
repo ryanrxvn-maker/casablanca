@@ -210,7 +210,7 @@ function SeletorDeVoz({
             type="button"
             disabled={desabilitado}
             onClick={() => onSelecionar(null)}
-            className="shrink-0 rounded-[8px] border border-line/60 px-2.5 py-1 text-[12px] text-fg-dim hover:text-fg disabled:opacity-40"
+            className="shrink-0 rounded-[8px] border border-line/60 px-2.5 py-1 text-[12px] text-text-dim hover:text-text disabled:opacity-40"
           >
             trocar
           </button>
@@ -222,7 +222,7 @@ function SeletorDeVoz({
         disabled={desabilitado}
         onChange={(e) => setBusca(e.target.value)}
         placeholder="Buscar voz pelo nome…"
-        className="w-full rounded-[10px] border border-line/60 bg-bg px-3 py-2 text-[13px] outline-none placeholder:text-fg-dim/60 focus:border-line disabled:opacity-40"
+        className="w-full rounded-[10px] border border-line/60 bg-bg px-3 py-2 text-[13px] outline-none placeholder:text-text-dim/60 focus:border-line disabled:opacity-40"
       />
 
       {erro ? (
@@ -230,9 +230,9 @@ function SeletorDeVoz({
       ) : (
         <div className="mt-2 max-h-[210px] space-y-1 overflow-y-auto">
           {carregando && vozes.length === 0 ? (
-            <p className="px-1 py-2 text-[12px] text-fg-dim">carregando vozes…</p>
+            <p className="px-1 py-2 text-[12px] text-text-dim">carregando vozes…</p>
           ) : vozes.length === 0 ? (
-            <p className="px-1 py-2 text-[12px] text-fg-dim">
+            <p className="px-1 py-2 text-[12px] text-text-dim">
               Nenhuma voz encontrada. As vozes vêm da conta da API key configurada em
               /configuracoes/api.
             </p>
@@ -257,7 +257,7 @@ function SeletorDeVoz({
                       CLONE
                     </span>
                   ) : null}
-                  <span className="ml-1.5 text-fg-dim">{v.language || ''}</span>
+                  <span className="ml-1.5 text-text-dim">{v.language || ''}</span>
                 </button>
                 {v.previewAudio ? (
                   <button
@@ -655,7 +655,7 @@ export default function FamousHeyPage() {
       <HeyGenContaAviso />
 
       <section className="mb-6">
-        <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-fg-dim">
+        <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-text-dim">
           1 · A imagem que vai falar
         </h2>
         <div className="grid gap-4 md:grid-cols-[1fr_180px]">
@@ -675,7 +675,7 @@ export default function FamousHeyPage() {
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
               placeholder="Nome do vídeo (opcional)"
-              className="mt-2 w-full rounded-[10px] border border-line/60 bg-bg px-3 py-2 text-[13px] outline-none placeholder:text-fg-dim/60 focus:border-line"
+              className="mt-2 w-full rounded-[10px] border border-line/60 bg-bg px-3 py-2 text-[13px] outline-none placeholder:text-text-dim/60 focus:border-line"
             />
           </div>
           <div className="flex items-center justify-center rounded-[14px] border border-line/60 bg-bg/40 p-2">
@@ -687,7 +687,7 @@ export default function FamousHeyPage() {
                 className="max-h-[220px] w-auto rounded-[10px] object-contain"
               />
             ) : (
-              <span className="px-2 text-center text-[12px] text-fg-dim">
+              <span className="px-2 text-center text-[12px] text-text-dim">
                 a imagem aparece aqui
               </span>
             )}
@@ -696,7 +696,7 @@ export default function FamousHeyPage() {
       </section>
 
       <section className="mb-6">
-        <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-fg-dim">
+        <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-text-dim">
           2 · A fala
         </h2>
         <div className="mb-3 inline-flex rounded-[12px] border border-line/60 bg-bg/40 p-1">
@@ -710,7 +710,7 @@ export default function FamousHeyPage() {
               }}
               className={[
                 'rounded-[9px] px-4 py-1.5 text-[13px] font-semibold transition',
-                modo === m ? 'bg-fg text-bg' : 'text-fg-dim hover:text-fg',
+                modo === m ? 'bg-text text-bg' : 'text-text-dim hover:text-text',
               ].join(' ')}
             >
               {m === 'texto' ? 'Escrever o texto' : 'Usar um áudio'}
@@ -725,9 +725,9 @@ export default function FamousHeyPage() {
               onChange={(e) => setScript(e.target.value)}
               rows={5}
               placeholder="O que a pessoa da imagem vai falar…"
-              className="w-full rounded-[12px] border border-line/60 bg-bg px-3 py-2.5 text-[13.5px] leading-relaxed outline-none placeholder:text-fg-dim/60 focus:border-line"
+              className="w-full rounded-[12px] border border-line/60 bg-bg px-3 py-2.5 text-[13.5px] leading-relaxed outline-none placeholder:text-text-dim/60 focus:border-line"
             />
-            <div className="text-[11.5px] text-fg-dim">{script.trim().length} caracteres</div>
+            <div className="text-[11.5px] text-text-dim">{script.trim().length} caracteres</div>
             <SeletorDeVoz selecionada={voz} onSelecionar={setVoz} />
           </div>
         ) : (
@@ -754,7 +754,7 @@ export default function FamousHeyPage() {
               />
               <span className="text-[13px]">
                 <span className="font-semibold">Espelhar voz</span>
-                <span className="text-fg-dim">
+                <span className="text-text-dim">
                   {' '}
                   — trocar a voz do áudio por outra da sua conta.
                 </span>
@@ -783,15 +783,15 @@ export default function FamousHeyPage() {
                   onChange={(e) => setTranscricao(e.target.value)}
                   rows={5}
                   placeholder="A transcrição aparece aqui pra você revisar antes de gerar."
-                  className="w-full rounded-[12px] border border-line/60 bg-bg px-3 py-2.5 text-[13.5px] leading-relaxed outline-none placeholder:text-fg-dim/60 focus:border-line"
+                  className="w-full rounded-[12px] border border-line/60 bg-bg px-3 py-2.5 text-[13.5px] leading-relaxed outline-none placeholder:text-text-dim/60 focus:border-line"
                 />
-                <p className="text-[11.5px] text-fg-dim">
+                <p className="text-[11.5px] text-text-dim">
                   Confira nomes próprios e números — é este texto que vai ser falado, não o áudio.
                 </p>
                 <SeletorDeVoz selecionada={voz} onSelecionar={setVoz} />
               </div>
             ) : (
-              <p className="text-[12px] text-fg-dim">
+              <p className="text-[12px] text-text-dim">
                 A voz do arquivo entra como está — a boca da imagem sincroniza com ela.
               </p>
             )}
@@ -800,12 +800,12 @@ export default function FamousHeyPage() {
       </section>
 
       <section className="mb-6">
-        <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-fg-dim">
+        <h2 className="mb-2 text-[13px] font-bold uppercase tracking-wide text-text-dim">
           3 · Ajustes
         </h2>
         <div className="grid gap-3 md:grid-cols-3">
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg-dim">Proporção</span>
+            <span className="mb-1 block text-[12px] text-text-dim">Proporção</span>
             <select
               value={aspectRatio}
               onChange={(e) => setAspectRatio(e.target.value)}
@@ -819,7 +819,7 @@ export default function FamousHeyPage() {
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg-dim">Resolução</span>
+            <span className="mb-1 block text-[12px] text-text-dim">Resolução</span>
             <select
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
@@ -833,7 +833,7 @@ export default function FamousHeyPage() {
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-[12px] text-fg-dim">Expressividade</span>
+            <span className="mb-1 block text-[12px] text-text-dim">Expressividade</span>
             <select
               value={expressiveness}
               onChange={(e) => setExpressiveness(e.target.value)}
@@ -848,14 +848,14 @@ export default function FamousHeyPage() {
           </label>
         </div>
         <label className="mt-3 block">
-          <span className="mb-1 block text-[12px] text-fg-dim">
+          <span className="mb-1 block text-[12px] text-text-dim">
             Movimento (opcional) — descreva a cena; em inglês funciona melhor
           </span>
           <input
             value={motionPrompt}
             onChange={(e) => setMotionPrompt(e.target.value)}
             placeholder="ex.: slight push-in, natural hand gestures, soft daylight"
-            className="w-full rounded-[10px] border border-line/60 bg-bg px-3 py-2 text-[13px] outline-none placeholder:text-fg-dim/60 focus:border-line"
+            className="w-full rounded-[10px] border border-line/60 bg-bg px-3 py-2 text-[13px] outline-none placeholder:text-text-dim/60 focus:border-line"
           />
         </label>
       </section>
@@ -865,12 +865,12 @@ export default function FamousHeyPage() {
           type="button"
           onClick={disparar}
           disabled={!!impedimento || disparando}
-          className="rounded-[12px] bg-fg px-6 py-2.5 text-[14px] font-bold text-bg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-[12px] bg-text px-6 py-2.5 text-[14px] font-bold text-bg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {disparando ? fase || 'enviando…' : 'Gerar vídeo'}
         </button>
         {impedimento && !disparando ? (
-          <span className="text-[12.5px] text-fg-dim">{impedimento}</span>
+          <span className="text-[12.5px] text-text-dim">{impedimento}</span>
         ) : null}
       </div>
 
@@ -884,13 +884,13 @@ export default function FamousHeyPage() {
 
       <section className="mt-8 border-t border-line/50 pt-6">
         <div className="mb-3 flex items-baseline justify-between gap-3">
-          <h2 className="text-[13px] font-bold uppercase tracking-wide text-fg-dim">Histórico</h2>
-          <span className="text-[11.5px] text-fg-dim">
+          <h2 className="text-[13px] font-bold uppercase tracking-wide text-text-dim">Histórico</h2>
+          <span className="text-[11.5px] text-text-dim">
             fica neste navegador · os 30 mais recentes
           </span>
         </div>
         {jobs.length === 0 ? (
-          <p className="text-[13px] text-fg-dim">
+          <p className="text-[13px] text-text-dim">
             Nada gerado ainda. O que sair daqui fica guardado pra baixar de novo quando quiser.
           </p>
         ) : (
@@ -1008,12 +1008,12 @@ function CardJob({
         )}
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-semibold">{job.titulo}</div>
-          <div className="mono mt-0.5 truncate text-[11px] text-fg-dim">
+          <div className="mono mt-0.5 truncate text-[11px] text-text-dim">
             {new Date(job.criadoEm).toLocaleString('pt-BR')} · {job.aspectRatio} · {job.resolution}
             {job.duracao ? ` · ${job.duracao.toFixed(1)}s` : ''}
             {job.bytes ? ` · ${(job.bytes / 1e6).toFixed(1)}MB` : ''}
           </div>
-          <div className="mt-1 text-[11.5px] text-fg-dim">
+          <div className="mt-1 text-[11.5px] text-text-dim">
             {job.voiceNome
               ? `voz: ${job.voiceNome}`
               : job.audioNome
@@ -1035,7 +1035,7 @@ function CardJob({
               <button
                 type="button"
                 onClick={onBaixar}
-                className="rounded-[9px] bg-fg px-3 py-1.5 text-[12px] font-bold text-bg hover:opacity-90"
+                className="rounded-[9px] bg-text px-3 py-1.5 text-[12px] font-bold text-bg hover:opacity-90"
               >
                 Baixar
               </button>
@@ -1060,7 +1060,7 @@ function CardJob({
           <button
             type="button"
             onClick={onApagar}
-            className="rounded-[9px] px-3 py-1 text-[11.5px] text-fg-dim hover:text-red-300"
+            className="rounded-[9px] px-3 py-1 text-[11.5px] text-text-dim hover:text-red-300"
           >
             apagar
           </button>
