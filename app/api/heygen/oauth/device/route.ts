@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireTier } from '@/lib/require-tier';
 import { encryptSecret, decryptSecret, lastFour } from '@/lib/secrets';
-import { empacotarCredencial } from '@/lib/heygen-image-video';
+import { empacotarCredencial, lerValidadeDoRefresh } from '@/lib/heygen-image-video';
 
 /**
  * LOGIN DO HEYGEN DENTRO DO APP — device flow, sem CLI e sem copiar arquivo.
@@ -124,6 +124,9 @@ export async function POST(req: Request) {
       refresh,
       access,
       exp: access && validade > 0 ? Date.now() + validade * 1000 : undefined,
+      // Prazo do REFRESH (~10 dias no login). É daqui que a tela vai dizer até
+      // quando o login vale, em vez de o usuário descobrir quando trava.
+      refreshExp: lerValidadeDoRefresh(r.json),
     });
 
     const supabase = createClient();

@@ -26,7 +26,7 @@ type Aviso = { nivel: 'erro' | 'atencao'; titulo: string; texto: string } | null
 type Diagnostico = {
   aviso: Aviso;
   apiKey?: { conta?: { email?: string | null } | null };
-  oauth?: { conta?: { email?: string | null } | null };
+  oauth?: { conta?: { email?: string | null } | null; expiraEm?: string | null };
 };
 
 export function HeyGenContaAviso() {
@@ -72,6 +72,14 @@ export function HeyGenContaAviso() {
         <div className="min-w-0 flex-1">
           <div className="font-bold">{aviso.titulo}</div>
           <p className="mt-1 opacity-95">{aviso.texto}</p>
+
+          {diag?.oauth?.expiraEm ? (
+            <p className="mt-1.5 text-[11.5px] opacity-80">
+              O login do modo imagem vale até{' '}
+              {new Date(diag.oauth.expiraEm).toLocaleDateString('pt-BR')} — a renovação
+              automática empurra essa data todo dia.
+            </p>
+          ) : null}
 
           {emailKey && emailOauth && emailKey !== emailOauth ? (
             <div className="mono mt-2 space-y-0.5 text-[11.5px] opacity-80">

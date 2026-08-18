@@ -32,7 +32,7 @@
  * cache/banco, e o cron diário mantém a corrente viva de qualquer forma.
  */
 
-import { accessTokenDoRefresh } from '@/lib/heygen-image-video';
+import { accessTokenDoRefresh, lerCredencial } from '@/lib/heygen-image-video';
 
 const API_BASE = 'https://api.heygen.com';
 
@@ -64,6 +64,14 @@ export type Diagnostico = {
   /** Aviso pronto pra tela. `null` = nada a avisar. */
   aviso: { nivel: 'erro' | 'atencao'; titulo: string; texto: string } | null;
 };
+
+/** Dias inteiros até a data (negativo = já passou). `null` quando não se sabe. */
+function diasAte(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((t - Date.now()) / 86400_000);
+}
 
 function extrairConta(j: unknown): Conta | null {
   if (!j || typeof j !== 'object') return null;
@@ -157,17 +165,22 @@ export async function identidadeOAuth(
         (e instanceof Error ? e.message.slice(0, 160) : ''),
     };
   }
+  // Até quando o REFRESH vale. Vem do login/rotação quando o provedor informa;
+  // `null` significa "não sei", nunca "não expira".
+  const venc = lerCredencial(guardado).refreshExp;
+  const expiraEm = venc ? new Date(venc).toISOString() : null;
+
   const conta = await contaPorHeaders({ Authorization: `Bearer ${access}` });
   if (!conta) {
     return {
       configurada: true,
       valida: false,
       conta: null,
-      expiraEm: null,
+      expiraEm,
       erro: 'O OAuth renovou mas a conta não respondeu. Tente de novo em instantes.',
     };
   }
-  return { configurada: true, valida: true, conta, expiraEm: null, erro: null };
+  return { configurada: true, valida: true, conta, expiraEm, erro: null };
 }
 
 /** Junta os dois lados e monta o aviso de tela. */
@@ -191,6 +204,20 @@ export function montarDiagnostico(
       texto:
         oauth.erro ??
         'Clique em "Conectar HeyGen agora" aqui embaixo — abre o HeyGen e você aprova com um código.',
+    };
+  } else if (diasAte(oauth.expiraEm) !== null && (diasAte(oauth.expiraEm) as number) <= 3) {
+    // Avisar ANTES de quebrar. Descobrir que o login venceu no meio de um lote
+    // é o pior momento possível — e é exatamente quando isso acontecia.
+    const dias = diasAte(oauth.expiraEm) as number;
+    aviso = {
+      nivel: 'atencao',
+      titulo:
+        dias <= 0
+          ? 'O login do modo imagem vence hoje'
+          : `O login do modo imagem vence em ${dias} dia${dias > 1 ? 's' : ''}`,
+      texto:
+        'A renovação automática roda todo dia e costuma resolver sozinha. Se este ' +
+        'aviso não sumir amanhã, clique em "Conectar HeyGen agora" — leva dois cliques.',
     };
   } else if (conflito) {
     aviso = {

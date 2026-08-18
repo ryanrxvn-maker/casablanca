@@ -76,7 +76,46 @@ export type RefreshResult = {
  * Compatível com o que já está gravado: string pura = refresh sozinho, que é
  * também o que o usuário cola na mão em /configuracoes/api.
  */
-type Credencial = { refresh: string; access?: string; exp?: number };
+type Credencial = {
+  refresh: string;
+  access?: string;
+  /** Quando o ACCESS vence (~1h). */
+  exp?: number;
+  /**
+   * Quando o REFRESH vence (~10 dias no login inicial).
+   *
+   * Guardado pra responder de uma vez a pergunta que sempre volta: "isso vai
+   * expirar de novo?". Se cada rotação trouxer um prazo NOVO, o cron diário
+   * empurra o vencimento pra sempre e a resposta é "não". Se vier sempre o
+   * mesmo, é reconectar a cada 10 dias. Sem medir, era chute — agora a própria
+   * tela mostra a data e o número decide.
+   */
+  refreshExp?: number;
+};
+
+/** Lê a validade do refresh de qualquer um dos nomes que o provedor possa usar.
+ *  A lista é ampla de propósito: um nome que não bate vira `undefined`, que é
+ *  só "não sei" — nunca um prazo inventado. */
+export function lerValidadeDoRefresh(j: Record<string, unknown> | null): number | undefined {
+  if (!j) return undefined;
+  for (const chave of ['refresh_expires_in', 'refresh_token_expires_in']) {
+    const v = Number(j[chave]);
+    if (v > 0) return Date.now() + v * 1000;
+  }
+  for (const chave of ['refresh_expires_at', 'refresh_token_expires_at', 'expires_at']) {
+    const v = j[chave];
+    if (typeof v === 'string') {
+      const t = Date.parse(v);
+      // `expires_at` pode ser do ACCESS: só aceita se for prazo longo (>2 dias),
+      // senão o app mostraria "vence em 1h" pro refresh e assustaria à toa.
+      if (t > Date.now() + 2 * 86400_000) return t;
+    } else if (Number(v) > 0) {
+      const t = Number(v) * 1000;
+      if (t > Date.now() + 2 * 86400_000) return t;
+    }
+  }
+  return undefined;
+}
 
 export function lerCredencial(guardado: string): Credencial {
   const s = (guardado || '').trim();
@@ -87,6 +126,7 @@ export function lerCredencial(guardado: string): Credencial {
       refresh: String(j.refresh || j.refresh_token || ''),
       access: typeof j.access === 'string' ? j.access : undefined,
       exp: Number(j.exp) > 0 ? Number(j.exp) : undefined,
+      refreshExp: Number(j.refreshExp) > 0 ? Number(j.refreshExp) : undefined,
     };
   } catch {
     return { refresh: s };
@@ -94,7 +134,12 @@ export function lerCredencial(guardado: string): Credencial {
 }
 
 export function empacotarCredencial(c: Credencial): string {
-  return JSON.stringify({ refresh: c.refresh, access: c.access, exp: c.exp });
+  return JSON.stringify({
+    refresh: c.refresh,
+    access: c.access,
+    exp: c.exp,
+    refreshExp: c.refreshExp,
+  });
 }
 
 /** Quanto o access vale de verdade. Medido: o refresh grant devolve ~1h — o
@@ -192,7 +237,15 @@ export async function accessTokenDoRefresh(
   // access novo e as próximas instâncias não precisarem renovar nada.
   return {
     access: j.access_token,
-    novoRefresh: empacotarCredencial({ refresh: refreshFinal, access: j.access_token, exp }),
+    novoRefresh: empacotarCredencial({
+      refresh: refreshFinal,
+      access: j.access_token,
+      exp,
+      // Se a rotação trouxer prazo novo, ele entra; se não trouxer, o
+      // anterior é preservado. Preservar importa: apagar viraria "não sei"
+      // toda vez que o cron rodasse, e a tela nunca mostraria nada.
+      refreshExp: lerValidadeDoRefresh(j) ?? lerCredencial(refreshToken).refreshExp,
+    }),
     origem: 'renovou',
   };
 }
