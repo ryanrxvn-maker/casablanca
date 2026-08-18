@@ -53,8 +53,8 @@ const META: Array<{
     id: 'heygen',
     label: 'HeyGen',
     helper:
-      'API key de avatares. Crie em app.heygen.com → API Keys.',
-    link: 'https://app.heygen.com/settings?tab=api',
+      'De graça — não precisa pôr saldo. No painel, seção “API Keys” → botão “Create API Key”, copie e cole aqui. O “Add balance” que aparece em cima na MESMA tela não é obrigatório: esse saldo só é debitado por quem GERA VÍDEO pela API. Aqui a chave só LÊ a sua biblioteca (avatares e vozes), então funciona com saldo zerado — a única coisa desta lista que pode consumir saldo é a clonagem de voz.',
+    link: 'https://app.heygen.com/developers/api',
     usedBy: 'Seletor de avatares e vozes · Clonagem de voz (HeyGen)',
   },
   {
