@@ -607,12 +607,14 @@ export default function FamousHeyPage() {
   /** Recarrega a ficha no formulário — pra editar o texto, trocar o áudio ou só
    *  regerar com outro ajuste. A imagem volta do IndexedDB. */
   const reabrir = async (job: FamousHeyJob) => {
-    setErro(null);
+    // Recados acumulam em vez de um sobrescrever o outro: quando falta a imagem
+    // E o áudio, o usuário precisa saber das duas coisas, não da última.
+    const recados: string[] = [];
     const img = await pegarImagem(job.id);
     if (img) {
       setImagem(new File([img], `${job.titulo}.jpg`, { type: img.type || 'image/jpeg' }));
     } else {
-      setErro('A imagem original não está mais guardada — suba ela de novo pra regerar.');
+      recados.push('A imagem original não está mais guardada — suba ela de novo.');
     }
     setTitulo(job.titulo);
     setMotionPrompt(job.motionPrompt);
@@ -633,12 +635,19 @@ export default function FamousHeyPage() {
         });
       }
     } else {
-      // Job de áudio: o arquivo não é guardado (só o vídeo e a imagem cabem no
-      // orçamento do IndexedDB), então o usuário escolhe o áudio de novo.
+      // Job de áudio: o arquivo NÃO é guardado (só o vídeo e a imagem cabem no
+      // orçamento do IndexedDB). Sem este recado o campo volta vazio e parece
+      // bug — o usuário fica procurando o áudio que ele "já tinha subido".
       setModo('audio');
       setEspelharVoz(false);
       setAudio(null);
+      recados.push(
+        `O áudio não fica guardado no navegador — suba de novo${
+          job.audioNome ? ` (era "${job.audioNome}")` : ''
+        }.`,
+      );
     }
+    setErro(recados.length ? recados.join(' ') : null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
