@@ -232,9 +232,23 @@ export function FamousHeySection() {
       <Reveal>
         <div className="max-w-[760px]">
           <Kicker index="00" label="Novo no estúdio" />
-          <h2 className="section-title mt-5 text-[36px] md:text-[52px]">
-            Qualquer foto
-            <br />
+          {/* Lettering vivo: na landing ele é o dobro do tamanho do card da
+              home, porque aqui é a primeira vez que alguém lê o nome. */}
+          <span className="relative mt-5 inline-block">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -inset-x-6 -inset-y-3 rounded-full blur-3xl"
+              style={{ background: 'radial-gradient(60% 60% at 50% 50%, rgba(244,114,182,0.34), transparent 70%)' }}
+            />
+            <span
+              className="fh-lettering relative block text-[46px] font-black leading-none tracking-[-0.025em] md:text-[76px]"
+              style={{ fontFamily: 'var(--font-display), var(--font-tech), system-ui' }}
+            >
+              Famous Hey
+            </span>
+          </span>
+          <h2 className="section-title mt-4 text-[30px] md:text-[44px]">
+            Use qualquer avatar
             <span
               style={{
                 background: 'linear-gradient(100deg,#fbbf24,#f472b6 58%,#a78bfa)',
@@ -243,7 +257,8 @@ export function FamousHeySection() {
                 color: 'transparent',
               }}
             >
-              vira avatar que fala.
+              {' '}
+              no HeyGen.
             </span>
           </h2>
           <p className="mt-4 max-w-[56ch] text-[15.5px] leading-relaxed text-text-muted">
@@ -318,11 +333,22 @@ export function FamousHeySection() {
             >
               <div>
                 {gratis ? (
-                  <span
-                    className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-lime/50 bg-lime/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-lime backdrop-blur-md"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Grátis por mais {dias} dia{dias === 1 ? '' : 's'}
+                  <span className="relative mb-3 inline-flex items-center gap-2 rounded-[10px] border border-lime/55 bg-lime/[0.12] px-3 py-1.5 backdrop-blur-md">
+                    <span aria-hidden className="absolute -left-[5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#06060a]" />
+                    <span aria-hidden className="absolute -right-[5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#06060a]" />
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-75" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
+                    </span>
+                    <span className="text-[18px] font-black leading-none text-lime">{dias}</span>
+                    <span
+                      className="text-[8.5px] font-black uppercase leading-[1.1] tracking-[0.14em] text-lime/85"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      dia{dias === 1 ? '' : 's'}
+                      <br />
+                      grátis
+                    </span>
                   </span>
                 ) : null}
                 <p className="max-w-[38ch] text-[13px] leading-relaxed text-white/75 md:text-[14.5px]">

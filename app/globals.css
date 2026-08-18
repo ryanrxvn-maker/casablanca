@@ -2115,3 +2115,36 @@ html[data-theme='light'] {
     animation: none !important;
   }
 }
+
+/* ─────────────── LETTERING do Famous Hey (hero) ───────────────
+   Gradiente vivo com varredura de brilho CONTÍNUA — não depende de hover,
+   porque o card também precisa chamar atenção de quem só passa os olhos.
+   A varredura é `background-position` num gradiente 3x maior que o texto: só
+   isso anima, então roda na GPU sem repintar layout.
+   Respeita prefers-reduced-motion: o gradiente fica, o movimento sai. */
+.fh-lettering {
+  background-image: linear-gradient(
+    100deg,
+    #fbbf24 0%,
+    #f472b6 22%,
+    #ffffff 34%,
+    #a78bfa 48%,
+    #f472b6 68%,
+    #fbbf24 100%
+  );
+  background-size: 300% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 3px 18px rgba(244, 114, 182, 0.45));
+  animation: fh-lettering-sweep 6s linear infinite;
+}
+@keyframes fh-lettering-sweep {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fh-lettering { animation: none; }
+}

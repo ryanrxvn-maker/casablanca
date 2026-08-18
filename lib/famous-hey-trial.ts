@@ -14,8 +14,13 @@
  * o aviso e não gera nada — a janela dá acesso à tela, não a créditos nossos.
  */
 
-/** Fim da janela (UTC). Liberada em 18.08.2026, fecha 10 dias depois. */
-export const FAMOUS_HEY_GRATIS_ATE = Date.UTC(2026, 7, 28, 23, 59, 59);
+/**
+ * Fim da janela (UTC). Liberada em 18.08.2026; fecha na VIRADA do dia 28.
+ *
+ * ⚠ O corte é 00:00 do dia 28, não 23:59. Com 23:59 a conta de dias inteiros
+ * arredondava pra cima e o selo abria anunciando "11 dias" numa promoção de 10.
+ */
+export const FAMOUS_HEY_GRATIS_ATE = Date.UTC(2026, 7, 28, 0, 0, 0);
 
 export const FAMOUS_HEY_PATH = '/tools/famous-hey';
 
