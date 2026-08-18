@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { logHistory } from '@/lib/history';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
+import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { DocImport3DButton } from '@/components/DocImport3DButton';
 import { Toggle3DIcon } from '@/components/Toggle3DIcon';
 import { CancelButton } from '@/components/CancelButton';
@@ -2605,6 +2606,10 @@ function HeyGenAutoInner() {
   return (
     <>
       <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
+        {/* Credencial do HeyGen: avisa token expirado ou contas divergentes
+            ANTES do disparo. Silencioso quando esta tudo certo. */}
+        <HeyGenContaAviso />
+
         <ToolHeroVideo
           src="/cards/hey-auto.mp4"
           poster="/cards/hey-auto.jpg"

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { logHistory } from '@/lib/history';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
+import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   getClickUpToken,
@@ -8994,6 +8995,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         hue="rgba(200,232,124,0.45)"
         icon={<IconClickUpPilot size={56} />}
       >
+          {/* Credencial do HeyGen: avisa token expirado ou contas divergentes
+              ANTES do disparo. Silencioso quando esta tudo certo. */}
+          <HeyGenContaAviso />
+
           {/* Command Center — chip de status + métricas ao vivo */}
           {(() => {
             const setupOK = hasToken && selectedTeam && selectedEditor;
