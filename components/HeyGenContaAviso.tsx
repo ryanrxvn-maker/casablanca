@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { HeyGenConectar } from '@/components/HeyGenConectar';
 
 /**
  * Banner que avisa ANTES do disparo quando a credencial do HeyGen vai falhar.
@@ -78,6 +79,10 @@ export function HeyGenContaAviso() {
               <div>modo imagem (OAuth): {emailOauth}</div>
             </div>
           ) : null}
+
+          {/* Consertar ONDE o problema aparece. Mandar o usuário pra outra
+              tela (e de lá pro terminal) era o que fazia isso virar ritual. */}
+          {aviso.titulo.includes('expirou') ? <HeyGenConectar /> : null}
 
           <a
             href="/configuracoes/api"

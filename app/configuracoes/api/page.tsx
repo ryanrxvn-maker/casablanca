@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { ToolShell } from '@/components/ToolShell';
+import { HeyGenConectar } from '@/components/HeyGenConectar';
 
 /**
  * /configuracoes/api — gerenciamento das chaves de IA do proprio usuario.
@@ -92,7 +93,7 @@ const META: Array<{
     id: 'heygen_oauth',
     label: 'HeyGen OAuth (modo imagem)',
     helper:
-      'NÃO é a API key acima — é o refresh token do OAuth, e a diferença é de cobrança: a key cai no tier de API (saldo USD à parte) e o OAuth sai do crédito do plano, que você já paga. Pegue rodando `heygen auth login --oauth` e copiando o campo oauth.refresh_token de ~/.heygen/credentials. Renova sozinho.',
+      'NÃO é a API key acima. A diferença é de COBRANÇA: a key cai no tier de API (saldo USD à parte) e o OAuth sai do crédito do plano, que você já paga. Use o botão "Conectar HeyGen agora" — ele tira um login PRÓPRIO do app e renova sozinho todo dia. Colar o token do CLI aqui também funciona, mas aí o CLI e o app disputam a MESMA corrente (o refresh é de uso único): quem renovar primeiro derruba o outro, e é por isso que o login vivia expirando.',
     link: 'https://developers.heygen.com/docs/cli',
     usedBy: 'ClickUp Pilot — MODO IMAGEM (animar imagem sem avatar da biblioteca)',
   },
@@ -259,6 +260,10 @@ export default function ApiKeysPage() {
                       <p className="mt-0.5 text-[11px] text-text-muted">
                         Usado em: <span className="text-lime">{m.usedBy}</span>
                       </p>
+                      {/* Caminho PRINCIPAL do OAuth: login pelo próprio app, em
+                          corrente que o CLI não derruba. O campo de colar
+                          continua logo abaixo, como saída manual. */}
+                      {m.id === 'heygen_oauth' ? <HeyGenConectar compacto /> : null}
                     </div>
                     {s?.configured ? (
                       <button
