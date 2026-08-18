@@ -17,7 +17,8 @@ import {
  *   - API key e OAuth em contas DIFERENTES → o usuário escolhe avatar numa
  *     conta e gera na outra, e o HeyGen devolve "Avatar group not accessible"
  *
- * Consumido pelo banner do /tools/clickup-pilot e do /tools/heygen-auto.
+ * Consumido pelo banner do /tools/clickup-pilot, do /tools/heygen-auto e da
+ * /tools/famous-hey (que depende SO do OAuth — pra ela o aviso é o mais crítico).
  *
  * ⚠ Não gasta crédito: só chama endpoints de informação de conta.
  */
@@ -28,7 +29,7 @@ export const maxDuration = 30;
 export async function GET() {
   try {
     const gate = await requireTier('admin', {
-      unlockTools: ['/tools/heygen-auto', '/tools/clickup-pilot'],
+      unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
 
