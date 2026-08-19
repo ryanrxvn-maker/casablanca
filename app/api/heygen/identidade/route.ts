@@ -27,7 +27,7 @@ import {
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const gate = await requireTier(famousHeyGratis() ? 'free' : 'admin', {
       unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
@@ -47,7 +47,10 @@ export async function GET() {
       identidadeOAuth(oauthGuardado),
     ]);
 
-    return NextResponse.json(montarDiagnostico(ladoKey, ladoOauth));
+    // A Famous Hey manda ?apiKeyOpcional=1: lá o seletor de voz cai pro OAuth
+    // quando não há key, então cobrar a key seria pedir o que não desbloqueia.
+    const opcional = new URL(req.url).searchParams.get('apiKeyOpcional') === '1';
+    return NextResponse.json(montarDiagnostico(ladoKey, ladoOauth, opcional));
   } catch (e) {
     // Falha de diagnóstico NÃO pode travar a ferramenta: o banner simplesmente
     // não aparece. Por isso 200 com aviso nulo em vez de 500.
@@ -56,6 +59,7 @@ export async function GET() {
       oauth: { configurada: false, valida: false, conta: null, expiraEm: null, erro: null },
       conflitoDeConta: false,
       aviso: null,
+      falta: null,
       falhaDiagnostico: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
     });
   }

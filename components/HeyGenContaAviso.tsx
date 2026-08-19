@@ -25,11 +25,20 @@ type Aviso = { nivel: 'erro' | 'atencao'; titulo: string; texto: string } | null
 
 type Diagnostico = {
   aviso: Aviso;
+  /** qual credencial está com problema — decide QUAL botão aparece */
+  falta?: 'oauth' | 'apikey' | 'ambas' | null;
   apiKey?: { conta?: { email?: string | null } | null };
   oauth?: { conta?: { email?: string | null } | null; expiraEm?: string | null };
 };
 
-export function HeyGenContaAviso() {
+export function HeyGenContaAviso({
+  /**
+   * `true` nas telas que não precisam da API key (Famous Hey: o seletor de voz
+   * cai pro OAuth). Sem isto, a tela cobrava uma credencial que não desbloqueia
+   * nada ali — o usuário conectava, recarregava e continuava vendo aviso.
+   */
+  apiKeyOpcional,
+}: { apiKeyOpcional?: boolean } = {}) {
   const [diag, setDiag] = useState<Diagnostico | null>(null);
   const [fechado, setFechado] = useState(false);
 
@@ -37,7 +46,7 @@ export function HeyGenContaAviso() {
     let vivo = true;
     // Falha silenciosa de propósito: se o diagnóstico não responder, a
     // ferramenta segue normal — o banner é proteção, não dependência.
-    fetch('/api/heygen/identidade')
+    fetch(`/api/heygen/identidade${apiKeyOpcional ? '?apiKeyOpcional=1' : ''}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (vivo && j) setDiag(j as Diagnostico);
@@ -46,9 +55,10 @@ export function HeyGenContaAviso() {
     return () => {
       vivo = false;
     };
-  }, []);
+  }, [apiKeyOpcional]);
 
   const aviso = diag?.aviso ?? null;
+  const falta = diag?.falta ?? null;
   if (!aviso || fechado) return null;
 
   const erro = aviso.nivel === 'erro';
@@ -88,16 +98,29 @@ export function HeyGenContaAviso() {
             </div>
           ) : null}
 
-          {/* Consertar ONDE o problema aparece. Mandar o usuário pra outra
-              tela (e de lá pro terminal) era o que fazia isso virar ritual. */}
-          {/oauth|expirou|configurar/i.test(aviso.titulo) ? <HeyGenConectar /> : null}
+          {/* O BOTÃO TEM QUE RESOLVER O QUE O TÍTULO DIZ. Antes aparecia
+              "falta API key" com um botão de OAuth do lado: o usuário conectava,
+              recarregava e via a mesma tela, sem entender que eram credenciais
+              diferentes. */}
+          {falta === 'oauth' || falta === 'ambas' ? <HeyGenConectar /> : null}
 
-          <a
-            href="/configuracoes/api"
-            className="mt-2 inline-block font-semibold underline underline-offset-2"
-          >
-            Abrir configurações de API →
-          </a>
+          {falta === 'apikey' || falta === 'ambas' ? (
+            <a
+              href="/configuracoes/api"
+              className="mt-2 inline-flex items-center gap-1.5 rounded-[10px] border border-current/40 px-3.5 py-2 text-[13px] font-bold transition-opacity hover:opacity-80"
+            >
+              Colar minha API key →
+            </a>
+          ) : null}
+
+          {!falta ? (
+            <a
+              href="/configuracoes/api"
+              className="mt-2 inline-block font-semibold underline underline-offset-2"
+            >
+              Abrir configurações de API →
+            </a>
+          ) : null}
         </div>
         <button
           type="button"

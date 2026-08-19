@@ -376,8 +376,8 @@ function SeletorDeVoz({
             <p className="px-1 py-2 text-[12px] text-text-muted">carregando vozes…</p>
           ) : vozes.length === 0 ? (
             <p className="px-1 py-2 text-[12px] text-text-muted">
-              Nenhuma voz encontrada. As vozes vêm da conta da API key configurada em
-              /configuracoes/api.
+              Nenhuma voz encontrada. Se a busca estiver vazia e mesmo assim não vier
+              nada, é sinal de que o HeyGen ainda não está conectado.
             </p>
           ) : (
             vozes.map((v) => {
@@ -953,7 +953,9 @@ export default function FamousHeyPage() {
       hue="rgba(251, 191, 36, 0.42)"
       icon={<IconFamousHey size={30} />}
     >
-      <HeyGenContaAviso />
+      {/* apiKeyOpcional: aqui o seletor de voz cai pro OAuth quando não há
+          key, então cobrar a key seria pedir o que não desbloqueia nada. */}
+      <HeyGenContaAviso apiKeyOpcional />
 
       <Etapa n="01" titulo="A imagem" aparte="JPEG, PNG ou WebP · até 4MB">
         <div className="grid gap-3 md:grid-cols-[1fr_150px]">

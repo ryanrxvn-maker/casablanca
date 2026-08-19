@@ -63,6 +63,13 @@ export type Diagnostico = {
   conflitoDeConta: boolean;
   /** Aviso pronto pra tela. `null` = nada a avisar. */
   aviso: { nivel: 'erro' | 'atencao'; titulo: string; texto: string } | null;
+  /**
+   * QUAL credencial está com problema. Existe porque a tela precisa oferecer a
+   * AÇÃO CERTA: o botão "Conectar HeyGen" resolve OAuth e não resolve API key.
+   * Mostrar "falta API key" com um botão de OAuth ao lado foi exatamente o que
+   * fez o usuário conectar, recarregar e achar que nada tinha acontecido.
+   */
+  falta: 'oauth' | 'apikey' | 'ambas' | null;
 };
 
 /** Dias inteiros até a data (negativo = já passou). `null` quando não se sabe. */
@@ -187,6 +194,12 @@ export async function identidadeOAuth(
 export function montarDiagnostico(
   apiKey: LadoDiagnostico,
   oauth: LadoDiagnostico & { expiraEm: string | null },
+  /**
+   * `true` quando a tela chamadora NÃO precisa da API key. É o caso da Famous
+   * Hey: o seletor de voz cai pro OAuth quando não há key, então cobrar a key
+   * ali é pedir uma coisa que não desbloqueia nada.
+   */
+  apiKeyOpcional = false,
 ): Diagnostico {
   const emailKey = apiKey.conta?.email ?? null;
   const emailOAuth = oauth.conta?.email ?? null;
@@ -229,19 +242,22 @@ export function montarDiagnostico(
         `devolve "Avatar group not accessible". Deixe as duas na mesma conta em ` +
         `/configuracoes/api antes de disparar.`,
     };
-  } else if (!apiKey.configurada || !oauth.configurada) {
-    const falta = [
-      !apiKey.configurada ? 'API key' : null,
-      !oauth.configurada ? 'OAuth (modo imagem)' : null,
-    ]
-      .filter(Boolean)
-      .join(' e ');
+  } else if (!oauth.configurada) {
     aviso = {
       nivel: 'atencao',
-      titulo: `Falta configurar: ${falta}`,
-      texto: 'Configure em /configuracoes/api para o disparo funcionar por completo.',
+      titulo: 'Falta conectar o HeyGen',
+      texto:
+        'Um clique: abre o HeyGen, você aprova com um código e volta. Sem terminal e sem colar nada.',
     };
-  } else if (apiKey.configurada && !apiKey.valida) {
+  } else if (!apiKey.configurada && !apiKeyOpcional) {
+    aviso = {
+      nivel: 'atencao',
+      titulo: 'Falta a API key do HeyGen',
+      texto:
+        'O login já está conectado — isto aqui é OUTRA credencial, usada só pra listar seus ' +
+        'avatares e vozes. Ela se cola à mão em /configuracoes/api.',
+    };
+  } else if (apiKey.configurada && !apiKey.valida && !apiKeyOpcional) {
     aviso = {
       nivel: 'atencao',
       titulo: 'A API key do HeyGen não foi aceita',
@@ -249,5 +265,10 @@ export function montarDiagnostico(
     };
   }
 
-  return { apiKey, oauth, conflitoDeConta: conflito, aviso };
+  const faltaOauth = !oauth.configurada || !oauth.valida;
+  const faltaKey = !apiKeyOpcional && (!apiKey.configurada || !apiKey.valida);
+  const falta: Diagnostico['falta'] =
+    faltaOauth && faltaKey ? 'ambas' : faltaOauth ? 'oauth' : faltaKey ? 'apikey' : null;
+
+  return { apiKey, oauth, conflitoDeConta: conflito, aviso, falta };
 }
