@@ -151,8 +151,8 @@ export async function identidadeOAuth(
       conta: null,
       expiraEm: null,
       erro:
-        'OAuth do HeyGen não configurado — o modo imagem não vai disparar. ' +
-        'Clique em "Conectar HeyGen agora" pra resolver em dois cliques.',
+        'Falta conectar sua conta do HeyGen — é ela que gera os vídeos. ' +
+        'Um clique aqui embaixo resolve.',
     };
   }
   let access: string;
@@ -163,6 +163,7 @@ export async function identidadeOAuth(
     // O SUCESSOR SOBE JUNTO. Descartar aqui era matar a corrente.
     novoRefresh = r.novoRefresh;
   } catch (e) {
+    console.error('[heygen identidade] renovacao falhou:', e);
     return {
       configurada: true,
       valida: false,
@@ -172,10 +173,11 @@ export async function identidadeOAuth(
       // a disputa pela mesma corrente de refresh (uso único + rotação): quem
       // renovar primeiro derruba o outro. O botão "Conectar HeyGen agora" tira
       // um login PRÓPRIO do app, que o CLI não encosta.
-      erro:
-        'Clique em "Conectar HeyGen agora" aqui embaixo: abre o HeyGen, você aprova ' +
-        'com um código e pronto. ' +
-        (e instanceof Error ? e.message.slice(0, 160) : ''),
+      // ⚠ O erro CRU do provedor não entra na tela. Concatenar a mensagem do
+      // HeyGen aqui produzia um amontoado: minha frase + "invalid_grant (HTTP
+      // 400)" + o marcador interno + a mesma instrução repetida. Fica no log,
+      // onde serve pra depurar; na tela vai uma frase só.
+      erro: 'Sua conexão com o HeyGen caiu. É só reconectar aqui embaixo — leva dois cliques.',
     };
   }
   // Até quando o REFRESH vale. Vem do login/rotação quando o provedor informa;
@@ -219,10 +221,10 @@ export function montarDiagnostico(
   if (oauth.configurada && !oauth.valida) {
     aviso = {
       nivel: 'erro',
-      titulo: 'O login do modo imagem expirou',
+      titulo: 'Reconecte sua conta do HeyGen',
       texto:
         oauth.erro ??
-        'Clique em "Conectar HeyGen agora" aqui embaixo — abre o HeyGen e você aprova com um código.',
+        'Sua conexão com o HeyGen caiu. É só reconectar aqui embaixo — leva dois cliques.',
     };
   } else if (diasAte(oauth.expiraEm) !== null && (diasAte(oauth.expiraEm) as number) <= 3) {
     // Avisar ANTES de quebrar. Descobrir que o login venceu no meio de um lote
@@ -251,17 +253,17 @@ export function montarDiagnostico(
   } else if (!oauth.configurada) {
     aviso = {
       nivel: 'atencao',
-      titulo: 'Falta conectar o HeyGen',
+      titulo: 'Conecte sua conta do HeyGen',
       texto:
-        'Um clique: abre o HeyGen, você aprova com um código e volta. Sem terminal e sem colar nada.',
+        'Abre o HeyGen, você confirma com um código e volta. É a conta que vai gerar os vídeos.',
     };
   } else if (!apiKey.configurada && !apiKeyOpcional) {
     aviso = {
       nivel: 'atencao',
-      titulo: 'Falta a API key do HeyGen',
+      titulo: 'Falta a chave que lista seus avatares',
       texto:
-        'O login já está conectado — isto aqui é OUTRA credencial, usada só pra listar seus ' +
-        'avatares e vozes. Ela se cola à mão em /configuracoes/api.',
+        'Sua conta já está conectada. Isto aqui é uma chave separada, usada só pra mostrar ' +
+        'seus avatares e vozes salvos.',
     };
   } else if (apiKey.configurada && !apiKey.valida && !apiKeyOpcional) {
     aviso = {

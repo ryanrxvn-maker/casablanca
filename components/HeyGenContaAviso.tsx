@@ -81,7 +81,7 @@ export function HeyGenContaAviso({
         </span>
         <div className="min-w-0 flex-1">
           <div className="font-bold">{aviso.titulo}</div>
-          <p className="mt-1 opacity-95">{aviso.texto}</p>
+          <p className="mt-1 opacity-95">{aviso.texto.replace('[RECONECTAR]', '').trim()}</p>
 
           {diag?.oauth?.expiraEm ? (
             <p className="mt-1.5 text-[11.5px] opacity-80">

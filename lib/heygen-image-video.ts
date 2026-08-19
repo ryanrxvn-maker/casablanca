@@ -265,13 +265,15 @@ export async function accessTokenDoRefresh(
   }
 
   if (!r.ok || !j?.access_token) {
+    // O detalhe do provedor vai pro log; a tela recebe uma frase que a pessoa
+    // entende e um marcador que faz o botao de reconectar aparecer.
+    console.error('[heygen oauth] renovacao falhou:', describeError(r.status, j));
     throw new Error(
-      'Não consegui renovar o OAuth do HeyGen: ' +
-        describeError(r.status, j) +
+      '' +
         // ⚠ Marcador que a TELA procura pra oferecer o botão de reconectar.
         // Sem ele o usuário lia "invalid_grant (HTTP 400)" e não tinha o que
         // clicar — que foi exatamente o beco em que ele caiu.
-        ' [RECONECTAR] O login do HeyGen caiu. Clique em "Conectar HeyGen agora" pra refazer em dois cliques.',
+        '[RECONECTAR]Sua conexão com o HeyGen caiu. Reconecte aqui embaixo — leva dois cliques.',
     );
   }
 

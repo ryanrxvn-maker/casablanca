@@ -54,6 +54,10 @@ const FREE_ALLOWED_TOOLS = [
   '/tools/compressor',
   '/tools/normalizador', // liberado pra TODOS em 14.08.2026 (roda no navegador, custo zero)
   '/tools/historico', // histórico geral — todo tier vê o próprio trabalho
+  // Famous Hey na janela grátis. Tirar do gate de ADMIN não bastava: sem estar
+  // AQUI o free continuava sendo mandado pra /planos. Duas listas, e eu só
+  // tinha mexido numa.
+  ...(famousHeyGratis() ? ['/tools/famous-hey'] : []),
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
 const FREE_EXTRA_OK_PREFIXES = ['/planos'];
