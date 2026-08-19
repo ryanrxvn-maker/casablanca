@@ -149,8 +149,11 @@ export async function POST(req: Request) {
       if (code === 'email_not_confirmed' || msg.includes('not confirmed')) {
         return json({
           reason: 'unconfirmed',
+          // ⚠ É CÓDIGO de 6 dígitos, não link: o template do Supabase manda
+          // {{ .Token }}. Dizer "link" fazia a pessoa procurar algo pra clicar
+          // e ignorar o código que estava na frente dela.
           message:
-            'Você ainda não confirmou o email. Te mandamos um novo link agora — confira a caixa de entrada (e o spam).',
+            'Falta confirmar seu email. O código de 6 dígitos foi pro seu email — digite ele na tela seguinte (confira o spam).',
           canResend: true,
         });
       }

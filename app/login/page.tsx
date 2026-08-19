@@ -139,9 +139,11 @@ function LoginInner() {
         setResentMsg(json.error || 'Falha ao reenviar.');
         return;
       }
-      setResentMsg(
-        'Email reenviado. Confira a caixa de entrada (e o spam).',
-      );
+      // O email traz um CÓDIGO de 6 dígitos, e a tela pra digitá-lo é a
+      // /verify. Só avisar "confira a caixa de entrada" deixava a pessoa parada
+      // no login com o código na mão e nenhum campo pra usar.
+      setResentMsg('Código enviado. Abrindo a tela pra digitar…');
+      router.push(`/verify?email=${encodeURIComponent(email.trim().toLowerCase())}`);
     } finally {
       setResending(false);
     }
@@ -274,8 +276,19 @@ function LoginInner() {
                   className="rounded-full border border-yellow-500/60 bg-yellow-500/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-yellow-100 transition hover:bg-yellow-500/25 disabled:opacity-50"
                   style={{ fontFamily: 'var(--font-tech)' }}
                 >
-                  {resending ? 'Reenviando…' : '↻ Reenviar email de confirmação'}
+                  {resending ? 'Enviando…' : '↻ Enviar código de novo'}
                 </button>
+              ) : null}
+              {/* Atalho pra quem JÁ recebeu: pedir outro código só pra achar a
+                  tela de digitar era o caminho mais longo possível. */}
+              {error.canResend ? (
+                <a
+                  href={`/verify?email=${encodeURIComponent(email.trim().toLowerCase())}`}
+                  className="rounded-full border border-violet/60 bg-violet/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-violet-100 transition hover:bg-violet/25"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  Já tenho o código →
+                </a>
               ) : null}
               {error.ctaHref && error.ctaLabel ? (
                 <a
