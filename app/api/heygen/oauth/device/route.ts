@@ -1,3 +1,4 @@
+import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { requireTier } from '@/lib/require-tier';
@@ -58,7 +59,10 @@ async function form(url: string, campos: Record<string, string>) {
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireTier('admin', {
+    // Janela grátis: é o PRIMEIRO botão que o usuário free clica. Ficou de fora
+    // quando as outras rotas foram abertas, e o resultado era ele receber
+    // "Recurso disponível só pra contas Admin" logo no primeiro clique.
+    const gate = await requireTier(famousHeyGratis() ? 'free' : 'admin', {
       unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
