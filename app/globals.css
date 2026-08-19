@@ -2116,35 +2116,86 @@ html[data-theme='light'] {
   }
 }
 
-/* ─────────────── LETTERING do Famous Hey (hero) ───────────────
-   Gradiente vivo com varredura de brilho CONTÍNUA — não depende de hover,
-   porque o card também precisa chamar atenção de quem só passa os olhos.
-   A varredura é `background-position` num gradiente 3x maior que o texto: só
-   isso anima, então roda na GPU sem repintar layout.
-   Respeita prefers-reduced-motion: o gradiente fica, o movimento sai. */
+/* ─────────────── SOMBRA DOS SLIDES DO HERÓI ───────────────
+   Era inline com rgba(0,0,0,.95): no tema CLARO isso vira uma mancha cinza
+   em volta do card, que lia como "borda sobrando". Aqui a sombra é escura no
+   dark e discreta+fria no light, onde a profundidade vem de contraste suave e
+   não de preto puro. */
+.hero-sombra {
+  box-shadow: 0 30px 70px -26px rgba(0, 0, 0, 0.95);
+}
+html[data-theme='light'] .hero-sombra {
+  box-shadow:
+    0 2px 6px -2px rgba(24, 24, 32, 0.14),
+    0 18px 44px -24px rgba(24, 24, 32, 0.35);
+}
+
+/* ─────────────── LETTERING v2 ───────────────
+   Camadas: halo colorido atrás (pseudo-elemento borrado), corpo em gradiente
+   cromado com varredura contínua, e um contorno fino pra segurar a leitura
+   sobre vídeo claro — sem contorno o lettering sumia no frame do estádio. */
 .fh-lettering {
+  position: relative;
   background-image: linear-gradient(
     100deg,
     #fbbf24 0%,
-    #f472b6 22%,
-    #ffffff 34%,
-    #a78bfa 48%,
-    #f472b6 68%,
+    #fde68a 14%,
+    #ffffff 26%,
+    #f472b6 42%,
+    #ffffff 56%,
+    #a78bfa 72%,
     #fbbf24 100%
   );
-  background-size: 300% 100%;
+  background-size: 320% 100%;
   background-position: 0% 50%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 3px 18px rgba(244, 114, 182, 0.45));
-  animation: fh-lettering-sweep 6s linear infinite;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 0.6px rgba(0, 0, 0, 0.35);
+  animation: fh-lettering-sweep 5.5s linear infinite;
+}
+/* Halo: fica ATRÁS do texto e pulsa devagar. Em pseudo-elemento pra não
+   entrar no background-clip do gradiente. */
+.fh-lettering::before {
+  content: attr(data-texto);
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  color: rgba(244, 114, 182, 0.55);
+  -webkit-text-fill-color: rgba(244, 114, 182, 0.55);
+  filter: blur(14px);
+  animation: fh-lettering-halo 3.2s ease-in-out infinite;
 }
 @keyframes fh-lettering-sweep {
   0% { background-position: 0% 50%; }
-  100% { background-position: 300% 50%; }
+  100% { background-position: 320% 50%; }
+}
+@keyframes fh-lettering-halo {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.035); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .fh-lettering { animation: none; }
+  .fh-lettering, .fh-lettering::before { animation: none; }
+}
+
+/* ─────────────── SELO AO VIVO / GRÁTIS ───────────────
+   Vermelho de plantão, igual à tarja do FakePrint: é o único tom da paleta que
+   o olho já lê como "urgente" sem precisar de texto explicando. */
+.fh-selo {
+  background: linear-gradient(140deg, #e0483f, #cc0000);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    0 8px 22px -8px rgba(204, 0, 0, 0.85);
+}
+.fh-selo-pulso {
+  animation: fh-selo-pulso 1.8s ease-in-out infinite;
+}
+@keyframes fh-selo-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fh-selo-pulso { animation: none; }
 }

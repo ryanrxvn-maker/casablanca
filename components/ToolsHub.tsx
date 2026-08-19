@@ -639,10 +639,9 @@ function TipografiaSlide() {
       ref={wrapRef}
       href="/tools/tipografia"
       onPointerMove={onMove}
-      className="dark-island group relative block overflow-hidden rounded-[26px] border border-line/60"
+      className="dark-island hero-sombra group relative block overflow-hidden rounded-[26px] border border-line/60"
       style={
         {
-          boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)',
           '--mx': '50%',
           '--my': '40%',
           '--px': '0',
@@ -862,11 +861,10 @@ function FamousHeySlide() {
     >
       <Link
         href="/tools/famous-hey"
-        className="dark-island relative block h-full overflow-hidden rounded-[26px] border border-line/60 transition-transform duration-300 ease-out will-change-transform"
+        className="dark-island hero-sombra relative block h-full overflow-hidden rounded-[26px] border border-line/60 transition-transform duration-300 ease-out will-change-transform"
         style={{
           transform: 'rotateX(var(--rx)) rotateY(var(--ry))',
           transformStyle: 'preserve-3d',
-          boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)',
         }}
       >
         <div className="absolute inset-0 transition-transform duration-[1800ms] ease-out group-hover:scale-[1.06]">
@@ -922,57 +920,41 @@ function FamousHeySlide() {
           className="absolute inset-0 z-10 flex flex-col justify-end p-5 md:p-8"
           style={{ transform: 'translateZ(38px)' }}
         >
-          {/* LETTERING — o nome é a marca do card, não uma etiqueta. Gradiente
-              vivo com varredura contínua de brilho (sem depender de hover) e um
-              halo por trás pra descolar do vídeo. */}
-          <div className="mb-3 flex items-center gap-3">
-            <span className="relative inline-block">
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -inset-x-4 -inset-y-2 rounded-full blur-2xl"
-                style={{ background: 'radial-gradient(60% 60% at 50% 50%, rgba(244,114,182,0.4), transparent 70%)' }}
-              />
-              <span
-                className="fh-lettering relative block text-[30px] font-black leading-none tracking-[-0.02em] sm:text-[38px] lg:text-[46px]"
-                style={{ fontFamily: 'var(--font-display), var(--font-tech), system-ui' }}
-              >
-                Famous Hey
-              </span>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            {/* data-texto alimenta o halo do ::before (mesmo texto, borrado) */}
+            <span
+              className="fh-lettering block text-[34px] font-black leading-none tracking-[-0.03em] sm:text-[44px] lg:text-[54px]"
+              data-texto="Famous Hey"
+              style={{ fontFamily: 'var(--font-display), var(--font-tech), system-ui' }}
+            >
+              Famous Hey
             </span>
 
-            {/* SELO da janela grátis — bilhete com furo, não mais uma barrinha
-                igual à de cima. A contagem cai sozinha porque vem da mesma
-                constante que abre e fecha o acesso. */}
+            {/* Vermelho de plantão: mesmo tom do AO VIVO do FakePrint — é o que
+                o olho lê como urgente sem precisar de texto explicando. */}
             {famousHeyGratis() ? (
-              <span className="relative inline-flex items-center gap-2 rounded-[10px] border border-lime/55 bg-lime/[0.12] px-3 py-1.5 backdrop-blur-md">
-                <span
-                  aria-hidden
-                  className="absolute -left-[5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#06060a]"
-                />
-                <span
-                  aria-hidden
-                  className="absolute -right-[5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#06060a]"
-                />
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
-                </span>
-                <span className="text-[17px] font-black leading-none text-lime">
+              <span
+                className="fh-selo inline-flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                <span className="fh-selo-pulso h-1.5 w-1.5 rounded-full bg-white" />
+                <span className="text-[13px] font-black leading-none">
                   {famousHeyDiasRestantes()}
                 </span>
-                <span
-                  className="text-[8.5px] font-black uppercase leading-[1.1] tracking-[0.14em] text-lime/85"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  dia{famousHeyDiasRestantes() === 1 ? '' : 's'}
-                  <br />
-                  grátis
+                <span className="text-[9px] font-black uppercase leading-none tracking-[0.16em]">
+                  dia{famousHeyDiasRestantes() === 1 ? '' : 's'} grátis
                 </span>
               </span>
             ) : null}
           </div>
 
-          <h3 className="max-w-[17ch] text-[24px] font-black leading-[1.05] tracking-tight text-white drop-shadow-[0_4px_24px_rgba(0,0,0,0.9)] sm:text-[30px] lg:text-[36px]">
+          {/* text-shadow no lugar de drop-shadow: o filtro criava região de
+              recorte começando exatamente na borda do glifo e comia o
+              antialiasing da primeira letra — o "U" de Use lia como "J". */}
+          <h3
+            className="max-w-[17ch] text-[24px] font-black leading-[1.05] tracking-tight text-white sm:text-[30px] lg:text-[36px]"
+            style={{ textShadow: '0 4px 24px rgba(0,0,0,0.9), 0 1px 3px rgba(0,0,0,0.85)' }}
+          >
             Use qualquer avatar
             <br />
             <span
@@ -987,9 +969,6 @@ function FamousHeySlide() {
             </span>
           </h3>
 
-          <p className="mt-2 max-w-[42ch] text-[12.5px] leading-relaxed text-white/70 md:text-[13.5px]">
-            Uma foto vira take falando. Sem cadastrar avatar na biblioteca.
-          </p>
 
           <span
             className="relative mt-4 inline-flex w-fit items-center gap-2 overflow-hidden rounded-full px-5 py-2.5 text-[13px] font-bold text-white transition-transform duration-300 group-hover:-translate-y-[2px]"
@@ -1042,8 +1021,7 @@ function FakePrintSlide() {
   return (
     <Link
       href="/tools/fakepass"
-      className="dark-island group relative block overflow-hidden rounded-[26px] border border-line/60"
-      style={{ boxShadow: '0 30px 70px -26px rgba(0,0,0,0.95)' }}
+      className="dark-island hero-sombra group relative block overflow-hidden rounded-[26px] border border-line/60"
     >
       {/* A medida vem da caixa canônica do carrossel (HERO_BOX) */}
       <div className="relative h-full w-full">

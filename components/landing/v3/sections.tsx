@@ -241,7 +241,8 @@ export function FamousHeySection() {
               style={{ background: 'radial-gradient(60% 60% at 50% 50%, rgba(244,114,182,0.34), transparent 70%)' }}
             />
             <span
-              className="fh-lettering relative block text-[46px] font-black leading-none tracking-[-0.025em] md:text-[76px]"
+              className="fh-lettering relative block text-[46px] font-black leading-none tracking-[-0.03em] md:text-[76px]"
+              data-texto="Famous Hey"
               style={{ fontFamily: 'var(--font-display), var(--font-tech), system-ui' }}
             >
               Famous Hey
@@ -262,8 +263,7 @@ export function FamousHeySection() {
             </span>
           </h2>
           <p className="mt-4 max-w-[56ch] text-[15.5px] leading-relaxed text-text-muted">
-            Você sobe uma imagem, escreve a fala ou manda um áudio, e sai o take pronto —
-            sem cadastrar avatar na biblioteca do HeyGen.
+            Você sobe uma imagem, escreve a fala ou manda um áudio, e sai o take pronto.
           </p>
         </div>
       </Reveal>
@@ -332,28 +332,25 @@ export function FamousHeySection() {
               style={{ transform: 'translateZ(46px)' }}
             >
               <div>
+                <span
+                  className="fh-lettering mb-2 block text-[26px] font-black leading-none tracking-[-0.03em] md:text-[34px]"
+                  data-texto="Famous Hey"
+                  style={{ fontFamily: 'var(--font-display), var(--font-tech), system-ui' }}
+                >
+                  Famous Hey
+                </span>
                 {gratis ? (
-                  <span className="relative mb-3 inline-flex items-center gap-2 rounded-[10px] border border-lime/55 bg-lime/[0.12] px-3 py-1.5 backdrop-blur-md">
-                    <span aria-hidden className="absolute -left-[5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#06060a]" />
-                    <span aria-hidden className="absolute -right-[5px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[#06060a]" />
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-75" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
-                    </span>
-                    <span className="text-[18px] font-black leading-none text-lime">{dias}</span>
-                    <span
-                      className="text-[8.5px] font-black uppercase leading-[1.1] tracking-[0.14em] text-lime/85"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      dia{dias === 1 ? '' : 's'}
-                      <br />
-                      grátis
+                  <span
+                    className="fh-selo mb-3 inline-flex items-center gap-1.5 rounded-[6px] px-3 py-1.5 text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    <span className="fh-selo-pulso h-1.5 w-1.5 rounded-full bg-white" />
+                    <span className="text-[15px] font-black leading-none">{dias}</span>
+                    <span className="text-[9.5px] font-black uppercase leading-none tracking-[0.16em]">
+                      dia{dias === 1 ? '' : 's'} grátis
                     </span>
                   </span>
                 ) : null}
-                <p className="max-w-[38ch] text-[13px] leading-relaxed text-white/75 md:text-[14.5px]">
-                  Um take, uma fala. Sai o vídeo cru pra você levar pra edição.
-                </p>
               </div>
 
               <Link
