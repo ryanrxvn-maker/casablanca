@@ -52,7 +52,7 @@ type ToolEntry = {
   icon: React.ReactNode;
   /** Cor do glow do ícone (deve casar com o gradient do icon) */
   hue: string;
-  badge?: 'IA' | 'ADMIN';
+  badge?: 'IA' | 'ADMIN' | 'GRÁTIS';
   adminOnly?: boolean;
   /** Vídeo do card (roda só no hover). Em /public/cards/. */
   video?: string;
@@ -224,11 +224,13 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/famous-hey',
     label: 'Famous Hey',
-    description: 'Anima uma foto no HeyGen, sem cadastrar avatar na biblioteca.',
+    description: 'Anima uma foto no HeyGen. Uma foto vira take falando.',
     icon: <IconFamousHey size={26} />,
     hue: 'rgba(251, 191, 36, 0.42)',
-    badge: 'ADMIN',
-    adminOnly: true,
+    // Na janela grátis o selo anuncia a promoção e o card aparece pra TODOS;
+    // fechada a janela, volta a ser ADMIN e some pra cliente sozinho.
+    badge: famousHeyGratis() ? 'GRÁTIS' : 'ADMIN',
+    adminOnly: !famousHeyGratis(),
   },
 ];
 
@@ -481,6 +483,15 @@ function PromoBanner({
  * O `min-h` é o piso pros heróis de TEXTO (Pilot / Auto B-roll), que empilham
  * título + copy + botões no mobile e não cabem num 16/10 magro.
  */
+/** Estilo do selo do card. 'GRÁTIS' usa o vermelho de plantão em vez do violeta
+ *  padrão: no meio de uma grade cheia de selos "IA" violeta, mais um violeta
+ *  passava batido — e o ponto do selo é justamente ser notado. */
+function seloClasse(badge: string): string {
+  return badge === 'GRÁTIS'
+    ? 'rounded-full border border-white/25 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-white backdrop-blur-md transition-transform duration-300 group-hover:scale-105 fh-selo'
+    : 'rounded-full border border-violet/35 bg-violet/10 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md transition-transform duration-300 group-hover:scale-105';
+}
+
 const HERO_BOX =
   'aspect-[16/10] min-h-[440px] max-h-[480px] sm:aspect-[16/8] sm:min-h-[400px] lg:aspect-[21/9] lg:min-h-0';
 
@@ -2128,7 +2139,7 @@ function FeaturedCard({
             ) : null}
             {entry.badge ? (
               <span
-                className="rounded-full border border-violet/35 bg-violet/10 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md transition-transform duration-300 group-hover:scale-105"
+                className={seloClasse(entry.badge)}
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 {entry.badge}
@@ -2307,7 +2318,11 @@ function ToolCard({
             </span>
             {entry.badge ? (
               <span
-                className="rounded-full border border-violet/35 bg-black/45 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
+                className={
+                  entry.badge === 'GRÁTIS'
+                    ? 'fh-selo rounded-full border border-white/25 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.20em] text-white backdrop-blur-md'
+                    : 'rounded-full border border-violet/35 bg-black/45 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md'
+                }
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 {entry.badge}
