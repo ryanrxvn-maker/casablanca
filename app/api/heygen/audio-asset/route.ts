@@ -104,26 +104,58 @@ export async function POST(req: Request) {
 
     const bytes = new Uint8Array(await audio.arrayBuffer());
 
-    // 1ª tentativa: Bearer — o asset nasce na conta que vai gerar o vídeo.
-    const keyResult = await getUserKey('heygen_oauth');
-    if ('response' in keyResult) return keyResult.response;
-    const { access } = await accessTokenDoRefresh(keyResult.key);
-    let r = await subir({ Authorization: `Bearer ${access}` }, bytes, mime);
+    /**
+     * ORDEM: API KEY PRIMEIRO.
+     *
+     * O upload.heygen.com é o endpoint de API key — é assim que a clonagem de
+     * voz sobe áudio há meses. O Bearer aqui é a aposta, não o caminho certo,
+     * então ele vira o SEGUNDO.
+     *
+     * E as duas tentativas são independentes de propósito: antes, um OAuth
+     * morto fazia `accessTokenDoRefresh` lançar e o catch de fora respondia 500
+     * — a API key, que resolveria, nunca chegava a ser testada.
+     */
+    const tentativas: Array<{ nome: string; headers: Record<string, string> }> = [];
 
-    // 2ª: API key. O upload é o único ponto onde as duas credenciais servem —
-    // a URL devolvida é de CDN público, então o /v3/videos alcança de qualquer
-    // conta. Sem este fallback, um OAuth sem permissão de upload derrubaria a
-    // ferramenta inteira por causa de um passo acessório.
-    if (!r.url && !r.assetId) {
-      const rk = await getUserKey('heygen');
-      if (!('response' in rk)) {
-        const alt = await subir({ 'X-Api-Key': rk.key }, bytes, mime);
-        if (alt.url || alt.assetId) r = alt;
+    const rk = await getUserKey('heygen');
+    if (!('response' in rk)) {
+      tentativas.push({ nome: 'API key', headers: { 'X-Api-Key': rk.key } });
+    }
+
+    const rOauth = await getUserKey('heygen_oauth');
+    if (!('response' in rOauth)) {
+      try {
+        const { access } = await accessTokenDoRefresh(rOauth.key);
+        tentativas.push({ nome: 'conta conectada', headers: { Authorization: `Bearer ${access}` } });
+      } catch {
+        /* OAuth morto não impede a API key de tentar */
       }
     }
 
+    if (tentativas.length === 0) {
+      return jsonError(
+        'Pra usar áudio você precisa conectar sua conta do HeyGen (ou colar a chave em Configurações).',
+        400,
+      );
+    }
+
+    let r = { url: '', assetId: '', erro: '' };
+    const falhas: string[] = [];
+    for (const t of tentativas) {
+      r = await subir(t.headers, bytes, mime);
+      if (r.url || r.assetId) break;
+      falhas.push(`${t.nome}: ${r.erro.slice(0, 160)}`);
+    }
+
     if (!r.url && !r.assetId) {
-      return jsonError('O HeyGen recusou o upload do áudio.', 502, r.erro);
+      // O motivo REAL vai junto. "O HeyGen recusou" sozinho não dizia nada — nem
+      // pro usuário, nem pra mim quando ele mandava o print.
+      console.error('[audio-asset] upload falhou:', falhas.join(' | '));
+      return jsonError(
+        `Não consegui subir o áudio pro HeyGen. ${falhas.join(' · ')}`,
+        502,
+        falhas.join(' | '),
+      );
     }
     return NextResponse.json({ url: r.url || null, assetId: r.assetId || null });
   } catch (e) {

@@ -791,7 +791,12 @@ export default function FamousHeyPage() {
         fdA.append('audio', audio);
         const rA = await fetch('/api/heygen/audio-asset', { method: 'POST', body: fdA });
         const jA = await rA.json().catch(() => null);
-        if (!rA.ok) throw new Error(jA?.error || `Falha ao subir o áudio (HTTP ${rA.status}).`);
+        if (!rA.ok) {
+          // `detalhe` carrega o que o HeyGen respondeu. Sem ele a tela dizia só
+          // "recusou o upload" e ninguém — nem eu — sabia o motivo.
+          const porque = [jA?.error, jA?.detalhe].filter(Boolean).join(' — ');
+          throw new Error(porque || `Falha ao subir o áudio (HTTP ${rA.status}).`);
+        }
         audioUrl = jA?.url || '';
         audioAssetId = jA?.assetId || '';
         if (!audioUrl && !audioAssetId) {
