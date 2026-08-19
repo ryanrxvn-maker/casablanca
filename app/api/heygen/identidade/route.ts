@@ -1,6 +1,9 @@
 import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { createClient } from '@/lib/supabase/server';
+import { encryptSecret, lastFour } from '@/lib/secrets';
+import { lerCredencial } from '@/lib/heygen-image-video';
 import { requireTier } from '@/lib/require-tier';
 import {
   identidadeApiKey,
@@ -49,6 +52,35 @@ export async function GET(req: Request) {
 
     // A Famous Hey manda ?apiKeyOpcional=1: lá o seletor de voz cai pro OAuth
     // quando não há key, então cobrar a key seria pedir o que não desbloqueia.
+    /**
+     * GRAVA O SUCESSOR. O refresh do HeyGen é de uso único: se o diagnóstico
+     * troca e não guarda o novo, o que fica no banco já nasce morto e o
+     * disparo seguinte bate em `invalid_grant`. Era isto que fazia ABRIR A
+     * TELA derrubar o login.
+     */
+    if (ladoOauth.novoRefresh) {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // supabase-js NÃO lança em erro de banco: devolve { error }.
+          const { error: errGrava } = await supabase.from('user_api_keys').upsert(
+            {
+              user_id: user.id,
+              heygen_oauth_refresh: encryptSecret(ladoOauth.novoRefresh),
+              heygen_oauth_last4: lastFour(lerCredencial(ladoOauth.novoRefresh).refresh),
+            },
+            { onConflict: 'user_id' },
+          );
+          if (errGrava) {
+            console.error('[identidade] nao gravei o refresh rotacionado:', errGrava.message);
+          }
+        }
+      } catch (e) {
+        console.error('[identidade] falha ao gravar o refresh rotacionado:', e);
+      }
+    }
+
     const opcional = new URL(req.url).searchParams.get('apiKeyOpcional') === '1';
     return NextResponse.json(montarDiagnostico(ladoKey, ladoOauth, opcional));
   } catch (e) {

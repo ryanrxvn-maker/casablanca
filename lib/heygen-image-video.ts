@@ -268,7 +268,10 @@ export async function accessTokenDoRefresh(
     throw new Error(
       'Não consegui renovar o OAuth do HeyGen: ' +
         describeError(r.status, j) +
-        '. Rode `heygen auth login --oauth` e cole o novo refresh token em /configuracoes/api.',
+        // ⚠ Marcador que a TELA procura pra oferecer o botão de reconectar.
+        // Sem ele o usuário lia "invalid_grant (HTTP 400)" e não tinha o que
+        // clicar — que foi exatamente o beco em que ele caiu.
+        ' [RECONECTAR] O login do HeyGen caiu. Clique em "Conectar HeyGen agora" pra refazer em dois cliques.',
     );
   }
 

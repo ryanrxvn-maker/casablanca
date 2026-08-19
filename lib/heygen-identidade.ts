@@ -24,12 +24,16 @@
  * ⚠ SÓ LÊ. Nunca gera vídeo, nunca gasta crédito. As chamadas usadas são de
  * informação de conta (grátis).
  *
- * ⚠ Não persiste refresh rotacionado: o diagnóstico usa `accessTokenDoRefresh`
- * em modo leitura e DESCARTA o sucessor. Quem grava é o disparo e o cron — se
- * este módulo gravasse, dois caminhos disputariam a mesma corrente.
- * Consequência aceita: um diagnóstico pode queimar um refresh quando o access
- * já venceu. Por isso ele só chama a troca quando NÃO há access válido em
- * cache/banco, e o cron diário mantém a corrente viva de qualquer forma.
+ * ⚠ HISTÓRICO — ele DESCARTAVA o refresh rotacionado, e isso matava o login.
+ * O refresh do HeyGen é de USO ÚNICO: cada troca emite um sucessor e invalida
+ * o anterior. Como o access dura ~1h, bastava abrir a ferramenta depois disso
+ * pro diagnóstico trocar o refresh e jogar o sucessor no lixo — o que ficava
+ * gravado já estava morto, e o disparo seguinte batia em `invalid_grant`.
+ * Resultado: ABRIR A TELA derrubava o login, e o usuário reconectava sem
+ * entender por quê. Medido em 19.08.
+ *
+ * Agora `identidadeOAuth` DEVOLVE o sucessor e quem chama GRAVA. Não há
+ * disputa: gravar o sucessor é justamente o que mantém a corrente viva.
  */
 
 import { accessTokenDoRefresh, lerCredencial } from '@/lib/heygen-image-video';
@@ -139,7 +143,7 @@ export async function identidadeApiKey(apiKey: string | null): Promise<LadoDiagn
 /** Identidade do OAuth do modo imagem. */
 export async function identidadeOAuth(
   guardado: string | null,
-): Promise<LadoDiagnostico & { expiraEm: string | null }> {
+): Promise<LadoDiagnostico & { expiraEm: string | null; novoRefresh?: string | null }> {
   if (!guardado) {
     return {
       configurada: false,
@@ -152,10 +156,12 @@ export async function identidadeOAuth(
     };
   }
   let access: string;
+  let novoRefresh: string | null = null;
   try {
-    // sem `relerDoBanco`: diagnóstico não entra na disputa de rotação
     const r = await accessTokenDoRefresh(guardado);
     access = r.access;
+    // O SUCESSOR SOBE JUNTO. Descartar aqui era matar a corrente.
+    novoRefresh = r.novoRefresh;
   } catch (e) {
     return {
       configurada: true,
@@ -187,7 +193,7 @@ export async function identidadeOAuth(
       erro: 'O OAuth renovou mas a conta não respondeu. Tente de novo em instantes.',
     };
   }
-  return { configurada: true, valida: true, conta, expiraEm, erro: null };
+  return { configurada: true, valida: true, conta, expiraEm, erro: null, novoRefresh };
 }
 
 /** Junta os dois lados e monta o aviso de tela. */

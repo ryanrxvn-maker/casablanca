@@ -5,6 +5,7 @@ import { ToolShell } from '@/components/ToolShell';
 import { IconFamousHey } from '@/components/ToolIcons';
 import { Btn3D } from '@/components/BatchJobCard3D';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
+import { HeyGenConectar } from '@/components/HeyGenConectar';
 import { logHistory } from '@/lib/history';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
@@ -1151,9 +1152,13 @@ export default function FamousHeyPage() {
       </div>
 
       {erro ? (
-        <p className="mt-3 rounded-[11px] border border-red-500/45 bg-red-500/10 px-3 py-2 text-[13px] text-red-400">
-          {erro}
-        </p>
+        <div className="mt-3 rounded-[11px] border border-red-500/45 bg-red-500/10 px-3 py-2 text-[13px] text-red-400">
+          <p>{erro.replace('[RECONECTAR] ', '')}</p>
+          {/* Erro de login vem com o botão que o resolve. Mandar a pessoa
+              procurar o banner lá em cima (que pode até estar fechado) era
+              deixá-la sem saída bem na hora do disparo. */}
+          {/RECONECTAR|invalid_grant|OAuth/i.test(erro) ? <HeyGenConectar compacto /> : null}
+        </div>
       ) : null}
 
       {emAndamento ? <CardProgresso job={emAndamento} /> : null}
