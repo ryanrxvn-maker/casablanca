@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 /**
  * MODO IMAGEM — anima uma imagem solta no HeyGen, sem criar avatar.
  *
@@ -45,7 +46,38 @@ const OAUTH_CLIENT_ID = 'q2A2QRSke2LrFTPJhoDbHtXh';
 /** Cache do access token em memória do processo. Medido: o refresh grant devolve
  *  ~1h de validade (o `expires_at` de 10 dias do arquivo do CLI é do login
  *  inicial, não da renovação). Guardamos 60s de folga. */
-let tokenCache: { access: string; expiraEm: number } | null = null;
+/**
+ * ⚠ POR CREDENCIAL, NUNCA GLOBAL.
+ *
+ * Era um único objeto de módulo. Em serverless a MESMA instância atende
+ * usuários diferentes, e o cache era devolvido sem olhar de quem era o refresh
+ * que entrou: quem chegasse depois recebia o access token de OUTRA CONTA.
+ *
+ * Medido em 18.08 assim que a janela grátis abriu a ferramenta pra mais de um
+ * usuário: a tela do admin passou a relatar a conta HeyGen de outra sessão. E
+ * o estrago não parava no diagnóstico — uma geração podia sair (e ser cobrada)
+ * na conta HeyGen errada.
+ *
+ * A chave é o HASH do refresh, não o refresh: chave de cache acaba em log e em
+ * mensagem de erro, e credencial não pode ir junto.
+ */
+const tokenCache = new Map<string, { access: string; expiraEm: number }>();
+
+/** Teto do cache. Sem ele o Map cresce enquanto a instância viver. */
+const MAX_CACHE = 50;
+
+function chaveCache(refresh: string): string {
+  return createHash('sha256').update(refresh).digest('hex').slice(0, 32);
+}
+
+function guardarNoCache(chave: string, access: string, expiraEm: number): void {
+  // Ao encher, descarta a entrada mais antiga (Map preserva ordem de inserção).
+  if (tokenCache.size >= MAX_CACHE) {
+    const primeira = tokenCache.keys().next().value;
+    if (primeira) tokenCache.delete(primeira);
+  }
+  tokenCache.set(chave, { access, expiraEm });
+}
 
 export type RefreshResult = {
   access: string;
@@ -156,6 +188,12 @@ export const MARGEM_ACCESS_MS = 5 * 60_000;
  * you are billed under the API tier" (saldo USD à parte), enquanto o OAuth usa
  * subscription credits. Como o Silas não quer saldo em API, o caminho é este.
  */
+/** Qual refresh identifica a entrada do cache depois da troca: o novo quando
+ *  houve rotação, senão o que foi usado. */
+function refreshFinalDoCache(j: { refresh_token?: unknown }, usado: string): string {
+  return typeof j.refresh_token === 'string' && j.refresh_token ? j.refresh_token : usado;
+}
+
 export async function accessTokenDoRefresh(
   guardado: string,
   /**
@@ -166,16 +204,21 @@ export async function accessTokenDoRefresh(
   relerDoBanco?: () => Promise<string | null>,
 ): Promise<RefreshResult> {
   const agora = Date.now();
-  if (tokenCache && tokenCache.expiraEm > agora + 60_000) {
-    return { access: tokenCache.access, novoRefresh: null, origem: 'cache' };
+  const cred = lerCredencial(guardado);
+  // A chave sai do REFRESH (estável entre renovações do access) — assim cada
+  // conta tem a própria entrada e ninguém pega o token de ninguém.
+  const chave = chaveCache(cred.refresh || guardado);
+
+  const emCache = tokenCache.get(chave);
+  if (emCache && emCache.expiraEm > agora + 60_000) {
+    return { access: emCache.access, novoRefresh: null, origem: 'cache' };
   }
 
-  const cred = lerCredencial(guardado);
   // ACCESS AINDA VÁLIDO (~1h): usa e não encosta no refresh. É o que impede o
   // token de ser queimado a cada instância fria — a causa de "tenho que fazer
   // login toda vez". Margem de 5min pra não servir token na virada.
   if (cred.access && cred.exp && cred.exp > agora + MARGEM_ACCESS_MS) {
-    tokenCache = { access: cred.access, expiraEm: cred.exp };
+    guardarNoCache(chave, cred.access, cred.exp);
     return { access: cred.access, novoRefresh: null, origem: 'banco' };
   }
   const refreshToken = cred.refresh;
@@ -207,7 +250,8 @@ export async function accessTokenDoRefresh(
       const fresco = frescoRaw ? lerCredencial(frescoRaw) : null;
       // a vencedora deixou um access pronto: usa e nem renova
       if (fresco?.access && fresco.exp && fresco.exp > Date.now() + MARGEM_ACCESS_MS) {
-        tokenCache = { access: fresco.access, expiraEm: fresco.exp };
+        // chave do refresh FRESCO: a vencedora pode ter rotacionado
+        guardarNoCache(chaveCache(fresco.refresh || chave), fresco.access, fresco.exp);
         return { access: fresco.access, novoRefresh: null, origem: 'banco' };
       }
       // ou pelo menos um refresh diferente do que já queimou
@@ -230,7 +274,7 @@ export async function accessTokenDoRefresh(
 
   const ttl = Number(j.expires_in) > 0 ? Number(j.expires_in) * 1000 : 3600_000;
   const exp = agora + ttl;
-  tokenCache = { access: j.access_token, expiraEm: exp };
+  guardarNoCache(chaveCache(refreshFinalDoCache(j, usado)), j.access_token, exp);
   const refreshFinal =
     typeof j.refresh_token === 'string' && j.refresh_token ? j.refresh_token : usado;
   // Grava SEMPRE que renovou — mesmo sem rotação do refresh — pra guardar o
