@@ -2,6 +2,7 @@ import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
+import { accessTokenDoRefresh } from '@/lib/heygen-image-video';
 
 /**
  * GET /api/heygen/voices?q=
@@ -26,9 +27,37 @@ export async function GET(req: Request) {
       unlockTools: ['/tools/famous-hey', '/tools/heygen-auto', '/tools/clickup-pilot'],
     });
     if (!gate.ok) return gate.response;
+    /**
+     * DUAS CREDENCIAIS pra uma ferramenta so e atrito: o usuario conecta pelo
+     * botao, acha que acabou, e o seletor de voz continua vazio pedindo uma
+     * API key que ele nem sabia que existia.
+     *
+     * Entao: tenta a API key; nao havendo, tenta o Bearer do OAuth que ele JA
+     * conectou. Se o HeyGen recusar Bearer aqui, o comportamento e o mesmo de
+     * antes (erro pedindo a key) — o fallback so pode melhorar, nunca piorar.
+     */
     const keyResult = await getUserKey('heygen');
-    if ('response' in keyResult) return keyResult.response;
-    const apiKey = keyResult.key;
+    let auth: Record<string, string> | null =
+      'response' in keyResult ? null : { 'X-Api-Key': keyResult.key };
+
+    if (!auth) {
+      const rOauth = await getUserKey('heygen_oauth');
+      if (!('response' in rOauth)) {
+        try {
+          const { access } = await accessTokenDoRefresh(rOauth.key);
+          auth = { Authorization: `Bearer ${access}` };
+        } catch {
+          /* OAuth morto tambem: cai no erro de key ausente logo abaixo */
+        }
+      }
+    }
+    // Sem API key E sem OAuth: devolve a mesma resposta de credencial ausente
+    // que o getUserKey ja monta (mensagem + status corretos).
+    if (!auth) {
+      return 'response' in keyResult
+        ? keyResult.response
+        : jsonError('Configure a chave do HeyGen em /configuracoes/api.', 400);
+    }
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get('q') ?? '').trim().toLowerCase();
@@ -36,7 +65,7 @@ export async function GET(req: Request) {
 
     const res = await fetch('https://api.heygen.com/v2/voices', {
       method: 'GET',
-      headers: { 'X-Api-Key': apiKey },
+      headers: auth,
     });
 
     if (!res.ok) {
