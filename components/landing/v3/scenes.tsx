@@ -93,17 +93,18 @@ export function BreakingCard({ className = '' }: { className?: string }) {
         }}
       >
         {/* a transmissão — o repórter de verdade, com o gráfico por cima */}
+        {/* vídeo próprio da landing — o repórter na chuva ficou na home logada */}
         <video
           ref={vidRef}
-          src="/hero/fakeprint-reporter.mp4"
-          poster="/hero/fakeprint-reporter.jpg"
+          src="/hero/fakeprint-landing.mp4"
+          poster="/hero/fakeprint-landing.jpg"
           muted
           loop
           playsInline
           preload="none"
           aria-hidden
           className="absolute inset-0 h-full w-full object-cover"
-          style={{ objectPosition: '50% 26%' }}
+          style={{ objectPosition: '50% 30%' }}
         />
         {/* vinheta broadcast — legibilidade do gerador de caracteres */}
         <div

@@ -19,25 +19,26 @@ import { ensureTypoFonts, type FontKey } from '@/lib/typography/fonts';
 // modelo × copy — pares curados: cada frase fala do que a FERRAMENTA faz,
 // escrita como a legenda que ela mesma produziria. Sem acento de propósito
 // (mesma convenção das demos do engine).
-// HERO = os mais fortes (fumaça, ouro, karaokê, neon) pro carrossel;
-// CARD = ciclo diferente pro destaque menor.
+//
+// Os MODELOS são os favoritos do Silas (21.08), renderizados com fidelidade
+// máxima pelo engine: Vermelho Sangue, Título Ouro, Glitch Viral, Verde
+// Dinheiro, Empilhado e Extensão Script. HERO e CARD usam os mesmos seis,
+// em ordem e com frases diferentes.
 const SHOW_HERO: Array<{ id: string; text: string }> = [
-  { id: 'ouro-fumaca', text: 'SUA FALA VIRA LEGENDA' },
-  { id: 'karaoke-fill-ouro', text: 'PALAVRA POR PALAVRA' },
-  { id: 'neon-tube', text: 'NO TEMPO DO AUDIO' },
-  { id: 'fumaca', text: 'SEM DIGITAR NADA' },
-  { id: 'vermelho-sangue', text: 'VOCE EDITA NO PREVIEW' },
-  { id: 'chrome', text: 'RENDERIZA NO NAVEGADOR' },
-  { id: 'epico', text: '491 MODELOS PRONTOS' },
-  { id: 'glitch-viral', text: 'DIRETO NO MP4' },
+  { id: 'vermelho-sangue', text: 'SUA FALA VIRA LEGENDA' },
+  { id: 'titulo-ouro', text: 'PALAVRA POR PALAVRA' },
+  { id: 'glitch-viral', text: 'SEM DIGITAR NADA' },
+  { id: 'verde-dinheiro', text: 'NO TEMPO DO AUDIO' },
+  { id: 'empilhado', text: 'VOCE EDITA NO PREVIEW' },
+  { id: 'extensao-script', text: 'DIRETO NO MP4' },
 ];
 const SHOW_CARD: Array<{ id: string; text: string }> = [
-  { id: 'titulo-viral', text: 'legenda em UM CLIQUE' },
-  { id: 'palavra-box', text: 'PALAVRA POR PALAVRA' },
-  { id: 'esmagado', text: 'DIRETO DO VIDEO' },
-  { id: 'linha-destaque', text: 'NO TEMPO DA FALA' },
-  { id: 'titulo-ouro', text: 'SUA COPY VIVA' },
-  { id: 'karaoke-fill', text: 'MODO KARAOKE' },
+  { id: 'titulo-ouro', text: 'LEGENDA EM UM CLIQUE' },
+  { id: 'vermelho-sangue', text: 'DIRETO DO VIDEO' },
+  { id: 'verde-dinheiro', text: 'NO TEMPO DA FALA' },
+  { id: 'empilhado', text: 'PALAVRA POR PALAVRA' },
+  { id: 'glitch-viral', text: 'SUA COPY VIVA' },
+  { id: 'extensao-script', text: 'SEM DIGITAR NADA' },
 ];
 const STEP_MS = 2600; // mesmo ciclo da demo do engine
 
