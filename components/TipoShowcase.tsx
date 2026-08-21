@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * TipoShowcase — vitrine ANIMADA da Tipografia Automática pra cards de
- * destaque (hero do hub e da home). Um canvas roda o ENGINE REAL da
+ * TipoShowcase — vitrine ANIMADA das Legendas Automáticas pra cards de
+ * destaque (hero do hub, home e login). Um canvas roda o ENGINE REAL da
  * ferramenta ciclando modelos × frases de copy — o que o cliente vê no card
  * é literalmente o que a ferramenta produz (nada de vídeo gravado).
  *
@@ -16,26 +16,28 @@ import { drawPresetDemo } from '@/lib/typography/engine';
 import { TYPO_PRESETS } from '@/lib/typography/presets';
 import { ensureTypoFonts, type FontKey } from '@/lib/typography/fonts';
 
-// modelo × copy — pares curados pra mostrar a variedade real.
-// HERO = os mais insanos (fumaça, ouro, 3D, glitch, neon) pro carrossel;
-// CARD = ciclo diferente (mix viral, karaokê, linha) pro destaque menor.
+// modelo × copy — pares curados: cada frase fala do que a FERRAMENTA faz,
+// escrita como a legenda que ela mesma produziria. Sem acento de propósito
+// (mesma convenção das demos do engine).
+// HERO = os mais fortes (fumaça, ouro, karaokê, neon) pro carrossel;
+// CARD = ciclo diferente pro destaque menor.
 const SHOW_HERO: Array<{ id: string; text: string }> = [
-  { id: 'ouro-fumaca', text: 'FATUROU 20 MIL' },
-  { id: 'verde-dinheiro', text: 'GANHE 500 POR DIA' },
-  { id: 'fumaca', text: 'O SEGREDO DELES' },
-  { id: 'glitch-viral', text: 'ISSO MUDA TUDO' },
-  { id: 'davinci-3d', text: 'SEM EDITAR NADA' },
-  { id: 'epico', text: 'VIRALIZA HOJE' },
-  { id: 'neon-viral', text: 'PRESTA ATENCAO' },
-  { id: 'extrude-slam', text: 'PRONTO PRA POSTAR' },
+  { id: 'ouro-fumaca', text: 'SUA FALA VIRA LEGENDA' },
+  { id: 'karaoke-fill-ouro', text: 'PALAVRA POR PALAVRA' },
+  { id: 'neon-tube', text: 'NO TEMPO DO AUDIO' },
+  { id: 'fumaca', text: 'SEM DIGITAR NADA' },
+  { id: 'vermelho-sangue', text: 'VOCE EDITA NO PREVIEW' },
+  { id: 'chrome', text: 'RENDERIZA NO NAVEGADOR' },
+  { id: 'epico', text: '491 MODELOS PRONTOS' },
+  { id: 'glitch-viral', text: 'DIRETO NO MP4' },
 ];
 const SHOW_CARD: Array<{ id: string; text: string }> = [
-  { id: 'titulo-viral', text: 'hoje voce vai LUCRAR' },
-  { id: 'palavra-box', text: 'LEGENDA EM 1 CLIQUE' },
+  { id: 'titulo-viral', text: 'legenda em UM CLIQUE' },
+  { id: 'palavra-box', text: 'PALAVRA POR PALAVRA' },
   { id: 'esmagado', text: 'DIRETO DO VIDEO' },
-  { id: 'linha-destaque', text: 'SUA COPY VIVA' },
-  { id: 'titulo-ouro', text: 'ESTILO DE AGENCIA' },
-  { id: 'cyber', text: 'MODO TURBO' },
+  { id: 'linha-destaque', text: 'NO TEMPO DA FALA' },
+  { id: 'titulo-ouro', text: 'SUA COPY VIVA' },
+  { id: 'karaoke-fill', text: 'MODO KARAOKE' },
 ];
 const STEP_MS = 2600; // mesmo ciclo da demo do engine
 
@@ -67,7 +69,6 @@ export function TipoShowcase({
       if (it.preset!.mix) fontKeys.add(it.preset!.mix.font);
       if (it.preset!.highlightFont) fontKeys.add(it.preset!.highlightFont);
     }
-    void ensureTypoFonts(Array.from(fontKeys));
 
     const io =
       typeof IntersectionObserver !== 'undefined'
@@ -81,8 +82,10 @@ export function TipoShowcase({
     io?.observe(canvas);
 
     let raf = 0;
-    const t0 = performance.now();
+    let cancelled = false;
+    let t0 = 0;
     const tick = () => {
+      if (cancelled) return;
       raf = requestAnimationFrame(tick);
       if (!visRef.current) return;
       const wrap = canvas.parentElement;
@@ -103,8 +106,16 @@ export function TipoShowcase({
       ctx.clearRect(0, 0, W, H);
       drawPresetDemo(ctx, it.preset!, t % STEP_MS, W, H, it.text);
     };
-    raf = requestAnimationFrame(tick);
+    // Espera as fontes ANTES do primeiro frame: o ctx.fillText rasteriza com o
+    // que estiver ativo no document.fonts na hora — desenhar antes do load
+    // fazia os primeiros ciclos saírem em sans-serif genérica (fonte "errada").
+    void ensureTypoFonts(Array.from(fontKeys)).then(() => {
+      if (cancelled) return;
+      t0 = performance.now();
+      raf = requestAnimationFrame(tick);
+    });
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
       io?.disconnect();
     };

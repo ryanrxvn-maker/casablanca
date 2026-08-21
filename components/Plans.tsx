@@ -38,7 +38,7 @@ const ALL_TOOLS: Tool[] = [
   { key: 'mixer-velocidade', label: 'Mixer de Velocidade' },
   { key: 'separar-audios', label: 'Dividir áudios' },
   { key: 'normalizador', label: 'Normalizador' },
-  { key: 'tipografia', label: 'Tipografia Automática' },
+  { key: 'tipografia', label: 'Legendas Automáticas' },
   { key: 'compressor', label: 'Compressor' },
   { key: 'downloader', label: 'Downloader' },
   { key: 'fakepass', label: 'FakePrint' },
@@ -966,10 +966,10 @@ const TOOL_DETAILS: ToolInfo[] = [
   },
   {
     key: 'tipografia',
-    name: 'Tipografia Automática',
+    name: 'Legendas Automáticas',
     cat: 'Vídeo',
     hue: 'rgba(251,191,36,0.5)',
-    desc: 'Letterings animados no tempo do áudio, com centenas de modelos prontos.',
+    desc: 'Legendas animadas no tempo do áudio, com centenas de modelos prontos.',
     win: 'Você escolhe o estilo, ele acerta a palavra certa no tempo certo.',
   },
   {

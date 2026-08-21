@@ -1005,9 +1005,9 @@ function TipografiaInner() {
   return (
     <div className="mx-auto w-full max-w-[1920px] px-5 pt-6 md:px-8">
       <ToolHero
-        title="Tipografia Automática"
-        eyebrow="Letterings animados"
-        subtitle="Sobe o vídeo e a fala vira lettering animado profissional, no tempo exato do áudio — escolhe o modelo, edita direto no preview e baixa com a legenda queimada."
+        title="Legendas Automáticas"
+        eyebrow="Legendas animadas"
+        subtitle="Sobe o vídeo e a fala vira legenda animada profissional, no tempo exato do áudio — escolhe o modelo, edita direto no preview e baixa com a legenda queimada."
         hue={HUE}
         icon={<IconTipografia size={30} />}
       />

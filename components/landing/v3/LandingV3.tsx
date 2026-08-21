@@ -65,8 +65,8 @@ export function LandingV3() {
           'Decupagem — o silêncio sai sozinho',
           'Camuflagem — duas trilhas no mesmo arquivo',
           'FakePrint — 41 modelos de print',
+          'Legendas Automáticas — sua fala vira legenda animada',
           'Gerador de SRT — legenda palavra por palavra',
-          'Fila — segue rodando em segundo plano',
           'FakePrint — tela verde pronta pro chroma',
           'Lote — vários arquivos de uma vez',
           'Grátis — sem cartão pra começar',
@@ -209,7 +209,7 @@ function Masthead() {
 /* ────────────────────── herói ────────────────────── */
 
 const STATS = [
-  { n: '11', label: 'ferramentas no ar' },
+  { n: '13', label: 'ferramentas no ar' },
   { n: '41', label: 'modelos de print' },
   { n: 'R$ 0', label: 'pra começar' },
 ];
@@ -227,18 +227,18 @@ function Hero() {
               className="mt-6 text-[42px] font-extrabold leading-[0.98] tracking-[-0.03em] text-white sm:text-[54px] lg:text-[62px]"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              Menos horas
+              Todas as ferramentas
               <br />
-              na timeline.
+              que você precisa.
               <span className="mt-1 block text-editorial font-normal tracking-[-0.01em] text-white/70">
-                Mais criativo no ar.
+                Num lugar só.
               </span>
             </h1>
 
             <p className="mt-6 max-w-[54ch] text-[16px] leading-relaxed text-text-muted">
-              O silêncio do bruto some sozinho, o áudio do vídeo engana a transcrição
-              das plataformas e a manchete do telejornal sai do jeito que você
-              escreveu — tudo no navegador, sem instalar nada.
+              Corte de silêncio, legenda animada, print de notícia, compressão,
+              download — cada etapa chata do dia do editor tem uma ferramenta aqui.
+              Tudo roda no navegador, sem instalar nada.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">

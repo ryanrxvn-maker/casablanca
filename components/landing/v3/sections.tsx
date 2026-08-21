@@ -19,7 +19,6 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { FAQ } from '@/lib/faq';
 import { DarkoLogo } from '../../DarkoLogo';
-import { TipoShowcase } from '../../TipoShowcase';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -38,7 +37,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { Kicker, Reveal, Ticker } from './kit';
 import { famousHeyGratis, famousHeyDiasRestantes } from '@/lib/famous-hey-trial';
-import { CamuflagemScene, DecupagemScene, MiniPrints, NewspaperCard } from './scenes';
+import { CamuflagemScene, DecupagemScene, LegendasScene, MiniPrints, TelejornalCard } from './scenes';
 
 const RED = '#e0483f';
 
@@ -58,22 +57,22 @@ type Highlight = {
 
 const HIGHLIGHTS: Highlight[] = [
   {
-    tag: 'Tipografia Automática',
+    tag: 'Legendas Automáticas',
     tone: '#ffd60a',
     title: (
       <>
-        Sua fala vira <span className="text-editorial">lettering animado</span>.
+        Sua fala vira <span className="text-editorial">legenda animada</span>.
       </>
     ),
     lead:
-      'Sobe o vídeo, a transcrição sai palavra por palavra e cada bloco ganha tipografia de agência — fumaça, ouro 3D, neon, karaokê. Você edita como no CapCut e o MP4 renderiza no seu navegador.',
+      'Sobe o vídeo, a transcrição sai palavra por palavra e cada frase vira uma legenda animada — fumaça, ouro 3D, neon, karaokê. Você ajusta tudo no preview, como no CapCut, e o MP4 renderiza no seu navegador.',
     bullets: [
-      '491 modelos de lettering, com destaque automático da palavra forte',
+      '491 modelos de legenda animada, com destaque automático da palavra forte',
       'Editor no preview: arrasta, redimensiona, edita o texto e marca trechos',
       'O que você vê é o que sai — preview e MP4 usam o mesmo motor',
     ],
     note: 'Grátis pra qualquer conta — a animação aqui do lado é o motor real rodando, não um vídeo.',
-    scene: <TipografiaScene />,
+    scene: <LegendasScene />,
   },
   {
     tag: 'Camuflagem de áudio',
@@ -103,7 +102,7 @@ const HIGHLIGHTS: Highlight[] = [
       </>
     ),
     lead:
-      'Sobe o bruto — vídeo ou áudio — e ele volta sem tempo morto, sem respiro no meio da frase e com a voz já nivelada. Você decide quanta pausa quer manter: corte seco de anúncio ou respiro natural.',
+      'Sobe o vídeo (ou só o áudio) e recebe de volta sem os silêncios: sem tempo morto, sem respiro esticado no meio da frase, e com a voz já nivelada. Você escolhe quanta pausa fica — corte seco de anúncio ou respiro natural.',
     bullets: [
       'Fila em lote: vários arquivos de uma vez, um atrás do outro',
       'Volume nivelado antes do corte — dois locutores no mesmo patamar',
@@ -133,52 +132,12 @@ const HIGHLIGHTS: Highlight[] = [
       'A barra de status do celular é editável até a bateria: 63% às 21:47 conta uma história, 100% às 9:00 conta outra.',
     scene: (
       <div>
-        <NewspaperCard />
+        <TelejornalCard />
         <MiniPrints className="mt-7" />
       </div>
     ),
   },
 ];
-
-/** Cena da Tipografia: o ENGINE REAL ciclando letterings (não é vídeo). */
-function TipografiaScene() {
-  return (
-    <div
-      className="relative overflow-hidden rounded-[18px] border border-white/10"
-      style={{
-        aspectRatio: '16/10',
-        background:
-          'radial-gradient(120% 90% at 18% 0%, rgba(109,78,232,0.3), transparent 55%), radial-gradient(110% 80% at 88% 100%, rgba(255,214,10,0.12), transparent 50%), linear-gradient(165deg, #0b0a12 0%, #060509 55%, #0d0a14 100%)',
-        boxShadow: '0 30px 70px -30px rgba(0,0,0,0.9)',
-      }}
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.05]"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-        }}
-      />
-      <TipoShowcase variant="hero" />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            'linear-gradient(to top, rgba(2,2,6,0.55) 0%, transparent 26%)',
-        }}
-      />
-      <span
-        className="absolute bottom-3 left-3 rounded-[5px] bg-black/60 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm"
-        style={{ fontFamily: 'var(--font-label)' }}
-      >
-        Motor real · 491 letterings
-      </span>
-    </div>
-  );
-}
 
 /* ────────────────────── Famous Hey — abertura do corpo ──────────────────── */
 
@@ -403,8 +362,8 @@ export function HighlightsSection() {
             <span className="text-editorial text-white/70">o gargalo do dia.</span>
           </h2>
           <p className="mt-4 text-[15.5px] leading-relaxed text-text-muted">
-            O resto da suíte você conhece na seção seguinte. Estas três são as que mudam
-            o tamanho da sua entrega.
+            O resto da suíte você conhece na seção seguinte. Estas quatro são as que
+            mudam o tamanho da sua entrega.
           </p>
         </div>
       </Reveal>
@@ -534,8 +493,8 @@ const TOOLS: Tool[] = [
     icon: <IconNormalizador size={20} />,
   },
   {
-    name: 'Tipografia Automática',
-    desc: 'Letterings animados no tempo do áudio, com centenas de modelos prontos.',
+    name: 'Legendas Automáticas',
+    desc: 'Legendas animadas no tempo do áudio, com centenas de modelos prontos.',
     plan: 'free',
     icon: <IconTipografia size={20} />,
   },
@@ -692,12 +651,12 @@ const STEPS = [
   },
   {
     n: '02',
-    title: 'Sobe o arquivo e liga a fila',
-    desc: 'Decupagem, compressão e camuflagem processam no seu navegador. A fila segue em segundo plano e mostra a fase de cada item ao vivo.',
+    title: 'Escolhe a ferramenta e sobe o arquivo',
+    desc: 'Decupagem, compressão e camuflagem processam no seu navegador. Dá pra mandar vários arquivos de uma vez e acompanhar a fase de cada um ao vivo.',
   },
   {
     n: '03',
-    title: 'Volta e baixa pronto',
+    title: 'Baixa pronto e publica',
     desc: 'Arquivo cortado, legenda alinhada, ZIP nomeado, PNG em alta ou .webm animado. Você revisa e publica.',
   },
 ];
@@ -716,9 +675,9 @@ export function HowSection() {
         <div className="max-w-[680px]">
           <Kicker index="03" label="Como funciona" tone="#c8d684" />
           <h2 className="section-title mt-5 text-[36px] md:text-[52px]">
-            Liga a fila.
+            Do bruto ao pronto.
             <br />
-            <span className="text-editorial text-white/70">Volta pra baixar.</span>
+            <span className="text-editorial text-white/70">Em três passos.</span>
           </h2>
         </div>
       </Reveal>
@@ -905,7 +864,7 @@ export function FaqSection() {
           <h2 className="section-title mt-5 text-[36px] md:text-[48px]">
             Tira a dúvida.
             <br />
-            <span className="text-editorial text-white/70">Depois liga a fila.</span>
+            <span className="text-editorial text-white/70">Depois é só usar.</span>
           </h2>
         </div>
       </Reveal>
@@ -972,9 +931,9 @@ export function FinalCta() {
               <div>
                 <Kicker index="—" label="Última chamada da edição" />
                 <h2 className="section-title mt-5 text-[38px] md:text-[56px]">
-                  Cria a conta e sobe
+                  Cria a conta grátis.
                   <br />
-                  <span className="text-editorial text-white/70">o primeiro arquivo.</span>
+                  <span className="text-editorial text-white/70">O resto do dia agradece.</span>
                 </h2>
                 <p className="mt-5 max-w-[52ch] text-[15px] leading-relaxed text-text-muted">
                   Leva menos tempo do que exportar um vídeo. Você começa pelo plano

@@ -197,8 +197,8 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/tipografia',
-    label: 'Tipografia Automática',
-    description: 'A fala vira lettering animado, no tempo exato do áudio.',
+    label: 'Legendas Automáticas',
+    description: 'A fala vira legenda animada, no tempo exato do áudio.',
     icon: <IconTipografia size={26} />,
     hue: 'rgba(251, 191, 36, 0.42)',
     badge: 'IA',
@@ -734,7 +734,7 @@ function TipografiaSlide() {
               className="hidden rounded-[5px] bg-black/60 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur-sm sm:inline-flex"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              Tipografia Automática · 491 letterings
+              Legendas Automáticas · 491 modelos
             </span>
           </div>
           <span
@@ -1832,7 +1832,7 @@ function TipografiaFeaturedCard({ delay }: { delay: number }) {
             className="absolute bottom-0 left-0 z-10 p-4 text-[19px] font-bold leading-tight tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)] transition-transform duration-300 group-hover:-translate-y-0.5"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
           >
-            Tipografia Automática
+            Legendas Automáticas
           </h3>
         </div>
         <div
@@ -1841,9 +1841,9 @@ function TipografiaFeaturedCard({ delay }: { delay: number }) {
         >
           <div className="px-4 pb-4 pt-3.5">
             <p className="text-[12.5px] leading-relaxed text-white/80">
-              A fala do vídeo vira lettering animado de agência — transcrição
-              palavra por palavra, 491 modelos, editor estilo CapCut e o MP4
-              renderizado no seu navegador.
+              A fala do vídeo vira legenda animada — transcrição palavra por
+              palavra, 491 modelos, editor estilo CapCut e o MP4 renderizado
+              no seu navegador.
             </p>
             <span
               className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"

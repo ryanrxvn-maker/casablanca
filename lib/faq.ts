@@ -20,7 +20,7 @@ export type FaqItem = { q: string; a: string };
 export const FAQ: FaqItem[] = [
   {
     q: 'O que é o Auto Edit?',
-    a: 'O Auto Edit é uma plataforma de automação de edição de vídeo. Ele faz decupagem automática, lipsync de avatar, legendas alinhadas à copy e ajustes de arquivo em lote — você liga a fila e recebe tudo pronto, sem ficar no monitor.',
+    a: 'O Auto Edit é uma suíte de ferramentas de edição de vídeo que roda no navegador. Ele faz decupagem automática, legendas animadas, prints de notícia e conversa (FakePrint), lipsync de avatar, legenda SRT alinhada à copy e ajustes de arquivo em lote — cada etapa chata do dia do editor tem uma ferramenta.',
   },
   {
     q: 'Como funciona a decupagem automática?',

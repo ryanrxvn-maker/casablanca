@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * AuthShell v7 — "A edição de hoje".
+ * AuthShell v8 — o palco das ferramentas.
  *
  * Mesma direção da landing v3 (components/landing/v3): tarja de edição no topo,
- * cabeçalho de jornal e, do lado esquerdo, a CAPA IMPRESSA — a manchete troca
- * sozinha e cada edição fala de uma ferramenta (Decupagem, Camuflagem,
- * FakePrint). O formulário fica à direita, com fio vermelho de retranca.
+ * cabeçalho de jornal e, do lado esquerdo, o SHOWCASE — um banner temático por
+ * ferramenta (Legendas Automáticas, Decupagem, FakePrint, Camuflagem), cada um
+ * com a cena animada real e a própria copy, trocando de 6 em 6 segundos. O
+ * formulário fica à direita, com fio vermelho de retranca.
  *
  * A API é a mesma de sempre (title, subtitle, children, footer), então todas as
  * telas de auth — login, cadastro, recuperar senha, verificar email/telefone —
@@ -15,7 +16,7 @@
 
 import Link from 'next/link';
 import { DarkoLogo } from './DarkoLogo';
-import { NewspaperCard } from './landing/v3/scenes';
+import { AuthShowcase } from './AuthShowcase';
 import { useClock, useToday } from './landing/v3/kit';
 
 const RED = '#e0483f';
@@ -85,7 +86,7 @@ export function AuthShell({
 
       <section className="relative flex flex-1 items-center justify-center px-5 py-10 md:px-8 md:py-14">
         <div className="grid w-full max-w-[1180px] grid-cols-1 items-center gap-12 lg:grid-cols-[1fr_420px] lg:gap-16">
-          {/* ESQUERDA — a capa de hoje */}
+          {/* ESQUERDA — o palco das ferramentas */}
           <div className="order-2 lg:order-1">
             <div className="flex items-center gap-3">
               <span
@@ -97,12 +98,20 @@ export function AuthShell({
                 className="text-[10px] uppercase tracking-[0.26em] text-white/55"
                 style={{ fontFamily: 'var(--font-label)', fontWeight: 600 }}
               >
-                A edição de hoje
+                A suíte do editor
               </span>
             </div>
 
-            <div className="mt-5 max-w-[640px]">
-              <NewspaperCard compact />
+            <h2
+              className="mt-4 max-w-[560px] text-[24px] leading-[1.12] text-white md:text-[28px]"
+              style={{ fontFamily: 'var(--font-serif)', letterSpacing: '-0.005em' }}
+            >
+              Tudo que agiliza o seu dia de edição,{' '}
+              <span className="text-white/60">num lugar só.</span>
+            </h2>
+
+            <div className="mt-6 max-w-[640px]">
+              <AuthShowcase />
             </div>
 
             <div

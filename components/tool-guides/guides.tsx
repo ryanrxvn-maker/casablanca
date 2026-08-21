@@ -735,23 +735,23 @@ export const GUIDES: Record<string, ToolGuide> = {
   },
 
   '/tools/tipografia': {
-    title: 'Tipografia Automática',
-    tagline: 'A fala do vídeo vira lettering animado profissional, no tempo exato do áudio — e sai queimado no MP4.',
+    title: 'Legendas Automáticas',
+    tagline: 'A fala do vídeo vira legenda animada profissional, no tempo exato do áudio — e sai queimada no MP4.',
     steps: [
       {
         title: 'Envie o vídeo',
         text: 'Solte o arquivo na área de upload — MP4, MOV ou WEBM, até 800 MB e 20 minutos. A página mostra o tamanho e a duração detectados. O vídeo não sai do seu navegador: só o áudio comprimido sobe pra transcrição.',
         visual: (
-          <Shot label="Tipografia · vídeo">
+          <Shot label="Legendas · vídeo">
             <MDrop label="Arraste ou clique pra subir" sub="MP4, MOV, WEBM — até 800MB e 20min" />
           </Shot>
         ),
       },
       {
         title: 'Gere as legendas automáticas',
-        text: 'Escolha o idioma da fala (ou "Detectar") e clique em "Gerar legendas". A ferramenta transcreve palavra por palavra e monta os blocos no ritmo da fala — como a legenda automática do CapCut, só que já com timing word-level pros letterings baterem certinho.',
+        text: 'Escolha o idioma da fala (ou "Detectar") e clique em "Gerar legendas". A ferramenta transcreve palavra por palavra e monta os blocos no ritmo da fala — como a legenda automática do CapCut, só que já com timing word-level pras animações baterem certinho.',
         visual: (
-          <Shot label="Tipografia · transcrição">
+          <Shot label="Legendas · transcrição">
             <MRow>
               <MChip tone="violet">PORTUGUÊS</MChip>
               <MBtn tone="primary">Gerar legendas</MBtn>
@@ -762,9 +762,9 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Escolha o modelo e edite',
-        text: 'A galeria tem dezenas de letterings animados (karaokê, glitch, neon, bounce, máquina de escrever...) com preview ao vivo — o que você vê no player é EXATAMENTE o que sai no MP4. Ajuste tamanho, altura na tela, cores e ritmo dos blocos. Na lista de blocos dá pra corrigir texto, dividir, juntar, ajustar o tempo e clicar numa palavra pra pintá-la na cor de destaque.',
+        text: 'A galeria tem centenas de modelos de legenda animada (karaokê, glitch, neon, bounce, máquina de escrever...) com preview ao vivo — o que você vê no player é EXATAMENTE o que sai no MP4. Ajuste tamanho, altura na tela, cores e ritmo dos blocos. Na lista de blocos dá pra corrigir texto, dividir, juntar, ajustar o tempo e clicar numa palavra pra pintá-la na cor de destaque.',
         visual: (
-          <Shot label="Tipografia · editor">
+          <Shot label="Legendas · editor">
             <MRow>
               <MChip tone="violet">KARAOKÊ</MChip>
               <MChip tone="dim">GLITCH</MChip>
@@ -778,7 +778,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Renderize — o download vem sozinho',
         text: 'Clique em "Renderizar vídeo". O render roda no SEU navegador, acelerado por hardware (o áudio original volta no final) — bem mais rápido que o vídeo em tempo real. Deixe a aba aberta até o fim: quando terminar, o MP4 baixa automaticamente. Se o navegador segurar o download, o card do resultado tem o "Baixar de novo".',
         visual: (
-          <Shot label="Tipografia · render">
+          <Shot label="Legendas · render">
             <MRow>
               <MBtn tone="primary">Renderizar vídeo</MBtn>
               <MBtn tone="lime">Baixar de novo</MBtn>

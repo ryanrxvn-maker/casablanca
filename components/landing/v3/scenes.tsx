@@ -8,8 +8,11 @@
  *
  *   BreakingCard    — gerador de caracteres de telejornal (FakePrint), com
  *                     relógio ao vivo, chyron digitando e modo TELA VERDE.
- *   NewspaperCard   — capa de jornal impresso; a manchete troca sozinha e cada
- *                     edição fala de uma ferramenta. Reusada no login.
+ *   TelejornalCard  — plantão estilo CNN sem vídeo: lower third digitando,
+ *                     ticker rolando e o campo chroma esperando o vídeo do
+ *                     cliente. Usada na seção FakePrint e no login.
+ *   LegendasScene   — o ENGINE REAL das Legendas Automáticas ciclando
+ *                     modelos num canvas. Usada no destaque e no login.
  *   CamuflagemScene — duas trilhas no mesmo arquivo + leitura da transcrição.
  *   DecupagemScene  — o silêncio saindo da timeline, em loop.
  *   MiniPrints      — chamada de vídeo, post e live, os outros modelos.
@@ -21,7 +24,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useClock, useCycle, useInView, useReduced, useToday, useTypewriter, waveBars } from './kit';
+import { TipoShowcase } from '../../TipoShowcase';
+import { useClock, useInView, useReduced, useTypewriter, waveBars } from './kit';
 
 const UNSATURATE_FIX = 'saturate(1.39)';
 
@@ -322,243 +326,286 @@ export function BreakingCard({ className = '' }: { className?: string }) {
   );
 }
 
-/* ══════════════════════════ 2. JORNAL IMPRESSO ══════════════════════════ */
-
-type Edition = {
-  tag: string;
-  headline: string;
-  deck: string;
-  lede: string;
-  tone: string;
-};
+/* ══════════════════════════ 2. TELEJORNAL (plantão CNN) ══════════════════════════ */
 
 /**
- * O jornal É um FakePrint — então toda edição fala de FakePrint.
- * Cada capa destaca uma família de modelos: telejornal, sites, conversas/lives.
+ * Manchetes do lower third — cada linha é uma verdade do FakePrint.
+ * Curtas de propósito: precisam caber na faixa sem quebrar.
  */
-const EDITIONS: Edition[] = [
-  {
-    tag: 'Telejornais',
-    headline: 'Você escreve a manchete do jornal da noite',
-    deck:
-      '14 emissoras com manchete, tag do assunto, hora, local e ticker editáveis. Sai em PNG de alta ou em .webm com o relógio andando.',
-    lede:
-      'No modo tela verde o cenário inteiro sai em chroma key: só o gerador de caracteres fica de pé, pronto pra receber o seu vídeo por trás.',
-    tone: '#b4413a',
-  },
-  {
-    tag: 'Sites de notícia',
-    headline: 'O portal publica a matéria que você escrever',
-    deck:
-      '11 layouts de portal com manchete, linha fina, autor e primeiro parágrafo editáveis — e a foto principal também sai em tela verde.',
-    lede:
-      'A prévia acompanha cada tecla: o que você vê na tela é exatamente o PNG que baixa, nítido o bastante pra ampliar dentro do vídeo.',
-    tone: '#2f5e8f',
-  },
-  {
-    tag: 'Conversas & lives',
-    headline: 'O print de WhatsApp sai do jeito que a história pede',
-    deck:
-      'Conversa, chamada de vídeo, post, story, notificação e live animada — 41 modelos no total, do sticker de story à tela de bloqueio.',
-    lede:
-      'As lives exportam .webm com comentários rolando e reações subindo. Com o fundo verde ligado, é sobrepor no criativo e tirar o chroma.',
-    tone: '#6d5a9e',
-  },
+const TJ_HEADLINES = [
+  'VOCÊ ESCREVE A MANCHETE DO JORNAL',
+  'O CENÁRIO INTEIRO SAI EM TELA VERDE',
+  'EXPORTA PNG EM ALTA OU .WEBM ANIMADO',
+];
+
+const TJ_TICKER = [
+  'Manchete, tag, hora e local editáveis',
+  '14 emissoras',
+  'Relógio andando no .webm',
+  '16:9 e 9:16',
+  'Pronto pro chroma key',
+  'O que você vê é o que baixa',
 ];
 
 /**
- * Capa de jornal. Compacta = versão do login (uma coluna a menos, sem folha
- * de baixo). A manchete troca de edição sozinha, e cada edição é uma
- * ferramenta.
+ * Plantão de TV sem vídeo nenhum: o estúdio é CSS, o lower third digita as
+ * manchetes e o ticker roda embaixo — tudo no vocabulário do que o FakePrint
+ * exporta de verdade. O campo central tracejado é o convite: ali entra o
+ * vídeo do cliente, por trás do gerador de caracteres.
  */
-export function NewspaperCard({
-  compact = false,
-  className = '',
-}: {
-  compact?: boolean;
-  className?: string;
-}) {
-  const { ref, inView } = useInView<HTMLDivElement>(0.15);
-  const i = useCycle(EDITIONS.length, 6400, inView);
-  const ed = EDITIONS[i] ?? EDITIONS[0]!;
-  const today = useToday();
+export function TelejornalCard({ className = '' }: { className?: string }) {
+  const { ref, inView } = useInView<HTMLDivElement>(0.2);
+  const reduced = useReduced();
+  const clock = useClock();
+  const { text } = useTypewriter(TJ_HEADLINES, { active: inView });
+  const live = inView && !reduced;
 
   return (
-    <div ref={ref} className={'relative ' + className} style={{ filter: UNSATURATE_FIX }}>
-      {/* folha de baixo — dá espessura de pilha */}
-      {!compact && (
-        <div
-          aria-hidden
-          className="absolute inset-x-3 -bottom-2 top-3 rounded-[3px]"
-          style={{
-            background: '#cfcabb',
-            transform: 'rotate(1.4deg)',
-            boxShadow: '0 24px 50px -26px rgba(0,0,0,0.9)',
-          }}
-        />
-      )}
-
-      <article
-        className="relative overflow-hidden rounded-[4px] px-5 pb-5 pt-4 md:px-7 md:pb-7 md:pt-6"
+    <div
+      ref={ref}
+      className={'relative isolate ' + className}
+      style={{ filter: UNSATURATE_FIX }}
+    >
+      {/* luz por trás — tira o card do preto chapado */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -inset-10 -z-10 opacity-70 blur-3xl"
         style={{
-          background: PAPER,
-          color: INK,
-          transform: compact ? 'rotate(-0.5deg)' : 'rotate(-0.9deg)',
+          background:
+            'radial-gradient(45% 45% at 22% 18%, rgba(224,72,63,0.22), transparent 70%),' +
+            'radial-gradient(45% 45% at 82% 78%, rgba(0,177,64,0.14), transparent 70%)',
+        }}
+      />
+
+      <div
+        className="relative aspect-[16/10] w-full overflow-hidden rounded-[14px] border border-white/12"
+        style={{
+          background:
+            'radial-gradient(90% 70% at 30% 10%, #101725 0%, #0a0f1a 55%, #060911 100%)',
           boxShadow:
-            '0 36px 80px -30px rgba(0,0,0,0.95), 0 2px 0 rgba(255,255,255,0.5) inset',
-          backgroundImage:
-            "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%' height='100%' filter='url(%23p)' opacity='0.05'/></svg>\")",
+            '0 40px 90px -32px rgba(0,0,0,0.95), 0 0 0 1px rgba(255,255,255,0.04) inset',
         }}
       >
-        {/* cabeçalho */}
-        <div className="border-b-[3px]" style={{ borderColor: INK }}>
-          <div
-            className="flex items-center justify-between pb-1 text-[8.5px] uppercase tracking-[0.24em]"
-            style={{ fontFamily: 'var(--font-label)', color: 'rgba(20,20,15,0.55)' }}
-          >
-            <span>Edição de hoje</span>
-            <span className="truncate px-2 text-center">{today || '—'}</span>
-            <span>Sem cartão</span>
-          </div>
-          <h3
-            className="pb-1.5 text-center leading-[0.86]"
-            style={{
-              fontFamily: 'var(--font-serif)',
-              fontSize: compact ? 'clamp(30px, 7vw, 44px)' : 'clamp(34px, 6vw, 60px)',
-              letterSpacing: '0.01em',
-            }}
-          >
-            Auto Edit
-          </h3>
-        </div>
-        <div className="mt-[3px] h-px" style={{ background: INK, opacity: 0.55 }} />
-
-        {/* manchete */}
-        <div className="mt-4">
+        {/* varredura de luz do estúdio */}
+        {live && (
           <span
-            className="inline-block rounded-[2px] px-1.5 py-[3px] text-[9px] font-bold uppercase tracking-[0.2em] text-white transition-colors duration-500"
-            style={{ background: ed.tone, fontFamily: 'var(--font-label)' }}
-          >
-            {ed.tag}
-          </span>
-          <h4
-            key={ed.headline}
-            className="np-in mt-2.5"
+            aria-hidden
+            className="tj-sweep pointer-events-none absolute inset-y-0 w-[30%]"
             style={{
-              fontFamily: 'var(--font-serif)',
-              fontSize: compact ? 'clamp(24px, 5.2vw, 34px)' : 'clamp(27px, 3.6vw, 46px)',
-              lineHeight: 0.98,
-              letterSpacing: '-0.005em',
+              background:
+                'linear-gradient(105deg, transparent, rgba(255,255,255,0.06), transparent)',
+            }}
+          />
+        )}
+        {/* linhas de varredura broadcast */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.12]"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(0deg, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0.5) 1px, transparent 1px, transparent 3px)',
+          }}
+        />
+        {/* marcas de enquadramento */}
+        {[
+          'left-3 top-3 border-l border-t',
+          'right-3 top-3 border-r border-t',
+        ].map((pos) => (
+          <span
+            key={pos}
+            aria-hidden
+            className={'pointer-events-none absolute h-3.5 w-3.5 border-white/25 ' + pos}
+          />
+        ))}
+
+        {/* topo */}
+        <div className="absolute inset-x-0 top-0 flex items-start justify-between p-3.5 md:p-4">
+          <span
+            className="inline-flex items-center gap-2 rounded-[4px] px-2 py-1 text-[10.5px] font-extrabold uppercase tracking-[0.2em] text-white"
+            style={{ background: RED, fontFamily: 'var(--font-tech)' }}
+          >
+            AE NEWS
+          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-[4px] border border-white/20 bg-black/45 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.2em] text-white backdrop-blur-sm"
+              style={{ fontFamily: 'var(--font-label)' }}
+            >
+              <i
+                className="tj-dot inline-block h-[6px] w-[6px] rounded-full"
+                style={{ background: RED }}
+              />
+              Ao vivo
+            </span>
+            <span
+              className="num rounded-[4px] border border-white/15 bg-black/45 px-2 py-1 text-[10.5px] text-white/85 backdrop-blur-sm"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            >
+              {clock}
+            </span>
+          </div>
+        </div>
+
+        {/* campo chroma — onde entra o vídeo do cliente */}
+        <div className="absolute inset-x-0 top-[26%] bottom-[34%] flex items-center justify-center px-8">
+          <div
+            className="tj-chroma relative flex h-full w-full max-w-[62%] flex-col items-center justify-center gap-1.5 rounded-[10px] border border-dashed"
+            style={{
+              borderColor: 'rgba(255,255,255,0.35)',
+              background: `radial-gradient(80% 80% at 50% 45%, rgba(20,197,89,0.22) 0%, rgba(0,177,64,0.12) 55%, rgba(0,148,57,0.06) 100%)`,
             }}
           >
-            {ed.headline}
-          </h4>
-          <p
-            key={ed.deck}
-            className="np-in mt-2.5 max-w-[52ch] text-[12.5px] leading-[1.45]"
-            style={{ color: 'rgba(20,20,15,0.68)', animationDelay: '90ms' }}
-          >
-            {ed.deck}
-          </p>
+            <span
+              className="text-[10px] font-bold uppercase tracking-[0.22em] text-white/85"
+              style={{ fontFamily: 'var(--font-label)' }}
+            >
+              Seu vídeo entra aqui
+            </span>
+            <span
+              className="text-[8.5px] uppercase tracking-[0.2em]"
+              style={{ fontFamily: 'var(--font-label)', color: CHROMA }}
+            >
+              tela verde · chroma key
+            </span>
+          </div>
         </div>
 
-        <div className="mt-4 h-px" style={{ background: 'rgba(20,20,15,0.22)' }} />
-
-        {/* corpo em colunas */}
-        <div
-          className={
-            'mt-4 grid gap-4 ' +
-            (compact ? 'grid-cols-[1.2fr_1fr]' : 'grid-cols-[1.1fr_1fr] sm:grid-cols-[1.1fr_1fr_0.9fr]')
-          }
-        >
-          <div>
-            <p
-              key={ed.lede}
-              className="np-in text-[11.5px] leading-[1.5]"
-              style={{ color: 'rgba(20,20,15,0.75)', animationDelay: '150ms' }}
+        {/* lower third */}
+        <div className="absolute inset-x-0 bottom-0">
+          <div className="flex items-stretch px-3.5 md:px-4">
+            <span
+              className="flex shrink-0 items-center px-2.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-white md:px-3 md:text-[12.5px]"
+              style={{ background: RED, fontFamily: 'var(--font-tech)' }}
             >
-              <span
-                className="float-left mr-1.5 leading-[0.78]"
-                style={{ fontFamily: 'var(--font-serif)', fontSize: '2.7em' }}
-              >
-                {ed.lede.charAt(0)}
-              </span>
-              {ed.lede.slice(1)}
-            </p>
-            <TextBars lines={compact ? 3 : 5} />
-          </div>
-
-          <div>
+              Urgente
+            </span>
             <div
-              className="relative mb-2 aspect-[4/3] overflow-hidden rounded-[2px] transition-colors duration-700"
-              style={{ background: ed.tone }}
+              className="min-w-0 flex-1 px-3 py-2 md:px-3.5 md:py-2.5"
+              style={{ background: PAPER }}
             >
               <div
-                aria-hidden
-                className="absolute inset-0 opacity-30"
-                style={{
-                  backgroundImage:
-                    'repeating-linear-gradient(45deg, rgba(255,255,255,0.35) 0 2px, transparent 2px 5px)',
-                }}
-              />
-              <span
-                className="absolute bottom-1 left-1.5 text-[8px] font-bold uppercase tracking-[0.18em] text-white/90"
-                style={{ fontFamily: 'var(--font-label)' }}
+                className="truncate text-[13px] font-extrabold uppercase leading-tight tracking-[-0.01em] md:text-[16.5px]"
+                style={{ color: INK, fontFamily: 'var(--font-tech)' }}
               >
-                Foto · chroma
-              </span>
-            </div>
-            <TextBars lines={compact ? 4 : 6} />
-          </div>
-
-          {!compact && (
-            <div className="hidden sm:block">
-              <div
-                className="mb-2 border-y py-1 text-[8.5px] font-bold uppercase tracking-[0.18em]"
-                style={{ borderColor: 'rgba(20,20,15,0.25)', color: 'rgba(20,20,15,0.6)', fontFamily: 'var(--font-label)' }}
-              >
-                Também nesta edição
+                {text}
+                <span className="tj-caret" style={{ background: RED }} />
               </div>
-              <TextBars lines={9} />
             </div>
-          )}
-        </div>
-
-        {/* rodapé */}
-        <div
-          className="mt-4 flex items-center justify-between border-t pt-2 text-[8.5px] uppercase tracking-[0.2em]"
-          style={{ borderColor: 'rgba(20,20,15,0.3)', color: 'rgba(20,20,15,0.5)', fontFamily: 'var(--font-label)' }}
-        >
-          <span>FakePrint · modelo de impresso</span>
-          <span className="flex items-center gap-2.5">
-            <span aria-hidden className="flex h-[11px] items-stretch gap-[1.5px]">
-              {[2, 1, 3, 1, 1, 2, 1, 3, 1, 2, 1, 1, 3, 1].map((w, k) => (
-                <span key={k} style={{ width: w, background: 'rgba(20,20,15,0.65)' }} />
-              ))}
+          </div>
+          {/* ticker rolando */}
+          <div
+            className="flex items-stretch overflow-hidden"
+            style={{ background: 'rgba(9,13,22,0.95)' }}
+          >
+            <div className="tj-mask relative flex-1 overflow-hidden py-1.5">
+              <div className={'flex w-max items-center ' + (live ? 'tj-ticker' : '')}>
+                {[false, true].map((hidden) => (
+                  <div
+                    key={String(hidden)}
+                    className="flex shrink-0 items-center"
+                    aria-hidden={hidden || undefined}
+                  >
+                    {TJ_TICKER.map((t, i) => (
+                      <span key={i} className="flex items-center">
+                        <span
+                          className="whitespace-nowrap px-4 text-[9px] uppercase tracking-[0.2em] text-white/55"
+                          style={{ fontFamily: 'var(--font-label)', fontWeight: 600 }}
+                        >
+                          {t}
+                        </span>
+                        <span
+                          aria-hidden
+                          className="h-[3px] w-[3px] shrink-0 rounded-full"
+                          style={{ background: RED }}
+                        />
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <span
+              className="num flex shrink-0 items-center px-2.5 text-[9px] tracking-[0.2em] text-white/40"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            >
+              16:9 · 9:16
             </span>
-            <span className="num" style={{ fontFamily: 'var(--font-mono)' }}>
-              {String(i + 1).padStart(2, '0')} / {String(EDITIONS.length).padStart(2, '0')}
-            </span>
-          </span>
+          </div>
         </div>
-      </article>
+      </div>
 
       <style jsx>{`
-        .np-in {
-          animation: np-in 620ms cubic-bezier(0.16, 0.84, 0.28, 1) both;
+        .tj-dot {
+          animation: tj-pulse 1.6s ease-in-out infinite;
         }
-        @keyframes np-in {
+        .tj-chroma {
+          animation: tj-breathe 4.5s ease-in-out infinite;
+        }
+        .tj-caret {
+          display: inline-block;
+          width: 2px;
+          height: 0.86em;
+          margin-left: 3px;
+          vertical-align: -0.08em;
+          animation: tj-blink 1s steps(2, end) infinite;
+        }
+        .tj-sweep {
+          animation: tj-sweep 7s linear infinite;
+        }
+        .tj-mask {
+          -webkit-mask-image: linear-gradient(90deg, transparent, #000 4%, #000 94%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 4%, #000 94%, transparent);
+        }
+        .tj-ticker {
+          animation: tj-scroll 22s linear infinite;
+        }
+        @keyframes tj-scroll {
           from {
-            opacity: 0;
-            transform: translateY(9px);
+            transform: translate3d(0, 0, 0);
           }
           to {
+            transform: translate3d(-50%, 0, 0);
+          }
+        }
+        @keyframes tj-sweep {
+          from {
+            transform: translateX(-140%);
+          }
+          to {
+            transform: translateX(480%);
+          }
+        }
+        @keyframes tj-breathe {
+          0%,
+          100% {
+            box-shadow: 0 0 0 0 rgba(0, 177, 64, 0.0);
+          }
+          50% {
+            box-shadow: 0 0 34px -6px rgba(0, 177, 64, 0.45);
+          }
+        }
+        @keyframes tj-pulse {
+          0%,
+          100% {
             opacity: 1;
-            transform: none;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.35;
+            transform: scale(0.8);
+          }
+        }
+        @keyframes tj-blink {
+          50% {
+            opacity: 0;
           }
         }
         @media (prefers-reduced-motion: reduce) {
-          .np-in {
+          .tj-dot,
+          .tj-caret,
+          .tj-chroma,
+          .tj-sweep,
+          .tj-ticker {
             animation: none;
           }
         }
@@ -567,18 +614,47 @@ export function NewspaperCard({
   );
 }
 
-/** Linhas "de texto" do jornal — barras, pra não inventar notícia nenhuma. */
-function TextBars({ lines }: { lines: number }) {
-  const widths = ['100%', '96%', '99%', '88%', '100%', '93%', '97%', '84%', '100%', '91%'];
+/* ══════════════════════ 2b. LEGENDAS AUTOMÁTICAS (engine ao vivo) ══════════════════════ */
+
+/**
+ * O ENGINE REAL das Legendas Automáticas ciclando modelos num canvas — o que
+ * aparece é exatamente o que a ferramenta queima no MP4, não um vídeo gravado.
+ */
+export function LegendasScene({ className = '' }: { className?: string }) {
   return (
-    <div className="mt-2 flex flex-col gap-[5px]">
-      {Array.from({ length: lines }).map((_, i) => (
-        <span
-          key={i}
-          className="block h-[4px] rounded-[1px]"
-          style={{ width: widths[i % widths.length], background: 'rgba(20,20,15,0.16)' }}
-        />
-      ))}
+    <div
+      className={'relative overflow-hidden rounded-[18px] border border-white/10 ' + className}
+      style={{
+        aspectRatio: '16/10',
+        background:
+          'radial-gradient(120% 90% at 18% 0%, rgba(109,78,232,0.3), transparent 55%), radial-gradient(110% 80% at 88% 100%, rgba(255,214,10,0.12), transparent 50%), linear-gradient(165deg, #0b0a12 0%, #060509 55%, #0d0a14 100%)',
+        boxShadow: '0 30px 70px -30px rgba(0,0,0,0.9)',
+      }}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.05]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
+        }}
+      />
+      <TipoShowcase variant="hero" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(to top, rgba(2,2,6,0.55) 0%, transparent 26%)',
+        }}
+      />
+      <span
+        className="absolute bottom-3 left-3 rounded-[5px] bg-black/60 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm"
+        style={{ fontFamily: 'var(--font-label)' }}
+      >
+        Motor real · 491 modelos
+      </span>
     </div>
   );
 }
