@@ -411,7 +411,7 @@ export type CompressPool = {
 /** Planeja as partes: [start, dur] em segundos, contíguas, última absorve o resto. */
 export function planCompressChunks(durationSec: number, chunkSec = COMPRESS_CHUNK_SEC): Array<[number, number]> {
   if (!Number.isFinite(durationSec) || durationSec <= 0) return [[0, 0]];
-  const n = Math.max(1, Math.ceil(durationSec / chunkSec));
+  const n = Math.max(1, Math.round(durationSec / chunkSec));
   const out: Array<[number, number]> = [];
   for (let i = 0; i < n; i++) {
     const start = i * chunkSec;
@@ -517,7 +517,13 @@ export async function compressVideoChunked(
     }
 
     const hasAudio = await probeHasAudio(ff, mainPath);
-    const chunks = planCompressChunks(durationSec);
+    // Partes: no mínimo dur/120s, mas SEMPRE pelo menos uma por instância
+    // disponível (partes de ≥30s) — senão um vídeo de 2:38 virava 2 partes e
+    // deixava 3 das 5 instâncias paradas (4K HEVC levou 1h assim).
+    const pool = opts.pool;
+    const conc = Math.max(1, Math.min(opts.chunkConcurrency ?? 3, pool ? pool.maxSize : 1));
+    const nParts = Math.max(Math.ceil(durationSec / COMPRESS_CHUNK_SEC), Math.min(conc, Math.floor(durationSec / 30)), 1);
+    const chunks = planCompressChunks(durationSec, durationSec / nParts);
     const N = chunks.length;
     const chunkProg = new Array<number>(N).fill(0);
     let audioProg = 0;
@@ -565,8 +571,7 @@ export async function compressVideoChunked(
       }
     };
 
-    const pool = opts.pool;
-    const conc = Math.max(1, Math.min(opts.chunkConcurrency ?? 3, N, pool ? pool.maxSize : 1));
+    const workersN = Math.min(conc, N);
     const results = new Array<Blob | null>(N).fill(null);
     let next = 0;
     const runOn = async (inst: FFmpeg, inPath: string) => {
@@ -579,7 +584,7 @@ export async function compressVideoChunked(
     };
     const workers: Promise<void>[] = [runOn(ff, mainPath)];
     if (pool) {
-      for (let w = 1; w < conc; w++) {
+      for (let w = 1; w < workersN; w++) {
         const inst = await pool.acquire();
         try {
           const m = await makeInputsAvailable(inst, [{ name: inputName, data: file }]);

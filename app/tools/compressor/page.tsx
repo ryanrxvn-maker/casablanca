@@ -301,7 +301,7 @@ export default function CompressorPage() {
             { crf, resolution, durationSec: meta?.durationSec, inputHeight: meta?.height },
             // Partes em paralelo em instâncias extras do pool (o job já segura
             // uma). Num lote de vários arquivos grandes o pool se auto-regula.
-            { ...runOpts, pool, chunkConcurrency: Math.max(1, Math.min(3, effectivePoolSize())) },
+            { ...runOpts, pool, chunkConcurrency: effectivePoolSize() },
           )
         : await compressVideoOn(ff, job.file, { crf, resolution }, runOpts);
       const url = URL.createObjectURL(blob);
