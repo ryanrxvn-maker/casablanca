@@ -436,6 +436,31 @@ function compressVideoArgs(params: { crf: number; resolution: 'original' | '1080
   return args;
 }
 
+/** Altura do vídeo pelo log do ffmpeg ("Video: ... 1920x1080"). 0 se não achar. */
+async function probeVideoHeight(ff: FFmpeg, path: string): Promise<number> {
+  let h = 0;
+  const fn = ({ message }: { message: string }) => {
+    if (!/Video:/.test(message)) return;
+    const m = /(\d{2,5})x(\d{2,5})/.exec(message);
+    if (m) h = Math.max(h, parseInt(m[2], 10));
+  };
+  ff.on('log', fn);
+  try {
+    await ff.exec(['-hide_banner', '-i', path]);
+  } catch { /* rc≠0 esperado (sem output) */ } finally {
+    ff.off('log', fn);
+  }
+  return h;
+}
+
+/** Previsão CRUA da saída (bitrate-alvo × duração), sem o piso/teto da UI. */
+export function predictRawCompressedBytes(p: { durationSec: number; inputHeight: number; crf: number; resolution: 'original' | '1080' | '720' | '480' }): number {
+  let videoBps = TARGET_BITRATE_AT_CRF23[p.resolution];
+  if (p.resolution === 'original' && p.inputHeight > 0) videoBps = Math.min(10_000_000, 6_500_000 * (p.inputHeight / 1080) ** 2);
+  videoBps *= Math.pow(2, (23 - p.crf) / 6);
+  return ((videoBps + 128_000) * p.durationSec) / 8;
+}
+
 /** Lê "time=HH:MM:SS.xx" do log do ffmpeg → segundos processados do exec atual. */
 function wireTimeProgress(ff: FFmpeg, onTime: (sec: number) => void): () => void {
   const h = ({ message }: { message: string }) => {
@@ -474,10 +499,15 @@ export async function compressVideoChunked(
     if (!durationSec) durationSec = await readDurationFromLogs(ff, mainPath);
     if (!durationSec) throw new Error('Não consegui ler a duração desse vídeo. Tente outro formato (MP4/MOV/WEBM).');
 
-    // 2) guarda da SAÍDA — antes de gastar meia hora de encode
-    const predicted = estimateCompressedSize({
-      durationSec, inputHeight: params.inputHeight, inputBytes: file.size, crf: params.crf, resolution: params.resolution,
-    });
+    // 2) guarda da SAÍDA — antes de gastar meia hora de encode.
+    // NÃO usa a estimativa da UI: ela tem piso de 60% do input em "Original"
+    // (conservadora pra mostrar "Previsão"), que em câmera a 50Mbps dá 1,5GB
+    // previstos pra uma saída real de ~330MB. Aqui é bitrate-alvo × duração,
+    // com a altura lida do próprio ffmpeg, e margem de 30%.
+    const inputHeight = (params.inputHeight && params.inputHeight > 0) ? params.inputHeight : await probeVideoHeight(ff, mainPath);
+    const predicted = Math.round(predictRawCompressedBytes({
+      durationSec, inputHeight, crf: params.crf, resolution: params.resolution,
+    }) * 1.3);
     if (predicted > COMPRESS_MAX_OUTPUT_BYTES) {
       throw new Error(
         `A saída prevista (~${Math.round(predicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução.`,

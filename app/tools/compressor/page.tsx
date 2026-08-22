@@ -15,6 +15,7 @@ import {
   COMPRESS_CHUNK_THRESHOLD,
   COMPRESS_MAX_OUTPUT_BYTES,
   estimateCompressedSize,
+  predictRawCompressedBytes,
   isCancellationError,
   probeVideoMetadata,
   type FFProgress,
@@ -258,10 +259,15 @@ export default function CompressorPage() {
     // Só com duração conhecida: sem ela a estimativa é crua (≈ tamanho de
     // entrada) e barraria arquivo bom. O motor repete a guarda com a duração
     // real lida do ffmpeg.
-    if (chunked && (meta?.durationSec ?? 0) > 0 && job.estimatedSize > COMPRESS_MAX_OUTPUT_BYTES) {
+    // (previsão CRUA por bitrate — a "Previsão" da UI tem piso de 60% do input
+    // em "Original" e barraria câmera a 50Mbps que sai em 330MB)
+    const rawPredicted = (meta?.durationSec ?? 0) > 0
+      ? Math.round(predictRawCompressedBytes({ durationSec: meta!.durationSec, inputHeight: meta!.height, crf, resolution }) * 1.3)
+      : 0;
+    if (chunked && rawPredicted > COMPRESS_MAX_OUTPUT_BYTES) {
       updateJob(job.id, {
         state: 'error',
-        error: `A saída prevista (~${Math.round(job.estimatedSize / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução e tente de novo.`,
+        error: `A saída prevista (~${Math.round(rawPredicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução e tente de novo.`,
       });
       return;
     }
