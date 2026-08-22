@@ -11,6 +11,9 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
   compressVideoOn,
+  compressVideoChunked,
+  COMPRESS_CHUNK_THRESHOLD,
+  COMPRESS_MAX_OUTPUT_BYTES,
   estimateCompressedSize,
   isCancellationError,
   probeVideoMetadata,
@@ -248,23 +251,39 @@ export default function CompressorPage() {
       });
       return;
     }
+    // Arquivo GRANDE: o encode de uma vez estoura o heap do wasm (~500MB).
+    // Acima do limiar vai em PARTES (WORKERFS, sem carregar o original na
+    // memória) — entrada sem teto; só a SAÍDA precisa caber (guarda abaixo).
+    const chunked = job.file.size >= COMPRESS_CHUNK_THRESHOLD;
+    if (chunked && job.estimatedSize > COMPRESS_MAX_OUTPUT_BYTES) {
+      updateJob(job.id, {
+        state: 'error',
+        error: `A saída prevista (~${Math.round(job.estimatedSize / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução e tente de novo.`,
+      });
+      return;
+    }
     const pool = getFFmpegPool(effectivePoolSize());
     const t0 = performance.now();
     updateJob(job.id, { state: 'running', progress: 0 });
     const ff = await pool.acquire();
     try {
       if (cancelledRef.current) throw new Error('CANCELLED_BY_USER');
-      const blob = await compressVideoOn(
-        ff,
-        job.file,
-        { crf, resolution },
-        {
-          onProgress: (p: FFProgress) =>
-            updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
-          onStage: (s) =>
-            setStageMsg(`${batchIdx}/${batchTotal} · ${job.file.name} — ${s}`),
-        },
-      );
+      const runOpts = {
+        onProgress: (p: FFProgress) =>
+          updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
+        onStage: (s: string) =>
+          setStageMsg(`${batchIdx}/${batchTotal} · ${job.file.name} — ${s}`),
+      };
+      const blob = chunked
+        ? await compressVideoChunked(
+            ff,
+            job.file,
+            { crf, resolution, durationSec: meta?.durationSec, inputHeight: meta?.height },
+            // Partes em paralelo em instâncias extras do pool (o job já segura
+            // uma). Num lote de vários arquivos grandes o pool se auto-regula.
+            { ...runOpts, pool, chunkConcurrency: Math.max(1, Math.min(3, effectivePoolSize())) },
+          )
+        : await compressVideoOn(ff, job.file, { crf, resolution }, runOpts);
       const url = URL.createObjectURL(blob);
       const elapsedMs = performance.now() - t0;
       updateJob(job.id, {
@@ -299,7 +318,7 @@ export default function CompressorPage() {
         console.error('[compressor]', job.file.name, e);
         updateJob(job.id, {
           state: 'error',
-          error: toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — arquivos muito pesados podem estourar a memória do navegador.'),
+          error: toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — se for muito pesado, suba o CRF ou reduza a resolução.'),
         });
       }
     } finally {
