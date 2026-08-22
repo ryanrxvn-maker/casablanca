@@ -331,7 +331,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Solte os vídeos',
-        text: 'No card "Solta os vídeos", arraste até 20 arquivos MP4, WEBM ou MOV (esta ferramenta é só pra vídeo). Até 5 comprimem ao mesmo tempo; os demais aguardam a vez sozinhos. Assim que os arquivos entram, o topo mostra as métricas do lote: "Arquivos", "Entrada" (peso total), "Duração" e "Previsão" — o tamanho estimado da saída com o ajuste atual.',
+        text: 'No card "Solta os vídeos", arraste até 20 arquivos MP4, WEBM ou MOV, de até 2 GB cada (esta ferramenta é só pra vídeo; arquivo maior é recusado na hora, com aviso). Até 5 comprimem ao mesmo tempo; os demais aguardam a vez sozinhos. Assim que os arquivos entram, o topo mostra as métricas do lote: "Arquivos", "Entrada" (peso total), "Duração" e "Previsão" — o tamanho estimado da saída com o ajuste atual.',
         visual: (
           <Shot label="Compressor · fila">
             <MStack>

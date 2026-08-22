@@ -393,6 +393,8 @@ export async function compressVideoOn(
 
 /** A partir deste tamanho o Compressor usa o caminho em partes. */
 export const COMPRESS_CHUNK_THRESHOLD = 300 * 1024 * 1024;
+/** Teto da ENTRADA por arquivo (2 GB) — acima disso o tempo e a memória da saída deixam de ser previsíveis. */
+export const COMPRESS_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024;
 /** Teto da SAÍDA (o MP4 final precisa caber no MEMFS). */
 export const COMPRESS_MAX_OUTPUT_BYTES = 900 * 1024 * 1024;
 /** Acima disso o faststart (que duplica a saída em memória) é pulado. */

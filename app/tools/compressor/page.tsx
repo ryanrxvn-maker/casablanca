@@ -14,6 +14,7 @@ import {
   compressVideoChunked,
   COMPRESS_CHUNK_THRESHOLD,
   COMPRESS_MAX_OUTPUT_BYTES,
+  COMPRESS_MAX_INPUT_BYTES,
   estimateCompressedSize,
   predictRawCompressedBytes,
   isCancellationError,
@@ -99,6 +100,7 @@ export default function CompressorPage() {
     'compressor:stageMsg',
     null,
   );
+  const [rejectedMsg, setRejectedMsg] = useToolState<string | null>('compressor:rejected', null);
   const [zipping, setZipping] = useToolState<boolean>(
     'compressor:zipping',
     false,
@@ -222,10 +224,19 @@ export default function CompressorPage() {
 
   function setFilesSafe(next: File[]) {
     if (processing) return;
+    // Teto por arquivo (2 GB): acima disso o tempo de encode e a memória da
+    // saída deixam de ser previsíveis — recusa na entrada, com aviso claro.
+    const tooBig = next.filter((f) => f.size > COMPRESS_MAX_INPUT_BYTES);
+    const ok = next.filter((f) => f.size <= COMPRESS_MAX_INPUT_BYTES);
+    setRejectedMsg(
+      tooBig.length
+        ? `${tooBig.length === 1 ? 'Arquivo recusado' : `${tooBig.length} arquivos recusados`} por passar de ${formatBytes(COMPRESS_MAX_INPUT_BYTES)}: ${tooBig.map((f) => `${f.name} (${formatBytes(f.size)})`).join(', ')}. O Compressor aceita até 2 GB por vídeo.`
+        : null,
+    );
     // Limpa resultados anteriores
     jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
     setJobs([]);
-    setFiles(next.slice(0, MAX_BATCH));
+    setFiles(ok.slice(0, MAX_BATCH));
   }
 
   function updateJob(id: string, patch: Partial<Job>) {
@@ -453,7 +464,7 @@ export default function CompressorPage() {
           n={1}
           icon={<IconStepUpload size={18} />}
           title="Solta os vídeos"
-          hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV`}
+          hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV · até 2 GB cada`}
           hue={HUE}
         >
           <BatchFileUpload
@@ -461,9 +472,12 @@ export default function CompressorPage() {
             value={files}
             onChange={setFilesSafe}
             max={MAX_BATCH}
-            hint="MP4, WEBM ou MOV"
+            hint="MP4, WEBM ou MOV · até 2 GB cada"
             disabled={processing}
           />
+          {rejectedMsg ? (
+            <p className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-200">{rejectedMsg}</p>
+          ) : null}
           {files.length > 0 ? (
             <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-4">
               <ToolMetric value={String(files.length)} label="Arquivos" />
