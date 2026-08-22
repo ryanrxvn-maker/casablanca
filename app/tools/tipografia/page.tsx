@@ -49,6 +49,11 @@ import {
   captionBBoxAt,
   wordBoxesAt,
   DEFAULT_STYLE,
+  IN_ANIM_OPTIONS,
+  OUT_ANIM_OPTIONS,
+  unsupportedInKinds,
+  type AnimKind,
+  type OutKind,
   type Block,
   type StyleState,
   type PerBlockStyle,
@@ -136,6 +141,11 @@ function langLabel(code: Language): string {
 }
 
 // botões com relevo 3D (hover levanta, clique afunda) — usado em todo o editor
+// mesmo relevo do T3D com o glow âmbar FUNDIDO na mesma sombra — dois
+// utilitários shadow-[] no mesmo elemento brigam e um deles vira CSS morto
+const T3D_GLOW =
+  ' shadow-[0_0_16px_rgba(255,159,10,0.2),0_2px_0_rgba(0,0,0,0.16),0_6px_12px_-6px_rgba(0,0,0,0.25)] hover:-translate-y-[1.5px] hover:shadow-[0_0_20px_rgba(255,159,10,0.28),0_3.5px_0_rgba(0,0,0,0.16),0_10px_18px_-8px_rgba(0,0,0,0.3)] active:translate-y-[1px] active:shadow-[inset_0_2px_5px_rgba(0,0,0,0.28)] disabled:shadow-none transition-all duration-150 will-change-transform';
+
 const T3D =
   ' shadow-[0_2px_0_rgba(0,0,0,0.16),0_6px_12px_-6px_rgba(0,0,0,0.25)] hover:-translate-y-[1.5px] hover:shadow-[0_3.5px_0_rgba(0,0,0,0.16),0_10px_18px_-8px_rgba(0,0,0,0.3)] active:translate-y-[1px] active:shadow-[inset_0_2px_5px_rgba(0,0,0,0.28)] transition-all duration-150 will-change-transform';
 type UpperMode = 'auto' | 'on' | 'off'; // legado (migração de sessões antigas)
@@ -178,6 +188,8 @@ type SavedSession = {
   bgMode?: 'preset' | 'on' | 'off';
   bgColor?: string | null;
   bgOpacity?: number;
+  animIn?: AnimKind | null;
+  animOut?: OutKind | null;
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -249,6 +261,8 @@ function TipografiaInner() {
   const [bgModeG, setBgModeG] = useToolState<'preset' | 'on' | 'off'>('tipografia:bgmode', 'preset');
   const [bgColorG, setBgColorG] = useToolState<string | null>('tipografia:bgcolor', null);
   const [bgOpacityG, setBgOpacityG] = useToolState<number>('tipografia:bgopacity', 1);
+  const [animInG, setAnimInG] = useToolState<AnimKind | null>('tipografia:animin', null);
+  const [animOutG, setAnimOutG] = useToolState<OutKind | null>('tipografia:animout', null);
   // estilos POR PALAVRA (seleção parcial no preview) + blocos BLOQUEADOS
   const [wordStyles, setWordStyles] = useToolState<Record<string, Record<number, WordStyle>>>(
     'tipografia:wordstyles',
@@ -351,6 +365,8 @@ function TipografiaInner() {
     bold: boolean;
     italic: boolean;
     fontOv: FontKey | null;
+    animIn: AnimKind | null;
+    animOut: OutKind | null;
   };
   const historyRef = useRef<Snapshot[]>([]);
   const snapRef = useRef<Snapshot | null>(null);
@@ -370,6 +386,8 @@ function TipografiaInner() {
     bold,
     italic,
     fontOv,
+    animIn: animInG,
+    animOut: animOutG,
   };
   const pushHistory = useCallback(() => {
     const s = snapRef.current;
@@ -395,6 +413,8 @@ function TipografiaInner() {
     setBold(s.bold);
     setItalic(s.italic);
     setFontOv(s.fontOv);
+    setAnimInG(s.animIn);
+    setAnimOutG(s.animOut);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -438,10 +458,12 @@ function TipografiaInner() {
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
+      animIn: animInG,
+      animOut: animOutG,
       wordStyles,
       perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, bgModeG, bgColorG, bgOpacityG, wordStyles, blockStyles],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
   );
 
   // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
@@ -469,6 +491,8 @@ function TipografiaInner() {
         if (patch.bgMode !== undefined) setBgModeG(patch.bgMode ?? 'preset');
         if (patch.bgColor !== undefined) setBgColorG(patch.bgColor ?? null);
         if (patch.bgOpacity !== undefined) setBgOpacityG(patch.bgOpacity ?? 1);
+        if (patch.animIn !== undefined) setAnimInG(patch.animIn ?? null);
+        if (patch.animOut !== undefined) setAnimOutG(patch.animOut ?? null);
         return;
       }
       setBlockStyles((prev) => ({
@@ -476,8 +500,11 @@ function TipografiaInner() {
         [editingBlockId]: { ...prev[editingBlockId], ...patch },
       }));
     },
-    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setBgModeG, setBgColorG, setBgOpacityG, setBlockStyles],
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
   );
+  // modelo EFETIVO do que o painel está editando: com um bloco travado (ou em
+  // edição só-dele), o modelo do bloco vence o global — os rótulos "do modelo"
+  // e a lista de animações indisponíveis têm que falar DESSE modelo
   const effOf = useCallback(
     <K extends keyof PerBlockStyle>(k: K, global: PerBlockStyle[K]): PerBlockStyle[K] => {
       if (editingBlockId) {
@@ -487,6 +514,11 @@ function TipografiaInner() {
       return global;
     },
     [editingBlockId, blockStyles],
+  );
+
+  const panelPreset = useMemo(
+    () => getPreset(effOf('presetId', presetId) ?? presetId),
+    [effOf, presetId],
   );
 
   // ── seleção PARCIAL (palavras marcadas no preview) ───────────────────────
@@ -567,13 +599,15 @@ function TipografiaInner() {
           bgMode: bgModeG,
           bgColor: bgColorG,
           bgOpacity: bgOpacityG,
+          animIn: animInG,
+          animOut: animOutG,
           // o que o user já tinha ajustado neste bloco continua valendo
           ...prev[blockId],
         },
       }));
       setLockedBlocks((prev) => [...prev, blockId]);
     },
-    [pushHistory, lockedBlocks, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG],
+    [pushHistory, lockedBlocks, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -616,13 +650,27 @@ function TipografiaInner() {
         );
         setBold(saved.bold ?? false);
         setItalic(saved.italic ?? false);
-        setBlockStyles(saved.blockStyles ?? {});
+        // sessão salva ANTES desta feature: bloco travado congelou tudo menos
+        // a animação. Sem o backfill, mexer na animação global vazaria pra
+        // dentro dele — e o cadeado promete o contrário.
+        {
+          const styles = { ...(saved.blockStyles ?? {}) };
+          for (const id of saved.lockedBlocks ?? []) {
+            const ov = { ...(styles[id] ?? {}) };
+            if (ov.animIn === undefined) ov.animIn = null;
+            if (ov.animOut === undefined) ov.animOut = null;
+            styles[id] = ov;
+          }
+          setBlockStyles(styles);
+        }
         setWordStyles(saved.wordStyles ?? {});
         setLockedBlocks(saved.lockedBlocks ?? []);
         setAutoFitG(saved.autoFit ?? true);
         setBgModeG(saved.bgMode ?? 'preset');
         setBgColorG(saved.bgColor ?? null);
         setBgOpacityG(saved.bgOpacity ?? 1);
+        setAnimInG(saved.animIn ?? null);
+        setAnimOutG(saved.animOut ?? null);
         setPace(saved.pace);
         setLanguage(saved.language);
         setHighlights(saved.highlights ?? {});
@@ -667,8 +715,10 @@ function TipografiaInner() {
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
+      animIn: animInG,
+      animOut: animOutG,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, bgModeG, bgColorG, bgOpacityG]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -1185,6 +1235,11 @@ function TipografiaInner() {
                   bgMode={effOf('bgMode', bgModeG) ?? 'preset'}
                   bgColor={effOf('bgColor', bgColorG) ?? null}
                   bgOpacity={effOf('bgOpacity', bgOpacityG) ?? 1}
+                  animIn={effOf('animIn', animInG) ?? null}
+                  animOut={effOf('animOut', animOutG) ?? null}
+                  presetInKind={panelPreset.in.kind}
+                  presetOutKind={panelPreset.out.kind}
+                  unsupportedIn={unsupportedInKinds(panelPreset)}
                   sel={
                     wordSel
                       ? {
@@ -2767,27 +2822,45 @@ function CopyFixPanel({
   const [text, setText] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   return (
-    <div className="mt-5 rounded-[14px] border border-line bg-bg-soft/40 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div
-            className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            Corrigir legenda pela copy
+    <div
+      className={
+        'mt-5 overflow-hidden rounded-[16px] border transition-colors duration-200 ' +
+        (open
+          ? 'border-amber-400/40 bg-gradient-to-br from-amber-400/[0.06] via-bg-soft/40 to-bg-soft/20 shadow-[0_0_24px_-8px_rgba(255,159,10,0.25)]'
+          : 'border-line bg-gradient-to-br from-bg-soft/55 via-bg-soft/35 to-transparent')
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] border border-amber-400/40 bg-amber-400/10 text-amber-400 shadow-[0_0_14px_rgba(255,159,10,0.18)]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M14 2.5H7a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5L14 2.5z" />
+              <path d="M14 2.5v5h5" />
+              <path d="m8.8 14.6 2.1 2.1 4.3-4.3" />
+            </svg>
           </div>
-          <p className="mt-0.5 text-[11px] text-text-muted">
-            Cola o texto da copy e a legenda inteira é corrigida por ela — só
-            palavras erradas e pontuação. Blocos, tempos e separação ficam
-            exatamente como foram gerados.
-          </p>
+          <div className="min-w-0">
+            <div
+              className="text-[11px] font-bold uppercase tracking-[0.18em] text-text"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Corrigir legenda pela copy
+            </div>
+            <p className="mt-0.5 max-w-[520px] text-[11px] leading-relaxed text-text-muted">
+              Cola o texto da copy e a legenda inteira é corrigida por ela — só
+              palavras erradas e pontuação. Blocos, tempos e separação ficam
+              exatamente como foram gerados.
+            </p>
+          </div>
         </div>
         <button
           onClick={() => setOpen((v) => !v)}
           disabled={disabled}
           className={
-            'rounded-[10px] border border-amber-400/60 bg-amber-400/10 px-4 py-2 text-[11.5px] font-bold text-amber-600 hover:bg-amber-400/20' +
-            T3D
+            'shrink-0 rounded-[11px] border px-4 py-2.5 text-[11.5px] font-bold ' +
+            (open
+              ? 'bg-bg-soft border-line text-text-muted hover:text-text' + T3D
+              : 'border-amber-400/70 bg-gradient-to-b from-amber-400/25 to-amber-400/10 text-amber-600 dark:text-amber-500 hover:from-amber-400/35 hover:to-amber-400/15' + T3D_GLOW)
           }
           style={{ fontFamily: 'var(--font-tech)' }}
         >
@@ -2795,22 +2868,22 @@ function CopyFixPanel({
         </button>
       </div>
       {open ? (
-        <div className="mt-3">
+        <div className="border-t border-line/60 bg-black/10 p-4">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Cola aqui o texto exato da copy narrada no vídeo..."
             rows={5}
             disabled={disabled}
-            className="w-full rounded-[10px] border border-line bg-black/20 px-3 py-2.5 text-[13px] leading-relaxed text-text outline-none focus:border-amber-400/50"
+            className="w-full rounded-[12px] border border-line bg-black/25 px-3.5 py-3 text-[13px] leading-relaxed text-text outline-none transition-colors placeholder:text-text-muted/60 focus:border-amber-400/60 focus:shadow-[0_0_0_3px_rgba(255,159,10,0.08)]"
           />
-          <div className="mt-2 flex flex-wrap items-center gap-3">
+          <div className="mt-2.5 flex flex-wrap items-center gap-3">
             <button
               onClick={() => setFeedback(onFix(text))}
               disabled={disabled || text.trim().length < 20}
               className={
-                'rounded-[10px] border border-amber-400/70 bg-amber-400/20 px-5 py-2 text-[12px] font-bold text-amber-600 hover:bg-amber-400/30 disabled:opacity-40' +
-                T3D
+                'rounded-[11px] border border-amber-400/70 bg-gradient-to-b from-amber-400/30 to-amber-400/15 px-5 py-2.5 text-[12px] font-bold text-amber-600 dark:text-amber-500 hover:from-amber-400/40 hover:to-amber-400/20 disabled:opacity-40' +
+                T3D_GLOW
               }
               style={{ fontFamily: 'var(--font-tech)' }}
             >
@@ -2819,7 +2892,7 @@ function CopyFixPanel({
             {feedback ? (
               <span
                 className={
-                  'rounded-[9px] border px-3 py-1.5 text-[11px] font-semibold ' +
+                  'rounded-[10px] border px-3 py-1.5 text-[11px] font-semibold ' +
                   (feedback.ok
                     ? 'border-lime/40 bg-lime/10 text-lime'
                     : 'border-red-500/40 bg-red-500/10 text-red-400')
@@ -3179,6 +3252,11 @@ function StylePanel({
   bgMode,
   bgColor,
   bgOpacity,
+  animIn,
+  animOut,
+  presetInKind,
+  presetOutKind,
+  unsupportedIn,
   sel,
   disabled,
 }: {
@@ -3209,6 +3287,12 @@ function StylePanel({
   bgMode: 'preset' | 'on' | 'off';
   bgColor: string | null;
   bgOpacity: number;
+  animIn: AnimKind | null;
+  animOut: OutKind | null;
+  presetInKind: AnimKind;
+  presetOutKind: OutKind;
+  /** entradas que ESTE modelo não executa (o engine ignoraria em silêncio) */
+  unsupportedIn: AnimKind[];
   /** seleção PARCIAL ativa: os controles de texto agem só nas palavras marcadas */
   sel: {
     count: number;
@@ -3462,6 +3546,38 @@ function StylePanel({
         </p>
       </div>
 
+      <div className="md:col-span-2">
+        <div
+          className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Animação da legenda
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <AnimPicker
+            label="Entrada"
+            value={animIn}
+            options={IN_ANIM_OPTIONS}
+            presetKind={presetInKind}
+            unsupported={unsupportedIn}
+            onPick={(k) => onSet({ animIn: k })}
+            disabled={disabled}
+          />
+          <AnimPicker
+            label="Saída"
+            value={animOut}
+            options={OUT_ANIM_OPTIONS}
+            presetKind={presetOutKind}
+            onPick={(k) => onSet({ animOut: k })}
+            disabled={disabled}
+          />
+        </div>
+        <p className="mt-1 text-[10px] text-text-muted">
+          “Do modelo” usa a animação que o lettering já traz · “Sem animação”
+          faz a legenda aparecer/sumir seca, sem efeito
+        </p>
+      </div>
+
       <div>
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -3621,6 +3737,141 @@ function StylePanel({
   );
 }
 
+/* ─────────────────── Seletor de animação (entrada/saída) ─────────────────── */
+
+function AnimPicker<K extends string>({
+  label,
+  value,
+  options,
+  presetKind,
+  unsupported,
+  onPick,
+  disabled,
+}: {
+  label: string;
+  value: K | null;
+  options: Array<{ kind: K; label: string }>;
+  /** kind que o modelo atual já traz — vira o rótulo do "Do modelo" */
+  presetKind: K;
+  /** kinds que ESTE modelo não executa — ficam visíveis, porém travados */
+  unsupported?: K[];
+  onPick: (v: K | null) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  // menu por PORTAL (components/Popover): o card do passo tem overflow-hidden
+  // E ganha transform no hover — os dois cortam/deslocam popover ancorado
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const closeMenu = useCallback(() => setOpen(false), []);
+  const labelOf = (k: K) => options.find((o) => o.kind === k)?.label ?? k;
+  const isCustom = value !== null;
+  const blocked = new Set(unsupported ?? []);
+  return (
+    <div className="min-w-0">
+      <div
+        className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-text-muted"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        {label}
+      </div>
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className={
+          'flex w-full items-center justify-between gap-3 rounded-[12px] border px-3.5 py-2.5 text-[12.5px] font-semibold' + T3D + ' ' +
+          (isCustom
+            ? 'border-amber-400/60 bg-amber-400/10 text-amber-600'
+            : 'bg-bg-soft border-line text-text hover:border-amber-400/50')
+        }
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={isCustom ? 'text-amber-400' : 'text-text-muted'}
+            aria-hidden
+          >
+            <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z" />
+          </svg>
+          <span className="truncate">
+            {value === null ? `Do modelo · ${labelOf(presetKind)}` : labelOf(value)}
+          </span>
+          {isCustom && blocked.has(value) ? (
+            <span
+              className="mono shrink-0 rounded-[6px] border border-line px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-text-muted"
+              title="Este modelo não executa a animação escolhida — ele usa a dele"
+            >
+              n/d
+            </span>
+          ) : null}
+        </span>
+        <span className="shrink-0 text-text-muted">▾</span>
+      </button>
+      <Popover open={open} anchorRef={btnRef} onClose={closeMenu} width={250}>
+        <div className="overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl">
+          <button
+            onClick={() => {
+              onPick(null);
+              setOpen(false);
+            }}
+            className={
+              'flex w-full items-center gap-2 border-b border-line px-3.5 py-2.5 text-left text-[12.5px] font-bold transition-colors ' +
+              (value === null
+                ? 'bg-amber-400/15 text-amber-600'
+                : 'text-text hover:bg-black/5')
+            }
+          >
+            ✨ Do modelo ({labelOf(presetKind)})
+          </button>
+          <div className="max-h-[260px] overflow-y-auto py-1">
+            {options.map((o) => {
+              const off = blocked.has(o.kind);
+              return (
+                <button
+                  key={o.kind}
+                  onClick={() => {
+                    if (off) return;
+                    onPick(o.kind);
+                    setOpen(false);
+                  }}
+                  disabled={off}
+                  title={off ? 'Este modelo não executa esta animação' : undefined}
+                  className={
+                    'flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-[12.5px] font-semibold transition-colors ' +
+                    (off
+                      ? 'cursor-not-allowed text-text-muted/45'
+                      : value === o.kind
+                        ? 'bg-amber-400/15 text-amber-600'
+                        : 'text-text-muted hover:bg-black/5 hover:text-text')
+                  }
+                >
+                  <span className={off ? 'line-through decoration-1' : undefined}>{o.label}</span>
+                  {off ? (
+                    <span className="mono shrink-0 text-[9.5px] uppercase tracking-wider opacity-60">
+                      n/d neste modelo
+                    </span>
+                  ) : o.kind === presetKind ? (
+                    <span className="mono shrink-0 text-[9.5px] uppercase tracking-wider opacity-50">
+                      do modelo
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
 /* ───────────────────────── Lista de blocos ───────────────────────── */
 
 function BlockList({
@@ -3662,9 +3913,12 @@ function BlockList({
         style={{ fontFamily: 'var(--font-tech)' }}
       >
         <span>Blocos de legenda — {blocks.length}</span>
-        <span className="normal-case tracking-normal font-normal">
-          clica na palavra pra pintar de destaque · 🔒 congela o bloco (o
-          “aplicar a todas” não pega nele)
+        <span className="flex items-center gap-1.5 normal-case tracking-normal font-normal">
+          clica na palavra pra pintar de destaque ·
+          <span className="inline-flex items-center text-violet-400">
+            <IconPadlock locked size={11} />
+          </span>
+          congela o bloco (o “aplicar a todas” não pega nele)
         </span>
       </div>
       <div className="max-h-[280px] overflow-y-auto rounded-[14px] border border-line">
@@ -3682,8 +3936,10 @@ function BlockList({
                   ? 'bg-amber-400/[0.07]'
                   : isActive
                     ? 'bg-lime/[0.05]'
-                    : 'hover:bg-white/[0.02]') +
-                (isLocked ? ' opacity-95' : '')
+                    : isLocked
+                      ? 'bg-violet-500/[0.04]'
+                      : 'hover:bg-white/[0.02]') +
+                (isLocked ? ' shadow-[inset_2.5px_0_0_rgba(167,139,250,0.55)]' : '')
               }
               style={{ contentVisibility: 'auto' } as CSSProperties}
             >
@@ -3721,22 +3977,22 @@ function BlockList({
                     }
                     disabled={disabled}
                     className={
-                      'flex h-7 w-7 items-center justify-center rounded-[8px] border bg-bg-soft text-[12.5px] disabled:opacity-30' + T3D + ' ' +
+                      'flex h-8 w-8 items-center justify-center rounded-[9px] border disabled:opacity-30 ' +
                       (isLocked
-                        ? 'border-amber-400/70 bg-amber-400/15 text-amber-200'
-                        : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
+                        ? 'border-violet-400/80 bg-violet-500/20 text-violet-300 shadow-[0_0_16px_rgba(139,92,246,0.5),inset_0_0_10px_rgba(167,139,250,0.14),0_2px_0_rgba(0,0,0,0.16)] transition-all duration-150 hover:bg-violet-500/30'
+                        : 'bg-bg-soft border-line text-text-muted hover:border-violet-400/60 hover:text-violet-300' + T3D)
                     }
                   >
-                    {isLocked ? '🔒' : '🔓'}
+                    <IconPadlock locked={isLocked} />
                   </button>
                   <RowBtn title="Dividir bloco" onClick={() => onSplit(b.id)} disabled={disabled || b.words.length < 2}>
-                    ✂
+                    <IconScissors />
                   </RowBtn>
                   <RowBtn title="Juntar com o próximo" onClick={() => onMerge(b.id)} disabled={disabled || i === blocks.length - 1}>
-                    ⇣
+                    <IconMergeDown />
                   </RowBtn>
                   <RowBtn title="Excluir bloco" onClick={() => onDelete(b.id)} disabled={disabled} danger>
-                    ✕
+                    <IconClose />
                   </RowBtn>
                 </div>
               </div>
@@ -3806,7 +4062,7 @@ function RowBtn({
       title={title}
       disabled={disabled}
       className={
-        'flex h-7 w-7 items-center justify-center rounded-[8px] border bg-bg-soft text-[12.5px] disabled:opacity-30' + T3D + ' ' +
+        'flex h-8 w-8 items-center justify-center rounded-[9px] border bg-bg-soft text-[13px] disabled:opacity-30' + T3D + ' ' +
         (danger
           ? 'border-line text-text-muted hover:border-red-500/50 hover:text-red-300'
           : 'border-line text-text-muted hover:border-amber-400/50 hover:text-amber-200')
@@ -3814,5 +4070,68 @@ function RowBtn({
     >
       {children}
     </button>
+  );
+}
+
+/* ─── ícones DIGITAIS dos botões de bloco (stroke herda a cor do botão) ─── */
+
+function IconPadlock({ locked, size = 14 }: { locked: boolean; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.1"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect
+        x="4.5"
+        y="10.5"
+        width="15"
+        height="10"
+        rx="2.6"
+        fill={locked ? 'currentColor' : 'none'}
+        fillOpacity={locked ? 0.18 : 0}
+      />
+      {locked ? (
+        <path d="M8 10.5V7.4a4 4 0 0 1 8 0v3.1" />
+      ) : (
+        // aberto: a haste levanta e solta do corpo
+        <path d="M8 10.5V6.9a4 4 0 0 1 7.8-1.2" />
+      )}
+      <path d="M12 14.4v2.4" />
+    </svg>
+  );
+}
+
+function IconScissors() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="6" cy="6" r="2.7" />
+      <circle cx="6" cy="18" r="2.7" />
+      <path d="M8.2 7.7 20 19.2M8.2 16.3 20 4.8" />
+    </svg>
+  );
+}
+
+function IconMergeDown() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 3.5v10.8" />
+      <path d="m7.6 10 4.4 4.3L16.4 10" />
+      <path d="M5 20.5h14" />
+    </svg>
+  );
+}
+
+function IconClose() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" aria-hidden>
+      <path d="M5.5 5.5l13 13M18.5 5.5l-13 13" />
+    </svg>
   );
 }

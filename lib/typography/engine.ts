@@ -89,7 +89,17 @@ export type AnimKind =
   | 'tracking-in'
   | 'squash';
 
-export type OutKind = 'none' | 'fade' | 'zoom' | 'blur' | 'drop';
+export type OutKind =
+  | 'none'
+  | 'fade'
+  | 'zoom'
+  | 'shrink'
+  | 'blur'
+  | 'drop'
+  | 'rise'
+  | 'slide-left'
+  | 'slide-right'
+  | 'flip';
 
 export type AnimSpec = {
   kind: AnimKind;
@@ -99,6 +109,104 @@ export type AnimSpec = {
   /** magnitude — deslocamentos em frações do fontSize, escalas em fator */
   amp?: number;
 };
+
+export type OutSpec = { kind: OutKind; dur: number; ease?: EaseName };
+
+/**
+ * Specs padrão do OVERRIDE de animação do editor. O user escolhe só o KIND;
+ * dur/ease/stagger saem daqui. Escolher o MESMO kind que o modelo já usa
+ * mantém o spec fino do preset (calibrado à mão) — o merge no drawCaptions
+ * só troca quando o kind difere.
+ */
+export const IN_SPEC_BY_KIND: Record<AnimKind, AnimSpec> = {
+  'none': { kind: 'none', dur: 0 },
+  'fade': { kind: 'fade', dur: 260, ease: 'outQuad', stagger: 90 },
+  'pop': { kind: 'pop', dur: 280, ease: 'outBackSoft', stagger: 100 },
+  'zoom-out': { kind: 'zoom-out', dur: 300, ease: 'outQuint', stagger: 90, amp: 0.5 },
+  'rise': { kind: 'rise', dur: 300, ease: 'outQuint', stagger: 90, amp: 0.6 },
+  'drop': { kind: 'drop', dur: 300, ease: 'outQuint', stagger: 90, amp: 0.6 },
+  'slide-left': { kind: 'slide-left', dur: 320, ease: 'outQuint', stagger: 90, amp: 0.7 },
+  'slide-right': { kind: 'slide-right', dur: 320, ease: 'outQuint', stagger: 90, amp: 0.7 },
+  'blur': { kind: 'blur', dur: 340, ease: 'outQuad', stagger: 90, amp: 1 },
+  'blur-zoom': { kind: 'blur-zoom', dur: 340, ease: 'outQuad', stagger: 90, amp: 1 },
+  'typewriter': { kind: 'typewriter', dur: 420, ease: 'linear' },
+  'glitch': { kind: 'glitch', dur: 320, ease: 'outQuad', amp: 1 },
+  'flip': { kind: 'flip', dur: 300, ease: 'outBack', stagger: 90 },
+  'stretch-x': { kind: 'stretch-x', dur: 300, ease: 'outQuint', stagger: 90, amp: 0.8 },
+  'mask-up': { kind: 'mask-up', dur: 360, ease: 'outQuint', stagger: 110 },
+  'wipe': { kind: 'wipe', dur: 380, ease: 'outQuint' },
+  'rotate-in': { kind: 'rotate-in', dur: 320, ease: 'outBack', stagger: 90, amp: 1 },
+  'skew-slide': { kind: 'skew-slide', dur: 320, ease: 'outQuint', stagger: 90 },
+  'tracking-in': { kind: 'tracking-in', dur: 420, ease: 'outQuint', amp: 0.6 },
+  'squash': { kind: 'squash', dur: 300, ease: 'outBack', stagger: 100 },
+};
+
+export const OUT_SPEC_BY_KIND: Record<OutKind, OutSpec> = {
+  'none': { kind: 'none', dur: 0 },
+  'fade': { kind: 'fade', dur: 240, ease: 'outQuad' },
+  'zoom': { kind: 'zoom', dur: 260, ease: 'outQuad' },
+  'shrink': { kind: 'shrink', dur: 260, ease: 'outQuad' },
+  'blur': { kind: 'blur', dur: 280, ease: 'outQuad' },
+  'drop': { kind: 'drop', dur: 260, ease: 'outQuad' },
+  'rise': { kind: 'rise', dur: 260, ease: 'outQuad' },
+  'slide-left': { kind: 'slide-left', dur: 280, ease: 'outQuad' },
+  'slide-right': { kind: 'slide-right', dur: 280, ease: 'outQuad' },
+  'flip': { kind: 'flip', dur: 240, ease: 'outQuad' },
+};
+
+/** Catálogo pro editor — rótulos PT-BR na ordem de exibição do menu. */
+export const IN_ANIM_OPTIONS: Array<{ kind: AnimKind; label: string }> = [
+  { kind: 'none', label: 'Sem animação' },
+  { kind: 'pop', label: 'Pop' },
+  { kind: 'fade', label: 'Fade' },
+  { kind: 'rise', label: 'Subindo' },
+  { kind: 'drop', label: 'Caindo' },
+  { kind: 'zoom-out', label: 'Zoom recuando' },
+  { kind: 'slide-left', label: 'Entra da direita' },
+  { kind: 'slide-right', label: 'Entra da esquerda' },
+  { kind: 'blur', label: 'Desfoque' },
+  { kind: 'blur-zoom', label: 'Desfoque + zoom' },
+  { kind: 'mask-up', label: 'Máscara subindo' },
+  { kind: 'wipe', label: 'Revelar (wipe)' },
+  { kind: 'typewriter', label: 'Máquina de escrever' },
+  { kind: 'tracking-in', label: 'Espaçamento fechando' },
+  { kind: 'glitch', label: 'Glitch' },
+  { kind: 'flip', label: 'Flip vertical' },
+  { kind: 'stretch-x', label: 'Esticada' },
+  { kind: 'rotate-in', label: 'Girando' },
+  { kind: 'skew-slide', label: 'Derrapagem' },
+  { kind: 'squash', label: 'Esmagada' },
+];
+
+/**
+ * Kinds de ENTRADA que ESTE modelo não executa — o editor não pode oferecer
+ * animação que o engine descartaria em silêncio.
+ *  - karaokê SOLO (uma palavra por vez) e MÁSCARA (knockout) têm caminho de
+ *    desenho próprio, então tudo que depende do desenho normal não roda;
+ *  - na máscara o vazado sempre entra em fade+zoom: o kind não muda nada.
+ */
+export function unsupportedInKinds(preset: TypoPreset): AnimKind[] {
+  if (preset.knockout && preset.karaoke !== 'solo') {
+    return IN_ANIM_OPTIONS.map((o) => o.kind).filter((k) => k !== 'none');
+  }
+  if (preset.karaoke === 'solo') {
+    return ['typewriter', 'mask-up', 'wipe', 'tracking-in'];
+  }
+  return [];
+}
+
+export const OUT_ANIM_OPTIONS: Array<{ kind: OutKind; label: string }> = [
+  { kind: 'none', label: 'Sem animação' },
+  { kind: 'fade', label: 'Fade' },
+  { kind: 'shrink', label: 'Encolhendo' },
+  { kind: 'zoom', label: 'Zoom crescendo' },
+  { kind: 'rise', label: 'Subindo' },
+  { kind: 'drop', label: 'Caindo' },
+  { kind: 'slide-left', label: 'Sai pra esquerda' },
+  { kind: 'slide-right', label: 'Sai pra direita' },
+  { kind: 'blur', label: 'Desfoque' },
+  { kind: 'flip', label: 'Flip fechando' },
+];
 
 export type LoopKind =
   | 'none'
@@ -342,6 +450,10 @@ export type StyleState = {
   bgColor?: string | null;
   /** opacidade do fundo 0..1 (default 1) */
   bgOpacity?: number;
+  /** animação de ENTRADA escolhida no editor (null = a do modelo) */
+  animIn?: AnimKind | null;
+  /** animação de SAÍDA escolhida no editor (null = a do modelo) */
+  animOut?: OutKind | null;
   /** estilo POR PALAVRA (seleção parcial estilo CapCut): blockId → índice → estilo */
   wordStyles?: Record<string, Record<number, WordStyle>>;
   /**
@@ -389,6 +501,8 @@ export type PerBlockStyle = Partial<
     | 'bgMode'
     | 'bgColor'
     | 'bgOpacity'
+    | 'animIn'
+    | 'animOut'
   >
 >;
 
@@ -779,6 +893,34 @@ type UnitFx = {
   p: number;
   e: number;
 };
+
+/**
+ * Encaixa o spec do OVERRIDE no bloco. Duas armadilhas que o spec genérico
+ * do catálogo não conhece:
+ *  1. modelo por LETRA (unit 'char') — os presets nativos usam stagger ~22ms;
+ *     jogar 90-110ms ali faz a última letra estrear segundos depois.
+ *  2. bloco curto com muitas unidades — se a última unidade só começa a
+ *     entrar DEPOIS do bloco acabar, o fim da legenda nunca aparece (p fica
+ *     0 e todo kind mapeia p=0 pra alpha 0), no preview E no MP4.
+ * Determinístico (função pura de spec+unit+bloco) — WYSIWYG preservado.
+ */
+function fitInSpec(spec: AnimSpec, unit: Unit, block: Block): AnimSpec {
+  if (!spec.stagger || spec.dur <= 0) return spec;
+  const nUnits =
+    unit === 'char'
+      ? block.words.reduce((n, w) => n + w.text.length, 0)
+      : unit === 'word'
+        ? block.words.length
+        : 1;
+  if (nUnits <= 1) return spec;
+  // por letra: mesma calibragem dos modelos nativos do catálogo
+  let stagger = unit === 'char' ? Math.max(12, Math.round(spec.stagger / 4)) : spec.stagger;
+  // a rampa inteira (última unidade JÁ entrando) cabe em 60% do bloco
+  const budget = (block.end - block.start) * 0.6 - spec.dur;
+  const maxStagger = budget / (nUnits - 1);
+  if (stagger > maxStagger) stagger = Math.max(0, Math.floor(maxStagger));
+  return stagger === spec.stagger ? spec : { ...spec, stagger };
+}
 
 function computeInFx(
   spec: AnimSpec,
@@ -1318,6 +1460,16 @@ export function drawCaptions(
   // mantém a dele (a composição é parte do modelo)
   let preset = presetDoBloco(style, basePreset);
 
+  // Animação escolhida no editor vence a do modelo (null = a do modelo).
+  // Mesmo kind do modelo mantém o spec fino do preset; o override vive no
+  // StyleState de propósito — preview e export passam por este MESMO merge.
+  if (style.animIn != null && style.animIn !== preset.in.kind) {
+    preset = { ...preset, in: fitInSpec(IN_SPEC_BY_KIND[style.animIn], preset.unit, block) };
+  }
+  if (style.animOut != null && style.animOut !== preset.out.kind) {
+    preset = { ...preset, out: OUT_SPEC_BY_KIND[style.animOut] };
+  }
+
   // Fundo configurável: 'off' remove caixa+barra do modelo; 'on' garante uma
   // caixa mesmo em modelo sem; cor custom recolore a caixa que existir.
   const bgMode = style.bgMode ?? 'preset';
@@ -1390,11 +1542,15 @@ export function drawCaptions(
 
   // Saída
   let outAlpha = 1;
+  let outDx = 0;
   let outDy = 0;
   let outScale = 1;
+  let outScaleY = 1;
   let outBlur = 0;
   if (preset.out.kind !== 'none' && preset.out.dur > 0) {
-    const po = clamp01((block.end - tMs) / preset.out.dur);
+    // bloco curto: a saída nunca engole a leitura — no máx. 45% da duração
+    const oDur = Math.min(preset.out.dur, (block.end - block.start) * 0.45);
+    const po = oDur <= 0 ? 1 : clamp01((block.end - tMs) / oDur);
     const eo = EASE[preset.out.ease ?? 'outQuad'](po);
     switch (preset.out.kind) {
       case 'fade':
@@ -1404,6 +1560,10 @@ export function drawCaptions(
         outAlpha = eo;
         outScale = 1 + (1 - eo) * 0.35;
         break;
+      case 'shrink':
+        outAlpha = eo;
+        outScale = 0.62 + 0.38 * eo;
+        break;
       case 'blur':
         outAlpha = eo;
         outBlur = (1 - eo) * fontPx * 0.25;
@@ -1411,6 +1571,22 @@ export function drawCaptions(
       case 'drop':
         outAlpha = eo;
         outDy = (1 - eo) * fontPx * 0.9;
+        break;
+      case 'rise':
+        outAlpha = eo;
+        outDy = -(1 - eo) * fontPx * 0.9;
+        break;
+      case 'slide-left':
+        outAlpha = eo;
+        outDx = -(1 - eo) * fontPx * 2.2;
+        break;
+      case 'slide-right':
+        outAlpha = eo;
+        outDx = (1 - eo) * fontPx * 2.2;
+        break;
+      case 'flip':
+        outAlpha = eo;
+        outScaleY = Math.max(0.0001, eo);
         break;
     }
   }
@@ -1439,9 +1615,9 @@ export function drawCaptions(
 
   ctx.save();
   ctx.globalAlpha = outAlpha;
-  if (outScale !== 1 || outDy !== 0) {
-    ctx.translate(cx, topY + blockH / 2 + outDy);
-    ctx.scale(outScale, outScale);
+  if (outScale !== 1 || outScaleY !== 1 || outDx !== 0 || outDy !== 0) {
+    ctx.translate(cx + outDx, topY + blockH / 2 + outDy);
+    ctx.scale(outScale, outScale * outScaleY);
     ctx.translate(-cx, -(topY + blockH / 2));
   }
   if (outBlur > 0.4) ctx.filter = `blur(${outBlur.toFixed(1)}px)`;
@@ -1898,9 +2074,17 @@ export function drawCaptions(
   // ── ecos ATRÁS do texto (fantasma vazado gigante) ──
   drawEchoes('behind');
 
+  // caixa de LINHA/BLOCO com autoText: o texto contrasta com a caixa
+  // (fix "branco sobre branco" nos lower-thirds) — calculado ANTES do
+  // typewriter porque ele tem caminho próprio e também pinta sobre a caixa
+  const lineBoxText =
+    blockBox && blockBox.mode !== 'word' && blockBox.autoText
+      ? contrastColor(resolveColor(blockBox.fill, primary, accent))
+      : null;
+
   // ── typewriter (caminho próprio) ──
   if (preset.in.kind === 'typewriter') {
-    drawTypewriter(d, block, layout, tMs, cx, topY, highlights, outAlpha);
+    drawTypewriter(d, block, layout, tMs, cx, topY, highlights, outAlpha, lineBoxText);
     drawEchoes('front');
     finishDraw();
     return;
@@ -1909,13 +2093,6 @@ export function drawCaptions(
   const isMask = preset.in.kind === 'mask-up';
   const isWipe = preset.in.kind === 'wipe';
   const isFill = karaoke === 'fill';
-
-  // caixa de LINHA/BLOCO com autoText: o texto contrasta com a caixa
-  // (fix "branco sobre branco" nos lower-thirds)
-  const lineBoxText =
-    blockBox && blockBox.mode !== 'word' && blockBox.autoText
-      ? contrastColor(resolveColor(blockBox.fill, primary, accent))
-      : null;
 
   const drawPass = (pass: 'base' | 'accent') => {
     layout.lines.forEach((line, li) => {
@@ -2510,6 +2687,8 @@ function drawTypewriter(
   topY: number,
   highlights: Set<number>,
   outAlpha: number,
+  /** cor de contraste quando existe caixa autoText por baixo (null = sem caixa) */
+  lineBoxText: string | null,
 ) {
   const { ctx, preset, fontPx } = d;
   const lineH = layout.lineH;
@@ -2534,9 +2713,17 @@ function drawTypewriter(
     for (const wi of line.wordIdx) {
       const wl = layout.words[wi];
       const isHi = highlights.has(wi);
-      const fill = isHi
+      let fill = isHi
         ? resolveColor(preset.highlightColor ?? 'accent', d.primary, d.accent)
         : resolveFill(d, lineH);
+      // mesma regra do drawPass: sobre caixa autoText, o texto usa a cor de
+      // contraste (só o destaque com cor/gradiente PRÓPRIO escapa)
+      if (lineBoxText) {
+        fill =
+          isHi && (preset.highlightColor || preset.highlightGradient)
+            ? fill
+            : lineBoxText;
+      }
       for (let ci = 0; ci < wl.chars.length; ci++) {
         if (drawn >= visible) {
           caretX = x0 + wl.x + wl.chars[ci].x;
