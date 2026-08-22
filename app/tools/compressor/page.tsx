@@ -255,7 +255,10 @@ export default function CompressorPage() {
     // Acima do limiar vai em PARTES (WORKERFS, sem carregar o original na
     // memória) — entrada sem teto; só a SAÍDA precisa caber (guarda abaixo).
     const chunked = job.file.size >= COMPRESS_CHUNK_THRESHOLD;
-    if (chunked && job.estimatedSize > COMPRESS_MAX_OUTPUT_BYTES) {
+    // Só com duração conhecida: sem ela a estimativa é crua (≈ tamanho de
+    // entrada) e barraria arquivo bom. O motor repete a guarda com a duração
+    // real lida do ffmpeg.
+    if (chunked && (meta?.durationSec ?? 0) > 0 && job.estimatedSize > COMPRESS_MAX_OUTPUT_BYTES) {
       updateJob(job.id, {
         state: 'error',
         error: `A saída prevista (~${Math.round(job.estimatedSize / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução e tente de novo.`,
