@@ -40,6 +40,12 @@ import {
 } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerJob, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
+  type VersaoCanal,
+  nomeComCanal,
+  avatarDoCanal,
+  precisaGerarDeNovo,
+} from '@/lib/versao-canal';
+import {
   buildDisparosFromDoc,
   buildDisparosFromNomenclatures,
   type AvatarCandidate,
@@ -251,6 +257,11 @@ function HeyGenAutoInner() {
   // tem o seu gesto). Vazio/null = cena parada. Quem tem gesto sobe pro
   // Avatar IV sozinho no runner — ver motorEfetivo() em heygen-job-runner.
   const [partMotions, setPartMotions] = useState<(string | null)[]>([]);
+  /** DUAS VERSÕES — ligado, cada cena ganha um seletor de avatar do YouTube.
+   *  Desligado (o padrão) tudo é exatamente como antes: uma versão só. */
+  const [duasVersoes, setDuasVersoes] = useToolState<boolean>('hgauto:duasVersoes', false);
+  /** Avatar da versão YouTube por cena. Vazio = o mesmo do META (sem custo). */
+  const [partAvatarsYoutube, setPartAvatarsYoutube] = useState<(AvatarOption | null)[]>([]);
   // MODO IMAGEM — anima a imagem em vez de usar avatar da biblioteca. Serve pro
   // avatar que não existe lá (inclusive rosto que a moderação reprovou, caso em
   // que o caminho normal morre no 0x0). Uma imagem POR PARTE: assim vários
@@ -354,6 +365,12 @@ function HeyGenAutoInner() {
     motionPrompt?: string | null;
     /** Modo imagem: data URL do frame a animar (sem avatar da biblioteca). */
     imageDataUrl?: string | null;
+    /** AVATAR DA VERSÃO YOUTUBE desta cena. Vazio = o mesmo do META, e aí a
+     *  versão YouTube não custa geração nenhuma: sai do próprio decupado.
+     *  Preenchido com um avatar DIFERENTE, o item ganha um irmão na fila. */
+    avatarIdYoutube?: string | null;
+    avatarNameYoutube?: string | null;
+    voiceIdYoutube?: string | null;
   };
   type QueueItem = {
     id: string;
@@ -367,6 +384,10 @@ function HeyGenAutoInner() {
      *  na fila. Repassada FIELMENTE ao pipeline (keepSilenceSec). Default 0.12. */
     decupIntensity: number;
     source: 'manual' | 'doc';
+    /** De que versão é este item. Ausente/'meta' = o item de sempre. */
+    canalVersao?: VersaoCanal;
+    /** Este item TEM um irmão de YouTube na fila (só pra mostrar no card). */
+    temIrmaoYoutube?: boolean;
     /** Nome da voz (override) pra exibir no card da fila — null = voz padrao do avatar. */
     voiceName?: string | null;
     unmatched?: string[];
@@ -428,7 +449,12 @@ function HeyGenAutoInner() {
     avatarId: string | null;
     avatarName: string | null;
     defaultVoiceId: string | null; // voz padrao do avatar casado
-    voiceOverride: { id: string; name: string } | null; // voz custom escolhida
+    voiceOverride: { id: string; name: string } | null;
+    /** DUAS VERSÕES: avatar da versão YouTube deste papel. Vazio = mesmo do
+     *  META, e aí a versão YouTube não custa geração. */
+    avatarYoutubeId?: string | null;
+    avatarYoutubeName?: string | null;
+    avatarYoutubeVoiceId?: string | null; // voz custom escolhida
     // Material do briefing pra UI casar o roleSlot do ClickUp Pilot:
     username: string | null; // @handle do avatar no doc
     briefingFileId: string | null; // Drive file ID → thumb + Baixar
@@ -706,6 +732,7 @@ function HeyGenAutoInner() {
       ...p,
       mode: p.mode as Mode,
       motor: p.motor as Motor,
+      canalVersao: (p.canalVersao as VersaoCanal) || undefined,
       phase: p.phase as QueueItem['phase'],
       parts,
       takePreviews: p.takePreviews as LipsyncTake[] | undefined,
@@ -1954,6 +1981,10 @@ function HeyGenAutoInner() {
             avatarId: slot?.avatarId ?? p.avatarId,
             avatarName: slot?.avatarName ?? p.avatarName,
             voiceId: slot?.voiceOverride?.id ?? slot?.defaultVoiceId ?? p.voiceId,
+            avatarIdYoutube: slot?.avatarYoutubeId ?? null,
+            avatarNameYoutube: slot?.avatarYoutubeName ?? null,
+            // a voz do papel vale nos dois canais quando o YouTube não escolheu
+            voiceIdYoutube: slot?.avatarYoutubeVoiceId ?? null,
           };
         }),
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
@@ -1976,7 +2007,9 @@ function HeyGenAutoInner() {
       setDocError('Selecione pelo menos 1 AD pra adicionar à fila.');
       return;
     }
-    setQueue((prev) => [...prev, ...items]);
+    // passa pelo enfileirador: quem tiver avatar diferente no YouTube ganha o
+    // item irmão aqui, num ponto só
+    for (const it of items) enfileirar(it);
     setDocModalOpen(false);
     setDocAnalysisOpen(false);
     setDocPreview(null);
@@ -2027,6 +2060,76 @@ function HeyGenAutoInner() {
 
   /** Captura a configuracao atual (avatar + copy/audios + modos) como 1 item
    *  da fila, sem disparar agora. Permite empilhar varios ADs manualmente. */
+  /** Este item pede uma SEGUNDA geração pro YouTube? Só quando alguma cena
+   *  tem avatar de YouTube DIFERENTE do de META. */
+  function pedeIrmaoYoutube(item: QueueItem): boolean {
+    if (item.canalVersao === 'youtube') return false;
+    return precisaGerarDeNovo(
+      item.parts.map((p) => ({
+        avatarId: p.avatarId, avatarName: p.avatarName, avatarVoiceId: p.voiceId,
+        youtube: p.avatarIdYoutube
+          ? { avatarId: p.avatarIdYoutube, avatarName: p.avatarNameYoutube, avatarVoiceId: p.voiceIdYoutube }
+          : null,
+      })),
+    );
+  }
+
+  /**
+   * O item da versão YOUTUBE, derivado do do META.
+   *
+   * Os avatares do YouTube já vêm resolvidos dentro de `avatarId` — o irmão não
+   * guarda `avatarIdYoutube` pra não gerar uma terceira versão. `safeName` fica
+   * IGUAL de propósito: é dele que sai `AD06G1GL.mp4` no pipeline (o
+   * insertGSuffix não aceita `_` no meio), e o `_YOUTUBE` entra depois, no nome
+   * do arquivo entregue, por `canalVersao`.
+   */
+  function itemYoutube(item: QueueItem): QueueItem {
+    const parts: QueuePart[] = item.parts.map((p) => {
+      const esc = avatarDoCanal({
+        avatarId: p.avatarId, avatarName: p.avatarName, avatarVoiceId: p.voiceId,
+        youtube: p.avatarIdYoutube
+          ? { avatarId: p.avatarIdYoutube, avatarName: p.avatarNameYoutube, avatarVoiceId: p.voiceIdYoutube }
+          : null,
+      }, 'youtube');
+      return {
+        ...p,
+        avatarId: esc.avatarId ?? null,
+        avatarName: esc.avatarName ?? null,
+        voiceId: esc.avatarVoiceId ?? null,
+        avatarIdYoutube: null,
+        avatarNameYoutube: null,
+        voiceIdYoutube: null,
+      };
+    });
+    return {
+      ...item,
+      id: `${item.id}:yt`,
+      adName: `${item.adName} · YouTube`,
+      canalVersao: 'youtube',
+      temIrmaoYoutube: false,
+      batchId: undefined,
+      videoIds: undefined,
+      partResults: undefined,
+      zips: undefined,
+      status: 'pending',
+      message: undefined,
+      progress: undefined,
+      phase: undefined,
+      parts,
+      takePreviews: parts.map((p) => ({ label: p.label, status: 'pending', videoUrl: null, error: null })),
+    };
+  }
+
+  /** Põe o item na fila — e o irmão do YouTube junto, quando o doc pediu
+   *  avatar diferente. Um ponto só: todo caminho de enfileirar passa aqui. */
+  function enfileirar(item: QueueItem) {
+    const precisa = pedeIrmaoYoutube(item);
+    const mae: QueueItem = precisa ? { ...item, temIrmaoYoutube: true } : item;
+    const novos = precisa ? [mae, itemYoutube(mae)] : [mae];
+    setQueue((prev) => [...prev, ...novos]);
+    if (mae.mode === 'audio') for (const it of novos) void persistQueueItemAudios(it);
+  }
+
   function addCurrentToQueue() {
     // No modo imagem nao existe avatar: a imagem de cada parte substitui.
     if (!selectedAvatar && !imageMode) {
@@ -2056,6 +2159,11 @@ function HeyGenAutoInner() {
           voiceId: dynamicMode && !selectedVoice ? av?.voiceId || null : fixedVoice,
           motionPrompt: partMotions[i] || null,
           imageDataUrl: imageMode ? partImages[i] || null : null,
+          // Avatar do YouTube desta cena. Só entra com a função ligada E com um
+          // avatar escolhido — vazio significa "mesmo do META", sem custo.
+          avatarIdYoutube: duasVersoes ? partAvatarsYoutube[i]?.id || null : null,
+          avatarNameYoutube: duasVersoes ? partAvatarsYoutube[i]?.name || null : null,
+          voiceIdYoutube: duasVersoes ? (partAvatarsYoutube[i] as any)?.voiceId || null : null,
         });
       });
     } else {
@@ -2109,10 +2217,7 @@ function HeyGenAutoInner() {
         error: null,
       })),
     };
-    setQueue((prev) => [...prev, newItem]);
-    // Áudio (File) não serializa no localStorage — os bytes vão pro IndexedDB
-    // JÁ no enfileirar (persistir cedo): o F5 re-hidrata de lá.
-    if (mode === 'audio') void persistQueueItemAudios(newItem);
+    enfileirar(newItem);
     setError(null);
   }
 
@@ -2173,6 +2278,12 @@ function HeyGenAutoInner() {
     },
   ): Promise<void> {
     const safe = item.safeName;
+    // A versão YouTube entrega com sufixo PRÓPRIO (`_YOUTUBE`): as duas versões
+    // do mesmo AD caem na mesma pasta e, com o mesmo nome, uma sobrescreveria a
+    // outra. O META continua sem sufixo — é o nome que a edição e o Drive
+    // esperam. O `safeName` fica limpo de propósito: é dele que sai o
+    // `AD06G1GL.mp4` (o insertGSuffix do pipeline não aceita `_` no meio).
+    const canalItem: VersaoCanal = item.canalVersao || 'meta';
     // newBatchId (nome+ms+nonce) — o fallback antigo sem nonce podia colidir
     // a chave IDB de dois itens de mesmo nome no mesmo milissegundo.
     const batchId = item.batchId || newBatchId(safe);
@@ -2349,7 +2460,7 @@ function HeyGenAutoInner() {
     // o user quer só o MP4 montado decupado, nunca a pasta de takes.
     stage('Salvando takes (histórico)...', 90, 'post');
     const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-    const takesName = `${safe}_takes.zip`;
+    const takesName = `${safe}${canalItem === 'youtube' ? '_YOUTUBE' : ''}_takes.zip`;
     try {
       await saveZip(`batch:${batchId}:takes`, takesBlob, takesName);
       upsertSharedBatch(batchId, { zipFilename: takesName });
@@ -2389,7 +2500,7 @@ function HeyGenAutoInner() {
     // Montados finais: decupado (ou rawAssembled se a decupagem em si falhou).
     const montados = pipeRes.items
       .filter((it) => !it.errors?.assemble)
-      .map((it) => ({ name: it.filename, blob: it.decupado || it.rawAssembled }))
+      .map((it) => ({ name: nomeComCanal(it.filename, canalItem), blob: it.decupado || it.rawAssembled }))
       .filter((m): m is { name: string; blob: Blob } => !!m.blob && m.blob.size > 0);
     if (montados.length === 0) {
       upsertSharedBatch(batchId, { phase: 'failed', message: `Montagem falhou: ${pipeRes.diagnostics?.summary || 'sem itens'}`, finishedAt: Date.now() });
@@ -2407,7 +2518,7 @@ function HeyGenAutoInner() {
       const zipMont = new JSZip();
       for (const m of montados) zipMont.file(m.name, m.blob);
       const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      montName = `${safe}_montado.zip`;
+      montName = `${safe}${canalItem === 'youtube' ? '_YOUTUBE' : ''}_montado.zip`;
       try { await saveZip(`batch:${batchId}:montado`, blobMont, montName); } catch {}
       const u = triggerDownload(blobMont, montName);
       setTimeout(() => URL.revokeObjectURL(u), 5000);
@@ -2438,7 +2549,7 @@ function HeyGenAutoInner() {
           }
         }
         const blobCamu = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-        const camuName = `${safe}_camuflado.zip`;
+        const camuName = `${safe}${canalItem === 'youtube' ? '_YOUTUBE' : ''}_camuflado.zip`;
         try {
           await saveZip(`batch:${batchId}:camo`, blobCamu, camuName);
           upsertSharedBatch(batchId, { camufladoZipName: camuName });
@@ -3113,6 +3224,20 @@ function HeyGenAutoInner() {
                   </p>
                 </div>
               ) : null}
+              {/* DUAS VERSÕES — o AD sai em META (editada com b-roll/SFX/trilha) e
+                  YouTube (só o avatar decupado com zoom). Ligar NÃO dobra o custo
+                  sozinho: enquanto o avatar for o mesmo nos dois canais, a versão
+                  YouTube é o próprio decupado e a diferença mora só na edição. Só
+                  escolher um avatar de YouTube diferente é que cria o segundo
+                  disparo ([[project_b2c_duas_versoes_meta_youtube]]). */}
+              <Toggle3D
+                on={duasVersoes}
+                onChange={setDuasVersoes}
+                label="2 versões (META + YouTube)"
+                hint="Cada cena ganha um avatar de YouTube. Vazio = mesmo do META, sem custo"
+                variant="cyan"
+                icon={<span className="text-base">▶</span>}
+              />
               <Toggle3D
                 on={camuflagemMode}
                 onChange={setCamuflagemMode}
@@ -3301,6 +3426,29 @@ function HeyGenAutoInner() {
                             disabled={processing}
                             label={`Avatar pra parte ${i + 1}`}
                           />
+                          {duasVersoes ? (
+                            <div className="mt-2 rounded-[10px] border border-red-500/30 bg-red-500/[0.06] p-2">
+                              <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                <span className="text-[11px] leading-none">▶</span>
+                                Avatar do YouTube
+                                <span className="font-normal normal-case tracking-normal text-text-muted">
+                                  {partAvatarsYoutube[i] ? '— gera de novo' : '— vazio: usa o do META'}
+                                </span>
+                              </div>
+                              <CompactAvatarPicker
+                                selected={partAvatarsYoutube[i] ?? null}
+                                setSelected={(a) => {
+                                  setPartAvatarsYoutube((prev) => {
+                                    const next = [...prev];
+                                    next[i] = a;
+                                    return next;
+                                  });
+                                }}
+                                disabled={processing}
+                                label={`Avatar do YouTube pra parte ${i + 1}`}
+                              />
+                            </div>
+                          ) : null}
                         </div>
                         )}
                       </div>
@@ -4494,6 +4642,34 @@ function HeyGenAutoInner() {
                                       label={`Avatar pra ${slot.roleLabel}`}
                                     />
                                   </div>
+                                  {duasVersoes ? (
+                                    <div className="mt-2 rounded-[10px] border border-red-500/30 bg-red-500/[0.06] p-2">
+                                      <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                        <span className="text-[11px] leading-none">▶</span>
+                                        Avatar do YouTube
+                                        <span className="font-normal normal-case tracking-normal text-text-muted">
+                                          {slot.avatarYoutubeId ? '— gera de novo' : '— vazio: usa o do META (sem custo)'}
+                                        </span>
+                                      </div>
+                                      <div className="max-w-[420px]">
+                                        <CompactAvatarPicker
+                                          selected={
+                                            slot.avatarYoutubeId
+                                              ? ({ id: slot.avatarYoutubeId, name: slot.avatarYoutubeName || '', thumb: '' } as any)
+                                              : null
+                                          }
+                                          setSelected={(a) =>
+                                            updateDocSlot(d.baseAdId, sIdx, {
+                                              avatarYoutubeId: a?.id || null,
+                                              avatarYoutubeName: a?.name || null,
+                                              avatarYoutubeVoiceId: (a as any)?.voiceId ?? null,
+                                            })
+                                          }
+                                          label={`Avatar do YouTube pra ${slot.roleLabel}`}
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : null}
                                 </div>
                                 {slot.avatarId ? (
                                   <div>

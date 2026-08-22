@@ -41,6 +41,17 @@ import {
 } from '@/lib/copy-parser';
 import { alignEditedToWords } from '@/lib/edited-text-align';
 import { newPilotGenId, pilotGenPrefix, pilotPartKey } from '@/lib/pilot-gen-isolation';
+import {
+  type VersaoCanal,
+  rotuloCanal,
+  nomeComCanal,
+  avatarDoCanal,
+  precisaGerarDeNovo,
+  planejarDuasVersoes,
+  taskIdDoCanal,
+  canalDoTaskId,
+  taskIdBase,
+} from '@/lib/versao-canal';
 import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
@@ -770,6 +781,18 @@ type RoleSlot = {
   avatarVoiceId: string | null;
   /** Se != null, sobrescreve avatarVoiceId — voz custom escolhida pelo user */
   voiceOverride: { id: string; name: string } | null;
+  /** AVATAR DA VERSÃO YOUTUBE deste papel. Todo AD tem duas versões: a do META
+   *  (editada com b-roll/SFX/trilha) e a do YouTube (só avatar decupado com
+   *  zoom). Quando o doc indica o MESMO avatar nos dois canais, este campo fica
+   *  null e a versão YouTube reaproveita o decupado do META — custo zero. Só
+   *  quando o doc indica avatar/look DIFERENTE é que ele é preenchido, e aí a
+   *  versão YouTube vira uma task irmã que gera de novo. */
+  avatarYoutube?: {
+    avatarId: string | null;
+    avatarName: string | null;
+    avatarThumb: string | null;
+    avatarVoiceId: string | null;
+  } | null;
   /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | 'visual' | null */
   matchedBy: string | null;
   /** Slot criado NA MÃO pelo usuário (o doc não trazia "Avatar: @fulano").
@@ -824,6 +847,14 @@ type TaskAnalysis = {
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
   /** Cada avatar do briefing — usuario controla individualmente */
+  /** DUAS VERSÕES ligadas nesta task (META + YouTube). Desligada — o padrão —
+   *  tudo se comporta exatamente como antes: uma versão só. Liga quando o doc
+   *  pede ([[project_b2c_duas_versoes_meta_youtube]]). */
+  duasVersoes?: boolean;
+  /** Esta análise É a versão YouTube de outra task (criada por
+   *  `criarVersaoYoutube`). Serve pra UI não oferecer ligar duas versões de
+   *  novo em cima de uma versão. */
+  canalVersao?: VersaoCanal;
   roleSlots: RoleSlot[];
   /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
   partTemplates: Array<{ label: string; text: string; matchByRole: string | null; speaker?: string | null }>;
@@ -3130,7 +3161,7 @@ function ClickUpPilotInner() {
     // Resolve o plano: 1o de taskAnalyses (sessao com a task analisada);
     // senao do `replan` persistido (sobrevive reload/navegacao) — e isso
     // que faz Retomar/Debug funcionarem em task que falhou com 0 videoIds.
-    let plan = a ? buildPlan(a) : null;
+    let plan = a ? buildPlan(a, canalDoTaskId(taskId)) : null;
     let rTaskName: string;
     let rBaseAdId: string;
     let replan: BatchTaskState['replan'];
@@ -3188,7 +3219,12 @@ function ClickUpPilotInner() {
     }
     if (!plan) return;
     const partsLen = plan.parts.length;
-    const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_');
+    // De que versão é esta task? A irmã do YouTube tem id próprio (`<id>-yt`),
+    // então TODO nome derivado — zip de takes, montado, camuflado e até o
+    // título do vídeo no HeyGen — já sai distinguível.
+    const canalVersao = canalDoTaskId(taskId);
+    const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_')
+      + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
 
     // Re-run da mesma task: revoga blob URLs antigos pra nao vazar memoria
     for (const url of [batchStates[taskId]?.zipBlobUrl, batchStates[taskId]?.montadoZipUrl, batchStates[taskId]?.camufladoZipUrl]) {
@@ -3853,7 +3889,12 @@ function ClickUpPilotInner() {
         }));
         return;
       }
-      const assembled = pipeRes.items;
+      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
+      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
+      const assembled = canalVersao === 'meta'
+        ? pipeRes.items
+        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
 
       // ZIP 2 — versoes montadas + decupadas. SEMPRE cria, mesmo quando
       // assembled.length === 0 (nesse caso vai so com _DIAGNOSTICO.txt
@@ -4054,7 +4095,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         return { ...prev, [taskId]: { ...cur, genId } };
       });
     }
-    const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+    const canalVersao = canalDoTaskId(taskId);
+    const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_')
+      + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
     const validIds = validParts.map((p) => p.videoId!);
 
     try {
@@ -4578,7 +4621,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }));
         return;
       }
-      const assembled = pipeRes.items;
+      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
+      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
+      const assembled = canalVersao === 'meta'
+        ? pipeRes.items
+        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
 
       // ZIP 2 — versoes montadas + decupadas (sempre cria, mesmo com 0
       // assembled — entrega _DIAGNOSTICO.txt explicando o motivo)
@@ -4875,6 +4923,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         !taskAnalyses[id]?.trocaBriefing,
     );
 
+    // DUAS VERSÕES: cada task com a função ligada E avatar diferente no YouTube
+    // ganha uma task IRMÃ que dispara a versão do YouTube. Task sem a função,
+    // ou com o MESMO avatar nos dois canais, não gera nada a mais — a versão
+    // YouTube sai do próprio decupado, na edição ([[project_b2c_duas_versoes_meta_youtube]]).
+    const irmasYoutube: TaskAnalysis[] = normalTasks
+      .map((id) => taskAnalyses[id])
+      .filter((a): a is TaskAnalysis => pedeVersaoYoutube(a))
+      .map(analiseYoutube);
+    if (irmasYoutube.length) {
+      const porId: Record<string, TaskAnalysis> = {};
+      for (const ir of irmasYoutube) porId[ir.taskId] = ir;
+      setTaskAnalyses((prev) => ({ ...prev, ...porId }));
+      taskAnalysesRef.current = { ...taskAnalysesRef.current, ...porId };
+      normalTasks.push(...irmasYoutube.map((ir) => ir.taskId));
+    }
+
     if (vaTasks.length === 0 && trocaTasks.length === 0 && normalTasks.length === 0) {
       // Mensagem util: diz exatamente o que falta por tipo selecionado.
       const selVA = selected.some((id) => taskAnalyses[id]?.vaBriefing);
@@ -4894,7 +4958,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setBatchStates((prev) => {
       const next = { ...prev };
       for (const id of normalTasks) {
-        const a = taskAnalyses[id];
+        // as irmãs recém-criadas ainda não estão no state deste tick
+        const a = taskAnalyses[id] || irmasYoutube.find((ir) => ir.taskId === id);
         if (!a) continue;
         const baseAdId = a.baseAdId || a.taskName;
         // BLINDAGEM F5 (perda de plano): persiste o PLANO (replan) JÁ ao enfileirar.
@@ -4906,7 +4971,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // replan entra no state → persistBatchStates grava no localStorage no ATO do
         // enfileiramento → sobrevive reload → a task até AUTO-RETOMA (o promoter
         // reencontra o plano), sem nem precisar clicar Retomar.
-        const qplan = buildPlan(a);
+        const qplan = buildPlan(a, canalDoTaskId(id));
         const qreplan: BatchTaskState['replan'] = qplan ? {
           taskName: a.taskName,
           baseAdId,
@@ -6098,8 +6163,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
       // Reconstroi os ZIPs (montado + camo) — mesmo pattern do resumeTaskBatch
       const JSZip = (await import('jszip')).default;
-      const assembled = pipeRes.items;
-      const adNameClean = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+      const canalVersao = canalDoTaskId(taskId);
+      const adNameClean = b.baseAdId.replace(/[^A-Z0-9]/gi, '_')
+        + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
+      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
+      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
+      const assembled = canalVersao === 'meta'
+        ? pipeRes.items
+        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
 
       // ZIP montado
       const zipMont = new JSZip();
@@ -6504,6 +6576,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     for (const idx of pendingIdxs) {
       await runVisualMatchForSlot(taskId, idx);
     }
+  }
+
+  /** Liga/desliga as DUAS VERSÕES (META + YouTube) desta task. Desligado é o
+   *  padrão: só liga quando o doc pede. */
+  function setDuasVersoes(taskId: string, ativo: boolean) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a) return prev;
+      const next = { ...prev, [taskId]: { ...a, duasVersoes: ativo } };
+      taskAnalysesRef.current = next;
+      return next;
+    });
   }
 
   /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz.
@@ -7000,7 +7084,63 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   }
 
   /** Constroi DispatchPlan a partir dos roleSlots + partTemplates da task */
-  function buildPlan(a: TaskAnalysis): DispatchPlan | null {
+  /** Os papéis desta task no formato que a lib de canal entende. */
+  function papeisDaTask(a: TaskAnalysis) {
+    return (a.roleSlots || []).map((s) => ({
+      avatarId: s.avatarId, avatarName: s.avatarName,
+      avatarThumb: s.avatarThumb, avatarVoiceId: s.avatarVoiceId,
+      youtube: s.avatarYoutube || null,
+    }));
+  }
+
+  /** Esta task pede uma SEGUNDA geração pro YouTube? */
+  function pedeVersaoYoutube(a: TaskAnalysis | undefined | null): boolean {
+    if (!a || !a.duasVersoes || a.canalVersao === 'youtube') return false;
+    return precisaGerarDeNovo(papeisDaTask(a));
+  }
+
+  /**
+   * A ANÁLISE da versão YouTube, derivada da do META.
+   *
+   * Os avatares do YouTube já vêm resolvidos DENTRO de `avatarId` — a irmã não
+   * guarda `avatarYoutube` pra não gerar uma terceira versão. `baseAdId` fica
+   * IGUAL de propósito: é dele que sai `AD06G1GL.mp4` (o `insertGSuffix` não
+   * aceita `_` no meio), e o sufixo `_YOUTUBE` entra depois, no nome do arquivo
+   * entregue, pelo `canalDoTaskId`.
+   */
+  function analiseYoutube(a: TaskAnalysis): TaskAnalysis {
+    return {
+      ...a,
+      taskId: taskIdDoCanal(a.taskId, 'youtube'),
+      taskName: `${a.taskName} · YouTube`,
+      canalVersao: 'youtube',
+      duasVersoes: false,
+      dispatchedAt: undefined,
+      roleSlots: (a.roleSlots || []).map((sl) => {
+        const esc = avatarDoCanal({
+          avatarId: sl.avatarId, avatarName: sl.avatarName,
+          avatarThumb: sl.avatarThumb, avatarVoiceId: sl.avatarVoiceId,
+          youtube: sl.avatarYoutube || null,
+        }, 'youtube');
+        return {
+          ...sl,
+          avatarId: esc.avatarId ?? null,
+          avatarName: esc.avatarName ?? null,
+          avatarThumb: esc.avatarThumb ?? null,
+          avatarVoiceId: esc.avatarVoiceId ?? null,
+          avatarYoutube: null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Monta o plano de disparo do AD. `canal` escolhe de qual versão: 'meta' usa
+   * o avatar do papel (o caminho de sempre) e 'youtube' usa `avatarYoutube`
+   * quando ele existe — caindo no do META quando não existe, pra nenhum slot
+   * disparar com avatar vazio.
+   */
+  function buildPlan(a: TaskAnalysis, canal: VersaoCanal = 'meta'): DispatchPlan | null {
     if (!a.roleSlots || !a.partTemplates) return null;
     const slotsByRole: Record<string, RoleSlot> = {};
     for (const s of a.roleSlots) slotsByRole[s.role.toLowerCase()] = s;
@@ -7008,15 +7148,26 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const adName = (a.baseAdId || a.taskName).replace(/[^a-z0-9_-]/gi, '_');
     const parts = a.partTemplates.map((pt) => {
       const slot = (pt.matchByRole && slotsByRole[pt.matchByRole]) || firstSlot;
+      // Avatar DO CANAL: no META é o do papel; no YouTube é o `avatarYoutube`
+      // quando escolhido, senão o mesmo do META.
+      const esc = slot
+        ? avatarDoCanal({
+            avatarId: slot.avatarId, avatarName: slot.avatarName,
+            avatarThumb: slot.avatarThumb, avatarVoiceId: slot.avatarVoiceId,
+            youtube: slot.avatarYoutube || null,
+          }, canal)
+        : null;
       return {
         label: pt.label,
         text: pt.text,
-        avatarId: slot?.avatarId || null,
-        avatarName: slot?.avatarName || null,
-        avatarThumb: slot?.avatarThumb || null,
+        avatarId: esc?.avatarId || null,
+        avatarName: esc?.avatarName || null,
+        avatarThumb: esc?.avatarThumb || null,
         matchedBy: slot?.matchedBy || undefined,
-        // voiceId: override > avatar default
-        voiceId: slot?.voiceOverride?.id || slot?.avatarVoiceId || null,
+        // voiceId: override > avatar do canal. O override é do papel e vale
+        // nos dois canais — trocar o avatar do YouTube não desfaz a voz que o
+        // user escolheu na mão.
+        voiceId: slot?.voiceOverride?.id || esc?.avatarVoiceId || null,
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
         imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
@@ -7063,7 +7214,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     for (const p of colapsado as any[]) { delete p._slotRole; delete p._imageMode; delete p._takeUnico; }
     // Slot em modo imagem não precisa de avatarId — a imagem substitui.
     const unmatchedAvatars = a.roleSlots
-      .filter((s) => !s.avatarId && !(s.imageMode && s.imageDataUrl))
+      .filter((s) => {
+        const idCanal = avatarDoCanal({
+          avatarId: s.avatarId, avatarVoiceId: s.avatarVoiceId, youtube: s.avatarYoutube || null,
+        }, canal).avatarId;
+        return !idCanal && !(s.imageMode && s.imageDataUrl);
+      })
       .map((s) => `${s.role}: @${s.username}`);
     return { adName, parts: colapsado as any, unmatchedAvatars };
   }
@@ -11292,9 +11448,76 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                   ) : (
                                   <div className="mt-1.5 grid gap-2">
-                                    <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
-                                      Avatares ({a.roleSlots.length}) — selecione cada um e a voz
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
+                                        Avatares ({a.roleSlots.length}) — selecione cada um e a voz
+                                      </div>
+                                      {/* DUAS VERSÕES — o AD sai em META (editada) e YouTube (só
+                                          avatar decupado). Ligar aqui NÃO dobra o custo sozinho:
+                                          enquanto o avatar for o mesmo nos dois canais, a versão
+                                          YouTube reaproveita o decupado que já vai pra edição. Só
+                                          escolher um avatar diferente abaixo é que cria a segunda
+                                          geração. Desligado por padrão — liga quando o doc pede. */}
+                                      <button
+                                        type="button"
+                                        onClick={() => setDuasVersoes(a.taskId, !a.duasVersoes)}
+                                        className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                        style={
+                                          a.duasVersoes
+                                            ? {
+                                                fontFamily: 'var(--font-tech)',
+                                                color: '#1a0505',
+                                                borderColor: 'rgba(255,0,0,0.5)',
+                                                background: 'linear-gradient(135deg, #ff6b6b 0%, #ff0000 100%)',
+                                                boxShadow:
+                                                  '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(255,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                              }
+                                            : {
+                                                fontFamily: 'var(--font-tech)',
+                                                color: 'rgba(255,255,255,0.55)',
+                                                borderColor: 'rgba(255,255,255,0.12)',
+                                                background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                                                boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+                                              }
+                                        }
+                                        title={
+                                          a.duasVersoes
+                                            ? 'Ligado: o AD sai em duas versões. Escolha o avatar do YouTube em cada papel — deixando igual ao do META, a versão YouTube reaproveita o decupado e não gasta geração.'
+                                            : 'Ligue quando o doc pedir versão de YouTube além da do META.'
+                                        }
+                                      >
+                                        <span className="text-[12px] leading-none">▶</span>
+                                        2 versões
+                                        <span
+                                          className={
+                                            'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
+                                            (a.duasVersoes ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                                          }
+                                        >
+                                          {a.duasVersoes ? 'ON' : 'OFF'}
+                                        </span>
+                                      </button>
                                     </div>
+                                    {a.duasVersoes ? (
+                                      <div className="rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-text-muted">
+                                        {pedeVersaoYoutube(a) ? (
+                                          <>
+                                            <b className="text-red-200">Duas gerações.</b>{' '}
+                                            {planejarDuasVersoes(true, papeisDaTask(a)).motivo} — o START
+                                            enfileira a versão do YouTube como uma task irmã, e ela entrega
+                                            com <b>_YOUTUBE</b> no nome.
+                                          </>
+                                        ) : (
+                                          <>
+                                            <b className="text-lime">Uma geração só.</b> O avatar é o mesmo
+                                            nos dois canais, então a versão YouTube é o próprio avatar
+                                            decupado — a diferença fica na edição (o META leva b-roll, SFX e
+                                            trilha; o YouTube só o zoom). Escolha um avatar de YouTube abaixo
+                                            se o doc pedir rosto ou look diferente.
+                                          </>
+                                        )}
+                                      </div>
+                                    ) : null}
                                     {a.roleSlots.length === 0 ? (
                                       <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px]">
                                         <div className="mono text-[9px] uppercase tracking-widest text-yellow-200">
@@ -11660,6 +11883,46 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </div>
                                             </div>
                                             )}
+                                            {/* AVATAR DA VERSÃO YOUTUBE deste papel. Vazio = mesmo do
+                                                META, e aí a versão YouTube não custa geração nenhuma. */}
+                                            {a.duasVersoes && !slot.imageMode ? (
+                                              <div>
+                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                  <span className="text-[11px] leading-none">▶</span>
+                                                  Avatar da versão YouTube
+                                                  <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                    {slot.avatarYoutube?.avatarId
+                                                      ? '— gera de novo'
+                                                      : '— vazio: usa o mesmo do META (sem custo)'}
+                                                  </span>
+                                                </div>
+                                                <div className="max-w-[420px]">
+                                                  <CompactAvatarPicker
+                                                    selected={
+                                                      slot.avatarYoutube?.avatarId
+                                                        ? ({
+                                                            id: slot.avatarYoutube.avatarId,
+                                                            name: slot.avatarYoutube.avatarName || '',
+                                                            thumb: slot.avatarYoutube.avatarThumb || '',
+                                                          } as any)
+                                                        : null
+                                                    }
+                                                    setSelected={(newAv) => updateRoleSlot(a.taskId, sIdx, {
+                                                      avatarYoutube: newAv
+                                                        ? {
+                                                            avatarId: newAv.id,
+                                                            avatarName: newAv.name || null,
+                                                            avatarThumb: newAv.thumb || null,
+                                                            avatarVoiceId: (newAv as any)?.voiceId || null,
+                                                          }
+                                                        : null,
+                                                    })}
+                                                    disabled={false}
+                                                    label={`Avatar do YouTube pra ${slot.role}`}
+                                                  />
+                                                </div>
+                                              </div>
+                                            ) : null}
                                             {slot.avatarId || slot.imageMode ? (
                                               <div>
                                                 <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">

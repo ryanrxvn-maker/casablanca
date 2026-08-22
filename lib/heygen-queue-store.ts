@@ -43,6 +43,11 @@ export type PersistedQueuePart = {
    *  estourariam a quota do localStorage e derrubariam a fila inteira). Fica só
    *  esta marca, pra o card avisar que a imagem precisa ser re-subida. */
   tinhaImagem?: boolean;
+  /** DUAS VERSÕES: avatar da versão YouTube desta cena. Vazio = o mesmo do
+   *  META (a versão YouTube sai do próprio decupado, sem custo). */
+  avatarIdYoutube?: string | null;
+  avatarNameYoutube?: string | null;
+  voiceIdYoutube?: string | null;
   /** Modo audio: bytes no IndexedDB (zip-store) sob esta chave. */
   audioKey?: string;
   audioName?: string;
@@ -60,6 +65,10 @@ export type PersistedQueueItem = {
   decupagem: boolean;
   decupIntensity: number;
   source: 'manual' | 'doc';
+  /** De que versão é este item ('meta' | 'youtube'). Ausente = 'meta'. */
+  canalVersao?: string;
+  /** Este item tem um irmão de YouTube na fila. */
+  temIrmaoYoutube?: boolean;
   voiceName?: string | null;
   unmatched?: string[];
   status: 'pending' | 'running' | 'done' | 'failed';
