@@ -1981,10 +1981,12 @@ function HeyGenAutoInner() {
             avatarId: slot?.avatarId ?? p.avatarId,
             avatarName: slot?.avatarName ?? p.avatarName,
             voiceId: slot?.voiceOverride?.id ?? slot?.defaultVoiceId ?? p.voiceId,
-            avatarIdYoutube: slot?.avatarYoutubeId ?? null,
-            avatarNameYoutube: slot?.avatarYoutubeName ?? null,
+            // só com a função LIGADA: desligar o toggle depois de ter escolhido
+            // um avatar de YouTube não pode continuar criando o item irmão.
+            avatarIdYoutube: duasVersoes ? slot?.avatarYoutubeId ?? null : null,
+            avatarNameYoutube: duasVersoes ? slot?.avatarYoutubeName ?? null : null,
             // a voz do papel vale nos dois canais quando o YouTube não escolheu
-            voiceIdYoutube: slot?.avatarYoutubeVoiceId ?? null,
+            voiceIdYoutube: duasVersoes ? slot?.avatarYoutubeVoiceId ?? null : null,
           };
         }),
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
