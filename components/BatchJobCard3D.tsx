@@ -472,12 +472,18 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   //  - downloadBlocked → FALTA conteúdo (parte/texto): tem que Retomar, download travado.
   //  - isPartialDone só (sem block) → montado completo mas um pós-processo
   //    opcional (decupagem/camuflagem) falhou: é entregável, download liberado.
-  const showAsWarn = isPartialDone;
+  //  - montagemVelha → os takes mudaram DEPOIS de montar. O arquivo montado
+  //    existe, mas e' o de ANTES da correcao. Dizer "Pronto" aqui engana: quem
+  //    olha o card baixa e leva o video sem as correcoes. (Silas, 23.08.)
+  const montagemVelha = dirtyPartsCount > 0 && phase === 'done';
+  const showAsWarn = isPartialDone || montagemVelha;
   const effectiveLabel = downloadBlocked
     ? 'Incompleto — clica Retomar'
-    : isPartialDone
-      ? 'Pronto · pós-processo parcial'
-      : phaseInfo.label;
+    : montagemVelha
+      ? `Montagem desatualizada — ${dirtyPartsCount} take${dirtyPartsCount === 1 ? '' : 's'} mudou`
+      : isPartialDone
+        ? 'Pronto · pós-processo parcial'
+        : phaseInfo.label;
   const ringColor =
     showAsWarn ? 'border-amber-400/35'
     : phase === 'done' ? 'border-lime/35'
@@ -802,16 +808,22 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 // parte/texto, render incompleto). O user pediu: só baixar o
                 // vídeo de fato pronto, nunca uma versão zoada. Tem que clicar
                 // Retomar pra completar antes. (troca não passa downloadBlocked.)
+                // MONTAGEM VELHA trava igual: o arquivo existe, mas e' o de
+                // ANTES da correcao dos takes. Baixar ali entrega o video sem
+                // as correcoes — o pior tipo de erro, porque parece certo.
+                const travado = downloadBlocked || montagemVelha;
                 const tooltip = downloadBlocked
                   ? '⚠ Incompleto — clique Retomar pra completar (não baixa versão zoada)'
-                  : 'Baixar MP4';
+                  : montagemVelha
+                    ? '⚠ Montagem desatualizada — clique "Atualizar montagem" antes, senão baixa a versão de ANTES das correções'
+                    : 'Baixar MP4';
                 return (
                   <Btn3D
                     icon={<IconDownload size={16} />}
-                    color={downloadBlocked ? 'neutral' : 'lime'}
+                    color={travado ? 'neutral' : 'lime'}
                     title={tooltip}
-                    disabled={downloadBlocked}
-                    onClick={downloadBlocked ? undefined : (onDownload ? onDownload : () => void handleDownloadAll())}
+                    disabled={travado}
+                    onClick={travado ? undefined : (onDownload ? onDownload : () => void handleDownloadAll())}
                   />
                 );
               })() : null}
