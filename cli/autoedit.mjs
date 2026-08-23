@@ -11,14 +11,16 @@
  */
 
 import { basename } from 'node:path';
+import { readFileSync } from 'node:fs';
 import {
   loadConfig, saveConfig, configPath,
   api, uploadViaTool, download,
   runLipsync, runSepararAudio,
   isUrl, UPLOAD_TOOLS,
 } from './core.mjs';
+import * as pilot from './pilot.mjs';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 // ─── UI (cores opcionais — desligadas se não for TTY ou NO_COLOR) ────────────
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -258,7 +260,46 @@ const COMMANDS = {
   'separar-audio': (a) => cmdSepararAudio(a),
   separador: (a) => cmdSepararAudio(a),
   tools: () => cmdTools(),
+  pilot: (a) => cmdPilot(a),
 };
+
+/**
+ * `autoedit pilot <sub>` — o lado LEGÍVEL do ClickUp Pilot, sem abrir aba.
+ *
+ * A orquestração (clicar, montar slot, disparar) só existe na página; mas
+ * tudo que decide o plano — tasks, looks, vozes, conta ligada — vem de rota
+ * autenticada. Conferir por aqui antes de colar lá é o que evita disparar com
+ * look errado, que foi o que quase aconteceu em 23.08.
+ */
+async function cmdPilot({ positionals, flags }) {
+  const sub = positionals.shift();
+  const mostra = (x) => console.log(JSON.stringify(x, null, 1));
+  if (sub === 'tasks') {
+    return mostra(await pilot.tasks({ editor: flags.editor, status: flags.status }));
+  }
+  if (sub === 'avatares') return mostra(await pilot.avatares({ busca: flags.busca }));
+  if (sub === 'vozes') return mostra(await pilot.vozes({ busca: flags.busca }));
+  if (sub === 'identidade') return mostra(await pilot.identidade());
+  if (sub === 'conferir') {
+    const p = flags.cenas || positionals.shift();
+    if (!p) return warn('uso: autoedit pilot conferir --cenas cenas.json');
+    const cenas = JSON.parse(readFileSync(p, 'utf8'));
+    const problemas = await pilot.conferirPlano(cenas);
+    if (!problemas.length) return console.log(c.green('plano ok — pode colar no Pilot'));
+    problemas.forEach((x) => console.log(c.red('  ✗ ' + x)));
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`
+${c.bold('autoedit pilot')} — ClickUp Pilot pela linha de comando
+
+  ${c.cyan('tasks')} [--editor Silas] [--status "editando"]   tasks do workspace
+  ${c.cyan('avatares')} [--busca catia]                       avatares + looks do HeyGen
+  ${c.cyan('vozes')} [--busca martina]                        vozes PRIVADAS da conta
+  ${c.cyan('identidade')}                                     qual conta HeyGen está ligada
+  ${c.cyan('conferir')} --cenas cenas.json                    valida o plano contra o HeyGen
+`);
+}
 
 async function main() {
   const { positionals, flags } = parseArgs(process.argv.slice(2));

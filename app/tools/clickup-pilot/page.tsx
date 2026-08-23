@@ -797,6 +797,11 @@ type RoleSlot = {
     avatarThumb: string | null;
     avatarVoiceId: string | null;
   } | null;
+  /** VOZ da versao YouTube deste papel. So faz sentido quando `avatarYoutube`
+   *  aponta OUTRA pessoa: dai a versao do YouTube tem que falar com a voz DELA,
+   *  nao com a do META. Vazio = usa a mesma voz do META (o caso normal, em que
+   *  os dois canais sao a mesma pessoa). */
+  voiceOverrideYoutube?: { id: string; name: string } | null;
   /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | 'visual' | null */
   matchedBy: string | null;
   /** Slot criado NA MÃO pelo usuário (o doc não trazia "Avatar: @fulano").
@@ -7132,6 +7137,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarName: esc.avatarName ?? null,
           avatarThumb: esc.avatarThumb ?? null,
           avatarVoiceId: esc.avatarVoiceId ?? null,
+          // A irmã JA' E' a versão YouTube: a voz do YouTube vira a voz do
+          // papel aqui dentro. Sem isso, o avatar do YouTube — que é OUTRA
+          // pessoa — sairia falando com a voz escolhida pro META.
+          voiceOverride: (sl.avatarYoutube?.avatarId && sl.voiceOverrideYoutube?.id)
+            ? sl.voiceOverrideYoutube
+            : sl.voiceOverride,
+          voiceOverrideYoutube: null,
           avatarYoutube: null,
         };
       }),
@@ -7170,8 +7182,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         matchedBy: slot?.matchedBy || undefined,
         // voiceId: override > avatar do canal. O override é do papel e vale
         // nos dois canais — trocar o avatar do YouTube não desfaz a voz que o
-        // user escolheu na mão.
-        voiceId: slot?.voiceOverride?.id || esc?.avatarVoiceId || null,
+        // user escolheu na mão. A EXCEÇÃO é o YouTube com avatar próprio: aí
+        // ele é OUTRA pessoa, e falar com a voz do META entregaria a segunda
+        // versão com a voz errada. Só a voz escolhida na mão pro YouTube fura.
+        voiceId:
+          (canal === 'youtube' && slot?.avatarYoutube?.avatarId && slot?.voiceOverrideYoutube?.id)
+            ? slot.voiceOverrideYoutube.id
+            : (slot?.voiceOverride?.id || esc?.avatarVoiceId || null),
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
         imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
@@ -11925,6 +11942,25 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     label={`Avatar do YouTube pra ${slot.role}`}
                                                   />
                                                 </div>
+                                                {/* VOZ DO YOUTUBE. Só aparece com avatar próprio no
+                                                    canal — porque aí é outra pessoa, e ela tem que
+                                                    falar com a voz dela. Vazio = mesma voz do META. */}
+                                                {slot.avatarYoutube?.avatarId ? (
+                                                  <div className="mt-1.5 max-w-[420px]">
+                                                    <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                      Voz da versão YouTube
+                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                        {slot.voiceOverrideYoutube?.id
+                                                          ? '— voz própria'
+                                                          : '— vazio: usa a mesma voz do META'}
+                                                      </span>
+                                                    </div>
+                                                    <CompactVoiceSelector
+                                                      selected={slot.voiceOverrideYoutube || null}
+                                                      setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverrideYoutube: v })}
+                                                    />
+                                                  </div>
+                                                ) : null}
                                               </div>
                                             ) : null}
                                             {slot.avatarId || slot.imageMode ? (
