@@ -20,7 +20,7 @@
  * tudo vira `LlmError` com texto PT-BR.
  */
 
-import { LlmError, parseRetryAfter } from './anthropic';
+import { LlmError } from './anthropic';
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
@@ -63,6 +63,66 @@ export const GROQ_LIMITS = {
 // ───────────────────────────────────────────────────────────────────────────
 // Catálogo real da conta (cache por processo, 10 min)
 // ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Orçamento de tokens do free tier, por (chave, modelo).
+ *
+ * O Groq devolve em TODA resposta quanto sobrou no minuto
+ * (`x-ratelimit-remaining-tokens`) e quando o balde enche de novo
+ * (`x-ratelimit-reset-tokens`, ex.: "7.66s" / "2m59.5s"). Guardar isso e
+ * ESPERAR antes de mandar o próximo pedido é o que evita o 429 — bater na
+ * parede e re-tentar só queima tentativa.
+ */
+type Budget = { remaining: number; resetAt: number };
+const budgets = new Map<string, Budget>();
+
+/** "2m59.56s" / "7.66s" / "1.2" → segundos. */
+export function parseGroqDuration(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const t = raw.trim();
+  const composto = t.match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/i);
+  if (composto && (composto[1] || composto[2] || composto[3])) {
+    return (
+      (parseFloat(composto[1] ?? '0') || 0) * 3600 +
+      (parseFloat(composto[2] ?? '0') || 0) * 60 +
+      (parseFloat(composto[3] ?? '0') || 0)
+    );
+  }
+  const n = Number(t);
+  if (Number.isFinite(n) && n >= 0) return n;
+  const when = Date.parse(t);
+  if (Number.isFinite(when)) return Math.max(0, (when - Date.now()) / 1000);
+  return 0;
+}
+
+function budgetKey(apiKey: string, model: string): string {
+  return `${apiKey.slice(-6)}:${model}`;
+}
+
+function readBudget(apiKey: string, model: string, headers: Headers): void {
+  const rem = Number(headers.get('x-ratelimit-remaining-tokens'));
+  const reset = parseGroqDuration(headers.get('x-ratelimit-reset-tokens'));
+  if (!Number.isFinite(rem)) return;
+  budgets.set(budgetKey(apiKey, model), {
+    remaining: rem,
+    resetAt: Date.now() + Math.max(0, reset) * 1000,
+  });
+}
+
+/** Segundos a esperar pro pedido caber no que sobrou do minuto. */
+function waitForBudget(apiKey: string, model: string, needed: number): number {
+  const b = budgets.get(budgetKey(apiKey, model));
+  if (!b) return 0;
+  const faltaPraEncher = (b.resetAt - Date.now()) / 1000;
+  if (faltaPraEncher <= 0) return 0;
+  if (b.remaining >= needed) return 0;
+  return Math.min(90, Math.ceil(faltaPraEncher) + 1);
+}
+
+/** Estimativa grosseira de tokens do pedido (4 chars ≈ 1 token) + saída pedida. */
+function estimateTokens(system: string, user: string, maxTokens: number): number {
+  return Math.ceil((system.length + user.length) / 4) + maxTokens;
+}
 
 type ModelCache = { at: number; ids: string[] };
 const MODELS_TTL_MS = 10 * 60 * 1000;
@@ -230,7 +290,15 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
         ? { type: 'json_schema', json_schema: { name: 'auto_cortes', schema: args.schema } }
         : { type: 'json_object' },
     };
-    if (/^openai\/gpt-oss-/.test(model)) body.reasoning_effort = args.effort ?? 'medium';
+    if (/^openai\/gpt-oss-/.test(model)) body.reasoning_effort = args.effort ?? 'low';
+
+    // Espera o balde de tokens encher em vez de tomar 429.
+    const precisa = estimateTokens(args.system, args.user, Number(body.max_completion_tokens));
+    const esperaSec = waitForBudget(args.apiKey, model, precisa);
+    if (esperaSec > 0) {
+      console.warn(`[groq] orçamento baixo em ${model} — esperando ${esperaSec}s`);
+      await sleep(esperaSec * 1000, args.signal);
+    }
 
     let res: Response;
     try {
@@ -253,6 +321,8 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
       });
     }
 
+    readBudget(args.apiKey, model, res.headers);
+
     if (res.status === 401 || res.status === 403) {
       throw new LlmError(
         'Sua chave de Transcrição (Groq) não foi aceita pela IA de texto. Confira em Configurações → API.',
@@ -261,15 +331,25 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
     }
 
     if (res.status === 429) {
-      if (rateLimitRetries < 3) {
+      // `retry-after` do Groq pode passar de um minuto — respeitar INTEIRO
+      // (o clamp de 30 s que existia fazia re-tentar cedo e queimar tentativa).
+      const espera = Math.min(
+        120,
+        Math.ceil(
+          parseGroqDuration(res.headers.get('retry-after')) ||
+            parseGroqDuration(res.headers.get('x-ratelimit-reset-tokens')) ||
+            8 * (rateLimitRetries + 1),
+        ),
+      );
+      if (rateLimitRetries < 5) {
         rateLimitRetries++;
-        const waitSec = parseRetryAfter(res.headers, 8 * rateLimitRetries);
-        await sleep(waitSec * 1000, args.signal);
+        console.warn(`[groq] 429 em ${model} — esperando ${espera}s (tentativa ${rateLimitRetries}/5)`);
+        await sleep(espera * 1000, args.signal);
         continue;
       }
-      throw new LlmError('A IA gratuita está no limite por minuto. Espere um pouco e tente de novo.', {
+      throw new LlmError('A IA gratuita está no limite por minuto. Espere um pouco e clique em Retomar.', {
         status: 429,
-        retryAfterSec: parseRetryAfter(res.headers, 30),
+        retryAfterSec: espera,
       });
     }
 

@@ -43,7 +43,7 @@ const ENDPOINT = '/api/auto-cortes/analyze';
 const MAP_TRIES = 3;
 const REDUCE_TRIES = 2;
 /** Teto de espera antes de re-tentar (o retry-after do servidor manda, mas com limite). */
-const MAX_WAIT_SEC = 45;
+const MAX_WAIT_SEC = 130;
 
 export type AnalyzeInput = {
   transcript: Transcript;
