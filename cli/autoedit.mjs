@@ -19,8 +19,10 @@ import {
   isUrl, UPLOAD_TOOLS,
 } from './core.mjs';
 import * as pilot from './pilot.mjs';
+import { medirArquivo, medirVideo, medirUrl } from './voz-medir.mjs';
+import { revisarCopy, contarGraves } from '../lib/revisar-copy.ts';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 // ─── UI (cores opcionais — desligadas se não for TTY ou NO_COLOR) ────────────
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -261,6 +263,7 @@ const COMMANDS = {
   separador: (a) => cmdSepararAudio(a),
   tools: () => cmdTools(),
   pilot: (a) => cmdPilot(a),
+  voz: (a) => cmdVoz(a),
 };
 
 /**
@@ -280,6 +283,29 @@ async function cmdPilot({ positionals, flags }) {
   if (sub === 'avatares') return mostra(await pilot.avatares({ busca: flags.busca }));
   if (sub === 'vozes') return mostra(await pilot.vozes({ busca: flags.busca }));
   if (sub === 'identidade') return mostra(await pilot.identidade());
+  if (sub === 'revisar') {
+    // REVISA A COPY antes de virar take pago. Um AD ja saiu com o avatar
+    // dizendo "que TA nao importa" (o doc truncou "tamanho"): o parser copia
+    // fiel e ninguem le o texto de novo.
+    const p = flags.cenas || positionals.shift();
+    if (!p) return warn('uso: autoedit pilot revisar --cenas cenas.json');
+    const cenas = JSON.parse(readFileSync(p, 'utf8'));
+    const lista = Array.isArray(cenas) ? cenas : Object.values(cenas).flat();
+    const papeis = [...new Set(lista.map((x) => x.papel).filter(Boolean))];
+    let graves = 0;
+    for (const cena of lista) {
+      const achados = revisarCopy(cena.texto || '', papeis);
+      if (!achados.length) continue;
+      graves += contarGraves(achados);
+      console.log(c.bold((cena.ad || '?') + ' cena ' + cena.n));
+      achados.forEach((x) => console.log(
+        '   ' + (x.peso === 'alto' ? c.red('!') : c.yellow('~')) + ' ' +
+        (x.trecho ? '"' + x.trecho + '" ' : '') + x.motivo));
+    }
+    if (!graves) return console.log(c.green('copy sem defeito mecanico — o resto e leitura'));
+    process.exitCode = 1;
+    return;
+  }
   if (sub === 'conferir') {
     const p = flags.cenas || positionals.shift();
     if (!p) return warn('uso: autoedit pilot conferir --cenas cenas.json');
@@ -298,6 +324,44 @@ ${c.bold('autoedit pilot')} — ClickUp Pilot pela linha de comando
   ${c.cyan('vozes')} [--busca martina]                        vozes PRIVADAS da conta
   ${c.cyan('identidade')}                                     qual conta HeyGen está ligada
   ${c.cyan('conferir')} --cenas cenas.json                    valida o plano contra o HeyGen
+  ${c.cyan('revisar')} --cenas cenas.json                     revisa a COPY (typo, repetida, rotulo vazado)
+`);
+}
+
+/**
+ * `autoedit voz medir` — mede o pitch do que o HeyGen ENTREGOU.
+ *
+ * O rotulo `gender` do clone mente nos dois sentidos (medido em 23.08): a
+ * Catia voltou "male" e saiu feminina; a `redheadedgurl` voltou "female" e
+ * saiu grave no take. Decidir pelo campo ja custou video pronto errado.
+ */
+async function cmdVoz({ positionals, flags }) {
+  const sub = positionals.shift();
+  if (sub === 'medir') {
+    const alvo = flags.video || flags.arquivo || flags.url || positionals.shift();
+    if (!alvo) return warn('uso: autoedit voz medir --video <videoId> | --arquivo take.mp4 | --url <preview>');
+    let laudo;
+    if (flags.video) laudo = medirVideo(flags.video);
+    else if (flags.url) laudo = medirUrl(flags.url);
+    else laudo = medirArquivo(alvo);
+    const cor = laudo.sexo === 'feminina' ? c.green : laudo.sexo === 'AMBIGUA' ? c.yellow : c.red;
+    console.log('  mediana : ' + cor(laudo.mediana.toFixed(0) + ' Hz') + '  (' + laudo.sexo + ')');
+    console.log('  p10/p90 : ' + laudo.p10.toFixed(0) + ' / ' + laudo.p90.toFixed(0) + ' Hz');
+    console.log('  silencio: ' + laudo.silencioPct.toFixed(0) + '%');
+    console.log('  picos   : ' + laudo.picos.map((x) => x.hz + ' Hz').join(', '));
+    if (!laudo.alertas.length) return console.log(c.green('  ok — nada suspeito'));
+    laudo.alertas.forEach((x) => console.log(c.red('  ! ' + x)));
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`
+${c.bold('autoedit voz')} — conferir o que o HeyGen entregou
+
+  ${c.cyan('medir')} --video <videoId>     baixa o take e mede o pitch
+  ${c.cyan('medir')} --arquivo take.mp4    mede um arquivo local
+  ${c.cyan('medir')} --url <preview>       mede o preview de um clone
+
+  O campo ${c.bold('gender')} do clone MENTE. A medicao que vale e a do take.
 `);
 }
 
