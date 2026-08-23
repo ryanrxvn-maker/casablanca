@@ -10175,9 +10175,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         percent={pct}
                                         fileBase={b.baseAdId || b.taskName}
                                         isRegenerating={isRegenThis}
-                                        // Editar texto: nos prontos (trocar script/voz) E nos que
-                                        // FALHARAM (contornar a falha do HeyGen re-gerando a parte).
-                                        onEdit={canEdit && (t.status === 'completed' || t.status === 'failed') ? () => openEditPart(b.taskId, originalIdx) : undefined}
+                                        // Editar texto: nos prontos (trocar script/voz), nos que
+                                        // FALHARAM (contornar a falha do HeyGen re-gerando a parte) e
+                                        // nos TRAVADOS. 'stalled' e' "o poll desistiu de esperar" — o
+                                        // video pode ate' ja' ter ficado pronto la'. Sem o lapis, a
+                                        // parte travada nao tinha saida nenhuma na tela: nem editar,
+                                        // nem re-gerar. Aconteceu em 23.08, com a aba fechada por
+                                        // 98min e 6 takes presos nesse estado.
+                                        onEdit={canEdit && (t.status === 'completed' || t.status === 'failed' || t.status === 'stalled') ? () => openEditPart(b.taskId, originalIdx) : undefined}
                                         // Usar áudio: saída pra parte que FALHOU (sobe um áudio e o
                                         // avatar dá lipsync, pulando o TTS quebrado) e também pra que
                                         // está AGUARDANDO o HeyGen — aí é escolha EXPLÍCITA do user
