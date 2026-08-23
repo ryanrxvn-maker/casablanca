@@ -194,6 +194,15 @@ const LEX: FamilyByLang = {
       'e isso ai pessoal', 'fica com deus', 'um abraco', 'valeu pessoal',
       'sem mais delongas', 'vamos ao que interessa', 'chega de papo',
       'na descricao do video', 'no primeiro comentario',
+      // vlog/YouTube: abertura e CTA que apareceram no teste com dado real
+      'fala galera', 'fala pessoal', 'fala rapaziada', 'e ai galera',
+      'mais um vlog', 'mais um video', 'comecando mais um', 'nesse vlog',
+      'do vlog', 'no vlog de hoje', 'deixa um comentario', 'deixe um comentario',
+      'curta aqui', 'curte ai', 'da um like', 'de um like', 'se voce ainda',
+      'ainda nao curtiu', 'comenta aqui', 'o que voce achou do',
+      'ativa as notificacoes', 'salva esse video', 'me segue',
+      // "vlog" só aparece quando o vídeo fala DE SI MESMO (abertura, CTA, fecho)
+      'vlog', 'esse video de hoje', 'chegando ao fim', 'por hoje e isso',
     ],
     en: [
       'welcome to', 'welcome back', 'good morning everyone', 'another episode',
@@ -224,7 +233,20 @@ const LEX: FamilyByLang = {
       'no video passado', 'no episodio passado', 'daqui a pouco eu explico',
       'ja ja eu explico', 'volto nisso depois', 'como falei antes',
       'a pergunta que ele fez', 'respondendo o que voce', 'voltando ao assunto',
-      'voltando la', 'retomando',
+      'voltando la', 'retomando', 'voltando pro', 'voltando para o',
+      // RETOMADA: o trecho se apoia numa conversa que ficou FORA do corte.
+      // Achado no primeiro teste com dado real ("A gente já conversou sobre
+      // isso." abrindo um corte) — a lista de anáfora não pegava porque a
+      // frase não COMEÇA com pronome.
+      'a gente ja falou', 'a gente ja conversou', 'a gente ja viu',
+      'a gente ja comentou', 'a gente ja discutiu', 'a gente falou sobre isso',
+      'a gente conversou sobre isso', 'ja conversamos sobre', 'ja falamos sobre',
+      'eu ja falei', 'eu ja disse', 'eu ja comentei', 'eu ja expliquei',
+      'como voce falou', 'como voces falaram', 'como ele falou', 'como ela falou',
+      'isso que voce falou', 'isso que voce disse', 'o que voce falou',
+      'que voce falou mais cedo', 'que ele falou mais cedo', 'igual eu falei',
+      'igual a gente falou', 'voltando naquele ponto', 'aquele ponto que',
+      'pegando o gancho', 'complementando o que',
     ],
     en: [
       'as i said', 'as i mentioned', 'earlier in the episode', 'at the beginning',
@@ -292,11 +314,17 @@ const DANGLING_ENDINGS: Record<LangCode, string[]> = {
     'as', 'um', 'uma', 'meu', 'minha', 'seu', 'sua', 'nosso', 'nossa',
     'qual', 'quanto', 'cujo', 'onde', 'tipo', 'tambem', 'muito', 'mais',
     'ja', 'so', 'tao', 'nao', 'talvez', 'quase', 'dessa', 'desse', 'deste',
+    // auxiliares e advérbios que, no fim, deixam a frase esperando o resto —
+    // "…a constância há", "…o cara", "…isso aí" (visto na transcrição real)
+    'ha', 'tem', 'temos', 'faz', 'vai', 'vou', 'foi', 'era', 'esta', 'estao',
+    'sao', 'seja', 'fica', 'ficou', 'sera', 'pode', 'quer', 'la', 'ali',
+    'aqui', 'assim', 'cara', 'sabe', 'ne', 'ta', 'bem', 'agora', 'entre',
   ],
   en: [
     'and', 'or', 'but', 'that', 'because', 'so', 'to', 'of', 'in', 'on',
     'for', 'with', 'the', 'a', 'an', 'if', 'when', 'which', 'who', 'while',
     'as', 'from', 'by', 'my', 'your', 'our', 'their', 'very', 'more', 'just',
+    'is', 'was', 'has', 'have', 'will', 'can', 'here', 'there', 'like',
   ],
   es: [
     'y', 'o', 'pero', 'que', 'porque', 'entonces', 'para', 'con', 'sin', 'de',

@@ -43,6 +43,16 @@ const PT_STOP = [
   'depois', 'entao', 'assim', 'bem', 'mal', 'sim', 'nao', 'ne', 'ta', 'tao',
   'gente', 'coisa', 'coisas', 'jeito', 'lado', 'vez', 'vezes', 'hora', 'dia',
   'ano', 'parte', 'caso', 'ponto', 'forma', 'meio', 'fim', 'tipo',
+  // determinantes e quantificadores que viravam "tema" do título ("Cada:")
+  'cada', 'qualquer', 'quaisquer', 'certo', 'certa', 'varios', 'varias',
+  'diversos', 'diversas', 'demais', 'proprio', 'propria', 'inteiro', 'inteira',
+  'grande', 'pequeno', 'melhor', 'pior', 'maior', 'menor', 'bom', 'boa',
+  'legal', 'ruim', 'novo', 'nova', 'velho', 'primeiro', 'segundo', 'terceiro',
+  'acho', 'acha', 'achar', 'falar', 'falando', 'falou', 'fala', 'dizer', 'diz',
+  'disse', 'sabe', 'sei', 'ver', 'vendo', 'vejo', 'olhar', 'olha', 'pensar',
+  'quer', 'quero', 'queria', 'consegue', 'consegui', 'conseguir', 'precisa',
+  'precisar', 'usar', 'usa', 'pegar', 'pega', 'botar', 'colocar', 'chegar',
+  'chega', 'passar', 'passa', 'virar', 'vira', 'manter', 'entao',
 ];
 
 const EN_STOP = [

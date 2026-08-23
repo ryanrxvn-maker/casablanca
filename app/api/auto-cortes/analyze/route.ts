@@ -4,6 +4,7 @@ import { getUserKey } from '@/lib/user-keys';
 import { createAnthropicClient, LlmError, structuredMessage, llmModel } from '@/lib/llm/anthropic';
 import { GROQ_LIMITS, GROQ_MODEL_PREFERENCE, groqModelOverride, groqStructuredMessage, resolveGroqModels } from '@/lib/llm/groq';
 import {
+  sanitizeHeadline,
   MAP_SCHEMA,
   MAP_SYSTEM,
   REDUCE_SCHEMA,
@@ -243,7 +244,7 @@ export async function POST(req: Request) {
     }
 
     const op = body?.op;
-    if (op !== 'map' && op !== 'reduce') {
+    if (op !== 'map' && op !== 'reduce' && op !== 'titles') {
       return fail({ error: 'Pedido de análise inválido (etapa desconhecida).' }, 400);
     }
 
@@ -255,6 +256,8 @@ export async function POST(req: Request) {
     /** Uma chamada estruturada no provedor escolhido (mesma forma de resposta). */
     // Fila de modelos REAIS da conta (o catálogo do Groq muda; nada fixo aqui).
     const groqModels = client ? [] : await resolveGroqModels(picked.apiKey, signal);
+
+    if (op === 'titles') return await responderTitulos(body, picked, client, signal);
 
     const ask = <T,>(a: {
       system: string;
@@ -398,6 +401,122 @@ export async function POST(req: Request) {
     console.error('[auto-cortes analyze]', e);
     return fail({ error: 'Erro inesperado na análise. Tente de novo em instantes.' }, 500);
   }
+}
+
+const TITLES_SYSTEM = `Você é redator de cortes virais. Recebe trechos JÁ ESCOLHIDOS de um vídeo (a fala transcrita de cada um) e escreve, para cada trecho, um título de post e uma headline pra queimar no vídeo.
+
+REGRAS DURAS
+- Use SOMENTE o que foi dito no trecho. Não invente fato, número, nome nem promessa.
+- A transcrição é fala real e pode ter erro de reconhecimento; conserte a gramática ao escrever, mas não mude o sentido.
+- headline: no máximo 8 palavras, no máximo 2 linhas de leitura, SEM ponto final, sem emoji, sem aspas, sem hashtag. Tem que ser entendida em 1 segundo com o som desligado e criar tensão que só o vídeo resolve. Prefira número concreto, contraste, ordem direta ou pergunta.
+- title: até 70 caracteres, específico, sem clickbait vazio. O padrão que performa é "<setup específico>: <payoff>".
+- headline e title falam do MESMO fato central do trecho.
+- Nunca use a pergunta do entrevistador como título: o título é a resposta.
+- Escreva no MESMO idioma da fala.
+- Devolva um item para cada índice recebido, sem pular nenhum.`;
+
+function readTitleItems(raw: unknown): Array<{ i: number; durationSec: number; atual: string; fala: string }> | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 40) return null;
+  const out: Array<{ i: number; durationSec: number; atual: string; fala: string }> = [];
+  for (const it of raw as Array<Record<string, unknown>>) {
+    const i = Number(it?.i);
+    const fala = String(it?.fala ?? '').slice(0, 1200);
+    if (!Number.isInteger(i) || i < 0 || i > 60 || fala.length < 20) continue;
+    out.push({
+      i,
+      durationSec: Math.max(1, Math.min(600, Math.round(Number(it?.durationSec) || 0))),
+      atual: String(it?.atual ?? '').slice(0, 120),
+      fala,
+    });
+  }
+  return out.length > 0 ? out : null;
+}
+
+const TITLES_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['titles'],
+  properties: {
+    titles: {
+      type: 'array',
+      maxItems: 40,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['i', 'title', 'headline'],
+        properties: {
+          i: { type: 'integer', minimum: 0, maximum: 60 },
+          title: { type: 'string', maxLength: 90 },
+          headline: { type: 'string', maxLength: 70 },
+        },
+      },
+    },
+  },
+} as const;
+
+/**
+ * op:'titles' — reescreve título/headline dos cortes que o CURADOR LOCAL já
+ * escolheu. É a única chamada de IA que sobrou no fluxo, e é pequena: só o
+ * texto falado dos cortes (~1,5 mil tokens no vídeo inteiro).
+ */
+async function responderTitulos(
+  body: RawBody & { items?: unknown; language?: unknown },
+  picked: { provider: Provider; apiKey: string },
+  client: ReturnType<typeof createAnthropicClient> | null,
+  signal: AbortSignal,
+) {
+  const items = readTitleItems(body.items);
+  if (!items) return fail({ error: 'Lista de cortes inválida pro polimento de títulos.' }, 400);
+  const language = String(body.language ?? 'pt').slice(0, 12);
+
+  const user = [
+    `Idioma da fala: ${language}. São ${items.length} trechos.`,
+    '',
+    ...items.map(
+      (it) =>
+        `#${it.i} (${it.durationSec}s) — headline atual: "${it.atual}"\nfala: ${it.fala}`,
+    ),
+  ].join('\n\n');
+
+  const res = client
+    ? await structuredMessage<{ titles: Array<{ i: number; title: string; headline: string }> }>({
+        client,
+        system: TITLES_SYSTEM,
+        user,
+        schema: TITLES_SCHEMA as unknown as Record<string, unknown>,
+        effort: 'medium',
+        maxTokens: 4000,
+        signal,
+      })
+    : await groqStructuredMessage<{ titles: Array<{ i: number; title: string; headline: string }> }>({
+        apiKey: picked.apiKey,
+        models: await resolveGroqModels(picked.apiKey, signal),
+        system: TITLES_SYSTEM,
+        user,
+        schema: TITLES_SCHEMA as unknown as Record<string, unknown>,
+        effort: 'medium',
+        maxTokens: 2500,
+        signal,
+      });
+
+  const titles = (res.data?.titles ?? [])
+    .filter((t) => Number.isInteger(t?.i))
+    .map((t) => ({
+      i: Number(t.i),
+      title: sanitizeTitleText(t.title),
+      headline: sanitizeHeadline(String(t.headline ?? '')),
+    }))
+    .filter((t) => t.title.length >= 8 && t.headline.length >= 4);
+
+  return NextResponse.json({ op: 'titles', titles, model: res.model, usage: res.usage });
+}
+
+function sanitizeTitleText(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/[#"“”*`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 90);
 }
 
 function scoreSumOf(c: ResolvedCandidate): number {

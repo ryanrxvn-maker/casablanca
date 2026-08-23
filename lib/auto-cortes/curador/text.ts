@@ -73,6 +73,88 @@ export function countExclamations(s: string): number {
   return m ? m.length : 0;
 }
 
+/**
+ * A frase COMEÇA com maiúscula? Em saída de Whisper, frase que começa em
+ * minúscula é quase sempre CONTINUAÇÃO da anterior (o ASR cortou no meio) —
+ * "milhões de Só reais aqui no Brasil". Nunca pode abrir corte nem virar
+ * manchete. Devolve `null` quando não há letra pra julgar.
+ */
+export function startsUppercase(text: string): boolean | null {
+  const t = (text ?? '').trim();
+  for (const ch of t) {
+    if (/[a-zà-ÿ]/.test(ch)) return false;
+    if (/[A-ZÀ-Þ]/.test(ch)) return true;
+    if (/[0-9]/.test(ch)) return true; // "30 milhões..." abre bem
+  }
+  return null;
+}
+
+/**
+ * Palavra repetida colada ("do do IFA", "que que") — artefato clássico de ASR.
+ * Dois iguais seguidos em fala real acontece ("que que" existe), três não.
+ */
+export function hasAdjacentRepeat(text: string): boolean {
+  const t = tokenize(text);
+  for (let i = 1; i < t.length; i++) {
+    if (t[i].length >= 2 && t[i] === t[i - 1]) return true;
+  }
+  return false;
+}
+
+/**
+ * Frase terminando em reticências. Em saída de Whisper isso não é estilo: é a
+ * marca de que o modelo cortou a fala no meio ("A gente junta e toma um...").
+ * Medido no podcast real: 7 de 323 frases, todas truncadas de verdade.
+ */
+export function endsWithEllipsis(text: string): boolean {
+  return /(?:\.\.\.|\u2026)["'\u201d\u2019)\]]*\s*$/.test((text ?? '').trim());
+}
+
+const PT_ART = new Set(['o', 'a', 'os', 'as', 'um', 'uma', 'uns', 'umas']);
+const PT_PREP = new Set([
+  'de', 'do', 'da', 'dos', 'das', 'em', 'no', 'na', 'nos', 'nas', 'por', 'pelo',
+  'pela', 'para', 'pra', 'com', 'sem', 'ao', 'aos', 'num', 'numa',
+]);
+const PT_COORD = new Set(['e', 'ou', 'mas', 'nem']);
+const PT_ADV = new Set(['hoje', 'ontem', 'amanha', 'agora', 'sempre', 'nunca', 'ja', 'tambem']);
+
+/**
+ * Par de palavras que NÃO EXISTE em português ("do e", "a hoje", "os a").
+ * Quando aparece, o ASR embaralhou a ordem — e todo texto extraído dali sai
+ * sem sentido. Só três padrões, todos impossíveis de verdade (artigo+artigo,
+ * artigo+advérbio, preposição+conjunção); "por aqui" e "de hoje" ficam de fora
+ * de propósito porque são frases legítimas.
+ *
+ * Vale só pra PT: em inglês "as a whole" cairia no artigo+artigo.
+ */
+export function hasImpossibleBigramPt(text: string): boolean {
+  const t = tokenize(text);
+  for (let i = 1; i < t.length; i++) {
+    const a = t[i - 1];
+    const b = t[i];
+    if (PT_ART.has(a) && PT_ART.has(b)) return true;
+    if (PT_ART.has(a) && PT_ADV.has(b)) return true;
+    if (PT_PREP.has(a) && PT_COORD.has(b)) return true;
+  }
+  return false;
+}
+
+/**
+ * Deixa um recorte apresentável: sem espaço duplo, sem pontuação solta na
+ * borda, sem "??" nem aspas órfãs. É a última coisa que roda antes de qualquer
+ * texto sair do curador — headline terminando em vírgula era o defeito mais
+ * feio da primeira rodada com dado real.
+ */
+export function tidyFragment(text: string): string {
+  return (text ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?…])/g, '$1')
+    .replace(/([?!.])\1+/g, '$1')
+    .replace(/^[\s,;:.\-–—"'“”‘’)\]]+/, '')
+    .replace(/[\s,;:\-–—"'“”‘’(\[]+$/, '')
+    .trim();
+}
+
 /** Tira pontuação final (headline não leva ponto). */
 export function stripTrailingPunct(s: string): string {
   return (s ?? '').replace(/[\s.,;:!…]+$/g, '').trim();
@@ -190,7 +272,7 @@ export const NO_FACTS: Facts = {
  * manchete. Mascarar antes de ler os fatos resolve nos dois formatos.
  */
 const YEAR_RE =
-  /(?:19|20)\d{2}|dois\s+mil(?:\s+e\s+[a-zà-ÿ]+)?|mil\s+(?:novecentos|oitocentos)(?:\s+e\s+[a-zà-ÿ]+)*|two\s+thousand(?:\s+and\s+[a-z]+)?/gi;
+  /\b(?:19|20)\d{2}\b|\bdois\s+mil(?:\s+e\s+[a-zà-ÿ]+)?\b|\bmil\s+(?:novecentos|oitocentos)(?:\s+e\s+[a-zà-ÿ]+)*\b|\btwo\s+thousand(?:\s+and\s+[a-z]+)?\b/gi;
 
 export function maskYears(text: string): string {
   return (text ?? '').replace(YEAR_RE, (m) => ' '.repeat(m.length));

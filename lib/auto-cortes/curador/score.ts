@@ -29,12 +29,16 @@ import {
   countExclamations,
   endsWithFinalPunct,
   firstToken,
+  endsWithEllipsis,
+  hasAdjacentRepeat,
+  hasImpossibleBigramPt,
   isQuestionText,
   lastToken,
   mergeFacts,
   NO_FACTS,
   normalizeForMatch,
   readFacts,
+  startsUppercase,
   tokenize,
   type Facts,
 } from './text';
@@ -61,6 +65,14 @@ export const MIN_TOTAL = 24;
 export const MIN_HOOK = 18;
 /** Fração de frases com marcador de logística que reprova o trecho. */
 export const MAX_LOGISTICS_RATIO = 0.25;
+/**
+ * Palavras mínimas na frase que ABRE o corte. Whisper devolve muito caco de 2-4
+ * palavras ("Com nesses certeza", "ó") e um deles chegou a abrir corte no
+ * primeiro teste com dado real.
+ */
+export const MIN_OPENING_WORDS = 5;
+/** Fração de frases quebradas (caco/continuação) que reprova o trecho inteiro. */
+export const MAX_BROKEN_RATIO = 0.5;
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const clamp01 = (v: number) => clamp(v, 0, 1);
@@ -100,8 +112,18 @@ export type SentenceFeature = {
   gapAfterMs: number;
   /** palavras de conteúdo / palavras totais */
   contentRatio: number;
+  /** quantas palavras de conteúdo (não-stopword) a frase tem */
+  contentWords: number;
   /** alguma palavra de conteúdo se repete na frase (paralelismo, "X mata, Y mata") */
   repeatsContent: boolean;
+  /** começa em minúscula = CONTINUAÇÃO cortada pelo ASR (só quando dá pra julgar) */
+  startsLower: boolean;
+  /** palavras de conteúdo que aparecem em UMA só frase do vídeo inteiro */
+  hapaxContent: number;
+  /** cheiro de transcrição suja: caco curto, palavra repetida, hapax demais */
+  suspectAsr: boolean;
+  /** a frase ANTERIOR é pergunta → esta é a resposta (é dela que sai o payoff) */
+  answersQuestion: boolean;
   /** 0-100: o quanto essa frase sozinha é citável */
   quotability: number;
 };
@@ -119,6 +141,19 @@ export function buildSentenceFeatures(
 ): SentenceFeature[] {
   const out: SentenceFeature[] = new Array(sentences.length);
 
+  // A regra "minúscula = continuação" só vale se a transcrição REALMENTE usa
+  // caixa. Se o provedor devolveu tudo minúsculo, ela seria um massacre.
+  let up = 0;
+  let low = 0;
+  for (const s of sentences) {
+    const u = startsUppercase(s.text);
+    if (u === true) up++;
+    else if (u === false) low++;
+  }
+  const caseIsMeaningful = up + low >= 10 && up / Math.max(1, up + low) >= 0.4;
+  // o teste de bigrama impossível é gramática de PT: não vale pra EN/ES
+  const soPt = lex.langs.length === 1 && lex.langs[0] === 'pt';
+
   for (let i = 0; i < sentences.length; i++) {
     const s = sentences[i];
     const norm = normalizeForMatch(s.text);
@@ -132,6 +167,14 @@ export function buildSentenceFeatures(
 
     const contentCount = model.content[i]?.length ?? 0;
     const contentRatio = toks.length === 0 ? 0 : contentCount / toks.length;
+
+    let hapax = 0;
+    const vistos = new Set<string>();
+    for (const t of model.content[i] ?? []) {
+      if (vistos.has(t)) continue;
+      vistos.add(t);
+      if ((model.df.get(t) ?? 0) <= 1) hapax++;
+    }
 
     const f: SentenceFeature = {
       index: i,
@@ -166,14 +209,39 @@ export function buildSentenceFeatures(
           ? Number.POSITIVE_INFINITY
           : sentences[i + 1].startMs - s.endMs,
       contentRatio,
+      contentWords: contentCount,
       repeatsContent: hasRepeat(model.content[i] ?? []),
+      startsLower: caseIsMeaningful && startsUppercase(s.text) === false,
+      hapaxContent: hapax,
+      suspectAsr: false,
+      answersQuestion: i > 0 && isQuestionText(sentences[i - 1].text),
       quotability: 0,
     };
+    f.suspectAsr = smellsLikeAsrJunk(
+      f,
+      hasAdjacentRepeat(s.text) ||
+        endsWithEllipsis(s.text) ||
+        (soPt && hasImpossibleBigramPt(s.text)),
+    );
     f.quotability = quotabilityOf(f);
     out[i] = f;
   }
 
   return out;
+}
+
+/**
+ * Heurística de transcrição suja. Conservadora de propósito: só reprova o texto
+ * como FONTE DE MANCHETE, nunca o corte inteiro — num podcast real 54% do
+ * vocabulário é hapax, então hapax sozinho não prova nada. O que prova é hapax
+ * concentrado numa frase curta sem número, ou palavra repetida colada.
+ */
+function smellsLikeAsrJunk(f: SentenceFeature, artefato: boolean): boolean {
+  if (f.words < MIN_OPENING_WORDS) return true;
+  if (artefato) return true;
+  const conteudo = Math.max(1, Math.round(f.contentRatio * f.words));
+  if (!f.facts.hasNumber && conteudo <= 5 && f.hapaxContent >= 2) return true;
+  return false;
 }
 
 function hasRepeat(tokens: string[]): boolean {
@@ -332,6 +400,7 @@ export function scoreClip(i0: number, i1: number, ctx: ScoreContext): ClipScore 
   // ── fatos e agregados do corte
   let facts = NO_FACTS;
   let logisticsSentences = 0;
+  let quebradas = 0;
   let fillerHits = 0;
   let externalRefHits = 0;
   let emotionHits = 0;
@@ -349,6 +418,7 @@ export function scoreClip(i0: number, i1: number, ctx: ScoreContext): ClipScore 
     const f = F[i];
     facts = mergeFacts(facts, f.facts);
     if (f.logisticsHits > 0) logisticsSentences++;
+    if (f.suspectAsr || f.startsLower) quebradas++;
     fillerHits += f.fillerHits;
     externalRefHits += f.externalRefHits;
     emotionHits += f.emotionHits;
@@ -368,6 +438,7 @@ export function scoreClip(i0: number, i1: number, ctx: ScoreContext): ClipScore 
   }
 
   const logisticsRatio = count > 0 ? logisticsSentences / count : 0;
+  const asrRatio = count > 0 ? quebradas / count : 0;
   const contentRatio = allTokens > 0 ? contentTokens / allTokens : 0;
   const distinctRatio = contentTokens > 0 ? distinct.size / contentTokens : 0;
 
@@ -516,6 +587,18 @@ export function scoreClip(i0: number, i1: number, ctx: ScoreContext): ClipScore 
   let rejected: string | null = null;
   if (head.logisticsHits > 0) rejected = 'abre em logistica/agradecimento';
   else if (logisticsRatio > MAX_LOGISTICS_RATIO) rejected = 'trecho de logistica';
+  // Retomada: "A gente já conversou sobre isso." Pega o espectador no meio de
+  // uma conversa que ele não viu — mata a autossuficiência na primeira frase.
+  else if (head.externalRefHits > 0) rejected = 'abre retomando assunto de fora';
+  else if (head.startsLower) rejected = 'abre no meio de frase (ASR)';
+  else if (head.words < MIN_OPENING_WORDS) rejected = 'abre em caco de frase';
+  // "Como é que eu posso te falar?" tem 8 palavras e ZERO conteúdo: é fala de
+  // preenchimento. Abertura precisa dizer alguma coisa.
+  else if (head.contentWords < 2) rejected = 'abre sem conteudo';
+  // Trecho em que a maioria das frases é caco ou continuação: a transcrição
+  // ali está quebrada demais pra virar corte apresentável, e o texto que sai
+  // dele é sempre sem sentido ("Mercado na aí batalha").
+  else if (asrRatio > MAX_BROKEN_RATIO) rejected = 'transcricao quebrada no trecho';
   else if (head.startsWithFiller) rejected = 'abre em muleta';
   else if (head.startsWithConnective) rejected = 'abre em conectivo';
   else if (head.startsWithAnaphora) rejected = 'abre em anafora';

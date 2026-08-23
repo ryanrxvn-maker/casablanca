@@ -205,7 +205,13 @@ export type TermWeight = { term: string; weight: number };
  * o que voltou 5 vezes é do que o trecho fala. Empate por ordem alfabética;
  * número puro fica de fora (não vira tema nem hashtag).
  */
-export function topTerms(model: TfidfModel, from: number, to: number, k: number): TermWeight[] {
+export function topTerms(
+  model: TfidfModel,
+  from: number,
+  to: number,
+  k: number,
+  minDf = 1,
+): TermWeight[] {
   const a = Math.max(0, from);
   const b = Math.min(model.n - 1, to);
   const acc = new Map<string, number>();
@@ -215,6 +221,9 @@ export function topTerms(model: TfidfModel, from: number, to: number, k: number)
       if (/^\d/.test(t)) continue;
       if (NUM_WORDS.has(t)) continue; // "dezoito" não é tema, é quantidade
       if (t.length < 4) continue;
+      // Termo que aparece numa frase só do VÍDEO INTEIRO é quase sempre erro de
+      // ASR ("quai", "tabula") — não vira tema nem hashtag.
+      if ((model.df.get(t) ?? 0) < minDf) continue;
       if (once.has(t)) continue; // conta 1 vez por FRASE: tema é o que volta
       once.add(t);               // ao longo do corte, não o que repete na frase
       acc.set(t, (acc.get(t) ?? 0) + (model.idf.get(t) ?? model.maxIdf));
@@ -224,40 +233,4 @@ export function topTerms(model: TfidfModel, from: number, to: number, k: number)
   for (const [term, weight] of acc) out.push({ term, weight });
   out.sort((x, y) => y.weight - x.weight || (x.term < y.term ? -1 : x.term > y.term ? 1 : 0));
   return out.slice(0, Math.max(0, k));
-}
-
-/**
- * Bigrama mais frequente que COMEÇA em `term` dentro do trecho ("tráfego pago").
- * `null` quando o termo anda sozinho. É o que dá tema com cara de gente.
- */
-export function bigramFor(
-  model: TfidfModel,
-  from: number,
-  to: number,
-  term: string,
-  stopwords: Set<string>,
-): string | null {
-  const a = Math.max(0, from);
-  const b = Math.min(model.n - 1, to);
-  const counts = new Map<string, number>();
-  for (let i = a; i <= b; i++) {
-    const toks = model.all[i];
-    for (let j = 0; j + 1 < toks.length; j++) {
-      if (toks[j] !== term) continue;
-      const nx = toks[j + 1];
-      if (!nx || nx.length < 3 || stopwords.has(nx) || /^\d/.test(nx)) continue;
-      counts.set(nx, (counts.get(nx) ?? 0) + 1);
-    }
-  }
-  let best: string | null = null;
-  let bestN = 0;
-  const keys = Array.from(counts.keys()).sort();
-  for (const k of keys) {
-    const c = counts.get(k) ?? 0;
-    if (c > bestN) {
-      bestN = c;
-      best = k;
-    }
-  }
-  return bestN >= 2 ? best : null;
 }

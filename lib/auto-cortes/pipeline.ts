@@ -48,6 +48,7 @@ import { opfsGetFile } from './opfs';
 import { analyzeTranscript } from './analyze-client';
 import { transcribeSource } from './transcribe';
 import { curate, type EnergyEnvelope } from './curador/curate';
+import { polishTitles } from './titles-ia';
 import { extractEnergyEnvelope } from '@/lib/ffmpeg-worker';
 import { planReframe, planCrop } from './reframe';
 import { makeComposer, renderClip, renderThumb, type OverlayFn, type OutSize } from './render';
@@ -432,22 +433,15 @@ function browserDeps(): PipelineDeps {
       // "candidatos" (isso era da leitura por IA em 2 passos).
       const local = { ...bruto, candidates: [] };
 
-      // 2) IA de texto só quando o cliente pede. Falhou/limitou? Fica o local.
+      // 2) IA de texto (opcional) reescreve SÓ título e headline dos cortes que o
+      // curador escolheu — uma chamada pequena. Falhou? Fica o texto local.
       if (input.settings.intelligence !== 'ia') return local;
-      try {
-        const ia = await analyzeTranscript(input, o);
-        if (ia.clips.length > 0) return { ...ia, warnings: [...local.warnings, ...ia.warnings] };
-        return local;
-      } catch (e) {
-        console.warn('[auto-cortes] IA de texto falhou — seguindo com o curador local:', e);
-        return {
-          ...local,
-          warnings: [
-            ...local.warnings,
-            'A IA de texto não respondeu agora; os cortes saíram pelo curador local (grátis).',
-          ],
-        };
-      }
+      const polido = await polishTitles(local.clips, input.transcript, { signal: o.signal });
+      return {
+        ...local,
+        clips: polido.clips,
+        warnings: polido.warning ? [...local.warnings, polido.warning] : local.warnings,
+      };
     },
     engine: createBrowserEngine(),
     captions: (words, startMs, endMs, pace) => buildClipCaptions(words, startMs, endMs, pace),

@@ -20,8 +20,17 @@ import { buildLexicon } from './lexicon';
 import { buildSentenceFeatures, energyStats, scoreClip, type ScoreContext } from './score';
 import { buildTfidf, corpusStats } from './tfidf';
 import { findTopics } from './topics';
-import { extractFactPhrase, endsWithFinalPunct, firstToken, lastToken } from './text';
-import { buildSentences, transcriptHash } from '../transcript';
+import {
+  extractFactPhrase,
+  endsWithFinalPunct,
+  firstToken,
+  hasAdjacentRepeat,
+  lastToken,
+  startsUppercase,
+  tidyFragment,
+} from './text';
+import { trimEdges } from './titles';
+import { buildSentences, sentenceId, transcriptHash } from '../transcript';
 import { DEFAULT_CLIP_SETTINGS, CLIP_LENGTH_RANGE_SEC } from '../types';
 import type { ClipSettings, Sentence, Transcript, Word } from '../types';
 
@@ -645,6 +654,327 @@ if (process.env.CURADOR_DEBUG) {
   ok(!auto.fillers.openers.has('so'), '"so" (muleta do inglês) fica de fora pra não comer o "só" do português');
   ok(buildLexicon('en').fillers.openers.has('so'), 'mas em vídeo declarado em inglês "so" volta a ser muleta');
   ok(buildLexicon('es').langs[0] === 'es', 'espanhol tem léxico próprio');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PARTE 2 — DADOS REAIS
+//
+// As frases abaixo são VERBATIM de uma transcrição de Whisper de verdade
+// (podcast de 24 min, PT, 323 frases) — com todo o defeito que ASR real tem:
+// frase cortada no meio ("milhões de Só reais aqui no Brasil"), caco de três
+// palavras ("Com nesses certeza"), palavra repetida ("do do"), ordem trocada
+// ("uns 6 no anos") e a pergunta do entrevistador colada na resposta.
+//
+// Cada bloco daqui trava um defeito que a PRIMEIRA versão do curador cometeu
+// quando rodou nesse material.
+// ═══════════════════════════════════════════════════════════════════════════
+
+type Real = { text: string; startMs: number; endMs: number };
+const R = (text: string, startMs: number, endMs: number): Real => ({ text, startMs, endMs });
+
+/** Monta o Transcript com o TEXTO real e o tempo real; palavras distribuídas. */
+function realTranscript(lines: Real[], language = 'pt'): Transcript {
+  const words: Word[] = [];
+  const sentences: Sentence[] = [];
+  lines.forEach((line, n) => {
+    const parts = line.text.split(/\s+/).filter(Boolean);
+    const span = Math.max(parts.length, line.endMs - line.startMs);
+    const step = span / Math.max(1, parts.length);
+    const from = words.length;
+    for (let k = 0; k < parts.length; k++) {
+      const a = Math.round(line.startMs + k * step);
+      const b = Math.round(line.startMs + (k + 1) * step) - 20;
+      words.push({ text: parts[k], start: a, end: Math.max(a + 1, b) });
+    }
+    sentences.push({
+      id: sentenceId(n + 1),
+      startMs: line.startMs,
+      endMs: line.endMs,
+      text: line.text,
+      wordFrom: from,
+      wordTo: words.length - 1,
+    });
+  });
+  return { words, sentences, language, provider: 'whisper', hash: transcriptHash(words, language) };
+}
+
+const REAL: Real[] = [
+  R("Fala galera, começando mais um vlog aqui, direto de NatalRN E hoje eu estou com dois caras brabíssimos do Direct Response Eles já faturaram juntos mais de 30", 0, 11200),
+  R("milhões de Só reais aqui no Brasil, tá?", 11200, 13620),
+  R("E hoje eu vou apresentar vocês, provavelmente alguns de vocês já devem conhecer eles Já gravaram um paintcast com E a gente são esses dois brabos aqui, Wesley,", 13620, 21980),
+  R("ó", 21020, 21040),
+  R("esse aqui, cara aqui, E ó esse aqui é o Dijadson Wesley Dijadson, contem pra gente o que é que vocês fazem quanto tempo você está no mercado?", 21980, 30920),
+  R("A gente está mais ou menos aí uns 6 no anos", 30920, 34100),
+  R("mercado na aí batalha, nesse período de 6 a anos gente tem ainda uma operação de Nutra, a gente sempre com trabalhou Direct Response ali e atualmente a", 34100, 44140),
+  R("gente está observando esse movimento do mercado, Direct de Response com Expert e tudo a mais gente está fazendo essa migração já estamos de olho, estudando já o", 44140, 53320),
+  R("mercado fechamos com alguns Experts e aí estamos migrando para esse mercado agora, de DR e Info com Experts.", 52680, 59760),
+  R("Vocês pretendem migrar ou abrir um braço na empresa?", 59860, 63320),
+  R("faturando muito vocês estão 6 anos, eu tenho certeza que vocês vão ficar mais 5, 6, 10 qual anos o segredo para tanta consistência?", 98500, 105560),
+  R("que eu vejo assim, muitas operações o cara chega, escala, depois morre a oferta e ele desaparece.", 105560, 110700),
+  R("Com nesses certeza", 110700, 112220),
+  R("6 anos que estão, vocês", 112220, 114060),
+  R("vocês já passaram por isso várias vezes, criou uma oferta, escalou, ela morreu, se tiver que criar ou outra, renovar ela.", 114060, 120220),
+  R("Cara, como é que vocês fizeram para ser tão consistente?", 120060, 123000),
+  R("Primeiro ponto, que eu acredito que é o principal, que a gente sempre conversa isso, eu e o Dijatos nas nossas conversas diárias aqui, é que a gente", 122920, 131820),
+  R("segue uma premissa, quem não se adapta morre basicamente.", 131820, 135440),
+  R("Então acredito que o principal fator, o principal princípio para a gente estar com essa constância no mercado nos últimos seis e anos vários anos desses fazendo sete", 134920, 145190),
+  R("múltiplos distros por ano, até oito por distros ano, é justamente essa adaptação.", 144350, 149370),
+  R("Então no a digital gente sente que a gente está se adaptando toda hora, o que funciona essa semana não necessariamente vai funcionar na outra semana também.", 150030, 158790),
+  R("Então acredito que ter essa flexibilidade para se adaptar a esses momentos de mercado, as ondas de mercado e tudo isso, é algo que faz a gente continuar", 158230, 167970),
+  R("ano a ano no mercado, faturando consistente e crescendo com constância.", 167970, 172270),
+  R("E você, Jato, tem alguma opinião do seriedo da constância de vocês?", 172010, 176610),
+  R("Seria basicamente isso.", 176290, 177710),
+  R("A nossa constância tem muito disso.", 177750, 180390),
+  R("principalmente, porque a gente mexe com muito dinheiro.", 347000, 349920),
+  R("Então, tipo assim, um dia você está rodando mil reais por dia em uma oferta, no outro dia você está rodando 30, 40, 50, 100 mil.", 349900, 357360),
+  R("E se você não tiver o controle, você acaba indo só no automático ali, não sabe muito bem ali o que está entrando, o que está saindo, com", 357620, 365960),
+  R("o que está saindo.", 365960, 367320),
+  R("Aí do nada você vê lá, está com 5, 6 mil, 30 mil de ferramenta, como já teve mês a aqui, gente pagando 30, 40 mil só de", 367040, 375200),
+  R("ferramenta de recorrência.", 375200, 376880),
+  R("Então, tipo assim, aí a gente vai lá, faz uma tem análise, ferramenta que a gente não usa e já tudo mais, consegue cortar um pouco.", 376780, 382340),
+  R("Então, tipo assim, são muitas coisas invisíveis que você vai no automático e não presta atenção, que às vezes vai comendo o seu lucro, né?", 381860, 388740),
+  R("É, fiquei curioso aqui.", 422870, 424390),
+  R("O que é esse caixa para investimentos perigosos?", 424370, 427570),
+  R("Então, hoje a gente separa 10% da nossa margem de lucro, né?", 427150, 432230),
+  R("pra investir no negócio.", 432090, 434290),
+  R("Perigosa é o quê?", 433930, 434530),
+  R("Coisas que a gente não tem muita previsibilidade.", 434630, 437630),
+  R("Então, tipo assim, entrar em um mercado novo, abrir um nicho novo, onde a gente não tem muitos números ainda, mas a gente sabe que tem um potencial", 437310, 445550),
+  R("grande.", 445550, 446470),
+  R("Entendeu?", 446190, 446510),
+  R("Tipo agora, se chama pra expert, isso já tava separado Separado, o dinheiro.", 446550, 451510),
+  R("Já claro.", 451010, 451650),
+  R("tava separado, entendeu?", 451650, 452870),
+  R("Eu sei que no começo, sei lá, seis anos atrás, um cuidava de tráfego, outro cuidava de copy, Hoje né.", 501110, 506610),
+  R("eu sei que a operação de vocês é bem robusta, né.", 506610, 509590),
+  R("Vocês devem ter mais de 10 colaboradores.", 509310, 511290),
+  R("Sim, temos quase 20.", 511270, 513410),
+  R("Quase 20 colaboradores.", 513450, 514910),
+  R("Quase 20 Né.", 514510, 515390),
+  R("colaboradores.", 514830, 515690),
+  R("Cara, hoje, com a comparação que vocês têm, quase 20 colaboradores, faturando consistentemente múltiplos sete dígitos por mês, qual é a função que você exerce, o seu ESDE,", 515430, 526950),
+  R("depois para o Dijasso, qual a função que o Dijasso exerce na empresa?", 526990, 530210),
+  R("Show de bola.", 530190, 530670),
+  R("Hoje, a minha função é praticamente um CEO.", 530710, 534290),
+  R("Hoje, eu não estou à frente de nenhum setor específico.", 534350, 538850),
+  R("Fico acima de todos os líderes, tanto do tráfego, de quanto copy, quanto das outras de fontes tráfego que a gente tem, na parte financeira e novas oportunidades", 539190, 547360),
+  R("a para empresa.", 547280, 548700),
+  R("Como você acha que vai estar o mercado?", 942600, 944040),
+  R("Porque, assim, a gente está vendo aí um enxame de pessoas usando IA, tanto usando IA de boa fé, quanto usando IA de má fé.", 943720, 951770),
+  R("Você acha que isso tem mais a prejudicar o mercado ou veio para agregar o mercado?", 951770, 956430),
+  R("A gente já conversou sobre isso.", 956430, 958770),
+  R("A gente acredita que o mercado nos próximos anos vai haver uma sofisticação, assim como na época que a gente só rodava real mudou totalmente para ver se", 958770, 968270),
+  R("é bem ter essa reviravolta no mercado ali mas acredito que para o público em si o vai ficando cada vez mais sério né e vai necessitando de", 968270, 976330),
+  R("cada vez mais você provar para ele ali a ter a credibilidade e é fato né que entre unha e o expert real a gente sabe que o", 976330, 984610),
+  R("expert real tem muito mais credibilidade né então eu comparto com essa ideia que o mercado né de expertos aí reais mesmo vai crescer muito por conta disso", 983850, 993630),
+  R("né que o público vai ficar cada e essa questão da IA, cara, é realmente", 993630, 998190),
+  R("uma faca de dois gumes veio pra potencializar muito, tá potencializando muito, né, tanto pra quem faz tanto certo pra quem faz errado, pra né, usa forma errada,", 998190, 1006510),
+  R("que você ganha velocidade em tudo, né, na IA, a e aí sofisticação vai vir muito mais rápido na também minha visão, como a gente já tá acompanhando", 1006510, 1013070),
+  R("isso né, não é só você um fazer simples deep sink que vai você ter um resultado bom, sabe, dia pra cada a mais, tá uma velocidade de", 1013070, 1020910),
+  R("sofisticação gigantesca, e vai ficar mais ainda difícil das pessoas se adaptarem, né, então quem não se profissionalizar realmente, não estiver atento ao caminho que o mercado está", 1020910, 1028970),
+  R("eu indo acredito que vai ficar para trás, sabe?", 1028810, 1031170),
+];
+
+const T_REAL = realTranscript(REAL);
+const DUR_REAL = REAL[REAL.length - 1].endMs / 1000 + 1;
+const REAL_OUT = curate({
+  transcript: T_REAL,
+  energy: null,
+  settings: settings({ count: 5 }),
+  durationSec: DUR_REAL,
+});
+
+if (process.env.CURADOR_DEBUG) {
+  for (const c of REAL_OUT.clips) {
+    console.log(`  [real ${c.plan.score}] T: ${c.plan.title}\n              H: ${c.plan.headline}`);
+  }
+}
+
+function fraseDoCorte(c: { startMs: number; endMs: number }, qual: 'primeira' | 'ultima'): Sentence {
+  const s = T_REAL.sentences;
+  // As frases do Whisper real SE SOBREPÕEM (a última palavra de uma termina
+  // depois do início da seguinte), então "encostar no tempo" não quer dizer
+  // "está no corte": vale quem COMEÇA dentro, com o respiro do refineBounds.
+  const dentro = s.filter((x) => x.startMs >= c.startMs - 200 && x.endMs <= c.endMs + 400);
+  return dentro.length > 0 ? dentro[qual === 'primeira' ? 0 : dentro.length - 1] : s[0];
+}
+
+const fold = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+console.log('\nGARANTIA — curador local em transcrição REAL de Whisper:');
+
+// (R0) o material real entra e sai corte
+{
+  ok(
+    T_REAL.sentences.length === REAL.length,
+    `${REAL.length} frases reais viraram ${T_REAL.sentences.length} frases`,
+  );
+  ok(REAL_OUT.clips.length > 0, `transcrição real de Whisper produziu ${REAL_OUT.clips.length} corte(s)`);
+}
+
+// (R1) caco de ASR e continuação em minúscula nunca ABREM corte
+//      defeitos reais: "Com nesses certeza" e "milhões de Só reais aqui no Brasil, tá?"
+{
+  const caco = T_REAL.sentences.find((x) => x.text.trim() === 'Com nesses certeza');
+  const cont = T_REAL.sentences.find((x) => x.text.startsWith('milhões de Só reais'));
+  ok(!!caco && !!cont, 'as duas frases-problema estão na fixture');
+  let ruins = 0;
+  for (const c of REAL_OUT.clips) {
+    const f = fraseDoCorte(c, 'primeira');
+    const palavras = f.text.trim().split(/\s+/).filter(Boolean).length;
+    if (palavras < 5 || startsUppercase(f.text) === false) {
+      ruins++;
+      console.error(`       abriu em caco: "${f.text.slice(0, 60)}"`);
+    }
+  }
+  ok(ruins === 0, 'nenhum corte abre em caco de ASR nem no meio de uma frase cortada');
+}
+
+// (R2) retomada ("A gente já conversou sobre isso.") não abre corte
+{
+  const retomada = T_REAL.sentences.find((x) => x.text.trim() === 'A gente já conversou sobre isso.');
+  ok(!!retomada, 'a frase de retomada está na fixture');
+  const abriu = REAL_OUT.clips.some((c) => fraseDoCorte(c, 'primeira').id === retomada?.id);
+  ok(!abriu, 'nenhum corte abre retomando conversa que ficou fora dele');
+}
+
+// (R3) nada de texto terminando em vírgula ou palavra pendurada
+//      defeito real: headline "10%: separa da nossa margem de lucro,"
+{
+  const PENDURADO =
+    /(?:^|\s)(?:de|do|da|dos|das|em|no|na|por|para|pra|com|e|ou|mas|que|se|a|o|os|as|um|uma|ao|há|tem|vai|meu|minha|nosso|nossa|esses|essas)$/i;
+  let ruins = 0;
+  for (const c of REAL_OUT.clips) {
+    const pares: Array<[string, string]> = [
+      ['headline', c.plan.headline],
+      ['título', c.plan.title],
+    ];
+    for (const [nome, t] of pares) {
+      const limpo = t.trim();
+      if (/[,;:\-–—]$/.test(limpo) || PENDURADO.test(limpo)) {
+        ruins++;
+        console.error(`       ${nome} pendurado: "${limpo}"`);
+      }
+    }
+  }
+  ok(ruins === 0, 'nenhuma headline ou título termina em vírgula ou palavra de função');
+}
+
+// (R4) a pergunta do entrevistador NUNCA vira título
+//      defeito real: "Colaboradores: Qual a função que o Dijasso exerce na empresa?"
+{
+  const perguntas = T_REAL.sentences.filter((x) => /\?\s*$/.test(x.text.trim()));
+  ok(perguntas.length >= 5, `a fixture tem ${perguntas.length} perguntas do entrevistador`);
+  let ruins = 0;
+  for (const c of REAL_OUT.clips) {
+    if (/\?$/.test(c.plan.title.trim())) {
+      ruins++;
+      console.error(`       título é pergunta: "${c.plan.title}"`);
+    }
+    for (const q of perguntas) {
+      const nucleo = fold(q.text).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (nucleo.length > 25 && fold(c.plan.title).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').includes(nucleo)) {
+        ruins++;
+        console.error(`       título copiou a pergunta: "${c.plan.title}"`);
+      }
+    }
+  }
+  ok(ruins === 0, 'nenhum título é a pergunta do entrevistador — só a resposta');
+}
+
+// (R5) headline e título falam do MESMO trecho
+//      defeito real: título "Youtube: Primeiro mês ali eu acertei o único criativo"
+//      com headline "10%: utilizou esses pra validar fontes de tráfego"
+{
+  const nucleo = (h: string) => {
+    const i = h.indexOf(': ');
+    return i > 0 && i <= 26 ? h.slice(i + 2) : h;
+  };
+  let ruins = 0;
+  for (const c of REAL_OUT.clips) {
+    if (!fold(c.plan.title).includes(fold(nucleo(c.plan.headline)))) {
+      ruins++;
+      console.error(`       incoerente:\n         T: ${c.plan.title}\n         H: ${c.plan.headline}`);
+    }
+  }
+  ok(ruins === 0, 'o título sempre contém o miolo da headline (mesma fala, mesmo fato)');
+}
+
+// (R6) tema antes dos dois-pontos só se for substantivo plausível
+//      defeitos reais: "Cada:", "Vira:", "Manter:", "Acha:", "Rodar:", "Saindo:"
+{
+  const PROIBIDOS = ['cada', 'vira', 'manter', 'acha', 'rodar', 'saindo', 'falando', 'tanto'];
+  let ruins = 0;
+  for (const c of REAL_OUT.clips) {
+    const i = c.plan.title.indexOf(': ');
+    if (i <= 0) continue;
+    const tema = fold(c.plan.title.slice(0, i));
+    if (PROIBIDOS.includes(tema)) {
+      ruins++;
+      console.error(`       tema sem sentido: "${c.plan.title}"`);
+    }
+  }
+  ok(ruins === 0, 'nenhum título usa verbo ou quantificador como tema');
+}
+
+// (R7) trava de ASR sujo nas peças puras (as provas do dump, uma a uma)
+{
+  ok(startsUppercase('milhões de Só reais aqui no Brasil, tá?') === false, 'continuação em minúscula é detectada');
+  ok(startsUppercase('Vocês devem ter mais de 10 colaboradores.') === true, 'frase de verdade começa em maiúscula');
+  ok(startsUppercase('30 milhões faturados em seis anos.') === true, 'frase que abre em número também vale');
+  ok(hasAdjacentRepeat('dos maiores caras do do IFA e da atualidade.'), '"do do" é pego como artefato de ASR');
+  ok(
+    !hasAdjacentRepeat('A gente sempre fica atento ao movimento do mercado.'),
+    'frase normal não é acusada de artefato',
+  );
+}
+
+// (R8) higiene de texto: vírgula no fim e "??" (defeitos reais)
+{
+  ok(
+    tidyFragment('10%: separa da nossa margem de lucro,') === '10%: separa da nossa margem de lucro',
+    'vírgula solta no fim some',
+  );
+  ok(tidyFragment('Como é que eu posso te falar??') === 'Como é que eu posso te falar?', '"??" vira "?"');
+  ok(tidyFragment('  "Wesley tem número de Tudo"  ') === 'Wesley tem número de Tudo', 'aspas e espaço nas bordas somem');
+  ok(
+    trimEdges('A gente vem mantendo a constância há', LEX) === 'A gente vem mantendo a constância',
+    '"há" pendurado no fim é aparado',
+  );
+  ok(
+    trimEdges('Vocês devem ter mais de 10 colaboradores', LEX) === 'Vocês devem ter mais de 10 colaboradores',
+    'frase inteira e boa não é mexida',
+  );
+}
+
+// (R9) o dado extraído é o que foi dito — nem "dois mil" no lugar de
+//      "dois milhões", nem ANO virando dado
+{
+  ok(
+    extractFactPhrase('A dívida com o banco passou de dois milhões e o caixa não fechava.') === 'dois milhões',
+    '"dois milhões" não vira "dois mil" (ordem das alternativas do regex)',
+  );
+  ok(
+    extractFactPhrase('A gente quase quebrou em dois mil e dezenove, foi duro.') === null,
+    'ano falado por extenso não é dado ("dois mil e dezenove")',
+  );
+  ok(
+    extractFactPhrase('Faturamos 30 milhões de reais em seis anos.') === '30 milhões de reais',
+    'dinheiro ganha de tempo',
+  );
+  ok(extractFactPhrase('Hoje a gente separa 10% da nossa margem de lucro.') === '10%', 'porcentagem é recortada sozinha');
+}
+
+// (R10) determinismo no material real
+{
+  const a = curate({
+    transcript: T_REAL,
+    energy: null,
+    settings: settings({ count: 5 }),
+    durationSec: DUR_REAL,
+  });
+  ok(JSON.stringify(a) === JSON.stringify(REAL_OUT), 'transcrição real também é determinística');
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} curador: ${passed} ok, ${failed} fail\n`);

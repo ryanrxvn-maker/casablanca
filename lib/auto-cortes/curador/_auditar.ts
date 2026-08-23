@@ -56,7 +56,13 @@ function rodar(nome: string, settings: Record<string, unknown>, comEnergia: bool
   for (let i = 0; i < ordenados.length; i++) {
     const c = ordenados[i];
     const dur = (c.endMs - c.startMs) / 1000;
-    const frases = dump.transcript.sentences.filter((s) => s.startMs >= c.startMs - 400 && s.endMs <= c.endMs + 400);
+    // As frases do Whisper real SE SOBREPOEM (a ultima palavra de uma termina
+    // depois do inicio da seguinte), entao "encostar no tempo" nao quer dizer
+    // "estar no corte". A frase conta quando ela COMECA dentro do corte, com a
+    // mesma folga de respiro que o refineBounds usa (150 ms / 300 ms).
+    const frases = dump.transcript.sentences.filter(
+      (s) => s.startMs >= c.startMs - 200 && s.endMs <= c.endMs + 400,
+    );
     const abre = (frases[0]?.text ?? '').trim();
     const fecha = (frases[frases.length - 1]?.text ?? '').trim();
 
@@ -64,13 +70,13 @@ function rodar(nome: string, settings: Record<string, unknown>, comEnergia: bool
     console.log(`  título   : ${c.plan.title}`);
     console.log(`  headline : ${c.plan.headline}`);
     console.log(`  abre     : "${abre.slice(0, 110)}"`);
-    console.log(`  fecha    : "${fecha.slice(-110)}"`);
+    console.log(`  fecha    : "${fecha.slice(0, 110)}"`);
     console.log(`  tags     : ${c.plan.hashtags.join(', ')}`);
     console.log(`  por quê  : ${c.plan.why}`);
 
     // ── auditoria independente ──
     if (ABERTURA_RUIM.test(abre)) falhas.push(`ABERTURA fraca em ${fmt(c.startMs)}: "${abre.slice(0, 60)}"`);
-    if (FIM_RUIM.test(fecha)) falhas.push(`FIM pendurado em ${fmt(c.startMs)}: "...${fecha.slice(-60)}"`);
+    if (FIM_RUIM.test(fecha)) falhas.push(`FIM pendurado em ${fmt(c.startMs)}: "${fecha.slice(0, 60)}"`);
     const hw = c.plan.headline.trim().split(/\s+/).length;
     if (hw > 8) falhas.push(`HEADLINE com ${hw} palavras em ${fmt(c.startMs)}`);
     if (/[.]$/.test(c.plan.headline.trim())) falhas.push(`HEADLINE com ponto final em ${fmt(c.startMs)}`);

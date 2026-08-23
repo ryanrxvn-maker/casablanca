@@ -314,7 +314,7 @@ export function ClipSettingsPanel({
           onChange={(v: 'local' | 'ia') => set('intelligence', v)}
           options={[
             { value: 'local', label: 'Local', sub: 'grátis e ilimitada' },
-            { value: 'ia', label: 'IA de texto', sub: 'usa sua chave' },
+            { value: 'ia', label: 'Local + IA nos textos', sub: 'usa sua chave' },
           ]}
           disabled={disabled}
           hue={AC_HUE}
@@ -322,7 +322,7 @@ export function ClipSettingsPanel({
         <p className="mt-1.5 text-[11px] leading-relaxed text-text-dim">
           {(value.intelligence ?? 'local') === 'local'
             ? 'Roda no seu navegador: lê a transcrição, mede a energia da fala e acha os trechos que se sustentam sozinhos. Sem chave, sem limite.'
-            : 'Tenta ler a transcrição com a IA de texto da sua chave. Se ela faltar ou bater no limite, os cortes saem pelo curador local do mesmo jeito.'}
+            : 'Os cortes continuam sendo escolhidos aqui no navegador; a IA só reescreve título e headline (uma chamada curta). Se ela faltar ou limitar, fica o texto local.'}
         </p>
       </Row>
 

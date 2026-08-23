@@ -15,7 +15,7 @@
  */
 
 import type { Sentence } from '../types';
-import type { SentenceFeature } from './score';
+import { MIN_OPENING_WORDS, type SentenceFeature } from './score';
 import type { TopicMap } from './topics';
 
 export type CandidateSpan = {
@@ -79,7 +79,15 @@ export function buildCandidates(opts: BuildCandidatesOpts): BuildCandidatesResul
   };
 
   const cleanStart = (i: number): boolean =>
-    !F[i].startsWithFiller && !F[i].startsWithAnaphora && !F[i].startsWithConnective;
+    !F[i].startsWithFiller &&
+    !F[i].startsWithAnaphora &&
+    !F[i].startsWithConnective &&
+    // caco do ASR e retomada de assunto de fora nunca abrem corte
+    !F[i].startsLower &&
+    F[i].words >= MIN_OPENING_WORDS &&
+    F[i].contentWords >= 2 &&
+    !F[i].suspectAsr &&
+    F[i].externalRefHits === 0;
 
   const breathes = (i: number): boolean =>
     i === 0 || topics.isBoundary[i] === true || F[i].gapBeforeMs >= openPauseMs || F[i - 1].endsFinal;
@@ -124,6 +132,10 @@ export function buildCandidates(opts: BuildCandidatesOpts): BuildCandidatesResul
       if (dur < range.min) continue;
       if (!isIdeaEnd(i1)) continue;
       if (F[i1].endsWithDangling) continue;
+      // fechar num caco do ASR ("o que está saindo.") não fecha ideia nenhuma
+      if (F[i1].suspectAsr) continue;
+      // nem numa PERGUNTA: quem assiste fica esperando a resposta que não vem
+      if (F[i1].isQuestion) continue;
       // Terminar NA primeira frase de outro assunto = entregar a abertura do
       // próximo tema como se fosse o fecho deste. Nunca fecha bem.
       if (topics.isBoundary[i1] && topics.topicOf[i1] !== topics.topicOf[i0]) continue;

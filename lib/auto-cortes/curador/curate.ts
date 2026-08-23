@@ -18,7 +18,7 @@
  * Mesma entrada → exatamente a mesma saída.
  */
 
-import { refineBounds, type FinalClip } from '../analyze';
+import { LEAD_PAD_MS, refineBounds, TAIL_PAD_MS, type FinalClip } from '../analyze';
 import { sanitizeClipPlan } from '../analyze';
 import { clampScore } from '../prompts';
 import {
@@ -27,6 +27,7 @@ import {
   LIMITS,
   type ClipCountPreset,
   type ClipSettings,
+  type Ms,
   type Sentence,
   type Transcript,
 } from '../types';
@@ -211,7 +212,12 @@ export function curate(input: CurateInput): CurateResult {
   type Final = { span: CandidateSpan; score: ClipScore; startMs: number; endMs: number };
   const refined: Final[] = [];
   for (const p of picked) {
-    const b = refineBounds(p.span.startMs, p.span.endMs, words, input.settings.length);
+    const b = clampToSentences(
+      refineBounds(p.span.startMs, p.span.endMs, words, input.settings.length),
+      sentences[p.span.i0],
+      sentences[p.span.i1],
+      words,
+    );
     const collide = refined.some((r) => overlapRatio(r, b) > MAX_OVERLAP);
     if (collide) continue; // o de nota maior já ocupou o momento
     refined.push({ span: p.span, score: p.score, startMs: b.startMs, endMs: b.endMs });
@@ -277,6 +283,34 @@ function applyRange(
   });
   const idx = inside.length > 0 ? inside : touching;
   return { sentences: idx.map((i) => sentences[i]), sourceIndex: idx };
+}
+
+/**
+ * Trava as bordas dentro das FRASES escolhidas.
+ *
+ * O Whisper real devolve frases que se sobrepõem: a última palavra de uma
+ * termina depois do início da seguinte (medido no podcast de teste — "conheço."
+ * acaba em 795190 e a frase seguinte começa em 795130). Nessa situação o
+ * `refineBounds`, que procura "a primeira palavra que termina depois do
+ * início", pega a palavra da frase ANTERIOR — e o corte estreava com um caco de
+ * duas palavras ("Não conheço.") apesar de todas as travas de abertura.
+ *
+ * Aqui a borda é presa no primeiro/último som das frases que o curador
+ * realmente escolheu, com o mesmo respiro que o `refineBounds` usa.
+ */
+function clampToSentences(
+  bounds: { startMs: Ms; endMs: Ms },
+  first: Sentence,
+  last: Sentence,
+  words: Transcript['words'],
+): { startMs: Ms; endMs: Ms } {
+  const w0 = words[first.wordFrom];
+  const w1 = words[last.wordTo];
+  const piso = w0 ? Math.max(0, w0.start - LEAD_PAD_MS) : bounds.startMs;
+  const teto = w1 ? w1.end + TAIL_PAD_MS : bounds.endMs;
+  const startMs = Math.max(bounds.startMs, piso);
+  const endMs = Math.min(bounds.endMs, teto);
+  return { startMs, endMs: Math.max(startMs + 1, endMs) };
 }
 
 export function resolveCount(preset: ClipCountPreset, durationSec: number): number {
