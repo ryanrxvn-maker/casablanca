@@ -2980,6 +2980,56 @@ function ClickUpPilotInner() {
           console.warn('[batch restore] hidratacao blob URLs falhou:', e);
         }
       })();
+
+      // ─── AS PREVIAS DOS TAKES (fix 2026-08-23) ───
+      //
+      // O bloco acima devolve os ZIPs (takes/montado/camo), mas NUNCA devolvia
+      // o `videoUrl` de cada parte — e e' ele que alimenta a previa. Resultado:
+      // depois de todo F5 os sete takes de um AD PRONTO ficavam em "NA FILA…"
+      // com a barrinha animando pra sempre, num card que dizia "Pronto". So'
+      // clicando RETOMAR (que re-baixa tudo) as previas voltavam.
+      //
+      // Silas mandou o print: *"atualizo a pagina e ta isso carregando assim"*,
+      // *"nao deveria jamais mostrar pronto se tem algo carregando ainda"*.
+      //
+      // Os blobs ja' estao no IDB desde o primeiro download, sob a chave
+      // isolada por geracao. So' faltava criar as object URLs de novo.
+      void (async () => {
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          for (const taskId of doneTaskIds) {
+            const st = restored[taskId];
+            if (!st?.parts?.length) continue;
+            const genId = st.genId;
+            const urls: Record<string, string> = {};
+            for (const part of st.parts) {
+              // Sem videoId = parte vazia (texto em branco no plano): nunca
+              // teve blob, e procurar so' geraria ruido no console.
+              if (!part.videoId || part.videoUrl) continue;
+              try {
+                const b = await loadBlob(pilotPartKey(taskId, genId, part.label), 'video/mp4');
+                if (b && b.size > 1024) urls[part.label] = URL.createObjectURL(b);
+              } catch { /* parte sem cache: segue como estava */ }
+            }
+            if (!Object.keys(urls).length) continue;
+            setBatchStates((prev) => {
+              const cur = prev[taskId];
+              if (!cur) return prev;
+              return {
+                ...prev,
+                [taskId]: {
+                  ...cur,
+                  parts: cur.parts.map((x) => (urls[x.label] && !x.videoUrl
+                    ? { ...x, videoUrl: urls[x.label] }
+                    : x)),
+                },
+              };
+            });
+          }
+        } catch (e) {
+          console.warn('[batch restore] previas dos takes:', e);
+        }
+      })();
     }
   }, []);
 
