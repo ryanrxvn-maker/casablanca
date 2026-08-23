@@ -124,6 +124,7 @@ import {
 import { LangSwitch3D } from '@/components/LangSwitch3D';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
 import { takeUnicoPorLook, motorEfetivo } from '@/lib/heygen-motion-motor';
+import { revisarCopy, contarGraves } from '@/lib/revisar-copy';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -11705,7 +11706,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 }
                                                 return (
                                                   <div className="grid gap-2">
-                                                    {matched.map(({ pt, idx }) => (
+                                                    {matched.map(({ pt, idx }) => {
+                                                    // REVISAO DA COPY, antes de virar take pago. Um AD ja saiu
+                                                    // do HeyGen com o avatar dizendo "que TA nao importa" (o doc
+                                                    // truncou "tamanho"): o parser copia fiel e ninguem olha o
+                                                    // texto de novo. Aviso, nunca bloqueio — quem decide e o olho.
+                                                    const achados = revisarCopy(pt.text, (a.roleSlots || []).map((s2) => s2.role));
+                                                    const graves = contarGraves(achados);
+                                                    return (
                                                       <div key={idx} className="rounded-[8px] border border-line bg-bg/60 p-2">
                                                         <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-widest">
                                                           <div className="flex min-w-0 items-center gap-2">
@@ -11763,8 +11771,24 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           spellCheck={false}
                                                           placeholder="(vazio — esse part nao vai gerar nada)"
                                                         />
+                                                        {achados.length ? (
+                                                          <div className={`mono mt-1.5 rounded-[6px] border px-2 py-1 text-[9.5px] leading-relaxed ${
+                                                            graves ? 'border-rose-400/45 bg-rose-500/10 text-rose-200' : 'border-yellow-500/40 bg-yellow-500/5 text-yellow-200'
+                                                          }`}>
+                                                            <span className="font-bold uppercase tracking-widest">
+                                                              {graves ? '⚠ revisar a copy' : 'revisar'}
+                                                            </span>
+                                                            {achados.slice(0, 3).map((x, k) => (
+                                                              <div key={k} className="mt-0.5">
+                                                                {x.trecho ? <span className="rounded bg-black/30 px-1">{x.trecho}</span> : null} {x.motivo}
+                                                              </div>
+                                                            ))}
+                                                            {achados.length > 3 ? <div className="mt-0.5 opacity-70">+{achados.length - 3} outro(s)</div> : null}
+                                                          </div>
+                                                        ) : null}
                                                       </div>
-                                                    ))}
+                                                    );
+                                                    })}
                                                   </div>
                                                 );
                                               })()}
