@@ -206,6 +206,7 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/auto-cortes',
+    adminOnly: true,
     label: 'Auto Cortes',
     description: 'Vídeo longo vira cortes prontos, com legenda e headline.',
     icon: <IconAutoCortes size={26} />,

@@ -125,6 +125,29 @@ function nextTask(): Promise<void> {
   });
 }
 
+/**
+ * Onde a linha do tempo DESTE arquivo começa, segundo o próprio navegador.
+ *
+ * Um mp4 cortado com `-copyts` guarda os timestamps ABSOLUTOS da fonte: o
+ * elemento <video> então enxerga a faixa [760,5 … 806] em vez de [0 … 46], e
+ * pedir `currentTime = 6` prende no primeiro frame. Somar esta base faz o
+ * mesmo código servir pros dois jeitos de cortar.
+ */
+function timelineBase(video: HTMLVideoElement): number {
+  try {
+    if (video.seekable && video.seekable.length > 0) {
+      const b = video.seekable.start(0);
+      if (Number.isFinite(b) && b > 0) return b;
+    }
+  } catch {
+    /* seekable pode lançar antes dos metadados; base 0 é o certo aí */
+  }
+  // `startTime` só existe em implementações antigas; lido por indexação
+  // justamente pra não depender de tipo que o TS não conhece.
+  const s = (video as unknown as Record<string, unknown>).startTime;
+  return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
+}
+
 function seekVideo(video: HTMLVideoElement, t: number): Promise<void> {
   return new Promise((resolve) => {
     let done = false;
@@ -638,7 +661,8 @@ async function renderFramesBySeek(
       const tRel = Math.min(i / FPS + 0.0001, outDurationSec - 0.001);
       const tAbs = absStart + tRel;
       // tempo DENTRO do clipe (o <video> conta do 1º frame do arquivo)
-      const tLocal = clamp(tAbs - clipFirstPts, 0, Math.max(0, clipDurationSec - 0.001));
+      const tLocal =
+        timelineBase(video) + clamp(tAbs - clipFirstPts, 0, Math.max(0, clipDurationSec - 0.001));
       await seekVideo(video, tLocal);
 
       compose(ctx, video, tAbs);
@@ -932,7 +956,7 @@ export async function renderThumb(
     });
 
     const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-    const tLocal = clamp(tAbs - clipFirstPts, 0, Math.max(0, dur - 0.05));
+    const tLocal = timelineBase(video) + clamp(tAbs - clipFirstPts, 0, Math.max(0, dur - 0.05));
     await seekVideo(video, tLocal);
 
     // Compõe em resolução CHEIA (o overlay é dimensionado pela largura do

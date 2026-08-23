@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * AUTO CORTES — transcrição word-level de UM PEDAÇO de áudio.
  *
  * Gêmea da /api/tipografia/transcribe, com duas diferenças que importam:
- *  1. gate Premium por ferramenta (`requireToolAccess('/tools/auto-cortes')`) —
+ *  1. gate ADMIN por ferramenta (`requireToolAccess('/tools/auto-cortes')`) —
  *     rota de tool paga nunca fica aberta pra conta free com cookie válido;
  *  2. o cliente manda MUITOS pedaços (vídeo longo é o caso normal), então o
  *     navegador é quem orquestra paralelismo/retry — aqui cada request é um
@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
  * AssemblyAI — é o comportamento de `transcribeAudio`.
  */
 export async function POST(req: Request) {
-  const gate = await requireToolAccess('/tools/auto-cortes', 'basic');
+  const gate = await requireToolAccess('/tools/auto-cortes', 'admin');
   if (!gate.ok) return gate.response;
 
   let form: FormData;

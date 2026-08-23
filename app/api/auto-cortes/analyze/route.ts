@@ -229,7 +229,7 @@ function readCandidates(raw: unknown): ResolvedCandidate[] | null {
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireToolAccess('/tools/auto-cortes', 'basic');
+    const gate = await requireToolAccess('/tools/auto-cortes', 'admin');
     if (!gate.ok) return gateError(gate.response);
 
     const picked = await pickProvider();
@@ -527,7 +527,7 @@ function scoreSumOf(c: ResolvedCandidate): number {
 /** GET = qual IA vai rodar pra este cliente e os limites que o navegador deve respeitar. */
 export async function GET() {
   try {
-    const gate = await requireToolAccess('/tools/auto-cortes', 'basic');
+    const gate = await requireToolAccess('/tools/auto-cortes', 'admin');
     if (!gate.ok) return gateError(gate.response);
     const picked = await pickProvider();
     if ('response' in picked) return gateError(picked.response);

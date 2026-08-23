@@ -98,6 +98,29 @@ function seekVideo(video: HTMLVideoElement, t: number): Promise<void> {
   });
 }
 
+/**
+ * Onde a linha do tempo DESTE arquivo começa, segundo o próprio navegador.
+ *
+ * Um mp4 cortado com `-copyts` guarda os timestamps ABSOLUTOS da fonte: o
+ * elemento <video> então enxerga a faixa [760,5 … 806] em vez de [0 … 46], e
+ * pedir `currentTime = 6` prende no primeiro frame. Somar esta base faz o
+ * mesmo código servir pros dois jeitos de cortar.
+ */
+function timelineBase(video: HTMLVideoElement): number {
+  try {
+    if (video.seekable && video.seekable.length > 0) {
+      const b = video.seekable.start(0);
+      if (Number.isFinite(b) && b > 0) return b;
+    }
+  } catch {
+    /* seekable pode lançar antes dos metadados; base 0 é o certo aí */
+  }
+  // `startTime` só existe em implementações antigas; lido por indexação
+  // justamente pra não depender de tipo que o TS não conhece.
+  const s = (video as unknown as Record<string, unknown>).startTime;
+  return typeof s === 'number' && Number.isFinite(s) && s > 0 ? s : 0;
+}
+
 /** Histograma de luminância em 16 bins, normalizado (soma 1). */
 export function lumaHistogram(data: Uint8ClampedArray, bins = HIST_BINS): number[] {
   const hist = new Array<number>(bins).fill(0);
@@ -182,7 +205,9 @@ export async function sampleFaces(input: SampleFacesInput): Promise<ReframeScan>
       throwIfAborted();
       const tAbs = absStart + (i + 0.5) * step;
       // tempo DENTRO do clipe: o <video> conta a partir do 1º frame do arquivo
-      const tLocal = Math.max(0, Math.min(tAbs - clipFirstPts, Math.max(0, clipDur - 0.001)));
+      const base = timelineBase(video);
+      const tLocal =
+        base + Math.max(0, Math.min(tAbs - clipFirstPts, Math.max(0, clipDur - 0.001)));
       await seekVideo(video, tLocal);
       throwIfAborted();
 

@@ -194,7 +194,7 @@ function repassar(head: Uint8Array, reader: ReadableStreamDefaultReader<Uint8Arr
 }
 
 export async function GET(req: Request) {
-  const gate = await requireToolAccess('/tools/auto-cortes', 'basic');
+  const gate = await requireToolAccess('/tools/auto-cortes', 'admin');
   if (!gate.ok) return gate.response;
 
   const { searchParams } = new URL(req.url);

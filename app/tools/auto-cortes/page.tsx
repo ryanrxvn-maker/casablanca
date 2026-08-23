@@ -112,7 +112,7 @@ function probeLocal(
 
 export default function AutoCortesPage() {
   return (
-    <TierGate require="basic" toolName="Auto Cortes">
+    <TierGate require="admin" toolName="Auto Cortes">
       <AutoCortesInner />
     </TierGate>
   );

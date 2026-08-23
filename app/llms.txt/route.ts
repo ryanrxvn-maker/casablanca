@@ -21,7 +21,6 @@ const BODY = `# Auto Edit
 - Decupagem automática: remove silêncios e cortes mortos em lote, com volume nivelado.
 - Decupagem Inteligente: a IA lê a copy e escolhe o melhor take de cada frase.
 - Lipsync Video to Video: o rosto do vídeo falando qualquer áudio novo, com a boca encaixada.
-- Auto Cortes: vídeo longo (podcast, live, aula) vira cortes curtos com legenda animada, headline e reenquadro 9:16, 4:5, 1:1 ou 16:9 — tudo processado no navegador.
 - Legendas (SRT) alinhadas à copy, palavra por palavra.
 - Compressão, ajuste de velocidade e divisão de áudio em lote.
 

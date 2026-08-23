@@ -31,7 +31,6 @@ type Tool = {
  * propaganda enganosa. */
 const ALL_TOOLS: Tool[] = [
   { key: 'lipsync', label: 'Lipsync Video to Video' },
-  { key: 'auto-cortes', label: 'Auto Cortes' },
   { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
   { key: 'gerador-srt', label: 'Gerador de SRT' },
   { key: 'decupagem', label: 'Decupagem' },
@@ -996,14 +995,6 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(232,121,249,0.55)',
     desc: 'A IA decupa o vídeo seguindo a copy do roteiro com precisão.',
     win: 'Você diz o que tem que ser dito, a IA escolhe o melhor take e monta.',
-  },
-  {
-    key: 'auto-cortes',
-    name: 'Auto Cortes',
-    cat: 'IA',
-    hue: 'rgba(244,114,182,0.55)',
-    desc: 'Podcast, live ou aula viram cortes curtos com legenda, headline e reenquadro.',
-    win: 'A IA acha os trechos que se sustentam sozinhos e você baixa tudo pronto — o vídeo nunca sai do seu navegador.',
   },
 ];
 
