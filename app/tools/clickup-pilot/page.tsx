@@ -5757,7 +5757,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   // caber numa parte SO, senao o unico jeito era re-disparar o AD inteiro.
   const [editEngine, setEditEngine] = useState<'auto' | 'III' | 'IV' | 'V'>('auto');
   const [editMotion, setEditMotion] = useState<string>('');
-  const [regeneratingPart, setRegeneratingPart] = useState<{ taskId: string; label: string } | null>(null);
+  /**
+   * QUAIS partes estao re-gerando agora — `${taskId}::${label}`.
+   *
+   * Era um objeto SO': uma parte no ar deixava o botao de re-gerar desabilitado
+   * pro AD inteiro, e corrigir 13 takes de um lote virava fila de um em um, cada
+   * um esperando o render anterior. Cada parte dispara e faz poll por conta
+   * propria, entao nada impede que andem juntas.
+   */
+  const [regeneratingParts, setRegeneratingParts] = useState<Record<string, true>>({});
+  const chaveParte = (taskId: string, label: string) => taskId + '::' + label;
+  const marcarRegen = (taskId: string, label: string, on: boolean) =>
+    setRegeneratingParts((prev) => {
+      const k = chaveParte(taskId, label);
+      if (on) return { ...prev, [k]: true as const };
+      const { [k]: _fora, ...resto } = prev;
+      return resto;
+    });
   const [regenError, setRegenError] = useState<string | null>(null);
   const [rebuildingTaskId, setRebuildingTaskId] = useState<string | null>(null);
 
@@ -5843,7 +5859,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // ser excluído do HeyGen antes do novo submit (anti-memória de moderação).
     const prevPart = b.parts[partIdx];
     const rejectedVideoId = prevPart?.videoStatus === 'failed' ? (prevPart.videoId || null) : null;
-    setRegeneratingPart({ taskId, label });
+    marcarRegen(taskId, label, true);
     setRegenError(null);
     // FECHA O MODAL NA HORA: a re-geração (dispatch + poll de até 25min + download)
     // roda em BACKGROUND — o card já mostra o progresso da parte (isRegenThis) e, se
@@ -5998,7 +6014,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         };
       });
     } finally {
-      setRegeneratingPart(null);
+      marcarRegen(taskId, label, false);
     }
   }
 
@@ -6034,7 +6050,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const rejectedError = part.error;
 
     // Marca a parte como "re-gerando agora" (overlay no card) + reseta erro.
-    setRegeneratingPart({ taskId, label });
+    marcarRegen(taskId, label, true);
     setBatchStates((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
@@ -6141,7 +6157,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       });
       setError(`Parte ${label} (áudio): ${msg}`);
     } finally {
-      setRegeneratingPart(null);
+      marcarRegen(taskId, label, false);
     }
   }
 
@@ -10145,7 +10161,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                                   {previews.map((t, ti) => {
                                     const originalIdx = validIdxsFiltered[ti];
-                                    const isRegenThis = regeneratingPart?.taskId === b.taskId && regeneratingPart?.label === t.label;
+                                    const isRegenThis = !!regeneratingParts[chaveParte(b.taskId, t.label)];
                                     return (
                                       <LipsyncPreviewCard
                                         key={ti}
@@ -12519,7 +12535,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             engine: editEngine,
             motionPrompt: editMotion,
           }}
-          busy={!!regeneratingPart}
+          busy={!!regeneratingParts[chaveParte(editingPart.taskId, editingPart.label)]}
           errorMsg={regenError}
           onClose={() => {
             // Fechar SEMPRE liberado — a re-geração roda em BACKGROUND (o card mostra o
@@ -12539,7 +12555,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             <CompactAvatarPicker
               selected={editAvatar}
               setSelected={(a) => setEditAvatar(a)}
-              disabled={!!regeneratingPart}
+              disabled={!!regeneratingParts[chaveParte(editingPart.taskId, editingPart.label)]}
               label={`Avatar pra ${editingPart.label}`}
             />
           }
