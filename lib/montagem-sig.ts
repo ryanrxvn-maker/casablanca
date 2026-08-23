@@ -18,6 +18,17 @@ export type ParteAssinavel = {
   label: string;
   videoId?: string | null;
   videoStatus?: string;
+  /** O que REALMENTE gerou este take — nao o que o plano pede hoje. */
+  usouAvatarId?: string | null;
+  usouVoiceId?: string | null;
+  usouEngine?: string | null;
+};
+
+export type PartePlanejada = {
+  label: string;
+  avatarId?: string | null;
+  voiceId?: string | null;
+  engine?: string | null;
 };
 
 /** Assina os takes que entraram numa montagem.
@@ -74,4 +85,41 @@ export function takesPendentesDe(b: { parts?: ParteAssinavel[] }): number {
   return (b.parts || []).filter(
     (p) => p.videoStatus === 'pending' || p.videoStatus === 'processing',
   ).length;
+}
+
+
+/** ═══ TAKE QUE FICOU PRA TRAS DO PLANO ═══
+ *
+ *  Caso real (AD06, 23.08): o avatar da Catia foi refeito, o photo avatar novo
+ *  foi criado e o plano do AD passou a apontar pro look corrigido — mas os
+ *  SETE takes nunca foram re-gerados. Nada no card acusou: selo verde, download
+ *  aberto, e o video entregue trazia o avatar velho. O Silas viu na tela:
+ *  *"esse e' o disparo sem o frame novo mesmo e sem o avatar iv que voce usou.
+ *  NAO PODE ACONTECER ISSO E VOLTAR PRO ANTIGO"*.
+ *
+ *  Trocar o look no plano NAO re-gera nada — e' so' intencao. Aqui se compara a
+ *  intencao com o que de fato gerou cada take.
+ *
+ *  ⚠ So' acusa quando o take TEM carimbo (`usouAvatarId`). Take de disparo
+ *  antigo nao tem, e inventar divergencia ali seria alarme falso em todo batch
+ *  velho — pior que o silencio que se esta' consertando.
+ */
+export function partesForaDoPlano(
+  parts?: ParteAssinavel[],
+  planejadas?: PartePlanejada[],
+): string[] {
+  if (!parts?.length || !planejadas?.length) return [];
+  const plano = new Map(planejadas.map((x) => [x.label, x]));
+  const fora: string[] = [];
+  for (const p of parts) {
+    if (!p.usouAvatarId) continue;              // sem carimbo = legado, nao acusa
+    const q = plano.get(p.label);
+    if (!q) continue;
+    const mudouAvatar = !!q.avatarId && q.avatarId !== p.usouAvatarId;
+    const mudouVoz = !!q.voiceId && !!p.usouVoiceId && q.voiceId !== p.usouVoiceId;
+    const mudouMotor = !!q.engine && !!p.usouEngine
+      && String(q.engine).toUpperCase() !== String(p.usouEngine).toUpperCase();
+    if (mudouAvatar || mudouVoz || mudouMotor) fora.push(p.label);
+  }
+  return fora;
 }

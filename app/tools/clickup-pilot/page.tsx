@@ -79,7 +79,7 @@ import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPrevie
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
 // Estado DERIVADO do conteudo: e' o que impede o card de dizer "Pronto"
 // sobre um montado velho (ver o modulo — caso AD06, 23.08).
-import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe } from '@/lib/montagem-sig';
+import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe, partesForaDoPlano } from '@/lib/montagem-sig';
 import { EditPartModal } from '@/components/EditPartModal';
 import {
   PilotBtn3D,
@@ -681,7 +681,12 @@ type BatchTaskState = {
    *  é falha e NÃO re-dispara — o watcher retoma sozinho quando ficarem prontos. */
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed' | 'waiting-heygen';
   /** Per-part status durante dispatch (parteN: error|null) */
-  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; videoUrl?: string | null; error?: string | null; renamedTo: string }>;
+  /** ⚠ `usouAvatarId`/`usouVoiceId`/`usouEngine` = o que REALMENTE gerou este
+   *  take, nao o que o plano pede hoje. Sao coisas diferentes: em 23.08 o AD06
+   *  teve avatar novo criado e o replan atualizado pro look corrigido, mas os
+   *  takes nunca foram re-gerados — e nada no card acusou. O video entregue era
+   *  o do avatar velho, com o card verde dizendo "Pronto". */
+  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; videoUrl?: string | null; error?: string | null; renamedTo: string; usouAvatarId?: string | null; usouVoiceId?: string | null; usouEngine?: string | null }>;
   message?: string;
   startedAt: number;
   finishedAt?: number;
@@ -3495,7 +3500,17 @@ function ClickUpPilotInner() {
           setBatchStates((prev) => {
             const s = prev[taskId];
             if (!s) return prev;
-            const newParts = s.parts.map((p, i) => i === orig ? { ...p, videoId: r.videoId, error: r.error } : p);
+            // Carimba o que gerou este take (o plano DESTE disparo), pra o card
+            // poder acusar depois que o plano mudou e o take ficou pra tras.
+            const doPlano = replan?.parts?.find((x) => x.label === s.parts[orig]?.label);
+            const newParts = s.parts.map((p, i) => i === orig ? {
+              ...p,
+              videoId: r.videoId,
+              error: r.error,
+              usouAvatarId: doPlano?.avatarId ?? p.usouAvatarId ?? null,
+              usouVoiceId: doPlano?.voiceId ?? p.usouVoiceId ?? null,
+              usouEngine: doPlano?.engine ? String(doPlano.engine).toUpperCase() : (p.usouEngine ?? null),
+            } : p);
             return { ...prev, [taskId]: { ...s, parts: newParts } };
           });
         },
@@ -6032,7 +6047,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const cur = prev[taskId];
         if (!cur) return prev;
         const newParts = cur.parts.map((p, i) => i === partIdx
-          ? { ...p, videoId: job.videoId, videoStatus: 'pending' as const, videoUrl: null, error: null }
+          ? {
+              ...p,
+              videoId: job.videoId,
+              videoStatus: 'pending' as const,
+              videoUrl: null,
+              error: null,
+              // Carimba o que ESTE take passou a usar. E' o que deixa o card
+              // comparar plano x realidade e acusar take que ficou pra tras.
+              usouAvatarId: effectiveAvatarId || null,
+              usouVoiceId: effectiveVoiceId || null,
+              usouEngine: motorParte ? String(motorParte).toUpperCase() : null,
+            }
           : p);
         return { ...prev, [taskId]: { ...cur, parts: newParts } };
       });
@@ -10378,6 +10404,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               }}
                               dirtyPartsCount={partesDesatualizadas(b).length}
                               takesPendentes={takesPendentesDe(b)}
+                              takesForaDoPlano={partesForaDoPlano(b.parts, b.replan?.parts).length}
                               onRebuild={() => void rebuildMontage(b.taskId)}
                               isRebuilding={rebuildingTaskId === b.taskId}
                               docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}

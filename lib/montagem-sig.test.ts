@@ -1,4 +1,4 @@
-import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe } from './montagem-sig';
+import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe, partesForaDoPlano } from './montagem-sig';
 
 let falhas = 0;
 function ok(cond: boolean, nome: string) {
@@ -54,6 +54,37 @@ ok(partesDesatualizadas({ parts: naFila, montagemSig: sig }).join() === 'BODY 2'
 ok(assinaturaMontagem([]) === '' && assinaturaMontagem(undefined) === '',
    'sem partes = assinatura vazia');
 ok(partesDesatualizadas({}).length === 0, 'batch sem nada nao quebra');
+
+// ── take que ficou pra tras do plano (o caso AD06, 23.08) ───────────────
+const takesGerados = [
+  { label: 'HOOK 1', videoId: 'v1', usouAvatarId: 'catia-VELHO', usouEngine: 'III' },
+  { label: 'BODY 1', videoId: 'v2', usouAvatarId: 'catia-VELHO', usouEngine: 'III' },
+];
+const planoNovo = [
+  { label: 'HOOK 1', avatarId: 'catia-CORRIGIDO', engine: 'IV' },
+  { label: 'BODY 1', avatarId: 'catia-CORRIGIDO', engine: 'III' },
+];
+ok(partesForaDoPlano(takesGerados, planoNovo).length === 2,
+   'plano trocou o avatar e os takes nao foram re-gerados: acusa os dois');
+
+const planoIgual = [
+  { label: 'HOOK 1', avatarId: 'catia-VELHO', engine: 'III' },
+  { label: 'BODY 1', avatarId: 'catia-VELHO', engine: 'III' },
+];
+ok(partesForaDoPlano(takesGerados, planoIgual).length === 0,
+   'plano igual ao que gerou: nao acusa nada');
+
+ok(partesForaDoPlano(takesGerados, [
+   { label: 'HOOK 1', avatarId: 'catia-VELHO', engine: 'IV' },
+   { label: 'BODY 1', avatarId: 'catia-VELHO', engine: 'III' },
+ ]).join() === 'HOOK 1', 'so' + String.fromCharCode(39) + ' o motor mudou: acusa so a parte dele');
+
+const semCarimbo = [{ label: 'HOOK 1', videoId: 'v1' }];
+ok(partesForaDoPlano(semCarimbo, planoNovo).length === 0,
+   'take de disparo antigo (sem carimbo) nao vira alarme falso');
+
+ok(partesForaDoPlano(takesGerados, []).length === 0 && partesForaDoPlano([], planoNovo).length === 0,
+   'sem plano ou sem takes nao quebra');
 
 console.log('');
 console.log(falhas ? falhas + ' FALHA(S)' : 'montagem-sig: tudo ok');
