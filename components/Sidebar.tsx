@@ -478,6 +478,7 @@ const TOOL_PATHS = [
   '/tools/decupagem-copy',
   '/tools/copy-srt',
   '/tools/tipografia',
+  '/tools/auto-cortes',
   '/tools/heygen-auto',
   '/tools/famous-hey',
 ];

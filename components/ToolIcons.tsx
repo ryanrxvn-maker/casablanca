@@ -115,6 +115,28 @@ export function IconCompressor(p: IconProps) {
   );
 }
 
+/** Auto Cortes — tesoura cortando + play (gradient rosa-coral) */
+export function IconAutoCortes(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  return (
+    <svg {...baseProps(p, `url(#${id})`)}>
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#f472b6" />
+          <stop offset="100%" stopColor="#fb7185" />
+        </linearGradient>
+      </defs>
+      <circle cx="5" cy="7" r="2.1" />
+      <circle cx="5" cy="17" r="2.1" />
+      <path d="M6.8 8.2l7 7" />
+      <path d="M6.8 15.8l2.8-2.8" />
+      <path d="M11.6 11l2.2-2.2" />
+      <path d="M16 8.6l5.4 3.4-5.4 3.4z" fill={`url(#${id})`} />
+    </svg>
+  );
+}
+
 /** Downloader — gradient azul */
 export function IconDownloader(p: IconProps) {
   const raw = useId();

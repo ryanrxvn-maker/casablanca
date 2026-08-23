@@ -87,6 +87,8 @@ export const metadata: Metadata = {
     'editor de vídeo automático',
     'automação UGC',
     'gerador de legenda SRT',
+    'cortes de podcast',
+    'cortes para reels e tiktok',
     'compressor de vídeo online',
     'editar vídeo com IA',
     'Auto Edit',
@@ -191,6 +193,7 @@ const JSON_LD = {
         'FakePrint — prints de telejornal, site de notícia e redes sociais',
         'Lipsync Video to Video',
         'Legendas (SRT) alinhadas à copy',
+        'Auto Cortes — cortes de vídeo longo com legenda e headline',
         'Compressão e ajuste de velocidade em lote',
       ],
       offers: {

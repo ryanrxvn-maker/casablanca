@@ -12,6 +12,7 @@ export const GUIDE_PATHS = new Set<string>([
   '/tools/acelerador',
   '/tools/audio-split',
   '/tools/auto-broll',
+  '/tools/auto-cortes',
   '/tools/background',
   '/tools/caixinha-pergunta',
   '/tools/calculadora',

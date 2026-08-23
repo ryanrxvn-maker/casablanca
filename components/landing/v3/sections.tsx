@@ -22,6 +22,7 @@ import { DarkoLogo } from '../../DarkoLogo';
 import {
   IconAcelerador,
   IconAudioSplit,
+  IconAutoCortes,
   IconCalculadora,
   IconCamuflagem,
   IconCompressor,
@@ -517,6 +518,12 @@ const TOOLS: Tool[] = [
     icon: <IconDecupageCopy size={20} />,
   },
   {
+    name: 'Auto Cortes',
+    desc: 'Podcast, live ou aula viram cortes curtos com legenda, headline e reenquadro.',
+    plan: 'premium',
+    icon: <IconAutoCortes size={20} />,
+  },
+  {
     name: 'Gerador de SRT',
     desc: 'Áudio + copy entram; a legenda sai alinhada palavra por palavra.',
     plan: 'premium',
@@ -815,6 +822,7 @@ export function PricingSection() {
                 'Camuflagem (com selo por plataforma)',
                 'Lipsync Video to Video',
                 'Decupagem Inteligente',
+                'Auto Cortes',
                 'Gerador de SRT pela copy',
                 'Mixer de Velocidade',
                 'Dividir Áudios',
@@ -1010,6 +1018,7 @@ export function LandingFooter() {
           'FakePrint · 41 modelos',
           'Gerador de SRT',
           'Lipsync Video to Video',
+          'Auto Cortes',
           'Compressor',
           'Downloader',
           'Mixer de velocidade',

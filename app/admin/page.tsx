@@ -80,6 +80,7 @@ const TOOL_LABELS: Record<string, string> = {
   normalizador: 'Normalizador',
   calculadora: 'Calculadora',
   'copy-srt': 'Gerador de SRT',
+  'auto-cortes': 'Auto Cortes',
   'auto-broll': 'Auto B-roll',
   'heygen-auto': 'Hey Auto',
   'clickup-pilot': 'ClickUp Pilot',

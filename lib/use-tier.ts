@@ -38,6 +38,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/copy-srt',
     '/tools/decupagem-copy',
     '/tools/lipsync',
+    '/tools/auto-cortes',
     '/tools/historico',
     // ⚠ NÃO inclui as ferramentas de uso interno (admin-only): auto-broll,
     // heygen-auto, clickup-pilot, remover-elementos, separador-audio,
@@ -60,6 +61,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/copy-srt',
     '/tools/decupagem-copy',
     '/tools/lipsync',
+    '/tools/auto-cortes',
     '/tools/historico',
   ]),
   admin: new Set([]), // admin é tratado por bypass (allow tudo)

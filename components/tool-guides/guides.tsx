@@ -798,6 +798,133 @@ export const GUIDES: Record<string, ToolGuide> = {
     ],
   },
 
+  '/tools/auto-cortes': {
+    title: 'Auto Cortes',
+    tagline:
+      'Vídeo longo — podcast, live, aula, entrevista — vira cortes curtos com legenda animada, headline e reenquadro, sem o arquivo sair do seu navegador.',
+    size: 'large',
+    steps: [
+      {
+        title: 'Cole o link ou solte o vídeo',
+        text: 'O passo "1 Fonte" tem um campo único: "Cole o link do YouTube ou do Drive, ou solte o vídeo". Soltar o arquivo do computador é o caminho que não exige nada instalado. Pra colar LINK valem os mesmos dois requisitos do Downloader (passo 1 do guia dele): o Motor instalado e rodando, e a extensão do Chrome na versão 1.8.0. Os chips do lado dizem em que pé você está: "Motor conectado" quer dizer que pode colar link; "Extensão 1.8.0 necessária pra link" quer dizer que a extensão precisa ser atualizada — enquanto isso, subir o arquivo funciona igual. Limite de entrada: 4 GB e 4 horas por vídeo.',
+        visual: (
+          <Shot label="Auto Cortes · 1 Fonte">
+            <MStack>
+              <MField value="Cole o link do YouTube ou do Drive, ou solte o vídeo" grow />
+              <MRow>
+                <MChip tone="lime">Motor conectado</MChip>
+                <MChip tone="amber">Extensão 1.8.0 necessária pra link</MChip>
+              </MRow>
+              <MDrop
+                label="Solte o vídeo aqui"
+                sub="Até 4 GB e 4 h — upload não precisa de extensão"
+              />
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Escolha os ajustes',
+        text: 'No passo "2 Ajustes" você define como os cortes vão sair. "Proporção": 9:16, 4:5, 1:1 ou 16:9. "Duração do corte": Auto, <30s, 30-59s, 60-89s, 90s-3min ou 3-5min. "Quantidade": Auto (a ferramenta calcula pelo tamanho do vídeo) ou um número fixo — 5, 10, 15, 20 ou 30. "Gênero" e "Idioma da fala" afinam a curadoria e a transcrição. "Legenda" abre a mesma galeria das Legendas Automáticas (e tem "Sem legenda"), com "Ritmo da legenda" pra escolher se o bloco anda palavra por palavra ou em frases. "Headline" é o título queimado em cima do corte — galeria própria, opção "Sem headline" e "Headline aparece" em "Todo o corte" ou só nos "Primeiros 5 s". "Reenquadro" (Auto, Seguir, Dividir, Centro, Ajustar) decide o que fica no quadro quando a proporção muda. Em "Momentos específicos" você escreve o que quer que a IA procure ("tudo sobre tráfego pago") e em "Trecho do vídeo" limita a faixa analisada. Gostou da combinação? "Salvar como padrão" guarda tudo pra próxima vez.',
+        visual: (
+          <Shot label="Auto Cortes · 2 Ajustes">
+            <MStack>
+              <MRow>
+                <MChip tone="violet">9:16</MChip>
+                <MChip tone="dim">4:5</MChip>
+                <MChip tone="dim">1:1</MChip>
+                <MChip tone="dim">16:9</MChip>
+              </MRow>
+              <MRow>
+                <MChip tone="violet">Auto</MChip>
+                <MChip tone="dim">30-59s</MChip>
+                <MChip tone="dim">60-89s</MChip>
+                <MChip tone="dim">90s-3min</MChip>
+              </MRow>
+              <MRow>
+                <MChip tone="dim">Legenda</MChip>
+                <MChip tone="dim">Headline</MChip>
+                <MChip tone="dim">Reenquadro</MChip>
+              </MRow>
+              <MField label="Momentos específicos" value="tudo sobre tráfego pago" grow />
+              <MRow>
+                <MBtn tone="ghost">Salvar como padrão</MBtn>
+              </MRow>
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Gere os cortes',
+        text: 'Clique em "Gerar cortes" e acompanhe a barra "Fonte → Áudio → Transcrição → Análise → Render". Tudo roda no seu navegador: o vídeo é aberto localmente, o áudio é extraído em pedaços, a fala vira transcrição, a IA lê a transcrição pra escolher os trechos e o MP4 de cada corte é montado aqui mesmo. Só duas chaves precisam estar preenchidas em /configuracoes/api: "Transcrição" e "IA de texto" — faltando alguma, o banner no topo do passo 2 aponta o caminho. Tempo esperado num PC comum: podcast de 1 h fica em torno de 8 a 12 minutos do início ao último corte renderizado.',
+        visual: (
+          <Shot label="Auto Cortes · 3 Gerar cortes">
+            <MStack>
+              <MRow>
+                <MBtn tone="primary">Gerar cortes</MBtn>
+              </MRow>
+              <MRow>
+                <MChip tone="lime">Fonte</MChip>
+                <MChip tone="lime">Áudio</MChip>
+                <MChip tone="violet">Transcrição</MChip>
+                <MChip tone="dim">Análise</MChip>
+                <MChip tone="dim">Render</MChip>
+              </MRow>
+              <MQueueItem name="Transcrição · pedaço 4 de 9" status="44%" pct={44} />
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Revise e baixe',
+        text: 'Cada corte vira um card com a miniatura, a duração, o título e um score de 0 a 99. Esse score é um ranking relativo DENTRO do seu vídeo — serve pra dizer por onde começar, não pra prometer alcance. Nas ações do card: "Pré-visualizar" mostra o corte exatamente como o MP4 vai sair, "Ajustar" abre o editor, "Baixar" salva aquele corte, "Copiar textos" leva título, descrição e hashtags pra área de transferência, e "SRT" baixa a legenda do corte em arquivo. Na barra de cima, "Baixar todos (ZIP)" junta a leva inteira num arquivo só.',
+        visual: (
+          <Shot label="Auto Cortes · resultado">
+            <MStack>
+              <MRow>
+                <MChip tone="lime">92</MChip>
+                <MChip tone="dim">0:58</MChip>
+                <MChip tone="dim">9:16</MChip>
+              </MRow>
+              <MRow>
+                <MBtn tone="ghost">Pré-visualizar</MBtn>
+                <MBtn tone="ghost">Ajustar</MBtn>
+                <MBtn tone="ghost">Baixar</MBtn>
+                <MBtn tone="ghost">Copiar textos</MBtn>
+                <MBtn tone="ghost">SRT</MBtn>
+              </MRow>
+              <MRow>
+                <MBtn tone="lime">Baixar todos (ZIP)</MBtn>
+              </MRow>
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Ajuste um corte',
+        text: '"Ajustar" abre o editor daquele corte: puxe as bordas de início e fim pra pegar a frase inteira, reescreva o título e a headline, e clique em "Renderizar de novo" — só aquele corte é remontado. Se a mudança vale pra leva toda, use "Trocar legenda/headline" na barra: os cortes voltam a renderizar com o novo estilo sem refazer a análise. "Refazer análise" pede cortes novos aproveitando a transcrição que já existe, e "Retomar" volta de onde parou quando algo travou no meio. F5 não perde o trabalho: o projeto volta do jeito que estava — se a fonte foi upload, a página pede o mesmo arquivo de novo pra continuar.',
+        visual: (
+          <Shot label="Auto Cortes · editor">
+            <MStack>
+              <MField label="Headline" value="6 anos faturando: o segredo da consistência" grow />
+              <MRow>
+                <MBtn tone="primary">Renderizar de novo</MBtn>
+                <MBtn tone="ghost">Trocar legenda/headline</MBtn>
+                <MBtn tone="ghost">Refazer análise</MBtn>
+                <MBtn tone="dark">Retomar</MBtn>
+              </MRow>
+            </MStack>
+          </Shot>
+        ),
+      },
+    ],
+    tips: [
+      'Link do YouTube/Drive precisa da extensão 1.8.0 + Motor; upload não.',
+      'Tudo roda no seu navegador — o vídeo não sobe pra nenhum servidor.',
+      'Deixe a aba aberta; pode ficar em segundo plano.',
+    ],
+  },
+
   '/tools/decupagem-copy': {
     title: 'Decupagem Inteligente',
     tagline: 'A IA lê a sua copy, escolhe o melhor take de cada frase no vídeo bruto e audita o resultado.',

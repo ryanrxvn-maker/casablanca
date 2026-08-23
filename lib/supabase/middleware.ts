@@ -67,6 +67,7 @@ const FREE_EXTRA_OK_PREFIXES = ['/planos'];
 const PREMIUM_ONLY_TOOLS = [
   '/tools/decupagem-copy',     // Decupagem Inteligente
   '/tools/lipsync',            // Lipsync Video to Video
+  '/tools/auto-cortes',        // Auto Cortes
 ];
 
 // Rotas exclusivamente do admin (mesmo Pro legado não acessa)

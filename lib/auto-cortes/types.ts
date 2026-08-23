@@ -355,6 +355,12 @@ export type Project = {
   clips: Clip[];
   warnings: ProjectWarning[];
   lastError: string | null;
+  /**
+   * Fase em que o erro aconteceu (só quando `phase === 'erro'`). É o que o
+   * "Retomar" usa pra voltar EXATAMENTE pro passo que faltava em vez de
+   * recomeçar o vídeo inteiro. Campo aditivo (B1, 22.08).
+   */
+  errorPhase?: ProjectPhase;
 };
 
 // ───────────────────────────────────────────────────────────────────────────
