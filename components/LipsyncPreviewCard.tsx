@@ -358,6 +358,23 @@ export function LipsyncPreviewCard({
             <p className="relative z-10 line-clamp-3 text-[10px] leading-relaxed text-amber-200/75" title={take.error || undefined}>
               Ainda renderizando lá — não re-gerei pra não gastar cota à toa. Fecho sozinho quando ficar pronto.
             </p>
+            {/* TAKE TRAVADO tambem precisa de saida pelo texto. Antes so' havia
+                "usar audio" aqui: quem quisesse trocar a VOZ ou o LOOK de uma
+                parte presa nesse estado nao tinha por onde. Medido em 23.08,
+                com 6 takes parados e os videos ja' prontos do lado do HeyGen. */}
+            {onEdit ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                title="Editar script/voz/look e re-gerar só essa parte"
+                className="label-tech relative z-10 mt-1 inline-flex items-center justify-center gap-1.5 rounded-full border border-cyan-400/60 bg-cyan-500/15 px-3 py-1.5 text-[9px] uppercase tracking-widest text-cyan-100 transition-all hover:-translate-y-[1px] hover:border-cyan-400/80 hover:bg-cyan-500/25 active:scale-95"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+                </svg>
+                Editar e re-gerar
+              </button>
+            ) : null}
             {onUploadAudio ? (
               <>
                 <button
