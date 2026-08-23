@@ -2531,7 +2531,23 @@ function ClickUpPilotInner() {
           }
           const partTemplates: TaskAnalysis['partTemplates'] = [];
           for (const h of briefing.hooks) {
-            partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label, h.role) });
+            // HOOK COM DOIS FALANTES vira DOIS takes. O dialogo de abertura
+            // (um pergunta, o outro responde) mora no hook, e um take so' fazia
+            // o avatar do primeiro dizer a fala do segundo — o DIDI falando a
+            // fala da Mulher no AD05, 23.08. Mesmo tratamento do body.
+            const hs = h.segments && h.segments.length > 1 ? h.segments : null;
+            if (!hs) {
+              partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label, h.role), speaker: h.role ?? null });
+              continue;
+            }
+            hs.forEach((seg, i) => {
+              partTemplates.push({
+                label: `${h.label}.${i + 1}`,
+                text: seg.text,
+                matchByRole: pickRoleForText(seg.text, h.label, seg.role, seg.username ?? null),
+                speaker: seg.role ?? null,
+              });
+            });
           }
           // Body segmentado por SPEAKER (cada role vira sub-bloco). Dentro
           // de cada segmento, split por tempo (~20s) preservando o role.

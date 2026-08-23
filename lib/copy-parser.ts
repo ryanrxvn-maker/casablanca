@@ -1247,7 +1247,15 @@ export type ParsedDarkoBriefing = {
   /** Hooks em ordem: HOOK 1 (G1), HOOK 2 (G2), ...
    *  role = quem fala (extraido da linha "Mulher:"/"Homem:"/etc do briefing).
    *  Pode ser null se nao havia indicacao explicita. Usado pra mapear avatar. */
-  hooks: Array<{ label: string; text: string; sourceG: number; role: string | null }>;
+  hooks: Array<{
+    label: string; text: string; sourceG: number; role: string | null;
+    /** Hook SEGMENTADO POR SPEAKER — mesmo tratamento do `bodySegments`.
+     *  O hook nao "costuma ter 1 speaker": o dialogo entre dois avatares vive
+     *  justamente ali (AD05: o Homem pergunta, a Mulher responde). Sem isso o
+     *  hook inteiro virava UM take com o role do PRIMEIRO falante, e o avatar
+     *  dele dizia a fala do outro. 1 segmento = o caso simples de sempre. */
+    segments?: Array<{ role: string | null; username?: string | null; text: string }>;
+  }>;
   /** Body CONCATENADO (todos os segmentos juntos) — pra UI display + bodyRaw.
    *  Pra dispatch, use bodySegments. */
   body: string | null;
@@ -1926,11 +1934,18 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
       // pode vir embutido — sanitize com knownRoles tira o resto.
       const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles, ytTitles);
       if (hookText) {
+        // Segmenta POR SPEAKER, igual ao body: o dialogo de abertura entre
+        // dois avatares mora no hook, e juntar tudo num take so' faz um avatar
+        // falar a fala do outro.
+        const hSegs = splitBySpeaker(parsed.hook.text, knownRoles, parsed.hook.role, avatarUsernames)
+          .map((x) => ({ role: x.role, username: x.username ?? null, text: sanitizeSpokenCopy(x.text, knownRoles, ytTitles) }))
+          .filter((x) => x.text.length > 0);
         hooks.push({
           label: `HOOK ${sib.gNum}`,
           text: hookText,
           sourceG: sib.gNum,
           role: parsed.hook.role,
+          segments: hSegs.length > 1 ? hSegs : undefined,
         });
       }
     }
@@ -1971,7 +1986,13 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
         hooks.length = 0;
         if (parsed.hook) {
           const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles, ytTitles);
-          if (hookText) hooks.push({ label: 'HOOK 1', text: hookText, sourceG: 1, role: parsed.hook.role });
+          const hSegs = splitBySpeaker(parsed.hook.text, knownRoles, parsed.hook.role, avatarUsernames)
+            .map((x) => ({ role: x.role, username: x.username ?? null, text: sanitizeSpokenCopy(x.text, knownRoles, ytTitles) }))
+            .filter((x) => x.text.length > 0);
+          if (hookText) hooks.push({
+            label: 'HOOK 1', text: hookText, sourceG: 1, role: parsed.hook.role,
+            segments: hSegs.length > 1 ? hSegs : undefined,
+          });
         }
         bodySegments = baseBodySegs;
         body = baseBodySegs.map((s) => s.text).join('\n\n');
