@@ -387,6 +387,39 @@ function runPostPipelineSerial(
  *  isso a chave do 'decupado' carrega a intensidade (`@k<sec>`): mudar a
  *  intensidade = chave diferente = recorta de verdade no novo valor (não reusa
  *  o corte antigo); voltar pra intensidade anterior reusa o que já existe. */
+/** ⛔ TODAS as chaves derivadas de UMA parte — a fonte unica de verdade.
+ *
+ *  23.08: o nivelado passou a ser gravado como `leveled2:` (motor novo) e a
+ *  invalidacao continuou apagando `leveled:`. Regenerar um take deixava de
+ *  invalidar o nivelado dele, e "Atualizar montagem" remontava com o clip
+ *  VELHO em cache — o AD06 voltou inteiro pro avatar antigo depois de os sete
+ *  takes terem sido re-gerados. Silas: *"NAO PODE ACONTECER ISSO E VOLTAR PRO
+ *  ANTIGO"*.
+ *
+ *  Duas listas de nomes em lugares diferentes sempre acabam divergindo. Esta e'
+ *  a unica: `makeClipCacheHooks` cria, isto apaga, e o nome legado fica junto
+ *  pra limpar cache de quem rodou antes da troca.
+ */
+function chavesDerivadasDaParte(taskId: string, genId: string | null | undefined, label: string): string[] {
+  const pfx = pilotGenPrefix(taskId, genId);
+  return [
+    `${pfx}leveled2:${label}`,      // nivelado (motor atual)
+    `${pfx}leveled:${label}`,       // nivelado (legado, pre-23.08)
+    `${pfx}decupado:${label}@k`,    // decupado, TODAS as intensidades
+    `${pfx}decupado:${label}`,      // decupado (legado, sem intensidade)
+  ];
+}
+
+/** Apaga tudo que foi derivado de uma parte. Chamar SEMPRE que o take mudar. */
+async function invalidarDerivadosDaParte(taskId: string, genId: string | null | undefined, label: string) {
+  try {
+    const { deletePrefix } = await import('@/lib/zip-store');
+    for (const k of chavesDerivadasDaParte(taskId, genId, label)) {
+      await deletePrefix(k).catch(() => {});
+    }
+  } catch (e) { console.warn('[pilot] invalidar derivados de', label, e); }
+}
+
 function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.05, genId?: string | null) {
   const kTag = (Math.round(keepSilenceSec * 100) / 100).toFixed(2);
   const pfx = pilotGenPrefix(taskId, genId);
@@ -6094,9 +6127,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // cache stale. As outras partes seguem cacheadas (rebuild rápido). O
         // decupado é por intensidade (`...:<label>@k<sec>`) → deletePrefix limpa
         // TODAS as intensidades dessa parte de uma vez.
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}leveled:${label}`).catch(() => {});
-        await deletePrefix(`${pilotGenPrefix(taskId, genId)}decupado:${label}@k`).catch(() => {});
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}decupado:${label}`).catch(() => {}); // legado (chave antiga sem intensidade)
+        await invalidarDerivadosDaParte(taskId, genId, label);
       } catch (e) { console.warn('[edit-part] save blob IDB falhou:', e); }
 
       // 6) Atualiza state final com URL pronta + marca como dirty (montagem
@@ -6236,11 +6267,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const bytes = await downloadVideoBytes(st.videoUrl);
       const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       try {
-        const { saveBlob, deleteZip, deletePrefix } = await import('@/lib/zip-store');
+        const { saveBlob } = await import('@/lib/zip-store');
         await saveBlob(pilotPartKey(taskId, genId, label), partBlob, 'video/mp4');
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}leveled:${label}`).catch(() => {});
-        await deletePrefix(`${pilotGenPrefix(taskId, genId)}decupado:${label}@k`).catch(() => {});
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}decupado:${label}`).catch(() => {});
+        await invalidarDerivadosDaParte(taskId, genId, label);
       } catch (e) { console.warn('[edit-part-audio] save blob IDB falhou:', e); }
 
       // Marca completa + dirty → aparece "Atualizar montagem" pra fechar o AD.
