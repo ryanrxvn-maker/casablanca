@@ -23,6 +23,16 @@ export type EditPartInput = {
   /** Voz atual (id+nome opcional). Editavel se onPickVoice for fornecido. */
   voiceId?: string | null;
   voiceName?: string | null;
+  /** MOTOR desta parte. 'auto' = III, ou IV quando ha gesto. */
+  engine?: 'auto' | 'III' | 'IV' | 'V' | null;
+  /** APPLY CUSTOM MOTION desta parte — o gesto pedido ao HeyGen. */
+  motionPrompt?: string | null;
+};
+
+/** O que a re-geracao leva alem do texto. */
+export type EditPartOpts = {
+  engine: 'auto' | 'III' | 'IV' | 'V';
+  motionPrompt: string | null;
 };
 
 export function EditPartModal({
@@ -40,14 +50,21 @@ export function EditPartModal({
 }: {
   input: EditPartInput;
   onClose: () => void;
-  onRegenerate: (newText: string) => void;
+  onRegenerate: (newText: string, opts: EditPartOpts) => void;
   avatarPicker?: React.ReactNode;
   voicePicker?: React.ReactNode;
   busy?: boolean;
   errorMsg?: string | null;
 }) {
   const [text, setText] = useState(input.text);
-  const hasChange = text.trim() !== input.text.trim();
+  const [engine, setEngine] = useState<'auto' | 'III' | 'IV' | 'V'>(input.engine || 'auto');
+  const [motion, setMotion] = useState(input.motionPrompt || '');
+  const temGesto = motion.trim().length > 0;
+  // o III DESCARTA motion: cena com gesto sobe pro IV sozinha
+  const motorSaida = engine !== 'auto' ? engine : (temGesto ? 'IV' : 'III');
+  const hasChange = text.trim() !== input.text.trim()
+    || engine !== (input.engine || 'auto')
+    || motion.trim() !== (input.motionPrompt || '').trim();
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -138,6 +155,50 @@ export function EditPartModal({
           />
         </div>
 
+        {/* MOTOR + APPLY CUSTOM MOTION desta parte.
+            O III e barato mas DESCARTA gesto — entao "cobrindo o peito com a
+            mao" so acontece de verdade no IV. Sem isto aqui, a unica saida era
+            re-disparar o AD inteiro por causa de um take. */}
+        <div className="mt-4 rounded-[10px] border border-white/12 bg-bg-soft/40 p-3">
+          <div className="label-tech mb-2 flex items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
+            Apply Custom Motion
+            <div className="ml-auto flex items-center gap-1">
+              {(['auto', 'III', 'IV', 'V'] as const).map((op) => {
+                const sel = engine === op;
+                const subiu = op === 'auto' && temGesto;
+                return (
+                  <button
+                    key={op}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setEngine(op)}
+                    title={op === 'auto' ? 'auto: III, ou IV quando tem gesto' : `Avatar ${op}`}
+                    className={`label-tech rounded-full border px-2 py-0.5 text-[8.5px] uppercase tracking-widest transition-colors disabled:opacity-40 ${
+                      sel ? 'border-lime/60 bg-lime/15 text-lime' : 'border-white/15 text-text-muted hover:border-white/35 hover:text-white'
+                    }`}
+                  >
+                    {op === 'auto' ? (subiu ? 'auto·IV' : 'auto·III') : op}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <textarea
+            value={motion}
+            onChange={(e) => setMotion(e.target.value)}
+            disabled={busy}
+            placeholder="ex: cobrir o peito com uma das maos no comeco e falar"
+            className="mono w-full resize-y rounded-[8px] border border-white/12 bg-bg/60 px-3 py-2 text-[11px] leading-relaxed text-white outline-none transition-colors placeholder:text-text-muted/50 hover:border-white/25 focus:border-lime/50 disabled:opacity-50"
+            rows={2}
+            style={{ fontFamily: 'var(--font-mono)' }}
+          />
+          <div className="mono mt-1.5 text-[9px] leading-relaxed text-text-muted/80">
+            {temGesto
+              ? `Esta parte sai no Avatar ${motorSaida} — o III descarta gesto. Em acao curta, peca o gesto UMA vez no comeco e a fala solta depois, senao o avatar repete o movimento o take inteiro.`
+              : `Sem gesto: esta parte sai no Avatar ${motorSaida}.`}
+          </div>
+        </div>
+
         {errorMsg ? (
           <div className="mono mt-3 rounded-[8px] border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
             {errorMsg}
@@ -157,7 +218,7 @@ export function EditPartModal({
           {/* REFRESH 3D — icon-only, lift+glow no hover */}
           <button
             type="button"
-            onClick={() => onRegenerate(text.trim())}
+            onClick={() => onRegenerate(text.trim(), { engine, motionPrompt: motion.trim() || null })}
             disabled={busy || text.trim().length === 0}
             title={
               busy

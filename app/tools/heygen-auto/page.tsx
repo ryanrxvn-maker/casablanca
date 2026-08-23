@@ -76,6 +76,7 @@ import { type VoiceOption } from '@/components/HeyGenVoicePicker';
 import { TierGate } from '@/components/TierGate';
 import { BatchJobCard3D, type BatchJob3DPhase } from '@/components/BatchJobCard3D';
 import { EditPartModal } from '@/components/EditPartModal';
+import { motorEfetivo } from '@/lib/heygen-motion-motor';
 
 /**
  * Hey Auto Avatar — automacao do HeyGen sem API.
@@ -1571,7 +1572,7 @@ function HeyGenAutoInner() {
   /** Re-dispara SÓ a parte editada no HeyGen (mantém o label/posição), troca o
    *  videoId no results e invalida o montado — o próximo Baixar re-monta com o
    *  take novo. Avatar/voz seguem os mesmos da parte (não muda continuidade). */
-  async function regeneratePart(newText: string) {
+  async function regeneratePart(newText: string, opts?: { engine: 'auto' | 'III' | 'IV' | 'V'; motionPrompt: string | null }) {
     if (!editPart) return;
     const idx = editPart.idx;
     const av = (dynamicMode ? partAvatars[idx] : null) || selectedAvatar;
@@ -1587,9 +1588,16 @@ function HeyGenAutoInner() {
         seed: safeName,
       });
       const voiceId = selectedVoice ? selectedVoice.id : av.voiceId || undefined;
+      // GESTO E MOTOR DESTA PARTE. Sem opts, mantém o que a cena já tinha —
+      // re-gerar o texto não pode devolver o take parado. Com opts, o user
+      // pediu um gesto novo (ex: cobrir o peito com a mão) e aí o motor sobe
+      // pro IV sozinho, porque o III descarta motion.
+      const gestoDaParte = (opts ? opts.motionPrompt : partMotions[idx]) || undefined;
+      const motorPedido = opts && opts.engine !== 'auto' ? opts.engine : (motorsPerPart[idx] || motor);
+      const motorDaParte = motorEfetivo(motorPedido, gestoDaParte);
+      if (opts) setPartMotions((prev) => ({ ...prev, [idx]: opts.motionPrompt || '' }));
       const res = await runHeyGenJobs(
-        // Mantém o gesto da cena — re-gerar o texto não pode devolver o take parado.
-        [{ label: editPart.label, copy: newText, avatarId: av.id, voiceId, motionPrompt: partMotions[idx] || undefined, motor: motorsPerPart[idx] || motor }],
+        [{ label: editPart.label, copy: newText, avatarId: av.id, voiceId, motionPrompt: gestoDaParte, motor: motorDaParte }],
         {
           parallel: 1,
           mode: 'copy',
@@ -4082,11 +4090,12 @@ function HeyGenAutoInner() {
             text: editPart.text,
             avatarName:
               ((dynamicMode ? partAvatars[editPart.idx] : null) || selectedAvatar)?.name || undefined,
+            motionPrompt: partMotions[editPart.idx] || null,
           }}
           onClose={() => {
             if (!editBusy) setEditPart(null);
           }}
-          onRegenerate={(t) => void regeneratePart(t)}
+          onRegenerate={(t, opts) => void regeneratePart(t, opts)}
           busy={editBusy}
           errorMsg={editError}
         />

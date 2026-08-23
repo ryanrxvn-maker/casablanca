@@ -123,7 +123,7 @@ import {
 } from '@/lib/drmillion-parser';
 import { LangSwitch3D } from '@/components/LangSwitch3D';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
-import { takeUnicoPorLook } from '@/lib/heygen-motion-motor';
+import { takeUnicoPorLook, motorEfetivo } from '@/lib/heygen-motion-motor';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -5752,6 +5752,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   // Resetados ao abrir; lidos no regenerateSinglePart.
   const [editAvatar, setEditAvatar] = useState<AvatarOption | null>(null);
   const [editVoice, setEditVoice] = useState<{ id: string; name: string } | null>(null);
+  // MOTOR + GESTO da parte sendo editada. O III descarta motion, entao pedir
+  // "cobrir o peito com a mao" so vale se a parte subir pro IV — e isso tem que
+  // caber numa parte SO, senao o unico jeito era re-disparar o AD inteiro.
+  const [editEngine, setEditEngine] = useState<'auto' | 'III' | 'IV' | 'V'>('auto');
+  const [editMotion, setEditMotion] = useState<string>('');
   const [regeneratingPart, setRegeneratingPart] = useState<{ taskId: string; label: string } | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
   const [rebuildingTaskId, setRebuildingTaskId] = useState<string | null>(null);
@@ -5791,6 +5796,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const currentAvatar = findAvatarOptionById(replanPart?.avatarId);
     setEditAvatar(currentAvatar);
     setEditVoice(replanPart?.voiceId ? { id: replanPart.voiceId, name: '' } : null);
+    setEditEngine(((replanPart as any)?.engine as 'auto' | 'III' | 'IV' | 'V') || 'auto');
+    setEditMotion(String((replanPart as any)?.motionPrompt || ''));
     setEditingPart({
       taskId,
       partIdx,
@@ -5801,7 +5808,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     void reloadLibrary(false);
   }
 
-  async function regenerateSinglePart(newText: string) {
+  async function regenerateSinglePart(newText: string, opts?: { engine: 'auto' | 'III' | 'IV' | 'V'; motionPrompt: string | null }) {
     if (!editingPart) return;
     const { taskId, partIdx, label } = editingPart;
     const b = batchStates[taskId];
@@ -5822,6 +5829,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     // Voz pode vir do picker (editVoice) OU do replan antigo. Null = voz padrao do avatar.
     const effectiveVoiceId = editVoice?.id || replanPart.voiceId || null;
+    // MOTOR DESTA PARTE. 'auto' = III, e sobe pro IV sozinho quando ha gesto
+    // (o III descarta motion — pedir e nao subir sairia parado). Escolha na mao
+    // vence, menos IV->III com gesto, que voltaria o take sem o movimento.
+    const gestoDaParte = (opts ? opts.motionPrompt : ((replanPart as any).motionPrompt || null)) || null;
+    const motorPedido = opts?.engine || ((replanPart as any).engine as 'auto' | 'III' | 'IV' | 'V') || 'auto';
+    const motorParte = motorEfetivo(motorPedido === 'auto' ? 'III' : motorPedido, gestoDaParte);
     if (newText.trim().length === 0) {
       setRegenError('Texto vazio — preenche o script.');
       return;
@@ -5846,7 +5859,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const cur = prev[taskId];
         if (!cur || !cur.replan) return prev;
         const newReplanParts = cur.replan.parts.map((p, i) => i === partIdx
-          ? { ...p, text: newText, avatarId: effectiveAvatarId || null, voiceId: effectiveVoiceId }
+          // 'auto' nao existe no replan: la o campo e o motor de verdade, e
+          // vazio JA' significa auto. Guardar a string 'auto' quebraria o tipo.
+          ? { ...p, text: newText, avatarId: effectiveAvatarId || null, voiceId: effectiveVoiceId,
+              engine: motorPedido === 'auto' ? undefined : motorPedido,
+              motionPrompt: gestoDaParte }
           : p);
         return {
           ...prev,
@@ -5883,7 +5900,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         fd.append('image', blob, 'frame.jpg');
         fd.append('script', newText);
         fd.append('voiceId', effectiveVoiceId);
-        const motionDaParte = (replanPart as any).motionPrompt;
+        const motionDaParte = gestoDaParte;
         if (motionDaParte) fd.append('motionPrompt', String(motionDaParte));
         fd.append('title', `${adNameSafe}_${label}_edit`);
         fd.append('aspectRatio', '9:16');
@@ -5898,7 +5915,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           voiceId: effectiveVoiceId || undefined,
           title: `${adNameSafe}_${label}_edit`,
           avatarId: effectiveAvatarId!,
-          engine: 'iii',
+          engine: motorParte.toLowerCase() as 'iii' | 'iv' | 'v',
+          motionPrompt: gestoDaParte || undefined,
           orientation: 'portrait',
         });
       }
@@ -12498,6 +12516,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             avatarName: editAvatar?.name,
             voiceId: editVoice?.id ?? null,
             voiceName: editVoice?.name ?? null,
+            engine: editEngine,
+            motionPrompt: editMotion,
           }}
           busy={!!regeneratingPart}
           errorMsg={regenError}
@@ -12510,7 +12530,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             setEditVoice(null);
             setRegenError(null);
           }}
-          onRegenerate={(newText) => void regenerateSinglePart(newText)}
+          onRegenerate={(newText, opts) => {
+            setEditEngine(opts.engine);
+            setEditMotion(opts.motionPrompt || '');
+            void regenerateSinglePart(newText, opts);
+          }}
           avatarPicker={
             <CompactAvatarPicker
               selected={editAvatar}
