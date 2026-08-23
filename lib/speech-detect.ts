@@ -58,7 +58,9 @@ export type SpeechDetectConfig = {
   minSpeechSec: number;
   /** margem intocada em cada borda da fala (segundos) */
   edgePadSec: number;
-  /** só corta intervalos de não-fala a partir desta duração (segundos) */
+  /** piso absoluto do intervalo que vale cortar (segundos). O mínimo REAL sai do
+   *  keepSilence escolhido (ver planSpeechCut): pedir uma pausa curta tem que
+   *  alcançar pausas curtas, senão o controle "não faz nada" em áudio bem falado. */
   minGapSec: number;
   /** não corta pedaço menor que isso — evita jump cut à toa (segundos) */
   minCutSec: number;
@@ -74,7 +76,7 @@ export const DEFAULT_SPEECH_CONFIG: SpeechDetectConfig = {
   closeHolesSec: 0.18,
   minSpeechSec: 0.1,
   edgePadSec: 0.02,
-  minGapSec: 0.15,
+  minGapSec: 0.11,
   minCutSec: 0.06,
 };
 
@@ -348,7 +350,12 @@ export function planSpeechCut(
   const fs = f.frameSec;
   const padN = Math.round(cfg.edgePadSec / fs);
   const keepN = Math.max(1, Math.round(keepSilence / fs));
-  const minGapN = Math.round(cfg.minGapSec / fs);
+  // O intervalo mínimo que vale cortar ACOMPANHA o keepSilence: pra sobrar a pausa
+  // pedida ainda é preciso caber as duas bordas intocadas + um corte que valha a
+  // pena. Sem isso, o controle da UI não alcançava as pausas curtas — o usuário
+  // arrastava de 0.50 até 0.01 e a duração mal mudava em áudio bem falado.
+  const minGapSec = Math.max(cfg.minGapSec, keepSilence + 2 * cfg.edgePadSec + cfg.minCutSec);
+  const minGapN = Math.round(minGapSec / fs);
   const minCutN = Math.max(1, Math.round(cfg.minCutSec / fs));
 
   const drops: Array<[number, number]> = [];
