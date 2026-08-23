@@ -211,7 +211,13 @@ export type PipelineDeps = {
     },
   ): Promise<Transcript>;
   analyze(
-    input: { transcript: Transcript; settings: ClipSettings; source: { name: string; durationSec: number } },
+    input: {
+      transcript: Transcript;
+      settings: ClipSettings;
+      source: { name: string; durationSec: number };
+      /** fonte montável — o curador local tira daqui o envelope de energia */
+      file: File;
+    },
     o: { onProgress?: (p: AnalyzeProgressLite) => void; signal?: AbortSignal },
   ): Promise<AnalyzeOutcomeLite>;
   engine: RenderEngine;
@@ -617,7 +623,7 @@ export function createPipelineCore(opts: CreateCoreOptions): Pipeline {
     }));
   }
 
-  async function ensureClips(transcript: Transcript, signal: AbortSignal): Promise<void> {
+  async function ensureClips(transcript: Transcript, file: File, signal: AbortSignal): Promise<void> {
     if (project.clips.length > 0) return;
 
     setPhase('analisando', 'Lendo a transcrição…', 0);
@@ -626,6 +632,7 @@ export function createPipelineCore(opts: CreateCoreOptions): Pipeline {
         transcript,
         settings: project.settings,
         source: { name: project.source.name || 'vídeo', durationSec: project.source.durationSec ?? 0 },
+        file,
       },
       {
         signal,
@@ -646,7 +653,7 @@ export function createPipelineCore(opts: CreateCoreOptions): Pipeline {
     const clips = buildClips(out.clips, transcript.words);
     if (clips.length === 0) {
       throw deps.makeError(
-        'A IA não fechou nenhum corte neste vídeo. Tente outra duração de corte ou descreva os momentos que você quer.',
+        'Não encontrei nenhum trecho que funcione sozinho neste vídeo. Tente outra duração de corte ou descreva os momentos que você quer.',
       );
     }
     mutate((p) => {
@@ -1011,7 +1018,7 @@ export function createPipelineCore(opts: CreateCoreOptions): Pipeline {
         const transcript = await ensureTranscript(file, ctrl.signal);
         if (ctrl.signal.aborted) return;
 
-        await ensureClips(transcript, ctrl.signal);
+        await ensureClips(transcript, file, ctrl.signal);
         if (ctrl.signal.aborted) return;
 
         await renderPending(file, ctrl.signal);

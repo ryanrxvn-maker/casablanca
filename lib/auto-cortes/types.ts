@@ -114,6 +114,12 @@ export type ClipSettings = {
   range: { startSec: Sec; endSec: Sec } | null;
   /** P2 — remover pausas > 1,2 s dentro do corte. */
   removePauses: boolean;
+  /**
+   * Quem escolhe os cortes.
+   * - `local` (padrão): curador que roda no navegador — grátis, ilimitado, sem rede.
+   * - `ia`: tenta a leitura por IA de texto e CAI PRO LOCAL se faltar chave/cota.
+   */
+  intelligence?: 'local' | 'ia';
 };
 
 export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
@@ -130,6 +136,7 @@ export const DEFAULT_CLIP_SETTINGS: ClipSettings = {
   focusPrompt: '',
   range: null,
   removePauses: false,
+  intelligence: 'local',
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -474,11 +481,14 @@ export const LIMITS = {
   cutLeadSec: 6, // margem antes do corte no -c copy (keyframe)
   cutTailSec: 1,
   driveServerFallbackMaxBytes: 800 * 1024 * 1024,
-  minClips: 3,
+  minClips: 5,
   maxClips: 30,
 } as const;
 
 export function autoClipCount(durationSec: Sec): number {
-  const n = Math.round(durationSec / 360);
+  // Régua calibrada contra o Opus Clip no mesmo vídeo (podcast de 24 min → 27
+  // cortes lá). 1 a cada 6 min entregava 4 e deixava material bom na mesa;
+  // 1 a cada 2,5 min dá ~10 num podcast de 24 min e ~30 numa live de 1h15.
+  const n = Math.round(durationSec / 150);
   return Math.max(LIMITS.minClips, Math.min(LIMITS.maxClips, n));
 }

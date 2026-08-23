@@ -45,7 +45,7 @@ const LENGTH_OPTIONS: Array<{ value: ClipLengthPreset; label: string; sub?: stri
 ];
 
 const COUNT_OPTIONS: Array<{ value: string; label: string; sub?: string }> = [
-  { value: 'auto', label: 'Automático', sub: '≈1 a cada 6 min' },
+  { value: 'auto', label: 'Automático', sub: '≈1 a cada 2,5 min' },
   { value: '5', label: '5' },
   { value: '10', label: '10' },
   { value: '15', label: '15' },
@@ -306,6 +306,24 @@ export function ClipSettingsPanel({
           disabled={disabled}
           sameAspect={sameAspect}
         />
+      </Row>
+
+      <Row label="Inteligência" hint="quem escolhe os momentos">
+        <ToolChoice
+          value={value.intelligence ?? 'local'}
+          onChange={(v: 'local' | 'ia') => set('intelligence', v)}
+          options={[
+            { value: 'local', label: 'Local', sub: 'grátis e ilimitada' },
+            { value: 'ia', label: 'IA de texto', sub: 'usa sua chave' },
+          ]}
+          disabled={disabled}
+          hue={AC_HUE}
+        />
+        <p className="mt-1.5 text-[11px] leading-relaxed text-text-dim">
+          {(value.intelligence ?? 'local') === 'local'
+            ? 'Roda no seu navegador: lê a transcrição, mede a energia da fala e acha os trechos que se sustentam sozinhos. Sem chave, sem limite.'
+            : 'Tenta ler a transcrição com a IA de texto da sua chave. Se ela faltar ou bater no limite, os cortes saem pelo curador local do mesmo jeito.'}
+        </p>
       </Row>
 
       <Row label="Momentos específicos" hint="opcional">

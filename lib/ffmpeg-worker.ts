@@ -3942,3 +3942,53 @@ export async function extractAudioRangeAac(
 export async function probeDurationMounted(ff: FFmpeg, mountedPath: string): Promise<number> {
   return readDurationFromLogs(ff, mountedPath);
 }
+
+/**
+ * Envelope de ENERGIA da fala (RMS em dBFS a cada 0,5 s) de um arquivo já
+ * montado. É o sinal de prosódia do curador local: ênfase, riso e empolgação
+ * aparecem como pico de energia; respiro e fim de raciocínio, como vale.
+ *
+ * Lê do LOG (ametadata=print), não da memória: um podcast de 3 h vira ~21 mil
+ * números em vez de centenas de MB de PCM. `asetnsamples` fixa a janela em
+ * 4000 amostras a 8 kHz = 0,5 s exatos por valor, então o índice do array é
+ * tempo direto (i * 0,5 s) — sem depender do tamanho de frame do codec.
+ *
+ * Falhou (filtro indisponível, áudio ausente)? Devolve null — o curador
+ * pontua sem o sinal de energia em vez de derrubar o lote.
+ */
+export const ENERGY_STEP_SEC = 0.5;
+
+export async function extractEnergyEnvelope(
+  ff: FFmpeg,
+  mountedPath: string,
+  opts: RunOptions = {},
+): Promise<{ stepSec: number; db: Float32Array } | null> {
+  const vals: number[] = [];
+  const h = ({ message }: { message: string }) => {
+    const m = /lavfi\.astats\.Overall\.RMS_level=(-?[\d.]+|-?inf)/i.exec(message);
+    if (!m) return;
+    const raw = m[1].toLowerCase();
+    // silêncio absoluto vira -120 dBFS (o ffmpeg imprime "-inf")
+    vals.push(raw.includes('inf') ? -120 : parseFloat(raw));
+  };
+  ff.on('log', h);
+  try {
+    const rc = await ff.exec([
+      '-hide_banner',
+      '-i', mountedPath,
+      '-vn',
+      '-af',
+      `aresample=8000,asetnsamples=n=${Math.round(8000 * ENERGY_STEP_SEC)},astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level`,
+      '-f', 'null', '-',
+    ]);
+    if (rc !== 0 && vals.length === 0) return null;
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    return null;
+  } finally {
+    ff.off('log', h);
+    opts.onProgress?.({ ratio: 1, time: 0 });
+  }
+  if (vals.length < 4) return null;
+  return { stepSec: ENERGY_STEP_SEC, db: Float32Array.from(vals) };
+}

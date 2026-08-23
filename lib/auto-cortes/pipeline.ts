@@ -47,6 +47,8 @@ import { ingestLink, ingestUpload, uploadSignature } from './ingest';
 import { opfsGetFile } from './opfs';
 import { analyzeTranscript } from './analyze-client';
 import { transcribeSource } from './transcribe';
+import { curate, type EnergyEnvelope } from './curador/curate';
+import { extractEnergyEnvelope } from '@/lib/ffmpeg-worker';
 import { planReframe, planCrop } from './reframe';
 import { makeComposer, renderClip, renderThumb, type OverlayFn, type OutSize } from './render';
 import {
@@ -358,6 +360,31 @@ function createBrowserEngine(): RenderEngine {
 // Dependências reais
 // ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * Envelope de energia (RMS 0,5 s) da fonte. Monta o arquivo numa instância do
+ * pool (WORKERFS, sem heap) e devolve a instância no fim. Qualquer falha vira
+ * `null`: o curador pontua sem prosódia em vez de derrubar o lote.
+ */
+async function energiaDoVideo(file: File, signal?: AbortSignal): Promise<EnergyEnvelope | null> {
+  const pool = getFFmpegPool(recommendedPoolSize());
+  let ff: Awaited<ReturnType<typeof pool.acquire>> | null = null;
+  let limpar: (() => Promise<void>) | null = null;
+  try {
+    if (signal?.aborted) return null;
+    ff = await pool.acquire();
+    const nome = `ac_energy_${Date.now().toString(36)}.${(file.name.split('.').pop() || 'mp4').slice(0, 4)}`;
+    const m = await mountInputs(ff, [{ name: nome, data: file }]);
+    limpar = m.cleanup;
+    return await extractEnergyEnvelope(ff, `${m.dir}/${nome}`);
+  } catch (e) {
+    console.warn('[auto-cortes] envelope de energia indisponível:', e);
+    return null;
+  } finally {
+    if (limpar) await limpar().catch(() => {});
+    if (ff) pool.release(ff);
+  }
+}
+
 function browserDeps(): PipelineDeps {
   return {
     store: {
@@ -391,7 +418,37 @@ function browserDeps(): PipelineDeps {
         onDuration: o.onDuration,
         signal: o.signal,
       }),
-    analyze: (input, o) => analyzeTranscript(input, o),
+    analyze: async (input, o) => {
+      // 1) CURADOR LOCAL — sem rede, sem chave, sem cota. É sempre o que manda.
+      const energy = await energiaDoVideo(input.file, o.signal);
+      o.onProgress?.({ stage: 'reduce' });
+      const bruto = curate({
+        transcript: input.transcript,
+        energy,
+        settings: input.settings,
+        durationSec: input.source.durationSec,
+      });
+      // O curador local trabalha direto nos cortes finais: não existe etapa de
+      // "candidatos" (isso era da leitura por IA em 2 passos).
+      const local = { ...bruto, candidates: [] };
+
+      // 2) IA de texto só quando o cliente pede. Falhou/limitou? Fica o local.
+      if (input.settings.intelligence !== 'ia') return local;
+      try {
+        const ia = await analyzeTranscript(input, o);
+        if (ia.clips.length > 0) return { ...ia, warnings: [...local.warnings, ...ia.warnings] };
+        return local;
+      } catch (e) {
+        console.warn('[auto-cortes] IA de texto falhou — seguindo com o curador local:', e);
+        return {
+          ...local,
+          warnings: [
+            ...local.warnings,
+            'A IA de texto não respondeu agora; os cortes saíram pelo curador local (grátis).',
+          ],
+        };
+      }
+    },
     engine: createBrowserEngine(),
     captions: (words, startMs, endMs, pace) => buildClipCaptions(words, startMs, endMs, pace),
     srt: (blocks) => blocksToSrt(blocks),
