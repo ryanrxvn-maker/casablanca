@@ -206,6 +206,7 @@ export type PipelineDeps = {
       language: string;
       onProgress?: (p: TranscribeProgressLite) => void;
       onWarning?: (m: string) => void;
+      onDuration?: (durationSec: number) => void;
       signal?: AbortSignal;
     },
   ): Promise<Transcript>;
@@ -570,6 +571,11 @@ export function createPipelineCore(opts: CreateCoreOptions): Pipeline {
       language: project.settings.language,
       signal,
       onWarning: addWarning,
+      onDuration: (sec) => {
+        mutate((p) => {
+          p.source.durationSec = sec;
+        }, true);
+      },
       onProgress: (p) => {
         if (p.stage === 'audio') {
           setProgress(pct(p.done, p.total), `Preparando o áudio ${p.done}/${p.total}`, 'audio');

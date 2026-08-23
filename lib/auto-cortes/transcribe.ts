@@ -31,7 +31,7 @@ import {
   CANCELLED_ERROR,
   extractAsrChunk,
   isCancellationError,
-  mountInputs,
+  mountInputs, probeDurationMounted,
   pickTranscribeBitrateKbps,
 } from '@/lib/ffmpeg-worker';
 import { LIMITS } from './types';
@@ -66,6 +66,8 @@ export type TranscribeSourceOptions = {
   onProgress?: (p: TranscribeProgress) => void;
   /** Pedaço que falhou/veio mudo — o projeto guarda como aviso. */
   onWarning?: (message: string) => void;
+  /** Duração lida do ffmpeg quando o chamador não sabia (durationSec <= 0). */
+  onDuration?: (durationSec: number) => void;
   signal?: AbortSignal;
   /** Rota alternativa (só pra teste). */
   endpoint?: string;
@@ -102,7 +104,7 @@ function parseRetryAfter(header: string | null): number {
   return 0;
 }
 
-function guardSource(file: File, durationSec: number): void {
+function guardSource(file: File): void {
   if (!file || file.size === 0) {
     throw new FriendlyError('Não recebi nenhum arquivo pra transcrever. Escolha o vídeo e tente de novo.');
   }
@@ -112,6 +114,9 @@ function guardSource(file: File, durationSec: number): void {
         'Comprime ele no Compressor (ou corta em partes) e tenta de novo.',
     );
   }
+}
+
+function guardDuration(durationSec: number): void {
   if (!Number.isFinite(durationSec) || durationSec <= 0) {
     throw new FriendlyError(
       'Não consegui ler a duração desse vídeo. Tenta outro formato (MP4, MOV ou WEBM).',
@@ -269,20 +274,17 @@ export async function transcribeSource(
   file: File,
   opts: TranscribeSourceOptions,
 ): Promise<Transcript> {
-  const { durationSec, language, pool } = opts;
-  guardSource(file, durationSec);
+  const { language, pool } = opts;
+  let durationSec = opts.durationSec;
+  guardSource(file);
   throwIfAborted(opts.signal);
 
-  const plan = planAudioChunks(durationSec, {
-    chunkSec: LIMITS.audioChunkSec,
-    overlapSec: LIMITS.audioChunkOverlapSec,
-  });
-  if (plan.length === 0) {
-    throw new FriendlyError('Não consegui dividir esse vídeo pra transcrever. Tenta outro arquivo.');
-  }
-
-  const total = plan.length;
-  const results = new Array<ChunkWords | null>(total).fill(null);
+  // A duração pode chegar desconhecida (o `<video>` não entrega metadata em aba
+  // de 2º plano). Nesse caso ela é lida do log do ffmpeg logo após a 1ª montagem,
+  // e só então o plano de pedaços é feito.
+  let plan: ReturnType<typeof planAudioChunks> = [];
+  let total = 0;
+  let results: Array<ChunkWords | null> = [];
   let audioDone = 0;
   let asrDone = 0;
   const report = (stage: TranscribeStage) =>
@@ -291,7 +293,7 @@ export async function transcribeSource(
 
   const inputName = `ac_src.${extOf(file)}`;
   const slots: Array<{ ff: FFmpeg; path: string; cleanup: () => Promise<void> }> = [];
-  const wanted = Math.max(1, Math.min(LIMITS.asrConcurrency, pool.maxSize, total));
+  const wanted = Math.max(1, Math.min(LIMITS.asrConcurrency, pool.maxSize));
   let providerSeen = '';
   // idioma detectado pelo Whisper (vem do servidor quando o cliente escolheu 'auto');
   // conta por voto: o mais frequente entre os pedaços vence
@@ -321,6 +323,22 @@ export async function transcribeSource(
         break;
       }
     }
+    if (slots.length > 0 && !(Number.isFinite(durationSec) && durationSec > 0)) {
+      durationSec = await probeDurationMounted(slots[0].ff, slots[0].path);
+      if (durationSec > 0) opts.onDuration?.(durationSec);
+    }
+    guardDuration(durationSec);
+    plan = planAudioChunks(durationSec, {
+      chunkSec: LIMITS.audioChunkSec,
+      overlapSec: LIMITS.audioChunkOverlapSec,
+    });
+    if (plan.length === 0) {
+      throw new FriendlyError('Não consegui dividir esse vídeo pra transcrever. Tenta outro arquivo.');
+    }
+    total = plan.length;
+    results = new Array<ChunkWords | null>(total).fill(null);
+    report('audio');
+
     if (slots.length === 0) {
       throw new FriendlyError(
         'Não consegui abrir esse vídeo pra tirar o áudio. Tenta outro formato (MP4, MOV ou WEBM).',

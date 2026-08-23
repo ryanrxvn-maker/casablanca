@@ -3934,3 +3934,11 @@ export async function extractAudioRangeAac(
     await safeDelete(ff, outputName);
   }
 }
+
+/**
+ * Duração (s) de um arquivo JÁ montado (WORKERFS/MEMFS), lida do log do ffmpeg.
+ * É o fallback quando o `<video>` não entrega metadata (aba/janela em 2º plano).
+ */
+export async function probeDurationMounted(ff: FFmpeg, mountedPath: string): Promise<number> {
+  return readDurationFromLogs(ff, mountedPath);
+}

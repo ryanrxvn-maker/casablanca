@@ -388,6 +388,7 @@ function browserDeps(): PipelineDeps {
         pool: getFFmpegPool(recommendedPoolSize()),
         onProgress: o.onProgress,
         onWarning: o.onWarning,
+        onDuration: o.onDuration,
         signal: o.signal,
       }),
     analyze: (input, o) => analyzeTranscript(input, o),
