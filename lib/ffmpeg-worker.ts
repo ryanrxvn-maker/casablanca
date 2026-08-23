@@ -2820,10 +2820,11 @@ export async function prepareVoiceForDecupagem(
   file: Blob,
   opts: RunOptions = {},
   format: NormalizeOutFormat = 'mp4',
+  profile: NormalizeProfile = 'natural',
 ): Promise<Blob> {
   try {
     opts.onStage?.('Regulando a voz (nível + limpeza)...');
-    return await normalizeVolume(file, { output: format, profile: 'natural' }, opts);
+    return await normalizeVolume(file, { output: format, profile }, opts);
   } catch (e) {
     if (isCancellationError(e)) throw e;
     console.warn('[ffmpeg-worker] prepareVoiceForDecupagem falhou, usando áudio original:', (e as Error)?.message);

@@ -4,7 +4,12 @@
  * Funções puras para decodificação, detecção de silêncio, trim, split e
  * codificação WAV. Todo o processamento acontece no browser — nenhum
  * upload é feito para servidor.
+ *
+ * A DECISÃO de onde há fala mora em `lib/speech-detect` (periodicidade + energia),
+ * que é o que a Decupagem usa. O `detectSilences`/`trimSilences` daqui decidem só
+ * por energia e ficaram para quem precisa desse comportamento (split, VA legado).
  */
+import { planSpeechCut } from './speech-detect';
 
 export const SAMPLE_RATE = 44100;
 export const RMS_WINDOW_MS = 20;          // 20ms de janela
@@ -226,6 +231,40 @@ export function trimSilences(
     }
   }
 
+  return out as unknown as AudioBuffer;
+}
+
+/**
+ * Corta o buffer com o detector de FALA (lib/speech-detect): remove as pausas E a
+ * respiração dentro delas, deixando `keepSilence` segundos de pausa no lugar.
+ *
+ * É o que a Decupagem usa hoje. `trimSilences` (acima) continua aqui porque
+ * decide só por energia — serve de referência e para quem precisa do
+ * comportamento antigo, mas não é mais o caminho da ferramenta.
+ */
+export function trimSpeechCut(
+  buffer: AudioBuffer,
+  keepSilence: number = 0.08,
+): AudioBuffer {
+  const { segments } = planSpeechCut(buffer, keepSilence);
+  const sr = buffer.sampleRate;
+  const chCount = buffer.numberOfChannels;
+  const ranges = segments.map((s) => ({
+    start: Math.max(0, Math.floor(s.start * sr)),
+    end: Math.min(buffer.length, Math.ceil(s.end * sr)),
+  })).filter((r) => r.end > r.start);
+
+  const totalSamples = ranges.reduce((n, r) => n + (r.end - r.start), 0);
+  const out = new AudioBufferMock(chCount, Math.max(totalSamples, 1), sr);
+  for (let ch = 0; ch < chCount; ch++) {
+    const src = buffer.getChannelData(ch);
+    const dst = out.getChannelData(ch);
+    let offset = 0;
+    for (const r of ranges) {
+      dst.set(src.subarray(r.start, r.end), offset);
+      offset += r.end - r.start;
+    }
+  }
   return out as unknown as AudioBuffer;
 }
 

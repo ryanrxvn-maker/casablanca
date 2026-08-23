@@ -389,10 +389,14 @@ function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.12, genId
   // Intensidade vai no FIM da chave do 'decupado' (`...:<label>@k<sec>`) pra que
   // a invalidação por parte (deletePrefix `...:decupado:<label>@k`) atinja todas
   // as intensidades daquela parte sem tocar nas outras partes.
+  // 'leveled2' (23.08): o nivelamento passou a usar o motor da ferramenta
+  // Normalizador (profile 'full'). Trocar o nome da chave invalida de uma vez os
+  // clips nivelados pelo motor antigo — senão um RETOMAR reusaria o áudio velho e
+  // o conserto não apareceria pra quem já tinha rodado a task.
   const keyFor = (kind: 'leveled' | 'decupado', label: string) =>
     kind === 'decupado'
       ? `${pfx}decupado:${label}@k${kTag}`
-      : `${pfx}${kind}:${label}`;
+      : `${pfx}leveled2:${label}`;
   return {
     loadCachedClip: async (kind: 'leveled' | 'decupado', label: string): Promise<Blob | null> => {
       try {
@@ -3932,7 +3936,7 @@ Bodies identificados (label BODY ou PARTE): ${pipeRes.diagnostics.bodiesFound}
 Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
 
 Items finais: ${assembled.length}
-${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
+${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'}${it.errors?.nivelamento ? ' | NIVELAMENTO: '+it.errors.nivelamento : ''} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
 
 Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
@@ -4658,7 +4662,7 @@ Bodies identificados (label BODY ou PARTE): ${pipeRes.diagnostics.bodiesFound}
 Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
 
 Items finais: ${assembled.length}
-${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
+${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'}${it.errors?.nivelamento ? ' | NIVELAMENTO: '+it.errors.nivelamento : ''} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
 
 Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
