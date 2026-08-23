@@ -6,11 +6,15 @@
  * pros modelos de texto do Groq. O Claude (lib/llm/anthropic.ts) fica como
  * opção quando `AUTO_CORTES_PROVIDER=anthropic` e o cliente tem chave própria.
  *
- * Limites do free tier que moldam o código (2026): ~8k tokens/min no
- * `openai/gpt-oss-120b` e ~12k no `llama-3.3-70b-versatile`; pedido MAIOR que o
- * teto por minuto volta 413 ("Request too large"), pedido que estoura o acumulado
- * volta 429 com `retry-after`. Por isso as janelas do Groq são menores
- * (GROQ_LIMITS) e o fallback troca de modelo no 413.
+ * ⚠ NADA DE MODELO FIXO NO CÓDIGO. O catálogo do Groq muda (em 23.08.2026 o
+ * `llama-3.3-70b-versatile` sumiu da conta e derrubou o reduce em produção):
+ * a lista real vem de `GET /models` com a chave do cliente e a preferência
+ * abaixo é só uma ORDEM — o que não existe é pulado.
+ *
+ * Limites do free tier que moldam o resto: poucos mil tokens por minuto por
+ * modelo, e o teto conta ENTRADA + `max_completion_tokens`. Pedido maior que o
+ * teto volta 413 — por isso o erro carrega `tooLarge` e quem chamou encolhe o
+ * pedido em vez de desistir (ver app/api/auto-cortes/analyze/route.ts).
  *
  * Mesma interface do `structuredMessage` do Claude: nunca lança erro cru —
  * tudo vira `LlmError` com texto PT-BR.
@@ -20,16 +24,27 @@ import { LlmError, parseRetryAfter } from './anthropic';
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
-export const DEFAULT_GROQ_MODEL = 'openai/gpt-oss-120b';
-/** usado quando o modelo principal recusa o pedido por tamanho (413) ou por schema */
-export const FALLBACK_GROQ_MODEL = 'llama-3.3-70b-versatile';
+/** Ordem de preferência. O primeiro que EXISTIR na conta vira o principal. */
+export const GROQ_MODEL_PREFERENCE = [
+  'openai/gpt-oss-120b',
+  'moonshotai/kimi-k2-instruct-0905',
+  'moonshotai/kimi-k2-instruct',
+  'meta-llama/llama-4-maverick-17b-128e-instruct',
+  'openai/gpt-oss-20b',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+] as const;
 
 /** Modelos que aceitam `response_format: json_schema` no Groq. */
 const JSON_SCHEMA_MODELS = /^(openai\/gpt-oss-|moonshotai\/kimi-k2|meta-llama\/llama-4-)/;
 
-export function groqModel(): string {
+/** Não servem pra texto (áudio/moderação) — nunca entram na escolha. */
+const NOT_TEXT = /whisper|tts|guard|prompt-?guard|distil-whisper|playai/i;
+
+export function groqModelOverride(): string | null {
   const m = (process.env.AUTO_CORTES_GROQ_MODEL ?? '').trim();
-  return m || DEFAULT_GROQ_MODEL;
+  return m || null;
 }
 
 /** Janelas/concorrência que cabem no free tier (o cliente lê via GET /analyze). */
@@ -38,16 +53,75 @@ export const GROQ_LIMITS = {
   analyzeWindowOverlapSec: 60,
   analyzeMapConcurrency: 1,
   /** candidatos mandados pro reduce (os melhores por soma de notas) */
-  reduceMaxCandidates: 36,
+  reduceMaxCandidates: 20,
   /** cortes por reduce — acima disso o pedido não cabe no teto por minuto */
-  reduceMaxClips: 15,
-  mapMaxTokens: 2500,
-  reduceMaxTokens: 4000,
+  reduceMaxClips: 12,
+  mapMaxTokens: 2000,
+  reduceMaxTokens: 3000,
 } as const;
+
+// ───────────────────────────────────────────────────────────────────────────
+// Catálogo real da conta (cache por processo, 10 min)
+// ───────────────────────────────────────────────────────────────────────────
+
+type ModelCache = { at: number; ids: string[] };
+const MODELS_TTL_MS = 10 * 60 * 1000;
+const modelCache = new Map<string, ModelCache>();
+
+function keyTag(apiKey: string): string {
+  return apiKey.slice(-6);
+}
+
+/** `GET /models` da conta. Falha = lista vazia (a preferência vira o palpite). */
+export async function fetchGroqModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
+  const tag = keyTag(apiKey);
+  const hit = modelCache.get(tag);
+  if (hit && Date.now() - hit.at < MODELS_TTL_MS) return hit.ids;
+  try {
+    const res = await fetch(`${GROQ_BASE}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal,
+    });
+    if (!res.ok) return hit?.ids ?? [];
+    const j = (await res.json()) as { data?: Array<{ id?: string }> };
+    const ids = (j?.data ?? [])
+      .map((m) => String(m?.id ?? ''))
+      .filter((id) => id && !NOT_TEXT.test(id));
+    if (ids.length > 0) modelCache.set(tag, { at: Date.now(), ids });
+    return ids;
+  } catch {
+    return hit?.ids ?? [];
+  }
+}
+
+/**
+ * Fila de modelos a tentar, na ordem: override do env → preferência que EXISTE
+ * na conta → qualquer outro modelo de texto da conta.
+ */
+export async function resolveGroqModels(apiKey: string, signal?: AbortSignal): Promise<string[]> {
+  const override = groqModelOverride();
+  const available = await fetchGroqModels(apiKey, signal);
+  const has = (id: string) => available.length === 0 || available.includes(id);
+
+  const queue: string[] = [];
+  const push = (id: string) => {
+    if (id && !queue.includes(id)) queue.push(id);
+  };
+
+  if (override) push(override);
+  for (const id of GROQ_MODEL_PREFERENCE) if (has(id)) push(id);
+  // resto da conta como último recurso (catálogo novo que ainda não conhecemos)
+  for (const id of available) push(id);
+  if (queue.length === 0) push(GROQ_MODEL_PREFERENCE[0]);
+  return queue;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 
 export type GroqStructuredArgs = {
   apiKey: string;
-  model?: string;
+  /** fila de modelos (resolveGroqModels); o 1º que responder ganha */
+  models: string[];
   system: string;
   user: string;
   schema: Record<string, unknown>;
@@ -93,19 +167,38 @@ type ChatResponse = {
   error?: { message?: string; code?: string; type?: string };
 };
 
+const NOT_FOUND_MSG = /does not exist|decommissioned|not found|no longer|unsupported model/i;
+
 /**
  * Uma chamada ao Groq com saída no formato do `schema`.
+ *
  * Retries: 429 (honra retry-after, máx 3), 5xx/rede (2), JSON inválido (1 com
- * correção), 413/schema recusado (troca pro modelo de fallback, 1×).
+ * correção), modelo inexistente (próximo da fila), schema recusado (cai pro
+ * `json_object` com o schema no texto). 413 vira `LlmError.tooLarge` depois de
+ * tentar todos os modelos — quem chamou encolhe o pedido.
  */
 export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promise<GroqStructuredResult<T>> {
-  let model = args.model ?? groqModel();
+  const queue = args.models.length > 0 ? [...args.models] : [GROQ_MODEL_PREFERENCE[0]];
+  let mi = 0;
+  let model = queue[0];
   let useSchema = JSON_SCHEMA_MODELS.test(model);
   let rateLimitRetries = 0;
   let transientRetries = 0;
   let parseRetries = 0;
-  let modelSwaps = 0;
   let badOutput: string | null = null;
+  let sawTooLarge = false;
+
+  /** Passa pro próximo modelo da fila. false = acabou. */
+  const nextModel = (motivo: string): boolean => {
+    mi++;
+    if (mi >= queue.length) return false;
+    model = queue[mi];
+    useSchema = JSON_SCHEMA_MODELS.test(model);
+    parseRetries = 0;
+    badOutput = null;
+    console.warn(`[groq] ${motivo} — tentando ${model}`);
+    return true;
+  };
 
   const schemaNote =
     '\n\nResponda SOMENTE com um objeto JSON válido (sem texto fora dele, sem cercas de código) ' +
@@ -181,28 +274,35 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
     }
 
     const json = (await res.json().catch(() => null)) as ChatResponse | null;
+    const errMsg = json?.error?.message ?? '';
 
-    // 413 = pedido maior que o teto por minuto do modelo; 400 de schema/modelo
-    // inexistente → troca pro modelo de fallback (uma vez).
     if (res.status === 413 || res.status === 400 || res.status === 404) {
-      const msg = json?.error?.message ?? '';
-      if (modelSwaps === 0 && model !== FALLBACK_GROQ_MODEL) {
-        modelSwaps++;
-        console.warn(`[groq] ${res.status} em ${model} (${msg.slice(0, 120)}) — trocando pra ${FALLBACK_GROQ_MODEL}`);
-        model = FALLBACK_GROQ_MODEL;
-        useSchema = JSON_SCHEMA_MODELS.test(model);
-        continue;
+      // modelo sumiu do catálogo → próximo da fila
+      if (res.status !== 413 && NOT_FOUND_MSG.test(errMsg)) {
+        if (nextModel(`${model} indisponível (${errMsg.slice(0, 80)})`)) continue;
+        throw new LlmError('Nenhum modelo de IA gratuito está disponível na sua chave agora.', {
+          status: 502,
+        });
       }
-      if (useSchema && /schema|response_format/i.test(msg)) {
+      // schema recusado → tenta json_object no MESMO modelo
+      if (useSchema && /schema|response_format|json/i.test(errMsg)) {
         useSchema = false;
         continue;
       }
-      throw new LlmError(
-        res.status === 413
-          ? 'Esse trecho é grande demais pra IA gratuita. Tente com "Trecho do vídeo" menor ou menos cortes.'
-          : `A IA recusou o pedido (${msg.slice(0, 140) || res.status}).`,
-        { status: 502 },
-      );
+      // pedido grande demais → outro modelo pode ter teto maior; senão avisa quem chamou
+      if (res.status === 413) {
+        sawTooLarge = true;
+        if (nextModel(`413 em ${model} (pedido grande demais)`)) continue;
+        throw new LlmError(
+          'Esse pedido ficou grande demais pra IA gratuita. Vou tentar com menos trechos.',
+          { status: 413, tooLarge: true },
+        );
+      }
+      if (nextModel(`400 em ${model} (${errMsg.slice(0, 80)})`)) continue;
+      throw new LlmError(`A IA recusou o pedido (${errMsg.slice(0, 140) || res.status}).`, {
+        status: 502,
+        tooLarge: sawTooLarge || undefined,
+      });
     }
 
     if (!res.ok) {
@@ -211,6 +311,7 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
         await sleep(800 * 2 ** (transientRetries - 1), args.signal);
         continue;
       }
+      if (nextModel(`${res.status} em ${model}`)) continue;
       throw new LlmError(`O serviço de IA respondeu com erro (${res.status}). Tente de novo.`, {
         status: 502,
       });
@@ -219,6 +320,7 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
     const raw = json?.choices?.[0]?.message?.content ?? '';
     const finish = json?.choices?.[0]?.finish_reason;
     if (!raw.trim()) {
+      if (nextModel(`${model} devolveu vazio`)) continue;
       throw new LlmError('A IA devolveu uma resposta vazia. Tente de novo.', { status: 502 });
     }
 
@@ -227,8 +329,9 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
       data = JSON.parse(stripFence(raw)) as T;
     } catch {
       if (finish === 'length') {
-        throw new LlmError('A resposta da IA foi cortada por tamanho. Tente com menos cortes.', {
-          status: 502,
+        throw new LlmError('A resposta da IA foi cortada por tamanho. Vou tentar com menos trechos.', {
+          status: 413,
+          tooLarge: true,
         });
       }
       if (parseRetries < 1) {
@@ -236,6 +339,7 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
         badOutput = raw.slice(0, 4000);
         continue;
       }
+      if (nextModel(`${model} não devolveu JSON válido`)) continue;
       throw new LlmError('A IA não devolveu o formato esperado. Tente de novo.', { status: 502 });
     }
 

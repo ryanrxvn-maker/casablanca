@@ -34,16 +34,19 @@ export class LlmError extends Error {
   readonly showConfig?: boolean;
   /** segundos que o cliente deve esperar antes de tentar de novo (429). */
   readonly retryAfterSec?: number;
+  /** true = o PEDIDO era grande demais pro modelo/limite; encolher e repetir resolve. */
+  readonly tooLarge?: boolean;
 
   constructor(
     message: string,
-    opts: { status: number; showConfig?: boolean; retryAfterSec?: number; cause?: unknown },
+    opts: { status: number; showConfig?: boolean; retryAfterSec?: number; tooLarge?: boolean; cause?: unknown },
   ) {
     super(message);
     this.name = 'LlmError';
     this.status = opts.status;
     if (opts.showConfig) this.showConfig = true;
     if (typeof opts.retryAfterSec === 'number') this.retryAfterSec = opts.retryAfterSec;
+    if (opts.tooLarge) this.tooLarge = true;
     if (opts.cause !== undefined) (this as { cause?: unknown }).cause = opts.cause;
   }
 }

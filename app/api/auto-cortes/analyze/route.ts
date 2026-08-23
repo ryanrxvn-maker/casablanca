@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireToolAccess } from '@/lib/require-tier';
 import { getUserKey } from '@/lib/user-keys';
 import { createAnthropicClient, LlmError, structuredMessage, llmModel } from '@/lib/llm/anthropic';
-import { GROQ_LIMITS, groqModel, groqStructuredMessage } from '@/lib/llm/groq';
+import { GROQ_LIMITS, GROQ_MODEL_PREFERENCE, groqModelOverride, groqStructuredMessage, resolveGroqModels } from '@/lib/llm/groq';
 import {
   MAP_SCHEMA,
   MAP_SYSTEM,
@@ -67,7 +67,7 @@ async function pickProvider(): Promise<
   return { provider: 'groq', apiKey: g.key };
 }
 
-function infoFor(provider: Provider): AnalyzeInfo {
+async function infoFor(provider: Provider, apiKey: string): Promise<AnalyzeInfo> {
   if (provider === 'anthropic') {
     return {
       provider,
@@ -82,7 +82,7 @@ function infoFor(provider: Provider): AnalyzeInfo {
   }
   return {
     provider,
-    model: groqModel(),
+    model: groqModelOverride() ?? (await resolveGroqModels(apiKey))[0] ?? GROQ_MODEL_PREFERENCE[0],
     free: true,
     windowSec: GROQ_LIMITS.analyzeWindowSec,
     windowOverlapSec: GROQ_LIMITS.analyzeWindowOverlapSec,
@@ -233,7 +233,7 @@ export async function POST(req: Request) {
 
     const picked = await pickProvider();
     if ('response' in picked) return gateError(picked.response);
-    const info = infoFor(picked.provider);
+    const info = await infoFor(picked.provider, picked.apiKey);
 
     let body: RawBody;
     try {
@@ -253,6 +253,9 @@ export async function POST(req: Request) {
     const client = picked.provider === 'anthropic' ? createAnthropicClient(picked.apiKey) : null;
 
     /** Uma chamada estruturada no provedor escolhido (mesma forma de resposta). */
+    // Fila de modelos REAIS da conta (o catálogo do Groq muda; nada fixo aqui).
+    const groqModels = client ? [] : await resolveGroqModels(picked.apiKey, signal);
+
     const ask = <T,>(a: {
       system: string;
       user: string;
@@ -264,6 +267,7 @@ export async function POST(req: Request) {
         ? structuredMessage<T>({ client, ...a, signal })
         : groqStructuredMessage<T>({
             apiKey: picked.apiKey,
+            models: groqModels,
             ...a,
             maxTokens: a.effort === 'high' ? GROQ_LIMITS.reduceMaxTokens : GROQ_LIMITS.mapMaxTokens,
             signal,
@@ -330,26 +334,41 @@ export async function POST(req: Request) {
             .sort((a, b) => a.startMs - b.startMs)
         : candidates;
 
-    const user = buildReduceUser({
-      candidates: shortlist,
-      count,
-      genre: settings.genre,
-      length: settings.length,
-      focusPrompt: settings.focusPrompt,
-      language: settings.language,
-      sourceName: source.name,
-      sourceDurationSec: source.durationSec,
-    });
+    // O teto por minuto do free tier conta entrada + saída: pedido recusado por
+    // tamanho é ENCOLHIDO (menos candidatos) em vez de virar erro pro cliente.
+    let pool = shortlist;
+    let res: Awaited<ReturnType<typeof ask<ReduceResult>>>;
+    for (let tentativa = 0; ; tentativa++) {
+      try {
+        res = await ask<ReduceResult>({
+          system: REDUCE_SYSTEM,
+          user: buildReduceUser({
+            candidates: pool,
+            count: Math.min(count, pool.length),
+            genre: settings.genre,
+            length: settings.length,
+            focusPrompt: settings.focusPrompt,
+            language: settings.language,
+            sourceName: source.name,
+            sourceDurationSec: source.durationSec,
+          }),
+          schema: REDUCE_SCHEMA as unknown as Record<string, unknown>,
+          effort: 'high',
+          maxTokens: REDUCE_MAX_TOKENS,
+        });
+        break;
+      } catch (e) {
+        const menor = Math.max(6, Math.floor(pool.length / 2));
+        if (e instanceof LlmError && e.tooLarge && tentativa < 3 && menor < pool.length) {
+          console.warn(`[auto-cortes] reduce grande demais com ${pool.length} candidatos — tentando ${menor}`);
+          pool = pool.slice(0, menor);
+          continue;
+        }
+        throw e;
+      }
+    }
 
-    const res = await ask<ReduceResult>({
-      system: REDUCE_SYSTEM,
-      user,
-      schema: REDUCE_SCHEMA as unknown as Record<string, unknown>,
-      effort: 'high',
-      maxTokens: REDUCE_MAX_TOKENS,
-    });
-
-    const known = new Set(candidates.map((c) => c.id));
+    const known = new Set(pool.map((c) => c.id));
     const seen = new Set<string>();
     const clips = (Array.isArray(res.data?.clips) ? res.data.clips : [])
       .filter((c) => {
@@ -393,7 +412,7 @@ export async function GET() {
     if (!gate.ok) return gateError(gate.response);
     const picked = await pickProvider();
     if ('response' in picked) return gateError(picked.response);
-    return NextResponse.json(infoFor(picked.provider));
+    return NextResponse.json(await infoFor(picked.provider, picked.apiKey));
   } catch (e) {
     console.error('[auto-cortes analyze GET]', e);
     return fail({ error: 'Não consegui consultar a IA agora. Tente de novo em instantes.' }, 500);
