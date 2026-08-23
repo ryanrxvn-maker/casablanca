@@ -85,7 +85,11 @@ export function medirArquivo(caminho) {
         ...(sexo === 'MASCULINA' ? ['a voz saiu MASCULINA'] : []),
         ...(sexo === 'AMBIGUA' ? ['pitch na faixa ambigua (' + GRAVE + '-' + AGUDA + ' Hz) — ouca antes de aprovar'] : []),
         ...(graves.length ? ['pico na faixa grave (' + graves.map((x) => x.hz + ' Hz').join(', ') + ') — masculinizou ou tem 2 falantes'] : []),
-        ...(Number(sil) > 28 ? ['fala ESPACADA (' + Number(sil).toFixed(0) + '% de silencio) — o clone herdou as pausas do material'] : []),
+        // CALIBRADO em 23.08 contra takes que o Silas aprovou: 18% e 28%.
+        // Take de anuncio tem pausa de pontuacao mesmo — 28 acendia alarme
+        // falso. 38 deixa o normal passar e ainda pega o patologico (o
+        // clone da Catia herdando as pausas do podcast).
+        ...(Number(sil) > 38 ? ['fala ESPACADA (' + Number(sil).toFixed(0) + '% de silencio) — o clone pode ter herdado as pausas do material'] : []),
       ],
     };
   } finally {
