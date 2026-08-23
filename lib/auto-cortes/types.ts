@@ -14,7 +14,7 @@
  *   (`SentenceId`), e o código resolve pra tempo. Ver `Candidate`.
  */
 
-import type { Block, TWord } from '@/lib/typography/engine';
+import type { Block, TWord } from '../typography/engine';
 
 export type Ms = number;
 export type Sec = number;
@@ -428,6 +428,8 @@ export type ExtFetchRequest = {
 export type ExtFetchEvent =
   | { type: 'DL_FETCH_META'; reqId: string; filename: string; size: number | null; mime: string }
   | { type: 'DL_FETCH_CHUNK'; reqId: string; idx: number; buf: ArrayBuffer }
+  /** pulso do SW (5 s) — o Motor roda o yt-dlp inteiro antes do 1º byte; sem isso o watchdog mataria download saudável */
+  | { type: 'DL_FETCH_PROGRESS'; reqId: string; received: number; total: number | null; phase: 'preparando' | 'baixando' }
   | { type: 'DL_FETCH_DONE'; reqId: string; total: number; chunks: number }
   | { type: 'DL_FETCH_ERROR'; reqId: string; error: string };
 

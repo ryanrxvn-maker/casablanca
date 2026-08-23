@@ -3721,3 +3721,216 @@ export function estimateTakeBoundaries(
   }
   return result;
 }
+
+// ---------- AUTO CORTES — primitivas de corte / áudio ---------------------
+//
+// Bloco ADITIVO (nada acima foi tocado). São as peças que a tool AUTO CORTES
+// usa por CIMA do pool: montar o MESMO arquivo grande em N instâncias, tirar
+// pedaços de áudio pro ASR, cortar o trecho sem re-encode e ler o timestamp
+// absoluto do primeiro frame do trecho cortado.
+// Ver docs/auto-cortes/ARQUITETURA.md §3.2 e §3.5.
+
+/** Sufixo único por chamada — o pool roda várias em paralelo no mesmo MEMFS. */
+function acTag(): string {
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Wrapper PÚBLICO de `makeInputsAvailable`: monta blobs por WORKERFS (sem
+ * heap), com fallback MEMFS. Mesma assinatura e mesmo retorno do interno —
+ * existe só pra outras camadas (auto-cortes) montarem o MESMO `File` em cada
+ * instância do pool sem duplicar a lógica.
+ */
+export async function mountInputs(
+  ff: FFmpeg,
+  entries: Array<{ name: string; data: Blob }>,
+): Promise<{ dir: string; mounted: boolean; cleanup: () => Promise<void> }> {
+  return makeInputsAvailable(ff, entries);
+}
+
+/**
+ * Extrai UM pedaço de áudio (opus 16k mono) de um arquivo JÁ MONTADO, pronto
+ * pra ir pro ASR. `-ss/-t` antes do `-i` = seek rápido no container (mesmo
+ * padrão do compressVideoChunked). Nome de saída único por chamada: o pool
+ * roda várias extrações ao mesmo tempo.
+ */
+export async function extractAsrChunk(
+  ff: FFmpeg,
+  mountedPath: string,
+  startSec: number,
+  durSec: number,
+  kbps: number,
+): Promise<Blob> {
+  const outName = `asr_${acTag()}.opus`;
+  const rate = Math.max(8, Math.min(64, Math.round(kbps)));
+  try {
+    await execOrThrow(
+      ff,
+      [
+        '-ss', Math.max(0, startSec).toFixed(3),
+        '-t', Math.max(0.05, durSec).toFixed(3),
+        '-i', mountedPath,
+        '-vn',
+        '-c:a', 'libopus',
+        '-b:a', `${rate}k`,
+        '-ac', '1',
+        '-ar', '16000',
+        // Acima de ~24k o modo 'audio' preserva timbre/consoantes; abaixo, o
+        // 'voip' é mais inteligível (mesma regra da extractAudioForTranscription).
+        '-application', rate >= 24 ? 'audio' : 'voip',
+        '-vbr', 'on',
+        outName,
+      ],
+      'extração do áudio do trecho pra transcrição',
+    );
+    const data = (await ff.readFile(outName)) as Uint8Array;
+    if (!data || data.length === 0) throw new Error('O trecho de áudio saiu vazio.');
+    return toBlob(data, 'audio/ogg');
+  } finally {
+    await safeDelete(ff, outName);
+  }
+}
+
+/**
+ * Corta um trecho do arquivo montado SEM re-encode (`-c copy`).
+ *
+ * `-copyts` mantém os timestamps ABSOLUTOS da fonte dentro do mp4 cortado — é
+ * o que deixa o render mapear `pts → tempo absoluto do vídeo original` (via
+ * `probeFirstPts`) e casar legenda/headline com a transcrição sem deriva.
+ * Nem todo container aguenta: quando a saída sai quebrada/minúscula (ou o
+ * ffmpeg falha), refazemos SEM `-copyts`, com `-avoid_negative_ts make_zero`
+ * (o clipe passa a começar em 0) e devolvemos `copyts:false` — aí o chamador
+ * usa o start que ele mesmo pediu como base, em vez do pts.
+ */
+export async function cutClipCopy(
+  ff: FFmpeg,
+  mountedPath: string,
+  startSec: number,
+  endSec: number,
+): Promise<{ blob: Blob; copyts: boolean }> {
+  const s = Math.max(0, startSec);
+  const e = Math.max(s + 0.04, endSec);
+  const base = ['-ss', s.toFixed(3), '-to', e.toFixed(3), '-i', mountedPath, '-c', 'copy'];
+
+  // Tentativa 1 — timestamps absolutos preservados.
+  const outA = `cut_${acTag()}.mp4`;
+  try {
+    await execOrThrow(
+      ff,
+      [...base, '-copyts', '-avoid_negative_ts', 'disabled', '-movflags', '+faststart', outA],
+      'corte do trecho',
+    );
+    const data = (await ff.readFile(outA)) as Uint8Array;
+    if (data && data.length >= 4096) {
+      assertValidMp4(data, 'trecho cortado');
+      return { blob: toBlob(data, 'video/mp4'), copyts: true };
+    }
+    console.warn('[auto-cortes] corte com -copyts saiu pequeno demais — refazendo sem.');
+  } catch (err) {
+    if (isCancellationError(err)) throw err;
+    console.warn('[auto-cortes] corte com -copyts falhou:', (err as Error)?.message);
+  } finally {
+    await safeDelete(ff, outA);
+  }
+
+  // Tentativa 2 — sem -copyts (o clipe começa em 0).
+  const outB = `cut_${acTag()}.mp4`;
+  try {
+    await execOrThrow(
+      ff,
+      [...base, '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', outB],
+      'corte do trecho (sem timestamps absolutos)',
+    );
+    const data = (await ff.readFile(outB)) as Uint8Array;
+    assertValidMp4(data, 'trecho cortado');
+    return { blob: toBlob(data, 'video/mp4'), copyts: false };
+  } finally {
+    await safeDelete(ff, outB);
+  }
+}
+
+/**
+ * Lê o `pts_time` do PRIMEIRO frame de vídeo de um trecho já cortado — com
+ * `-copyts` esse valor é o tempo ABSOLUTO no vídeo original, e é o que amarra
+ * o render (o WebCodecs entrega pts, não tempo de linha do tempo).
+ *
+ * O ffmpeg-wasm não expõe stdout: o `showinfo` sai pelo LOG, então plugamos um
+ * listener em `ff.on('log')` e removemos no finally. Sem match → 0 (o chamador
+ * cai no start que ele mesmo pediu; degradação, nunca erro).
+ */
+export async function probeFirstPts(ff: FFmpeg, blob: Blob): Promise<number> {
+  const name = `pts_${acTag()}.${guessExt(blob, 'mp4')}`;
+  let pts = 0;
+  let found = false;
+  const onLog = ({ message }: { message: string }) => {
+    if (found) return;
+    const m = /pts_time:\s*(\d+(?:\.\d+)?)/.exec(message);
+    if (m) {
+      pts = parseFloat(m[1]);
+      found = true;
+    }
+  };
+  const { fetchFile } = await import('@ffmpeg/util');
+  await ff.writeFile(name, await fetchFile(blob));
+  ff.on('log', onLog);
+  try {
+    await execOrThrow(
+      ff,
+      ['-i', name, '-vf', 'showinfo', '-frames:v', '1', '-f', 'null', '-'],
+      'leitura do timestamp do trecho',
+    );
+  } catch (err) {
+    if (isCancellationError(err)) throw err;
+    // Probe é best-effort: se o rc veio != 0 mas o log já trouxe o pts, vale.
+    console.warn('[auto-cortes] showinfo falhou:', (err as Error)?.message);
+  } finally {
+    ff.off('log', onLog);
+    await safeDelete(ff, name);
+  }
+  return found && Number.isFinite(pts) && pts > 0 ? pts : 0;
+}
+
+/**
+ * Extrai a faixa de áudio final do corte (AAC 48k estéreo) pra ser muxada no
+ * MP4 renderizado. O `clip` aqui é o trecho JÁ cortado (poucos MB), então vai
+ * direto no MEMFS — sem WORKERFS.
+ *
+ * `opts.ff` permite usar uma instância do pool (o render roda 2 cortes em
+ * paralelo); sem ela, usa o singleton.
+ */
+export async function extractAudioRangeAac(
+  clip: Blob,
+  startSec: number,
+  durSec: number,
+  opts: RunOptions & { ff?: FFmpeg } = {},
+): Promise<Blob> {
+  const ff = opts.ff ?? (await getFFmpeg(opts.onStage, opts.onLog));
+  const { fetchFile } = await import('@ffmpeg/util');
+  const tag = acTag();
+  const inputName = `aud_in_${tag}.${guessExt(clip, 'mp4')}`;
+  const outputName = `aud_out_${tag}.m4a`;
+  try {
+    await ff.writeFile(inputName, await fetchFile(clip));
+    await execOrThrow(
+      ff,
+      [
+        '-ss', Math.max(0, startSec).toFixed(3),
+        '-t', Math.max(0.05, durSec).toFixed(3),
+        '-i', inputName,
+        '-vn',
+        '-c:a', 'aac',
+        '-b:a', '160k',
+        '-ar', '48000',
+        '-ac', '2',
+        outputName,
+      ],
+      'extração do áudio do corte',
+    );
+    const data = (await ff.readFile(outputName)) as Uint8Array;
+    if (!data || data.length === 0) throw new Error('O áudio do corte saiu vazio.');
+    return toBlob(data, 'audio/mp4');
+  } finally {
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}

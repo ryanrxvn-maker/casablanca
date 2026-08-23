@@ -66,6 +66,83 @@ export function unloadFaceDetector() {
   mediaPipePromise = null;
 }
 
+/** Tamanho em pixels de qualquer fonte de imagem aceita pelo canvas. */
+function sourcePixelSize(src: CanvasImageSource): { w: number; h: number } {
+  const any = src as {
+    videoWidth?: number;
+    videoHeight?: number;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    displayWidth?: number;
+    displayHeight?: number;
+    codedWidth?: number;
+    codedHeight?: number;
+    width?: number | SVGAnimatedLength;
+    height?: number | SVGAnimatedLength;
+  };
+  const w =
+    any.videoWidth ||
+    any.naturalWidth ||
+    any.displayWidth ||
+    any.codedWidth ||
+    (typeof any.width === 'number' ? any.width : 0);
+  const h =
+    any.videoHeight ||
+    any.naturalHeight ||
+    any.displayHeight ||
+    any.codedHeight ||
+    (typeof any.height === 'number' ? any.height : 0);
+  return { w: w || 0, h: h || 0 };
+}
+
+/**
+ * Rostos de UM frame (imagem/canvas/vídeo já posicionado), em coordenadas
+ * NORMALIZADAS da própria imagem (0..1) e ordenados do mais confiável pro
+ * menos. Usado pelo reenquadro do AUTO CORTES — o `detectFacePresence` acima
+ * continua intacto (ele varre segmentos, este olha um frame só).
+ *
+ * Nunca lança: detector indisponível ou frame ruim devolve lista vazia (o
+ * planner degrada pra enquadro central).
+ */
+export async function detectFacesInImage(
+  src: CanvasImageSource | HTMLVideoElement | HTMLCanvasElement,
+): Promise<Array<{ x: number; y: number; w: number; h: number; score: number }>> {
+  let detector: any;
+  try {
+    detector = await getDetector();
+  } catch (e) {
+    console.warn('[face-detector] MediaPipe indisponivel:', e);
+    return [];
+  }
+  if (!detector) return [];
+
+  const { w: sw, h: sh } = sourcePixelSize(src as CanvasImageSource);
+  if (!sw || !sh) return [];
+
+  try {
+    const det = detector.detect(src);
+    const detections = det?.detections || [];
+    const out: Array<{ x: number; y: number; w: number; h: number; score: number }> = [];
+    for (const d of detections) {
+      const bb = d?.boundingBox;
+      if (!bb) continue;
+      out.push({
+        x: bb.originX / sw,
+        y: bb.originY / sh,
+        w: bb.width / sw,
+        h: bb.height / sh,
+        score: d?.categories?.[0]?.score ?? 1,
+      });
+    }
+    // ordem estável: score desc, depois X (determinismo do rastreamento)
+    out.sort((a, b) => b.score - a.score || a.x - b.x);
+    return out;
+  } catch (e) {
+    console.warn('[face-detector] detect falhou neste frame:', e);
+    return [];
+  }
+}
+
 export type FaceSample = {
   /** Timestamp em segundos */
   ts: number;
