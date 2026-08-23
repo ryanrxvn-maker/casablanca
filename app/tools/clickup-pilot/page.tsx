@@ -77,6 +77,9 @@ import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
+// Estado DERIVADO do conteudo: e' o que impede o card de dizer "Pronto"
+// sobre um montado velho (ver o modulo — caso AD06, 23.08).
+import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe } from '@/lib/montagem-sig';
 import { EditPartModal } from '@/components/EditPartModal';
 import {
   PilotBtn3D,
@@ -743,6 +746,12 @@ type BatchTaskState = {
    *  "Atualizar montagem" que re-roda runPostPipeline. Persiste no
    *  localStorage pra sobreviver reload. */
   dirtyParts?: string[];
+  /** ASSINATURA dos takes que ENTRARAM na montagem atual (ver
+   *  `assinaturaMontagem`). E' a PROVA de que o arquivo montado corresponde aos
+   *  takes de agora — `dirtyParts` sozinho e' flag de intencao e mente quando
+   *  alguem esquece de marcar. Ausente = batch montado antes de 23.08 (legado):
+   *  cai no comportamento antigo, sem alarme falso. */
+  montagemSig?: string;
   /** Doc URL (Google Docs) da task — pra botao "abrir doc" no card. */
   docUrl?: string;
   /** ClickUp task URL — fallback se docUrl nao foi capturado. */
@@ -4055,6 +4064,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
+          // Carimba QUAIS takes entraram neste montado. E' o que permite ao
+          // card detectar sozinho que o arquivo ficou velho depois.
+          montagemSig: assinaturaMontagem(prev[taskId]?.parts),
+          dirtyParts: [],
         },
       }));
       if (entregou) {
@@ -4795,6 +4808,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
+          // Carimba QUAIS takes entraram neste montado. E' o que permite ao
+          // card detectar sozinho que o arquivo ficou velho depois.
+          montagemSig: assinaturaMontagem(prev[taskId]?.parts),
+          dirtyParts: [],
         },
       }));
       if (entregou) {
@@ -6324,6 +6341,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipName: camuName,
           pipeStats,
           dirtyParts: [], // limpa flag — montagem ta fresh
+          montagemSig: assinaturaMontagem(prev[taskId]?.parts),
         },
       }));
     } catch (e) {
@@ -10308,7 +10326,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   return rest;
                                 });
                               }}
-                              dirtyPartsCount={(b.dirtyParts || []).length}
+                              dirtyPartsCount={partesDesatualizadas(b).length}
+                              takesPendentes={takesPendentesDe(b)}
                               onRebuild={() => void rebuildMontage(b.taskId)}
                               isRebuilding={rebuildingTaskId === b.taskId}
                               docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}

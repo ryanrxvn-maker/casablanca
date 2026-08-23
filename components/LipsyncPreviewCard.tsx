@@ -75,6 +75,13 @@ export function LipsyncPreviewCard({
   const [expanded, setExpanded] = useState(false);
 
   const ready = take.status === 'completed' && !!take.videoUrl;
+  /** O take RENDEROU, mas o blob ainda nao voltou pra memoria. Acontece a cada
+   *  F5: o persist descarta os object URLs (eles morrem com a aba) e o video
+   *  vive no IndexedDB ate' o Retomar re-hidratar. Ate' 23.08 esse estado
+   *  mostrava "Na fila..." — dizia que o take nem comecou quando ele esta'
+   *  pronto no disco. Silas viu isso depois de atualizar a pagina e achou que
+   *  o lote tinha voltado pro zero. */
+  const recuperando = take.status === 'completed' && !take.videoUrl;
   const failed = take.status === 'failed';
   /** Esperando o HeyGen terminar — âmbar, não vermelho. */
   const waitingHeyGen = take.status === 'stalled';
@@ -422,7 +429,9 @@ export function LipsyncPreviewCard({
               />
             </div>
             <span className="relative z-10 mono text-[9px] uppercase tracking-widest text-violet">
-              {take.status === 'processing' ? 'Renderizando…' : 'Na fila…'}
+              {recuperando ? 'Recuperando do cache…'
+                : take.status === 'processing' ? 'Renderizando…'
+                : 'Na fila…'}
             </span>
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-line/40">
               <div

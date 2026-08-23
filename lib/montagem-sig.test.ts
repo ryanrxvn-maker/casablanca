@@ -1,0 +1,60 @@
+import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe } from './montagem-sig';
+
+let falhas = 0;
+function ok(cond: boolean, nome: string) {
+  if (cond) { console.log('  ok  ' + nome); }
+  else { console.log('  FALHOU  ' + nome); falhas++; }
+}
+
+// ── o caso real do AD06 (23.08) ──────────────────────────────────────────
+const antes = [
+  { label: 'HOOK 1', videoId: 'v-hook-velho', videoStatus: 'completed' },
+  { label: 'BODY 1', videoId: 'v-body-1', videoStatus: 'completed' },
+  { label: 'BODY 2', videoId: 'v-body-2', videoStatus: 'completed' },
+];
+const sig = assinaturaMontagem(antes);
+
+const depois = antes.map((p) =>
+  p.label === 'HOOK 1' ? { ...p, videoId: 'v-hook-CORRIGIDO' } : p);
+
+ok(partesDesatualizadas({ parts: antes, montagemSig: sig }).length === 0,
+   'montagem fresca: nenhuma parte desatualizada');
+
+ok(partesDesatualizadas({ parts: depois, montagemSig: sig }).join() === 'HOOK 1',
+   'take corrigido acusa desatualizado MESMO SEM dirtyParts (o bug do AD06)');
+
+ok(partesDesatualizadas({ parts: depois, montagemSig: sig, dirtyParts: [] }).length === 1,
+   'dirtyParts vazio (limpo por um Retomar) nao esconde a mudanca');
+
+// ── a URL que expira NAO pode acusar mudanca ─────────────────────────────
+const urlNova = antes.map((p) => ({ ...p, videoUrl: 'https://heygen/novo-token' }));
+ok(partesDesatualizadas({ parts: urlNova, montagemSig: sig }).length === 0,
+   'URL do HeyGen renovada nao vira falso alarme (assina videoId, nao URL)');
+
+// ── legado: batch montado antes da assinatura existir ────────────────────
+ok(partesDesatualizadas({ parts: depois }).length === 0,
+   'sem montagemSig (batch legado) segue o comportamento antigo');
+ok(partesDesatualizadas({ parts: depois, dirtyParts: ['BODY 1'] }).join() === 'BODY 1',
+   'sem montagemSig o flag antigo continua valendo');
+
+// ── take novo (label que nao existia) nao acende alarme ──────────────────
+const comNovo = [...antes, { label: 'BODY 3', videoId: 'v-novo', videoStatus: 'completed' }];
+ok(partesDesatualizadas({ parts: comNovo, montagemSig: sig }).length === 0,
+   'label ausente da assinatura nao conta como mudanca');
+
+// ── take que VOLTOU pra fila ─────────────────────────────────────────────
+const naFila = antes.map((p) =>
+  p.label === 'BODY 2' ? { label: 'BODY 2', videoId: null, videoStatus: 'pending' } : p);
+ok(takesPendentesDe({ parts: naFila }) === 1, 'take pendente e contado');
+ok(takesPendentesDe({ parts: antes }) === 0, 'todos completos = zero pendentes');
+ok(partesDesatualizadas({ parts: naFila, montagemSig: sig }).join() === 'BODY 2',
+   'take que voltou pra fila tambem invalida a montagem');
+
+// ── vazios ───────────────────────────────────────────────────────────────
+ok(assinaturaMontagem([]) === '' && assinaturaMontagem(undefined) === '',
+   'sem partes = assinatura vazia');
+ok(partesDesatualizadas({}).length === 0, 'batch sem nada nao quebra');
+
+console.log('');
+console.log(falhas ? falhas + ' FALHA(S)' : 'montagem-sig: tudo ok');
+if (falhas) process.exit(1);
