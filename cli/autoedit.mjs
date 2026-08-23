@@ -345,7 +345,7 @@ async function cmdVoz({ positionals, flags }) {
       const ruins = [];
       for (const id of ids) {
         let laudo;
-        try { laudo = medirVideo(id); } catch (e) { console.log(c.red('  ! ' + id.slice(0, 10) + ' — ' + e.message)); ruins.push(id); continue; }
+        try { laudo = medirVideo(id, flags.esperado); } catch (e) { console.log(c.red('  ! ' + id.slice(0, 10) + ' — ' + e.message)); ruins.push(id); continue; }
         const cor = laudo.sexo === 'feminina' ? c.green : laudo.sexo === 'AMBIGUA' ? c.yellow : c.red;
         const marca = laudo.alertas.length ? c.red('!') : c.green('ok');
         console.log('  ' + marca + ' ' + id.slice(0, 10) + '  ' + cor(String(Math.round(laudo.mediana)).padStart(3) + ' Hz') +
@@ -362,9 +362,9 @@ async function cmdVoz({ positionals, flags }) {
     const alvo = flags.video || flags.arquivo || flags.url || positionals.shift();
     if (!alvo) return warn('uso: autoedit voz medir --video <videoId> | --arquivo take.mp4 | --url <preview>');
     let laudo;
-    if (flags.video) laudo = medirVideo(flags.video);
-    else if (flags.url) laudo = medirUrl(flags.url);
-    else laudo = medirArquivo(alvo);
+    if (flags.video) laudo = medirVideo(flags.video, flags.esperado);
+    else if (flags.url) laudo = medirUrl(flags.url, flags.esperado);
+    else laudo = medirArquivo(alvo, flags.esperado);
     const cor = laudo.sexo === 'feminina' ? c.green : laudo.sexo === 'AMBIGUA' ? c.yellow : c.red;
     console.log('  mediana : ' + cor(laudo.mediana.toFixed(0) + ' Hz') + '  (' + laudo.sexo + ')');
     console.log('  p10/p90 : ' + laudo.p10.toFixed(0) + ' / ' + laudo.p90.toFixed(0) + ' Hz');
@@ -382,6 +382,7 @@ ${c.bold('autoedit voz')} — conferir o que o HeyGen entregou
   ${c.cyan('medir')} --arquivo take.mp4    mede um arquivo local
   ${c.cyan('medir')} --url <preview>       mede o preview de um clone
   ${c.cyan('medir')} --videos id1,id2,...  mede um LOTE e resume no fim
+  ${c.dim ? c.dim('') : ''}       --esperado feminina|masculina   de quem e a cena (evita alerta falso)
 
   O campo ${c.bold('gender')} do clone MENTE. A medicao que vale e a do take.
 `);

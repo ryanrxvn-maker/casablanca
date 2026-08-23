@@ -55,7 +55,7 @@ function rodar(cmd, args) {
  * Mede um arquivo de áudio/vídeo local e devolve o laudo.
  * @param {string} caminho
  */
-export function medirArquivo(caminho) {
+export function medirArquivo(caminho, esperado) {
   if (!existsSync(caminho)) throw new Error('arquivo nao existe: ' + caminho);
   const dir = mkdtempSync(join(tmpdir(), 'vozmedir-'));
   const wav = join(dir, 'a.wav');
@@ -81,10 +81,17 @@ export function medirArquivo(caminho) {
     return {
       mediana, p10: Number(p10), p90: Number(p90), silencioPct: Number(sil),
       sexo, picos: listaPicos,
+      esperado: esperado || null,
       alertas: [
-        ...(sexo === 'MASCULINA' ? ['a voz saiu MASCULINA'] : []),
-        ...(sexo === 'AMBIGUA' ? ['pitch na faixa ambigua (' + GRAVE + '-' + AGUDA + ' Hz) — ouca antes de aprovar'] : []),
-        ...(graves.length ? ['pico na faixa grave (' + graves.map((x) => x.hz + ' Hz').join(', ') + ') — masculinizou ou tem 2 falantes'] : []),
+        // `esperado` diz de quem e' a cena. Sem ele, todo take masculino
+        // legitimo (o Doutor, o Gordao) acendia alerta e o laudo virava ruido.
+        ...(esperado === 'masculina'
+          ? (sexo === 'feminina' ? ['esperava voz MASCULINA e saiu feminina'] : [])
+          : esperado === 'feminina'
+          ? (sexo === 'MASCULINA' ? ['esperava voz FEMININA e saiu masculina'] : [])
+          : (sexo === 'MASCULINA' ? ['a voz saiu MASCULINA'] : [])),
+        ...(sexo === 'AMBIGUA' && !esperado ? ['pitch na faixa ambigua (' + GRAVE + '-' + AGUDA + ' Hz) — ouca antes de aprovar'] : []),
+        ...(graves.length && esperado !== 'masculina' ? ['pico na faixa grave (' + graves.map((x) => x.hz + ' Hz').join(', ') + ') — masculinizou ou tem 2 falantes'] : []),
         // CALIBRADO em 23.08 contra takes que o Silas aprovou: 18% e 28%.
         // Take de anuncio tem pausa de pontuacao mesmo — 28 acendia alarme
         // falso. 38 deixa o normal passar e ainda pega o patologico (o
@@ -98,26 +105,26 @@ export function medirArquivo(caminho) {
 }
 
 /** Baixa o take do HeyGen pelo videoId e mede. Usa o CLI `heygen`. */
-export function medirVideo(videoId) {
+export function medirVideo(videoId, esperado) {
   const dir = mkdtempSync(join(tmpdir(), 'vozmedir-'));
   const mp4 = join(dir, 'take.mp4');
   try {
     const r = rodar('heygen', ['video', 'download', videoId, '--output-path', mp4, '--force']);
     if (!existsSync(mp4)) throw new Error('nao baixou o video: ' + (r.err || r.out || '').slice(0, 200));
-    return medirArquivo(mp4);
+    return medirArquivo(mp4, esperado);
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ }
   }
 }
 
 /** Baixa de uma URL (ex: `preview_audio_url` do clone) e mede. */
-export function medirUrl(url) {
+export function medirUrl(url, esperado) {
   const dir = mkdtempSync(join(tmpdir(), 'vozmedir-'));
   const arq = join(dir, 'a.bin');
   try {
     const r = rodar('curl', ['-sL', '-o', arq, url]);
     if (!existsSync(arq)) throw new Error('nao baixou a url: ' + (r.err || '').slice(0, 200));
-    return medirArquivo(arq);
+    return medirArquivo(arq, esperado);
   } finally {
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ }
   }
