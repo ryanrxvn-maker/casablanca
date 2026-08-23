@@ -26,6 +26,7 @@ import {
   LIMITS,
   autoClipCount,
   type AnalyzeErrorResponse,
+  type AnalyzeInfo,
   type AnalyzeMapRequest,
   type AnalyzeMapResponse,
   type AnalyzeProgress,
@@ -204,17 +205,22 @@ export async function analyzeTranscript(
   const { onProgress, signal } = opts;
   throwIfAborted(signal);
 
+  const warningsInit: string[] = [];
   const sentences = transcript?.sentences ?? [];
   if (sentences.length === 0) {
     throw new FriendlyError('A transcrição ficou vazia — não dá pra encontrar cortes. Confira o áudio do vídeo.');
   }
 
+  // Quem decide o tamanho da janela é o provedor (Groq free tier cabe menos
+  // tokens por minuto que o Claude). Sem resposta → defaults do LIMITS.
+  const info = await fetchAnalyzeInfo(signal);
+  if (info?.free) warningsInit.push(`IA gratuita (${info.model}) — até ${info.maxClips} cortes por análise.`);
   const windows = planWindows(sentences, {
-    windowSec: LIMITS.analyzeWindowSec,
-    overlapSec: LIMITS.analyzeWindowOverlapSec,
+    windowSec: info?.windowSec ?? LIMITS.analyzeWindowSec,
+    overlapSec: info?.windowOverlapSec ?? LIMITS.analyzeWindowOverlapSec,
   });
   const total = windows.length;
-  const warnings: string[] = [];
+  const warnings: string[] = [...warningsInit];
   const perWindow: ResolvedCandidate[][] = new Array(total).fill(null).map(() => []);
   const settingsForApi = analyzeSettings(settings);
 
@@ -274,7 +280,7 @@ export async function analyzeTranscript(
     }
   };
 
-  const lanes = Math.max(1, Math.min(LIMITS.analyzeMapConcurrency, total));
+  const lanes = Math.max(1, Math.min(info?.mapConcurrency ?? LIMITS.analyzeMapConcurrency, total));
   await Promise.all(Array.from({ length: lanes }, () => runOne()));
   throwIfAborted(signal);
 
@@ -293,7 +299,8 @@ export async function analyzeTranscript(
 
   const count =
     settings.count === 'auto' ? autoClipCount(source.durationSec || 0) : Number(settings.count);
-  const finalCount = Math.max(1, Math.min(LIMITS.maxClips, Math.min(count, candidates.length)));
+  const maxClips = Math.min(LIMITS.maxClips, info?.maxClips ?? LIMITS.maxClips);
+  const finalCount = Math.max(1, Math.min(maxClips, Math.min(count, candidates.length)));
 
   onProgress?.({ stage: 'reduce' });
   const reduce = await callWithRetry<AnalyzeReduceResponse>(
@@ -328,4 +335,30 @@ export async function analyzeTranscript(
   }
 
   return { candidates, clips, warnings };
+}
+
+/** Pergunta à rota qual IA vai rodar (e seus limites). Falha = null (usa defaults). */
+export async function fetchAnalyzeInfo(signal?: AbortSignal): Promise<AnalyzeInfo | null> {
+  try {
+    const res = await fetch(ENDPOINT, { method: 'GET', signal, cache: 'no-store' });
+    if (!res.ok) {
+      // chave/plano faltando: deixa o POST do map produzir o erro amigável completo
+      return null;
+    }
+    const j = (await res.json()) as Partial<AnalyzeInfo>;
+    if (!j || (j.provider !== 'groq' && j.provider !== 'anthropic')) return null;
+    return {
+      provider: j.provider,
+      model: String(j.model ?? ''),
+      free: Boolean(j.free),
+      windowSec: Number(j.windowSec) > 0 ? Number(j.windowSec) : LIMITS.analyzeWindowSec,
+      windowOverlapSec:
+        Number(j.windowOverlapSec) >= 0 ? Number(j.windowOverlapSec) : LIMITS.analyzeWindowOverlapSec,
+      mapConcurrency: Number(j.mapConcurrency) > 0 ? Number(j.mapConcurrency) : LIMITS.analyzeMapConcurrency,
+      maxClips: Number(j.maxClips) > 0 ? Number(j.maxClips) : LIMITS.maxClips,
+      reduceMaxCandidates: Number(j.reduceMaxCandidates) > 0 ? Number(j.reduceMaxCandidates) : 400,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -856,7 +856,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Gere os cortes',
-        text: 'Clique em "Gerar cortes" e acompanhe a barra "Fonte → Áudio → Transcrição → Análise → Render". Tudo roda no seu navegador: o vídeo é aberto localmente, o áudio é extraído em pedaços, a fala vira transcrição, a IA lê a transcrição pra escolher os trechos e o MP4 de cada corte é montado aqui mesmo. Só duas chaves precisam estar preenchidas em /configuracoes/api: "Transcrição" e "IA de texto" — faltando alguma, o banner no topo do passo 2 aponta o caminho. Tempo esperado num PC comum: podcast de 1 h fica em torno de 8 a 12 minutos do início ao último corte renderizado.',
+        text: 'Clique em "Gerar cortes" e acompanhe a barra "Fonte → Áudio → Transcrição → Análise → Render". Tudo roda no seu navegador: o vídeo é aberto localmente, o áudio é extraído em pedaços, a fala vira transcrição, a IA lê a transcrição pra escolher os trechos e o MP4 de cada corte é montado aqui mesmo. Só a chave de "Transcrição" (Groq, gratuita) precisa estar preenchida em /configuracoes/api — ela serve pra transcrever e pra IA escolher os cortes, sem custo. Faltando, o banner no topo do passo 2 aponta o caminho. Tempo esperado num PC comum: podcast de 1 h fica em torno de 8 a 12 minutos do início ao último corte renderizado.',
         visual: (
           <Shot label="Auto Cortes · 3 Gerar cortes">
             <MStack>

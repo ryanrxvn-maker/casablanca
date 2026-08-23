@@ -195,7 +195,7 @@ export function ClipSettingsPanel({
 
   return (
     <div className="space-y-5">
-      <MissingKeyBanner services={['groq', 'anthropic']} />
+      <MissingKeyBanner services={['groq']} />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Row label="Proporção">

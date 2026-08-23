@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requireToolAccess } from '@/lib/require-tier';
 import { getUserKey } from '@/lib/user-keys';
-import { createAnthropicClient, LlmError, structuredMessage } from '@/lib/llm/anthropic';
+import { createAnthropicClient, LlmError, structuredMessage, llmModel } from '@/lib/llm/anthropic';
+import { GROQ_LIMITS, groqModel, groqStructuredMessage } from '@/lib/llm/groq';
 import {
   MAP_SCHEMA,
   MAP_SYSTEM,
@@ -15,6 +16,7 @@ import { resolveCandidates, sanitizeClipPlan } from '@/lib/auto-cortes/analyze';
 import { CLIP_LENGTH_RANGE_SEC, GENRE_LABEL, LIMITS } from '@/lib/auto-cortes/types';
 import type {
   AnalyzeErrorResponse,
+  AnalyzeInfo,
   AnalyzeMapResponse,
   AnalyzeReduceResponse,
   AnalyzeSettings,
@@ -35,8 +37,60 @@ import type {
  * navegador — lib/auto-cortes/analyze-client.ts.
  *
  * Nenhum byte de vídeo passa por aqui: só texto de transcrição.
- * Chave BYOK do cliente (`anthropic`); custo zero pro dono.
+ *
+ * PROVEDOR (decisão do dono, 23.08.2026: "não pode gastar nada"):
+ *   - padrão = Groq (free tier) com a MESMA chave que o cliente já usa pra
+ *     transcrição → custo zero pra todo mundo;
+ *   - `AUTO_CORTES_PROVIDER=anthropic` liga o Claude (chave BYOK `anthropic`),
+ *     e `auto` usa o Claude só quando o cliente tem a chave, senão Groq.
  */
+
+type Provider = 'groq' | 'anthropic';
+
+function providerPolicy(): 'groq' | 'anthropic' | 'auto' {
+  const v = (process.env.AUTO_CORTES_PROVIDER ?? '').trim().toLowerCase();
+  return v === 'anthropic' || v === 'auto' ? v : 'groq';
+}
+
+/** Escolhe o provedor e pega a chave certa. Nunca gasta Claude sem o dono ligar. */
+async function pickProvider(): Promise<
+  { provider: Provider; apiKey: string } | { response: Response }
+> {
+  const policy = providerPolicy();
+  if (policy !== 'groq') {
+    const a = await getUserKey('anthropic');
+    if (!('response' in a)) return { provider: 'anthropic', apiKey: a.key };
+    if (policy === 'anthropic') return a;
+  }
+  const g = await getUserKey('groq');
+  if ('response' in g) return g;
+  return { provider: 'groq', apiKey: g.key };
+}
+
+function infoFor(provider: Provider): AnalyzeInfo {
+  if (provider === 'anthropic') {
+    return {
+      provider,
+      model: llmModel(),
+      free: false,
+      windowSec: LIMITS.analyzeWindowSec,
+      windowOverlapSec: LIMITS.analyzeWindowOverlapSec,
+      mapConcurrency: LIMITS.analyzeMapConcurrency,
+      maxClips: LIMITS.maxClips,
+      reduceMaxCandidates: MAX_CANDIDATES,
+    };
+  }
+  return {
+    provider,
+    model: groqModel(),
+    free: true,
+    windowSec: GROQ_LIMITS.analyzeWindowSec,
+    windowOverlapSec: GROQ_LIMITS.analyzeWindowOverlapSec,
+    mapConcurrency: GROQ_LIMITS.analyzeMapConcurrency,
+    maxClips: GROQ_LIMITS.reduceMaxClips,
+    reduceMaxCandidates: GROQ_LIMITS.reduceMaxCandidates,
+  };
+}
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -177,8 +231,9 @@ export async function POST(req: Request) {
     const gate = await requireToolAccess('/tools/auto-cortes', 'basic');
     if (!gate.ok) return gateError(gate.response);
 
-    const keyResult = await getUserKey('anthropic');
-    if ('response' in keyResult) return gateError(keyResult.response);
+    const picked = await pickProvider();
+    if ('response' in picked) return gateError(picked.response);
+    const info = infoFor(picked.provider);
 
     let body: RawBody;
     try {
@@ -194,8 +249,25 @@ export async function POST(req: Request) {
 
     const settings = readSettings(body.settings);
     const source = readSource(body.source);
-    const client = createAnthropicClient(keyResult.key);
     const signal = req.signal;
+    const client = picked.provider === 'anthropic' ? createAnthropicClient(picked.apiKey) : null;
+
+    /** Uma chamada estruturada no provedor escolhido (mesma forma de resposta). */
+    const ask = <T,>(a: {
+      system: string;
+      user: string;
+      schema: Record<string, unknown>;
+      effort: 'medium' | 'high';
+      maxTokens: number;
+    }) =>
+      client
+        ? structuredMessage<T>({ client, ...a, signal })
+        : groqStructuredMessage<T>({
+            apiKey: picked.apiKey,
+            ...a,
+            maxTokens: a.effort === 'high' ? GROQ_LIMITS.reduceMaxTokens : GROQ_LIMITS.mapMaxTokens,
+            signal,
+          });
 
     if (op === 'map') {
       const sentences = readSentences(body.sentences);
@@ -219,14 +291,12 @@ export async function POST(req: Request) {
         sourceName: source.name,
       });
 
-      const res = await structuredMessage<MapResult>({
-        client,
+      const res = await ask<MapResult>({
         system: MAP_SYSTEM,
         user,
         schema: MAP_SCHEMA as unknown as Record<string, unknown>,
         effort: 'medium',
         maxTokens: MAP_MAX_TOKENS,
-        signal,
       });
 
       const payload: AnalyzeMapResponse = {
@@ -249,11 +319,19 @@ export async function POST(req: Request) {
     }
     const count = Math.max(
       1,
-      Math.min(LIMITS.maxClips, Math.floor(Number(body.count) || LIMITS.minClips)),
+      Math.min(info.maxClips, Math.floor(Number(body.count) || LIMITS.minClips)),
     );
+    // Free tier: só os melhores candidatos cabem no teto por minuto do modelo.
+    const shortlist =
+      candidates.length > info.reduceMaxCandidates
+        ? [...candidates]
+            .sort((a, b) => scoreSumOf(b) - scoreSumOf(a))
+            .slice(0, info.reduceMaxCandidates)
+            .sort((a, b) => a.startMs - b.startMs)
+        : candidates;
 
     const user = buildReduceUser({
-      candidates,
+      candidates: shortlist,
       count,
       genre: settings.genre,
       length: settings.length,
@@ -263,14 +341,12 @@ export async function POST(req: Request) {
       sourceDurationSec: source.durationSec,
     });
 
-    const res = await structuredMessage<ReduceResult>({
-      client,
+    const res = await ask<ReduceResult>({
       system: REDUCE_SYSTEM,
       user,
       schema: REDUCE_SCHEMA as unknown as Record<string, unknown>,
       effort: 'high',
       maxTokens: REDUCE_MAX_TOKENS,
-      signal,
     });
 
     const known = new Set(candidates.map((c) => c.id));
@@ -305,6 +381,21 @@ export async function POST(req: Request) {
   }
 }
 
-export function GET() {
-  return fail({ error: 'Use POST.' }, 405);
+function scoreSumOf(c: ResolvedCandidate): number {
+  const s = c.scores;
+  return (s?.hook ?? 0) + (s?.value ?? 0) + (s?.emotion ?? 0) + (s?.completeness ?? 0) + (s?.shareability ?? 0);
+}
+
+/** GET = qual IA vai rodar pra este cliente e os limites que o navegador deve respeitar. */
+export async function GET() {
+  try {
+    const gate = await requireToolAccess('/tools/auto-cortes', 'basic');
+    if (!gate.ok) return gateError(gate.response);
+    const picked = await pickProvider();
+    if ('response' in picked) return gateError(picked.response);
+    return NextResponse.json(infoFor(picked.provider));
+  } catch (e) {
+    console.error('[auto-cortes analyze GET]', e);
+    return fail({ error: 'Não consegui consultar a IA agora. Tente de novo em instantes.' }, 500);
+  }
 }

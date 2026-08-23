@@ -374,8 +374,8 @@ function AutoCortesInner() {
           ) : null}
         </div>
         <p className="mt-2.5 text-[11.5px] leading-relaxed text-text-dim">
-          A transcrição usa sua chave de transcrição e a curadoria usa sua chave de IA de texto. O
-          vídeo é cortado e renderizado aqui no seu navegador — pode demorar alguns minutos num
+          A transcrição e a curadoria usam a sua chave de transcrição (Groq, gratuita) — nada é
+          cobrado. O vídeo é cortado e renderizado aqui no seu navegador — pode demorar alguns minutos num
           arquivo longo, e a aba pode ficar em segundo plano.
         </p>
       </ToolStep>

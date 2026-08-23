@@ -409,6 +409,21 @@ export type AnalyzeReduceResponse = {
 
 export type AnalyzeErrorResponse = { error: string; showConfig?: boolean; retryAfterSec?: number };
 
+/** GET /api/auto-cortes/analyze — qual IA vai rodar e que janelas cabem nela. */
+export type AnalyzeInfo = {
+  provider: 'groq' | 'anthropic';
+  model: string;
+  /** true = free tier (Groq) — janelas menores, 1 por vez, reduce limitado */
+  free: boolean;
+  windowSec: Sec;
+  windowOverlapSec: Sec;
+  mapConcurrency: number;
+  /** teto de cortes por análise neste provedor */
+  maxClips: number;
+  /** teto de candidatos mandados pro reduce (os melhores por nota) */
+  reduceMaxCandidates: number;
+};
+
 /** Progresso emitido pelo orquestrador do navegador (analyze-client.ts). */
 export type AnalyzeProgress =
   | { stage: 'map'; done: number; total: number; candidatesSoFar: number }

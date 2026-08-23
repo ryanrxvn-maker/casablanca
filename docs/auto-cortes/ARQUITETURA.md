@@ -12,7 +12,7 @@
 
 ## 0. Princípios (não negociáveis)
 
-1. **Custo zero pro dono em qualquer escala.** Transcrição = Groq Whisper (chave BYOK do cliente, fallback AssemblyAI BYOK). Inteligência = Claude (chave BYOK "IA de texto" = `anthropic`). Render = 100% no navegador (WebCodecs + ffmpeg-wasm). Nenhum byte de vídeo sobe pro servidor.
+1. **Custo zero pro dono em qualquer escala.** Transcrição = Groq Whisper (chave BYOK do cliente, fallback AssemblyAI BYOK). Inteligência = **Groq free tier** (`openai/gpt-oss-120b`, fallback `llama-3.3-70b`) com a MESMA chave Groq da transcrição — decisão do dono em 23.08 ("não pode gastar nada"); Claude (`lib/llm/anthropic.ts`, chave BYOK `anthropic`) só com `AUTO_CORTES_PROVIDER=anthropic|auto`. O navegador lê `GET /api/auto-cortes/analyze` pra saber janela/concorrência/teto de cortes do provedor (free: janelas de 5 min, 1 por vez, ≤ 15 cortes, 36 candidatos no reduce). Render = 100% no navegador (WebCodecs + ffmpeg-wasm). Nenhum byte de vídeo sobe pro servidor.
 2. **Arquivo grande é o caso normal, não a exceção.** Podcast de 2-3 h / 2-4 GB entra. Nada carrega o original no heap: WORKERFS (já provado no Compressor) + OPFS pra links.
 3. **Blindagem total** (`feedback_blindagem_fluxos`): persistir cedo (projeto nasce no IDB antes de qualquer trabalho), todo passo termina e entrega (timeout + retry + degradação), nenhum botão morto (todo estado travado tem "Retomar" que funciona), aba em 2º plano não trava (MessageChannel / Worker clock), concorrência com gate, nunca entregar MP4 quebrado (`assertValidMp4`), fix aditivo sem desfazer o que existe.
 4. **WYSIWYG.** O que o card de preview mostra é pixel a pixel o que o MP4 terá — mesmo `drawCaptions`, mesmo compositor, mesmo plano de crop.
