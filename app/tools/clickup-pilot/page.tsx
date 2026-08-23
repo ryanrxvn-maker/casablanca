@@ -4170,6 +4170,24 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           if (b && b.size > 1024) cachedIdxs.add(i);
         } catch {}
       }
+      // O BLOB NO IDB E' PROVA DE QUE A PARTE FICOU PRONTA. Sem isto, uma parte
+      // que ficou 'stalled' (o poll desistiu de esperar) continuava marcada
+      // assim mesmo depois do RETOMAR baixar e montar tudo: o card dizia
+      // "Pronto: 7 takes · 1 montagens · 90MB" e ao mesmo tempo "INCOMPLETO —
+      // CLICA RETOMAR", e o lapis de editar nao aparecia. Medido em 23.08.
+      if (cachedIdxs.size) {
+        setBatchStates((prev) => {
+          const cur = prev[taskId];
+          if (!cur) return prev;
+          let mudou = false;
+          const novas = cur.parts.map((p, i) => {
+            if (!cachedIdxs.has(i) || p.videoStatus === 'completed') return p;
+            mudou = true;
+            return { ...p, videoStatus: 'completed' as const, error: undefined };
+          });
+          return mudou ? { ...prev, [taskId]: { ...cur, parts: novas } } : prev;
+        });
+      }
 
       // ── PARTES NUNCA DISPARADAS (fix 2026-06-08 — AD31GL ficou 8/9) ──
       // Parte com replan dispatchavel (texto + avatar) mas SEM videoId: o
