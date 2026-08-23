@@ -86,6 +86,24 @@ ok(partesForaDoPlano(semCarimbo, planoNovo).length === 0,
 ok(partesForaDoPlano(takesGerados, []).length === 0 && partesForaDoPlano([], planoNovo).length === 0,
    'sem plano ou sem takes nao quebra');
 
+// ── take re-gerado DURANTE a montagem (a corrida) ────────────────────────
+// Montar leva minutos. Se um take e' re-gerado nesse meio tempo, ele NAO esta'
+// no arquivo — e carimbar a assinatura no FIM diria que esta'. Por isso a
+// assinatura e' a do que ENTROU, e o dirty que sobra e' calculado contra ela.
+const antesDeMontar = [
+  { label: 'HOOK 1', videoId: 'v1', videoStatus: 'completed' },
+  { label: 'BODY 1', videoId: 'v2', videoStatus: 'completed' },
+];
+const sigEntrou = assinaturaMontagem(antesDeMontar);
+const durante = [
+  { label: 'HOOK 1', videoId: 'v1', videoStatus: 'completed' },
+  { label: 'BODY 1', videoId: 'v2-REGERADO', videoStatus: 'completed' },
+];
+ok(partesDesatualizadas({ parts: durante, montagemSig: sigEntrou }).join() === 'BODY 1',
+   'take re-gerado durante a montagem continua sujo (nao entrou no arquivo)');
+ok(partesDesatualizadas({ parts: antesDeMontar, montagemSig: sigEntrou }).length === 0,
+   'nada mudou durante a montagem: dirty zerado');
+
 console.log('');
 console.log(falhas ? falhas + ' FALHA(S)' : 'montagem-sig: tudo ok');
 if (falhas) process.exit(1);

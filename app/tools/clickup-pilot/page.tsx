@@ -3952,6 +3952,10 @@ function ClickUpPilotInner() {
         },
       }));
 
+      // ⛔ Assinatura do que ENTRA na montagem, capturada antes de montar. Ver a
+      // nota em rebuildMontage: carimbar no fim mentiria sobre take re-gerado
+      // durante o processo.
+      const sigDoQueEntrou = assinaturaMontagem(batchStatesRef.current[taskId]?.parts);
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         const _tc = getTaskCamuflagem(taskId);
@@ -4131,8 +4135,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           pipeStats,
           // Carimba QUAIS takes entraram neste montado. E' o que permite ao
           // card detectar sozinho que o arquivo ficou velho depois.
-          montagemSig: assinaturaMontagem(prev[taskId]?.parts),
-          dirtyParts: [],
+          montagemSig: sigDoQueEntrou,
+          dirtyParts: partesDesatualizadas({ parts: prev[taskId]?.parts, montagemSig: sigDoQueEntrou }),
         },
       }));
       if (entregou) {
@@ -4706,6 +4710,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       }));
 
+      // ⛔ Assinatura do que ENTRA na montagem, capturada antes de montar. Ver a
+      // nota em rebuildMontage: carimbar no fim mentiria sobre take re-gerado
+      // durante o processo.
+      const sigDoQueEntrou = assinaturaMontagem(batchStatesRef.current[taskId]?.parts);
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         const _tc = getTaskCamuflagem(taskId);
@@ -4875,8 +4883,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           pipeStats,
           // Carimba QUAIS takes entraram neste montado. E' o que permite ao
           // card detectar sozinho que o arquivo ficou velho depois.
-          montagemSig: assinaturaMontagem(prev[taskId]?.parts),
-          dirtyParts: [],
+          montagemSig: sigDoQueEntrou,
+          dirtyParts: partesDesatualizadas({ parts: prev[taskId]?.parts, montagemSig: sigDoQueEntrou }),
         },
       }));
       if (entregou) {
@@ -6286,6 +6294,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const b = batchStates[taskId];
     if (!b) return;
     const genId = b.genId; // isolação por geração: hidrata só os takes DESTA geração
+    // ⛔ A assinatura e' do estado que ENTROU na montagem, capturado AGORA — nao
+    // do estado no fim dela. Montar leva minutos; um take re-gerado nesse meio
+    // tempo nao esta' no arquivo, e carimbar no fim diria que esta'. Seria a
+    // mesma mentira que a assinatura existe pra impedir.
+    const sigDoQueEntrou = assinaturaMontagem(b.parts);
     setRebuildingTaskId(taskId);
     try {
       const { loadBlob } = await import('@/lib/zip-store');
@@ -6416,8 +6429,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
-          dirtyParts: [], // limpa flag — montagem ta fresh
-          montagemSig: assinaturaMontagem(prev[taskId]?.parts),
+          // Limpa SO' o que entrou nesta montagem. Take re-gerado DURANTE ela
+          // nao esta' no arquivo: continua sujo, e o card segue pedindo
+          // "Atualizar montagem" — que e' a verdade.
+          dirtyParts: partesDesatualizadas({
+            parts: prev[taskId]?.parts,
+            montagemSig: sigDoQueEntrou,
+          }),
+          montagemSig: sigDoQueEntrou,
         },
       }));
     } catch (e) {
