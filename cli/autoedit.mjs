@@ -338,6 +338,27 @@ ${c.bold('autoedit pilot')} — ClickUp Pilot pela linha de comando
 async function cmdVoz({ positionals, flags }) {
   const sub = positionals.shift();
   if (sub === 'medir') {
+    // LOTE: `--videos id1,id2,...` mede tudo de uma vez e resume no fim.
+    // Depois de corrigir 18 takes num lote, conferir um a um nao acontece.
+    if (flags.videos) {
+      const ids = String(flags.videos).split(/[,\s]+/).filter(Boolean);
+      const ruins = [];
+      for (const id of ids) {
+        let laudo;
+        try { laudo = medirVideo(id); } catch (e) { console.log(c.red('  ! ' + id.slice(0, 10) + ' — ' + e.message)); ruins.push(id); continue; }
+        const cor = laudo.sexo === 'feminina' ? c.green : laudo.sexo === 'AMBIGUA' ? c.yellow : c.red;
+        const marca = laudo.alertas.length ? c.red('!') : c.green('ok');
+        console.log('  ' + marca + ' ' + id.slice(0, 10) + '  ' + cor(String(Math.round(laudo.mediana)).padStart(3) + ' Hz') +
+          '  p10 ' + String(Math.round(laudo.p10)).padStart(3) + '  sil ' + String(Math.round(laudo.silencioPct)).padStart(2) + '%' +
+          (laudo.alertas.length ? '  ' + c.red(laudo.alertas[0]) : ''));
+        if (laudo.alertas.length) ruins.push(id);
+      }
+      console.log('');
+      if (!ruins.length) return console.log(c.green(ids.length + ' take(s) — nenhum alerta'));
+      console.log(c.red(ruins.length + ' de ' + ids.length + ' take(s) com alerta'));
+      process.exitCode = 1;
+      return;
+    }
     const alvo = flags.video || flags.arquivo || flags.url || positionals.shift();
     if (!alvo) return warn('uso: autoedit voz medir --video <videoId> | --arquivo take.mp4 | --url <preview>');
     let laudo;
@@ -360,6 +381,7 @@ ${c.bold('autoedit voz')} — conferir o que o HeyGen entregou
   ${c.cyan('medir')} --video <videoId>     baixa o take e mede o pitch
   ${c.cyan('medir')} --arquivo take.mp4    mede um arquivo local
   ${c.cyan('medir')} --url <preview>       mede o preview de um clone
+  ${c.cyan('medir')} --videos id1,id2,...  mede um LOTE e resume no fim
 
   O campo ${c.bold('gender')} do clone MENTE. A medicao que vale e a do take.
 `);
