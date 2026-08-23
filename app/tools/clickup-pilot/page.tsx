@@ -383,7 +383,7 @@ function runPostPipelineSerial(
  *  isso a chave do 'decupado' carrega a intensidade (`@k<sec>`): mudar a
  *  intensidade = chave diferente = recorta de verdade no novo valor (não reusa
  *  o corte antigo); voltar pra intensidade anterior reusa o que já existe. */
-function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.12, genId?: string | null) {
+function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.05, genId?: string | null) {
   const kTag = (Math.round(keepSilenceSec * 100) / 100).toFixed(2);
   const pfx = pilotGenPrefix(taskId, genId);
   // Intensidade vai no FIM da chave do 'decupado' (`...:<label>@k<sec>`) pra que
@@ -1316,13 +1316,16 @@ function ClickUpPilotInner() {
   };
 
   // INTENSIDADE da decupagem (keepSilence em segundos) — por task, persistida.
-  // É o MESMO parâmetro da ferramenta /decupagem: quanto de silêncio manter nas
-  // bordas da fala. Menor = corte mais agressivo. O valor escolhido é repassado
-  // FIELMENTE pro pipeline (keepSilenceSec → computeSpeechSegments): se o user
-  // põe 0.05, o corte usa 0.05. Default 0.12 = comportamento histórico (pausa
-  // natural entre takes, feedback 12/05/2026) — não muda nada de quem não toca.
+  // É o MESMO parâmetro da ferramenta /decupagem: quanta pausa FICA no lugar de
+  // cada silêncio cortado. Menor = corte mais seco. O valor escolhido é repassado
+  // FIELMENTE pro pipeline (keepSilenceSec → planSpeechCut): se o user põe 0.05,
+  // o corte usa 0.05.
+  // Default 0.05 desde 23.08 (era 0.12): é o valor que o Silas põe à mão em quase
+  // toda task. O 0.12 vinha de "pausa natural entre takes" (12/05/2026), de quando
+  // o detector achava pouca pausa e a margem valia pras DUAS bordas; com o motor
+  // por periodicidade, 0.05 significa 0,05 s de pausa mantida — seco, sem comer fala.
   const DECUP_INTENSITY_KEY = 'darkolab:clickup-pilot:decupIntensity';
-  const DEFAULT_KEEP_SILENCE = 0.12;
+  const DEFAULT_KEEP_SILENCE = 0.05;
   const [decupIntensity, setDecupIntensity] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return {};
     try { return JSON.parse(localStorage.getItem(DECUP_INTENSITY_KEY) || '{}'); } catch { return {}; }

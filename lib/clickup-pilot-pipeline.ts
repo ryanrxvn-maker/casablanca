@@ -201,7 +201,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
   // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
   // sem soar robotico — feedback do user em 12/05/2026.
-  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
+  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);

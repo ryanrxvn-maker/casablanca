@@ -231,9 +231,10 @@ function HeyGenAutoInner() {
     true,
   );
   /** INTENSIDADE do corte (keepSilence em s) — MESMO parâmetro da ferramenta
-   *  /decupagem. Menor = mais agressivo. Repassado FIEL ao pipeline. Default
-   *  0.12 = comportamento histórico (não muda nada de quem não toca). */
-  const DEFAULT_KEEP_SILENCE = 0.12;
+   *  /decupagem: quanta pausa FICA no lugar de cada silêncio cortado. Menor =
+   *  mais seco. Repassado FIEL ao pipeline. Default 0.05 desde 23.08 (era 0.12),
+   *  alinhado ao Pilot e ao valor que o Silas usa na mão. */
+  const DEFAULT_KEEP_SILENCE = 0.05;
   const [decupIntensity, setDecupIntensityRaw] = useToolState<number>(
     'hgauto:decupIntensity',
     DEFAULT_KEEP_SILENCE,
@@ -382,7 +383,7 @@ function HeyGenAutoInner() {
     motor: Motor;
     decupagem: boolean;
     /** Intensidade do corte (keepSilence em s) capturada quando o item entrou
-     *  na fila. Repassada FIELMENTE ao pipeline (keepSilenceSec). Default 0.12. */
+     *  na fila. Repassada FIELMENTE ao pipeline (keepSilenceSec). Default 0.05. */
     decupIntensity: number;
     source: 'manual' | 'doc';
     /** De que versão é este item. Ausente/'meta' = o item de sempre. */
