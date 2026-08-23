@@ -156,7 +156,17 @@ export function LipsyncPreviewCard({
       onMouseLeave={handleMouseLeave}
       onMouseMove={handleMouseMove}
       className={
-        'lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border transition-all duration-300 ' +
+        // ⛔ `dark-island`: este card e' ESCURO POR DESIGN — e' a moldura de um
+        // player de video, com texto branco e acentos claros por cima. No modo
+        // CLARO ele continuava preto (a miniatura manda no fundo) mas as vars
+        // de texto viravam escuras: cartao preto com letra preta, ilegivel.
+        // A ilha devolve as vars escuras so' aqui dentro.
+        // `bg-bg-soft` opaco ANTES do gradiente: os tons do card sao
+        // semitransparentes, e sem base propria eles compunham com o fundo
+        // CLARO da pagina — o cabecalho ficava bege com o rotulo em lime
+        // claro por cima (contraste 1.11, medido). Com base escura + a ilha,
+        // o card fica igual nos dois temas.
+        'dark-island lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border bg-bg-soft transition-all duration-300 ' +
         (tone === 'ready'
           ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-600/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(16,185,129,0.45),0_0_36px_-12px_rgba(16,185,129,0.35)] hover:border-emerald-500/70'
           : tone === 'err'
