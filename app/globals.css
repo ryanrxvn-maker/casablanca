@@ -2199,3 +2199,37 @@ html[data-theme='light'] .hero-sombra {
 @media (prefers-reduced-motion: reduce) {
   .fh-selo-pulso { animation: none; }
 }
+
+/* ─────────── PLANO DE CENAS (ClickUp Pilot) ───────────
+   O bloco que monta avatar + voz + movimento de 47 cenas de uma vez merecia
+   parecer o que é: a alavanca mais pesada da tela. Relevo por LUZ (aurora +
+   fio no topo + tile com gradiente), nunca por cor chapada — a mesma gramática
+   do painel de reiniciar disparo. */
+.plano-shell {
+  background:
+    linear-gradient(180deg, rgba(34, 211, 238, 0.10) 0%, rgba(34, 211, 238, 0.03) 45%, transparent 100%),
+    rgba(10, 12, 16, 0.35);
+}
+html[data-theme='light'] .plano-shell {
+  background:
+    linear-gradient(180deg, rgba(14, 165, 233, 0.10) 0%, rgba(14, 165, 233, 0.03) 45%, transparent 100%),
+    rgba(255, 255, 255, 0.6);
+}
+.plano-aurora {
+  background:
+    radial-gradient(38% 62% at 6% 0%, rgba(34, 211, 238, 0.20), transparent 70%),
+    radial-gradient(34% 58% at 97% 10%, rgba(167, 139, 250, 0.14), transparent 70%);
+}
+.plano-tile {
+  background: linear-gradient(150deg, #67e8f9 0%, #22d3ee 55%, #0ea5e9 100%);
+}
+.plano-corpo {
+  animation: plano-abre 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes plano-abre {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plano-corpo { animation: none; }
+}

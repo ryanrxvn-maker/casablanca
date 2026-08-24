@@ -3430,6 +3430,14 @@ function ClickUpPilotInner() {
         startedAt: Date.now(),
         message: 'TTS + upload + submit por parte...',
         replan,
+        // A MARCA TEM QUE SOBREVIVER AO PROPRIO DISPARO. Esta escrita reconstroi
+        // a entrada inteira (de proposito: disparo do zero limpa entrega velha),
+        // e sem esta linha o `replanManual` sumia do state e, no persist
+        // seguinte, do localStorage — ai um F5 com a analise reaberta fazia o
+        // RETOMAR voltar pro buildPlan e jogar fora o avatar/voz que o user
+        // tinha editado no painel de reiniciar. Some sozinho quando o disparo
+        // volta a vir da analise (planoManual null).
+        replanManual: planoManual ? true : undefined,
         // Preserva docUrl/taskUrl se ja existiam (re-run) OU pega da analise
         docUrl: prev[taskId]?.docUrl || aForUrl?.docUrl,
         taskUrl: prev[taskId]?.taskUrl || aForUrl?.taskUrl,
@@ -6056,6 +6064,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // label/avatar/voz) já foi capturado acima. (User reportou 2026-07-01: modal preso.)
     setEditingPart(null);
 
+    // O plano acabou de mudar POR FORA do painel de reiniciar: derruba a copia
+    // que o painel/ref estavam segurando. Sem isto, um REINICIAR depois desta
+    // correcao re-disparava o take com o texto VELHO (o ref e' lido antes do
+    // state) e ainda gravava o plano velho por cima da correcao.
+    invalidarPlanoDeReinicio(taskId, `o take ${label} foi re-gerado`);
+
     try {
       // 1) Atualiza replan local com novo texto + novo avatar + nova voz
       //    (persiste no localStorage automaticamente via useEffect persistBatchStates).
@@ -6569,13 +6583,25 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  Não pergunta nada: quem clica no card passa antes pela mini janela
    *  (`pedirReinicioDaTask`), e o command-bus (outra tela mandando reiniciar)
    *  não tem UI pra perguntar. */
-  function debugTaskBatch(taskId: string, _skipConfirm = false) {
+  async function debugTaskBatch(taskId: string, _skipConfirm = false) {
     // TROCA DE ÁUDIO: re-roda o pipeline proprio do zero (sem HeyGen).
     if (batchStates[taskId]?.kind === 'troca' || taskAnalyses[taskId]?.trocaBriefing) {
       void runTrocaAudioPipelineForTask(taskId);
       return;
     }
     batchCancelRef.current[taskId] = true;
+    // Com um run ainda vivo, o gate NAO dispara — so' anota a intencao, e o
+    // finally do run velho a descarta ao fechar em 'done'. O reinicio virava
+    // nada e o card ficava verde com a montagem anterior. Sem run vivo isto
+    // retorna na hora.
+    if (!(await esperarRunAnteriorSoltar(taskId))) {
+      batchCancelRef.current[taskId] = false;
+      setError(
+        'O disparo anterior dessa task ainda está encerrando (o HeyGen leva alguns segundos pra soltar). '
+        + 'Clique REINICIAR de novo em instantes.',
+      );
+      return;
+    }
     // Pequeno delay deixa o run atual (se houver) abortar antes do restart.
     setTimeout(() => {
       batchCancelRef.current[taskId] = false;
@@ -6702,6 +6728,35 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setReinicioBusy(false);
   }
 
+  /** O plano desta task mudou POR FORA do painel (o lapis re-gerou um take, por
+   *  exemplo). Derruba o ref — que e' lido ANTES do state e ficaria mentindo — e
+   *  fecha o painel aberto, avisando: o rascunho dele descreve um plano que nao
+   *  existe mais, e reiniciar com ele desfaria a correcao que acabou de ser feita. */
+  function invalidarPlanoDeReinicio(taskId: string, motivo: string) {
+    delete redispatchPlanRef.current[taskId];
+    if (reinicioPainelTaskId === taskId) {
+      fecharPainelDeReinicio();
+      setError(`Fechei o painel de reiniciar dessa task porque ${motivo} — reabra pra ver o plano já atualizado.`);
+    }
+  }
+
+  /** Espera o run anterior desta task SOLTAR o wrapper antes de disparar de novo.
+   *
+   *  Enquanto `heygenPendingRef` esta ocupado, `runHeyGenGated` nao dispara: ele
+   *  so' anota a intencao em `pendingRetomarRef`, e o finally do run velho
+   *  DESCARTA essa intencao quando ele fecha em 'done' ou numa fase ativa. Era
+   *  assim que um reinicio pedido com a task rodando virava nada — e o card
+   *  voltava verde com a montagem ANTERIOR, que e' o pior desfecho possivel.
+   *  O cancel ja foi pedido; o run le esse flag no proximo ciclo do poll. */
+  async function esperarRunAnteriorSoltar(taskId: string, tetoMs = 30_000): Promise<boolean> {
+    const t0 = Date.now();
+    while (heygenPendingRef.current[taskId]) {
+      if (Date.now() - t0 >= tetoMs) return false;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return true;
+  }
+
   /** REINICIAR com o plano editado no painel.
    *
    *  Não é "mais uma na fila": grava o plano novo (state + localStorage + ref),
@@ -6776,8 +6831,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       console.warn('[clickup-pilot] purge dos negados antes do reinício falhou (segue):', e);
     }
     setError(null);
+    // 5) ESPERA o run anterior morrer de verdade. Com um run vivo, o gate nao
+    //    dispara — anota a intencao e o finally dele a descarta, e o card volta
+    //    verde com a montagem ANTERIOR. Sem run vivo isto retorna na hora.
+    if (!(await esperarRunAnteriorSoltar(taskId))) {
+      setReinicioBusy(false);
+      batchCancelRef.current[taskId] = false;
+      setError(
+        'O disparo anterior dessa task ainda está encerrando (o HeyGen leva alguns segundos pra soltar). '
+        + 'Seu plano ficou salvo — clique REINICIAR de novo em instantes.',
+      );
+      return;
+    }
     fecharPainelDeReinicio();
-    // 5) Mesma coreografia do reinício normal: solta o cancel, marca 'queued' e
+    // 6) Mesma coreografia do reinício normal: solta o cancel, marca 'queued' e
     //    chama o gate no MESMO tick — assim o `heygenPendingRef` já está setado
     //    quando o promoter acordar, e ninguém dispara a task duas vezes.
     setTimeout(() => {
@@ -6938,7 +7005,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       if (c.scope === 'heygen') {
         if (c.action === 'retomar') retomarTaskBatch(c.taskId);
         else if (c.action === 'pausar') pausarTaskBatch(c.taskId);
-        else if (c.action === 'debug') debugTaskBatch(c.taskId, true);
+        else if (c.action === 'debug') void debugTaskBatch(c.taskId, true);
       } else {
         if (c.action === 'retomar') resumeMagnificJob(c.taskId);
         else if (c.action === 'pausar') pauseMagnificJob(c.taskId);
@@ -12718,20 +12785,70 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       {/* ═══ CARREGAR PLANO — monta as cenas por DADOS ═══
                         * Existe porque montar 47 cenas clicando erra: os rótulos
                         * do seletor se repetem e já cruzaram avatar entre ADs. */}
-                      <div className="mt-3 rounded-[14px] border border-cyan-500/35 bg-cyan-500/[0.06] p-3">
+                      <div className="plano-shell group/plano relative mt-3 overflow-hidden rounded-[16px] border border-cyan-400/40 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_16px_44px_-26px_rgba(34,211,238,0.7)]">
+                        {/* Aurora + fio de luz: relevo por LUZ, não por cor chapada. */}
+                        <span aria-hidden className="plano-aurora pointer-events-none absolute inset-0" />
+                        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
                         <button
                           type="button"
                           onClick={() => setPlanoAberto((v) => !v)}
-                          className="mono flex w-full items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200"
+                          aria-expanded={planoAberto}
+                          className="relative flex w-full items-center gap-3 text-left"
                         >
-                          <span className="text-[13px] leading-none">{planoAberto ? '▾' : '▸'}</span>
-                          Carregar plano de cenas
-                          <span className="ml-auto normal-case tracking-normal text-text-muted">
-                            monta avatar + voz + movimento de uma vez
+                          {/* Tile do ícone (camadas = o plano inteiro de uma vez) */}
+                          <span className="plano-tile dark-island relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] border border-cyan-300/50 text-cyan-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_6px_16px_-8px_rgba(34,211,238,0.9)] transition-transform duration-300 group-hover/plano:scale-[1.06]">
+                            <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[11px] bg-gradient-to-b from-white/25 to-transparent" />
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="relative">
+                              <path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" />
+                            </svg>
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span
+                              className="block text-[12.5px] font-extrabold leading-none tracking-tight text-white"
+                              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+                            >
+                              Carregar plano de cenas
+                            </span>
+                            <span className="label-tech mt-1 block text-[8.5px] uppercase tracking-[0.16em] text-text-muted">
+                              avatar + voz + movimento de uma vez
+                            </span>
+                          </span>
+                          {/* Chip de estado: quantas cenas o JSON colado tem. */}
+                          {(() => {
+                            const bruto = (planoTexto || '').trim();
+                            if (!bruto) return null;
+                            let n = 0;
+                            try {
+                              const j = JSON.parse(bruto);
+                              n = Array.isArray(j)
+                                ? j.length
+                                : Object.values(j).reduce((s: number, v) => s + (Array.isArray(v) ? v.length : 0), 0);
+                            } catch { n = -1; }
+                            return (
+                              <span
+                                className={`label-tech hidden shrink-0 rounded-full border px-2.5 py-1 text-[8.5px] uppercase tracking-[0.16em] sm:inline-flex ${
+                                  n > 0
+                                    ? 'border-lime/50 bg-lime/12 text-lime'
+                                    : 'border-rose-400/50 bg-rose-500/12 text-rose-200'
+                                }`}
+                              >
+                                {n > 0 ? `${n} cena${n === 1 ? '' : 's'}` : 'JSON inválido'}
+                              </span>
+                            );
+                          })()}
+                          {/* Chevron que gira ao abrir */}
+                          <span
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-cyan-100 transition-transform duration-300 ${
+                              planoAberto ? 'rotate-180' : ''
+                            }`}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="m6 9 6 6 6-6" />
+                            </svg>
                           </span>
                         </button>
                         {planoAberto ? (
-                          <div className="mt-2.5 grid gap-2">
+                          <div className="plano-corpo relative mt-3 grid gap-2">
                             <textarea
                               value={planoTexto}
                               onChange={(e) => setPlanoTexto(e.target.value)}
@@ -12774,8 +12891,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               type="button"
                               onClick={aplicarPlano}
                               disabled={!planoTexto.trim()}
-                              className="mono self-start rounded-full border border-cyan-500/50 bg-cyan-500/15 px-4 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100 transition hover:bg-cyan-500/25 disabled:opacity-40"
+                              className="label-tech group/aplicar inline-flex self-start items-center gap-2 rounded-full border dark-island border-cyan-300/70 bg-gradient-to-b from-cyan-400 via-cyan-500 to-sky-500 px-4 py-2 text-[9.5px] font-extrabold uppercase tracking-[0.16em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_8px_22px_-8px_rgba(34,211,238,0.95)] transition-all duration-200 hover:-translate-y-[1px] hover:scale-[1.02] hover:border-cyan-300 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_12px_26px_-10px_rgba(34,211,238,1)] active:translate-y-0 active:scale-95 disabled:cursor-not-allowed disabled:border-white/12 disabled:bg-white/[0.04] disabled:text-text-muted disabled:shadow-none disabled:hover:translate-y-0 disabled:hover:scale-100"
                             >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-300 group-hover/aplicar:translate-x-[2px]">
+                                <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+                              </svg>
                               Aplicar plano
                             </button>
                             {planoRelato ? (
@@ -13135,7 +13255,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             onEditar={() => abrirPainelDeReinicio(tid)}
             onReiniciarDireto={() => {
               setReinicioPerguntaTaskId(null);
-              debugTaskBatch(tid);
+              void debugTaskBatch(tid);
             }}
             onClose={() => setReinicioPerguntaTaskId(null)}
           />
