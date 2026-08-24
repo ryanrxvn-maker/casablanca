@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from 'react';
 import { CancelButton } from '@/components/CancelButton';
-import { createClient } from '@/lib/supabase/client';
 import { Popover } from '@/components/Popover';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -45,7 +44,6 @@ import {
 } from '@/components/ToolIcons';
 import {
   drawCaptions,
-  drawPresetDemo,
   captionBBoxAt,
   wordBoxesAt,
   DEFAULT_STYLE,
@@ -60,7 +58,10 @@ import {
   type WordStyle,
   type TWord,
 } from '@/lib/typography/engine';
-import { TYPO_PRESETS, TYPO_CATEGORIES, getPreset } from '@/lib/typography/presets';
+import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
+import { PresetGallery } from '@/components/typography/PresetGallery';
+import { LangPicker } from '@/components/typography/LangPicker';
+import { useTypoFavs } from '@/components/typography/useTypoFavs';
 import {
   ensureTypoFonts,
   TYPO_FONTS,
@@ -93,52 +94,6 @@ const HUE = 'rgba(255,159,10,0.45)';
 
 type Phase = 'idle' | 'transcribing' | 'ready' | 'rendering';
 type Language = string; // ISO-639-1 ('pt', 'en'...) ou 'auto'
-
-// idiomas do Whisper (Groq) — os mais usados primeiro, resto alfabético
-const LANGS: Array<{ code: string; label: string }> = [
-  { code: 'pt-br', label: 'Português (Brasil)' },
-  { code: 'pt', label: 'Português (Portugal)' },
-  { code: 'en', label: 'Inglês' },
-  { code: 'es', label: 'Espanhol' },
-  { code: 'pl', label: 'Polonês' },
-  { code: 'cs', label: 'Tcheco' },
-  { code: 'fr', label: 'Francês' },
-  { code: 'de', label: 'Alemão' },
-  { code: 'it', label: 'Italiano' },
-  { code: 'ar', label: 'Árabe' },
-  { code: 'bg', label: 'Búlgaro' },
-  { code: 'zh', label: 'Chinês' },
-  { code: 'ko', label: 'Coreano' },
-  { code: 'hr', label: 'Croata' },
-  { code: 'da', label: 'Dinamarquês' },
-  { code: 'sk', label: 'Eslovaco' },
-  { code: 'sl', label: 'Esloveno' },
-  { code: 'fi', label: 'Finlandês' },
-  { code: 'el', label: 'Grego' },
-  { code: 'he', label: 'Hebraico' },
-  { code: 'hi', label: 'Hindi' },
-  { code: 'nl', label: 'Holandês' },
-  { code: 'hu', label: 'Húngaro' },
-  { code: 'id', label: 'Indonésio' },
-  { code: 'ja', label: 'Japonês' },
-  { code: 'ms', label: 'Malaio' },
-  { code: 'no', label: 'Norueguês' },
-  { code: 'ro', label: 'Romeno' },
-  { code: 'ru', label: 'Russo' },
-  { code: 'sr', label: 'Sérvio' },
-  { code: 'sv', label: 'Sueco' },
-  { code: 'th', label: 'Tailandês' },
-  { code: 'tl', label: 'Tagalo (Filipinas)' },
-  { code: 'tr', label: 'Turco' },
-  { code: 'uk', label: 'Ucraniano' },
-  { code: 'ur', label: 'Urdu' },
-  { code: 'vi', label: 'Vietnamita' },
-];
-
-function langLabel(code: Language): string {
-  if (code === 'auto') return 'Identificar automaticamente';
-  return LANGS.find((l) => l.code === code)?.label ?? code.toUpperCase();
-}
 
 // botões com relevo 3D (hover levanta, clique afunda) — usado em todo o editor
 // mesmo relevo do T3D com o glow âmbar FUNDIDO na mesma sombra — dois
@@ -272,78 +227,8 @@ function TipografiaInner() {
   const [wordSel, setWordSel] = useState<{ blockId: string; a: number; b: number } | null>(null);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
-  // ⭐ favoritos POR CONTA: a verdade mora no banco (user_tool_prefs, RLS);
-  // localStorage é cache instantâneo + fallback enquanto a migração 031 não
-  // roda / sem internet
-  const [favs, setFavs] = useState<string[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    try {
-      const raw = localStorage.getItem('tipografia:favs');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) setFavs(arr.filter((x) => typeof x === 'string'));
-      }
-    } catch {
-      /* sem cache local */
-    }
-    (async () => {
-      try {
-        const supabase = createClient();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid || cancelled) return;
-        const { data, error } = await supabase
-          .from('user_tool_prefs')
-          .select('tipografia_favs')
-          .eq('user_id', uid)
-          .maybeSingle();
-        if (error || cancelled) return; // tabela ainda não migrada → local segura
-        if (data && Array.isArray(data.tipografia_favs)) {
-          const server = (data.tipografia_favs as unknown[]).filter(
-            (x): x is string => typeof x === 'string',
-          );
-          setFavs(server);
-          try {
-            localStorage.setItem('tipografia:favs', JSON.stringify(server));
-          } catch {
-            /* cache local é best-effort */
-          }
-        }
-      } catch {
-        /* offline — o cache local vale */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const toggleFav = useCallback((id: string) => {
-    setFavs((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      try {
-        localStorage.setItem('tipografia:favs', JSON.stringify(next));
-      } catch {
-        /* storage cheio — segue só em memória */
-      }
-      void (async () => {
-        try {
-          const supabase = createClient();
-          const { data: u } = await supabase.auth.getUser();
-          const uid = u.user?.id;
-          if (!uid) return;
-          await supabase.from('user_tool_prefs').upsert({
-            user_id: uid,
-            tipografia_favs: next,
-            updated_at: new Date().toISOString(),
-          });
-        } catch {
-          /* servidor indisponível — localStorage segurou */
-        }
-      })();
-      return next;
-    });
-  }, []);
+  // ⭐ favoritos POR CONTA (hook compartilhado com o Auto Cortes)
+  const { favs, toggleFav } = useTypoFavs();
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -2001,250 +1886,6 @@ function PreviewPane({
   );
 }
 
-/* ───────────────────────── Galeria de modelos ───────────────────────── */
-
-const FAV_CAT = '⭐ Favoritos';
-
-function PresetGallery({
-  presetId,
-  onPick,
-  favs,
-  onToggleFav,
-  disabled,
-}: {
-  presetId: string;
-  onPick: (id: string) => void;
-  favs: string[];
-  onToggleFav: (id: string) => void;
-  disabled?: boolean;
-}) {
-  const [cat, setCat] = useState<string>(TYPO_CATEGORIES[0]);
-  const canvasesRef = useRef(new Map<string, HTMLCanvasElement>());
-  const scrollBoxRef = useRef<HTMLDivElement | null>(null);
-  // só os cards VISÍVEIS na rolagem animam (IntersectionObserver)
-  const visRef = useRef(new Set<string>());
-  const ioRef = useRef<IntersectionObserver | null>(null);
-  // canvases que já receberam AO MENOS um frame (WeakSet: card remontado volta virgem)
-  const drawnRef = useRef(new WeakSet<HTMLCanvasElement>());
-  const fontsReadyRef = useRef(false);
-  const favSet = useMemo(() => new Set(favs), [favs]);
-  const list = useMemo(
-    () =>
-      cat === FAV_CAT
-        ? TYPO_PRESETS.filter((p) => favSet.has(p.id))
-        : TYPO_PRESETS.filter((p) => p.cat === cat),
-    [cat, favSet],
-  );
-
-  useEffect(() => {
-    visRef.current.clear();
-    if (scrollBoxRef.current) scrollBoxRef.current.scrollTop = 0;
-  }, [cat]);
-
-  // Observer criado SOB DEMANDA: os refs dos cards disparam ANTES dos
-  // useEffect no primeiro mount — criar o IO num effect deixava a galeria
-  // inteira sem observação (cards pretos até um clique re-renderizar).
-  const obtainIO = useCallback(() => {
-    if (!ioRef.current && typeof IntersectionObserver !== 'undefined') {
-      ioRef.current = new IntersectionObserver(
-        (entries) => {
-          for (const en of entries) {
-            const id = (en.target as HTMLElement).dataset.pid;
-            if (!id) continue;
-            if (en.isIntersecting) visRef.current.add(id);
-            else visRef.current.delete(id);
-          }
-        },
-        // root = viewport: o IO já clipa pelo scroll-box ancestral
-        { rootMargin: '160px' },
-      );
-    }
-    return ioRef.current;
-  }, []);
-
-  useEffect(() => () => ioRef.current?.disconnect(), []);
-
-  useEffect(() => {
-    void ensureTypoFonts().then(() => {
-      fontsReadyRef.current = true;
-    });
-    let raf = 0;
-    const t0 = performance.now();
-    const tick = () => {
-      const now = performance.now() - t0;
-      // cards fora da viewport ganham 1 frame estático (nunca preto ao rolar);
-      // no máx 3 por tick e só com fontes prontas pra não carimbar fallback
-      let prepaint = 3;
-      for (const preset of list) {
-        const c = canvasesRef.current.get(preset.id);
-        if (!c) continue;
-        const vis = ioRef.current ? visRef.current.has(preset.id) : true;
-        if (!vis) {
-          if (!fontsReadyRef.current || prepaint <= 0 || drawnRef.current.has(c))
-            continue;
-          prepaint--;
-        }
-        const ctx = c.getContext('2d');
-        if (!ctx) continue;
-        ctx.clearRect(0, 0, c.width, c.height);
-        // TODA demo mostra "SUA LEGENDA AQUI" (lineAccent quebra em 2 linhas
-        // sozinho pro efeito de linha colorida aparecer)
-        drawPresetDemo(ctx, preset, now, c.width, c.height);
-        drawnRef.current.add(c);
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [list]);
-
-  return (
-    <div>
-      <div
-        className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-        style={{ fontFamily: 'var(--font-tech)' }}
-      >
-        Modelos — {TYPO_PRESETS.length} letterings
-      </div>
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        <button
-          onClick={() => setCat(FAV_CAT)}
-          className={
-            'rounded-full border px-3 py-1 text-[11px] font-bold transition-colors' +
-            T3D +
-            ' ' +
-            (cat === FAV_CAT
-              ? 'border-violet/70 bg-violet/20 text-violet'
-              : 'border-violet/35 bg-violet/5 text-violet/80 hover:border-violet/60 hover:text-violet')
-          }
-          style={{ fontFamily: 'var(--font-tech)' }}
-          title="Seus modelos favoritos (estrela roxa nos cards)"
-        >
-          ⭐ Favoritos
-          <span className="ml-1 opacity-70">{favs.length}</span>
-        </button>
-        {TYPO_CATEGORIES.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={
-              'rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ' +
-              (c === cat
-                ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                : 'border-line text-text-muted hover:border-amber-400/40 hover:text-text')
-            }
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            {c}
-            <span className="ml-1 opacity-60">
-              {TYPO_PRESETS.filter((p) => p.cat === c).length}
-            </span>
-          </button>
-        ))}
-      </div>
-      <div
-        ref={scrollBoxRef}
-        className="max-h-[560px] overflow-y-auto pr-1.5"
-      >
-      {cat === FAV_CAT && list.length === 0 ? (
-        <div className="rounded-[14px] border border-dashed border-violet/40 bg-violet/5 px-4 py-8 text-center text-[12.5px] text-text-muted">
-          Nenhum favorito ainda — clica na <span className="text-violet">estrela roxa</span> de
-          qualquer modelo pra ele aparecer aqui.
-        </div>
-      ) : null}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
-        {list.map((preset) => {
-          const active = preset.id === presetId;
-          const isFav = favSet.has(preset.id);
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              disabled={disabled}
-              data-pid={preset.id}
-              ref={(el) => {
-                if (el) obtainIO()?.observe(el);
-              }}
-              onClick={() => onPick(preset.id)}
-              className={
-                'group relative overflow-hidden rounded-[12px] border text-left transition-all duration-200 active:scale-[0.97] ' +
-                (active
-                  ? 'border-amber-400/70 shadow-[0_0_20px_-6px_rgba(255,159,10,0.5)]'
-                  : 'border-line-strong hover:-translate-y-[1px] hover:border-amber-400/40')
-              }
-            >
-              <canvas
-                width={520}
-                height={240}
-                ref={(el) => {
-                  if (el) canvasesRef.current.set(preset.id, el);
-                  else canvasesRef.current.delete(preset.id);
-                }}
-                className="block aspect-[520/240] w-full"
-                style={{
-                  background:
-                    'linear-gradient(145deg, #17181d 0%, #101116 55%, #191a20 100%)',
-                }}
-              />
-              {/* estrela roxa de favoritar (não seleciona o modelo) */}
-              <span
-                role="button"
-                tabIndex={-1}
-                title={isFav ? 'Tirar dos favoritos' : 'Favoritar'}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleFav(preset.id);
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className={
-                  'absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur-sm transition-all duration-200 hover:scale-110 ' +
-                  (isFav
-                    ? 'border-violet/70 bg-violet/25 opacity-100'
-                    : 'border-white/20 bg-black/45 opacity-0 group-hover:opacity-100')
-                }
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill={isFav ? '#a78bfa' : 'none'}
-                  stroke={isFav ? '#a78bfa' : 'rgba(255,255,255,0.85)'}
-                  strokeWidth="1.8"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z" />
-                </svg>
-              </span>
-              <div className="flex items-center justify-between px-2.5 py-1.5">
-                <span
-                  className={
-                    'text-[11px] font-bold ' + (active ? 'text-amber-200' : 'text-text-muted group-hover:text-text')
-                  }
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  {preset.name}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  {isFav ? (
-                    <span className="text-[10px] text-violet" aria-hidden>
-                      ★
-                    </span>
-                  ) : null}
-                  {active ? (
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]" />
-                  ) : null}
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-      </div>
-    </div>
-  );
-}
-
 /* ───────────────────────── Timeline ───────────────────────── */
 
 // cada bloco de legenda ganha uma cor própria (identificação instantânea)
@@ -2904,109 +2545,6 @@ function CopyFixPanel({
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/* ───────────────────────── Seletor de idioma ───────────────────────── */
-
-function LangPicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: Language;
-  onChange: (v: Language) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  // menu por PORTAL (components/Popover): o card do passo tem overflow-hidden
-  // E ganha transform no hover — os dois cortam/deslocam popover ancorado
-  const btnRef = useRef<HTMLButtonElement | null>(null);
-  const closeMenu = useCallback(() => setOpen(false), []);
-  const list = q.trim()
-    ? LANGS.filter((l) => l.label.toLowerCase().includes(q.trim().toLowerCase()))
-    : LANGS;
-  return (
-    <div className="inline-block">
-      <div
-        className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-        style={{ fontFamily: 'var(--font-tech)' }}
-      >
-        Idioma da fala
-      </div>
-      <button
-        ref={btnRef}
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        className={
-          'flex min-w-[260px] items-center justify-between gap-3 rounded-[12px] border border-line bg-bg-soft px-3.5 py-2.5 text-[13px] font-semibold text-text hover:border-amber-400/50' +
-          T3D
-        }
-      >
-        <span className="flex items-center gap-2">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-text-muted" aria-hidden>
-            <circle cx="12" cy="12" r="9" />
-            <path d="M3.5 12h17M12 3.2c2.6 2.4 3.9 5.4 3.9 8.8s-1.3 6.4-3.9 8.8c-2.6-2.4-3.9-5.4-3.9-8.8S9.4 5.6 12 3.2z" />
-          </svg>
-          {langLabel(value)}
-        </span>
-        <span className="text-text-muted">▾</span>
-      </button>
-      <Popover open={open} anchorRef={btnRef} onClose={closeMenu} width={300}>
-        <div className="overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl">
-          <button
-            onClick={() => {
-              onChange('auto');
-              setOpen(false);
-            }}
-            className={
-              'flex w-full items-center gap-2 border-b border-line px-3.5 py-2.5 text-left text-[12.5px] font-bold transition-colors ' +
-              (value === 'auto'
-                ? 'bg-amber-400/15 text-amber-600'
-                : 'text-text hover:bg-black/5')
-            }
-          >
-            ✨ Identificar automaticamente
-          </button>
-          <div className="border-b border-line p-2">
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar idioma..."
-              className="w-full rounded-[9px] border border-line bg-bg px-2.5 py-1.5 text-[12px] text-text outline-none focus:border-amber-400/50"
-            />
-          </div>
-          <div className="max-h-[260px] overflow-y-auto py-1">
-            {list.map((l) => (
-              <button
-                key={l.code}
-                onClick={() => {
-                  onChange(l.code);
-                  setOpen(false);
-                  setQ('');
-                }}
-                className={
-                  'flex w-full items-center justify-between px-3.5 py-2 text-left text-[12.5px] font-semibold transition-colors ' +
-                  (value === l.code
-                    ? 'bg-amber-400/15 text-amber-600'
-                    : 'text-text-muted hover:bg-black/5 hover:text-text')
-                }
-              >
-                {l.label}
-                <span className="mono text-[10px] uppercase opacity-50">{l.code}</span>
-              </button>
-            ))}
-            {list.length === 0 ? (
-              <div className="px-3.5 py-3 text-[12px] text-text-muted">
-                Nenhum idioma com esse nome.
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </Popover>
     </div>
   );
 }

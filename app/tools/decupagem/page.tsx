@@ -25,9 +25,9 @@ import {
   decodeAudioRobust,
   downloadBlob,
   encodeWAV,
-  trimSilences,
-  detectSilences,
+  trimSpeechCut,
 } from '@/lib/audio-engine';
+import { planSpeechCut } from '@/lib/speech-detect';
 import {
   cancelFFmpeg,
   concatDecupChunks,
@@ -114,25 +114,6 @@ function isAcceptedMedia(file: File): boolean {
 function baseName(name?: string | null) {
   if (!name) return 'arquivo';
   return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
-}
-
-function computeSpeechSegments(
-  silences: Array<{ start: number; end: number }>,
-  totalDur: number,
-  keepSilence: number,
-): Array<{ start: number; end: number }> {
-  const segs: Array<{ start: number; end: number }> = [];
-  let cursor = 0;
-  for (const s of silences) {
-    const silStart = Math.max(0, s.start + keepSilence);
-    const silEnd = Math.min(totalDur, s.end - keepSilence);
-    if (silEnd > silStart) {
-      if (silStart > cursor) segs.push({ start: cursor, end: silStart });
-      cursor = silEnd;
-    }
-  }
-  if (cursor < totalDur) segs.push({ start: cursor, end: totalDur });
-  return segs.filter((s) => s.end - s.start > 0.05);
 }
 
 export default function DecupagemPage() {
@@ -246,7 +227,7 @@ export default function DecupagemPage() {
       onStage('Carregando...');
       const decoded = await decodeAudioRobust(leveled, () => onStage('Carregando...'));
       onStage('Cortando silêncios...');
-      const trimmed = trimSilences(decoded, keepSilence);
+      const trimmed = trimSpeechCut(decoded, keepSilence);
       if (trimmed.duration <= 0.05) {
         if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
         throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
@@ -280,8 +261,7 @@ export default function DecupagemPage() {
     );
     onStage('Analisando...');
     const decoded = await decodeAudioRobust(leveled, () => onStage('Analisando...'));
-    const silences = detectSilences(decoded);
-    const segments = computeSpeechSegments(silences, decoded.duration, keepSilence);
+    const segments = planSpeechCut(decoded, keepSilence).segments;
     if (segments.length === 0) {
       if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
       throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');

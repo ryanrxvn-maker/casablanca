@@ -18,6 +18,7 @@ import {
   IconAcelerador,
   IconAudioSplit,
   IconAutoBroll,
+  IconAutoCortes,
   IconFakePass,
   IconCamuflagem,
   IconClickUpPilot,
@@ -201,6 +202,15 @@ const TOOLS: ToolEntry[] = [
     description: 'A fala vira legenda animada, no tempo exato do áudio.',
     icon: <IconTipografia size={26} />,
     hue: 'rgba(251, 191, 36, 0.42)',
+    badge: 'IA',
+  },
+  {
+    href: '/tools/auto-cortes',
+    adminOnly: true,
+    label: 'Auto Cortes',
+    description: 'Vídeo longo vira cortes prontos, com legenda e headline.',
+    icon: <IconAutoCortes size={26} />,
+    hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
   },
   {
@@ -2514,6 +2524,7 @@ function LockIcon({ size = 18 }: { size?: number }) {
 const TOOL_LABELS: Record<string, string> = {
   '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/lipsync': 'Lipsync Video to Video',
+  '/tools/auto-cortes': 'Auto Cortes',
   '/tools/camuflagem': 'Camuflagem',
   '/tools/compressor': 'Compressor',
   '/tools/audio-split': 'Dividir áudios',

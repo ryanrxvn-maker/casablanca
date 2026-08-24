@@ -41,6 +41,17 @@ import {
 } from '@/lib/copy-parser';
 import { alignEditedToWords } from '@/lib/edited-text-align';
 import { newPilotGenId, pilotGenPrefix, pilotPartKey } from '@/lib/pilot-gen-isolation';
+import {
+  type VersaoCanal,
+  rotuloCanal,
+  nomeComCanal,
+  avatarDoCanal,
+  precisaGerarDeNovo,
+  planejarDuasVersoes,
+  taskIdDoCanal,
+  canalDoTaskId,
+  taskIdBase,
+} from '@/lib/versao-canal';
 import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
@@ -66,6 +77,9 @@ import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
+// Estado DERIVADO do conteudo: e' o que impede o card de dizer "Pronto"
+// sobre um montado velho (ver o modulo — caso AD06, 23.08).
+import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe, partesForaDoPlano } from '@/lib/montagem-sig';
 import { EditPartModal } from '@/components/EditPartModal';
 import {
   PilotBtn3D,
@@ -112,7 +126,8 @@ import {
 } from '@/lib/drmillion-parser';
 import { LangSwitch3D } from '@/components/LangSwitch3D';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
-import { takeUnicoPorLook } from '@/lib/heygen-motion-motor';
+import { takeUnicoPorLook, motorEfetivo } from '@/lib/heygen-motion-motor';
+import { revisarCopy, contarGraves } from '@/lib/revisar-copy';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { sleepUnthrottled } from '@/lib/unthrottled-clock';
@@ -372,16 +387,53 @@ function runPostPipelineSerial(
  *  isso a chave do 'decupado' carrega a intensidade (`@k<sec>`): mudar a
  *  intensidade = chave diferente = recorta de verdade no novo valor (não reusa
  *  o corte antigo); voltar pra intensidade anterior reusa o que já existe. */
-function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.12, genId?: string | null) {
+/** ⛔ TODAS as chaves derivadas de UMA parte — a fonte unica de verdade.
+ *
+ *  23.08: o nivelado passou a ser gravado como `leveled2:` (motor novo) e a
+ *  invalidacao continuou apagando `leveled:`. Regenerar um take deixava de
+ *  invalidar o nivelado dele, e "Atualizar montagem" remontava com o clip
+ *  VELHO em cache — o AD06 voltou inteiro pro avatar antigo depois de os sete
+ *  takes terem sido re-gerados. Silas: *"NAO PODE ACONTECER ISSO E VOLTAR PRO
+ *  ANTIGO"*.
+ *
+ *  Duas listas de nomes em lugares diferentes sempre acabam divergindo. Esta e'
+ *  a unica: `makeClipCacheHooks` cria, isto apaga, e o nome legado fica junto
+ *  pra limpar cache de quem rodou antes da troca.
+ */
+function chavesDerivadasDaParte(taskId: string, genId: string | null | undefined, label: string): string[] {
+  const pfx = pilotGenPrefix(taskId, genId);
+  return [
+    `${pfx}leveled2:${label}`,      // nivelado (motor atual)
+    `${pfx}leveled:${label}`,       // nivelado (legado, pre-23.08)
+    `${pfx}decupado:${label}@k`,    // decupado, TODAS as intensidades
+    `${pfx}decupado:${label}`,      // decupado (legado, sem intensidade)
+  ];
+}
+
+/** Apaga tudo que foi derivado de uma parte. Chamar SEMPRE que o take mudar. */
+async function invalidarDerivadosDaParte(taskId: string, genId: string | null | undefined, label: string) {
+  try {
+    const { deletePrefix } = await import('@/lib/zip-store');
+    for (const k of chavesDerivadasDaParte(taskId, genId, label)) {
+      await deletePrefix(k).catch(() => {});
+    }
+  } catch (e) { console.warn('[pilot] invalidar derivados de', label, e); }
+}
+
+function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.05, genId?: string | null) {
   const kTag = (Math.round(keepSilenceSec * 100) / 100).toFixed(2);
   const pfx = pilotGenPrefix(taskId, genId);
   // Intensidade vai no FIM da chave do 'decupado' (`...:<label>@k<sec>`) pra que
   // a invalidação por parte (deletePrefix `...:decupado:<label>@k`) atinja todas
   // as intensidades daquela parte sem tocar nas outras partes.
+  // 'leveled2' (23.08): o nivelamento passou a usar o motor da ferramenta
+  // Normalizador (profile 'full'). Trocar o nome da chave invalida de uma vez os
+  // clips nivelados pelo motor antigo — senão um RETOMAR reusaria o áudio velho e
+  // o conserto não apareceria pra quem já tinha rodado a task.
   const keyFor = (kind: 'leveled' | 'decupado', label: string) =>
     kind === 'decupado'
       ? `${pfx}decupado:${label}@k${kTag}`
-      : `${pfx}${kind}:${label}`;
+      : `${pfx}leveled2:${label}`;
   return {
     loadCachedClip: async (kind: 'leveled' | 'decupado', label: string): Promise<Blob | null> => {
       try {
@@ -662,7 +714,12 @@ type BatchTaskState = {
    *  é falha e NÃO re-dispara — o watcher retoma sozinho quando ficarem prontos. */
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed' | 'waiting-heygen';
   /** Per-part status durante dispatch (parteN: error|null) */
-  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; videoUrl?: string | null; error?: string | null; renamedTo: string }>;
+  /** ⚠ `usouAvatarId`/`usouVoiceId`/`usouEngine` = o que REALMENTE gerou este
+   *  take, nao o que o plano pede hoje. Sao coisas diferentes: em 23.08 o AD06
+   *  teve avatar novo criado e o replan atualizado pro look corrigido, mas os
+   *  takes nunca foram re-gerados — e nada no card acusou. O video entregue era
+   *  o do avatar velho, com o card verde dizendo "Pronto". */
+  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; videoUrl?: string | null; error?: string | null; renamedTo: string; usouAvatarId?: string | null; usouVoiceId?: string | null; usouEngine?: string | null }>;
   message?: string;
   startedAt: number;
   finishedAt?: number;
@@ -727,6 +784,12 @@ type BatchTaskState = {
    *  "Atualizar montagem" que re-roda runPostPipeline. Persiste no
    *  localStorage pra sobreviver reload. */
   dirtyParts?: string[];
+  /** ASSINATURA dos takes que ENTRARAM na montagem atual (ver
+   *  `assinaturaMontagem`). E' a PROVA de que o arquivo montado corresponde aos
+   *  takes de agora — `dirtyParts` sozinho e' flag de intencao e mente quando
+   *  alguem esquece de marcar. Ausente = batch montado antes de 23.08 (legado):
+   *  cai no comportamento antigo, sem alarme falso. */
+  montagemSig?: string;
   /** Doc URL (Google Docs) da task — pra botao "abrir doc" no card. */
   docUrl?: string;
   /** ClickUp task URL — fallback se docUrl nao foi capturado. */
@@ -770,6 +833,23 @@ type RoleSlot = {
   avatarVoiceId: string | null;
   /** Se != null, sobrescreve avatarVoiceId — voz custom escolhida pelo user */
   voiceOverride: { id: string; name: string } | null;
+  /** AVATAR DA VERSÃO YOUTUBE deste papel. Todo AD tem duas versões: a do META
+   *  (editada com b-roll/SFX/trilha) e a do YouTube (só avatar decupado com
+   *  zoom). Quando o doc indica o MESMO avatar nos dois canais, este campo fica
+   *  null e a versão YouTube reaproveita o decupado do META — custo zero. Só
+   *  quando o doc indica avatar/look DIFERENTE é que ele é preenchido, e aí a
+   *  versão YouTube vira uma task irmã que gera de novo. */
+  avatarYoutube?: {
+    avatarId: string | null;
+    avatarName: string | null;
+    avatarThumb: string | null;
+    avatarVoiceId: string | null;
+  } | null;
+  /** VOZ da versao YouTube deste papel. So faz sentido quando `avatarYoutube`
+   *  aponta OUTRA pessoa: dai a versao do YouTube tem que falar com a voz DELA,
+   *  nao com a do META. Vazio = usa a mesma voz do META (o caso normal, em que
+   *  os dois canais sao a mesma pessoa). */
+  voiceOverrideYoutube?: { id: string; name: string } | null;
   /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | 'visual' | null */
   matchedBy: string | null;
   /** Slot criado NA MÃO pelo usuário (o doc não trazia "Avatar: @fulano").
@@ -824,6 +904,14 @@ type TaskAnalysis = {
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
   /** Cada avatar do briefing — usuario controla individualmente */
+  /** DUAS VERSÕES ligadas nesta task (META + YouTube). Desligada — o padrão —
+   *  tudo se comporta exatamente como antes: uma versão só. Liga quando o doc
+   *  pede ([[project_b2c_duas_versoes_meta_youtube]]). */
+  duasVersoes?: boolean;
+  /** Esta análise É a versão YouTube de outra task (criada por
+   *  `criarVersaoYoutube`). Serve pra UI não oferecer ligar duas versões de
+   *  novo em cima de uma versão. */
+  canalVersao?: VersaoCanal;
   roleSlots: RoleSlot[];
   /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
   partTemplates: Array<{ label: string; text: string; matchByRole: string | null; speaker?: string | null }>;
@@ -1276,13 +1364,16 @@ function ClickUpPilotInner() {
   };
 
   // INTENSIDADE da decupagem (keepSilence em segundos) — por task, persistida.
-  // É o MESMO parâmetro da ferramenta /decupagem: quanto de silêncio manter nas
-  // bordas da fala. Menor = corte mais agressivo. O valor escolhido é repassado
-  // FIELMENTE pro pipeline (keepSilenceSec → computeSpeechSegments): se o user
-  // põe 0.05, o corte usa 0.05. Default 0.12 = comportamento histórico (pausa
-  // natural entre takes, feedback 12/05/2026) — não muda nada de quem não toca.
+  // É o MESMO parâmetro da ferramenta /decupagem: quanta pausa FICA no lugar de
+  // cada silêncio cortado. Menor = corte mais seco. O valor escolhido é repassado
+  // FIELMENTE pro pipeline (keepSilenceSec → planSpeechCut): se o user põe 0.05,
+  // o corte usa 0.05.
+  // Default 0.05 desde 23.08 (era 0.12): é o valor que o Silas põe à mão em quase
+  // toda task. O 0.12 vinha de "pausa natural entre takes" (12/05/2026), de quando
+  // o detector achava pouca pausa e a margem valia pras DUAS bordas; com o motor
+  // por periodicidade, 0.05 significa 0,05 s de pausa mantida — seco, sem comer fala.
   const DECUP_INTENSITY_KEY = 'darkolab:clickup-pilot:decupIntensity';
-  const DEFAULT_KEEP_SILENCE = 0.12;
+  const DEFAULT_KEEP_SILENCE = 0.05;
   const [decupIntensity, setDecupIntensity] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return {};
     try { return JSON.parse(localStorage.getItem(DECUP_INTENSITY_KEY) || '{}'); } catch { return {}; }
@@ -2491,7 +2582,23 @@ function ClickUpPilotInner() {
           }
           const partTemplates: TaskAnalysis['partTemplates'] = [];
           for (const h of briefing.hooks) {
-            partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label, h.role) });
+            // HOOK COM DOIS FALANTES vira DOIS takes. O dialogo de abertura
+            // (um pergunta, o outro responde) mora no hook, e um take so' fazia
+            // o avatar do primeiro dizer a fala do segundo — o DIDI falando a
+            // fala da Mulher no AD05, 23.08. Mesmo tratamento do body.
+            const hs = h.segments && h.segments.length > 1 ? h.segments : null;
+            if (!hs) {
+              partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label, h.role), speaker: h.role ?? null });
+              continue;
+            }
+            hs.forEach((seg, i) => {
+              partTemplates.push({
+                label: `${h.label}.${i + 1}`,
+                text: seg.text,
+                matchByRole: pickRoleForText(seg.text, h.label, seg.role, seg.username ?? null),
+                speaker: seg.role ?? null,
+              });
+            });
           }
           // Body segmentado por SPEAKER (cada role vira sub-bloco). Dentro
           // de cada segmento, split por tempo (~20s) preservando o role.
@@ -2911,6 +3018,56 @@ function ClickUpPilotInner() {
           console.warn('[batch restore] hidratacao blob URLs falhou:', e);
         }
       })();
+
+      // ─── AS PREVIAS DOS TAKES (fix 2026-08-23) ───
+      //
+      // O bloco acima devolve os ZIPs (takes/montado/camo), mas NUNCA devolvia
+      // o `videoUrl` de cada parte — e e' ele que alimenta a previa. Resultado:
+      // depois de todo F5 os sete takes de um AD PRONTO ficavam em "NA FILA…"
+      // com a barrinha animando pra sempre, num card que dizia "Pronto". So'
+      // clicando RETOMAR (que re-baixa tudo) as previas voltavam.
+      //
+      // Silas mandou o print: *"atualizo a pagina e ta isso carregando assim"*,
+      // *"nao deveria jamais mostrar pronto se tem algo carregando ainda"*.
+      //
+      // Os blobs ja' estao no IDB desde o primeiro download, sob a chave
+      // isolada por geracao. So' faltava criar as object URLs de novo.
+      void (async () => {
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          for (const taskId of doneTaskIds) {
+            const st = restored[taskId];
+            if (!st?.parts?.length) continue;
+            const genId = st.genId;
+            const urls: Record<string, string> = {};
+            for (const part of st.parts) {
+              // Sem videoId = parte vazia (texto em branco no plano): nunca
+              // teve blob, e procurar so' geraria ruido no console.
+              if (!part.videoId || part.videoUrl) continue;
+              try {
+                const b = await loadBlob(pilotPartKey(taskId, genId, part.label), 'video/mp4');
+                if (b && b.size > 1024) urls[part.label] = URL.createObjectURL(b);
+              } catch { /* parte sem cache: segue como estava */ }
+            }
+            if (!Object.keys(urls).length) continue;
+            setBatchStates((prev) => {
+              const cur = prev[taskId];
+              if (!cur) return prev;
+              return {
+                ...prev,
+                [taskId]: {
+                  ...cur,
+                  parts: cur.parts.map((x) => (urls[x.label] && !x.videoUrl
+                    ? { ...x, videoUrl: urls[x.label] }
+                    : x)),
+                },
+              };
+            });
+          }
+        } catch (e) {
+          console.warn('[batch restore] previas dos takes:', e);
+        }
+      })();
     }
   }, []);
 
@@ -3130,7 +3287,7 @@ function ClickUpPilotInner() {
     // Resolve o plano: 1o de taskAnalyses (sessao com a task analisada);
     // senao do `replan` persistido (sobrevive reload/navegacao) — e isso
     // que faz Retomar/Debug funcionarem em task que falhou com 0 videoIds.
-    let plan = a ? buildPlan(a) : null;
+    let plan = a ? buildPlan(a, canalDoTaskId(taskId)) : null;
     let rTaskName: string;
     let rBaseAdId: string;
     let replan: BatchTaskState['replan'];
@@ -3188,7 +3345,12 @@ function ClickUpPilotInner() {
     }
     if (!plan) return;
     const partsLen = plan.parts.length;
-    const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_');
+    // De que versão é esta task? A irmã do YouTube tem id próprio (`<id>-yt`),
+    // então TODO nome derivado — zip de takes, montado, camuflado e até o
+    // título do vídeo no HeyGen — já sai distinguível.
+    const canalVersao = canalDoTaskId(taskId);
+    const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_')
+      + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
 
     // Re-run da mesma task: revoga blob URLs antigos pra nao vazar memoria
     for (const url of [batchStates[taskId]?.zipBlobUrl, batchStates[taskId]?.montadoZipUrl, batchStates[taskId]?.camufladoZipUrl]) {
@@ -3371,7 +3533,17 @@ function ClickUpPilotInner() {
           setBatchStates((prev) => {
             const s = prev[taskId];
             if (!s) return prev;
-            const newParts = s.parts.map((p, i) => i === orig ? { ...p, videoId: r.videoId, error: r.error } : p);
+            // Carimba o que gerou este take (o plano DESTE disparo), pra o card
+            // poder acusar depois que o plano mudou e o take ficou pra tras.
+            const doPlano = replan?.parts?.find((x) => x.label === s.parts[orig]?.label);
+            const newParts = s.parts.map((p, i) => i === orig ? {
+              ...p,
+              videoId: r.videoId,
+              error: r.error,
+              usouAvatarId: doPlano?.avatarId ?? p.usouAvatarId ?? null,
+              usouVoiceId: doPlano?.voiceId ?? p.usouVoiceId ?? null,
+              usouEngine: doPlano?.engine ? String(doPlano.engine).toUpperCase() : (p.usouEngine ?? null),
+            } : p);
             return { ...prev, [taskId]: { ...s, parts: newParts } };
           });
         },
@@ -3813,6 +3985,10 @@ function ClickUpPilotInner() {
         },
       }));
 
+      // ⛔ Assinatura do que ENTRA na montagem, capturada antes de montar. Ver a
+      // nota em rebuildMontage: carimbar no fim mentiria sobre take re-gerado
+      // durante o processo.
+      const sigDoQueEntrou = assinaturaMontagem(batchStatesRef.current[taskId]?.parts);
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         const _tc = getTaskCamuflagem(taskId);
@@ -3853,7 +4029,12 @@ function ClickUpPilotInner() {
         }));
         return;
       }
-      const assembled = pipeRes.items;
+      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
+      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
+      const assembled = canalVersao === 'meta'
+        ? pipeRes.items
+        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
 
       // ZIP 2 — versoes montadas + decupadas. SEMPRE cria, mesmo quando
       // assembled.length === 0 (nesse caso vai so com _DIAGNOSTICO.txt
@@ -3891,7 +4072,7 @@ Bodies identificados (label BODY ou PARTE): ${pipeRes.diagnostics.bodiesFound}
 Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
 
 Items finais: ${assembled.length}
-${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
+${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'}${it.errors?.nivelamento ? ' | NIVELAMENTO: '+it.errors.nivelamento : ''} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
 
 Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
@@ -3985,6 +4166,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
+          // Carimba QUAIS takes entraram neste montado. E' o que permite ao
+          // card detectar sozinho que o arquivo ficou velho depois.
+          montagemSig: sigDoQueEntrou,
+          dirtyParts: partesDesatualizadas({ parts: prev[taskId]?.parts, montagemSig: sigDoQueEntrou }),
         },
       }));
       if (entregou) {
@@ -4054,7 +4239,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         return { ...prev, [taskId]: { ...cur, genId } };
       });
     }
-    const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+    const canalVersao = canalDoTaskId(taskId);
+    const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_')
+      + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
     const validIds = validParts.map((p) => p.videoId!);
 
     try {
@@ -4097,6 +4284,24 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const b = await loadBlob(pilotPartKey(taskId, genId, p.label), 'video/mp4');
           if (b && b.size > 1024) cachedIdxs.add(i);
         } catch {}
+      }
+      // O BLOB NO IDB E' PROVA DE QUE A PARTE FICOU PRONTA. Sem isto, uma parte
+      // que ficou 'stalled' (o poll desistiu de esperar) continuava marcada
+      // assim mesmo depois do RETOMAR baixar e montar tudo: o card dizia
+      // "Pronto: 7 takes · 1 montagens · 90MB" e ao mesmo tempo "INCOMPLETO —
+      // CLICA RETOMAR", e o lapis de editar nao aparecia. Medido em 23.08.
+      if (cachedIdxs.size) {
+        setBatchStates((prev) => {
+          const cur = prev[taskId];
+          if (!cur) return prev;
+          let mudou = false;
+          const novas = cur.parts.map((p, i) => {
+            if (!cachedIdxs.has(i) || p.videoStatus === 'completed') return p;
+            mudou = true;
+            return { ...p, videoStatus: 'completed' as const, error: undefined };
+          });
+          return mudou ? { ...prev, [taskId]: { ...cur, parts: novas } } : prev;
+        });
       }
 
       // ── PARTES NUNCA DISPARADAS (fix 2026-06-08 — AD31GL ficou 8/9) ──
@@ -4538,6 +4743,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       }));
 
+      // ⛔ Assinatura do que ENTRA na montagem, capturada antes de montar. Ver a
+      // nota em rebuildMontage: carimbar no fim mentiria sobre take re-gerado
+      // durante o processo.
+      const sigDoQueEntrou = assinaturaMontagem(batchStatesRef.current[taskId]?.parts);
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         const _tc = getTaskCamuflagem(taskId);
@@ -4578,7 +4787,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }));
         return;
       }
-      const assembled = pipeRes.items;
+      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
+      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
+      const assembled = canalVersao === 'meta'
+        ? pipeRes.items
+        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
 
       // ZIP 2 — versoes montadas + decupadas (sempre cria, mesmo com 0
       // assembled — entrega _DIAGNOSTICO.txt explicando o motivo)
@@ -4610,7 +4824,7 @@ Bodies identificados (label BODY ou PARTE): ${pipeRes.diagnostics.bodiesFound}
 Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
 
 Items finais: ${assembled.length}
-${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
+${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'}${it.errors?.nivelamento ? ' | NIVELAMENTO: '+it.errors.nivelamento : ''} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
 
 Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
@@ -4700,6 +4914,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
+          // Carimba QUAIS takes entraram neste montado. E' o que permite ao
+          // card detectar sozinho que o arquivo ficou velho depois.
+          montagemSig: sigDoQueEntrou,
+          dirtyParts: partesDesatualizadas({ parts: prev[taskId]?.parts, montagemSig: sigDoQueEntrou }),
         },
       }));
       if (entregou) {
@@ -4875,6 +5093,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         !taskAnalyses[id]?.trocaBriefing,
     );
 
+    // DUAS VERSÕES: cada task com a função ligada E avatar diferente no YouTube
+    // ganha uma task IRMÃ que dispara a versão do YouTube. Task sem a função,
+    // ou com o MESMO avatar nos dois canais, não gera nada a mais — a versão
+    // YouTube sai do próprio decupado, na edição ([[project_b2c_duas_versoes_meta_youtube]]).
+    const irmasYoutube: TaskAnalysis[] = normalTasks
+      .map((id) => taskAnalyses[id])
+      .filter((a): a is TaskAnalysis => pedeVersaoYoutube(a))
+      .map(analiseYoutube);
+    if (irmasYoutube.length) {
+      const porId: Record<string, TaskAnalysis> = {};
+      for (const ir of irmasYoutube) porId[ir.taskId] = ir;
+      setTaskAnalyses((prev) => ({ ...prev, ...porId }));
+      taskAnalysesRef.current = { ...taskAnalysesRef.current, ...porId };
+      normalTasks.push(...irmasYoutube.map((ir) => ir.taskId));
+    }
+
     if (vaTasks.length === 0 && trocaTasks.length === 0 && normalTasks.length === 0) {
       // Mensagem util: diz exatamente o que falta por tipo selecionado.
       const selVA = selected.some((id) => taskAnalyses[id]?.vaBriefing);
@@ -4894,7 +5128,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setBatchStates((prev) => {
       const next = { ...prev };
       for (const id of normalTasks) {
-        const a = taskAnalyses[id];
+        // as irmãs recém-criadas ainda não estão no state deste tick
+        const a = taskAnalyses[id] || irmasYoutube.find((ir) => ir.taskId === id);
         if (!a) continue;
         const baseAdId = a.baseAdId || a.taskName;
         // BLINDAGEM F5 (perda de plano): persiste o PLANO (replan) JÁ ao enfileirar.
@@ -4906,7 +5141,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // replan entra no state → persistBatchStates grava no localStorage no ATO do
         // enfileiramento → sobrevive reload → a task até AUTO-RETOMA (o promoter
         // reencontra o plano), sem nem precisar clicar Retomar.
-        const qplan = buildPlan(a);
+        const qplan = buildPlan(a, canalDoTaskId(id));
         const qreplan: BatchTaskState['replan'] = qplan ? {
           taskName: a.taskName,
           baseAdId,
@@ -5662,7 +5897,28 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   // Resetados ao abrir; lidos no regenerateSinglePart.
   const [editAvatar, setEditAvatar] = useState<AvatarOption | null>(null);
   const [editVoice, setEditVoice] = useState<{ id: string; name: string } | null>(null);
-  const [regeneratingPart, setRegeneratingPart] = useState<{ taskId: string; label: string } | null>(null);
+  // MOTOR + GESTO da parte sendo editada. O III descarta motion, entao pedir
+  // "cobrir o peito com a mao" so vale se a parte subir pro IV — e isso tem que
+  // caber numa parte SO, senao o unico jeito era re-disparar o AD inteiro.
+  const [editEngine, setEditEngine] = useState<'auto' | 'III' | 'IV' | 'V'>('auto');
+  const [editMotion, setEditMotion] = useState<string>('');
+  /**
+   * QUAIS partes estao re-gerando agora — `${taskId}::${label}`.
+   *
+   * Era um objeto SO': uma parte no ar deixava o botao de re-gerar desabilitado
+   * pro AD inteiro, e corrigir 13 takes de um lote virava fila de um em um, cada
+   * um esperando o render anterior. Cada parte dispara e faz poll por conta
+   * propria, entao nada impede que andem juntas.
+   */
+  const [regeneratingParts, setRegeneratingParts] = useState<Record<string, true>>({});
+  const chaveParte = (taskId: string, label: string) => taskId + '::' + label;
+  const marcarRegen = (taskId: string, label: string, on: boolean) =>
+    setRegeneratingParts((prev) => {
+      const k = chaveParte(taskId, label);
+      if (on) return { ...prev, [k]: true as const };
+      const { [k]: _fora, ...resto } = prev;
+      return resto;
+    });
   const [regenError, setRegenError] = useState<string | null>(null);
   const [rebuildingTaskId, setRebuildingTaskId] = useState<string | null>(null);
 
@@ -5701,6 +5957,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const currentAvatar = findAvatarOptionById(replanPart?.avatarId);
     setEditAvatar(currentAvatar);
     setEditVoice(replanPart?.voiceId ? { id: replanPart.voiceId, name: '' } : null);
+    setEditEngine(((replanPart as any)?.engine as 'auto' | 'III' | 'IV' | 'V') || 'auto');
+    setEditMotion(String((replanPart as any)?.motionPrompt || ''));
     setEditingPart({
       taskId,
       partIdx,
@@ -5711,7 +5969,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     void reloadLibrary(false);
   }
 
-  async function regenerateSinglePart(newText: string) {
+  async function regenerateSinglePart(newText: string, opts?: { engine: 'auto' | 'III' | 'IV' | 'V'; motionPrompt: string | null }) {
     if (!editingPart) return;
     const { taskId, partIdx, label } = editingPart;
     const b = batchStates[taskId];
@@ -5732,6 +5990,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     // Voz pode vir do picker (editVoice) OU do replan antigo. Null = voz padrao do avatar.
     const effectiveVoiceId = editVoice?.id || replanPart.voiceId || null;
+    // MOTOR DESTA PARTE. 'auto' = III, e sobe pro IV sozinho quando ha gesto
+    // (o III descarta motion — pedir e nao subir sairia parado). Escolha na mao
+    // vence, menos IV->III com gesto, que voltaria o take sem o movimento.
+    const gestoDaParte = (opts ? opts.motionPrompt : ((replanPart as any).motionPrompt || null)) || null;
+    const motorPedido = opts?.engine || ((replanPart as any).engine as 'auto' | 'III' | 'IV' | 'V') || 'auto';
+    const motorParte = motorEfetivo(motorPedido === 'auto' ? 'III' : motorPedido, gestoDaParte);
     if (newText.trim().length === 0) {
       setRegenError('Texto vazio — preenche o script.');
       return;
@@ -5740,7 +6004,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // ser excluído do HeyGen antes do novo submit (anti-memória de moderação).
     const prevPart = b.parts[partIdx];
     const rejectedVideoId = prevPart?.videoStatus === 'failed' ? (prevPart.videoId || null) : null;
-    setRegeneratingPart({ taskId, label });
+    marcarRegen(taskId, label, true);
     setRegenError(null);
     // FECHA O MODAL NA HORA: a re-geração (dispatch + poll de até 25min + download)
     // roda em BACKGROUND — o card já mostra o progresso da parte (isRegenThis) e, se
@@ -5756,7 +6020,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const cur = prev[taskId];
         if (!cur || !cur.replan) return prev;
         const newReplanParts = cur.replan.parts.map((p, i) => i === partIdx
-          ? { ...p, text: newText, avatarId: effectiveAvatarId || null, voiceId: effectiveVoiceId }
+          // 'auto' nao existe no replan: la o campo e o motor de verdade, e
+          // vazio JA' significa auto. Guardar a string 'auto' quebraria o tipo.
+          ? { ...p, text: newText, avatarId: effectiveAvatarId || null, voiceId: effectiveVoiceId,
+              engine: motorPedido === 'auto' ? undefined : motorPedido,
+              motionPrompt: gestoDaParte }
           : p);
         return {
           ...prev,
@@ -5793,7 +6061,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         fd.append('image', blob, 'frame.jpg');
         fd.append('script', newText);
         fd.append('voiceId', effectiveVoiceId);
-        const motionDaParte = (replanPart as any).motionPrompt;
+        const motionDaParte = gestoDaParte;
         if (motionDaParte) fd.append('motionPrompt', String(motionDaParte));
         fd.append('title', `${adNameSafe}_${label}_edit`);
         fd.append('aspectRatio', '9:16');
@@ -5808,7 +6076,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           voiceId: effectiveVoiceId || undefined,
           title: `${adNameSafe}_${label}_edit`,
           avatarId: effectiveAvatarId!,
-          engine: 'iii',
+          engine: motorParte.toLowerCase() as 'iii' | 'iv' | 'v',
+          motionPrompt: gestoDaParte || undefined,
           orientation: 'portrait',
         });
       }
@@ -5819,7 +6088,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const cur = prev[taskId];
         if (!cur) return prev;
         const newParts = cur.parts.map((p, i) => i === partIdx
-          ? { ...p, videoId: job.videoId, videoStatus: 'pending' as const, videoUrl: null, error: null }
+          ? {
+              ...p,
+              videoId: job.videoId,
+              videoStatus: 'pending' as const,
+              videoUrl: null,
+              error: null,
+              // Carimba o que ESTE take passou a usar. E' o que deixa o card
+              // comparar plano x realidade e acusar take que ficou pra tras.
+              usouAvatarId: effectiveAvatarId || null,
+              usouVoiceId: effectiveVoiceId || null,
+              usouEngine: motorParte ? String(motorParte).toUpperCase() : null,
+            }
           : p);
         return { ...prev, [taskId]: { ...cur, parts: newParts } };
       });
@@ -5847,9 +6127,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // cache stale. As outras partes seguem cacheadas (rebuild rápido). O
         // decupado é por intensidade (`...:<label>@k<sec>`) → deletePrefix limpa
         // TODAS as intensidades dessa parte de uma vez.
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}leveled:${label}`).catch(() => {});
-        await deletePrefix(`${pilotGenPrefix(taskId, genId)}decupado:${label}@k`).catch(() => {});
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}decupado:${label}`).catch(() => {}); // legado (chave antiga sem intensidade)
+        await invalidarDerivadosDaParte(taskId, genId, label);
       } catch (e) { console.warn('[edit-part] save blob IDB falhou:', e); }
 
       // 6) Atualiza state final com URL pronta + marca como dirty (montagem
@@ -5890,7 +6168,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         };
       });
     } finally {
-      setRegeneratingPart(null);
+      marcarRegen(taskId, label, false);
     }
   }
 
@@ -5926,7 +6204,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const rejectedError = part.error;
 
     // Marca a parte como "re-gerando agora" (overlay no card) + reseta erro.
-    setRegeneratingPart({ taskId, label });
+    marcarRegen(taskId, label, true);
     setBatchStates((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;
@@ -5989,11 +6267,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const bytes = await downloadVideoBytes(st.videoUrl);
       const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       try {
-        const { saveBlob, deleteZip, deletePrefix } = await import('@/lib/zip-store');
+        const { saveBlob } = await import('@/lib/zip-store');
         await saveBlob(pilotPartKey(taskId, genId, label), partBlob, 'video/mp4');
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}leveled:${label}`).catch(() => {});
-        await deletePrefix(`${pilotGenPrefix(taskId, genId)}decupado:${label}@k`).catch(() => {});
-        await deleteZip(`${pilotGenPrefix(taskId, genId)}decupado:${label}`).catch(() => {});
+        await invalidarDerivadosDaParte(taskId, genId, label);
       } catch (e) { console.warn('[edit-part-audio] save blob IDB falhou:', e); }
 
       // Marca completa + dirty → aparece "Atualizar montagem" pra fechar o AD.
@@ -6033,7 +6309,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       });
       setError(`Parte ${label} (áudio): ${msg}`);
     } finally {
-      setRegeneratingPart(null);
+      marcarRegen(taskId, label, false);
     }
   }
 
@@ -6047,6 +6323,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const b = batchStates[taskId];
     if (!b) return;
     const genId = b.genId; // isolação por geração: hidrata só os takes DESTA geração
+    // ⛔ A assinatura e' do estado que ENTROU na montagem, capturado AGORA — nao
+    // do estado no fim dela. Montar leva minutos; um take re-gerado nesse meio
+    // tempo nao esta' no arquivo, e carimbar no fim diria que esta'. Seria a
+    // mesma mentira que a assinatura existe pra impedir.
+    const sigDoQueEntrou = assinaturaMontagem(b.parts);
     setRebuildingTaskId(taskId);
     try {
       const { loadBlob } = await import('@/lib/zip-store');
@@ -6098,8 +6379,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
       // Reconstroi os ZIPs (montado + camo) — mesmo pattern do resumeTaskBatch
       const JSZip = (await import('jszip')).default;
-      const assembled = pipeRes.items;
-      const adNameClean = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+      const canalVersao = canalDoTaskId(taskId);
+      const adNameClean = b.baseAdId.replace(/[^A-Z0-9]/gi, '_')
+        + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
+      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
+      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
+      const assembled = canalVersao === 'meta'
+        ? pipeRes.items
+        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
 
       // ZIP montado
       const zipMont = new JSZip();
@@ -6170,7 +6458,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
-          dirtyParts: [], // limpa flag — montagem ta fresh
+          // Limpa SO' o que entrou nesta montagem. Take re-gerado DURANTE ela
+          // nao esta' no arquivo: continua sujo, e o card segue pedindo
+          // "Atualizar montagem" — que e' a verdade.
+          dirtyParts: partesDesatualizadas({
+            parts: prev[taskId]?.parts,
+            montagemSig: sigDoQueEntrou,
+          }),
+          montagemSig: sigDoQueEntrou,
         },
       }));
     } catch (e) {
@@ -6504,6 +6799,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     for (const idx of pendingIdxs) {
       await runVisualMatchForSlot(taskId, idx);
     }
+  }
+
+  /** Liga/desliga as DUAS VERSÕES (META + YouTube) desta task. Desligado é o
+   *  padrão: só liga quando o doc pede. */
+  function setDuasVersoes(taskId: string, ativo: boolean) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a) return prev;
+      const next = { ...prev, [taskId]: { ...a, duasVersoes: ativo } };
+      taskAnalysesRef.current = next;
+      return next;
+    });
   }
 
   /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz.
@@ -7000,7 +7307,70 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   }
 
   /** Constroi DispatchPlan a partir dos roleSlots + partTemplates da task */
-  function buildPlan(a: TaskAnalysis): DispatchPlan | null {
+  /** Os papéis desta task no formato que a lib de canal entende. */
+  function papeisDaTask(a: TaskAnalysis) {
+    return (a.roleSlots || []).map((s) => ({
+      avatarId: s.avatarId, avatarName: s.avatarName,
+      avatarThumb: s.avatarThumb, avatarVoiceId: s.avatarVoiceId,
+      youtube: s.avatarYoutube || null,
+    }));
+  }
+
+  /** Esta task pede uma SEGUNDA geração pro YouTube? */
+  function pedeVersaoYoutube(a: TaskAnalysis | undefined | null): boolean {
+    if (!a || !a.duasVersoes || a.canalVersao === 'youtube') return false;
+    return precisaGerarDeNovo(papeisDaTask(a));
+  }
+
+  /**
+   * A ANÁLISE da versão YouTube, derivada da do META.
+   *
+   * Os avatares do YouTube já vêm resolvidos DENTRO de `avatarId` — a irmã não
+   * guarda `avatarYoutube` pra não gerar uma terceira versão. `baseAdId` fica
+   * IGUAL de propósito: é dele que sai `AD06G1GL.mp4` (o `insertGSuffix` não
+   * aceita `_` no meio), e o sufixo `_YOUTUBE` entra depois, no nome do arquivo
+   * entregue, pelo `canalDoTaskId`.
+   */
+  function analiseYoutube(a: TaskAnalysis): TaskAnalysis {
+    return {
+      ...a,
+      taskId: taskIdDoCanal(a.taskId, 'youtube'),
+      taskName: `${a.taskName} · YouTube`,
+      canalVersao: 'youtube',
+      duasVersoes: false,
+      dispatchedAt: undefined,
+      roleSlots: (a.roleSlots || []).map((sl) => {
+        const esc = avatarDoCanal({
+          avatarId: sl.avatarId, avatarName: sl.avatarName,
+          avatarThumb: sl.avatarThumb, avatarVoiceId: sl.avatarVoiceId,
+          youtube: sl.avatarYoutube || null,
+        }, 'youtube');
+        return {
+          ...sl,
+          avatarId: esc.avatarId ?? null,
+          avatarName: esc.avatarName ?? null,
+          avatarThumb: esc.avatarThumb ?? null,
+          avatarVoiceId: esc.avatarVoiceId ?? null,
+          // A irmã JA' E' a versão YouTube: a voz do YouTube vira a voz do
+          // papel aqui dentro. Sem isso, o avatar do YouTube — que é OUTRA
+          // pessoa — sairia falando com a voz escolhida pro META.
+          voiceOverride: (sl.avatarYoutube?.avatarId && sl.voiceOverrideYoutube?.id)
+            ? sl.voiceOverrideYoutube
+            : sl.voiceOverride,
+          voiceOverrideYoutube: null,
+          avatarYoutube: null,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Monta o plano de disparo do AD. `canal` escolhe de qual versão: 'meta' usa
+   * o avatar do papel (o caminho de sempre) e 'youtube' usa `avatarYoutube`
+   * quando ele existe — caindo no do META quando não existe, pra nenhum slot
+   * disparar com avatar vazio.
+   */
+  function buildPlan(a: TaskAnalysis, canal: VersaoCanal = 'meta'): DispatchPlan | null {
     if (!a.roleSlots || !a.partTemplates) return null;
     const slotsByRole: Record<string, RoleSlot> = {};
     for (const s of a.roleSlots) slotsByRole[s.role.toLowerCase()] = s;
@@ -7008,15 +7378,31 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const adName = (a.baseAdId || a.taskName).replace(/[^a-z0-9_-]/gi, '_');
     const parts = a.partTemplates.map((pt) => {
       const slot = (pt.matchByRole && slotsByRole[pt.matchByRole]) || firstSlot;
+      // Avatar DO CANAL: no META é o do papel; no YouTube é o `avatarYoutube`
+      // quando escolhido, senão o mesmo do META.
+      const esc = slot
+        ? avatarDoCanal({
+            avatarId: slot.avatarId, avatarName: slot.avatarName,
+            avatarThumb: slot.avatarThumb, avatarVoiceId: slot.avatarVoiceId,
+            youtube: slot.avatarYoutube || null,
+          }, canal)
+        : null;
       return {
         label: pt.label,
         text: pt.text,
-        avatarId: slot?.avatarId || null,
-        avatarName: slot?.avatarName || null,
-        avatarThumb: slot?.avatarThumb || null,
+        avatarId: esc?.avatarId || null,
+        avatarName: esc?.avatarName || null,
+        avatarThumb: esc?.avatarThumb || null,
         matchedBy: slot?.matchedBy || undefined,
-        // voiceId: override > avatar default
-        voiceId: slot?.voiceOverride?.id || slot?.avatarVoiceId || null,
+        // voiceId: override > avatar do canal. O override é do papel e vale
+        // nos dois canais — trocar o avatar do YouTube não desfaz a voz que o
+        // user escolheu na mão. A EXCEÇÃO é o YouTube com avatar próprio: aí
+        // ele é OUTRA pessoa, e falar com a voz do META entregaria a segunda
+        // versão com a voz errada. Só a voz escolhida na mão pro YouTube fura.
+        voiceId:
+          (canal === 'youtube' && slot?.avatarYoutube?.avatarId && slot?.voiceOverrideYoutube?.id)
+            ? slot.voiceOverrideYoutube.id
+            : (slot?.voiceOverride?.id || esc?.avatarVoiceId || null),
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
         imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
@@ -7063,7 +7449,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     for (const p of colapsado as any[]) { delete p._slotRole; delete p._imageMode; delete p._takeUnico; }
     // Slot em modo imagem não precisa de avatarId — a imagem substitui.
     const unmatchedAvatars = a.roleSlots
-      .filter((s) => !s.avatarId && !(s.imageMode && s.imageDataUrl))
+      .filter((s) => {
+        const idCanal = avatarDoCanal({
+          avatarId: s.avatarId, avatarVoiceId: s.avatarVoiceId, youtube: s.avatarYoutube || null,
+        }, canal).avatarId;
+        return !idCanal && !(s.imageMode && s.imageDataUrl);
+      })
       .map((s) => `${s.role}: @${s.username}`);
     return { adName, parts: colapsado as any, unmatchedAvatars };
   }
@@ -9934,7 +10325,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
                                   {previews.map((t, ti) => {
                                     const originalIdx = validIdxsFiltered[ti];
-                                    const isRegenThis = regeneratingPart?.taskId === b.taskId && regeneratingPart?.label === t.label;
+                                    const isRegenThis = !!regeneratingParts[chaveParte(b.taskId, t.label)];
                                     return (
                                       <LipsyncPreviewCard
                                         key={ti}
@@ -9944,9 +10335,30 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         percent={pct}
                                         fileBase={b.baseAdId || b.taskName}
                                         isRegenerating={isRegenThis}
-                                        // Editar texto: nos prontos (trocar script/voz) E nos que
-                                        // FALHARAM (contornar a falha do HeyGen re-gerando a parte).
-                                        onEdit={canEdit && (t.status === 'completed' || t.status === 'failed') ? () => openEditPart(b.taskId, originalIdx) : undefined}
+                                        // AUTO-CURA DA PREVIA: a object URL guardada no state morre
+                                        // se alguem revogar, e o <video> nao avisa — vira um
+                                        // retangulo PRETO com play em cima. Aconteceu no AD85 em
+                                        // 23.08 com o take intacto no disco. Aqui a previa pede uma
+                                        // URL nova direto do IndexedDB e se conserta sozinha.
+                                        recuperarVideo={async () => {
+                                          try {
+                                            const { loadBlob } = await import('@/lib/zip-store');
+                                            const chave = pilotPartKey(b.taskId, b.genId, t.label);
+                                            const blob = await loadBlob(chave, 'video/mp4');
+                                            return blob && blob.size > 1024 ? URL.createObjectURL(blob) : null;
+                                          } catch (e) {
+                                            console.warn('[preview] resgate do blob falhou:', e);
+                                            return null;
+                                          }
+                                        }}
+                                        // Editar texto: nos prontos (trocar script/voz), nos que
+                                        // FALHARAM (contornar a falha do HeyGen re-gerando a parte) e
+                                        // nos TRAVADOS. 'stalled' e' "o poll desistiu de esperar" — o
+                                        // video pode ate' ja' ter ficado pronto la'. Sem o lapis, a
+                                        // parte travada nao tinha saida nenhuma na tela: nem editar,
+                                        // nem re-gerar. Aconteceu em 23.08, com a aba fechada por
+                                        // 98min e 6 takes presos nesse estado.
+                                        onEdit={canEdit && (t.status === 'completed' || t.status === 'failed' || t.status === 'stalled') ? () => openEditPart(b.taskId, originalIdx) : undefined}
                                         // Usar áudio: saída pra parte que FALHOU (sobe um áudio e o
                                         // avatar dá lipsync, pulando o TTS quebrado) e também pra que
                                         // está AGUARDANDO o HeyGen — aí é escolha EXPLÍCITA do user
@@ -10054,7 +10466,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   return rest;
                                 });
                               }}
-                              dirtyPartsCount={(b.dirtyParts || []).length}
+                              dirtyPartsCount={partesDesatualizadas(b).length}
+                              takesPendentes={takesPendentesDe(b)}
+                              takesForaDoPlano={partesForaDoPlano(b.parts, b.replan?.parts).length}
                               onRebuild={() => void rebuildMontage(b.taskId)}
                               isRebuilding={rebuildingTaskId === b.taskId}
                               docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}
@@ -11292,9 +11706,76 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                   ) : (
                                   <div className="mt-1.5 grid gap-2">
-                                    <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
-                                      Avatares ({a.roleSlots.length}) — selecione cada um e a voz
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
+                                        Avatares ({a.roleSlots.length}) — selecione cada um e a voz
+                                      </div>
+                                      {/* DUAS VERSÕES — o AD sai em META (editada) e YouTube (só
+                                          avatar decupado). Ligar aqui NÃO dobra o custo sozinho:
+                                          enquanto o avatar for o mesmo nos dois canais, a versão
+                                          YouTube reaproveita o decupado que já vai pra edição. Só
+                                          escolher um avatar diferente abaixo é que cria a segunda
+                                          geração. Desligado por padrão — liga quando o doc pede. */}
+                                      <button
+                                        type="button"
+                                        onClick={() => setDuasVersoes(a.taskId, !a.duasVersoes)}
+                                        className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                        style={
+                                          a.duasVersoes
+                                            ? {
+                                                fontFamily: 'var(--font-tech)',
+                                                color: '#1a0505',
+                                                borderColor: 'rgba(255,0,0,0.5)',
+                                                background: 'linear-gradient(135deg, #ff6b6b 0%, #ff0000 100%)',
+                                                boxShadow:
+                                                  '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(255,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                              }
+                                            : {
+                                                fontFamily: 'var(--font-tech)',
+                                                color: 'rgba(255,255,255,0.55)',
+                                                borderColor: 'rgba(255,255,255,0.12)',
+                                                background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                                                boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+                                              }
+                                        }
+                                        title={
+                                          a.duasVersoes
+                                            ? 'Ligado: o AD sai em duas versões. Escolha o avatar do YouTube em cada papel — deixando igual ao do META, a versão YouTube reaproveita o decupado e não gasta geração.'
+                                            : 'Ligue quando o doc pedir versão de YouTube além da do META.'
+                                        }
+                                      >
+                                        <span className="text-[12px] leading-none">▶</span>
+                                        2 versões
+                                        <span
+                                          className={
+                                            'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
+                                            (a.duasVersoes ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                                          }
+                                        >
+                                          {a.duasVersoes ? 'ON' : 'OFF'}
+                                        </span>
+                                      </button>
                                     </div>
+                                    {a.duasVersoes ? (
+                                      <div className="rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-text-muted">
+                                        {pedeVersaoYoutube(a) ? (
+                                          <>
+                                            <b className="text-red-200">Duas gerações.</b>{' '}
+                                            {planejarDuasVersoes(true, papeisDaTask(a)).motivo} — o START
+                                            enfileira a versão do YouTube como uma task irmã, e ela entrega
+                                            com <b>_YOUTUBE</b> no nome.
+                                          </>
+                                        ) : (
+                                          <>
+                                            <b className="text-lime">Uma geração só.</b> O avatar é o mesmo
+                                            nos dois canais, então a versão YouTube é o próprio avatar
+                                            decupado — a diferença fica na edição (o META leva b-roll, SFX e
+                                            trilha; o YouTube só o zoom). Escolha um avatar de YouTube abaixo
+                                            se o doc pedir rosto ou look diferente.
+                                          </>
+                                        )}
+                                      </div>
+                                    ) : null}
                                     {a.roleSlots.length === 0 ? (
                                       <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px]">
                                         <div className="mono text-[9px] uppercase tracking-widest text-yellow-200">
@@ -11408,7 +11889,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 }
                                                 return (
                                                   <div className="grid gap-2">
-                                                    {matched.map(({ pt, idx }) => (
+                                                    {matched.map(({ pt, idx }) => {
+                                                    // REVISAO DA COPY, antes de virar take pago. Um AD ja saiu
+                                                    // do HeyGen com o avatar dizendo "que TA nao importa" (o doc
+                                                    // truncou "tamanho"): o parser copia fiel e ninguem olha o
+                                                    // texto de novo. Aviso, nunca bloqueio — quem decide e o olho.
+                                                    const achados = revisarCopy(pt.text, (a.roleSlots || []).map((s2) => s2.role));
+                                                    const graves = contarGraves(achados);
+                                                    return (
                                                       <div key={idx} className="rounded-[8px] border border-line bg-bg/60 p-2">
                                                         <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-widest">
                                                           <div className="flex min-w-0 items-center gap-2">
@@ -11466,8 +11954,24 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           spellCheck={false}
                                                           placeholder="(vazio — esse part nao vai gerar nada)"
                                                         />
+                                                        {achados.length ? (
+                                                          <div className={`mono mt-1.5 rounded-[6px] border px-2 py-1 text-[9.5px] leading-relaxed ${
+                                                            graves ? 'border-rose-400/45 bg-rose-500/10 text-rose-200' : 'border-yellow-500/40 bg-yellow-500/5 text-yellow-200'
+                                                          }`}>
+                                                            <span className="font-bold uppercase tracking-widest">
+                                                              {graves ? '⚠ revisar a copy' : 'revisar'}
+                                                            </span>
+                                                            {achados.slice(0, 3).map((x, k) => (
+                                                              <div key={k} className="mt-0.5">
+                                                                {x.trecho ? <span className="rounded bg-black/30 px-1">{x.trecho}</span> : null} {x.motivo}
+                                                              </div>
+                                                            ))}
+                                                            {achados.length > 3 ? <div className="mt-0.5 opacity-70">+{achados.length - 3} outro(s)</div> : null}
+                                                          </div>
+                                                        ) : null}
                                                       </div>
-                                                    ))}
+                                                    );
+                                                    })}
                                                   </div>
                                                 );
                                               })()}
@@ -11660,6 +12164,65 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </div>
                                             </div>
                                             )}
+                                            {/* AVATAR DA VERSÃO YOUTUBE deste papel. Vazio = mesmo do
+                                                META, e aí a versão YouTube não custa geração nenhuma. */}
+                                            {a.duasVersoes && !slot.imageMode ? (
+                                              <div>
+                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                  <span className="text-[11px] leading-none">▶</span>
+                                                  Avatar da versão YouTube
+                                                  <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                    {slot.avatarYoutube?.avatarId
+                                                      ? '— gera de novo'
+                                                      : '— vazio: usa o mesmo do META (sem custo)'}
+                                                  </span>
+                                                </div>
+                                                <div className="max-w-[420px]">
+                                                  <CompactAvatarPicker
+                                                    selected={
+                                                      slot.avatarYoutube?.avatarId
+                                                        ? ({
+                                                            id: slot.avatarYoutube.avatarId,
+                                                            name: slot.avatarYoutube.avatarName || '',
+                                                            thumb: slot.avatarYoutube.avatarThumb || '',
+                                                          } as any)
+                                                        : null
+                                                    }
+                                                    setSelected={(newAv) => updateRoleSlot(a.taskId, sIdx, {
+                                                      avatarYoutube: newAv
+                                                        ? {
+                                                            avatarId: newAv.id,
+                                                            avatarName: newAv.name || null,
+                                                            avatarThumb: newAv.thumb || null,
+                                                            avatarVoiceId: (newAv as any)?.voiceId || null,
+                                                          }
+                                                        : null,
+                                                    })}
+                                                    disabled={false}
+                                                    label={`Avatar do YouTube pra ${slot.role}`}
+                                                  />
+                                                </div>
+                                                {/* VOZ DO YOUTUBE. Só aparece com avatar próprio no
+                                                    canal — porque aí é outra pessoa, e ela tem que
+                                                    falar com a voz dela. Vazio = mesma voz do META. */}
+                                                {slot.avatarYoutube?.avatarId ? (
+                                                  <div className="mt-1.5 max-w-[420px]">
+                                                    <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                      Voz da versão YouTube
+                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                        {slot.voiceOverrideYoutube?.id
+                                                          ? '— voz própria'
+                                                          : '— vazio: usa a mesma voz do META'}
+                                                      </span>
+                                                    </div>
+                                                    <CompactVoiceSelector
+                                                      selected={slot.voiceOverrideYoutube || null}
+                                                      setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverrideYoutube: v })}
+                                                    />
+                                                  </div>
+                                                ) : null}
+                                              </div>
+                                            ) : null}
                                             {slot.avatarId || slot.imageMode ? (
                                               <div>
                                                 <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
@@ -12179,8 +12742,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             avatarName: editAvatar?.name,
             voiceId: editVoice?.id ?? null,
             voiceName: editVoice?.name ?? null,
+            engine: editEngine,
+            motionPrompt: editMotion,
           }}
-          busy={!!regeneratingPart}
+          busy={!!regeneratingParts[chaveParte(editingPart.taskId, editingPart.label)]}
           errorMsg={regenError}
           onClose={() => {
             // Fechar SEMPRE liberado — a re-geração roda em BACKGROUND (o card mostra o
@@ -12191,12 +12756,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             setEditVoice(null);
             setRegenError(null);
           }}
-          onRegenerate={(newText) => void regenerateSinglePart(newText)}
+          onRegenerate={(newText, opts) => {
+            setEditEngine(opts.engine);
+            setEditMotion(opts.motionPrompt || '');
+            void regenerateSinglePart(newText, opts);
+          }}
           avatarPicker={
             <CompactAvatarPicker
               selected={editAvatar}
               setSelected={(a) => setEditAvatar(a)}
-              disabled={!!regeneratingPart}
+              disabled={!!regeneratingParts[chaveParte(editingPart.taskId, editingPart.label)]}
               label={`Avatar pra ${editingPart.label}`}
             />
           }

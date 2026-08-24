@@ -22,6 +22,7 @@ import { DarkoLogo } from '../../DarkoLogo';
 import {
   IconAcelerador,
   IconAudioSplit,
+  IconAutoCortes,
   IconCalculadora,
   IconCamuflagem,
   IconCompressor,

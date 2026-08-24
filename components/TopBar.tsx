@@ -32,6 +32,7 @@ const TITLES: Record<string, string> = {
   '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/copy-srt': 'Gerador de SRT',
   '/tools/tipografia': 'Legendas Automáticas',
+  '/tools/auto-cortes': 'Auto Cortes',
   '/tools/heygen-auto': 'Hey Auto',
   '/tools/points': 'Pontos',
   '/tools/background': 'Tarefas em segundo plano',

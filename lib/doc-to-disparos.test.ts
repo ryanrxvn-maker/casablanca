@@ -1477,6 +1477,55 @@ Corpo do AD oito.
   assert((p6b?.hooks.length || 0) > 0, 'AD6GL (sem pad) segue funcionando');
 }
 
+/* --------- HOOK COM DOIS FALANTES (AD05, 23.08) --------- */
+// O hook nao "costuma ter 1 speaker": o dialogo de abertura entre dois
+// avatares mora justamente ali. Antes disso o hook inteiro virava UM take com
+// o role do PRIMEIRO falante, e o avatar dele dizia a fala do outro — o DIDI
+// falando "Nenhum dos dois. Eles tomam o viagra indigena." no lugar da Mulher.
+console.log('\nhook com dois falantes:');
+{
+  const DOC_DIALOGO = [
+    'AD05GL - RIPTINPB',
+    'INSTRUCOES PARA EDICAO:',
+    'Avatar e Vozes:',
+    'Homem: @gordao.mp4',
+    'Mulher: @mulher14.mp4',
+    'Doutor: @dayan.mp4',
+    '',
+    'AD05G1GL - RIPTINPB',
+    'Homem',
+    'O que esses caras que gravam usam para deixar firme?',
+    '',
+    'Mulher',
+    'Nenhum dos dois. Eles tomam o viagra indigena.',
+    '',
+    'Body',
+    'Mulher',
+    'O cara com quem eu filmo tentou fazer o viagra indigena.',
+    '',
+    'Doutor',
+    'As pessoas acreditam que se faz de qualquer jeito.',
+  ].join('\n');
+  const d = parseDarkoBriefing(DOC_DIALOGO, 'AD05GL');
+  const h = d?.hooks?.[0];
+  assert(!!h, 'hook capturado');
+  assert(!!h?.segments && h.segments.length === 2, `hook rende 2 segmentos (got ${h?.segments?.length ?? 0})`);
+  const s0 = h?.segments?.[0], s1 = h?.segments?.[1];
+  assert(/homem/i.test(s0?.role || ''), `1o segmento e do Homem (got ${s0?.role})`);
+  assert(/deixar firme/i.test(s0?.text || ''), 'o Homem fica so com a pergunta dele');
+  assert(!/Nenhum dos dois/i.test(s0?.text || ''), 'a fala da Mulher NAO vaza pro take do Homem');
+  assert(/mulher/i.test(s1?.role || ''), `2o segmento e da Mulher (got ${s1?.role})`);
+  assert(/Nenhum dos dois/i.test(s1?.text || ''), 'a resposta fica com a Mulher');
+  // hook de um falante so continua sem segments (o caso normal)
+  const DOC_SIMPLES = [
+    'AD09GL - RIPTVWA', 'INSTRUCOES PARA EDICAO:', 'Avatar e Vozes:', 'Mulher: @babi.mp4', '',
+    'AD09G1GL - RIPTVWA', 'Mulher', 'Se um homem anda sem energia, presta atencao.', '',
+    'Body', 'Mulher', 'Tem um truque natural que devolve a confianca.',
+  ].join('\n');
+  const d2 = parseDarkoBriefing(DOC_SIMPLES, 'AD09GL');
+  assert(!d2?.hooks?.[0]?.segments, 'hook de 1 falante continua sem segments (nada mudou pro caso simples)');
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ ${failures} assert(s) falharam`);

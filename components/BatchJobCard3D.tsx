@@ -90,6 +90,14 @@ export type BatchJob3DProps = {
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
    *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
   dirtyPartsCount?: number;
+  /** Takes AINDA renderizando. Enquanto >0 o card NAO pode dizer "Pronto":
+   *  Silas, 23.08 — *"nao deveria jamais mostrar pronto se tem algo carregando
+   *  ainda"*. O selo vira ambar com a contagem e o download trava. */
+  takesPendentes?: number;
+  /** Takes cujo AVATAR/VOZ/MOTOR no plano ja' nao e' o que gerou o video.
+   *  Trocar o look no plano nao re-gera nada — sem este aviso o card ficava
+   *  verde sobre um AD inteiro com o avatar velho (AD06, 23.08). */
+  takesForaDoPlano?: number;
   /** Click no botao "Atualizar montagem" — re-roda runPostPipeline. */
   onRebuild?: () => void;
   /** Spinner quando rebuild ta rodando. */
@@ -452,6 +460,8 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     queuedRecoverable = false,
     children,
     dirtyPartsCount = 0,
+    takesPendentes = 0,
+    takesForaDoPlano = 0,
     onRebuild,
     isRebuilding = false,
     docUrl,
@@ -472,12 +482,31 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   //  - downloadBlocked → FALTA conteúdo (parte/texto): tem que Retomar, download travado.
   //  - isPartialDone só (sem block) → montado completo mas um pós-processo
   //    opcional (decupagem/camuflagem) falhou: é entregável, download liberado.
-  const showAsWarn = isPartialDone;
+  //  - montagemVelha → os takes mudaram DEPOIS de montar. O arquivo montado
+  //    existe, mas e' o de ANTES da correcao. Dizer "Pronto" aqui engana: quem
+  //    olha o card baixa e leva o video sem as correcoes. (Silas, 23.08.)
+  const montagemVelha = dirtyPartsCount > 0 && phase === 'done';
+  //  - renderizando → tem take em pé (pending/processing) num card que se diz
+  //    'done'. Acontece quando um take e' re-gerado depois do fim do run: o
+  //    batch ja' esta 'done' e o take volta pra fila. Dizer "Pronto" aqui e' a
+  //    mesma mentira da montagem velha, com o agravante de o video nem existir.
+  const renderizando = takesPendentes > 0 && phase === 'done';
+  //  - foraDoPlano → o plano do AD mudou (avatar/voz/motor) e o take nao foi
+  //    re-gerado com ele. E' a mentira mais silenciosa das tres: nada no fluxo
+  //    normal acusa, e o video sai com o avatar antigo parecendo certo.
+  const foraDoPlano = takesForaDoPlano > 0 && phase === 'done';
+  const showAsWarn = isPartialDone || montagemVelha || renderizando || foraDoPlano;
   const effectiveLabel = downloadBlocked
     ? 'Incompleto — clica Retomar'
-    : isPartialDone
-      ? 'Pronto · pós-processo parcial'
-      : phaseInfo.label;
+    : renderizando
+      ? `Renderizando ${takesPendentes} take${takesPendentes === 1 ? '' : 's'} — ainda não`
+      : foraDoPlano
+        ? `Plano mudou — ${takesForaDoPlano} take${takesForaDoPlano === 1 ? '' : 's'} precisa re-gerar`
+      : montagemVelha
+        ? `Montagem desatualizada — ${dirtyPartsCount} take${dirtyPartsCount === 1 ? '' : 's'} mudou`
+        : isPartialDone
+          ? 'Pronto · pós-processo parcial'
+          : phaseInfo.label;
   const ringColor =
     showAsWarn ? 'border-amber-400/35'
     : phase === 'done' ? 'border-lime/35'
@@ -802,16 +831,26 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 // parte/texto, render incompleto). O user pediu: só baixar o
                 // vídeo de fato pronto, nunca uma versão zoada. Tem que clicar
                 // Retomar pra completar antes. (troca não passa downloadBlocked.)
+                // MONTAGEM VELHA trava igual: o arquivo existe, mas e' o de
+                // ANTES da correcao dos takes. Baixar ali entrega o video sem
+                // as correcoes — o pior tipo de erro, porque parece certo.
+                const travado = downloadBlocked || montagemVelha || renderizando || foraDoPlano;
                 const tooltip = downloadBlocked
                   ? '⚠ Incompleto — clique Retomar pra completar (não baixa versão zoada)'
-                  : 'Baixar MP4';
+                  : renderizando
+                    ? `⚠ ${takesPendentes} take${takesPendentes === 1 ? '' : 's'} ainda renderizando — espere terminar e atualize a montagem`
+                  : foraDoPlano
+                    ? `⚠ ${takesForaDoPlano} take${takesForaDoPlano === 1 ? '' : 's'} com avatar/voz/motor diferente do plano — re-gere antes de baixar`
+                    : montagemVelha
+                      ? '⚠ Montagem desatualizada — clique "Atualizar montagem" antes, senão baixa a versão de ANTES das correções'
+                      : 'Baixar MP4';
                 return (
                   <Btn3D
                     icon={<IconDownload size={16} />}
-                    color={downloadBlocked ? 'neutral' : 'lime'}
+                    color={travado ? 'neutral' : 'lime'}
                     title={tooltip}
-                    disabled={downloadBlocked}
-                    onClick={downloadBlocked ? undefined : (onDownload ? onDownload : () => void handleDownloadAll())}
+                    disabled={travado}
+                    onClick={travado ? undefined : (onDownload ? onDownload : () => void handleDownloadAll())}
                   />
                 );
               })() : null}

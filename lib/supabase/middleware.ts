@@ -83,6 +83,7 @@ const ADMIN_ONLY_PREFIXES = [
   '/tools/points', // sistema de pontos é interno
   '/tools/separador-audio',   // uso interno — some pra conta não-admin
   '/tools/remover-elementos', // Smart Remover (legenda + marca d'água) — admin-only
+  '/tools/auto-cortes',       // EM CONSTRUÇÃO (pausada) — some pra conta não-admin
   '/tools/auto-broll',        // uso interno — some pra conta não-admin
   '/tools/heygen-auto',       // uso interno — some pra conta não-admin
   '/tools/clickup-pilot',     // uso interno — some pra conta não-admin

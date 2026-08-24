@@ -49,6 +49,7 @@ export function LipsyncPreviewCard({
   onRetry,
   onUploadAudio,
   isRegenerating = false,
+  recuperarVideo,
 }: {
   take: LipsyncTake;
   position: number;
@@ -57,6 +58,16 @@ export function LipsyncPreviewCard({
   percent?: number;
   /** Prefixo do nome do arquivo no download. */
   fileBase?: string;
+  /** Devolve uma URL NOVA pro video desta parte (lendo o blob do IndexedDB).
+   *
+   *  ⛔ Object URL guardada em state e' fragil: ela morre se alguem revogar, e
+   *  quando morre o <video> nao avisa em lugar nenhum — fica um retangulo PRETO
+   *  com o botao de play em cima. Foi o que apareceu no AD85 em 23.08: o take
+   *  estava perfeito no disco (720x1280, 27s) e a previa nao abria nada.
+   *
+   *  Em vez de tentar garantir que ninguem revogue (impossivel de sustentar), a
+   *  previa se CURA: no onError ela pede uma URL nova e troca. */
+  recuperarVideo?: () => Promise<string | null>;
   /** Se fornecido, mostra botao EDIT no card pronto. Usa pra re-gerar so essa parte com novo script/voz. */
   onEdit?: () => void;
   /** Se fornecido e o card FALHOU, mostra "Tentar de novo" (re-roda o mesmo disparo). */
@@ -75,10 +86,36 @@ export function LipsyncPreviewCard({
   const [expanded, setExpanded] = useState(false);
 
   const ready = take.status === 'completed' && !!take.videoUrl;
+  /** O take RENDEROU, mas o blob ainda nao voltou pra memoria. Acontece a cada
+   *  F5: o persist descarta os object URLs (eles morrem com a aba) e o video
+   *  vive no IndexedDB ate' o Retomar re-hidratar. Ate' 23.08 esse estado
+   *  mostrava "Na fila..." — dizia que o take nem comecou quando ele esta'
+   *  pronto no disco. Silas viu isso depois de atualizar a pagina e achou que
+   *  o lote tinha voltado pro zero. */
+  const recuperando = take.status === 'completed' && !take.videoUrl;
   const failed = take.status === 'failed';
   /** Esperando o HeyGen terminar — âmbar, não vermelho. */
   const waitingHeyGen = take.status === 'stalled';
-  const videoUrl = ready ? take.videoUrl : null;
+  // URL de resgate: quando a do state morre, esta assume.
+  const [urlResgate, setUrlResgate] = useState<string | null>(null);
+  const [resgatando, setResgatando] = useState(false);
+  const videoUrl = urlResgate || (ready ? take.videoUrl : null);
+
+  // Troca de take (re-geracao) invalida qualquer resgate anterior.
+  useEffect(() => { setUrlResgate(null); }, [take.videoUrl]);
+
+  async function aoFalharVideo() {
+    if (!recuperarVideo || resgatando || urlResgate) return;
+    setResgatando(true);
+    try {
+      const nova = await recuperarVideo();
+      if (nova) setUrlResgate(nova);
+    } catch (e) {
+      console.warn('[preview] resgate do video falhou:', e);
+    } finally {
+      setResgatando(false);
+    }
+  }
   const tone: 'ready' | 'err' | 'wait' | 'loading' =
     ready ? 'ready' : failed ? 'err' : waitingHeyGen ? 'wait' : 'loading';
 
@@ -156,7 +193,17 @@ export function LipsyncPreviewCard({
       onMouseLeave={handleMouseLeave}
       onMouseMove={handleMouseMove}
       className={
-        'lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border transition-all duration-300 ' +
+        // ⛔ `dark-island`: este card e' ESCURO POR DESIGN — e' a moldura de um
+        // player de video, com texto branco e acentos claros por cima. No modo
+        // CLARO ele continuava preto (a miniatura manda no fundo) mas as vars
+        // de texto viravam escuras: cartao preto com letra preta, ilegivel.
+        // A ilha devolve as vars escuras so' aqui dentro.
+        // `bg-bg-soft` opaco ANTES do gradiente: os tons do card sao
+        // semitransparentes, e sem base propria eles compunham com o fundo
+        // CLARO da pagina — o cabecalho ficava bege com o rotulo em lime
+        // claro por cima (contraste 1.11, medido). Com base escura + a ilha,
+        // o card fica igual nos dois temas.
+        'dark-island lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border bg-bg-soft transition-all duration-300 ' +
         (tone === 'ready'
           ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-600/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(16,185,129,0.45),0_0_36px_-12px_rgba(16,185,129,0.35)] hover:border-emerald-500/70'
           : tone === 'err'
@@ -185,6 +232,7 @@ export function LipsyncPreviewCard({
             <video
               ref={videoRef}
               src={videoUrl}
+              onError={() => void aoFalharVideo()}
               preload="metadata"
               playsInline
               muted
@@ -348,6 +396,23 @@ export function LipsyncPreviewCard({
             <p className="relative z-10 line-clamp-3 text-[10px] leading-relaxed text-amber-200/75" title={take.error || undefined}>
               Ainda renderizando lá — não re-gerei pra não gastar cota à toa. Fecho sozinho quando ficar pronto.
             </p>
+            {/* TAKE TRAVADO tambem precisa de saida pelo texto. Antes so' havia
+                "usar audio" aqui: quem quisesse trocar a VOZ ou o LOOK de uma
+                parte presa nesse estado nao tinha por onde. Medido em 23.08,
+                com 6 takes parados e os videos ja' prontos do lado do HeyGen. */}
+            {onEdit ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                title="Editar script/voz/look e re-gerar só essa parte"
+                className="label-tech relative z-10 mt-1 inline-flex items-center justify-center gap-1.5 rounded-full border border-cyan-400/60 bg-cyan-500/15 px-3 py-1.5 text-[9px] uppercase tracking-widest text-cyan-100 transition-all hover:-translate-y-[1px] hover:border-cyan-400/80 hover:bg-cyan-500/25 active:scale-95"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+                </svg>
+                Editar e re-gerar
+              </button>
+            ) : null}
             {onUploadAudio ? (
               <>
                 <button
@@ -395,7 +460,9 @@ export function LipsyncPreviewCard({
               />
             </div>
             <span className="relative z-10 mono text-[9px] uppercase tracking-widest text-violet">
-              {take.status === 'processing' ? 'Renderizando…' : 'Na fila…'}
+              {recuperando ? 'Recuperando do cache…'
+                : take.status === 'processing' ? 'Renderizando…'
+                : 'Na fila…'}
             </span>
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-line/40">
               <div

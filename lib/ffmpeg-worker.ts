@@ -304,6 +304,344 @@ export async function speedUpVideo(
   }
 }
 
+export async function compressVideo(
+  file: Blob,
+  params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  return compressVideoOn(ff, file, params, opts);
+}
+
+/**
+ * Versão "lower-level" do compressVideo que aceita uma instância FFmpeg
+ * já carregada (vinda do pool). Permite paralelismo real — várias
+ * instâncias do pool podem comprimir simultaneamente em workers próprios.
+ *
+ * Nomes de arquivo dentro do FFmpeg são únicos por chamada (timestamp +
+ * random) pra dois jobs paralelos não colidirem no FS virtual.
+ */
+export async function compressVideoOn(
+  ff: FFmpeg,
+  file: Blob,
+  params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const inputName = `in_${uniq}.${guessExt(file, 'mp4')}`;
+  const outputName = `out_${uniq}.mp4`;
+
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+    const args: string[] = ['-i', inputName];
+    if (params.resolution !== 'original') {
+      // fast_bilinear é ~30-40% mais rápido que o scaler default; perda
+      // visual em downscale (1080→720→480) é imperceptível.
+      args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
+    }
+    // ENCODE: preset ultrafast + x264-params agressivos pra wasm.
+    args.push(
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
+      '-crf', String(params.crf),
+      '-g', '120',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      outputName,
+    );
+    await execOrThrow(ff, args, 'compressão do vídeo');
+    const data = await ff.readFile(outputName);
+    // Sem isto, um encode que estourou a memória do wasm entregava MP4
+    // truncado (sem moov) como job "done" — o cliente baixava arquivo morto.
+    assertValidMp4(data as Uint8Array, 'vídeo comprimido');
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+// ---------- Compressão de arquivo GRANDE (WORKERFS + partes por tempo) ------
+//
+// O compressVideoOn carrega o arquivo INTEIRO no heap do wasm (fetchFile →
+// MEMFS) e o encode ainda precisa de ~3× isso — morre por volta de 500MB. Pra
+// arquivos grandes o caminho é o mesmo que a Decupagem usa:
+//
+//   1. o ORIGINAL é MONTADO via WORKERFS (lido por streaming do disco, zero
+//      heap) — a entrada deixa de ter teto;
+//   2. o áudio sai UMA vez pro arquivo inteiro (AAC, leve) — evita o "clique"
+//      de encoder priming que AAC por parte deixaria em cada emenda;
+//   3. o vídeo é codificado em PARTES por tempo (-ss/-t antes do -i = corte
+//      exato no re-encode), cada parte vira MPEG-TS (byte-contíguo, sem moov),
+//      é lida pro JS e apagada do MEMFS na hora — pico por parte: dezenas de MB;
+//      partes rodam em PARALELO em instâncias extras do pool;
+//   4. no fim, concat demuxer (-c copy) junta as partes + o áudio num MP4.
+//
+// O que SOBRA de limite é a SAÍDA: o MP4 final nasce no MEMFS (e o faststart
+// reescreve o arquivo = 2×). Por isso existe COMPRESS_MAX_OUTPUT_BYTES e o
+// faststart só entra quando a saída prevista é pequena. Saída prevista acima
+// do teto vira erro humano ANTES de gastar meia hora de encode.
+
+/** A partir deste tamanho o Compressor usa o caminho em partes. */
+export const COMPRESS_CHUNK_THRESHOLD = 300 * 1024 * 1024;
+/** Teto da ENTRADA por arquivo (2 GB) — acima disso o tempo e a memória da saída deixam de ser previsíveis. */
+export const COMPRESS_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024;
+/** Teto da SAÍDA (o MP4 final precisa caber no MEMFS). */
+export const COMPRESS_MAX_OUTPUT_BYTES = 900 * 1024 * 1024;
+/** Acima disso o faststart (que duplica a saída em memória) é pulado. */
+const COMPRESS_FASTSTART_MAX_BYTES = 450 * 1024 * 1024;
+/** Duração de cada parte de vídeo (s). */
+export const COMPRESS_CHUNK_SEC = 120;
+
+export type CompressPool = {
+  acquire(): Promise<FFmpeg>;
+  release(ff: FFmpeg): void;
+  readonly maxSize: number;
+};
+
+/** Planeja as partes: [start, dur] em segundos, contíguas, última absorve o resto. */
+export function planCompressChunks(durationSec: number, chunkSec = COMPRESS_CHUNK_SEC): Array<[number, number]> {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return [[0, 0]];
+  const n = Math.max(1, Math.round(durationSec / chunkSec));
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const start = i * chunkSec;
+    const dur = i === n - 1 ? durationSec - start : chunkSec;
+    out.push([Math.round(start * 1000) / 1000, Math.round(dur * 1000) / 1000]);
+  }
+  return out;
+}
+
+function compressVideoArgs(params: { crf: number; resolution: 'original' | '1080' | '720' | '480' }): string[] {
+  const args: string[] = [];
+  if (params.resolution !== 'original') {
+    args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
+  }
+  args.push(
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-tune', 'fastdecode',
+    '-crf', String(params.crf),
+    '-g', '120',
+    '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+    '-pix_fmt', 'yuv420p',
+  );
+  return args;
+}
+
+/** Altura do vídeo pelo log do ffmpeg ("Video: ... 1920x1080"). 0 se não achar. */
+async function probeVideoHeight(ff: FFmpeg, path: string): Promise<number> {
+  let h = 0;
+  const fn = ({ message }: { message: string }) => {
+    if (!/Video:/.test(message)) return;
+    const m = /(\d{2,5})x(\d{2,5})/.exec(message);
+    if (m) h = Math.max(h, parseInt(m[2], 10));
+  };
+  ff.on('log', fn);
+  try {
+    await ff.exec(['-hide_banner', '-i', path]);
+  } catch { /* rc≠0 esperado (sem output) */ } finally {
+    ff.off('log', fn);
+  }
+  return h;
+}
+
+/** Previsão CRUA da saída (bitrate-alvo × duração), sem o piso/teto da UI. */
+export function predictRawCompressedBytes(p: { durationSec: number; inputHeight: number; crf: number; resolution: 'original' | '1080' | '720' | '480' }): number {
+  let videoBps = TARGET_BITRATE_AT_CRF23[p.resolution];
+  if (p.resolution === 'original' && p.inputHeight > 0) videoBps = Math.min(10_000_000, 6_500_000 * (p.inputHeight / 1080) ** 2);
+  videoBps *= Math.pow(2, (23 - p.crf) / 6);
+  return ((videoBps + 128_000) * p.durationSec) / 8;
+}
+
+/** Lê "time=HH:MM:SS.xx" do log do ffmpeg → segundos processados do exec atual. */
+function wireTimeProgress(ff: FFmpeg, onTime: (sec: number) => void): () => void {
+  const h = ({ message }: { message: string }) => {
+    const m = /time=\s*(\d+):(\d+):([\d.]+)/.exec(message);
+    if (m) onTime(+m[1] * 3600 + +m[2] * 60 + parseFloat(m[3]));
+  };
+  ff.on('log', h);
+  return () => ff.off('log', h);
+}
+
+/**
+ * Comprime um arquivo GRANDE em partes (ver bloco acima). `ff` é a instância
+ * principal (faz áudio, a primeira parte e a junção); `opts.pool` permite
+ * puxar instâncias extras pra codificar partes em paralelo.
+ */
+export async function compressVideoChunked(
+  ff: FFmpeg,
+  file: Blob,
+  params: { crf: number; resolution: 'original' | '1080' | '720' | '480'; durationSec?: number; inputHeight?: number },
+  opts: RunOptions & { pool?: CompressPool; chunkConcurrency?: number } = {},
+): Promise<Blob> {
+  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const inputName = `in_${uniq}.${guessExt(file, 'mp4')}`;
+  const stage = (s: string) => opts.onStage?.(s);
+
+  // 1) entrada montada (sem heap)
+  stage('Abrindo o arquivo (sem carregar na memória)…');
+  const mainIn = await makeInputsAvailable(ff, [{ name: inputName, data: file }]);
+  const mainPath = `${mainIn.dir}/${inputName}`;
+  const extraMounts: Array<{ ff: FFmpeg; cleanup: () => Promise<void> }> = [];
+  const audioName = `aud_${uniq}.m4a`;
+  let audioBlob: Blob | null = null;
+  const chunkBlobs: Blob[] = [];
+  try {
+    let durationSec = params.durationSec && params.durationSec > 0 ? params.durationSec : 0;
+    if (!durationSec) durationSec = await readDurationFromLogs(ff, mainPath);
+    if (!durationSec) throw new Error('Não consegui ler a duração desse vídeo. Tente outro formato (MP4/MOV/WEBM).');
+
+    // 2) guarda da SAÍDA — antes de gastar meia hora de encode.
+    // NÃO usa a estimativa da UI: ela tem piso de 60% do input em "Original"
+    // (conservadora pra mostrar "Previsão"), que em câmera a 50Mbps dá 1,5GB
+    // previstos pra uma saída real de ~330MB. Aqui é bitrate-alvo × duração,
+    // com a altura lida do próprio ffmpeg, e margem de 30%.
+    const inputHeight = (params.inputHeight && params.inputHeight > 0) ? params.inputHeight : await probeVideoHeight(ff, mainPath);
+    const predicted = Math.round(predictRawCompressedBytes({
+      durationSec, inputHeight, crf: params.crf, resolution: params.resolution,
+    }) * 1.3);
+    if (predicted > COMPRESS_MAX_OUTPUT_BYTES) {
+      throw new Error(
+        `A saída prevista (~${Math.round(predicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução.`,
+      );
+    }
+
+    const hasAudio = await probeHasAudio(ff, mainPath);
+    // Partes: no mínimo dur/120s, mas SEMPRE pelo menos uma por instância
+    // disponível (partes de ≥30s) — senão um vídeo de 2:38 virava 2 partes e
+    // deixava 3 das 5 instâncias paradas (4K HEVC levou 1h assim).
+    const pool = opts.pool;
+    const conc = Math.max(1, Math.min(opts.chunkConcurrency ?? 3, pool ? pool.maxSize : 1));
+    const nParts = Math.max(Math.ceil(durationSec / COMPRESS_CHUNK_SEC), Math.min(conc, Math.floor(durationSec / 30)), 1);
+    const chunks = planCompressChunks(durationSec, durationSec / nParts);
+    const N = chunks.length;
+    const chunkProg = new Array<number>(N).fill(0);
+    let audioProg = 0;
+    let concatProg = 0;
+    const report = () => {
+      if (!opts.onProgress) return;
+      const v = chunkProg.reduce((a, b) => a + b, 0) / N;
+      const ratio = 0.06 * audioProg + 0.88 * v + 0.06 * concatProg;
+      opts.onProgress({ ratio: Math.max(0, Math.min(1, ratio)), time: 0 });
+    };
+
+    // 3) áudio inteiro, uma vez
+    if (hasAudio) {
+      stage(`Áudio (1 passo) · vídeo em ${N} partes…`);
+      const off = wireTimeProgress(ff, (t) => { audioProg = Math.min(1, t / durationSec); report(); });
+      try {
+        await execOrThrow(ff, ['-i', mainPath, '-vn', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', audioName], 'áudio do vídeo comprimido');
+        audioBlob = toBlob(await ff.readFile(audioName), 'audio/mp4');
+      } finally {
+        off();
+        await safeDelete(ff, audioName);
+      }
+    }
+    audioProg = 1; report();
+
+    // 4) partes de vídeo em paralelo
+    const vArgs = compressVideoArgs(params);
+    const encodeChunk = async (inst: FFmpeg, inPath: string, i: number): Promise<Blob> => {
+      const [start, dur] = chunks[i];
+      const outName = `part_${uniq}_${i}.ts`;
+      const off = wireTimeProgress(inst, (t) => { chunkProg[i] = Math.min(1, t / Math.max(0.1, dur)); report(); });
+      try {
+        await execOrThrow(
+          inst,
+          ['-ss', String(start), '-t', String(dur), '-i', inPath, '-an', ...vArgs, '-f', 'mpegts', outName],
+          `parte ${i + 1}/${N} do vídeo comprimido`,
+        );
+        const data = (await inst.readFile(outName)) as Uint8Array;
+        if (!data || data.length < 1024) throw new Error(`A parte ${i + 1}/${N} saiu vazia.`);
+        chunkProg[i] = 1; report();
+        return toBlob(data, 'video/mp2t');
+      } finally {
+        off();
+        await safeDelete(inst, outName);
+      }
+    };
+
+    const workersN = Math.min(conc, N);
+    const results = new Array<Blob | null>(N).fill(null);
+    let next = 0;
+    const runOn = async (inst: FFmpeg, inPath: string) => {
+      while (true) {
+        const i = next++;
+        if (i >= N) break;
+        stage(`Comprimindo parte ${i + 1}/${N}…`);
+        results[i] = await encodeChunk(inst, inPath, i);
+      }
+    };
+    const workers: Promise<void>[] = [runOn(ff, mainPath)];
+    if (pool) {
+      for (let w = 1; w < workersN; w++) {
+        const inst = await pool.acquire();
+        try {
+          const m = await makeInputsAvailable(inst, [{ name: inputName, data: file }]);
+          extraMounts.push({ ff: inst, cleanup: async () => { await m.cleanup(); pool.release(inst); } });
+          workers.push(runOn(inst, `${m.dir}/${inputName}`));
+        } catch (e) {
+          pool.release(inst);
+          if (isCancellationError(e)) throw e;
+          // sem instância extra não é erro — segue com menos paralelismo
+        }
+      }
+    }
+    await Promise.all(workers);
+    for (let i = 0; i < N; i++) {
+      const b = results[i];
+      if (!b) throw new Error(`A parte ${i + 1}/${N} não foi gerada.`);
+      chunkBlobs.push(b);
+    }
+
+    // 5) junção: partes + áudio → MP4 (entradas montadas, só a saída no MEMFS)
+    stage('Juntando as partes…');
+    const entries: Array<{ name: string; data: Blob }> = chunkBlobs.map((b, i) => ({ name: `part_${i}.ts`, data: b }));
+    if (audioBlob) entries.push({ name: 'audio.m4a', data: audioBlob });
+    const mnt = await makeInputsAvailable(ff, entries);
+    const listName = `list_${uniq}.txt`;
+    const outputName = `out_${uniq}.mp4`;
+    try {
+      const list = chunkBlobs.map((_, i) => `file '${mnt.dir}/part_${i}.ts'`).join('\n') + '\n';
+      await ff.writeFile(listName, new TextEncoder().encode(list));
+      const args = ['-f', 'concat', '-safe', '0', '-i', listName];
+      if (audioBlob) args.push('-i', `${mnt.dir}/audio.m4a`);
+      args.push('-map', '0:v:0');
+      if (audioBlob) args.push('-map', '1:a:0');
+      args.push('-c', 'copy');
+      if (predicted <= COMPRESS_FASTSTART_MAX_BYTES) args.push('-movflags', '+faststart');
+      args.push(outputName);
+      const off = wireTimeProgress(ff, (t) => { concatProg = Math.min(1, t / durationSec); report(); });
+      try {
+        await execOrThrow(ff, args, 'junção do vídeo comprimido');
+      } finally {
+        off();
+      }
+      const data = (await ff.readFile(outputName)) as Uint8Array;
+      assertValidMp4(data, 'vídeo comprimido');
+      concatProg = 1; report();
+      return toBlob(data, 'video/mp4');
+    } finally {
+      await safeDelete(ff, listName);
+      await safeDelete(ff, outputName);
+      await mnt.cleanup();
+    }
+  } finally {
+    for (const x of extraMounts) { try { await x.cleanup(); } catch { /* ok */ } }
+    await mainIn.cleanup();
+  }
+}
+
 export async function speedUpAudio(
   file: Blob,
   speed: number,
@@ -377,72 +715,6 @@ export async function extractAudioAs(
     await execOrThrow(ff, args, 'extração do áudio');
     const data = await ff.readFile(outputName);
     return toBlob(data, format === 'wav' ? 'audio/wav' : 'audio/mpeg');
-  } finally {
-    if (progressHandler) ff.off('progress', progressHandler);
-    await safeDelete(ff, inputName);
-    await safeDelete(ff, outputName);
-  }
-}
-
-export async function compressVideo(
-  file: Blob,
-  params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
-  opts: RunOptions = {},
-): Promise<Blob> {
-  const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  return compressVideoOn(ff, file, params, opts);
-}
-
-/**
- * Versão "lower-level" do compressVideo que aceita uma instância FFmpeg
- * já carregada (vinda do pool). Permite paralelismo real — várias
- * instâncias do pool podem comprimir simultaneamente em workers próprios.
- *
- * Nomes de arquivo dentro do FFmpeg são únicos por chamada (timestamp +
- * random) pra dois jobs paralelos não colidirem no FS virtual.
- */
-export async function compressVideoOn(
-  ff: FFmpeg,
-  file: Blob,
-  params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
-  opts: RunOptions = {},
-): Promise<Blob> {
-  const { fetchFile } = await import('@ffmpeg/util');
-
-  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const inputName = `in_${uniq}.${guessExt(file, 'mp4')}`;
-  const outputName = `out_${uniq}.mp4`;
-
-  const progressHandler = wireProgress(ff, opts.onProgress);
-
-  try {
-    await ff.writeFile(inputName, await fetchFile(file));
-    const args: string[] = ['-i', inputName];
-    if (params.resolution !== 'original') {
-      // fast_bilinear é ~30-40% mais rápido que o scaler default; perda
-      // visual em downscale (1080→720→480) é imperceptível.
-      args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
-    }
-    // ENCODE: preset ultrafast + x264-params agressivos pra wasm.
-    args.push(
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-tune', 'fastdecode',
-      '-crf', String(params.crf),
-      '-g', '120',
-      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-movflags', '+faststart',
-      outputName,
-    );
-    await execOrThrow(ff, args, 'compressão do vídeo');
-    const data = await ff.readFile(outputName);
-    // Sem isto, um encode que estourou a memória do wasm entregava MP4
-    // truncado (sem moov) como job "done" — o cliente baixava arquivo morto.
-    assertValidMp4(data as Uint8Array, 'vídeo comprimido');
-    return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
@@ -2548,10 +2820,11 @@ export async function prepareVoiceForDecupagem(
   file: Blob,
   opts: RunOptions = {},
   format: NormalizeOutFormat = 'mp4',
+  profile: NormalizeProfile = 'natural',
 ): Promise<Blob> {
   try {
     opts.onStage?.('Regulando a voz (nível + limpeza)...');
-    return await normalizeVolume(file, { output: format, profile: 'natural' }, opts);
+    return await normalizeVolume(file, { output: format, profile }, opts);
   } catch (e) {
     if (isCancellationError(e)) throw e;
     console.warn('[ffmpeg-worker] prepareVoiceForDecupagem falhou, usando áudio original:', (e as Error)?.message);
@@ -3448,4 +3721,275 @@ export function estimateTakeBoundaries(
     result[result.length - 1].endSec = totalDurationSec;
   }
   return result;
+}
+
+// ---------- AUTO CORTES — primitivas de corte / áudio ---------------------
+//
+// Bloco ADITIVO (nada acima foi tocado). São as peças que a tool AUTO CORTES
+// usa por CIMA do pool: montar o MESMO arquivo grande em N instâncias, tirar
+// pedaços de áudio pro ASR, cortar o trecho sem re-encode e ler o timestamp
+// absoluto do primeiro frame do trecho cortado.
+// Ver docs/auto-cortes/ARQUITETURA.md §3.2 e §3.5.
+
+/** Sufixo único por chamada — o pool roda várias em paralelo no mesmo MEMFS. */
+function acTag(): string {
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Wrapper PÚBLICO de `makeInputsAvailable`: monta blobs por WORKERFS (sem
+ * heap), com fallback MEMFS. Mesma assinatura e mesmo retorno do interno —
+ * existe só pra outras camadas (auto-cortes) montarem o MESMO `File` em cada
+ * instância do pool sem duplicar a lógica.
+ */
+export async function mountInputs(
+  ff: FFmpeg,
+  entries: Array<{ name: string; data: Blob }>,
+): Promise<{ dir: string; mounted: boolean; cleanup: () => Promise<void> }> {
+  return makeInputsAvailable(ff, entries);
+}
+
+/**
+ * Extrai UM pedaço de áudio (opus 16k mono) de um arquivo JÁ MONTADO, pronto
+ * pra ir pro ASR. `-ss/-t` antes do `-i` = seek rápido no container (mesmo
+ * padrão do compressVideoChunked). Nome de saída único por chamada: o pool
+ * roda várias extrações ao mesmo tempo.
+ */
+export async function extractAsrChunk(
+  ff: FFmpeg,
+  mountedPath: string,
+  startSec: number,
+  durSec: number,
+  kbps: number,
+): Promise<Blob> {
+  const outName = `asr_${acTag()}.opus`;
+  const rate = Math.max(8, Math.min(64, Math.round(kbps)));
+  try {
+    await execOrThrow(
+      ff,
+      [
+        '-ss', Math.max(0, startSec).toFixed(3),
+        '-t', Math.max(0.05, durSec).toFixed(3),
+        '-i', mountedPath,
+        '-vn',
+        '-c:a', 'libopus',
+        '-b:a', `${rate}k`,
+        '-ac', '1',
+        '-ar', '16000',
+        // Acima de ~24k o modo 'audio' preserva timbre/consoantes; abaixo, o
+        // 'voip' é mais inteligível (mesma regra da extractAudioForTranscription).
+        '-application', rate >= 24 ? 'audio' : 'voip',
+        '-vbr', 'on',
+        outName,
+      ],
+      'extração do áudio do trecho pra transcrição',
+    );
+    const data = (await ff.readFile(outName)) as Uint8Array;
+    if (!data || data.length === 0) throw new Error('O trecho de áudio saiu vazio.');
+    return toBlob(data, 'audio/ogg');
+  } finally {
+    await safeDelete(ff, outName);
+  }
+}
+
+/**
+ * Corta um trecho do arquivo montado SEM re-encode (`-c copy`).
+ *
+ * `-copyts` mantém os timestamps ABSOLUTOS da fonte dentro do mp4 cortado — é
+ * o que deixa o render mapear `pts → tempo absoluto do vídeo original` (via
+ * `probeFirstPts`) e casar legenda/headline com a transcrição sem deriva.
+ * Nem todo container aguenta: quando a saída sai quebrada/minúscula (ou o
+ * ffmpeg falha), refazemos SEM `-copyts`, com `-avoid_negative_ts make_zero`
+ * (o clipe passa a começar em 0) e devolvemos `copyts:false` — aí o chamador
+ * usa o start que ele mesmo pediu como base, em vez do pts.
+ */
+export async function cutClipCopy(
+  ff: FFmpeg,
+  mountedPath: string,
+  startSec: number,
+  endSec: number,
+): Promise<{ blob: Blob; copyts: boolean }> {
+  const s = Math.max(0, startSec);
+  const e = Math.max(s + 0.04, endSec);
+  const base = ['-ss', s.toFixed(3), '-to', e.toFixed(3), '-i', mountedPath, '-c', 'copy'];
+
+  // Tentativa 1 — timestamps absolutos preservados.
+  const outA = `cut_${acTag()}.mp4`;
+  try {
+    await execOrThrow(
+      ff,
+      [...base, '-copyts', '-avoid_negative_ts', 'disabled', '-movflags', '+faststart', outA],
+      'corte do trecho',
+    );
+    const data = (await ff.readFile(outA)) as Uint8Array;
+    if (data && data.length >= 4096) {
+      assertValidMp4(data, 'trecho cortado');
+      return { blob: toBlob(data, 'video/mp4'), copyts: true };
+    }
+    console.warn('[auto-cortes] corte com -copyts saiu pequeno demais — refazendo sem.');
+  } catch (err) {
+    if (isCancellationError(err)) throw err;
+    console.warn('[auto-cortes] corte com -copyts falhou:', (err as Error)?.message);
+  } finally {
+    await safeDelete(ff, outA);
+  }
+
+  // Tentativa 2 — sem -copyts (o clipe começa em 0).
+  const outB = `cut_${acTag()}.mp4`;
+  try {
+    await execOrThrow(
+      ff,
+      [...base, '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', outB],
+      'corte do trecho (sem timestamps absolutos)',
+    );
+    const data = (await ff.readFile(outB)) as Uint8Array;
+    assertValidMp4(data, 'trecho cortado');
+    return { blob: toBlob(data, 'video/mp4'), copyts: false };
+  } finally {
+    await safeDelete(ff, outB);
+  }
+}
+
+/**
+ * Lê o `pts_time` do PRIMEIRO frame de vídeo de um trecho já cortado — com
+ * `-copyts` esse valor é o tempo ABSOLUTO no vídeo original, e é o que amarra
+ * o render (o WebCodecs entrega pts, não tempo de linha do tempo).
+ *
+ * O ffmpeg-wasm não expõe stdout: o `showinfo` sai pelo LOG, então plugamos um
+ * listener em `ff.on('log')` e removemos no finally. Sem match → 0 (o chamador
+ * cai no start que ele mesmo pediu; degradação, nunca erro).
+ */
+export async function probeFirstPts(ff: FFmpeg, blob: Blob): Promise<number> {
+  const name = `pts_${acTag()}.${guessExt(blob, 'mp4')}`;
+  let pts = 0;
+  let found = false;
+  const onLog = ({ message }: { message: string }) => {
+    if (found) return;
+    const m = /pts_time:\s*(\d+(?:\.\d+)?)/.exec(message);
+    if (m) {
+      pts = parseFloat(m[1]);
+      found = true;
+    }
+  };
+  const { fetchFile } = await import('@ffmpeg/util');
+  await ff.writeFile(name, await fetchFile(blob));
+  ff.on('log', onLog);
+  try {
+    await execOrThrow(
+      ff,
+      ['-i', name, '-vf', 'showinfo', '-frames:v', '1', '-f', 'null', '-'],
+      'leitura do timestamp do trecho',
+    );
+  } catch (err) {
+    if (isCancellationError(err)) throw err;
+    // Probe é best-effort: se o rc veio != 0 mas o log já trouxe o pts, vale.
+    console.warn('[auto-cortes] showinfo falhou:', (err as Error)?.message);
+  } finally {
+    ff.off('log', onLog);
+    await safeDelete(ff, name);
+  }
+  return found && Number.isFinite(pts) && pts > 0 ? pts : 0;
+}
+
+/**
+ * Extrai a faixa de áudio final do corte (AAC 48k estéreo) pra ser muxada no
+ * MP4 renderizado. O `clip` aqui é o trecho JÁ cortado (poucos MB), então vai
+ * direto no MEMFS — sem WORKERFS.
+ *
+ * `opts.ff` permite usar uma instância do pool (o render roda 2 cortes em
+ * paralelo); sem ela, usa o singleton.
+ */
+export async function extractAudioRangeAac(
+  clip: Blob,
+  startSec: number,
+  durSec: number,
+  opts: RunOptions & { ff?: FFmpeg } = {},
+): Promise<Blob> {
+  const ff = opts.ff ?? (await getFFmpeg(opts.onStage, opts.onLog));
+  const { fetchFile } = await import('@ffmpeg/util');
+  const tag = acTag();
+  const inputName = `aud_in_${tag}.${guessExt(clip, 'mp4')}`;
+  const outputName = `aud_out_${tag}.m4a`;
+  try {
+    await ff.writeFile(inputName, await fetchFile(clip));
+    await execOrThrow(
+      ff,
+      [
+        '-ss', Math.max(0, startSec).toFixed(3),
+        '-t', Math.max(0.05, durSec).toFixed(3),
+        '-i', inputName,
+        '-vn',
+        '-c:a', 'aac',
+        '-b:a', '160k',
+        '-ar', '48000',
+        '-ac', '2',
+        outputName,
+      ],
+      'extração do áudio do corte',
+    );
+    const data = (await ff.readFile(outputName)) as Uint8Array;
+    if (!data || data.length === 0) throw new Error('O áudio do corte saiu vazio.');
+    return toBlob(data, 'audio/mp4');
+  } finally {
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+/**
+ * Duração (s) de um arquivo JÁ montado (WORKERFS/MEMFS), lida do log do ffmpeg.
+ * É o fallback quando o `<video>` não entrega metadata (aba/janela em 2º plano).
+ */
+export async function probeDurationMounted(ff: FFmpeg, mountedPath: string): Promise<number> {
+  return readDurationFromLogs(ff, mountedPath);
+}
+
+/**
+ * Envelope de ENERGIA da fala (RMS em dBFS a cada 0,5 s) de um arquivo já
+ * montado. É o sinal de prosódia do curador local: ênfase, riso e empolgação
+ * aparecem como pico de energia; respiro e fim de raciocínio, como vale.
+ *
+ * Lê do LOG (ametadata=print), não da memória: um podcast de 3 h vira ~21 mil
+ * números em vez de centenas de MB de PCM. `asetnsamples` fixa a janela em
+ * 4000 amostras a 8 kHz = 0,5 s exatos por valor, então o índice do array é
+ * tempo direto (i * 0,5 s) — sem depender do tamanho de frame do codec.
+ *
+ * Falhou (filtro indisponível, áudio ausente)? Devolve null — o curador
+ * pontua sem o sinal de energia em vez de derrubar o lote.
+ */
+export const ENERGY_STEP_SEC = 0.5;
+
+export async function extractEnergyEnvelope(
+  ff: FFmpeg,
+  mountedPath: string,
+  opts: RunOptions = {},
+): Promise<{ stepSec: number; db: Float32Array } | null> {
+  const vals: number[] = [];
+  const h = ({ message }: { message: string }) => {
+    const m = /lavfi\.astats\.Overall\.RMS_level=(-?[\d.]+|-?inf)/i.exec(message);
+    if (!m) return;
+    const raw = m[1].toLowerCase();
+    // silêncio absoluto vira -120 dBFS (o ffmpeg imprime "-inf")
+    vals.push(raw.includes('inf') ? -120 : parseFloat(raw));
+  };
+  ff.on('log', h);
+  try {
+    const rc = await ff.exec([
+      '-hide_banner',
+      '-i', mountedPath,
+      '-vn',
+      '-af',
+      `aresample=8000,asetnsamples=n=${Math.round(8000 * ENERGY_STEP_SEC)},astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level`,
+      '-f', 'null', '-',
+    ]);
+    if (rc !== 0 && vals.length === 0) return null;
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    return null;
+  } finally {
+    ff.off('log', h);
+    opts.onProgress?.({ ratio: 1, time: 0 });
+  }
+  if (vals.length < 4) return null;
+  return { stepSec: ENERGY_STEP_SEC, db: Float32Array.from(vals) };
 }

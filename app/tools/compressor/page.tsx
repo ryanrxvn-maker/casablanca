@@ -11,7 +11,12 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
   compressVideoOn,
+  compressVideoChunked,
+  COMPRESS_CHUNK_THRESHOLD,
+  COMPRESS_MAX_OUTPUT_BYTES,
+  COMPRESS_MAX_INPUT_BYTES,
   estimateCompressedSize,
+  predictRawCompressedBytes,
   isCancellationError,
   probeVideoMetadata,
   type FFProgress,
@@ -95,6 +100,7 @@ export default function CompressorPage() {
     'compressor:stageMsg',
     null,
   );
+  const [rejectedMsg, setRejectedMsg] = useToolState<string | null>('compressor:rejected', null);
   const [zipping, setZipping] = useToolState<boolean>(
     'compressor:zipping',
     false,
@@ -218,10 +224,19 @@ export default function CompressorPage() {
 
   function setFilesSafe(next: File[]) {
     if (processing) return;
+    // Teto por arquivo (2 GB): acima disso o tempo de encode e a memória da
+    // saída deixam de ser previsíveis — recusa na entrada, com aviso claro.
+    const tooBig = next.filter((f) => f.size > COMPRESS_MAX_INPUT_BYTES);
+    const ok = next.filter((f) => f.size <= COMPRESS_MAX_INPUT_BYTES);
+    setRejectedMsg(
+      tooBig.length
+        ? `${tooBig.length === 1 ? 'Arquivo recusado' : `${tooBig.length} arquivos recusados`} por passar de ${formatBytes(COMPRESS_MAX_INPUT_BYTES)}: ${tooBig.map((f) => `${f.name} (${formatBytes(f.size)})`).join(', ')}. O Compressor aceita até 2 GB por vídeo.`
+        : null,
+    );
     // Limpa resultados anteriores
     jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
     setJobs([]);
-    setFiles(next.slice(0, MAX_BATCH));
+    setFiles(ok.slice(0, MAX_BATCH));
   }
 
   function updateJob(id: string, patch: Partial<Job>) {
@@ -248,23 +263,47 @@ export default function CompressorPage() {
       });
       return;
     }
+    // Arquivo GRANDE: o encode de uma vez estoura o heap do wasm (~500MB).
+    // Acima do limiar vai em PARTES (WORKERFS, sem carregar o original na
+    // memória) — entrada sem teto; só a SAÍDA precisa caber (guarda abaixo).
+    const chunked = job.file.size >= COMPRESS_CHUNK_THRESHOLD;
+    // Só com duração conhecida: sem ela a estimativa é crua (≈ tamanho de
+    // entrada) e barraria arquivo bom. O motor repete a guarda com a duração
+    // real lida do ffmpeg.
+    // (previsão CRUA por bitrate — a "Previsão" da UI tem piso de 60% do input
+    // em "Original" e barraria câmera a 50Mbps que sai em 330MB)
+    const rawPredicted = (meta?.durationSec ?? 0) > 0
+      ? Math.round(predictRawCompressedBytes({ durationSec: meta!.durationSec, inputHeight: meta!.height, crf, resolution }) * 1.3)
+      : 0;
+    if (chunked && rawPredicted > COMPRESS_MAX_OUTPUT_BYTES) {
+      updateJob(job.id, {
+        state: 'error',
+        error: `A saída prevista (~${Math.round(rawPredicted / 1048576)} MB) passa do que o navegador aguenta (~${Math.round(COMPRESS_MAX_OUTPUT_BYTES / 1048576)} MB). Suba o CRF ou reduza a resolução e tente de novo.`,
+      });
+      return;
+    }
     const pool = getFFmpegPool(effectivePoolSize());
     const t0 = performance.now();
     updateJob(job.id, { state: 'running', progress: 0 });
     const ff = await pool.acquire();
     try {
       if (cancelledRef.current) throw new Error('CANCELLED_BY_USER');
-      const blob = await compressVideoOn(
-        ff,
-        job.file,
-        { crf, resolution },
-        {
-          onProgress: (p: FFProgress) =>
-            updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
-          onStage: (s) =>
-            setStageMsg(`${batchIdx}/${batchTotal} · ${job.file.name} — ${s}`),
-        },
-      );
+      const runOpts = {
+        onProgress: (p: FFProgress) =>
+          updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
+        onStage: (s: string) =>
+          setStageMsg(`${batchIdx}/${batchTotal} · ${job.file.name} — ${s}`),
+      };
+      const blob = chunked
+        ? await compressVideoChunked(
+            ff,
+            job.file,
+            { crf, resolution, durationSec: meta?.durationSec, inputHeight: meta?.height },
+            // Partes em paralelo em instâncias extras do pool (o job já segura
+            // uma). Num lote de vários arquivos grandes o pool se auto-regula.
+            { ...runOpts, pool, chunkConcurrency: effectivePoolSize() },
+          )
+        : await compressVideoOn(ff, job.file, { crf, resolution }, runOpts);
       const url = URL.createObjectURL(blob);
       const elapsedMs = performance.now() - t0;
       updateJob(job.id, {
@@ -299,7 +338,7 @@ export default function CompressorPage() {
         console.error('[compressor]', job.file.name, e);
         updateJob(job.id, {
           state: 'error',
-          error: toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — arquivos muito pesados podem estourar a memória do navegador.'),
+          error: toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — se for muito pesado, suba o CRF ou reduza a resolução.'),
         });
       }
     } finally {
@@ -425,7 +464,7 @@ export default function CompressorPage() {
           n={1}
           icon={<IconStepUpload size={18} />}
           title="Solta os vídeos"
-          hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV`}
+          hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV · até 2 GB cada`}
           hue={HUE}
         >
           <BatchFileUpload
@@ -433,9 +472,12 @@ export default function CompressorPage() {
             value={files}
             onChange={setFilesSafe}
             max={MAX_BATCH}
-            hint="MP4, WEBM ou MOV"
+            hint="MP4, WEBM ou MOV · até 2 GB cada"
             disabled={processing}
           />
+          {rejectedMsg ? (
+            <p className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-200">{rejectedMsg}</p>
+          ) : null}
           {files.length > 0 ? (
             <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-4">
               <ToolMetric value={String(files.length)} label="Arquivos" />

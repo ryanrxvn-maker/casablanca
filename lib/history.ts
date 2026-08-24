@@ -42,6 +42,7 @@ export const HISTORY_TOOLS: { id: string; label: string }[] = [
   { id: 'decupagem-copy', label: 'Decupagem Inteligente' },
   { id: 'copy-srt', label: 'Gerador de SRT' },
   { id: 'tipografia', label: 'Legendas Automáticas' },
+  { id: 'auto-cortes', label: 'Auto Cortes' },
   { id: 'camuflagem', label: 'Camuflagem' },
   { id: 'compressor', label: 'Compressor' },
   { id: 'acelerador', label: 'Mixer de Velocidade' },

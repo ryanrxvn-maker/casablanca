@@ -20,6 +20,8 @@ export type TranscribeResult = {
   words: Word[];
   provider: string;
   errors: string[];
+  /** idioma detectado pelo Whisper (ISO-639-1) quando o Groq devolve; ausente no AAI/erro */
+  detectedLanguage?: string;
 };
 
 export async function transcribeAudio(
@@ -39,15 +41,18 @@ export async function transcribeAudio(
 
   let words: Word[] = [];
   let provider = '';
+  let detectedLanguage: string | undefined;
   const errors: string[] = [];
 
   for (const p of order) {
     if (words.length > 0) break;
     try {
-      words =
-        p === 'assemblyai'
-          ? await transcribeViaAssemblyAI(audio, vocab, language)
-          : await transcribeViaGroq(audio, vocab, language);
+      if (p === 'assemblyai') {
+        words = await transcribeViaAssemblyAI(audio, vocab, language);
+      } else {
+        words = await transcribeViaGroq(audio, vocab, language);
+        if (words.length > 0 && lastGroqLanguage) detectedLanguage = lastGroqLanguage;
+      }
       if (words.length > 0) provider = p;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -56,14 +61,18 @@ export async function transcribeAudio(
     }
   }
 
-  return { words, provider, errors };
+  return { words, provider, errors, ...(detectedLanguage ? { detectedLanguage } : {}) };
 }
+
+/** idioma da ÚLTIMA resposta do Groq (aditivo: a assinatura de transcribeViaGroq não muda) */
+let lastGroqLanguage: string | undefined;
 
 async function transcribeViaGroq(
   audio: File,
   vocab: string[],
   language = 'pt',
 ): Promise<Word[]> {
+  lastGroqLanguage = undefined;
   const keyResult = await getUserKey('groq');
   if ('response' in keyResult) throw new Error('Groq key ausente.');
   const apiKey = keyResult.key;
@@ -90,8 +99,12 @@ async function transcribeViaGroq(
   }
   const json = (await res.json().catch(() => null)) as {
     words?: Array<{ word: string; start: number; end: number }>;
+    language?: string;
   } | null;
   if (!json?.words) throw new Error('Groq retornou sem palavras.');
+  if (typeof json.language === 'string' && json.language) {
+    lastGroqLanguage = groqLanguageToIso(json.language);
+  }
 
   return json.words.map((w) => ({
     text: w.word,
@@ -167,4 +180,19 @@ async function transcribeViaAssemblyAI(
     if (body.status === 'error') throw new Error(body.error ?? 'AAI error');
   }
   throw new Error('AAI timeout');
+}
+
+/** O Groq devolve o nome em inglês ('portuguese'); o app fala ISO-639-1. */
+const GROQ_LANG_NAMES: Record<string, string> = {
+  portuguese: 'pt', english: 'en', spanish: 'es', french: 'fr', german: 'de', italian: 'it',
+  polish: 'pl', czech: 'cs', dutch: 'nl', russian: 'ru', turkish: 'tr', japanese: 'ja',
+  korean: 'ko', chinese: 'zh', arabic: 'ar', hindi: 'hi', indonesian: 'id', vietnamese: 'vi',
+  romanian: 'ro', hungarian: 'hu', swedish: 'sv', norwegian: 'no', danish: 'da', finnish: 'fi',
+  greek: 'el', hebrew: 'he', ukrainian: 'uk', thai: 'th', malay: 'ms', catalan: 'ca',
+  bulgarian: 'bg', croatian: 'hr', slovak: 'sk', tagalog: 'tl', urdu: 'ur', persian: 'fa',
+};
+function groqLanguageToIso(name: string): string {
+  const n = name.trim().toLowerCase();
+  if (/^[a-z]{2}$/.test(n)) return n;
+  return GROQ_LANG_NAMES[n] ?? n.slice(0, 2);
 }

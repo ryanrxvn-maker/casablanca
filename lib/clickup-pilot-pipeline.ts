@@ -8,7 +8,7 @@
  *    Nomenclatura final: <baseAdId>G<N><sufixo>.mp4 (ex: AD140G1GL.mp4).
  *    Reusa concatAvatarParts do ffmpeg-worker (ja normaliza 1080x1920@30).
  *
- * 2. DECUPAGEM: roda detectSilences + cutVideoSegments em cada video montado
+ * 2. DECUPAGEM: roda planSpeechCut (lib/speech-detect) + cutVideoSegments em cada video montado
  *    pra cortar silencios SEM mexer no lipsync (ffmpeg corta no audio +
  *    video preserva sync por construcao).
  *
@@ -18,7 +18,8 @@
  * Output: { takesZip, montadoZip, camufladoZip? } pronto pra download.
  */
 
-import { decodeAudioRobust, detectSilences } from './audio-engine';
+import { decodeAudioRobust } from './audio-engine';
+import { planSpeechCut } from './speech-detect';
 import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem, cancelFFmpeg, normalizeForConcat } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
 
@@ -32,7 +33,7 @@ export type AssembledPart = {
   /** Blob apos decupagem + camuflagem audio */
   camuflado?: Blob;
   /** Erros por estagio */
-  errors?: { assemble?: string; decupagem?: string; camuflagem?: string };
+  errors?: { assemble?: string; nivelamento?: string; decupagem?: string; camuflagem?: string };
   /** Labels de partes ESPERADAS (expected:true) que faltaram blob e foram
    *  puladas → a montagem saiu INCOMPLETA ("faltando texto"). Se preenchido,
    *  a task NUNCA deve marcar 100% pronto nem liberar download limpo. */
@@ -200,7 +201,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
   // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
   // sem soar robotico — feedback do user em 12/05/2026.
-  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
+  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
@@ -374,10 +375,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     return out;
   };
 
-  // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
-  // nivelamento transparente (loudnorm linear, perfil 'natural' SEM speechnorm
-  // → sem robótico) + true-peak -1.5 (anti-clipping). NUNCA lança: se
-  // falhar/timeout, devolve o blob original intacto.
+  // Regula a voz de UM clipe a -16 LUFS com o MESMO motor da ferramenta
+  // Normalizador (perfil 'full': denoise + dynaudnorm + speechnorm + true-peak
+  // -1.5). É o que iguala trecho alto com trecho baixo DENTRO da parte, não só a
+  // média dela. Se falhar 2x, devolve o clipe original E REGISTRA — parte crua no
+  // meio de partes niveladas era a origem do "uma parte alta, outra baixa".
+  const nivelFalhou: string[] = [];   // partes que entraram SEM nivelar (vira aviso na task)
   const regularVoz = async (blob: Blob, label: string): Promise<Blob> => {
     // Timeout PROPORCIONAL ao tamanho (era 150s fixo): parte LONGA (BODY de
     // 60-90s) num PC carregado estourava o teto no meio de um nivelamento
@@ -386,16 +389,35 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // verdade não depende deste teto: o watchdog por batimento do worker mata
     // em ~3min de silêncio de qualquer jeito.
     const levelMs = Math.min(600_000, Math.max(150_000, Math.round((blob.size / (1024 * 1024)) * 6_000)));
-    try {
-      return await withTimeout(
-        prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }),
-        levelMs,
-        'regulagemVoz',
-      );
-    } catch (e) {
-      console.warn(`[clickup-pilot-pipeline] regul ${label}: falhou (${(e as Error)?.message?.slice(0, 80)}), mantendo clipe original`);
-      return blob;
+    // TENTA 2x: uma parte que entra CRUA no meio de partes niveladas é a origem do
+    // "uma parte muito alta e outra muito baixa" que o cliente ouve. Falha aqui é
+    // quase sempre transitória (heap do wasm), e instância limpa costuma resolver.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        return await withTimeout(
+          // profile 'full' = o MESMO motor da ferramenta Normalizador (dynaudnorm +
+          // speechnorm): é ele que iguala trecho alto com trecho baixo DENTRO da
+          // parte. O 'natural' de antes só acertava a média e deixava o contraste.
+          prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }, 'mp4', 'full'),
+          levelMs,
+          'regulagemVoz',
+        );
+      } catch (e) {
+        const msg = (e as Error)?.message?.slice(0, 80);
+        try { cancelFFmpeg(); } catch { /* ignora */ }
+        if (attempt < 2) {
+          console.warn(`[clickup-pilot-pipeline] regul ${label}: t1 falhou (${msg}) — reset+retry`);
+          continue;
+        }
+        // Não dá pra abortar a montagem por causa disso (o vídeo existe e é
+        // entregável), mas TAMBÉM não pode passar em silêncio: registra pra
+        // virar aviso na task, em vez de o cliente descobrir ouvindo.
+        console.warn(`[clickup-pilot-pipeline] regul ${label}: 2x falhou (${msg}) — parte entra SEM nivelar`);
+        nivelFalhou.push(label);
+        return blob;
+      }
     }
+    return blob;
   };
 
   // Nivela CADA parte a -16 LUFS ANTES de concatenar. É o que IGUALA o volume
@@ -492,7 +514,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // NIVELA cada parte a -16 LUFS ANTES de juntar → iguala avatares/renders
     // de volumes diferentes + limpa hiss + crava true-peak (anti-clipping).
     onProgress?.({ stage: 'regulando', currentFilename: filename, doneCount: g, totalCount: total });
+    const nivelAntes = nivelFalhou.length;
     const leveledBlobs = await nivelarPartes(blobs, blobLabels, filename);
+    const nivelDesteGrupo = nivelFalhou.slice(nivelAntes);
+    const nivelErro = nivelDesteGrupo.length
+      ? `${nivelDesteGrupo.length} de ${blobs.length} parte(s) entraram sem nivelar (volume pode variar): ${nivelDesteGrupo.join(', ')}`
+      : undefined;
 
     // HEAP FRESCO pro concat da montagem (raiz do AMARELO intermitente): o
     // nivelamento acima rodou ~2 execs POR PARTE na mesma instância e o heap do
@@ -535,7 +562,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       out.push({
         filename,
         rawAssembled: new Blob(),
-        errors: { assemble: (e as Error)?.message || 'falha no concat' },
+        errors: { assemble: (e as Error)?.message || 'falha no concat', nivelamento: nivelErro },
         missingParts: missingExpected.length ? missingExpected : undefined,
         // Guarda as partes JÁ NIVELADAS pro SALVAGE (Stage 1.5) re-tentar SÓ o
         // concat com instância recém-reciclada — sem refazer o nivelamento e
@@ -548,6 +575,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     out.push({
       filename,
       rawAssembled: assembled,
+      errors: nivelErro ? { nivelamento: nivelErro } : undefined,
       missingParts: missingExpected.length ? missingExpected : undefined,
       _usedFastPath: usedFastPath,
       // Guarda as partes JÁ NIVELADAS pra Stage 2 decupar uma a uma (arquivos
@@ -625,8 +653,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         try {
           const audioBuf = await withTimeout(decodeAudioRobust(src), 90_000, `decode ${label} (t${attempt})`);
           const durSec = audioBuf.duration || 0;
-          const silences = detectSilences(audioBuf);
-          const segments = computeSpeechSegments(silences, durSec, keepSilenceSec);
+          // MESMO motor da ferramenta /decupagem (lib/speech-detect): decide por
+          // periodicidade, então respiração e ar saem junto com o silêncio. Antes
+          // aqui rodava só threshold de energia e o keepSilence era aplicado nas
+          // DUAS bordas de cada pausa — medido em material real: cortava 0-2%.
+          const plan = planSpeechCut(audioBuf, keepSilenceSec);
+          const segments = plan.segments;
           if (segments.length === 0) return null; // sem fala → mantém original (NÃO é erro)
           // Parte é curta; teto generoso por segurança (não é o tempo esperado).
           const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
@@ -817,23 +849,3 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary, okMontagens: okMont.length, failMontagens: failMont } };
 }
 
-/** Helper local — derivado de app/tools/decupagem/page.tsx pra evitar import
- *  cross-route. Calcula regioes "com som" como complemento das silenciosas. */
-function computeSpeechSegments(
-  silences: Array<{ start: number; end: number }>,
-  totalDur: number,
-  keepSilence: number,
-): Array<{ start: number; end: number }> {
-  const segs: Array<{ start: number; end: number }> = [];
-  let cursor = 0;
-  for (const s of silences) {
-    const silStart = Math.max(0, s.start + keepSilence);
-    const silEnd = Math.min(totalDur, s.end - keepSilence);
-    if (silEnd > silStart) {
-      if (silStart > cursor) segs.push({ start: cursor, end: silStart });
-      cursor = silEnd;
-    }
-  }
-  if (cursor < totalDur) segs.push({ start: cursor, end: totalDur });
-  return segs.filter((s) => s.end - s.start > 0.05);
-}
