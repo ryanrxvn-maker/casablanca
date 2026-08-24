@@ -233,6 +233,9 @@ ${c.bold('FERRAMENTAS')}
         separa em vocals/drums/bass/other (Demucs) e baixa as trilhas.
   ${c.cyan('upload')} <arquivo> [--tool lipsync|separador] [--kind video|audio]
         sobe um arquivo pro Storage e imprime a URL pública.
+  ${c.cyan('normalizar')} <arquivo|pasta> [--out saida.mp4]
+        Normalizador de volume do AutoEdit: denoise + dynaudnorm +
+        speechnorm + -16 LUFS / -1.5 dBTP. O MESMO motor da ferramenta.
 
 ${c.bold('GENÉRICO (controle total)')}
   ${c.cyan('call')} <MÉTODO> <caminho> [--json '<body>'] [--data k=v] [--query k=v]
@@ -264,8 +267,69 @@ const COMMANDS = {
   tools: () => cmdTools(),
   pilot: (a) => cmdPilot(a),
   voz: (a) => cmdVoz(a),
+  normalizar: (a) => cmdNormalizar(a),
 };
 
+/**
+ * `autoedit normalizar` - o Normalizador de volume do AutoEdit, local.
+ *
+ * A MESMA cadeia da ferramenta do app: denoise -> dynaudnorm (leveling macro)
+ * -> speechnorm (leveling micro de fala) -> loudnorm -16 LUFS / -1.5 dBTP.
+ * O video e' COPIADO, entao custa segundos e nao re-encoda imagem.
+ *
+ * Aceita um arquivo ou uma PASTA (nivela todo mp4 dentro dela, no lugar).
+ *
+ * Ordem que importa: no pipeline de AVA isto roda DEPOIS de decupar. O
+ * speechnorm levanta o piso e a pausa sobe junto - decupar sobre audio ja'
+ * nivelado e' decupar com o detector cego.
+ */
+async function cmdNormalizar({ positionals, flags }) {
+  const { spawnSync } = await import('node:child_process');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const alvo = positionals[0];
+  if (!alvo) return warn('uso: autoedit normalizar <arquivo.mp4|pasta> [--out saida.mp4]');
+  if (!fs.existsSync(alvo)) return warn('nao achei: ' + alvo);
+
+  const CADEIAS = [
+    'afftdn=nf=-25,dynaudnorm=f=200:g=17:p=0.9:m=8:r=0.6:s=6,speechnorm=p=0.95:e=6:c=2:t=0.001:r=0.0008:f=0.0008,loudnorm=I=-16:TP=-1.5:LRA=11',
+    'afftdn=nf=-25,dynaudnorm=f=200:g=17:p=0.9:m=8:r=0.6:s=6,loudnorm=I=-16:TP=-1.5:LRA=11',
+    'loudnorm=I=-16:TP=-1.5:LRA=11',
+  ];
+
+  const nivelar = (entrada, saida) => {
+    for (const af of CADEIAS) {
+      const r = spawnSync('ffmpeg', ['-hide_banner', '-y', '-i', entrada, '-c:v', 'copy',
+        '-af', af, '-c:a', 'aac', '-b:a', '256k', '-ar', '48000',
+        '-movflags', '+faststart', saida], { encoding: 'utf8' });
+      if (r.status === 0 && fs.existsSync(saida) && fs.statSync(saida).size > 1024) return true;
+    }
+    return false;
+  };
+
+  const ehPasta = fs.statSync(alvo).isDirectory();
+  const arquivos = ehPasta
+    ? fs.readdirSync(alvo).filter((f) => /[.]mp4$/i.test(f)).map((f) => path.join(alvo, f))
+    : [alvo];
+  if (!arquivos.length) return warn('nenhum .mp4 na pasta');
+
+  let ok = 0;
+  for (const f of arquivos) {
+    const trocaNoLugar = !(flags.out && arquivos.length === 1);
+    const saida = trocaNoLugar ? f + '.norm.mp4' : flags.out;
+    process.stdout.write('  ' + path.basename(f) + ' ... ');
+    if (nivelar(f, saida)) {
+      if (trocaNoLugar) fs.renameSync(saida, f);
+      console.log('OK -16 LUFS');
+      ok++;
+    } else {
+      console.log('FALHOU (mantido como estava)');
+      try { fs.unlinkSync(saida); } catch { /* nao chegou a existir */ }
+    }
+  }
+  console.log('');
+  console.log('  ' + ok + '/' + arquivos.length + ' normalizado(s) com o motor do AutoEdit');
+}
 /**
  * `autoedit pilot <sub>` — o lado LEGÍVEL do ClickUp Pilot, sem abrir aba.
  *
