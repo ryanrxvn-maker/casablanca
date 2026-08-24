@@ -603,7 +603,12 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <PhasePill label={effectiveLabel} tone={showAsWarn ? 'warn' : phaseInfo.tone} icon={phaseInfo.icon} pulsing={isRunning} />
-              <h3 className="mono truncate text-[12px] font-semibold text-white">{taskName}</h3>
+              <h3
+                className="truncate text-[13px] font-semibold text-white"
+                style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+              >
+                {taskName}
+              </h3>
               {channels && channels.length > 0 ? (
                 <span className="flex shrink-0 flex-wrap items-center gap-1">
                   {channels.map((ch, i) => (
@@ -1050,7 +1055,7 @@ function PhasePill({
   };
   return (
     <span
-      className={`label-tech relative inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[9.5px] font-semibold uppercase tracking-widest ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
+      className={`label-tech relative inline-flex items-center gap-1 rounded-full border px-2.5 py-[3px] text-[9.5px] font-semibold uppercase tracking-[0.08em] ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
     >
       {pulsing && tone === 'progress' ? (
         <span className="absolute inset-0 rounded-full border border-current/30 animate-ping opacity-40" aria-hidden />
@@ -1082,7 +1087,7 @@ function StatPill({
   return (
     <span className={`mono inline-flex items-baseline gap-1 ${highlight ? 'text-white' : ''}`}>
       <strong className={`text-[12px] font-semibold ${accent ? accentMap[accent] : 'text-white/90'}`}>{value}</strong>
-      <span className="text-[9.5px] uppercase tracking-widest text-text-muted">{label}</span>
+      <span className="field-label text-[10.5px] text-text-muted">{label}</span>
     </span>
   );
 }

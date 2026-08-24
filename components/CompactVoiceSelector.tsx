@@ -187,12 +187,12 @@ export function CompactVoiceSelector({
             {selected ? selected.name : <span className="text-text-muted">Voz padrao do avatar</span>}
           </div>
           {!selected ? (
-            <div className="label-tech text-[8px] tracking-[0.16em] text-text-muted">
-              click pra escolher voz custom
+            <div className="field-label text-[10.5px] text-text-muted">
+              clique pra escolher outra
             </div>
           ) : null}
         </div>
-        <span className="label-tech shrink-0 rounded-full border border-line-strong bg-bg-soft/50 px-2 py-0.5 text-[8px] tracking-[0.16em] text-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all group-hover:border-lime group-hover:text-lime group-hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_16px_-6px_rgba(200,232,124,0.6)]">
+        <span className="field-label shrink-0 rounded-full border border-line-strong bg-bg-soft/50 px-2.5 py-1 text-[10.5px] text-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all group-hover:border-lime group-hover:text-lime group-hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_16px_-6px_rgba(200,232,124,0.6)]">
           {open ? 'Fechar' : 'Trocar'}
         </span>
       </button>

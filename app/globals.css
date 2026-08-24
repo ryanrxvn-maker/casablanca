@@ -1017,6 +1017,17 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     letter-spacing: 0.12em;
   }
 
+  /* Rótulo de campo em SENTENÇA. O irmão calmo do .label-tech: mesma fonte
+     (Inter), mas sem uppercase e sem tracking largo. Existe porque rótulo
+     minúsculo em caixa alta espaçada em TODO campo é o que faz uma tela
+     parecer template, mesmo quando o resto está bom. Use em formulário e
+     painel; guarde o .label-tech pra quando o rótulo for de fato um eyebrow. */
+  .field-label {
+    font-family: var(--font-label), var(--font-display), system-ui;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+
   /* Cabeçalho de seção com barrinha-acento (violet→lime). Use num wrapper flex:
      <div class="section-eyebrow"><span/>TÍTULO</div> — a barra é o ::before. */
   .section-eyebrow {
@@ -2201,30 +2212,120 @@ html[data-theme='light'] .hero-sombra {
 }
 
 /* ─────────── PLANO DE CENAS (ClickUp Pilot) ───────────
-   O bloco que monta avatar + voz + movimento de 47 cenas de uma vez merecia
-   parecer o que é: a alavanca mais pesada da tela. Relevo por LUZ (aurora +
-   fio no topo + tile com gradiente), nunca por cor chapada — a mesma gramática
-   do painel de reiniciar disparo. */
+   O bloco que monta avatar, voz e movimento de 47 cenas de uma vez merecia
+   parecer o que é: a alavanca mais pesada da tela. Mesma gramática do painel
+   de reiniciar disparo — duplo bisel (casca fina + núcleo concêntrico),
+   rótulo em sentença, hairline no lugar de borda cinza, um acento só e curva
+   de mola no movimento. Sem aurora e sem caixa alta espaçada: os dois eram o
+   sotaque de IA que o Silas reprovou em 24.08. */
 .plano-shell {
-  background:
-    linear-gradient(180deg, rgba(34, 211, 238, 0.10) 0%, rgba(34, 211, 238, 0.03) 45%, transparent 100%),
-    rgba(10, 12, 16, 0.35);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 24px 60px -34px rgba(14, 116, 144, 0.5);
 }
 html[data-theme='light'] .plano-shell {
-  background:
-    linear-gradient(180deg, rgba(14, 165, 233, 0.10) 0%, rgba(14, 165, 233, 0.03) 45%, transparent 100%),
-    rgba(255, 255, 255, 0.6);
+  background: rgba(16, 16, 24, 0.05);
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 16, 24, 0.06),
+    0 24px 60px -36px rgba(14, 116, 144, 0.3);
 }
-.plano-aurora {
+.plano-core {
   background:
-    radial-gradient(38% 62% at 6% 0%, rgba(34, 211, 238, 0.20), transparent 70%),
-    radial-gradient(34% 58% at 97% 10%, rgba(167, 139, 250, 0.14), transparent 70%);
+    radial-gradient(120% 90% at 50% -20%, rgba(34, 211, 238, 0.09), transparent 60%),
+    rgba(12, 14, 18, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+html[data-theme='light'] .plano-core {
+  background:
+    radial-gradient(120% 90% at 50% -20%, rgba(14, 165, 233, 0.07), transparent 60%),
+    rgba(255, 255, 255, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .plano-tile {
-  background: linear-gradient(150deg, #67e8f9 0%, #22d3ee 55%, #0ea5e9 100%);
+  background: linear-gradient(155deg, #67e8f9 0%, #22d3ee 55%, #0ea5e9 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 8px 18px -10px rgba(14, 165, 233, 0.9);
+}
+.plano-marca {
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-family: var(--font-label), var(--font-display), system-ui;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+html[data-theme='light'] .plano-marca {
+  background: rgba(16, 16, 24, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.06);
+}
+.plano-marca.is-erro {
+  color: #fecdd3;
+  background: rgba(244, 63, 94, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.4);
+}
+html[data-theme='light'] .plano-marca.is-erro {
+  color: #9f1239;
+  background: rgba(244, 63, 94, 0.12);
+}
+.plano-chevron {
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1), color 0.2s;
+}
+html[data-theme='light'] .plano-chevron {
+  background: rgba(16, 16, 24, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.06);
+}
+.group\/plano:hover .plano-chevron {
+  color: rgb(var(--text));
+}
+.plano-cta {
+  background: linear-gradient(135deg, #67e8f9 0%, #22d3ee 45%, #0284c7 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 10px 26px -10px rgba(14, 165, 233, 0.9);
+  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.2s, filter 0.2s;
+}
+.plano-cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 16px 34px -12px rgba(14, 165, 233, 1);
+}
+.plano-cta:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+.plano-cta:disabled {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgb(var(--text-muted));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  cursor: not-allowed;
+}
+html[data-theme='light'] .plano-cta:disabled {
+  background: rgba(16, 16, 24, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.08);
+}
+.plano-cta-icone {
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+  transition: background-color 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.plano-cta:hover:not(:disabled) .plano-cta-icone {
+  background: rgba(255, 255, 255, 0.28);
+}
+.plano-cta:disabled .plano-cta-icone {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
 }
 .plano-corpo {
-  animation: plano-abre 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: plano-abre 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 @keyframes plano-abre {
   from { opacity: 0; transform: translateY(-6px); }
@@ -2232,4 +2333,16 @@ html[data-theme='light'] .plano-shell {
 }
 @media (prefers-reduced-motion: reduce) {
   .plano-corpo { animation: none; }
+}
+.plano-input {
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.plano-input:focus {
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.7);
+}
+html[data-theme='light'] .plano-input {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
 }

@@ -12785,35 +12785,36 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       {/* ═══ CARREGAR PLANO — monta as cenas por DADOS ═══
                         * Existe porque montar 47 cenas clicando erra: os rótulos
                         * do seletor se repetem e já cruzaram avatar entre ADs. */}
-                      <div className="plano-shell group/plano relative mt-3 overflow-hidden rounded-[16px] border border-cyan-400/40 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_16px_44px_-26px_rgba(34,211,238,0.7)]">
-                        {/* Aurora + fio de luz: relevo por LUZ, não por cor chapada. */}
-                        <span aria-hidden className="plano-aurora pointer-events-none absolute inset-0" />
-                        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
+                      {/* Duplo bisel: casca fina por fora, núcleo com raio
+                        * concêntrico por dentro. Mesma gramática do painel de
+                        * reiniciar disparo: rótulo em sentença, um acento só,
+                        * hairline no lugar de borda cinza. */}
+                      <div className="plano-shell mt-3 rounded-[18px] p-[5px]">
+                        <div className="plano-core group/plano rounded-[13px] p-3">
                         <button
                           type="button"
                           onClick={() => setPlanoAberto((v) => !v)}
                           aria-expanded={planoAberto}
-                          className="relative flex w-full items-center gap-3 text-left"
+                          className="flex w-full items-center gap-3 text-left"
                         >
-                          {/* Tile do ícone (camadas = o plano inteiro de uma vez) */}
-                          <span className="plano-tile dark-island relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] border border-cyan-300/50 text-cyan-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_6px_16px_-8px_rgba(34,211,238,0.9)] transition-transform duration-300 group-hover/plano:scale-[1.06]">
-                            <span aria-hidden className="pointer-events-none absolute inset-0 rounded-[11px] bg-gradient-to-b from-white/25 to-transparent" />
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="relative">
+                          {/* Camadas: o plano inteiro de uma vez. */}
+                          <span className="plano-tile dark-island flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-white transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] group-hover/plano:scale-[1.05]">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                               <path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" />
                             </svg>
                           </span>
                           <span className="min-w-0 flex-1">
                             <span
-                              className="block text-[12.5px] font-extrabold leading-none tracking-tight text-white"
-                              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+                              className="block text-[14px] font-semibold leading-tight text-white"
+                              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
                             >
                               Carregar plano de cenas
                             </span>
-                            <span className="label-tech mt-1 block text-[8.5px] uppercase tracking-[0.16em] text-text-muted">
-                              avatar + voz + movimento de uma vez
+                            <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">
+                              Monta avatar, voz e movimento de todas as cenas de uma vez.
                             </span>
                           </span>
-                          {/* Chip de estado: quantas cenas o JSON colado tem. */}
+                          {/* Quantas cenas o JSON colado tem. */}
                           {(() => {
                             const bruto = (planoTexto || '').trim();
                             if (!bruto) return null;
@@ -12825,24 +12826,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 : Object.values(j).reduce((s: number, v) => s + (Array.isArray(v) ? v.length : 0), 0);
                             } catch { n = -1; }
                             return (
-                              <span
-                                className={`label-tech hidden shrink-0 rounded-full border px-2.5 py-1 text-[8.5px] uppercase tracking-[0.16em] sm:inline-flex ${
-                                  n > 0
-                                    ? 'border-lime/50 bg-lime/12 text-lime'
-                                    : 'border-rose-400/50 bg-rose-500/12 text-rose-200'
-                                }`}
-                              >
+                              <span className={`plano-marca hidden shrink-0 sm:inline-flex ${n > 0 ? '' : 'is-erro'}`}>
                                 {n > 0 ? `${n} cena${n === 1 ? '' : 's'}` : 'JSON inválido'}
                               </span>
                             );
                           })()}
-                          {/* Chevron que gira ao abrir */}
-                          <span
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-cyan-100 transition-transform duration-300 ${
-                              planoAberto ? 'rotate-180' : ''
-                            }`}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                          <span className={`plano-chevron flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${planoAberto ? 'rotate-180' : ''}`}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                               <path d="m6 9 6 6 6-6" />
                             </svg>
                           </span>
@@ -12854,7 +12844,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               onChange={(e) => setPlanoTexto(e.target.value)}
                               rows={5}
                               placeholder='Cole o JSON do plano — {"AD37":[{"cena":"AD37_1","n":1,"avatarId":"...","voiceId":"...","motionPrompt":null,"modoImagem":false}, ...]}'
-                              className="w-full resize-y rounded-[8px] border border-white/10 bg-black/30 px-2.5 py-2 font-mono text-[10.5px] leading-snug text-text placeholder:text-text-muted/60 focus:border-cyan-400/50 focus:outline-none"
+                              className="plano-input w-full resize-y rounded-[10px] px-3 py-2.5 font-mono text-[11px] leading-snug text-text outline-none"
                             />
                             <div>
                               <div className="label-tech mb-1 text-[9px] uppercase tracking-[0.16em] text-text-muted">
@@ -12891,12 +12881,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               type="button"
                               onClick={aplicarPlano}
                               disabled={!planoTexto.trim()}
-                              className="label-tech group/aplicar inline-flex self-start items-center gap-2 rounded-full border dark-island border-cyan-300/70 bg-gradient-to-b from-cyan-400 via-cyan-500 to-sky-500 px-4 py-2 text-[9.5px] font-extrabold uppercase tracking-[0.16em] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_8px_22px_-8px_rgba(34,211,238,0.95)] transition-all duration-200 hover:-translate-y-[1px] hover:scale-[1.02] hover:border-cyan-300 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_12px_26px_-10px_rgba(34,211,238,1)] active:translate-y-0 active:scale-95 disabled:cursor-not-allowed disabled:border-white/12 disabled:bg-white/[0.04] disabled:text-text-muted disabled:shadow-none disabled:hover:translate-y-0 disabled:hover:scale-100"
+                              className="plano-cta dark-island group/aplicar inline-flex justify-self-start self-start items-center gap-2.5 rounded-full py-1.5 pl-5 pr-1.5 text-[12px] font-semibold text-white"
                             >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-300 group-hover/aplicar:translate-x-[2px]">
-                                <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
-                              </svg>
                               Aplicar plano
+                              <span className="plano-cta-icone flex h-7 w-7 items-center justify-center rounded-full">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] group-hover/aplicar:translate-x-[2px]">
+                                  <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+                                </svg>
+                              </span>
                             </button>
                             {planoRelato ? (
                               <div className="rounded-[8px] border border-line bg-bg/60 p-2 text-[10.5px] leading-relaxed text-text-muted">
@@ -12905,12 +12897,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 ))}
                               </div>
                             ) : null}
-                            <div className="text-[9.5px] leading-tight text-text-muted">
-                              Reparte os takes entre as cenas na ordem (hook na cena 1) — é um
-                              ponto de partida: abra o 👁 de cada cena pra ajustar o corte antes de disparar.
+                            <div className="text-[11px] leading-snug text-text-muted">
+                              Reparte os takes entre as cenas na ordem (hook na cena 1). É um ponto
+                              de partida: abra o olho de cada cena pra ajustar o corte antes de disparar.
                             </div>
                           </div>
                         ) : null}
+                        </div>
                       </div>
 
                       {/* Start batch — abaixo da lista, mais perto das tasks ready (CTA principal).
