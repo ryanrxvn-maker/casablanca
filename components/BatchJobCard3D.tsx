@@ -98,6 +98,15 @@ export type BatchJob3DProps = {
    *  Trocar o look no plano nao re-gera nada — sem este aviso o card ficava
    *  verde sobre um AD inteiro com o avatar velho (AD06, 23.08). */
   takesForaDoPlano?: number;
+  /** Ultima barreira antes de entregar o arquivo: devolve uma mensagem quando o
+   *  montado no disco NAO corresponde aos takes de agora, ou null quando bate.
+   *
+   *  Os avisos do card dependem do state, e o state pode se perder (aba nova,
+   *  storage limpo) enquanto o arquivo continua no disco. Esta checagem le a
+   *  assinatura gravada AO LADO do arquivo — se o montado e' velho, o download
+   *  nao acontece. Silas, 23.08: *"mostrando pronto ali mas se eu clico em
+   *  download baixa versao antiga. ISSO JAMAIS DEVE ACONTECER"*. */
+  conferirEntrega?: () => Promise<string | null>;
   /** Click no botao "Atualizar montagem" — re-roda runPostPipeline. */
   onRebuild?: () => void;
   /** Spinner quando rebuild ta rodando. */
@@ -462,6 +471,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     dirtyPartsCount = 0,
     takesPendentes = 0,
     takesForaDoPlano = 0,
+    conferirEntrega,
     onRebuild,
     isRebuilding = false,
     docUrl,
@@ -733,6 +743,14 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 };
 
                 const handleDownloadAll = async () => {
+                  // ⛔ CONFERE ANTES DE ENTREGAR. Se o arquivo no disco nao e' o
+                  // dos takes de agora, nao baixa — avisa e manda atualizar.
+                  if (conferirEntrega) {
+                    try {
+                      const problema = await conferirEntrega();
+                      if (problema) { alert(problema); return; }
+                    } catch (e) { console.warn('[card] conferirEntrega falhou:', e); }
+                  }
                   // GARANTIA (fix 2026-07-03): se as URLs vivas sumiram (persist/
                   // reload descartou e a re-hidratacao do IDB falhou), busca as
                   // fontes DIRETO do IndexedDB por taskId agora. Sem isto, uma task

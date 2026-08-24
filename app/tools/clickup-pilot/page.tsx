@@ -182,6 +182,34 @@ function rescueDownloadToDisk(blob: Blob, filename: string): void {
  *  baixa pro disco na hora. Retorna { persisted, rescued } pra que o caller
  *  possa avisar o user honestamente (nunca marca "PRONTO" mudo). Ver
  *  [[feedback_blindagem_fluxos]]: sempre terminar+entregar, nenhum botão morto. */
+/** Chave onde vive a assinatura do montado — ao LADO do arquivo, no IDB.
+ *
+ *  A assinatura no state ja' protege o card. Mas o state pode se perder (aba
+ *  nova, storage limpo, batch de outra maquina) e o arquivo continua no disco:
+ *  ai o download volta a ser um ato de fe'. Guardada junto do arquivo, ela
+ *  viaja com ele. */
+function chaveSigDoMontado(taskId: string) {
+  return `batch:${taskId}:montado:sig`;
+}
+
+/** Grava a assinatura do que entrou no montado, ao lado do arquivo. */
+async function gravarSigDoMontado(taskId: string, sig: string) {
+  if (!sig) return;
+  try {
+    const { saveBlob } = await import('@/lib/zip-store');
+    await saveBlob(chaveSigDoMontado(taskId), new Blob([sig], { type: 'text/plain' }), 'text/plain');
+  } catch (e) { console.warn('[pilot] gravar sig do montado:', e); }
+}
+
+/** A assinatura gravada com o montado, ou null se o arquivo e' anterior a isto. */
+async function lerSigDoMontado(taskId: string): Promise<string | null> {
+  try {
+    const { loadBlob } = await import('@/lib/zip-store');
+    const b = await loadBlob(chaveSigDoMontado(taskId), 'text/plain');
+    return b ? (await b.text()) : null;
+  } catch { return null; }
+}
+
 async function persistDeliverableOrRescue(
   key: string,
   blob: Blob,
@@ -4086,6 +4114,7 @@ pra ver os erros detalhados [clickup-pilot-pipeline].`);
         if (temVideo) {
           montadoUrl = URL.createObjectURL(blob2);
           const rMont = await persistDeliverableOrRescue(`batch:${taskId}:montado`, blob2, montadoName);
+          await gravarSigDoMontado(taskId, sigDoQueEntrou);
           if (rMont.rescued) deliveryRescued = true;
         } else {
           montadoName = undefined; // sem vídeo → não anuncia entrega falsa
@@ -4837,6 +4866,7 @@ pra ver os erros detalhados [clickup-pilot-pipeline].`);
         if (temVideo) {
           montadoUrl = URL.createObjectURL(blob2);
           const rMont = await persistDeliverableOrRescue(`batch:${taskId}:montado`, blob2, montadoName);
+          await gravarSigDoMontado(taskId, sigDoQueEntrou);
           if (rMont.rescued) deliveryRescued = true;
         } else {
           montadoName = undefined;
@@ -6407,6 +6437,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
       const montadoUrl = URL.createObjectURL(montBlob);
       await persistDeliverableOrRescue(`batch:${taskId}:montado`, montBlob, montadoName);
+      await gravarSigDoMontado(taskId, sigDoQueEntrou);
 
       // ZIP camo (se modo ON)
       let camuUrl: string | undefined;
@@ -10469,6 +10500,18 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               dirtyPartsCount={partesDesatualizadas(b).length}
                               takesPendentes={takesPendentesDe(b)}
                               takesForaDoPlano={partesForaDoPlano(b.parts, b.replan?.parts).length}
+                              conferirEntrega={async () => {
+                                const gravada = await lerSigDoMontado(b.taskId);
+                                // Arquivo anterior a esta checagem nao tem assinatura:
+                                // nao da' pra afirmar nada, e travar todo montado antigo
+                                // seria pior que o silencio. Segue.
+                                if (!gravada) return null;
+                                const agora = assinaturaMontagem(b.parts);
+                                if (gravada === agora) return null;
+                                return '⚠ O vídeo montado no cache NÃO é o dos takes atuais — '
+                                  + 'algum take mudou depois da montagem. Clique "Atualizar '
+                                  + 'montagem", espere terminar, e baixe de novo.';
+                              }}
                               onRebuild={() => void rebuildMontage(b.taskId)}
                               isRebuilding={rebuildingTaskId === b.taskId}
                               docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}
