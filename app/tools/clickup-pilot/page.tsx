@@ -10335,6 +10335,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         percent={pct}
                                         fileBase={b.baseAdId || b.taskName}
                                         isRegenerating={isRegenThis}
+                                        // AUTO-CURA DA PREVIA: a object URL guardada no state morre
+                                        // se alguem revogar, e o <video> nao avisa — vira um
+                                        // retangulo PRETO com play em cima. Aconteceu no AD85 em
+                                        // 23.08 com o take intacto no disco. Aqui a previa pede uma
+                                        // URL nova direto do IndexedDB e se conserta sozinha.
+                                        recuperarVideo={async () => {
+                                          try {
+                                            const { loadBlob } = await import('@/lib/zip-store');
+                                            const chave = pilotPartKey(b.taskId, b.genId, t.label);
+                                            const blob = await loadBlob(chave, 'video/mp4');
+                                            return blob && blob.size > 1024 ? URL.createObjectURL(blob) : null;
+                                          } catch (e) {
+                                            console.warn('[preview] resgate do blob falhou:', e);
+                                            return null;
+                                          }
+                                        }}
                                         // Editar texto: nos prontos (trocar script/voz), nos que
                                         // FALHARAM (contornar a falha do HeyGen re-gerando a parte) e
                                         // nos TRAVADOS. 'stalled' e' "o poll desistiu de esperar" — o

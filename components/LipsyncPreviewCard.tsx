@@ -49,6 +49,7 @@ export function LipsyncPreviewCard({
   onRetry,
   onUploadAudio,
   isRegenerating = false,
+  recuperarVideo,
 }: {
   take: LipsyncTake;
   position: number;
@@ -57,6 +58,16 @@ export function LipsyncPreviewCard({
   percent?: number;
   /** Prefixo do nome do arquivo no download. */
   fileBase?: string;
+  /** Devolve uma URL NOVA pro video desta parte (lendo o blob do IndexedDB).
+   *
+   *  ⛔ Object URL guardada em state e' fragil: ela morre se alguem revogar, e
+   *  quando morre o <video> nao avisa em lugar nenhum — fica um retangulo PRETO
+   *  com o botao de play em cima. Foi o que apareceu no AD85 em 23.08: o take
+   *  estava perfeito no disco (720x1280, 27s) e a previa nao abria nada.
+   *
+   *  Em vez de tentar garantir que ninguem revogue (impossivel de sustentar), a
+   *  previa se CURA: no onError ela pede uma URL nova e troca. */
+  recuperarVideo?: () => Promise<string | null>;
   /** Se fornecido, mostra botao EDIT no card pronto. Usa pra re-gerar so essa parte com novo script/voz. */
   onEdit?: () => void;
   /** Se fornecido e o card FALHOU, mostra "Tentar de novo" (re-roda o mesmo disparo). */
@@ -85,7 +96,26 @@ export function LipsyncPreviewCard({
   const failed = take.status === 'failed';
   /** Esperando o HeyGen terminar — âmbar, não vermelho. */
   const waitingHeyGen = take.status === 'stalled';
-  const videoUrl = ready ? take.videoUrl : null;
+  // URL de resgate: quando a do state morre, esta assume.
+  const [urlResgate, setUrlResgate] = useState<string | null>(null);
+  const [resgatando, setResgatando] = useState(false);
+  const videoUrl = urlResgate || (ready ? take.videoUrl : null);
+
+  // Troca de take (re-geracao) invalida qualquer resgate anterior.
+  useEffect(() => { setUrlResgate(null); }, [take.videoUrl]);
+
+  async function aoFalharVideo() {
+    if (!recuperarVideo || resgatando || urlResgate) return;
+    setResgatando(true);
+    try {
+      const nova = await recuperarVideo();
+      if (nova) setUrlResgate(nova);
+    } catch (e) {
+      console.warn('[preview] resgate do video falhou:', e);
+    } finally {
+      setResgatando(false);
+    }
+  }
   const tone: 'ready' | 'err' | 'wait' | 'loading' =
     ready ? 'ready' : failed ? 'err' : waitingHeyGen ? 'wait' : 'loading';
 
@@ -202,6 +232,7 @@ export function LipsyncPreviewCard({
             <video
               ref={videoRef}
               src={videoUrl}
+              onError={() => void aoFalharVideo()}
               preload="metadata"
               playsInline
               muted
