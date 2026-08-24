@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 
 /**
@@ -87,6 +87,12 @@ export type BatchJob3DProps = {
   queuedRecoverable?: boolean;
   /** Children: preview grid abaixo do card (renderizado fora pra nao limitar layout) */
   children?: React.ReactNode;
+  /** Painel que abre DENTRO do card, ACIMA dos previews — hoje é o de
+   *  reiniciar o disparo (reorganizar avatar/voz/texto antes de gerar de
+   *  novo). Diferente de `children`, aparece mesmo com o card minimizado: o
+   *  user clicou pra editar ESTA task, então não pode depender de lembrar de
+   *  expandir. Enquanto ele existe, o card abre sozinho. */
+  topPanel?: React.ReactNode;
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
    *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
   dirtyPartsCount?: number;
@@ -145,7 +151,7 @@ function chipTextColor(hex: string): string {
 
 // ───────────────────────── Botão 3D icon-only ─────────────────────────
 
-type Btn3DColor = 'lime' | 'cyan' | 'fuchsia' | 'amber' | 'rose' | 'neutral';
+type Btn3DColor = 'lime' | 'cyan' | 'fuchsia' | 'violet' | 'amber' | 'rose' | 'neutral';
 
 type Btn3DProps = {
   icon: React.ReactNode;
@@ -180,6 +186,14 @@ const PALETTE: Record<Btn3DColor, { ring: string; bg: string; text: string; glow
     text: 'text-fuchsia-200',
     glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(217,70,239,0.45)]',
     hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(217,70,239,0.7)]',
+  },
+  // ROXO do site (#a78bfa) — é o estado "painel de reinício aberto" deste card.
+  violet: {
+    ring: 'border-violet-400/60',
+    bg: 'from-violet-400/28 via-violet-400/12 to-violet-400/[0.03]',
+    text: 'text-violet-100',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_3px_10px_-3px_rgba(167,139,250,0.5)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_12px_26px_-6px_rgba(167,139,250,0.75)]',
   },
   amber: {
     ring: 'border-amber-400/55',
@@ -481,11 +495,20 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     defaultMinimized = true,
     extraActions,
     channels,
+    topPanel,
   } = props;
 
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
   const [expanded, setExpanded] = useState(!defaultMinimized);
   const [resolvingDoc, setResolvingDoc] = useState(false);
+
+  // Painel aberto (ex: reiniciar disparo) => card ABRE sozinho. Sem isto, quem
+  // clicasse em "editar antes de reiniciar" num card minimizado veria só o
+  // painel espremido, sem os takes que ele quer conferir do lado.
+  const temTopPanel = !!topPanel;
+  useEffect(() => {
+    if (temTopPanel) setExpanded(true);
+  }, [temTopPanel]);
 
   const phaseInfo = PHASE_MAP[phase];
   // Override pra parcial. Distingue:
@@ -889,10 +912,11 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               />
               <Btn3D
                 icon={<IconBug size={16} />}
-                color="fuchsia"
-                title="Reiniciar do zero"
+                color={temTopPanel ? 'violet' : 'fuchsia'}
+                title="Reiniciar disparo — pergunta se você quer editar antes"
                 onClick={onDebug}
                 disabled={isQueued && !queuedRecoverable}
+                pulse={temTopPanel}
               />
               {!isRunning ? (
                 <Btn3D icon={<IconX size={14} />} color="neutral" title="Remover" onClick={onRemove} />
@@ -981,6 +1005,12 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
           ) : expanded && friendlyMsg && !banner ? (
             <div className="mono mt-1.5 text-[10px] text-text-muted">{friendlyMsg}</div>
           ) : null}
+
+          {/* PAINEL DO CARD (reiniciar disparo) — SEMPRE visível quando existe,
+           *  e sempre ACIMA dos previews: o user pediu que a reorganização do
+           *  disparo abra em cima dos cards de take, na própria task, e não lá
+           *  embaixo junto da fila. */}
+          {topPanel ? <div className="mt-3">{topPanel}</div> : null}
 
           {/* Preview takes — so renderiza children se expandido */}
           {expanded && children ? <div className="mt-3">{children}</div> : null}

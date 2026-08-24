@@ -81,6 +81,10 @@ import { BatchJobCard3D } from '@/components/BatchJobCard3D';
 // sobre um montado velho (ver o modulo — caso AD06, 23.08).
 import { assinaturaMontagem, partesDesatualizadas, takesPendentesDe, partesForaDoPlano } from '@/lib/montagem-sig';
 import { EditPartModal } from '@/components/EditPartModal';
+// REINICIAR DISPARO: a mini janela ("editar antes de reiniciar?") e o painel
+// que reabre o disparo exatamente como ele saiu, dentro do card da task.
+import { RestartDispatchModal } from '@/components/RestartDispatchModal';
+import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
 import {
   PilotBtn3D,
   IconScissors as PilotIconScissors,
@@ -527,17 +531,37 @@ function loadPersistedBatchStates(): Record<string, unknown> {
  *  fonte autoritativa pra re-disparar mesmo apos reload/navegacao
  *  (quando taskAnalyses esta vazio e o estado React ainda nao
  *  reidratou). */
-function loadPersistedReplan(taskId: string): {
-  taskName: string;
-  baseAdId: string;
-  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V' }>;
-} | null {
+function loadPersistedReplan(taskId: string): NonNullable<BatchTaskState['replan']> | null {
   try {
     const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
     return all?.[taskId]?.replan ?? null;
   } catch {
     return null;
   }
+}
+
+/** O caminho de volta: `replan` (plano salvo) → DispatchPlan (o que o runner
+ *  come). Usado pelo RETOMAR pós-F5 e pelo REINICIAR editado — os dois só têm
+ *  o plano salvo, nunca a análise. Nome/thumb do avatar não fazem parte do
+ *  disparo (só do que a tela mostra), então saem null aqui. */
+function planoDoReplan(saved: NonNullable<BatchTaskState['replan']>): DispatchPlan {
+  return {
+    adName: saved.baseAdId.replace(/[^a-z0-9_-]/gi, '_'),
+    parts: saved.parts.map((p) => ({
+      label: p.label,
+      text: p.text,
+      avatarId: p.avatarId,
+      avatarName: p.avatarName ?? null,
+      avatarThumb: null,
+      voiceId: p.voiceId,
+      // Sem isto o RETOMAR pós-F5 re-disparava a cena SEM o gesto.
+      motionPrompt: p.motionPrompt ?? null,
+      // dataUrl não sobrevive ao reload; os bytes vêm do IDB por esta chave.
+      imageKey: p.imageKey ?? null,
+      engine: p.engine,
+    })),
+    unmatchedAvatars: [],
+  } as unknown as DispatchPlan;
 }
 
 /** ============= VA RESUME SNAPSHOT (sobrevive restart do PC) =============
@@ -805,8 +829,18 @@ type BatchTaskState = {
   replan?: {
     taskName: string;
     baseAdId: string;
-    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V' }>;
+    /** `avatarName`/`voiceName` são SÓ pra tela (o painel de reiniciar mostra
+     *  quem foi disparado mesmo com a biblioteca do HeyGen ainda carregando).
+     *  O disparo continua olhando só os ids. Thumb NÃO entra: URL longa vezes
+     *  N takes vezes N tasks estoura a quota do localStorage. */
+    parts: Array<{ label: string; text: string; avatarId: string | null; avatarName?: string | null; voiceId: string | null; voiceName?: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V' }>;
   };
+  /** O `replan` acima foi EDITADO NA MÃO no painel de reiniciar disparo. Nesse
+   *  caso ele MANDA sobre a análise em memória: sem esta marca, um reinício
+   *  editado numa aba que ainda tem `taskAnalyses` seria silenciosamente
+   *  sobrescrito pelo buildPlan da análise (avatar/voz voltariam pros antigos).
+   *  Volta a false assim que o disparo sai da análise de novo (START/▶). */
+  replanManual?: boolean;
   /** Parts re-geradas via EditPartModal — labels que ficaram "dirty" depois
    *  do montadoZipUrl ter sido gerado. Quando array > 0, UI mostra botao
    *  "Atualizar montagem" que re-roda runPostPipeline. Persiste no
@@ -3312,32 +3346,28 @@ function ClickUpPilotInner() {
       await runVAPipelineForTask(taskId);
       return;
     }
+    // ═══ PLANO EDITADO NO PAINEL DE REINICIAR (vence a análise) ═══
+    // Quem clicou "editar antes de reiniciar" e trocou avatar/voz espera que
+    // SAIA o que ele escolheu. Sem esta prioridade, numa aba que ainda tem a
+    // análise aberta o buildPlan abaixo recalcularia tudo a partir dos
+    // roleSlots e mandaria os avatares ANTIGOS de novo — o disparo ignoraria a
+    // edição em silêncio. Duas fontes porque elas falham em momentos
+    // diferentes: o ref é escrito no clique (o run do mesmo tick já enxerga,
+    // sem esperar re-render) e a marca `replanManual` sobrevive a F5/aba nova.
+    const planoManual = planoDeReinicioManual(taskId);
     // Resolve o plano: 1o de taskAnalyses (sessao com a task analisada);
     // senao do `replan` persistido (sobrevive reload/navegacao) — e isso
     // que faz Retomar/Debug funcionarem em task que falhou com 0 videoIds.
-    let plan = a ? buildPlan(a, canalDoTaskId(taskId)) : null;
+    let plan = planoManual ? null : (a ? buildPlan(a, canalDoTaskId(taskId)) : null);
     let rTaskName: string;
     let rBaseAdId: string;
     let replan: BatchTaskState['replan'];
-    if (a && plan) {
+    if (!planoManual && a && plan) {
       rTaskName = a.taskName;
       rBaseAdId = a.baseAdId || a.taskName;
-      replan = {
-        taskName: rTaskName,
-        baseAdId: rBaseAdId,
-        parts: plan.parts.map((p: any) => ({
-          label: p.label,
-          text: p.text,
-          avatarId: p.avatarId ?? null,
-          voiceId: p.voiceId ?? null,
-          motionPrompt: p.motionPrompt ?? null,
-          // só a CHAVE: base64 aqui estouraria a quota do localStorage.
-          imageKey: p.imageKey ?? null,
-          engine: p.engine,
-        })),
-      };
+      replan = replanDoPlano(rTaskName, rBaseAdId, plan);
     } else {
-      const saved = batchStates[taskId]?.replan || loadPersistedReplan(taskId);
+      const saved = planoManual || batchStates[taskId]?.replan || loadPersistedReplan(taskId);
       if (!saved || !saved.parts?.length) {
         setBatchStates((prev) => ({
           ...prev,
@@ -3350,26 +3380,13 @@ function ClickUpPilotInner() {
         }));
         return;
       }
+      if (planoManual) {
+        console.log(`[clickup-pilot] REINÍCIO EDITADO task=${taskId}: usando o plano do painel (${saved.parts.length} take(s)), ignorando a análise em memória.`);
+      }
       rTaskName = saved.taskName;
       rBaseAdId = saved.baseAdId;
       replan = saved;
-      plan = {
-        adName: rBaseAdId.replace(/[^a-z0-9_-]/gi, '_'),
-        parts: saved.parts.map((p) => ({
-          label: p.label,
-          text: p.text,
-          avatarId: p.avatarId,
-          avatarName: null,
-          avatarThumb: null,
-          voiceId: p.voiceId,
-          // Sem isto o RETOMAR pós-F5 re-disparava a cena SEM o gesto.
-          motionPrompt: p.motionPrompt ?? null,
-          // dataUrl não sobrevive ao reload; os bytes vêm do IDB por esta chave.
-          imageKey: p.imageKey ?? null,
-          engine: p.engine,
-        })),
-        unmatchedAvatars: [],
-      } as any;
+      plan = planoDoReplan(saved);
     }
     if (!plan) return;
     const partsLen = plan.parts.length;
@@ -5172,31 +5189,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // enfileiramento → sobrevive reload → a task até AUTO-RETOMA (o promoter
         // reencontra o plano), sem nem precisar clicar Retomar.
         const qplan = buildPlan(a, canalDoTaskId(id));
-        const qreplan: BatchTaskState['replan'] = qplan ? {
-          taskName: a.taskName,
-          baseAdId,
-          parts: qplan.parts.map((p: any) => ({
-            label: p.label,
-            text: p.text,
-            avatarId: p.avatarId ?? null,
-            voiceId: p.voiceId ?? null,
-            motionPrompt: p.motionPrompt ?? null,
-            imageKey: p.imageKey ?? null,
-            engine: p.engine,
-          })),
-        } : undefined;
+        const qreplan: BatchTaskState['replan'] = qplan
+          ? replanDoPlano(a.taskName, baseAdId, qplan)
+          : undefined;
         next[id] = {
           ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
           phase: 'queued',
           message: 'Na fila — aguardando vaga...',
           // não sobrescreve um replan já bom se buildPlan falhar por algum motivo
           replan: qreplan || next[id]?.replan,
+          // Disparo pela ANÁLISE: ela volta a ser a fonte da verdade, então uma
+          // edição antiga do painel de reiniciar não pode continuar mandando.
+          replanManual: qreplan ? false : next[id]?.replanManual,
           finishedAt: undefined,
         } as BatchTaskState;
       }
       return next;
     });
     for (const taskId of normalTasks) {
+      // Disparo pela ANÁLISE: uma edição antiga do painel de reiniciar não pode
+      // continuar mandando (o par disto é o `replanManual: false` acima).
+      delete redispatchPlanRef.current[taskId];
       void runHeyGenGated(taskId, 'run');
     }
 
@@ -6547,17 +6560,21 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
-  /** DEBUG (HeyGen lipsync) — reserva pra casos de bug: reinicia o processo
-   *  de gerar os lips DESSA task do ZERO (re-dispatch completo). Aborta o
-   *  run atual e recomeca limpo. Gated por MAX_HEYGEN_PARALLEL. */
-  function debugTaskBatch(taskId: string, skipConfirm = false) {
+  /** REINICIAR (HeyGen lipsync) — refaz a geração dos lips DESSA task do ZERO
+   *  (re-dispatch completo). Aborta o run atual e recomeça limpo. Gated por
+   *  MAX_HEYGEN_PARALLEL (o teto do HeyGen continua valendo; se as duas vagas
+   *  estiverem livres — o caso normal de quem reinicia um AD pronto — ele sai
+   *  na hora, sem passar por fila nenhuma).
+   *
+   *  Não pergunta nada: quem clica no card passa antes pela mini janela
+   *  (`pedirReinicioDaTask`), e o command-bus (outra tela mandando reiniciar)
+   *  não tem UI pra perguntar. */
+  function debugTaskBatch(taskId: string, _skipConfirm = false) {
     // TROCA DE ÁUDIO: re-roda o pipeline proprio do zero (sem HeyGen).
     if (batchStates[taskId]?.kind === 'troca' || taskAnalyses[taskId]?.trocaBriefing) {
-      if (!skipConfirm && !confirm('Refazer a troca de áudio dessa task do zero?')) return;
       void runTrocaAudioPipelineForTask(taskId);
       return;
     }
-    if (!skipConfirm && !confirm('DEBUG: reiniciar a geracao de LIPS dessa task do zero?\n\nVai re-disparar TODAS as partes no HeyGen (cria videos novos).')) return;
     batchCancelRef.current[taskId] = true;
     // Pequeno delay deixa o run atual (se houver) abortar antes do restart.
     setTimeout(() => {
@@ -6566,7 +6583,234 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setBatchStates((prev) => {
         const cur = prev[taskId];
         if (!cur) return prev;
-        return { ...prev, [taskId]: { ...cur, phase: 'queued', message: 'Debug — recriando do zero (aguardando vaga)...', finishedAt: undefined } };
+        return { ...prev, [taskId]: { ...cur, phase: 'queued', message: 'Reiniciando do zero (aguardando vaga)...', finishedAt: undefined } };
+      });
+      void runHeyGenGated(taskId, 'run');
+    }, 300);
+  }
+
+  // ═══════════════ REINICIAR DISPARO (mini janela + painel) ═══════════════
+  //
+  // Silas, 23.08: *"ao clicar no botão de reiniciar o disparo, abre uma mini
+  // janela: editar antes de reiniciar? Se sim, abre a análise da task de novo,
+  // mesmo que tenha sido fechada, exatamente a daquele disparo — com avatares
+  // já escolhidos, com voz escolhida. O botão é REINICIAR em vez de START, ele
+  // não fica em fila, é roxo, e abre ali na task, em cima dos previews."*
+  //
+  // O que sustenta o "exatamente como foi disparado": o `replan`, gravado no
+  // ATO do disparo e persistido no localStorage. A análise (`taskAnalyses`)
+  // NÃO sobrevive reload — se o painel lesse dela, um F5 mostraria outra coisa
+  // (ou nada). E o `replanManual`/ref garantem que o que for editado aqui é o
+  // que de fato sai no HeyGen, mesmo com a análise viva na tela.
+
+  /** Task cuja mini janela ("editar antes de reiniciar?") está aberta. */
+  const [reinicioPerguntaTaskId, setReinicioPerguntaTaskId] = useState<string | null>(null);
+  /** Task cujo painel de reorganização está aberto DENTRO do card. */
+  const [reinicioPainelTaskId, setReinicioPainelTaskId] = useState<string | null>(null);
+  /** Plano que o painel está mostrando (congelado ao abrir — é o do disparo). */
+  const [reinicioPlano, setReinicioPlano] = useState<NonNullable<BatchTaskState['replan']> | null>(null);
+  const [reinicioBusy, setReinicioBusy] = useState(false);
+  /** Biblioteca do HeyGen ainda carregando quando o painel abriu (só UI). */
+  const [reinicioLibLoading, setReinicioLibLoading] = useState(false);
+  /** Planos editados no painel, por taskId. Escrito no CLIQUE (síncrono), então
+   *  o run que sai no mesmo tick já enxerga — `batchStates` só valeria no
+   *  próximo render. Some ao recarregar a página; aí quem manda é a marca
+   *  `replanManual` persistida. */
+  const redispatchPlanRef = useRef<Record<string, NonNullable<BatchTaskState['replan']>>>({});
+
+  /** O plano de reinício editado desta task, se houver — ref (fresco) ou o
+   *  persistido marcado como manual. null = ninguém editou, segue o fluxo
+   *  normal (análise > replan salvo). */
+  function planoDeReinicioManual(taskId: string): NonNullable<BatchTaskState['replan']> | null {
+    const doRef = redispatchPlanRef.current[taskId];
+    if (doRef?.parts?.length) return doRef;
+    const noState = batchStates[taskId];
+    if (noState?.replanManual && noState.replan?.parts?.length) return noState.replan;
+    // Pós-F5 o state ainda pode não ter reidratado — o localStorage é a fonte.
+    try {
+      const salvo = (loadPersistedBatchStates() as Record<string, BatchTaskState>)[taskId];
+      if (salvo?.replanManual && salvo.replan?.parts?.length) return salvo.replan;
+    } catch { /* sem localStorage: segue o fluxo normal */ }
+    return null;
+  }
+
+  /** O plano do disparo desta task, de onde quer que ele tenha sobrevivido:
+   *  edição anterior > state > localStorage. null = task sem plano editável
+   *  (batch legado, ou disparo que nunca gravou replan). */
+  function planoDoDisparo(taskId: string): NonNullable<BatchTaskState['replan']> | null {
+    const manual = planoDeReinicioManual(taskId);
+    if (manual) return manual;
+    const doState = batchStates[taskId]?.replan;
+    if (doState?.parts?.length) return doState;
+    const salvo = loadPersistedReplan(taskId);
+    return salvo?.parts?.length ? salvo : null;
+  }
+
+  /** Esta task pode ser reorganizada antes de reiniciar? VA e TROCA têm
+   *  pipeline próprio (avatar/voz vivem em outro lugar), e sem plano salvo não
+   *  há o que mostrar — nesses casos a mini janela só confirma o reinício. */
+  function motivoSemEdicaoNoReinicio(taskId: string): string | null {
+    const b = batchStates[taskId];
+    if (b?.kind === 'troca' || taskAnalyses[taskId]?.trocaBriefing) {
+      return 'Troca de Áudio não tem avatar nem voz pra escolher — o reinício refaz o pipeline de áudio dessa task.';
+    }
+    if (b?.isVA || taskAnalyses[taskId]?.vaBriefing) {
+      return 'Variação de Avatar monta os avatares no painel da própria task (acima), não aqui — o reinício refaz o pipeline VA com o que está configurado lá.';
+    }
+    if (!planoDoDisparo(taskId)) {
+      return 'O plano desse disparo não ficou salvo (batch antigo). Dá pra reiniciar com o que existe, mas pra trocar avatar/voz é preciso analisar a task de novo.';
+    }
+    return null;
+  }
+
+  /** Clique no botão REINICIAR do card → abre a mini janela. Com o painel desta
+   *  task já aberto, o mesmo botão fecha (é o jeito de desistir sem varrer a
+   *  tela atrás do Cancelar num card comprido). */
+  function pedirReinicioDaTask(taskId: string) {
+    if (reinicioPainelTaskId === taskId) {
+      fecharPainelDeReinicio();
+      return;
+    }
+    setReinicioPerguntaTaskId(taskId);
+  }
+
+  /** "Sim — editar": abre o painel com o plano EXATO do disparo. */
+  function abrirPainelDeReinicio(taskId: string) {
+    const plano = planoDoDisparo(taskId);
+    setReinicioPerguntaTaskId(null);
+    if (!plano) {
+      // Não deveria acontecer (a mini janela só oferece editar quando há
+      // plano), mas nunca deixa o clique mudo.
+      setError('Esse disparo não tem plano salvo pra editar. Analise a task de novo pra montar o disparo.');
+      return;
+    }
+    setReinicioPlano(plano);
+    setReinicioPainelTaskId(taskId);
+    // A biblioteca do HeyGen é quem dá nome/thumb/versão dos avatares salvos.
+    // Sem ela o painel ainda abre (cai no nome gravado no disparo), mas os
+    // pickers ficam sem a grade — então puxa aqui, no-op se já está em cache.
+    const snap = getLibrarySnapshot();
+    if (!snap.groups.length) {
+      setReinicioLibLoading(true);
+      void reloadLibrary(false).finally(() => setReinicioLibLoading(false));
+    }
+  }
+
+  function fecharPainelDeReinicio() {
+    setReinicioPainelTaskId(null);
+    setReinicioPlano(null);
+    setReinicioBusy(false);
+  }
+
+  /** REINICIAR com o plano editado no painel.
+   *
+   *  Não é "mais uma na fila": grava o plano novo (state + localStorage + ref),
+   *  zera os takes antigos e manda ESTA task pro disparo. O gate de 2 em
+   *  paralelo do HeyGen continua valendo — com vaga livre sai na hora. */
+  async function reiniciarComPlanoEditado(
+    taskId: string,
+    partes: NonNullable<BatchTaskState['replan']>['parts'],
+  ) {
+    const base = planoDoDisparo(taskId);
+    const b = batchStates[taskId];
+    const novoPlano: NonNullable<BatchTaskState['replan']> = {
+      taskName: base?.taskName || b?.taskName || taskId,
+      baseAdId: base?.baseAdId || b?.baseAdId || b?.taskName || taskId,
+      parts: partes.map((p) => ({
+        label: p.label,
+        text: p.text,
+        avatarId: p.avatarId ?? null,
+        avatarName: p.avatarName ?? null,
+        voiceId: p.voiceId ?? null,
+        voiceName: p.voiceName ?? null,
+        motionPrompt: (p.motionPrompt || '').trim() || null,
+        imageKey: p.imageKey ?? null,
+        engine: p.engine,
+      })),
+    };
+    // Última barreira antes de gastar cota: o runner morre em "part sem
+    // avatarId nem imagem", e o painel já avisa — mas se algo escapar, o erro
+    // aparece aqui, no clique, e não no meio do disparo.
+    const furada = novoPlano.parts.findIndex((p) => !p.avatarId && !p.imageKey);
+    if (furada >= 0) {
+      setError(`O take ${novoPlano.parts[furada].label} está sem avatar. Escolha um antes de reiniciar.`);
+      return;
+    }
+    setReinicioBusy(true);
+    // Os blobs da entrega anterior saem do state logo abaixo — revoga aqui, ou
+    // eles ficariam pendurados na memória sem ninguém pra soltar depois.
+    for (const url of [b?.zipBlobUrl, b?.montadoZipUrl, b?.camufladoZipUrl]) {
+      if (url) { try { URL.revokeObjectURL(url); } catch { /* já revogada */ } }
+    }
+    // 1) O ref vale JÁ (o run pode sair neste mesmo tick).
+    redispatchPlanRef.current[taskId] = novoPlano;
+    // 2) Grava o plano no state (→ localStorage) SEM mexer na fase ainda: se o
+    //    navegador fechar entre este clique e o disparo, a edição não se perde.
+    //    A fase só muda lá embaixo, junto com o disparo — pôr 'queued' aqui
+    //    faria o promoter promover a task antes do `batchCancelRef` voltar a
+    //    false, e o run nasceria já cancelado.
+    setBatchStates((prev) => {
+      const cur = prev[taskId];
+      const anterior: BatchTaskState = cur || {
+        taskId,
+        taskName: novoPlano.taskName,
+        baseAdId: novoPlano.baseAdId,
+        parts: [],
+        startedAt: Date.now(),
+        phase: 'failed',
+      };
+      return { ...prev, [taskId]: { ...anterior, replan: novoPlano, replanManual: true } };
+    });
+    // 3) Aborta o run atual (se houver) — daqui pra frente ele não gasta mais
+    //    nada; o disparo novo sai no setTimeout abaixo.
+    batchCancelRef.current[taskId] = true;
+    // 4) Vídeo NEGADO pela moderação some do HeyGen antes do novo submit — sem
+    //    isso o mesmo texto é negado de novo (ele "lembra" do registro vivo).
+    //    Best-effort: falhar aqui não pode impedir o reinício.
+    try {
+      const negados = (b?.parts || [])
+        .filter((p) => p.videoStatus === 'failed' && p.videoId)
+        .map((p) => ({ videoId: p.videoId as string, error: p.error }));
+      if (negados.length) await purgeRejectedVideosBeforeRedispatch(negados, 'reinicio-editado');
+    } catch (e) {
+      console.warn('[clickup-pilot] purge dos negados antes do reinício falhou (segue):', e);
+    }
+    setError(null);
+    fecharPainelDeReinicio();
+    // 5) Mesma coreografia do reinício normal: solta o cancel, marca 'queued' e
+    //    chama o gate no MESMO tick — assim o `heygenPendingRef` já está setado
+    //    quando o promoter acordar, e ninguém dispara a task duas vezes.
+    setTimeout(() => {
+      batchCancelRef.current[taskId] = false;
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [taskId]: {
+            ...cur,
+            phase: 'queued',
+            message: 'Reiniciando com o plano editado...',
+            // Disparo do ZERO: os takes antigos não existem mais pra este run.
+            // Zerar aqui também impede o promoter de escolher 'resume' (ele
+            // decide por "tem videoId?") e re-hidratar os vídeos anteriores.
+            parts: [],
+            finishedAt: undefined,
+            // A entrega anterior deixa de valer: sem limpar, o card poderia
+            // exibir selo/download do montado velho enquanto o novo não sai.
+            dirtyParts: [],
+            montagemSig: undefined,
+            pipeStats: undefined,
+            deliveryOk: undefined,
+            waitingVideoIds: undefined,
+            zipFilename: undefined,
+            montadoZipName: undefined,
+            camufladoZipName: undefined,
+            zipBlobUrl: undefined,
+            montadoZipUrl: undefined,
+            camufladoZipUrl: undefined,
+          },
+        };
       });
       void runHeyGenGated(taskId, 'run');
     }, 300);
@@ -7434,6 +7678,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           (canal === 'youtube' && slot?.avatarYoutube?.avatarId && slot?.voiceOverrideYoutube?.id)
             ? slot.voiceOverrideYoutube.id
             : (slot?.voiceOverride?.id || esc?.avatarVoiceId || null),
+        // NOME da voz — só quando ela foi escolhida na mão. Vazio significa
+        // "voz que veio junto do avatar", e é assim que o painel de reiniciar
+        // sabe que pode deixar a voz acompanhar quando o look muda.
+        voiceName:
+          (canal === 'youtube' && slot?.avatarYoutube?.avatarId && slot?.voiceOverrideYoutube?.id)
+            ? (slot.voiceOverrideYoutube.name || null)
+            : (slot?.voiceOverride?.name || null),
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
         imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
@@ -7488,6 +7739,35 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       })
       .map((s) => `${s.role}: @${s.username}`);
     return { adName, parts: colapsado as any, unmatchedAvatars };
+  }
+
+  /** O plano SERIALIZÁVEL (replan) a partir do DispatchPlan.
+   *
+   *  Fonte ÚNICA dos três lugares que gravam plano — enfileirar (startBatch),
+   *  disparar (runTaskInBackground) e reiniciar editado. Existe porque quando
+   *  eram três cópias, um campo esquecido numa delas virava escolha perdida no
+   *  re-disparo (foi o que aconteceu com o gesto). */
+  function replanDoPlano(
+    taskName: string,
+    baseAdId: string,
+    plan: DispatchPlan,
+  ): NonNullable<BatchTaskState['replan']> {
+    return {
+      taskName,
+      baseAdId,
+      parts: plan.parts.map((p: any) => ({
+        label: p.label,
+        text: p.text,
+        avatarId: p.avatarId ?? null,
+        avatarName: p.avatarName ?? null,
+        voiceId: p.voiceId ?? null,
+        voiceName: p.voiceName ?? null,
+        motionPrompt: p.motionPrompt ?? null,
+        // só a CHAVE: base64 de imagem aqui estouraria a quota do localStorage.
+        imageKey: p.imageKey ?? null,
+        engine: p.engine,
+      })),
+    };
   }
 
   /** Dispara UMA task pra HeyGen Auto Dynamic */
@@ -10470,7 +10750,27 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               queuedRecoverable={b.kind === 'troca'}
                               onRetomar={() => retomarTaskBatch(b.taskId)}
                               onPausar={() => pausarTaskBatch(b.taskId)}
-                              onDebug={() => debugTaskBatch(b.taskId)}
+                              // REINICIAR: passa pela mini janela ("editar antes
+                              // de reiniciar?") em vez de re-disparar direto.
+                              onDebug={() => pedirReinicioDaTask(b.taskId)}
+                              // O painel de reorganização abre AQUI DENTRO, em
+                              // cima dos previews desta task — nunca lá embaixo
+                              // junto da fila.
+                              topPanel={
+                                reinicioPainelTaskId === b.taskId && reinicioPlano ? (
+                                  <RedispatchPanel
+                                    key={`reinicio:${b.taskId}`}
+                                    taskName={reinicioPlano.taskName || b.taskName}
+                                    adName={reinicioPlano.baseAdId || b.baseAdId}
+                                    partesOriginais={reinicioPlano.parts as RedispatchPart[]}
+                                    resolverAvatar={(id) => findAvatarOptionById(id || null)}
+                                    bibliotecaCarregando={reinicioLibLoading}
+                                    busy={reinicioBusy}
+                                    onCancel={fecharPainelDeReinicio}
+                                    onReiniciar={(partes) => void reiniciarComPlanoEditado(b.taskId, partes)}
+                                  />
+                                ) : undefined
+                              }
                               onRemove={() => {
                                 if (queued) batchCancelRef.current[b.taskId] = true;
                                 for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
@@ -12820,6 +13120,27 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           }
         />
       ) : null}
+      {/* Mini janela do REINICIAR — "editar antes de reiniciar?" */}
+      {reinicioPerguntaTaskId ? (() => {
+        const tid = reinicioPerguntaTaskId;
+        const b = batchStates[tid];
+        const motivo = motivoSemEdicaoNoReinicio(tid);
+        const plano = planoDoDisparo(tid);
+        return (
+          <RestartDispatchModal
+            taskName={b?.taskName || plano?.taskName || tid}
+            totalTakes={plano?.parts?.length || b?.parts?.length || undefined}
+            podeEditar={!motivo}
+            motivoSemEdicao={motivo}
+            onEditar={() => abrirPainelDeReinicio(tid)}
+            onReiniciarDireto={() => {
+              setReinicioPerguntaTaskId(null);
+              debugTaskBatch(tid);
+            }}
+            onClose={() => setReinicioPerguntaTaskId(null)}
+          />
+        );
+      })() : null}
     </>
   );
 }
