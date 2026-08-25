@@ -48,13 +48,19 @@
  *    −100 dB num bruto e −41 dB numa gravação de sala. Com um teto: em montado do
  *    Pilot (quase tudo fala) o percentil sobe até a voz e apagaria a consoante.
  *
- * 2. O que entra na fala além do núcleo vozeado é EVENTO, não estado. Fala começa,
- *    dura 30–600 ms e acaba; chiado, trilha e respiração longa não acabam. Então todo
- *    run delimitado de "parece fala" vira fala — inclusive no MEIO de um intervalo,
- *    que é onde um /s/ inteiro estava sendo cortado. E ainda precisa ser fala de
- *    fato: encostar na voz (a sílaba pertence a uma palavra) ou ser consoante na
- *    maior parte do run. Sem essa segunda trava, trilha alta no meio de uma pausa de
- *    3 s virava "sílaba" e a pausa deixava de ser cortada.
+ * 2. Fora do núcleo vozeado, entram na fala DUAS coisas, por portas diferentes —
+ *    porque consoante e respiração são as duas ruído, e o que as separa é ONDE
+ *    estão e quão inequívocas são (medido: o /s/ de "horaS" começa 1 frame depois
+ *    do núcleo com hfRatio 0,98–1,00; a respiração que sobrava começava 21 frames
+ *    depois, com 0,43–0,63):
+ *      (a) a CADEIA colada ao núcleo, que aceita ruído ambíguo — é a sílaba se
+ *          completando, e atravessa o vale da transição e a oclusão muda;
+ *      (b) a sibilante INEQUÍVOCA solta, longe do núcleo — é o /s/ que ficou no
+ *          MEIO de um intervalo e estava sendo cortado inteiro.
+ *    Em ambas vale o mesmo relógio: fala é EVENTO (começa, dura 30–600 ms, acaba);
+ *    chiado, trilha e respiração longa são ESTADO, não acabam, e continuam
+ *    cortáveis. Sem esse relógio, trilha alta no meio de uma pausa de 3 s virava
+ *    "sílaba" e a pausa inteira deixava de ser cortada.
  *
  * 3. GUARDA-CORPO no corte (`planSpeechCut`): antes de remover, as BORDAS do
  *    intervalo são reexaminadas com um critério independente da máscara, e o corte
@@ -138,8 +144,13 @@ export type SpeechDetectConfig = {
   eventMaxSec: number;
   /** duração MÍNIMA de um evento (segundos) — abaixo disso é estalo/clique */
   eventMinSec: number;
-  /** fração do run que precisa ser obstruinte pra ele valer SOZINHO, longe da voz */
-  eventObstruentShare: number;
+  /** quando a cadeia colada ao núcleo NÃO para dentro do teto, ela deixou de ser
+   *  sílaba e virou chiado/respiração longa: protege só isto (segundos). */
+  chainSustainedSec: number;
+  /** hfRatio que torna a consoante INEQUÍVOCA — o que basta pra ela ser
+   *  protegida longe do núcleo. Medido: /s/ e /ʃ/ reais dão 0,75–1,00; a
+   *  respiração que estava sendo poupada indevidamente não passa de 0,63. */
+  strongHfRatioMin: number;
   /** dB abaixo da voz: um frame tão alto quanto a fala é fala, mesmo sem F0
    *  (sílaba grave, nasal, voz rouca). Sem isto um trecho a 2 dB da voz saiu no
    *  corte só porque a periodicidade dele estava em 0,40. */
@@ -194,7 +205,8 @@ export const DEFAULT_SPEECH_CONFIG: SpeechDetectConfig = {
   obstruentHfRatioMin: 0.35,
   eventMaxSec: 0.6,
   eventMinSec: 0.03,
-  eventObstruentShare: 0.3,
+  chainSustainedSec: 0.06,
+  strongHfRatioMin: 0.7,
   loudEventBelowSpeechDb: 8,
   obstruentBridgeSec: 0.08,
   localFloorWindowSec: 2,
@@ -538,58 +550,94 @@ export function detectSpeechMask(
   // A consoante surda não tem F0 e é fraca; uma sílaba grave/nasal pode ter
   // periodicidade baixa e ainda ser alta como a voz. As duas caem fora do núcleo
   // — e foi assim que um /s/ inteiro ("respostaS") ficou NO MEIO de um intervalo
-  // e virou corte. Proteger só as bordas não resolvia: fala no miolo continuava
-  // caindo.
+  // e virou corte.
   //
-  // O que separa fala de chiado aqui não é o timbre, é a FORMA NO TEMPO: fala é
-  // EVENTO (começa, dura 30–600 ms, acaba); ruído de fundo, respiração longa e
-  // trilha são ESTADO (não acabam). Então: todo run delimitado de "parece fala"
-  // vira fala, onde quer que esteja; run que não termina dentro do teto é ruído
-  // e continua cortável.
+  // A pergunta que separa consoante de respiração NÃO é o timbre: as duas são
+  // ruído. É ONDE ela está e QUÃO inequívoca ela é. Medido no material real:
+  //
+  //   /s/ de "horaS"    → começa 1 frame depois do núcleo, hfRatio 0,98–1,00
+  //   respiração        → começa 21 frames (0,21 s) depois, hfRatio 0,43–0,63
+  //
+  // Daí as duas portas de entrada:
+  //   (a) CADEIA — a partir da borda do núcleo, anda enquanto houver "parece
+  //       fala", atravessando o vale da transição e a oclusão muda da plosiva.
+  //       É a sílaba se completando, então aceita ruído ambíguo.
+  //   (b) SOLTO — longe do núcleo só entra sibilante INEQUÍVOCA (hfRatio alto),
+  //       porque ali um /s/ pode estar isolado por uma oclusão longa, mas
+  //       respiração não pode entrar de carona.
+  //
+  // Sem (b), um /s/ no meio do intervalo era cortado. Sem o limite de (a), a
+  // respiração emendava na palavra seguinte por uma corrente de pontes e a pausa
+  // inteira deixava de ser cortada.
   const eventN = Math.max(1, Math.round(cfg.eventMaxSec / f.frameSec));
   const minEventN = Math.max(1, Math.round(cfg.eventMinSec / f.frameSec));
   const bridgeN = Math.max(0, Math.round(cfg.obstruentBridgeSec / f.frameSec));
+  const sustainedN = Math.max(1, Math.round(cfg.chainSustainedSec / f.frameSec));
   const { isObstruent } = makeObstruentProbe(f, cfg, speechRef);
   const loudDbGuard = speechRef - cfg.loudEventBelowSpeechDb;
-
   const core = Uint8Array.from(mask); // o núcleo vozeado, antes dos eventos
+
+  /** ambíguo: só vale colado ao núcleo (cauda/ataque de palavra) */
+  const pareceFala = (i: number) => !core[i] && (isObstruent(i) || f.db[i] >= loudDbGuard);
+  /** inequívoco: sibilante forte, vale sozinha em qualquer lugar */
+  const sibilante = (i: number) => !core[i] && isObstruent(i) && f.hfRatio[i] >= cfg.strongHfRatioMin;
+
   const ev = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    if (mask[i]) continue;
-    if (isObstruent(i) || f.db[i] >= loudDbGuard) ev[i] = 1;
-  }
-  // fecha o vale entre a vogal e a consoante, e a oclusão muda da plosiva
   for (let i = 0; i < n; ) {
-    if (ev[i]) { i++; continue; }
+    if (!core[i]) { i++; continue; }
     let j = i;
-    while (j < n && !ev[j]) j++;
-    if (i > 0 && j < n && j - i <= bridgeN) ev.fill(1, i, j);
-    i = j;
-  }
-  // Só os runs DELIMITADOS entram na fala — e ainda precisam ser fala de fato:
-  //   · ENCOSTAR na voz (a sílaba pertence a uma palavra: o /t/ de "interneT", o
-  //     /s/ de "respostaS", a sílaba grave que a periodicidade não pegou), ou
-  //   · SER consoante de verdade (obstruinte na maior parte do run) — que pode
-  //     aparecer depois de uma oclusão longa e ficar "solta" do núcleo.
-  // Sem isso, trilha e ruído alto no meio de uma pausa de 3 s viravam "sílaba" e
-  // a pausa inteira deixava de ser cortada: medido no material com fundo alto,
-  // 13,9 s de pausa sobrando em 15 pontos.
-  for (let i = 0; i < n; ) {
-    if (!ev[i]) { i++; continue; }
-    let j = i;
-    while (j < n && ev[j]) j++;
-    const len = j - i;
-    if (len >= minEventN && len <= eventN) {
-      let encosta = false;
-      for (let k = Math.max(0, i - bridgeN); k < i && !encosta; k++) if (core[k]) encosta = true;
-      for (let k = j; k < Math.min(n, j + bridgeN) && !encosta; k++) if (core[k]) encosta = true;
-      let obs = 0;
-      for (let k = i; k < j; k++) if (isObstruent(k)) obs++;
-      const consoante = obs >= Math.max(2, Math.round(cfg.eventObstruentShare * len));
-      if (encosta || consoante) mask.fill(1, i, j);
+    while (j < n && core[j]) j++;
+    // (a1) cauda: anda pra frente a partir do fim do núcleo
+    let k = j;
+    let last = j;
+    let holes = 0;
+    while (k < n && !core[k] && k - j < eventN) {
+      if (pareceFala(k)) { last = k + 1; holes = 0; }
+      else if (++holes > bridgeN) break;
+      k++;
     }
+    // Encostou no teto sem parar? Então não é sílaba se completando, é chiado
+    // ou respiração LONGA emendando na fala — cauda de palavra acaba sozinha.
+    // Nesse caso protege só a folga mínima e o resto continua cortável.
+    const stopTail = last - j >= eventN ? Math.min(last, j + sustainedN) : last;
+    for (let t = j; t < stopTail; t++) ev[t] = 1;
+    // (a2) ataque: anda pra trás a partir do início do núcleo
+    let a = i - 1;
+    let first = i;
+    holes = 0;
+    while (a >= 0 && !core[a] && i - 1 - a < eventN) {
+      if (pareceFala(a)) { first = a; holes = 0; }
+      else if (++holes > bridgeN) break;
+      a--;
+    }
+    const startAttack = i - first >= eventN ? Math.max(first, i - sustainedN) : first;
+    for (let t = startAttack; t < i; t++) ev[t] = 1;
     i = j;
   }
+  // (b) sibilante solta — delimitada, senão é chiado contínuo.
+  // ⚠ Fechar o buraco ANTES de medir o comprimento é o que impede a fraude do
+  // ruído: chiado de banda larga também dá hfRatio alto, e um run de 1 s dele
+  // flutua o bastante pra se PARTIR em pedaços de meio segundo — cada um
+  // passando pelo teto de duração como se fosse um /s/. Fechado, ele volta a
+  // ser um bloco só, longo, e cai fora.
+  const sib = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (sibilante(i)) sib[i] = 1;
+  for (let i = 0; i < n; ) {
+    if (sib[i]) { i++; continue; }
+    let j = i;
+    while (j < n && !sib[j]) j++;
+    if (i > 0 && j < n && j - i <= bridgeN) sib.fill(1, i, j);
+    i = j;
+  }
+  for (let i = 0; i < n; ) {
+    if (!sib[i]) { i++; continue; }
+    let j = i;
+    while (j < n && sib[j]) j++;
+    const len = j - i;
+    if (len >= minEventN && len <= eventN) ev.fill(1, i, j);
+    i = j;
+  }
+  for (let i = 0; i < n; i++) if (ev[i]) mask[i] = 1;
   // fecha buracos curtos (fricativa no meio da palavra não vira corte)
   const closeN = Math.round(cfg.closeHolesSec / f.frameSec);
   for (let i = 0; i < n; ) {
@@ -600,13 +648,21 @@ export function detectSpeechMask(
       i = j;
     } else i++;
   }
-  // descarta ilhas curtas de "fala" (estalo isolado)
+  // Descarta ilhas curtas de "fala" (estalo isolado) — MAS nunca uma ilha que é
+  // consoante detectada.
+  //
+  // ⚠ Este passo era um furo na garantia: consoante surda É curta por natureza
+  // (um /t/ tem 40–60 ms), então uma que ficasse isolada do núcleo caía aqui,
+  // saía da máscara e voltava a ser cortável — sem sequer aparecer no laudo,
+  // porque `speechRemovedSec` conta a máscara DEPOIS deste passo.
   const minSpeechN = Math.round(cfg.minSpeechSec / f.frameSec);
   for (let i = 0; i < n; ) {
     if (mask[i]) {
       let j = i;
       while (j < n && mask[j]) j++;
-      if (j - i < minSpeechN) mask.fill(0, i, j);
+      let ehConsoante = false;
+      for (let t = i; t < j && !ehConsoante; t++) if (ev[t]) ehConsoante = true;
+      if (j - i < minSpeechN && !ehConsoante) mask.fill(0, i, j);
       i = j;
     } else i++;
   }

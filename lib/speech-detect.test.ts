@@ -255,6 +255,31 @@ console.log('\nGARANTIA — respiração continua saindo (a proteção não viro
   ok(plan.keptSec < 2.7, `respiração + silêncio saíram (3.7s → ${plan.keptSec.toFixed(2)}s)`);
 }
 
+console.log('\nGARANTIA — respiração ENTRE duas falas sai, e o /s/ ao lado fica:');
+{
+  // O caso que o Silas ouviu na prova: "...horaS [pausa] (respiração) [pausa]
+  // Pegando...". A respiração estava a 0,21 s do núcleo e emendava na palavra
+  // seguinte por uma corrente de pontes — a pausa inteira deixava de ser cortada.
+  const buf = build([
+    { kind: 'voice', sec: 0.8 },
+    { kind: 'fricative', sec: 0.16, amp: 0.014 },  // o /s/ de "horaS"
+    { kind: 'silence', sec: 0.26 },
+    { kind: 'breath', sec: 0.13, amp: 0.022 },     // a respiração
+    { kind: 'silence', sec: 0.12 },
+    { kind: 'voice', sec: 0.8 },
+  ]);
+  const plan = planSpeechCut(buf, 0.05);
+  const comeuS = plan.removed.reduce(
+    (n, r) => n + Math.max(0, Math.min(r.end, 0.96) - Math.max(r.start, 0.8)), 0,
+  );
+  const tirouRespiro = plan.removed.reduce(
+    (n, r) => n + Math.max(0, Math.min(r.end, 1.35) - Math.max(r.start, 1.22)), 0,
+  );
+  ok(comeuS < 0.01, `o /s/ ficou inteiro (comeu ${comeuS.toFixed(3)}s)`);
+  ok(tirouRespiro > 0.08, `e a respiração foi embora (${tirouRespiro.toFixed(2)}s de 0,13s)`);
+  ok(plan.audit.speechRemovedSec === 0, 'sem tocar em fala');
+}
+
 console.log('\nGARANTIA — o laudo é o contrato: nada de fala dentro do removido:');
 {
   const casos = [
