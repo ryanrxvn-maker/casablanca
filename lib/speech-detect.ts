@@ -107,7 +107,12 @@ export type SpeechDetectConfig = {
   minSpeechSec: number;
   /** margem intocada em cada borda da fala (segundos) — base dos dois pads abaixo */
   edgePadSec: number;
-  /** folga fixa DEPOIS da fala (cauda de vogal decaindo) */
+  /** folga fixa DEPOIS da fala (cauda de vogal decaindo).
+   *  Pequena de propósito: quem protege a palavra é a análise (a cadeia da
+   *  consoante e o guarda-corpo), não uma margem cega. Cada 10 ms a mais aqui
+   *  custa 10 ms em CADA corte — num vídeo de 70 s com 38 cortes, os pads de
+   *  0,02+0,02 seguravam 1,5 s de pausa sem nenhum ganho de segurança medível
+   *  (a invasão de palavra ficou igual com 0,01). */
   padTailSec: number;
   /** folga fixa ANTES da fala (ataque) */
   padAttackSec: number;
@@ -132,12 +137,19 @@ export type SpeechDetectConfig = {
    *  pra 9% guardando respiração. Medido: cauda de palavra vive em −31 dB com a
    *  voz em −15; respiração, em −60 ou menos. */
   obstruentMaxBelowSpeechDb: number;
-  /** fração MÍNIMA da energia do frame que tem que estar no agudo. É o critério
-   *  de FORMA, e sem ele o de nível sozinho mente: num bruto com silêncio digital
-   *  a cauda de uma vogal decaindo (−40 dB) também fica "muito acima do piso" e
-   *  virava consoante — engordando a fala em 4,8 s e comendo 14 cortes. Medido:
-   *  vogal 0,02–0,05 · consoante surda 0,3–0,7. */
+  /** TETO da fração da energia que tem que estar no agudo. É o critério de FORMA,
+   *  e sem ele o de nível sozinho mente: num bruto com silêncio digital a cauda de
+   *  uma vogal decaindo (−40 dB) também fica "muito acima do piso" e virava
+   *  consoante — engordando a fala em 4,8 s e comendo 14 cortes. */
   obstruentHfRatioMin: number;
+  /** quantas vezes mais agudo que a VOZ do arquivo o frame precisa ser. O teto
+   *  acima sozinho não serve: num áudio com grave forte no fundo, o /s/ de
+   *  "certoS" acendia a banda aguda em +14 dB e mesmo assim ficava em hfRatio
+   *  0,10 — porque o grave dominava a energia total. O que importa é o CONTRASTE
+   *  com a voz do próprio material (ali a vogal fica em 0,005). */
+  obstruentHfOverVoice: number;
+  /** piso absoluto do critério de forma, pra ele nunca virar "qualquer coisa" */
+  obstruentHfRatioFloor: number;
   /** duração MÁXIMA de um evento de fala (segundos). Run mais longo que isto não
    *  é consoante nem sílaba: é chiado, respiração longa ou trilha — ESTADO, e
    *  continua cortável. */
@@ -194,15 +206,17 @@ export const DEFAULT_SPEECH_CONFIG: SpeechDetectConfig = {
   voiceRatioMin: 0.3,
   closeHolesSec: 0.18,
   minSpeechSec: 0.1,
-  edgePadSec: 0.02,
-  padTailSec: 0.02,
-  padAttackSec: 0.02,
+  edgePadSec: 0.01,
+  padTailSec: 0.01,
+  padAttackSec: 0.01,
   minGapSec: 0.11,
-  minCutSec: 0.06,
+  minCutSec: 0.05,
 
   obstruentHfOverFloorDb: 11,
   obstruentMaxBelowSpeechDb: 38,
   obstruentHfRatioMin: 0.35,
+  obstruentHfOverVoice: 40,
+  obstruentHfRatioFloor: 0.12,
   eventMaxSec: 0.6,
   eventMinSec: 0.03,
   chainSustainedSec: 0.06,
@@ -473,6 +487,16 @@ export function makeObstruentProbe(f: FrameFeatures, cfg: SpeechDetectConfig, sp
     if (hfFloorDb[i] > hfFloorCap) hfFloorDb[i] = hfFloorCap;
   }
   const tooWeakDb = speechRefDb - cfg.obstruentMaxBelowSpeechDb;
+  // hfRatio típico da VOZ deste arquivo (mediana nos frames mais fortes, que são
+  // vogais): é a régua do critério de forma — ver obstruentHfOverVoice.
+  const fortes: number[] = [];
+  for (let i = 0; i < f.count; i++) if (f.db[i] >= speechRefDb - 6) fortes.push(f.hfRatio[i]);
+  fortes.sort((a, b) => a - b);
+  const hfVoz = fortes.length ? fortes[Math.floor(fortes.length / 2)] : 0.02;
+  const hfRatioMin = Math.min(
+    cfg.obstruentHfRatioMin,
+    Math.max(cfg.obstruentHfRatioFloor, hfVoz * cfg.obstruentHfOverVoice),
+  );
   // ⚠ NÃO exigir também energia TOTAL acima do piso local: a consoante surda é
   // mais fraca que a vogal fraca, então num material justo ela fica ABAIXO do
   // próprio piso de energia — medido no /s/ de "mesmoS" (db −44,0 contra piso
@@ -482,7 +506,7 @@ export function makeObstruentProbe(f: FrameFeatures, cfg: SpeechDetectConfig, sp
   const isObstruent = (i: number) =>
     i >= 0 && i < f.count &&
     f.db[i] >= tooWeakDb &&
-    f.hfRatio[i] >= cfg.obstruentHfRatioMin &&
+    f.hfRatio[i] >= hfRatioMin &&
     f.hfDb[i] >= hfFloorDb[i] + cfg.obstruentHfOverFloorDb;
   return { isObstruent, floorDb, hfFloorDb };
 }
@@ -738,8 +762,15 @@ export function planSpeechCut(
   // pedida ainda é preciso caber as duas bordas intocadas + um corte que valha a
   // pena. Sem isso, o controle da UI não alcançava as pausas curtas — o usuário
   // arrastava de 0.50 até 0.01 e a duração mal mudava em áudio bem falado.
-  const padSec = (padTailN + padAttackN) * fs;
-  const minGapSec = Math.max(cfg.minGapSec, keepSilence + padSec + cfg.minCutSec);
+  // A pausa entregue é `keepSilence` NO TOTAL — as folgas das bordas fazem parte
+  // dela, não se somam a ela.
+  //
+  // ⚠ Isto era uma promessa quebrada: quem punha 0,05 no controle recebia 0,05 de
+  // pausa MAIS 0,02+0,02 de folga = 0,07 em cada corte. Num vídeo de 70 s com 30
+  // pausas, 0,6 s a mais de silêncio que ninguém pediu — e a sensação, correta, de
+  // que "dava pra decupar um pouco mais no 0,05".
+  const keepInnerN = Math.max(1, keepN - padTailN - padAttackN);
+  const minGapSec = Math.max(cfg.minGapSec, keepSilence + cfg.minCutSec);
   const minGapN = Math.round(minGapSec / fs);
   const minCutN = Math.max(1, Math.round(cfg.minCutSec / fs));
 
@@ -804,20 +835,20 @@ export function planSpeechCut(
       const savedAttack = j - b;
       b -= padAttackN;
 
-      if (b - a > keepN) {
+      if (b - a > keepInnerN) {
         savedN += savedTail + savedAttack;
         // a pausa que sobrevive é a janela mais silenciosa do intervalo:
         // é assim que a respiração some junto com o silêncio.
         let bestOff = 0;
         let run = 0;
-        for (let k = 0; k < keepN && a + k < b; k++) run += f.rms[a + k];
+        for (let k = 0; k < keepInnerN && a + k < b; k++) run += f.rms[a + k];
         let bestSum = run;
-        for (let k = a + keepN; k < b; k++) {
-          run += f.rms[k] - f.rms[k - keepN];
-          if (run < bestSum) { bestSum = run; bestOff = k - keepN - a + 1; }
+        for (let k = a + keepInnerN; k < b; k++) {
+          run += f.rms[k] - f.rms[k - keepInnerN];
+          if (run < bestSum) { bestSum = run; bestOff = k - keepInnerN - a + 1; }
         }
         const qa = a + bestOff;
-        const qb = qa + keepN;
+        const qb = qa + keepInnerN;
         let cut = 0;
         if (qa - a >= minCutN) { drops.push([a, qa]); cut++; }
         if (b - qb >= minCutN) { drops.push([qb, b]); cut++; }
