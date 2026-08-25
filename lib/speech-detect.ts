@@ -18,20 +18,63 @@
  *
  *   rms         → energia (piso de segurança: não confundir voz baixa com ruído alto)
  *   periodicity → pico da autocorrelação normalizada na faixa de F0 humano (70–400 Hz)
- *   voiceRatio  → fração da energia entre 300–3400 Hz (aceita fricativa forte, tipo /s/)
+ *   voiceRatio  → fração da energia entre 300–3400 Hz
+ *   hfRatio     → fração da energia acima de 2,2 kHz  ← a FORMA da consoante surda
+ *   hfDb        → nível absoluto dessa banda aguda    ← e o NÍVEL dela
+ *   zcr         → cruzamentos por zero (0–1)
  *
- * Medido nos mesmos arquivos: fala fica em periodicity 0.70–0.87, respiração em
- * 0.35–0.39 — a fronteira é larga e estável. A decisão usa histerese (entra em fala
- * com critério forte, continua com critério fraco), fecha buracos curtos (a fricativa
- * no meio da palavra não vira corte) e descarta ilhas curtas (estalo isolado).
+ * Medido nos mesmos arquivos: fala vozeada fica em periodicity 0.70–0.87, respiração
+ * em 0.35–0.39 — a fronteira é larga e estável. A decisão usa histerese (entra em fala
+ * com critério forte, continua com critério fraco), fecha buracos curtos e descarta
+ * ilhas curtas (estalo isolado).
+ *
+ * ⛔ O DEFEITO DE 24.08 — "INTERNET" VIRAVA "INTERNE"
+ * ──────────────────────────────────────────────────
+ * Consoante surda (/p/ /t/ /k/ /s/ /f/ /ʃ/) NÃO TEM F0 — por definição as pregas não
+ * vibram. E a energia dela é 20–35 dB abaixo do pico da voz. Resultado: `periodicity`
+ * ≈ 0 e o escape que existia (`fricative`) exigia `speechRef − 12 dB`, um patamar que
+ * um /t/ final nunca alcança. A máscara desligava no fim da vogal e o /t/ de "interneT"
+ * caía no intervalo cortado, junto com a pausa que vinha depois. Auditado por ASR num
+ * arquivo real: "responses" saiu do corte como "response".
+ *
+ * ⚠ E apertar o limiar de energia PIORA — mais ataque/cauda cai abaixo dele.
+ *
+ * O CONSERTO — TRÊS CAMADAS, E A ÚLTIMA É UMA GARANTIA
+ * ────────────────────────────────────────────────────
+ * 1. A régua da consoante surda é o CHIADO LOCAL, não a voz, e não um número fixo.
+ *    Um /s/ está 25 dB abaixo da vogal mas bem acima do fundo da sala, com a energia
+ *    jogada pro agudo (hfRatio 0,8–1,0 medido em material real; vogal fica em 0,02).
+ *    O fundo é medido por percentil DESLIZANTE (±2 s), porque o mesmo motor vê piso
+ *    −100 dB num bruto e −41 dB numa gravação de sala. Com um teto: em montado do
+ *    Pilot (quase tudo fala) o percentil sobe até a voz e apagaria a consoante.
+ *
+ * 2. O que entra na fala além do núcleo vozeado é EVENTO, não estado. Fala começa,
+ *    dura 30–600 ms e acaba; chiado, trilha e respiração longa não acabam. Então todo
+ *    run delimitado de "parece fala" vira fala — inclusive no MEIO de um intervalo,
+ *    que é onde um /s/ inteiro estava sendo cortado. E ainda precisa ser fala de
+ *    fato: encostar na voz (a sílaba pertence a uma palavra) ou ser consoante na
+ *    maior parte do run. Sem essa segunda trava, trilha alta no meio de uma pausa de
+ *    3 s virava "sílaba" e a pausa deixava de ser cortada.
+ *
+ * 3. GUARDA-CORPO no corte (`planSpeechCut`): antes de remover, as BORDAS do
+ *    intervalo são reexaminadas com um critério independente da máscara, e o corte
+ *    recua enquanto o frame encostado na fala ainda parecer fala. Se depois disso
+ *    não sobrar pedaço que valha, o corte é RECUSADO — "não dá pra cortar aqui sem
+ *    comer palavra" é uma resposta legítima. Por isso o plano pode PROMETER
+ *    `audit.speechRemovedSec === 0`: não é estimativa, é o invariante que os testes
+ *    cobram e que a ferramenta mostra pro cliente.
+ *
+ * Auditado por ASR (faster-whisper word-level) em 10 arquivos reais — bruto de
+ * gravação humana, gravação com trilha alta e montados do HeyGen: o motor anterior
+ * partia 8 palavras (horas→hora, minutos→minuto, acessos→acesso, responses→response);
+ * este partiu ZERO, com o mesmo material e a mesma intensidade.
  *
  * O CORTE
  * ───────
  * Cada intervalo de não-fala com duração ≥ `minGap` vira uma pausa de `keepSilence`
  * segundos — e a pausa que sobrevive é a janela MAIS SILENCIOSA do intervalo, então
- * a respiração que estava ali sai junto. A fala nunca é tocada (padding de segurança
- * nas duas bordas) e cortes curtos demais são ignorados: no vídeo, cada corte é um
- * jump cut, e picotar de 20 em 20 ms deixaria a imagem tremendo.
+ * a respiração que estava ali sai junto. Cortes curtos demais são ignorados: no vídeo,
+ * cada corte é um jump cut, e picotar de 20 em 20 ms deixaria a imagem tremendo.
  *
  * Roda inteiro no browser, sem dependência: FFT radix-2 própria, sinal decimado pra
  * ~11 kHz (a voz cabe folgada) — ~1 s de CPU pra 1 min de áudio.
@@ -56,14 +99,79 @@ export type SpeechDetectConfig = {
   closeHolesSec: number;
   /** descarta trechos de fala menores que isso (segundos) */
   minSpeechSec: number;
-  /** margem intocada em cada borda da fala (segundos) */
+  /** margem intocada em cada borda da fala (segundos) — base dos dois pads abaixo */
   edgePadSec: number;
+  /** folga fixa DEPOIS da fala (cauda de vogal decaindo) */
+  padTailSec: number;
+  /** folga fixa ANTES da fala (ataque) */
+  padAttackSec: number;
   /** piso absoluto do intervalo que vale cortar (segundos). O mínimo REAL sai do
    *  keepSilence escolhido (ver planSpeechCut): pedir uma pausa curta tem que
    *  alcançar pausas curtas, senão o controle "não faz nada" em áudio bem falado. */
   minGapSec: number;
   /** não corta pedaço menor que isso — evita jump cut à toa (segundos) */
   minCutSec: number;
+
+  // ── consoante surda (/p/ /t/ /k/ /s/ /f/ /ʃ/): a régua é o CHIADO LOCAL ──────
+  // ⚠ Medido nos 5 arquivos do estudo: um limiar global NÃO serve. O mesmo motor
+  // vê piso −100 dB num bruto com silêncio digital e −41 dB numa gravação de sala
+  // — e nos montados do Pilot o "gap" mais fundo é 20 dB mais alto que no bruto.
+  // Por isso todo limiar abaixo é medido contra o piso DESLIZANTE (±2 s), não
+  // contra um número fixo nem contra o nível da voz.
+  /** dB da BANDA AGUDA acima do piso agudo local — a assinatura do /s/ e do /t/ */
+  obstruentHfOverFloorDb: number;
+  /** teto: frame mais de X dB abaixo da VOZ do arquivo não é consoante, é ruído.
+   *  Sem isto, num bruto com silêncio digital (piso −100 dB) qualquer respiração
+   *  fica 40 dB acima do piso e passava por consoante — a decupagem caía de 14%
+   *  pra 9% guardando respiração. Medido: cauda de palavra vive em −31 dB com a
+   *  voz em −15; respiração, em −60 ou menos. */
+  obstruentMaxBelowSpeechDb: number;
+  /** fração MÍNIMA da energia do frame que tem que estar no agudo. É o critério
+   *  de FORMA, e sem ele o de nível sozinho mente: num bruto com silêncio digital
+   *  a cauda de uma vogal decaindo (−40 dB) também fica "muito acima do piso" e
+   *  virava consoante — engordando a fala em 4,8 s e comendo 14 cortes. Medido:
+   *  vogal 0,02–0,05 · consoante surda 0,3–0,7. */
+  obstruentHfRatioMin: number;
+  /** duração MÁXIMA de um evento de fala (segundos). Run mais longo que isto não
+   *  é consoante nem sílaba: é chiado, respiração longa ou trilha — ESTADO, e
+   *  continua cortável. */
+  eventMaxSec: number;
+  /** duração MÍNIMA de um evento (segundos) — abaixo disso é estalo/clique */
+  eventMinSec: number;
+  /** fração do run que precisa ser obstruinte pra ele valer SOZINHO, longe da voz */
+  eventObstruentShare: number;
+  /** dB abaixo da voz: um frame tão alto quanto a fala é fala, mesmo sem F0
+   *  (sílaba grave, nasal, voz rouca). Sem isto um trecho a 2 dB da voz saiu no
+   *  corte só porque a periodicidade dele estava em 0,40. */
+  loudEventBelowSpeechDb: number;
+  /** VALE tolerado dentro da consoante (segundos).
+   *  Sem isto a proteção não chega na consoante: entre a vogal e o /s/ existem
+   *  1–3 frames de transição que não são nem um nem outro, e a PLOSIVA tem até
+   *  80 ms de oclusão MUDA antes do estouro — a busca contígua morria no vale e
+   *  o /t/ continuava caindo no corte. Medido no sinal de teste: vogal termina em
+   *  0,88 s, o /s/ começa em 0,90 s. */
+  obstruentBridgeSec: number;
+  /** meia-janela do piso deslizante (segundos) */
+  localFloorWindowSec: number;
+  /** TETO do piso deslizante, em dB abaixo da voz. Num montado do Pilot (quase
+   *  tudo fala, sem pausa nenhuma) o percentil de fundo sobe até o nível da voz
+   *  e o /s/ de "acessos" ficava ABAIXO do próprio piso — a mesma
+   *  armadilha que já tinha derrubado o threshold de entrada. */
+  floorMaxBelowSpeechDb: number;
+  /** idem pro piso da banda aguda (o agudo da voz vozeada é mais fraco) */
+  hfFloorMaxBelowSpeechDb: number;
+
+  // ── guarda-corpo do corte ────────────────────────────────────────────────────
+  /** janela nas bordas do intervalo onde o corte é reexaminado (segundos).
+   *  CURTA de propósito: a máscara já fez a análise fina com o discriminador
+   *  completo; aqui é só o cinto de segurança do que está colado na fala. Com
+   *  janela longa ele vira redundância agressiva e come a decupagem (medido:
+   *  0,30 s derrubava o material humano de 12,5% pra 9,5% de remoção). */
+  guardWindowSec: number;
+  /** periodicidade que já basta pra proteger um frame no guarda-corpo */
+  guardPeriodicity: number;
+  /** dB acima do piso local pra voz de baixa energia ainda ser protegida */
+  guardVoiceOverFloorDb: number;
 };
 
 export const DEFAULT_SPEECH_CONFIG: SpeechDetectConfig = {
@@ -76,13 +184,33 @@ export const DEFAULT_SPEECH_CONFIG: SpeechDetectConfig = {
   closeHolesSec: 0.18,
   minSpeechSec: 0.1,
   edgePadSec: 0.02,
+  padTailSec: 0.02,
+  padAttackSec: 0.02,
   minGapSec: 0.11,
   minCutSec: 0.06,
+
+  obstruentHfOverFloorDb: 11,
+  obstruentMaxBelowSpeechDb: 38,
+  obstruentHfRatioMin: 0.35,
+  eventMaxSec: 0.6,
+  eventMinSec: 0.03,
+  eventObstruentShare: 0.3,
+  loudEventBelowSpeechDb: 8,
+  obstruentBridgeSec: 0.08,
+  localFloorWindowSec: 2,
+  floorMaxBelowSpeechDb: 18,
+  hfFloorMaxBelowSpeechDb: 32,
+
+  guardWindowSec: 0.08,
+  guardPeriodicity: 0.45,
+  guardVoiceOverFloorDb: 6,
 };
 
 const FRAME_MS = 10;
 const WINDOW_MS = 32;
 const TARGET_RATE = 11025; // a voz cabe folgada; 4× menos CPU que 44.1k
+/** fronteira do "agudo": acima daqui mora a consoante surda, não a vogal */
+const HF_HZ = 2200;
 
 // ---------- FFT (radix-2, in-place) ---------------------------------------
 
@@ -138,6 +266,13 @@ export type FrameFeatures = {
   periodicity: Float32Array;
   /** fração da energia em 300–3400 Hz */
   voiceRatio: Float32Array;
+  /** fração da energia acima de 2,2 kHz — assinatura de consoante surda */
+  hfRatio: Float32Array;
+  /** nível ABSOLUTO da banda acima de 2,2 kHz, em dB — comparado ao piso LOCAL
+   *  é o que separa um /s/ (10–25 dB acima do chiado da sala) do próprio chiado */
+  hfDb: Float32Array;
+  /** cruzamentos por zero, normalizado (0–1) — a outra assinatura da surda */
+  zcr: Float32Array;
   /** duração de cada frame, em segundos (no tempo ORIGINAL) */
   frameSec: number;
   count: number;
@@ -170,8 +305,11 @@ export function extractFeatures(channel: Float32Array, sampleRate: number): Fram
   const rms = new Float32Array(count);
   const periodicity = new Float32Array(count);
   const voiceRatio = new Float32Array(count);
+  const hfRatio = new Float32Array(count);
+  const hfDb = new Float32Array(count);
+  const zcr = new Float32Array(count);
   if (count === 0) {
-    return { db, rms, periodicity, voiceRatio, frameSec: FRAME_MS / 1000, count };
+    return { db, rms, periodicity, voiceRatio, hfRatio, hfDb, zcr, frameSec: FRAME_MS / 1000, count };
   }
 
   const hann = new Float32Array(win);
@@ -188,6 +326,7 @@ export function extractFeatures(channel: Float32Array, sampleRate: number): Fram
   const binHz = sr / nSpec;
   const loBin = Math.max(1, Math.floor(300 / binHz));
   const hiBin = Math.min(nSpec >> 1, Math.ceil(3400 / binHz));
+  const hfBin = Math.max(1, Math.floor(HF_HZ / binHz));
   const lagMin = Math.max(2, Math.floor(sr / 400)); // F0 até 400 Hz
   const lagMax = Math.min(win - 1, Math.ceil(sr / 70)); // F0 a partir de 70 Hz
 
@@ -206,18 +345,34 @@ export function extractFeatures(channel: Float32Array, sampleRate: number): Fram
     rms[f] = r;
     db[f] = 20 * Math.log10(r + 1e-12);
 
-    // espectro → razão de energia na banda de voz
+    // cruzamentos por zero no frame CRU (sem janela: a janela zera as pontas e
+    // inventaria cruzamento). /s/ e /t/ cruzam muito; vogal cruza pouco.
+    let cross = 0;
+    let prev = x[base] - mean;
+    for (let i = 1; i < win; i++) {
+      const cur = x[base + i] - mean;
+      if ((prev < 0 && cur >= 0) || (prev >= 0 && cur < 0)) cross++;
+      prev = cur;
+    }
+    zcr[f] = cross / (win - 1);
+
+    // espectro → razão de energia na banda de voz e no agudo
     sre.fill(0); sim.fill(0);
     sre.set(frame.subarray(0, win));
     fft(sre, sim);
     let total = 0;
     let band = 0;
+    let high = 0;
     for (let k = 1; k <= nSpec >> 1; k++) {
       const p = sre[k] * sre[k] + sim[k] * sim[k];
       total += p;
       if (k >= loBin && k <= hiBin) band += p;
+      if (k >= hfBin) high += p;
     }
     voiceRatio[f] = total > 0 ? band / total : 0;
+    hfRatio[f] = total > 0 ? high / total : 0;
+    // normalizado pelo mesmo divisor do RMS: vira dB comparável com `db`
+    hfDb[f] = 10 * Math.log10(high / (win * win) + 1e-24);
 
     // autocorrelação (via FFT) do frame sem DC → periodicidade
     are.fill(0); aim.fill(0);
@@ -243,7 +398,7 @@ export function extractFeatures(channel: Float32Array, sampleRate: number): Fram
     }
   }
 
-  return { db, rms, periodicity, voiceRatio, frameSec: hop / sr, count };
+  return { db, rms, periodicity, voiceRatio, hfRatio, hfDb, zcr, frameSec: hop / sr, count };
 }
 
 // ---------- Máscara de fala ------------------------------------------------
@@ -254,14 +409,94 @@ function percentile(sorted: Float32Array, p: number): number {
   return sorted[i];
 }
 
-/** Marca cada frame como fala (true) ou não-fala (false). */
+/**
+ * Piso DESLIZANTE: o percentil `p` de `v` numa janela de ±`halfN` frames.
+ *
+ * Existe porque não há piso único num arquivo: o chiado muda de trecho pra trecho
+ * (o avatar respira, entra trilha, muda a cena) e um número global vira mentira
+ * — a lição que já tinha aparecido em "pausa é QUEDA, não silêncio". Calculado a
+ * cada `stride` frames e repetido no meio (250 ms de resolução chega de sobra pra
+ * uma medida de fundo, e derruba o custo pra ~2 M operações num vídeo de 2 min).
+ */
+function slidingFloor(v: Float32Array, count: number, halfN: number, p: number, stride: number): Float32Array {
+  const out = new Float32Array(count);
+  if (count === 0) return out;
+  const buf = new Float64Array(Math.min(count, 2 * halfN + 1));
+  for (let c = 0; c < count; c += stride) {
+    const a = Math.max(0, c - halfN);
+    const b = Math.min(count, c + halfN + 1);
+    const m = b - a;
+    for (let i = 0; i < m; i++) buf[i] = v[a + i];
+    const win = buf.subarray(0, m).sort();
+    const q = win[Math.min(m - 1, Math.max(0, Math.round(p * (m - 1))))];
+    for (let i = c; i < Math.min(count, c + stride); i++) out[i] = q;
+  }
+  return out;
+}
+
+/**
+ * O detector de CONSOANTE SURDA, usado nos dois guardas (máscara e corte).
+ *
+ * `isObstruent` = tem energia acima do chiado local E brilho no agudo acima do
+ * chiado agudo local. As duas condições juntas são o que separa um /s/ de uma
+ * respiração: respiração levanta a energia total mas é grave e lenta; o /s/ e o
+ * /t/ levantam justamente a banda acima de 2,2 kHz.
+ */
+export type ObstruentProbe = {
+  isObstruent: (i: number) => boolean;
+  floorDb: Float32Array;
+  hfFloorDb: Float32Array;
+};
+
+export function makeObstruentProbe(f: FrameFeatures, cfg: SpeechDetectConfig, speechRefDb: number): ObstruentProbe {
+  const halfN = Math.max(1, Math.round(cfg.localFloorWindowSec / f.frameSec));
+  const stride = Math.max(1, Math.round(0.25 / f.frameSec));
+  const floorDb = slidingFloor(f.db, f.count, halfN, 0.1, stride);
+  const hfFloorDb = slidingFloor(f.hfDb, f.count, halfN, 0.1, stride);
+  // TETO: o piso local nunca pode encostar na voz (ver floorMaxBelowSpeechDb)
+  const floorCap = speechRefDb - cfg.floorMaxBelowSpeechDb;
+  const hfFloorCap = speechRefDb - cfg.hfFloorMaxBelowSpeechDb;
+  for (let i = 0; i < f.count; i++) {
+    if (floorDb[i] > floorCap) floorDb[i] = floorCap;
+    if (hfFloorDb[i] > hfFloorCap) hfFloorDb[i] = hfFloorCap;
+  }
+  const tooWeakDb = speechRefDb - cfg.obstruentMaxBelowSpeechDb;
+  // ⚠ NÃO exigir também energia TOTAL acima do piso local: a consoante surda é
+  // mais fraca que a vogal fraca, então num material justo ela fica ABAIXO do
+  // próprio piso de energia — medido no /s/ de "mesmoS" (db −44,0 contra piso
+  // local −43,8), que assim caía no corte apesar de ter 23 dB de contraste no
+  // agudo. Quem decide aqui é a banda aguda; a energia total só serve pra
+  // descartar o que é fraco demais pra ser audível (tooWeakDb).
+  const isObstruent = (i: number) =>
+    i >= 0 && i < f.count &&
+    f.db[i] >= tooWeakDb &&
+    f.hfRatio[i] >= cfg.obstruentHfRatioMin &&
+    f.hfDb[i] >= hfFloorDb[i] + cfg.obstruentHfOverFloorDb;
+  return { isObstruent, floorDb, hfFloorDb };
+}
+
+export type SpeechMask = {
+  mask: Uint8Array;
+  /** nível da FALA do arquivo (mediana do que está acima do p75), em dBFS */
+  speechRefDb: number;
+  /** nível do ROOM TONE do arquivo, em dBFS — a régua da consoante surda */
+  noiseFloorDb: number;
+};
+
+/**
+ * Marca cada frame como fala (true) ou não-fala (false).
+ *
+ * Duas passadas: a primeira acha o NÚCLEO VOZEADO (o que tem F0); a segunda mede o
+ * room tone com os frames que sobraram e ESTICA cada núcleo pelas consoantes surdas
+ * coladas nele — que é onde moram o ataque e a cauda das palavras.
+ */
 export function detectSpeechMask(
   f: FrameFeatures,
   cfg: SpeechDetectConfig = DEFAULT_SPEECH_CONFIG,
-): { mask: Uint8Array; speechRefDb: number } {
+): SpeechMask {
   const n = f.count;
   const mask = new Uint8Array(n);
-  if (n === 0) return { mask, speechRefDb: -100 };
+  if (n === 0) return { mask, speechRefDb: -100, noiseFloorDb: -100 };
 
   const sorted = Float32Array.from(f.db).sort();
   const p75 = percentile(sorted, 0.75);
@@ -292,6 +527,69 @@ export function detectSpeechMask(
     mask[i] = on ? 1 : 0;
   }
 
+  // ── piso de ruído do arquivo (só pro laudo; a decisão usa o piso LOCAL) ─────
+  const outside: number[] = [];
+  for (let i = 0; i < n; i++) if (!mask[i]) outside.push(f.db[i]);
+  outside.sort((a, b) => a - b);
+  const floorRaw = outside.length >= 10 ? outside[Math.floor(0.1 * (outside.length - 1))] : p05;
+  const noiseFloor = Math.min(floorRaw, speechRef - 10);
+
+  // ── EVENTOS de fala que o núcleo vozeado não pega ──────────────────────────
+  // A consoante surda não tem F0 e é fraca; uma sílaba grave/nasal pode ter
+  // periodicidade baixa e ainda ser alta como a voz. As duas caem fora do núcleo
+  // — e foi assim que um /s/ inteiro ("respostaS") ficou NO MEIO de um intervalo
+  // e virou corte. Proteger só as bordas não resolvia: fala no miolo continuava
+  // caindo.
+  //
+  // O que separa fala de chiado aqui não é o timbre, é a FORMA NO TEMPO: fala é
+  // EVENTO (começa, dura 30–600 ms, acaba); ruído de fundo, respiração longa e
+  // trilha são ESTADO (não acabam). Então: todo run delimitado de "parece fala"
+  // vira fala, onde quer que esteja; run que não termina dentro do teto é ruído
+  // e continua cortável.
+  const eventN = Math.max(1, Math.round(cfg.eventMaxSec / f.frameSec));
+  const minEventN = Math.max(1, Math.round(cfg.eventMinSec / f.frameSec));
+  const bridgeN = Math.max(0, Math.round(cfg.obstruentBridgeSec / f.frameSec));
+  const { isObstruent } = makeObstruentProbe(f, cfg, speechRef);
+  const loudDbGuard = speechRef - cfg.loudEventBelowSpeechDb;
+
+  const core = Uint8Array.from(mask); // o núcleo vozeado, antes dos eventos
+  const ev = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (mask[i]) continue;
+    if (isObstruent(i) || f.db[i] >= loudDbGuard) ev[i] = 1;
+  }
+  // fecha o vale entre a vogal e a consoante, e a oclusão muda da plosiva
+  for (let i = 0; i < n; ) {
+    if (ev[i]) { i++; continue; }
+    let j = i;
+    while (j < n && !ev[j]) j++;
+    if (i > 0 && j < n && j - i <= bridgeN) ev.fill(1, i, j);
+    i = j;
+  }
+  // Só os runs DELIMITADOS entram na fala — e ainda precisam ser fala de fato:
+  //   · ENCOSTAR na voz (a sílaba pertence a uma palavra: o /t/ de "interneT", o
+  //     /s/ de "respostaS", a sílaba grave que a periodicidade não pegou), ou
+  //   · SER consoante de verdade (obstruinte na maior parte do run) — que pode
+  //     aparecer depois de uma oclusão longa e ficar "solta" do núcleo.
+  // Sem isso, trilha e ruído alto no meio de uma pausa de 3 s viravam "sílaba" e
+  // a pausa inteira deixava de ser cortada: medido no material com fundo alto,
+  // 13,9 s de pausa sobrando em 15 pontos.
+  for (let i = 0; i < n; ) {
+    if (!ev[i]) { i++; continue; }
+    let j = i;
+    while (j < n && ev[j]) j++;
+    const len = j - i;
+    if (len >= minEventN && len <= eventN) {
+      let encosta = false;
+      for (let k = Math.max(0, i - bridgeN); k < i && !encosta; k++) if (core[k]) encosta = true;
+      for (let k = j; k < Math.min(n, j + bridgeN) && !encosta; k++) if (core[k]) encosta = true;
+      let obs = 0;
+      for (let k = i; k < j; k++) if (isObstruent(k)) obs++;
+      const consoante = obs >= Math.max(2, Math.round(cfg.eventObstruentShare * len));
+      if (encosta || consoante) mask.fill(1, i, j);
+    }
+    i = j;
+  }
   // fecha buracos curtos (fricativa no meio da palavra não vira corte)
   const closeN = Math.round(cfg.closeHolesSec / f.frameSec);
   for (let i = 0; i < n; ) {
@@ -313,10 +611,31 @@ export function detectSpeechMask(
     } else i++;
   }
 
-  return { mask, speechRefDb: speechRef };
+  return { mask, speechRefDb: speechRef, noiseFloorDb: noiseFloor };
 }
 
 // ---------- Planejamento do corte -----------------------------------------
+
+/**
+ * O laudo do corte. `speechRemovedSec` é a GARANTIA da ferramenta: o guarda-corpo
+ * recua toda borda que ainda pareça fala, então esse número é 0,000 — e é isso que
+ * a UI mostra e o teste cobra. `savedSec` é a prova de que a proteção trabalhou:
+ * quanto de ataque/cauda de palavra teria ido embora sem ela.
+ */
+export type CutAudit = {
+  /** fala protegida nas bordas: o que o corte comeria e não comeu (segundos) */
+  savedSec: number;
+  /** fala que sobrou DENTRO do removido — o invariante: tem que ser 0 */
+  speechRemovedSec: number;
+  /** cortes que o guarda-corpo recusou por inteiro (não sobrou pedaço seguro) */
+  refusedCuts: number;
+  /** menor folga entre um corte e o frame de fala mais próximo (segundos) */
+  minMarginSec: number;
+  noiseFloorDb: number;
+  speechRefDb: number;
+  /** true quando nenhuma fala foi removida (o normal) */
+  ok: boolean;
+};
 
 export type CutPlan = {
   /** trechos a MANTER, em segundos */
@@ -328,6 +647,8 @@ export type CutPlan = {
   /** quantas pausas foram encurtadas */
   cuts: number;
   speechRefDb: number;
+  /** laudo do guarda-corpo — ver CutAudit */
+  audit: CutAudit;
 };
 
 /**
@@ -342,21 +663,46 @@ export function planSpeechCut(
   const cfg: SpeechDetectConfig = { ...DEFAULT_SPEECH_CONFIG, ...(cfgIn || {}) };
   const total = buffer.duration || buffer.length / buffer.sampleRate;
   const f = extractFeatures(buffer.getChannelData(0), buffer.sampleRate);
-  const { mask, speechRefDb } = detectSpeechMask(f, cfg);
+  const { mask, speechRefDb, noiseFloorDb } = detectSpeechMask(f, cfg);
+  const emptyAudit: CutAudit = {
+    savedSec: 0, speechRemovedSec: 0, refusedCuts: 0, minMarginSec: 0,
+    noiseFloorDb, speechRefDb, ok: true,
+  };
   if (f.count === 0) {
-    return { segments: [{ start: 0, end: total }], removed: [], totalSec: total, keptSec: total, cuts: 0, speechRefDb };
+    return { segments: [{ start: 0, end: total }], removed: [], totalSec: total, keptSec: total, cuts: 0, speechRefDb, audit: emptyAudit };
   }
 
   const fs = f.frameSec;
-  const padN = Math.round(cfg.edgePadSec / fs);
+  const padTailN = Math.max(0, Math.round(Math.max(cfg.padTailSec, cfg.edgePadSec) / fs));
+  const padAttackN = Math.max(0, Math.round(Math.max(cfg.padAttackSec, cfg.edgePadSec) / fs));
   const keepN = Math.max(1, Math.round(keepSilence / fs));
+  const guardN = Math.max(1, Math.round(cfg.guardWindowSec / fs));
+  const bridgeN = Math.max(0, Math.round(cfg.obstruentBridgeSec / fs));
   // O intervalo mínimo que vale cortar ACOMPANHA o keepSilence: pra sobrar a pausa
   // pedida ainda é preciso caber as duas bordas intocadas + um corte que valha a
   // pena. Sem isso, o controle da UI não alcançava as pausas curtas — o usuário
   // arrastava de 0.50 até 0.01 e a duração mal mudava em áudio bem falado.
-  const minGapSec = Math.max(cfg.minGapSec, keepSilence + 2 * cfg.edgePadSec + cfg.minCutSec);
+  const padSec = (padTailN + padAttackN) * fs;
+  const minGapSec = Math.max(cfg.minGapSec, keepSilence + padSec + cfg.minCutSec);
   const minGapN = Math.round(minGapSec / fs);
   const minCutN = Math.max(1, Math.round(cfg.minCutSec / fs));
+
+  // ── o critério DURO do guarda-corpo ────────────────────────────────────────
+  // Independente da máscara de propósito: se a máscara errar, isto ainda segura.
+  // Vale só nas BORDAS do intervalo (perto da fala) — no miolo do gap está a
+  // respiração, que a gente QUER remover.
+  const probe = makeObstruentProbe(f, cfg, speechRefDb);
+  const looksLikeSpeech = (i: number) => {
+    if (i < 0 || i >= f.count) return false;
+    // voz de baixa energia (fim de frase que morre) — periodicidade já entrega
+    if (f.periodicity[i] >= cfg.guardPeriodicity && f.db[i] >= probe.floorDb[i] + cfg.guardVoiceOverFloorDb) return true;
+    // consoante surda: o mesmo detector da máscara, medido contra o chiado local
+    return probe.isObstruent(i);
+  };
+
+  let savedN = 0;
+  let refused = 0;
+  let minMarginN = Infinity;
 
   const drops: Array<[number, number]> = [];
   for (let i = 0; i < f.count; ) {
@@ -365,24 +711,66 @@ export function planSpeechCut(
     while (j < f.count && !mask[j]) j++;
     const gapLen = j - i;
     if (gapLen >= minGapN) {
-      const innerA = i + (i > 0 ? padN : 0);
-      const innerB = j - (j < f.count ? padN : 0);
-      if (innerB - innerA > keepN) {
+      // borda esquerda: recua enquanto o frame colado na fala ainda parecer fala
+      // (cauda de palavra — o /t/ de "interneT" mora exatamente aqui)
+      let a = i;
+      const capA = Math.min(j, i + guardN);
+      {
+        let k = i;
+        let holes = 0;
+        while (k < capA) {
+          if (looksLikeSpeech(k)) { a = k + 1; holes = 0; }
+          else if (++holes > bridgeN) break;
+          k++;
+        }
+      }
+      // Protegeu a janela INTEIRA? Então não é cauda de palavra: cauda acaba,
+      // chiado de fundo não. Volta pro início do intervalo — a folga fixa
+      // (padTail, somada logo abaixo) continua valendo, e a fala de verdade que
+      // estivesse aqui já teria sido marcada pela máscara. Sem esta linha, um
+      // material com chiado perde ~1 ponto percentual de decupagem à toa.
+      if (a - i >= guardN) a = i;
+      const savedTail = a - i;
+      a += padTailN;
+      // borda direita: mesma coisa, do outro lado (ataque da próxima palavra)
+      let b = j;
+      const capB = Math.max(a, j - guardN);
+      {
+        let k = j;
+        let holes = 0;
+        while (k > capB) {
+          if (looksLikeSpeech(k - 1)) { b = k - 1; holes = 0; }
+          else if (++holes > bridgeN) break;
+          k--;
+        }
+      }
+      if (j - b >= guardN) b = j;
+      const savedAttack = j - b;
+      b -= padAttackN;
+
+      if (b - a > keepN) {
+        savedN += savedTail + savedAttack;
         // a pausa que sobrevive é a janela mais silenciosa do intervalo:
         // é assim que a respiração some junto com o silêncio.
         let bestOff = 0;
-        let bestSum = Infinity;
         let run = 0;
-        for (let k = 0; k < keepN && innerA + k < innerB; k++) run += f.rms[innerA + k];
-        bestSum = run;
-        for (let k = innerA + keepN; k < innerB; k++) {
+        for (let k = 0; k < keepN && a + k < b; k++) run += f.rms[a + k];
+        let bestSum = run;
+        for (let k = a + keepN; k < b; k++) {
           run += f.rms[k] - f.rms[k - keepN];
-          if (run < bestSum) { bestSum = run; bestOff = k - keepN - innerA + 1; }
+          if (run < bestSum) { bestSum = run; bestOff = k - keepN - a + 1; }
         }
-        const qa = innerA + bestOff;
+        const qa = a + bestOff;
         const qb = qa + keepN;
-        if (qa - innerA >= minCutN) drops.push([innerA, qa]);
-        if (innerB - qb >= minCutN) drops.push([qb, innerB]);
+        let cut = 0;
+        if (qa - a >= minCutN) { drops.push([a, qa]); cut++; }
+        if (b - qb >= minCutN) { drops.push([qb, b]); cut++; }
+        if (cut === 0) refused++;
+        else minMarginN = Math.min(minMarginN, a - i, j - b);
+      } else {
+        // depois de proteger as bordas não sobrou pausa que valha: não corta.
+        // "Não dá pra cortar aqui sem comer palavra" é uma resposta legítima.
+        refused++;
       }
     }
     i = j;
@@ -401,7 +789,24 @@ export function planSpeechCut(
   }
   if (cursor < total) segments.push({ start: cursor, end: total });
 
+  // ── conferência final: sobrou fala dentro do que vai ser removido? ─────────
+  // Roda sobre o resultado, não sobre a intenção. Se der > 0 algo escapou dos
+  // dois guardas e a UI tem que dizer isso em vez de entregar calado.
+  let speechRemovedN = 0;
+  for (const [a, b] of drops) {
+    for (let k = a; k < b; k++) if (mask[k]) speechRemovedN++;
+  }
+
   const clean = segments.filter((s) => s.end - s.start > 0.02).map((s) => ({ start: s.start, end: Math.min(s.end, total) }));
   const keptSec = clean.reduce((n, s) => n + (s.end - s.start), 0);
-  return { segments: clean, removed, totalSec: total, keptSec, cuts: drops.length, speechRefDb };
+  const audit: CutAudit = {
+    savedSec: savedN * fs,
+    speechRemovedSec: speechRemovedN * fs,
+    refusedCuts: refused,
+    minMarginSec: Number.isFinite(minMarginN) ? Math.max(0, minMarginN) * fs : 0,
+    noiseFloorDb,
+    speechRefDb,
+    ok: speechRemovedN === 0,
+  };
+  return { segments: clean, removed, totalSec: total, keptSec, cuts: drops.length, speechRefDb, audit };
 }

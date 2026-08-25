@@ -7,7 +7,12 @@
  *      do detector antigo, que só olhava energia e deixava tudo passar;
  *   3. silêncio de verdade não é fala;
  *   4. o corte encurta as pausas SEM tocar na voz;
- *   5. `keepSilence` maior deixa mais pausa (o controle da UI faz o que promete).
+ *   5. `keepSilence` maior deixa mais pausa (o controle da UI faz o que promete);
+ *   6. CONSOANTE SURDA no fim da palavra sobrevive — o defeito de 24.08, em que
+ *      "internet" saía "interne" e "horas" saía "hora". Consoante surda não tem F0
+ *      e é 25 dB mais fraca que a vogal: quem decide por periodicidade+energia a
+ *      trata como pausa e o corte come o fim da palavra;
+ *   7. o INVARIANTE do laudo: `audit.speechRemovedSec === 0` em todo plano.
  */
 import {
   extractFeatures,
@@ -28,6 +33,10 @@ const SR = 16000;
 type Part =
   | { kind: 'voice'; sec: number; f0?: number; amp?: number }
   | { kind: 'noise'; sec: number; amp?: number }
+  /** respiração de verdade: ruído GRAVE (passa-baixa), não ruído branco */
+  | { kind: 'breath'; sec: number; amp?: number }
+  /** /s/ /ʃ/ /f/: ruído AGUDO, fraco e curto, colado na vogal */
+  | { kind: 'fricative'; sec: number; amp?: number }
   | { kind: 'silence'; sec: number };
 
 /** Gerador determinístico (sem Math.random: teste tem que dar sempre o mesmo). */
@@ -44,9 +53,28 @@ function build(parts: Part[], sampleRate = SR) {
   let i = 0;
   for (const p of parts) {
     const n = Math.round(p.sec * sampleRate);
+    // ruído GRAVE (média móvel = passa-baixa): é assim que respiração soa
+    let lp = 0;
+    // ruído AGUDO (diferenciador = passa-alta): é assim que /s/ e /t/ soam
+    let prev = 0;
     for (let k = 0; k < n; k++, i++) {
       if (p.kind === 'silence') { data[i] = 0; continue; }
       if (p.kind === 'noise') { data[i] = (p.amp ?? 0.018) * rnd(); continue; }
+      if (p.kind === 'breath') {
+        const r = rnd();
+        lp = lp * 0.88 + r * 0.12;
+        data[i] = (p.amp ?? 0.02) * lp * 6;
+        continue;
+      }
+      if (p.kind === 'fricative') {
+        const r = rnd();
+        const hp = r - prev;
+        prev = r;
+        // envelope suave nas pontas pra não virar clique
+        const env = Math.min(1, Math.min(k, n - k) / Math.max(1, sampleRate * 0.004));
+        data[i] = (p.amp ?? 0.014) * hp * env;
+        continue;
+      }
       const t = k / sampleRate;
       const f0 = p.f0 ?? 130;
       const amp = p.amp ?? 0.25;
@@ -162,6 +190,89 @@ console.log('\nGARANTIA — config default é sã:');
   ok(DEFAULT_SPEECH_CONFIG.periodicityEnter > DEFAULT_SPEECH_CONFIG.periodicityStay, 'histerese: entrar exige mais que continuar');
   ok(DEFAULT_SPEECH_CONFIG.enterOffsetDb > DEFAULT_SPEECH_CONFIG.exitOffsetDb, 'histerese de energia na mesma direção');
   ok(DEFAULT_SPEECH_CONFIG.minGapSec >= DEFAULT_SPEECH_CONFIG.minCutSec, 'não corta pedaço maior que o próprio intervalo mínimo');
+}
+
+console.log('\nGARANTIA — CONSOANTE SURDA no fim da palavra não é comida (bug 24.08):');
+{
+  // "interneT": vogal + /t/ fraco e agudo, e só DEPOIS a pausa longa. O detector
+  // antigo não via o /t/ (sem F0, 25 dB abaixo da vogal) e o corte começava nele.
+  const buf = build([
+    { kind: 'voice', sec: 0.9 },
+    { kind: 'fricative', sec: 0.06, amp: 0.012 },
+    { kind: 'silence', sec: 1.4 },
+    { kind: 'voice', sec: 0.9 },
+  ]);
+  const plan = planSpeechCut(buf, 0.05);
+  const comeu = plan.removed.reduce(
+    (n, r) => n + Math.max(0, Math.min(r.end, 0.96) - Math.max(r.start, 0.9)), 0,
+  );
+  ok(comeu < 0.005, `o /t/ final sobreviveu (comeu ${comeu.toFixed(3)}s)`);
+  ok(plan.cuts >= 1, `e ainda assim cortou a pausa (${plan.cuts} cortes)`);
+  ok(plan.keptSec < buf.duration - 0.8, `a pausa de 1,4s foi encurtada (${buf.duration.toFixed(1)}s → ${plan.keptSec.toFixed(1)}s)`);
+}
+
+{
+  // "horaS": o /s/ do plural, mais longo que a plosiva — o caso que o ASR pegou
+  // no material real (horas→hora, minutos→minuto, acessos→acesso).
+  const buf = build([
+    { kind: 'voice', sec: 0.8 },
+    { kind: 'fricative', sec: 0.18, amp: 0.014 },
+    { kind: 'silence', sec: 1.5 },
+    { kind: 'voice', sec: 0.8 },
+  ]);
+  const plan = planSpeechCut(buf, 0.05);
+  const comeu = plan.removed.reduce(
+    (n, r) => n + Math.max(0, Math.min(r.end, 0.98) - Math.max(r.start, 0.8)), 0,
+  );
+  ok(comeu < 0.01, `o /s/ do plural sobreviveu (comeu ${comeu.toFixed(3)}s)`);
+  ok(plan.cuts >= 1, 'e a pausa de 1,5s continuou sendo cortada');
+}
+
+{
+  // ataque: o /p/ de "Pepino" — consoante ANTES da vogal, logo depois de uma pausa
+  const buf = build([
+    { kind: 'voice', sec: 0.8 },
+    { kind: 'silence', sec: 1.4 },
+    { kind: 'fricative', sec: 0.05, amp: 0.012 },
+    { kind: 'voice', sec: 0.9 },
+  ]);
+  const plan = planSpeechCut(buf, 0.05);
+  const comeu = plan.removed.reduce(
+    (n, r) => n + Math.max(0, Math.min(r.end, 2.25) - Math.max(r.start, 2.2)), 0,
+  );
+  ok(comeu < 0.005, `o ataque da palavra sobreviveu (comeu ${comeu.toFixed(3)}s)`);
+}
+
+console.log('\nGARANTIA — respiração continua saindo (a proteção não virou desculpa):');
+{
+  const buf = build([
+    { kind: 'voice', sec: 1.0 },
+    { kind: 'breath', sec: 0.9 },
+    { kind: 'silence', sec: 0.8 },
+    { kind: 'voice', sec: 1.0 },
+  ]);
+  const plan = planSpeechCut(buf, 0.05);
+  ok(plan.keptSec < 2.7, `respiração + silêncio saíram (3.7s → ${plan.keptSec.toFixed(2)}s)`);
+}
+
+console.log('\nGARANTIA — o laudo é o contrato: nada de fala dentro do removido:');
+{
+  const casos = [
+    build([{ kind: 'voice', sec: 1 }, { kind: 'silence', sec: 1.2 }, { kind: 'voice', sec: 1 }]),
+    build([{ kind: 'voice', sec: 0.7 }, { kind: 'fricative', sec: 0.15 }, { kind: 'breath', sec: 0.7 },
+           { kind: 'silence', sec: 0.9 }, { kind: 'voice', sec: 0.7 }]),
+    build([{ kind: 'voice', sec: 2 }]),
+    build([{ kind: 'silence', sec: 2 }]),
+    build([{ kind: 'breath', sec: 1.5 }, { kind: 'voice', sec: 0.6 }]),
+  ];
+  let todosOk = true;
+  for (const c of casos) {
+    for (const keep of [0.01, 0.05, 0.12, 0.3]) {
+      const plan = planSpeechCut(c, keep);
+      if (plan.audit.speechRemovedSec > 0 || !plan.audit.ok) todosOk = false;
+    }
+  }
+  ok(todosOk, 'audit.speechRemovedSec === 0 em 5 sinais × 4 intensidades');
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} speech-detect: ${pass} ok, ${fail} fail`);

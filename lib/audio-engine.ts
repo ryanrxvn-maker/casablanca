@@ -246,7 +246,20 @@ export function trimSpeechCut(
   buffer: AudioBuffer,
   keepSilence: number = 0.08,
 ): AudioBuffer {
-  const { segments } = planSpeechCut(buffer, keepSilence);
+  return trimSpeechCutWithPlan(buffer, keepSilence).buffer;
+}
+
+/**
+ * Igual a `trimSpeechCut`, mas devolve JUNTO o plano — inclusive o laudo
+ * (`plan.audit`), que é o que a ferramenta mostra pro cliente: quanta fala foi
+ * protegida nas bordas e a confirmação de que nada de fala entrou no corte.
+ */
+export function trimSpeechCutWithPlan(
+  buffer: AudioBuffer,
+  keepSilence: number = 0.08,
+): { buffer: AudioBuffer; plan: ReturnType<typeof planSpeechCut> } {
+  const plan = planSpeechCut(buffer, keepSilence);
+  const { segments } = plan;
   const sr = buffer.sampleRate;
   const chCount = buffer.numberOfChannels;
   const ranges = segments.map((s) => ({
@@ -265,7 +278,7 @@ export function trimSpeechCut(
       offset += r.end - r.start;
     }
   }
-  return out as unknown as AudioBuffer;
+  return { buffer: out as unknown as AudioBuffer, plan };
 }
 
 // ---------- Split por parágrafos ------------------------------------------

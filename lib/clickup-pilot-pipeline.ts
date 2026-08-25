@@ -640,6 +640,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     const partLabels = item._partLabels || [];
     if (leveled.length === 0) continue;
 
+    // Laudo do corte DESTA task (ver plan.audit em lib/speech-detect).
+    let decupSavedSec = 0;
+    let decupAuditWarn = '';
+
     // Decupa UMA parte. Retorna o blob cortado, ou null se não dá pra cortar
     // (sem fala detectável OU erro persistente) — aí o chamador usa a original.
     // ASSERTIVIDADE: o ffmpeg-wasm trava de forma INTERMITENTE (uma parte que
@@ -659,6 +663,14 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           // DUAS bordas de cada pausa — medido em material real: cortava 0-2%.
           const plan = planSpeechCut(audioBuf, keepSilenceSec);
           const segments = plan.segments;
+          // LAUDO do corte (o mesmo que a ferramenta mostra pro cliente). O motor
+          // recua toda borda que encosta em fala, então `speechRemovedSec` sai 0 —
+          // se um dia não sair, isso vira aviso na task em vez de sumir no console.
+          if (!plan.audit.ok) {
+            decupAuditWarn = `${label}: o corte encostou em ${plan.audit.speechRemovedSec.toFixed(2)}s de fala`;
+            console.warn(`[clickup-pilot-pipeline] decup ${decupAuditWarn}`);
+          }
+          decupSavedSec += plan.audit.savedSec;
           if (segments.length === 0) return null; // sem fala → mantém original (NÃO é erro)
           // Parte é curta; teto generoso por segurança (não é o tempo esperado).
           const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
@@ -700,6 +712,13 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       }
       if (cut && cut.size > 1024) { decupadoParts.push(cut); cutCount++; }
       else decupadoParts.push(leveled[k]); // fallback: parte nivelada original (sem corte)
+    }
+
+    if (decupSavedSec >= 0.01) {
+      console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${decupSavedSec.toFixed(2)}s de ataque/cauda de palavra protegidos do corte`);
+    }
+    if (decupAuditWarn) {
+      item.errors = { ...item.errors, decupagem: `confere o corte — ${decupAuditWarn}` };
     }
 
     if (cutCount === 0) {

@@ -25,7 +25,7 @@ import {
   decodeAudioRobust,
   downloadBlob,
   encodeWAV,
-  trimSpeechCut,
+  trimSpeechCutWithPlan,
 } from '@/lib/audio-engine';
 import { planSpeechCut } from '@/lib/speech-detect';
 import {
@@ -38,6 +38,7 @@ import {
   splitMediaForChunks,
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
+import { DecupAuditBadge, type DecupAudit } from '@/components/DecupAuditBadge';
 import { formatTime } from '@/lib/utils';
 import { useTier } from '@/lib/use-tier';
 import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
@@ -45,9 +46,31 @@ import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 type OutputKind = 'video' | 'audio';
 type AudioFmt = 'wav' | 'mp3';
 
+function toAudit(plan: { cuts: number; audit: { savedSec: number; speechRemovedSec: number; refusedCuts: number; ok: boolean } }): DecupAudit {
+  return {
+    savedSec: plan.audit.savedSec,
+    speechRemovedSec: plan.audit.speechRemovedSec,
+    refusedCuts: plan.audit.refusedCuts,
+    cuts: plan.cuts,
+    ok: plan.audit.ok,
+  };
+}
+
+function mergeAudit(a: DecupAudit | undefined, b: DecupAudit | undefined): DecupAudit | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    savedSec: a.savedSec + b.savedSec,
+    speechRemovedSec: a.speechRemovedSec + b.speechRemovedSec,
+    refusedCuts: a.refusedCuts + b.refusedCuts,
+    cuts: a.cuts + b.cuts,
+    ok: a.ok && b.ok,
+  };
+}
+
 type Result =
-  | { kind: 'video'; blob: Blob; url: string; originalDur: number; newDur: number }
-  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number };
+  | { kind: 'video'; blob: Blob; url: string; originalDur: number; newDur: number; audit?: DecupAudit }
+  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number; audit?: DecupAudit };
 
 type QueueStatus = 'pending' | 'processing' | 'done' | 'error';
 type QueueItem = {
@@ -111,6 +134,14 @@ function isAcceptedMedia(file: File): boolean {
   return /\.(mp3|wav|m4a|aac|ogg|opus|flac|mp4|webm|mov|mkv|avi)$/i.test(file.name);
 }
 
+/**
+ * O selo de auditoria — a promessa da ferramenta, escrita em número.
+ *
+ * Não é enfeite: o corte é reexaminado nas bordas e recua sempre que encosta em
+ * fala, então "nenhuma palavra cortada" é uma medição do resultado, não uma
+ * intenção. Quando o motor não consegue garantir (nunca deveria acontecer), o
+ * selo vira aviso âmbar em vez de sumir.
+ */
 function baseName(name?: string | null) {
   if (!name) return 'arquivo';
   return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
@@ -214,7 +245,7 @@ export default function DecupagemPage() {
     onStage: (s: string) => void,
     onProgress: (r: number | null) => void,
     allowEmpty: boolean,
-  ): Promise<{ blob: Blob | null; originalDur: number; newDur: number }> {
+  ): Promise<{ blob: Blob | null; originalDur: number; newDur: number; audit?: DecupAudit }> {
     if (kind === 'audio') {
       // Regula a voz (nível + limpeza, transparente) ANTES de cortar — voz
       // baixa não vira silêncio e o ruído some sem deixar a voz robótica.
@@ -227,7 +258,8 @@ export default function DecupagemPage() {
       onStage('Carregando...');
       const decoded = await decodeAudioRobust(leveled, () => onStage('Carregando...'));
       onStage('Cortando silêncios...');
-      const trimmed = trimSpeechCut(decoded, keepSilence);
+      const { buffer: trimmed, plan: audioPlan } = trimSpeechCutWithPlan(decoded, keepSilence);
+      const audit = toAudit(audioPlan);
       if (trimmed.duration <= 0.05) {
         if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
         throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
@@ -246,7 +278,7 @@ export default function DecupagemPage() {
           onProgress: ({ ratio }) => onProgress(0.5 + ratio * 0.5),
         });
       }
-      return { blob, originalDur: decoded.duration, newDur: trimmed.duration };
+      return { blob, originalDur: decoded.duration, newDur: trimmed.duration, audit };
     }
 
     // vídeo
@@ -261,7 +293,9 @@ export default function DecupagemPage() {
     );
     onStage('Analisando...');
     const decoded = await decodeAudioRobust(leveled, () => onStage('Analisando...'));
-    const segments = planSpeechCut(decoded, keepSilence).segments;
+    const videoPlan = planSpeechCut(decoded, keepSilence);
+    const segments = videoPlan.segments;
+    const audit = toAudit(videoPlan);
     if (segments.length === 0) {
       if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
       throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
@@ -272,7 +306,7 @@ export default function DecupagemPage() {
       onStage: (s) => onStage(s),
       onProgress: ({ ratio }) => onProgress(0.4 + ratio * 0.6),
     });
-    return { blob, originalDur: decoded.duration, newDur };
+    return { blob, originalDur: decoded.duration, newDur, audit };
   }
 
   // Arquivo GRANDE (>200MB): divide em partes de ~160MB SEM re-encode, roda o
@@ -295,6 +329,7 @@ export default function DecupagemPage() {
     const outputs: Blob[] = [];
     let originalDur = 0;
     let newDur = 0;
+    let audit: DecupAudit | undefined;
     for (let i = 0; i < n; i++) {
       if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
       const prefix = n > 1 ? `Parte ${i + 1}/${n} — ` : '';
@@ -310,6 +345,7 @@ export default function DecupagemPage() {
       chunks[i] = null; // solta a parte crua já processada (GC)
       originalDur += part.originalDur;
       newDur += part.newDur;
+      audit = mergeAudit(audit, part.audit);
       if (part.blob) outputs.push(part.blob);
     }
     if (outputs.length === 0) {
@@ -324,9 +360,9 @@ export default function DecupagemPage() {
             onProgress: ({ ratio }) => onProgress(0.95 + ratio * 0.05),
           });
     if (kind === 'video') {
-      return { kind: 'video', blob: joined, url: URL.createObjectURL(joined), originalDur, newDur };
+      return { kind: 'video', blob: joined, url: URL.createObjectURL(joined), originalDur, newDur, audit };
     }
-    return { kind: 'audio', blob: joined, url: URL.createObjectURL(joined), format: audioFormat, originalDur, newDur };
+    return { kind: 'audio', blob: joined, url: URL.createObjectURL(joined), format: audioFormat, originalDur, newDur, audit };
   }
 
   // Processa UM arquivo → retorna Result (não mexe em state global).
@@ -356,6 +392,7 @@ export default function DecupagemPage() {
         url: URL.createObjectURL(part.blob),
         originalDur: part.originalDur,
         newDur: part.newDur,
+        audit: part.audit,
       };
     }
     return {
@@ -365,6 +402,7 @@ export default function DecupagemPage() {
       format: audioFormat,
       originalDur: part.originalDur,
       newDur: part.newDur,
+      audit: part.audit,
     };
   }
 
@@ -692,6 +730,7 @@ export default function DecupagemPage() {
                       <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
                       <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
                     </div>
+                    {r.audit ? <DecupAuditBadge audit={r.audit} /> : null}
                     {r.kind === 'video' ? (
                       <video
                         src={r.url}
