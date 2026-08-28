@@ -46,6 +46,11 @@ const HUE = 'rgba(232,121,249,0.45)';
  *   6. Download do MP4 final
  *
  * Custo: ~$0.27 por video de 40min (AssemblyAI).
+ *
+ * ACESSO: ferramenta INTERNA (admin-only) desde 28.08.2026 — saiu do plano
+ * Premium a pedido do dono. Quem não é admin só entra com desbloqueio
+ * pontual da conta (BETA PRO, lib/tool-unlocks.ts). O bloqueio real é
+ * server-side: middleware (ADMIN_ONLY_PREFIXES) + requireTier nas 3 rotas.
  */
 
 const MAX_FILE_BYTES = 800 * 1024 * 1024;
@@ -84,7 +89,11 @@ type AuditReport = {
 
 export default function DecupagemCopyPage() {
   return (
-    <TierGate require="basic" toolName="Decupagem Inteligente">
+    <TierGate
+      require="admin"
+      toolName="Decupagem Inteligente"
+      toolPath="/tools/decupagem-copy"
+    >
       <DecupagemCopyInner />
     </TierGate>
   );

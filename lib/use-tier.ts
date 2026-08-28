@@ -36,12 +36,11 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/normalizador',
     '/tools/calculadora',
     '/tools/copy-srt',
-    '/tools/decupagem-copy',
     '/tools/lipsync',
     '/tools/historico',
     // ⚠ NÃO inclui as ferramentas de uso interno (admin-only): auto-broll,
     // heygen-auto, clickup-pilot, remover-elementos, separador-audio,
-    // ltx-video
+    // ltx-video, decupagem-copy
   ]),
   // pro (legado, não vendido) = mesmo conjunto do Premium. As ferramentas de
   // automação interna (auto-broll, heygen-auto, clickup-pilot) são admin-only.
@@ -58,7 +57,6 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/normalizador',
     '/tools/calculadora',
     '/tools/copy-srt',
-    '/tools/decupagem-copy',
     '/tools/lipsync',
     '/tools/historico',
   ]),

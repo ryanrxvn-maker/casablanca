@@ -27,7 +27,6 @@ import {
   IconCamuflagem,
   IconCompressor,
   IconCopySRT,
-  IconDecupageCopy,
   IconDecupagem,
   IconDownloader,
   IconFakePass,
@@ -512,12 +511,6 @@ const TOOLS: Tool[] = [
     icon: <IconLipsync size={20} />,
   },
   {
-    name: 'Decupagem Inteligente',
-    desc: 'A IA lê a copy e escolhe o melhor take de cada frase do bruto.',
-    plan: 'premium',
-    icon: <IconDecupageCopy size={20} />,
-  },
-  {
     name: 'Gerador de SRT',
     desc: 'Áudio + copy entram; a legenda sai alinhada palavra por palavra.',
     plan: 'premium',
@@ -815,7 +808,6 @@ export function PricingSection() {
               {[
                 'Camuflagem (com selo por plataforma)',
                 'Lipsync Video to Video',
-                'Decupagem Inteligente',
                 'Gerador de SRT pela copy',
                 'Mixer de Velocidade',
                 'Dividir Áudios',

@@ -65,7 +65,6 @@ const FREE_EXTRA_OK_PREFIXES = ['/planos'];
 // Ferramentas que SÓ Premium (tier interno 'basic') ou acima acessam —
 // free é mandado direto pra /planos ao tentar abrir
 const PREMIUM_ONLY_TOOLS = [
-  '/tools/decupagem-copy',     // Decupagem Inteligente
   '/tools/lipsync',            // Lipsync Video to Video
 ];
 
@@ -83,6 +82,7 @@ const ADMIN_ONLY_PREFIXES = [
   '/tools/points', // sistema de pontos é interno
   '/tools/separador-audio',   // uso interno — some pra conta não-admin
   '/tools/remover-elementos', // Smart Remover (legenda + marca d'água) — admin-only
+  '/tools/decupagem-copy',    // Decupagem Inteligente — uso interno; liberável por conta
   '/tools/auto-cortes',       // EM CONSTRUÇÃO (pausada) — some pra conta não-admin
   '/tools/auto-broll',        // uso interno — some pra conta não-admin
   '/tools/heygen-auto',       // uso interno — some pra conta não-admin

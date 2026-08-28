@@ -182,6 +182,7 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/decupagem-copy',
+    adminOnly: true,
     label: 'Decupagem Inteligente',
     description: 'IA lê a copy. Escolhe o take certo.',
     icon: <IconDecupageCopy size={26} />,
@@ -2522,7 +2523,6 @@ function LockIcon({ size = 18 }: { size?: number }) {
 // ⚠ Ferramentas de uso interno (admin-only) NÃO entram aqui — o flash cai no
 // genérico "Esta ferramenta" sem revelar o nome pra cliente.
 const TOOL_LABELS: Record<string, string> = {
-  '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/lipsync': 'Lipsync Video to Video',
   '/tools/auto-cortes': 'Auto Cortes',
   '/tools/camuflagem': 'Camuflagem',

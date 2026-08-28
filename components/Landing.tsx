@@ -1811,11 +1811,6 @@ function SuiteSection() {
       desc: 'O rosto do seu vídeo falando qualquer áudio novo.',
     },
     {
-      img: '/cards/decupagem-inteligente.jpg',
-      title: 'Decupagem Inteligente',
-      desc: 'A IA lê a copy e escolhe o melhor take de cada frase.',
-    },
-    {
       img: '/cards/gerador-srt.jpg',
       title: 'Gerador de SRT',
       desc: 'Legenda alinhada palavra por palavra, pronta pro CapCut.',

@@ -58,6 +58,11 @@ export const UNLOCKABLE_TOOLS: ReadonlyArray<{
     label: 'Separador de Áudio',
     desc: 'Separa voz/instrumental/SFX (consome créditos da casa).',
   },
+  {
+    path: '/tools/decupagem-copy',
+    label: 'Decupagem Inteligente',
+    desc: 'Decupa seguindo a copy (consome créditos de transcrição da casa).',
+  },
   // '/tools/normalizador' saiu daqui em 14.08.2026: liberado pra TODOS os
   // tiers (incl. free) — não precisa mais de desbloqueio por email.
   {

@@ -19,7 +19,6 @@ const BODY = `# Auto Edit
 
 ## O que o Auto Edit faz
 - Decupagem automática: remove silêncios e cortes mortos em lote, com volume nivelado.
-- Decupagem Inteligente: a IA lê a copy e escolhe o melhor take de cada frase.
 - Lipsync Video to Video: o rosto do vídeo falando qualquer áudio novo, com a boca encaixada.
 - Legendas (SRT) alinhadas à copy, palavra por palavra.
 - Compressão, ajuste de velocidade e divisão de áudio em lote.

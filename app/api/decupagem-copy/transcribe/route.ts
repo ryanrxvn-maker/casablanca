@@ -23,7 +23,12 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireTier('basic');
+    // Ferramenta INTERNA (admin-only). Conta com desbloqueio pontual
+    // (BETA PRO, profiles.tool_unlocks) também passa — mesmo furo do
+    // middleware, senão a página abre e a rota nega.
+    const gate = await requireTier('admin', {
+      unlockTools: ['/tools/decupagem-copy'],
+    });
     if (!gate.ok) return gate.response;
 
     let form: FormData;

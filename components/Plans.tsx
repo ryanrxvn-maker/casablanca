@@ -31,7 +31,6 @@ type Tool = {
  * propaganda enganosa. */
 const ALL_TOOLS: Tool[] = [
   { key: 'lipsync', label: 'Lipsync Video to Video' },
-  { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
   { key: 'gerador-srt', label: 'Gerador de SRT' },
   { key: 'decupagem', label: 'Decupagem' },
   { key: 'camuflagem', label: 'Camuflagem' },
@@ -987,14 +986,6 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(45,212,191,0.5)',
     desc: 'Disfarça o áudio pra dificultar detecção automática de plataformas.',
     win: 'Mais segurança pro seu conteúdo. Sem perder qualidade audível.',
-  },
-  {
-    key: 'decupagem-inteligente',
-    name: 'Decupagem Inteligente',
-    cat: 'IA',
-    hue: 'rgba(232,121,249,0.55)',
-    desc: 'A IA decupa o vídeo seguindo a copy do roteiro com precisão.',
-    win: 'Você diz o que tem que ser dito, a IA escolhe o melhor take e monta.',
   },
 ];
 

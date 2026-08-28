@@ -44,7 +44,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'Tem plano grátis? Quanto custa?',
-    a: 'Tem plano grátis pra começar sem cartão. O plano pago é o Premium (R$ 57/mês), que libera todas as ferramentas — incluindo Lipsync Video to Video, Decupagem Inteligente e Gerador de SRT. A assinatura mensal é recorrente no cartão e o plano anual pode ser parcelado em até 12×.',
+    a: 'Tem plano grátis pra começar sem cartão. O plano pago é o Premium (R$ 57/mês), que libera todas as ferramentas — incluindo Lipsync Video to Video e Gerador de SRT. A assinatura mensal é recorrente no cartão e o plano anual pode ser parcelado em até 12×.',
   },
   {
     q: 'Serve pra agência e produção em escala?',

@@ -118,7 +118,6 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Decupagem automática — remove silêncios e cortes mortos',
-          'Decupagem Inteligente — a IA escolhe o melhor take seguindo a copy',
           'Lipsync Video to Video — o avatar falando exatamente a sua copy',
           'Compressão e ajuste de velocidade em lote',
           'Legendas automáticas alinhadas à copy',
@@ -303,7 +302,6 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Decupagem automática corta os silêncios da narração',
-          'Decupagem Inteligente escolhe o melhor take seguindo o roteiro',
           'Lipsync Video to Video gera o avatar falando, se o canal usar avatar',
           'Legenda automática fecha o vídeo',
         ],
