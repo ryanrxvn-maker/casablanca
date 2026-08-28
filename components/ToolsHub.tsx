@@ -2520,23 +2520,21 @@ function LockIcon({ size = 18 }: { size?: number }) {
 }
 
 // Mapa de path → label legível (espelha TopBar). Usado no flash de bloqueio.
-// ⚠ Ferramentas de uso interno (admin-only) NÃO entram aqui — o flash cai no
-// genérico "Esta ferramenta" sem revelar o nome pra cliente.
+// ⚠ SÓ ferramentas que o cliente PODE ver. As admin-only (ADMIN_ONLY_PREFIXES
+// do middleware) ficam de fora: o flash cai no genérico "Esta ferramenta" e o
+// cliente nem descobre que existem. Saíram daqui por isso em 28.08.2026:
+// auto-cortes, separador-audio, ltx-video, points, lipsync-history, background
+// (e decupagem-copy, que virou interna no mesmo dia). O LockedFlash abaixo
+// ainda faz o cinto de segurança — need='admin' nunca imprime nome.
 const TOOL_LABELS: Record<string, string> = {
   '/tools/lipsync': 'Lipsync Video to Video',
-  '/tools/auto-cortes': 'Auto Cortes',
   '/tools/camuflagem': 'Camuflagem',
   '/tools/compressor': 'Compressor',
   '/tools/audio-split': 'Dividir áudios',
   '/tools/acelerador': 'Mixer de Velocidade',
   '/tools/normalizador': 'Normalizador',
-  '/tools/separador-audio': 'Separador de Áudio',
   '/tools/copy-srt': 'Gerador de SRT',
   '/tools/calculadora': 'Calculadora',
-  '/tools/ltx-video': 'LTX Video',
-  '/tools/points': 'Pontos',
-  '/tools/lipsync-history': 'Histórico de avatares',
-  '/tools/background': 'Tarefas em segundo plano',
 };
 
 function LockedFlash({
@@ -2548,7 +2546,10 @@ function LockedFlash({
   need: 'basic' | 'pro' | 'admin' | null;
   tier: 'free' | 'basic' | 'pro' | 'admin' | null;
 }) {
-  const toolName = TOOL_LABELS[from] || 'Esta ferramenta';
+  // Bloqueio ADMIN nunca revela o nome: ferramenta de uso interno não
+  // existe pro cliente. Vale mesmo se alguém re-adicionar o path acima.
+  const toolName =
+    need === 'admin' ? 'Esta ferramenta' : TOOL_LABELS[from] || 'Esta ferramenta';
   const needLabel =
     need === 'admin' ? 'Admin' : need === 'pro' || need === 'basic' ? 'Premium' : null;
   const tierLabel =
