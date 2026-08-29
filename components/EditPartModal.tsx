@@ -162,14 +162,14 @@ export function EditPartModal({
         <div className="mt-4 rounded-[10px] border border-white/12 bg-bg-soft/40 p-3">
           <div className="label-tech mb-2 flex items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
             Apply Custom Motion
-            {/* Sem chip "auto" separado (pedido 29.08): só III/IV/V — em
-              * automático o motor EFETIVO fica marcado com a micro-tag "auto".
-              * Clicar trava na mão; clicar de novo volta pro automático. */}
+            {/* Só III/IV/V, sem chip "auto" e sem tag (revisão 29.08): em
+              * automático o motor EFETIVO simplesmente fica ACESO. Clicar
+              * trava na mão; clicar de novo volta pro automático. */}
             <div className="ml-auto flex items-center gap-1">
               {(['III', 'IV', 'V'] as const).map((op) => {
                 const efetivo = engine !== 'auto' ? engine : (temGesto ? 'IV' : 'III');
                 const sel = engine === op;
-                const selAuto = engine === 'auto' && efetivo === op;
+                const aceso = sel || (engine === 'auto' && efetivo === op);
                 return (
                   <button
                     key={op}
@@ -179,24 +179,17 @@ export function EditPartModal({
                     title={
                       sel
                         ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
-                        : selAuto
+                        : aceso
                           ? `Automático: sai no ${efetivo} (com gesto sobe pro IV). Clica pra travar no ${op}.`
                           : `Avatar ${op}`
                     }
-                    className={`label-tech relative rounded-full border px-2 py-0.5 text-[8.5px] uppercase tracking-widest transition-colors disabled:opacity-40 ${
-                      sel
+                    className={`label-tech rounded-full border px-2 py-0.5 text-[8.5px] uppercase tracking-widest transition-colors disabled:opacity-40 ${
+                      aceso
                         ? 'border-lime/60 bg-lime/15 text-lime'
-                        : selAuto
-                          ? 'border-lime/40 bg-lime/[0.08] text-lime'
-                          : 'border-white/15 text-text-muted hover:border-white/35 hover:text-white'
+                        : 'border-white/15 text-text-muted hover:border-white/35 hover:text-white'
                     }`}
                   >
                     {op}
-                    {selAuto ? (
-                      <span className="absolute -top-[7px] left-1/2 -translate-x-1/2 rounded-full border border-lime/50 bg-[#101408] px-1 text-[6.5px] font-bold lowercase tracking-[0.08em] text-lime shadow-[0_1px_4px_rgba(0,0,0,0.5)]">
-                        auto
-                      </span>
-                    ) : null}
                   </button>
                 );
               })}

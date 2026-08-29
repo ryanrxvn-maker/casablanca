@@ -563,6 +563,7 @@ function planoDoReplan(saved: NonNullable<BatchTaskState['replan']>): DispatchPl
       // repassar aqui, o RETOMAR/REINICIAR voltava pro TTS em silêncio.
       audioKey: p.audioKey ?? null,
       audioName: p.audioName ?? null,
+      audioDur: p.audioDur ?? null,
       audioMirror: p.audioMirror ?? false,
       audioParte: p.audioParte ?? false,
       role: p.role ?? null,
@@ -738,6 +739,7 @@ type DispatchPlan = {
      *  mesmo audioKey sem cortar fala), não do TTS. */
     audioKey?: string | null;
     audioName?: string | null;
+    audioDur?: number | null;
     /** Voice Mirror: re-sintetiza o áudio na voz do take (STS do HeyGen). */
     audioMirror?: boolean;
     /** true = áudio anexado a ESTE take (painel de reiniciar): vai inteiro,
@@ -857,7 +859,7 @@ type BatchTaskState = {
      *  quem foi disparado mesmo com a biblioteca do HeyGen ainda carregando).
      *  O disparo continua olhando só os ids. Thumb NÃO entra: URL longa vezes
      *  N takes vezes N tasks estoura a quota do localStorage. */
-    parts: Array<{ label: string; text: string; avatarId: string | null; avatarName?: string | null; voiceId: string | null; voiceName?: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V'; audioKey?: string | null; audioName?: string | null; audioMirror?: boolean; audioParte?: boolean; role?: string | null; username?: string | null; briefingFileId?: string | null }>;
+    parts: Array<{ label: string; text: string; avatarId: string | null; avatarName?: string | null; voiceId: string | null; voiceName?: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V'; audioKey?: string | null; audioName?: string | null; audioDur?: number | null; audioMirror?: boolean; audioParte?: boolean; role?: string | null; username?: string | null; briefingFileId?: string | null }>;
   };
   /** O `replan` acima foi EDITADO NA MÃO no painel de reiniciar disparo. Nesse
    *  caso ele MANDA sobre a análise em memória: sem esta marca, um reinício
@@ -971,6 +973,9 @@ type RoleSlot = {
    *  arquivo vai inteiro. */
   audioKey?: string | null;
   audioName?: string | null;
+  /** Duração do arquivo (s), medida no attach. REGRA DOS 30s: áudio ≤30s vai
+   *  INTEIRO num take único mesmo no Avatar III — só acima disso divide. */
+  audioDur?: number | null;
   /** Voice Mirror: o HeyGen re-sintetiza o áudio na voz selecionada (STS) —
    *  timing/cadência do arquivo, timbre da voz escolhida. Exige voz. */
   audioMirror?: boolean;
@@ -1004,6 +1009,9 @@ type TaskAnalysis = {
   /** Linhas da copy do idioma escolhido que NÃO entraram em nenhum take.
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
+  /** INDICAÇÕES do copy (comentários do Docs) que não têm um avatar dono
+   *  claro — aparecem no botão dourado do TOPO do card da task. */
+  indicacoesDoc?: string[];
   /** Cada avatar do briefing — usuario controla individualmente */
   /** DUAS VERSÕES ligadas nesta task (META + YouTube). Desligada — o padrão —
    *  tudo se comporta exatamente como antes: uma versão só. Liga quando o doc
@@ -2633,49 +2641,78 @@ function ClickUpPilotInner() {
               matchedBy: null,
             });
           }
-          // ═══ INDICAÇÕES DO COPY (29.08) — comentários do Docs por avatar ═══
+          // ═══ INDICAÇÕES DO COPY (29.08, v2) — comentários do Docs ═══
           // O copy indica cena nos COMENTÁRIOS do doc ("avatar segurando o
-          // produto", "ambiente de cozinha"). A extensão (4.18+) extrai cada
-          // comentário do export HTML com marcador ([a]/[b]), contexto (o
-          // trecho ancorado) e corpo. Aqui casamos com o avatar dono:
-          //  · contexto/corpo menciona o @username do slot; OU
-          //  · o marcador [x] está NA LINHA do doc que declara esse avatar
-          //    (marcadores são únicos no doc, então não vaza entre ADs).
-          // O que casar vira o botão 3D de indicação no card do avatar.
+          // produto", "ambiente X"). A extensão (4.18+) extrai cada comentário
+          // do export com marcador ([a]/[b]), contexto e corpo. Regras:
+          //  1. O comentário pertence a ESTE AD quando o marcador [x] cai na
+          //     seção dele (heading "AD02G1GL - ..." mais próximo acima —
+          //     mesmo NÚMERO de AD = mesmo anúncio, cobre G1/G2/GL).
+          //  2. Dentro do AD, o avatar dono é: quem o contexto/corpo menciona
+          //     (@username), OU o papel da linha "Role:" mais próxima ACIMA
+          //     do marcador (comentário na fala do Doutor → slot do Doutor).
+          //  3. Sem dono claro: AD com 1 avatar → vai pra ele; com vários →
+          //     vira indicação DA TASK (botão dourado no topo do card).
+          // Validado ao vivo (29.08) no doc ADGL-PRPB12: comentário no hook
+          // sob "AD02G1GL - PRPB12" com "Doutor:" acima → slot do Doutor.
+          const indicacoesDoc: string[] = [];
           try {
             const docComments = docR.comments || [];
-            if (docComments.length && roleSlots.length) {
+            if (docComments.length) {
               const linhasDoDoc = (docR.text || '').split(/\r?\n/);
-              for (const slot of roleSlots) {
-                const uNorm = normalizeForMatch(slot.username || '');
-                const roleNorm = normalizeForMatch(slot.role || '');
-                const inds: string[] = [];
-                for (const c of docComments) {
-                  const body = (c.body || '').trim();
-                  if (!body) continue;
-                  const ctxNorm = normalizeForMatch(c.context || '');
-                  const bodyNorm = normalizeForMatch(body);
-                  const porMencao = !!uNorm && uNorm.length >= 4 && (ctxNorm.includes(uNorm) || bodyNorm.includes(uNorm));
-                  let porMarcador = false;
-                  if (!porMencao && c.marker) {
-                    const tag = `[${c.marker}]`;
-                    for (const ln of linhasDoDoc) {
-                      if (!ln.includes(tag)) continue;
-                      const lnNorm = normalizeForMatch(ln);
-                      if ((uNorm && uNorm.length >= 4 && lnNorm.includes(uNorm)) ||
-                          (roleNorm && new RegExp(`^\\s*${slot.role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`, 'i').test(ln))) {
-                        porMarcador = true;
-                      }
-                      break; // marcador é único no doc — achou a linha, decidiu
-                    }
-                  }
-                  if ((porMencao || porMarcador) && !inds.includes(body)) inds.push(body);
+              const numDo = (ad: string | null | undefined) => {
+                const m = /^AD0*(\d+)/i.exec(String(ad || ''));
+                return m ? m[1] : null;
+              };
+              const numTask = numDo(baseAdId);
+              const headingRe = /^\s*(AD\d+[A-Z0-9]*)\s*[-–—]/i;
+              for (const c of docComments) {
+                const body = (c.body || '').trim();
+                if (!body || !c.marker) continue;
+                const tag = `[${c.marker}]`;
+                const idxMarcador = linhasDoDoc.findIndex((l) => l.includes(tag));
+                if (idxMarcador < 0) continue;
+                // (1) AD dono = heading mais próximo acima do marcador
+                let adDono: string | null = null;
+                for (let k = idxMarcador; k >= 0; k--) {
+                  const hm = headingRe.exec(linhasDoDoc[k]);
+                  if (hm) { adDono = hm[1].toUpperCase(); break; }
                 }
-                if (inds.length) slot.indicacoes = inds;
+                if (!numTask || numDo(adDono) !== numTask) continue; // outro AD
+                // (2) avatar dono
+                let dono: RoleSlot | null = null;
+                const ctxNorm = normalizeForMatch(c.context || '');
+                const bodyNorm = normalizeForMatch(body);
+                for (const slot of roleSlots) {
+                  const uNorm = normalizeForMatch(slot.username || '');
+                  if (uNorm && uNorm.length >= 4 && (ctxNorm.includes(uNorm) || bodyNorm.includes(uNorm))) { dono = slot; break; }
+                }
+                if (!dono) {
+                  // papel da linha "Role:" mais próxima acima do marcador
+                  // (parando se esbarrar noutro heading de AD)
+                  for (let k = idxMarcador; k >= 0 && k > idxMarcador - 25; k--) {
+                    if (k < idxMarcador && headingRe.test(linhasDoDoc[k])) break;
+                    const rm = /^\s*([\p{L}\s]{2,30}?)\s*:/u.exec(linhasDoDoc[k]);
+                    if (!rm) continue;
+                    const rNorm = normalizeForMatch(rm[1]);
+                    const achado = roleSlots.find((s) => {
+                      const sNorm = normalizeForMatch(s.role || '');
+                      return sNorm && rNorm && (sNorm === rNorm || sNorm.includes(rNorm) || rNorm.includes(sNorm));
+                    });
+                    if (achado) { dono = achado; break; }
+                  }
+                }
+                if (!dono && roleSlots.length === 1) dono = roleSlots[0];
+                if (dono) {
+                  dono.indicacoes = dono.indicacoes || [];
+                  if (!dono.indicacoes.includes(body)) dono.indicacoes.push(body);
+                } else if (!indicacoesDoc.includes(body)) {
+                  indicacoesDoc.push(body); // (3) indicação da task
+                }
               }
               const comIndicacao = roleSlots.filter((s) => s.indicacoes?.length).length;
-              if (comIndicacao) {
-                console.log(`[clickup-pilot] indicações do copy: ${docComments.length} comentário(s) no doc, ${comIndicacao} avatar(es) com indicação em ${task.name}`);
+              if (comIndicacao || indicacoesDoc.length) {
+                console.log(`[clickup-pilot] indicações do copy em ${task.name}: ${comIndicacao} avatar(es) + ${indicacoesDoc.length} da task (de ${docComments.length} comentário(s) no doc)`);
               }
             }
           } catch (e) {
@@ -2811,6 +2848,9 @@ function ClickUpPilotInner() {
                 roleSlots,
                 partTemplates,
                 copyFaltando,
+                // Indicações do copy sem dono claro (AD multi-avatar) — botão
+                // dourado no topo do card.
+                indicacoesDoc: indicacoesDoc.length ? indicacoesDoc : undefined,
                 bodyRaw: briefing.body || undefined,
                 dispatchedAt: getDispatchedAt(sid),
                 // Marca siblings como "compartilhada com primary"
@@ -2888,6 +2928,8 @@ function ClickUpPilotInner() {
    *  do áudio nos takes (corte na pausa entre as falas dos takes). */
   const [roleAudioInfo, setRoleAudioInfo] = useState<Record<string, {
     status: 'analisando' | 'ok' | 'divergente' | 'erro';
+    /** % de igualdade com a copy (0-100) — é o número que a tela mostra. */
+    pct?: number;
     resumo?: string;
     trechos?: Array<{ tipo: 'faltou-no-audio' | 'sobrou-no-audio' | 'trocado'; copy?: string; audio?: string }>;
     asrText?: string;
@@ -2895,6 +2937,8 @@ function ClickUpPilotInner() {
     duracao?: number;
     erro?: string;
   }>>({});
+  /** Painel de diferenças copy×áudio aberto (só abre pelo botão de aviso). */
+  const [audioDiffOpen, setAudioDiffOpen] = useState<Record<string, boolean>>({});
   /** Espelho em ref (File + palavras do ASR) pro RUNNER ler fresco no meio do
    *  disparo — state capturado num closure velho mentiria. File é cache: se
    *  sumir (F5), os bytes voltam do IDB pela audioKey. */
@@ -6940,7 +6984,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setError('Esse disparo não tem plano salvo pra editar. Analise a task de novo pra montar o disparo.');
       return;
     }
-    setReinicioPlano(plano);
+    // ENRIQUECE com o briefing da análise (29.08): replan de disparo antigo
+    // não gravou role/username/briefingFileId — se a análise está viva nesta
+    // sessão, completa pelos slots (match por avatarId; AD de 1 avatar leva
+    // tudo dele). As INDICAÇÕES do copy também descem pro painel.
+    const aRef = taskAnalyses[taskId] || taskAnalyses[taskId.replace(/-yt$/, '')];
+    const planoRico = aRef?.roleSlots?.length
+      ? {
+          ...plano,
+          parts: plano.parts.map((p) => {
+            const slot =
+              aRef.roleSlots.find((s) => s.avatarId && s.avatarId === (p as any).avatarId) ||
+              (aRef.roleSlots.length === 1 ? aRef.roleSlots[0] : null);
+            if (!slot) return p;
+            return {
+              ...p,
+              role: (p as any).role || slot.role || null,
+              username: (p as any).username || slot.username || null,
+              briefingFileId: (p as any).briefingFileId || slot.briefingFileId || null,
+              ...(slot.indicacoes?.length ? { indicacoes: slot.indicacoes } : {}),
+            } as typeof p;
+          }),
+        }
+      : plano;
+    setReinicioPlano(planoRico);
     setReinicioPainelTaskId(taskId);
     // A biblioteca do HeyGen é quem dá nome/thumb/versão dos avatares salvos.
     // Sem ela o painel ainda abre (cai no nome gravado no disparo), mas os
@@ -7014,6 +7081,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // ÁUDIO POR AVATAR: preserva (ou recebe do painel) o áudio do take.
         audioKey: (p as any).audioKey ?? null,
         audioName: (p as any).audioName ?? null,
+        audioDur: (p as any).audioDur ?? null,
         audioMirror: (p as any).audioMirror ?? false,
         audioParte: (p as any).audioParte ?? false,
         role: (p as any).role ?? null,
@@ -7900,6 +7968,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         ...p,
         [audioKey]: {
           status: diff.igual ? 'ok' : 'divergente',
+          pct: Math.round(diff.similaridade * 100),
           resumo: diff.resumo,
           trechos: diff.trechos,
           asrText: up.text || '',
@@ -7914,6 +7983,34 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       console.warn('[clickup-pilot] análise do áudio falhou (disparo segue liberado):', msg);
       setRoleAudioInfo((p) => ({ ...p, [audioKey]: { status: 'erro', erro: msg } }));
     }
+  }
+
+  /** Duração do arquivo em segundos, pelos metadados (rápido, sem decodar o
+   *  áudio inteiro). null = não deu pra medir (aí a regra dos 30s não colapsa
+   *  e o comportamento é o de sempre: divide). */
+  function medirDuracaoDoAudio(file: File): Promise<number | null> {
+    return new Promise((res) => {
+      let done = false;
+      const finish = (v: number | null) => {
+        if (done) return;
+        done = true;
+        try { URL.revokeObjectURL(url); } catch { /* já foi */ }
+        res(v && Number.isFinite(v) && v > 0 ? v : null);
+      };
+      let url = '';
+      try {
+        url = URL.createObjectURL(file);
+        // <video> lê metadado de áudio E de vídeo (mp4/webm com voz).
+        const el = document.createElement('video');
+        el.preload = 'metadata';
+        el.onloadedmetadata = () => finish(el.duration);
+        el.onerror = () => finish(null);
+        el.src = url;
+        setTimeout(() => finish(el.duration), 8000);
+      } catch {
+        finish(null);
+      }
+    });
   }
 
   /** Copy combinada das partes que pertencem a um slot — é contra ela que o
@@ -7949,7 +8046,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       console.warn('[clickup-pilot] áudio não foi pro IDB (F5 perderia):', e);
     }
     roleAudioRef.current[audioKey] = { file };
-    updateRoleSlot(taskId, roleIdx, { audioKey, audioName: file.name });
+    // Duração ANTES de pendurar no slot: é ela que decide take único (≤30s)
+    // vs divisão — e precisa estar no plano já no primeiro disparo.
+    const dur = await medirDuracaoDoAudio(file);
+    updateRoleSlot(taskId, roleIdx, { audioKey, audioName: file.name, audioDur: dur });
     setError(null);
     void analisarAudioUpado(audioKey, file, copyDoSlot(a, roleIdx));
   }
@@ -7962,7 +8062,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setRoleAudioInfo((p) => { const n = { ...p }; delete n[key]; return n; });
       void import('@/lib/zip-store').then((m) => m.deletePrefix(key)).catch(() => {});
     }
-    updateRoleSlot(taskId, roleIdx, { audioKey: null, audioName: null, audioMirror: false });
+    updateRoleSlot(taskId, roleIdx, { audioKey: null, audioName: null, audioDur: null, audioMirror: false });
   }
 
   /** Áudio anexado a UM take no painel de reiniciar: guarda os bytes e devolve
@@ -8101,6 +8201,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // script + voz), então lá a chave nem entra.
         audioKey: !slot?.imageMode ? (slot?.audioKey || null) : null,
         audioName: !slot?.imageMode ? (slot?.audioName || null) : null,
+        audioDur: !slot?.imageMode ? (slot?.audioDur ?? null) : null,
         audioMirror: !slot?.imageMode ? !!slot?.audioMirror : false,
         audioParte: false,
         // Preview do briefing pro painel de reiniciar (quem o copy pediu).
@@ -8111,11 +8212,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         _imageMode: !!slot?.imageMode,
         // Cena que NÃO roda no Avatar III: motion sobe pro IV sozinho
         // (motorEfetivo), e IV/V escolhido na mão manda direto.
+        // REGRA DOS 30s (29.08): áudio upado de até 30s TAMBÉM vira take
+        // único — só arquivo maior que isso é dividido pela ferramenta de
+        // dividir áudios. Sem duração medida (attach antigo), divide como
+        // antes (não colapsa no escuro).
         _takeUnico: takeUnicoPorLook({
           engine: (slot?.engine as 'III' | 'IV' | 'V') || 'III',
           motionPrompt: (slot?.motionPrompt || '').trim() || null,
           imageMode: !!slot?.imageMode,
-        }),
+        }) || (!slot?.imageMode && !!slot?.audioKey && (slot?.audioDur ?? 0) > 0 && (slot!.audioDur as number) <= 30),
       };
     });
     // TAKE ÚNICO por slot quando a cena NÃO é Avatar III.
@@ -8187,6 +8292,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // localStorage — é o que faz o REINICIAR sair com o MESMO áudio.
         audioKey: p.audioKey ?? null,
         audioName: p.audioName ?? null,
+        audioDur: p.audioDur ?? null,
         audioMirror: p.audioMirror ?? false,
         audioParte: p.audioParte ?? false,
         role: p.role ?? null,
@@ -11515,6 +11621,27 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </span>
                                   ) : null}
                                 </span>
+                                {/* Indicação do copy SEM avatar dono (AD multi-avatar):
+                                  * botão 3D dourado no topo do card da task. */}
+                                {(a.indicacoesDoc || []).length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:task`]: !prev[`${a.taskId}:task`] }))}
+                                    aria-expanded={!!indicacaoOpen[`${a.taskId}:task`]}
+                                    className={'pilot-ind-btn shrink-0' + (indicacaoOpen[`${a.taskId}:task`] ? ' is-open' : '')}
+                                    title={`Indicação do copy neste AD (${(a.indicacoesDoc || []).length}) — clica pra ver`}
+                                  >
+                                    <span className="pilot-ind-halo" aria-hidden />
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                      <path d="m3 11 14-6v14L3 13v-2z" />
+                                      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                                      <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                                    </svg>
+                                    {(a.indicacoesDoc || []).length > 1 ? (
+                                      <span className="pilot-ind-count">{(a.indicacoesDoc || []).length}</span>
+                                    ) : null}
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   onClick={() => removeTaskFromAnalysis(a.taskId)}
@@ -11524,6 +11651,25 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   × Remover
                                 </button>
                               </div>
+                              {/* Painel da indicação da TASK — abre pelo botão dourado acima. */}
+                              {indicacaoOpen[`${a.taskId}:task`] && (a.indicacoesDoc || []).length > 0 ? (
+                                <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                  <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-500">
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                      <path d="m3 11 14-6v14L3 13v-2z" />
+                                      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                                    </svg>
+                                    Indicação do copy · comentário do Docs
+                                  </div>
+                                  <ul className="grid gap-1.5">
+                                    {(a.indicacoesDoc || []).map((ind, k) => (
+                                      <li key={k} className="rounded-[8px] border border-amber-400/30 bg-bg/60 px-2.5 py-2 text-[12px] leading-relaxed text-text">
+                                        {ind}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
 
                               {/* MOTOR CONFIG — Avatar III/IV/V picker.
                                   ESCONDIDO quando ONLY MAGNIFIC tá ligado:
@@ -12669,7 +12815,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           {/* PAINEL DA INDICAÇÃO DO COPY — abre pelo botão 3D dourado. */}
                                           {indicacaoOpen[`${a.taskId}:${sIdx}`] && (slot.indicacoes || []).length > 0 ? (
                                             <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                                              <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-200">
+                                              <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-500">
                                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                                                   <path d="m3 11 14-6v14L3 13v-2z" />
                                                   <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
@@ -12678,13 +12824,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </div>
                                               <ul className="grid gap-1.5">
                                                 {(slot.indicacoes || []).map((ind, k) => (
-                                                  <li key={k} className="rounded-[8px] border border-amber-400/25 bg-black/25 px-2.5 py-2 text-[11.5px] leading-relaxed text-amber-50">
+                                                  <li key={k} className="rounded-[8px] border border-amber-400/30 bg-bg/60 px-2.5 py-2 text-[12px] leading-relaxed text-text">
                                                     {ind}
                                                   </li>
                                                 ))}
                                               </ul>
-                                              <div className="mono mt-1.5 text-[9px] uppercase tracking-widest text-amber-200/60">
-                                                é o que o copy pediu pra cena — use pra escolher o avatar/look certo
+                                              <div className="mt-1.5 text-[10px] text-text-muted">
+                                                É o que o copy pediu pra cena — usa pra escolher o avatar/look certo.
                                               </div>
                                             </div>
                                           ) : null}
@@ -12892,8 +13038,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               * montagem junta igual. */}
                                             <button
                                               type="button"
+                                              disabled={!!slot.audioKey && !slot.imageMode}
                                               onClick={() => updateRoleSlot(a.taskId, sIdx, { imageMode: !slot.imageMode })}
-                                              className="group relative inline-flex items-center gap-2 self-start rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                              className={
+                                                'group relative inline-flex items-center gap-2 self-start rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px] ' +
+                                                // MODO ÁUDIO: imagem e áudio são mutuamente exclusivos — dorme.
+                                                (slot.audioKey && !slot.imageMode ? 'pointer-events-none opacity-35' : '')
+                                              }
                                               style={
                                                 slot.imageMode
                                                   ? {
@@ -13051,13 +13202,21 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </div>
                                             ) : null}
                                             {slot.avatarId || slot.imageMode ? (
-                                              <div>
+                                              // MODO ÁUDIO sem Voice Mirror: a voz do take é a do próprio
+                                              // arquivo → o seletor dorme. Liga o Mirror e ele acorda
+                                              // (vira a voz alvo do espelho).
+                                              <div className={slot.audioKey && !slot.imageMode && !slot.audioMirror ? 'pointer-events-none select-none opacity-35' : ''}>
                                                 <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
                                                     <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
                                                   </svg>
                                                   Voz
+                                                  {slot.audioKey && !slot.imageMode ? (
+                                                    <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                      {slot.audioMirror ? '— voz alvo do Voice Mirror' : '— dorme: a voz é a do áudio'}
+                                                    </span>
+                                                  ) : null}
                                                   <span className={`ml-auto normal-case tracking-normal ${slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted/70'}`}>
                                                     {effectiveVoiceLabel}
                                                   </span>
@@ -13077,8 +13236,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 No DR MILLION cada cena do AD é um avatar próprio, então
                                                 o gesto é por avatar: preenchido, ESTA cena sobe pro
                                                 Avatar IV (o III descarta motion); vazio, segue no III,
-                                                que é mais barato e não inventa gesto. */}
-                                            {slot.avatarId || slot.imageMode ? (() => {
+                                                que é mais barato e não inventa gesto.
+                                                MODO ÁUDIO (29.08): com áudio no slot este bloco SOME —
+                                                os chips de motor moram dentro do card de áudio. */}
+                                            {(slot.avatarId || slot.imageMode) && !(slot.audioKey && !slot.imageMode) ? (() => {
                                               const motion = slot.motionPrompt || '';
                                               const on = !!motion.trim();
                                               return (
@@ -13092,16 +13253,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       * gesto. Escolher na mão vence — mas cena com
                                                       * gesto nunca desce pro III (o runner sobe), senão
                                                       * o take voltaria parado. */}
-                                                    {/* Sem chip "AUTO-III" separado (pedido 29.08): só III/IV/V.
-                                                      * Em automático, o motor EFETIVO aparece marcado com a
-                                                      * micro-tag "auto" em cima — continua o III automático de
-                                                      * sempre (sobe pro IV com gesto), só o visual mudou.
-                                                      * Clicar trava o motor na mão; clicar de novo volta pro auto. */}
+                                                    {/* Só III/IV/V — sem chip "auto" e sem tag (revisão 29.08):
+                                                      * em automático o motor EFETIVO simplesmente fica ACESO.
+                                                      * Continua o III automático de sempre (sobe pro IV com
+                                                      * gesto); clicar trava na mão, clicar de novo volta pro
+                                                      * automático (o aceso não muda — só o tooltip conta). */}
                                                     <div className="ml-auto flex items-center gap-1">
                                                       {(['III', 'IV', 'V'] as const).map((op) => {
                                                         const efetivo = slot.engine || (on ? 'IV' : 'III');
                                                         const sel = slot.engine === op;
-                                                        const selAuto = !slot.engine && efetivo === op;
+                                                        const aceso = sel || (!slot.engine && efetivo === op);
                                                         return (
                                                           <button
                                                             key={op}
@@ -13110,17 +13271,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                               engine: sel ? undefined : op,
                                                             })}
                                                             className={
-                                                              'mono relative rounded-full border px-2 py-[2px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
-                                                              (sel
-                                                                ? 'border-violet-400/60 bg-violet-500/25 text-violet-100'
-                                                                : selAuto
-                                                                  ? 'border-violet-400/45 bg-violet-500/15 text-violet-100'
-                                                                  : 'border-white/10 bg-white/5 text-text-muted hover:border-violet-400/40')
+                                                              'mono rounded-full border px-2 py-[2px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
+                                                              (aceso
+                                                                ? 'border-violet-500/70 bg-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(124,92,246,0.7)]'
+                                                                : 'border-line bg-bg-soft/50 text-text-muted hover:border-violet-400/50')
                                                             }
                                                             title={
                                                               sel
                                                                 ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
-                                                                : selAuto
+                                                                : aceso
                                                                   ? `Automático: sai no ${efetivo} (sem gesto = III; com gesto sobe pro IV). Clica pra travar no ${op}.`
                                                                   : op === 'III'
                                                                     ? 'Avatar III — mais barato, NÃO anima gesto'
@@ -13128,11 +13287,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                             }
                                                           >
                                                             {op}
-                                                            {selAuto ? (
-                                                              <span className="absolute -top-[7px] left-1/2 -translate-x-1/2 rounded-full border border-violet-400/50 bg-[#17111f] px-1 text-[6.5px] font-bold lowercase tracking-[0.08em] text-violet-200 shadow-[0_1px_4px_rgba(0,0,0,0.5)]">
-                                                                auto
-                                                              </span>
-                                                            ) : null}
                                                           </button>
                                                         );
                                                       })}
@@ -13153,33 +13307,38 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 </div>
                                               );
                                             })() : null}
-                                            {/* ═══ ÁUDIO DO AVATAR (29.08) — fala um ÁUDIO upado no lugar
-                                              * do TTS. Ao colocar, o ASR do HeyGen compara com a copy do
-                                              * Docs e ACUSA qualquer diferença (sem bloquear o disparo).
-                                              * Avatar III: o áudio é dividido nos takes do avatar pelas
-                                              * PAUSAS (sem cortar fala → sem reverse). IV/V: take único,
-                                              * arquivo inteiro. Voice Mirror re-sintetiza na voz escolhida. */}
+                                            {/* ═══ ÁUDIO DO AVATAR (redesign 29.08) — fala um ÁUDIO upado
+                                              * no lugar do TTS. Comparação vira UMA linha ("X% igual à
+                                              * copy" — vermelho quando difere) + botão de aviso que abre
+                                              * a tabela de diferenças. ≤30s = take único; >30s divide
+                                              * pelas pausas. Com áudio ativo, o resto do card dorme. */}
                                             {slot.avatarId && !slot.imageMode ? (() => {
                                               const akey = slot.audioKey || null;
                                               const info = akey ? roleAudioInfo[akey] : undefined;
+                                              const dur = slot.audioDur ?? info?.duracao ?? null;
+                                              const curto = dur != null && dur > 0 && dur <= 30;
                                               const motorAudio = slot.engine || ((slot.motionPrompt || '').trim() ? 'IV' : 'III');
-                                              const takeUnicoAudio = motorAudio !== 'III';
+                                              const takeUnicoAudio = motorAudio !== 'III' || curto;
                                               const temVozPraMirror = !!(slot.voiceOverride?.id || slot.avatarVoiceId);
+                                              const diffAberto = !!(akey && audioDiffOpen[akey]);
+                                              const pct = info?.pct ?? null;
                                               return (
                                                 <div>
                                                   <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                       <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
                                                       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                                                      <path d="M3 21h18" />
+                                                      <path d="M12 19v4" />
                                                     </svg>
                                                     Áudio do avatar
-                                                    <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                      — opcional: fala este áudio no lugar do TTS
-                                                    </span>
+                                                    {!akey ? (
+                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                        — opcional: fala este áudio no lugar do TTS
+                                                      </span>
+                                                    ) : null}
                                                   </div>
                                                   {!akey ? (
-                                                    <label className="mono group/upaudio inline-flex cursor-pointer items-center gap-2 rounded-[12px] border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-[10.5px] font-bold uppercase tracking-[0.14em] text-cyan-100 transition hover:-translate-y-[1px] hover:border-cyan-400/70 hover:bg-cyan-500/20 active:translate-y-[1px]" style={{ fontFamily: 'var(--font-tech)' }}>
+                                                    <label className="group/upaudio inline-flex cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-bg-soft/70 px-4 py-2 text-[11.5px] font-semibold text-text transition hover:-translate-y-[1px] hover:border-cyan-500/60 hover:text-cyan-500 active:translate-y-[1px]" style={{ fontFamily: 'var(--font-tech)' }}>
                                                       <PilotIconUpload size={13} />
                                                       Colocar áudio
                                                       <input
@@ -13194,120 +13353,183 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       />
                                                     </label>
                                                   ) : (
-                                                    <div className="rounded-[12px] border border-cyan-500/35 bg-cyan-500/[0.06] p-2.5">
-                                                      <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
-                                                        <span className="inline-flex min-w-0 items-center gap-1.5 text-cyan-100">
-                                                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
-                                                          <span className="truncate font-semibold" title={slot.audioName || 'áudio'}>{slot.audioName || 'áudio'}</span>
-                                                          {info?.duracao ? <span className="shrink-0 text-cyan-300/70">{Math.round(info.duracao)}s</span> : null}
+                                                    <div className="rounded-[14px] border border-line bg-bg-soft/60 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                                                      {/* Linha 1: arquivo + como sai + motor + tirar */}
+                                                      <div className="flex items-center gap-2.5">
+                                                        <span className="dark-island flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-white" style={{ background: 'linear-gradient(150deg, #22d3ee 0%, #0891b2 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 6px 14px -8px rgba(8,145,178,0.9)' }}>
+                                                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                                            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                                                          </svg>
                                                         </span>
+                                                        <div className="min-w-0 flex-1">
+                                                          <div className="truncate text-[12.5px] font-semibold leading-tight text-text" style={{ fontFamily: 'var(--font-tech)' }} title={slot.audioName || 'áudio'}>
+                                                            {slot.audioName || 'áudio'}
+                                                          </div>
+                                                          <div className="mt-0.5 text-[10.5px] leading-tight text-text-muted">
+                                                            {dur ? `${Math.round(dur)}s · ` : ''}
+                                                            {takeUnicoAudio
+                                                              ? (curto && motorAudio === 'III' ? 'até 30s: vai inteiro, sem dividir' : `Avatar ${motorAudio}: vai inteiro num take único`)
+                                                              : `divido em ${partsCount || 1} takes pelas pausas, sem cortar fala`}
+                                                          </div>
+                                                        </div>
+                                                        {/* Motor da cena: com áudio, o seletor mora AQUI (o
+                                                          * bloco de gesto some). III ≤30s inteiro / >30s divide;
+                                                          * IV e V sempre inteiro. */}
+                                                        <div className="flex shrink-0 items-center gap-1">
+                                                          {(['III', 'IV', 'V'] as const).map((op) => {
+                                                            const sel = slot.engine === op;
+                                                            const aceso = sel || (!slot.engine && motorAudio === op);
+                                                            return (
+                                                              <button
+                                                                key={op}
+                                                                type="button"
+                                                                onClick={() => updateRoleSlot(a.taskId, sIdx, { engine: sel ? undefined : op })}
+                                                                className={
+                                                                  'mono rounded-full border px-2 py-[2px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
+                                                                  (aceso
+                                                                    ? 'border-violet-500/70 bg-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(124,92,246,0.7)]'
+                                                                    : 'border-line bg-bg-soft/50 text-text-muted hover:border-violet-400/50')
+                                                                }
+                                                                title={
+                                                                  sel
+                                                                    ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
+                                                                    : op === 'III'
+                                                                      ? 'Avatar III — até 30s vai inteiro; acima disso divide pelas pausas'
+                                                                      : `Avatar ${op} — o áudio vai inteiro num take único`
+                                                                }
+                                                              >
+                                                                {op}
+                                                              </button>
+                                                            );
+                                                          })}
+                                                        </div>
                                                         <button
                                                           type="button"
                                                           onClick={() => removerAudioDoSlot(a.taskId, sIdx)}
-                                                          className="ml-auto rounded-full border border-text-muted/30 px-1.5 py-0.5 text-[10px] text-text-muted hover:border-red-500/50 hover:text-red-300"
-                                                          title="Remover o áudio — o avatar volta a falar por TTS (texto)"
+                                                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line text-text-muted transition hover:rotate-90 hover:border-red-500/60 hover:text-red-500"
+                                                          title="Tirar o áudio — o avatar volta a falar por TTS (texto)"
                                                         >
-                                                          ×
+                                                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
                                                         </button>
                                                       </div>
-                                                      {/* Comparação copy × áudio (ASR) — acusa, nunca bloqueia */}
-                                                      <div className="mt-1.5">
+
+                                                      {/* Linha 2: comparação — SÓ a % (o detalhe abre no aviso) */}
+                                                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
                                                         {!info || info.status === 'analisando' ? (
-                                                          <span className="mono inline-flex items-center gap-1.5 text-[9.5px] uppercase tracking-widest text-cyan-200">
+                                                          <span className="inline-flex items-center gap-2 text-[11.5px] text-text-muted">
                                                             <span className="relative flex h-1.5 w-1.5">
                                                               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-60" />
                                                               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400" />
                                                             </span>
-                                                            Comparando o áudio com a copy do Docs...
+                                                            Comparando com a copy do Docs…
                                                           </span>
                                                         ) : info.status === 'ok' ? (
-                                                          <span className="mono inline-flex items-center gap-1 rounded-full border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-lime">
-                                                            ✓ áudio bate com a copy
+                                                          <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-lime">
+                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                                                            Áudio 100% igual à copy
                                                           </span>
                                                         ) : info.status === 'divergente' ? (
-                                                          <div className="rounded-[8px] border border-amber-400/45 bg-amber-400/[0.08] px-2.5 py-2">
-                                                            <div className="mono text-[9.5px] font-bold uppercase tracking-widest text-amber-200">
-                                                              ⚠ áudio ≠ copy do Docs
-                                                            </div>
-                                                            <div className="mt-0.5 text-[10px] leading-snug text-amber-100/90">{info.resumo}</div>
-                                                            {(info.trechos || []).slice(0, 6).map((t, k) => (
-                                                              <div key={k} className="mt-1 text-[10px] leading-snug text-amber-100/80">
-                                                                {t.tipo === 'trocado' ? (
-                                                                  <>na copy: <span className="rounded bg-black/30 px-1 text-amber-100">{t.copy}</span> · no áudio: <span className="rounded bg-black/30 px-1 text-amber-100">{t.audio}</span></>
-                                                                ) : t.tipo === 'faltou-no-audio' ? (
-                                                                  <>faltou no áudio: <span className="rounded bg-black/30 px-1 text-amber-100">{t.copy}</span></>
-                                                                ) : (
-                                                                  <>sobrou no áudio: <span className="rounded bg-black/30 px-1 text-amber-100">{t.audio}</span></>
-                                                                )}
-                                                              </div>
-                                                            ))}
-                                                            {(info.trechos || []).length > 6 ? (
-                                                              <div className="mt-0.5 text-[9.5px] text-amber-200/60">+{(info.trechos || []).length - 6} outra(s) diferença(s)</div>
-                                                            ) : null}
-                                                            <div className="mono mt-1 text-[9px] uppercase tracking-widest text-amber-200/70">
-                                                              dá pra disparar mesmo assim — só confere se é o áudio certo
-                                                            </div>
-                                                          </div>
+                                                          <>
+                                                            <span className="text-[12.5px] font-bold text-red-500">
+                                                              Áudio {pct ?? '?'}% igual à copy
+                                                            </span>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => setAudioDiffOpen((p) => ({ ...p, [akey]: !p[akey] }))}
+                                                              aria-expanded={diffAberto}
+                                                              className={
+                                                                'flex h-7 w-7 items-center justify-center rounded-full border transition hover:-translate-y-[1px] active:translate-y-[1px] ' +
+                                                                (diffAberto
+                                                                  ? 'border-red-500/70 bg-red-500 text-white shadow-[0_4px_12px_-4px_rgba(239,68,68,0.7)]'
+                                                                  : 'border-red-500/50 bg-red-500/10 text-red-500 hover:bg-red-500/20')
+                                                              }
+                                                              title={diffAberto ? 'Fechar as diferenças' : 'Ver o que está diferente da copy'}
+                                                            >
+                                                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                                                                <path d="M12 9v4M12 17h.01" />
+                                                              </svg>
+                                                            </button>
+                                                            <span className="text-[10.5px] text-text-muted">dá pra disparar mesmo assim</span>
+                                                          </>
                                                         ) : (
-                                                          <span className="mono inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted" title={info.erro || ''}>
-                                                            não consegui comparar agora — o disparo segue normal
+                                                          <span className="text-[11px] text-text-muted" title={info.erro || ''}>
+                                                            Não deu pra comparar agora — o disparo segue normal.
                                                           </span>
                                                         )}
                                                       </div>
-                                                      {/* VOICE MIRROR — usa a VOZ selecionada com o áudio usado */}
-                                                      <div className="mt-2 flex flex-wrap items-center gap-2">
+
+                                                      {/* Tabela de diferenças — SÓ quando o aviso é clicado */}
+                                                      {diffAberto && (info?.trechos || []).length > 0 ? (
+                                                        <div className="mt-2.5 overflow-hidden rounded-[10px] border border-line">
+                                                          <div className="grid grid-cols-2 bg-bg/70 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted">
+                                                            <div className="px-3 py-1.5">O que a copy diz</div>
+                                                            <div className="border-l border-line px-3 py-1.5">O que o áudio fala</div>
+                                                          </div>
+                                                          {(info!.trechos || []).slice(0, 20).map((t, k) => (
+                                                            <div key={k} className="grid grid-cols-2 border-t border-line">
+                                                              <div className="px-3 py-2 text-[12px] leading-relaxed text-text">
+                                                                {t.copy ? t.copy : <span className="italic text-text-muted">— (não está na copy)</span>}
+                                                              </div>
+                                                              <div className="border-l border-line px-3 py-2 text-[12px] font-medium leading-relaxed text-red-500">
+                                                                {t.audio ? t.audio : <span className="italic opacity-70">— (não falou)</span>}
+                                                              </div>
+                                                            </div>
+                                                          ))}
+                                                          {(info!.trechos || []).length > 20 ? (
+                                                            <div className="border-t border-line px-3 py-1.5 text-[10.5px] text-text-muted">
+                                                              +{(info!.trechos || []).length - 20} outra(s) diferença(s)
+                                                            </div>
+                                                          ) : null}
+                                                        </div>
+                                                      ) : null}
+
+                                                      {/* Linha 3: Voice Mirror */}
+                                                      <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-line pt-2.5">
                                                         <button
                                                           type="button"
                                                           onClick={() => updateRoleSlot(a.taskId, sIdx, { audioMirror: !slot.audioMirror })}
-                                                          className="group relative inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                                          className={
+                                                            'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] transition hover:-translate-y-[1px] active:translate-y-[1px] ' +
+                                                            (slot.audioMirror
+                                                              ? 'border-cyan-500/60 text-[#04252b]'
+                                                              : 'border-line-strong bg-bg-soft/70 text-text-muted hover:text-text')
+                                                          }
                                                           style={
                                                             slot.audioMirror
                                                               ? {
                                                                   fontFamily: 'var(--font-tech)',
-                                                                  color: '#041012',
-                                                                  borderColor: 'rgba(34,211,238,0.55)',
                                                                   background: 'linear-gradient(135deg, #67e8f9 0%, #22d3ee 100%)',
-                                                                  boxShadow:
-                                                                    '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(34,211,238,0.7), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                                  boxShadow: '0 3px 0 rgba(0,0,0,0.25), 0 0 18px -6px rgba(34,211,238,0.7), inset 0 1px 0 rgba(255,255,255,0.5)',
                                                                 }
-                                                              : {
-                                                                  fontFamily: 'var(--font-tech)',
-                                                                  color: 'rgba(255,255,255,0.55)',
-                                                                  borderColor: 'rgba(255,255,255,0.12)',
-                                                                  background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
-                                                                  boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
-                                                                }
+                                                              : { fontFamily: 'var(--font-tech)' }
                                                           }
                                                           title={
                                                             slot.audioMirror
-                                                              ? 'Ligado: o HeyGen re-sintetiza este áudio na VOZ selecionada (timing e cadência do arquivo, timbre da voz).'
-                                                              : 'Voice Mirror: usa a voz selecionada com o áudio usado — o take sai com o timbre da voz escolhida seguindo a cadência do arquivo.'
+                                                              ? 'Ligado: o HeyGen re-sintetiza este áudio na VOZ selecionada (cadência do arquivo, timbre da voz).'
+                                                              : 'Voice Mirror: usa a voz selecionada com o áudio usado — o take sai no timbre da voz escolhida seguindo a cadência do arquivo.'
                                                           }
                                                         >
-                                                          <span className="text-[12px] leading-none">🪞</span>
                                                           Voice Mirror
                                                           <span
                                                             className={
                                                               'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
-                                                              (slot.audioMirror ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                                                              (slot.audioMirror ? 'bg-black/20 text-black/75' : 'bg-bg/60 text-text-muted')
                                                             }
                                                           >
                                                             {slot.audioMirror ? 'ON' : 'OFF'}
                                                           </span>
                                                         </button>
                                                         {slot.audioMirror && !temVozPraMirror ? (
-                                                          <span className="mono rounded-full border border-red-400/50 bg-red-500/15 px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-widest text-red-300">
-                                                            ⚠ escolha uma voz pro espelho
+                                                          <span className="text-[11px] font-semibold text-red-500">
+                                                            escolha uma voz pro espelho
                                                           </span>
-                                                        ) : null}
-                                                      </div>
-                                                      <div className="mt-1.5 text-[9.5px] leading-tight text-text-muted">
-                                                        {takeUnicoAudio ? (
-                                                          <>Avatar {motorAudio}: o áudio vai <b>inteiro num take único</b> (sem dividir).</>
                                                         ) : (
-                                                          <>Avatar III: divido o áudio nos <b>{partsCount || 1} take{(partsCount || 1) === 1 ? '' : 's'}</b> deste avatar pelas pausas — sem cortar fala, sem reverse.</>
+                                                          <span className="text-[10.5px] text-text-muted">
+                                                            {slot.audioMirror ? 'sai na voz selecionada, com a cadência do arquivo' : 'a voz do take é a do próprio áudio'}
+                                                          </span>
                                                         )}
-                                                        {' '}{slot.audioMirror ? 'Voice Mirror ligado: sai na voz selecionada.' : 'A voz do take é a do próprio áudio.'}
                                                       </div>
                                                     </div>
                                                   )}

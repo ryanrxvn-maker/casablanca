@@ -62,6 +62,10 @@ export type RedispatchPart = {
   role?: string | null;
   username?: string | null;
   briefingFileId?: string | null;
+  /** Duração do áudio (s) — regra dos 30s. */
+  audioDur?: number | null;
+  /** Indicações do copy (comentários do Docs) do avatar deste take. */
+  indicacoes?: string[];
 };
 
 type Motor = 'auto' | 'III' | 'IV' | 'V';
@@ -181,6 +185,8 @@ export function RedispatchPanel({
     partesOriginais.map((p) => ({ ...p })),
   );
   const [abertos, setAbertos] = useState<Record<number, boolean>>({});
+  /** Indicação do copy aberta no card do papel (seção "o que o copy pediu"). */
+  const [indicacaoAberta, setIndicacaoAberta] = useState<Record<number, boolean>>({});
   // O que foi aplicado "em todos": só pra tela mostrar a escolha em vez de
   // voltar pro estado vazio (e pra reaparecer o "voltar pra voz padrão").
   const [avatarGlobal, setAvatarGlobal] = useState<AvatarOption | null>(null);
@@ -331,15 +337,26 @@ export function RedispatchPanel({
          *  @username — na gramática deste painel. Só aparece quando o replan
          *  gravou o briefing (disparos a partir de 29.08). */}
         {(() => {
-          const papeis: Array<{ role: string; username: string | null; fileId: string | null }> = [];
-          const vistos = new Set<string>();
+          const papeis: Array<{ role: string; username: string | null; fileId: string | null; indicacoes: string[] }> = [];
+          const vistos = new Map<string, number>();
           for (const p of partesOriginais) {
             const role = (p.role || '').trim();
             if (!role && !p.briefingFileId) continue;
             const k = `${role.toLowerCase()}|${p.username || ''}|${p.briefingFileId || ''}`;
-            if (vistos.has(k)) continue;
-            vistos.add(k);
-            papeis.push({ role: role || 'Avatar', username: p.username || null, fileId: p.briefingFileId || null });
+            const idxExistente = vistos.get(k);
+            if (idxExistente !== undefined) {
+              for (const ind of p.indicacoes || []) {
+                if (!papeis[idxExistente].indicacoes.includes(ind)) papeis[idxExistente].indicacoes.push(ind);
+              }
+              continue;
+            }
+            vistos.set(k, papeis.length);
+            papeis.push({
+              role: role || 'Avatar',
+              username: p.username || null,
+              fileId: p.briefingFileId || null,
+              indicacoes: [...(p.indicacoes || [])],
+            });
           }
           if (papeis.length === 0) return null;
           return (
@@ -347,42 +364,70 @@ export function RedispatchPanel({
               <Campo>O que o copy pediu no Docs</Campo>
               <div className="grid gap-2 sm:grid-cols-2">
                 {papeis.map((pp, k) => (
-                  <div key={k} className="rdp-nota flex items-center gap-2.5 rounded-[10px] px-2.5 py-2">
-                    {pp.fileId ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={`https://drive.google.com/thumbnail?id=${pp.fileId}&sz=w200`}
-                        alt={pp.username || pp.role}
-                        className="h-12 w-12 shrink-0 rounded-[8px] object-cover"
-                        referrerPolicy="no-referrer"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[8px] bg-white/[0.05] text-white/35">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="8" r="4" />
-                          <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
-                        </svg>
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
-                        {pp.role}
+                  <div key={k} className="rdp-nota rounded-[10px] px-2.5 py-2">
+                    <div className="flex items-center gap-2.5">
+                      {pp.fileId ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={`https://drive.google.com/thumbnail?id=${pp.fileId}&sz=w200`}
+                          alt={pp.username || pp.role}
+                          className="h-12 w-12 shrink-0 rounded-[8px] object-cover"
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[8px] bg-white/[0.05] text-white/35">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="8" r="4" />
+                            <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                          </svg>
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                          {pp.role}
+                        </div>
+                        <div className="truncate text-[10.5px] text-text-muted">
+                          {pp.username ? `@${pp.username}` : 'sem referência no doc'}
+                        </div>
                       </div>
-                      <div className="truncate text-[10.5px] text-text-muted">
-                        {pp.username ? `@${pp.username}` : 'sem referência no doc'}
-                      </div>
+                      {pp.indicacoes.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setIndicacaoAberta((prev) => ({ ...prev, [k]: !prev[k] }))}
+                          aria-expanded={!!indicacaoAberta[k]}
+                          className={'pilot-ind-btn shrink-0' + (indicacaoAberta[k] ? ' is-open' : '')}
+                          title={`Indicação do copy pra este avatar (${pp.indicacoes.length}) — clica pra ver`}
+                        >
+                          <span className="pilot-ind-halo" aria-hidden />
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <path d="m3 11 14-6v14L3 13v-2z" />
+                            <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                            <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                          </svg>
+                          {pp.indicacoes.length > 1 ? <span className="pilot-ind-count">{pp.indicacoes.length}</span> : null}
+                        </button>
+                      ) : null}
+                      {pp.fileId ? (
+                        <a
+                          href={`https://drive.google.com/uc?export=download&id=${pp.fileId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rdp-btn-ghost shrink-0 rounded-full px-2.5 py-1.5 text-[10px]"
+                          title="Baixar o arquivo de referência do copywriter (Drive)"
+                        >
+                          Baixar
+                        </a>
+                      ) : null}
                     </div>
-                    {pp.fileId ? (
-                      <a
-                        href={`https://drive.google.com/uc?export=download&id=${pp.fileId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rdp-btn-ghost shrink-0 rounded-full px-2.5 py-1.5 text-[10px]"
-                        title="Baixar o arquivo de referência do copywriter (Drive)"
-                      >
-                        Baixar
-                      </a>
+                    {indicacaoAberta[k] && pp.indicacoes.length > 0 ? (
+                      <ul className="mt-2 grid gap-1.5 border-t border-white/[0.07] pt-2">
+                        {pp.indicacoes.map((ind, j) => (
+                          <li key={j} className="rounded-[8px] bg-amber-400/[0.10] px-2.5 py-1.5 text-[11.5px] leading-relaxed text-text shadow-[inset_0_0_0_1px_rgba(251,191,36,0.3)]">
+                            {ind}
+                          </li>
+                        ))}
+                      </ul>
                     ) : null}
                   </div>
                 ))}
@@ -452,13 +497,13 @@ export function RedispatchPanel({
                   {alterada ? <span className="rdp-marca is-acento">alterado</span> : null}
 
                   <div className="ml-auto flex items-center gap-1.5">
-                    {/* Sem item "auto" separado (pedido 29.08): só III/IV/V. Em
-                     *  automático o motor EFETIVO fica marcado com a micro-tag
-                     *  "auto" — clicar trava na mão; clicar de novo volta pro auto. */}
+                    {/* Só III/IV/V, sem item "auto" e sem tag (revisão 29.08): em
+                     *  automático o motor EFETIVO simplesmente fica ACESO. Clicar
+                     *  trava na mão; clicar de novo volta pro automático. */}
                     <div className="rdp-seg flex items-center gap-0.5 rounded-full p-[3px]">
                       {(['III', 'IV', 'V'] as const).map((op) => {
                         const sel = motor === op;
-                        const selAuto = motor === 'auto' && saida === op;
+                        const aceso = sel || (motor === 'auto' && saida === op);
                         return (
                           <button
                             key={op}
@@ -468,15 +513,14 @@ export function RedispatchPanel({
                             title={
                               sel
                                 ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
-                                : selAuto
+                                : aceso
                                   ? `Automático: sai no ${saida} (com gesto sobe pro IV). Clica pra travar no ${op}.`
                                   : `Avatar ${op}`
                             }
-                            className={`rdp-seg-item relative rounded-full px-2 py-[3px] text-[10px] disabled:opacity-40 ${sel ? 'dark-island is-on text-white' : selAuto ? 'is-on-auto text-white' : 'text-text-muted hover:text-white'}`}
+                            className={`rdp-seg-item rounded-full px-2 py-[3px] text-[10px] disabled:opacity-40 ${aceso ? 'dark-island is-on text-white' : 'text-text-muted hover:text-white'}`}
                             style={{ fontFamily: 'var(--font-mono)' }}
                           >
                             {op}
-                            {selAuto ? <span className="rdp-tag-auto">auto</span> : null}
                           </button>
                         );
                       })}
@@ -839,30 +883,6 @@ export function RedispatchPanel({
         .rdp-seg-item.is-on {
           background: linear-gradient(180deg, #8b5cf6, #6d4ee8);
           box-shadow: 0 3px 10px -4px rgba(109, 78, 232, 0.9);
-        }
-        /* Automático: o motor efetivo fica marcado mais suave + micro-tag. */
-        .rdp-seg-item.is-on-auto {
-          background: rgba(139, 92, 246, 0.22);
-          box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.45);
-        }
-        .rdp-tag-auto {
-          position: absolute;
-          top: -7px;
-          left: 50%;
-          transform: translateX(-50%);
-          border-radius: 999px;
-          padding: 0 4px;
-          font-size: 6.5px;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          color: #ddd2ff;
-          background: #17111f;
-          box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5), 0 1px 4px rgba(0, 0, 0, 0.5);
-        }
-        :global(html[data-theme='light']) .rdp-tag-auto {
-          color: #4c2ea8;
-          background: #f4f0ff;
-          box-shadow: inset 0 0 0 1px rgba(124, 92, 246, 0.4), 0 1px 4px rgba(16, 16, 24, 0.2);
         }
 
         .rdp-icone {
