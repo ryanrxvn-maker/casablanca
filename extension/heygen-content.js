@@ -804,33 +804,66 @@ function parseVoicesResponse(json) {
 async function listMyAvatars() {
   console.log('[DARKO LAB] === STEP 1: listMyAvatars iniciando ===');
 
-  // 1) Lista grupos da biblioteca via api2.heygen.com (cookies)
+  // 1) Lista grupos da biblioteca via api2.heygen.com (cookies).
+  //
+  // PAGINACAO OBRIGATORIA (fix 2026-08-29 — caso JOSHUA): antes era so
+  // `limit=200&page=1`, entao conta com MAIS de 200 grupos perdia todo o
+  // resto em silencio — o avatar existia no HeyGen mas nunca aparecia na
+  // biblioteca do app ("1 de 200 avatares" era o teto, nao a conta).
+  // Agora percorre TODAS as paginas ate a resposta vir menor que o limit
+  // (ou o total reportado ser atingido). Dedup por id como rede extra.
   let groups = [];
   try {
-    console.log('[DARKO LAB] fetching grupos...');
-    const r = await fetchWithTimeout(
-      'https://api2.heygen.com/v2/avatar_group.private.list?limit=200&page=1',
-      { method: 'GET', credentials: 'include' },
-      5000,
-    );
-    console.log('[DARKO LAB] grupos response status:', r.status);
-    if (!r.ok) {
+    console.log('[DARKO LAB] fetching grupos (paginado)...');
+    const PAGE_LIMIT = 200;
+    const MAX_PAGES = 25; // teto sanity: 5000 grupos
+    const seenGroupIds = new Set();
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const r = await fetchWithTimeout(
+        `https://api2.heygen.com/v2/avatar_group.private.list?limit=${PAGE_LIMIT}&page=${page}`,
+        { method: 'GET', credentials: 'include' },
+        8000,
+      );
+      console.log(`[DARKO LAB] grupos page=${page} status:`, r.status);
+      if (!r.ok) {
+        // Pagina 1 falhou = erro real. Pagina N>1 falhou = fica com o que
+        // ja veio (parcial e melhor que nada — e o retry de looks segue).
+        if (page === 1) {
+          return {
+            ok: false,
+            error: `HeyGen retornou HTTP ${r.status} ao listar grupos.`,
+            avatars: [],
+          };
+        }
+        console.warn(`[DARKO LAB] page ${page} falhou (HTTP ${r.status}) — seguindo com ${groups.length} grupos ja coletados`);
+        break;
+      }
+      const json = await r.json();
+      const batch = json?.data?.avatar_groups ?? [];
+      let added = 0;
+      for (const g of batch) {
+        const gid = g?.id;
+        if (!gid || seenGroupIds.has(gid)) continue;
+        seenGroupIds.add(gid);
+        groups.push(g);
+        added++;
+      }
+      const total = Number(json?.data?.total ?? 0) || null;
+      console.log(`[DARKO LAB] page=${page}: +${added} grupos (acum ${groups.length}${total ? ` de ${total}` : ''})`);
+      // Fim da lista: pagina veio curta, nada novo entrou, ou total atingido.
+      if (batch.length < PAGE_LIMIT || added === 0 || (total && groups.length >= total)) break;
+    }
+    console.log(`[DARKO LAB] STEP 2: ${groups.length} grupos encontrados (todas as paginas)`);
+  } catch (e) {
+    console.error('[DARKO LAB] erro ao listar grupos:', e);
+    if (groups.length === 0) {
       return {
         ok: false,
-        error: `HeyGen retornou HTTP ${r.status} ao listar grupos.`,
+        error: 'Falha ao listar grupos: ' + (e.message ?? e),
         avatars: [],
       };
     }
-    const json = await r.json();
-    groups = json?.data?.avatar_groups ?? [];
-    console.log(`[DARKO LAB] STEP 2: ${groups.length} grupos encontrados`);
-  } catch (e) {
-    console.error('[DARKO LAB] erro ao listar grupos:', e);
-    return {
-      ok: false,
-      error: 'Falha ao listar grupos: ' + (e.message ?? e),
-      avatars: [],
-    };
+    console.warn(`[DARKO LAB] listagem interrompida com ${groups.length} grupos coletados — seguindo com o parcial`);
   }
 
   if (groups.length === 0) {

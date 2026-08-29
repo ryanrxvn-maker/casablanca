@@ -1577,7 +1577,62 @@ function parseGoogleDocsHtml(html) {
     headings.push({ id: hid, text: htext });
   }
 
-  return { text, driveLinks, headings, docImages };
+  // === COMENTARIOS DO DOCS (indicacoes do copy) ===
+  // O export?format=html traz cada comentario como ancora [a]/[b] inline
+  // (<sup><a href="#cmnt1">[a]</a></sup>) + o corpo no rodape do doc
+  // (<a href="#cmnt_ref1" id="cmnt1">[a]</a> + texto). E como o copy indica
+  // "AVATAR SEGURANDO ALGO" / "avatar em ambiente X" sem sujar a fala.
+  // Capturado como campo SEPARADO — o `text` acima continua identico
+  // (zero regressao no parser de copy).
+  const comments = extractDocComments(html);
+
+  return { text, driveLinks, headings, docImages, comments };
+}
+
+/** Extrai os comentarios do export HTML do Google Docs.
+ *  Retorna [{ marker: 'a', context: '<texto ancorado/vizinho>', body: '<comentario>' }].
+ *  Best-effort: doc sem comentario (ou Google mudou o shape) → []. */
+function extractDocComments(html) {
+  const comments = [];
+  if (!html || html.indexOf('cmnt') === -1) return comments;
+  const stripTags = (s) => decodeHtmlEntities(String(s || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  try {
+    // 1) CORPO (rodape): <a href="#cmnt_refN" id="cmntN">[x]</a> ... ate fechar o bloco.
+    const bodyByN = new Map();
+    const markerByN = new Map();
+    const bodyRe = /<a\b[^>]*href=["']#cmnt_ref(\d+)["'][^>]*>\s*\[([^\]]{1,6})\]\s*<\/a>([\s\S]{0,4000}?)<\/div>/gi;
+    let bm;
+    while ((bm = bodyRe.exec(html)) !== null) {
+      const n = bm[1];
+      const marker = bm[2];
+      const body = stripTags(bm[3]);
+      if (!body) continue;
+      markerByN.set(n, marker);
+      // Mesmo N duas vezes = replies na thread → junta.
+      bodyByN.set(n, bodyByN.has(n) ? bodyByN.get(n) + ' · ' + body : body);
+    }
+    // 2) CONTEXTO (inline): <a href="#cmntN" id="cmnt_refN">[x]</a> — o texto
+    //    imediatamente ANTES da ancora e o trecho comentado (ou a vizinhanca).
+    const refRe = /<a\b[^>]*href=["']#cmnt(\d+)["'][^>]*>\s*\[([^\]]{1,6})\]\s*<\/a>/gi;
+    const contextByN = new Map();
+    let rm;
+    while ((rm = refRe.exec(html)) !== null) {
+      const n = rm[1];
+      const before = stripTags(html.slice(Math.max(0, rm.index - 700), rm.index));
+      contextByN.set(n, before.slice(-180));
+      if (!markerByN.has(n)) markerByN.set(n, rm[2]);
+    }
+    for (const [n, body] of bodyByN) {
+      comments.push({
+        marker: markerByN.get(n) || n,
+        context: contextByN.get(n) || '',
+        body,
+      });
+    }
+  } catch (e) {
+    console.warn('[DARKO LAB BG] extractDocComments falhou (segue sem comentarios):', e?.message ?? e);
+  }
+  return comments;
 }
 
 /** Decide quais imagens embutidas sao PRINT DE AVATAR e renumera os marcadores.
@@ -1743,6 +1798,7 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
         length: parsed.text.length,
         driveLinks: parsed.driveLinks,
         headings: parsed.headings || [],
+        comments: parsed.comments || [],
         source: 'export_html',
       });
       return;
@@ -1888,6 +1944,8 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       // Fallback mobilebasic NAO expõe os ids de heading do editor (DOM diferente
       // do export) → sem deep-link nesse caminho (app cai no docUrl normal).
       headings: [],
+      // Comentarios so vem pelo export HTML (o mobilebasic nao tem as ancoras).
+      comments: [],
       source: 'tab_fallback',
     });
   } catch (e) {
