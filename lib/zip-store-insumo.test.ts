@@ -49,6 +49,8 @@ eq(zipGroupId(`pilot:${T}:g:abc:img:2`), T, 'frame com genId também agrupa cert
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:img:0`), true, 'purga preserva o frame');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:g:abc:img:2`), true, 'preserva o frame também com genId');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:part:BODY 1`), false, 'take velho continua sendo purgado');
+eq(INSUMO_DO_DISPARO.test(`pilot:${T}:roleaudio:doutor:123`), true, 'áudio upado por avatar é insumo — purga preserva');
+eq(zipGroupId(`pilot:${T}:roleaudio:doutor:123`), T, 'áudio por avatar agrupa com o disparo (não vira " misc ")');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:leveled:BODY 1`), false, 'clip derivado continua sendo purgado');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:decupado:BODY 1@k0.04`), false, 'decupado continua sendo purgado');
 

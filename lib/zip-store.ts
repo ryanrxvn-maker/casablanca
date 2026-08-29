@@ -330,5 +330,7 @@ export async function deletePrefix(
 }
 
 /** O que a purga por GERAÇÃO nunca pode levar: insumo do disparo, não
- *  resultado dele. Hoje é só o frame do modo imagem. */
-export const INSUMO_DO_DISPARO = /:img:/;
+ *  resultado dele. Hoje: o frame do modo imagem (`:img:`) e o ÁUDIO upado por
+ *  avatar (`:roleaudio:`) — os dois são matéria-prima que o RETOMAR/REINICIAR
+ *  precisa reusar; take velho continua sendo purgado normalmente. */
+export const INSUMO_DO_DISPARO = /:img:|:roleaudio:/;

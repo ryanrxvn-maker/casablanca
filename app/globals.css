@@ -2346,3 +2346,99 @@ html[data-theme='light'] .plano-input {
   background: rgba(255, 255, 255, 0.92);
   box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
 }
+
+/* ═══════════ Botão 3D de INDICAÇÃO do copy (ClickUp Pilot, 29.08) ═══════════
+   Ícone-only, dourado, vivo: halo pulsando + brilho respirando + ícone com
+   micro-balanço. Aparece no card do avatar quando o comentário do Docs traz
+   direção de cena ("avatar segurando algo", "ambiente X"). Clique abre o
+   painel com a indicação. */
+.pilot-ind-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  color: #2b1a02;
+  background: linear-gradient(145deg, #fde68a 0%, #f59e0b 55%, #d97706 100%);
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.45),
+    0 6px 18px -6px rgba(245, 158, 11, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  animation: pilotIndGlow 2.6s ease-in-out infinite;
+  transition: transform 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.pilot-ind-btn:hover {
+  transform: translateY(-2px) scale(1.07);
+}
+.pilot-ind-btn:active {
+  transform: translateY(1px) scale(0.96);
+}
+.pilot-ind-btn.is-open {
+  background: linear-gradient(145deg, #fef3c7 0%, #fbbf24 55%, #f59e0b 100%);
+}
+.pilot-ind-btn > svg {
+  position: relative;
+  z-index: 1;
+  animation: pilotIndWiggle 2.6s ease-in-out infinite;
+  transform-origin: 50% 60%;
+}
+.pilot-ind-halo {
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(251, 191, 36, 0.55);
+  animation: pilotIndHalo 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+.pilot-ind-count {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  z-index: 2;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 9999px;
+  background: #15120a;
+  color: #fbbf24;
+  font-size: 8.5px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1.5px rgba(251, 191, 36, 0.6);
+}
+@keyframes pilotIndGlow {
+  0%, 100% {
+    box-shadow:
+      0 3px 0 rgba(0, 0, 0, 0.45),
+      0 6px 18px -6px rgba(245, 158, 11, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 3px 0 rgba(0, 0, 0, 0.45),
+      0 8px 26px -6px rgba(251, 191, 36, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  }
+}
+@keyframes pilotIndHalo {
+  0% { transform: scale(0.9); opacity: 0.9; }
+  70% { transform: scale(1.35); opacity: 0; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@keyframes pilotIndWiggle {
+  0%, 100% { transform: rotate(0deg); }
+  12% { transform: rotate(-9deg); }
+  24% { transform: rotate(7deg); }
+  36% { transform: rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pilot-ind-btn, .pilot-ind-btn > svg { animation: none; }
+  .pilot-ind-halo { display: none; }
+}

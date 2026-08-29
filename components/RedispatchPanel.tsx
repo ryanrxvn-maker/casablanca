@@ -50,6 +50,18 @@ export type RedispatchPart = {
   /** Cena em MODO IMAGEM: a imagem faz o papel do avatar (não tem avatarId).
    *  A chave dos bytes no IndexedDB tem que viajar intacta pro re-disparo. */
   imageKey?: string | null;
+  /** ÁUDIO POR AVATAR/TAKE (29.08): chave IDB do áudio upado. Do slot
+   *  (audioParte=false) = um arquivo dividido entre os takes; do painel
+   *  (audioParte=true) = o arquivo inteiro só neste take. */
+  audioKey?: string | null;
+  audioName?: string | null;
+  /** Voice Mirror: re-sintetiza o áudio na voz do take (STS). */
+  audioMirror?: boolean;
+  audioParte?: boolean;
+  /** Preview do briefing (o que o copy pediu no Docs) — só tela. */
+  role?: string | null;
+  username?: string | null;
+  briefingFileId?: string | null;
 };
 
 type Motor = 'auto' | 'III' | 'IV' | 'V';
@@ -68,7 +80,11 @@ function mesmaParte(a: RedispatchPart, b: RedispatchPart): boolean {
     (a.avatarId || null) === (b.avatarId || null) &&
     (a.voiceId || null) === (b.voiceId || null) &&
     (a.engine || null) === (b.engine || null) &&
-    (a.motionPrompt || '').trim() === (b.motionPrompt || '').trim()
+    (a.motionPrompt || '').trim() === (b.motionPrompt || '').trim() &&
+    // Áudio conta como mudança: trocar/tirar o áudio (ou ligar o mirror) é
+    // motivo real de reinício — sem isto o "alterado" não acendia.
+    (a.audioKey || null) === (b.audioKey || null) &&
+    !!a.audioMirror === !!b.audioMirror
   );
 }
 
@@ -139,6 +155,9 @@ export function RedispatchPanel({
   busy = false,
   onCancel,
   onReiniciar,
+  salvarAudioTake,
+  analisarAudioTake,
+  audioInfo,
 }: {
   taskName: string;
   adName: string;
@@ -150,6 +169,13 @@ export function RedispatchPanel({
   busy?: boolean;
   onCancel: () => void;
   onReiniciar: (partes: RedispatchPart[]) => void;
+  /** ÁUDIO POR TAKE (29.08): guarda os bytes no IDB e devolve a chave. Sem
+   *  este prop o botão de áudio nem aparece (painel legado segue igual). */
+  salvarAudioTake?: (label: string, file: File) => Promise<string>;
+  /** Dispara a comparação ASR × texto do take (advisory, nunca bloqueia). */
+  analisarAudioTake?: (audioKey: string, file: File, texto: string) => void;
+  /** Estado da análise por audioKey (compartilhado com o card da análise). */
+  audioInfo?: Record<string, { status: 'analisando' | 'ok' | 'divergente' | 'erro'; resumo?: string }>;
 }) {
   const [draft, setDraft] = useState<RedispatchPart[]>(() =>
     partesOriginais.map((p) => ({ ...p })),
@@ -300,6 +326,71 @@ export function RedispatchPanel({
           ) : null}
         </p>
 
+        {/* ─────────────── O que o copy pediu (briefing do Docs) ───────────────
+         *  O MESMO preview da análise — thumb do arquivo do Drive, papel e
+         *  @username — na gramática deste painel. Só aparece quando o replan
+         *  gravou o briefing (disparos a partir de 29.08). */}
+        {(() => {
+          const papeis: Array<{ role: string; username: string | null; fileId: string | null }> = [];
+          const vistos = new Set<string>();
+          for (const p of partesOriginais) {
+            const role = (p.role || '').trim();
+            if (!role && !p.briefingFileId) continue;
+            const k = `${role.toLowerCase()}|${p.username || ''}|${p.briefingFileId || ''}`;
+            if (vistos.has(k)) continue;
+            vistos.add(k);
+            papeis.push({ role: role || 'Avatar', username: p.username || null, fileId: p.briefingFileId || null });
+          }
+          if (papeis.length === 0) return null;
+          return (
+            <section className="rdp-bloco mt-3.5 rounded-[13px] p-3">
+              <Campo>O que o copy pediu no Docs</Campo>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {papeis.map((pp, k) => (
+                  <div key={k} className="rdp-nota flex items-center gap-2.5 rounded-[10px] px-2.5 py-2">
+                    {pp.fileId ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={`https://drive.google.com/thumbnail?id=${pp.fileId}&sz=w200`}
+                        alt={pp.username || pp.role}
+                        className="h-12 w-12 shrink-0 rounded-[8px] object-cover"
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[8px] bg-white/[0.05] text-white/35">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="8" r="4" />
+                          <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                        </svg>
+                      </span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                        {pp.role}
+                      </div>
+                      <div className="truncate text-[10.5px] text-text-muted">
+                        {pp.username ? `@${pp.username}` : 'sem referência no doc'}
+                      </div>
+                    </div>
+                    {pp.fileId ? (
+                      <a
+                        href={`https://drive.google.com/uc?export=download&id=${pp.fileId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rdp-btn-ghost shrink-0 rounded-full px-2.5 py-1.5 text-[10px]"
+                        title="Baixar o arquivo de referência do copywriter (Drive)"
+                      >
+                        Baixar
+                      </a>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })()}
+
         {/* ─────────────── Aplicar em todos os takes ─────────────── */}
         <section className="rdp-bloco mt-3.5 rounded-[13px] p-3">
           <Campo>Aplicar em todos os takes</Campo>
@@ -361,20 +452,31 @@ export function RedispatchPanel({
                   {alterada ? <span className="rdp-marca is-acento">alterado</span> : null}
 
                   <div className="ml-auto flex items-center gap-1.5">
+                    {/* Sem item "auto" separado (pedido 29.08): só III/IV/V. Em
+                     *  automático o motor EFETIVO fica marcado com a micro-tag
+                     *  "auto" — clicar trava na mão; clicar de novo volta pro auto. */}
                     <div className="rdp-seg flex items-center gap-0.5 rounded-full p-[3px]">
-                      {(['auto', 'III', 'IV', 'V'] as const).map((op) => {
+                      {(['III', 'IV', 'V'] as const).map((op) => {
                         const sel = motor === op;
+                        const selAuto = motor === 'auto' && saida === op;
                         return (
                           <button
                             key={op}
                             type="button"
                             disabled={busy}
-                            onClick={() => patch(idx, { engine: op === 'auto' ? undefined : op })}
-                            title={op === 'auto' ? 'Automático: III, ou IV quando tem gesto' : `Avatar ${op}`}
-                            className={`rdp-seg-item rounded-full px-2 py-[3px] text-[10px] disabled:opacity-40 ${sel ? 'dark-island is-on text-white' : 'text-text-muted hover:text-white'}`}
+                            onClick={() => patch(idx, { engine: sel ? undefined : op })}
+                            title={
+                              sel
+                                ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
+                                : selAuto
+                                  ? `Automático: sai no ${saida} (com gesto sobe pro IV). Clica pra travar no ${op}.`
+                                  : `Avatar ${op}`
+                            }
+                            className={`rdp-seg-item relative rounded-full px-2 py-[3px] text-[10px] disabled:opacity-40 ${sel ? 'dark-island is-on text-white' : selAuto ? 'is-on-auto text-white' : 'text-text-muted hover:text-white'}`}
                             style={{ fontFamily: 'var(--font-mono)' }}
                           >
-                            {op === 'auto' ? `auto ${saida}` : op}
+                            {op}
+                            {selAuto ? <span className="rdp-tag-auto">auto</span> : null}
                           </button>
                         );
                       })}
@@ -425,6 +527,87 @@ export function RedispatchPanel({
                     />
                   </div>
                 </div>
+
+                {/* ÁUDIO DO TAKE (29.08): o take pode sair de um ÁUDIO upado em
+                 *  vez do TTS — aqui dá pra ver o áudio que o disparo usou,
+                 *  trocar por outro, tirar, e ligar o Voice Mirror. Áudio
+                 *  colocado AQUI vale só neste take (vai inteiro, sem dividir). */}
+                {salvarAudioTake && !modoImagem ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 pl-[30px]">
+                    {p.audioKey ? (
+                      <>
+                        <span
+                          className="rdp-marca max-w-[240px]"
+                          title={p.audioParte ? 'Áudio deste take (vai inteiro, sem dividir)' : 'Áudio do avatar no disparo (dividido entre os takes dele)'}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                          </svg>
+                          <span className="truncate">{p.audioName || 'áudio do disparo'}</span>
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => patch(idx, { audioMirror: !p.audioMirror })}
+                          className={`rdp-marca ${p.audioMirror ? 'is-acento' : ''}`}
+                          title={
+                            p.audioMirror
+                              ? 'Voice Mirror LIGADO: o HeyGen re-sintetiza o áudio na voz deste take (timing do arquivo, timbre da voz).'
+                              : 'Voice Mirror: usa a voz selecionada com o áudio usado. Clica pra ligar.'
+                          }
+                        >
+                          🪞 mirror {p.audioMirror ? 'on' : 'off'}
+                        </button>
+                        {(() => {
+                          const st = p.audioKey ? audioInfo?.[p.audioKey] : undefined;
+                          if (!st) return null;
+                          if (st.status === 'analisando') return <span className="rdp-marca">comparando com a copy…</span>;
+                          if (st.status === 'ok') return <span className="rdp-marca" style={{ color: '#c8e87c' }}>✓ bate com o texto</span>;
+                          if (st.status === 'divergente') return (
+                            <span className="rdp-marca" style={{ color: '#fcd34d' }} title={st.resumo || ''}>
+                              ⚠ áudio ≠ texto do take
+                            </span>
+                          );
+                          return null;
+                        })()}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => patch(idx, { audioKey: null, audioName: null, audioMirror: false, audioParte: false })}
+                          className="rdp-icone flex h-6 w-6 items-center justify-center rounded-full"
+                          title="Tirar o áudio — este take volta a sair por TTS (texto)"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                        </button>
+                      </>
+                    ) : (
+                      <label className={`rdp-btn-ghost inline-flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-[10.5px] ${busy ? 'pointer-events-none opacity-40' : ''}`}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                        </svg>
+                        Colocar áudio neste take
+                        <input
+                          type="file"
+                          accept="audio/*,video/mp4,video/webm,video/ogg"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!f || !salvarAudioTake) return;
+                            void salvarAudioTake(p.label, f)
+                              .then((key) => {
+                                patch(idx, { audioKey: key, audioName: f.name, audioParte: true });
+                                analisarAudioTake?.(key, f, p.text || '');
+                              })
+                              .catch((err) => console.error('[RedispatchPanel] áudio do take falhou:', err));
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                ) : null}
 
                 {/* Texto: prévia quando fechado, editor quando aberto */}
                 {!aberto ? (
@@ -656,6 +839,30 @@ export function RedispatchPanel({
         .rdp-seg-item.is-on {
           background: linear-gradient(180deg, #8b5cf6, #6d4ee8);
           box-shadow: 0 3px 10px -4px rgba(109, 78, 232, 0.9);
+        }
+        /* Automático: o motor efetivo fica marcado mais suave + micro-tag. */
+        .rdp-seg-item.is-on-auto {
+          background: rgba(139, 92, 246, 0.22);
+          box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.45);
+        }
+        .rdp-tag-auto {
+          position: absolute;
+          top: -7px;
+          left: 50%;
+          transform: translateX(-50%);
+          border-radius: 999px;
+          padding: 0 4px;
+          font-size: 6.5px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          color: #ddd2ff;
+          background: #17111f;
+          box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5), 0 1px 4px rgba(0, 0, 0, 0.5);
+        }
+        :global(html[data-theme='light']) .rdp-tag-auto {
+          color: #4c2ea8;
+          background: #f4f0ff;
+          box-shadow: inset 0 0 0 1px rgba(124, 92, 246, 0.4), 0 1px 4px rgba(16, 16, 24, 0.2);
         }
 
         .rdp-icone {

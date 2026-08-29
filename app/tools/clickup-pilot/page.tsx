@@ -559,6 +559,15 @@ function planoDoReplan(saved: NonNullable<BatchTaskState['replan']>): DispatchPl
       // dataUrl não sobrevive ao reload; os bytes vêm do IDB por esta chave.
       imageKey: p.imageKey ?? null,
       engine: p.engine,
+      // ÁUDIO POR AVATAR: a chave IDB sobrevive ao F5 igual à do frame — sem
+      // repassar aqui, o RETOMAR/REINICIAR voltava pro TTS em silêncio.
+      audioKey: p.audioKey ?? null,
+      audioName: p.audioName ?? null,
+      audioMirror: p.audioMirror ?? false,
+      audioParte: p.audioParte ?? false,
+      role: p.role ?? null,
+      username: p.username ?? null,
+      briefingFileId: p.briefingFileId ?? null,
     })),
     unmatchedAvatars: [],
   } as unknown as DispatchPlan;
@@ -724,6 +733,21 @@ type DispatchPlan = {
     imageKey?: string | null;
     /** Motor escolhido na mão pra esta cena (ausente = automático). */
     engine?: 'III' | 'IV' | 'V';
+    /** ÁUDIO POR AVATAR (29.08): chave IDB do áudio upado no slot dono desta
+     *  parte. Presente → o take sai do ÁUDIO (dividido entre as partes do
+     *  mesmo audioKey sem cortar fala), não do TTS. */
+    audioKey?: string | null;
+    audioName?: string | null;
+    /** Voice Mirror: re-sintetiza o áudio na voz do take (STS do HeyGen). */
+    audioMirror?: boolean;
+    /** true = áudio anexado a ESTE take (painel de reiniciar): vai inteiro,
+     *  sem dividir. false/ausente = áudio do slot, dividido entre as partes. */
+    audioParte?: boolean;
+    /** Preview do briefing (papel/arquivo do Docs) — só pra tela do painel de
+     *  reiniciar mostrar QUEM o copy pediu; o disparo não usa. */
+    role?: string | null;
+    username?: string | null;
+    briefingFileId?: string | null;
   }>;
   unmatchedAvatars: string[];
 };
@@ -833,7 +857,7 @@ type BatchTaskState = {
      *  quem foi disparado mesmo com a biblioteca do HeyGen ainda carregando).
      *  O disparo continua olhando só os ids. Thumb NÃO entra: URL longa vezes
      *  N takes vezes N tasks estoura a quota do localStorage. */
-    parts: Array<{ label: string; text: string; avatarId: string | null; avatarName?: string | null; voiceId: string | null; voiceName?: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V' }>;
+    parts: Array<{ label: string; text: string; avatarId: string | null; avatarName?: string | null; voiceId: string | null; voiceName?: string | null; motionPrompt?: string | null; imageKey?: string | null; engine?: 'III' | 'IV' | 'V'; audioKey?: string | null; audioName?: string | null; audioMirror?: boolean; audioParte?: boolean; role?: string | null; username?: string | null; briefingFileId?: string | null }>;
   };
   /** O `replan` acima foi EDITADO NA MÃO no painel de reiniciar disparo. Nesse
    *  caso ele MANDA sobre a análise em memória: sem esta marca, um reinício
@@ -939,6 +963,21 @@ type RoleSlot = {
    *  IV no runner de qualquer jeito, senão o take voltaria parado. */
   engine?: 'III' | 'IV' | 'V';
   imageMode?: boolean;
+  /** ÁUDIO POR AVATAR (29.08) — em vez do TTS por texto, este avatar fala um
+   *  ÁUDIO upado. Os bytes vivem no IDB (`pilot:<task>:roleaudio:<slug>:<ts>`,
+   *  insumo protegido da purga) e a chave entra no replan → sobrevive F5 e
+   *  vale no REINICIAR. Em Avatar III o áudio é dividido entre os takes do
+   *  avatar SEM cortar fala (sem reverse); IV/V já colapsam em take único e o
+   *  arquivo vai inteiro. */
+  audioKey?: string | null;
+  audioName?: string | null;
+  /** Voice Mirror: o HeyGen re-sintetiza o áudio na voz selecionada (STS) —
+   *  timing/cadência do arquivo, timbre da voz escolhida. Exige voz. */
+  audioMirror?: boolean;
+  /** INDICAÇÕES do copy — comentários do Google Docs ancorados neste avatar
+   *  ("avatar segurando o produto", "ambiente de cozinha"...). Extraídos do
+   *  export HTML pela extensão; aparecem no botão 3D de indicação do card. */
+  indicacoes?: string[];
   /** Data URL da imagem — vive em memória (taskAnalyses) e vai pro runner.
    *  NÃO entra no replan: base64 de imagem no localStorage estoura a quota e
    *  derruba a persistência de TODAS as tasks. Os bytes vão pro IndexedDB. */
@@ -1789,7 +1828,7 @@ function ClickUpPilotInner() {
    * Retorna tambem driveLinks: links pra videos em Drive citados no doc
    * (necessarios pra visual match de avatares).
    */
-  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }> {
+  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; comments?: Array<{ marker: string; context: string; body: string }>; transient?: boolean }> {
     return new Promise((resolve) => {
       const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       // Timeout em DOIS estagios (extensao v4.16.2+ manda HG_DOC_ACK assim
@@ -1803,7 +1842,7 @@ function ClickUpPilotInner() {
       let acked = false;
       let done = false;
       const timers: ReturnType<typeof setTimeout>[] = [];
-      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }) => {
+      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; comments?: Array<{ marker: string; context: string; body: string }>; transient?: boolean }) => {
         if (done) return;
         done = true;
         window.removeEventListener('message', handler);
@@ -1821,6 +1860,8 @@ function ClickUpPilotInner() {
             error,
             driveLinks: ev.data.driveLinks,
             headings: ev.data.headings,
+            // Comentários do Docs (indicações do copy) — extensão 4.18+.
+            comments: ev.data.comments,
             // permissao/inexistente nao melhora com retry; resto sim
             transient: !ev.data.ok && !!error && !/permiss|nao existe|não existe|privado/i.test(error),
           });
@@ -1840,8 +1881,8 @@ function ClickUpPilotInner() {
   /** Doc fetch com retry automatico: ate 3 tentativas pra erro transient
    *  (timeout, glitch de rede, service worker dormindo). Erro definitivo
    *  (sem permissao / doc nao existe) falha direto sem retry. */
-  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }> }> {
-    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
+  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; comments?: Array<{ marker: string; context: string; body: string }> }> {
+    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; comments?: Array<{ marker: string; context: string; body: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
     for (let attempt = 1; attempt <= 3; attempt++) {
       last = await fetchDocViaExtensionOnce(url);
       if (last.ok || !last.transient) return last;
@@ -2592,6 +2633,54 @@ function ClickUpPilotInner() {
               matchedBy: null,
             });
           }
+          // ═══ INDICAÇÕES DO COPY (29.08) — comentários do Docs por avatar ═══
+          // O copy indica cena nos COMENTÁRIOS do doc ("avatar segurando o
+          // produto", "ambiente de cozinha"). A extensão (4.18+) extrai cada
+          // comentário do export HTML com marcador ([a]/[b]), contexto (o
+          // trecho ancorado) e corpo. Aqui casamos com o avatar dono:
+          //  · contexto/corpo menciona o @username do slot; OU
+          //  · o marcador [x] está NA LINHA do doc que declara esse avatar
+          //    (marcadores são únicos no doc, então não vaza entre ADs).
+          // O que casar vira o botão 3D de indicação no card do avatar.
+          try {
+            const docComments = docR.comments || [];
+            if (docComments.length && roleSlots.length) {
+              const linhasDoDoc = (docR.text || '').split(/\r?\n/);
+              for (const slot of roleSlots) {
+                const uNorm = normalizeForMatch(slot.username || '');
+                const roleNorm = normalizeForMatch(slot.role || '');
+                const inds: string[] = [];
+                for (const c of docComments) {
+                  const body = (c.body || '').trim();
+                  if (!body) continue;
+                  const ctxNorm = normalizeForMatch(c.context || '');
+                  const bodyNorm = normalizeForMatch(body);
+                  const porMencao = !!uNorm && uNorm.length >= 4 && (ctxNorm.includes(uNorm) || bodyNorm.includes(uNorm));
+                  let porMarcador = false;
+                  if (!porMencao && c.marker) {
+                    const tag = `[${c.marker}]`;
+                    for (const ln of linhasDoDoc) {
+                      if (!ln.includes(tag)) continue;
+                      const lnNorm = normalizeForMatch(ln);
+                      if ((uNorm && uNorm.length >= 4 && lnNorm.includes(uNorm)) ||
+                          (roleNorm && new RegExp(`^\\s*${slot.role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:`, 'i').test(ln))) {
+                        porMarcador = true;
+                      }
+                      break; // marcador é único no doc — achou a linha, decidiu
+                    }
+                  }
+                  if ((porMencao || porMarcador) && !inds.includes(body)) inds.push(body);
+                }
+                if (inds.length) slot.indicacoes = inds;
+              }
+              const comIndicacao = roleSlots.filter((s) => s.indicacoes?.length).length;
+              if (comIndicacao) {
+                console.log(`[clickup-pilot] indicações do copy: ${docComments.length} comentário(s) no doc, ${comIndicacao} avatar(es) com indicação em ${task.name}`);
+              }
+            }
+          } catch (e) {
+            console.warn('[clickup-pilot] associação de comentários falhou (segue sem indicações):', e);
+          }
           // Parser não achou avatar nenhum e você já tinha escolhido um na
           // mão? Ele volta — com avatar e voz. É o que faz trocar de idioma
           // no DR MILLION não jogar sua escolha fora.
@@ -2792,6 +2881,26 @@ function ClickUpPilotInner() {
    *  reflete o numero REAL de runs ativos nesta aba — independente do
    *  batchStates (que pode estar com phase 'queued' por race). */
   const heygenSlotsRef = useRef<number>(0);
+  /** ═══ ÁUDIO POR AVATAR (29.08) ═══
+   *  Estado da ANÁLISE do áudio upado (ASR do HeyGen × copy do Docs), por
+   *  audioKey. Nunca bloqueia o disparo — só acusa a diferença, com o trecho
+   *  exato ("na copy: X · no áudio: Y"). As `palavras` do ASR guiam a divisão
+   *  do áudio nos takes (corte na pausa entre as falas dos takes). */
+  const [roleAudioInfo, setRoleAudioInfo] = useState<Record<string, {
+    status: 'analisando' | 'ok' | 'divergente' | 'erro';
+    resumo?: string;
+    trechos?: Array<{ tipo: 'faltou-no-audio' | 'sobrou-no-audio' | 'trocado'; copy?: string; audio?: string }>;
+    asrText?: string;
+    palavras?: Array<{ texto: string; inicio: number; fim: number }>;
+    duracao?: number;
+    erro?: string;
+  }>>({});
+  /** Espelho em ref (File + palavras do ASR) pro RUNNER ler fresco no meio do
+   *  disparo — state capturado num closure velho mentiria. File é cache: se
+   *  sumir (F5), os bytes voltam do IDB pela audioKey. */
+  const roleAudioRef = useRef<Record<string, { file?: File; palavras?: Array<{ texto: string; inicio: number; fim: number }> }>>({});
+  /** Popover de indicações do copy (comentários do Docs) aberto, por slot. */
+  const [indicacaoOpen, setIndicacaoOpen] = useState<Record<string, boolean>>({});
   /** Dedup de wrappers gated por taskId. Se ja ha um wrapper esperando
    *  vaga pra essa task, segundo clique e no-op (idempotente). */
   const heygenPendingRef = useRef<Record<string, 'run' | 'resume'>>({});
@@ -3492,7 +3601,11 @@ function ClickUpPilotInner() {
       //
       // B2C: dedupOn=false → minhasIdx vira [0,1,2,...] e todo o resto abaixo
       // se comporta exatamente como antes (resultsFull === results).
-      const dedupOn = !!a?.drMillion;
+      // Take com ÁUDIO upado nunca entra no dedup por conteúdo: a chave é
+      // texto+avatar+voz, e dois takes com o mesmo texto podem carregar fatias
+      // de áudio diferentes — reusar seria entregar a fala errada.
+      const temAudioUpado = plan.parts.some((p: any) => p.audioKey);
+      const dedupOn = !!a?.drMillion && !temAudioUpado;
       const plano = planejarDisparo(plan.parts as any, {
         ativo: dedupOn,
         reservadas: new Set(drDedupRef.current.keys()),
@@ -3542,6 +3655,67 @@ function ClickUpPilotInner() {
           console.warn(`[clickup-pilot] imagem ${p.imageKey} não voltou do IDB:`, e);
         }
       }
+      // ═══ ÁUDIO POR AVATAR (29.08) ═══════════════════════════════════════
+      // Partes que compartilham a MESMA audioKey são o slot de um avatar com
+      // áudio upado: o arquivo é UM e vira N takes — dividido nas fronteiras
+      // dos textos (ASR quando a análise rodou), com o corte caindo na PAUSA
+      // (nunca no meio de fala → sem reverse no Avatar III). Slot em IV/V já
+      // foi colapsado em take único pelo buildPlan, então o grupo tem 1 parte
+      // e o arquivo vai inteiro. `audioParte` (take do painel de reiniciar)
+      // também vai inteiro. Faltou o áudio no navegador (IDB limpo/outra
+      // máquina)? Falha AGORA com nome — mandar TTS em silêncio entregaria a
+      // voz errada, e take mudo custa cota.
+      const audioPorParte = new Map<number, File>();
+      if (temAudioUpado) {
+        const grupos = new Map<string, number[]>();
+        for (const i of minhasIdx) {
+          const p: any = plan.parts[i];
+          if (p.audioKey) {
+            const g = grupos.get(p.audioKey) || [];
+            g.push(i);
+            grupos.set(p.audioKey, g);
+          }
+        }
+        for (const [akey, idxs] of grupos) {
+          idxs.sort((x, y) => x - y);
+          try {
+            let full: File | null = roleAudioRef.current[akey]?.file || null;
+            if (!full) {
+              const { loadBlob } = await import('@/lib/zip-store');
+              const blob = await loadBlob(akey, 'audio/mpeg');
+              if (blob) {
+                const nome = (plan.parts[idxs[0]] as any).audioName || 'audio-do-avatar';
+                full = new File([blob], nome, { type: blob.type || 'audio/mpeg' });
+                roleAudioRef.current[akey] = { ...(roleAudioRef.current[akey] || {}), file: full };
+              }
+            }
+            if (!full) {
+              throw new Error('o áudio upado não está mais guardado neste navegador — suba o arquivo de novo no card do avatar e dispare');
+            }
+            const ehTakeUnico = idxs.length === 1 || (plan.parts[idxs[0]] as any).audioParte;
+            if (ehTakeUnico) {
+              for (const i of idxs) audioPorParte.set(i, full);
+              continue;
+            }
+            const { dividirAudioPorPartes } = await import('@/lib/pilot-audio');
+            const palavras = roleAudioRef.current[akey]?.palavras || null;
+            setBatchStates((prev) => prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `Dividindo o áudio em ${idxs.length} takes (sem cortar fala)...` } } : prev);
+            const fatias = await dividirAudioPorPartes(
+              full,
+              idxs.map((i) => ({ label: plan!.parts[i].label, text: plan!.parts[i].text })),
+              palavras as any,
+            );
+            idxs.forEach((i, k) => { if (fatias[k]?.file) audioPorParte.set(i, fatias[k].file); });
+            console.log(`[clickup-pilot] áudio ${akey}: dividido em ${fatias.length} take(s) — ${fatias.map((f) => `${f.label}=${f.duracaoSec.toFixed(1)}s`).join(', ')}`);
+          } catch (e) {
+            const labels = idxs.map((i) => plan!.parts[i].label).join(', ');
+            const errMsg = `Áudio do avatar (takes ${labels}): ${(e as Error)?.message || e}.`;
+            console.error(`[clickup-pilot] ${errMsg}`);
+            setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
+            return;
+          }
+        }
+      }
       const jobs = minhasIdx.map((i) => {
         const p: any = plan.parts[i];
         return {
@@ -3553,6 +3727,11 @@ function ClickUpPilotInner() {
           motionPrompt: p.motionPrompt || undefined,
           // Modo imagem: sem avatar — o runner sobe pela variante `image`.
           imageDataUrl: p.imageDataUrl || (p.imageKey ? imagensPorChave.get(p.imageKey) : undefined) || undefined,
+          // ÁUDIO POR AVATAR: com fatia anexada o runner dispara em modo áudio
+          // (job.audio vence o mode global); voiceMirroring re-sintetiza na
+          // voz do take (STS) quando o Voice Mirror do slot está ligado.
+          audio: audioPorParte.get(i),
+          voiceMirroring: audioPorParte.has(i) ? (!!p.audioMirror || undefined) : undefined,
           // motor escolhido na cena vence o motorConfig global
           motor: p.engine || motorsPerPart[i],
         };
@@ -4525,6 +4704,49 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               console.warn(`[pilot resume] imagem ${rp.imageKey} não voltou do IDB:`, e);
             }
           }
+          // ÁUDIO POR AVATAR no RETOMAR (29.08): take que nasceu de áudio
+          // upado re-dispara com o MESMO pedaço de áudio — cair pro TTS em
+          // silêncio entregaria a voz errada. As fronteiras da divisão
+          // dependem do GRUPO inteiro (todas as partes da mesma audioKey),
+          // então dividimos o grupo completo e pegamos só as fatias zumbis.
+          const audioResume = new Map<number, File>();
+          {
+            const chavesZumbis = new Set<string>();
+            for (const i of zombieIdxs) {
+              const rp: any = state.replan!.parts[i];
+              if (rp?.audioKey) chavesZumbis.add(rp.audioKey);
+            }
+            for (const akey of chavesZumbis) {
+              try {
+                const todas = state.replan!.parts
+                  .map((rp: any, i: number) => ({ rp, i }))
+                  .filter(({ rp }: any) => rp.audioKey === akey);
+                let full: File | null = roleAudioRef.current[akey]?.file || null;
+                if (!full) {
+                  const { loadBlob } = await import('@/lib/zip-store');
+                  const blob = await loadBlob(akey, 'audio/mpeg');
+                  if (blob) {
+                    full = new File([blob], (todas[0]?.rp as any)?.audioName || 'audio-do-avatar', { type: blob.type || 'audio/mpeg' });
+                    roleAudioRef.current[akey] = { ...(roleAudioRef.current[akey] || {}), file: full };
+                  }
+                }
+                if (!full) throw new Error('o áudio upado não está mais guardado neste navegador');
+                if (todas.length === 1 || (todas[0].rp as any).audioParte) {
+                  for (const { i } of todas) audioResume.set(i, full);
+                } else {
+                  const { dividirAudioPorPartes } = await import('@/lib/pilot-audio');
+                  const fatias = await dividirAudioPorPartes(
+                    full,
+                    todas.map(({ rp }: any) => ({ label: rp.label, text: rp.text })),
+                    (roleAudioRef.current[akey]?.palavras as any) || null,
+                  );
+                  todas.forEach(({ i }: any, k: number) => { if (fatias[k]?.file) audioResume.set(i, fatias[k].file); });
+                }
+              } catch (e) {
+                console.error(`[pilot resume] áudio ${akey} não pôde ser preparado (as partes dele ficam de fora deste round):`, e);
+              }
+            }
+          }
           const jobsToRedispatch = zombieIdxs.map((i) => {
             const rp: any = state.replan!.parts[i];
             return {
@@ -4538,22 +4760,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               imageDataUrl: rp.imageDataUrl || (rp.imageKey ? imgsResume.get(rp.imageKey) : undefined) || undefined,
               motionPrompt: rp.motionPrompt || undefined,
               motor: rp.engine || ('III' as const),
+              // Take de áudio: a fatia certa (nunca TTS por engano).
+              audio: audioResume.get(i),
+              voiceMirroring: audioResume.has(i) ? (!!rp.audioMirror || undefined) : undefined,
+              _precisaAudio: !!rp.audioKey,
             };
           });
-          // Sem avatar E sem imagem não dá pra disparar. Mas descartar calado
+          // Sem avatar E sem imagem não dá pra disparar — e take de ÁUDIO sem o
+          // áudio também não (TTS entregaria voz errada). Mas descartar calado
           // faz o RETOMAR "rodar" e não fazer nada — foi assim que a faxina do
           // IndexedDB comendo o frame passou despercebida por horas. Fala qual
           // cena e por quê.
-          const semInsumo = jobsToRedispatch.filter((j) => !j.avatarId && !j.imageDataUrl);
-          const prontos = jobsToRedispatch.filter((j) => j.avatarId || j.imageDataUrl);
+          const semInsumo = jobsToRedispatch.filter((j) => (!j.avatarId && !j.imageDataUrl) || (j._precisaAudio && !j.audio));
+          const prontos = jobsToRedispatch.filter((j) => (j.avatarId || j.imageDataUrl) && !(j._precisaAudio && !j.audio));
           if (semInsumo.length) {
             const quais = semInsumo.map((j) => j.label).join(', ');
-            console.error(`[pilot resume] sem imagem no IDB pra re-disparar: ${quais}`);
+            const temAudioFaltando = semInsumo.some((j) => j._precisaAudio && !j.audio);
+            console.error(`[pilot resume] sem insumo no IDB pra re-disparar: ${quais}`);
             setBatchStates((prev) => ({
               ...prev,
               [taskId]: {
                 ...prev[taskId],
-                message: `Cena(s) em modo imagem sem o frame guardado: ${quais}. Reaplica o plano com os frames e dispara de novo.`,
+                message: temAudioFaltando
+                  ? `Take(s) de áudio sem o arquivo guardado: ${quais}. Suba o áudio de novo no card do avatar (ou no painel de reiniciar) e retome.`
+                  : `Cena(s) em modo imagem sem o frame guardado: ${quais}. Reaplica o plano com os frames e dispara de novo.`,
               },
             }));
           }
@@ -6781,6 +7011,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         motionPrompt: (p.motionPrompt || '').trim() || null,
         imageKey: p.imageKey ?? null,
         engine: p.engine,
+        // ÁUDIO POR AVATAR: preserva (ou recebe do painel) o áudio do take.
+        audioKey: (p as any).audioKey ?? null,
+        audioName: (p as any).audioName ?? null,
+        audioMirror: (p as any).audioMirror ?? false,
+        audioParte: (p as any).audioParte ?? false,
+        role: (p as any).role ?? null,
+        username: (p as any).username ?? null,
+        briefingFileId: (p as any).briefingFileId ?? null,
       })),
     };
     // Última barreira antes de gastar cota: o runner morre em "part sem
@@ -7638,6 +7876,106 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setError(null);
   }
 
+  /* ═══════════════ ÁUDIO POR AVATAR (29.08) ═══════════════
+   *  O botão "Colocar áudio" do card guarda os bytes no IDB (insumo — a purga
+   *  por geração preserva), pendura a chave no slot (entra no replan → F5 e
+   *  REINICIAR mantêm o áudio) e dispara a ANÁLISE: ASR do próprio HeyGen no
+   *  arquivo × copy do Docs, diff palavra a palavra. Divergência ACUSA, nunca
+   *  bloqueia. */
+
+  /** Análise assíncrona do áudio: sobe pro HeyGen (fast_asr embutido no
+   *  uploadAudio) e compara com a copy das partes DESTE avatar. */
+  async function analisarAudioUpado(audioKey: string, file: File, copyDoAvatar: string) {
+    setRoleAudioInfo((p) => ({ ...p, [audioKey]: { status: 'analisando' } }));
+    try {
+      const [{ uploadAudio }, { compararCopyComAudio, normalizarPalavrasAsr }] = await Promise.all([
+        import('@/lib/heygen-api-direct'),
+        import('@/lib/pilot-audio'),
+      ]);
+      const up = await uploadAudio(file);
+      const palavras = normalizarPalavrasAsr(up.words);
+      roleAudioRef.current[audioKey] = { ...(roleAudioRef.current[audioKey] || {}), file, palavras };
+      const diff = compararCopyComAudio(copyDoAvatar, up.text || '');
+      setRoleAudioInfo((p) => ({
+        ...p,
+        [audioKey]: {
+          status: diff.igual ? 'ok' : 'divergente',
+          resumo: diff.resumo,
+          trechos: diff.trechos,
+          asrText: up.text || '',
+          palavras,
+          duracao: up.duration,
+        },
+      }));
+    } catch (e) {
+      // Análise é ADVISORY: falhar aqui não impede o disparo (o upload de
+      // verdade acontece de novo no runner, take a take).
+      const msg = (e as Error)?.message || String(e);
+      console.warn('[clickup-pilot] análise do áudio falhou (disparo segue liberado):', msg);
+      setRoleAudioInfo((p) => ({ ...p, [audioKey]: { status: 'erro', erro: msg } }));
+    }
+  }
+
+  /** Copy combinada das partes que pertencem a um slot — é contra ela que o
+   *  áudio do avatar é comparado. */
+  function copyDoSlot(a: TaskAnalysis, sIdx: number): string {
+    return (a.partTemplates || [])
+      .filter((pt) => ownerSlotIdx(a, pt) === sIdx)
+      .map((pt) => pt.text)
+      .filter((t) => t && t.trim())
+      .join('\n');
+  }
+
+  async function colocarAudioNoSlot(taskId: string, roleIdx: number, file: File) {
+    if (!/^(audio\/|video\/)/.test(file.type || '') && !/\.(mp3|wav|m4a|aac|ogg|mp4|webm)$/i.test(file.name)) {
+      setError(`Isso não parece um áudio (${file.type || file.name}). Use MP3, WAV, M4A ou o vídeo com a voz.`);
+      return;
+    }
+    if (file.size > 200 * 1024 * 1024) {
+      setError(`Áudio muito grande (${(file.size / 1e6).toFixed(0)}MB). Máximo 200MB.`);
+      return;
+    }
+    const a = taskAnalyses[taskId];
+    const slot = a?.roleSlots?.[roleIdx];
+    if (!a || !slot) return;
+    const slug = (slot.role || 'avatar').toLowerCase().replace(/[^a-z0-9]+/gi, '-') || 'avatar';
+    const audioKey = `pilot:${taskId}:roleaudio:${slug}:${Date.now()}`;
+    // Bytes no IDB PRIMEIRO — é o que faz F5/REINICIAR reusarem o mesmo áudio.
+    try {
+      const { saveBlob, deletePrefix } = await import('@/lib/zip-store');
+      if (slot.audioKey) { void deletePrefix(slot.audioKey).catch(() => {}); }
+      await saveBlob(audioKey, file, file.type || 'audio/mpeg');
+    } catch (e) {
+      console.warn('[clickup-pilot] áudio não foi pro IDB (F5 perderia):', e);
+    }
+    roleAudioRef.current[audioKey] = { file };
+    updateRoleSlot(taskId, roleIdx, { audioKey, audioName: file.name });
+    setError(null);
+    void analisarAudioUpado(audioKey, file, copyDoSlot(a, roleIdx));
+  }
+
+  function removerAudioDoSlot(taskId: string, roleIdx: number) {
+    const slot = taskAnalyses[taskId]?.roleSlots?.[roleIdx];
+    const key = slot?.audioKey;
+    if (key) {
+      delete roleAudioRef.current[key];
+      setRoleAudioInfo((p) => { const n = { ...p }; delete n[key]; return n; });
+      void import('@/lib/zip-store').then((m) => m.deletePrefix(key)).catch(() => {});
+    }
+    updateRoleSlot(taskId, roleIdx, { audioKey: null, audioName: null, audioMirror: false });
+  }
+
+  /** Áudio anexado a UM take no painel de reiniciar: guarda os bytes e devolve
+   *  a chave (o painel pendura no take; vai INTEIRO no disparo, sem dividir). */
+  async function salvarAudioDeTake(taskId: string, label: string, file: File): Promise<string> {
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/gi, '-') || 'take';
+    const audioKey = `pilot:${taskId}:roleaudio:take-${slug}:${Date.now()}`;
+    const { saveBlob } = await import('@/lib/zip-store');
+    await saveBlob(audioKey, file, file.type || 'audio/mpeg');
+    roleAudioRef.current[audioKey] = { file };
+    return audioKey;
+  }
+
   /** Slot pronto pra disparar: avatar escolhido OU, no modo imagem, imagem
    *  subida (a imagem substitui o avatar — não existe avatarId nesse caminho). */
   function slotPronto(s: RoleSlot): boolean {
@@ -7757,6 +8095,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
         imageKey: slot?.imageMode ? (slot.imageKey || null) : null,
         engine: slot?.engine,
+        // ÁUDIO POR AVATAR: cada parte do slot herda a chave do áudio upado —
+        // no runner elas se agrupam por chave e dividem o arquivo sem cortar
+        // fala. Modo imagem NÃO leva áudio (a variante `image` só aceita
+        // script + voz), então lá a chave nem entra.
+        audioKey: !slot?.imageMode ? (slot?.audioKey || null) : null,
+        audioName: !slot?.imageMode ? (slot?.audioName || null) : null,
+        audioMirror: !slot?.imageMode ? !!slot?.audioMirror : false,
+        audioParte: false,
+        // Preview do briefing pro painel de reiniciar (quem o copy pediu).
+        role: slot?.role || null,
+        username: slot?.username || null,
+        briefingFileId: slot?.briefingFileId || null,
         _slotRole: slot?.role?.toLowerCase() || '',
         _imageMode: !!slot?.imageMode,
         // Cena que NÃO roda no Avatar III: motion sobe pro IV sozinho
@@ -7833,6 +8183,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // só a CHAVE: base64 de imagem aqui estouraria a quota do localStorage.
         imageKey: p.imageKey ?? null,
         engine: p.engine,
+        // ÁUDIO POR AVATAR + preview do briefing: strings curtas, cabem no
+        // localStorage — é o que faz o REINICIAR sair com o MESMO áudio.
+        audioKey: p.audioKey ?? null,
+        audioName: p.audioName ?? null,
+        audioMirror: p.audioMirror ?? false,
+        audioParte: p.audioParte ?? false,
+        role: p.role ?? null,
+        username: p.username ?? null,
+        briefingFileId: p.briefingFileId ?? null,
       })),
     };
   }
@@ -7866,6 +8225,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const plan = buildPlan(a);
     if (!plan || plan.parts.some((p: any) => !p.avatarId && !p.imageDataUrl)) {
       setError(`Tem avatar sem selecionar. Click no slot e escolhe.`);
+      return;
+    }
+    // ÁUDIO POR AVATAR (29.08): o handoff pro Hey Auto é por TEXTO — mandaria
+    // a task de áudio pro TTS em silêncio (voz errada). Task com áudio upado
+    // dispara pela MESMA fila em background do START, que fala áudio.
+    if (plan.parts.some((p: any) => p.audioKey)) {
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName, parts: [], startedAt: Date.now() }),
+          phase: 'queued',
+          message: 'Na fila — task com áudio upado roda em background...',
+          finishedAt: undefined,
+        } as BatchTaskState,
+      }));
+      for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
+      void runHeyGenGated(taskId, 'run');
       return;
     }
     const handoff = {
@@ -9760,7 +10136,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       <ToolShell
         title="ClickUp Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
-        description="O cérebro do estúdio. Conecta no ClickUp, lê cada task e dispara avatares, B-rolls, decupagem e camuflagem — tudo em fila, sem você abrir uma aba sequer."
+        description="O cérebro do estúdio. Conecta no ClickUp, lê cada task e dispara os avatares no HeyGen — com decupagem e camuflagem em fila, sem você abrir uma aba sequer."
         hue="rgba(200,232,124,0.45)"
         icon={<IconClickUpPilot size={56} />}
       >
@@ -10835,6 +11211,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     busy={reinicioBusy}
                                     onCancel={fecharPainelDeReinicio}
                                     onReiniciar={(partes) => void reiniciarComPlanoEditado(b.taskId, partes)}
+                                    salvarAudioTake={(label, file) => salvarAudioDeTake(b.taskId, label, file)}
+                                    analisarAudioTake={(key, file, texto) => void analisarAudioUpado(key, file, texto)}
+                                    audioInfo={roleAudioInfo}
                                   />
                                 ) : undefined
                               }
@@ -11280,18 +11659,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       title={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'Camuflagem ON' : 'Camuflagem OFF — clica pra ativar'}
                                       onClick={() => toggleTaskCamuflagem(a.taskId)}
                                     />
-                                    {/* Auto B-roll JSON — abre caixa pra colar JSON e disparar Magnific dessa task */}
-                                    <PilotBtn3D
-                                      icon={<PilotIconBroll size={16} />}
-                                      color={(taskMagnificJson[a.taskId] || '').trim() ? 'violet' : 'neutral'}
-                                      active={!!magnificEditorOpen[a.taskId]}
-                                      title={
-                                        (taskMagnificJson[a.taskId] || '').trim()
-                                          ? 'Auto B-roll · JSON colado (clica pra editar/disparar)'
-                                          : 'Auto B-roll · clica pra colar o JSON dos prompts dessa task'
-                                      }
-                                      onClick={() => setMagnificEditorOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
-                                    />
+                                    {/* Botao Auto B-roll removido a pedido (29.08) — o Pilot dispara
+                                      * so avatares no HeyGen. O motor Magnific segue no codigo
+                                      * (dispatchTaskToMagnific) caso volte um dia. */}
                                     {/* Doc button */}
                                     {(a.docUrl || a.taskUrl) ? (
                                       <PilotBtn3D
@@ -11371,8 +11741,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   </div>
                                 </div>
                               ) : null}
-                              {/* CAIXA INLINE de JSON Auto B-roll (Magnific) por task — abre/fecha pelo botão 3D ✨ */}
-                              {!a.vaBriefing && !a.trocaBriefing && magnificEditorOpen[a.taskId] ? (
+                              {/* CAIXA INLINE de JSON Auto B-roll — sem o botão 3D ✨ (removido
+                                * 29.08) ela nunca abre; fica atrás do flag até o recurso voltar. */}
+                              {false && !a.vaBriefing && !a.trocaBriefing && magnificEditorOpen[a.taskId] ? (
                                 <div className="mt-2 rounded-[12px] border border-violet-400/45 bg-gradient-to-br from-violet-500/[0.08] via-violet-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                                   <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-violet-200">
                                     <span className="inline-flex items-center gap-1.5">
@@ -12254,10 +12625,34 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               * onde matchByRole === slot.role.toLowerCase(). Permite confirmar
                                               * o que cada avatar vai falar ANTES de disparar. Critico pra pegar
                                               * leaks de indicativo (texto vermelho) que escapou do parser. */}
+                                            {/* BOTÃO 3D DE INDICAÇÃO (29.08) — só aparece quando o copy
+                                              * deixou COMENTÁRIO no Docs ancorado neste avatar ("avatar
+                                              * segurando algo", "ambiente X"). Ícone-only, animado;
+                                              * clique abre o painel com a(s) indicação(ões). */}
+                                            {(slot.indicacoes || []).length > 0 ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
+                                                aria-expanded={!!indicacaoOpen[`${a.taskId}:${sIdx}`]}
+                                                className={'pilot-ind-btn ml-auto shrink-0' + (indicacaoOpen[`${a.taskId}:${sIdx}`] ? ' is-open' : '')}
+                                                title={`Indicação do copy pra este avatar (${(slot.indicacoes || []).length}) — clica pra ver`}
+                                              >
+                                                <span className="pilot-ind-halo" aria-hidden />
+                                                {/* megafone do diretor — traço fino, mesmo idioma dos outros ícones */}
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                  <path d="m3 11 14-6v14L3 13v-2z" />
+                                                  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                                                  <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                                                </svg>
+                                                {(slot.indicacoes || []).length > 1 ? (
+                                                  <span className="pilot-ind-count">{(slot.indicacoes || []).length}</span>
+                                                ) : null}
+                                              </button>
+                                            ) : null}
                                             <button
                                               type="button"
                                               onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
-                                              className="ml-auto rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 hover:bg-cyan-500/25 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] active:shadow-[0_1px_0_rgba(0,0,0,0.4)]"
+                                              className={((slot.indicacoes || []).length > 0 ? '' : 'ml-auto ') + 'rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 hover:bg-cyan-500/25 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] active:shadow-[0_1px_0_rgba(0,0,0,0.4)]'}
                                               title="Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)"
                                             >
                                               👁
@@ -12271,6 +12666,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               ×
                                             </button>
                                           </div>
+                                          {/* PAINEL DA INDICAÇÃO DO COPY — abre pelo botão 3D dourado. */}
+                                          {indicacaoOpen[`${a.taskId}:${sIdx}`] && (slot.indicacoes || []).length > 0 ? (
+                                            <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                              <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-200">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                  <path d="m3 11 14-6v14L3 13v-2z" />
+                                                  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                                                </svg>
+                                                Indicação do copy · comentário do Docs
+                                              </div>
+                                              <ul className="grid gap-1.5">
+                                                {(slot.indicacoes || []).map((ind, k) => (
+                                                  <li key={k} className="rounded-[8px] border border-amber-400/25 bg-black/25 px-2.5 py-2 text-[11.5px] leading-relaxed text-amber-50">
+                                                    {ind}
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                              <div className="mono mt-1.5 text-[9px] uppercase tracking-widest text-amber-200/60">
+                                                é o que o copy pediu pra cena — use pra escolher o avatar/look certo
+                                              </div>
+                                            </div>
+                                          ) : null}
                                           {/* PAINEL DE PREVIEW POR AVATAR — editavel.
                                             * Mostra TODAS as parts (HOOK/BODY) que matcham por role do slot.
                                             * Cada part tem um textarea independente — user pode ajustar
@@ -12675,34 +13092,47 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       * gesto. Escolher na mão vence — mas cena com
                                                       * gesto nunca desce pro III (o runner sobe), senão
                                                       * o take voltaria parado. */}
+                                                    {/* Sem chip "AUTO-III" separado (pedido 29.08): só III/IV/V.
+                                                      * Em automático, o motor EFETIVO aparece marcado com a
+                                                      * micro-tag "auto" em cima — continua o III automático de
+                                                      * sempre (sobe pro IV com gesto), só o visual mudou.
+                                                      * Clicar trava o motor na mão; clicar de novo volta pro auto. */}
                                                     <div className="ml-auto flex items-center gap-1">
-                                                      {(['auto', 'III', 'IV', 'V'] as const).map((op) => {
-                                                        const sel = (slot.engine || 'auto') === op;
-                                                        // o que sai de fato quando está em auto
+                                                      {(['III', 'IV', 'V'] as const).map((op) => {
                                                         const efetivo = slot.engine || (on ? 'IV' : 'III');
-                                                        const subiu = op === 'auto' && on;
+                                                        const sel = slot.engine === op;
+                                                        const selAuto = !slot.engine && efetivo === op;
                                                         return (
                                                           <button
                                                             key={op}
                                                             type="button"
                                                             onClick={() => updateRoleSlot(a.taskId, sIdx, {
-                                                              engine: op === 'auto' ? undefined : op,
+                                                              engine: sel ? undefined : op,
                                                             })}
                                                             className={
-                                                              'mono rounded-full border px-1.5 py-[1px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
+                                                              'mono relative rounded-full border px-2 py-[2px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
                                                               (sel
                                                                 ? 'border-violet-400/60 bg-violet-500/25 text-violet-100'
-                                                                : 'border-white/10 bg-white/5 text-text-muted hover:border-violet-400/40')
+                                                                : selAuto
+                                                                  ? 'border-violet-400/45 bg-violet-500/15 text-violet-100'
+                                                                  : 'border-white/10 bg-white/5 text-text-muted hover:border-violet-400/40')
                                                             }
                                                             title={
-                                                              op === 'auto'
-                                                                ? `Automático: ${efetivo} (sem gesto = III; com gesto sobe pro IV)`
-                                                                : op === 'III'
-                                                                  ? 'Avatar III — mais barato, NÃO anima gesto'
-                                                                  : `Avatar ${op} — anima o movimento`
+                                                              sel
+                                                                ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
+                                                                : selAuto
+                                                                  ? `Automático: sai no ${efetivo} (sem gesto = III; com gesto sobe pro IV). Clica pra travar no ${op}.`
+                                                                  : op === 'III'
+                                                                    ? 'Avatar III — mais barato, NÃO anima gesto'
+                                                                    : `Avatar ${op} — anima o movimento`
                                                             }
                                                           >
-                                                            {op === 'auto' ? (subiu ? 'auto·IV' : 'auto·III') : op}
+                                                            {op}
+                                                            {selAuto ? (
+                                                              <span className="absolute -top-[7px] left-1/2 -translate-x-1/2 rounded-full border border-violet-400/50 bg-[#17111f] px-1 text-[6.5px] font-bold lowercase tracking-[0.08em] text-violet-200 shadow-[0_1px_4px_rgba(0,0,0,0.5)]">
+                                                                auto
+                                                              </span>
+                                                            ) : null}
                                                           </button>
                                                         );
                                                       })}
@@ -12720,6 +13150,167 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     peca o gesto <b>uma vez no comeco</b> e a fala solta depois — senao o avatar
                                                     repete o movimento o video inteiro.
                                                   </div>
+                                                </div>
+                                              );
+                                            })() : null}
+                                            {/* ═══ ÁUDIO DO AVATAR (29.08) — fala um ÁUDIO upado no lugar
+                                              * do TTS. Ao colocar, o ASR do HeyGen compara com a copy do
+                                              * Docs e ACUSA qualquer diferença (sem bloquear o disparo).
+                                              * Avatar III: o áudio é dividido nos takes do avatar pelas
+                                              * PAUSAS (sem cortar fala → sem reverse). IV/V: take único,
+                                              * arquivo inteiro. Voice Mirror re-sintetiza na voz escolhida. */}
+                                            {slot.avatarId && !slot.imageMode ? (() => {
+                                              const akey = slot.audioKey || null;
+                                              const info = akey ? roleAudioInfo[akey] : undefined;
+                                              const motorAudio = slot.engine || ((slot.motionPrompt || '').trim() ? 'IV' : 'III');
+                                              const takeUnicoAudio = motorAudio !== 'III';
+                                              const temVozPraMirror = !!(slot.voiceOverride?.id || slot.avatarVoiceId);
+                                              return (
+                                                <div>
+                                                  <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                                      <path d="M3 21h18" />
+                                                    </svg>
+                                                    Áudio do avatar
+                                                    <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                      — opcional: fala este áudio no lugar do TTS
+                                                    </span>
+                                                  </div>
+                                                  {!akey ? (
+                                                    <label className="mono group/upaudio inline-flex cursor-pointer items-center gap-2 rounded-[12px] border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-[10.5px] font-bold uppercase tracking-[0.14em] text-cyan-100 transition hover:-translate-y-[1px] hover:border-cyan-400/70 hover:bg-cyan-500/20 active:translate-y-[1px]" style={{ fontFamily: 'var(--font-tech)' }}>
+                                                      <PilotIconUpload size={13} />
+                                                      Colocar áudio
+                                                      <input
+                                                        type="file"
+                                                        accept="audio/*,video/mp4,video/webm,video/ogg"
+                                                        className="hidden"
+                                                        onChange={(e) => {
+                                                          const f = e.target.files?.[0];
+                                                          if (f) void colocarAudioNoSlot(a.taskId, sIdx, f);
+                                                          e.target.value = '';
+                                                        }}
+                                                      />
+                                                    </label>
+                                                  ) : (
+                                                    <div className="rounded-[12px] border border-cyan-500/35 bg-cyan-500/[0.06] p-2.5">
+                                                      <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
+                                                        <span className="inline-flex min-w-0 items-center gap-1.5 text-cyan-100">
+                                                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400" />
+                                                          <span className="truncate font-semibold" title={slot.audioName || 'áudio'}>{slot.audioName || 'áudio'}</span>
+                                                          {info?.duracao ? <span className="shrink-0 text-cyan-300/70">{Math.round(info.duracao)}s</span> : null}
+                                                        </span>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => removerAudioDoSlot(a.taskId, sIdx)}
+                                                          className="ml-auto rounded-full border border-text-muted/30 px-1.5 py-0.5 text-[10px] text-text-muted hover:border-red-500/50 hover:text-red-300"
+                                                          title="Remover o áudio — o avatar volta a falar por TTS (texto)"
+                                                        >
+                                                          ×
+                                                        </button>
+                                                      </div>
+                                                      {/* Comparação copy × áudio (ASR) — acusa, nunca bloqueia */}
+                                                      <div className="mt-1.5">
+                                                        {!info || info.status === 'analisando' ? (
+                                                          <span className="mono inline-flex items-center gap-1.5 text-[9.5px] uppercase tracking-widest text-cyan-200">
+                                                            <span className="relative flex h-1.5 w-1.5">
+                                                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-400 opacity-60" />
+                                                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                                                            </span>
+                                                            Comparando o áudio com a copy do Docs...
+                                                          </span>
+                                                        ) : info.status === 'ok' ? (
+                                                          <span className="mono inline-flex items-center gap-1 rounded-full border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-lime">
+                                                            ✓ áudio bate com a copy
+                                                          </span>
+                                                        ) : info.status === 'divergente' ? (
+                                                          <div className="rounded-[8px] border border-amber-400/45 bg-amber-400/[0.08] px-2.5 py-2">
+                                                            <div className="mono text-[9.5px] font-bold uppercase tracking-widest text-amber-200">
+                                                              ⚠ áudio ≠ copy do Docs
+                                                            </div>
+                                                            <div className="mt-0.5 text-[10px] leading-snug text-amber-100/90">{info.resumo}</div>
+                                                            {(info.trechos || []).slice(0, 6).map((t, k) => (
+                                                              <div key={k} className="mt-1 text-[10px] leading-snug text-amber-100/80">
+                                                                {t.tipo === 'trocado' ? (
+                                                                  <>na copy: <span className="rounded bg-black/30 px-1 text-amber-100">{t.copy}</span> · no áudio: <span className="rounded bg-black/30 px-1 text-amber-100">{t.audio}</span></>
+                                                                ) : t.tipo === 'faltou-no-audio' ? (
+                                                                  <>faltou no áudio: <span className="rounded bg-black/30 px-1 text-amber-100">{t.copy}</span></>
+                                                                ) : (
+                                                                  <>sobrou no áudio: <span className="rounded bg-black/30 px-1 text-amber-100">{t.audio}</span></>
+                                                                )}
+                                                              </div>
+                                                            ))}
+                                                            {(info.trechos || []).length > 6 ? (
+                                                              <div className="mt-0.5 text-[9.5px] text-amber-200/60">+{(info.trechos || []).length - 6} outra(s) diferença(s)</div>
+                                                            ) : null}
+                                                            <div className="mono mt-1 text-[9px] uppercase tracking-widest text-amber-200/70">
+                                                              dá pra disparar mesmo assim — só confere se é o áudio certo
+                                                            </div>
+                                                          </div>
+                                                        ) : (
+                                                          <span className="mono inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted" title={info.erro || ''}>
+                                                            não consegui comparar agora — o disparo segue normal
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                      {/* VOICE MIRROR — usa a VOZ selecionada com o áudio usado */}
+                                                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => updateRoleSlot(a.taskId, sIdx, { audioMirror: !slot.audioMirror })}
+                                                          className="group relative inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                                          style={
+                                                            slot.audioMirror
+                                                              ? {
+                                                                  fontFamily: 'var(--font-tech)',
+                                                                  color: '#041012',
+                                                                  borderColor: 'rgba(34,211,238,0.55)',
+                                                                  background: 'linear-gradient(135deg, #67e8f9 0%, #22d3ee 100%)',
+                                                                  boxShadow:
+                                                                    '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(34,211,238,0.7), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                                }
+                                                              : {
+                                                                  fontFamily: 'var(--font-tech)',
+                                                                  color: 'rgba(255,255,255,0.55)',
+                                                                  borderColor: 'rgba(255,255,255,0.12)',
+                                                                  background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                                                                  boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+                                                                }
+                                                          }
+                                                          title={
+                                                            slot.audioMirror
+                                                              ? 'Ligado: o HeyGen re-sintetiza este áudio na VOZ selecionada (timing e cadência do arquivo, timbre da voz).'
+                                                              : 'Voice Mirror: usa a voz selecionada com o áudio usado — o take sai com o timbre da voz escolhida seguindo a cadência do arquivo.'
+                                                          }
+                                                        >
+                                                          <span className="text-[12px] leading-none">🪞</span>
+                                                          Voice Mirror
+                                                          <span
+                                                            className={
+                                                              'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
+                                                              (slot.audioMirror ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                                                            }
+                                                          >
+                                                            {slot.audioMirror ? 'ON' : 'OFF'}
+                                                          </span>
+                                                        </button>
+                                                        {slot.audioMirror && !temVozPraMirror ? (
+                                                          <span className="mono rounded-full border border-red-400/50 bg-red-500/15 px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-widest text-red-300">
+                                                            ⚠ escolha uma voz pro espelho
+                                                          </span>
+                                                        ) : null}
+                                                      </div>
+                                                      <div className="mt-1.5 text-[9.5px] leading-tight text-text-muted">
+                                                        {takeUnicoAudio ? (
+                                                          <>Avatar {motorAudio}: o áudio vai <b>inteiro num take único</b> (sem dividir).</>
+                                                        ) : (
+                                                          <>Avatar III: divido o áudio nos <b>{partsCount || 1} take{(partsCount || 1) === 1 ? '' : 's'}</b> deste avatar pelas pausas — sem cortar fala, sem reverse.</>
+                                                        )}
+                                                        {' '}{slot.audioMirror ? 'Voice Mirror ligado: sai na voz selecionada.' : 'A voz do take é a do próprio áudio.'}
+                                                      </div>
+                                                    </div>
+                                                  )}
                                                 </div>
                                               );
                                             })() : null}
@@ -12929,14 +13520,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               ) : null}
                             </span>
                             <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={copyAllSelectedBodies}
-                                className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
-                                title="Copia o body de TODAS as tasks selecionadas, identificado por AD. Nunca inclui Variacao de Avatar."
-                              >
-                                {copiedAllBodies ? '✓ bodies copiados' : '⧉ Copiar todos os bodies'}
-                              </button>
+                              {/* "Copiar todos os bodies" removido a pedido (29.08) — o fluxo de
+                                * gerar prompts externos saiu do Pilot. copyAllSelectedBodies segue
+                                * no codigo caso volte. */}
                               <button
                                 type="button"
                                 onClick={startBatch}

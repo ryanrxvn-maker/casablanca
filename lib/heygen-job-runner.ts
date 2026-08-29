@@ -121,11 +121,16 @@ export async function runHeyGenJobs(
         const motion = (job.motionPrompt || '').trim();
         // Cena com gesto sobe pro Avatar IV sozinha (o III descarta motion).
         const effectiveMotor = motorEfetivo(job.motor || opts.motor, motion);
+        // MODO POR JOB (fix 2026-08-29): job com `audio` anexado dispara em
+        // modo audio MESMO num batch 'copy' — é o que permite ao ClickUp Pilot
+        // misturar takes por texto e takes por áudio upado no mesmo disparo.
+        // Sem job.audio, tudo segue exatamente como antes (opts.mode global).
+        const jobMode: 'copy' | 'audio' = job.audio ? 'audio' : opts.mode;
         // ESPELHAMENTO DE VOZ (modo audio): liga SÓ quando pedido E há voz alvo.
         // Sem isso o audio vai como está (voz original). Em copy o voiceId é a
         // voz do TTS (sem mirror).
         const mirror =
-          opts.mode === 'audio' &&
+          jobMode === 'audio' &&
           !!(job.voiceMirroring ?? opts.voiceMirroring) &&
           !!effectiveVoiceId;
         // ===== MODO IMAGEM: variante `image` do /v3/videos, sem avatar =====
@@ -167,11 +172,11 @@ export async function runHeyGenJobs(
         } else {
 
         const input: ProcessJobInput = {
-          file: opts.mode === 'audio' ? job.audio : undefined,
-          text: opts.mode === 'copy' ? job.copy : undefined,
+          file: jobMode === 'audio' ? job.audio : undefined,
+          text: jobMode === 'copy' ? job.copy : undefined,
           // copy: voz do TTS; audio: só passa voiceId quando vai espelhar.
           voiceId:
-            opts.mode === 'copy'
+            jobMode === 'copy'
               ? effectiveVoiceId
               : (mirror ? effectiveVoiceId : undefined),
           voiceMirroring: mirror || undefined,

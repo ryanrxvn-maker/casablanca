@@ -54,7 +54,9 @@ export function zipGroupId(key: string): string {
   // grupo próprio, competia sozinho pelos keepGroups e a faxina varria os
   // frames enquanto o disparo seguia vivo. Sem o frame, a cena de imagem não
   // tem o que re-disparar e o RETOMAR não fecha o AD nunca.
-  m = /^pilot:(.+?):(?:g:[^:]+:)?(?:part|leveled|decupado|img):/.exec(key);
+  // `roleaudio` é o ÁUDIO upado por avatar (insumo, igual ao frame): agrupa
+  // com o disparo pra viver e morrer junto dele — nunca como " misc " solto.
+  m = /^pilot:(.+?):(?:g:[^:]+:)?(?:part|leveled|decupado|img|roleaudio):/.exec(key);
   if (m) return m[1];
   // Auto B-roll: o MP4 individual de um take é `brollvid:<zipKey>:<idx>` e o
   // ZIP do batch fica na própria zipKey (`broll:<jobId>:<ts>:zip`). Ambos caem
