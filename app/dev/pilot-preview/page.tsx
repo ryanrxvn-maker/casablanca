@@ -167,7 +167,7 @@ function Conteudo() {
           <VersoesDoDisparo
             versoes={versoesDemo}
             onBaixar={() => {}}
-            onPreview={() => {}}
+            onTrocar={(v) => setVersoesDemo((prev) => prev.map((x) => ({ ...x, atual: x.taskId === v.taskId })))}
             onRenomear={(v, nome) => setVersoesDemo((prev) => prev.map((x) => (x.taskId === v.taskId ? { ...x, nome } : x)))}
           />
         </div>
@@ -372,6 +372,13 @@ function Conteudo() {
         resolverAvatar={() => null}
         onCancel={() => {}}
         onReiniciar={() => {}}
+        indicacoesAvatar={[
+          { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [resolverLinkIndicacao('https://youtu.be/dQw4w9WgXcQ')] },
+        ]}
+        indicacoesCopy={[
+          { take: 'HOOK 1', trecho: 'Para próstata inchada, não existe nada melhor do que isso daqui.', nota: 'COMENTARIO DE TESTE, CENARIO X' },
+          { take: 'BODY 2', trecho: 'Esse composto se chama oleocantal do azeite.', nota: 'Tela dividida aqui', links: [resolverLinkIndicacao('https://drive.google.com/file/d/1eyJoDa-rfD8IsnPM__qCBjfUc8hzdDhn/view')] },
+        ]}
         salvarAudioTake={async () => `mock-${Date.now()}`}
         analisarAudioTake={() => {}}
         audioInfo={{ 'mock-audio-1': { status: 'divergente', resumo: 'Áudio ≠ copy: 2 trechos diferentes (92% igual).' } }}

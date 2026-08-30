@@ -167,6 +167,8 @@ export function RedispatchPanel({
   salvarAudioTake,
   analisarAudioTake,
   audioInfo,
+  indicacoesAvatar = [],
+  indicacoesCopy = [],
 }: {
   taskName: string;
   adName: string;
@@ -185,6 +187,11 @@ export function RedispatchPanel({
   analisarAudioTake?: (audioKey: string, file: File, texto: string) => void;
   /** Estado da análise por audioKey (compartilhado com o card da análise). */
   audioInfo?: Record<string, { status: 'analisando' | 'ok' | 'divergente' | 'erro'; resumo?: string }>;
+  /** INDICAÇÕES do copy desta task (comentários do Docs), pros mesmos dois
+   *  botões da análise aparecerem aqui no cabeçalho do painel: dourado =
+   *  indicação de AVATAR, azul = comentário NO TEXTO. */
+  indicacoesAvatar?: IndicacaoAvatar[];
+  indicacoesCopy?: Array<{ take?: string | null; trecho?: string; nota: string; links?: LinkIndicacao[] }>;
 }) {
   const [draft, setDraft] = useState<RedispatchPart[]>(() =>
     partesOriginais.map((p) => ({ ...p })),
@@ -194,6 +201,8 @@ export function RedispatchPanel({
   const [indicacaoAberta, setIndicacaoAberta] = useState<Record<number, boolean>>({});
   /** Comentário de COPY aberto por take (botão azul na linha). */
   const [copyNotaAberta, setCopyNotaAberta] = useState<Record<number, boolean>>({});
+  /** Painéis de indicação do CABEÇALHO (os mesmos dois botões da análise). */
+  const [indTaskAberta, setIndTaskAberta] = useState<'avatar' | 'copy' | null>(null);
   // O que foi aplicado "em todos": só pra tela mostrar a escolha em vez de
   // voltar pro estado vazio (e pra reaparecer o "voltar pra voz padrão").
   const [avatarGlobal, setAvatarGlobal] = useState<AvatarOption | null>(null);
@@ -311,7 +320,43 @@ export function RedispatchPanel({
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-4 self-center">
+          <div className="flex shrink-0 items-center gap-2.5 self-center">
+            {/* INDICADORES DO COPY — os mesmos dois botões da análise, aqui
+             *  também (pedido 30.08): azul = comentário no texto do AD,
+             *  dourado = indicação de avatar. Só aparecem quando existem. */}
+            {indicacoesCopy.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setIndTaskAberta((v) => (v === 'copy' ? null : 'copy'))}
+                aria-expanded={indTaskAberta === 'copy'}
+                className={'pilot-ind-btn is-copy shrink-0' + (indTaskAberta === 'copy' ? ' is-open' : '')}
+                title={`Comentário do copy no texto deste AD (${indicacoesCopy.length}) — clica pra ver`}
+              >
+                <span className="pilot-ind-halo" aria-hidden />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  <path d="M8 9h.01M12 9h.01M16 9h.01" />
+                </svg>
+                {indicacoesCopy.length > 1 ? <span className="pilot-ind-count">{indicacoesCopy.length}</span> : null}
+              </button>
+            ) : null}
+            {indicacoesAvatar.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setIndTaskAberta((v) => (v === 'avatar' ? null : 'avatar'))}
+                aria-expanded={indTaskAberta === 'avatar'}
+                className={'pilot-ind-btn shrink-0' + (indTaskAberta === 'avatar' ? ' is-open' : '')}
+                title={`Indicação de avatar do copy (${indicacoesAvatar.length}) — clica pra ver`}
+              >
+                <span className="pilot-ind-halo" aria-hidden />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="m3 11 14-6v14L3 13v-2z" />
+                  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                  <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                </svg>
+                {indicacoesAvatar.length > 1 ? <span className="pilot-ind-count">{indicacoesAvatar.length}</span> : null}
+              </button>
+            ) : null}
             <div className="text-right">
               <div className="text-[17px] font-semibold leading-none tabular-nums text-white" style={{ fontFamily: 'var(--font-mono)' }}>
                 {draft.length}
@@ -338,6 +383,16 @@ export function RedispatchPanel({
             <span className="ml-1.5 text-cyan-300">Carregando a biblioteca de avatares.</span>
           ) : null}
         </p>
+
+        {indTaskAberta === 'copy' && indicacoesCopy.length > 0 ? (
+          <IndicacaoPanel
+            tipo="copy"
+            itens={indicacoesCopy.map((ic) => ({ nota: ic.nota, links: ic.links, take: ic.take, trecho: ic.trecho }))}
+          />
+        ) : null}
+        {indTaskAberta === 'avatar' && indicacoesAvatar.length > 0 ? (
+          <IndicacaoPanel tipo="avatar" itens={indicacoesAvatar.map((ia) => ({ nota: ia.nota, links: ia.links }))} />
+        ) : null}
 
         {/* ─────────────── O que o copy pediu (briefing do Docs) ───────────────
          *  O MESMO preview da análise — thumb do arquivo do Drive, papel e

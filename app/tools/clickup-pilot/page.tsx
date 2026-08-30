@@ -2995,6 +2995,26 @@ function ClickUpPilotInner() {
    *  disparo — state capturado num closure velho mentiria. File é cache: se
    *  sumir (F5), os bytes voltam do IDB pela audioKey. */
   const roleAudioRef = useRef<Record<string, { file?: File; palavras?: Array<{ texto: string; inicio: number; fim: number }> }>>({});
+  /** VERSÃO VISÍVEL de cada AD na fila, por taskId BASE (30.08). A fila
+   *  mostra UM card por AD — não um card por versão: clicar numa versão no
+   *  botão de versões TROCA o que este card mostra. Persistido pra escolha
+   *  sobreviver ao F5. */
+  const [versaoVisivel, setVersaoVisivel] = useState<Record<string, string>>({});
+  useEffect(() => {
+    try {
+      const cru = localStorage.getItem('darkolab:pilot:versao-visivel');
+      if (cru) setVersaoVisivel(JSON.parse(cru));
+    } catch { /* sem localStorage: mostra sempre a versão 1 */ }
+  }, []);
+  function mostrarVersao(taskIdDaVersaoAlvo: string) {
+    const base = taskIdBaseDaVersao(taskIdDaVersaoAlvo);
+    setVersaoVisivel((prev) => {
+      const next = { ...prev, [base]: taskIdDaVersaoAlvo };
+      try { localStorage.setItem('darkolab:pilot:versao-visivel', JSON.stringify(next)); } catch { /* quota */ }
+      return next;
+    });
+  }
+
   /** NOMES das versões no card do disparo, por taskId da versão. Editável no
    *  botão de versões; o padrão é "<task> · <versão> · @avatar". Persiste em
    *  localStorage (a lista tem que sobreviver ao F5 como o resto do card). */
@@ -3458,6 +3478,30 @@ function ClickUpPilotInner() {
     }
     return out;
   }, [batchStates, selectedTeam]);
+
+  /** A fila COLAPSADA por AD (30.08): as versões do mesmo anúncio (`-yt`,
+   *  `-v3`…) deixam de ocupar um card cada — sobra UM card por AD, o da
+   *  versão escolhida no botão de versões. Sem versões, isto devolve
+   *  exatamente a mesma lista de antes. */
+  const batchStatesVisiveis = useMemo(() => {
+    const porBase = new Map<string, string[]>();
+    for (const id of Object.keys(batchStatesDaEmpresa)) {
+      const base = taskIdBaseDaVersao(id);
+      porBase.set(base, [...(porBase.get(base) || []), id]);
+    }
+    const out: Record<string, BatchTaskState> = {};
+    for (const [base, ids] of porBase) {
+      if (ids.length === 1) { out[ids[0]] = batchStatesDaEmpresa[ids[0]]; continue; }
+      // escolhida > a mãe > a de menor versão que exista
+      const escolhido = versaoVisivel[base];
+      const id: string =
+        (escolhido && batchStatesDaEmpresa[escolhido] ? escolhido : null)
+        || (batchStatesDaEmpresa[base] ? base : null)
+        || ids.slice().sort((x, y) => versaoDoTaskId(x) - versaoDoTaskId(y))[0];
+      out[id] = batchStatesDaEmpresa[id];
+    }
+    return out;
+  }, [batchStatesDaEmpresa, versaoVisivel]);
 
   /** Disparos rodando NAS OUTRAS empresas — some da lista, mas você precisa
    *  saber que continuam de pé. Vira um aviso discreto no painel. */
@@ -7305,6 +7349,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   function versoesDoDisparo(taskId: string): VersaoNoCard[] {
     const base = taskIdBaseDaVersao(taskId);
     const ids = Object.keys(batchStates).filter((id) => taskIdBaseDaVersao(id) === base);
+    // `taskId` aqui É a versão que o card mostra agora (a fila colapsa por AD).
     if (ids.length <= 1) return [];
     return ids
       .map((id) => {
@@ -11289,7 +11334,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   ) : null}
 
                   {/* Painel batch — tasks rodando ou completas */}
-                  {Object.keys(batchStatesDaEmpresa).length > 0 ? (
+                  {Object.keys(batchStatesVisiveis).length > 0 ? (
                     <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
                       <div className="label-tech mb-3 flex items-center justify-between text-[10px] tracking-widest text-fuchsia-200">
                         <span className="inline-flex items-center gap-2">
@@ -11297,7 +11342,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
                             <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-300" />
                           </span>
-                          Tasks em produção · {Object.keys(batchStatesDaEmpresa).length}
+                          Tasks em produção · {Object.keys(batchStatesVisiveis).length}
                         </span>
                         {batchesEmOutrasEmpresas.length ? (
                           <span
@@ -11309,7 +11354,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         ) : null}
                       </div>
                       <ul className="grid gap-3">
-                        {Object.values(batchStatesDaEmpresa).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
+                        {Object.values(batchStatesVisiveis).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
                           // "Tudo OK" = todas partes COM CONTEÚDO dispararam + renderizaram E
@@ -11612,6 +11657,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     busy={reinicioBusy}
                                     onCancel={fecharPainelDeReinicio}
                                     onReiniciar={(partes) => void reiniciarComPlanoEditado(b.taskId, partes)}
+                                    // INDICAÇÕES da análise viva (mesma task, ou a mãe da
+                                    // versão): os dois botões do cabeçalho do painel.
+                                    indicacoesAvatar={(() => {
+                                      const aRef = taskAnalyses[b.taskId] || taskAnalyses[taskIdBaseDaVersao(b.taskId)];
+                                      const doSlot = (aRef?.roleSlots || []).flatMap((sl) => sl.indicacoes || []);
+                                      return [...doSlot, ...(aRef?.indicacoesDoc || [])];
+                                    })()}
+                                    indicacoesCopy={(() => {
+                                      const aRef = taskAnalyses[b.taskId] || taskAnalyses[taskIdBaseDaVersao(b.taskId)];
+                                      return aRef?.indicacoesCopy || [];
+                                    })()}
                                     salvarAudioTake={(label, file) => salvarAudioDeTake(b.taskId, label, file)}
                                     analisarAudioTake={(key, file, texto) => void analisarAudioUpado(key, file, texto)}
                                     audioInfo={roleAudioInfo}
@@ -11694,11 +11750,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <VersoesDoDisparo
                                     versoes={vs}
                                     onBaixar={(v) => downloadZip(v.taskId)}
-                                    onPreview={(v) => {
-                                      // leva o olho pra versão escolhida
-                                      const el = document.getElementById(`batch-card-${v.taskId}`);
-                                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    }}
+                                    onTrocar={(v) => mostrarVersao(v.taskId)}
                                     onRenomear={(v, nome) => renomearVersaoNoCard(v.taskId, nome)}
                                   />
                                 ) : null;

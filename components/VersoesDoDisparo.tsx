@@ -8,9 +8,10 @@ import { Btn3D } from './BatchJobCard3D';
  * VersoesDoDisparo — o botão 3D de VERSÕES no card do disparo (29.08).
  *
  * O AD pode sair em até 10 versões (avatar diferente por versão). Antes cada
- * versão aparecia como um CARD separado na fila, e o Silas contava na mão
- * quem era irmão de quem. Agora elas moram num botão só: clica e escolhe a
- * versão — pra BAIXAR, pra ver o PREVIEW, ou só pra saber em que pé está.
+ * versão ocupava um CARD separado na fila, com o nome repetido e "YouTube"
+ * no fim — e o Silas contava na mão quem era irmão de quem. Agora é UM card
+ * por AD: clicar numa versão aqui TROCA o que o card mostra (takes, estado,
+ * downloads, tudo). O botão também baixa e renomeia sem sair do lugar.
  *
  * Vale em qualquer fase (fila, gerando, pronto): a lista mostra o estado de
  * cada versão. O nome vem pronto — "AD03GL - PRPB12 · YouTube · @avatar" — e
@@ -55,14 +56,14 @@ function selo(fase?: string, pronta?: boolean): { txt: string; cor: string } {
 export function VersoesDoDisparo({
   versoes,
   onBaixar,
-  onPreview,
+  onTrocar,
   onRenomear,
 }: {
   versoes: VersaoNoCard[];
   /** Baixa a entrega daquela versão (null = não há o que baixar ainda). */
   onBaixar?: (v: VersaoNoCard) => void;
-  /** Abre/expande o card daquela versão pra ver os takes. */
-  onPreview?: (v: VersaoNoCard) => void;
+  /** TROCA a versão que o card está mostrando (o clique na linha). */
+  onTrocar?: (v: VersaoNoCard) => void;
   onRenomear?: (v: VersaoNoCard, nome: string) => void;
 }) {
   const [aberto, setAberto] = React.useState(false);
@@ -121,7 +122,26 @@ export function VersoesDoDisparo({
                 const st = selo(v.fase, v.pronta);
                 const emEdicao = editando === v.taskId;
                 return (
-                  <span key={v.taskId} className={'vd-item' + (v.atual ? ' is-atual' : '')}>
+                  <span
+                    key={v.taskId}
+                    className={'vd-item' + (v.atual ? ' is-atual' : '') + (onTrocar && !emEdicao ? ' is-clicavel' : '')}
+                    role={onTrocar && !emEdicao ? 'button' : undefined}
+                    tabIndex={onTrocar && !emEdicao ? 0 : undefined}
+                    title={v.atual ? 'Esta é a versão que o card está mostrando' : 'Mostrar esta versão no card'}
+                    onClick={() => {
+                      if (!onTrocar || emEdicao || v.atual) return;
+                      onTrocar(v);
+                      setAberto(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!onTrocar || emEdicao || v.atual) return;
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onTrocar(v);
+                        setAberto(false);
+                      }
+                    }}
+                  >
                     <span className="vd-n-badge">{v.n}</span>
                     <span className="vd-txt">
                       {emEdicao ? (
@@ -144,31 +164,28 @@ export function VersoesDoDisparo({
                         {typeof v.prontos === 'number' && typeof v.total === 'number' && v.total > 0 && !v.pronta
                           ? ` · ${v.prontos}/${v.total}`
                           : ''}
+                        {v.atual ? <span className="vd-mostrando">mostrando</span> : null}
                       </span>
                     </span>
-                    <span className="vd-acoes">
+                    <span className="vd-acoes" onClick={(e) => e.stopPropagation()}>
                       {onRenomear && !emEdicao ? (
                         <button
                           type="button"
                           className="vd-mini"
                           title="Renomear esta versão"
-                          onClick={() => { setEditando(v.taskId); setRascunho(v.nome); }}
+                          onClick={(e) => { e.stopPropagation(); setEditando(v.taskId); setRascunho(v.nome); }}
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
                         </button>
                       ) : null}
-                      {onPreview ? (
-                        <button type="button" className="vd-mini" title="Ver os takes desta versão" onClick={() => { onPreview(v); setAberto(false); }}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
-                        </button>
-                      ) : null}
+
                       {onBaixar ? (
                         <button
                           type="button"
                           className={'vd-mini' + (v.pronta ? ' is-ok' : '')}
                           title={v.pronta ? 'Baixar esta versão' : 'Ainda não tem entrega desta versão'}
                           disabled={!v.pronta}
-                          onClick={() => { onBaixar(v); setAberto(false); }}
+                          onClick={(e) => { e.stopPropagation(); onBaixar(v); setAberto(false); }}
                         >
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4.5 20h15" /></svg>
                         </button>

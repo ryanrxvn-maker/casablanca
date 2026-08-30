@@ -2830,3 +2830,22 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
         @media (prefers-reduced-motion: reduce) {
           .vd-botao, .vd-halo { animation: none; }
         }
+
+/* Item da lista de versões: clicar TROCA a versão que o card mostra. */
+.vd-item.is-clicavel { cursor: pointer; }
+.vd-item.is-clicavel:hover {
+  background: rgba(167, 139, 250, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.4);
+}
+.vd-item.is-atual { cursor: default; }
+.vd-mostrando {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0d0a16;
+  background: linear-gradient(150deg, #ddd6fe, #a78bfa);
+}
