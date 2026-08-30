@@ -2971,3 +2971,85 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
     inset 0 0 0 1px rgba(255, 255, 255, 0.3);
 }
 .roteiro-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Caixa do APPLY CUSTOM MOTION: acende quando tem prompt escrito. */
+.gesto-caixa {
+  position: relative;
+  border-radius: 10px;
+  transition: box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1), background-color 0.2s;
+}
+.gesto-input {
+  width: 100%;
+  resize: vertical;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgb(var(--text));
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  outline: none;
+  transition: box-shadow 0.2s cubic-bezier(0.32, 0.72, 0, 1), background-color 0.2s;
+}
+html[data-theme='light'] .gesto-input {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
+}
+.gesto-input::placeholder { color: rgba(var(--text-muted), 0.75); }
+.gesto-input:focus { box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.7); }
+.gesto-caixa.is-on { padding-bottom: 22px; }
+.gesto-caixa.is-on .gesto-input {
+  background: rgba(139, 92, 246, 0.12);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(167, 139, 250, 0.75),
+    0 0 22px -8px rgba(167, 139, 250, 0.9);
+}
+html[data-theme='light'] .gesto-caixa.is-on .gesto-input {
+  background: rgba(139, 92, 246, 0.09);
+}
+.gesto-selo {
+  position: absolute;
+  left: 9px;
+  bottom: 1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 1px 8px 1px 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #16092e;
+  background: linear-gradient(150deg, #ddd6fe, #a78bfa);
+  box-shadow: 0 3px 10px -4px rgba(124, 58, 237, 0.9);
+}
+
+/* Botao de escolher o FRAME de uma versao (modo imagem). */
+.frame-ver-btn {
+  display: inline-flex;
+  cursor: pointer;
+  align-items: center;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+  padding: 3px 10px;
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #fecaca;
+  transition: background-color 0.16s, border-color 0.16s;
+}
+.frame-ver-btn:hover {
+  background: rgba(239, 68, 68, 0.24);
+  border-color: rgba(248, 113, 113, 0.75);
+}
+html[data-theme='light'] .frame-ver-btn { color: #b91c1c; }
+
+/* Rotulo das VERSOES do AD (avatar da versao / frame da versao). O red-200 do
+   Tailwind e' quase branco: no tema claro ele sumia no fundo. */
+.label-versao { color: #fca5a5; }
+html[data-theme='light'] .label-versao { color: #b91c1c; }

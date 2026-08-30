@@ -176,5 +176,57 @@ console.log('\nGARANTIA — duas versões por AD (META × YouTube):');
   ok(rotuloCanal('meta') === 'META' && rotuloCanal('youtube') === 'YouTube', 'rótulos legíveis pra UI');
 }
 
+// (9) MODO IMAGEM (30.08): no DR MILLION o AD nao tem avatar de biblioteca — a
+// pessoa E a foto. Entao "+ versoes" tem que trocar o FRAME, e a mesma regra de
+// custo vale: frame vazio no canal = reaproveita o decupado do META.
+{
+  const semFrameProprio: PapelCanal[] = [
+    { avatarId: null, imageKey: 'pilot:t1:img:0', youtube: null },
+  ];
+  ok(!precisaGerarDeNovo(semFrameProprio), 'modo imagem sem frame no YouTube NAO gera de novo');
+  ok(
+    avatarDoCanal(semFrameProprio[0], 'youtube').imageKey === 'pilot:t1:img:0',
+    'sem frame proprio, o YouTube usa o MESMO frame do META',
+  );
+
+  const comFrameProprio: PapelCanal[] = [
+    {
+      avatarId: null,
+      avatarVoiceId: 'voz-do-papel',
+      imageKey: 'pilot:t1:img:0',
+      imageName: 'meta.png',
+      youtube: {
+        avatarId: null,
+        imageKey: 'pilot:t1:v2:img:0',
+        imageDataUrl: 'data:image/png;base64,YT',
+        imageName: 'yt.png',
+      },
+    },
+  ];
+  ok(precisaGerarDeNovo(comFrameProprio), 'frame proprio no YouTube EXIGE segundo disparo');
+  ok(papeisQueMudam(comFrameProprio).length === 1, 'o relatorio de custo enxerga o papel que muda de frame');
+  const escYt = avatarDoCanal(comFrameProprio[0], 'youtube');
+  ok(escYt.imageKey === 'pilot:t1:v2:img:0', 'o YouTube sai com o frame DELE');
+  ok(escYt.imageDataUrl === 'data:image/png;base64,YT', 'e com os bytes do frame dele');
+  // A voz e o nome continuam do papel: e a MESMA pessoa em outra foto.
+  ok(escYt.avatarVoiceId === 'voz-do-papel', 'a voz do papel sobrevive a troca de frame');
+  ok(avatarDoCanal(comFrameProprio[0], 'meta').imageKey === 'pilot:t1:img:0', 'o META nao muda de frame');
+
+  // MESMO frame nos dois canais = nao gera de novo (a armadilha do custo).
+  const mesmoFrame: PapelCanal[] = [
+    { avatarId: null, imageKey: 'pilot:t1:img:0', youtube: { avatarId: null, imageKey: 'pilot:t1:img:0' } },
+  ];
+  ok(!precisaGerarDeNovo(mesmoFrame), 'frame IGUAL nos dois canais nao gasta geracao');
+
+  // O plano em portugues tem que dizer a verdade nos dois casos.
+  ok(planejarDuasVersoes(true, comFrameProprio).gerarDeNovo, 'o plano acusa a geracao nova no modo imagem');
+  ok(!planejarDuasVersoes(true, mesmoFrame).gerarDeNovo, 'o plano diz reaproveita quando o frame e igual');
+
+  // E o caminho ANTIGO (avatar de biblioteca) nao pode ter mudado.
+  const soAvatar: PapelCanal[] = [{ avatarId: 'av1', youtube: { avatarId: 'av2' } }];
+  ok(precisaGerarDeNovo(soAvatar), 'avatar diferente no YouTube continua gerando de novo');
+  ok(avatarDoCanal(soAvatar[0], 'youtube').avatarId === 'av2', 'e continua trocando o avatar');
+}
+
 console.log(`\n${failed === 0 ? '✓' : '✗'} versao-canal: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

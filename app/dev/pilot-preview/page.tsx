@@ -14,8 +14,11 @@ import { useState } from 'react';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
+import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
+
+const FRAME_FAKE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="160"><rect width="90" height="160" fill="#3b1d5e"/><circle cx="45" cy="58" r="22" fill="#c4b5fd"/><rect x="18" y="88" width="54" height="60" rx="14" fill="#a78bfa"/></svg>');
 
 const PARTES: RedispatchPart[] = [
   {
@@ -94,7 +97,8 @@ function Conteudo() {
     { taskId: 't1-yt', n: 2, nome: 'AD03GL - PRPB12 · YouTube · @joshuagonzalezmd', fase: 'rendering', prontos: 5, total: 8 },
     { taskId: 't1-v3', n: 3, nome: 'AD03GL - PRPB12 · Avatar 3 · @tiagorochaog', fase: 'queued', prontos: 0, total: 8 },
   ]);
-  const gestoDemo = '';
+  const [frameYt, setFrameYt] = useState<string | null>(FRAME_FAKE);
+  const [gestoDemo, setGestoDemo] = useState('mexe a gelatina 2x no começo e segue falando');
   const motorAudio: 'III' | 'IV' | 'V' = (engine || 'III') === 'III' && gestoDemo ? 'IV' : (engine || 'III');
   const dur = 145;
   const curto = dur <= 30;
@@ -150,12 +154,6 @@ function Conteudo() {
             ) : null}
           </div>
         </div>
-        {totalVersoes > 1 ? (
-          <div className="rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-text-muted">
-            <b className="text-red-200">{totalVersoes} gerações.</b> As versões com avatar próprio saem como task irmã
-            (o arquivo leva o sufixo da versão).
-          </div>
-        ) : null}
         <div className="mt-3 flex items-center gap-2">
           <span className="text-[11px] text-text-muted">botão de versões do card do disparo:</span>
           <VersoesDoDisparo
@@ -167,6 +165,64 @@ function Conteudo() {
         </div>
       </section>
 
+
+      {/* ══════════ 0.4 FRAME POR VERSAO (modo imagem) ══════════ */}
+      <section className="grid gap-2.5 rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
+          Modo imagem — o que “+ versões” mostra
+        </div>
+        <FrameDaVersao
+          titulo="Frame da versão YouTube"
+          imageDataUrl={frameYt}
+          imageName={frameYt ? 'AD37_youtube.png' : null}
+          onArquivo={() => setFrameYt(FRAME_FAKE)}
+          onLimpar={() => setFrameYt(null)}
+        />
+        <FrameDaVersao
+          titulo="Frame da versão"
+          nome="Versão 3"
+          onRenomear={() => {}}
+          imageDataUrl={null}
+          imageName={null}
+          onArquivo={() => setFrameYt(FRAME_FAKE)}
+          onLimpar={() => {}}
+        />
+      </section>
+
+      {/* ══════════ 0.5 APPLY CUSTOM MOTION (caixa acesa) ══════════ */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+          Apply Custom Motion
+          <div className="ml-auto flex items-center gap-1">
+            {(['III', 'IV', 'V'] as const).map((op) => {
+              const efetivo: 'III' | 'IV' | 'V' = gestoDemo.trim() ? 'IV' : 'III';
+              const aceso = efetivo === op;
+              return (
+                <span key={op} className={'mono rounded-full border px-2 py-[2px] text-[8.5px] font-bold uppercase tracking-widest ' + (aceso ? 'border-violet-500/70 bg-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(124,92,246,0.7)]' : 'border-line bg-bg-soft/50 text-text-muted')}>
+                  {op}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+        <div className={'gesto-caixa' + (gestoDemo.trim() ? ' is-on' : '')}>
+          <textarea
+            value={gestoDemo}
+            onChange={(e) => setGestoDemo(e.target.value)}
+            rows={2}
+            placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
+            className="gesto-input"
+          />
+          {gestoDemo.trim() ? (
+            <span className="gesto-selo" aria-hidden>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2 4.1 12.97a1 1 0 0 0 .77 1.63H11l-1 7.4 8.9-10.97a1 1 0 0 0-.77-1.63H12l1-7.4z" />
+              </svg>
+              gesto ativo · sai no IV
+            </span>
+          ) : null}
+        </div>
+      </section>
 
       {/* ══════════ 1. CARD DE ÁUDIO DO AVATAR (mock do slot) ══════════ */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">

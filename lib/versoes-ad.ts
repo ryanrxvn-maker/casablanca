@@ -23,13 +23,22 @@
 
 export const MAX_VERSOES = 10;
 
-/** Escolha de avatar de um papel numa versão. */
+/** Escolha de avatar de um papel numa versão.
+ *
+ *  MODO IMAGEM (30.08): a cena não tem avatar — quem fala é o FRAME que o
+ *  HeyGen anima. Então a versão troca a IMAGEM, não o avatar: `imageKey` é a
+ *  chave dos bytes no IndexedDB (o que sobrevive ao F5) e `imageDataUrl` é o
+ *  cache em memória pra prévia. Versão sem imagem própria herda a da 1. */
 export type EscolhaAvatarVersao = {
   avatarId?: string | null;
   avatarName?: string | null;
   avatarThumb?: string | null;
   avatarVoiceId?: string | null;
   voiceOverride?: { id: string; name: string } | null;
+  /** MODO IMAGEM: o frame DESTA versão. */
+  imageKey?: string | null;
+  imageDataUrl?: string | null;
+  imageName?: string | null;
 };
 
 export type VersaoAd = {
@@ -118,26 +127,45 @@ export function avatarDaVersao(
   role: string,
 ): EscolhaAvatarVersao {
   const esc = versao?.porPapel?.[role.toLowerCase()];
-  if (!esc || !esc.avatarId) return base;
+  // Nem avatar nem imagem própria: a versão é a 1 (custo zero).
+  if (!esc || (!esc.avatarId && !esc.imageKey && !esc.imageDataUrl)) return base;
+  // MODO IMAGEM: a imagem da versão substitui o frame, e o resto (voz) segue
+  // o da versão 1 quando ela não escolheu.
+  if (!esc.avatarId && (esc.imageKey || esc.imageDataUrl)) {
+    return {
+      ...base,
+      imageKey: esc.imageKey ?? base.imageKey ?? null,
+      imageDataUrl: esc.imageDataUrl ?? base.imageDataUrl ?? null,
+      imageName: esc.imageName ?? base.imageName ?? null,
+      avatarVoiceId: esc.avatarVoiceId ?? base.avatarVoiceId ?? null,
+      voiceOverride: esc.voiceOverride ?? base.voiceOverride ?? null,
+    };
+  }
   return {
     avatarId: esc.avatarId,
     avatarName: esc.avatarName ?? base.avatarName ?? null,
     avatarThumb: esc.avatarThumb ?? base.avatarThumb ?? null,
     avatarVoiceId: esc.avatarVoiceId ?? base.avatarVoiceId ?? null,
     voiceOverride: esc.voiceOverride ?? base.voiceOverride ?? null,
+    imageKey: esc.imageKey ?? null,
+    imageDataUrl: esc.imageDataUrl ?? null,
+    imageName: esc.imageName ?? null,
   };
 }
 
 /** Esta versão precisa GERAR de novo no HeyGen? Só quando algum papel tem
  *  avatar diferente do da versão 1 — é a pergunta que decide o custo. */
 export function versaoGeraDeNovo(
-  papeisBase: Array<{ role: string; avatarId?: string | null }>,
+  papeisBase: Array<{ role: string; avatarId?: string | null; imageKey?: string | null }>,
   versao: VersaoAd,
 ): boolean {
   if (versao.n <= 1) return true; // a 1 é o disparo original
   return papeisBase.some((p) => {
     const esc = versao.porPapel?.[p.role.toLowerCase()];
-    return !!esc?.avatarId && esc.avatarId !== (p.avatarId || null);
+    if (!esc) return false;
+    // MODO IMAGEM: frame diferente do da versão 1 = geração nova.
+    if (esc.imageKey && esc.imageKey !== (p.imageKey || null)) return true;
+    return !!esc.avatarId && esc.avatarId !== (p.avatarId || null);
   });
 }
 

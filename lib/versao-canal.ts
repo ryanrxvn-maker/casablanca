@@ -96,6 +96,12 @@ export type EscolhaAvatar = {
   avatarName?: string | null;
   avatarThumb?: string | null;
   avatarVoiceId?: string | null;
+  /** MODO IMAGEM (30.08): a versao troca o FRAME, nao o avatar da biblioteca.
+   *  Quem esta em modo imagem nao tem `avatarId` nenhum — o que identifica a
+   *  escolha e' a chave do frame. */
+  imageKey?: string | null;
+  imageDataUrl?: string | null;
+  imageName?: string | null;
 };
 
 /** Um papel do AD com a escolha de cada canal. `youtube` ausente = mesmo do META. */
@@ -108,6 +114,16 @@ export type PapelCanal = EscolhaAvatar & {
 export function avatarDoCanal(papel: PapelCanal, canal: VersaoCanal): EscolhaAvatar {
   if (canal === 'meta') return papel;
   const y = papel.youtube;
+  // MODO IMAGEM: o que muda no canal e' o FRAME. Voz e nome continuam do papel
+  // — e' a mesma pessoa em outra foto, nao outra pessoa.
+  if (y && !y.avatarId && y.imageKey) {
+    return {
+      ...papel,
+      imageKey: y.imageKey,
+      imageDataUrl: y.imageDataUrl ?? null,
+      imageName: y.imageName ?? papel.imageName ?? null,
+    };
+  }
   if (!y || !y.avatarId) return papel;
   return {
     avatarId: y.avatarId,
@@ -128,7 +144,9 @@ export function avatarDoCanal(papel: PapelCanal, canal: VersaoCanal): EscolhaAva
 export function precisaGerarDeNovo(papeis: PapelCanal[]): boolean {
   return papeis.some((p) => {
     const y = p.youtube;
-    if (!y || !y.avatarId) return false;
+    if (!y) return false;
+    // frame proprio no canal = segundo disparo, mesmo sem avatar de biblioteca
+    if (!y.avatarId) return !!y.imageKey && y.imageKey !== (p.imageKey || null);
     return y.avatarId !== p.avatarId;
   });
 }
@@ -138,7 +156,10 @@ export function papeisQueMudam(papeis: PapelCanal[]): number[] {
   const fora: number[] = [];
   papeis.forEach((p, i) => {
     const y = p.youtube;
-    if (y && y.avatarId && y.avatarId !== p.avatarId) fora.push(i);
+    if (!y) return;
+    if (y.avatarId ? y.avatarId !== p.avatarId : !!y.imageKey && y.imageKey !== (p.imageKey || null)) {
+      fora.push(i);
+    }
   });
   return fora;
 }

@@ -90,6 +90,7 @@ import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPan
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 // Botao 3D de VERSOES no card do disparo: uma lista so pra todas as
 // versoes do AD (baixar/ver/renomear), em vez de N cards soltos na fila.
+import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import type { IndicacaoAvatar, IndicacaoCopy } from '@/lib/pilot-indicacoes';
 // VERSÕES do AD (1..10) — generaliza o "2 versões" sem desfazer o caminho
@@ -953,6 +954,11 @@ type RoleSlot = {
     avatarName: string | null;
     avatarThumb: string | null;
     avatarVoiceId: string | null;
+    /** MODO IMAGEM (30.08): aqui o canal troca o FRAME, nao o avatar — no modo
+     *  imagem nao existe avatar de biblioteca, a pessoa e' a foto. */
+    imageKey?: string | null;
+    imageDataUrl?: string | null;
+    imageName?: string | null;
   } | null;
   /** VOZ da versao YouTube deste papel. So faz sentido quando `avatarYoutube`
    *  aponta OUTRA pessoa: dai a versao do YouTube tem que falar com a voz DELA,
@@ -7653,12 +7659,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (a.duasVersoes) {
       const porPapel: VersaoAd['porPapel'] = {};
       for (const sl of a.roleSlots || []) {
-        if (sl.avatarYoutube?.avatarId) {
+        const y = sl.avatarYoutube;
+        // No modo imagem a versao 2 nao tem avatar: o que ela tem e' FRAME.
+        if (y?.avatarId || y?.imageKey) {
           porPapel[sl.role.toLowerCase()] = {
-            avatarId: sl.avatarYoutube.avatarId,
-            avatarName: sl.avatarYoutube.avatarName,
-            avatarThumb: sl.avatarYoutube.avatarThumb,
-            avatarVoiceId: sl.avatarYoutube.avatarVoiceId,
+            avatarId: y.avatarId,
+            avatarName: y.avatarName,
+            avatarThumb: y.avatarThumb,
+            avatarVoiceId: y.avatarVoiceId,
+            imageKey: y.imageKey || null,
+            imageDataUrl: y.imageDataUrl || null,
+            imageName: y.imageName || null,
             voiceOverride: sl.voiceOverrideYoutube || null,
           };
         }
@@ -7712,7 +7723,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     taskId: string,
     n: number,
     role: string,
-    escolha: { avatarId: string | null; avatarName?: string | null; avatarThumb?: string | null; avatarVoiceId?: string | null } | null,
+    escolha:
+      | {
+          avatarId: string | null;
+          avatarName?: string | null;
+          avatarThumb?: string | null;
+          avatarVoiceId?: string | null;
+          // MODO IMAGEM: a versão troca o FRAME em vez do avatar.
+          imageKey?: string | null;
+          imageDataUrl?: string | null;
+          imageName?: string | null;
+        }
+      | null,
   ) {
     setTaskAnalyses((prev) => {
       const a = prev[taskId];
@@ -7725,7 +7747,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           versoes: a.versoes.map((v) => {
             if (v.n !== n) return v;
             const porPapel = { ...v.porPapel };
-            if (!escolha?.avatarId) delete porPapel[chave];
+            // Sem avatar E sem frame = a versão volta a herdar a 1.
+            if (!escolha?.avatarId && !escolha?.imageKey) delete porPapel[chave];
             else porPapel[chave] = { ...escolha };
             return { ...v, porPapel };
           }),
@@ -8231,6 +8254,58 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setError(null);
   }
 
+  /** MODO IMAGEM por VERSÃO (30.08): cada versão do AD pode ter o SEU frame.
+   *  Mesmo caminho do frame da versão 1 — bytes no IDB (chave própria da
+   *  versão, pra não sobrescrever a dela) e a chave viaja no plano. */
+  async function subirImagemDaVersao(taskId: string, roleIdx: number, n: number, file: File) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      setError(`Formato não suportado (${file.type || '?'}). Use JPEG, PNG ou WebP.`);
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError(`Imagem muito grande (${(file.size / 1e6).toFixed(1)}MB). Máximo 8MB.`);
+      return;
+    }
+    const slot = taskAnalyses[taskId]?.roleSlots?.[roleIdx];
+    if (!slot) return;
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result || ''));
+      fr.onerror = () => rej(new Error('Falha ao ler a imagem.'));
+      fr.readAsDataURL(file);
+    });
+    const imageKey = `pilot:${taskId}:v${n}:img:${roleIdx}`;
+    try {
+      const { saveBlob } = await import('@/lib/zip-store');
+      await saveBlob(imageKey, file, file.type);
+    } catch (e) {
+      console.warn('[clickup-pilot] frame da versão não foi pro IDB (F5 perderia):', e);
+    }
+    if (n === 2) {
+      // A versao 2 continua morando no `avatarYoutube` do slot (o caminho de
+      // sempre) — so' que aqui o que ela troca e' o FRAME.
+      updateRoleSlot(taskId, roleIdx, {
+        avatarYoutube: {
+          avatarId: null,
+          avatarName: null,
+          avatarThumb: null,
+          avatarVoiceId: null,
+          imageKey,
+          imageDataUrl: dataUrl,
+          imageName: file.name,
+        },
+      });
+    } else {
+      setAvatarDaVersao(taskId, n, slot.role, {
+        avatarId: null,
+        imageKey,
+        imageDataUrl: dataUrl,
+        imageName: file.name,
+      });
+    }
+    setError(null);
+  }
+
   /* ═══════════════ ÁUDIO POR AVATAR (29.08) ═══════════════
    *  O botão "Colocar áudio" do card guarda os bytes no IDB (insumo — a purga
    *  por geração preserva), pendura a chave no slot (entra no replan → F5 e
@@ -8379,6 +8454,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     return (a.roleSlots || []).map((s) => ({
       avatarId: s.avatarId, avatarName: s.avatarName,
       avatarThumb: s.avatarThumb, avatarVoiceId: s.avatarVoiceId,
+      imageKey: s.imageMode ? s.imageKey : null,
       youtube: s.avatarYoutube || null,
     }));
   }
@@ -8416,6 +8492,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             avatarThumb: sl.avatarThumb,
             avatarVoiceId: sl.avatarVoiceId,
             voiceOverride: sl.voiceOverride,
+            imageKey: sl.imageKey,
+            imageDataUrl: sl.imageDataUrl,
+            imageName: sl.imageName,
           },
           ver,
           sl.role,
@@ -8427,6 +8506,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarThumb: esc.avatarThumb ?? null,
           avatarVoiceId: esc.avatarVoiceId ?? null,
           voiceOverride: esc.voiceOverride ?? null,
+          // MODO IMAGEM: a irmã leva o FRAME da versão (ou o da 1).
+          imageKey: esc.imageKey ?? null,
+          imageDataUrl: esc.imageDataUrl ?? null,
+          imageName: esc.imageName ?? null,
           avatarYoutube: null,
           voiceOverrideYoutube: null,
         };
@@ -8438,7 +8521,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  viram task irmã (as demais reaproveitam a entrega da versão 1). */
   function versoesExtrasQueGeram(a: TaskAnalysis | undefined | null): VersaoAd[] {
     if (!a?.versoes?.length) return [];
-    const papeisBase = (a.roleSlots || []).map((sl) => ({ role: sl.role, avatarId: sl.avatarId }));
+    const papeisBase = (a.roleSlots || []).map((sl) => ({
+      role: sl.role,
+      avatarId: sl.avatarId,
+      imageKey: sl.imageMode ? sl.imageKey : null,
+    }));
     return a.versoes.filter((v) => versaoGeraDeNovo(papeisBase, v));
   }
 
@@ -8463,6 +8550,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const esc = avatarDoCanal({
           avatarId: sl.avatarId, avatarName: sl.avatarName,
           avatarThumb: sl.avatarThumb, avatarVoiceId: sl.avatarVoiceId,
+          imageKey: sl.imageMode ? sl.imageKey : null,
+          imageDataUrl: sl.imageMode ? sl.imageDataUrl : null,
+          imageName: sl.imageMode ? sl.imageName : null,
           youtube: sl.avatarYoutube || null,
         }, 'youtube');
         return {
@@ -8471,6 +8561,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarName: esc.avatarName ?? null,
           avatarThumb: esc.avatarThumb ?? null,
           avatarVoiceId: esc.avatarVoiceId ?? null,
+          // MODO IMAGEM: a irmã leva o FRAME do canal (ou o mesmo do META).
+          imageKey: sl.imageMode ? (esc.imageKey ?? null) : sl.imageKey,
+          imageDataUrl: sl.imageMode ? (esc.imageDataUrl ?? null) : sl.imageDataUrl,
+          imageName: sl.imageMode ? (esc.imageName ?? null) : sl.imageName,
           // A irmã JA' E' a versão YouTube: a voz do YouTube vira a voz do
           // papel aqui dentro. Sem isso, o avatar do YouTube — que é OUTRA
           // pessoa — sairia falando com a voz escolhida pro META.
@@ -8504,6 +8598,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         ? avatarDoCanal({
             avatarId: slot.avatarId, avatarName: slot.avatarName,
             avatarThumb: slot.avatarThumb, avatarVoiceId: slot.avatarVoiceId,
+            imageKey: slot.imageMode ? slot.imageKey : null,
+            imageDataUrl: slot.imageMode ? slot.imageDataUrl : null,
+            imageName: slot.imageMode ? slot.imageName : null,
             youtube: slot.avatarYoutube || null,
           }, canal)
         : null;
@@ -8532,8 +8629,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             : (slot?.voiceOverride?.name || null),
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
         motionPrompt: (slot?.motionPrompt || '').trim() || null,
-        imageDataUrl: slot?.imageMode ? (slot.imageDataUrl || null) : null,
-        imageKey: slot?.imageMode ? (slot.imageKey || null) : null,
+        // O frame e' o DO CANAL: no META o do papel, no YouTube o proprio
+        // quando escolhido — senao o mesmo do META (e aí nao gera de novo).
+        imageDataUrl: slot?.imageMode ? (esc?.imageDataUrl || null) : null,
+        imageKey: slot?.imageMode ? (esc?.imageKey || null) : null,
         engine: slot?.engine,
         // ÁUDIO POR AVATAR: cada parte do slot herda a chave do áudio upado —
         // no runner elas se agrupam por chave e dividem o arquivo sem cortar
@@ -13000,7 +13099,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
                                                     }
                                               }
-                                              title="Quantas versoes este AD tem (1 a 10). Cada versao pode ter avatar diferente; sem avatar proprio, ela reaproveita a versao 1 sem gastar geracao."
+                                              title="Quantas versoes este AD tem (1 a 10). Cada versao pode ter avatar (ou frame, no modo imagem) proprio; sem escolha propria, ela reaproveita a versao 1 sem gastar geracao."
                                             >
                                               <span className="text-[12px] leading-none">+</span>
                                               versões
@@ -13044,28 +13143,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         );
                                       })()}
                                     </div>
-                                    {totalDeVersoes(a) > 1 ? (
-                                      <div className="rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-text-muted">
-                                        {(() => {
-                                          const vs = versoesDaTask(a);
-                                          const papeisBase = (a.roleSlots || []).map((sl) => ({ role: sl.role, avatarId: sl.avatarId }));
-                                          const geram = vs.filter((v) => v.n > 1 && versaoGeraDeNovo(papeisBase, v));
-                                          return geram.length ? (
-                                            <>
-                                              <b className="text-red-200">{1 + geram.length} gerações.</b>{' '}
-                                              As versões {geram.map((v) => v.nome).join(', ')} têm avatar próprio, então o
-                                              START enfileira cada uma como task irmã (o arquivo sai com o sufixo da versão).
-                                            </>
-                                          ) : (
-                                            <>
-                                              <b className="text-lime">Uma geração só.</b> As {vs.length} versões usam o mesmo
-                                              avatar, então elas reaproveitam o decupado — a diferença fica na edição. Escolha
-                                              um avatar próprio abaixo pra alguma versão gerar de novo.
-                                            </>
-                                          );
-                                        })()}
-                                      </div>
-                                    ) : null}
                                     {a.roleSlots.length === 0 ? (
                                       <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px]">
                                         <div className="mono text-[9px] uppercase tracking-widest text-yellow-200">
@@ -13531,9 +13608,18 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             )}
                                             {/* AVATAR DA VERSÃO YOUTUBE deste papel. Vazio = mesmo do
                                                 META, e aí a versão YouTube não custa geração nenhuma. */}
+                                            {a.duasVersoes && slot.imageMode ? (
+                                              <FrameDaVersao
+                                                titulo="Frame da versão YouTube"
+                                                imageDataUrl={slot.avatarYoutube?.imageDataUrl || null}
+                                                imageName={slot.avatarYoutube?.imageName || null}
+                                                onArquivo={(f) => void subirImagemDaVersao(a.taskId, sIdx, 2, f)}
+                                                onLimpar={() => updateRoleSlot(a.taskId, sIdx, { avatarYoutube: null })}
+                                              />
+                                            ) : null}
                                             {a.duasVersoes && !slot.imageMode ? (
                                               <div>
-                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
                                                   <span className="text-[11px] leading-none">▶</span>
                                                   Avatar da versão YouTube
                                                   <span className="font-normal normal-case tracking-normal text-text-muted">
@@ -13572,7 +13658,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     falar com a voz dela. Vazio = mesma voz do META. */}
                                                 {slot.avatarYoutube?.avatarId ? (
                                                   <div className="mt-1.5 max-w-[420px]">
-                                                    <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                    <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
                                                       Voz da versão YouTube
                                                       <span className="font-normal normal-case tracking-normal text-text-muted">
                                                         {slot.voiceOverrideYoutube?.id
@@ -13591,12 +13677,29 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             {/* AVATAR DAS VERSOES 3..10 (29.08). Mesma regra da 2:
                                                 vazio = usa o da versao 1 (sem custo); escolhido =
                                                 aquela versao gera de novo. */}
+                                            {slot.imageMode
+                                              ? (a.versoes || []).map((ver) => {
+                                                  const esc = ver.porPapel?.[slot.role.toLowerCase()];
+                                                  return (
+                                                    <FrameDaVersao
+                                                      key={`img-v${ver.n}`}
+                                                      titulo="Frame da versão"
+                                                      nome={ver.nome}
+                                                      onRenomear={(v) => renomearVersao(a.taskId, ver.n, v)}
+                                                      imageDataUrl={esc?.imageDataUrl || null}
+                                                      imageName={esc?.imageName || null}
+                                                      onArquivo={(f) => void subirImagemDaVersao(a.taskId, sIdx, ver.n, f)}
+                                                      onLimpar={() => setAvatarDaVersao(a.taskId, ver.n, slot.role, null)}
+                                                    />
+                                                  );
+                                                })
+                                              : null}
                                             {!slot.imageMode
                                               ? (a.versoes || []).map((ver) => {
                                                   const esc = ver.porPapel?.[slot.role.toLowerCase()];
                                                   return (
                                                     <div key={ver.n}>
-                                                      <div className="label-tech mb-1 flex flex-wrap items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                      <div className="label-tech mb-1 flex flex-wrap items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
                                                         <span className="text-[11px] leading-none">+</span>
                                                         Avatar da versão
                                                         <input
@@ -13734,17 +13837,25 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       })}
                                                     </div>
                                                   </div>
-                                                  <textarea
-                                                    value={motion}
-                                                    onChange={(e) => updateRoleSlot(a.taskId, sIdx, { motionPrompt: e.target.value })}
-                                                    rows={2}
-                                                    placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
-                                                    className="w-full resize-y rounded-[8px] border border-white/10 bg-black/30 px-2.5 py-2 text-[11px] leading-snug text-text placeholder:text-text-muted/60 focus:border-violet-400/50 focus:outline-none"
-                                                  />
-                                                  <div className="mt-1 text-[9.5px] leading-tight text-text-muted">
-                                                    So pra cena com acao (mexer, despejar, espremer, ninar). Em acao curta,
-                                                    peca o gesto <b>uma vez no comeco</b> e a fala solta depois — senao o avatar
-                                                    repete o movimento o video inteiro.
+                                                  {/* Com prompt escrito, a caixa ACENDE: filete violeta,
+                                                    * fundo tintado e o selo do motor que vai sair. É a
+                                                    * confirmação visual de que o gesto está ativo. */}
+                                                  <div className={'gesto-caixa' + (on ? ' is-on' : '')}>
+                                                    <textarea
+                                                      value={motion}
+                                                      onChange={(e) => updateRoleSlot(a.taskId, sIdx, { motionPrompt: e.target.value })}
+                                                      rows={2}
+                                                      placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
+                                                      className="gesto-input"
+                                                    />
+                                                    {on ? (
+                                                      <span className="gesto-selo" aria-hidden>
+                                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                                          <path d="M13 2 4.1 12.97a1 1 0 0 0 .77 1.63H11l-1 7.4 8.9-10.97a1 1 0 0 0-.77-1.63H12l1-7.4z" />
+                                                        </svg>
+                                                        gesto ativo · sai no {motorEfetivo((slot.engine as 'III' | 'IV' | 'V') || 'III', motion)}
+                                                      </span>
+                                                    ) : null}
                                                   </div>
                                                 </div>
                                               );
@@ -13774,11 +13885,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       <path d="M12 19v4" />
                                                     </svg>
                                                     Áudio do avatar
-                                                    {!akey ? (
-                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                        — opcional: fala este áudio no lugar do TTS
-                                                      </span>
-                                                    ) : null}
                                                   </div>
                                                   {!akey ? (
                                                     <label className="group/upaudio inline-flex cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-bg-soft/70 px-4 py-2 text-[11.5px] font-semibold text-text transition hover:-translate-y-[1px] hover:border-cyan-500/60 hover:text-cyan-500 active:translate-y-[1px]" style={{ fontFamily: 'var(--font-tech)' }}>

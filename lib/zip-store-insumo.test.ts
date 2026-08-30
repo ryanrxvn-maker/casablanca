@@ -48,6 +48,11 @@ eq(zipGroupId(`pilot:${T}:g:abc:img:2`), T, 'frame com genId também agrupa cert
 // (2) PURGA POR GERAÇÃO: o regex de exceção pega frame e só frame.
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:img:0`), true, 'purga preserva o frame');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:g:abc:img:2`), true, 'preserva o frame também com genId');
+// MODO IMAGEM por VERSAO (30.08): o frame da versao 2..10 mora sob o prefixo da
+// task MAE — e' insumo dela. Sem esta linha, re-disparar do zero apagaria o
+// frame das outras versoes e elas sairiam com a foto da versao 1.
+eq(INSUMO_DO_DISPARO.test(`pilot:${T}:v2:img:0`), true, 'frame da versao 2 e insumo — purga preserva');
+eq(INSUMO_DO_DISPARO.test(`pilot:${T}:v7:img:1`), true, 'frame da versao 7 tambem');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:part:BODY 1`), false, 'take velho continua sendo purgado');
 eq(INSUMO_DO_DISPARO.test(`pilot:${T}:roleaudio:doutor:123`), true, 'áudio upado por avatar é insumo — purga preserva');
 eq(zipGroupId(`pilot:${T}:roleaudio:doutor:123`), T, 'áudio por avatar agrupa com o disparo (não vira " misc ")');

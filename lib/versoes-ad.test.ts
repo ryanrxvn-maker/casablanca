@@ -93,6 +93,23 @@ console.log('— avatarDaVersao cai na versão 1 quando a versão não escolheu 
   ok(avatarDaVersao(base, null, 'Doutor').avatarId === 'av1', 'sem versão = versão 1');
 }
 
+console.log('— MODO IMAGEM: a versão troca o FRAME, não o avatar —');
+{
+  const papeis = [{ role: 'Doutor', avatarId: null, imageKey: 'pilot:t:img:0' }];
+  ok(versaoGeraDeNovo(papeis, V(2, 'YouTube')) === false, 'versão sem frame próprio herda a 1 (custo zero)');
+  ok(versaoGeraDeNovo(papeis, V(2, 'YouTube', { doutor: { imageKey: 'pilot:t:img:0' } })) === false, 'mesmo frame = não gera');
+  ok(versaoGeraDeNovo(papeis, V(3, 'Avatar 3', { doutor: { imageKey: 'pilot:t:v3:img:0' } })) === true, 'frame diferente = gera de novo');
+}
+{
+  const base = { avatarId: null, imageKey: 'img-1', imageDataUrl: 'data:1', imageName: 'cena1.jpg', avatarVoiceId: 'vz1' };
+  const herdou = avatarDaVersao(base, V(2, 'YouTube'), 'Doutor');
+  ok(herdou.imageKey === 'img-1', 'sem escolha, a versão usa o frame da 1');
+  const trocou = avatarDaVersao(base, V(2, 'YouTube', { doutor: { imageKey: 'img-2', imageDataUrl: 'data:2', imageName: 'cena2.jpg' } }), 'Doutor');
+  ok(trocou.imageKey === 'img-2' && trocou.imageName === 'cena2.jpg', 'usa o frame da versão');
+  ok(trocou.avatarVoiceId === 'vz1', 'voz não escolhida continua a da versão 1');
+  ok(!trocou.avatarId, 'modo imagem não inventa avatarId');
+}
+
 /* ═══════════ MAPEAMENTO AUTOMÁTICO (o caso do Silas) ═══════════ */
 
 const DOC_IGUAL = [
