@@ -25,9 +25,29 @@ const PACES: Record<GroupPace, PaceCfg> = {
 };
 
 let seq = 0;
+/**
+ * Sufixo sorteado UMA vez por carregamento de pagina.
+ *
+ * ⚠ Sem ele o `seq` reiniciava do zero a cada F5 e a sessao restaurada
+ * (sessionStorage) voltava com blocos `b11`, `b22`... — o primeiro
+ * split/merge depois do reload cunhava EXATAMENTE o mesmo id de um bloco
+ * que ja existia. Dois blocos com a mesma chave = React reciclando o card
+ * errado e, pior, estilo/cadeado/destaque de um vazando pro outro.
+ */
+let runTag = '';
 function newId(): string {
+  if (!runTag) {
+    runTag = Math.floor(Math.random() * 1679616)
+      .toString(36)
+      .padStart(4, '0');
+  }
   seq += 1;
-  return `b${seq.toString(36)}${(seq * 7919 % 1296).toString(36)}`;
+  return `b${runTag}${seq.toString(36)}`;
+}
+
+/** Expoe a cunhagem de id pros modulos de edicao (split/merge/roteiro). */
+export function mintBlockId(): string {
+  return newId();
 }
 
 /** Pontuação que fecha bloco (fim de frase). */

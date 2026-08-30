@@ -2481,3 +2481,157 @@ html[data-theme='light'] .plano-input {
       inset 0 -2px 0 rgba(0, 0, 0, 0.25);
   }
 }
+
+/* ═══════════════ ROTEIRO DE LEGENDA (hook x body) ═══════════════
+   O gatilho é um botão SÓ ÍCONE com relevo real: casca fina + núcleo de raio
+   concêntrico (duplo bisel), hairline no lugar de borda cinza e sombra difusa
+   tintada de âmbar. Ele respira parado, levanta no hover e afunda no clique,
+   sempre na curva de mola. Modal e botão vivem em app/tools/tipografia. */
+.roteiro-orb {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1a1206;
+  background: linear-gradient(150deg, #ffe1a3 0%, #ffb340 46%, #f08a12 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -2.5px 0 rgba(120, 62, 0, 0.34),
+    0 3px 0 rgba(96, 50, 0, 0.32),
+    0 10px 22px -10px rgba(240, 138, 18, 0.9);
+  transition:
+    transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1);
+  animation: roteiroOrbBreathe 3.6s ease-in-out infinite;
+  will-change: transform;
+}
+/* núcleo do duplo bisel: raio concêntrico, 3px pra dentro da casca */
+.roteiro-orb::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 10px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 58%);
+  pointer-events: none;
+}
+.roteiro-orb > svg {
+  position: relative;
+  z-index: 1;
+  transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.roteiro-orb:hover {
+  transform: translateY(-2.5px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.82),
+    inset 0 -2.5px 0 rgba(120, 62, 0, 0.34),
+    0 5px 0 rgba(96, 50, 0, 0.3),
+    0 16px 30px -10px rgba(255, 179, 64, 1);
+}
+.roteiro-orb:hover > svg { transform: scale(1.08); }
+.roteiro-orb:active {
+  transform: translateY(1.5px);
+  box-shadow:
+    inset 0 2px 6px rgba(96, 50, 0, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+    0 1px 0 rgba(96, 50, 0, 0.3);
+}
+.roteiro-orb:disabled { opacity: 0.4; animation: none; cursor: not-allowed; }
+.roteiro-orb.is-open {
+  background: linear-gradient(150deg, #fff2d4 0%, #ffc766 46%, #f59f22 100%);
+  animation: none;
+}
+/* halo que sai do botão de tempos em tempos (só quando parado) */
+.roteiro-orb-halo {
+  position: absolute;
+  inset: -3px;
+  border-radius: 16px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1.5px rgba(255, 179, 64, 0.65);
+  animation: roteiroOrbHalo 3.6s cubic-bezier(0.32, 0.72, 0, 1) infinite;
+}
+@keyframes roteiroOrbBreathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1.5px) scale(1.015); }
+}
+@keyframes roteiroOrbHalo {
+  0% { transform: scale(0.92); opacity: 0.8; }
+  55%, 100% { transform: scale(1.28); opacity: 0; }
+}
+/* a barra de cima do ícone desliza (sugere hook separado do body) */
+.roteiro-orb-hook {
+  animation: roteiroHookSlide 3.6s cubic-bezier(0.32, 0.72, 0, 1) infinite;
+  transform-origin: left center;
+}
+@keyframes roteiroHookSlide {
+  0%, 62%, 100% { transform: translateX(0); }
+  74% { transform: translateX(2.2px); }
+}
+
+/* ── janelinha ── */
+.roteiro-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3vh 16px;
+  overflow-y: auto;
+  background: rgba(6, 6, 8, 0.62);
+  backdrop-filter: blur(7px);
+  animation: roteiroFade 200ms ease both;
+}
+html[data-theme='light'] .roteiro-backdrop { background: rgba(22, 20, 16, 0.42); }
+.roteiro-window {
+  width: min(1040px, 100%);
+  border-radius: 22px;
+  background: rgb(var(--bg-soft));
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--line-strong)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 40px 90px -30px rgba(0, 0, 0, 0.8),
+    0 0 60px -24px rgba(255, 159, 10, 0.34);
+  animation: roteiroPop 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes roteiroFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes roteiroPop {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* fita colorida que marca o trecho (hook = âmbar, body = ciano) */
+.roteiro-seg {
+  position: relative;
+  border-radius: 16px;
+  background: rgb(var(--bg-softer));
+  box-shadow: inset 0 0 0 1px rgb(var(--line));
+  transition: box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+/* Ambar do roteiro. O `text-amber-500` do Tailwind e' claro demais em cima
+   do bege do tema claro: aqui o tom escurece pra continuar legivel nos dois. */
+.roteiro-accent { color: #f0a520; }
+html[data-theme='light'] .roteiro-accent { color: #96540a; }
+
+/* campo do formulario: sempre um degrau MAIS FUNDO que o card, nos dois
+   temas (no claro um `bg-black/20` virava uma mancha cinza ilegivel) */
+.roteiro-field {
+  background: rgb(var(--bg));
+  box-shadow: inset 0 0 0 1px rgb(var(--line));
+}
+.roteiro-field:focus {
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.65);
+}
+.roteiro-seg:hover { box-shadow: inset 0 0 0 1px rgb(var(--line-strong)); }
+.roteiro-seg.is-hook { box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.34); }
+.roteiro-seg.is-hook:hover { box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.55); }
+@media (prefers-reduced-motion: reduce) {
+  .roteiro-orb, .roteiro-orb-halo, .roteiro-orb-hook, .roteiro-window, .roteiro-backdrop {
+    animation: none;
+  }
+}

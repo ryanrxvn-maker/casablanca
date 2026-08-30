@@ -60,6 +60,7 @@ import {
 } from '@/lib/typography/engine';
 import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
 import { PresetGallery } from '@/components/typography/PresetGallery';
+import { ColorDot } from '@/components/typography/ColorDot';
 import { LangPicker } from '@/components/typography/LangPicker';
 import { useTypoFavs } from '@/components/typography/useTypoFavs';
 import {
@@ -72,10 +73,26 @@ import {
   groupWords,
   blockText,
   retimeBlockText,
-  splitBlock,
-  mergeBlocks,
   type GroupPace,
 } from '@/lib/typography/group';
+import {
+  emptyIdentity,
+  mergeKeepingIdentity,
+  pruneIdentity,
+  regroupKeepingLocks,
+  removeKeepingIdentity,
+  splitKeepingIdentity,
+  type BlockIdentity,
+} from '@/lib/typography/blocks-edit';
+import {
+  defaultSegments,
+  type ApplyResult,
+  type CaptionSegment,
+} from '@/lib/typography/caption-script';
+import {
+  CaptionScriptModal,
+  RoteiroOrbButton,
+} from '@/components/typography/CaptionScriptModal';
 import {
   renderTypographyVideo,
   type RenderProgress,
@@ -145,6 +162,7 @@ type SavedSession = {
   bgOpacity?: number;
   animIn?: AnimKind | null;
   animOut?: OutKind | null;
+  script?: CaptionSegment[];
 };
 
 function saveSession(file: File, s: SavedSession) {
@@ -165,6 +183,17 @@ function loadSession(file: File): SavedSession | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Semente do roteiro de legenda (1 hook + 1 body, no Template 1). Criada UMA
+ * vez por carregamento: `useToolState` recebe valor, não fábrica, e chamar
+ * defaultSegments() a cada render cunharia ids novos sem parar.
+ */
+let SCRIPT_SEED: CaptionSegment[] | null = null;
+function scriptSeed(): CaptionSegment[] {
+  if (!SCRIPT_SEED) SCRIPT_SEED = defaultSegments();
+  return SCRIPT_SEED;
 }
 
 export default function TipografiaPage() {
@@ -227,11 +256,23 @@ function TipografiaInner() {
   const [wordSel, setWordSel] = useState<{ blockId: string; a: number; b: number } | null>(null);
   const [selBlockId, setSelBlockId] = useState<string | null>(null);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  // ⭐ ROTEIRO DE LEGENDA (hook × body com letterings diferentes)
+  const [scriptSegs, setScriptSegs] = useToolState<CaptionSegment[]>(
+    'tipografia:script',
+    scriptSeed(),
+  );
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [scriptOnTpls, setScriptOnTpls] = useState(false);
+  // recado honesto do último "trocar o ritmo" (quantos travados sobreviveram)
+  const [regroupInfo, setRegroupInfo] = useState<string | null>(null);
   // ⭐ favoritos POR CONTA (hook compartilhado com o Auto Cortes)
   const { favs, toggleFav } = useTypoFavs();
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // override que o bloco JÁ tinha antes do cadeado fechar — soltar o cadeado
+  // devolve só ele, em vez de zerar o ajuste manual do user
+  const preLockRef = useRef<Record<string, PerBlockStyle>>({});
 
   // ── Ctrl+Z: histórico de edição (até 40 passos) ──────────────────────────
   type Snapshot = {
@@ -453,13 +494,23 @@ function TipografiaInner() {
         // preso ao estilo congelado pra sempre — o perBlock vence o global, e
         // nenhum "aplicar a todas" conseguia mais alcançá-lo. O cadeado virava
         // via de mão única.
+        //
+        // ⚠ Mas apagar o override INTEIRO também jogava fora o que o user
+        // tinha ajustado NAQUELE bloco antes de fechar o cadeado (o "aplicar
+        // a todas" desligado). Guardamos, no congelamento, quais chaves
+        // existiam antes — soltar o cadeado devolve exatamente aquelas.
+        const antes = preLockRef.current[blockId];
+        delete preLockRef.current[blockId];
         setBlockStyles((prev) => {
           if (!prev[blockId]) return prev;
           const { [blockId]: _descartado, ...resto } = prev;
-          return resto;
+          return antes && Object.keys(antes).length > 0
+            ? { ...resto, [blockId]: antes }
+            : resto;
         });
         return;
       }
+      preLockRef.current[blockId] = { ...(blockStyles[blockId] ?? {}) };
       setBlockStyles((prev) => ({
         ...prev,
         [blockId]: {
@@ -492,7 +543,26 @@ function TipografiaInner() {
       }));
       setLockedBlocks((prev) => [...prev, blockId]);
     },
-    [pushHistory, lockedBlocks, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
+    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
+  );
+
+  // ── IDENTIDADE dos blocos (cadeado + os 3 mapas por id) ─────────────────
+  // Tudo que morre junto com o bloco quando ele ganha um id novo. Sai daqui
+  // pro motor testado e volta inteiro — é o que impede o "trocar o ritmo
+  // destrava o cadeado sozinho".
+  const identity = useMemo<BlockIdentity>(
+    () => ({ locked: lockedBlocks, blockStyles, wordStyles, highlights }),
+    [lockedBlocks, blockStyles, wordStyles, highlights],
+  );
+  const commitBlocks = useCallback(
+    (r: { blocks: Block[] } & BlockIdentity) => {
+      setBlocks(r.blocks);
+      setLockedBlocks(r.locked);
+      setBlockStyles(r.blockStyles);
+      setWordStyles(r.wordStyles);
+      setHighlights(r.highlights);
+    },
+    [setBlocks, setLockedBlocks, setBlockStyles, setWordStyles, setHighlights],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -546,10 +616,23 @@ function TipografiaInner() {
             if (ov.animOut === undefined) ov.animOut = null;
             styles[id] = ov;
           }
-          setBlockStyles(styles);
+          // sessões antigas guardavam cadeado/estilo/destaque de blocos que já
+          // não existem (split/merge/excluir nunca limpavam) — a poda entra
+          // aqui pra a sessão restaurada não voltar suja
+          const podado = pruneIdentity(saved.blocks, {
+            locked: saved.lockedBlocks ?? [],
+            blockStyles: styles,
+            wordStyles: saved.wordStyles ?? {},
+            highlights: saved.highlights ?? {},
+          });
+          setBlockStyles(podado.blockStyles);
+          setWordStyles(podado.wordStyles);
+          setLockedBlocks(podado.locked);
+          setHighlights(podado.highlights);
         }
-        setWordStyles(saved.wordStyles ?? {});
-        setLockedBlocks(saved.lockedBlocks ?? []);
+        if (Array.isArray(saved.script) && saved.script.length > 0) {
+          setScriptSegs(saved.script);
+        }
         setAutoFitG(saved.autoFit ?? true);
         setBgModeG(saved.bgMode ?? 'preset');
         setBgColorG(saved.bgColor ?? null);
@@ -558,7 +641,7 @@ function TipografiaInner() {
         setAnimOutG(saved.animOut ?? null);
         setPace(saved.pace);
         setLanguage(saved.language);
-        setHighlights(saved.highlights ?? {});
+        // highlights já veio podado junto com o resto da identidade acima
         setAutoEmph(saved.autoEmph ?? true);
         setFontOv(saved.fontOv ?? null);
         setPosX(saved.posX ?? 0.5);
@@ -602,8 +685,9 @@ function TipografiaInner() {
       bgOpacity: bgOpacityG,
       animIn: animInG,
       animOut: animOutG,
+      script: scriptSegs,
     });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -619,7 +703,16 @@ function TipografiaInner() {
   function resetAll() {
     setWords([]);
     setBlocks([]);
+    // ⚠ os quatro mapas morrem JUNTOS com os blocos. Antes só os destaques
+    // eram zerados, e cadeado/estilo de bloco do vídeo anterior ficavam
+    // pendurados em ids que não existiam mais.
     setHighlights({});
+    setLockedBlocks([]);
+    setBlockStyles({});
+    setWordStyles({});
+    // vídeo novo = copy nova. O visual de cada trecho fica (é o template do
+    // lote); só os textos colados vão embora.
+    setScriptSegs((prev) => prev.map((sg) => ({ ...sg, text: '', words: null })));
     setPhase('idle');
     setStage(null);
     setProgress(null);
@@ -627,6 +720,10 @@ function TipografiaInner() {
     setResult(null);
     setRestored(false);
     setSelBlockId(null);
+    setActiveBlockId(null);
+    setWordSel(null);
+    setRegroupInfo(null);
+    preLockRef.current = {};
   }
 
   function handleCancel() {
@@ -694,6 +791,10 @@ function TipografiaInner() {
       setLockedBlocks([]);
       setBlockStyles({});
       setWordSel(null);
+      setSelBlockId(null);
+      setActiveBlockId(null);
+      setRegroupInfo(null);
+      preLockRef.current = {};
       setStage(null);
       setProgress(null);
       setPhase('ready');
@@ -813,54 +914,68 @@ function TipografiaInner() {
     [setBlocks],
   );
 
+  // ⚠ nada de setState dentro do updater de outro setState: em StrictMode o
+  // updater roda duas vezes e o efeito colateral saía repetido/fora de hora.
+  // O bloco novo é calculado FORA e a identidade é podada de uma vez.
   function editBlockText(id: string, text: string) {
+    const b = blocks.find((x) => x.id === id);
+    if (!b) return;
+    const nb = retimeBlockText(b, text);
+    if (nb.words.length === b.words.length && blockText(nb) === blockText(b)) return;
     pushHistory();
-    updateBlock(id, (b) => {
-      const nb = retimeBlockText(b, text);
-      if (nb.id === b.id && nb.words.length !== b.words.length) {
-        setHighlights((h) => {
-          const cur = h[b.id];
-          if (!cur) return h;
-          return { ...h, [b.id]: cur.filter((i) => i < nb.words.length) };
-        });
-        // texto mudou de tamanho → os índices dos estilos por palavra já eram
-        setWordStyles((prev) => {
-          if (!prev[b.id]) return prev;
-          const next = { ...prev };
-          delete next[b.id];
-          return next;
-        });
-        setWordSel((w) => (w && w.blockId === b.id ? null : w));
-      }
-      return nb;
-    });
+    const nextBlocks = blocks.map((x) => (x.id === id ? nb : x));
+    if (nb.words.length !== b.words.length) {
+      // o texto mudou de tamanho: destaque e estilo por palavra que apontam
+      // pra posição que não existe mais são podados (o resto sobrevive)
+      const ident2: BlockIdentity = {
+        locked: lockedBlocks,
+        blockStyles,
+        wordStyles: { ...wordStyles, [id]: {} },
+        highlights,
+      };
+      const podado = pruneIdentity(nextBlocks, ident2);
+      setBlocks(nextBlocks);
+      setLockedBlocks(podado.locked);
+      setBlockStyles(podado.blockStyles);
+      setWordStyles(podado.wordStyles);
+      setHighlights(podado.highlights);
+      setWordSel((w) => (w && w.blockId === id ? null : w));
+      return;
+    }
+    setBlocks(nextBlocks);
   }
 
+  // ⚠ split/merge/excluir cunham um id NOVO. Fazer isso "na mão" jogava fora
+  // cadeado, estilo do bloco, destaques e estilos por palavra do bloco antigo
+  // — dividir um bloco travado o destravava calado. O motor testado
+  // (lib/typography/blocks-edit) carrega a identidade junto e remapeia os
+  // índices de palavra. Nada de setState dentro do updater: o resultado é
+  // calculado FORA e aplicado de uma vez (updater roda 2x em StrictMode e
+  // cunhava ids fantasma na seleção).
   function doSplit(id: string) {
+    const r = splitKeepingIdentity(blocks, id, identity);
+    if (!r) return;
     pushHistory();
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx < 0) return prev;
-      const pair = splitBlock(prev[idx]);
-      if (!pair) return prev;
-      const next = [...prev];
-      next.splice(idx, 1, pair[0], pair[1]);
-      setSelBlockId(pair[0].id);
-      return next;
-    });
+    commitBlocks(r);
+    setSelBlockId(r.firstId);
+    setWordSel((w) => (w && w.blockId === id ? null : w));
   }
 
   function doMerge(id: string) {
+    const r = mergeKeepingIdentity(blocks, id, identity);
+    if (!r) return;
     pushHistory();
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx < 0 || idx >= prev.length - 1) return prev;
-      const merged = mergeBlocks(prev[idx], prev[idx + 1]);
-      const next = [...prev];
-      next.splice(idx, 2, merged);
-      setSelBlockId(merged.id);
-      return next;
-    });
+    commitBlocks(r);
+    setSelBlockId(r.mergedId);
+    setWordSel(null);
+  }
+
+  function doDelete(id: string) {
+    pushHistory();
+    commitBlocks(removeKeepingIdentity(blocks, id, identity));
+    setSelBlockId((cur) => (cur === id ? null : cur));
+    setActiveBlockId((cur) => (cur === id ? null : cur));
+    setWordSel((w) => (w && w.blockId === id ? null : w));
   }
 
   function nudge(id: string, edge: 'start' | 'end', delta: number) {
@@ -914,19 +1029,26 @@ function TipografiaInner() {
     });
   }
 
+  // ⭐ trocar o RITMO respeitando o CADEADO (bug relatado em 30.08: marcar o
+  // cadeado em algumas partes e mudar o ritmo destravava tudo e aplicava a
+  // mudança no vídeo inteiro). Agora só o que NÃO está travado é remontado;
+  // o bloco travado atravessa com o mesmo id, as mesmas palavras, o mesmo
+  // tempo e o mesmo estilo congelado.
   function regroup(newPace: GroupPace) {
+    if (newPace === pace) return;
     pushHistory();
     setPace(newPace);
-    if (words.length > 0) {
-      setBlocks(groupWords(words, newPace));
-      setHighlights({});
-      // ids de bloco novos → estilos por palavra/bloqueios antigos não apontam
-      // mais pra nada (mesma regra já avisada na UI pro texto editado)
-      setWordStyles({});
-      setLockedBlocks([]);
-      setBlockStyles({});
-      setWordSel(null);
-    }
+    if (words.length === 0) return;
+    const r = regroupKeepingLocks(words, newPace, blocks, identity);
+    commitBlocks(r);
+    setWordSel(null);
+    setSelBlockId((cur) => (cur && r.blocks.some((b) => b.id === cur) ? cur : null));
+    setActiveBlockId((cur) => (cur && r.blocks.some((b) => b.id === cur) ? cur : null));
+    setRegroupInfo(
+      r.kept > 0
+        ? `${r.remade} bloco${r.remade === 1 ? '' : 's'} remontado${r.remade === 1 ? '' : 's'} no ritmo novo · ${r.kept} travado${r.kept === 1 ? '' : 's'} ficou${r.kept === 1 ? '' : 'ram'} intacto${r.kept === 1 ? '' : 's'}`
+        : null,
+    );
   }
 
   function seekTo(ms: number) {
@@ -1066,6 +1188,39 @@ function TipografiaInner() {
                   favs={favs}
                   onToggleFav={toggleFav}
                   disabled={processing}
+                  extra={
+                    <>
+                      {/* Templates de ROTEIRO (hook × body), irmãos dos ⭐ Favoritos */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScriptOnTpls(true);
+                          setScriptOpen(true);
+                        }}
+                        disabled={processing}
+                        title="Templates de roteiro: hook num lettering e body em outro"
+                        className={
+                          'rounded-full px-3 py-1 text-[11px] font-bold text-amber-500 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.45)] hover:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.75)] disabled:opacity-40' +
+                          T3D
+                        }
+                        style={{
+                          fontFamily: 'var(--font-tech)',
+                          background: 'rgba(255,159,10,0.09)',
+                        }}
+                      >
+                        Templates
+                        <span className="ml-1 opacity-70">{scriptSegs.length}</span>
+                      </button>
+                      <RoteiroOrbButton
+                        open={scriptOpen}
+                        disabled={processing}
+                        onClick={() => {
+                          setScriptOnTpls(false);
+                          setScriptOpen((v) => !v);
+                        }}
+                      />
+                    </>
+                  }
                 />
                 <FontPicker
                   value={
@@ -1114,6 +1269,7 @@ function TipografiaInner() {
                   setAutoEmph={setAutoEmph}
                   pace={pace}
                   regroup={regroup}
+                  regroupInfo={regroupInfo}
                   defaultPrimary={preset.defaultPrimary}
                   defaultAccent={preset.defaultAccent}
                   autoFit={effOf('autoFit', autoFitG) ?? true}
@@ -1173,14 +1329,30 @@ function TipografiaInner() {
               onEditText={editBlockText}
               onSplit={doSplit}
               onMerge={doMerge}
-              onDelete={(id) => {
-                pushHistory();
-                updateBlock(id, () => null);
-              }}
+              onDelete={doDelete}
               onNudge={nudge}
               onToggleWord={toggleHighlight}
               onToggleLock={toggleLock}
               disabled={processing}
+            />
+
+            <CaptionScriptModal
+              open={scriptOpen}
+              onClose={() => setScriptOpen(false)}
+              blocks={blocks}
+              ident={identity}
+              fallbackPresetId={presetId}
+              segments={scriptSegs}
+              onSegments={setScriptSegs}
+              favs={favs}
+              onToggleFav={toggleFav}
+              startOnTemplates={scriptOnTpls}
+              onApply={(r: ApplyResult) => {
+                pushHistory();
+                commitBlocks(r);
+                setWordSel(null);
+                setSelBlockId(null);
+              }}
             />
 
             <CopyFixPanel
@@ -2402,53 +2574,6 @@ function FontPicker({
 /* ───────────────────────── Painel de ajustes ───────────────────────── */
 
 // HSV ↔ hex (pro seletor de tom arrastável estilo CapCut)
-function hsvToHex(h: number, s: number, v: number): string {
-  const c = v * s;
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-  const m = v - c;
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  if (h < 60) [r, g, b] = [c, x, 0];
-  else if (h < 120) [r, g, b] = [x, c, 0];
-  else if (h < 180) [r, g, b] = [0, c, x];
-  else if (h < 240) [r, g, b] = [0, x, c];
-  else if (h < 300) [r, g, b] = [x, 0, c];
-  else [r, g, b] = [c, 0, x];
-  const to2 = (n: number) =>
-    Math.round((n + m) * 255)
-      .toString(16)
-      .padStart(2, '0');
-  return `#${to2(r)}${to2(g)}${to2(b)}`;
-}
-function hexToHsv(hex: string): { h: number; s: number; v: number } | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  const r = ((n >> 16) & 255) / 255;
-  const g = ((n >> 8) & 255) / 255;
-  const b = (n & 255) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const d = max - min;
-  let h = 0;
-  if (d > 0) {
-    if (max === r) h = 60 * (((g - b) / d) % 6);
-    else if (max === g) h = 60 * ((b - r) / d + 2);
-    else h = 60 * ((r - g) / d + 4);
-  }
-  if (h < 0) h += 360;
-  return { h, s: max === 0 ? 0 : d / max, v: max };
-}
-
-const SWATCHES = [
-  '#ffffff', '#d9dbe0', '#8a8f99', '#3a3d45', '#0f0f10', '#000000',
-  '#ffd60a', '#ffb300', '#ff9f0a', '#ff6b00', '#e8b04c', '#b8860b',
-  '#ff2d55', '#e8192c', '#b00020', '#ff5db1', '#f472b6', '#ffb3c6',
-  '#a78bfa', '#7c5cff', '#5b2fd6', '#c9bcf2', '#31c4ff', '#22d3ee',
-  '#0aa2c0', '#bde0fe', '#2eff4f', '#2edb84', '#0f9d58', '#c8e87c',
-  '#d4fc79', '#f5f0e1', '#ffdab9', '#8b5a2b', '#5c3a21', '#2b1d0e',
-];
 
 /* ───────────────────── Corrigir legenda pela copy ───────────────────── */
 
@@ -2549,219 +2674,6 @@ function CopyFixPanel({
   );
 }
 
-function ColorDot({
-  label,
-  value,
-  fallback,
-  onPick,
-  disabled,
-}: {
-  label: string;
-  value: string | null;
-  fallback: string;
-  onPick: (v: string | null) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [hex, setHex] = useState('');
-  const cur = value ?? fallback;
-  // seletor de TOM arrastável (CapCut): quadrado saturação×brilho + barra de matiz
-  const [hsv, setHsv] = useState<{ h: number; s: number; v: number }>({ h: 45, s: 1, v: 1 });
-  const svRef = useRef<HTMLDivElement | null>(null);
-  const hueRef = useRef<HTMLDivElement | null>(null);
-  // gatilho + menu por PORTAL (o card do passo corta/desloca popover ancorado)
-  const dotBtnRef = useRef<HTMLButtonElement | null>(null);
-  const closeDot = useCallback(() => setOpen(false), []);
-  const openPicker = () => {
-    if (!open) {
-      const fromCur = hexToHsv(cur);
-      if (fromCur) setHsv(fromCur);
-    }
-    setOpen((v) => !v);
-  };
-  const dragSv = (e: React.PointerEvent) => {
-    const el = svRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const s = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    const v = 1 - Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-    const next = { ...hsv, s, v };
-    setHsv(next);
-    onPick(hsvToHex(next.h, next.s, next.v));
-  };
-  const dragHue = (e: React.PointerEvent) => {
-    const el = hueRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const h = Math.min(359.9, Math.max(0, ((e.clientX - r.left) / r.width) * 360));
-    const next = { ...hsv, h };
-    setHsv(next);
-    onPick(hsvToHex(next.h, next.s, next.v));
-  };
-  return (
-    <div className="relative">
-      <button
-        ref={dotBtnRef}
-        onClick={openPicker}
-        disabled={disabled}
-        className={
-          'flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft px-2.5 py-1.5 hover:border-amber-400/50' +
-          T3D
-        }
-      >
-        <span
-          className="h-5 w-5 rounded-[6px] border border-white/25 shadow-inner"
-          style={{ background: cur }}
-        />
-        <span className="text-[11px] font-semibold text-text-muted">{label}</span>
-      </button>
-      <Popover open={open} anchorRef={dotBtnRef} onClose={closeDot} width={248}>
-        <div className="rounded-[16px] border border-line-strong bg-bg-elev p-3 shadow-2xl">
-          {/* topo: cor atual grande + hex + conta-gotas (só ícone) */}
-          <div className="mb-2.5 flex items-center gap-2">
-            <span
-              className="h-8 w-8 shrink-0 rounded-[9px] border border-white/20 shadow-[inset_0_1px_2px_rgba(255,255,255,0.25),0_2px_6px_rgba(0,0,0,0.35)]"
-              style={{ background: cur }}
-            />
-            <input
-              value={hex}
-              onChange={(e) => {
-                setHex(e.target.value);
-                const v = e.target.value.trim();
-                if (/^#?[0-9a-fA-F]{6}$/.test(v)) {
-                  onPick(v.startsWith('#') ? v : '#' + v);
-                }
-              }}
-              placeholder={cur}
-              className="mono w-full min-w-0 rounded-[8px] border border-line bg-black/25 px-2 py-1.5 text-[11px] text-text outline-none focus:border-amber-400/50"
-            />
-            {typeof window !== 'undefined' && 'EyeDropper' in window ? (
-              <button
-                title="Pegar cor da tela — clica em qualquer pixel do preview"
-                onClick={async () => {
-                  try {
-                    const picker = new (
-                      window as unknown as {
-                        EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> };
-                      }
-                    ).EyeDropper();
-                    const r = await picker.open();
-                    if (r?.sRGBHex) {
-                      onPick(r.sRGBHex);
-                      const fromPick = hexToHsv(r.sRGBHex);
-                      if (fromPick) setHsv(fromPick);
-                    }
-                  } catch {
-                    /* user cancelou o conta-gotas */
-                  }
-                }}
-                className={
-                  'flex h-8 w-9 shrink-0 items-center justify-center rounded-[9px] border border-line bg-bg-soft text-text hover:border-amber-400/60 hover:text-amber-400' +
-                  T3D
-                }
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <path d="m2 22 1-1h3l9-9M3 21v-3l9-9m0 0 3.5-3.5M15 6l3 3m-3-3 2.3-2.3a2.4 2.4 0 0 1 3.4 3.4L18 9" />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-
-          {/* quadrado de TOM (saturação × brilho) — arrasta igual CapCut */}
-          <div
-            ref={svRef}
-            onPointerDown={(e) => {
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              dragSv(e);
-            }}
-            onPointerMove={(e) => {
-              if (e.buttons === 1) dragSv(e);
-            }}
-            className="relative h-[130px] w-full cursor-crosshair touch-none rounded-[10px] border border-white/15"
-            style={{
-              background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hsvToHex(hsv.h, 1, 1)})`,
-            }}
-          >
-            <span
-              className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.6)]"
-              style={{
-                left: `${hsv.s * 100}%`,
-                top: `${(1 - hsv.v) * 100}%`,
-                background: hsvToHex(hsv.h, hsv.s, hsv.v),
-              }}
-            />
-          </div>
-          {/* barra de matiz */}
-          <div
-            ref={hueRef}
-            onPointerDown={(e) => {
-              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              dragHue(e);
-            }}
-            onPointerMove={(e) => {
-              if (e.buttons === 1) dragHue(e);
-            }}
-            className="relative mt-2 h-[14px] w-full cursor-pointer touch-none rounded-full border border-white/15"
-            style={{
-              background:
-                'linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%)',
-            }}
-          >
-            <span
-              className="pointer-events-none absolute top-1/2 h-[18px] w-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.6)]"
-              style={{ left: `${(hsv.h / 360) * 100}%`, background: hsvToHex(hsv.h, 1, 1) }}
-            />
-          </div>
-
-          {/* paleta rápida */}
-          <div className="mt-2.5 grid grid-cols-9 gap-1">
-            {SWATCHES.map((c) => (
-              <button
-                key={c}
-                onClick={() => {
-                  onPick(c);
-                  const fromSw = hexToHsv(c);
-                  if (fromSw) setHsv(fromSw);
-                }}
-                className={
-                  'h-[19px] w-[19px] rounded-[5px] border transition-transform hover:scale-125 ' +
-                  (cur.toLowerCase() === c ? 'border-amber-400' : 'border-white/15')
-                }
-                style={{ background: c }}
-                title={c}
-              />
-            ))}
-          </div>
-
-          <div className="mt-2.5 flex items-center gap-1.5">
-            <button
-              onClick={() => {
-                onPick(null);
-                setOpen(false);
-              }}
-              className={
-                'w-full rounded-[8px] border border-line bg-bg-soft px-2 py-1.5 text-[10.5px] font-semibold text-text-muted hover:text-text' +
-                T3D
-              }
-            >
-              Padrão do modelo
-            </button>
-            <button
-              onClick={() => setOpen(false)}
-              className={
-                'shrink-0 rounded-[8px] border border-amber-400/60 bg-amber-400/15 px-3 py-1.5 text-[10.5px] font-bold text-amber-600' +
-                T3D
-              }
-            >
-              OK
-            </button>
-          </div>
-        </div>
-      </Popover>
-    </div>
-  );
-}
-
 function StylePanel({
   fontScale,
   posY,
@@ -2784,6 +2696,7 @@ function StylePanel({
   setAutoEmph,
   pace,
   regroup,
+  regroupInfo,
   defaultPrimary,
   defaultAccent,
   autoFit,
@@ -2819,6 +2732,8 @@ function StylePanel({
   setAutoEmph: (v: boolean) => void;
   pace: GroupPace;
   regroup: (p: GroupPace) => void;
+  /** recado do último reagrupamento (quantos travados sobreviveram) */
+  regroupInfo: string | null;
   defaultPrimary: string;
   defaultAccent: string;
   autoFit: boolean;
@@ -3266,10 +3181,18 @@ function StylePanel({
             { value: 'frases', label: 'Frases', sub: 'blocos longos' },
           ]}
         />
-        <p className="mt-1.5 text-[10.5px] text-text-muted">
-          Trocar o ritmo remonta os blocos a partir da transcrição — edições de texto
-          feitas na lista abaixo são perdidas (Ctrl+Z desfaz).
+        <p className="mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
+          Trocar o ritmo remonta os blocos a partir da transcrição, mas
+          <span className="text-violet-400"> não encosta nos travados</span>: bloco
+          de cadeado fechado atravessa com as mesmas palavras, o mesmo tempo e o
+          mesmo visual. Os livres perdem a edição de texto feita na lista abaixo
+          (Ctrl+Z desfaz).
         </p>
+        {regroupInfo ? (
+          <div className="mt-2 rounded-[10px] border border-violet-400/40 bg-violet-500/10 px-3 py-1.5 text-[11px] text-violet-300">
+            {regroupInfo}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -3456,7 +3379,8 @@ function BlockList({
           <span className="inline-flex items-center text-violet-400">
             <IconPadlock locked size={11} />
           </span>
-          congela o bloco (o “aplicar a todas” não pega nele)
+          congela o bloco: nem o “aplicar a todas”, nem trocar o ritmo, nem
+          dividir ou juntar mexem no visual dele
         </span>
       </div>
       <div className="max-h-[280px] overflow-y-auto rounded-[14px] border border-line">
@@ -3510,8 +3434,8 @@ function BlockList({
                     onClick={() => onToggleLock(b.id)}
                     title={
                       isLocked
-                        ? 'Desbloquear (volta a receber o "aplicar a todas")'
-                        : 'Bloquear: congela o visual atual — o "aplicar a todas" não pega mais neste bloco'
+                        ? 'Desbloquear: volta a receber o "aplicar a todas" (e devolve o ajuste que este bloco tinha antes do cadeado)'
+                        : 'Bloquear: congela o visual atual. Nem o "aplicar a todas", nem trocar o ritmo, nem dividir/juntar mexem mais neste bloco'
                     }
                     disabled={disabled}
                     className={

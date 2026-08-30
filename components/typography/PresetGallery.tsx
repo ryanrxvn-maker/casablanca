@@ -16,7 +16,7 @@
  *  - `compact`: caixa de rolagem menor (cabe dentro de um passo do fluxo).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { drawPresetDemo, type TypoPreset } from '@/lib/typography/engine';
 import { ensureTypoFonts } from '@/lib/typography/fonts';
 import { TYPO_CATEGORIES, TYPO_PRESETS } from '@/lib/typography/presets';
@@ -43,6 +43,12 @@ export type PresetGalleryProps = {
   allowNone?: { label: string; selected: boolean; onPick: () => void };
   /** Caixa de rolagem menor + grade de 2 colunas. */
   compact?: boolean;
+  /**
+   * Conteudo extra na fileira de abas, logo depois do chip de ⭐ Favoritos.
+   * A Tipografia manda o chip de Templates e o botao do roteiro de legenda;
+   * quem nao passa nada (Auto Cortes) fica exatamente como era.
+   */
+  extra?: ReactNode;
 };
 
 export function PresetGallery({
@@ -55,6 +61,7 @@ export function PresetGallery({
   demoText,
   allowNone,
   compact,
+  extra,
 }: PresetGalleryProps) {
   const all = presets ?? TYPO_PRESETS;
   const subset = presets != null;
@@ -159,7 +166,7 @@ export function PresetGallery({
       >
         Modelos — {all.length} letterings
       </div>
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           onClick={() => setCat(FAV_CAT)}
@@ -177,6 +184,7 @@ export function PresetGallery({
           ⭐ Favoritos
           <span className="ml-1 opacity-70">{favs.length}</span>
         </button>
+        {extra}
         {cats.map((c) => (
           <button
             key={c}
