@@ -23,11 +23,30 @@
  * grupo de hooks do mesmo AD). Comentário de outro AD nunca vaza.
  */
 
-export type ComentarioDoc = { marker: string; context: string; body: string };
+export type ComentarioDoc = {
+  marker: string;
+  context: string;
+  body: string;
+  /** hrefs capturados do HTML do comentário (extensão 4.18.1+) — texto
+   *  hiperlinkado perde a URL no strip de tags; aqui ela sobrevive. */
+  links?: string[];
+};
 
 export type SlotPraIndicacao = { role: string; username: string | null };
 
 export type PartePraIndicacao = { label: string; text: string };
+
+/** Um link citado numa indicação, já resolvido pra UI: tipo + thumb + rótulo. */
+export type LinkIndicacao = {
+  url: string;
+  tipo: 'drive' | 'youtube' | 'tiktok' | 'instagram' | 'imagem' | 'docs' | 'link';
+  /** URL de thumbnail exibível (Drive/YouTube/imagem direta). null = sem
+   *  thumb pública (TikTok/Instagram/genérico) → a UI mostra o glifo. */
+  thumb: string | null;
+  rotulo: string;
+};
+
+export type IndicacaoAvatar = { nota: string; links: LinkIndicacao[] };
 
 export type IndicacaoCopy = {
   /** Label do take onde o trecho comentado caiu (HOOK 1, BODY 2...). null =
@@ -37,16 +56,85 @@ export type IndicacaoCopy = {
   trecho: string;
   /** O comentário em si. */
   nota: string;
+  links: LinkIndicacao[];
 };
 
 export type ResultadoIndicacoes = {
   /** Indicações DE AVATAR por slot, alinhado ao array de entrada. */
-  porSlot: string[][];
+  porSlot: IndicacaoAvatar[][];
   /** Indicações de avatar sem slot resolvível (raro — username que não casou). */
-  daTask: string[];
+  daTask: IndicacaoAvatar[];
   /** Indicações DE COPY (hook/body) — o outro botão. */
   copy: IndicacaoCopy[];
 };
+
+/* ═══════════════ Links citados nas indicações ═══════════════ */
+
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi;
+
+function idDoDrive(u: string): string | null {
+  const m =
+    /\/(?:file\/)?d\/([a-zA-Z0-9_-]{15,})/.exec(u) ||
+    /[?&]id=([a-zA-Z0-9_-]{15,})/.exec(u);
+  return m ? m[1] : null;
+}
+
+function idDoYouTube(u: string): string | null {
+  const m =
+    /youtu\.be\/([a-zA-Z0-9_-]{6,})/.exec(u) ||
+    /[?&]v=([a-zA-Z0-9_-]{6,})/.exec(u) ||
+    /\/shorts\/([a-zA-Z0-9_-]{6,})/.exec(u) ||
+    /\/embed\/([a-zA-Z0-9_-]{6,})/.exec(u);
+  return m ? m[1] : null;
+}
+
+/** Resolve UMA url pra {tipo, thumb, rotulo}. Exportada pro teste/reuso. */
+export function resolverLinkIndicacao(urlBruta: string): LinkIndicacao {
+  let url = String(urlBruta || '').trim().replace(/[.,;)\]]+$/, '');
+  // Redirect do Google (links de comentário vêm embrulhados em /url?q=)
+  const q = /[?&]q=([^&]+)/.exec(url);
+  if (q && /google\.com\/url/i.test(url)) {
+    try { url = decodeURIComponent(q[1]); } catch { /* usa como veio */ }
+  }
+  let host = '';
+  try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* rótulo genérico */ }
+
+  if (/drive\.google\.com|docs\.google\.com\/file/i.test(url)) {
+    const id = idDoDrive(url);
+    return { url, tipo: 'drive', thumb: id ? `https://drive.google.com/thumbnail?id=${id}&sz=w400` : null, rotulo: 'Drive' };
+  }
+  if (/docs\.google\.com\/(document|spreadsheets|presentation)/i.test(url)) {
+    return { url, tipo: 'docs', thumb: null, rotulo: 'Google Docs' };
+  }
+  if (/youtube\.com|youtu\.be/i.test(url)) {
+    const id = idDoYouTube(url);
+    return { url, tipo: 'youtube', thumb: id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null, rotulo: 'YouTube' };
+  }
+  if (/tiktok\.com/i.test(url)) return { url, tipo: 'tiktok', thumb: null, rotulo: 'TikTok' };
+  if (/instagram\.com/i.test(url)) return { url, tipo: 'instagram', thumb: null, rotulo: 'Instagram' };
+  if (/\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(url) || /googleusercontent\.com/i.test(url)) {
+    return { url, tipo: 'imagem', thumb: url, rotulo: 'Imagem' };
+  }
+  return { url, tipo: 'link', thumb: null, rotulo: host || 'Link' };
+}
+
+/** Junta os hrefs do HTML do comentário com URLs coladas no texto e resolve
+ *  cada uma (dedupe por URL final). */
+export function linksDaIndicacao(texto: string, hrefs?: string[] | null): LinkIndicacao[] {
+  const brutos: string[] = [];
+  for (const h of hrefs || []) { if (h) brutos.push(h); }
+  const doTexto = String(texto || '').match(URL_RE) || [];
+  brutos.push(...doTexto);
+  const out: LinkIndicacao[] = [];
+  const vistos = new Set<string>();
+  for (const b of brutos) {
+    const r = resolverLinkIndicacao(b);
+    if (!r.url || vistos.has(r.url)) continue;
+    vistos.add(r.url);
+    out.push(r);
+  }
+  return out;
+}
 
 /** Mesma normalização do matcher do Pilot: sem acento, sem pontuação, minúsculas. */
 function norm(s: string): string {
@@ -82,8 +170,8 @@ export function associarIndicacoes(opts: {
 }): ResultadoIndicacoes {
   const { docText, baseAdId, comments, slots } = opts;
   const partes = opts.partes || [];
-  const porSlot: string[][] = slots.map(() => []);
-  const daTask: string[] = [];
+  const porSlot: IndicacaoAvatar[][] = slots.map(() => []);
+  const daTask: IndicacaoAvatar[] = [];
   const copy: IndicacaoCopy[] = [];
   const numTask = numeroDoAd(baseAdId);
   if (!numTask || !comments?.length) return { porSlot, daTask, copy };
@@ -126,7 +214,9 @@ export function associarIndicacoes(opts: {
       }
     }
     if (slotIdx >= 0) {
-      if (!porSlot[slotIdx].includes(nota)) porSlot[slotIdx].push(nota);
+      if (!porSlot[slotIdx].some((x) => x.nota === nota)) {
+        porSlot[slotIdx].push({ nota, links: linksDaIndicacao(nota, c.links) });
+      }
       continue;
     }
 
@@ -149,7 +239,7 @@ export function associarIndicacoes(opts: {
     }
     const trecho = linhaDaAncora || (c.context || '').trim().slice(-120);
     if (!copy.some((x) => x.nota === nota && x.trecho === trecho)) {
-      copy.push({ take, trecho, nota });
+      copy.push({ take, trecho, nota, links: linksDaIndicacao(nota, c.links) });
     }
   }
   return { porSlot, daTask, copy };

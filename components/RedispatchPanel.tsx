@@ -4,6 +4,8 @@ import React, { useMemo, useState } from 'react';
 import { CompactAvatarPicker } from './CompactAvatarPicker';
 import { CompactVoiceSelector } from './CompactVoiceSelector';
 import type { AvatarOption } from './HeyGenAvatarPicker';
+import { IndicacaoPanel } from './IndicacaoPanel';
+import type { IndicacaoAvatar, LinkIndicacao } from '@/lib/pilot-indicacoes';
 
 /**
  * RedispatchPanel — a ANÁLISE daquele disparo, reaberta DENTRO do card da
@@ -65,10 +67,10 @@ export type RedispatchPart = {
   /** Duração do áudio (s) — regra dos 30s. */
   audioDur?: number | null;
   /** Indicações DE AVATAR (comentários do Docs) do avatar deste take. */
-  indicacoes?: string[];
+  indicacoes?: IndicacaoAvatar[];
   /** Indicações DE COPY: comentário ancorado no TEXTO deste take
    *  (trecho comentado + nota). Botão azul na linha do take. */
-  indicacoesCopy?: Array<{ trecho: string; nota: string }>;
+  indicacoesCopy?: Array<{ trecho: string; nota: string; links?: LinkIndicacao[] }>;
 };
 
 type Motor = 'auto' | 'III' | 'IV' | 'V';
@@ -342,7 +344,7 @@ export function RedispatchPanel({
          *  @username — na gramática deste painel. Só aparece quando o replan
          *  gravou o briefing (disparos a partir de 29.08). */}
         {(() => {
-          const papeis: Array<{ role: string; username: string | null; fileId: string | null; indicacoes: string[] }> = [];
+          const papeis: Array<{ role: string; username: string | null; fileId: string | null; indicacoes: IndicacaoAvatar[] }> = [];
           const vistos = new Map<string, number>();
           for (const p of partesOriginais) {
             const role = (p.role || '').trim();
@@ -351,7 +353,7 @@ export function RedispatchPanel({
             const idxExistente = vistos.get(k);
             if (idxExistente !== undefined) {
               for (const ind of p.indicacoes || []) {
-                if (!papeis[idxExistente].indicacoes.includes(ind)) papeis[idxExistente].indicacoes.push(ind);
+                if (!papeis[idxExistente].indicacoes.some((x) => x.nota === ind.nota)) papeis[idxExistente].indicacoes.push(ind);
               }
               continue;
             }
@@ -426,13 +428,7 @@ export function RedispatchPanel({
                       ) : null}
                     </div>
                     {indicacaoAberta[k] && pp.indicacoes.length > 0 ? (
-                      <ul className="mt-2 grid gap-1.5 border-t border-white/[0.07] pt-2">
-                        {pp.indicacoes.map((ind, j) => (
-                          <li key={j} className="rounded-[8px] bg-amber-400/[0.10] px-2.5 py-1.5 text-[11.5px] leading-relaxed text-text shadow-[inset_0_0_0_1px_rgba(251,191,36,0.3)]">
-                            {ind}
-                          </li>
-                        ))}
-                      </ul>
+                      <IndicacaoPanel tipo="avatar" itens={pp.indicacoes.map((ia) => ({ nota: ia.nota, links: ia.links }))} />
                     ) : null}
                   </div>
                 ))}
@@ -681,16 +677,12 @@ export function RedispatchPanel({
 
                 {/* Nota(s) do copy neste take — abre pelo botão azul acima. */}
                 {copyNotaAberta[idx] && (p.indicacoesCopy || []).length > 0 ? (
-                  <ul className="mt-2 grid gap-1.5 pl-[30px]">
-                    {(p.indicacoesCopy || []).map((ic, j) => (
-                      <li key={j} className="rounded-[8px] bg-blue-400/[0.10] px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]">
-                        <div className="text-[11px] italic leading-snug text-text-muted">
-                          “{ic.trecho.length > 110 ? ic.trecho.slice(0, 110) + '…' : ic.trecho}”
-                        </div>
-                        <div className="mt-0.5 text-[11.5px] leading-relaxed text-text">{ic.nota}</div>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="pl-[30px]">
+                    <IndicacaoPanel
+                      tipo="copy"
+                      itens={(p.indicacoesCopy || []).map((ic) => ({ nota: ic.nota, links: ic.links, trecho: ic.trecho }))}
+                    />
+                  </div>
                 ) : null}
 
                 {/* Texto: prévia quando fechado, editor quando aberto */}

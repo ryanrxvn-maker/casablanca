@@ -85,6 +85,10 @@ import { EditPartModal } from '@/components/EditPartModal';
 // que reabre o disparo exatamente como ele saiu, dentro do card da task.
 import { RestartDispatchModal } from '@/components/RestartDispatchModal';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
+// INDICAÇÕES do copy (comentários do Docs): painel escuro com thumb/botão dos
+// links citados. Dois sabores — âmbar (avatar) e azul (comentário no texto).
+import { IndicacaoPanel } from '@/components/IndicacaoPanel';
+import type { IndicacaoAvatar, IndicacaoCopy } from '@/lib/pilot-indicacoes';
 import {
   PilotBtn3D,
   IconScissors as PilotIconScissors,
@@ -980,9 +984,10 @@ type RoleSlot = {
    *  timing/cadência do arquivo, timbre da voz escolhida. Exige voz. */
   audioMirror?: boolean;
   /** INDICAÇÕES do copy — comentários do Google Docs ancorados neste avatar
-   *  ("avatar segurando o produto", "ambiente de cozinha"...). Extraídos do
-   *  export HTML pela extensão; aparecem no botão 3D de indicação do card. */
-  indicacoes?: string[];
+   *  ("avatar segurando o produto", "ambiente de cozinha"...), com os links
+   *  citados já resolvidos (thumb + tipo). Extraídos do export HTML pela
+   *  extensão; aparecem no botão 3D dourado do card. */
+  indicacoes?: IndicacaoAvatar[];
   /** Data URL da imagem — vive em memória (taskAnalyses) e vai pro runner.
    *  NÃO entra no replan: base64 de imagem no localStorage estoura a quota e
    *  derruba a persistência de TODAS as tasks. Os bytes vão pro IndexedDB. */
@@ -1010,12 +1015,12 @@ type TaskAnalysis = {
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
   /** INDICAÇÕES DE AVATAR (comentários do Docs) que não acharam um slot —
-   *  aparecem no botão dourado do TOPO do card da task (raro). */
-  indicacoesDoc?: string[];
+   *  caem no primeiro avatar (o botão vive no card do avatar, não no topo). */
+  indicacoesDoc?: IndicacaoAvatar[];
   /** INDICAÇÕES DE COPY (v3, 29.08): comentário ancorado no HOOK/BODY. Não é
-   *  o indicador de avatar — é o botão AZUL no topo do card, com o trecho
+   *  o indicador de avatar — é o botão AZUL do lado do olhinho, com o trecho
    *  comentado e em qual take ele caiu. */
-  indicacoesCopy?: Array<{ take: string | null; trecho: string; nota: string }>;
+  indicacoesCopy?: IndicacaoCopy[];
   /** Cada avatar do briefing — usuario controla individualmente */
   /** DUAS VERSÕES ligadas nesta task (META + YouTube). Desligada — o padrão —
    *  tudo se comporta exatamente como antes: uma versão só. Liga quando o doc
@@ -2764,7 +2769,7 @@ function ClickUpPilotInner() {
           //  · COPY (botão azul no topo do card): ancora no hook/body — sai
           //    com o trecho + o take. Regras/escopo em lib/pilot-indicacoes
           //    (testada com o texto real do doc ADGL-PRPB12).
-          let indicacoesDoc: string[] = [];
+          let indicacoesDoc: IndicacaoAvatar[] = [];
           let indicacoesCopy: TaskAnalysis['indicacoesCopy'] = undefined;
           try {
             const docComments = docR.comments || [];
@@ -2780,7 +2785,12 @@ function ClickUpPilotInner() {
               resultado.porSlot.forEach((inds, si) => {
                 if (inds.length) roleSlots[si].indicacoes = inds;
               });
-              indicacoesDoc = resultado.daTask;
+              // Indicação de avatar sem slot dono (raro): sem botão no topo do
+              // card, ela cai no PRIMEIRO avatar — senão sumiria da tela.
+              if (resultado.daTask.length && roleSlots.length) {
+                roleSlots[0].indicacoes = [...(roleSlots[0].indicacoes || []), ...resultado.daTask];
+              }
+              indicacoesDoc = roleSlots.length ? [] : resultado.daTask;
               indicacoesCopy = resultado.copy.length ? resultado.copy : undefined;
               const comIndicacao = roleSlots.filter((s) => s.indicacoes?.length).length;
               if (comIndicacao || indicacoesDoc.length || resultado.copy.length) {
@@ -6962,7 +6972,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             // take colapsado "BODY 1+2" também pega os takes que ele engoliu).
             const copyDoTake = (aRef.indicacoesCopy || [])
               .filter((ic) => ic.take && (ic.take === p.label || p.label.startsWith(`${ic.take}+`) || p.label.split('+')[0] === ic.take))
-              .map(({ trecho, nota }) => ({ trecho, nota }));
+              .map(({ trecho, nota, links }) => ({ trecho, nota, links }));
             if (!slot && copyDoTake.length === 0) return p;
             return {
               ...p,
@@ -11589,52 +11599,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </span>
                                   ) : null}
                                 </span>
-                                {/* Grupo da direita — SEM filho solto no justify-between
-                                  * (o botão azul ficava flutuando no meio do header). */}
+                                {/* Grupo da direita. Os indicadores NÃO moram aqui: eles
+                                  * vivem no card do avatar, do lado do olhinho (29.08). */}
                                 <div className="flex shrink-0 items-center gap-1.5">
-                                  {/* INDICAÇÃO DE COPY (botão AZUL): comentário ancorado no
-                                    * texto do hook/body — mostra o trecho comentado e em
-                                    * qual take caiu. Não é o indicador de avatar. */}
-                                  {(a.indicacoesCopy || []).length > 0 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:copy`]: !prev[`${a.taskId}:copy`] }))}
-                                      aria-expanded={!!indicacaoOpen[`${a.taskId}:copy`]}
-                                      className={'pilot-ind-btn is-copy shrink-0' + (indicacaoOpen[`${a.taskId}:copy`] ? ' is-open' : '')}
-                                      title={`Comentário do copy no texto do AD (${(a.indicacoesCopy || []).length}) — clica pra ver o trecho e o take`}
-                                    >
-                                      <span className="pilot-ind-halo" aria-hidden />
-                                      {/* balão de comentário — o comentário é NO TEXTO */}
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                        <path d="M8 9h.01M12 9h.01M16 9h.01" />
-                                      </svg>
-                                      {(a.indicacoesCopy || []).length > 1 ? (
-                                        <span className="pilot-ind-count">{(a.indicacoesCopy || []).length}</span>
-                                      ) : null}
-                                    </button>
-                                  ) : null}
-                                  {/* Indicação de AVATAR sem dono claro (raro):
-                                    * botão 3D dourado no topo do card da task. */}
-                                  {(a.indicacoesDoc || []).length > 0 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:task`]: !prev[`${a.taskId}:task`] }))}
-                                      aria-expanded={!!indicacaoOpen[`${a.taskId}:task`]}
-                                      className={'pilot-ind-btn shrink-0' + (indicacaoOpen[`${a.taskId}:task`] ? ' is-open' : '')}
-                                      title={`Indicação do copy neste AD (${(a.indicacoesDoc || []).length}) — clica pra ver`}
-                                    >
-                                      <span className="pilot-ind-halo" aria-hidden />
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                        <path d="m3 11 14-6v14L3 13v-2z" />
-                                        <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-                                        <path d="M21 8.5c.7.8.7 5.2 0 6" />
-                                      </svg>
-                                      {(a.indicacoesDoc || []).length > 1 ? (
-                                        <span className="pilot-ind-count">{(a.indicacoesDoc || []).length}</span>
-                                      ) : null}
-                                    </button>
-                                  ) : null}
                                   <button
                                     type="button"
                                     onClick={() => removeTaskFromAnalysis(a.taskId)}
@@ -11645,57 +11612,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   </button>
                                 </div>
                               </div>
-                              {/* Painel da indicação de COPY — abre pelo botão AZUL. Cada
-                                * linha: take onde caiu + trecho comentado + a nota. */}
-                              {indicacaoOpen[`${a.taskId}:copy`] && (a.indicacoesCopy || []).length > 0 ? (
-                                <div className="mt-2 rounded-[12px] border border-blue-400/40 bg-gradient-to-br from-blue-400/[0.10] via-blue-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                                  <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500">
-                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                    </svg>
-                                    Comentário no texto · copy do Docs
-                                  </div>
-                                  <ul className="grid gap-1.5">
-                                    {(a.indicacoesCopy || []).map((ind, k) => (
-                                      <li key={k} className="rounded-[8px] border border-blue-400/30 bg-bg/60 px-2.5 py-2">
-                                        <div className="flex flex-wrap items-baseline gap-1.5">
-                                          {ind.take ? (
-                                            <span className="mono shrink-0 rounded-full border border-blue-400/45 bg-blue-500/15 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest text-blue-500">
-                                              {ind.take}
-                                            </span>
-                                          ) : null}
-                                          <span className="min-w-0 text-[11px] italic leading-snug text-text-muted">
-                                            “{ind.trecho.length > 110 ? ind.trecho.slice(0, 110) + '…' : ind.trecho}”
-                                          </span>
-                                        </div>
-                                        <div className="mt-1 text-[12px] leading-relaxed text-text">{ind.nota}</div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                  <div className="mt-1.5 text-[10px] text-text-muted">
-                                    É o comentário que o copy deixou nesse trecho da fala.
-                                  </div>
-                                </div>
-                              ) : null}
-                              {/* Painel da indicação da TASK — abre pelo botão dourado acima. */}
-                              {indicacaoOpen[`${a.taskId}:task`] && (a.indicacoesDoc || []).length > 0 ? (
-                                <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                                  <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-500">
-                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                      <path d="m3 11 14-6v14L3 13v-2z" />
-                                      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-                                    </svg>
-                                    Indicação do copy · comentário do Docs
-                                  </div>
-                                  <ul className="grid gap-1.5">
-                                    {(a.indicacoesDoc || []).map((ind, k) => (
-                                      <li key={k} className="rounded-[8px] border border-amber-400/30 bg-bg/60 px-2.5 py-2 text-[12px] leading-relaxed text-text">
-                                        {ind}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              ) : null}
 
                               {/* MOTOR CONFIG — Avatar III/IV/V picker.
                                   ESCONDIDO quando ONLY MAGNIFIC tá ligado:
@@ -12868,58 +12784,21 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </button>
                                             </div>
                                           </div>
-                                          {/* PAINEL AZUL — comentário no TEXTO dos takes deste avatar. */}
+                                          {/* PAINÉIS DAS INDICAÇÕES (29.08) — peça escura única,
+                                            * dois sabores: AZUL (comentário no texto dos takes
+                                            * deste avatar) e ÂMBAR ("Indicação de avatar"). Cada
+                                            * link citado vira card com thumb/botão. */}
                                           {indicacaoOpen[`${a.taskId}:${sIdx}:copy`] && copyIndsDoSlot.length > 0 ? (
-                                            <div className="mt-2 rounded-[12px] border border-blue-400/40 bg-gradient-to-br from-blue-400/[0.10] via-blue-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                                              <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500">
-                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                                </svg>
-                                                Comentário no texto · copy do Docs
-                                              </div>
-                                              <ul className="grid gap-1.5">
-                                                {copyIndsDoSlot.map((ind, k) => (
-                                                  <li key={k} className="rounded-[8px] border border-blue-400/30 bg-bg/60 px-2.5 py-2">
-                                                    <div className="flex flex-wrap items-baseline gap-1.5">
-                                                      {ind.take ? (
-                                                        <span className="mono shrink-0 rounded-full border border-blue-400/45 bg-blue-500/15 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest text-blue-500">
-                                                          {ind.take}
-                                                        </span>
-                                                      ) : null}
-                                                      <span className="min-w-0 text-[11px] italic leading-snug text-text-muted">
-                                                        “{ind.trecho.length > 110 ? ind.trecho.slice(0, 110) + '…' : ind.trecho}”
-                                                      </span>
-                                                    </div>
-                                                    <div className="mt-1 text-[12px] leading-relaxed text-text">{ind.nota}</div>
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                              <div className="mt-1.5 text-[10px] text-text-muted">
-                                                É o comentário que o copy deixou nesse trecho da fala.
-                                              </div>
-                                            </div>
+                                            <IndicacaoPanel
+                                              tipo="copy"
+                                              itens={copyIndsDoSlot.map((ic) => ({ nota: ic.nota, links: ic.links, take: ic.take, trecho: ic.trecho }))}
+                                            />
                                           ) : null}
-                                          {/* PAINEL DA INDICAÇÃO DO COPY — abre pelo botão 3D dourado. */}
                                           {indicacaoOpen[`${a.taskId}:${sIdx}`] && (slot.indicacoes || []).length > 0 ? (
-                                            <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                                              <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-500">
-                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                  <path d="m3 11 14-6v14L3 13v-2z" />
-                                                  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-                                                </svg>
-                                                Indicação do copy · comentário do Docs
-                                              </div>
-                                              <ul className="grid gap-1.5">
-                                                {(slot.indicacoes || []).map((ind, k) => (
-                                                  <li key={k} className="rounded-[8px] border border-amber-400/30 bg-bg/60 px-2.5 py-2 text-[12px] leading-relaxed text-text">
-                                                    {ind}
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                              <div className="mt-1.5 text-[10px] text-text-muted">
-                                                É o que o copy pediu pra cena — usa pra escolher o avatar/look certo.
-                                              </div>
-                                            </div>
+                                            <IndicacaoPanel
+                                              tipo="avatar"
+                                              itens={(slot.indicacoes || []).map((ia) => ({ nota: ia.nota, links: ia.links }))}
+                                            />
                                           ) : null}
                                           {/* PAINEL DE PREVIEW POR AVATAR — editavel.
                                             * Mostra TODAS as parts (HOOK/BODY) que matcham por role do slot.

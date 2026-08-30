@@ -12,6 +12,7 @@
 import { notFound } from 'next/navigation';
 import { useState } from 'react';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
+import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 
 const PARTES: RedispatchPart[] = [
   {
@@ -24,7 +25,10 @@ const PARTES: RedispatchPart[] = [
     role: 'Doutor',
     username: 'drrobertokalil 1',
     briefingFileId: null,
-    indicacoes: ['AVATAR SEGURANDO O AZEITE NA MÃO', 'AMBIENTE DE COZINHA, LUZ QUENTE'],
+    indicacoes: [
+      { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [{ url: 'https://youtu.be/dQw4w9WgXcQ', tipo: 'youtube', thumb: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', rotulo: 'YouTube' }] },
+      { nota: 'AMBIENTE DE COZINHA, LUZ QUENTE', links: [{ url: 'https://www.tiktok.com/@fulano/video/7300000000', tipo: 'tiktok', thumb: null, rotulo: 'TikTok' }] },
+    ],
     indicacoesCopy: [
       { trecho: 'Como transformar um azeite de R$10 no seu próprio remédio de próstata', nota: 'COMENTARIO DE TESTE, CENARIO X' },
     ],
@@ -40,6 +44,7 @@ const PARTES: RedispatchPart[] = [
     audioName: 'ELEVEN_body1.mp3',
     audioMirror: true,
     audioParte: true,
+    indicacoesCopy: [{ trecho: 'A maioria das pessoas usa azeite do jeito errado.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo', links: [{ url: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view', tipo: 'drive', thumb: 'https://drive.google.com/thumbnail?id=1AbCdEfGhIjKlMnOpQrStUv&sz=w400', rotulo: 'Drive' }] }],
     role: 'Doutor',
     username: 'drrobertokalil 1',
     briefingFileId: null,
@@ -124,52 +129,22 @@ function Conteudo() {
         </div>
 
         {indCopyAberta ? (
-          <div className="mb-2 rounded-[12px] border border-blue-400/40 bg-gradient-to-br from-blue-400/[0.10] via-blue-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-            <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              Comentário no texto · copy do Docs
-            </div>
-            <ul className="grid gap-1.5">
-              {[
-                { take: 'HOOK 1', trecho: 'Para próstata inchada, não existe nada melhor do que isso daqui.', nota: 'COMENTARIO DE TESTE, CENARIO X' },
-                { take: 'BODY 2', trecho: 'Esse composto se chama oleocantal do azeite.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo' },
-              ].map((ind, k) => (
-                <li key={k} className="rounded-[8px] border border-blue-400/30 bg-bg/60 px-2.5 py-2">
-                  <div className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="mono shrink-0 rounded-full border border-blue-400/45 bg-blue-500/15 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest text-blue-500">
-                      {ind.take}
-                    </span>
-                    <span className="min-w-0 text-[11px] italic leading-snug text-text-muted">“{ind.trecho}”</span>
-                  </div>
-                  <div className="mt-1 text-[12px] leading-relaxed text-text">{ind.nota}</div>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-1.5 text-[10px] text-text-muted">É o comentário que o copy deixou nesse trecho da fala.</div>
-          </div>
+          <IndicacaoPanel
+            tipo="copy"
+            itens={[
+              { take: 'HOOK 1', trecho: 'Para próstata inchada, não existe nada melhor do que isso daqui.', nota: 'COMENTARIO DE TESTE, CENARIO X' },
+              { take: 'BODY 2', trecho: 'Esse composto se chama oleocantal do azeite.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo', links: [{ url: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view', tipo: 'drive', thumb: 'https://drive.google.com/thumbnail?id=1AbCdEfGhIjKlMnOpQrStUv&sz=w400', rotulo: 'Drive' }] },
+            ]}
+          />
         ) : null}
         {indAberta ? (
-          <div className="mb-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-            <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-500">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="m3 11 14-6v14L3 13v-2z" />
-                <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-              </svg>
-              Indicação do copy · comentário do Docs
-            </div>
-            <ul className="grid gap-1.5">
-              {['AVATAR SEGURANDO O AZEITE NA MÃO', 'AMBIENTE DE COZINHA, LUZ QUENTE'].map((ind, k) => (
-                <li key={k} className="rounded-[8px] border border-amber-400/30 bg-bg/60 px-2.5 py-2 text-[12px] leading-relaxed text-text">
-                  {ind}
-                </li>
-              ))}
-            </ul>
-            <div className="mt-1.5 text-[10px] text-text-muted">
-              É o que o copy pediu pra cena — usa pra escolher o avatar/look certo.
-            </div>
-          </div>
+          <IndicacaoPanel
+            tipo="avatar"
+            itens={[
+              { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [{ url: 'https://youtu.be/dQw4w9WgXcQ', tipo: 'youtube', thumb: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', rotulo: 'YouTube' }, { url: 'https://www.tiktok.com/@fulano/video/7300000000', tipo: 'tiktok', thumb: null, rotulo: 'TikTok' }] },
+              { nota: 'AMBIENTE DE COZINHA, LUZ QUENTE', links: [{ url: 'https://www.instagram.com/reel/Cxyz123/', tipo: 'instagram', thumb: null, rotulo: 'Instagram' }] },
+            ]}
+          />
         ) : null}
 
         <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">

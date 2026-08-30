@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { CalculadoraButton } from './CalculadoraButton';
+import { ThemeToggle } from './ThemeToggle';
 import { GlobalSearchButton } from './GlobalSearch';
 import { HistoryButton } from './HistoryButton';
 
@@ -103,6 +104,9 @@ export function TopBar() {
             <CalculadoraButton />
             <span aria-hidden className="topbar-divider" />
             <HistoryButton />
+            <span aria-hidden className="topbar-divider" />
+            {/* Troca claro/escuro na mão, sem ir nas configurações (29.08). */}
+            <ThemeToggle />
           </div>
         </div>
       </div>

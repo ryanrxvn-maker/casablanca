@@ -8,7 +8,7 @@
  * O cenário principal é o DOC REAL do teste (29.08): comentário ancorado no
  * HOOK do AD02G1GL - PRPB12.
  */
-import { associarIndicacoes } from './pilot-indicacoes';
+import { associarIndicacoes, linksDaIndicacao, resolverLinkIndicacao } from './pilot-indicacoes';
 
 let falhas = 0;
 function ok(cond: boolean, msg: string) {
@@ -98,7 +98,7 @@ console.log('— comentário na LINHA DO AVATAR → indicador de AVATAR (dourado
     slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }, { role: 'Mulher', username: 'maria 2' }],
     partes: [{ label: 'HOOK 1', text: 'Hook da mulher aqui.' }],
   });
-  ok(r.porSlot[1].includes('AMBIENTE DE COZINHA'), 'linha do avatar → slot da Mulher');
+  ok(r.porSlot[1].some((x) => x.nota === 'AMBIENTE DE COZINHA'), 'linha do avatar → slot da Mulher');
   ok(r.copy.length === 0, 'não duplica como copy');
 }
 
@@ -141,6 +141,42 @@ console.log('— marcador inexistente / listas vazias —');
   ok(r.copy.length === 0 && r.porSlot[0].length === 0, 'marcador inexistente é ignorado');
   const r2 = associarIndicacoes({ docText: DOC, baseAdId: 'AD02GL', comments: [], slots: [], partes: [] });
   ok(r2.copy.length === 0 && r2.daTask.length === 0, 'lista vazia ok');
+}
+
+console.log('— links citados na indicação: tipo + thumb —');
+{
+  const dv = resolverLinkIndicacao('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view?usp=sharing');
+  ok(dv.tipo === 'drive' && !!dv.thumb && dv.thumb.includes('thumbnail?id=1AbCdEfGhIjKlMnOpQrStUv'), 'Drive → thumb do arquivo');
+  const yt = resolverLinkIndicacao('https://youtu.be/dQw4w9WgXcQ');
+  ok(yt.tipo === 'youtube' && yt.thumb === 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', 'YouTube → thumb hqdefault');
+  const sh = resolverLinkIndicacao('https://www.youtube.com/shorts/abc123XYZ_-');
+  ok(sh.tipo === 'youtube' && !!sh.thumb, 'YouTube shorts também');
+  const tk = resolverLinkIndicacao('https://www.tiktok.com/@fulano/video/7300000000');
+  ok(tk.tipo === 'tiktok' && tk.thumb === null && tk.rotulo === 'TikTok', 'TikTok → glifo (sem thumb pública)');
+  const ig = resolverLinkIndicacao('https://www.instagram.com/reel/Cxyz123/');
+  ok(ig.tipo === 'instagram' && ig.rotulo === 'Instagram', 'Instagram identificado');
+  const im = resolverLinkIndicacao('https://exemplo.com/frames/cena1.jpg?v=2');
+  ok(im.tipo === 'imagem' && im.thumb === im.url, 'imagem direta → a própria URL é a thumb');
+  const gd = resolverLinkIndicacao('https://www.google.com/url?q=https%3A%2F%2Fyoutu.be%2FdQw4w9WgXcQ&sa=D');
+  ok(gd.tipo === 'youtube', 'redirect do Google é desembrulhado');
+  const gen = resolverLinkIndicacao('https://exemplo.com/pagina');
+  ok(gen.tipo === 'link' && gen.rotulo === 'exemplo.com', 'genérico → hostname como rótulo');
+}
+{
+  const ls = linksDaIndicacao('referência aqui: https://youtu.be/dQw4w9WgXcQ e https://youtu.be/dQw4w9WgXcQ.', ['https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUv']);
+  ok(ls.length === 2, `dedupe + junta href do HTML com URL do texto (veio ${ls.length})`);
+  ok(ls.some((l) => l.tipo === 'drive') && ls.some((l) => l.tipo === 'youtube'), 'os dois tipos presentes');
+}
+{
+  // link só no HTML do comentário (texto hiperlinkado) chega via `links`
+  const r = associarIndicacoes({
+    docText: DOC,
+    baseAdId: 'AD02GL',
+    comments: [{ marker: 'a', context: '', body: 'faz igual a esta referência', links: ['https://youtu.be/dQw4w9WgXcQ'] }],
+    slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }],
+    partes: PARTES_AD02,
+  });
+  ok(r.copy[0]?.links?.length === 1 && r.copy[0].links[0].tipo === 'youtube', 'href do comentário vira link resolvido na indicação');
 }
 
 if (falhas > 0) {

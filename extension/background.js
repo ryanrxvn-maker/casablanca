@@ -1600,6 +1600,7 @@ function extractDocComments(html) {
     // 1) CORPO (rodape): <a href="#cmnt_refN" id="cmntN">[x]</a> ... ate fechar o bloco.
     const bodyByN = new Map();
     const markerByN = new Map();
+    const linksByN = new Map();
     const bodyRe = /<a\b[^>]*href=["']#cmnt_ref(\d+)["'][^>]*>\s*\[([^\]]{1,6})\]\s*<\/a>([\s\S]{0,4000}?)<\/div>/gi;
     let bm;
     while ((bm = bodyRe.exec(html)) !== null) {
@@ -1610,6 +1611,23 @@ function extractDocComments(html) {
       markerByN.set(n, marker);
       // Mesmo N duas vezes = replies na thread → junta.
       bodyByN.set(n, bodyByN.has(n) ? bodyByN.get(n) + ' · ' + body : body);
+      // LINKS do comentario (v4.18.1): texto hiperlinkado perde a URL no
+      // stripTags — captura os hrefs do HTML cru (desembrulhando o redirect
+      // /url?q= do Google) pro app mostrar botao + thumb da referencia.
+      const hrefRe = /<a\b[^>]*href=["']([^"']+)["']/gi;
+      let hm2;
+      while ((hm2 = hrefRe.exec(bm[3])) !== null) {
+        let u = hm2[1];
+        if (/^#/.test(u)) continue; // ancoras internas (#cmnt_ref)
+        const q = u.match(/[?&]q=([^&]+)/);
+        if (q && /google\.com\/url/i.test(u)) {
+          try { u = decodeURIComponent(q[1]); } catch { /* usa como veio */ }
+        }
+        if (!/^https?:/i.test(u)) continue;
+        const arr = linksByN.get(n) || [];
+        if (!arr.includes(u)) arr.push(u);
+        linksByN.set(n, arr);
+      }
     }
     // 2) CONTEXTO (inline): <a href="#cmntN" id="cmnt_refN">[x]</a> — o texto
     //    imediatamente ANTES da ancora e o trecho comentado (ou a vizinhanca).
@@ -1627,6 +1645,7 @@ function extractDocComments(html) {
         marker: markerByN.get(n) || n,
         context: contextByN.get(n) || '',
         body,
+        links: linksByN.get(n) || [],
       });
     }
   } catch (e) {
