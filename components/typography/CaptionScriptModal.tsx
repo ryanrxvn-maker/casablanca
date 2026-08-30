@@ -208,6 +208,7 @@ function SegPreview({
             italic: s.style.italic,
             underline: s.style.underline,
             autoFit: s.style.autoFit,
+            singleLine: s.style.singleLine,
             bgMode: s.style.bgMode,
             bgColor: s.style.bgColor,
             bgOpacity: s.style.bgOpacity,
@@ -795,6 +796,14 @@ function SegmentCard({
               }
             >
               Sem fundo
+            </Toggle>
+            <Toggle
+              wide
+              title="O bloco nunca desce pra uma segunda linha — encolhe pra caber e a frase seguinte entra no próximo bloco"
+              on={seg.style.singleLine === true}
+              onClick={() => onPatchStyle({ singleLine: !seg.style.singleLine })}
+            >
+              Linha única
             </Toggle>
           </div>
         </div>

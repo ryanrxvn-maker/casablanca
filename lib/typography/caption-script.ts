@@ -328,20 +328,21 @@ export const TEMPLATE_1: CaptionTemplate = {
 };
 
 /**
- * Template 2 — mesma fronteira, body em Faixa Suave. É o que salva quando a
- * cena é clara demais (roupa/cozinha branca): o Keynote é texto branco puro e
- * SOME; a pílula escura do Faixa Suave lê.
+ * Template 2 — hook na viral Extensão Script (o mix script vermelho + caps
+ * do print aprovado em 30.08) e body em Faixa Suave, que é o que salva
+ * quando a cena é clara demais (roupa/cozinha branca): o Keynote é texto
+ * branco puro e SOME; a pílula escura do Faixa Suave lê.
  */
 export const TEMPLATE_2: CaptionTemplate = {
   id: 'tpl-2',
   name: 'Template 2',
   builtin: true,
-  hint: 'Hook Vermelho Sangue · Body Faixa Suave (cena clara)',
+  hint: 'Hook Extensão Script · Body Faixa Suave (cena clara)',
   segments: [
     {
       kind: 'hook',
       label: 'Hook',
-      style: { presetId: 'vermelho-sangue', fontScale: 1.2, posY: 0.5, posX: 0.5 },
+      style: { presetId: 'extensao-script', fontScale: 1.2, posY: 0.5, posX: 0.5 },
     },
     {
       kind: 'body',

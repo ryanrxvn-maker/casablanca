@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -52,6 +53,7 @@ import {
   unsupportedInKinds,
   type AnimKind,
   type OutKind,
+  type TypoPreset,
   type Block,
   type StyleState,
   type PerBlockStyle,
@@ -89,10 +91,7 @@ import {
   type ApplyResult,
   type CaptionSegment,
 } from '@/lib/typography/caption-script';
-import {
-  CaptionScriptModal,
-  RoteiroOrbButton,
-} from '@/components/typography/CaptionScriptModal';
+import { CaptionScriptModal } from '@/components/typography/CaptionScriptModal';
 import {
   renderTypographyVideo,
   type RenderProgress,
@@ -131,6 +130,17 @@ type ResultState = {
   audioOk: boolean;
 } | null;
 
+/**
+ * Handler de identidade ESTÁVEL que sempre enxerga o estado atual — é o que
+ * deixa memorizar a galeria/timeline/lista de blocos sem closure velha.
+ */
+function useEvent<A extends unknown[], R>(fn: (...a: A) => R): (...a: A) => R {
+  const ref = useRef(fn);
+  ref.current = fn;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useCallback((...a: A) => ref.current(...a), []);
+}
+
 function sigOf(file: File): string {
   return `tipografia:v1:${file.name}:${file.size}`;
 }
@@ -157,6 +167,7 @@ type SavedSession = {
   wordStyles?: Record<string, Record<number, WordStyle>>;
   lockedBlocks?: string[];
   autoFit?: boolean;
+  singleLine?: boolean;
   bgMode?: 'preset' | 'on' | 'off';
   bgColor?: string | null;
   bgOpacity?: number;
@@ -242,6 +253,7 @@ function TipografiaInner() {
   const [fontOv, setFontOv] = useToolState<FontKey | null>('tipografia:fontov', null);
   const [posX, setPosX] = useToolState<number>('tipografia:posx', 0.5);
   const [autoFitG, setAutoFitG] = useToolState<boolean>('tipografia:autofit', true);
+  const [singleLineG, setSingleLineG] = useToolState<boolean>('tipografia:singleline', false);
   const [bgModeG, setBgModeG] = useToolState<'preset' | 'on' | 'off'>('tipografia:bgmode', 'preset');
   const [bgColorG, setBgColorG] = useToolState<string | null>('tipografia:bgcolor', null);
   const [bgOpacityG, setBgOpacityG] = useToolState<number>('tipografia:bgopacity', 1);
@@ -381,6 +393,7 @@ function TipografiaInner() {
       fontOverride: fontOv,
       posX,
       autoFit: autoFitG,
+      singleLine: singleLineG,
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
@@ -389,7 +402,7 @@ function TipografiaInner() {
       wordStyles,
       perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, singleLineG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
   );
 
   // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
@@ -414,6 +427,7 @@ function TipografiaInner() {
         if (patch.fxSmoke !== undefined) setFxSmokeG(patch.fxSmoke);
         if (patch.fontOverride !== undefined) setFontOv(patch.fontOverride ?? null);
         if (patch.autoFit !== undefined) setAutoFitG(patch.autoFit !== false);
+        if (patch.singleLine !== undefined) setSingleLineG(patch.singleLine === true);
         if (patch.bgMode !== undefined) setBgModeG(patch.bgMode ?? 'preset');
         if (patch.bgColor !== undefined) setBgColorG(patch.bgColor ?? null);
         if (patch.bgOpacity !== undefined) setBgOpacityG(patch.bgOpacity ?? 1);
@@ -426,7 +440,7 @@ function TipografiaInner() {
         [editingBlockId]: { ...prev[editingBlockId], ...patch },
       }));
     },
-    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setSingleLineG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
   );
   // modelo EFETIVO do que o painel está editando: com um bloco travado (ou em
   // edição só-dele), o modelo do bloco vence o global — os rótulos "do modelo"
@@ -532,6 +546,7 @@ function TipografiaInner() {
           fxGlow: fxGlowG,
           fxSmoke: fxSmokeG,
           autoFit: autoFitG,
+          singleLine: singleLineG,
           bgMode: bgModeG,
           bgColor: bgColorG,
           bgOpacity: bgOpacityG,
@@ -543,7 +558,7 @@ function TipografiaInner() {
       }));
       setLockedBlocks((prev) => [...prev, blockId]);
     },
-    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
+    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, singleLineG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
   );
 
   // ── IDENTIDADE dos blocos (cadeado + os 3 mapas por id) ─────────────────
@@ -563,6 +578,57 @@ function TipografiaInner() {
       setHighlights(r.highlights);
     },
     [setBlocks, setLockedBlocks, setBlockStyles, setWordStyles, setHighlights],
+  );
+
+  // ── handlers ESTÁVEIS pros componentes memorizados (useEvent) ───────────
+  const hPickPreset = useEvent((id: string) => {
+    pushHistory();
+    setPresetId(id);
+  });
+  const hTimelineSelect = useEvent((id: string) => setSelBlockId(id));
+  const hRetime = useEvent(
+    (id: string, start: number, end: number, mode: 'move' | 'trim') =>
+      retimeBounds(id, start, end, mode),
+  );
+  const hBlockSelect = useEvent((b: Block) => {
+    setSelBlockId(b.id);
+    seekTo(b.start);
+  });
+  const hEditText = useEvent((id: string, text: string) => editBlockText(id, text));
+  const hSplit = useEvent((id: string) => doSplit(id));
+  const hMerge = useEvent((id: string) => doMerge(id));
+  const hDelete = useEvent((id: string) => doDelete(id));
+  const hNudge = useEvent((id: string, edge: 'start' | 'end', delta: number) =>
+    nudge(id, edge, delta),
+  );
+  const hToggleWord = useEvent((id: string, wi: number) => toggleHighlight(id, wi));
+  const hToggleLock = useEvent((id: string) => toggleLock(id));
+  // o chip só depende do processing — nó estável pro memo da galeria
+  const galleryExtra = useMemo(
+    () => (
+      /* Templates + roteiro hook × body: UMA porta só, ao lado dos
+         ⭐ Favoritos — a janela traz os trechos dentro */
+      <button
+        type="button"
+        onClick={() => {
+          setScriptOnTpls(true);
+          setScriptOpen(true);
+        }}
+        disabled={phase === 'transcribing' || phase === 'rendering'}
+        title="Templates de legenda: hook num lettering e body em outro, aplicados de uma vez"
+        className="roteiro-chip"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <rect x="3.4" y="5" width="12.5" height="3.6" rx="1.8" fill="currentColor" />
+          <rect x="3.4" y="10.7" width="17.2" height="2.6" rx="1.3" fill="currentColor" opacity="0.62" />
+          <rect x="3.4" y="15.6" width="13.4" height="2.6" rx="1.3" fill="currentColor" opacity="0.62" />
+          <circle cx="19.6" cy="6.8" r="2" fill="currentColor" opacity="0.85" />
+        </svg>
+        Templates
+      </button>
+    ),
+    [phase],
   );
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -634,6 +700,7 @@ function TipografiaInner() {
           setScriptSegs(saved.script);
         }
         setAutoFitG(saved.autoFit ?? true);
+        setSingleLineG(saved.singleLine ?? false);
         setBgModeG(saved.bgMode ?? 'preset');
         setBgColorG(saved.bgColor ?? null);
         setBgOpacityG(saved.bgOpacity ?? 1);
@@ -655,10 +722,11 @@ function TipografiaInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
-  // persiste a edição na sessão a cada mudança relevante
+  // persiste a edição na sessão a cada mudança relevante — com RESPIRO:
+  // serializar words+blocks é caro e rodava a CADA tick de slider
   useEffect(() => {
     if (!file || phase !== 'ready' || blocks.length === 0) return;
-    saveSession(file, {
+    const t = setTimeout(() => saveSession(file, {
       words,
       blocks,
       presetId,
@@ -680,14 +748,16 @@ function TipografiaInner() {
       wordStyles,
       lockedBlocks,
       autoFit: autoFitG,
+      singleLine: singleLineG,
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
       animIn: animInG,
       animOut: animOutG,
       script: scriptSegs,
-    });
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
+    }), 400);
+    return () => clearTimeout(t);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -1179,48 +1249,13 @@ function TipografiaInner() {
                 </p>
               </div>
               <div className="min-w-0 flex flex-col gap-5">
-                <PresetGallery
+                <PresetGalleryM
                   presetId={presetId}
-                  onPick={(id) => {
-                    pushHistory();
-                    setPresetId(id);
-                  }}
+                  onPick={hPickPreset}
                   favs={favs}
                   onToggleFav={toggleFav}
                   disabled={processing}
-                  extra={
-                    <>
-                      {/* Templates de ROTEIRO (hook × body), irmãos dos ⭐ Favoritos */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setScriptOnTpls(true);
-                          setScriptOpen(true);
-                        }}
-                        disabled={processing}
-                        title="Templates de roteiro: hook num lettering e body em outro"
-                        className={
-                          'rounded-full px-3 py-1 text-[11px] font-bold text-amber-500 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.45)] hover:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.75)] disabled:opacity-40' +
-                          T3D
-                        }
-                        style={{
-                          fontFamily: 'var(--font-tech)',
-                          background: 'rgba(255,159,10,0.09)',
-                        }}
-                      >
-                        Templates
-                        <span className="ml-1 opacity-70">{scriptSegs.length}</span>
-                      </button>
-                      <RoteiroOrbButton
-                        open={scriptOpen}
-                        disabled={processing}
-                        onClick={() => {
-                          setScriptOnTpls(false);
-                          setScriptOpen((v) => !v);
-                        }}
-                      />
-                    </>
-                  }
+                  extra={galleryExtra}
                 />
                 <FontPicker
                   value={
@@ -1273,6 +1308,7 @@ function TipografiaInner() {
                   defaultPrimary={preset.defaultPrimary}
                   defaultAccent={preset.defaultAccent}
                   autoFit={effOf('autoFit', autoFitG) ?? true}
+                  singleLine={effOf('singleLine', singleLineG) ?? false}
                   bgMode={effOf('bgMode', bgModeG) ?? 'preset'}
                   bgColor={effOf('bgColor', bgColorG) ?? null}
                   bgOpacity={effOf('bgOpacity', bgOpacityG) ?? 1}
@@ -1280,6 +1316,7 @@ function TipografiaInner() {
                   animOut={effOf('animOut', animOutG) ?? null}
                   presetInKind={panelPreset.in.kind}
                   presetOutKind={panelPreset.out.kind}
+                  previewPreset={panelPreset}
                   unsupportedIn={unsupportedInKinds(panelPreset)}
                   sel={
                     wordSel
@@ -1303,36 +1340,33 @@ function TipografiaInner() {
               </div>
             </div>
 
-            <Timeline
+            <TimelineM
               blocks={blocks}
               duration={duration ?? 0}
               videoRef={videoRef}
               videoUrl={videoUrl}
               presetCat={preset.cat}
               selId={selBlockId}
-              onSelect={(id) => setSelBlockId(id)}
-              onRetime={retimeBounds}
+              onSelect={hTimelineSelect}
+              onRetime={hRetime}
               onDragStart={pushHistory}
               disabled={processing}
             />
 
-            <BlockList
+            <BlockListM
               blocks={blocks}
               selId={selBlockId}
               activeId={activeBlockId}
               highlights={highlights}
               locked={lockedBlocks}
-              onSelect={(b) => {
-                setSelBlockId(b.id);
-                seekTo(b.start);
-              }}
-              onEditText={editBlockText}
-              onSplit={doSplit}
-              onMerge={doMerge}
-              onDelete={doDelete}
-              onNudge={nudge}
-              onToggleWord={toggleHighlight}
-              onToggleLock={toggleLock}
+              onSelect={hBlockSelect}
+              onEditText={hEditText}
+              onSplit={hSplit}
+              onMerge={hMerge}
+              onDelete={hDelete}
+              onNudge={hNudge}
+              onToggleWord={hToggleWord}
+              onToggleLock={hToggleLock}
               disabled={processing}
             />
 
@@ -1521,6 +1555,11 @@ function PreviewPane({
   const [cur, setCur] = useState(0);
   const [dur, setDur] = useState(0);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  // arrasto AO VIVO: posição/tamanho ficam num ref que o rAF lê e o estado
+  // do React só é gravado ao SOLTAR. Antes, cada pointermove commitava no
+  // estado global e re-renderizava a página inteira (galeria de centenas de
+  // canvases, timeline, lista de blocos) — era a lentidão de mover a legenda.
+  const dragOvRef = useRef<{ posX: number; posY: number; fontScale: number } | null>(null);
   // drag da legenda: estado vivo pro rAF desenhar as guias sem re-render
   const dragRef = useRef<{
     mode: 'move' | 'scale' | 'wordsel';
@@ -1575,7 +1614,20 @@ function PreviewPane({
         const ctx = c.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, W, H);
-          const { blocks: b0, preset: p, style: s, wordSel: wSel } = liveRef.current;
+          const { blocks: b0, preset: p, style: sBase, wordSel: wSel } = liveRef.current;
+          // arrasto em andamento: o override do ref vence o estado — e vence
+          // também o perBlock do bloco em cena (senão o congelado não mexia)
+          let s = sBase;
+          const ov = dragOvRef.current;
+          if (ov) {
+            let pb = sBase.perBlock;
+            const curBB = bboxRef.current;
+            if (curBB && pb && pb[curBB.blockId]) {
+              const { posX: _px, posY: _py, fontScale: _pf, ...resto } = pb[curBB.blockId];
+              pb = { ...pb, [curBB.blockId]: resto };
+            }
+            s = { ...sBase, posX: ov.posX, posY: ov.posY, fontScale: ov.fontScale, perBlock: pb };
+          }
           // edição AO VIVO: o texto digitado renderiza com o lettering REAL
           // (mesmo engine), atualizando a cada tecla — estilo CapCut
           const ed = editingRef.current;
@@ -1738,6 +1790,13 @@ function PreviewPane({
             wrap.style.cursor = 'nwse-resize';
             const cxB = bb.x + bb.w / 2;
             const cyB = bb.y + bb.h / 2;
+            const st0 = liveRef.current.style;
+            const pb0 = st0.perBlock?.[bb.blockId];
+            dragOvRef.current = {
+              posX: pb0?.posX ?? st0.posX ?? 0.5,
+              posY: pb0?.posY ?? st0.posY ?? 0.76,
+              fontScale: liveRef.current.fontScale,
+            };
             dragRef.current = {
               mode: 'scale',
               moved: false,
@@ -1774,6 +1833,15 @@ function PreviewPane({
               };
               return;
             }
+          }
+          {
+            const st0 = liveRef.current.style;
+            const pb0 = bb ? st0.perBlock?.[bb.blockId] : undefined;
+            dragOvRef.current = {
+              posX: pb0?.posX ?? st0.posX ?? 0.5,
+              posY: pb0?.posY ?? st0.posY ?? 0.76,
+              fontScale: liveRef.current.fontScale,
+            };
           }
           dragRef.current = {
             mode: 'move',
@@ -1871,14 +1939,13 @@ function PreviewPane({
           if (!drag.moved) return;
           if (drag.mode === 'scale') {
             const bb = bboxRef.current;
-            if (!bb) return;
+            const ov = dragOvRef.current;
+            if (!bb || !ov) return;
             const dpr = dprRef.current;
             const px = (e.clientX - rect.left) * dpr;
             const py = (e.clientY - rect.top) * dpr;
             const dist = Math.hypot(px - (bb.x + bb.w / 2), py - (bb.y + bb.h / 2));
-            onFontScale(
-              Math.min(4, Math.max(0.3, drag.scale0 * (dist / drag.dist0))),
-            );
+            ov.fontScale = Math.min(4, Math.max(0.3, drag.scale0 * (dist / drag.dist0)));
             return;
           }
           let nx = (e.clientX - rect.left) / rect.width;
@@ -1888,15 +1955,24 @@ function PreviewPane({
           drag.snapY = Math.abs(ny - 0.5) < 0.03;
           if (drag.snapX) nx = 0.5;
           if (drag.snapY) ny = 0.5;
-          onPosChange(
-            Math.min(0.95, Math.max(0.05, nx)),
-            Math.min(0.95, Math.max(0.05, ny)),
-          );
+          const ov = dragOvRef.current;
+          if (ov) {
+            ov.posX = Math.min(0.95, Math.max(0.05, nx));
+            ov.posY = Math.min(0.95, Math.max(0.05, ny));
+          }
         }}
         onPointerUp={(e) => {
           const drag = dragRef.current;
           dragRef.current = null;
           wrapRef.current?.releasePointerCapture(e.pointerId);
+          // fim do arrasto: o override vira UM commit no estado (uma entrada
+          // no histórico, um save de sessão — não um por pointermove)
+          const ov = dragOvRef.current;
+          dragOvRef.current = null;
+          if (drag && drag.moved && ov) {
+            if (drag.mode === 'scale') onFontScale(ov.fontScale);
+            else if (drag.mode === 'move') onPosChange(ov.posX, ov.posY);
+          }
           if (!drag || drag.mode === 'wordsel' || drag.moved) return;
           // clique seco: dentro da legenda = selecionar; fora = play/deselect
           const wrap = wrapRef.current;
@@ -1923,6 +1999,7 @@ function PreviewPane({
         }}
         onPointerCancel={() => {
           dragRef.current = null;
+          dragOvRef.current = null;
         }}
         onDoubleClick={(e) => {
           const wrap = wrapRef.current;
@@ -2700,6 +2777,7 @@ function StylePanel({
   defaultPrimary,
   defaultAccent,
   autoFit,
+  singleLine,
   bgMode,
   bgColor,
   bgOpacity,
@@ -2707,6 +2785,7 @@ function StylePanel({
   animOut,
   presetInKind,
   presetOutKind,
+  previewPreset,
   unsupportedIn,
   sel,
   disabled,
@@ -2737,6 +2816,7 @@ function StylePanel({
   defaultPrimary: string;
   defaultAccent: string;
   autoFit: boolean;
+  singleLine: boolean;
   bgMode: 'preset' | 'on' | 'off';
   bgColor: string | null;
   bgOpacity: number;
@@ -2744,6 +2824,8 @@ function StylePanel({
   animOut: OutKind | null;
   presetInKind: AnimKind;
   presetOutKind: OutKind;
+  /** modelo EFETIVO do bloco em edição — a demo dos menus de animação usa ele */
+  previewPreset: TypoPreset;
   /** entradas que ESTE modelo não executa (o engine ignoraria em silêncio) */
   unsupportedIn: AnimKind[];
   /** seleção PARCIAL ativa: os controles de texto agem só nas palavras marcadas */
@@ -2949,6 +3031,7 @@ function StylePanel({
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
+          title="Intensidade sobre o que o modelo já tem (100% = padrão · 0% desliga) — só age nos modelos que têm o efeito"
         >
           Efeitos do modelo
         </div>
@@ -2994,47 +3077,46 @@ function StylePanel({
             disabled={disabled}
           />
         </div>
-        <p className="mt-1 text-[10px] text-text-muted">
-          intensidade sobre o que o modelo já tem (100% = padrão · 0% desliga) — só age nos modelos que têm o efeito
-        </p>
       </div>
 
       <div className="md:col-span-2">
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
+          title="“Do modelo” usa a animação que o lettering já traz · “Sem animação” faz a legenda aparecer/sumir seca — passa o mouse nas opções pra VER cada uma"
         >
           Animação da legenda
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <AnimPicker
             label="Entrada"
+            mode="in"
             value={animIn}
             options={IN_ANIM_OPTIONS}
             presetKind={presetInKind}
             unsupported={unsupportedIn}
+            previewPreset={previewPreset}
             onPick={(k) => onSet({ animIn: k })}
             disabled={disabled}
           />
           <AnimPicker
             label="Saída"
+            mode="out"
             value={animOut}
             options={OUT_ANIM_OPTIONS}
             presetKind={presetOutKind}
+            previewPreset={previewPreset}
             onPick={(k) => onSet({ animOut: k })}
             disabled={disabled}
           />
         </div>
-        <p className="mt-1 text-[10px] text-text-muted">
-          “Do modelo” usa a animação que o lettering já traz · “Sem animação”
-          faz a legenda aparecer/sumir seca, sem efeito
-        </p>
       </div>
 
       <div>
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
+          title="Ligado: re-organiza as linhas e nunca sai da tela · Livre: quebras congeladas e o texto cresce sem limite"
         >
           Ajuste automático
         </div>
@@ -3061,10 +3143,37 @@ function StylePanel({
             </button>
           ))}
         </div>
-        <p className="mt-1 text-[10px] text-text-muted">
-          ligado: re-organiza as linhas e nunca sai da tela · livre: quebras
-          congeladas e o texto cresce sem limite
-        </p>
+        <div
+          className="mb-1.5 mt-3 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+          title="Ligada: o bloco nunca desce pra uma segunda linha — encolhe pra caber e a frase seguinte entra no PRÓXIMO bloco"
+        >
+          Linha única
+        </div>
+        <div className="flex items-center gap-2">
+          {(
+            [
+              [true, 'Ligada'],
+              [false, 'Desligada'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={label}
+              onClick={() => onSet({ singleLine: v })}
+              disabled={disabled}
+              title="Ligada: o bloco nunca desce pra uma segunda linha — encolhe pra caber e a frase seguinte entra no PRÓXIMO bloco"
+              className={
+                'rounded-[9px] border bg-bg-soft px-3 py-1.5 text-[11px] font-bold' + T3D + ' ' +
+                (singleLine === v
+                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                  : 'border-line text-text-muted hover:text-text')
+              }
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div>
@@ -3120,17 +3229,14 @@ function StylePanel({
               disabled={disabled}
             />
           </div>
-        ) : (
-          <p className="mt-1 text-[10px] text-text-muted">
-            caixa e barra do modelo somem (o texto continua com os efeitos)
-          </p>
-        )}
+        ) : null}
       </div>
 
       <div className="md:col-span-2">
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
+          title="A palavra forte de cada bloco ganha o tratamento do modelo sozinha"
         >
           Destaque automático
         </div>
@@ -3156,9 +3262,6 @@ function StylePanel({
               {label}
             </button>
           ))}
-          <span className="text-[10.5px] text-text-muted">
-            a palavra forte de cada bloco ganha o tratamento do modelo sozinha
-          </span>
         </div>
       </div>
 
@@ -3166,6 +3269,7 @@ function StylePanel({
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
+          title="Remonta os blocos a partir da transcrição SEM encostar nos travados (cadeado). Blocos livres perdem edição de texto feita na lista (Ctrl+Z desfaz)"
         >
           Ritmo dos blocos
         </div>
@@ -3181,13 +3285,6 @@ function StylePanel({
             { value: 'frases', label: 'Frases', sub: 'blocos longos' },
           ]}
         />
-        <p className="mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
-          Trocar o ritmo remonta os blocos a partir da transcrição, mas
-          <span className="text-violet-400"> não encosta nos travados</span>: bloco
-          de cadeado fechado atravessa com as mesmas palavras, o mesmo tempo e o
-          mesmo visual. Os livres perdem a edição de texto feita na lista abaixo
-          (Ctrl+Z desfaz).
-        </p>
         {regroupInfo ? (
           <div className="mt-2 rounded-[10px] border border-violet-400/40 bg-violet-500/10 px-3 py-1.5 text-[11px] text-violet-300">
             {regroupInfo}
@@ -3202,20 +3299,26 @@ function StylePanel({
 
 function AnimPicker<K extends string>({
   label,
+  mode,
   value,
   options,
   presetKind,
   unsupported,
+  previewPreset,
   onPick,
   disabled,
 }: {
   label: string;
+  /** entrada ou saída — muda o que a demo do menu mostra */
+  mode: 'in' | 'out';
   value: K | null;
   options: Array<{ kind: K; label: string }>;
   /** kind que o modelo atual já traz — vira o rótulo do "Do modelo" */
   presetKind: K;
   /** kinds que ESTE modelo não executa — ficam visíveis, porém travados */
   unsupported?: K[];
+  /** modelo usado na DEMO ao vivo (passa o mouse na opção pra ver) */
+  previewPreset: TypoPreset;
   onPick: (v: K | null) => void;
   disabled?: boolean;
 }) {
@@ -3227,6 +3330,9 @@ function AnimPicker<K extends string>({
   const labelOf = (k: K) => options.find((o) => o.kind === k)?.label ?? k;
   const isCustom = value !== null;
   const blocked = new Set(unsupported ?? []);
+  // demo ao vivo: a opção sob o mouse (ou a escolhida) roda em loop no canvas
+  const [hoverKind, setHoverKind] = useState<K | null>(null);
+  const demoKind = hoverKind ?? value ?? presetKind;
   return (
     <div className="min-w-0">
       <div
@@ -3275,13 +3381,18 @@ function AnimPicker<K extends string>({
         </span>
         <span className="shrink-0 text-text-muted">▾</span>
       </button>
-      <Popover open={open} anchorRef={btnRef} onClose={closeMenu} width={250}>
+      <Popover open={open} anchorRef={btnRef} onClose={closeMenu} width={272}>
         <div className="overflow-hidden rounded-[14px] border border-line-strong bg-bg-elev shadow-2xl">
+          {open ? (
+            <AnimDemo mode={mode} kind={demoKind} preset={previewPreset} label={labelOf(demoKind)} />
+          ) : null}
           <button
             onClick={() => {
               onPick(null);
               setOpen(false);
             }}
+            onMouseEnter={() => setHoverKind(presetKind)}
+            onMouseLeave={() => setHoverKind(null)}
             className={
               'flex w-full items-center gap-2 border-b border-line px-3.5 py-2.5 text-left text-[12.5px] font-bold transition-colors ' +
               (value === null
@@ -3291,7 +3402,7 @@ function AnimPicker<K extends string>({
           >
             ✨ Do modelo ({labelOf(presetKind)})
           </button>
-          <div className="max-h-[260px] overflow-y-auto py-1">
+          <div className="max-h-[236px] overflow-y-auto py-1">
             {options.map((o) => {
               const off = blocked.has(o.kind);
               return (
@@ -3303,6 +3414,10 @@ function AnimPicker<K extends string>({
                     setOpen(false);
                   }}
                   disabled={off}
+                  onMouseEnter={() => {
+                    if (!off) setHoverKind(o.kind);
+                  }}
+                  onMouseLeave={() => setHoverKind(null)}
                   title={off ? 'Este modelo não executa esta animação' : undefined}
                   className={
                     'flex w-full items-center justify-between gap-2 px-3.5 py-2 text-left text-[12.5px] font-semibold transition-colors ' +
@@ -3329,6 +3444,96 @@ function AnimPicker<K extends string>({
           </div>
         </div>
       </Popover>
+    </div>
+  );
+}
+
+/**
+ * DEMO ao vivo do menu de animação: roda em loop a opção sob o mouse com o
+ * MESMO drawCaptions do preview/export — ver a animação, não ler o nome.
+ * Entrada: o bloco nasce no começo do loop. Saída: o bloco morre antes do fim
+ * do loop, então a animação de saída é o que aparece.
+ */
+function AnimDemo({
+  mode,
+  kind,
+  preset,
+  label,
+}: {
+  mode: 'in' | 'out';
+  kind: string;
+  preset: TypoPreset;
+  label: string;
+}) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  const liveDemo = useRef({ mode, kind, preset });
+  liveDemo.current = { mode, kind, preset };
+  // reinicia o loop quando troca a opção (a animação recomeça do zero)
+  const t0Ref = useRef(performance.now());
+  useEffect(() => {
+    t0Ref.current = performance.now();
+  }, [kind, mode]);
+
+  useEffect(() => {
+    void ensureTypoFonts();
+    let raf = 0;
+    const tick = () => {
+      const c = ref.current;
+      const ctx = c?.getContext('2d');
+      if (c && ctx) {
+        const { mode: m, kind: k, preset: p } = liveDemo.current;
+        const LOOP = 2100;
+        // saída: o bloco acaba aos 1400ms e o resto do loop é respiro — a
+        // animação de saída roda ali; entrada: o bloco vive o loop inteiro
+        const end = m === 'out' ? 1400 : LOOP - 250;
+        const bloco: Block = {
+          id: 'animdemo',
+          words: [
+            { text: 'Sua', start: 0, end: 300 },
+            { text: 'legenda', start: 300, end: 650 },
+            { text: 'aqui', start: 650, end: 950 },
+          ],
+          start: 0,
+          end,
+        };
+        const st: StyleState = {
+          presetId: p.id,
+          fontScale: 1,
+          posY: 0.55,
+          posX: 0.5,
+          primary: null,
+          accent: null,
+          uppercase: null,
+          highlights: {},
+          autoEmphasis: true,
+          animIn: m === 'in' ? (k as AnimKind) : null,
+          animOut: m === 'out' ? (k as OutKind) : null,
+        };
+        ctx.clearRect(0, 0, c.width, c.height);
+        const t = (performance.now() - t0Ref.current) % LOOP;
+        drawCaptions(ctx, [bloco], p, st, t, c.width, c.height);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div className="relative border-b border-line">
+      <canvas
+        ref={ref}
+        width={520}
+        height={200}
+        className="block w-full"
+        style={{
+          aspectRatio: '520 / 200',
+          background: 'linear-gradient(150deg, #17181d 0%, #101116 55%, #191a20 100%)',
+        }}
+      />
+      <span className="mono pointer-events-none absolute bottom-1.5 right-2 rounded-[6px] bg-black/55 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-white/75">
+        {label}
+      </span>
     </div>
   );
 }
@@ -3597,3 +3802,13 @@ function IconClose() {
     </svg>
   );
 }
+
+/**
+ * ⚡ Versões memorizadas dos blocos PESADOS da página. Mexer num slider ou
+ * arrastar a legenda muda estado global — sem memo, a galeria (centenas de
+ * canvases), a timeline (thumbs) e a lista de blocos re-renderizavam a CADA
+ * tick. Todos os handlers passados a eles são useEvent (identidade estável).
+ */
+const PresetGalleryM = memo(PresetGallery);
+const TimelineM = memo(Timeline);
+const BlockListM = memo(BlockList);

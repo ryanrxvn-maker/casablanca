@@ -12,10 +12,7 @@
 
 import { notFound } from 'next/navigation';
 import { useMemo, useState } from 'react';
-import {
-  CaptionScriptModal,
-  RoteiroOrbButton,
-} from '@/components/typography/CaptionScriptModal';
+import { CaptionScriptModal } from '@/components/typography/CaptionScriptModal';
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { blockText, groupWords } from '@/lib/typography/group';
 import {
@@ -80,26 +77,23 @@ function Inner() {
           compact
           presets={[]}
           extra={
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setOnTpls(true);
-                  setOpen(true);
-                }}
-                className="rounded-full bg-amber-400/10 px-3 py-1 text-[11px] font-bold text-amber-500 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.45)]"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                Templates
-              </button>
-              <RoteiroOrbButton
-                open={open}
-                onClick={() => {
-                  setOnTpls(false);
-                  setOpen((v) => !v);
-                }}
-              />
-            </>
+            <button
+              type="button"
+              onClick={() => {
+                setOnTpls(true);
+                setOpen(true);
+              }}
+              className="roteiro-chip"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <rect x="3.4" y="5" width="12.5" height="3.6" rx="1.8" fill="currentColor" />
+                <rect x="3.4" y="10.7" width="17.2" height="2.6" rx="1.3" fill="currentColor" opacity="0.62" />
+                <rect x="3.4" y="15.6" width="13.4" height="2.6" rx="1.3" fill="currentColor" opacity="0.62" />
+                <circle cx="19.6" cy="6.8" r="2" fill="currentColor" opacity="0.85" />
+              </svg>
+              Templates
+            </button>
           }
         />
       </div>

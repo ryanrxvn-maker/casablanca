@@ -279,6 +279,7 @@ console.log('\n── templates ──');
   ok(TEMPLATE_1.segments[0].style.posY === 0.5, 'Template 1: hook na altura 50%');
   ok(TEMPLATE_1.segments[1].style.presetId === 'keynote', 'Template 1: body Keynote');
   ok(TEMPLATE_1.segments[1].style.posY === 0.7, 'Template 1: body na altura 70%');
+  ok(TEMPLATE_2.segments[0].style.presetId === 'extensao-script', 'Template 2: hook Extensão Script');
   ok(TEMPLATE_2.segments[1].style.presetId === 'faixa-suave', 'Template 2: body Faixa Suave');
 
   const atual = relabelSegments([

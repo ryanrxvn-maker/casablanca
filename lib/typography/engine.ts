@@ -444,6 +444,13 @@ export type StyleState = {
    * LIVRE (pode sair do frame de propósito, estilo CapCut).
    */
   autoFit?: boolean;
+  /**
+   * LINHA ÚNICA (default DESLIGADO): o bloco nunca quebra pra uma segunda
+   * linha — a linha encolhe pra caber no frame e a frase seguinte entra no
+   * PRÓXIMO bloco, em vez de descer. Vence o empilhado/quebra-de-ênfase do
+   * modelo e ignora o "livre" do autoFit (linha única nunca vaza da tela).
+   */
+  singleLine?: boolean;
   /** fundo: 'preset' segue o modelo; 'on' força caixa (mesmo sem no modelo); 'off' remove caixa+barra */
   bgMode?: 'preset' | 'on' | 'off';
   /** cor do fundo (null = a do modelo) */
@@ -498,6 +505,7 @@ export type PerBlockStyle = Partial<
     | 'fxGlow'
     | 'fxSmoke'
     | 'autoFit'
+    | 'singleLine'
     | 'bgMode'
     | 'bgColor'
     | 'bgOpacity'
@@ -517,6 +525,7 @@ export const DEFAULT_STYLE: Omit<StyleState, 'presetId'> = {
   fontOverride: null,
   posX: 0.5,
   autoFit: true,
+  singleLine: false,
   bgMode: 'preset',
   bgColor: null,
   bgOpacity: 1,
@@ -703,7 +712,8 @@ function measureLayout(
   const ws = style.wordStyles?.[block.id];
   const wsKey = ws ? hashStr(JSON.stringify(ws)) : 0;
   const fit = style.autoFit !== false;
-  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}|${fit ? 1 : 0}|${wsKey}`;
+  const single = style.singleLine === true;
+  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}|${fit ? 1 : 0}${single ? 'u' : ''}|${wsKey}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
   if (layoutCache.size > 300) layoutCache.clear();
@@ -713,7 +723,12 @@ function measureLayout(
   const maxLineW = W * 0.86;
   // ajuste automático DESLIGADO: quebras congeladas como no tamanho 100%
   // (limiar de quebra escala junto com a fonte → mesmos pontos de quebra)
-  const wrapW = fit ? maxLineW : maxLineW * Math.max(0.05, style.fontScale);
+  // LINHA ÚNICA: nunca quebra — o encolhimento lá embaixo garante que cabe
+  const wrapW = single
+    ? Number.MAX_SAFE_INTEGER
+    : fit
+      ? maxLineW
+      : maxLineW * Math.max(0.05, style.fontScale);
   const sizeCycle = preset.sizeCycle;
 
   const words: WordLayout[] = block.words.map((w, wi) => {
@@ -775,7 +790,7 @@ function measureLayout(
   };
   words.forEach((w, i) => {
     const ownLine =
-      preset.stack || (preset.emphasisBreak && highlights.has(i));
+      !single && (preset.stack || (preset.emphasisBreak && highlights.has(i)));
     if (ownLine) {
       flushLine();
       w.line = lines.length;
@@ -795,7 +810,7 @@ function measureLayout(
   // lineAccent precisa de 2+ linhas pra última linha colorida EXISTIR —
   // bloco de uma linha só é quebrado perto de 55% dos caracteres
   // (fix do "Linha Rosa não aparece o rosa")
-  if (preset.lineAccent === 'last' && lines.length === 1 && words.length >= 2) {
+  if (!single && preset.lineAccent === 'last' && lines.length === 1 && words.length >= 2) {
     const totalW = lines[0].width;
     let cut = 1;
     let accW = 0;
@@ -830,7 +845,8 @@ function measureLayout(
 
   // Linha maior que o frame: encolhe só aquela linha (ajuste automático).
   // Com o ajuste DESLIGADO o texto cresce livre — pode vazar de propósito.
-  if (fit) {
+  // Linha única SEMPRE encolhe: o contrato dela é nunca quebrar NEM vazar.
+  if (fit || single) {
     for (const line of lines) {
       if (line.width > maxLineW) line.scale = maxLineW / line.width;
     }
