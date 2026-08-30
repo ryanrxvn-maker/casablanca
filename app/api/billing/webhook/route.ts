@@ -29,6 +29,10 @@ import {
  * Garantias:
  *  - Falha de escrita no banco LANÇA → HTTP 500 → o Stripe re-tenta com backoff
  *    (~3 dias). Nada é engolido com 200 (era o bug intermitente: pagou e ficou free).
+ *  - EXCEÇÃO: assinatura ÓRFÃ (nenhum profile casa por id, customer nem email —
+ *    conta deletada com assinatura viva) NÃO lança. Retry não conserta o que não
+ *    existe: só repetia o alerta de hora em hora por 3 dias. Alerta uma vez por
+ *    evento, com os dados pro dono decidir (cancelar/reembolsar ou recriar).
  *  - Status TRANSITÓRIO (incomplete/past_due/paused) NÃO derruba quem pagou — só
  *    estado TERMINAL (canceled/unpaid/incomplete_expired) ou subscription.deleted
  *    rebaixam pra free. Protege contra evento 'updated' fora de ordem (o Stripe não
@@ -116,6 +120,103 @@ async function writeProfile(
   }
 }
 
+/** Email do customer no Stripe (best-effort; customer deletado devolve null). */
+async function stripeCustomerEmail(customerId: string): Promise<string | null> {
+  try {
+    const c = await getStripe().customers.retrieve(customerId);
+    if ((c as Stripe.DeletedCustomer).deleted) return null;
+    return (c as Stripe.Customer).email ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Acha o profile DONO da cobrança, nesta ordem: id do metadata → vínculo por
+ * stripe_customer_id → email do customer no Stripe (cura o vínculo quando o
+ * uuid do metadata envelheceu). Devolve null quando NENHUM profile casa:
+ * assinatura ÓRFÃ (conta deletada, uuid de outro banco). Nesse caso re-tentar
+ * não muda nada — o Stripe re-tentaria por ~3 dias enchendo o dono de email.
+ */
+async function resolveProfileId(
+  svc: ReturnType<typeof serviceClient>,
+  metaUserId: string | undefined,
+  customerId: string | undefined,
+): Promise<string | null> {
+  if (metaUserId) {
+    const { data } = await svc
+      .from('profiles')
+      .select('id')
+      .eq('id', metaUserId)
+      .maybeSingle();
+    const id = (data as { id?: string } | null)?.id;
+    if (id) return id;
+  }
+  if (!customerId) return null;
+
+  const { data: byCustomer } = await svc
+    .from('profiles')
+    .select('id')
+    .eq('stripe_customer_id', customerId)
+    .maybeSingle();
+  const cid = (byCustomer as { id?: string } | null)?.id;
+  if (cid) {
+    console.warn('[billing webhook] vínculo curado pelo customer', {
+      customerId,
+      metaUserId,
+      profileId: cid,
+    });
+    return cid;
+  }
+
+  // Último recurso: email do customer. Só aceita quando casa UM profile —
+  // email não é único na tabela, e ambiguidade não pode virar upgrade no
+  // perfil errado.
+  const email = await stripeCustomerEmail(customerId);
+  if (!email) return null;
+  const { data: rows } = await svc
+    .from('profiles')
+    .select('id')
+    .eq('email', email)
+    .limit(2);
+  const list = (rows as { id: string }[] | null) ?? [];
+  if (list.length === 1) {
+    console.warn('[billing webhook] vínculo curado pelo email', {
+      email,
+      metaUserId,
+      profileId: list[0].id,
+    });
+    return list[0].id;
+  }
+  return null;
+}
+
+/**
+ * Assinatura ÓRFÃ: o Stripe cobra, mas não existe conta dona da cobrança —
+ * quase sempre conta DELETADA com assinatura viva (deletar o usuário derruba o
+ * profile por cascade de auth.users e não encosta no Stripe). Avisa com tudo
+ * que o dono precisa pra decidir, e o handler sai com 200: retry não conserta
+ * orfandade, só repete o email.
+ */
+async function notifyOrphan(
+  ctx: string,
+  ref: string,
+  metaUserId: string | undefined,
+  customerId: string | undefined,
+) {
+  const email = customerId ? await stripeCustomerEmail(customerId) : null;
+  await notifyOwner(
+    '🧟 Assinatura ÓRFÃ — o cliente paga e a conta não existe mais',
+    `<p><b>${ctx}</b> (${ref}) não tem dono no banco.</p>` +
+      `<p><b>userId do metadata:</b> ${metaUserId ?? '—'} (nenhum profile com esse id)<br>` +
+      `<b>Customer:</b> ${customerId ?? '—'}<br>` +
+      `<b>Email no Stripe:</b> ${email ?? '—'}</p>` +
+      `<p>O cartão continua sendo cobrado por uma conta que não existe. Decida: ` +
+      `cancelar (e reembolsar, se for o caso) a assinatura no Stripe, ou recriar ` +
+      `a conta com esse email e usar "Sincronizar c/ Stripe" no painel.</p>`,
+  ).catch(() => {});
+}
+
 /** Aplica no profile o estado atual da assinatura. */
 async function applySubscription(sub: SubLike) {
   const planRaw = sub.metadata?.plan ?? '';
@@ -123,23 +224,32 @@ async function applySubscription(sub: SubLike) {
     typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
   const svc = serviceClient();
 
-  // userId vem do metadata; se faltar (subscription criada sem metadata, ou
-  // API antiga), acha o dono pelo customer salvo no checkout. Garante que o
-  // cliente NUNCA fica sem upgrade por um metadata perdido.
-  let userId: string | undefined = sub.metadata?.userId;
-  if (!userId && customerId) {
-    const { data } = await svc
-      .from('profiles')
-      .select('id')
-      .eq('stripe_customer_id', customerId)
-      .maybeSingle();
-    userId = (data as { id?: string } | null)?.id ?? undefined;
+  // Dono da cobrança: metadata → customer → email (cura vínculo perdido).
+  // Garante que o cliente NUNCA fica sem upgrade por um metadata velho.
+  const userId = await resolveProfileId(svc, sub.metadata?.userId, customerId);
+
+  if (!userId) {
+    // ÓRFÃ: nenhum profile casa. NÃO lança — o 500 fazia o Stripe re-tentar
+    // por ~3 dias e cada tentativa mandava 2 emails pro dono, sem NUNCA
+    // conseguir escrever (o profile não existe). Alerta e sai com 200.
+    console.error('[billing webhook] applySubscription: assinatura órfã', {
+      subId: sub.id,
+      customerId,
+      metadata: sub.metadata,
+    });
+    await notifyOrphan(
+      `applySubscription(${sub.status})`,
+      sub.id,
+      sub.metadata?.userId,
+      customerId,
+    );
+    return;
   }
 
-  if (!userId || !isPaidTier(planRaw)) {
+  if (!isPaidTier(planRaw)) {
     // NÃO lança: metadata ausente não conserta com retry (evita loop inútil de
     // re-tentativas do Stripe por 3 dias). Alerta e sai.
-    console.error('[billing webhook] applySubscription: sem userId/plan', {
+    console.error('[billing webhook] applySubscription: sem plan', {
       subId: sub.id,
       customerId,
       metadata: sub.metadata,
@@ -147,7 +257,7 @@ async function applySubscription(sub: SubLike) {
     await notifyOwner(
       '⚠️ Webhook sem metadata',
       `<p>Assinatura <b>${sub.id}</b> (customer ${customerId ?? '—'}) chegou sem ` +
-        `userId/plan válidos. Cliente pode ter ficado sem upgrade — ` +
+        `plan válido. Cliente pode ter ficado sem upgrade — ` +
         `use "Sincronizar c/ Stripe" no painel.</p>`,
     ).catch(() => {});
     return;
@@ -221,19 +331,21 @@ async function grantOneTime(session: Stripe.Checkout.Session) {
     typeof session.customer === 'string' ? session.customer : session.customer?.id;
   const svc = serviceClient();
 
-  // Fallback de userId pelo customer (igual applySubscription).
-  let userId = session.metadata?.userId;
-  if (!userId && customerId) {
-    const { data } = await svc
-      .from('profiles')
-      .select('id')
-      .eq('stripe_customer_id', customerId)
-      .maybeSingle();
-    userId = (data as { id?: string } | null)?.id ?? undefined;
+  // Dono do pagamento: metadata → customer → email (igual applySubscription).
+  const userId = await resolveProfileId(svc, session.metadata?.userId, customerId);
+
+  if (!userId) {
+    console.error('[billing webhook] grantOneTime: pagamento órfão', {
+      sessionId: session.id,
+      customerId,
+      metadata: session.metadata,
+    });
+    await notifyOrphan('grantOneTime', session.id, session.metadata?.userId, customerId);
+    return;
   }
 
-  if (!userId || !isPaidTier(planRaw)) {
-    console.error('[billing webhook] grantOneTime: sem userId/plan', {
+  if (!isPaidTier(planRaw)) {
+    console.error('[billing webhook] grantOneTime: sem plan', {
       sessionId: session.id,
       customerId,
       metadata: session.metadata,
@@ -241,7 +353,7 @@ async function grantOneTime(session: Stripe.Checkout.Session) {
     await notifyOwner(
       '⚠️ Pagamento único sem metadata',
       `<p>Sessão <b>${session.id}</b> (customer ${customerId ?? '—'}) sem ` +
-        `userId/plan. Reconcilie pelo painel.</p>`,
+        `plan. Reconcilie pelo painel.</p>`,
     ).catch(() => {});
     return;
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
+import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
 
 /**
  * POST /api/admin/toggle-user
@@ -7,6 +8,10 @@ import { jsonError, requireAdmin, serviceClient } from '../_helpers';
  *
  * So admin. Liga/desliga is_active, ou promove/demote is_admin, ou deleta.
  * Service role bypassa o trigger, entao a operacao funciona.
+ *
+ * DELETE tem trava: conta com assinatura VIVA no Stripe nao e deletada. O
+ * profile some por cascade de auth.users e o Stripe continua cobrando um
+ * cliente que nao tem mais conta — todo evento vira "assinatura orfa".
  */
 
 export const runtime = 'nodejs';
@@ -50,6 +55,30 @@ export async function POST(req: Request) {
     const svc = serviceClient();
 
     if (action === 'delete') {
+      // Trava: assinatura viva no Stripe. Deletar aqui apaga o profile
+      // (cascade) e deixa a cobranca rodando pra sempre, sem dono.
+      const { data: prof } = await svc
+        .from('profiles')
+        .select('email, stripe_customer_id')
+        .eq('id', userId)
+        .maybeSingle();
+      const p = prof as {
+        email?: string | null;
+        stripe_customer_id?: string | null;
+      } | null;
+      const live = await findLiveStripeSubscription(
+        p?.stripe_customer_id,
+        p?.email,
+      ).catch(() => null);
+      if (live) {
+        return jsonError(
+          `Esse usuario tem assinatura VIVA no Stripe (${live.sub.id} · ${live.sub.status}). ` +
+            'Cancele (e reembolse, se for o caso) no Stripe ANTES de deletar a conta — ' +
+            'senao o cartao continua sendo cobrado por uma conta que nao existe mais.',
+          409,
+        );
+      }
+
       const { error } = await svc.auth.admin.deleteUser(userId);
       if (error) return jsonError('Falha ao deletar.', 500, error.message);
       return NextResponse.json({ ok: true });
