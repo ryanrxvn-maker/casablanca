@@ -193,6 +193,11 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(objUrl), 10_000);
 }
 
+/** Quebra de linha da caixa de URLs (constantes: evitam escapes no meio
+ *  do arquivo, que ja quebraram o parse uma vez). */
+const NL = String.fromCharCode(10);
+const QUEBRA_DE_LINHA = new RegExp(String.fromCharCode(92) + 'r?' + String.fromCharCode(92) + 'n');
+
 function formatBytes(n: number): string {
   if (n < 1024) return n + ' B';
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
@@ -202,6 +207,30 @@ function formatBytes(n: number): string {
 
 export default function DownloaderPage() {
   const [raw, setRaw] = useToolState<string>('downloader:urls', '');
+  // LINK VINDO DE FORA (?url=...): o botão BAIXAR das indicações do copy no
+  // ClickUp Pilot abre esta página já com a URL colada (YouTube, TikTok,
+  // Instagram — que precisam do motor). Só ADICIONA a URL se ela ainda não
+  // estiver na caixa; nunca apaga o que o user já tinha digitado.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let doQuery: string | null = null;
+    try { doQuery = new URLSearchParams(window.location.search).get('url'); } catch { /* sem query */ }
+    if (!doQuery) return;
+    const url = doQuery.trim();
+    if (!/^https?:/i.test(url)) return;
+    setRaw((atual) => {
+      const linhas = (atual || '').split(QUEBRA_DE_LINHA).map((l) => l.trim());
+      if (linhas.includes(url)) return atual;
+      const base = (atual || '').trim();
+      return base ? base + NL + url : url;
+    });
+    try {
+      const limpa = new URL(window.location.href);
+      limpa.searchParams.delete('url');
+      window.history.replaceState({}, '', limpa.pathname + limpa.search + limpa.hash);
+    } catch { /* historico bloqueado: so ficaria o param na barra */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [mode, setMode] = useToolState<Mode>('downloader:mode', 'video');
   const [quality, setQuality] = useToolState<Quality>(
     'downloader:quality',

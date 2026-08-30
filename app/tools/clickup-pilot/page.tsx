@@ -88,7 +88,24 @@ import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPan
 // INDICAÇÕES do copy (comentários do Docs): painel escuro com thumb/botão dos
 // links citados. Dois sabores — âmbar (avatar) e azul (comentário no texto).
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
+// Botao 3D de VERSOES no card do disparo: uma lista so pra todas as
+// versoes do AD (baixar/ver/renomear), em vez de N cards soltos na fila.
+import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import type { IndicacaoAvatar, IndicacaoCopy } from '@/lib/pilot-indicacoes';
+// VERSÕES do AD (1..10) — generaliza o "2 versões" sem desfazer o caminho
+// META/YouTube que já roda ([[lib/versoes-ad.ts]]).
+import {
+  MAX_VERSOES,
+  mapearVersoesDoDoc,
+  taskIdDaVersao,
+  taskIdBaseDaVersao,
+  versaoDoTaskId,
+  versaoGeraDeNovo,
+  avatarDaVersao,
+  nomeComVersao,
+  rotuloDaVersao,
+  type VersaoAd,
+} from '@/lib/versoes-ad';
 import {
   PilotBtn3D,
   IconScissors as PilotIconScissors,
@@ -1024,8 +1041,17 @@ type TaskAnalysis = {
   /** Cada avatar do briefing — usuario controla individualmente */
   /** DUAS VERSÕES ligadas nesta task (META + YouTube). Desligada — o padrão —
    *  tudo se comporta exatamente como antes: uma versão só. Liga quando o doc
-   *  pede ([[project_b2c_duas_versoes_meta_youtube]]). */
+   *  pede ([[project_b2c_duas_versoes_meta_youtube]]).
+   *  ⚠ 29.08: continua sendo a fonte da verdade da VERSÃO 2 (compatibilidade
+   *  total com o que já foi disparado). As versões 3..10 vivem em `versoes`. */
   duasVersoes?: boolean;
+  /** VERSÕES EXTRAS (3..10) — a generalização do "2 versões". A versão 1 é a
+   *  própria task (META) e a 2 é a do `avatarYoutube`/`duasVersoes`; daqui pra
+   *  frente cada entrada tem nome editável e avatar por papel. */
+  versoes?: VersaoAd[];
+  /** O que o MAPEAMENTO AUTOMÁTICO leu no doc (blocos "Meta Ads:" / "Youtube
+   *  Ads:" / "Avatar 2:"). Guardado pra tela explicar por que sugeriu N. */
+  mapaVersoes?: { total: number; motivo: string; nomes: string[] };
   /** Esta análise É a versão YouTube de outra task (criada por
    *  `criarVersaoYoutube`). Serve pra UI não oferecer ligar duas versões de
    *  novo em cima de uma versão. */
@@ -2800,6 +2826,55 @@ function ClickUpPilotInner() {
           } catch (e) {
             console.warn('[clickup-pilot] associação de comentários falhou (segue sem indicações):', e);
           }
+          // ═══ MAPEAMENTO AUTOMÁTICO DE VERSÕES (29.08) ═══
+          // O doc separa versões por bloco ("Meta Ads:", "Youtube Ads / Kwai
+          // Ads:", "Avatar 1/2:"). Se o avatar for o MESMO em todos, é UMA
+          // versão (não adianta gerar duas vezes o mesmo vídeo); se diferir
+          // em algum papel, o Pilot já sugere N versões — e o user tira ou
+          // acrescenta no seletor "+ versões". Ver lib/versoes-ad.ts.
+          let mapaVersoes: TaskAnalysis['mapaVersoes'];
+          let versoesExtras: VersaoAd[] | undefined;
+          let duasVersoesSugerido = false;
+          try {
+            const secao = findAdSection(docR.text, baseAdId) || '';
+            const mapa = mapearVersoesDoDoc(secao);
+            mapaVersoes = { total: mapa.total, motivo: mapa.motivo, nomes: mapa.versoes.map((v) => v.nome) };
+            if (mapa.total >= 2) {
+              duasVersoesSugerido = true;
+              // Casa o avatar de cada bloco com a biblioteca, papel a papel.
+              const casarAvatar = (username: string) => {
+                const m = matchAvatar(username, avatarCandidates);
+                if (!m || m.score < 30) return null;
+                const cand = avatarCandidates.find((c) => c.id === m.id);
+                return { avatarId: m.id, avatarName: m.name, avatarThumb: cand?.thumb || null, avatarVoiceId: cand?.voiceId || null };
+              };
+              // versão 2 vai pro `avatarYoutube` dos slots (caminho de sempre)
+              const bloco2 = mapa.versoes[1];
+              if (bloco2) {
+                for (const p of bloco2.papeis) {
+                  const slot = roleSlots.find((sl) => normalizeForMatch(sl.role) === normalizeForMatch(p.role));
+                  if (!slot) continue;
+                  const esc = casarAvatar(p.username);
+                  if (esc) slot.avatarYoutube = esc;
+                }
+              }
+              // 3..10 viram versões extras
+              const extras: VersaoAd[] = [];
+              for (let i = 2; i < mapa.versoes.length; i++) {
+                const bloco = mapa.versoes[i];
+                const porPapel: VersaoAd['porPapel'] = {};
+                for (const p of bloco.papeis) {
+                  const esc = casarAvatar(p.username);
+                  if (esc) porPapel[p.role.toLowerCase()] = esc;
+                }
+                extras.push({ n: i + 1, nome: bloco.nome, rotuloDoDoc: bloco.rotuloDoDoc, porPapel });
+              }
+              if (extras.length) versoesExtras = extras;
+              console.log(`[clickup-pilot] versões em ${task.name}: ${mapa.motivo}`);
+            }
+          } catch (e) {
+            console.warn('[clickup-pilot] mapeamento de versões falhou (segue com 1 versão):', e);
+          }
           const allHaveAvatar = roleSlots.every(slotPronto);
           // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
           // (compartilham o doc — ja analisamos uma vez).
@@ -2823,6 +2898,11 @@ function ClickUpPilotInner() {
                 // de COPY (botão azul, com trecho + take).
                 indicacoesDoc: indicacoesDoc.length ? indicacoesDoc : undefined,
                 indicacoesCopy,
+                // Versões sugeridas pelo doc — o user confirma/ajusta no
+                // seletor "+ versões" antes de disparar.
+                mapaVersoes,
+                versoes: versoesExtras,
+                duasVersoes: prev[sid]?.duasVersoes ?? duasVersoesSugerido,
                 bodyRaw: briefing.body || undefined,
                 dispatchedAt: getDispatchedAt(sid),
                 // Marca siblings como "compartilhada com primary"
@@ -2915,6 +2995,26 @@ function ClickUpPilotInner() {
    *  disparo — state capturado num closure velho mentiria. File é cache: se
    *  sumir (F5), os bytes voltam do IDB pela audioKey. */
   const roleAudioRef = useRef<Record<string, { file?: File; palavras?: Array<{ texto: string; inicio: number; fim: number }> }>>({});
+  /** NOMES das versões no card do disparo, por taskId da versão. Editável no
+   *  botão de versões; o padrão é "<task> · <versão> · @avatar". Persiste em
+   *  localStorage (a lista tem que sobreviver ao F5 como o resto do card). */
+  const [nomesDeVersao, setNomesDeVersao] = useState<Record<string, string>>({});
+  useEffect(() => {
+    try {
+      const cru = localStorage.getItem('darkolab:pilot:nomes-versao');
+      if (cru) setNomesDeVersao(JSON.parse(cru));
+    } catch { /* sem localStorage: nomes ficam os padrões */ }
+  }, []);
+  function renomearVersaoNoCard(taskIdDaVersaoAlvo: string, nome: string) {
+    setNomesDeVersao((prev) => {
+      const next = { ...prev, [taskIdDaVersaoAlvo]: nome };
+      try { localStorage.setItem('darkolab:pilot:nomes-versao', JSON.stringify(next)); } catch { /* quota */ }
+      return next;
+    });
+  }
+
+  /** Seletor "+ versoes" (1..10) aberto, por task. */
+  const [versoesPickerOpen, setVersoesPickerOpen] = useState<Record<string, boolean>>({});
   /** Popover de indicações do copy (comentários do Docs) aberto, por slot. */
   const [indicacaoOpen, setIndicacaoOpen] = useState<Record<string, boolean>>({});
   /** Dedup de wrappers gated por taskId. Se ja ha um wrapper esperando
@@ -4280,9 +4380,17 @@ function ClickUpPilotInner() {
       // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
       // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
       // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
-      const assembled = canalVersao === 'meta'
+      // Versao 1 (META) sai sem sufixo; a 2 continua _YOUTUBE; 3..10 saem
+      // _V3.._V10 (o taskId da irma carrega a versao).
+      const nVersao = versaoDoTaskId(taskId);
+      const assembled = canalVersao === 'meta' && nVersao <= 1
         ? pipeRes.items
-        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
+        : pipeRes.items.map((it) => ({
+            ...it,
+            filename: nVersao > 1
+              ? nomeComVersao(it.filename, nVersao, nVersao === 2 ? 'YouTube' : '')
+              : nomeComCanal(it.filename, canalVersao),
+          }));
 
       // ZIP 2 — versoes montadas + decupadas. SEMPRE cria, mesmo quando
       // assembled.length === 0 (nesse caso vai so com _DIAGNOSTICO.txt
@@ -5090,9 +5198,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
       // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
       // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
-      const assembled = canalVersao === 'meta'
+      // Versao 1 (META) sai sem sufixo; a 2 continua _YOUTUBE; 3..10 saem
+      // _V3.._V10 (o taskId da irma carrega a versao).
+      const nVersao = versaoDoTaskId(taskId);
+      const assembled = canalVersao === 'meta' && nVersao <= 1
         ? pipeRes.items
-        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
+        : pipeRes.items.map((it) => ({
+            ...it,
+            filename: nVersao > 1
+              ? nomeComVersao(it.filename, nVersao, nVersao === 2 ? 'YouTube' : '')
+              : nomeComCanal(it.filename, canalVersao),
+          }));
 
       // ZIP 2 — versoes montadas + decupadas (sempre cria, mesmo com 0
       // assembled — entrega _DIAGNOSTICO.txt explicando o motivo)
@@ -5402,12 +5518,21 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       .map((id) => taskAnalyses[id])
       .filter((a): a is TaskAnalysis => pedeVersaoYoutube(a))
       .map(analiseYoutube);
-    if (irmasYoutube.length) {
+    // VERSOES 3..10 (29.08): mesma regra da irmã do YouTube — só vira task
+    // irmã a versão que tem avatar PRÓPRIO em algum papel. As outras saem da
+    // mesma geração (a diferença fica na edição), custo zero.
+    const irmasVersoes: TaskAnalysis[] = normalTasks
+      .map((id) => taskAnalyses[id])
+      .filter((a): a is TaskAnalysis => !!a)
+      .flatMap((a) => versoesExtrasQueGeram(a).map((ver) => analiseDaVersao(a, ver)));
+    const irmas = [...irmasYoutube, ...irmasVersoes];
+    if (irmas.length) {
       const porId: Record<string, TaskAnalysis> = {};
-      for (const ir of irmasYoutube) porId[ir.taskId] = ir;
+      for (const ir of irmas) porId[ir.taskId] = ir;
       setTaskAnalyses((prev) => ({ ...prev, ...porId }));
       taskAnalysesRef.current = { ...taskAnalysesRef.current, ...porId };
-      normalTasks.push(...irmasYoutube.map((ir) => ir.taskId));
+      normalTasks.push(...irmas.map((ir) => ir.taskId));
+      console.log(`[clickup-pilot] versões: ${irmas.length} task(s) irmã(s) enfileirada(s) — ${irmas.map((ir) => ir.taskName).join(', ')}`);
     }
 
     if (vaTasks.length === 0 && trocaTasks.length === 0 && normalTasks.length === 0) {
@@ -5430,7 +5555,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const next = { ...prev };
       for (const id of normalTasks) {
         // as irmãs recém-criadas ainda não estão no state deste tick
-        const a = taskAnalyses[id] || irmasYoutube.find((ir) => ir.taskId === id);
+        const a = taskAnalyses[id] || irmas.find((ir) => ir.taskId === id);
         if (!a) continue;
         const baseAdId = a.baseAdId || a.taskName;
         // BLINDAGEM F5 (perda de plano): persiste o PLANO (replan) JÁ ao enfileirar.
@@ -6688,9 +6813,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
       // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
       // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
-      const assembled = canalVersao === 'meta'
+      // Versao 1 (META) sai sem sufixo; a 2 continua _YOUTUBE; 3..10 saem
+      // _V3.._V10 (o taskId da irma carrega a versao).
+      const nVersao = versaoDoTaskId(taskId);
+      const assembled = canalVersao === 'meta' && nVersao <= 1
         ? pipeRes.items
-        : pipeRes.items.map((it) => ({ ...it, filename: nomeComCanal(it.filename, canalVersao) }));
+        : pipeRes.items.map((it) => ({
+            ...it,
+            filename: nVersao > 1
+              ? nomeComVersao(it.filename, nVersao, nVersao === 2 ? 'YouTube' : '')
+              : nomeComCanal(it.filename, canalVersao),
+          }));
 
       // ZIP montado
       const zipMont = new JSZip();
@@ -7167,6 +7300,34 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }, 300);
   }
 
+  /** As VERSÕES deste AD que existem na fila: a task mãe e as irmãs
+   *  (`-yt`, `-v3`...). É o que o botão de versões do card lista. */
+  function versoesDoDisparo(taskId: string): VersaoNoCard[] {
+    const base = taskIdBaseDaVersao(taskId);
+    const ids = Object.keys(batchStates).filter((id) => taskIdBaseDaVersao(id) === base);
+    if (ids.length <= 1) return [];
+    return ids
+      .map((id) => {
+        const b = batchStates[id];
+        const n = versaoDoTaskId(id);
+        const prontos = (b?.parts || []).filter((x) => x.videoStatus === 'completed').length;
+        const temEntrega = !!(b?.montadoZipUrl || b?.montadoZipName || b?.camufladoZipUrl || b?.zipBlobUrl || b?.zipFilename);
+        const avatarPrincipal = b?.replan?.parts?.find((x) => x.avatarName)?.avatarName || null;
+        const nomeVersao = n === 1 ? 'META' : n === 2 ? 'YouTube' : `Versão ${n}`;
+        return {
+          taskId: id,
+          n,
+          nome: nomesDeVersao[id] || rotuloDaVersao(b?.taskName || id, { nome: nomeVersao }, avatarPrincipal),
+          fase: b?.phase,
+          pronta: b?.phase === 'done' && temEntrega,
+          atual: id === taskId,
+          prontos,
+          total: (b?.parts || []).length,
+        } as VersaoNoCard;
+      })
+      .sort((x, y) => x.n - y.n);
+  }
+
   /** Baixa o ZIP de takes Magnific do IndexedDB (Blob URL nao sobrevive
    *  reload — sempre reconstruimos on-demand do zip-store). */
   async function downloadMagnificZip(taskId: string) {
@@ -7425,6 +7586,109 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     for (const idx of pendingIdxs) {
       await runVisualMatchForSlot(taskId, idx);
     }
+  }
+
+  /* ═══════════════ VERSÕES DO AD (1..10) — 29.08 ═══════════════
+   *  A versão 1 é a própria task (META) e a 2 continua sendo a do
+   *  `duasVersoes`/`avatarYoutube` — nada do que já roda muda. As de 3 em
+   *  diante moram em `a.versoes`, cada uma com nome editável e avatar por
+   *  papel; quem não escolhe avatar nenhum HERDA a versão 1 (custo zero). */
+
+  /** Quantas versões esta task tem hoje (contando a 1). */
+  function totalDeVersoes(a: TaskAnalysis | undefined | null): number {
+    if (!a) return 1;
+    const extras = (a.versoes || []).length; // 3..10
+    return 1 + (a.duasVersoes ? 1 : 0) + extras;
+  }
+
+  /** A lista COMPLETA de versões pra tela: a 1 (META), a 2 (YouTube, quando
+   *  ligada) e as extras. */
+  function versoesDaTask(a: TaskAnalysis): VersaoAd[] {
+    const out: VersaoAd[] = [{ n: 1, nome: 'META', porPapel: {} }];
+    if (a.duasVersoes) {
+      const porPapel: VersaoAd['porPapel'] = {};
+      for (const sl of a.roleSlots || []) {
+        if (sl.avatarYoutube?.avatarId) {
+          porPapel[sl.role.toLowerCase()] = {
+            avatarId: sl.avatarYoutube.avatarId,
+            avatarName: sl.avatarYoutube.avatarName,
+            avatarThumb: sl.avatarYoutube.avatarThumb,
+            avatarVoiceId: sl.avatarYoutube.avatarVoiceId,
+            voiceOverride: sl.voiceOverrideYoutube || null,
+          };
+        }
+      }
+      out.push({ n: 2, nome: 'YouTube', porPapel });
+    }
+    for (const v of a.versoes || []) out.push(v);
+    return out.sort((x, y) => x.n - y.n);
+  }
+
+  /** Define QUANTAS versões a task tem (1..10). Cresce criando versões vazias
+   *  (que herdam a 1 até você escolher avatar) e encolhe tirando as últimas —
+   *  a 2 continua sendo o `duasVersoes` de sempre. */
+  function setTotalDeVersoes(taskId: string, total: number) {
+    const alvo = Math.max(1, Math.min(MAX_VERSOES, Math.round(total)));
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a) return prev;
+      const nomesSugeridos = a.mapaVersoes?.nomes || [];
+      const extrasAtuais = a.versoes || [];
+      const extras: VersaoAd[] = [];
+      for (let n = 3; n <= alvo; n++) {
+        const existente = extrasAtuais.find((v) => v.n === n);
+        extras.push(existente || { n, nome: nomesSugeridos[n - 1] || `Versão ${n}`, porPapel: {} });
+      }
+      const next = {
+        ...prev,
+        [taskId]: { ...a, duasVersoes: alvo >= 2, versoes: extras.length ? extras : undefined },
+      };
+      taskAnalysesRef.current = next;
+      return next;
+    });
+  }
+
+  /** Renomeia uma versão (a 1 e a 2 têm nome fixo; extras são editáveis). */
+  function renomearVersao(taskId: string, n: number, nome: string) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.versoes) return prev;
+      const next = {
+        ...prev,
+        [taskId]: { ...a, versoes: a.versoes.map((v) => (v.n === n ? { ...v, nome } : v)) },
+      };
+      taskAnalysesRef.current = next;
+      return next;
+    });
+  }
+
+  /** Escolhe o avatar de UM papel numa versão extra (3..10). */
+  function setAvatarDaVersao(
+    taskId: string,
+    n: number,
+    role: string,
+    escolha: { avatarId: string | null; avatarName?: string | null; avatarThumb?: string | null; avatarVoiceId?: string | null } | null,
+  ) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.versoes) return prev;
+      const chave = role.toLowerCase();
+      const next = {
+        ...prev,
+        [taskId]: {
+          ...a,
+          versoes: a.versoes.map((v) => {
+            if (v.n !== n) return v;
+            const porPapel = { ...v.porPapel };
+            if (!escolha?.avatarId) delete porPapel[chave];
+            else porPapel[chave] = { ...escolha };
+            return { ...v, porPapel };
+          }),
+        },
+      };
+      taskAnalysesRef.current = next;
+      return next;
+    });
   }
 
   /** Liga/desliga as DUAS VERSÕES (META + YouTube) desta task. Desligado é o
@@ -8078,6 +8342,59 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   function pedeVersaoYoutube(a: TaskAnalysis | undefined | null): boolean {
     if (!a || !a.duasVersoes || a.canalVersao === 'youtube') return false;
     return precisaGerarDeNovo(papeisDaTask(a));
+  }
+
+  /**
+   * A ANÁLISE de uma VERSÃO EXTRA (3..10), derivada da versão 1.
+   *
+   * Mesma receita da irmã do YouTube: os avatares da versão já vêm resolvidos
+   * DENTRO de `avatarId` (a irmã não guarda `versoes`, senão geraria netos), o
+   * `baseAdId` fica IGUAL (o sufixo entra no NOME do arquivo entregue) e o
+   * taskId ganha o segmento da versão — que é o que separa fila, chaves do
+   * IndexedDB e entrega.
+   */
+  function analiseDaVersao(a: TaskAnalysis, ver: VersaoAd): TaskAnalysis {
+    return {
+      ...a,
+      taskId: taskIdDaVersao(a.taskId, ver),
+      taskName: `${a.taskName} - ${ver.nome}`,
+      canalVersao: undefined,
+      duasVersoes: false,
+      versoes: undefined,
+      mapaVersoes: undefined,
+      dispatchedAt: undefined,
+      roleSlots: (a.roleSlots || []).map((sl) => {
+        const esc = avatarDaVersao(
+          {
+            avatarId: sl.avatarId,
+            avatarName: sl.avatarName,
+            avatarThumb: sl.avatarThumb,
+            avatarVoiceId: sl.avatarVoiceId,
+            voiceOverride: sl.voiceOverride,
+          },
+          ver,
+          sl.role,
+        );
+        return {
+          ...sl,
+          avatarId: esc.avatarId ?? null,
+          avatarName: esc.avatarName ?? null,
+          avatarThumb: esc.avatarThumb ?? null,
+          avatarVoiceId: esc.avatarVoiceId ?? null,
+          voiceOverride: esc.voiceOverride ?? null,
+          avatarYoutube: null,
+          voiceOverrideYoutube: null,
+        };
+      }),
+    };
+  }
+
+  /** As versões EXTRAS (3..10) desta task que têm avatar próprio — só elas
+   *  viram task irmã (as demais reaproveitam a entrega da versão 1). */
+  function versoesExtrasQueGeram(a: TaskAnalysis | undefined | null): VersaoAd[] {
+    if (!a?.versoes?.length) return [];
+    const papeisBase = (a.roleSlots || []).map((sl) => ({ role: sl.role, avatarId: sl.avatarId }));
+    return a.versoes.filter((v) => versaoGeraDeNovo(papeisBase, v));
   }
 
   /**
@@ -11371,19 +11688,36 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   return null;
                                 }
                               }}
-                              extraActions={b.isVA && b.adOriginalUrl ? (
-                                <a
-                                  href={b.adOriginalUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title="Baixar AD original (Drive)"
-                                  aria-label="Baixar AD original"
-                                  className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/55 bg-gradient-to-b from-cyan-400/25 via-cyan-400/10 to-cyan-400/[0.02] text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.45)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/80 active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
-                                >
-                                  <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
-                                  <span className="relative text-[13px]">🎬</span>
-                                </a>
-                              ) : undefined}
+                              extraActions={(() => {
+                                const vs = versoesDoDisparo(b.taskId);
+                                const botaoVersoes = vs.length > 1 ? (
+                                  <VersoesDoDisparo
+                                    versoes={vs}
+                                    onBaixar={(v) => downloadZip(v.taskId)}
+                                    onPreview={(v) => {
+                                      // leva o olho pra versão escolhida
+                                      const el = document.getElementById(`batch-card-${v.taskId}`);
+                                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }}
+                                    onRenomear={(v, nome) => renomearVersaoNoCard(v.taskId, nome)}
+                                  />
+                                ) : null;
+                                const botaoVA = b.isVA && b.adOriginalUrl ? (
+                                  <a
+                                    href={b.adOriginalUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title="Baixar AD original (Drive)"
+                                    aria-label="Baixar AD original"
+                                    className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/55 bg-gradient-to-b from-cyan-400/25 via-cyan-400/10 to-cyan-400/[0.02] text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.45)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/80 active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                                  >
+                                    <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                                    <span className="relative text-[13px]">🎬</span>
+                                  </a>
+                                ) : null;
+                                if (!botaoVersoes && !botaoVA) return undefined;
+                                return (<>{botaoVersoes}{botaoVA}</>);
+                              })()}
                             >
                               {previewsNode}
                             </BatchJobCard3D>
@@ -12579,70 +12913,114 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
                                         Avatares ({a.roleSlots.length}) — selecione cada um e a voz
                                       </div>
-                                      {/* DUAS VERSÕES — o AD sai em META (editada) e YouTube (só
-                                          avatar decupado). Ligar aqui NÃO dobra o custo sozinho:
-                                          enquanto o avatar for o mesmo nos dois canais, a versão
-                                          YouTube reaproveita o decupado que já vai pra edição. Só
-                                          escolher um avatar diferente abaixo é que cria a segunda
-                                          geração. Desligado por padrão — liga quando o doc pede. */}
-                                      <button
-                                        type="button"
-                                        onClick={() => setDuasVersoes(a.taskId, !a.duasVersoes)}
-                                        className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
-                                        style={
-                                          a.duasVersoes
-                                            ? {
-                                                fontFamily: 'var(--font-tech)',
-                                                color: '#1a0505',
-                                                borderColor: 'rgba(255,0,0,0.5)',
-                                                background: 'linear-gradient(135deg, #ff6b6b 0%, #ff0000 100%)',
-                                                boxShadow:
-                                                  '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(255,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                      {/* + VERSOES (29.08) - o AD pode sair em ate 10 versoes,
+                                          cada uma com o seu avatar por papel. A 1 e a de sempre
+                                          (META) e a 2 e a do YouTube; da 3 em diante sao livres.
+                                          Versao que nao escolhe avatar proprio HERDA a 1: nao
+                                          custa geracao nenhuma, a diferenca fica na edicao. O
+                                          numero ja vem SUGERIDO pelo doc (mapeamento automatico
+                                          dos blocos "Meta Ads:" / "Youtube Ads:" / "Avatar 2:"). */}
+                                      {(() => {
+                                        const total = totalDeVersoes(a);
+                                        const aberto = !!versoesPickerOpen[a.taskId];
+                                        return (
+                                          <div className="relative">
+                                            <button
+                                              type="button"
+                                              onClick={() => setVersoesPickerOpen((pp) => ({ ...pp, [a.taskId]: !pp[a.taskId] }))}
+                                              aria-expanded={aberto}
+                                              className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                              style={
+                                                total > 1
+                                                  ? {
+                                                      fontFamily: 'var(--font-tech)',
+                                                      color: '#1a0505',
+                                                      borderColor: 'rgba(255,0,0,0.5)',
+                                                      background: 'linear-gradient(135deg, #ff6b6b 0%, #ff0000 100%)',
+                                                      boxShadow:
+                                                        '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(255,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                    }
+                                                  : {
+                                                      fontFamily: 'var(--font-tech)',
+                                                      color: 'rgba(255,255,255,0.55)',
+                                                      borderColor: 'rgba(255,255,255,0.12)',
+                                                      background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                                                      boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+                                                    }
                                               }
-                                            : {
-                                                fontFamily: 'var(--font-tech)',
-                                                color: 'rgba(255,255,255,0.55)',
-                                                borderColor: 'rgba(255,255,255,0.12)',
-                                                background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
-                                                boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
-                                              }
-                                        }
-                                        title={
-                                          a.duasVersoes
-                                            ? 'Ligado: o AD sai em duas versões. Escolha o avatar do YouTube em cada papel — deixando igual ao do META, a versão YouTube reaproveita o decupado e não gasta geração.'
-                                            : 'Ligue quando o doc pedir versão de YouTube além da do META.'
-                                        }
-                                      >
-                                        <span className="text-[12px] leading-none">▶</span>
-                                        2 versões
-                                        <span
-                                          className={
-                                            'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
-                                            (a.duasVersoes ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
-                                          }
-                                        >
-                                          {a.duasVersoes ? 'ON' : 'OFF'}
-                                        </span>
-                                      </button>
+                                              title="Quantas versoes este AD tem (1 a 10). Cada versao pode ter avatar diferente; sem avatar proprio, ela reaproveita a versao 1 sem gastar geracao."
+                                            >
+                                              <span className="text-[12px] leading-none">+</span>
+                                              versões
+                                              <span
+                                                className={
+                                                  'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
+                                                  (total > 1 ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
+                                                }
+                                              >
+                                                {total}
+                                              </span>
+                                            </button>
+                                            {aberto ? (
+                                              <>
+                                                <div className="fixed inset-0 z-30" onClick={() => setVersoesPickerOpen((pp) => ({ ...pp, [a.taskId]: false }))} aria-hidden />
+                                                <div className="absolute right-0 top-full z-40 mt-2 w-[290px] rounded-[14px] border border-line bg-bg-soft p-3 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur">
+                                                  <div className="label-tech mb-2 text-[10px] uppercase tracking-[0.16em] text-text-muted">
+                                                    Quantas versões deste AD
+                                                  </div>
+                                                  <div className="grid grid-cols-5 gap-1.5">
+                                                    {Array.from({ length: MAX_VERSOES }, (_, i) => i + 1).map((n) => (
+                                                      <button
+                                                        key={n}
+                                                        type="button"
+                                                        onClick={() => setTotalDeVersoes(a.taskId, n)}
+                                                        className={
+                                                          'mono rounded-[9px] border py-1.5 text-[12px] font-bold transition ' +
+                                                          (n === total
+                                                            ? 'border-red-500/70 bg-red-500 text-white shadow-[0_3px_10px_-3px_rgba(239,68,68,0.8)]'
+                                                            : 'border-line bg-bg/60 text-text-muted hover:border-red-400/50 hover:text-text')
+                                                        }
+                                                        title={n === 1 ? 'Uma versao so (o padrao)' : n + ' versoes deste AD'}
+                                                      >
+                                                        {n}
+                                                      </button>
+                                                    ))}
+                                                  </div>
+                                                  {a.mapaVersoes ? (
+                                                    <div className="mt-2.5 rounded-[9px] border border-line bg-bg/50 px-2.5 py-2 text-[10.5px] leading-snug text-text-muted">
+                                                      <span className="font-semibold text-text">Li do doc:</span> {a.mapaVersoes.motivo}
+                                                    </div>
+                                                  ) : null}
+                                                  <div className="mt-2 text-[10px] leading-snug text-text-muted">
+                                                    Versão sem avatar próprio reaproveita a 1 e <b>não gasta geração</b>.
+                                                  </div>
+                                                </div>
+                                              </>
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
-                                    {a.duasVersoes ? (
+                                    {totalDeVersoes(a) > 1 ? (
                                       <div className="rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-text-muted">
-                                        {pedeVersaoYoutube(a) ? (
-                                          <>
-                                            <b className="text-red-200">Duas gerações.</b>{' '}
-                                            {planejarDuasVersoes(true, papeisDaTask(a)).motivo} — o START
-                                            enfileira a versão do YouTube como uma task irmã, e ela entrega
-                                            com <b>_YOUTUBE</b> no nome.
-                                          </>
-                                        ) : (
-                                          <>
-                                            <b className="text-lime">Uma geração só.</b> O avatar é o mesmo
-                                            nos dois canais, então a versão YouTube é o próprio avatar
-                                            decupado — a diferença fica na edição (o META leva b-roll, SFX e
-                                            trilha; o YouTube só o zoom). Escolha um avatar de YouTube abaixo
-                                            se o doc pedir rosto ou look diferente.
-                                          </>
-                                        )}
+                                        {(() => {
+                                          const vs = versoesDaTask(a);
+                                          const papeisBase = (a.roleSlots || []).map((sl) => ({ role: sl.role, avatarId: sl.avatarId }));
+                                          const geram = vs.filter((v) => v.n > 1 && versaoGeraDeNovo(papeisBase, v));
+                                          return geram.length ? (
+                                            <>
+                                              <b className="text-red-200">{1 + geram.length} gerações.</b>{' '}
+                                              As versões {geram.map((v) => v.nome).join(', ')} têm avatar próprio, então o
+                                              START enfileira cada uma como task irmã (o arquivo sai com o sufixo da versão).
+                                            </>
+                                          ) : (
+                                            <>
+                                              <b className="text-lime">Uma geração só.</b> As {vs.length} versões usam o mesmo
+                                              avatar, então elas reaproveitam o decupado — a diferença fica na edição. Escolha
+                                              um avatar próprio abaixo pra alguma versão gerar de novo.
+                                            </>
+                                          );
+                                        })()}
                                       </div>
                                     ) : null}
                                     {a.roleSlots.length === 0 ? (
@@ -13167,6 +13545,53 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 ) : null}
                                               </div>
                                             ) : null}
+                                            {/* AVATAR DAS VERSOES 3..10 (29.08). Mesma regra da 2:
+                                                vazio = usa o da versao 1 (sem custo); escolhido =
+                                                aquela versao gera de novo. */}
+                                            {!slot.imageMode
+                                              ? (a.versoes || []).map((ver) => {
+                                                  const esc = ver.porPapel?.[slot.role.toLowerCase()];
+                                                  return (
+                                                    <div key={ver.n}>
+                                                      <div className="label-tech mb-1 flex flex-wrap items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
+                                                        <span className="text-[11px] leading-none">+</span>
+                                                        Avatar da versão
+                                                        <input
+                                                          type="text"
+                                                          value={ver.nome}
+                                                          onChange={(e) => renomearVersao(a.taskId, ver.n, e.target.value)}
+                                                          className="mono w-[110px] rounded border border-line bg-bg/60 px-1.5 py-[1px] text-[10px] normal-case tracking-normal text-text focus:border-red-400/60 focus:outline-none"
+                                                          title="Nome desta versao (aparece no card do disparo e no nome do arquivo)"
+                                                        />
+                                                        <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                          {esc?.avatarId ? '— gera de novo' : '— vazio: usa o mesmo da versão 1 (sem custo)'}
+                                                        </span>
+                                                      </div>
+                                                      <div className="max-w-[420px]">
+                                                        <CompactAvatarPicker
+                                                          selected={
+                                                            esc?.avatarId
+                                                              ? ({ id: esc.avatarId, name: esc.avatarName || '', thumb: esc.avatarThumb || '' } as any)
+                                                              : null
+                                                          }
+                                                          setSelected={(novoAv) =>
+                                                            setAvatarDaVersao(a.taskId, ver.n, slot.role, novoAv
+                                                              ? {
+                                                                  avatarId: novoAv.id,
+                                                                  avatarName: novoAv.name || null,
+                                                                  avatarThumb: novoAv.thumb || null,
+                                                                  avatarVoiceId: (novoAv as any)?.voiceId || null,
+                                                                }
+                                                              : null)
+                                                          }
+                                                          disabled={false}
+                                                          label={`Avatar da versão ${ver.nome} pra ${slot.role}`}
+                                                        />
+                                                      </div>
+                                                    </div>
+                                                  );
+                                                })
+                                              : null}
                                             {slot.avatarId || slot.imageMode ? (
                                               // MODO ÁUDIO sem Voice Mirror: a voz do take é a do próprio
                                               // arquivo → o seletor dorme. Liga o Mirror e ele acorda

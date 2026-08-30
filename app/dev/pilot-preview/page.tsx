@@ -13,6 +13,9 @@ import { notFound } from 'next/navigation';
 import { useState } from 'react';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
+import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
+import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
+import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
 
 const PARTES: RedispatchPart[] = [
   {
@@ -26,8 +29,8 @@ const PARTES: RedispatchPart[] = [
     username: 'drrobertokalil 1',
     briefingFileId: null,
     indicacoes: [
-      { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [{ url: 'https://youtu.be/dQw4w9WgXcQ', tipo: 'youtube', thumb: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', rotulo: 'YouTube' }] },
-      { nota: 'AMBIENTE DE COZINHA, LUZ QUENTE', links: [{ url: 'https://www.tiktok.com/@fulano/video/7300000000', tipo: 'tiktok', thumb: null, rotulo: 'TikTok' }] },
+      { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [resolverLinkIndicacao('https://youtu.be/dQw4w9WgXcQ')] },
+      { nota: 'AMBIENTE DE COZINHA, LUZ QUENTE', links: [resolverLinkIndicacao('https://www.tiktok.com/@fulano/video/7300000000')] },
     ],
     indicacoesCopy: [
       { trecho: 'Como transformar um azeite de R$10 no seu próprio remédio de próstata', nota: 'COMENTARIO DE TESTE, CENARIO X' },
@@ -44,7 +47,7 @@ const PARTES: RedispatchPart[] = [
     audioName: 'ELEVEN_body1.mp3',
     audioMirror: true,
     audioParte: true,
-    indicacoesCopy: [{ trecho: 'A maioria das pessoas usa azeite do jeito errado.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo', links: [{ url: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view', tipo: 'drive', thumb: 'https://drive.google.com/thumbnail?id=1AbCdEfGhIjKlMnOpQrStUv&sz=w400', rotulo: 'Drive' }] }],
+    indicacoesCopy: [{ trecho: 'A maioria das pessoas usa azeite do jeito errado.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo', links: [resolverLinkIndicacao('https://drive.google.com/file/d/1eyJoDa-rfD8IsnPM__qCBjfUc8hzdDhn/view')] }],
     role: 'Doutor',
     username: 'drrobertokalil 1',
     briefingFileId: null,
@@ -81,6 +84,16 @@ function Conteudo() {
   const [indAberta, setIndAberta] = useState(false);
   const [indCopyAberta, setIndCopyAberta] = useState(false);
   const [comAudio, setComAudio] = useState(true);
+  const [verPicker, setVerPicker] = useState(false);
+  const [totalVersoes, setTotalVersoes] = useState(3);
+  const mapaDemo = mapearVersoesDoDoc(
+    ['Meta Ads:', 'Doutor: drrobertokalil 1.mp4', 'Youtube Ads / Kwai Ads:', 'Doutor: joshuagonzalezmd.mp4'].join(String.fromCharCode(10)),
+  );
+  const [versoesDemo, setVersoesDemo] = useState<VersaoNoCard[]>([
+    { taskId: 't1', n: 1, nome: 'AD03GL - PRPB12 · META · @drrobertokalil', fase: 'done', pronta: true, atual: true, prontos: 8, total: 8 },
+    { taskId: 't1-yt', n: 2, nome: 'AD03GL - PRPB12 · YouTube · @joshuagonzalezmd', fase: 'rendering', prontos: 5, total: 8 },
+    { taskId: 't1-v3', n: 3, nome: 'AD03GL - PRPB12 · Avatar 3 · @tiagorochaog', fase: 'queued', prontos: 0, total: 8 },
+  ]);
   const motorAudio = engine || 'III';
   const dur = 145;
   const curto = dur <= 30;
@@ -91,6 +104,75 @@ function Conteudo() {
   return (
     <main className="mx-auto grid max-w-[760px] gap-8 px-4 py-10">
       <h1 className="text-lg font-bold text-text">DEV · preview Pilot 29.08</h1>
+
+      {/* ══════════ 0. VERSOES (1..10) ══════════ */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
+            Avatares (1) — selecione cada um e a voz
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setVerPicker((v) => !v)}
+              className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+              style={
+                totalVersoes > 1
+                  ? { fontFamily: 'var(--font-tech)', color: '#1a0505', borderColor: 'rgba(255,0,0,0.5)', background: 'linear-gradient(135deg, #ff6b6b 0%, #ff0000 100%)', boxShadow: '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(255,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)' }
+                  : { fontFamily: 'var(--font-tech)', color: 'rgba(255,255,255,0.55)', borderColor: 'rgba(255,255,255,0.12)', background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)', boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)' }
+              }
+            >
+              <span className="text-[12px] leading-none">+</span>
+              versões
+              <span className={'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' + (totalVersoes > 1 ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')}>
+                {totalVersoes}
+              </span>
+            </button>
+            {verPicker ? (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setVerPicker(false)} aria-hidden />
+                <div className="absolute right-0 top-full z-40 mt-2 w-[290px] rounded-[14px] border border-line bg-bg-soft p-3 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur">
+                  <div className="label-tech mb-2 text-[10px] uppercase tracking-[0.16em] text-text-muted">Quantas versões deste AD</div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {Array.from({ length: MAX_VERSOES }, (_, i) => i + 1).map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setTotalVersoes(n)}
+                        className={'mono rounded-[9px] border py-1.5 text-[12px] font-bold transition ' + (n === totalVersoes ? 'border-red-500/70 bg-red-500 text-white shadow-[0_3px_10px_-3px_rgba(239,68,68,0.8)]' : 'border-line bg-bg/60 text-text-muted hover:border-red-400/50 hover:text-text')}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2.5 rounded-[9px] border border-line bg-bg/50 px-2.5 py-2 text-[10.5px] leading-snug text-text-muted">
+                    <span className="font-semibold text-text">Li do doc:</span> {mapaDemo.motivo}
+                  </div>
+                  <div className="mt-2 text-[10px] leading-snug text-text-muted">
+                    Versão sem avatar próprio reaproveita a 1 e <b>não gasta geração</b>.
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+        {totalVersoes > 1 ? (
+          <div className="rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[10.5px] leading-snug text-text-muted">
+            <b className="text-red-200">{totalVersoes} gerações.</b> As versões com avatar próprio saem como task irmã
+            (o arquivo leva o sufixo da versão).
+          </div>
+        ) : null}
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-[11px] text-text-muted">botão de versões do card do disparo:</span>
+          <VersoesDoDisparo
+            versoes={versoesDemo}
+            onBaixar={() => {}}
+            onPreview={() => {}}
+            onRenomear={(v, nome) => setVersoesDemo((prev) => prev.map((x) => (x.taskId === v.taskId ? { ...x, nome } : x)))}
+          />
+        </div>
+      </section>
+
 
       {/* ══════════ 1. CARD DE ÁUDIO DO AVATAR (mock do slot) ══════════ */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
@@ -133,7 +215,7 @@ function Conteudo() {
             tipo="copy"
             itens={[
               { take: 'HOOK 1', trecho: 'Para próstata inchada, não existe nada melhor do que isso daqui.', nota: 'COMENTARIO DE TESTE, CENARIO X' },
-              { take: 'BODY 2', trecho: 'Esse composto se chama oleocantal do azeite.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo', links: [{ url: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view', tipo: 'drive', thumb: 'https://drive.google.com/thumbnail?id=1AbCdEfGhIjKlMnOpQrStUv&sz=w400', rotulo: 'Drive' }] },
+              { take: 'BODY 2', trecho: 'Esse composto se chama oleocantal do azeite.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo', links: [resolverLinkIndicacao('https://drive.google.com/file/d/1eyJoDa-rfD8IsnPM__qCBjfUc8hzdDhn/view')] },
             ]}
           />
         ) : null}
@@ -141,8 +223,8 @@ function Conteudo() {
           <IndicacaoPanel
             tipo="avatar"
             itens={[
-              { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [{ url: 'https://youtu.be/dQw4w9WgXcQ', tipo: 'youtube', thumb: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', rotulo: 'YouTube' }, { url: 'https://www.tiktok.com/@fulano/video/7300000000', tipo: 'tiktok', thumb: null, rotulo: 'TikTok' }] },
-              { nota: 'AMBIENTE DE COZINHA, LUZ QUENTE', links: [{ url: 'https://www.instagram.com/reel/Cxyz123/', tipo: 'instagram', thumb: null, rotulo: 'Instagram' }] },
+              { nota: 'AVATAR SEGURANDO O AZEITE NA MÃO', links: [resolverLinkIndicacao('https://youtu.be/dQw4w9WgXcQ'), resolverLinkIndicacao('https://www.tiktok.com/@fulano/video/7300000000')] },
+              { nota: 'AMBIENTE DE COZINHA, LUZ QUENTE', links: [resolverLinkIndicacao('https://www.instagram.com/reel/Cxyz123/')] },
             ]}
           />
         ) : null}

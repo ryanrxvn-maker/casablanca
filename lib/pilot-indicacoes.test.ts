@@ -162,6 +162,27 @@ console.log('— links citados na indicação: tipo + thumb —');
   const gen = resolverLinkIndicacao('https://exemplo.com/pagina');
   ok(gen.tipo === 'link' && gen.rotulo === 'exemplo.com', 'genérico → hostname como rótulo');
 }
+
+console.log('— thumbs em cascata + botão BAIXAR —');
+{
+  const dv = resolverLinkIndicacao('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUv/view');
+  ok(dv.thumbs.length === 2 && dv.thumbs[1].includes('lh3.googleusercontent.com/d/'), 'Drive tem 2 candidatos de thumb (thumbnail + lh3)');
+  ok(dv.baixar?.modo === 'direto' && dv.baixar.href.includes('uc?export=download&id=1AbCdEfGhIjKlMnOpQrStUv'), 'Drive baixa DIRETO');
+  const yt = resolverLinkIndicacao('https://youtu.be/dQw4w9WgXcQ');
+  ok(yt.thumbs.length === 2, 'YouTube tem hqdefault + mqdefault');
+  ok(yt.baixar?.modo === 'downloader' && yt.baixar.href.startsWith('/tools/downloader?url='), 'YouTube baixa pelo DOWNLOADER do AutoEdit');
+  ok(decodeURIComponent(yt.baixar!.href.split('url=')[1]) === 'https://youtu.be/dQw4w9WgXcQ', 'a URL vai codificada certinho pro downloader');
+  const tk = resolverLinkIndicacao('https://www.tiktok.com/@fulano/video/7300000000');
+  ok(tk.baixar?.modo === 'downloader', 'TikTok → downloader');
+  const ig = resolverLinkIndicacao('https://www.instagram.com/reel/Cxyz123/');
+  ok(ig.baixar?.modo === 'downloader', 'Instagram → downloader');
+  const im = resolverLinkIndicacao('https://exemplo.com/frames/cena1.jpg');
+  ok(im.baixar?.modo === 'direto' && im.thumbs[0] === im.url, 'imagem: thumb própria e download direto');
+  const doc = resolverLinkIndicacao('https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUv/edit');
+  ok(doc.baixar === null, 'Docs não oferece baixar');
+  const gen2 = resolverLinkIndicacao('https://exemplo.com/pagina');
+  ok(gen2.baixar === null && gen2.thumbs.length === 0, 'link genérico: sem thumb e sem baixar');
+}
 {
   const ls = linksDaIndicacao('referência aqui: https://youtu.be/dQw4w9WgXcQ e https://youtu.be/dQw4w9WgXcQ.', ['https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUv']);
   ok(ls.length === 2, `dedupe + junta href do HTML com URL do texto (veio ${ls.length})`);

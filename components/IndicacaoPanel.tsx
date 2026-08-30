@@ -109,26 +109,48 @@ function GlifoPlataforma({ tipo, size = 18 }: { tipo: LinkIndicacao['tipo']; siz
 }
 
 function CardDeLink({ link }: { link: LinkIndicacao }) {
-  const [falhou, setFalhou] = React.useState(false);
-  const temThumb = !!link.thumb && !falhou;
+  // Cascata de thumbs: o endpoint de thumbnail do Drive falha em alguns
+  // arquivos e o `lh3` pega — cai pro próximo quando o <img> dá erro OU
+  // quando a requisição fica pendurada (o Drive faz isso). Arquivo do Drive
+  // que NÃO está compartilhado por link não tem thumb pública em lugar
+  // nenhum: aí fica o glifo, com os botões de abrir e baixar funcionando.
+  const candidatos = link.thumbs?.length ? link.thumbs : (link.thumb ? [link.thumb] : []);
+  const [idx, setIdx] = React.useState(0);
+  const [carregou, setCarregou] = React.useState(false);
+  const imgRef = React.useRef<HTMLImageElement>(null);
+  // TIMEOUT do candidato: o endpoint de thumb do Drive às vezes deixa a
+  // requisição PENDURADA em vez de responder erro — sem isto o `onError`
+  // nunca dispara e o card fica com um quadrado vazio pra sempre.
+  React.useEffect(() => {
+    if (carregou || idx >= candidatos.length) return;
+    const t = setTimeout(() => {
+      if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) { setCarregou(true); return; }
+      setIdx((i) => i + 1);
+    }, 4500);
+    return () => clearTimeout(t);
+  }, [idx, candidatos.length, carregou]);
+  const srcAtual = idx < candidatos.length ? candidatos[idx] : null;
+  const temThumb = !!srcAtual;
   return (
-    <a
-      href={link.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`ind-link ind-link-${link.tipo}`}
-      title={link.url}
-    >
+    <span className={`ind-link ind-link-${link.tipo}`}>
+      <a
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="ind-link-abrir"
+        title={`Abrir no ${link.rotulo}`}
+      >
       <span className="ind-link-thumb">
         {temThumb ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
-            src={link.thumb as string}
+            ref={imgRef}
+            src={srcAtual as string}
             alt={link.rotulo}
-            loading="lazy"
             decoding="async"
             referrerPolicy="no-referrer"
-            onError={() => setFalhou(true)}
+            onLoad={() => setCarregou(true)}
+            onError={() => setIdx((i) => i + 1)}
           />
         ) : (
           <span className="ind-link-glifo"><GlifoPlataforma tipo={link.tipo} size={20} /></span>
@@ -139,13 +161,31 @@ function CardDeLink({ link }: { link: LinkIndicacao }) {
       </span>
       <span className="ind-link-txt">
         <span className="ind-link-rotulo">{link.rotulo}</span>
-        <span className="ind-link-url">{link.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 42)}</span>
+        <span className="ind-link-url">{link.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 38)}</span>
       </span>
       <span className="ind-link-seta" aria-hidden>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M7 17 17 7M9 7h8v8" />
         </svg>
       </span>
+      </a>
+      {/* BAIXAR: Drive/imagem baixam direto; YouTube, TikTok e Instagram
+          abrem o Downloader do AutoEdit já com a URL colada. */}
+      {link.baixar ? (
+        <a
+          href={link.baixar.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ind-link-baixar"
+          title={link.baixar.modo === 'downloader' ? `Baixar pelo Downloader do AutoEdit (${link.rotulo})` : `Baixar do ${link.rotulo}`}
+          aria-label="Baixar"
+          {...(link.baixar.modo === 'direto' ? { download: '' } : {})}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 3v12m0 0-4.5-4.5M12 15l4.5-4.5M4.5 20h15" />
+          </svg>
+        </a>
+      ) : null}
 
       <style jsx>{`
         /* ⚠ estes estilos moram AQUI (e não no painel): styled-jsx é escopado
@@ -153,7 +193,7 @@ function CardDeLink({ link }: { link: LinkIndicacao }) {
         .ind-link {
           display: inline-flex;
           align-items: center;
-          gap: 9px;
+          gap: 7px;
           max-width: 100%;
           border-radius: 10px;
           padding: 5px 10px 5px 5px;
@@ -235,8 +275,37 @@ function CardDeLink({ link }: { link: LinkIndicacao }) {
         .ind-link-tiktok .ind-link-glifo { color: #7ef0e0; }
         .ind-link-instagram .ind-link-glifo { color: #f7a3d0; }
         .ind-link-drive .ind-link-glifo { color: #8ee6a0; }
+
+        /* Link + botão de baixar dividem a mesma casca. */
+        .ind-link-abrir {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          min-width: 0;
+          text-decoration: none;
+        }
+        .ind-link-baixar {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 26px;
+          height: 26px;
+          flex-shrink: 0;
+          border-radius: 8px;
+          color: rgba(255, 255, 255, 0.72);
+          background: rgba(255, 255, 255, 0.07);
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+          transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), color 0.16s, background-color 0.16s, box-shadow 0.16s;
+        }
+        .ind-link-baixar:hover {
+          transform: translateY(-1px);
+          color: #fff;
+          background: rgba(var(--acento, 251, 191, 36), 0.28);
+          box-shadow: inset 0 0 0 1px rgba(var(--acento, 251, 191, 36), 0.6);
+        }
+        .ind-link-baixar:active { transform: translateY(1px) scale(0.96); }
       `}</style>
-    </a>
+    </span>
   );
 }
 

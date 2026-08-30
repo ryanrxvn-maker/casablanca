@@ -40,9 +40,20 @@ export type PartePraIndicacao = { label: string; text: string };
 export type LinkIndicacao = {
   url: string;
   tipo: 'drive' | 'youtube' | 'tiktok' | 'instagram' | 'imagem' | 'docs' | 'link';
-  /** URL de thumbnail exibível (Drive/YouTube/imagem direta). null = sem
-   *  thumb pública (TikTok/Instagram/genérico) → a UI mostra o glifo. */
+  /** 1ª URL de thumbnail exibível. null = sem thumb pública (TikTok/Instagram
+   *  /genérico) → a UI mostra o glifo da plataforma. */
   thumb: string | null;
+  /** TODOS os candidatos de thumb, em ordem de tentativa: o endpoint de
+   *  thumbnail do Drive falha em alguns arquivos e o `lh3` pega — a UI cai
+   *  pro próximo quando o <img> dá erro (mesma tática do picker de avatar). */
+  thumbs: string[];
+  /** Para onde vai o botão BAIXAR:
+   *   · 'direto'     → href de download direto (Drive `uc?export=download`,
+   *                    imagem) — o navegador baixa.
+   *   · 'downloader' → abre o Downloader do AutoEdit já com a URL colada
+   *                    (YouTube, TikTok, Instagram: precisam do motor).
+   *   · null         → não há como baixar (Docs, link genérico). */
+  baixar: { modo: 'direto' | 'downloader'; href: string } | null;
   rotulo: string;
 };
 
@@ -99,23 +110,50 @@ export function resolverLinkIndicacao(urlBruta: string): LinkIndicacao {
   let host = '';
   try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* rótulo genérico */ }
 
+  const comThumbs = (base: Omit<LinkIndicacao, 'thumb' | 'thumbs'> & { thumbs: string[] }): LinkIndicacao => ({
+    ...base,
+    thumb: base.thumbs[0] || null,
+  });
+  /** O Downloader do AutoEdit já com a URL colada (YouTube/TikTok/Instagram). */
+  const viaDownloader = (u: string) => ({ modo: 'downloader' as const, href: `/tools/downloader?url=${encodeURIComponent(u)}` });
+
   if (/drive\.google\.com|docs\.google\.com\/file/i.test(url)) {
     const id = idDoDrive(url);
-    return { url, tipo: 'drive', thumb: id ? `https://drive.google.com/thumbnail?id=${id}&sz=w400` : null, rotulo: 'Drive' };
+    return comThumbs({
+      url,
+      tipo: 'drive',
+      // dois endpoints: o `thumbnail` cobre a maioria; o `lh3` pega os que
+      // ele recusa (arquivo grande / tipo sem preview gerado ainda).
+      thumbs: id
+        ? [`https://drive.google.com/thumbnail?id=${id}&sz=w400`, `https://lh3.googleusercontent.com/d/${id}=w400`]
+        : [],
+      baixar: id ? { modo: 'direto', href: `https://drive.google.com/uc?export=download&id=${id}` } : null,
+      rotulo: 'Drive',
+    });
   }
   if (/docs\.google\.com\/(document|spreadsheets|presentation)/i.test(url)) {
-    return { url, tipo: 'docs', thumb: null, rotulo: 'Google Docs' };
+    return comThumbs({ url, tipo: 'docs', thumbs: [], baixar: null, rotulo: 'Google Docs' });
   }
   if (/youtube\.com|youtu\.be/i.test(url)) {
     const id = idDoYouTube(url);
-    return { url, tipo: 'youtube', thumb: id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null, rotulo: 'YouTube' };
+    return comThumbs({
+      url,
+      tipo: 'youtube',
+      thumbs: id ? [`https://img.youtube.com/vi/${id}/hqdefault.jpg`, `https://img.youtube.com/vi/${id}/mqdefault.jpg`] : [],
+      baixar: viaDownloader(url),
+      rotulo: 'YouTube',
+    });
   }
-  if (/tiktok\.com/i.test(url)) return { url, tipo: 'tiktok', thumb: null, rotulo: 'TikTok' };
-  if (/instagram\.com/i.test(url)) return { url, tipo: 'instagram', thumb: null, rotulo: 'Instagram' };
+  if (/tiktok\.com/i.test(url)) {
+    return comThumbs({ url, tipo: 'tiktok', thumbs: [], baixar: viaDownloader(url), rotulo: 'TikTok' });
+  }
+  if (/instagram\.com/i.test(url)) {
+    return comThumbs({ url, tipo: 'instagram', thumbs: [], baixar: viaDownloader(url), rotulo: 'Instagram' });
+  }
   if (/\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(url) || /googleusercontent\.com/i.test(url)) {
-    return { url, tipo: 'imagem', thumb: url, rotulo: 'Imagem' };
+    return comThumbs({ url, tipo: 'imagem', thumbs: [url], baixar: { modo: 'direto', href: url }, rotulo: 'Imagem' });
   }
-  return { url, tipo: 'link', thumb: null, rotulo: host || 'Link' };
+  return comThumbs({ url, tipo: 'link', thumbs: [], baixar: null, rotulo: host || 'Link' });
 }
 
 /** Junta os hrefs do HTML do comentário com URLs coladas no texto e resolve

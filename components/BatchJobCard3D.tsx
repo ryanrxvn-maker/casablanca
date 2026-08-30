@@ -585,7 +585,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const showProgress = phase !== 'done' && phase !== 'failed';
 
   return (
-    <li className="list-none">
+    <li className="list-none" id={`batch-card-${props.taskId}`}>
       <div
         onMouseMove={onMouseMove}
         onMouseLeave={onMouseLeave}
