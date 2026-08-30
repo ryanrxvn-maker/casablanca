@@ -13016,36 +13016,27 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             {aberto ? (
                                               <>
                                                 <div className="fixed inset-0 z-30" onClick={() => setVersoesPickerOpen((pp) => ({ ...pp, [a.taskId]: false }))} aria-hidden />
-                                                <div className="absolute right-0 top-full z-40 mt-2 w-[290px] rounded-[14px] border border-line bg-bg-soft p-3 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur">
-                                                  <div className="label-tech mb-2 text-[10px] uppercase tracking-[0.16em] text-text-muted">
-                                                    Quantas versões deste AD
-                                                  </div>
-                                                  <div className="grid grid-cols-5 gap-1.5">
+                                                <div className="vp-pop absolute right-0 top-full z-40 mt-2">
+                                                  <div className="vp-titulo">Quantas versões deste AD</div>
+                                                  <div className="vp-grade">
                                                     {Array.from({ length: MAX_VERSOES }, (_, i) => i + 1).map((n) => (
                                                       <button
                                                         key={n}
                                                         type="button"
                                                         onClick={() => setTotalDeVersoes(a.taskId, n)}
-                                                        className={
-                                                          'mono rounded-[9px] border py-1.5 text-[12px] font-bold transition ' +
-                                                          (n === total
-                                                            ? 'border-red-500/70 bg-red-500 text-white shadow-[0_3px_10px_-3px_rgba(239,68,68,0.8)]'
-                                                            : 'border-line bg-bg/60 text-text-muted hover:border-red-400/50 hover:text-text')
-                                                        }
-                                                        title={n === 1 ? 'Uma versao so (o padrao)' : n + ' versoes deste AD'}
+                                                        className={'vp-num' + (n === total ? ' is-on' : '')}
+                                                        title={n === 1 ? 'Uma versão só (o padrão)' : `${n} versões deste AD`}
                                                       >
                                                         {n}
                                                       </button>
                                                     ))}
                                                   </div>
                                                   {a.mapaVersoes ? (
-                                                    <div className="mt-2.5 rounded-[9px] border border-line bg-bg/50 px-2.5 py-2 text-[10.5px] leading-snug text-text-muted">
-                                                      <span className="font-semibold text-text">Li do doc:</span> {a.mapaVersoes.motivo}
+                                                    <div className="vp-doc">
+                                                      <span className="vp-doc-tag">indicador do docs</span>
+                                                      <span className="vp-doc-txt">{a.mapaVersoes.motivo}</span>
                                                     </div>
                                                   ) : null}
-                                                  <div className="mt-2 text-[10px] leading-snug text-text-muted">
-                                                    Versão sem avatar próprio reaproveita a 1 e <b>não gasta geração</b>.
-                                                  </div>
                                                 </div>
                                               </>
                                             ) : null}
@@ -13703,9 +13694,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       * automático (o aceso não muda — só o tooltip conta). */}
                                                     <div className="ml-auto flex items-center gap-1">
                                                       {(['III', 'IV', 'V'] as const).map((op) => {
-                                                        const efetivo = slot.engine || (on ? 'IV' : 'III');
-                                                        const sel = slot.engine === op;
-                                                        const aceso = sel || (!slot.engine && efetivo === op);
+                                                        // A MESMA regra do runner (motorEfetivo): cena com
+                                                        // gesto SOBE pro IV — inclusive quando o III foi
+                                                        // travado na mao, porque o III descarta motion e o
+                                                        // take voltaria parado. Antes a tela dizia III e o
+                                                        // disparo saia IV: quem estava errado era a tela.
+                                                        const efetivo = motorEfetivo((slot.engine as 'III' | 'IV' | 'V') || 'III', motion);
+                                                        const escolhido = slot.engine === op;
+                                                        const aceso = efetivo === op;
+                                                        const sel = escolhido;
                                                         return (
                                                           <button
                                                             key={op}
@@ -13720,13 +13717,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                                 : 'border-line bg-bg-soft/50 text-text-muted hover:border-violet-400/50')
                                                             }
                                                             title={
-                                                              sel
-                                                                ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
-                                                                : aceso
-                                                                  ? `Automático: sai no ${efetivo} (sem gesto = III; com gesto sobe pro IV). Clica pra travar no ${op}.`
-                                                                  : op === 'III'
-                                                                    ? 'Avatar III — mais barato, NÃO anima gesto'
-                                                                    : `Avatar ${op} — anima o movimento`
+                                                              aceso && on && slot.engine === 'III'
+                                                                ? 'Você travou no III, mas esta cena tem gesto: o III descarta movimento, então ela sai no IV.'
+                                                                : escolhido
+                                                                  ? `Avatar ${op} escolhido na mão — clica de novo pra voltar pro automático`
+                                                                  : aceso
+                                                                    ? `Automático: sai no ${efetivo} (sem gesto = III; com gesto sobe pro IV). Clica pra travar no ${op}.`
+                                                                    : op === 'III'
+                                                                      ? 'Avatar III — mais barato, NÃO anima gesto'
+                                                                      : `Avatar ${op} — anima o movimento`
                                                             }
                                                           >
                                                             {op}
@@ -13760,7 +13759,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               const info = akey ? roleAudioInfo[akey] : undefined;
                                               const dur = slot.audioDur ?? info?.duracao ?? null;
                                               const curto = dur != null && dur > 0 && dur <= 30;
-                                              const motorAudio = slot.engine || ((slot.motionPrompt || '').trim() ? 'IV' : 'III');
+                                              // mesma regra do runner: gesto sobe pro IV (o III descarta)
+                                              const motorAudio = motorEfetivo((slot.engine as 'III' | 'IV' | 'V') || 'III', slot.motionPrompt);
                                               const takeUnicoAudio = motorAudio !== 'III' || curto;
                                               const temVozPraMirror = !!(slot.voiceOverride?.id || slot.avatarVoiceId);
                                               const diffAberto = !!(akey && audioDiffOpen[akey]);
@@ -13822,7 +13822,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         <div className="flex shrink-0 items-center gap-1">
                                                           {(['III', 'IV', 'V'] as const).map((op) => {
                                                             const sel = slot.engine === op;
-                                                            const aceso = sel || (!slot.engine && motorAudio === op);
+                                                            const aceso = motorAudio === op;
                                                             return (
                                                               <button
                                                                 key={op}

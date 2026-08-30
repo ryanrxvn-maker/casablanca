@@ -167,9 +167,12 @@ export function EditPartModal({
               * trava na mão; clicar de novo volta pro automático. */}
             <div className="ml-auto flex items-center gap-1">
               {(['III', 'IV', 'V'] as const).map((op) => {
-                const efetivo = engine !== 'auto' ? engine : (temGesto ? 'IV' : 'III');
+                // MESMA regra do runner (motorEfetivo): com gesto o III sobe pro
+                // IV, inclusive travado na mão — senão a tela mente.
+                const base: 'III' | 'IV' | 'V' = engine === 'auto' ? 'III' : engine;
+                const efetivo = temGesto && base === 'III' ? 'IV' : base;
                 const sel = engine === op;
-                const aceso = sel || (engine === 'auto' && efetivo === op);
+                const aceso = efetivo === op;
                 return (
                   <button
                     key={op}

@@ -2849,3 +2849,82 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
   color: #0d0a16;
   background: linear-gradient(150deg, #ddd6fe, #a78bfa);
 }
+
+/* ═══════ Seletor "+ versões" (quantas versões deste AD) — 30.08 ═══════
+   Peça escura própria, na gramática dos outros painéis: números grandes,
+   grade respirada, o escolhido em vermelho cheio. */
+.vp-pop {
+  width: 300px;
+  border-radius: 16px;
+  padding: 13px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(255, 90, 90, 0.16), transparent 55%),
+    linear-gradient(180deg, #16131a 0%, #0e0d12 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 90, 90, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 26px 60px -22px rgba(0, 0, 0, 0.95);
+}
+.vp-titulo {
+  margin-bottom: 10px;
+  font-family: var(--font-tech), system-ui;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.92);
+}
+.vp-grade {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.vp-num {
+  height: 38px;
+  border-radius: 11px;
+  font-family: var(--font-mono), monospace;
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), color 0.16s, background-color 0.16s, box-shadow 0.16s;
+}
+.vp-num:hover:not(.is-on) {
+  transform: translateY(-1px);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(255, 120, 120, 0.45);
+}
+.vp-num.is-on {
+  color: #fff;
+  background: linear-gradient(160deg, #ff6b6b 0%, #e11d1d 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 6px 16px -6px rgba(225, 29, 29, 0.9);
+}
+.vp-doc {
+  display: grid;
+  gap: 4px;
+  margin-top: 11px;
+  border-radius: 11px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.vp-doc-tag {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0d0b04;
+  background: linear-gradient(150deg, #fde68a, #f59e0b);
+}
+.vp-doc-txt {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.86);
+}

@@ -614,7 +614,9 @@ export function RedispatchPanel({
                     <div className="rdp-seg flex items-center gap-0.5 rounded-full p-[3px]">
                       {(['III', 'IV', 'V'] as const).map((op) => {
                         const sel = motor === op;
-                        const aceso = sel || (motor === 'auto' && saida === op);
+                        // `saida` já é o motorDeSaida (III com gesto sobe pro IV):
+                        // o aceso mostra o que VAI SAIR, não o que foi clicado.
+                        const aceso = saida === op;
                         return (
                           <button
                             key={op}

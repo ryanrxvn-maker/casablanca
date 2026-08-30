@@ -94,7 +94,8 @@ function Conteudo() {
     { taskId: 't1-yt', n: 2, nome: 'AD03GL - PRPB12 · YouTube · @joshuagonzalezmd', fase: 'rendering', prontos: 5, total: 8 },
     { taskId: 't1-v3', n: 3, nome: 'AD03GL - PRPB12 · Avatar 3 · @tiagorochaog', fase: 'queued', prontos: 0, total: 8 },
   ]);
-  const motorAudio = engine || 'III';
+  const gestoDemo = '';
+  const motorAudio: 'III' | 'IV' | 'V' = (engine || 'III') === 'III' && gestoDemo ? 'IV' : (engine || 'III');
   const dur = 145;
   const curto = dur <= 30;
   const takeUnicoAudio = motorAudio !== 'III' || curto;
@@ -131,25 +132,18 @@ function Conteudo() {
             {verPicker ? (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setVerPicker(false)} aria-hidden />
-                <div className="absolute right-0 top-full z-40 mt-2 w-[290px] rounded-[14px] border border-line bg-bg-soft p-3 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur">
-                  <div className="label-tech mb-2 text-[10px] uppercase tracking-[0.16em] text-text-muted">Quantas versões deste AD</div>
-                  <div className="grid grid-cols-5 gap-1.5">
+                <div className="vp-pop absolute right-0 top-full z-40 mt-2">
+                  <div className="vp-titulo">Quantas versões deste AD</div>
+                  <div className="vp-grade">
                     {Array.from({ length: MAX_VERSOES }, (_, i) => i + 1).map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setTotalVersoes(n)}
-                        className={'mono rounded-[9px] border py-1.5 text-[12px] font-bold transition ' + (n === totalVersoes ? 'border-red-500/70 bg-red-500 text-white shadow-[0_3px_10px_-3px_rgba(239,68,68,0.8)]' : 'border-line bg-bg/60 text-text-muted hover:border-red-400/50 hover:text-text')}
-                      >
+                      <button key={n} type="button" onClick={() => setTotalVersoes(n)} className={'vp-num' + (n === totalVersoes ? ' is-on' : '')}>
                         {n}
                       </button>
                     ))}
                   </div>
-                  <div className="mt-2.5 rounded-[9px] border border-line bg-bg/50 px-2.5 py-2 text-[10.5px] leading-snug text-text-muted">
-                    <span className="font-semibold text-text">Li do doc:</span> {mapaDemo.motivo}
-                  </div>
-                  <div className="mt-2 text-[10px] leading-snug text-text-muted">
-                    Versão sem avatar próprio reaproveita a 1 e <b>não gasta geração</b>.
+                  <div className="vp-doc">
+                    <span className="vp-doc-tag">indicador do docs</span>
+                    <span className="vp-doc-txt">{mapaDemo.motivo}</span>
                   </div>
                 </div>
               </>
