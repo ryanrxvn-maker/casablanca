@@ -2655,61 +2655,21 @@ function ClickUpPilotInner() {
           //     vira indicação DA TASK (botão dourado no topo do card).
           // Validado ao vivo (29.08) no doc ADGL-PRPB12: comentário no hook
           // sob "AD02G1GL - PRPB12" com "Doutor:" acima → slot do Doutor.
-          const indicacoesDoc: string[] = [];
+          let indicacoesDoc: string[] = [];
           try {
             const docComments = docR.comments || [];
             if (docComments.length) {
-              const linhasDoDoc = (docR.text || '').split(/\r?\n/);
-              const numDo = (ad: string | null | undefined) => {
-                const m = /^AD0*(\d+)/i.exec(String(ad || ''));
-                return m ? m[1] : null;
-              };
-              const numTask = numDo(baseAdId);
-              const headingRe = /^\s*(AD\d+[A-Z0-9]*)\s*[-–—]/i;
-              for (const c of docComments) {
-                const body = (c.body || '').trim();
-                if (!body || !c.marker) continue;
-                const tag = `[${c.marker}]`;
-                const idxMarcador = linhasDoDoc.findIndex((l) => l.includes(tag));
-                if (idxMarcador < 0) continue;
-                // (1) AD dono = heading mais próximo acima do marcador
-                let adDono: string | null = null;
-                for (let k = idxMarcador; k >= 0; k--) {
-                  const hm = headingRe.exec(linhasDoDoc[k]);
-                  if (hm) { adDono = hm[1].toUpperCase(); break; }
-                }
-                if (!numTask || numDo(adDono) !== numTask) continue; // outro AD
-                // (2) avatar dono
-                let dono: RoleSlot | null = null;
-                const ctxNorm = normalizeForMatch(c.context || '');
-                const bodyNorm = normalizeForMatch(body);
-                for (const slot of roleSlots) {
-                  const uNorm = normalizeForMatch(slot.username || '');
-                  if (uNorm && uNorm.length >= 4 && (ctxNorm.includes(uNorm) || bodyNorm.includes(uNorm))) { dono = slot; break; }
-                }
-                if (!dono) {
-                  // papel da linha "Role:" mais próxima acima do marcador
-                  // (parando se esbarrar noutro heading de AD)
-                  for (let k = idxMarcador; k >= 0 && k > idxMarcador - 25; k--) {
-                    if (k < idxMarcador && headingRe.test(linhasDoDoc[k])) break;
-                    const rm = /^\s*([\p{L}\s]{2,30}?)\s*:/u.exec(linhasDoDoc[k]);
-                    if (!rm) continue;
-                    const rNorm = normalizeForMatch(rm[1]);
-                    const achado = roleSlots.find((s) => {
-                      const sNorm = normalizeForMatch(s.role || '');
-                      return sNorm && rNorm && (sNorm === rNorm || sNorm.includes(rNorm) || rNorm.includes(sNorm));
-                    });
-                    if (achado) { dono = achado; break; }
-                  }
-                }
-                if (!dono && roleSlots.length === 1) dono = roleSlots[0];
-                if (dono) {
-                  dono.indicacoes = dono.indicacoes || [];
-                  if (!dono.indicacoes.includes(body)) dono.indicacoes.push(body);
-                } else if (!indicacoesDoc.includes(body)) {
-                  indicacoesDoc.push(body); // (3) indicação da task
-                }
-              }
+              const { associarIndicacoes } = await import('@/lib/pilot-indicacoes');
+              const resultado = associarIndicacoes({
+                docText: docR.text || '',
+                baseAdId,
+                comments: docComments,
+                slots: roleSlots.map((s) => ({ role: s.role, username: s.username || null })),
+              });
+              resultado.porSlot.forEach((inds, si) => {
+                if (inds.length) roleSlots[si].indicacoes = inds;
+              });
+              indicacoesDoc = resultado.daTask;
               const comIndicacao = roleSlots.filter((s) => s.indicacoes?.length).length;
               if (comIndicacao || indicacoesDoc.length) {
                 console.log(`[clickup-pilot] indicações do copy em ${task.name}: ${comIndicacao} avatar(es) + ${indicacoesDoc.length} da task (de ${docComments.length} comentário(s) no doc)`);

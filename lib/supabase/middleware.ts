@@ -157,7 +157,10 @@ export async function updateSession(request: NextRequest) {
     pathname === '/sitemap.xml' ||
     pathname === '/llms.txt' ||
     pathname.startsWith('/opengraph-image') ||
-    pathname.startsWith('/api/');
+    pathname.startsWith('/api/') ||
+    // Previews DEV-ONLY (/dev/*): fora do dev a própria página dá 404, e
+    // aqui nem passa — nunca vira rota pública em produção.
+    (process.env.NODE_ENV === 'development' && pathname.startsWith('/dev/'));
 
   if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
