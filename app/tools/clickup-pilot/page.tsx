@@ -11589,57 +11589,61 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </span>
                                   ) : null}
                                 </span>
-                                {/* INDICAÇÃO DE COPY (botão AZUL): comentário ancorado no
-                                  * texto do hook/body — mostra o trecho comentado e em
-                                  * qual take caiu. Não é o indicador de avatar. */}
-                                {(a.indicacoesCopy || []).length > 0 ? (
+                                {/* Grupo da direita — SEM filho solto no justify-between
+                                  * (o botão azul ficava flutuando no meio do header). */}
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                  {/* INDICAÇÃO DE COPY (botão AZUL): comentário ancorado no
+                                    * texto do hook/body — mostra o trecho comentado e em
+                                    * qual take caiu. Não é o indicador de avatar. */}
+                                  {(a.indicacoesCopy || []).length > 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:copy`]: !prev[`${a.taskId}:copy`] }))}
+                                      aria-expanded={!!indicacaoOpen[`${a.taskId}:copy`]}
+                                      className={'pilot-ind-btn is-copy shrink-0' + (indicacaoOpen[`${a.taskId}:copy`] ? ' is-open' : '')}
+                                      title={`Comentário do copy no texto do AD (${(a.indicacoesCopy || []).length}) — clica pra ver o trecho e o take`}
+                                    >
+                                      <span className="pilot-ind-halo" aria-hidden />
+                                      {/* balão de comentário — o comentário é NO TEXTO */}
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                        <path d="M8 9h.01M12 9h.01M16 9h.01" />
+                                      </svg>
+                                      {(a.indicacoesCopy || []).length > 1 ? (
+                                        <span className="pilot-ind-count">{(a.indicacoesCopy || []).length}</span>
+                                      ) : null}
+                                    </button>
+                                  ) : null}
+                                  {/* Indicação de AVATAR sem dono claro (raro):
+                                    * botão 3D dourado no topo do card da task. */}
+                                  {(a.indicacoesDoc || []).length > 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:task`]: !prev[`${a.taskId}:task`] }))}
+                                      aria-expanded={!!indicacaoOpen[`${a.taskId}:task`]}
+                                      className={'pilot-ind-btn shrink-0' + (indicacaoOpen[`${a.taskId}:task`] ? ' is-open' : '')}
+                                      title={`Indicação do copy neste AD (${(a.indicacoesDoc || []).length}) — clica pra ver`}
+                                    >
+                                      <span className="pilot-ind-halo" aria-hidden />
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                        <path d="m3 11 14-6v14L3 13v-2z" />
+                                        <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                                        <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                                      </svg>
+                                      {(a.indicacoesDoc || []).length > 1 ? (
+                                        <span className="pilot-ind-count">{(a.indicacoesDoc || []).length}</span>
+                                      ) : null}
+                                    </button>
+                                  ) : null}
                                   <button
                                     type="button"
-                                    onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:copy`]: !prev[`${a.taskId}:copy`] }))}
-                                    aria-expanded={!!indicacaoOpen[`${a.taskId}:copy`]}
-                                    className={'pilot-ind-btn is-copy shrink-0' + (indicacaoOpen[`${a.taskId}:copy`] ? ' is-open' : '')}
-                                    title={`Comentário do copy no texto do AD (${(a.indicacoesCopy || []).length}) — clica pra ver o trecho e o take`}
+                                    onClick={() => removeTaskFromAnalysis(a.taskId)}
+                                    className="mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
+                                    title="Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois."
                                   >
-                                    <span className="pilot-ind-halo" aria-hidden />
-                                    {/* balão de comentário com aspas — o comentário é NO TEXTO */}
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                      <path d="M8 9h.01M12 9h.01M16 9h.01" />
-                                    </svg>
-                                    {(a.indicacoesCopy || []).length > 1 ? (
-                                      <span className="pilot-ind-count">{(a.indicacoesCopy || []).length}</span>
-                                    ) : null}
+                                    × Remover
                                   </button>
-                                ) : null}
-                                {/* Indicação de AVATAR sem dono claro (raro):
-                                  * botão 3D dourado no topo do card da task. */}
-                                {(a.indicacoesDoc || []).length > 0 ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:task`]: !prev[`${a.taskId}:task`] }))}
-                                    aria-expanded={!!indicacaoOpen[`${a.taskId}:task`]}
-                                    className={'pilot-ind-btn shrink-0' + (indicacaoOpen[`${a.taskId}:task`] ? ' is-open' : '')}
-                                    title={`Indicação do copy neste AD (${(a.indicacoesDoc || []).length}) — clica pra ver`}
-                                  >
-                                    <span className="pilot-ind-halo" aria-hidden />
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                      <path d="m3 11 14-6v14L3 13v-2z" />
-                                      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-                                      <path d="M21 8.5c.7.8.7 5.2 0 6" />
-                                    </svg>
-                                    {(a.indicacoesDoc || []).length > 1 ? (
-                                      <span className="pilot-ind-count">{(a.indicacoesDoc || []).length}</span>
-                                    ) : null}
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  onClick={() => removeTaskFromAnalysis(a.taskId)}
-                                  className="mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
-                                  title="Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois."
-                                >
-                                  × Remover
-                                </button>
+                                </div>
                               </div>
                               {/* Painel da indicação de COPY — abre pelo botão AZUL. Cada
                                 * linha: take onde caiu + trecho comentado + a nota. */}
@@ -12738,6 +12742,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     ) : null}
                                     {a.roleSlots.map((slot, sIdx) => {
                                       const partsCount = (a.partTemplates || []).filter(p => p.matchByRole === slot.role.toLowerCase()).length;
+                                      // Comentários de COPY nos takes DESTE avatar — botão azul
+                                      // do lado do olhinho (pedido 29.08).
+                                      const copyIndsDoSlot = (a.indicacoesCopy || []).filter((ic) => {
+                                        if (!ic.take) return false;
+                                        const pt = (a.partTemplates || []).find((p) => p.label === ic.take);
+                                        return pt ? ownerSlotIdx(a, pt) === sIdx : false;
+                                      });
                                       const candFull = slot.avatarId ? avatarCandidates.find(c => c.id === slot.avatarId) : null;
                                       const selected: AvatarOption | null = candFull ? {
                                         id: candFull.id,
@@ -12793,47 +12804,101 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               * onde matchByRole === slot.role.toLowerCase(). Permite confirmar
                                               * o que cada avatar vai falar ANTES de disparar. Critico pra pegar
                                               * leaks de indicativo (texto vermelho) que escapou do parser. */}
-                                            {/* BOTÃO 3D DE INDICAÇÃO (29.08) — só aparece quando o copy
-                                              * deixou COMENTÁRIO no Docs ancorado neste avatar ("avatar
-                                              * segurando algo", "ambiente X"). Ícone-only, animado;
-                                              * clique abre o painel com a(s) indicação(ões). */}
-                                            {(slot.indicacoes || []).length > 0 ? (
+                                            {/* Ações do slot num grupo só (ml-auto aqui, nunca em
+                                              * filho solto): [azul copy?] [dourado avatar?] [👁] [×]. */}
+                                            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                                              {/* BOTÃO AZUL — comentário no TEXTO dos takes deste
+                                                * avatar (indicação de COPY). Do lado do olhinho,
+                                                * como o Silas pediu (29.08). */}
+                                              {copyIndsDoSlot.length > 0 ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}:copy`]: !prev[`${a.taskId}:${sIdx}:copy`] }))}
+                                                  aria-expanded={!!indicacaoOpen[`${a.taskId}:${sIdx}:copy`]}
+                                                  className={'pilot-ind-btn is-copy shrink-0' + (indicacaoOpen[`${a.taskId}:${sIdx}:copy`] ? ' is-open' : '')}
+                                                  title={`Comentário do copy no texto deste avatar (${copyIndsDoSlot.length}) — clica pra ver o trecho e o take`}
+                                                >
+                                                  <span className="pilot-ind-halo" aria-hidden />
+                                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                                    <path d="M8 9h.01M12 9h.01M16 9h.01" />
+                                                  </svg>
+                                                  {copyIndsDoSlot.length > 1 ? (
+                                                    <span className="pilot-ind-count">{copyIndsDoSlot.length}</span>
+                                                  ) : null}
+                                                </button>
+                                              ) : null}
+                                              {/* BOTÃO DOURADO (29.08) — comentário ancorado NO AVATAR
+                                                * ("avatar segurando algo", "ambiente X"). */}
+                                              {(slot.indicacoes || []).length > 0 ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
+                                                  aria-expanded={!!indicacaoOpen[`${a.taskId}:${sIdx}`]}
+                                                  className={'pilot-ind-btn shrink-0' + (indicacaoOpen[`${a.taskId}:${sIdx}`] ? ' is-open' : '')}
+                                                  title={`Indicação do copy pra este avatar (${(slot.indicacoes || []).length}) — clica pra ver`}
+                                                >
+                                                  <span className="pilot-ind-halo" aria-hidden />
+                                                  {/* megafone do diretor — traço fino, mesmo idioma dos outros ícones */}
+                                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                    <path d="m3 11 14-6v14L3 13v-2z" />
+                                                    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                                                    <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                                                  </svg>
+                                                  {(slot.indicacoes || []).length > 1 ? (
+                                                    <span className="pilot-ind-count">{(slot.indicacoes || []).length}</span>
+                                                  ) : null}
+                                                </button>
+                                              ) : null}
                                               <button
                                                 type="button"
-                                                onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
-                                                aria-expanded={!!indicacaoOpen[`${a.taskId}:${sIdx}`]}
-                                                className={'pilot-ind-btn ml-auto shrink-0' + (indicacaoOpen[`${a.taskId}:${sIdx}`] ? ' is-open' : '')}
-                                                title={`Indicação do copy pra este avatar (${(slot.indicacoes || []).length}) — clica pra ver`}
+                                                onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
+                                                className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 hover:bg-cyan-500/25 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] active:shadow-[0_1px_0_rgba(0,0,0,0.4)]"
+                                                title="Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)"
                                               >
-                                                <span className="pilot-ind-halo" aria-hidden />
-                                                {/* megafone do diretor — traço fino, mesmo idioma dos outros ícones */}
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                  <path d="m3 11 14-6v14L3 13v-2z" />
-                                                  <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-                                                  <path d="M21 8.5c.7.8.7 5.2 0 6" />
-                                                </svg>
-                                                {(slot.indicacoes || []).length > 1 ? (
-                                                  <span className="pilot-ind-count">{(slot.indicacoes || []).length}</span>
-                                                ) : null}
+                                                👁
                                               </button>
-                                            ) : null}
-                                            <button
-                                              type="button"
-                                              onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
-                                              className={((slot.indicacoes || []).length > 0 ? '' : 'ml-auto ') + 'rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 hover:bg-cyan-500/25 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] active:shadow-[0_1px_0_rgba(0,0,0,0.4)]'}
-                                              title="Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)"
-                                            >
-                                              👁
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => removeRoleSlot(a.taskId, sIdx)}
-                                              className="rounded-full px-1.5 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
-                                              title="Remover este slot"
-                                            >
-                                              ×
-                                            </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => removeRoleSlot(a.taskId, sIdx)}
+                                                className="rounded-full px-1.5 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
+                                                title="Remover este slot"
+                                              >
+                                                ×
+                                              </button>
+                                            </div>
                                           </div>
+                                          {/* PAINEL AZUL — comentário no TEXTO dos takes deste avatar. */}
+                                          {indicacaoOpen[`${a.taskId}:${sIdx}:copy`] && copyIndsDoSlot.length > 0 ? (
+                                            <div className="mt-2 rounded-[12px] border border-blue-400/40 bg-gradient-to-br from-blue-400/[0.10] via-blue-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                              <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500">
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                                </svg>
+                                                Comentário no texto · copy do Docs
+                                              </div>
+                                              <ul className="grid gap-1.5">
+                                                {copyIndsDoSlot.map((ind, k) => (
+                                                  <li key={k} className="rounded-[8px] border border-blue-400/30 bg-bg/60 px-2.5 py-2">
+                                                    <div className="flex flex-wrap items-baseline gap-1.5">
+                                                      {ind.take ? (
+                                                        <span className="mono shrink-0 rounded-full border border-blue-400/45 bg-blue-500/15 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest text-blue-500">
+                                                          {ind.take}
+                                                        </span>
+                                                      ) : null}
+                                                      <span className="min-w-0 text-[11px] italic leading-snug text-text-muted">
+                                                        “{ind.trecho.length > 110 ? ind.trecho.slice(0, 110) + '…' : ind.trecho}”
+                                                      </span>
+                                                    </div>
+                                                    <div className="mt-1 text-[12px] leading-relaxed text-text">{ind.nota}</div>
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                              <div className="mt-1.5 text-[10px] text-text-muted">
+                                                É o comentário que o copy deixou nesse trecho da fala.
+                                              </div>
+                                            </div>
+                                          ) : null}
                                           {/* PAINEL DA INDICAÇÃO DO COPY — abre pelo botão 3D dourado. */}
                                           {indicacaoOpen[`${a.taskId}:${sIdx}`] && (slot.indicacoes || []).length > 0 ? (
                                             <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
