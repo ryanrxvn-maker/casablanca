@@ -18,14 +18,17 @@ import WHATSAPP_CALL from './model-whatsapp-call';
 import IGPOST from './model-igpost';
 import TWEET from './model-tweet';
 import COMMENTS from './model-comments';
+import TIKTOK_REPLY from './model-tiktok-reply';
 import NOTIF from './model-notif';
 import LIVE from './model-live';
+import ZOOM from './model-zoom';
 import NEWS_CNN from './model-news-cnn';
 import NEWS_CNNBR from './model-news-cnnbr';
 import NEWS_BBC from './model-news-bbc';
 import NEWS_FOX from './model-news-fox';
 import NEWS_MSNBC from './model-news-msnbc';
 import NEWS_CNBC from './model-news-cnbc';
+import NEWS_CBS from './model-news-cbs';
 import NEWS_GLOBAL from './model-news-global';
 import NEWS_NNN from './model-news-nnn';
 import NEWS_TVN24 from './model-news-tvn24';
@@ -52,6 +55,7 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'post', label: 'Posts' },
   { id: 'notif', label: 'Notificações' },
   { id: 'live', label: 'Lives' },
+  { id: 'meet', label: 'Reuniões' },
   { id: 'news', label: 'Telejornais' },
   { id: 'sites', label: 'Sites de notícia' },
 ];
@@ -60,6 +64,7 @@ export const MODELS: FakeModel[] = [
   // Stickers de Story
   ...STORY_MODELS,
   ...STORY_EXTRA,
+  ...TIKTOK_REPLY,
   // Conversas
   ...IGDM,
   ...WHATSAPP,
@@ -72,6 +77,8 @@ export const MODELS: FakeModel[] = [
   ...NOTIF,
   // Lives (TikTok / Instagram)
   ...LIVE,
+  // Reuniões (Zoom)
+  ...ZOOM,
   // Notícias (telejornais) — agrupados por emissora
   // Internacionais
   ...NEWS_CNN,
@@ -79,6 +86,7 @@ export const MODELS: FakeModel[] = [
   ...NEWS_FOX,
   ...NEWS_MSNBC,
   ...NEWS_CNBC,
+  ...NEWS_CBS,
   ...NEWS_GLOBAL,
   ...NEWS_NNN,
   ...NEWS_TVN24,

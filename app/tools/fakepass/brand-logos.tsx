@@ -174,6 +174,29 @@ function ReutersMark({ size }: { size: number }) {
   );
 }
 
+function ZoomMark({ size }: { size: number }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: size * 0.26, background: '#0e72ed', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 24 24" fill="#fff" aria-hidden>
+        <rect x="2.5" y="7" width="13" height="10" rx="3" />
+        <path d="M16.5 11l5-3v8l-5-3z" />
+      </svg>
+    </div>
+  );
+}
+
+function CbsMark({ size }: { size: number }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: size * 0.22, background: '#fff', border: '1px solid #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <svg width={size * 0.78} height={size * 0.5} viewBox="0 0 100 60" aria-hidden>
+        <path d="M50 1.5 C 71.5 1.5 88.5 13.5 98.5 30 C 88.5 46.5 71.5 58.5 50 58.5 C 28.5 58.5 11.5 46.5 1.5 30 C 11.5 13.5 28.5 1.5 50 1.5 Z" fill="#000" />
+        <circle cx="50" cy="30" r="20.5" fill="#fff" />
+        <circle cx="50" cy="30" r="13" fill="#000" />
+      </svg>
+    </div>
+  );
+}
+
 /* ─────────────── mark por marca ─────────────── */
 
 export function BrandMark({ brand, size = 26 }: { brand: string; size?: number }) {
@@ -193,6 +216,10 @@ export function BrandMark({ brand, size = 26 }: { brand: string; size?: number }
       return <Chip bg="#cc0000" t="CNN" italic size={size} radius={4} />;
     case 'bbc':
       return <BbcMark size={size} />;
+    case 'cbs':
+      return <CbsMark size={size} />;
+    case 'zoom':
+      return <ZoomMark size={size} />;
     case 'fox':
       return <Chip bg="#0a2342" t="FOX" size={size} radius={4} />;
     case 'msnbc':
@@ -240,6 +267,7 @@ const GROUP_TO_BRAND: Record<string, string> = {
   WhatsApp: 'whatsapp',
   CNN: 'cnn',
   BBC: 'bbc',
+  'CBS News': 'cbs',
   'Fox News': 'fox',
   MSNBC: 'msnbc',
   CNBC: 'cnbc',
@@ -267,7 +295,8 @@ export function brandForModel(m: FakeModel): string {
   if (m.id === 'whatsapp') return 'whatsapp';
   if (m.id === 'tweet') return 'x';
   if (m.id === 'notif') return 'notif';
-  if (m.id === 'live-tiktok') return 'tiktok';
+  if (m.id === 'live-tiktok' || m.id === 'tiktok-reply') return 'tiktok';
+  if (m.id.startsWith('zoom-')) return 'zoom';
   if (m.id.startsWith('ig-') || m.id === 'comments' || m.id === 'live-instagram') return 'instagram';
   return '';
 }
