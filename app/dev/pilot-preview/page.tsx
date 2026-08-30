@@ -14,6 +14,7 @@ import { useState } from 'react';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
+import { EditPartModal } from '@/components/EditPartModal';
 import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
@@ -98,6 +99,7 @@ function Conteudo() {
     { taskId: 't1-yt', n: 2, nome: 'AD03GL - PRPB12 · YouTube · @joshuagonzalezmd', fase: 'rendering', prontos: 5, total: 8 },
     { taskId: 't1-v3', n: 3, nome: 'AD03GL - PRPB12 · Avatar 3 · @tiagorochaog', fase: 'queued', prontos: 0, total: 8 },
   ]);
+  const [modalAberto, setModalAberto] = useState(false);
   const [frameYt, setFrameYt] = useState<string | null>(FRAME_FAKE);
   const [gestoDemo, setGestoDemo] = useState('mexe a gelatina 2x no começo e segue falando');
   const motorAudio: 'III' | 'IV' | 'V' = (engine || 'III') === 'III' && gestoDemo ? 'IV' : (engine || 'III');
@@ -166,6 +168,32 @@ function Conteudo() {
         </div>
       </section>
 
+
+      {/* ══════════ 0.45 EDITAR TAKE (caixa do gesto acesa) ══════════ */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <button
+          type="button"
+          onClick={() => setModalAberto(true)}
+          className="rounded-[10px] border border-line px-3 py-1.5 text-[11px] text-text hover:border-white/30"
+        >
+          abrir o modal de editar take
+        </button>
+      </section>
+      {modalAberto ? (
+        <EditPartModal
+          input={{
+            label: 'BODY 1',
+            text: 'A maioria das pessoas usa azeite do jeito errado.',
+            avatarName: 'Confident Business Executive',
+            voiceId: 'v1',
+            voiceName: 'drromaoyoussef',
+            engine: 'III',
+            motionPrompt: 'despeja o azeite na colher no comeco e segue falando',
+          }}
+          onClose={() => setModalAberto(false)}
+          onRegenerate={() => setModalAberto(false)}
+        />
+      ) : null}
 
       {/* ══════════ 0.4 FRAME POR VERSAO (modo imagem) ══════════ */}
       <section className="grid gap-2.5 rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">

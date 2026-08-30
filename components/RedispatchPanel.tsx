@@ -6,6 +6,7 @@ import { CompactVoiceSelector } from './CompactVoiceSelector';
 import type { AvatarOption } from './HeyGenAvatarPicker';
 import { IndicacaoPanel } from './IndicacaoPanel';
 import type { IndicacaoAvatar, LinkIndicacao } from '@/lib/pilot-indicacoes';
+import { motorEfetivo } from '@/lib/heygen-motion-motor';
 
 /**
  * RedispatchPanel — a ANÁLISE daquele disparo, reaberta DENTRO do card da
@@ -78,9 +79,7 @@ type Motor = 'auto' | 'III' | 'IV' | 'V';
 /** Motor que o take vai usar de fato: o III DESCARTA gesto, então cena com
  *  movimento sobe pro IV sozinha (mesma regra do runner e do EditPartModal). */
 function motorDeSaida(engine: Motor, motion: string | null | undefined): 'III' | 'IV' | 'V' {
-  const temGesto = !!(motion || '').trim();
-  if (engine !== 'auto') return engine === 'III' && temGesto ? 'IV' : engine;
-  return temGesto ? 'IV' : 'III';
+  return motorEfetivo(engine === 'auto' ? 'III' : engine, motion);
 }
 
 function mesmaParte(a: RedispatchPart, b: RedispatchPart): boolean {

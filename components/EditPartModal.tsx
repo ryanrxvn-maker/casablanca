@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { motorEfetivo } from '@/lib/heygen-motion-motor';
 
 /**
  * EditPartModal — modal pra re-gerar 1 take especifico do batch HeyGen
@@ -61,7 +62,10 @@ export function EditPartModal({
   const [motion, setMotion] = useState(input.motionPrompt || '');
   const temGesto = motion.trim().length > 0;
   // o III DESCARTA motion: cena com gesto sobe pro IV sozinha
-  const motorSaida = engine !== 'auto' ? engine : (temGesto ? 'IV' : 'III');
+  // O motor que VAI SAIR e' o do runner, nao o que esta' selecionado: gesto
+  // escrito sobe pro IV mesmo com o III travado na mao (o III descarta
+  // motion e devolveria um take PARADO). Uma regra so', em lib/.
+  const motorSaida = motorEfetivo(engine === 'auto' ? 'III' : engine, motion);
   const hasChange = text.trim() !== input.text.trim()
     || engine !== (input.engine || 'auto')
     || motion.trim() !== (input.motionPrompt || '').trim();
@@ -170,7 +174,7 @@ export function EditPartModal({
                 // MESMA regra do runner (motorEfetivo): com gesto o III sobe pro
                 // IV, inclusive travado na mão — senão a tela mente.
                 const base: 'III' | 'IV' | 'V' = engine === 'auto' ? 'III' : engine;
-                const efetivo = temGesto && base === 'III' ? 'IV' : base;
+                const efetivo = motorEfetivo(base, motion);
                 const sel = engine === op;
                 const aceso = efetivo === op;
                 return (
