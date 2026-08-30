@@ -344,94 +344,128 @@ export function RedispatchPanel({
          *  @username — na gramática deste painel. Só aparece quando o replan
          *  gravou o briefing (disparos a partir de 29.08). */}
         {(() => {
-          const papeis: Array<{ role: string; username: string | null; fileId: string | null; indicacoes: IndicacaoAvatar[] }> = [];
+          // A seção NUNCA fica vazia (revisão 30.08): quando o replan é antigo
+          // e não tem role/username/briefingFileId, ela mostra o AVATAR que o
+          // disparo usou — com a thumb resolvida na biblioteca do HeyGen.
+          type Papel = {
+            role: string;
+            username: string | null;
+            fileId: string | null;
+            avatarNome: string | null;
+            avatarThumb: string | null;
+            indicacoes: IndicacaoAvatar[];
+          };
+          const papeis: Papel[] = [];
           const vistos = new Map<string, number>();
           for (const p of partesOriginais) {
             const role = (p.role || '').trim();
-            if (!role && !p.briefingFileId) continue;
-            const k = `${role.toLowerCase()}|${p.username || ''}|${p.briefingFileId || ''}`;
+            const av = avatarDaParte(p);
+            // chave: papel do doc quando existe; senão o avatar do disparo
+            const k = role || p.username || p.briefingFileId
+              ? `${role.toLowerCase()}|${p.username || ''}|${p.briefingFileId || ''}`
+              : `av|${p.avatarId || 'sem'}`;
             const idxExistente = vistos.get(k);
             if (idxExistente !== undefined) {
               for (const ind of p.indicacoes || []) {
-                if (!papeis[idxExistente].indicacoes.some((x) => x.nota === ind.nota)) papeis[idxExistente].indicacoes.push(ind);
+                if (!papeis[idxExistente].indicacoes.some((x) => x.nota === ind.nota)) {
+                  papeis[idxExistente].indicacoes.push(ind);
+                }
               }
               continue;
             }
             vistos.set(k, papeis.length);
             papeis.push({
-              role: role || 'Avatar',
+              role: role || 'Avatar do disparo',
               username: p.username || null,
               fileId: p.briefingFileId || null,
+              avatarNome: av?.name || p.avatarName || null,
+              avatarThumb: av?.thumb || p.avatarThumb || null,
               indicacoes: [...(p.indicacoes || [])],
             });
           }
           if (papeis.length === 0) return null;
+          const semBriefing = papeis.every((pp) => !pp.fileId && !pp.username);
           return (
             <section className="rdp-bloco mt-3.5 rounded-[13px] p-3">
-              <Campo>O que o copy pediu no Docs</Campo>
+              <Campo
+                aside={
+                  semBriefing ? (
+                    <span className="field-label whitespace-nowrap text-[10.5px] text-white/35">
+                      analise a task pra ver o do Docs
+                    </span>
+                  ) : undefined
+                }
+              >
+                {semBriefing ? 'Quem falou neste disparo' : 'O que o copy pediu no Docs'}
+              </Campo>
               <div className="grid gap-2 sm:grid-cols-2">
-                {papeis.map((pp, k) => (
-                  <div key={k} className="rdp-nota rounded-[10px] px-2.5 py-2">
-                    <div className="flex items-center gap-2.5">
-                      {pp.fileId ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img
-                          src={`https://drive.google.com/thumbnail?id=${pp.fileId}&sz=w200`}
-                          alt={pp.username || pp.role}
-                          className="h-12 w-12 shrink-0 rounded-[8px] object-cover"
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[8px] bg-white/[0.05] text-white/35">
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="12" cy="8" r="4" />
-                            <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
-                          </svg>
-                        </span>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[12px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
-                          {pp.role}
+                {papeis.map((pp, k) => {
+                  const thumb = pp.fileId
+                    ? `https://drive.google.com/thumbnail?id=${pp.fileId}&sz=w200`
+                    : pp.avatarThumb;
+                  return (
+                    <div key={k} className="rdp-nota rounded-[10px] px-2.5 py-2">
+                      <div className="flex items-center gap-2.5">
+                        {thumb ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={thumb}
+                            alt={pp.username || pp.role}
+                            className="h-12 w-12 shrink-0 rounded-[8px] object-cover"
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[8px] bg-white/[0.05] text-white/35">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="8" r="4" />
+                              <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                            </svg>
+                          </span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[12px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                            {pp.role}
+                          </div>
+                          <div className="truncate text-[10.5px] text-text-muted">
+                            {pp.username ? `@${pp.username}` : pp.avatarNome || 'sem referência no doc'}
+                          </div>
                         </div>
-                        <div className="truncate text-[10.5px] text-text-muted">
-                          {pp.username ? `@${pp.username}` : 'sem referência no doc'}
-                        </div>
+                        {pp.indicacoes.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setIndicacaoAberta((prev) => ({ ...prev, [k]: !prev[k] }))}
+                            aria-expanded={!!indicacaoAberta[k]}
+                            className={'pilot-ind-btn shrink-0' + (indicacaoAberta[k] ? ' is-open' : '')}
+                            title={`Indicação do copy pra este avatar (${pp.indicacoes.length}) — clica pra ver`}
+                          >
+                            <span className="pilot-ind-halo" aria-hidden />
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="m3 11 14-6v14L3 13v-2z" />
+                              <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                              <path d="M21 8.5c.7.8.7 5.2 0 6" />
+                            </svg>
+                            {pp.indicacoes.length > 1 ? <span className="pilot-ind-count">{pp.indicacoes.length}</span> : null}
+                          </button>
+                        ) : null}
+                        {pp.fileId ? (
+                          <a
+                            href={`https://drive.google.com/uc?export=download&id=${pp.fileId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rdp-btn-ghost shrink-0 rounded-full px-2.5 py-1.5 text-[10px]"
+                            title="Baixar o arquivo de referência do copywriter (Drive)"
+                          >
+                            Baixar
+                          </a>
+                        ) : null}
                       </div>
-                      {pp.indicacoes.length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => setIndicacaoAberta((prev) => ({ ...prev, [k]: !prev[k] }))}
-                          aria-expanded={!!indicacaoAberta[k]}
-                          className={'pilot-ind-btn shrink-0' + (indicacaoAberta[k] ? ' is-open' : '')}
-                          title={`Indicação do copy pra este avatar (${pp.indicacoes.length}) — clica pra ver`}
-                        >
-                          <span className="pilot-ind-halo" aria-hidden />
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <path d="m3 11 14-6v14L3 13v-2z" />
-                            <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-                            <path d="M21 8.5c.7.8.7 5.2 0 6" />
-                          </svg>
-                          {pp.indicacoes.length > 1 ? <span className="pilot-ind-count">{pp.indicacoes.length}</span> : null}
-                        </button>
-                      ) : null}
-                      {pp.fileId ? (
-                        <a
-                          href={`https://drive.google.com/uc?export=download&id=${pp.fileId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rdp-btn-ghost shrink-0 rounded-full px-2.5 py-1.5 text-[10px]"
-                          title="Baixar o arquivo de referência do copywriter (Drive)"
-                        >
-                          Baixar
-                        </a>
+                      {indicacaoAberta[k] && pp.indicacoes.length > 0 ? (
+                        <IndicacaoPanel tipo="avatar" itens={pp.indicacoes.map((ia) => ({ nota: ia.nota, links: ia.links }))} />
                       ) : null}
                     </div>
-                    {indicacaoAberta[k] && pp.indicacoes.length > 0 ? (
-                      <IndicacaoPanel tipo="avatar" itens={pp.indicacoes.map((ia) => ({ nota: ia.nota, links: ia.links }))} />
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           );

@@ -2635,3 +2635,198 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
     animation: none;
   }
 }
+
+
+/* ═══════ Popover de VERSÕES do disparo (portal no body, 30.08) ═══════
+   Vive aqui porque o popover é renderizado por createPortal — o card do
+   disparo tem `transform` (efeito 3D) e prenderia um absolute dentro dele,
+   e styled-jsx não processa <style jsx> dentro do portal. */
+.vd-fora {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: block;
+}
+.vd-pop {
+  position: fixed;
+  z-index: 2147483001;
+  display: block;
+  width: 330px;
+  border-radius: 14px;
+  padding: 11px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(167, 139, 250, 0.16), transparent 55%),
+    linear-gradient(180deg, #14141b 0%, #0e0e14 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(167, 139, 250, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 26px 60px -20px rgba(0, 0, 0, 0.95);
+  animation: vdEntra 0.2s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+.vd-titulo {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-tech), system-ui;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #c4b5fd;
+}
+.vd-lista { display: grid; gap: 6px; }
+.vd-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+.vd-item.is-atual {
+  background: rgba(167, 139, 250, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.45);
+}
+.vd-n-badge {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 800;
+  color: #0d0a16;
+  background: linear-gradient(150deg, #c4b5fd, #8b5cf6);
+}
+.vd-txt { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.vd-nome {
+  font-family: var(--font-tech), system-ui;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.94);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vd-estado {
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+.vd-input {
+  width: 100%;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-family: var(--font-tech), system-ui;
+  font-size: 11.5px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(167, 139, 250, 0.6);
+  outline: none;
+}
+.vd-acoes { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.vd-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), color 0.16s, background-color 0.16s;
+}
+.vd-mini:hover:not(:disabled) {
+  transform: translateY(-1px);
+  color: #fff;
+  background: rgba(167, 139, 250, 0.3);
+}
+.vd-mini:disabled { opacity: 0.32; cursor: not-allowed; }
+.vd-mini.is-ok { color: #c8e87c; }
+@keyframes vdEntra {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .vd-pop { animation: none; } }
+
+/* Botao de VERSOES do card (fora do styled-jsx: o componente usa portal). */
+.vd-wrap { position: relative; display: inline-flex; }
+        /* Botão de VERSÕES: maior que os outros e com respiro próprio — é o
+           que o Silas pediu ("mais evidente"). Halo pulsando + gradiente
+           violeta cheio, pra ele achar de longe no card. */
+        .vd-botao {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 38px;
+          height: 38px;
+          border-radius: 9999px;
+          color: #16092e;
+          background: linear-gradient(150deg, #ddd6fe 0%, #a78bfa 45%, #7c3aed 100%);
+          box-shadow:
+            0 3px 0 rgba(0, 0, 0, 0.45),
+            0 8px 22px -8px rgba(124, 58, 237, 0.85),
+            inset 0 1px 0 rgba(255, 255, 255, 0.6),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.22);
+          animation: vdPulso 2.4s ease-in-out infinite;
+          transition: transform 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .vd-botao:hover { transform: translateY(-2px) scale(1.07); }
+        .vd-botao:active { transform: translateY(1px) scale(0.96); }
+        .vd-botao.is-open { background: linear-gradient(150deg, #f5f3ff 0%, #c4b5fd 45%, #8b5cf6 100%); }
+        .vd-halo {
+          position: absolute;
+          inset: -5px;
+          border-radius: 9999px;
+          border: 1.5px solid rgba(167, 139, 250, 0.6);
+          animation: vdHalo 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+          pointer-events: none;
+        }
+        .vd-n {
+          position: absolute;
+          top: -5px;
+          right: -6px;
+          z-index: 2;
+          min-width: 17px;
+          height: 17px;
+          padding: 0 4px;
+          border-radius: 9999px;
+          background: #17111f;
+          color: #ddd6fe;
+          font-family: var(--font-mono), monospace;
+          font-size: 10px;
+          font-weight: 800;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.75);
+          pointer-events: none;
+        }
+        @keyframes vdPulso {
+          0%, 100% {
+            box-shadow:
+              0 3px 0 rgba(0, 0, 0, 0.45),
+              0 8px 22px -8px rgba(124, 58, 237, 0.75),
+              inset 0 1px 0 rgba(255, 255, 255, 0.6),
+              inset 0 -2px 0 rgba(0, 0, 0, 0.22);
+          }
+          50% {
+            box-shadow:
+              0 3px 0 rgba(0, 0, 0, 0.45),
+              0 10px 30px -8px rgba(167, 139, 250, 1),
+              inset 0 1px 0 rgba(255, 255, 255, 0.7),
+              inset 0 -2px 0 rgba(0, 0, 0, 0.22);
+          }
+        }
+        @keyframes vdHalo {
+          0% { transform: scale(0.92); opacity: 0.9; }
+          70% { transform: scale(1.35); opacity: 0; }
+          100% { transform: scale(1.35); opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .vd-botao, .vd-halo { animation: none; }
+        }

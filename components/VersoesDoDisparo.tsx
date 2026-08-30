@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Btn3D } from './BatchJobCard3D';
 
 /**
@@ -67,22 +68,53 @@ export function VersoesDoDisparo({
   const [aberto, setAberto] = React.useState(false);
   const [editando, setEditando] = React.useState<string | null>(null);
   const [rascunho, setRascunho] = React.useState('');
+  // ⚠ O card do disparo tem `transform` (efeito 3D) e isso CRIA stacking
+  // context: um popover `position:absolute` dentro dele fica preso e sai
+  // cortado embaixo do card seguinte. Por isso ele vai por PORTAL no body,
+  // posicionado pelo rect do botão (e reposicionado no scroll/resize).
+  const ancoraRef = React.useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  const medir = React.useCallback(() => {
+    const el = ancoraRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const largura = 330;
+    // encosta pela direita do botão, sem sair da janela
+    const left = Math.max(10, Math.min(window.innerWidth - largura - 10, r.right - largura));
+    setPos({ top: r.bottom + 8, left });
+  }, []);
+  React.useEffect(() => {
+    if (!aberto) return;
+    medir();
+    const on = () => medir();
+    window.addEventListener('scroll', on, true);
+    window.addEventListener('resize', on);
+    return () => {
+      window.removeEventListener('scroll', on, true);
+      window.removeEventListener('resize', on);
+    };
+  }, [aberto, medir]);
   if (versoes.length <= 1) return null;
 
   return (
-    <span className="vd-wrap">
-      <Btn3D
-        icon={<IconVersoes size={16} />}
-        color="violet"
-        title={`Versões deste AD (${versoes.length}) — escolha pra baixar ou ver`}
+    <span className="vd-wrap" ref={ancoraRef}>
+      <button
+        type="button"
         onClick={() => setAberto((v) => !v)}
-      />
+        aria-expanded={aberto}
+        className={'vd-botao' + (aberto ? ' is-open' : '')}
+        title={`Versões deste AD (${versoes.length}) — escolha pra baixar ou ver`}
+      >
+        <span className="vd-halo" aria-hidden />
+        <IconVersoes size={17} />
+      </button>
       <span className="vd-n" aria-hidden>{versoes.length}</span>
 
-      {aberto ? (
+      {aberto && typeof document !== 'undefined' && pos
+        ? createPortal(
         <>
           <span className="vd-fora" onClick={() => setAberto(false)} aria-hidden />
-          <span className="vd-pop">
+          <span className="vd-pop" style={{ top: pos.top, left: pos.left }}>
             <span className="vd-titulo">Versões deste AD</span>
             <span className="vd-lista">
               {versoes.map((v) => {
@@ -147,139 +179,9 @@ export function VersoesDoDisparo({
               })}
             </span>
           </span>
-        </>
+        </>,
+        document.body,
       ) : null}
-
-      <style jsx>{`
-        .vd-wrap { position: relative; display: inline-flex; }
-        .vd-n {
-          position: absolute;
-          top: -4px;
-          right: -5px;
-          z-index: 2;
-          min-width: 15px;
-          height: 15px;
-          padding: 0 3px;
-          border-radius: 999px;
-          background: #17111f;
-          color: #c4b5fd;
-          font-family: var(--font-mono), monospace;
-          font-size: 9px;
-          font-weight: 800;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 0 0 1.5px rgba(167, 139, 250, 0.6);
-          pointer-events: none;
-        }
-        .vd-fora { position: fixed; inset: 0; z-index: 40; display: block; }
-        .vd-pop {
-          position: absolute;
-          right: 0;
-          top: calc(100% + 8px);
-          z-index: 41;
-          display: block;
-          width: 320px;
-          border-radius: 14px;
-          padding: 11px;
-          background:
-            radial-gradient(120% 100% at 0% 0%, rgba(167, 139, 250, 0.14), transparent 55%),
-            linear-gradient(180deg, #14141b 0%, #0e0e14 100%);
-          box-shadow:
-            inset 0 0 0 1px rgba(167, 139, 250, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.06),
-            0 22px 46px -24px rgba(0, 0, 0, 0.95);
-          animation: vdEntra 0.2s cubic-bezier(0.32, 0.72, 0, 1) both;
-        }
-        .vd-titulo {
-          display: block;
-          margin-bottom: 8px;
-          font-family: var(--font-tech), system-ui;
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.02em;
-          color: #c4b5fd;
-        }
-        .vd-lista { display: grid; gap: 6px; }
-        .vd-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          border-radius: 10px;
-          padding: 7px 8px;
-          background: rgba(255, 255, 255, 0.04);
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-        }
-        .vd-item.is-atual {
-          background: rgba(167, 139, 250, 0.14);
-          box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.45);
-        }
-        .vd-n-badge {
-          flex-shrink: 0;
-          width: 20px;
-          height: 20px;
-          border-radius: 6px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          font-family: var(--font-mono), monospace;
-          font-size: 10px;
-          font-weight: 800;
-          color: #0d0a16;
-          background: linear-gradient(150deg, #c4b5fd, #8b5cf6);
-        }
-        .vd-txt { display: grid; gap: 1px; min-width: 0; flex: 1; }
-        .vd-nome {
-          font-family: var(--font-tech), system-ui;
-          font-size: 11.5px;
-          font-weight: 600;
-          color: rgba(255, 255, 255, 0.94);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .vd-estado {
-          font-family: var(--font-mono), monospace;
-          font-size: 9.5px;
-          letter-spacing: 0.04em;
-        }
-        .vd-input {
-          width: 100%;
-          border-radius: 6px;
-          padding: 2px 6px;
-          font-family: var(--font-tech), system-ui;
-          font-size: 11.5px;
-          color: #fff;
-          background: rgba(0, 0, 0, 0.4);
-          border: 1px solid rgba(167, 139, 250, 0.6);
-          outline: none;
-        }
-        .vd-acoes { display: inline-flex; gap: 4px; flex-shrink: 0; }
-        .vd-mini {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 24px;
-          height: 24px;
-          border-radius: 7px;
-          color: rgba(255, 255, 255, 0.7);
-          background: rgba(255, 255, 255, 0.07);
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-          transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), color 0.16s, background-color 0.16s;
-        }
-        .vd-mini:hover:not(:disabled) {
-          transform: translateY(-1px);
-          color: #fff;
-          background: rgba(167, 139, 250, 0.3);
-        }
-        .vd-mini:disabled { opacity: 0.32; cursor: not-allowed; }
-        .vd-mini.is-ok { color: #c8e87c; }
-        @keyframes vdEntra {
-          from { opacity: 0; transform: translateY(-4px) scale(0.98); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @media (prefers-reduced-motion: reduce) { .vd-pop { animation: none; } }
-      `}</style>
-    </span>
+</span>
   );
 }
