@@ -42,6 +42,7 @@ const PARTES: RedispatchPart[] = [
   {
     label: 'BODY 1',
     text: 'A maioria das pessoas usa azeite do jeito errado e joga fora justamente a parte que importa pra próstata.',
+    motionPrompt: 'despeja o azeite na colher no comeco e segue falando',
     avatarId: 'av1',
     avatarName: 'Confident Business Executive',
     voiceId: 'v1',

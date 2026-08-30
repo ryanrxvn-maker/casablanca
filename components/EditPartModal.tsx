@@ -198,20 +198,32 @@ export function EditPartModal({
               })}
             </div>
           </div>
-          <textarea
-            value={motion}
-            onChange={(e) => setMotion(e.target.value)}
-            disabled={busy}
-            placeholder="ex: cobrir o peito com uma das maos no comeco e falar"
-            className="mono w-full resize-y rounded-[8px] border border-white/12 bg-bg/60 px-3 py-2 text-[11px] leading-relaxed text-white outline-none transition-colors placeholder:text-text-muted/50 hover:border-white/25 focus:border-lime/50 disabled:opacity-50"
-            rows={2}
-            style={{ fontFamily: 'var(--font-mono)' }}
-          />
-          <div className="mono mt-1.5 text-[9px] leading-relaxed text-text-muted/80">
-            {temGesto
-              ? `Esta parte sai no Avatar ${motorSaida} — o III descarta gesto. Em acao curta, peca o gesto UMA vez no comeco e a fala solta depois, senao o avatar repete o movimento o take inteiro.`
-              : `Sem gesto: esta parte sai no Avatar ${motorSaida}.`}
+          {/* Com gesto escrito a caixa ACENDE — confirmacao visual de que
+            * esta parte vai sair com movimento (e em qual motor). */}
+          <div className={'gesto-caixa' + (temGesto ? ' is-on' : '')}>
+            <textarea
+              value={motion}
+              onChange={(e) => setMotion(e.target.value)}
+              disabled={busy}
+              placeholder="ex: cobrir o peito com uma das maos no comeco e falar"
+              className="gesto-input mono disabled:opacity-50"
+              rows={2}
+              style={{ fontFamily: 'var(--font-mono)' }}
+            />
+            {temGesto ? (
+              <span className="gesto-selo" aria-hidden>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M13 2 4.1 12.97a1 1 0 0 0 .77 1.63H11l-1 7.4 8.9-10.97a1 1 0 0 0-.77-1.63H12l1-7.4z" />
+                </svg>
+                gesto ativo · sai no {motorSaida}
+              </span>
+            ) : null}
           </div>
+          {!temGesto ? (
+            <div className="mono mt-1.5 text-[9px] leading-relaxed text-text-muted/80">
+              {`Sem gesto: esta parte sai no Avatar ${motorSaida}.`}
+            </div>
+          ) : null}
         </div>
 
         {errorMsg ? (

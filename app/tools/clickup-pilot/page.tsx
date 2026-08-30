@@ -12788,18 +12788,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           {on ? 'Avatar IV' : 'Avatar III'}
                                                         </span>
                                                       </div>
-                                                      <textarea
-                                                        value={motion}
-                                                        onChange={(e) => setVaMotionPrompt((prev) => ({ ...prev, [choiceKey]: e.target.value }))}
-                                                        disabled={pickersLocked}
-                                                        rows={2}
-                                                        placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
-                                                        className="w-full resize-y rounded-[8px] border border-white/10 bg-black/30 px-2.5 py-2 text-[11px] leading-snug text-text placeholder:text-text-muted/60 focus:border-violet-400/50 focus:outline-none disabled:opacity-50"
-                                                      />
-                                                      <div className="mt-1 text-[9.5px] leading-tight text-text-muted">
-                                                        So pra cena com acao (mexer, despejar, espremer, ninar). Em acao curta,
-                                                        peca o gesto <b>uma vez no comeco</b> e a fala solta depois — senao o avatar
-                                                        repete o movimento o video inteiro.
+                                                      {/* Mesma caixa que ACENDE do fluxo normal: com prompt
+                                                        * escrito ela confirma sozinha que o gesto esta ativo. */}
+                                                      <div className={'gesto-caixa' + (on ? ' is-on' : '')}>
+                                                        <textarea
+                                                          value={motion}
+                                                          onChange={(e) => setVaMotionPrompt((prev) => ({ ...prev, [choiceKey]: e.target.value }))}
+                                                          disabled={pickersLocked}
+                                                          rows={2}
+                                                          placeholder="ex.: mexe a gelatina 2x no comeco, apoia a colher e segue falando com as maos soltas"
+                                                          className="gesto-input disabled:opacity-50"
+                                                        />
                                                       </div>
                                                     </div>
                                                   );

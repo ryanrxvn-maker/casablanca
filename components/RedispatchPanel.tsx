@@ -815,7 +815,7 @@ export function RedispatchPanel({
                         onChange={(e) => patch(idx, { motionPrompt: e.target.value || null })}
                         disabled={busy}
                         placeholder="cobrir o peito com uma das maos no comeco e falar"
-                        className="rdp-input w-full rounded-[10px] px-3 py-2.5 text-[12px] text-white outline-none disabled:opacity-50"
+                        className={'rdp-input w-full rounded-[10px] px-3 py-2.5 text-[12px] text-white outline-none disabled:opacity-50' + ((p.motionPrompt || '').trim() ? ' is-on' : '')}
                       />
                     </div>
                   </div>
@@ -1049,6 +1049,13 @@ export function RedispatchPanel({
         }
         .rdp-input::placeholder {
           color: rgba(255, 255, 255, 0.28);
+        }
+        /* Campo do MOVIMENTO com gesto escrito: acende igual ao do Pilot. */
+        .rdp-input.is-on {
+          background: rgba(139, 92, 246, 0.14);
+          box-shadow:
+            inset 0 0 0 1.5px rgba(167, 139, 250, 0.75),
+            0 0 20px -8px rgba(167, 139, 250, 0.9);
         }
         .rdp-input:focus {
           box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.7);
