@@ -1,7 +1,12 @@
 /**
- * Testes da associação de INDICAÇÕES (comentários do Docs → avatar do Pilot).
- * O cenário principal é o DOC REAL do teste do Silas (29.08): comentário
- * ancorado no HOOK do AD02G1GL - PRPB12, com "Doutor:" na linha acima.
+ * Testes da associação de INDICAÇÕES (comentários do Docs → Pilot).
+ *
+ * Dois tipos (revisão do Silas 29.08):
+ *  · AVATAR (dourado): ancora na linha do avatar ou menciona @username.
+ *  · COPY (azul): ancora no hook/body — sai com o TRECHO + o TAKE onde caiu.
+ *
+ * O cenário principal é o DOC REAL do teste (29.08): comentário ancorado no
+ * HOOK do AD02G1GL - PRPB12.
  */
 import { associarIndicacoes } from './pilot-indicacoes';
 
@@ -23,7 +28,7 @@ const DOC = [
   '',
   'AD02GL - PRPB12',
   'BRIEFING: AD79G1GL-PRPB07 adaptado para o PRPB12',
-  'Observações: ',
+  'Observações: isso aqui não é fala[f]',
   '',
   'AD02G1GL - PRPB12',
   'Doutor:',
@@ -37,105 +42,105 @@ const DOC = [
   'Hook da mulher aqui.',
 ].join('\n');
 
-console.log('— cenário REAL: comentário no hook do AD02, "Doutor:" acima —');
+const PARTES_AD02 = [
+  { label: 'HOOK 1', text: 'Para próstata inchada, não existe nada melhor do que isso daqui.' },
+  { label: 'BODY 1', text: 'Tomar finasterida te leva pro buraco rapidinho. E se você já toma mais de 3 meses, é melhor me escutar.' },
+];
+
+console.log('— cenário REAL: comentário no HOOK vira indicação de COPY (não de avatar) —');
 {
   const r = associarIndicacoes({
     docText: DOC,
     baseAdId: 'AD02GL',
     comments: [{ marker: 'a', context: 'AD02G1GL - PRPB12 Doutor: Para próstata inchada, não existe nada melhor do que isso daqui.', body: 'COMENTARIO DE TESTE, CENARIO X' }],
     slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }],
+    partes: PARTES_AD02,
   });
-  ok(r.porSlot[0].length === 1 && r.porSlot[0][0] === 'COMENTARIO DE TESTE, CENARIO X', 'indicação cai no slot do Doutor');
-  ok(r.daTask.length === 0, 'nada sobra na task');
+  ok(r.copy.length === 1, 'vira indicação de copy');
+  ok(r.copy[0]?.nota === 'COMENTARIO DE TESTE, CENARIO X', 'nota certa');
+  ok(r.copy[0]?.take === 'HOOK 1', `trecho casado com o take HOOK 1 (veio ${r.copy[0]?.take})`);
+  ok(r.copy[0]?.trecho.includes('Para próstata inchada'), 'trecho comentado preservado (sem o [a])');
+  ok(!r.copy[0]?.trecho.includes('[a]'), 'marcador não vaza no trecho');
+  ok(r.porSlot[0].length === 0, 'NÃO entra no indicador de avatar');
 }
 
-console.log('— o MESMO comentário não vaza pro AD01 nem pro AD03 —');
-{
-  const c = [{ marker: 'a', context: '...', body: 'CENARIO X' }];
-  const r1 = associarIndicacoes({ docText: DOC, baseAdId: 'AD01GL', comments: c, slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }] });
-  ok(r1.porSlot[0].length === 0 && r1.daTask.length === 0, 'AD01 não recebe o comentário do AD02');
-  const r3 = associarIndicacoes({ docText: DOC, baseAdId: 'AD03GL', comments: c, slots: [{ role: 'Mulher', username: 'maria 2' }] });
-  ok(r3.porSlot[0].length === 0 && r3.daTask.length === 0, 'AD03 não recebe o comentário do AD02');
-}
-
-console.log('— G1GL/GL: mesmo NÚMERO de AD = mesmo anúncio —');
+console.log('— comentário no BODY → copy com o take do body —');
 {
   const r = associarIndicacoes({
     docText: DOC,
     baseAdId: 'AD02G1GL',
-    comments: [{ marker: 'a', context: '', body: 'AVATAR SEGURANDO O AZEITE' }],
+    comments: [{ marker: 'b', context: 'Tomar finasterida te leva', body: 'TELA DIVIDIDA AQUI' }],
     slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }],
+    partes: PARTES_AD02,
   });
-  ok(r.porSlot[0][0] === 'AVATAR SEGURANDO O AZEITE', 'task AD02G1GL recebe comentário da seção AD02G1GL');
+  ok(r.copy.length === 1 && r.copy[0].take === 'BODY 1', `body → take BODY 1 (veio ${r.copy[0]?.take})`);
 }
 
-console.log('— comentário no BODY também acha o papel pela linha "Doutor:" acima —');
+console.log('— comentário fora da fala (Observações) → copy com take null —');
 {
   const r = associarIndicacoes({
     docText: DOC,
     baseAdId: 'AD02GL',
-    comments: [{ marker: 'b', context: 'Tomar finasterida te leva', body: 'AVATAR EM CONSULTÓRIO' }],
-    slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }, { role: 'Mulher', username: 'maria 2' }],
+    comments: [{ marker: 'f', context: 'Observações: isso aqui não é fala', body: 'LEMBRETE GERAL DO AD' }],
+    slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }],
+    partes: PARTES_AD02,
   });
-  ok(r.porSlot[0].includes('AVATAR EM CONSULTÓRIO'), 'body do AD02 → Doutor (linha Role: acima)');
-  ok(r.porSlot[1].length === 0, 'Mulher não recebe');
+  ok(r.copy.length === 1 && r.copy[0].take === null, 'sem take (âncora fora dos textos falados)');
+  ok(r.copy[0].trecho.includes('Observações'), 'trecho é a linha da âncora');
 }
 
-console.log('— comentário ancorado na LINHA do avatar (@username no contexto) —');
+console.log('— comentário na LINHA DO AVATAR → indicador de AVATAR (dourado) —');
 {
   const r = associarIndicacoes({
     docText: DOC,
     baseAdId: 'AD03GL',
     comments: [{ marker: 'c', context: 'Mulher: @maria 2.mp4', body: 'AMBIENTE DE COZINHA' }],
     slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }, { role: 'Mulher', username: 'maria 2' }],
+    partes: [{ label: 'HOOK 1', text: 'Hook da mulher aqui.' }],
   });
-  ok(r.porSlot[1].includes('AMBIENTE DE COZINHA'), 'menção @maria 2 → slot da Mulher');
+  ok(r.porSlot[1].includes('AMBIENTE DE COZINHA'), 'linha do avatar → slot da Mulher');
+  ok(r.copy.length === 0, 'não duplica como copy');
 }
 
-console.log('— multi-avatar sem dono claro → indicação da TASK —');
+console.log('— menção do @username no CORPO do comentário → avatar —');
 {
-  const doc2 = [
-    'AD07GL - VRWA05',
-    'Homem: @joao.mp4',
-    'Mulher: @ana.mp4',
-    'Body',
-    'Uma fala qualquer sem papel por perto.[d]',
-  ].join('\n');
-  // Sem linha "Role:" imediatamente acima E sem menção: os dois avatares
-  // existem → ambíguo → vai pro topo do card.
-  const doc3 = doc2.replace('Homem: @joao.mp4\nMulher: @ana.mp4\nBody\n', 'ELENCO — ver Drive\n\n\n');
   const r = associarIndicacoes({
-    docText: doc3,
-    baseAdId: 'AD07GL',
-    comments: [{ marker: 'd', context: 'Uma fala qualquer', body: 'TROCAR O FUNDO' }],
-    slots: [{ role: 'Homem', username: 'joao' }, { role: 'Mulher', username: 'ana' }],
+    docText: DOC,
+    baseAdId: 'AD02GL',
+    comments: [{ marker: 'b', context: 'Tomar finasterida te leva', body: 'trocar o look do @drrobertokalil 1' }],
+    slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }],
+    partes: PARTES_AD02,
   });
-  ok(r.daTask.includes('TROCAR O FUNDO'), 'sem dono claro → daTask');
-  ok(r.porSlot[0].length === 0 && r.porSlot[1].length === 0, 'nenhum slot recebe no ambíguo');
+  ok(r.porSlot[0].length === 1, 'menção no corpo → avatar mesmo ancorado no body');
+  ok(r.copy.length === 0, 'não vira copy');
 }
 
-console.log('— 1 avatar só: qualquer comentário do AD vai pra ele —');
+console.log('— o comentário não vaza pra outro AD —');
 {
-  const doc4 = [
-    'AD09GL - MEPB03',
-    'Narrador: @carlos.mp4',
-    'Hook sem papel colado.[e]',
-  ].join('\n');
+  const c = [{ marker: 'a', context: '...', body: 'CENARIO X' }];
+  const r1 = associarIndicacoes({ docText: DOC, baseAdId: 'AD01GL', comments: c, slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }], partes: [] });
+  ok(r1.copy.length === 0 && r1.porSlot[0].length === 0, 'AD01 não recebe o comentário do AD02');
+  const r3 = associarIndicacoes({ docText: DOC, baseAdId: 'AD03GL', comments: c, slots: [{ role: 'Mulher', username: 'maria 2' }], partes: [] });
+  ok(r3.copy.length === 0 && r3.porSlot[0].length === 0, 'AD03 não recebe o comentário do AD02');
+}
+
+console.log('— sem partes: copy sai com take null (nunca explode) —');
+{
   const r = associarIndicacoes({
-    docText: doc4,
-    baseAdId: 'AD09GL',
-    comments: [{ marker: 'e', context: 'Hook sem papel', body: 'AVATAR SEGURANDO ALGO' }],
-    slots: [{ role: 'Narrador', username: 'carlos' }],
+    docText: DOC,
+    baseAdId: 'AD02GL',
+    comments: [{ marker: 'a', context: '', body: 'X' }],
+    slots: [{ role: 'Doutor', username: 'drrobertokalil 1' }],
   });
-  ok(r.porSlot[0].includes('AVATAR SEGURANDO ALGO'), '1 avatar → recebe tudo do AD');
+  ok(r.copy.length === 1 && r.copy[0].take === null, 'copy com take null sem partes');
 }
 
-console.log('— doc sem comentários / marcador ausente não explode —');
+console.log('— marcador inexistente / listas vazias —');
 {
-  const r = associarIndicacoes({ docText: DOC, baseAdId: 'AD02GL', comments: [{ marker: 'z', context: '', body: 'X' }], slots: [{ role: 'Doutor', username: null }] });
-  ok(r.porSlot[0].length === 0 && r.daTask.length === 0, 'marcador inexistente é ignorado');
-  const r2 = associarIndicacoes({ docText: DOC, baseAdId: 'AD02GL', comments: [], slots: [] });
-  ok(r2.daTask.length === 0, 'lista vazia ok');
+  const r = associarIndicacoes({ docText: DOC, baseAdId: 'AD02GL', comments: [{ marker: 'z', context: '', body: 'X' }], slots: [{ role: 'Doutor', username: null }], partes: [] });
+  ok(r.copy.length === 0 && r.porSlot[0].length === 0, 'marcador inexistente é ignorado');
+  const r2 = associarIndicacoes({ docText: DOC, baseAdId: 'AD02GL', comments: [], slots: [], partes: [] });
+  ok(r2.copy.length === 0 && r2.daTask.length === 0, 'lista vazia ok');
 }
 
 if (falhas > 0) {

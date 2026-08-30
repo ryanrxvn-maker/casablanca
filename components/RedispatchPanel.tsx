@@ -64,8 +64,11 @@ export type RedispatchPart = {
   briefingFileId?: string | null;
   /** Duração do áudio (s) — regra dos 30s. */
   audioDur?: number | null;
-  /** Indicações do copy (comentários do Docs) do avatar deste take. */
+  /** Indicações DE AVATAR (comentários do Docs) do avatar deste take. */
   indicacoes?: string[];
+  /** Indicações DE COPY: comentário ancorado no TEXTO deste take
+   *  (trecho comentado + nota). Botão azul na linha do take. */
+  indicacoesCopy?: Array<{ trecho: string; nota: string }>;
 };
 
 type Motor = 'auto' | 'III' | 'IV' | 'V';
@@ -185,8 +188,10 @@ export function RedispatchPanel({
     partesOriginais.map((p) => ({ ...p })),
   );
   const [abertos, setAbertos] = useState<Record<number, boolean>>({});
-  /** Indicação do copy aberta no card do papel (seção "o que o copy pediu"). */
+  /** Indicação do papel aberta (cards "O que o copy pediu"). */
   const [indicacaoAberta, setIndicacaoAberta] = useState<Record<number, boolean>>({});
+  /** Comentário de COPY aberto por take (botão azul na linha). */
+  const [copyNotaAberta, setCopyNotaAberta] = useState<Record<number, boolean>>({});
   // O que foi aplicado "em todos": só pra tela mostrar a escolha em vez de
   // voltar pro estado vazio (e pra reaparecer o "voltar pra voz padrão").
   const [avatarGlobal, setAvatarGlobal] = useState<AvatarOption | null>(null);
@@ -495,6 +500,27 @@ export function RedispatchPanel({
                     </span>
                   ) : null}
                   {alterada ? <span className="rdp-marca is-acento">alterado</span> : null}
+                  {/* Comentário do copy NO TEXTO deste take (indicação de COPY) —
+                   *  botão azul, distinto do dourado de avatar. */}
+                  {(p.indicacoesCopy || []).length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setCopyNotaAberta((prev) => ({ ...prev, [idx]: !prev[idx] }))}
+                      aria-expanded={!!copyNotaAberta[idx]}
+                      className={'pilot-ind-btn is-copy shrink-0' + (copyNotaAberta[idx] ? ' is-open' : '')}
+                      style={{ width: 26, height: 26 }}
+                      title={`Comentário do copy neste take (${(p.indicacoesCopy || []).length}) — clica pra ver`}
+                    >
+                      <span className="pilot-ind-halo" aria-hidden />
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        <path d="M8 9h.01M12 9h.01M16 9h.01" />
+                      </svg>
+                      {(p.indicacoesCopy || []).length > 1 ? (
+                        <span className="pilot-ind-count">{(p.indicacoesCopy || []).length}</span>
+                      ) : null}
+                    </button>
+                  ) : null}
 
                   <div className="ml-auto flex items-center gap-1.5">
                     {/* Só III/IV/V, sem item "auto" e sem tag (revisão 29.08): em
@@ -651,6 +677,20 @@ export function RedispatchPanel({
                       </label>
                     )}
                   </div>
+                ) : null}
+
+                {/* Nota(s) do copy neste take — abre pelo botão azul acima. */}
+                {copyNotaAberta[idx] && (p.indicacoesCopy || []).length > 0 ? (
+                  <ul className="mt-2 grid gap-1.5 pl-[30px]">
+                    {(p.indicacoesCopy || []).map((ic, j) => (
+                      <li key={j} className="rounded-[8px] bg-blue-400/[0.10] px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]">
+                        <div className="text-[11px] italic leading-snug text-text-muted">
+                          “{ic.trecho.length > 110 ? ic.trecho.slice(0, 110) + '…' : ic.trecho}”
+                        </div>
+                        <div className="mt-0.5 text-[11.5px] leading-relaxed text-text">{ic.nota}</div>
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
 
                 {/* Texto: prévia quando fechado, editor quando aberto */}

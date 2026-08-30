@@ -1009,9 +1009,13 @@ type TaskAnalysis = {
   /** Linhas da copy do idioma escolhido que NÃO entraram em nenhum take.
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
-  /** INDICAÇÕES do copy (comentários do Docs) que não têm um avatar dono
-   *  claro — aparecem no botão dourado do TOPO do card da task. */
+  /** INDICAÇÕES DE AVATAR (comentários do Docs) que não acharam um slot —
+   *  aparecem no botão dourado do TOPO do card da task (raro). */
   indicacoesDoc?: string[];
+  /** INDICAÇÕES DE COPY (v3, 29.08): comentário ancorado no HOOK/BODY. Não é
+   *  o indicador de avatar — é o botão AZUL no topo do card, com o trecho
+   *  comentado e em qual take ele caiu. */
+  indicacoesCopy?: Array<{ take: string | null; trecho: string; nota: string }>;
   /** Cada avatar do briefing — usuario controla individualmente */
   /** DUAS VERSÕES ligadas nesta task (META + YouTube). Desligada — o padrão —
    *  tudo se comporta exatamente como antes: uma versão só. Liga quando o doc
@@ -2641,43 +2645,6 @@ function ClickUpPilotInner() {
               matchedBy: null,
             });
           }
-          // ═══ INDICAÇÕES DO COPY (29.08, v2) — comentários do Docs ═══
-          // O copy indica cena nos COMENTÁRIOS do doc ("avatar segurando o
-          // produto", "ambiente X"). A extensão (4.18+) extrai cada comentário
-          // do export com marcador ([a]/[b]), contexto e corpo. Regras:
-          //  1. O comentário pertence a ESTE AD quando o marcador [x] cai na
-          //     seção dele (heading "AD02G1GL - ..." mais próximo acima —
-          //     mesmo NÚMERO de AD = mesmo anúncio, cobre G1/G2/GL).
-          //  2. Dentro do AD, o avatar dono é: quem o contexto/corpo menciona
-          //     (@username), OU o papel da linha "Role:" mais próxima ACIMA
-          //     do marcador (comentário na fala do Doutor → slot do Doutor).
-          //  3. Sem dono claro: AD com 1 avatar → vai pra ele; com vários →
-          //     vira indicação DA TASK (botão dourado no topo do card).
-          // Validado ao vivo (29.08) no doc ADGL-PRPB12: comentário no hook
-          // sob "AD02G1GL - PRPB12" com "Doutor:" acima → slot do Doutor.
-          let indicacoesDoc: string[] = [];
-          try {
-            const docComments = docR.comments || [];
-            if (docComments.length) {
-              const { associarIndicacoes } = await import('@/lib/pilot-indicacoes');
-              const resultado = associarIndicacoes({
-                docText: docR.text || '',
-                baseAdId,
-                comments: docComments,
-                slots: roleSlots.map((s) => ({ role: s.role, username: s.username || null })),
-              });
-              resultado.porSlot.forEach((inds, si) => {
-                if (inds.length) roleSlots[si].indicacoes = inds;
-              });
-              indicacoesDoc = resultado.daTask;
-              const comIndicacao = roleSlots.filter((s) => s.indicacoes?.length).length;
-              if (comIndicacao || indicacoesDoc.length) {
-                console.log(`[clickup-pilot] indicações do copy em ${task.name}: ${comIndicacao} avatar(es) + ${indicacoesDoc.length} da task (de ${docComments.length} comentário(s) no doc)`);
-              }
-            }
-          } catch (e) {
-            console.warn('[clickup-pilot] associação de comentários falhou (segue sem indicações):', e);
-          }
           // Parser não achou avatar nenhum e você já tinha escolhido um na
           // mão? Ele volta — com avatar e voz. É o que faz trocar de idioma
           // no DR MILLION não jogar sua escolha fora.
@@ -2789,6 +2756,40 @@ function ClickUpPilotInner() {
           const copyFaltando = ehDrMillion
             ? conferirCoberturaDaCopy(docR.text, baseAdId, drLangRef.current, partTemplates.map((p) => p.text)).faltando
             : [];
+          // ═══ INDICAÇÕES DO COPY (v3, 29.08) — comentários do Docs ═══
+          // Roda DEPOIS dos partTemplates: a indicação de COPY precisa deles
+          // pra dizer em qual TAKE o trecho comentado caiu. Dois tipos:
+          //  · AVATAR (botão dourado no card do avatar): ancora na linha do
+          //    avatar ou menciona o @username.
+          //  · COPY (botão azul no topo do card): ancora no hook/body — sai
+          //    com o trecho + o take. Regras/escopo em lib/pilot-indicacoes
+          //    (testada com o texto real do doc ADGL-PRPB12).
+          let indicacoesDoc: string[] = [];
+          let indicacoesCopy: TaskAnalysis['indicacoesCopy'] = undefined;
+          try {
+            const docComments = docR.comments || [];
+            if (docComments.length) {
+              const { associarIndicacoes } = await import('@/lib/pilot-indicacoes');
+              const resultado = associarIndicacoes({
+                docText: docR.text || '',
+                baseAdId,
+                comments: docComments,
+                slots: roleSlots.map((s) => ({ role: s.role, username: s.username || null })),
+                partes: partTemplates.map((p) => ({ label: p.label, text: p.text })),
+              });
+              resultado.porSlot.forEach((inds, si) => {
+                if (inds.length) roleSlots[si].indicacoes = inds;
+              });
+              indicacoesDoc = resultado.daTask;
+              indicacoesCopy = resultado.copy.length ? resultado.copy : undefined;
+              const comIndicacao = roleSlots.filter((s) => s.indicacoes?.length).length;
+              if (comIndicacao || indicacoesDoc.length || resultado.copy.length) {
+                console.log(`[clickup-pilot] indicações em ${task.name}: ${comIndicacao} avatar(es) + ${resultado.copy.length} de copy + ${indicacoesDoc.length} da task (de ${docComments.length} comentário(s) no doc)`);
+              }
+            }
+          } catch (e) {
+            console.warn('[clickup-pilot] associação de comentários falhou (segue sem indicações):', e);
+          }
           const allHaveAvatar = roleSlots.every(slotPronto);
           // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
           // (compartilham o doc — ja analisamos uma vez).
@@ -2808,9 +2809,10 @@ function ClickUpPilotInner() {
                 roleSlots,
                 partTemplates,
                 copyFaltando,
-                // Indicações do copy sem dono claro (AD multi-avatar) — botão
-                // dourado no topo do card.
+                // Indicações de avatar sem dono (dourado no topo, raro) e as
+                // de COPY (botão azul, com trecho + take).
                 indicacoesDoc: indicacoesDoc.length ? indicacoesDoc : undefined,
+                indicacoesCopy,
                 bodyRaw: briefing.body || undefined,
                 dispatchedAt: getDispatchedAt(sid),
                 // Marca siblings como "compartilhada com primary"
@@ -6956,13 +6958,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             const slot =
               aRef.roleSlots.find((s) => s.avatarId && s.avatarId === (p as any).avatarId) ||
               (aRef.roleSlots.length === 1 ? aRef.roleSlots[0] : null);
-            if (!slot) return p;
+            // Comentário de COPY ancorado no texto DESTE take (label é a chave;
+            // take colapsado "BODY 1+2" também pega os takes que ele engoliu).
+            const copyDoTake = (aRef.indicacoesCopy || [])
+              .filter((ic) => ic.take && (ic.take === p.label || p.label.startsWith(`${ic.take}+`) || p.label.split('+')[0] === ic.take))
+              .map(({ trecho, nota }) => ({ trecho, nota }));
+            if (!slot && copyDoTake.length === 0) return p;
             return {
               ...p,
-              role: (p as any).role || slot.role || null,
-              username: (p as any).username || slot.username || null,
-              briefingFileId: (p as any).briefingFileId || slot.briefingFileId || null,
-              ...(slot.indicacoes?.length ? { indicacoes: slot.indicacoes } : {}),
+              role: (p as any).role || slot?.role || null,
+              username: (p as any).username || slot?.username || null,
+              briefingFileId: (p as any).briefingFileId || slot?.briefingFileId || null,
+              ...(slot?.indicacoes?.length ? { indicacoes: slot.indicacoes } : {}),
+              ...(copyDoTake.length ? { indicacoesCopy: copyDoTake } : {}),
             } as typeof p;
           }),
         }
@@ -11581,7 +11589,29 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </span>
                                   ) : null}
                                 </span>
-                                {/* Indicação do copy SEM avatar dono (AD multi-avatar):
+                                {/* INDICAÇÃO DE COPY (botão AZUL): comentário ancorado no
+                                  * texto do hook/body — mostra o trecho comentado e em
+                                  * qual take caiu. Não é o indicador de avatar. */}
+                                {(a.indicacoesCopy || []).length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setIndicacaoOpen((prev) => ({ ...prev, [`${a.taskId}:copy`]: !prev[`${a.taskId}:copy`] }))}
+                                    aria-expanded={!!indicacaoOpen[`${a.taskId}:copy`]}
+                                    className={'pilot-ind-btn is-copy shrink-0' + (indicacaoOpen[`${a.taskId}:copy`] ? ' is-open' : '')}
+                                    title={`Comentário do copy no texto do AD (${(a.indicacoesCopy || []).length}) — clica pra ver o trecho e o take`}
+                                  >
+                                    <span className="pilot-ind-halo" aria-hidden />
+                                    {/* balão de comentário com aspas — o comentário é NO TEXTO */}
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                      <path d="M8 9h.01M12 9h.01M16 9h.01" />
+                                    </svg>
+                                    {(a.indicacoesCopy || []).length > 1 ? (
+                                      <span className="pilot-ind-count">{(a.indicacoesCopy || []).length}</span>
+                                    ) : null}
+                                  </button>
+                                ) : null}
+                                {/* Indicação de AVATAR sem dono claro (raro):
                                   * botão 3D dourado no topo do card da task. */}
                                 {(a.indicacoesDoc || []).length > 0 ? (
                                   <button
@@ -11611,6 +11641,38 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   × Remover
                                 </button>
                               </div>
+                              {/* Painel da indicação de COPY — abre pelo botão AZUL. Cada
+                                * linha: take onde caiu + trecho comentado + a nota. */}
+                              {indicacaoOpen[`${a.taskId}:copy`] && (a.indicacoesCopy || []).length > 0 ? (
+                                <div className="mt-2 rounded-[12px] border border-blue-400/40 bg-gradient-to-br from-blue-400/[0.10] via-blue-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                  <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500">
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                    </svg>
+                                    Comentário no texto · copy do Docs
+                                  </div>
+                                  <ul className="grid gap-1.5">
+                                    {(a.indicacoesCopy || []).map((ind, k) => (
+                                      <li key={k} className="rounded-[8px] border border-blue-400/30 bg-bg/60 px-2.5 py-2">
+                                        <div className="flex flex-wrap items-baseline gap-1.5">
+                                          {ind.take ? (
+                                            <span className="mono shrink-0 rounded-full border border-blue-400/45 bg-blue-500/15 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest text-blue-500">
+                                              {ind.take}
+                                            </span>
+                                          ) : null}
+                                          <span className="min-w-0 text-[11px] italic leading-snug text-text-muted">
+                                            “{ind.trecho.length > 110 ? ind.trecho.slice(0, 110) + '…' : ind.trecho}”
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 text-[12px] leading-relaxed text-text">{ind.nota}</div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  <div className="mt-1.5 text-[10px] text-text-muted">
+                                    É o comentário que o copy deixou nesse trecho da fala.
+                                  </div>
+                                </div>
+                              ) : null}
                               {/* Painel da indicação da TASK — abre pelo botão dourado acima. */}
                               {indicacaoOpen[`${a.taskId}:task`] && (a.indicacoesDoc || []).length > 0 ? (
                                 <div className="mt-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">

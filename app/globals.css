@@ -2442,3 +2442,42 @@ html[data-theme='light'] .plano-input {
   .pilot-ind-btn, .pilot-ind-btn > svg { animation: none; }
   .pilot-ind-halo { display: none; }
 }
+
+/* Variante AZUL do botão de indicação: comentário ancorado no TEXTO do
+   hook/body (indicação de COPY) — não é o indicador de avatar (dourado). */
+.pilot-ind-btn.is-copy {
+  color: #041226;
+  background: linear-gradient(145deg, #93c5fd 0%, #3b82f6 55%, #2563eb 100%);
+  box-shadow:
+    0 3px 0 rgba(0, 0, 0, 0.45),
+    0 6px 18px -6px rgba(59, 130, 246, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  animation-name: pilotIndGlowCopy;
+}
+.pilot-ind-btn.is-copy.is-open {
+  background: linear-gradient(145deg, #bfdbfe 0%, #60a5fa 55%, #3b82f6 100%);
+}
+.pilot-ind-btn.is-copy .pilot-ind-halo {
+  border-color: rgba(96, 165, 250, 0.55);
+}
+.pilot-ind-btn.is-copy .pilot-ind-count {
+  color: #93c5fd;
+  box-shadow: 0 0 0 1.5px rgba(96, 165, 250, 0.6);
+}
+@keyframes pilotIndGlowCopy {
+  0%, 100% {
+    box-shadow:
+      0 3px 0 rgba(0, 0, 0, 0.45),
+      0 6px 18px -6px rgba(59, 130, 246, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 3px 0 rgba(0, 0, 0, 0.45),
+      0 8px 26px -6px rgba(96, 165, 250, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65),
+      inset 0 -2px 0 rgba(0, 0, 0, 0.25);
+  }
+}

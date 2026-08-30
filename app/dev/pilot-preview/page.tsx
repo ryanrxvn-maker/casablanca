@@ -25,6 +25,9 @@ const PARTES: RedispatchPart[] = [
     username: 'drrobertokalil 1',
     briefingFileId: null,
     indicacoes: ['AVATAR SEGURANDO O AZEITE NA MÃO', 'AMBIENTE DE COZINHA, LUZ QUENTE'],
+    indicacoesCopy: [
+      { trecho: 'Como transformar um azeite de R$10 no seu próprio remédio de próstata', nota: 'COMENTARIO DE TESTE, CENARIO X' },
+    ],
   },
   {
     label: 'BODY 1',
@@ -71,6 +74,7 @@ function Conteudo() {
   const [engine, setEngine] = useState<'III' | 'IV' | 'V' | undefined>(undefined);
   const [diffAberto, setDiffAberto] = useState(false);
   const [indAberta, setIndAberta] = useState(false);
+  const [indCopyAberta, setIndCopyAberta] = useState(false);
   const [comAudio, setComAudio] = useState(true);
   const motorAudio = engine || 'III';
   const dur = 145;
@@ -88,11 +92,25 @@ function Conteudo() {
         <div className="mono mb-2 flex items-center gap-2 text-[10px]">
           <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">Doutor</span>
           <span className="text-text-muted">@drrobertokalil 1 · 7 partes</span>
-          {/* botão 3D de indicação */}
+          {/* botão AZUL: comentário no TEXTO (indicação de copy) */}
+          <button
+            type="button"
+            onClick={() => setIndCopyAberta((v) => !v)}
+            className={'pilot-ind-btn is-copy ml-auto shrink-0' + (indCopyAberta ? ' is-open' : '')}
+            title="Comentário do copy no texto do AD (2) — clica pra ver o trecho e o take"
+          >
+            <span className="pilot-ind-halo" aria-hidden />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <path d="M8 9h.01M12 9h.01M16 9h.01" />
+            </svg>
+            <span className="pilot-ind-count">2</span>
+          </button>
+          {/* botão 3D de indicação de AVATAR (dourado) */}
           <button
             type="button"
             onClick={() => setIndAberta((v) => !v)}
-            className={'pilot-ind-btn ml-auto shrink-0' + (indAberta ? ' is-open' : '')}
+            className={'pilot-ind-btn shrink-0' + (indAberta ? ' is-open' : '')}
             title="Indicação do copy pra este avatar (2) — clica pra ver"
           >
             <span className="pilot-ind-halo" aria-hidden />
@@ -105,6 +123,33 @@ function Conteudo() {
           </button>
         </div>
 
+        {indCopyAberta ? (
+          <div className="mb-2 rounded-[12px] border border-blue-400/40 bg-gradient-to-br from-blue-400/[0.10] via-blue-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-blue-500">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              Comentário no texto · copy do Docs
+            </div>
+            <ul className="grid gap-1.5">
+              {[
+                { take: 'HOOK 1', trecho: 'Para próstata inchada, não existe nada melhor do que isso daqui.', nota: 'COMENTARIO DE TESTE, CENARIO X' },
+                { take: 'BODY 2', trecho: 'Esse composto se chama oleocantal do azeite.', nota: 'Tela dividida aqui — b-roll do azeite escorrendo' },
+              ].map((ind, k) => (
+                <li key={k} className="rounded-[8px] border border-blue-400/30 bg-bg/60 px-2.5 py-2">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    <span className="mono shrink-0 rounded-full border border-blue-400/45 bg-blue-500/15 px-1.5 py-[1px] text-[9px] font-bold uppercase tracking-widest text-blue-500">
+                      {ind.take}
+                    </span>
+                    <span className="min-w-0 text-[11px] italic leading-snug text-text-muted">“{ind.trecho}”</span>
+                  </div>
+                  <div className="mt-1 text-[12px] leading-relaxed text-text">{ind.nota}</div>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-1.5 text-[10px] text-text-muted">É o comentário que o copy deixou nesse trecho da fala.</div>
+          </div>
+        ) : null}
         {indAberta ? (
           <div className="mb-2 rounded-[12px] border border-amber-400/40 bg-gradient-to-br from-amber-400/[0.10] via-amber-400/[0.04] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
             <div className="mono mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-amber-500">
