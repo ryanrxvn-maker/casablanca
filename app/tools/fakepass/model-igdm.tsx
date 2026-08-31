@@ -11,7 +11,6 @@ import {
   StatusBar,
   Field,
   TextField,
-  TextArea,
   Toggle,
   ImageUpload,
   FONT_STACK,
@@ -19,19 +18,17 @@ import {
   type StatusCfg,
   emojify,
 } from './shared';
+import { ChatBuilder, toMsgs, newMsg, type ChatMsg } from './builder';
 
 type S = {
   nome: string;
   username: string;
-  conversa: string;
+  /** ChatMsg[] (construtor visual). String antiga ainda é aceita — ver toMsgs. */
+  conversa: ChatMsg[] | string;
   dark: boolean;
   avatar: string;
   visto: boolean;
 };
-
-type Msg = { kind: 'text'; t: string; me: boolean } | { kind: 'audio'; dur: string; me: boolean };
-
-const AUDIO_RE = /^(?:áudio|audio)\s+(\d+:\d{2})$/i;
 
 // Mensagens enviadas do Instagram DM = gradiente ROXO→AZUL (não o colorido).
 const IG_GRADIENT = 'linear-gradient(155deg,#bd3be0 0%,#8a45f0 48%,#5b6ef0 100%)';
@@ -48,20 +45,6 @@ function meBubbleBg(t: number): string {
   // leve gradiente vertical na própria bolha pra manter o brilho do original
   const lighter = `rgb(${Math.min(255, mix(IG_TOP[0], IG_BOT[0]) + 14)},${Math.min(255, mix(IG_TOP[1], IG_BOT[1]) + 10)},${Math.min(255, mix(IG_TOP[2], IG_BOT[2]) + 14)})`;
   return `linear-gradient(160deg,${lighter} 0%,${c} 100%)`;
-}
-
-function parseMsgs(txt: string): Msg[] {
-  return txt
-    .split('\n')
-    .map((l) => l.replace(/\r$/, ''))
-    .filter((l) => l.trim() !== '')
-    .map((l): Msg => {
-      const me = l.startsWith('> ');
-      const body = me ? l.slice(2) : l;
-      const a = body.match(AUDIO_RE);
-      if (a) return { kind: 'audio', dur: a[1], me };
-      return { kind: 'text', t: body, me };
-    });
 }
 
 /** Balão de áudio do Instagram DM: play + waveform + tempo + "Ver transcrição". */
@@ -83,6 +66,89 @@ function IgAudioBubble({ dur, me, dark, radius }: { dur: string; me: boolean; da
         <span style={{ fontSize: 11, color: meta }}>{dur}</span>
       </div>
       <div style={{ fontSize: 12, color: meta, marginTop: 5 }}>Ver transcrição</div>
+    </div>
+  );
+}
+
+/**
+ * Foto/vídeo no Direct: a mídia ocupa o balão inteiro (cantos arredondados,
+ * sem moldura), e o vídeo mostra o play no centro + duração — igual ao app.
+ * Tudo <img> + caixas absolutas: o export desenha idêntico à prévia.
+ */
+function IgMediaBubble({ m, dark, radius }: { m: ChatMsg; dark: boolean; radius: string }) {
+  const video = m.kind === 'video';
+  return (
+    <div style={{ position: 'relative', borderRadius: radius, overflow: 'hidden', display: 'flex', maxWidth: '72%' }}>
+      {m.src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={m.src} alt="" style={{ display: 'block', width: 200, height: 'auto', maxHeight: 265, objectFit: 'cover' }} />
+      ) : (
+        <div
+          style={{
+            width: 200,
+            height: 150,
+            background: dark ? '#262626' : '#efefef',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: dark ? '#6e6e6e' : '#b0b0b0',
+          }}
+        >
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            {video ? (
+              <>
+                <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+                <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
+              </>
+            ) : (
+              <>
+                <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                <circle cx="8.5" cy="9.5" r="1.6" />
+                <path d="M4 17l4.5-4.2a1.5 1.5 0 0 1 2 0L15 16l1.7-1.5a1.5 1.5 0 0 1 2 0L20 16" />
+              </>
+            )}
+          </svg>
+        </div>
+      )}
+      {video ? (
+        <>
+          <span
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              marginLeft: -20,
+              marginTop: -20,
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              background: 'rgba(0,0,0,0.42)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#ffffff" aria-hidden style={{ display: 'block', marginLeft: 3 }}>
+              <path d="M3 1.5 13 8 3 14.5z" />
+            </svg>
+          </span>
+          <span
+            style={{
+              position: 'absolute',
+              right: 9,
+              bottom: 9,
+              fontSize: 11,
+              lineHeight: 1,
+              color: '#ffffff',
+              background: 'rgba(0,0,0,0.38)',
+              borderRadius: 9,
+              padding: '3px 6px',
+            }}
+          >
+            {m.dur}
+          </span>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -300,7 +366,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const rodapeCircleBg = '#8a45f0';
   const emojiSet = status.os === 'android' ? 'google' : 'apple';
 
-  const msgs = parseMsgs(s.conversa);
+  const msgs = toMsgs(s.conversa);
   // índice da última mensagem enviada (pra âncora do "Visto")
   let lastMeIdx = -1;
   for (let i = 0; i < msgs.length; i++) if (msgs[i].me) lastMeIdx = i;
@@ -383,7 +449,6 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           flexDirection: 'column',
           justifyContent: 'flex-end',
           padding: 10,
-          gap: 3,
         }}
       >
         {msgs.map((m, i) => {
@@ -393,7 +458,9 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           const lastOfRun = !next || next.me !== m.me;
           const showVisto = s.visto && m.me && i === lastMeIdx;
           return (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column' }}>
+            // respiro do Direct: 2px DENTRO do bloco do mesmo autor, 9px quando
+            // troca de lado (antes era 3px fixo — os blocos ficavam sem leitura).
+            <div key={m.id || i} style={{ display: 'flex', flexDirection: 'column', marginTop: prev ? (firstOfRun ? 9 : 2) : 0 }}>
               <div
                 style={{
                   display: 'flex',
@@ -402,6 +469,8 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
               >
                 {m.kind === 'audio' ? (
                   <IgAudioBubble dur={m.dur} me={m.me} dark={s.dark} radius={bubbleRadius(m.me, firstOfRun, lastOfRun)} />
+                ) : m.kind === 'image' || m.kind === 'video' ? (
+                  <IgMediaBubble m={m} dark={s.dark} radius={bubbleRadius(m.me, firstOfRun, lastOfRun)} />
                 ) : (
                   <div
                     style={{
@@ -417,21 +486,25 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                       color: m.me ? '#ffffff' : recvFg,
                     }}
                   >
-                    {emojify(m.t, emojiSet)}
+                    {emojify(m.text, emojiSet)}
                   </div>
                 )}
               </div>
               {showVisto ? (
+                // "Visto" ALINHADO à borda do balão (flex-end), não textAlign num
+                // bloco de largura cheia — assim não encosta na borda do print.
                 <div
                   style={{
+                    display: 'flex',
+                    justifyContent: 'flex-end',
                     fontSize: 11,
+                    lineHeight: 1.4,
                     color: muted,
-                    textAlign: 'right',
-                    marginTop: 3,
-                    paddingRight: 2,
+                    marginTop: 4,
+                    paddingRight: 4,
                   }}
                 >
-                  Visto
+                  <span>Visto</span>
                 </div>
               ) : null}
             </div>
@@ -487,7 +560,14 @@ const MODEL: FakeModel<S> = {
   defaultState: {
     nome: 'ana.souza',
     username: 'ana.souza',
-    conversa: 'oii tudo bem?\nvi que você entrou no grupo\n> oi! tudo sim 😄\n> acabei de entrar mesmo\naudio 0:16\nque bom! qualquer dúvida chama',
+    conversa: [
+      newMsg({ kind: 'text', me: false, text: 'oii tudo bem?' }),
+      newMsg({ kind: 'text', me: false, text: 'vi que você entrou no grupo' }),
+      newMsg({ kind: 'text', me: true, text: 'oi! tudo sim 😄' }),
+      newMsg({ kind: 'text', me: true, text: 'acabei de entrar mesmo' }),
+      newMsg({ kind: 'audio', me: false, dur: '0:16' }),
+      newMsg({ kind: 'text', me: false, text: 'que bom! qualquer dúvida chama' }),
+    ],
     dark: false,
     avatar: '',
     visto: true,
@@ -515,14 +595,9 @@ const MODEL: FakeModel<S> = {
       </Field>
       <Field
         label="Conversa"
-        hint="Uma linha por mensagem. Comece com > pra ser sua (direita)."
+        hint="Monte a conversa: some texto, áudio, foto ou vídeo, escolha o lado e ordene pelas setas."
       >
-        <TextArea
-          value={s.conversa}
-          onChange={(v) => set({ conversa: v })}
-          placeholder={'oi!\n> oi, tudo bem?'}
-          rows={6}
-        />
+        <ChatBuilder value={s.conversa} onChange={(v) => set({ conversa: v })} meLabel="Eu" themLabel="Contato" />
       </Field>
       <Toggle on={s.dark} onChange={(v) => set({ dark: v })} label="Modo escuro" />
       <Toggle on={s.visto} onChange={(v) => set({ visto: v })} label='Mostrar "Visto"' />

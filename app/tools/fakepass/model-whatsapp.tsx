@@ -18,7 +18,6 @@ import {
   StatusBar,
   Field,
   TextField,
-  TextArea,
   Toggle,
   ImageUpload,
   Emo,
@@ -26,35 +25,17 @@ import {
   type FakeModel,
   type StatusCfg,
 } from './shared';
+import { ChatBuilder, toMsgs, newMsg, type ChatMsg } from './builder';
 
 type S = {
   nome: string;
   status: string;
-  conversa: string;
+  /** ChatMsg[] (construtor visual). String antiga ainda é aceita — ver toMsgs. */
+  conversa: ChatMsg[] | string;
   dark: boolean;
   avatar: string;
   hora: string;
 };
-
-type Msg =
-  | { kind: 'text'; t: string; me: boolean }
-  | { kind: 'audio'; dur: string; me: boolean };
-
-const AUDIO_RE = /^audio\s+(\d+:\d{2})/i;
-
-function parseMsgs(txt: string): Msg[] {
-  return txt
-    .split('\n')
-    .map((l) => l.replace(/\r$/, ''))
-    .filter((l) => l.trim() !== '')
-    .map((raw) => {
-      const me = raw.startsWith('> ');
-      const body = me ? raw.slice(2) : raw;
-      const a = body.match(AUDIO_RE);
-      if (a) return { kind: 'audio', dur: a[1], me } as Msg;
-      return { kind: 'text', t: body, me } as Msg;
-    });
-}
 
 /* ─────────────────────── Fundo (doodle pattern) ─────────────────────── */
 // Padrão de rabiscos do WhatsApp. IMPORTANTE: o html2canvas (export) NÃO honra
@@ -223,12 +204,12 @@ function DotsIcon({ color }: { color: string }) {
   );
 }
 
-function DoubleCheck() {
-  // dois checks azuis (visto)
+function DoubleCheck({ color = '#53bdeb' }: { color?: string }) {
+  // dois checks azuis (visto) — brancos quando ficam POR CIMA de uma mídia
   return (
     <svg width="16" height="11" viewBox="0 0 16 11" fill="none" aria-hidden style={{ display: 'block' }}>
-      <path d="M1 5.7 3.7 8.4 9 2.6" stroke="#53bdeb" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6.3 5.7 9 8.4 14.3 2.6" stroke="#53bdeb" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M1 5.7 3.7 8.4 9 2.6" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.3 5.7 9 8.4 14.3 2.6" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -378,7 +359,7 @@ function Waveform({ played, dim }: { played: string; dim: string }) {
 
 /* ─────────────────────────── Balão de áudio ─────────────────────────── */
 
-function AudioBubble({ m, hora, dark, tail }: { m: Extract<Msg, { kind: 'audio' }>; hora: string; dark: boolean; tail: boolean }) {
+function AudioBubble({ m, hora, dark, tail }: { m: ChatMsg; hora: string; dark: boolean; tail: boolean }) {
   const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
   const metaColor = dark ? '#8696a0' : '#667781';
   const waveDim = dark ? '#54656f' : '#c9d0d3';
@@ -442,6 +423,59 @@ function AudioBubble({ m, hora, dark, tail }: { m: Extract<Msg, { kind: 'audio' 
 
 /* ─────────────────────────── Balão de texto ─────────────────────────── */
 
+/**
+ * Hora + checks do balão.
+ *
+ * ⚠ ANTES era `float: right` dentro do texto — e o html2canvas NÃO reproduz
+ * float: no download a hora caía numa linha própria e empurrava o fim do texto
+ * (o emoji ❤️ "quebrava" pra baixo). Agora é o mesmo truque do WhatsApp Web:
+ * um ESPAÇADOR inline reserva o buraco na ÚLTIMA linha e a hora vai ABSOLUTA no
+ * canto — posição absoluta o html2canvas desenha exata, então download = prévia.
+ */
+function metaWidth(hora: string, me: boolean) {
+  return Math.round(hora.length * 5.9) + (me ? 19 : 0) + 10;
+}
+
+function MetaSpacer({ hora, me }: { hora: string; me: boolean }) {
+  return <span aria-hidden style={{ display: 'inline-block', width: metaWidth(hora, me), height: 1 }} />;
+}
+
+function MetaStamp({
+  hora,
+  me,
+  color,
+  checkColor,
+  onMedia,
+}: {
+  hora: string;
+  me: boolean;
+  color: string;
+  checkColor?: string;
+  onMedia?: boolean;
+}) {
+  return (
+    <span
+      style={{
+        position: 'absolute',
+        right: onMedia ? 8 : 9,
+        bottom: onMedia ? 8 : 5,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 3,
+        fontSize: 11,
+        lineHeight: 1,
+        color,
+        ...(onMedia
+          ? { background: 'rgba(0,0,0,0.4)', borderRadius: 9, padding: '3px 6px' }
+          : null),
+      }}
+    >
+      {hora}
+      {me ? <DoubleCheck color={checkColor} /> : null}
+    </span>
+  );
+}
+
 function TextBubble({
   m,
   hora,
@@ -449,7 +483,7 @@ function TextBubble({
   emojiSet,
   tail,
 }: {
-  m: Extract<Msg, { kind: 'text' }>;
+  m: ChatMsg;
   hora: string;
   dark: boolean;
   emojiSet: 'apple' | 'google';
@@ -463,7 +497,11 @@ function TextBubble({
       <div
         style={{
           position: 'relative',
-          maxWidth: '78%',
+          // 85% (era 78%): no balão estreito uma frase curta com emoji no fim
+          // já estourava e o emoji caía sozinho na 2ª linha — no WhatsApp real
+          // ela cabe inteira e só a HORA desce. Com 85% quem desce é o
+          // espaçador da hora, que é o comportamento certo.
+          maxWidth: '85%',
           background: bg,
           color,
           borderRadius: 7.5,
@@ -479,26 +517,188 @@ function TextBubble({
       >
         {tail ? <Tail me={m.me} color={bg} /> : null}
         <span>
-          <Emo t={m.t} set={emojiSet} />
+          <Emo t={m.text} set={emojiSet} />
         </span>
-        <span
-          style={{
-            float: 'right',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 3,
-            marginLeft: 8,
-            marginTop: 4,
-            fontSize: 11,
-            color: metaColor,
-            lineHeight: 1,
-            position: 'relative',
-            top: 3,
-          }}
-        >
-          {hora}
-          {m.me ? <DoubleCheck /> : null}
-        </span>
+        <MetaSpacer hora={hora} me={m.me} />
+        <MetaStamp hora={hora} me={m.me} color={metaColor} />
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────── Balão de mídia (imagem/vídeo) ─────────────────────── */
+
+/** Placeholder quando ainda não subiram a imagem (mantém o layout do print). */
+function MediaEmpty({ dark, video }: { dark: boolean; video: boolean }) {
+  return (
+    <div
+      style={{
+        width: 210,
+        height: 158,
+        borderRadius: 6,
+        background: dark ? '#0e1a20' : '#e3e6e5',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: dark ? '#54656f' : '#a9b3b6',
+      }}
+    >
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        {video ? (
+          <>
+            <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+            <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
+          </>
+        ) : (
+          <>
+            <rect x="3" y="4" width="18" height="16" rx="2.5" />
+            <circle cx="8.5" cy="9.5" r="1.6" />
+            <path d="M4 17l4.5-4.2a1.5 1.5 0 0 1 2 0L15 16l1.7-1.5a1.5 1.5 0 0 1 2 0L20 16" />
+          </>
+        )}
+      </svg>
+    </div>
+  );
+}
+
+/**
+ * Foto ou VÍDEO na conversa. O vídeo é a MESMA foto (a thumb do print) com o
+ * play redondo no centro e o selo de duração no topo — igual ao WhatsApp, e
+ * imune ao export porque é tudo <img> + caixas absolutas (nada de <video>).
+ */
+function MediaBubble({
+  m,
+  hora,
+  dark,
+  emojiSet,
+  tail,
+}: {
+  m: ChatMsg;
+  hora: string;
+  dark: boolean;
+  emojiSet: 'apple' | 'google';
+  tail: boolean;
+}) {
+  const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
+  const color = dark ? '#e9edef' : '#111b21';
+  const metaColor = dark ? '#8696a0' : '#667781';
+  const video = m.kind === 'video';
+  const legenda = m.text.trim() !== '';
+  return (
+    <div style={{ display: 'flex', justifyContent: m.me ? 'flex-end' : 'flex-start', marginTop: tail ? 4 : 0 }}>
+      <div
+        style={{
+          position: 'relative',
+          background: bg,
+          borderRadius: 7.5,
+          borderTopLeftRadius: tail && !m.me ? 0 : 7.5,
+          borderTopRightRadius: tail && m.me ? 0 : 7.5,
+          padding: 3,
+          boxShadow: dark ? '0 1px 0.5px rgba(0,0,0,0.28)' : '0 1px 0.5px rgba(0,0,0,0.13)',
+        }}
+      >
+        {tail ? <Tail me={m.me} color={bg} /> : null}
+        {/* mídia */}
+        <div style={{ position: 'relative', display: 'flex', borderRadius: 6, overflow: 'hidden' }}>
+          {m.src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={m.src}
+              alt=""
+              style={{ display: 'block', width: 210, height: 'auto', maxHeight: 260, objectFit: 'cover' }}
+            />
+          ) : (
+            <MediaEmpty dark={dark} video={video} />
+          )}
+          {video ? (
+            <>
+              {/* play central */}
+              <span
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  marginLeft: -21,
+                  marginTop: -21,
+                  width: 42,
+                  height: 42,
+                  borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.45)',
+                  border: '1.5px solid rgba(255,255,255,0.9)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="#ffffff" aria-hidden style={{ display: 'block', marginLeft: 3 }}>
+                  <path d="M3 1.5 13 8 3 14.5z" />
+                </svg>
+              </span>
+              {/* selo de duração */}
+              <span
+                style={{
+                  position: 'absolute',
+                  left: 8,
+                  top: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  background: 'rgba(0,0,0,0.4)',
+                  borderRadius: 9,
+                  padding: '3px 7px',
+                  fontSize: 11,
+                  lineHeight: 1,
+                  color: '#ffffff',
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="#ffffff" aria-hidden style={{ display: 'block' }}>
+                  <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h6A2.5 2.5 0 0 1 15 7.5v9A2.5 2.5 0 0 1 12.5 19h-6A2.5 2.5 0 0 1 4 16.5v-9Zm13 2.6 3.3-2.2c.4-.3 1 0 1 .5v7.2c0 .5-.6.8-1 .5L17 13.9v-3.8Z" />
+                </svg>
+                {m.dur}
+              </span>
+            </>
+          ) : null}
+          {/* sem legenda: hora POR CIMA da mídia (pílula escura, igual ao app) */}
+          {!legenda ? (
+            <MetaStamp hora={hora} me={m.me} color="#ffffff" checkColor="#ffffff" onMedia />
+          ) : null}
+        </div>
+        {/* legenda: vira um bloco de texto embaixo, com a hora no canto */}
+        {legenda ? (
+          <div
+            style={{
+              position: 'relative',
+              maxWidth: 210,
+              padding: '5px 6px 6px',
+              color,
+              fontSize: 14.2,
+              lineHeight: 1.32,
+              wordBreak: 'break-word',
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            <span>
+              <Emo t={m.text} set={emojiSet} />
+            </span>
+            <MetaSpacer hora={hora} me={m.me} />
+            <span
+              style={{
+                position: 'absolute',
+                right: 6,
+                bottom: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 11,
+                lineHeight: 1,
+                color: metaColor,
+              }}
+            >
+              {hora}
+              {m.me ? <DoubleCheck /> : null}
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -523,7 +723,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const unreadColor = dark ? '#e9edef' : '#54656f';
 
   const emojiSet = status.os === 'android' ? 'google' : 'apple';
-  const msgs = parseMsgs(s.conversa);
+  const msgs = toMsgs(s.conversa);
   const doodlePng = useDoodlePng(dark);
 
   return (
@@ -643,11 +843,10 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
         >
           {msgs.map((m, i) => {
             const tail = i === 0 || msgs[i - 1].me !== m.me;
-            return m.kind === 'audio' ? (
-              <AudioBubble key={i} m={m} hora={s.hora} dark={dark} tail={tail} />
-            ) : (
-              <TextBubble key={i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />
-            );
+            if (m.kind === 'audio') return <AudioBubble key={m.id || i} m={m} hora={s.hora} dark={dark} tail={tail} />;
+            if (m.kind === 'image' || m.kind === 'video')
+              return <MediaBubble key={m.id || i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />;
+            return <TextBubble key={m.id || i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />;
           })}
         </div>
       </div>
@@ -714,8 +913,14 @@ const MODEL: FakeModel<S> = {
   defaultState: {
     nome: 'Ana',
     status: 'online',
-    conversa:
-      'Oi, viu minha mensagem? 👀\nPreciso muito da sua resposta\n> Oi! Vi sim, tava sem sinal 😅\n> audio 0:07\nAh entendi! Fica tranquila então ❤️\n> Já te respondo tudo direitinho',
+    conversa: [
+      newMsg({ kind: 'text', me: false, text: 'Oi, viu minha mensagem? 👀' }),
+      newMsg({ kind: 'text', me: false, text: 'Preciso muito da sua resposta' }),
+      newMsg({ kind: 'text', me: true, text: 'Oi! Vi sim, tava sem sinal 😅' }),
+      newMsg({ kind: 'audio', me: true, dur: '0:07' }),
+      newMsg({ kind: 'text', me: false, text: 'Ah entendi! Fica tranquila então ❤️' }),
+      newMsg({ kind: 'text', me: true, text: 'Já te respondo tudo direitinho' }),
+    ],
     dark: false,
     avatar: '',
     hora: '09:41',
@@ -736,9 +941,9 @@ const MODEL: FakeModel<S> = {
       </Field>
       <Field
         label="Conversa"
-        hint='Uma linha por mensagem. > no início = sua. Escreva "audio 0:07" pra áudio.'
+        hint="Monte a conversa: some texto, áudio, foto ou vídeo, escolha o lado e arraste a ordem pelas setas."
       >
-        <TextArea value={s.conversa} onChange={(v) => set({ conversa: v })} rows={7} />
+        <ChatBuilder value={s.conversa} onChange={(v) => set({ conversa: v })} meLabel="Eu" themLabel="Contato" />
       </Field>
       <Toggle on={s.dark} onChange={(v) => set({ dark: v })} label="Modo escuro" />
     </div>

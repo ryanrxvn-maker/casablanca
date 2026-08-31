@@ -17,6 +17,7 @@ import {
   FONT_STACK,
   type FakeModel,
 } from './shared';
+import { CommentBuilder } from './builder';
 import type { ReactNode } from 'react';
 
 /* ─────────────────────────── Tipos / parse ─────────────────────────── */
@@ -448,13 +449,14 @@ const COMMENTS: FakeModel<S> = {
     <div className="flex flex-col gap-4">
       <Field
         label="Comentários"
-        hint="Uma linha por comentário no formato usuário: texto. Ponha ✓ no fim do nome pra verificado."
+        hint="Um card por comentário. Ponha ✓ no fim do nome pra sair verificado."
       >
-        <TextArea
+        <CommentBuilder
           value={s.comentarios}
           onChange={(v) => set({ comentarios: v })}
-          placeholder={'usuário: comentário aqui'}
-          rows={7}
+          userPlaceholder="usuário"
+          textPlaceholder="comentário…"
+          addLabel="Comentário"
         />
       </Field>
       <Toggle on={s.dark} onChange={(v) => set({ dark: v })} label="Modo escuro" />

@@ -43,6 +43,17 @@ const nextConfig = {
     serverComponentsExternalPackages: ['@gradio/client', 'undici'],
   },
 
+  // ── Cache do webpack em MEMÓRIA no dev (Windows) ───────────────────────
+  // O cache em DISCO (.next/cache/webpack/*.pack.gz) quebra com frequência
+  // nesta máquina: o rename do .pack.gz_ falha com ENOENT (antivírus/OneDrive
+  // segurando o arquivo), o cache fica podre e o dev passa a servir HTML no
+  // lugar dos chunks — a página carrega sem React ("missing required error
+  // components"). Em memória isso não acontece. NÃO afeta `next build`/produção.
+  webpack: (config, { dev }) => {
+    if (dev) config.cache = { type: 'memory' };
+    return config;
+  },
+
   async headers() {
     return [
       {

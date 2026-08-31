@@ -31,6 +31,7 @@ import {
   toUnified,
   type FakeModel,
 } from './shared';
+import { CommentBuilder } from './builder';
 
 /* ─────────────────────────── Tipos / estado ─────────────────────────── */
 
@@ -999,8 +1000,14 @@ function LiveControls({
       {kind === 'ig' ? (
         <Toggle on={s.verified} onChange={(v) => set({ verified: v })} label="Selo verificado" />
       ) : null}
-      <Field label="Comentários" hint="Um por linha, no formato usuário: mensagem.">
-        <TextArea value={s.comments} onChange={(v) => set({ comments: v })} rows={6} withEmoji placeholder={'usuário: mensagem'} />
+      <Field label="Comentários" hint="Cada card é um comentário subindo na live — botão + pra adicionar, setas pra ordenar.">
+        <CommentBuilder
+          value={s.comments}
+          onChange={(v) => set({ comments: v })}
+          userPlaceholder="usuário"
+          textPlaceholder="comentário…"
+          addLabel="Comentário"
+        />
       </Field>
       <Field label="Foto de perfil">
         <ImageUpload round value={s.avatar} onChange={(v) => set({ avatar: v })} label="foto" />
