@@ -1,63 +1,217 @@
 'use client';
 
 /**
- * MINI JANELAS da LEGENDA AUTOMÁTICA e da DINÂMICA DE ZOOM (ClickUp Pilot,
- * 30.08) — os dois popovers que abrem nos botões ao lado da tesoura.
+ * JANELAS da LEGENDA AUTOMÁTICA e da DINÂMICA DE ZOOM (ClickUp Pilot, 31.08).
  *
- * Desenho: a mesma gramática do popover de versões (`.vp-pop`) — casca escura
- * com hairline, título em label-tech, um acento só. Cada janela termina no
- * botão "usar sempre", que grava a escolha como PADRÃO da conta (é o
- * pré-configurar que o Silas pediu: liga uma vez, vale pras próximas tasks).
+ * v2 depois do feedback do Silas: as v1 eram popovers pequenos e ilegíveis.
+ * Agora são JANELAS centradas com backdrop, tipografia maior e — o principal —
+ * o preview de cada template é RENDERIZADO PELO MOTOR REAL das legendas
+ * (drawCaptions + presets + fontes de verdade num canvas 9:16), então o que o
+ * card mostra é exatamente o que sai no vídeo. O zoom tem uma prévia ANIMADA
+ * com a amplitude e o movimento escolhidos, rodando a mesma matemática do
+ * render (easing seno, janela ~2,6s).
  *
- * Ficam em componente próprio porque o card do Pilot tem `transform` (o tilt
- * 3D) e isso cria contexto de empilhamento — igual ao popover de versões, o
- * conteúdo é posicionado com `fixed` a partir do retângulo do botão, e o CSS
- * mora em globals.css (styled-jsx não atravessa portal).
+ * Vivem em portal (o card do Pilot tem transform 3D) e o CSS mora em
+ * globals.css (`.lz-*`) — styled-jsx não atravessa portal.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CaptionTemplate } from '@/lib/typography/caption-script';
-import type { LegendaCfg, ZoomCfg, ZoomModo, ZoomForca } from '@/lib/pilot-pos-producao';
+import {
+  ZOOM_AMP,
+  type LegendaCfg,
+  type ZoomCfg,
+  type ZoomModo,
+  type ZoomForca,
+} from '@/lib/pilot-pos-producao';
 
 const MODOS: Array<{ v: ZoomModo; label: string; dica: string }> = [
-  { v: 'in', label: 'Zoom in', dica: 'Cada take empurra pra dentro (push-in clássico).' },
-  { v: 'out', label: 'Zoom out', dica: 'Cada take começa fechado e abre.' },
-  { v: 'inout', label: 'In e out', dica: 'Alterna: um take entra, o seguinte abre.' },
+  { v: 'in', label: 'Zoom in', dica: 'Cada take empurra pra dentro — o push-in clássico dos criativos.' },
+  { v: 'out', label: 'Zoom out', dica: 'Cada take começa fechado no rosto e abre até o quadro inteiro.' },
+  { v: 'inout', label: 'In e out', dica: 'Alterna: um take entra, o seguinte abre. Movimento que nunca cansa.' },
 ];
 
-const FORCAS: Array<{ v: ZoomForca; label: string; dica: string }> = [
-  { v: 'leve', label: 'Leve', dica: '+4,5% — quase respiração.' },
-  { v: 'medio', label: 'Médio', dica: '+9% — o push-in do CapCut.' },
-  { v: 'forte', label: 'Forte', dica: '+16% — movimento evidente.' },
-  { v: 'misto', label: 'Misto', dica: 'Alterna leve e forte entre os takes.' },
+const FORCAS: Array<{ v: ZoomForca; label: string; pct: string; dica: string }> = [
+  { v: 'leve', label: 'Leve', pct: '+4,5%', dica: 'Quase uma respiração — presença sem chamar atenção.' },
+  { v: 'medio', label: 'Médio', pct: '+9%', dica: 'O push-in lento do CapCut. O padrão do estúdio.' },
+  { v: 'forte', label: 'Forte', pct: '+16%', dica: 'Movimento evidente, pra cena que precisa de energia.' },
+  { v: 'misto', label: 'Misto', pct: '4,5↔16%', dica: 'Alterna leve e forte entre os takes — ritmo de edição manual.' },
 ];
 
-/** Posiciona o painel embaixo do botão, sem sair da tela. */
-function usePos(anchor: HTMLElement | null, aberto: boolean) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  useLayoutEffect(() => {
-    if (!aberto || !anchor) return;
-    const calc = () => {
-      const r = anchor.getBoundingClientRect();
-      const largura = 288;
-      const left = Math.max(8, Math.min(window.innerWidth - largura - 8, r.right - largura));
-      setPos({ top: r.bottom + 8, left });
-    };
-    calc();
-    window.addEventListener('resize', calc);
-    window.addEventListener('scroll', calc, true);
-    return () => {
-      window.removeEventListener('resize', calc);
-      window.removeEventListener('scroll', calc, true);
-    };
-  }, [anchor, aberto]);
-  return pos;
+/* ═══════════════ preview REAL do template (motor das legendas) ═══════════ */
+
+/** Palavras fake com timing válido pro engine. */
+function blocoFake(id: string, texto: string) {
+  const palavras = texto.split(' ');
+  const dur = 3000;
+  return {
+    id,
+    words: palavras.map((t, i) => ({
+      text: t,
+      start: (i * dur) / palavras.length,
+      end: dur,
+    })),
+    start: 0,
+    end: dur,
+  };
 }
+
+/**
+ * Canvas 9:16 com um frame "de vídeo" fake + o HOOK e o BODY do template
+ * desenhados pelo drawCaptions — presets, fontes, caixa e destaque reais.
+ * O engine desenha UM bloco por instante, então são duas chamadas (uma pro
+ * hook, uma pro body) no mesmo canvas.
+ */
+function PreviewDoTemplate({ tpl }: { tpl: CaptionTemplate }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  const [pronto, setPronto] = useState(false);
+
+  useEffect(() => {
+    let morto = false;
+    (async () => {
+      try {
+        const [eng, pres, fonts] = await Promise.all([
+          import('@/lib/typography/engine'),
+          import('@/lib/typography/presets'),
+          import('@/lib/typography/fonts'),
+        ]);
+        try {
+          await fonts.ensureTypoFonts();
+        } catch {
+          /* cai na fallback — o preview ainda mostra cor/posição/caixa */
+        }
+        if (morto) return;
+        const c = ref.current;
+        if (!c) return;
+        const W = 300;
+        const H = 534;
+        c.width = W;
+        c.height = H;
+        const g = c.getContext('2d')!;
+
+        // ── frame fake de vídeo: cena escura com um "avatar" desfocado ──
+        const fundo = g.createLinearGradient(0, 0, 0, H);
+        fundo.addColorStop(0, '#232b36');
+        fundo.addColorStop(0.55, '#161c25');
+        fundo.addColorStop(1, '#0c1016');
+        g.fillStyle = fundo;
+        g.fillRect(0, 0, W, H);
+        // vulto do avatar (cabeça + tronco), só pra ancorar a leitura
+        g.save();
+        g.filter = 'blur(14px)';
+        g.fillStyle = 'rgba(214, 178, 148, 0.5)';
+        g.beginPath();
+        g.arc(W / 2, H * 0.32, 46, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = 'rgba(64, 76, 96, 0.85)';
+        g.beginPath();
+        g.ellipse(W / 2, H * 0.62, 92, 120, 0, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+        // vinheta
+        const vin = g.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.72);
+        vin.addColorStop(0, 'rgba(0,0,0,0)');
+        vin.addColorStop(1, 'rgba(0,0,0,0.45)');
+        g.fillStyle = vin;
+        g.fillRect(0, 0, W, H);
+
+        // ── HOOK e BODY do template, cada um pelo seu estilo ──
+        const hookSeg = tpl.segments.find((s) => s.kind === 'hook');
+        const bodySeg = [...tpl.segments].reverse().find((s) => s.kind === 'body');
+        const desenhar = (texto: string, estilo: Record<string, unknown>, fallback: string) => {
+          const b = blocoFake('p', texto);
+          const presetId = (estilo?.presetId as string) || fallback;
+          const style = {
+            ...eng.DEFAULT_STYLE,
+            presetId,
+            perBlock: { p: estilo },
+            highlights: {},
+          };
+          // t=2900: todas as palavras já entraram (anima por palavra)
+          eng.drawCaptions(g, [b] as never, pres.getPreset(presetId), style as never, 2900, W, H);
+        };
+        if (hookSeg) desenhar('SEU HOOK CHAMANDO ATENÇÃO', hookSeg.style as Record<string, unknown>, 'vermelho-sangue');
+        if (bodySeg) desenhar('e o corpo da legenda aqui', bodySeg.style as Record<string, unknown>, 'keynote');
+        if (!morto) setPronto(true);
+      } catch (e) {
+        console.warn('[PilotLegendaZoom] preview do template falhou:', e);
+        if (!morto) setPronto(true);
+      }
+    })();
+    return () => {
+      morto = true;
+    };
+  }, [tpl]);
+
+  return (
+    <span className={'lz-thumb-wrap' + (pronto ? ' is-pronto' : '')}>
+      <canvas ref={ref} className="lz-thumb" aria-hidden />
+      {!pronto ? <span className="lz-thumb-skel" aria-hidden /> : null}
+    </span>
+  );
+}
+
+/* ═══════════════════ prévia ANIMADA da dinâmica de zoom ══════════════════ */
+
+function PreviaDoZoom({ modo, forca }: { modo: ZoomModo; forca: ZoomForca }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const seloRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    const t0 = performance.now();
+    const T = 2600; // uma "troca de take" a cada 2,6s
+    const amps: [number, number] =
+      forca === 'misto' ? [ZOOM_AMP.leve, ZOOM_AMP.forte] : [ZOOM_AMP[forca], ZOOM_AMP[forca]];
+    const tick = (agora: number) => {
+      const tempo = agora - t0;
+      const j = Math.floor(tempo / T);
+      const p = (tempo % T) / T;
+      const e = -(Math.cos(Math.PI * p) - 1) / 2; // mesmo easing do render
+      const amp = amps[j % 2];
+      let s: number;
+      if (modo === 'in') s = 1 + (amp - 1) * e;
+      else if (modo === 'out') s = amp - (amp - 1) * e;
+      else s = j % 2 === 0 ? 1 + (amp - 1) * e : amp - (amp - 1) * e;
+      if (ref.current) ref.current.style.transform = `scale(${s.toFixed(4)})`;
+      if (seloRef.current) seloRef.current.textContent = `×${s.toFixed(3)}`;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [modo, forca]);
+
+  return (
+    <div className="lz-zoom-previa">
+      <div className="lz-zoom-frame">
+        <div ref={ref} className="lz-zoom-cena">
+          {/* cena fake: grade + "avatar" — a grade deixa o crop visível */}
+          <span className="lz-zoom-cabeca" aria-hidden />
+          <span className="lz-zoom-tronco" aria-hidden />
+        </div>
+        {/* marcas de canto fixas: mostram o que o crop come */}
+        <span className="lz-zoom-canto tl" aria-hidden />
+        <span className="lz-zoom-canto tr" aria-hidden />
+        <span className="lz-zoom-canto bl" aria-hidden />
+        <span className="lz-zoom-canto br" aria-hidden />
+        <span ref={seloRef} className="lz-zoom-escala">×1.000</span>
+      </div>
+      <div className="lz-zoom-previa-info">
+        <div className="lz-zoom-previa-titulo">Prévia ao vivo</div>
+        <p className="lz-zoom-previa-txt">
+          A mesma matemática do render: rampa com easing seno, uma janela por take.
+          O reset cai na troca de take — um corte real — então não pisca.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════ a janela ════════════════════════════════ */
 
 export function LegendaZoomPopover({
   tipo,
-  anchor,
   onFechar,
   legenda,
   zoom,
@@ -66,7 +220,8 @@ export function LegendaZoomPopover({
   onZoom,
 }: {
   tipo: 'legenda' | 'zoom';
-  anchor: HTMLElement | null;
+  /** mantido por compatibilidade — a janela agora é centrada */
+  anchor?: HTMLElement | null;
   onFechar: () => void;
   legenda: LegendaCfg;
   zoom: ZoomCfg;
@@ -74,9 +229,7 @@ export function LegendaZoomPopover({
   onLegenda: (cfg: LegendaCfg, virarPadrao?: boolean) => void;
   onZoom: (cfg: ZoomCfg, virarPadrao?: boolean) => void;
 }) {
-  const pos = usePos(anchor, true);
   const [montado, setMontado] = useState(false);
-  const caixaRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => setMontado(true), []);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
@@ -86,117 +239,158 @@ export function LegendaZoomPopover({
     return () => window.removeEventListener('keydown', esc);
   }, [onFechar]);
 
-  if (!montado || !pos) return null;
+  if (!montado) return null;
+
+  const ligado = tipo === 'legenda' ? legenda.on : zoom.on;
 
   const corpo =
     tipo === 'legenda' ? (
       <>
-        <div className="lz-titulo">Legenda automática</div>
-        <p className="lz-texto">
-          Depois de montar (e decupar), a legenda entra sozinha: transcreve o vídeo, corrige
-          pela copy do doc e aplica o modelo. O hook vem da copy do hook — a fronteira cai
-          exatamente onde o doc diz.
-        </p>
-        <button
-          type="button"
-          onClick={() => onLegenda({ ...legenda, on: !legenda.on })}
-          className={'lz-switch' + (legenda.on ? ' is-on' : '')}
-          aria-pressed={legenda.on}
-        >
-          <span className="lz-switch-bola" aria-hidden />
-          {legenda.on ? 'Ligada' : 'Desligada'}
-        </button>
-
-        <div className={'lz-lista' + (legenda.on ? '' : ' is-off')}>
-          <div className="lz-rotulo">Modelo</div>
-          {templates.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => onLegenda({ ...legenda, on: true, templateId: t.id })}
-              className={'lz-item' + (legenda.templateId === t.id ? ' is-on' : '')}
-            >
-              <span className="lz-item-nome">{t.name}</span>
-              {t.hint ? <span className="lz-item-dica">{t.hint}</span> : null}
-            </button>
-          ))}
+        <div className={'lz-secao' + (legenda.on ? '' : ' is-off')}>
+          <div className="lz-rotulo">Modelo da legenda</div>
+          <div className="lz-tpl-grade">
+            {templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onLegenda({ ...legenda, on: true, templateId: t.id })}
+                className={'lz-tpl' + (legenda.templateId === t.id ? ' is-on' : '')}
+                aria-pressed={legenda.templateId === t.id}
+              >
+                <PreviewDoTemplate tpl={t} />
+                <span className="lz-tpl-nome">{t.name}</span>
+                {t.hint ? <span className="lz-tpl-dica">{t.hint}</span> : null}
+                <span className="lz-tpl-check" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m4.5 12.8 5 5L19.5 6.5" />
+                  </svg>
+                </span>
+              </button>
+            ))}
+          </div>
           {templates.length === 0 ? (
             <div className="lz-vazio">Nenhum modelo — salva um nas Legendas Automáticas.</div>
           ) : null}
         </div>
-
-        <button type="button" className="lz-padrao" onClick={() => onLegenda(legenda, true)}>
-          usar sempre
-        </button>
+        <p className="lz-nota">
+          O hook recebe a copy do <b>HOOK do doc</b> — a fronteira cai exatamente onde o doc
+          diz — e o resto do vídeo vira body. Tudo corrigido palavra a palavra pela copy.
+        </p>
       </>
     ) : (
       <>
-        <div className="lz-titulo">Dinâmica de zoom</div>
-        <p className="lz-texto">
-          Na montagem, cada take ganha uma rampa de escala. O reset cai na troca de take —
-          onde já existe um corte — então o movimento não pisca.
-        </p>
-        <button
-          type="button"
-          onClick={() => onZoom({ ...zoom, on: !zoom.on })}
-          className={'lz-switch' + (zoom.on ? ' is-on' : '')}
-          aria-pressed={zoom.on}
-        >
-          <span className="lz-switch-bola" aria-hidden />
-          {zoom.on ? 'Ligada' : 'Desligada'}
-        </button>
+        <div className={'lz-secao' + (zoom.on ? '' : ' is-off')}>
+          <PreviaDoZoom modo={zoom.modo} forca={zoom.forca} />
 
-        <div className={'lz-lista' + (zoom.on ? '' : ' is-off')}>
           <div className="lz-rotulo">Movimento</div>
-          <div className="lz-grade">
+          <div className="lz-opcoes">
             {MODOS.map((m) => (
               <button
                 key={m.v}
                 type="button"
-                title={m.dica}
                 onClick={() => onZoom({ ...zoom, on: true, modo: m.v })}
-                className={'lz-chip' + (zoom.modo === m.v ? ' is-on' : '')}
+                className={'lz-opcao' + (zoom.modo === m.v ? ' is-on' : '')}
+                aria-pressed={zoom.modo === m.v}
               >
-                {m.label}
+                <span className="lz-opcao-nome">{m.label}</span>
               </button>
             ))}
           </div>
+          <div className="lz-dica">{MODOS.find((m) => m.v === zoom.modo)?.dica}</div>
+
           <div className="lz-rotulo mt">Intensidade</div>
-          <div className="lz-grade">
+          <div className="lz-opcoes">
             {FORCAS.map((f) => (
               <button
                 key={f.v}
                 type="button"
-                title={f.dica}
                 onClick={() => onZoom({ ...zoom, on: true, forca: f.v })}
-                className={'lz-chip' + (zoom.forca === f.v ? ' is-on' : '')}
+                className={'lz-opcao' + (zoom.forca === f.v ? ' is-on' : '')}
+                aria-pressed={zoom.forca === f.v}
               >
-                {f.label}
+                <span className="lz-opcao-nome">{f.label}</span>
+                <span className="lz-opcao-pct">{f.pct}</span>
               </button>
             ))}
           </div>
           <div className="lz-dica">{FORCAS.find((f) => f.v === zoom.forca)?.dica}</div>
         </div>
-
-        <button type="button" className="lz-padrao" onClick={() => onZoom(zoom, true)}>
-          usar sempre
-        </button>
       </>
     );
 
   return createPortal(
-    <>
-      <div className="lz-fora" onClick={onFechar} aria-hidden />
-      <div
-        ref={caixaRef}
-        className="lz-pop"
-        style={{ top: pos.top, left: pos.left }}
-        role="dialog"
-        aria-label={tipo === 'legenda' ? 'Legenda automática' : 'Dinâmica de zoom'}
-      >
-        {corpo}
+    <div className="lz-camada" role="dialog" aria-modal="true" aria-label={tipo === 'legenda' ? 'Legenda automática' : 'Dinâmica de zoom'}>
+      <div className="lz-veu" onClick={onFechar} aria-hidden />
+      <div className={'lz-janela' + (tipo === 'legenda' ? ' is-legenda' : ' is-zoom')}>
+        {/* ── cabeçalho ── */}
+        <div className="lz-cab">
+          <span className={'lz-cab-tile' + (tipo === 'legenda' ? ' is-ambar' : ' is-violeta')} aria-hidden>
+            {tipo === 'legenda' ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M7 15h4M13 15h4M7 11h10" opacity="0.6" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
+                <circle cx="12" cy="12" r="3.2" opacity="0.7" />
+              </svg>
+            )}
+          </span>
+          <span className="lz-cab-textos">
+            <span className="lz-titulo">{tipo === 'legenda' ? 'Legenda automática' : 'Dinâmica de zoom'}</span>
+            <span className="lz-sub">
+              {tipo === 'legenda'
+                ? 'Depois de montar e decupar, a legenda entra sozinha — transcrita, corrigida pela copy do doc e no modelo escolhido.'
+                : 'Cada take da montagem ganha uma rampa de escala, assada direto no vídeo final.'}
+            </span>
+          </span>
+          <button type="button" className="lz-x" onClick={onFechar} aria-label="Fechar">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── switch grande ── */}
+        <button
+          type="button"
+          onClick={() => (tipo === 'legenda' ? onLegenda({ ...legenda, on: !legenda.on }) : onZoom({ ...zoom, on: !zoom.on }))}
+          className={'lz-switch' + (ligado ? ' is-on' : '')}
+          aria-pressed={ligado}
+        >
+          <span className="lz-switch-trilho" aria-hidden>
+            <span className="lz-switch-bola" />
+          </span>
+          <span className="lz-switch-txt">
+            {ligado
+              ? tipo === 'legenda' ? 'Ligada — o AD já sai legendado' : 'Ligada — a montagem sai com o movimento'
+              : 'Desligada — clica pra ligar'}
+          </span>
+        </button>
+
+        <div className="lz-corpo">{corpo}</div>
+
+        {/* ── rodapé ── */}
+        <div className="lz-rodape">
+          <button
+            type="button"
+            className="lz-padrao"
+            onClick={() => (tipo === 'legenda' ? onLegenda(legenda, true) : onZoom(zoom, true))}
+            title="Grava esta escolha como padrão da conta — as próximas tasks já vêm assim"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <path d="M17 21v-8H7v8M7 3v5h8" />
+            </svg>
+            usar sempre
+          </button>
+          <button type="button" className="lz-ok" onClick={onFechar}>
+            Pronto
+          </button>
+        </div>
       </div>
-    </>,
+    </div>,
     document.body,
   );
 }
