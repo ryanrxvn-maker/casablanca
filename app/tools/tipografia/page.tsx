@@ -63,6 +63,11 @@ import {
 import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
 import { fxDefault, normalizeFx, type FxState } from '@/lib/typography/fx';
 import { registerCanvasJob } from '@/lib/typography/canvas-loop';
+import {
+  auditarTranscricao,
+  resumoAuditoria,
+  type AuditResult,
+} from '@/lib/typography/asr-audit';
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { ColorDot } from '@/components/typography/ColorDot';
 import { FxPanel } from '@/components/typography/FxPanel';
@@ -290,6 +295,11 @@ function TipografiaInner() {
   const [scriptOnTpls, setScriptOnTpls] = useState(false);
   // recado honesto do último "trocar o ritmo" (quantos travados sobreviveram)
   const [regroupInfo, setRegroupInfo] = useState<string | null>(null);
+  // ⭐ AUDITORIA da transcrição: o vídeo tinha fala sem legenda?
+  const [audit, setAudit] = useState<{ tom: 'ok' | 'aviso' | 'erro'; texto: string } | null>(null);
+  const [auditando, setAuditando] = useState(false);
+  /** áudio já extraído desta sessão — a re-conferência não re-extrai */
+  const audioRef = useRef<Blob | null>(null);
   // ⭐ favoritos POR CONTA (hook compartilhado com o Auto Cortes)
   const { favs, toggleFav } = useTypoFavs();
 
@@ -811,6 +821,8 @@ function TipografiaInner() {
     setActiveBlockId(null);
     setWordSel(null);
     setRegroupInfo(null);
+    setAudit(null);
+    audioRef.current = null;
     preLockRef.current = {};
   }
 
@@ -818,6 +830,56 @@ function TipografiaInner() {
     abortRef.current?.abort();
     cancelFFmpeg();
   }
+
+  /**
+   * Manda UMA janela de áudio pro Whisper (a recuperação de um trecho que
+   * ficou sem legenda). Mesma rota da transcrição cheia; devolve as palavras
+   * com tempo RELATIVO ao recorte — quem desloca é o spliceRecovered.
+   */
+  const transcreverJanela = useCallback(
+    async (wav: Blob, lang: string): Promise<TWord[]> => {
+      const fd = new FormData();
+      fd.append('audio', wav, 'trecho.wav');
+      fd.append('language', lang);
+      const res = await fetch('/api/tipografia/transcribe', {
+        method: 'POST',
+        body: fd,
+        signal: abortRef.current?.signal,
+      });
+      if (!res.ok) throw new Error(`janela ${res.status}`);
+      const j = (await res.json()) as { words?: TWord[] };
+      return Array.isArray(j.words) ? j.words : [];
+    },
+    [],
+  );
+
+  /** Roda a conferência de novo, sem re-transcrever o vídeo inteiro. */
+  const conferirDeNovo = useCallback(async () => {
+    const a = audioRef.current;
+    if (!a || words.length === 0 || auditando) return;
+    setAuditando(true);
+    setError(null);
+    try {
+      const r: AuditResult = await auditarTranscricao(a, words, (duration ?? 0) * 1000, {
+        transcreverJanela: (wav) => transcreverJanela(wav, language),
+        onStage: (m) => setStage(m),
+      });
+      if (r.recuperadas > 0) {
+        pushHistory();
+        setWords(r.words);
+        commitBlocks(
+          regroupKeepingLocks(r.words, pace, blocks, identity),
+        );
+      }
+      setAudit(resumoAuditoria(r));
+    } catch (e) {
+      setError(toFriendlyMessage(e, 'Não consegui conferir o áudio agora.'));
+    } finally {
+      setAuditando(false);
+      setStage(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [words, duration, language, auditando, pace, blocks, identity, transcreverJanela]);
 
   // ── transcrição ──
   async function transcribe() {
@@ -840,6 +902,7 @@ function TipografiaInner() {
         },
         duration ?? undefined,
       );
+      audioRef.current = audio;
       if (audio.size > 4_400_000) {
         throw new FriendlyError(
           `O áudio ficou grande demais pra enviar (${formatBytes(audio.size)}). Usa um vídeo mais curto e tenta de novo.`,
@@ -872,8 +935,28 @@ function TipografiaInner() {
         throw new FriendlyError(json.error || 'Não consegui transcrever agora. Tenta de novo em instantes.');
       }
 
-      setWords(json.words);
-      setBlocks(groupWords(json.words, pace));
+      // ⭐ CONFERE contra o áudio: o Whisper às vezes desiste de um trecho e
+      // volta sem palavra nenhuma ali, sem erro. O que tem VOZ e não tem
+      // palavra volta pro Whisper recortado; o que é silêncio fica quieto.
+      let finais = json.words;
+      try {
+        const r = await auditarTranscricao(audio, json.words, (duration ?? 0) * 1000, {
+          transcreverJanela: (wav) => transcreverJanela(wav, language),
+          onStage: (m) => setStage(m),
+          onProgress: (p) => setProgress(0.6 + p * 0.35),
+          signal: abortRef.current?.signal,
+        });
+        finais = r.words;
+        setAudit(resumoAuditoria(r));
+      } catch (e) {
+        // a conferência é uma REDE DE SEGURANÇA: se ela falhar, a
+        // transcrição original continua valendo (só some o selo)
+        console.warn('[tipografia] auditoria não rodou', e);
+        setAudit(null);
+      }
+
+      setWords(finais);
+      setBlocks(groupWords(finais, pace));
       setHighlights({});
       setWordStyles({});
       setLockedBlocks([]);
@@ -1408,6 +1491,33 @@ function TipografiaInner() {
                 setSelBlockId(null);
               }}
             />
+
+            {/* ⭐ o vídeo tinha fala sem legenda? a resposta vem MEDIDA */}
+            {audit ? (
+              <div
+                className={
+                  'mt-5 flex flex-wrap items-center gap-3 rounded-[14px] px-4 py-3 text-[12.5px] leading-relaxed ' +
+                  (audit.tom === 'ok'
+                    ? 'bg-lime/[0.07] text-lime shadow-[inset_0_0_0_1px_rgba(200,232,124,0.32)]'
+                    : audit.tom === 'erro'
+                      ? 'bg-red-500/[0.07] text-red-300 shadow-[inset_0_0_0_1px_rgba(248,113,113,0.38)]'
+                      : 'bg-amber-400/[0.07] text-amber-500 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.35)]')
+                }
+              >
+                <span className="min-w-0 flex-1">{audit.texto}</span>
+                <button
+                  type="button"
+                  onClick={conferirDeNovo}
+                  disabled={auditando || processing}
+                  className={
+                    'shrink-0 rounded-[10px] bg-bg-soft px-3 py-1.5 text-[11.5px] font-bold text-text shadow-[inset_0_0_0_1px_rgb(var(--line-strong))] hover:text-amber-500 disabled:opacity-40' +
+                    T3D
+                  }
+                >
+                  {auditando ? 'Conferindo...' : 'Conferir de novo'}
+                </button>
+              </div>
+            ) : null}
 
             <CopyFixPanel
               disabled={processing}

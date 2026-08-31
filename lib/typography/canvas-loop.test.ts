@@ -19,9 +19,19 @@ function job(o: Partial<JobLike> & { id: number }): JobLike {
 
 console.log('\n── quem está fora da tela não desenha ──');
 {
-  const r = pickJobs([job({ id: 1, visible: false }), job({ id: 2 })], 1000, 9);
+  const r = pickJobs([job({ id: 1, visible: false, last: 100 }), job({ id: 2, last: 100 })], 1000, 9);
   ok(r.run.join() === '2', 'só o visível entra');
   ok(!r.deferred.includes(1), 'o invisível nem conta como adiado (não está esperando vez)');
+}
+
+console.log('\n-- o PRIMEIRO quadro e incondicional --');
+{
+  // com a aba/painel oculto o IntersectionObserver diz que NADA esta na tela;
+  // sem esta regra o canvas nascia em branco e ficava em branco pra sempre
+  const r = pickJobs([job({ id: 1, visible: false, last: 0 })], 1000, 9);
+  ok(r.run.join() === '1', 'trabalho que nunca desenhou entra mesmo marcado como fora da tela');
+  const jaDesenhou = pickJobs([job({ id: 1, visible: false, last: 500 })], 1000, 9);
+  ok(jaDesenhou.run.length === 0, 'mas depois do primeiro quadro a visibilidade volta a mandar');
 }
 
 console.log('\n── teto de FPS ──');
@@ -112,7 +122,11 @@ console.log('\n── prioridade e rodízio (ninguém morre de fome) ──');
 console.log('\n── casos de borda ──');
 {
   ok(pickJobs([], 1000, 9).run.length === 0, 'lista vazia não quebra');
-  const todosInvisiveis = pickJobs([job({ id: 1, visible: false }), job({ id: 2, visible: false })], 1000, 9);
+  const todosInvisiveis = pickJobs(
+    [job({ id: 1, visible: false, last: 100 }), job({ id: 2, visible: false, last: 100 })],
+    1000,
+    9,
+  );
   ok(todosInvisiveis.run.length === 0 && todosInvisiveis.deferred.length === 0, 'página toda fora da tela = zero desenho');
   const custoZero = pickJobs([1, 2, 3].map((id) => job({ id, cost: 0, last: 0 })), 5000, 9);
   ok(custoZero.run.length === 3, 'trabalho ainda sem custo medido não é penalizado');

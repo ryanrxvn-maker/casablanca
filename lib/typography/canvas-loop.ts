@@ -10,7 +10,6 @@
  * Aqui existe um único rAF que:
  *
  *   • pula quem está FORA DA TELA (IntersectionObserver compartilhado);
- *   • pula tudo quando a aba está escondida;
  *   • respeita um teto de FPS por trabalho (a galeria não precisa de 60);
  *   • respeita um ORÇAMENTO de tempo por frame — estourou, o resto fica pro
  *     frame seguinte, em rodízio, pra ninguém morrer de fome.
@@ -51,7 +50,16 @@ export type PickResult = {
  */
 export function pickJobs(jobs: JobLike[], now: number, budgetMs: number): PickResult {
   const prontos = jobs
-    .filter((j) => j.visible && j.fps > 0 && now - j.last >= 1000 / j.fps - 0.5)
+    .filter((j) => {
+      if (j.fps <= 0) return false;
+      // ⚠ O PRIMEIRO desenho é incondicional: o IntersectionObserver reporta
+      // TUDO como fora da tela enquanto a aba/painel está oculto, e sem esta
+      // regra o canvas nascia em branco e ficava em branco (miniatura, print,
+      // aba aberta em segundo plano). Depois do primeiro quadro a visibilidade
+      // volta a mandar.
+      if (j.last === 0) return true;
+      return j.visible && now - j.last >= 1000 / j.fps - 0.5;
+    })
     .sort((a, b) => {
       if (b.prio !== a.prio) return b.prio - a.prio;
       const atrasoA = now - a.last;
@@ -106,25 +114,27 @@ function ensureIO(): IntersectionObserver | null {
 function loop() {
   raf = 0;
   if (jobs.size === 0) return;
-  const escondida = typeof document !== 'undefined' && document.hidden;
-  if (!escondida) {
-    const now = performance.now();
-    const lista = Array.from(jobs.values());
-    const { run } = pickJobs(lista, now, BUDGET_MS);
-    for (const id of run) {
-      const j = jobs.get(id);
-      if (!j) continue;
-      const t0 = performance.now();
-      try {
-        j.draw(t0);
-      } catch {
-        // um frame ruim não pode derrubar o relógio dos outros
-      }
-      const gasto = performance.now() - t0;
-      // média móvel: o custo real varia com o modelo desenhado
-      j.cost = j.cost === 0 ? gasto : j.cost * 0.7 + gasto * 0.3;
-      j.last = t0;
+  // ⚠ NÃO checar `document.hidden` aqui: o navegador já congela o rAF em aba
+  // escondida sozinho. Um guarda próprio só criava um caso ruim — quando o
+  // navegador PEDE um quadro mesmo com a aba oculta (captura de miniatura,
+  // print, aba em segundo plano que volta), o relógio pulava tudo e os canvas
+  // ficavam em branco de vez.
+  const now = performance.now();
+  const lista = Array.from(jobs.values());
+  const { run } = pickJobs(lista, now, BUDGET_MS);
+  for (const id of run) {
+    const j = jobs.get(id);
+    if (!j) continue;
+    const t0 = performance.now();
+    try {
+      j.draw(t0);
+    } catch {
+      // um frame ruim não pode derrubar o relógio dos outros
     }
+    const gasto = performance.now() - t0;
+    // média móvel: o custo real varia com o modelo desenhado
+    j.cost = j.cost === 0 ? gasto : j.cost * 0.7 + gasto * 0.3;
+    j.last = t0;
   }
   raf = requestAnimationFrame(loop);
 }
@@ -173,6 +183,18 @@ export function registerCanvasJob(
   if (el) {
     byEl.set(el, job);
     ensureIO()?.observe(el);
+  }
+  // PRIMEIRO quadro AGORA, sincrono: o rAF nao roda em aba escondida, e sem
+  // isto o canvas nascia em branco e so pintava quando a aba ganhasse foco
+  // (miniatura, print, aba aberta em segundo plano). De quebra, mata o
+  // piscar branco no mount.
+  try {
+    const t0 = performance.now();
+    job.draw(t0);
+    job.cost = performance.now() - t0;
+    job.last = t0;
+  } catch {
+    /* primeiro quadro falhou: o loop tenta de novo */
   }
   kick();
   return () => {
