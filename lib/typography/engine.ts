@@ -1133,6 +1133,62 @@ type DrawCtx = {
   wordStyles?: Record<number, WordStyle>;
 };
 
+/**
+ * Fatia do bloco que precisa continuar DENTRO do quadro quando o user
+ * pendura a legenda pra fora. Baixo de propósito: o pedido é ter bastante
+ * espaço invisível pra mexer, e a única proibição é o texto sumir inteiro.
+ * A UI do arrasto usa uma fatia um pouco MAIOR (lib do editor), pra o clamp
+ * do engine nunca brigar com a posição que o mouse acabou de escrever.
+ */
+export const FRACAO_VISIVEL = 0.14;
+
+/**
+ * Onde o bloco pousa no quadro, com a margem de manobra do arrasto.
+ *
+ * UMA função só — o desenho, a caixa de seleção, as caixas por palavra e o
+ * limite do arrasto na UI passam todos por aqui. Antes a mesma conta estava
+ * copiada em três lugares; mudar a regra num deles deixava a caixa de
+ * seleção desenhada longe da legenda.
+ */
+export function captionAnchor(
+  posX: number,
+  posY: number,
+  blockW: number,
+  blockH: number,
+  W: number,
+  H: number,
+): { cx: number; topY: number } {
+  const b = captionPosBounds(blockW, blockH, W, H);
+  const px = Math.min(b.maxX, Math.max(b.minX, posX));
+  const py = Math.min(b.maxY, Math.max(b.minY, posY));
+  return { cx: px * W, topY: py * H - blockH / 2 };
+}
+
+/**
+ * Limites NORMALIZADOS de posX/posY: até onde a legenda pode ser arrastada
+ * sem sumir por inteiro. A UI usa exatamente estes números, então o que o
+ * mouse escreve é o que o engine desenha (nada de zona morta no fim do
+ * arrasto).
+ */
+export function captionPosBounds(
+  blockW: number,
+  blockH: number,
+  W: number,
+  H: number,
+): { minX: number; maxX: number; minY: number; maxY: number } {
+  const bw = Math.max(1, blockW);
+  const bh = Math.max(1, blockH);
+  const restoX = Math.max(8, Math.min(bw, W) * FRACAO_VISIVEL);
+  const restoY = Math.max(8, Math.min(bh, H) * FRACAO_VISIVEL);
+  // topY ∈ [restoY - bh, H - restoY]  ·  posY = (topY + bh/2) / H
+  return {
+    minX: (restoX - bw / 2) / W,
+    maxX: (W - restoX + bw / 2) / W,
+    minY: (restoY - bh / 2) / H,
+    maxY: (H - restoY + bh / 2) / H,
+  };
+}
+
 function clearShadow(ctx: CanvasRenderingContext2D) {
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
@@ -1666,13 +1722,17 @@ export function drawCaptions(
   const karaoke = preset.karaoke ?? 'none';
   const isSolo = karaoke === 'solo';
   const blockH = isSolo ? lineH : layout.totalH;
-  let topY = style.posY * H - blockH / 2;
-  topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
-  // posição horizontal arrastável (clamp mantém o bloco dentro do frame)
-  const blockWmax = Math.max(...layout.lines.map((l) => l.width * l.scale));
-  let cx = (style.posX ?? 0.5) * W;
-  const halfW = blockWmax / 2 + W * 0.02;
-  cx = halfW * 2 >= W ? W / 2 : Math.min(Math.max(cx, halfW), W - halfW);
+  // ⚠ MARGEM DE MANOBRA (31.08): antes o bloco era obrigado a caber INTEIRO
+  // no quadro (topY em [4%, 96%-altura] e cx sempre com o bloco todo dentro).
+  // Na prática isso virava uma parede invisível: arrastar a legenda parava
+  // muito antes da borda e não dava pra pendurar o texto meio pra fora, que é
+  // um recurso normal de lettering. A regra agora é a única que importa: o
+  // bloco NUNCA some inteiro — sempre sobra uma fatia dentro do quadro.
+  // O mesmo cálculo vale no preview e no export (é o mesmo caminho).
+  const blockWmax = Math.max(...layout.lines.map((l) => l.width * l.scale), 1);
+  const ancora = captionAnchor(style.posX ?? 0.5, style.posY, blockWmax, blockH, W, H);
+  let topY = ancora.topY;
+  let cx = ancora.cx;
 
   // Palavra ativa (karaokê)
   let activeIdx = 0;
@@ -2911,7 +2971,15 @@ export function captionBBoxAt(
   tMs: number,
   W: number,
   H: number,
-): { x: number; y: number; w: number; h: number; blockId: string } | null {
+): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  blockId: string;
+  /** limites de posX/posY deste bloco — a UI do arrasto usa EXATAMENTE estes */
+  bounds: { minX: number; maxX: number; minY: number; maxY: number };
+} | null {
   let block: Block | null = null;
   for (const b of blocks) {
     if (tMs >= b.start && tMs < b.end) {
@@ -2938,14 +3006,14 @@ export function captionBBoxAt(
   const layout = measureLayout(ctx, block, preset, style, W, highlights);
   const isSolo = (preset.karaoke ?? 'none') === 'solo';
   const blockH = isSolo ? layout.lineH : layout.totalH;
-  let topY = style.posY * H - blockH / 2;
-  topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
+  // MESMA âncora do desenho (era copiada aqui e desencontrava do render)
   const blockWmax = isSolo
     ? Math.max(...layout.words.map((w) => w.w))
     : Math.max(...layout.lines.map((l) => l.width * l.scale));
-  let cx = (style.posX ?? 0.5) * W;
-  const halfW = blockWmax / 2 + W * 0.02;
-  cx = halfW * 2 >= W ? W / 2 : Math.min(Math.max(cx, halfW), W - halfW);
+  const larguraAncora = Math.max(...layout.lines.map((l) => l.width * l.scale), 1);
+  const ancora = captionAnchor(style.posX ?? 0.5, style.posY, larguraAncora, blockH, W, H);
+  const topY = ancora.topY;
+  const cx = ancora.cx;
   const pad = layout.fontPx * 0.45;
   return {
     x: cx - blockWmax / 2 - pad,
@@ -2953,6 +3021,7 @@ export function captionBBoxAt(
     w: blockWmax + pad * 2,
     h: blockH + pad * 2,
     blockId: block.id,
+    bounds: captionPosBounds(larguraAncora, blockH, W, H),
   };
 }
 
@@ -2996,14 +3065,14 @@ export function wordBoxesAt(
   const layout = measureLayout(ctx, block, preset, style, W, highlights);
   const isSolo = (preset.karaoke ?? 'none') === 'solo';
   const blockH = isSolo ? layout.lineH : layout.totalH;
-  let topY = style.posY * H - blockH / 2;
-  topY = Math.min(Math.max(topY, H * 0.04), H * 0.96 - blockH);
+  // MESMA âncora do desenho (era copiada aqui e desencontrava do render)
   const blockWmax = isSolo
     ? Math.max(...layout.words.map((w) => w.w))
     : Math.max(...layout.lines.map((l) => l.width * l.scale));
-  let cx = (style.posX ?? 0.5) * W;
-  const halfW = blockWmax / 2 + W * 0.02;
-  cx = halfW * 2 >= W ? W / 2 : Math.min(Math.max(cx, halfW), W - halfW);
+  const larguraAncora = Math.max(...layout.lines.map((l) => l.width * l.scale), 1);
+  const ancora = captionAnchor(style.posX ?? 0.5, style.posY, larguraAncora, blockH, W, H);
+  const topY = ancora.topY;
+  const cx = ancora.cx;
 
   const boxes: Array<{ i: number; x: number; y: number; w: number; h: number }> = [];
   if (isSolo) {

@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { drawPresetDemo, type TypoPreset } from '@/lib/typography/engine';
 import { ensureTypoFonts } from '@/lib/typography/fonts';
 import { TYPO_CATEGORIES, TYPO_PRESETS } from '@/lib/typography/presets';
+import { registerCanvasJob } from '@/lib/typography/canvas-loop';
 
 // botões com relevo 3D (hover levanta, clique afunda) — mesmo do editor
 const T3D =
@@ -128,7 +129,6 @@ export function PresetGallery({
     void ensureTypoFonts().then(() => {
       fontsReadyRef.current = true;
     });
-    let raf = 0;
     const t0 = performance.now();
     const tick = () => {
       const now = performance.now() - t0;
@@ -152,10 +152,10 @@ export function PresetGallery({
         drawPresetDemo(ctx, preset, now, c.width, c.height, demoText);
         drawnRef.current.add(c);
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // relógio COMPARTILHADO: a galeria não precisa de 60fps e não pode
+    // roubar frame do player de vídeo (lib/typography/canvas-loop.ts)
+    return registerCanvasJob(tick, { fps: 24, prio: 0, el: scrollBoxRef.current });
   }, [list, demoText]);
 
   return (

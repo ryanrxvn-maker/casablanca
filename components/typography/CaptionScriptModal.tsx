@@ -27,6 +27,7 @@ import {
 } from '@/lib/typography/engine';
 import { getPreset } from '@/lib/typography/presets';
 import { ensureTypoFonts } from '@/lib/typography/fonts';
+import { registerCanvasJob } from '@/lib/typography/canvas-loop';
 import type { BlockIdentity } from '@/lib/typography/blocks-edit';
 import { FxPanel } from '@/components/typography/FxPanel';
 import { normalizeFx, type FxState } from '@/lib/typography/fx';
@@ -180,7 +181,6 @@ function SegPreview({
 
   useEffect(() => {
     void ensureTypoFonts();
-    let raf = 0;
     const t0 = performance.now();
     const tick = () => {
       const c = ref.current;
@@ -233,10 +233,8 @@ function SegPreview({
           );
         }
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return registerCanvasJob(tick, { fps: 24, el: ref.current });
   }, []);
 
   return (

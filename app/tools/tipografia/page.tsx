@@ -62,6 +62,7 @@ import {
 } from '@/lib/typography/engine';
 import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
 import { fxDefault, normalizeFx, type FxState } from '@/lib/typography/fx';
+import { registerCanvasJob } from '@/lib/typography/canvas-loop';
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { ColorDot } from '@/components/typography/ColorDot';
 import { FxPanel } from '@/components/typography/FxPanel';
@@ -1598,6 +1599,8 @@ function PreviewPane({
     boxes: Array<{ i: number; x: number; y: number; w: number; h: number }>;
   } | null>(null);
   const dprRef = useRef(1);
+  /** último instante em que o hover remediu a caixa (throttle) */
+  const hoverMedidoRef = useRef(0);
   const [editing, setEditing] = useState<{
     id: string;
     value: string;
@@ -1640,7 +1643,6 @@ function PreviewPane({
   const scrubbingRef = useRef(false);
 
   useEffect(() => {
-    let raf = 0;
     const tick = () => {
       const v = videoRef.current;
       const c = canvasRef.current;
@@ -1750,12 +1752,16 @@ function PreviewPane({
             }
           }
           dprRef.current = dpr;
-          // bbox viva pro hit-test (clicar/arrastar/alça/duplo clique)
-          bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, W, H);
-          // caixas por PALAVRA vivas (seleção parcial estilo CapCut)
-          wordBoxesRef.current = selRef.current
-            ? wordBoxesAt(ctx, b, p, s, v.currentTime * 1000, W, H)
-            : null;
+          // ⚡ a bbox é uma SEGUNDA passada de layout. Só vale a pena no frame
+          // quando a caixa de seleção precisa ser DESENHADA; pro hit-test do
+          // clique/arrasto ela é calculada na hora do evento (medirBBox).
+          if (selRef.current) {
+            bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, W, H);
+            wordBoxesRef.current = wordBoxesAt(ctx, b, p, s, v.currentTime * 1000, W, H);
+          } else {
+            bboxRef.current = null;
+            wordBoxesRef.current = null;
+          }
           // realce da seleção de palavras (só preview, nunca no export)
           const wb = wordBoxesRef.current;
           if (wSel && wb && wb.blockId === wSel.blockId) {
@@ -1824,10 +1830,65 @@ function PreviewPane({
           if (cl && d > 0) cl.textContent = `${formatTime(v.currentTime)} / ${formatTime(d)}`;
         }
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // relógio COMPARTILHADO com prioridade alta: a prévia do vídeo desenha
+    // antes da galeria e dos cartões de efeito, e o orçamento por frame
+    // impede que eles roubem a thread do <video> (era o "player travado")
+    return registerCanvasJob(tick, { fps: 60, prio: 10, el: wrapRef.current });
+  }, [videoRef]);
+
+  /**
+   * Até onde a legenda pode ir. O engine só exige que sobre uma FATIA do
+   * bloco dentro do quadro (FRACAO_VISIVEL); aqui a conta é a mesma, com uma
+   * fatia um pouco maior, medida na caixa REAL desenhada. Sendo o limite da
+   * UI um pouco mais apertado que o do engine, a legenda acompanha o mouse
+   * até o fim sem zona morta (o engine nunca precisa corrigir por cima).
+   */
+  const limitesArrasto = useCallback(() => {
+    const c = canvasRef.current;
+    const bb = bboxRef.current ?? null;
+    if (!c || !bb || bb.w <= 0 || bb.h <= 0) {
+      return { minX: -0.6, maxX: 1.6, minY: -0.6, maxY: 1.6 };
+    }
+    const W = c.width;
+    const H = c.height;
+    // A caixa MEDIDA (bb) inclui o fundo/pílula do modelo, então é maior que
+    // o bloco de texto que o engine usa na conta dele. Pra o limite da UI
+    // ficar SEMPRE dentro do limite do engine (zero zona morta ao arrastar),
+    // esta fatia precisa ser >= 0,5 - (0,5 - FRACAO_VISIVEL) * bloco/caixa.
+    // Com uma pílula gorda (caixa até 1,5x o bloco) isso dá 0,26 — 0,30 sobra.
+    const FATIA = 0.3;
+    const restoX = Math.max(10, Math.min(bb.w, W) * FATIA);
+    const restoY = Math.max(10, Math.min(bb.h, H) * FATIA);
+    return {
+      minX: (restoX - bb.w / 2) / W,
+      maxX: (W - restoX + bb.w / 2) / W,
+      minY: (restoY - bb.h / 2) / H,
+      maxY: (H - restoY + bb.h / 2) / H,
+    };
+  }, []);
+
+  /**
+   * Mede a caixa da legenda AGORA (hit-test de clique/arrasto/duplo clique).
+   * Fora do frame de desenho, porque medir é caro e só o evento precisa.
+   */
+  const medirBBox = useCallback(() => {
+    const c = canvasRef.current;
+    const v = videoRef.current;
+    const ctx = c?.getContext('2d');
+    if (!c || !v || !ctx) return null;
+    const { blocks: b, preset: p, style: s } = liveRef.current;
+    bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, c.width, c.height);
+    return bboxRef.current;
+  }, [videoRef]);
+  const medirPalavras = useCallback(() => {
+    const c = canvasRef.current;
+    const v = videoRef.current;
+    const ctx = c?.getContext('2d');
+    if (!c || !v || !ctx) return null;
+    const { blocks: b, preset: p, style: s } = liveRef.current;
+    wordBoxesRef.current = wordBoxesAt(ctx, b, p, s, v.currentTime * 1000, c.width, c.height);
+    return wordBoxesRef.current;
   }, [videoRef]);
 
   // bloco ativo (4Hz via timeupdate — não re-renderiza a 60fps)
@@ -1881,7 +1942,8 @@ function PreviewPane({
           const dpr = dprRef.current;
           const px = (e.clientX - rect.left) * dpr;
           const py = (e.clientY - rect.top) * dpr;
-          const bb = bboxRef.current;
+          // a bbox não é mais recalculada todo frame — mede agora, pro clique
+          const bb = selRef.current ? (bboxRef.current ?? medirBBox()) : medirBBox();
           const handleR = 14 * dpr;
           const onHandle =
             !!bb &&
@@ -1914,7 +1976,7 @@ function PreviewPane({
           // legenda JÁ selecionada + clique EM CIMA de uma palavra = seleção
           // parcial (arrasta pra marcar o trecho — estilo CapCut). Clicar no
           // respiro ao redor continua movendo a legenda.
-          const wb = wordBoxesRef.current;
+          const wb = selRef.current ? (wordBoxesRef.current ?? medirPalavras()) : null;
           if (selRef.current && wb && bb && wb.blockId === bb.blockId) {
             const hitWord = wb.boxes.find(
               (bx) =>
@@ -1967,6 +2029,14 @@ function PreviewPane({
             const dpr0 = dprRef.current;
             const hx = (e.clientX - rect0.left) * dpr0;
             const hy = (e.clientY - rect0.top) * dpr0;
+            // hover: medir a cada movimento do mouse seria caro; mede no
+            // máximo a cada 120ms e reaproveita entre os movimentos
+            const agora = performance.now();
+            if (agora - hoverMedidoRef.current > 120) {
+              hoverMedidoRef.current = agora;
+              medirBBox();
+              if (selRef.current) medirPalavras();
+            }
             const bb0 = bboxRef.current;
             const wb0 = wordBoxesRef.current;
             const hr = 14 * dpr0;
@@ -2010,7 +2080,7 @@ function PreviewPane({
             const dprW = dprRef.current;
             const sx = (e.clientX - rectW.left) * dprW;
             const sy = (e.clientY - rectW.top) * dprW;
-            const wbW = wordBoxesRef.current;
+            const wbW = wordBoxesRef.current ?? medirPalavras();
             if (wbW) {
               let best = -1;
               let bestDist = Infinity;
@@ -2041,7 +2111,7 @@ function PreviewPane({
           }
           if (!drag.moved) return;
           if (drag.mode === 'scale') {
-            const bb = bboxRef.current;
+            const bb = bboxRef.current ?? medirBBox();
             const ov = dragOvRef.current;
             if (!bb || !ov) return;
             const dpr = dprRef.current;
@@ -2062,11 +2132,15 @@ function PreviewPane({
           if (drag.snapY) ny = 0.5;
           const ov = dragOvRef.current;
           if (ov) {
-            // trava só no fio da borda (1%). Antes eram 5%, e isso impedia
-            // encostar a legenda no canto — que é justamente onde ela precisa
-            // ficar quando o quadro pede o texto fora do centro.
-            ov.posX = Math.min(0.99, Math.max(0.01, nx));
-            ov.posY = Math.min(0.99, Math.max(0.01, ny));
+            // O limite NÃO é mais uma fração chutada da tela: vem MEDIDO do
+            // engine (captionBBoxAt devolve os mesmos números que o desenho
+            // usa). Dá pra pendurar a legenda pra fora do quadro; a única
+            // regra é ela nunca sumir inteira. Como é a mesma conta dos dois
+            // lados, o texto acompanha o mouse até o fim, sem zona morta.
+            if (!bboxRef.current) medirBBox();
+            const lim = limitesArrasto();
+            ov.posX = Math.min(lim.maxX, Math.max(lim.minX, nx));
+            ov.posY = Math.min(lim.maxY, Math.max(lim.minY, ny));
           }
         }}
         onPointerUp={(e) => {
@@ -2084,7 +2158,7 @@ function PreviewPane({
           if (!drag || drag.mode === 'wordsel' || drag.moved) return;
           // clique seco: dentro da legenda = selecionar; fora = play/deselect
           const wrap = wrapRef.current;
-          const bb = bboxRef.current;
+          const bb = bboxRef.current ?? medirBBox();
           if (wrap && bb) {
             const rect = wrap.getBoundingClientRect();
             const dpr = dprRef.current;
@@ -2111,7 +2185,7 @@ function PreviewPane({
         }}
         onDoubleClick={(e) => {
           const wrap = wrapRef.current;
-          const bb = bboxRef.current;
+          const bb = bboxRef.current ?? medirBBox();
           const v = videoRef.current;
           if (!wrap || !bb || !v) return;
           const rect = wrap.getBoundingClientRect();
@@ -2417,7 +2491,6 @@ function Timeline({
   const timeReadRef = useRef<HTMLSpanElement | null>(null);
   const lastTimeRef = useRef(-1); // só auto-rola quando o tempo muda
   useEffect(() => {
-    let raf = 0;
     const fmtClock = (s: number) =>
       `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}.${String(Math.floor((s % 1) * 10))}`;
     const tick = () => {
@@ -2445,10 +2518,8 @@ function Timeline({
           }
         }
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return registerCanvasJob(tick, { fps: 30, el: scrollRef.current });
   }, [videoRef, pps, duration]);
 
   if (duration <= 0) return null;
@@ -3651,7 +3722,6 @@ function AnimDemo({
 
   useEffect(() => {
     void ensureTypoFonts();
-    let raf = 0;
     const tick = () => {
       const c = ref.current;
       const ctx = c?.getContext('2d');
@@ -3688,10 +3758,8 @@ function AnimDemo({
         const t = (performance.now() - t0Ref.current) % LOOP;
         drawCaptions(ctx, [bloco], p, st, t, c.width, c.height);
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return registerCanvasJob(tick, { fps: 24, el: ref.current });
   }, []);
 
   return (

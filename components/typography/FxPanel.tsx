@@ -25,6 +25,7 @@ import {
   type TypoPreset,
 } from '@/lib/typography/engine';
 import { ensureTypoFonts } from '@/lib/typography/fonts';
+import { registerCanvasJob } from '@/lib/typography/canvas-loop';
 import {
   applyFx,
   fxDefault,
@@ -87,7 +88,6 @@ function FxPreview({
 
   useEffect(() => {
     void ensureTypoFonts();
-    let raf = 0;
     const t0 = performance.now();
     const tick = () => {
       const c = ref.current;
@@ -155,10 +155,10 @@ function FxPreview({
           }
         }
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // 20fps chega de sobra pra uma prévia de 4cm — e o relógio compartilhado
+    // pula o cartão que está fora da tela
+    return registerCanvasJob(tick, { fps: 20, el: ref.current });
   }, []);
 
   return (
