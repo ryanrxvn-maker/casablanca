@@ -25,6 +25,7 @@ import {
   RangeField,
   Swatches,
   ImageUpload,
+  VideoUpload,
   FONT_STACK,
   EMOJI_RE,
   toUnified,
@@ -43,6 +44,7 @@ type LiveS = {
   avatar: string; // data URL (fica no navegador)
   accent: string; // cor do selo LIVE / AO VIVO
   chroma: boolean; // fundo verde pra chroma key
+  bgVideo: string; // Object URL do vídeo DE FUNDO (opcional; vence o chroma)
   segundos: number; // duração do vídeo exportado
 };
 
@@ -393,6 +395,19 @@ function parseComments(raw: string): { user: string; text: string }[] {
     });
 }
 
+/** Fundo da live: vídeo enviado em COVER (1080×1920) — ou o fill de sempre. */
+function drawLiveBg(ctx: CanvasRenderingContext2D, s: LiveS, bgVideo: HTMLVideoElement | null) {
+  if (bgVideo && bgVideo.readyState >= 2 && bgVideo.videoWidth && bgVideo.videoHeight) {
+    const sc = Math.max(W / bgVideo.videoWidth, H / bgVideo.videoHeight);
+    const sw = W / sc;
+    const sh = H / sc;
+    ctx.drawImage(bgVideo, (bgVideo.videoWidth - sw) / 2, (bgVideo.videoHeight - sh) / 2, sw, sh, 0, 0, W, H);
+    return;
+  }
+  ctx.fillStyle = s.chroma ? '#00FF00' : '#000000';
+  ctx.fillRect(0, 0, W, H);
+}
+
 function drawAvatarCircle(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -490,10 +505,10 @@ function drawTikTok(
   anim: Anim,
   fam: string,
   avatarImg: HTMLImageElement | null,
+  bgVideo: HTMLVideoElement | null,
 ) {
-  // fundo
-  ctx.fillStyle = s.chroma ? '#00FF00' : '#000000';
-  ctx.fillRect(0, 0, W, H);
+  // fundo (vídeo enviado > chroma/preto)
+  drawLiveBg(ctx, s, bgVideo);
 
   // ── barra do topo ──
   const topY = 90;
@@ -587,9 +602,9 @@ function drawInstagram(
   anim: Anim,
   fam: string,
   avatarImg: HTMLImageElement | null,
+  bgVideo: HTMLVideoElement | null,
 ) {
-  ctx.fillStyle = s.chroma ? '#00FF00' : '#000000';
-  ctx.fillRect(0, 0, W, H);
+  drawLiveBg(ctx, s, bgVideo);
 
   // ── barra do topo ──
   const topY = 96;
@@ -667,14 +682,25 @@ function drawInstagram(
 // PNG via html2canvas, que copia o canvas pixel-a-pixel — prévia === download.
 // O botão de vídeo (nos controles) alcança o canvas por este registro.
 const liveCanvas: Partial<Record<LiveKind, HTMLCanvasElement | null>> = {};
+// idem pro <video> de fundo (o export reinicia ele do zero antes de gravar)
+const liveBgVideo: Partial<Record<LiveKind, HTMLVideoElement | null>> = {};
 
 function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
   const cvRef = useRef<HTMLCanvasElement | null>(null);
+  const vidRef = useRef<HTMLVideoElement | null>(null);
   const probeRef = useRef<HTMLSpanElement | null>(null);
   const sRef = useRef(s);
   sRef.current = s;
   const famRef = useRef<string>("'Inter', sans-serif");
   const avatarRef = useRef<{ url: string; img: HTMLImageElement | null }>({ url: '', img: null });
+
+  // registro do vídeo de fundo (o export reinicia ele antes de gravar)
+  useEffect(() => {
+    liveBgVideo[kind] = s.bgVideo ? vidRef.current : null;
+    return () => {
+      if (liveBgVideo[kind] === vidRef.current) liveBgVideo[kind] = null;
+    };
+  }, [kind, s.bgVideo]);
 
   // avatar (data URL) → HTMLImageElement em cache
   useEffect(() => {
@@ -722,8 +748,9 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
     let raf = 0;
     const tick = () => {
       anim.t += 1;
-      if (kind === 'tiktok') drawTikTok(ctx, sRef.current, anim, famRef.current, avatarRef.current.img);
-      else drawInstagram(ctx, sRef.current, anim, famRef.current, avatarRef.current.img);
+      const bgv = sRef.current.bgVideo ? vidRef.current : null;
+      if (kind === 'tiktok') drawTikTok(ctx, sRef.current, anim, famRef.current, avatarRef.current.img, bgv);
+      else drawInstagram(ctx, sRef.current, anim, famRef.current, avatarRef.current.img, bgv);
     };
     // 1º frame SÍNCRONO: aba em segundo plano não dispara rAF — sem isso o
     // canvas ficaria em branco até a aba ganhar foco (e o PNG sairia vazio).
@@ -732,7 +759,9 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
       for (let i = 0; i < n; i++) tick();
     };
     const loop = () => {
-      tick();
+      // __fpPause: o export RÁPIDO avança a animação na mão (frame a frame);
+      // o rAF pausa pra não competir e não acelerar a cinemática.
+      if (!(cv as any).__fpPause) tick();
       // carimbo pro export de vídeo saber se o rAF está VIVO (aba de fundo
       // suspende o rAF — aí o gravador avança a animação por conta própria)
       (cv as any).__fpLastRaf = performance.now();
@@ -749,6 +778,18 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
   return (
     <div style={{ position: 'relative', width: 360, height: 640 }}>
       <span ref={probeRef} aria-hidden style={{ fontFamily: FONT_STACK, position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} />
+      {/* vídeo de fundo (oculto): decodifica os frames que o canvas desenha */}
+      {s.bgVideo ? (
+        <video
+          ref={vidRef}
+          src={s.bgVideo}
+          muted
+          loop
+          autoPlay
+          playsInline
+          style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+        />
+      ) : null}
       <canvas ref={cvRef} width={W} height={H} style={{ width: 360, height: 640, display: 'block' }} />
     </div>
   );
@@ -760,9 +801,63 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
   const [gravando, setGravando] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const gravar = () => {
+  const baixa = (blob: Blob, ext: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fakepass-live-${kind === 'tiktok' ? 'tiktok' : 'instagram'}.${ext}`;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    setMsg('Vídeo baixado ✓');
+    logHistory({
+      tool: 'fakepass',
+      kind: 'export',
+      title: `Live ${kind === 'tiktok' ? 'TikTok' : 'Instagram'} — vídeo exportado`,
+    });
+  };
+
+  const gravar = async () => {
     const cv = liveCanvas[kind];
     if (!cv || gravando) return;
+
+    // vídeo de fundo: garante tocando (mudo) e DO COMEÇO — export pega o take inteiro
+    const bgv = liveBgVideo[kind];
+    if (bgv) {
+      try {
+        bgv.muted = true;
+        bgv.currentTime = 0;
+        await bgv.play().catch(() => {});
+      } catch {}
+    }
+
+    // ── caminho RÁPIDO (WebCodecs): sem vídeo de fundo os frames são
+    // determinísticos — codifica na velocidade máxima (30s saem em segundos)
+    // em vez de esperar o relógio. Com vídeo de fundo, segue o tempo real.
+    if (!bgv) {
+      setGravando(true);
+      setMsg('Renderizando o vídeo em alta velocidade…');
+      try {
+        const { encodeCanvasVideo } = await import('./video-export');
+        (cv as any).__fpPause = true;
+        const fast = await encodeCanvasVideo(cv, {
+          seconds: Math.max(1, seconds),
+          drawFrame: () => (cv as any).__fpTick?.(2),
+        });
+        (cv as any).__fpPause = false;
+        if (fast) {
+          baixa(fast.blob, fast.ext);
+          setGravando(false);
+          return;
+        }
+      } catch {
+        (cv as any).__fpPause = false;
+      }
+      setGravando(false);
+    }
+
     // ⚠ Mesma blindagem do video-export.ts: rAF morre com a aba em segundo
     // plano — captura MANUAL (captureStream(0) + requestFrame) com clock num
     // Worker, e a animação avança na mão quando o rAF do preview congela.
@@ -793,23 +888,8 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
       if (e.data.size > 0) chunks.push(e.data);
     };
     recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fakepass-live-${kind === 'tiktok' ? 'tiktok' : 'instagram'}.webm`;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      setMsg('Vídeo baixado ✓');
+      baixa(new Blob(chunks, { type: 'video/webm' }), 'webm');
       setGravando(false);
-      logHistory({
-        tool: 'fakepass',
-        kind: 'export',
-        title: `Live ${kind === 'tiktok' ? 'TikTok' : 'Instagram'} — vídeo exportado`,
-      });
     };
 
     const t0 = performance.now();
@@ -868,7 +948,7 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
         {gravando ? (
           <>
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
-            Gravando…
+            Renderizando…
           </>
         ) : (
           <>
@@ -876,7 +956,7 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
               <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
               <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
             </svg>
-            Exportar vídeo (.webm)
+            Exportar vídeo
           </>
         )}
       </button>
@@ -932,12 +1012,20 @@ function LiveControls({
       <Field label={kind === 'tiktok' ? 'Cor do selo LIVE' : 'Cor do selo AO VIVO'}>
         <Swatches value={s.accent} colors={SWATCHES[kind]} onChange={(v) => set({ accent: v })} />
       </Field>
-      <Toggle on={s.chroma} onChange={(v) => set({ chroma: v })} label="Fundo verde (chroma key)" />
+      <Field
+        label="Vídeo de fundo (opcional)"
+        hint="Aparece por baixo da live inteira — no PNG e no vídeo exportado. Com vídeo, o chroma é ignorado."
+      >
+        <VideoUpload value={s.bgVideo} onChange={(v) => set({ bgVideo: v })} label="vídeo" />
+      </Field>
+      {!s.bgVideo ? (
+        <Toggle on={s.chroma} onChange={(v) => set({ chroma: v })} label="Fundo verde (chroma key)" />
+      ) : null}
       <RangeField
         label="Duração do vídeo"
         value={s.segundos}
         min={3}
-        max={20}
+        max={30}
         onChange={(v) => set({ segundos: v })}
         display={(v) => v + 's'}
       />
@@ -966,6 +1054,7 @@ const TIKTOK_LIVE: FakeModel<LiveS> = {
     avatar: '',
     accent: '#FE2C55',
     chroma: false,
+    bgVideo: '',
     segundos: 6,
   },
   Controls: ({ s, set }) => <LiveControls kind="tiktok" s={s} set={set} />,
@@ -990,6 +1079,7 @@ const IG_LIVE: FakeModel<LiveS> = {
     avatar: '',
     accent: '#FF3040',
     chroma: false,
+    bgVideo: '',
     segundos: 6,
   },
   Controls: ({ s, set }) => <LiveControls kind="ig" s={s} set={set} />,

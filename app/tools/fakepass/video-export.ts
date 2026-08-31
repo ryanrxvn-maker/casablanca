@@ -56,6 +56,21 @@ type TickerSpec = { kind: 'ticker'; rect: Rect; pieces: Piece[]; totalW: number;
 type DotSpec = { kind: 'livedot'; rect: Rect; color: string };
 type Spec = ClockSpec | TickerSpec | DotSpec;
 
+/** Vídeo de fundo ([data-fp-video]): na base ele vira BURACO transparente e o
+ *  frame REAL é desenhado POR BAIXO a cada frame do export (cover no rect). */
+type VideoSpec = { rect: Rect; el: HTMLVideoElement };
+
+/** drawImage em COVER (recorta o excesso, centrado) — igual ao object-fit da prévia. */
+function drawCover(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, r: Rect) {
+  if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+  const sc = Math.max(r.w / v.videoWidth, r.h / v.videoHeight);
+  const sw = r.w / sc;
+  const sh = r.h / sc;
+  const sx = (v.videoWidth - sw) / 2;
+  const sy = (v.videoHeight - sh) / 2;
+  ctx.drawImage(v, sx, sy, sw, sh, r.x, r.y, r.w, r.h);
+}
+
 const TICKER_SPEED_CSS = 55; // px CSS por segundo (ritmo de chyron real)
 const TICKER_LOOP_GAP_CSS = 64; // respiro entre o fim e a volta do texto
 
@@ -148,6 +163,9 @@ export type StageVideo = {
   renderFrame: (ctx: CanvasRenderingContext2D, t: number) => void;
   /** Há alguma parte animada de fato? (sem specs o vídeo seria estático) */
   animated: boolean;
+  /** Vídeos de fundo AO VIVO no frame: o export precisa rodar em TEMPO REAL
+   *  (o <video> toca de verdade) — o encoder rápido não se aplica. */
+  hasLiveVideo: boolean;
 };
 
 export async function prepareStageVideo(
@@ -160,6 +178,7 @@ export async function prepareStageVideo(
   const prevZoom = zoomEl ? zoomEl.style.zoom : '';
   if (zoomEl) zoomEl.style.zoom = '1';
   const specs: Spec[] = [];
+  const videos: VideoSpec[] = [];
   try {
     const nodeRect = node.getBoundingClientRect();
     const scale = targetW / (refW ?? nodeRect.width);
@@ -258,11 +277,24 @@ export async function prepareStageVideo(
         return;
       }
     });
+
+    // vídeos de fundo ([data-fp-video]): rect medido no DOM real
+    node.querySelectorAll<HTMLVideoElement>('video[data-fp-video]').forEach((v) => {
+      const cs = getComputedStyle(v);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return;
+      const r = v.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      videos.push({ rect: rectOf(r), el: v });
+    });
   } finally {
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 
   // ── 2) base = export real com a tinta animada oculta no clone ──
+  // Vídeo de fundo vira BURACO transparente na base (data-fp-vidhole impede o
+  // snapshot do renderNodeToCanvas): o frame REAL é composto POR BAIXO a cada
+  // frame do export — chyron/PiP/qualquer coisa por cima segue na base.
+  videos.forEach((v) => { v.el.dataset.fpVidhole = '1'; });
   const base = await renderNodeToCanvas(node, targetW, refW, (root) => {
     root.querySelectorAll<HTMLElement>('[data-fp-anim="clock"], [data-fp-anim="calltimer"], [data-fp-anim="ticker"]').forEach((el) => {
       el.style.color = 'transparent';
@@ -278,6 +310,7 @@ export async function prepareStageVideo(
       el.style.visibility = 'hidden';
     });
   });
+  videos.forEach((v) => { delete v.el.dataset.fpVidhole; });
 
   // desenha uma peça na LARGURA do DOM: o canvas não tem `tabular-nums`, então
   // normalizamos com scaleX = wDom/wCanvas — no t=0 a tinta coincide com a base.
@@ -311,6 +344,8 @@ export async function prepareStageVideo(
 
   const renderFrame = (ctx: CanvasRenderingContext2D, t: number) => {
     ctx.clearRect(0, 0, base.width, base.height);
+    // vídeos de fundo PRIMEIRO (a base tem o buraco transparente na área deles)
+    for (const v of videos) drawCover(ctx, v.el, v.rect);
     ctx.drawImage(base, 0, 0);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
@@ -360,7 +395,101 @@ export async function prepareStageVideo(
     }
   };
 
-  return { width: base.width, height: base.height, renderFrame, animated: specs.length > 0 };
+  return {
+    width: base.width,
+    height: base.height,
+    renderFrame,
+    animated: specs.length > 0 || videos.length > 0,
+    hasLiveVideo: videos.length > 0,
+  };
+}
+
+/* ─────────────── Encoder RÁPIDO (WebCodecs + mp4-muxer) ─────────────── */
+
+export type EncodedVideo = { blob: Blob; ext: 'mp4' | 'webm' };
+
+/**
+ * Codifica `seconds`×`fps` frames MAIS RÁPIDO QUE TEMPO REAL: em vez de gravar
+ * o relógio de parede (MediaRecorder = 20s de vídeo → 20s esperando), cada
+ * frame é desenhado e empurrado pro encoder de HARDWARE (WebCodecs) na
+ * velocidade máxima — um export de 30s sai em poucos segundos, imune a aba em
+ * segundo plano. Sai .mp4 (H.264), que qualquer editor abre direto.
+ *
+ * `drawFrame(i, t)` desenha o frame i (t em segundos) no canvas dado.
+ * Devolve null quando o navegador não suporta (aí o chamador cai pro
+ * MediaRecorder em tempo real, comportamento antigo).
+ */
+export async function encodeCanvasVideo(
+  cv: HTMLCanvasElement,
+  opts: { seconds: number; fps?: number; drawFrame: (i: number, t: number) => void },
+): Promise<EncodedVideo | null> {
+  if (typeof (window as any).VideoEncoder === 'undefined') return null;
+  // H.264 4:2:0 exige dimensões PARES — ímpar cai pro caminho antigo
+  if (cv.width % 2 || cv.height % 2) return null;
+  const fps = opts.fps ?? 30;
+  const seconds = Math.max(1, opts.seconds);
+  const total = Math.round(seconds * fps);
+  // (sem tipo do DOM aqui: WebCodecs pode não existir no lib.dom do TS alvo)
+  const cfg = {
+    // High 5.0: cobre 1920×1080 e 1080×1920 com folga
+    codec: 'avc1.640032',
+    width: cv.width,
+    height: cv.height,
+    bitrate: 10_000_000,
+    framerate: fps,
+  };
+  try {
+    const sup = await (window as any).VideoEncoder.isConfigSupported(cfg);
+    if (!sup?.supported) return null;
+  } catch {
+    return null;
+  }
+  let Muxer: any;
+  let ArrayBufferTarget: any;
+  try {
+    ({ Muxer, ArrayBufferTarget } = await import('mp4-muxer'));
+  } catch {
+    return null;
+  }
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'avc', width: cv.width, height: cv.height },
+    fastStart: 'in-memory',
+  });
+  let encErr: unknown = null;
+  const encoder = new (window as any).VideoEncoder({
+    output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+    error: (e: unknown) => { encErr = e; },
+  });
+  encoder.configure(cfg);
+  try {
+    for (let i = 0; i < total; i++) {
+      if (encErr) throw encErr;
+      const t = Math.min(i / fps, seconds);
+      opts.drawFrame(i, t);
+      const frame = new (window as any).VideoFrame(cv, {
+        timestamp: Math.round((i * 1e6) / fps),
+        duration: Math.round(1e6 / fps),
+      });
+      encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      frame.close();
+      // backpressure SEM timer (timer sofre throttle em aba de fundo):
+      // espera o próprio encoder liberar a fila via evento dequeue
+      if (encoder.encodeQueueSize > 4) {
+        await new Promise<void>((res) => {
+          encoder.ondequeue = () => { encoder.ondequeue = null; res(); };
+        });
+      }
+    }
+    await encoder.flush();
+    if (encErr) throw encErr;
+    muxer.finalize();
+    return { blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }), ext: 'mp4' };
+  } catch (err) {
+    console.warn('[fakepass] encoder rápido falhou — caindo pro tempo real', err);
+    try { encoder.close(); } catch {}
+    return null;
+  }
 }
 
 /** Grava `seconds` de animação e devolve o Blob .webm.
@@ -380,7 +509,7 @@ export async function prepareStageVideo(
 export async function recordStageVideo(
   node: HTMLElement,
   opts: { seconds: number; targetW: number; refW?: number },
-): Promise<Blob> {
+): Promise<EncodedVideo> {
   const prep = await prepareStageVideo(node, opts.targetW, opts.refW);
   const cv = document.createElement('canvas');
   cv.width = prep.width;
@@ -390,6 +519,27 @@ export async function recordStageVideo(
   prep.renderFrame(ctx, 0);
   // gancho de inspeção (testes/dev): permite renderizar frames à mão
   (window as any).__fpVidLast = { prep, canvas: cv, ctx };
+
+  // vídeo de fundo? Garante tocando (mudo) e DO COMEÇO — o export pega o take inteiro.
+  const bgVids = Array.from(node.querySelectorAll<HTMLVideoElement>('video[data-fp-video]'));
+  for (const v of bgVids) {
+    try {
+      v.muted = true;
+      v.currentTime = 0;
+      await v.play().catch(() => {});
+    } catch {}
+  }
+
+  // ── caminho RÁPIDO (WebCodecs): frames determinísticos → codifica na
+  // velocidade máxima em vez de esperar o relógio. Vídeo de fundo AO VIVO não
+  // dá (o <video> anda em tempo real) → segue pro MediaRecorder abaixo.
+  if (!prep.hasLiveVideo) {
+    const fast = await encodeCanvasVideo(cv, {
+      seconds: opts.seconds,
+      drawFrame: (_i, t) => prep.renderFrame(ctx, t),
+    });
+    if (fast) return fast;
+  }
 
   // captura MANUAL (frameRequestRate 0): o frame só entra quando a gente chama
   // track.requestFrame() — determinístico. Sem suporte (borda), cai pra 30fps.
@@ -466,5 +616,5 @@ export async function recordStageVideo(
 
   const blob = await done;
   finish();
-  return blob;
+  return { blob, ext: 'webm' };
 }

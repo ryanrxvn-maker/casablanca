@@ -11,7 +11,7 @@
  * fontes. Recria o LAYOUT do site; todo texto é placeholder editável.
  */
 
-import type { ReactNode, CSSProperties } from 'react';
+import { createContext, useContext, type ReactNode, type CSSProperties } from 'react';
 import { Field, Segmented, ImageUpload, Swatches, TextField, FONT_STACK, type StageDims } from './shared';
 import { NEWS_GREEN } from './news-kit';
 
@@ -19,8 +19,12 @@ import { NEWS_GREEN } from './news-kit';
 
 export type SiteHeroMode = 'image' | 'green' | 'color';
 
+/** Formato do print: desktop (clássico), 9:16 (Story), 16:9 (TV) e 4:5 (Feed). */
+export type SiteFormat = 'desktop' | 'portrait' | 'landscape' | 'feed45';
+
 /** Fundo da imagem-hero que TODO template de site carrega no estado. */
 export type SiteBg = {
+  format: SiteFormat;
   heroMode: SiteHeroMode;
   heroImage: string;
   heroColor: string;
@@ -28,6 +32,7 @@ export type SiteBg = {
 };
 
 export const defaultSiteBg: SiteBg = {
+  format: 'desktop',
   heroMode: 'green',
   heroImage: '',
   heroColor: '#c9d2da',
@@ -57,38 +62,76 @@ export const defaultSiteArticle: SiteArticle = {
 export const SITE_SANS = FONT_STACK;
 export const SITE_SERIF = "Georgia, 'Times New Roman', 'Noto Serif', 'PT Serif', serif";
 
-/** Largura do palco (print de desktop). */
+/** Largura da COLUNA do artigo (o design de todos os templates vive nela). */
 export const SITE_W = 760;
-export function siteDims(): StageDims {
+
+/**
+ * Dimensões do PALCO por formato. O design do artigo é sempre a coluna de até
+ * 760px — os formatos só mudam o QUADRO em volta (corte/moldura), então a
+ * tipografia de cada portal fica idêntica em todos:
+ *  • desktop  → 760×939  (print clássico; export 1520×1878)
+ *  • portrait → 540×960  (coluna mobile; export 1080×1920)
+ *  • feed45   → 760×950  (mesmo design, corte 4:5; export 1080×1350)
+ *  • landscape→ 1280×720 (coluna 760 centrada, como no navegador; export 1920×1080)
+ */
+export function siteDims(format: SiteFormat = 'desktop'): StageDims {
+  if (format === 'portrait') return { stageW: 540, ratio: 16 / 9, exportW: 1080 };
+  if (format === 'landscape') return { stageW: 1280, ratio: 9 / 16, exportW: 1920 };
+  if (format === 'feed45') return { stageW: 760, ratio: 5 / 4, exportW: 1080 };
   return { stageW: SITE_W, ratio: 1.235, exportW: 1520 };
 }
-export function siteMetrics() {
-  const W = SITE_W;
-  const H = Math.round(W * 1.235);
+
+/** Largura da COLUNA (o W que os templates usam pra desenhar) + altura do quadro. */
+export function siteMetrics(format: SiteFormat = 'desktop') {
+  const d = siteDims(format);
+  const W = Math.min(d.stageW, SITE_W);
+  const H = Math.round(d.stageW * d.ratio);
   return { W, H, k: 1 };
 }
 
+/** Formato corrente do quadro — o SiteNav usa pra virar nav compacta no 9:16. */
+const SiteFormatCtx = createContext<SiteFormat>('desktop');
+
 /* ─────────────────────────────── Quadro ─────────────────────────────── */
 
-/** Página branca (recorte de topo do artigo), altura fixa com overflow hidden. */
-export function SiteFrame({ children, bg = '#ffffff', color = '#111111', font = SITE_SANS }: { children: ReactNode; bg?: string; color?: string; font?: string }) {
-  const { W, H } = siteMetrics();
+/** Página branca (recorte de topo do artigo), altura fixa com overflow hidden.
+ *  `format` muda o QUADRO: no 16:9 a coluna de 760 sai centrada (navegador);
+ *  no 9:16 a coluna é 540 (mobile) e o SiteNav compacta sozinho via contexto. */
+export function SiteFrame({
+  children,
+  format = 'desktop',
+  bg = '#ffffff',
+  color = '#111111',
+  font = SITE_SANS,
+}: {
+  children: ReactNode;
+  format?: SiteFormat;
+  bg?: string;
+  color?: string;
+  font?: string;
+}) {
+  const d = siteDims(format);
+  const frameW = d.stageW;
+  const frameH = Math.round(d.stageW * d.ratio);
+  const colW = Math.min(frameW, SITE_W);
   return (
     <div
       style={{
-        width: W,
-        height: H,
+        width: frameW,
+        height: frameH,
         overflow: 'hidden',
         background: bg,
         color,
         fontFamily: font,
         WebkitFontSmoothing: 'antialiased',
         position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
       }}
     >
-      {children}
+      <SiteFormatCtx.Provider value={format}>
+        <div style={{ width: colW, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+          {children}
+        </div>
+      </SiteFormatCtx.Provider>
     </div>
   );
 }
@@ -114,12 +157,15 @@ export function SiteNav({
   height?: number;
   fontSize?: number;
 }) {
+  // 9:16 (mobile): menu de itens não cabe — vira HAMBÚRGUER + logo, como os
+  // portais reais no celular. Nenhum template precisa saber disso (contexto).
+  const compact = useContext(SiteFormatCtx) === 'portrait';
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 16,
+        gap: compact ? 12 : 16,
         padding: '0 18px',
         height: height ?? 52,
         background: bg,
@@ -128,15 +174,24 @@ export function SiteNav({
         flexShrink: 0,
       }}
     >
+      {compact ? (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+      ) : null}
       {logo}
-      {items && items.length ? (
+      {items && items.length && !compact ? (
         <div style={{ display: 'flex', gap: 16, fontSize: fontSize ?? 13.5, fontWeight: 700, lineHeight: 1, marginLeft: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
           {items.map((it, i) => (
             <span key={i} style={{ lineHeight: 1 }}>{it}</span>
           ))}
         </div>
       ) : null}
-      {right ? <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>{right}</div> : null}
+      {/* lineHeight 1: os chips (Entrar/Assine/Sign in) herdavam o line-height 0
+          do palco → pílula de ~8px com o glifo transbordando; o html2canvas
+          ancorava o texto diferente e ele saía AFUNDADO/cortado no PNG. Com o
+          line box definido, prévia e download desenham igual. */}
+      {right ? <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, lineHeight: 1 }}>{right}</div> : null}
     </div>
   );
 }
@@ -191,6 +246,18 @@ function ColorInput({ value, onChange }: { value: string; onChange: (v: string) 
 export function SiteBgControls({ bg, set }: { bg: SiteBg; set: (p: any) => void }) {
   return (
     <div className="flex flex-col gap-4">
+      <Field label="Formato" hint="Todos exportam em alta e alinhados — o design do artigo é o mesmo.">
+        <Segmented
+          value={bg.format ?? 'desktop'}
+          options={[
+            { value: 'desktop', label: 'Desktop' },
+            { value: 'portrait', label: '9:16 (Story)' },
+            { value: 'feed45', label: '4:5 (Feed)' },
+            { value: 'landscape', label: '16:9 (TV)' },
+          ]}
+          onChange={(v) => set({ format: v })}
+        />
+      </Field>
       <Field label="Imagem principal (hero)" hint="Verde = chroma key pra encaixar sua imagem/vídeo.">
         <Segmented
           value={bg.heroMode}

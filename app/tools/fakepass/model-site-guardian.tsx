@@ -47,11 +47,11 @@ function GuardianWordmark() {
 }
 
 function GuardianPage({ s }: { s: S }) {
-  const { W } = siteMetrics();
+  const { W } = siteMetrics(s.format);
   const heroH = Math.round(W * 0.5);
   const items = s.nav.split(',').map((t) => t.trim()).filter(Boolean);
   return (
-    <SiteFrame>
+    <SiteFrame format={s.format}>
       {/* masthead azul-marinho com wordmark + pill amarelo */}
       <SiteNav
         logo={<GuardianWordmark />}
@@ -144,6 +144,7 @@ const GUARDIAN_SITE: FakeModel<S> = {
   stageW: siteDims().stageW,
   ratio: siteDims().ratio,
   exportW: siteDims().exportW,
+  dims: (s) => siteDims(s.format),
   usesPhone: false,
   defaultState: {
     ...defaultSiteArticle,

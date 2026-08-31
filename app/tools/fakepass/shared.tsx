@@ -347,7 +347,53 @@ export async function renderNodeToCanvas(
       ellipEls.push(el);
     });
   };
+  // ── Vídeo → snapshot ──
+  // O html2canvas NÃO desenha <video> (a área sairia vazia no PNG). Antes de
+  // capturar, cada vídeo visível vira um SNAPSHOT do frame atual, já recortado
+  // em COVER na proporção da caixa; no clone de cada render o <video> é trocado
+  // por um <img> desse snapshot — o PNG sai idêntico à prévia. Exceção: vídeo
+  // marcado com data-fp-vidhole="1" (export de .webm/.mp4) fica como BURACO
+  // transparente — o motor de vídeo compõe o frame REAL por baixo da base.
+  const vidShims: HTMLElement[] = [];
+  const computeVideoShims = () => {
+    node.querySelectorAll<HTMLVideoElement>('video').forEach((v) => {
+      if (v.dataset.fpVidhole === '1') return;
+      const r = v.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) return;
+      if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) return;
+      // 2× da caixa: nítido mesmo no export em alta (limite pra não estourar memória)
+      const cw = Math.max(2, Math.min(2048, Math.round(r.width * 2)));
+      const ch = Math.max(2, Math.min(2048, Math.round(r.height * 2)));
+      const c = document.createElement('canvas');
+      c.width = cw;
+      c.height = ch;
+      const cx = c.getContext('2d');
+      if (!cx) return;
+      const sc = Math.max(cw / v.videoWidth, ch / v.videoHeight);
+      const dw = v.videoWidth * sc;
+      const dh = v.videoHeight * sc;
+      cx.drawImage(v, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+      try {
+        v.dataset.fpVidsnap = c.toDataURL('image/png');
+        vidShims.push(v);
+      } catch {}
+    });
+  };
+  const applyVideoShimsInClone = (root: HTMLElement) => {
+    root.querySelectorAll<HTMLVideoElement>('video').forEach((v) => {
+      const snap = v.dataset?.fpVidsnap;
+      if (!snap) return; // sem snapshot (ou buraco de vídeo): h2c não desenha nada mesmo
+      const img = v.ownerDocument.createElement('img');
+      img.src = snap;
+      // snapshot já vem recortado em cover na proporção da caixa → 'fill' basta
+      img.style.cssText = v.style.cssText;
+      img.style.objectFit = 'fill';
+      v.replaceWith(img);
+    });
+  };
+
   const applyEllipsisInClone = (root: HTMLElement) => {
+    applyVideoShimsInClone(root);
     root.querySelectorAll<HTMLElement>('[data-fp-ellip]').forEach((el) => {
       el.textContent = el.dataset.fpEllip || el.textContent;
     });
@@ -422,6 +468,10 @@ export async function renderNodeToCanvas(
 
   let canvas: HTMLCanvasElement | null = null;
   let vcompCleanup: (() => void) | null = null;
+  // render CRU da sondagem: se NENHUM alvo precisou de correção, ele já é
+  // idêntico ao render final (mesmos shims, sem transform) → reaproveitamos e
+  // economizamos um html2canvas inteiro (export mais rápido).
+  let probeRaw: HTMLCanvasElement | null = null;
   try {
     // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
     // em branco no canvas.
@@ -437,6 +487,7 @@ export async function renderNodeToCanvas(
     );
     await new Promise((r) => setTimeout(r, 60));
 
+    computeVideoShims();
     computeEllipsisShims();
     computeClampShims();
     applyCropGuards();
@@ -522,6 +573,11 @@ export async function renderNodeToCanvas(
       range.selectNodeContents(el);
       const gr = range.getBoundingClientRect();
       if (!gr.height || gr.width < 3) continue;
+      // Texto CORTADO pela borda do palco (ex.: parágrafo no fold do quadro
+      // 16:9): a tinta visível é parcial — a sonda mediria o centro da parte
+      // que sobrou e "corrigiria" pro lugar errado. Fica como está: o corte é
+      // o MESMO da prévia. (Mesma guarda que os flow-blocks já tinham.)
+      if (gr.bottom > nodeRect.bottom - 2 || gr.top < nodeRect.top + 2) continue;
       const fs = parseFloat(cs.fontSize) || 14;
       // FLUXO INLINE MISTO que quebra em VÁRIAS linhas (comentário do IG com @menção/
       // #hashtag/emoji no meio; legenda de post): o pai tem 2+ pedaços de texto inline
@@ -729,10 +785,14 @@ export async function renderNodeToCanvas(
         onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-flow], [data-fp-flow] *')(d, root); },
       }) : null;
       targets.forEach((t) => { delete t.el.dataset.fpCal0; delete t.el.dataset.fpCal1; });
+      probeRaw = rawCanvas;
       const ra = rawCanvas.getContext('2d');
       const c0 = hid0Canvas ? hid0Canvas.getContext('2d') : null;
       const c1 = hid1Canvas ? hid1Canvas.getContext('2d') : null;
       const cf = hidFlowCanvas ? hidFlowCanvas.getContext('2d') : null;
+      // erro MEDIDO de cada alvo (antes de threshold): o nivelamento por linha
+      // (abaixo) precisa ver os valores crus pra igualar irmãos da mesma linha.
+      const errOf = new Map<VTarget, number>();
       if (ra && c0 && c1) {
         const CW = rawCanvas.width;
         const CH = rawCanvas.height;
@@ -809,23 +869,73 @@ export async function renderNodeToCanvas(
           // Cap de 16px (blindagem anti-embaralho): TODOS os erros REAIS já
           // medidos ficam em 6-13px; acima de 16px é janela poluída (com texto
           // fora do limite da UI, p.ex.) e a correção deslocaria ~1 linha.
-          if (Math.abs(err) > 0.3 && Math.abs(err) <= 16) {
-            t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
-            t.el.dataset.fpVmode = t.mode;
-            // Elemento com FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta", balão
-            // multi-linha)? Guardamos o padding: no render final subimos o TEXTO
-            // redistribuindo o padding (caixa+fundo ficam), em vez de mover o elemento
-            // inteiro (que deslocaria o fundo e, num overflow:hidden, encurtaria a caixa).
-            const csb = getComputedStyle(t.el);
-            const bgc = csb.backgroundColor;
-            const bm = bgc.match(/rgba?\(([^)]+)\)/);
-            const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
-            const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
-            if (bgOpaque || bgImg) {
-              t.el.dataset.fpBg = '1';
-              t.el.dataset.fpPt = String(parseFloat(csb.paddingTop) || 0);
-              t.el.dataset.fpPb = String(parseFloat(csb.paddingBottom) || 0);
+          if (Math.abs(err) <= 16) errOf.set(t, err);
+        }
+
+        // (chave de diagnóstico da auditoria dev: desliga o nivelamento pra
+        //  comparar A/B — nunca setada em produção)
+        const noRowUnify = (window as any).__fpNoRowUnify === true;
+        // ── NIVELAMENTO POR LINHA ──
+        // Alvos IRMÃOS na MESMA linha (itens do menu dos sites, byline
+        // "Autor — hora", colunas de um rodapé): cada um mede o próprio erro e
+        // 1-2px de diferença entre medições já deixa a linha SERRILHADA no PNG
+        // (um item do menu sai mais alto que os vizinhos — bug real do G1).
+        // Grupo = mesmo PAI + mesmo centro vertical (±4px). O grupo inteiro
+        // recebe a MEDIANA dos erros medidos: a linha desloca por IGUAL e fica
+        // reta como na prévia — inclusive os itens cuja medição falhou.
+        if (!noRowUnify) {
+          const byParent = new Map<HTMLElement, VTarget[]>();
+          for (const t of targets) {
+            if (t.multi) continue;
+            const p = t.el.parentElement;
+            if (!p) continue;
+            const arr = byParent.get(p);
+            if (arr) arr.push(t);
+            else byParent.set(p, [t]);
+          }
+          for (const group of byParent.values()) {
+            if (group.length < 2) continue;
+            group.sort((a, b) => a.cy - b.cy);
+            let cluster: VTarget[] = [];
+            const flush = () => {
+              if (cluster.length >= 2) {
+                const errs = cluster
+                  .map((t) => errOf.get(t))
+                  .filter((e): e is number => e !== undefined)
+                  .sort((a, b) => a - b);
+                if (errs.length) {
+                  const med = errs[Math.floor(errs.length / 2)];
+                  for (const t of cluster) errOf.set(t, med);
+                }
+              }
+              cluster = [];
+            };
+            for (const t of group) {
+              if (cluster.length && Math.abs(t.cy - cluster[cluster.length - 1].cy) > 4 * scale) flush();
+              cluster.push(t);
             }
+            flush();
+          }
+        }
+
+        for (const t of targets) {
+          const err = errOf.get(t);
+          if (err === undefined || Math.abs(err) <= 0.3) continue;
+          t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
+          t.el.dataset.fpVmode = t.mode;
+          // Elemento com FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta", balão
+          // multi-linha)? Guardamos o padding: no render final subimos o TEXTO
+          // redistribuindo o padding (caixa+fundo ficam), em vez de mover o elemento
+          // inteiro (que deslocaria o fundo e, num overflow:hidden, encurtaria a caixa).
+          const csb = getComputedStyle(t.el);
+          const bgc = csb.backgroundColor;
+          const bm = bgc.match(/rgba?\(([^)]+)\)/);
+          const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
+          const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
+          if (bgOpaque || bgImg) {
+            t.el.dataset.fpBg = '1';
+            t.el.dataset.fpPt = String(parseFloat(csb.paddingTop) || 0);
+            t.el.dataset.fpPb = String(parseFloat(csb.paddingBottom) || 0);
           }
         }
       }
@@ -896,6 +1006,14 @@ export async function renderNodeToCanvas(
       }
     }
 
+    // Sondagem rodou e NENHUMA correção ficou marcada? O render cru da sonda é
+    // pixel-idêntico ao final (mesmos shims, zero transform) → reusa e poupa
+    // um render inteiro.
+    if (probeRaw && !node.querySelector('[data-fp-vcal]')) {
+      canvas = probeRaw;
+      return canvas;
+    }
+
     // RENDER FINAL — sobe o glifo de cada alvo por translateY(−erro), só no clone
     // (a prévia não muda). Por modo:
     //  • 'fit'    → translateY DIRETO no FitText (sem fundo próprio, não re-quebra);
@@ -961,6 +1079,7 @@ export async function renderNodeToCanvas(
     textUnwrap.forEach((restore) => restore());
     ellipEls.forEach((el) => { delete el.dataset.fpEllip; });
     clampEls.forEach((el) => { delete el.dataset.fpClamp; });
+    vidShims.forEach((el) => { delete el.dataset.fpVidsnap; });
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 
@@ -1471,6 +1590,75 @@ export function ImageUpload({
         ref={inputRef}
         type="file"
         accept="image/*"
+        className="hidden"
+        onChange={(e) => pick(e.target.files?.[0])}
+      />
+    </div>
+  );
+}
+
+/**
+ * Upload de VÍDEO → devolve um Object URL (fica só no navegador; data URL
+ * truncaria arquivo grande). O vídeo roda na prévia (mudo, em loop); no PNG sai
+ * o frame atual (snapshot no export) e no export de vídeo ele roda de verdade.
+ */
+export function VideoUpload({
+  value,
+  onChange,
+  label = 'Vídeo',
+}: {
+  value: string;
+  onChange: (objectUrl: string) => void;
+  label?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const pick = (file?: File | null) => {
+    if (!file) return;
+    if (value && value.startsWith('blob:')) {
+      try { URL.revokeObjectURL(value); } catch {}
+    }
+    onChange(URL.createObjectURL(file));
+  };
+  const clear = () => {
+    if (value && value.startsWith('blob:')) {
+      try { URL.revokeObjectURL(value); } catch {}
+    }
+    onChange('');
+  };
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="relative flex h-14 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[12px] border border-line-strong bg-bg-soft/60 transition hover:border-violet/55"
+      >
+        {value ? (
+          <video src={value} muted loop autoPlay playsInline className="h-full w-full object-cover" />
+        ) : (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="text-text-muted" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+            <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
+          </svg>
+        )}
+      </button>
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="rounded-full border border-line-strong px-3 py-1.5 text-[12px] font-semibold text-text-muted transition hover:border-violet/55 hover:text-white"
+        >
+          {value ? 'Trocar' : `Enviar ${label.toLowerCase()}`}
+        </button>
+        {value ? (
+          <button type="button" onClick={clear} className="text-left text-[11px] text-text-dim hover:text-red-300">
+            Remover
+          </button>
+        ) : null}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/*"
         className="hidden"
         onChange={(e) => pick(e.target.files?.[0])}
       />

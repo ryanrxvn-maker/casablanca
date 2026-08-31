@@ -138,18 +138,36 @@ function stressify(s: any): any {
 export default function FpAuditPage() {
   const [idx, setIdx] = useState(-1);
   const [stress, setStress] = useState(false);
+  // patch de estado aplicado por cima do defaultState (ex.: {format:'portrait'}
+  // pra auditar os SITES em cada formato, ou {orient:'portrait'} pros jornais).
+  const [patch, setPatch] = useState<Record<string, any>>({});
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    (window as any).__fpAuditStart = (from = 0, opts: { stress?: boolean } = {}) => {
+    (window as any).__fpAuditStart = (
+      from = 0,
+      opts: { stress?: boolean; patch?: Record<string, any>; until?: number } = {},
+    ) => {
       (window as any).__fpAuditResults = [];
+      (window as any).__fpAuditUntil = typeof opts.until === 'number' ? opts.until : MODELS.length;
       setStress(!!opts.stress);
+      setPatch(opts.patch || {});
       setIdx(from);
     };
   }, []);
 
+  const stateFor = (model: any) => {
+    const base = stress ? stressify(model.defaultState) : model.defaultState;
+    const extra: Record<string, any> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (k in base) extra[k] = v; // só aplica em modelo que TEM o campo
+    }
+    return { ...base, ...extra };
+  };
+
   useEffect(() => {
-    if (idx < 0 || idx >= MODELS.length) return;
+    const until = (window as any).__fpAuditUntil ?? MODELS.length;
+    if (idx < 0 || idx >= Math.min(MODELS.length, until)) return;
     let cancel = false;
     (async () => {
       // FitText/efeitos/fontes assentarem antes de medir
@@ -158,11 +176,11 @@ export default function FpAuditPage() {
       if (cancel) return;
       const node = stageRef.current;
       const model = MODELS[idx];
-      const s = stress ? stressify(model.defaultState) : model.defaultState;
+      const s = stateFor(model);
       const dims = model.dims
         ? model.dims(s)
         : { stageW: model.stageW, ratio: model.ratio, exportW: model.exportW };
-      const out: any = { id: model.id, label: model.label, stress };
+      const out: any = { id: model.id, label: model.label, stress, patch };
       try {
         if (!node) throw new Error('sem stage');
         const scale = dims.exportW / dims.stageW;
@@ -183,7 +201,8 @@ export default function FpAuditPage() {
         out.desalinhado = leafResults.filter((l) => l.errPx !== null && Math.abs(l.errPx) > 2.5);
         out.maxErr = leafResults.reduce((m, l) => Math.max(m, Math.abs(l.errPx ?? 0)), 0);
         const blob: Blob | null = await new Promise((r) => A.toBlob(r, 'image/png'));
-        if (blob) await fetch(`/api/dev-fp-save?name=audit-${stress ? 'stress-' : ''}${model.id}`, { method: 'POST', body: blob });
+        const pTag = Object.values(patch).join('-');
+        if (blob) await fetch(`/api/dev-fp-save?name=audit-${stress ? 'stress-' : ''}${pTag ? pTag + '-' : ''}${model.id}`, { method: 'POST', body: blob });
       } catch (e: any) {
         out.error = String(e?.message || e);
       }
@@ -212,7 +231,7 @@ export default function FpAuditPage() {
       {model ? (
         <div data-fp-zoom style={{ zoom: 1, lineHeight: 0 }}>
           <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
-            {model.Preview({ s: stress ? stressify(model.defaultState) : model.defaultState, status: defaultStatus })}
+            {model.Preview({ s: stateFor(model), status: defaultStatus })}
           </div>
         </div>
       ) : null}

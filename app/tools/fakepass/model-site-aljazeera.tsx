@@ -46,11 +46,11 @@ function AlJazeeraWordmark() {
 }
 
 function AlJazeeraPage({ s }: { s: S }) {
-  const { W } = siteMetrics();
+  const { W } = siteMetrics(s.format);
   const heroH = Math.round(W * 0.5);
   const items = s.nav.split(',').map((t) => t.trim()).filter(Boolean);
   return (
-    <SiteFrame>
+    <SiteFrame format={s.format}>
       {/* masthead branco com wordmark */}
       <SiteNav
         logo={<AlJazeeraWordmark />}
@@ -129,6 +129,7 @@ const ALJAZEERA_SITE: FakeModel<S> = {
   stageW: siteDims().stageW,
   ratio: siteDims().ratio,
   exportW: siteDims().exportW,
+  dims: (s) => siteDims(s.format),
   usesPhone: false,
   defaultState: {
     ...defaultSiteArticle,

@@ -110,19 +110,20 @@ export default function FakePassPage() {
     }
   };
 
-  // vídeo (modelos anim: relógio rodando + ticker deslizando + AO VIVO pulsando)
+  // vídeo (modelos anim: relógio rodando + ticker deslizando + AO VIVO pulsando
+  // + vídeo de fundo rodando). Com WebCodecs sai MAIS RÁPIDO que tempo real.
   const baixarVideo = async () => {
     const node = stageRef.current;
     if (!node || gravandoVid) return;
     setGravandoVid(true);
-    setVidMsg(`Gravando ${vidSecs} segundos de animação…`);
+    setVidMsg(`Renderizando ${vidSecs} segundos de animação…`);
     try {
       const { recordStageVideo } = await import('./video-export');
-      const blob = await recordStageVideo(node, { seconds: vidSecs, targetW: dims.exportW, refW: dims.stageW });
+      const { blob, ext } = await recordStageVideo(node, { seconds: vidSecs, targetW: dims.exportW, refW: dims.stageW });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `fakepass-${model.id}.webm`;
+      a.download = `fakepass-${model.id}.${ext}`;
       a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();
@@ -137,6 +138,16 @@ export default function FakePassPage() {
       setGravandoVid(false);
     }
   };
+
+  // Aquece os módulos pesados DEPOIS da página pintar: o 1º export não paga o
+  // download do html2canvas/motor de vídeo, e o CDN de emojis já conecta.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      import('html2canvas').catch(() => {});
+      import('./video-export').catch(() => {});
+    }, 2000);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <ToolShell
@@ -269,22 +280,48 @@ export default function FakePassPage() {
               </span>
             </div>
 
-            <div ref={previewBoxRef} className="flex justify-center overflow-hidden">
-              {/* zoom (não transform:scale) reflui o palco no tamanho reduzido
-                  com texto/vetores NÍTIDOS — sem a rasterização borrada do
-                  scale. No export, downloadNodeAsPng zera este zoom pela marca
-                  data-fp-zoom, então o PNG sai em alta e imune ao encolhimento. */}
-              <div data-fp-zoom style={{ zoom: pscale }}>
-                {/* `line-height: 0` no palco tira o vão do descender do inline-block
-                    E — crucial — faz o texto SEM line-height próprio ter altura de
-                    linha 0 IGUAL no navegador e no html2canvas (o `normal` os dois
-                    renderiam com altura DIFERENTE → drift vertical que acumula no
-                    download). Cada texto que precisa de altura (barra de status,
-                    bolhas multi-linha) seta o SEU line-height. */}
-                <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
-                  {model.Preview({ s, status })}
+            <div ref={previewBoxRef} className="relative flex justify-center overflow-hidden">
+              {/* MOLDURA de tamanho FIXO (o tamanho escalado da prévia): durante o
+                  export o zoom do palco vai a 1 pros renders de sondagem — sem a
+                  moldura, a prévia "explodia" e empurrava a página inteira. Com
+                  ela, o palco cresce POR DENTRO (clipado) e o layout não mexe. */}
+              <div
+                style={{
+                  width: Math.round(dims.stageW * pscale),
+                  height: Math.round(dims.stageW * dims.ratio * pscale),
+                  overflow: 'hidden',
+                  position: 'relative',
+                }}
+              >
+                {/* zoom (não transform:scale) reflui o palco no tamanho reduzido
+                    com texto/vetores NÍTIDOS — sem a rasterização borrada do
+                    scale. No export, downloadNodeAsPng zera este zoom pela marca
+                    data-fp-zoom, então o PNG sai em alta e imune ao encolhimento. */}
+                <div data-fp-zoom style={{ zoom: pscale }}>
+                  {/* `line-height: 0` no palco tira o vão do descender do inline-block
+                      E — crucial — faz o texto SEM line-height próprio ter altura de
+                      linha 0 IGUAL no navegador e no html2canvas (o `normal` os dois
+                      renderiam com altura DIFERENTE → drift vertical que acumula no
+                      download). Cada texto que precisa de altura (barra de status,
+                      bolhas multi-linha) seta o SEU line-height. */}
+                  <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
+                    {model.Preview({ s, status })}
+                  </div>
                 </div>
               </div>
+              {/* VÉU durante a geração (fora do palco → não sai no export): cobre
+                  os renders de sondagem, que mexem no zoom por baixo dos panos. */}
+              {gerando || gravandoVid ? (
+                <div
+                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2"
+                  style={{ background: 'rgba(10,10,16,0.62)', backdropFilter: 'blur(3px)' }}
+                >
+                  <svg className="animate-spin text-white" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 3a9 9 0 1 0 9 9" /></svg>
+                  <span className="text-[12px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                    {gravandoVid ? 'Renderizando vídeo…' : 'Gerando em alta…'}
+                  </span>
+                </div>
+              ) : null}
             </div>
 
             <button
@@ -311,7 +348,7 @@ export default function FakePassPage() {
               )}
             </button>
             <p className="mt-2 text-center text-[11px] text-text-muted">
-              Imagem em alta ({model.exportW}px) — pronta pra postar.
+              Imagem em alta ({dims.exportW}×{Math.round(dims.exportW * dims.ratio)}px) — pronta pra postar.
             </p>
 
             {model.anim ? (
@@ -320,7 +357,7 @@ export default function FakePassPage() {
                   label="Duração do vídeo"
                   value={vidSecs}
                   min={3}
-                  max={20}
+                  max={30}
                   onChange={setVidSecs}
                   display={(v) => v + 's'}
                 />
@@ -338,7 +375,7 @@ export default function FakePassPage() {
                   {gravandoVid ? (
                     <>
                       <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
-                      Gravando…
+                      Renderizando…
                     </>
                   ) : (
                     <>
@@ -346,7 +383,7 @@ export default function FakePassPage() {
                         <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
                         <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
                       </svg>
-                      Exportar vídeo (.webm)
+                      Exportar vídeo
                     </>
                   )}
                 </button>

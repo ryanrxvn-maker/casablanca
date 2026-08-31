@@ -16,12 +16,12 @@
  */
 
 import type { ReactNode, CSSProperties } from 'react';
-import { Field, Segmented, ImageUpload, Swatches, FONT_STACK, type StageDims } from './shared';
+import { Field, Segmented, ImageUpload, VideoUpload, Swatches, FONT_STACK, type StageDims } from './shared';
 
 /* ─────────────────────────── Tipos / dimensões ─────────────────────────── */
 
 export type NewsOrient = 'landscape' | 'portrait' | 'feed45';
-export type NewsBgMode = 'image' | 'solid' | 'green';
+export type NewsBgMode = 'image' | 'solid' | 'green' | 'video';
 /** Arranjo da CENA atrás do chyron: 1 quadro cheio, 2/3 quadros, ou PiP. */
 export type NewsLayout = 'single' | 'duplo' | 'triplo' | 'pip';
 
@@ -47,6 +47,9 @@ export type NewsBg = {
   box2: string; // dataURL (quadro 2)
   box3: string; // dataURL (quadro 3)
   pip: string; // dataURL (janelinha do repórter)
+  /** Object URL do VÍDEO de fundo (bgMode 'video'): roda atrás do chyron na
+   *  prévia, sai como frame no PNG e RODANDO no export de vídeo. */
+  bgVideo?: string;
 };
 
 export const defaultNewsBg: NewsBg = {
@@ -59,6 +62,7 @@ export const defaultNewsBg: NewsBg = {
   box2: '',
   box3: '',
   pip: '',
+  bgVideo: '',
 };
 
 /** Dimensões do palco por orientação. 16:9 → 1920×1080; 9:16 → 1080×1920; 4:5 → 1080×1350. */
@@ -94,7 +98,12 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
   // fill = fundo dos quadros SEM imagem (verde de chroma por padrão, ou cor).
   const fill = bg.bgMode === 'solid' ? bg.bgColor : bg.green;
   const box1 = bg.bgMode === 'image' ? bg.bgImage : '';
-  const layout = bg.layout ?? 'single';
+  // VÍDEO de fundo: cobre a cena inteira (multi-quadro não se aplica; o PiP
+  // continua valendo por cima). Sem vídeo carregado, cai no verde normal.
+  const videoMode = bg.bgMode === 'video' && !!bg.bgVideo;
+  const layout = videoMode
+    ? (bg.layout === 'pip' ? 'pip' : 'single')
+    : (bg.layout ?? 'single');
   // No 9:16 sobe o chyron um tico pra não ficar colado na base.
   const lift = orient === 'portrait' ? Math.round(H * 0.05) : 0;
   const divider = Math.max(2, Math.round(W * 0.006));
@@ -106,7 +115,10 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
         width: W,
         height: H,
         overflow: 'hidden',
-        background: fill,
+        // videoMode: TRANSPARENTE — no export de vídeo a área do <video> vira
+        // buraco na base e o frame real é composto por baixo; um fundo opaco
+        // aqui taparia o vídeo.
+        background: videoMode ? 'transparent' : fill,
         fontFamily: NEWS_FONT,
         WebkitFontSmoothing: 'antialiased',
         color: '#fff',
@@ -118,7 +130,17 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
       }}
     >
       {/* CENA (atrás do chyron) */}
-      {layout === 'duplo' ? (
+      {videoMode ? (
+        <video
+          data-fp-video
+          src={bg.bgVideo}
+          muted
+          loop
+          autoPlay
+          playsInline
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : layout === 'duplo' ? (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', gap: divider, background: '#000' }}>
           <div style={{ flex: 1, background: boxBg(box1, fill) }} />
           <div style={{ flex: 1, background: boxBg(bg.box2, fill) }} />
@@ -172,10 +194,11 @@ function ColorInput({ value, onChange }: { value: string; onChange: (v: string) 
 /** Bloco de controles de fundo + orientação + cena, reusado por todos. */
 export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void }) {
   const layout = bg.layout ?? 'single';
-  const multi = layout === 'duplo' || layout === 'triplo';
+  const isVideo = bg.bgMode === 'video';
+  const multi = !isVideo && (layout === 'duplo' || layout === 'triplo');
   return (
     <div className="flex flex-col gap-4">
-      <Field label="Formato" hint="Ambos exportam em alta, sem distorcer.">
+      <Field label="Formato" hint="Todos exportam em alta, sem distorcer.">
         <Segmented
           value={bg.orient}
           options={[
@@ -186,15 +209,22 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
           onChange={(v) => set({ orient: v })}
         />
       </Field>
-      <Field label="Layout da cena" hint="Quantos quadros/janelas atrás do chyron.">
+      <Field label="Layout da cena" hint={isVideo ? 'Com vídeo de fundo: 1 quadro (com ou sem repórter).' : 'Quantos quadros/janelas atrás do chyron.'}>
         <Segmented
-          value={layout}
-          options={[
-            { value: 'single', label: '1 quadro' },
-            { value: 'duplo', label: '2 quadros' },
-            { value: 'triplo', label: '3 quadros' },
-            { value: 'pip', label: 'Repórter' },
-          ]}
+          value={isVideo && layout !== 'pip' ? 'single' : layout}
+          options={
+            isVideo
+              ? [
+                  { value: 'single', label: '1 quadro' },
+                  { value: 'pip', label: 'Repórter' },
+                ]
+              : [
+                  { value: 'single', label: '1 quadro' },
+                  { value: 'duplo', label: '2 quadros' },
+                  { value: 'triplo', label: '3 quadros' },
+                  { value: 'pip', label: 'Repórter' },
+                ]
+          }
           onChange={(v) => set({ layout: v })}
         />
       </Field>
@@ -204,6 +234,7 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
           options={[
             { value: 'green', label: 'Tela verde' },
             { value: 'image', label: 'Imagem' },
+            { value: 'video', label: 'Vídeo' },
             { value: 'solid', label: 'Cor' },
           ]}
           onChange={(v) => set({ bgMode: v })}
@@ -212,6 +243,14 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
       {bg.bgMode === 'image' ? (
         <Field label={multi ? 'Imagem do quadro 1' : 'Imagem de fundo'} hint="Sua foto/cena atrás do chyron.">
           <ImageUpload value={bg.bgImage} onChange={(v) => set({ bgImage: v })} label="imagem" />
+        </Field>
+      ) : null}
+      {isVideo ? (
+        <Field
+          label="Vídeo de fundo"
+          hint="Roda atrás do chyron. O PNG sai com o frame atual; o export de vídeo grava com ele RODANDO."
+        >
+          <VideoUpload value={bg.bgVideo || ''} onChange={(v) => set({ bgVideo: v })} label="vídeo" />
         </Field>
       ) : null}
       {bg.bgMode === 'solid' ? (
@@ -228,12 +267,12 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
         </Field>
       ) : null}
       {/* Uploads dos quadros extras — vazio = tela verde (dá pra chroma). */}
-      {layout === 'duplo' || layout === 'triplo' ? (
+      {!isVideo && (layout === 'duplo' || layout === 'triplo') ? (
         <Field label="Imagem do quadro 2" hint="Vazio = verde (pra encaixar outro vídeo).">
           <ImageUpload value={bg.box2} onChange={(v) => set({ box2: v })} label="quadro 2" />
         </Field>
       ) : null}
-      {layout === 'triplo' ? (
+      {!isVideo && layout === 'triplo' ? (
         <Field label="Imagem do quadro 3" hint="Vazio = verde.">
           <ImageUpload value={bg.box3} onChange={(v) => set({ box3: v })} label="quadro 3" />
         </Field>
