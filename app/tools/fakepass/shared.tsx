@@ -1102,15 +1102,10 @@ export async function downloadNodeAsPng(
     canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
   );
   if (!blob) throw new Error('export vazio');
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  // downloadBlob = Object URL + captura pro cofre do Histórico geral (o print
+  // fica recuperável por 7 dias no /tools/historico).
+  const { downloadBlob } = await import('@/lib/audio-engine');
+  await downloadBlob(blob, filename, { tool: 'fakepass' });
 }
 
 /* ─────────────────────── Ícones da StatusBar ─────────────────────── */

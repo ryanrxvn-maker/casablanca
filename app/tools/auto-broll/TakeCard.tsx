@@ -89,14 +89,10 @@ export function TakeCard({ take, position, total }: Props) {
       const r = await fetch(videoUrl);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `take_${String(take.idx).padStart(2, '0')}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      // downloadBlob revoga só depois de 60s — revogar na hora cortava o MP4
+      // no meio do download.
+      const { downloadBlob } = await import('@/lib/audio-engine');
+      await downloadBlob(blob, `take_${String(take.idx).padStart(2, '0')}.mp4`, { tool: 'auto-broll' });
     } catch (e) {
       console.warn('Download falhou', e);
     } finally {

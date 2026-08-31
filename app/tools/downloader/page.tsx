@@ -183,14 +183,11 @@ function detectSource(url: string): string {
 }
 
 function triggerDownload(blob: Blob, filename: string) {
-  const a = document.createElement('a');
-  const objUrl = URL.createObjectURL(blob);
-  a.href = objUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(objUrl), 10_000);
+  // downloadBlob = revoke de 60s (10s cortava vídeo grande de YouTube no meio)
+  // + captura pro cofre do Histórico geral (recuperável por 7 dias).
+  void import('@/lib/audio-engine').then(({ downloadBlob }) =>
+    downloadBlob(blob, filename, { tool: 'downloader' }),
+  );
 }
 
 /** Quebra de linha da caixa de URLs (constantes: evitam escapes no meio

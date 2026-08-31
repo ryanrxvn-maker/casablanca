@@ -485,10 +485,10 @@ export default function LipsyncHistoryPage() {
                                     a.download = rec.filename;
                                     document.body.appendChild(a);
                                     a.click();
-                                    setTimeout(() => {
-                                      document.body.removeChild(a);
-                                      URL.revokeObjectURL(rec.blobUrl);
-                                    }, 100);
+                                    a.remove();
+                                    // 60s: revogar em 100ms cortava ZIP grande
+                                    // no meio do download (corrompia).
+                                    setTimeout(() => URL.revokeObjectURL(rec.blobUrl), 60_000);
                                   } catch (err: any) {
                                     console.error('[lipsync-history] loadZip', err);
                                     alert('Não consegui carregar esse pacote agora. Tenta de novo em instantes.');

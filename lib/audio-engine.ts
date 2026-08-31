@@ -545,8 +545,18 @@ export function blobToDataURL(blob: Blob): Promise<string> {
  *
  * Object URL aponta pro blob na memória sem inflar nem truncar — aguenta
  * arquivos de vários GB. É o jeito correto e robusto de baixar blob no browser.
+ *
+ * CAPTURA PRO HISTÓRICO (31.08): todo download disparado por aqui também entra
+ * no cofre do Histórico geral (lib/history-vault.ts) — artefato pequeno fica
+ * recuperável por 7 dias. Fire-and-forget via import dinâmico: nunca atrasa
+ * nem quebra o download. `capture:false` é usado pelo próprio histórico ao
+ * re-entregar um arquivo (senão re-capturaria o que acabou de recuperar).
  */
-export function downloadBlob(blob: Blob, filename: string): Promise<void> {
+export function downloadBlob(
+  blob: Blob,
+  filename: string,
+  opts?: { capture?: boolean; tool?: string },
+): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -558,6 +568,11 @@ export function downloadBlob(blob: Blob, filename: string): Promise<void> {
   // Só revoga DEPOIS que o download pegou a URL. Revogar na hora cancelaria
   // downloads grandes no meio. 60s é folga suficiente pro browser iniciar.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  if (opts?.capture !== false && typeof window !== 'undefined') {
+    import('./history-vault')
+      .then((v) => v.captureDownload(blob, filename, opts?.tool))
+      .catch(() => {});
+  }
   return Promise.resolve();
 }
 

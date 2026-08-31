@@ -38,7 +38,15 @@
 export function zipGroupId(key: string): string {
   let m = /^troca:white:(.+)$/.exec(key);
   if (m) return m[1];
-  m = /^batch:(.+):(?:montado|takes|camo)$/.exec(key);
+  // `:montado:sig` é a assinatura da montagem — gravada junto do montado e lida
+  // pelo card pra detectar montado velho. Sem o `(?::sig)?` ela caía no grupo
+  // " misc " e podia ser evictada SEPARADA do montado que assina (achado 31.08).
+  m = /^batch:(.+):(?:montado(?::sig)?|takes|camo)$/.exec(key);
+  if (m) return m[1];
+  // ZIP de b-rolls Magnific do disparo (`magnific:<taskId>:takes`): agrupa com
+  // a task dona — como " misc " solto, a faxina varria o pack de b-roll
+  // enquanto o disparo seguia vivo (mesmo padrão do bug dos frames de 16/08).
+  m = /^magnific:(.+):takes$/.exec(key);
   if (m) return m[1];
   m = /^va:(.+):(?:zip|part(?::.*)?)$/.exec(key);
   if (m) return m[1];

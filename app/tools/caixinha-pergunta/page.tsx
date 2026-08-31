@@ -107,17 +107,11 @@ export default function CaixinhaPerguntaPage() {
       );
       if (!blob) throw new Error('toBlob vazio');
 
-      // Object URL (NUNCA base64/data URL — trunca e corrompe). Revoga depois.
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `caixinha-pergunta-${formato.id}.png`;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      // downloadBlob = Object URL (NUNCA base64/data URL — trunca e corrompe)
+      // + captura pro cofre do Histórico geral (recuperável por 7 dias).
+      const { downloadBlob } = await import('@/lib/audio-engine');
+      await downloadBlob(blob, `caixinha-pergunta-${formato.id}.png`, { tool: 'caixinha-pergunta' });
       logHistory({ tool: 'caixinha-pergunta', kind: 'export', title: `Caixinha exportada (${formato.id})` });
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err) {
       console.error('[caixinha-pergunta] falha ao exportar', err);
       alert('Não consegui gerar a imagem agora. Tenta de novo em instantes.');

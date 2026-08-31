@@ -154,14 +154,10 @@ export function LipsyncPreviewCard({
       const { downloadVideoBytes } = await import('@/lib/heygen-api-direct');
       const bytes = await downloadVideoBytes(videoUrl);
       const blob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${fileBase}_${safeLabel}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      // downloadBlob revoga só depois de 60s — revogar na hora cortava o
+      // download de MP4 grande no meio (arquivo corrompido, sem moov).
+      const { downloadBlob } = await import('@/lib/audio-engine');
+      await downloadBlob(blob, `${fileBase}_${safeLabel}.mp4`);
     } catch (e) {
       console.warn('Download falhou', e);
       alert('Não consegui baixar esse take agora — o link do HeyGen pode ter vencido. Clique Retomar no card pra renovar e tente de novo.');

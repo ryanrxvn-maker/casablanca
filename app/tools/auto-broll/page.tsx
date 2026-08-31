@@ -639,12 +639,11 @@ function AutoBrollInner() {
 
   function downloadZip(job: Job) {
     if (!job.zip) return;
-    const url = URL.createObjectURL(job.zip.blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = job.zip.name;
-    a.click();
-    URL.revokeObjectURL(url);
+    // downloadBlob = revoke de 60s — revogar na hora cortava ZIP de vários GB
+    // no meio do download (arquivo corrompido).
+    void import('@/lib/audio-engine').then(({ downloadBlob }) =>
+      downloadBlob(job.zip!.blob, job.zip!.name, { tool: 'auto-broll' }),
+    );
   }
 
   function addJob() {

@@ -73,6 +73,20 @@ console.log('\nGARANTIA — faxina do zip-store (nunca apaga disparo ativo/recen
   ok(!zipGroupId(`brollvid:${zipKey}:12`).startsWith(' misc'), 'E4: brollvid não cai mais no fallback misc');
 }
 
+// (E4b) Artefatos-satélite do disparo agrupam com a task dona (achado 31.08):
+// `batch:<id>:montado:sig` (assinatura da montagem) e `magnific:<id>:takes`
+// (ZIP de b-rolls) caíam no fallback " misc " e podiam ser evictados SEPARADOS
+// do disparo — mesmo padrão do bug dos frames :img: de 16/08.
+{
+  const t = 'task_abc';
+  ok(zipGroupId(`batch:${t}:montado:sig`) === t, 'E4b: sig da montagem no grupo do disparo');
+  ok(zipGroupId(`magnific:${t}:takes`) === t, 'E4b: zip Magnific no grupo do disparo');
+  ok(!zipGroupId(`batch:${t}:montado:sig`).startsWith(' misc'), 'E4b: sig não cai no misc');
+  ok(!zipGroupId(`magnific:${t}:takes`).startsWith(' misc'), 'E4b: magnific não cai no misc');
+  const tHg = 'heygenauto:heygen:1783567871328:y2reuz';
+  ok(zipGroupId(`batch:${tHg}:montado:sig`) === tHg, 'E4b: sig com taskId contendo ":" agrupa certo');
+}
+
 // (E5) Fila do Hey Auto: áudios persistidos de um item (hgaq:<itemId>:audio:<n>)
 // agrupam pelo itemId — protegíveis via `protect` enquanto o item não foi
 // entregue (fila de madrugada >12h não pode perder o áudio pra faxina).

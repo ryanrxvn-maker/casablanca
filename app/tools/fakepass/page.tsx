@@ -120,15 +120,8 @@ export default function FakePassPage() {
     try {
       const { recordStageVideo } = await import('./video-export');
       const { blob, ext } = await recordStageVideo(node, { seconds: vidSecs, targetW: dims.exportW, refW: dims.stageW });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fakepass-${model.id}.${ext}`;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const { downloadBlob } = await import('@/lib/audio-engine');
+      await downloadBlob(blob, `fakepass-${model.id}.${ext}`, { tool: 'fakepass' });
       setVidMsg('Vídeo baixado ✓');
       logHistory({ tool: 'fakepass', kind: 'export', title: `Vídeo ${model.id} exportado` });
     } catch (err) {

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { logHistory } from '@/lib/history';
+import { logHistory, attachRefToRecent, type FileRef } from '@/lib/history';
+import { downloadBlob } from '@/lib/audio-engine';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { DocImport3DButton } from '@/components/DocImport3DButton';
@@ -959,16 +960,11 @@ function HeyGenAutoInner() {
     // acontecia após F5 num disparo já entregue (re-batia na cota à toa).
     if (!partsOverride && pipelineZips.montadoName && runBatchIdRef.current) {
       try {
-        const { loadZip } = await import('@/lib/zip-store');
-        const z = await loadZip(`batch:${runBatchIdRef.current}:montado`);
-        if (z) {
-          const a = document.createElement('a');
-          a.href = z.blobUrl;
-          a.download = z.filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(z.blobUrl), 10000);
+        const { loadBlob } = await import('@/lib/zip-store');
+        const b = await loadBlob(`batch:${runBatchIdRef.current}:montado`, 'application/zip');
+        if (b) {
+          // Re-entrega de artefato já registrado → sem captura (evita duplicar).
+          void downloadBlob(b, pipelineZips.montadoName, { capture: false });
           return;
         }
       } catch { /* sumiu do disco → segue o fluxo completo abaixo */ }
@@ -1113,15 +1109,10 @@ function HeyGenAutoInner() {
         return;
       }
 
+      // downloadBlob = Object URL com revoke de 60s (revogar cedo cortava
+      // download grande no meio) + captura pro cofre do Histórico geral.
       const triggerDownload = (b: Blob, name: string) => {
-        const u = URL.createObjectURL(b);
-        const el = document.createElement('a');
-        el.href = u;
-        el.download = name;
-        document.body.appendChild(el);
-        el.click();
-        document.body.removeChild(el);
-        setTimeout(() => URL.revokeObjectURL(u), 8000);
+        void downloadBlob(b, name, { tool: 'heygen-auto' });
       };
 
       // Salva no IDB (histórico) + registra o nome no batch compartilhado.
@@ -1181,7 +1172,29 @@ function HeyGenAutoInner() {
         diagnosticMsg: pipeRes.diagnostics.summary,
       }));
       setDownloadStage(`✓ Baixado: ${savedMsg}`);
-      logHistory({ tool: 'heygen-auto', title: `${safeName} entregue`, meta: savedMsg });
+      logHistory({
+        tool: 'heygen-auto',
+        title: `${safeName} entregue`,
+        meta: savedMsg,
+        ref: bId
+          ? [
+              {
+                via: 'zip',
+                key: `batch:${bId}:montado`,
+                name: montados.length === 1 ? montados[0].name : `${safeName}_montado.zip`,
+                label: 'Montado',
+              },
+              ...(camuActive && camuflados.length > 0
+                ? [{
+                    via: 'zip' as const,
+                    key: `batch:${bId}:camo`,
+                    name: camuflados.length === 1 ? camuflados[0].name : `${safeName}_camuflado.zip`,
+                    label: 'Camuflado',
+                  }]
+                : []),
+            ]
+          : undefined,
+      });
       setTimeout(() => setDownloadStage(null), 8000);
       if (bId) upsertSharedBatch(bId, { phase: 'done', message: `Pronto — ${savedMsg}`, finishedAt: Date.now() });
     } catch (e) {
@@ -2260,16 +2273,13 @@ function HeyGenAutoInner() {
     queueCancelRef.current = true;
   }
 
-  /** Helper: baixa um blob como arquivo (auto-download). */
-  function triggerDownload(blob: Blob, filename: string): string {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return url;
+  /**
+   * Helper: baixa um blob como arquivo (auto-download). Via downloadBlob —
+   * revoke de 60s (revogar em 5s cortava zip grande no meio) + captura pro
+   * cofre do Histórico geral.
+   */
+  function triggerDownload(blob: Blob, filename: string): void {
+    void downloadBlob(blob, filename, { tool: 'heygen-auto' });
   }
 
   /**
@@ -2523,16 +2533,14 @@ function HeyGenAutoInner() {
     if (montados.length === 1) {
       montName = montados[0].name;
       try { await saveZip(`batch:${batchId}:montado`, montados[0].blob, montName); } catch {}
-      const u = triggerDownload(montados[0].blob, montName);
-      setTimeout(() => URL.revokeObjectURL(u), 5000);
+      triggerDownload(montados[0].blob, montName);
     } else {
       const zipMont = new JSZip();
       for (const m of montados) zipMont.file(m.name, m.blob);
       const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       montName = `${safe}${canalItem === 'youtube' ? '_YOUTUBE' : ''}_montado.zip`;
       try { await saveZip(`batch:${batchId}:montado`, blobMont, montName); } catch {}
-      const u = triggerDownload(blobMont, montName);
-      setTimeout(() => URL.revokeObjectURL(u), 5000);
+      triggerDownload(blobMont, montName);
     }
     upsertSharedBatch(batchId, { montadoZipName: montName });
     cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName, montado: montName } });
@@ -2566,12 +2574,38 @@ function HeyGenAutoInner() {
           upsertSharedBatch(batchId, { camufladoZipName: camuName });
         } catch {}
         cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName, camo: camuName } });
-        const camuUrl = triggerDownload(blobCamu, camuName);
-        setTimeout(() => URL.revokeObjectURL(camuUrl), 5000);
+        triggerDownload(blobCamu, camuName);
+        attachRefToRecent({
+          tool: 'heygen-auto',
+          ref: { via: 'zip', key: `batch:${batchId}:camo`, name: camuName, label: 'Camuflado' },
+          fallbackTitle: `${camuName} pronto`,
+        });
       } catch (e) {
         console.warn('[hgauto fila camuflagem] falhou:', e);
       }
     }
+
+    // Refs RECUPERÁVEIS pro Histórico geral: o logHistory de 'entregue' do
+    // caller (fila/retomar) absorve estes provisórios na fusão — o registro já
+    // nasce com botão de baixar que acha o montado no disco e, se o disco
+    // limpou, resgata os takes de novo no HeyGen pelos videoIds.
+    try {
+      const refs: FileRef[] = [
+        { via: 'zip', key: `batch:${batchId}:montado`, name: montName, label: 'Montado' },
+        { via: 'zip', key: `batch:${batchId}:takes`, name: takesName, label: 'Takes' },
+        ...(ready.length > 0
+          ? [{
+              via: 'heygen' as const,
+              parts: ready.map((r) => ({ label: r.label, videoId: r.videoId })),
+              name: `${safe}${canalItem === 'youtube' ? '_YOUTUBE' : ''}_takes_heygen.zip`,
+              label: 'Resgatar do HeyGen',
+            }]
+          : []),
+      ];
+      for (const r of refs) {
+        attachRefToRecent({ tool: 'heygen-auto', ref: r, fallbackTitle: `${r.name} pronto` });
+      }
+    } catch {}
 
     upsertSharedBatch(batchId, { phase: 'done', message: 'Pronto — ZIPs no disco (lipsync-history).', finishedAt: Date.now() });
     cbs.onUpdate({ progress: 100, phase: 'done' });
@@ -2592,7 +2626,8 @@ function HeyGenAutoInner() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(z.blobUrl), 10000);
+      // 60s: revogar cedo cortava zip grande no meio do download.
+      setTimeout(() => URL.revokeObjectURL(z.blobUrl), 60_000);
     } catch (e) {
       console.warn('[heygen-auto] baixar do disco falhou (erro cru):', e);
       setError('Não consegui abrir o arquivo salvo. Clique Retomar no item pra regerar a entrega.');

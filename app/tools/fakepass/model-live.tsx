@@ -802,15 +802,11 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
   const [msg, setMsg] = useState('');
 
   const baixa = (blob: Blob, ext: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fakepass-live-${kind === 'tiktok' ? 'tiktok' : 'instagram'}.${ext}`;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    void import('@/lib/audio-engine').then(({ downloadBlob }) =>
+      downloadBlob(blob, `fakepass-live-${kind === 'tiktok' ? 'tiktok' : 'instagram'}.${ext}`, {
+        tool: 'fakepass',
+      }),
+    );
     setMsg('Vídeo baixado ✓');
     logHistory({
       tool: 'fakepass',
