@@ -77,15 +77,29 @@ export const HISTORY_TOOLS: { id: string; label: string }[] = [
   { id: 'audio-split', label: 'Dividir áudios' },
   { id: 'downloader', label: 'Downloader' },
   { id: 'fakepass', label: 'FakePrint' },
-  { id: 'caixinha-pergunta', label: 'Caixinha de Pergunta' },
   { id: 'ltx-video', label: 'Vídeo do zero' },
   { id: 'normalizador', label: 'Normalizador' },
   { id: 'separador-audio', label: 'Separador de Áudio' },
   { id: 'voice-test', label: 'Isolar voz' },
 ];
 
+/**
+ * Ferramentas que o usuário enxerga como UMA só. A caixinha de pergunta tem
+ * rota própria, mas é o mesmo produto do FakePrint (que também traz a caixinha
+ * entre os modelos de story) — dois chips pro mesmo trabalho só confundia.
+ */
+const TOOL_ALIAS: Record<string, string> = {
+  'caixinha-pergunta': 'fakepass',
+};
+
+/** Id de exibição: dobra os apelidos na ferramenta dona (ver TOOL_ALIAS). */
+export function canonicalTool(id: string): string {
+  return TOOL_ALIAS[id] ?? id;
+}
+
 export function historyToolLabel(id: string): string {
-  return HISTORY_TOOLS.find((t) => t.id === id)?.label ?? id;
+  const c = canonicalTool(id);
+  return HISTORY_TOOLS.find((t) => t.id === c)?.label ?? c;
 }
 
 function safeRead(): HistoryEvent[] {

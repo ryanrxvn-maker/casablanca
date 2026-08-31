@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ToolHero } from '@/components/tool-kit';
 import {
+  canonicalTool,
   clearHistory,
   historyToolLabel,
   readHistory,
@@ -16,7 +17,6 @@ import {
   IconAcelerador,
   IconAudioSplit,
   IconAutoBroll,
-  IconCaixinhaPergunta,
   IconCamuflagem,
   IconClickUpPilot,
   IconCompressor,
@@ -56,7 +56,6 @@ const TOOL_ICON: Record<string, React.ReactNode> = {
   'audio-split': <IconAudioSplit size={20} />,
   downloader: <IconDownloader size={20} />,
   fakepass: <IconFakePass size={20} />,
-  'caixinha-pergunta': <IconCaixinhaPergunta size={20} />,
   'ltx-video': <IconLtxVideo size={20} />,
   normalizador: <IconNormalizador size={20} />,
   'separador-audio': <IconSeparadorAudio size={20} />,
@@ -233,7 +232,10 @@ export default function HistoricoPage() {
   // Contagem por ferramenta (pros chips) — só ferramentas com eventos.
   const counts = useMemo(() => {
     const m = new Map<string, number>();
-    for (const e of events) m.set(e.tool, (m.get(e.tool) ?? 0) + 1);
+    for (const e of events) {
+      const c = canonicalTool(e.tool);
+      m.set(c, (m.get(c) ?? 0) + 1);
+    }
     return m;
   }, [events]);
 
@@ -245,7 +247,7 @@ export default function HistoricoPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return events.filter((e) => {
-      if (tool !== 'all' && e.tool !== tool) return false;
+      if (tool !== 'all' && canonicalTool(e.tool) !== tool) return false;
       if (!q) return true;
       return (
         e.title.toLowerCase().includes(q) ||
@@ -289,7 +291,7 @@ export default function HistoricoPage() {
       {/* Resumo: registros, recuperáveis e cofre local */}
       <div className="grid grid-cols-3 gap-2 sm:max-w-[560px]">
         <StatCard label="REGISTROS" value={String(events.length)} tone="text-text" />
-        <StatCard label="BAIXÁVEIS" value={String(recuperaveis)} tone="text-lime" />
+        <StatCard label="DISPONÍVEIS" value={String(recuperaveis)} tone="text-lime" />
         <StatCard
           label="COFRE LOCAL"
           value={vaultInfo ? fmtBytes(vaultInfo.bytes) : '—'}
@@ -311,13 +313,6 @@ export default function HistoricoPage() {
               className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet"
             />
             Tarefas em segundo plano (ao vivo)
-          </Link>
-          <Link
-            href="/tools/lipsync-history"
-            className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            Console de disparos (interno)
           </Link>
         </div>
       ) : null}
@@ -459,7 +454,7 @@ export default function HistoricoPage() {
                           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] border border-line-strong bg-bg/50"
                           aria-hidden
                         >
-                          {TOOL_ICON[e.tool] ?? <IconClickUpPilot size={20} />}
+                          {TOOL_ICON[canonicalTool(e.tool)] ?? <IconClickUpPilot size={20} />}
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[13.5px] font-semibold text-text">

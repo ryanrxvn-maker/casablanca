@@ -44,6 +44,13 @@ export const VAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const DB_NAME = 'autoedit-history-vault';
 const STORE = 'files';
+/**
+ * Store SÓ de metadados (key/name/size/createdAt). Existe porque listar o
+ * cofre com openCursor no store de bytes MATERIALIZA cada arquivo — é o
+ * padrão que fez o boot do zip-store levar 70s em prod (223 blobs/1,58GB).
+ * Com o meta separado, a listagem lê registros de ~100 bytes.
+ */
+const META = 'meta';
 const DB_OP_TIMEOUT_MS = 15_000;
 const DB_WRITE_TIMEOUT_MS = 90_000;
 
@@ -67,11 +74,30 @@ function openDB(): Promise<IDBDatabase> {
         reject(new Error('vault: openDB timeout'));
       }
     }, DB_OP_TIMEOUT_MS);
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(META)) {
+        db.createObjectStore(META, { keyPath: 'key' });
+        // Migração v1 -> v2: reconstrói o meta do que já está guardado.
+        try {
+          const tx = req.transaction;
+          if (tx) {
+            const files = tx.objectStore(STORE);
+            const meta = tx.objectStore(META);
+            const cur = files.openCursor();
+            cur.onsuccess = (e: Event) => {
+              const c = (e.target as IDBRequest).result as IDBCursorWithValue | null;
+              if (!c) return;
+              const v = c.value as VaultRecord;
+              meta.put({ key: v.key, name: v.name, mime: v.mime, size: v.size, createdAt: v.createdAt });
+              c.continue();
+            };
+          }
+        } catch {}
       }
     };
     req.onsuccess = () => {
@@ -102,6 +128,7 @@ function runTx<T>(
   db: IDBDatabase,
   mode: IDBTransactionMode,
   fn: (store: IDBObjectStore, resolve: (v: T) => void, reject: (e: unknown) => void) => void,
+  storeName: string = STORE,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let done = false;
@@ -126,10 +153,10 @@ function runTx<T>(
       else reject(val);
     };
     try {
-      const tx = db.transaction(STORE, mode);
+      const tx = db.transaction(storeName, mode);
       tx.onabort = () => finish(false, tx.error ?? new Error('vault: tx abortada'));
       fn(
-        tx.objectStore(STORE),
+        tx.objectStore(storeName),
         (v) => finish(true, v),
         (e) => finish(false, e),
       );
@@ -139,13 +166,49 @@ function runTx<T>(
   });
 }
 
+/** Transação readwrite abrangendo bytes + meta (mantém os dois em sincronia). */
+function runTxBoth(
+  db: IDBDatabase,
+  fn: (files: IDBObjectStore, meta: IDBObjectStore) => void,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        try {
+          db.close();
+        } catch {}
+        reject(new Error('vault: transação travou (timeout)'));
+      }
+    }, DB_WRITE_TIMEOUT_MS);
+    const finish = (err?: unknown) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        db.close();
+      } catch {}
+      if (err) reject(err);
+      else resolve();
+    };
+    try {
+      const tx = db.transaction([STORE, META], 'readwrite');
+      tx.oncomplete = () => finish();
+      tx.onerror = () => finish(tx.error ?? new Error('vault: tx falhou'));
+      tx.onabort = () => finish(tx.error ?? new Error('vault: tx abortada'));
+      fn(tx.objectStore(STORE), tx.objectStore(META));
+    } catch (e) {
+      finish(e);
+    }
+  });
+}
+
 async function putRecord(rec: VaultRecord): Promise<void> {
   const db = await openDB();
-  return runTx<void>(db, 'readwrite', (store, resolve, reject) => {
-    const tx = store.transaction;
-    store.put(rec);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+  return runTxBoth(db, (files, meta) => {
+    files.put(rec);
+    meta.put({ key: rec.key, name: rec.name, mime: rec.mime, size: rec.size, createdAt: rec.createdAt });
   });
 }
 
@@ -171,17 +234,20 @@ export async function vaultLoad(key: string): Promise<Blob | null> {
 export async function vaultDelete(keys: string[]): Promise<void> {
   if (keys.length === 0) return;
   const db = await openDB();
-  return runTx<void>(db, 'readwrite', (store, resolve, reject) => {
-    const tx = store.transaction;
-    for (const k of keys) store.delete(k);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+  return runTxBoth(db, (files, meta) => {
+    for (const k of keys) {
+      files.delete(k);
+      meta.delete(k);
+    }
   });
 }
 
 export type VaultMeta = { key: string; name: string; size: number; createdAt: number };
 
-/** Só metadados (cursor sem materializar blob) — barato mesmo com centenas. */
+/**
+ * Lista o cofre lendo APENAS o store de metadados — nenhum byte de arquivo
+ * sai do disco. É o que mantém a página do histórico leve com o cofre cheio.
+ */
 export async function vaultList(): Promise<VaultMeta[]> {
   try {
     const db = await openDB();
@@ -191,7 +257,7 @@ export async function vaultList(): Promise<VaultMeta[]> {
       cur.onsuccess = (e: Event) => {
         const c = (e.target as IDBRequest).result as IDBCursorWithValue | null;
         if (c) {
-          const v = c.value as VaultRecord;
+          const v = c.value as VaultMeta;
           out.push({ key: v.key, name: v.name, size: v.size, createdAt: v.createdAt });
           c.continue();
         } else {
@@ -199,7 +265,7 @@ export async function vaultList(): Promise<VaultMeta[]> {
         }
       };
       cur.onerror = () => reject(cur.error);
-    });
+    }, META);
   } catch {
     return [];
   }
@@ -213,11 +279,9 @@ export async function vaultStats(): Promise<{ files: number; bytes: number }> {
 export async function clearVault(): Promise<void> {
   try {
     const db = await openDB();
-    await runTx<void>(db, 'readwrite', (store, resolve, reject) => {
-      const tx = store.transaction;
-      store.clear();
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+    await runTxBoth(db, (files, meta) => {
+      files.clear();
+      meta.clear();
     });
   } catch {
     /* best-effort */
@@ -295,6 +359,23 @@ function novaChave(): string {
   return `hv:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Fração da quota do navegador que o app se permite ocupar no total. */
+const QUOTA_TETO = 0.85;
+
+/** Cabe mais `bytes` sem chegar perto do teto de armazenamento do navegador? */
+async function cabeNoNavegador(bytes: number): Promise<boolean> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return true;
+    const e = await navigator.storage.estimate();
+    const quota = e.quota || 0;
+    const usage = e.usage || 0;
+    if (quota <= 0) return true;
+    return usage + bytes < quota * QUOTA_TETO;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Captura um download que acabou de ser disparado e o torna recuperável pelo
  * Histórico geral. Fire-and-forget: nunca lança, nunca atrasa o download em si.
@@ -315,6 +396,14 @@ export function captureDownload(blob: Blob, filename: string, toolHint?: string)
     const key = novaChave();
     void (async () => {
       try {
+        // GUARDA DE QUOTA: o cofre é uma comodidade, nunca um problema. Se o
+        // navegador já está perto do teto dele (disco cheio / muito cache),
+        // poda primeiro e, se ainda assim não couber, DESISTE em silêncio —
+        // guardar histórico jamais pode fazer o app estourar armazenamento.
+        if (!(await cabeNoNavegador(blob.size))) {
+          await pruneVault();
+          if (!(await cabeNoNavegador(blob.size))) return;
+        }
         const mime = blob.type || 'application/octet-stream';
         let rec: VaultRecord = {
           key,
