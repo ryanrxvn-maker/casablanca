@@ -202,6 +202,67 @@ function Conteudo() {
         />
       ) : null}
 
+      {/* ========== 0.2 PAINEL DO OLHINHO ========== */}
+      <section>
+        <div className="olho-painel mt-2 rounded-[10px] p-3">
+          <div className="olho-titulo mono mb-2 text-[9px] uppercase tracking-widest">
+            preview do texto pro HeyGen (Avatar 2) - editavel
+          </div>
+          <div className="grid gap-2">
+            <div className="olho-card rounded-[8px] p-2">
+              <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-widest">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="olho-label shrink-0 font-bold">BODY 7</span>
+                  <span className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-lime/35 bg-lime/10 px-1.5 py-0.5 normal-case tracking-normal text-lime">
+                    <span className="truncate text-[9px] font-semibold">@manual2</span>
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <select className="mono rounded border border-lime/35 bg-bg/70 px-1.5 py-0.5 text-[9px] normal-case tracking-normal text-lime focus:outline-none">
+                    <option>Avatar 2</option>
+                  </select>
+                  <span className="text-text-muted">0c - 0p</span>
+                  <button type="button" className="olho-x inline-flex h-5 w-5 items-center justify-center rounded-full transition">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                  </button>
+                </div>
+              </div>
+              <textarea
+                defaultValue=""
+                rows={3}
+                className="olho-input mono w-full resize-y rounded px-2 py-1.5 text-[12px] text-text focus:outline-none"
+                placeholder="(vazio - esse part nao vai gerar nada)"
+              />
+              <div className="olho-revisar is-grave mono mt-1.5 rounded-[6px] px-2 py-1 text-[9.5px] leading-relaxed">
+                <span className="font-bold uppercase tracking-widest">revisar a copy</span>
+                <div className="mt-0.5"><span className="olho-trecho rounded px-1">tem MUITA</span> nao tira video</div>
+              </div>
+            </div>
+            <div className="olho-card rounded-[8px] p-2">
+              <div className="mono mb-1.5 flex items-center gap-2 text-[9px] uppercase tracking-widest">
+                <span className="olho-label shrink-0 font-bold">HOOK 1</span>
+              </div>
+              <textarea
+                defaultValue="Como transformar um azeite de R$10 no seu proprio remedio."
+                rows={2}
+                className="olho-input mono w-full resize-y rounded px-2 py-1.5 text-[12px] text-text focus:outline-none"
+              />
+              <div className="olho-revisar mono mt-1.5 rounded-[6px] px-2 py-1 text-[9.5px] leading-relaxed">
+                <span className="font-bold uppercase tracking-widest">revisar</span>
+                <div className="mt-0.5"><span className="olho-trecho rounded px-1">R$10</span> numero por extenso soa melhor no TTS</div>
+              </div>
+            </div>
+          </div>
+          <button type="button" className="trecho-add mt-2">
+            <span aria-hidden>+</span>
+            trecho pra este avatar falar
+          </button>
+          <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
+            este e o texto EXATO que vai pro avatar.
+          </div>
+        </div>
+      </section>
+
       {/* ══════════ 0.3 MOTOR POR AVATAR (lista ao vivo) ══════════ */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
         <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Motor — modo &ldquo;Por avatar&rdquo;</div>

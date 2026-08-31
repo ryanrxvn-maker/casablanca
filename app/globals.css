@@ -3351,3 +3351,135 @@ html[data-theme='light'] .plano-core {
 /* Aviso amarelo legível nos dois temas — o yellow-200 do Tailwind some no claro. */
 .aviso-amarelo { color: #fde68a; }
 html[data-theme='light'] .aviso-amarelo { color: #92400e; }
+
+/* ═══════════ Painel do 👁 do ClickUp Pilot — "preview do texto pro HeyGen"
+   As cores cruas do Tailwind (cyan-200, rose-200, red-300, black/30) NÃO
+   trocam de lado com o tema: no claro o painel virava um borrão pastel. Aqui
+   cada peça tem os dois lados. ═══════════ */
+.olho-painel {
+  background: rgba(34, 211, 238, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.38);
+}
+html[data-theme='light'] .olho-painel {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(32, 90, 108, 0.28),
+    0 8px 22px -18px rgba(14, 116, 144, 0.6);
+}
+.olho-titulo { color: #67e8f9; }
+html[data-theme='light'] .olho-titulo { color: #155e75; }
+
+.olho-card {
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+html[data-theme='light'] .olho-card {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.1);
+}
+
+.olho-label { color: #67e8f9; }
+html[data-theme='light'] .olho-label { color: #0e5063; }
+
+.olho-input {
+  background: rgba(0, 0, 0, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: box-shadow 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.olho-input::placeholder { color: rgba(var(--text-muted), 0.7); }
+.olho-input:focus { box-shadow: inset 0 0 0 1.5px rgba(34, 211, 238, 0.7); }
+html[data-theme='light'] .olho-input {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.16);
+}
+html[data-theme='light'] .olho-input:focus {
+  box-shadow: inset 0 0 0 1.5px rgba(14, 116, 144, 0.85);
+}
+
+/* aviso "revisar a copy": amarelo = atenção, vermelho (is-grave) = risco real */
+.olho-revisar {
+  color: #fde68a;
+  background: rgba(234, 179, 8, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(234, 179, 8, 0.42);
+}
+.olho-revisar.is-grave {
+  color: #fecdd3;
+  background: rgba(244, 63, 94, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.5);
+}
+html[data-theme='light'] .olho-revisar {
+  color: #854d0e;
+  background: rgba(234, 179, 8, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(161, 98, 7, 0.4);
+}
+html[data-theme='light'] .olho-revisar.is-grave {
+  color: #9f1239;
+  background: rgba(244, 63, 94, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(190, 18, 60, 0.42);
+}
+.olho-trecho { background: rgba(0, 0, 0, 0.32); }
+html[data-theme='light'] .olho-trecho { background: rgba(16, 16, 24, 0.09); }
+
+.olho-x {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.42);
+}
+.olho-x:hover {
+  background: rgba(239, 68, 68, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.75);
+}
+html[data-theme='light'] .olho-x {
+  color: #b91c1c;
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.38);
+}
+
+/* Chips e avisos do card do avatar (ClickUp Pilot) — os dois temas. */
+.chip-alerta {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.5);
+}
+html[data-theme='light'] .chip-alerta {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.42);
+}
+.chip-violeta {
+  color: #ddd6fe;
+  background: rgba(139, 92, 246, 0.15);
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5);
+}
+html[data-theme='light'] .chip-violeta {
+  color: #5b21b6;
+  background: rgba(139, 92, 246, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(109, 40, 217, 0.4);
+}
+.caixa-vermelha {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.45);
+}
+html[data-theme='light'] .caixa-vermelha {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.4);
+}
+.btn-olho {
+  color: #a5f3fc;
+  background: rgba(34, 211, 238, 0.1);
+  box-shadow:
+    inset 0 0 0 1px rgba(34, 211, 238, 0.42),
+    0 2px 0 rgba(0, 0, 0, 0.4),
+    0 0 8px rgba(34, 211, 238, 0.28);
+  transition: background-color 0.16s, box-shadow 0.16s, transform 0.12s;
+}
+.btn-olho:hover { background: rgba(34, 211, 238, 0.26); }
+.btn-olho:active { box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.42), 0 1px 0 rgba(0, 0, 0, 0.4); }
+html[data-theme='light'] .btn-olho {
+  color: #0e5063;
+  background: rgba(34, 211, 238, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(14, 116, 144, 0.42),
+    0 2px 0 rgba(16, 16, 24, 0.14);
+}

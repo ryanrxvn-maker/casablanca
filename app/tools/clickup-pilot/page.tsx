@@ -13191,7 +13191,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                    *  não aparece na contagem nem no avatar — só lendo. Aqui
                                    *  o que ficou de fora aparece sozinho, antes do disparo. */}
                                   {a.copyFaltando && a.copyFaltando.length > 0 ? (
-                                    <div className="mt-1.5 rounded-[10px] border border-red-500/45 bg-red-500/10 px-3 py-2 text-[10.5px] leading-relaxed text-red-200">
+                                    <div className="caixa-vermelha mt-1.5 rounded-[10px] px-3 py-2 text-[10.5px] leading-relaxed">
                                       <div className="mono text-[9.5px] uppercase tracking-widest">
                                         ⚠ {a.copyFaltando.length} trecho(s) da copy NÃO entraram em nenhum take
                                       </div>
@@ -13296,7 +13296,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                     {a.roleSlots.length === 0 ? (
                                       <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px]">
-                                        <div className="mono text-[9px] uppercase tracking-widest text-yellow-200">
+                                        <div className="aviso-amarelo mono text-[9px] uppercase tracking-widest">
                                           ⚠ Nenhum avatar identificado automaticamente
                                         </div>
                                         <div className="mt-1 text-text-muted">
@@ -13352,13 +13352,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             <span className="text-white/70">{refLabel}</span>
                                             <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
-                                              <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-red-300">
+                                              <span className="chip-alerta ml-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest">
                                                 <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
                                                 Pendente
                                               </span>
                                             ) : slot.matchedBy === 'grupo' ? (
                                               <span
-                                                className="ml-1 inline-flex items-center gap-1 rounded-full border border-violet-400/50 bg-violet-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-violet-200"
+                                                className="chip-violeta ml-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest"
                                                 title="Mesmo avatar dos outros hooks deste AD — é o que permite reaproveitar o corpo já gerado. Trocar aqui vale só pra este hook."
                                               >
                                                 mesmo avatar do AD
@@ -13418,7 +13418,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               <button
                                                 type="button"
                                                 onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
-                                                className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 hover:bg-cyan-500/25 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] active:shadow-[0_1px_0_rgba(0,0,0,0.4)]"
+                                                className="btn-olho rounded-full px-2 py-0.5 text-[11px] active:translate-y-[1px]"
                                                 title="Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)"
                                               >
                                                 👁
@@ -13455,8 +13455,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             * o texto exato que vai pro HeyGen antes de disparar.
                                             * Diff visual: texto identico ao que sera enviado, 1:1. */}
                                           {previewOpen[`${a.taskId}:${sIdx}`] ? (
-                                            <div className="mt-2 rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
-                                              <div className="mono mb-2 text-[9px] uppercase tracking-widest text-cyan-200">
+                                            <div className="olho-painel mt-2 rounded-[10px] p-3">
+                                              <div className="olho-titulo mono mb-2 text-[9px] uppercase tracking-widest">
                                                 preview do texto pro HeyGen ({slot.role}) — editavel
                                               </div>
                                               {(() => {
@@ -13487,10 +13487,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     const achados = revisarCopy(pt.text, (a.roleSlots || []).map((s2) => s2.role));
                                                     const graves = contarGraves(achados);
                                                     return (
-                                                      <div key={idx} className="rounded-[8px] border border-line bg-bg/60 p-2">
+                                                      <div key={idx} className="olho-card rounded-[8px] p-2">
                                                         <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-widest">
                                                           <div className="flex min-w-0 items-center gap-2">
-                                                            <span className="shrink-0 font-bold text-cyan-300">{pt.label}</span>
+                                                            <span className="olho-label shrink-0 font-bold">{pt.label}</span>
                                                             {/* QUEM FALA esse trecho — chip com thumb + avatar/role */}
                                                             <span
                                                               className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-lime/35 bg-lime/10 px-1.5 py-0.5 normal-case tracking-normal text-lime"
@@ -13533,7 +13533,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                               type="button"
                                                               onClick={() => removePartTemplate(a.taskId, idx)}
                                                               title="Excluir esse trecho — não vira take no HeyGen (use pra tirar lixo de produção que sobrou)"
-                                                              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400/40 bg-red-500/10 text-red-300 transition hover:border-red-400/70 hover:bg-red-500/25"
+                                                              className="olho-x inline-flex h-5 w-5 items-center justify-center rounded-full transition"
                                                             >
                                                               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
                                                             </button>
@@ -13542,21 +13542,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         <textarea
                                                           value={pt.text}
                                                           onChange={(e) => updatePartTemplateText(a.taskId, idx, e.target.value)}
-                                                          className="mono w-full resize-y rounded border border-line-strong bg-bg/40 px-2 py-1.5 text-[12px] text-text focus:border-cyan-500/60 focus:outline-none"
+                                                          className="olho-input mono w-full resize-y rounded px-2 py-1.5 text-[12px] text-text focus:outline-none"
                                                           rows={Math.max(3, Math.min(12, pt.text.split('\n').length + 1))}
                                                           spellCheck={false}
                                                           placeholder="(vazio — esse part nao vai gerar nada)"
                                                         />
                                                         {achados.length ? (
-                                                          <div className={`mono mt-1.5 rounded-[6px] border px-2 py-1 text-[9.5px] leading-relaxed ${
-                                                            graves ? 'border-rose-400/45 bg-rose-500/10 text-rose-200' : 'border-yellow-500/40 bg-yellow-500/5 text-yellow-200'
-                                                          }`}>
+                                                          <div className={`olho-revisar mono mt-1.5 rounded-[6px] px-2 py-1 text-[9.5px] leading-relaxed${graves ? ' is-grave' : ''}`}>
                                                             <span className="font-bold uppercase tracking-widest">
                                                               {graves ? '⚠ revisar a copy' : 'revisar'}
                                                             </span>
                                                             {achados.slice(0, 3).map((x, k) => (
                                                               <div key={k} className="mt-0.5">
-                                                                {x.trecho ? <span className="rounded bg-black/30 px-1">{x.trecho}</span> : null} {x.motivo}
+                                                                {x.trecho ? <span className="olho-trecho rounded px-1">{x.trecho}</span> : null} {x.motivo}
                                                               </div>
                                                             ))}
                                                             {achados.length > 3 ? <div className="mt-0.5 opacity-70">+{achados.length - 3} outro(s)</div> : null}
