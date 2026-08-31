@@ -57,6 +57,11 @@ export type PipelineInputs = {
   parts: Array<{ label: string; blob: Blob | null; expected?: boolean }>;
   /** Roda decupagem nos montados (sempre true atualmente) */
   decupagem: boolean;
+  /** NIVELAR A VOZ de cada parte a -16 LUFS antes de juntar (default LIGADO).
+   *  É o que iguala HOOK gravado alto com BODY baixo — desligar entrega o
+   *  volume exatamente como saiu do HeyGen. Existe porque as vezes o material
+   *  ja' vem tratado e o Silas quer o audio intocado. */
+  nivelarVoz?: boolean;
   /** Roda camuflagem (gera 3a versao) */
   camuflagem: boolean;
   /** Audio WHITE pra camuflagem (file ou video — extrai audio se video) */
@@ -201,7 +206,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
   // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
   // sem soar robotico — feedback do user em 12/05/2026.
-  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
+  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, nivelarVoz = true, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
@@ -513,9 +518,16 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
 
     // NIVELA cada parte a -16 LUFS ANTES de juntar → iguala avatares/renders
     // de volumes diferentes + limpa hiss + crava true-peak (anti-clipping).
-    onProgress?.({ stage: 'regulando', currentFilename: filename, doneCount: g, totalCount: total });
+    // Nivelamento DESLIGADO: as partes entram como sairam do HeyGen. Nao e'
+    // falha de nivelamento — e' escolha — entao nao entra em `nivelFalhou`
+    // (que vira aviso de "volume pode variar" na task).
+    if (nivelarVoz) {
+      onProgress?.({ stage: 'regulando', currentFilename: filename, doneCount: g, totalCount: total });
+    } else {
+      console.log(`[clickup-pilot-pipeline] ${filename}: nivelamento DESLIGADO — volume sai como veio do HeyGen`);
+    }
     const nivelAntes = nivelFalhou.length;
-    const leveledBlobs = await nivelarPartes(blobs, blobLabels, filename);
+    const leveledBlobs = nivelarVoz ? await nivelarPartes(blobs, blobLabels, filename) : blobs;
     const nivelDesteGrupo = nivelFalhou.slice(nivelAntes);
     const nivelErro = nivelDesteGrupo.length
       ? `${nivelDesteGrupo.length} de ${blobs.length} parte(s) entraram sem nivelar (volume pode variar): ${nivelDesteGrupo.join(', ')}`

@@ -111,6 +111,7 @@ import {
   PilotBtn3D,
   IconScissors as PilotIconScissors,
   IconCamuflagem,
+  IconNivelar,
   IconDoc as PilotIconDoc,
   IconPlay as PilotIconPlay,
   IconX as PilotIconX,
@@ -1509,6 +1510,26 @@ function ClickUpPilotInner() {
     setDecupagemEnabled((prev) => {
       const next = { ...prev, [taskId]: enabled };
       try { localStorage.setItem(DECUPAGEM_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  // NORMALIZADOR DE VOLUME — toggle por task. Default LIGADO: e' o que iguala
+  // HOOK gravado alto com BODY baixo (nivela cada parte a -16 LUFS ANTES de
+  // juntar). Desligado, o montado sai com o volume exatamente como veio do
+  // HeyGen — util quando o material ja' esta' tratado e o Silas nao quer que
+  // nada encoste no audio. Persiste em localStorage, igual a decupagem.
+  const NIVELAMENTO_KEY = 'darkolab:clickup-pilot:nivelamento';
+  const [nivelamentoEnabled, setNivelamentoEnabled] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(NIVELAMENTO_KEY) || '{}'); } catch { return {}; }
+  });
+  /** LIGADO por padrao: so' fica desligado quando o user desliga na mao. */
+  const isNivelamentoEnabled = (taskId: string) => nivelamentoEnabled[taskId] !== false;
+  const setNivelamentoFor = (taskId: string, enabled: boolean) => {
+    setNivelamentoEnabled((prev) => {
+      const next = { ...prev, [taskId]: enabled };
+      try { localStorage.setItem(NIVELAMENTO_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
   };
@@ -4395,6 +4416,7 @@ function ClickUpPilotInner() {
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
+          nivelarVoz: isNivelamentoEnabled(taskId),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
@@ -5213,6 +5235,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
+          nivelarVoz: isNivelamentoEnabled(taskId),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
@@ -6840,6 +6863,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         parts: partBlobs,
         decupagem: isDecupagemEnabled(taskId),
         keepSilenceSec: getDecupIntensity(taskId),
+        nivelarVoz: isNivelamentoEnabled(taskId),
         camuflagem: _tc.camuflagem,
         whiteAudio: _tc.whiteAudio,
         camuflagemVolume: _tc.camuflagemVolume,
@@ -7924,6 +7948,46 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       if (!a?.partTemplates) return prev;
       const newParts = a.partTemplates.map((p, i) => i === partIdx ? { ...p, text: newText } : p);
       return { ...prev, [taskId]: { ...a, partTemplates: newParts } };
+    });
+  }
+
+  /** ADICIONA um trecho NOVO pra este avatar falar (30.08).
+   *
+   *  Avatar adicionado na mão nasce sem nenhuma parte — o parser só reparte o
+   *  que estava no doc. Sem isto, o único jeito de dar fala pra ele era roubar
+   *  um trecho de outro avatar; e não havia jeito NENHUM de acrescentar texto
+   *  que não estivesse no Docs.
+   *
+   *  O trecho nasce com `matchByRole` deste papel, então `ownerSlotIdx` já o
+   *  entrega pra este avatar e o `buildPlan` dispara com o avatar certo. O
+   *  label segue a contagem de BODY pra não colidir com o que veio do doc. */
+  function addPartTemplate(taskId: string, role: string) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a) return prev;
+      const parts = a.partTemplates || [];
+      // Numera pelo MAIOR BODY existente (não pelo total): apagar um trecho no
+      // meio não pode fazer o próximo nascer com label repetido — label é chave
+      // do cache de clip e de entrega.
+      const maiorBody = parts.reduce((mx, p) => {
+        const m = /^BODY\s+(\d+)/i.exec(p.label || '');
+        return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+      }, 0);
+      const novo = { label: `BODY ${maiorBody + 1}`, text: '', matchByRole: role.toLowerCase(), speaker: role };
+      const newParts = [...parts, novo];
+      const hookCount = newParts.filter((p) => /^(hook|gancho)/i.test(p.label)).length;
+      const next = {
+        ...prev,
+        [taskId]: {
+          ...a,
+          partTemplates: newParts,
+          totalParts: newParts.length,
+          hookCount,
+          bodyPartsCount: newParts.length - hookCount,
+        },
+      };
+      taskAnalysesRef.current = next;
+      return next;
     });
   }
 
@@ -12156,6 +12220,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     slotIds={(a.partTemplates || []).map((p: any, i: number) => p.label || `t${i}`)}
                                     // Calcula duracoes reais lendo a copy de cada parte (palavras / 150 wpm)
                                     takeSeconds={(a.partTemplates || []).map((p: any) => estimateSecondsFromText(p.text || ''))}
+                                    /* AVATARES AO VIVO (30.08): derivado de a.roleSlots, entao
+                                       adicionar/remover avatar aparece na hora. Escreve no MESMO
+                                       `slot.engine` dos chips do card — que e' quem o disparo
+                                       respeita (`p.engine || motorConfig`). */
+                                    avatarSlots={(a.roleSlots || []).map((sl, i) => ({
+                                      id: String(i),
+                                      nome: sl.avatarName || sl.username || sl.role,
+                                      thumb: sl.avatarThumb || sl.imageThumb || null,
+                                      motor: (sl.engine as Motor) || 'III',
+                                      motionPrompt: sl.motionPrompt || null,
+                                      imageMode: !!sl.imageMode,
+                                    }))}
+                                    setAvatarMotor={(id, m) => updateRoleSlot(a.taskId, Number(id), { engine: m })}
                                   />
                                 </div>
                               ) : null}
@@ -12268,6 +12345,20 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         </>
                                       ) : null}
                                     </div>
+                                    {/* NORMALIZADOR DE VOLUME (per-task). LIGADO por
+                                        padrao — e' ele que iguala HOOK alto com BODY
+                                        baixo, nivelando cada parte a -16 LUFS ANTES de
+                                        juntar. Desligado, o montado sai com o volume
+                                        exatamente como veio do HeyGen. */}
+                                    <PilotBtn3D
+                                      icon={<IconNivelar size={16} />}
+                                      color={isNivelamentoEnabled(a.taskId) ? 'cyan' : 'neutral'}
+                                      active={isNivelamentoEnabled(a.taskId)}
+                                      title={isNivelamentoEnabled(a.taskId)
+                                        ? 'Normalizador de volume ON — cada parte sai no mesmo patamar (-16 LUFS)'
+                                        : 'Normalizador de volume OFF — o volume sai como veio do HeyGen'}
+                                      onClick={() => setNivelamentoFor(a.taskId, !isNivelamentoEnabled(a.taskId))}
+                                    />
                                     {/* Camuflagem toggle (per-task) */}
                                     <PilotBtn3D
                                       icon={<IconCamuflagem size={16} />}
@@ -13361,9 +13452,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   .filter(({ pt }) => ownerSlotIdx(a, pt) === sIdx);
                                                 if (matched.length === 0) {
                                                   return (
-                                                    <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
-                                                      ⚠ Nenhuma parte foi atribuida a este avatar.
-                                                      Ou o parser nao detectou speaker corretamente, ou outro avatar pegou tudo.
+                                                    <div className="aviso-amarelo rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2.5 text-[11px] leading-relaxed">
+                                                      ⚠ Nenhum trecho é falado por este avatar.
+                                                      {(a.roleSlots || []).length > 1
+                                                        ? ' Escreve um trecho novo aqui embaixo, ou abre o 👁 de outro avatar e muda o "quem fala" de um trecho pra cá.'
+                                                        : ' Escreve um trecho novo aqui embaixo pra ele falar.'}
                                                     </div>
                                                   );
                                                 }
@@ -13399,8 +13492,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                             {/* TROCAR QUEM FALA — só com avatar adicionado
                                                               * na mão E 2+ avatares. No B2C (roles vindos do
                                                               * parser) nada disso aparece. */}
-                                                            {(a.roleSlots || []).length > 1 &&
-                                                            (a.roleSlots || []).some((s) => s.manual) ? (
+                                                            {/* TROCAR QUEM FALA — com 2+ avatares, sempre.
+                                                              * Antes exigia um slot MANUAL na task, então no
+                                                              * B2C (roles vindos do parser) não dava pra mover
+                                                              * um trecho de um avatar pro outro. */}
+                                                            {(a.roleSlots || []).length > 1 ? (
                                                               <select
                                                                 value={slot.role.toLowerCase()}
                                                                 onChange={(e) => assignPartToRole(a.taskId, idx, e.target.value)}
@@ -13455,9 +13551,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   </div>
                                                 );
                                               })()}
+                                              {/* TRECHO NOVO (30.08). O doc manda o que manda; aqui
+                                                * dá pra ACRESCENTAR fala pra este avatar — inclusive
+                                                * pra um avatar adicionado na mão, que nasce sem
+                                                * nenhuma parte. Vira take igual aos outros. */}
+                                              <button
+                                                type="button"
+                                                onClick={() => addPartTemplate(a.taskId, slot.role)}
+                                                className="trecho-add mt-2"
+                                                title={`Acrescenta um trecho pra ${slot.role} falar — vira um take novo no HeyGen`}
+                                              >
+                                                <span aria-hidden>+</span>
+                                                trecho pra este avatar falar
+                                              </button>
                                               <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
                                                 este é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
-                                                edita pra corrigir leak, ou × pra remover o trecho inteiro.
+                                                edita pra corrigir leak, × pra remover, ou + pra acrescentar fala.
                                               </div>
                                             </div>
                                           ) : null}
@@ -14218,7 +14327,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           </span>
                           <span className="min-w-0 flex-1">
                             <span
-                              className="block text-[14px] font-semibold leading-tight text-white"
+                              className="block text-[14px] font-semibold leading-tight text-text"
                               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
                             >
                               Carregar plano de cenas
@@ -14282,10 +14391,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   setPlanoImagens((p) => ({ ...p, ...novo }));
                                   e.target.value = '';
                                 }}
-                                className="block w-full text-[10.5px] text-text-muted file:mr-2 file:cursor-pointer file:rounded-md file:border file:border-cyan-500/45 file:bg-cyan-500/12 file:px-2.5 file:py-1 file:text-[9.5px] file:font-bold file:uppercase file:tracking-widest file:text-cyan-200"
+                                className="plano-file block w-full text-[10.5px] text-text-muted"
                               />
                               {Object.keys(planoImagens).length > 0 ? (
-                                <div className="mono mt-1 text-[9.5px] text-cyan-200">
+                                <div className="mono plano-acento mt-1 text-[9.5px]">
                                   {Object.keys(planoImagens).length} frame(s): {Object.keys(planoImagens).sort().join(', ')}
                                 </div>
                               ) : null}
@@ -14304,9 +14413,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               </span>
                             </button>
                             {planoRelato ? (
-                              <div className="rounded-[8px] border border-line bg-bg/60 p-2 text-[10.5px] leading-relaxed text-text-muted">
+                              <div className="plano-relato rounded-[8px] p-2 text-[10.5px] leading-relaxed text-text-muted">
                                 {planoRelato.map((l, i) => (
-                                  <div key={i} className={/⚠/.test(l) ? 'text-yellow-200' : ''}>{l}</div>
+                                  <div key={i} className={/⚠/.test(l) ? 'aviso-amarelo' : ''}>{l}</div>
                                 ))}
                               </div>
                             ) : null}

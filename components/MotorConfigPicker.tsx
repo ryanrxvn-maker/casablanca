@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { MOTORS, CREDIT_COST_PER_MIN, DEFAULT_TAKE_SECONDS, estimateCost, sanitizePercent, type Motor, type MotorConfig } from '@/lib/motor-config';
 import { useHeyGenCredits } from '@/lib/use-heygen-credits';
+import { motorEfetivo } from '@/lib/heygen-motion-motor';
 
 /**
  * Componente UI compartilhado pra escolher motor (III/IV/V) de uma task.
@@ -20,6 +21,8 @@ export function MotorConfigPicker({
   takeCount,
   slotIds,
   takeSeconds,
+  avatarSlots,
+  setAvatarMotor,
 }: {
   config: MotorConfig;
   setConfig: (c: MotorConfig) => void;
@@ -30,6 +33,23 @@ export function MotorConfigPicker({
    *  Se omitido, assume DEFAULT_TAKE_SECONDS pra cada take.
    *  Caller eh responsavel por estimar via estimateSecondsFromText. */
   takeSeconds?: number[];
+  /** AVATARES DA TASK, pro modo "Por avatar" (30.08). Vem derivado do estado
+   *  da analise, entao adicionar/remover avatar aparece aqui NA HORA. O motor
+   *  editado aqui e' o MESMO `slot.engine` dos chips do card do avatar — e' ele
+   *  que o disparo respeita (`p.engine || motorConfig`). Sem esta prop o modo
+   *  cai no texto de antes ("escolhe no card do avatar"), que e' como o Hey
+   *  Auto continua usando. */
+  avatarSlots?: Array<{
+    id: string;
+    nome: string;
+    thumb?: string | null;
+    motor: Motor;
+    /** gesto escrito nesta cena — o III descarta motion, entao sai no IV */
+    motionPrompt?: string | null;
+    /** modo imagem: nao tem avatar de biblioteca, a pessoa e' a foto */
+    imageMode?: boolean;
+  }>;
+  setAvatarMotor?: (id: string, m: Motor) => void;
 }) {
   const [collapsed, setCollapsed] = useState(true); // minimizado por padrao
   // Duracao: usa array per-take quando disponivel (calculado da copy/audio),
@@ -233,9 +253,59 @@ export function MotorConfigPicker({
               <div className="label-tech text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
                 Por avatar
               </div>
-              <div className="mt-1 text-[11.5px] text-foreground/85" style={{ fontFamily: 'var(--font-tech)' }}>
-                Escolha o motor de cada avatar embaixo, no card dele. Padrão = III.
-              </div>
+              {avatarSlots && setAvatarMotor ? (
+                <>
+                  <div className="mt-1 text-[11.5px] text-foreground/85" style={{ fontFamily: 'var(--font-tech)' }}>
+                    {avatarSlots.length === 0
+                      ? 'Nenhum avatar ainda — adiciona um avatar e ele aparece aqui.'
+                      : `${avatarSlots.length} avatar${avatarSlots.length === 1 ? '' : 'es'} nesta task. Padrão = III.`}
+                  </div>
+                  <div className="mt-2 grid gap-1.5">
+                    {avatarSlots.map((sl) => {
+                      // O motor que VAI SAIR: gesto escrito sobe pro IV sozinho
+                      // (o III descarta motion e devolveria um take PARADO).
+                      const efetivo = motorEfetivo(sl.motor, sl.motionPrompt);
+                      const forcado = efetivo !== sl.motor;
+                      return (
+                        <div key={sl.id} className="motor-slot">
+                          {sl.thumb ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={sl.thumb} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="motor-slot-vazio" aria-hidden>{sl.imageMode ? '▣' : '🎤'}</span>
+                          )}
+                          <span className="motor-slot-nome" title={sl.nome}>{sl.nome}</span>
+                          {forcado ? (
+                            <span className="motor-slot-gesto" title="Esta cena tem gesto escrito: o Avatar III descarta motion, então ela sai no IV.">
+                              gesto → {efetivo}
+                            </span>
+                          ) : null}
+                          <span className="motor-slot-chips">
+                            {MOTORS.map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => setAvatarMotor(sl.id, m)}
+                                className={'motor-slot-chip' + (sl.motor === m ? ' is-on' : '')}
+                                title={`Avatar ${m} pra ${sl.nome}`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 text-[10.5px] leading-snug text-foreground/70">
+                    É o mesmo motor dos chips no card de cada avatar — mexer aqui mexe lá.
+                  </div>
+                </>
+              ) : (
+                <div className="mt-1 text-[11.5px] text-foreground/85" style={{ fontFamily: 'var(--font-tech)' }}>
+                  Escolha o motor de cada avatar embaixo, no card dele. Padrão = III.
+                </div>
+              )}
             </div>
           ) : null}
 

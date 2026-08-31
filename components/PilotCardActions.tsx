@@ -152,6 +152,14 @@ export const IconCamuflagem = ({ size = 16 }: { size?: number }) => (
     <path d="M4 15c2 3 6 3 8 0s6-3 8 0" />
   </svg>
 );
+export const IconNivelar = ({ size = 16 }: { size?: number }) => (
+  // Barras iguais sob uma regua: e' o que o normalizador faz — poe todo mundo
+  // no MESMO patamar (nao e' "volume", e' NIVELAR).
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18" opacity="0.4" />
+    <path d="M6 10v8M10 10v8M14 10v8M18 10v8" />
+  </svg>
+);
 export const IconMotor = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />

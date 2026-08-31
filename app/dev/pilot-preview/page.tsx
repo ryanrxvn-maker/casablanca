@@ -15,6 +15,8 @@ import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPan
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
 import { EditPartModal } from '@/components/EditPartModal';
+import { MotorConfigPicker } from '@/components/MotorConfigPicker';
+import type { Motor, MotorConfig } from '@/lib/motor-config';
 import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
@@ -100,6 +102,11 @@ function Conteudo() {
     { taskId: 't1-v3', n: 3, nome: 'AD03GL - PRPB12 · Avatar 3 · @tiagorochaog', fase: 'queued', prontos: 0, total: 8 },
   ]);
   const [modalAberto, setModalAberto] = useState(false);
+  const [motorCfg, setMotorCfg] = useState<MotorConfig>({ kind: 'individual', perSlot: {} });
+  const [slotsDemo, setSlotsDemo] = useState([
+    { id: '0', nome: 'Confident Business Executive', thumb: null as string | null, motor: 'III' as Motor, motionPrompt: null as string | null, imageMode: false },
+    { id: '1', nome: 'Dra. Marina', thumb: null as string | null, motor: 'IV' as Motor, motionPrompt: 'mexe a gelatina', imageMode: false },
+  ]);
   const [frameYt, setFrameYt] = useState<string | null>(FRAME_FAKE);
   const [gestoDemo, setGestoDemo] = useState('mexe a gelatina 2x no começo e segue falando');
   const motorAudio: 'III' | 'IV' | 'V' = (engine || 'III') === 'III' && gestoDemo ? 'IV' : (engine || 'III');
@@ -194,6 +201,83 @@ function Conteudo() {
           onRegenerate={() => setModalAberto(false)}
         />
       ) : null}
+
+      {/* ══════════ 0.3 MOTOR POR AVATAR (lista ao vivo) ══════════ */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Motor — modo &ldquo;Por avatar&rdquo;</div>
+        <MotorConfigPicker
+          config={motorCfg}
+          setConfig={setMotorCfg}
+          takeCount={8}
+          avatarSlots={slotsDemo}
+          setAvatarMotor={(id, m) => setSlotsDemo((prev) => prev.map((x) => (x.id === id ? { ...x, motor: m } : x)))}
+        />
+        <button
+          type="button"
+          onClick={() =>
+            setSlotsDemo((prev) => [
+              ...prev,
+              { id: String(prev.length), nome: `Avatar ${prev.length + 1}`, thumb: null, motor: 'III' as const, motionPrompt: null, imageMode: false },
+            ])
+          }
+          className="trecho-add mt-2"
+        >
+          <span aria-hidden>+</span>
+          adicionar avatar (testa o ao vivo)
+        </button>
+      </section>
+
+      {/* ══════════ 0.35 CARD DO PLANO DE CENAS ══════════ */}
+      <div className="plano-shell rounded-[18px] p-[5px]">
+        <div className="plano-core group/plano rounded-[13px] p-3">
+          <div className="flex w-full items-center gap-3 text-left">
+            <span className="plano-tile dark-island flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-white">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" />
+              </svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14px] font-semibold leading-tight text-text" style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}>
+                Carregar plano de cenas
+              </span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">
+                Monta avatar, voz e movimento de todas as cenas de uma vez.
+              </span>
+            </span>
+            <span className="plano-marca hidden shrink-0 sm:inline-flex">3 cenas</span>
+            <span className="plano-chevron flex h-7 w-7 shrink-0 items-center justify-center rounded-full">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+            </span>
+          </div>
+          <div className="plano-corpo relative mt-3 grid gap-2">
+            <textarea
+              defaultValue={'{"AD37":[{"cena":"AD37_1","n":1,"avatarId":"abc"}]}'}
+              rows={4}
+              className="plano-input w-full resize-y rounded-[10px] px-3 py-2.5 font-mono text-[11px] leading-snug text-text outline-none"
+            />
+            <div>
+              <div className="label-tech mb-1 text-[9px] uppercase tracking-[0.16em] text-text-muted">
+                Frames das cenas em modo imagem (opcional — só as bloqueadas)
+              </div>
+              <input type="file" multiple className="plano-file block w-full text-[10.5px] text-text-muted" />
+              <div className="mono plano-acento mt-1 text-[9.5px]">2 frame(s): AD37_1, AD37_2</div>
+            </div>
+            <button type="button" className="plano-cta dark-island inline-flex justify-self-start self-start items-center gap-2.5 rounded-full py-1.5 pl-5 pr-1.5 text-[12px] font-semibold text-white">
+              Aplicar plano
+              <span className="plano-cta-icone flex h-7 w-7 items-center justify-center rounded-full">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+              </span>
+            </button>
+            <div className="plano-relato rounded-[8px] p-2 text-[10.5px] leading-relaxed text-text-muted">
+              <div>AD37_1 → HOOK 1</div>
+              <div className="text-yellow-200">⚠ AD37_3 sem avatar</div>
+            </div>
+            <div className="text-[11px] leading-snug text-text-muted">
+              Reparte os takes entre as cenas na ordem (hook na cena 1).
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ══════════ 0.4 FRAME POR VERSAO (modo imagem) ══════════ */}
       <section className="grid gap-2.5 rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
