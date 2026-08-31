@@ -11,6 +11,7 @@
  */
 
 import { Field, TextField, TextArea, FitText, Segmented, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -247,7 +248,9 @@ const GLOBAL: FakeModel<S> = {
         <Field label="Hora"><TextField value={s.time} onChange={(v) => set({ time: v })} placeholder="12:17 PM ET" maxLength={16} /></Field>
       </div>
       <Field label="Rótulo do ticker (caixa à esquerda)"><TextField value={s.tickerLabel} onChange={(v) => set({ tickerLabel: v })} placeholder="URGENT UPDATES" maxLength={28} /></Field>
-      <Field label="Ticker (um por linha ou separado por |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1 | Notícia 2" rows={2} maxLength={200} /></Field>
+      <Field label="Ticker" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (

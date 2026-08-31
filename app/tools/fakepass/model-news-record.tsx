@@ -10,6 +10,7 @@
  */
 
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -155,7 +156,9 @@ const RECORD: FakeModel<S> = {
         <Field label="Ao vivo"><TextField value={s.live} onChange={(v) => set({ live: v })} placeholder="AO VIVO" maxLength={12} /></Field>
         <Field label="Hora"><TextField value={s.time} onChange={(v) => set({ time: v })} placeholder="21:34" maxLength={12} /></Field>
       </div>
-      <Field label="Ticker (um por linha ou separado por |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1 | Notícia 2" rows={2} maxLength={200} /></Field>
+      <Field label="Ticker" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (

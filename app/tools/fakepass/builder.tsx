@@ -404,6 +404,172 @@ export function ChatBuilder({
   );
 }
 
+/* ────────────────────────── LineBuilder ────────────────────────── */
+
+type LineItem = { id: string; t: string };
+let lseq = 0;
+function newLine(t = ''): LineItem {
+  lseq += 1;
+  return { id: `l${lseq}`, t };
+}
+
+/**
+ * Lista de LINHAS soltas (manchete do ticker, participante da reunião…).
+ * Guarda a mesma string "uma por linha" que os modelos já leem — só a edição
+ * vira visual. `chips` liga marcadores por BOTÃO no fim da linha (ex.: `*`
+ * falando / `!` mutado do Zoom), pra ninguém ter que decorar símbolo.
+ */
+export function LineBuilder({
+  value,
+  onChange,
+  placeholder = 'texto…',
+  addLabel = 'Linha',
+  max,
+  withEmoji,
+  chips,
+  pipe,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  addLabel?: string;
+  max?: number;
+  withEmoji?: boolean;
+  chips?: { mark: string; label: string; title?: string }[];
+  /** Ticker: o valor pode vir com itens separados por " | " numa linha só —
+   *  cada item vira um card, e a saída volta em linhas (o parser lê os dois). */
+  pipe?: boolean;
+}) {
+  // mesma razão do CommentBuilder: uma linha vazia não sobrevive à string, e o
+  // card recém-criado sumiria antes de ser preenchido.
+  const parse = (v: string) =>
+    (pipe ? v.split(/\n|\s\|\s/g) : v.split('\n')).filter((l) => l.trim() !== '').map((l) => newLine(l.trim()));
+  const [items, setItems] = useState<LineItem[]>(() => parse(value));
+  const emitted = useRef(value);
+  useEffect(() => {
+    if (value !== emitted.current) {
+      setItems(parse(value));
+      emitted.current = value;
+    }
+  }, [value]);
+  const commit = (list: LineItem[]) => {
+    setItems(list);
+    const s = list.map((i) => i.t).filter((t) => t.trim() !== '').join('\n');
+    emitted.current = s;
+    onChange(s);
+  };
+
+  const patch = (i: number, t: string) => commit(items.map((it, k) => (k === i ? { ...it, t } : it)));
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d;
+    if (j < 0 || j >= items.length) return;
+    const copy = items.slice();
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+    commit(copy);
+  };
+  const del = (i: number) => commit(items.filter((_, k) => k !== i));
+
+  // ── Marcadores por BOTÃO ──
+  // O modelo guarda o marcador no fim da linha ("Nancy *" = falando), mas o
+  // usuário NÃO precisa saber disso: o campo mostra só o NOME e os chips ligam
+  // e desligam o marcador. Ao digitar, os marcadores ativos são recolocados.
+  const marks = (chips || []).map((c) => c.mark);
+  const baseOf = (t: string) => {
+    let out = t;
+    for (const m of marks) out = out.split(m).join('');
+    return out.trim();
+  };
+  const marksOf = (t: string) => marks.filter((m) => t.includes(m));
+  const compose = (base: string, ms: string[]) => (ms.length ? `${base.trim()} ${ms.join('')}` : base);
+  const hasMark = (t: string, mark: string) => t.includes(mark);
+  const patchBase = (i: number, base: string) => patch(i, compose(base, marksOf(items[i].t)));
+  const toggleMark = (i: number, mark: string) => {
+    const cur = items[i].t;
+    const ms = marksOf(cur);
+    const next = ms.includes(mark) ? ms.filter((m) => m !== mark) : [...ms, mark];
+    patch(i, compose(baseOf(cur), next));
+  };
+
+  const full = typeof max === 'number' && items.length >= max;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {items.map((it, i) => (
+        <div key={it.id} className="flex items-center gap-1.5">
+          <span
+            className="w-5 shrink-0 text-center text-[10.5px] font-bold text-text-dim"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {i + 1}
+          </span>
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={chips ? baseOf(it.t) : it.t}
+              placeholder={placeholder}
+              onChange={(e) => (chips ? patchBase(i, e.target.value) : patch(i, e.target.value))}
+              className={'input-field !py-2 text-[13px]' + (withEmoji ? ' !pr-9' : '')}
+            />
+            {withEmoji ? (
+              <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                <EmojiPickerButton
+                  align="right"
+                  onPick={(e) => (chips ? patchBase(i, baseOf(it.t) + e) : patch(i, it.t + e))}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
+                </EmojiPickerButton>
+              </span>
+            ) : null}
+          </div>
+          {chips?.map((c) => {
+            const on = hasMark(it.t, c.mark);
+            return (
+              <button
+                key={c.mark}
+                type="button"
+                title={c.title || c.label}
+                onClick={() => toggleMark(i, c.mark)}
+                className={
+                  'shrink-0 rounded-full border px-2 py-1 text-[10.5px] font-bold transition ' +
+                  (on
+                    ? 'border-violet/65 bg-violet/20 text-white'
+                    : 'border-line-strong text-text-dim hover:border-violet/50 hover:text-white')
+                }
+              >
+                {c.label}
+              </button>
+            );
+          })}
+          <span className="flex shrink-0 items-center gap-0.5">
+            <IconBtn title="Subir" onClick={() => move(i, -1)} disabled={i === 0}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+            </IconBtn>
+            <IconBtn title="Descer" onClick={() => move(i, 1)} disabled={i === items.length - 1}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M19 12l-7 7-7-7" /></svg>
+            </IconBtn>
+            <IconBtn title="Remover" onClick={() => del(i)} danger>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </IconBtn>
+          </span>
+        </div>
+      ))}
+      <div>
+        <button
+          type="button"
+          disabled={full}
+          onClick={() => commit([...items, newLine('')])}
+          className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-line-strong px-3 py-1.5 text-[12px] font-semibold text-text-muted transition hover:border-violet/60 hover:bg-violet/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+          {addLabel}
+          {full ? ' (máx.)' : ''}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ───────────────────────── CommentBuilder ───────────────────────── */
 
 export type CommentItem = { id: string; user: string; text: string };

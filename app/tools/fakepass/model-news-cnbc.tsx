@@ -9,6 +9,7 @@
  */
 
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -155,7 +156,9 @@ const CNBC: FakeModel<S> = {
       <Field label="Programa (caixa azul)"><TextField value={s.showLabel} onChange={(v) => set({ showLabel: v })} placeholder="SQUAWK BOX" maxLength={40} /></Field>
       <Field label="Manchete"><TextArea value={s.headline} onChange={(v) => set({ headline: v })} placeholder="MARKETS REACT TO LATEST ECONOMIC DATA" rows={2} maxLength={140} /></Field>
       <Field label="LIVE"><TextField value={s.live} onChange={(v) => set({ live: v })} placeholder="LIVE" maxLength={12} /></Field>
-      <Field label="Ticker (um por linha ou separado por |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="DOW +312.44 | NASDAQ +1.28%" rows={2} maxLength={200} /></Field>
+      <Field label="Ticker" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="DOW +312.44" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (

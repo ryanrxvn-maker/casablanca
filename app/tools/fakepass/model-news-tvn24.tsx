@@ -20,6 +20,7 @@
  */
 
 import { Field, TextField, TextArea, Segmented, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -474,8 +475,8 @@ const TVN24: FakeModel<S> = {
       <Field label="Faixa azul (passa no vídeo — um por linha ou separado por |)">
         <TextArea value={s.sub} onChange={(v) => set({ sub: v })} placeholder="Segunda manchete" rows={2} maxLength={200} />
       </Field>
-      <Field label="Ticker branco (passa no vídeo — um por linha ou separado por |)">
-        <TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1 | Notícia 2" rows={2} maxLength={240} />
+      <Field label="Ticker branco" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1" addLabel="Item" pipe />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Caderno (canto)"><TextField value={s.kicker} onChange={(v) => set({ kicker: v })} placeholder="KRAJ" maxLength={12} /></Field>

@@ -14,6 +14,7 @@
  */
 
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -176,7 +177,9 @@ const CBS_NAT: FakeModel<SNat> = {
       </div>
       <Field label="Assunto (kicker vermelho)" hint="Opcional — vazio deixa o visual limpo de bancada."><TextField value={s.kicker} onChange={(v) => set({ kicker: v })} placeholder="EYE ON AMERICA" maxLength={48} /></Field>
       <Field label="Manchete" hint="Opcional — aparece na faixa branca acima do rodapé."><TextArea value={s.headline} onChange={(v) => set({ headline: v })} placeholder="Manchete principal" rows={2} maxLength={140} /></Field>
-      <Field label="Faixa de rodapé (▶▶)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="CBS MORNINGS: STREAMING WEEKDAYS @ 8 AM" rows={2} maxLength={200} /></Field>
+      <Field label="Faixa de rodapé (▶▶)" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="CBS MORNINGS: STREAMING WEEKDAYS @ 8 AM" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (
@@ -336,7 +339,9 @@ const CBS_NY: FakeModel<SNy> = {
         <Field label="Hora"><TextField value={s.hora} onChange={(v) => set({ hora: v })} placeholder="4:59 PM" maxLength={12} /></Field>
       </div>
       <Field label="Etiqueta do rodapé"><TextField value={s.tickerLabel} onChange={(v) => set({ tickerLabel: v })} placeholder="HEADLINES" maxLength={20} /></Field>
-      <Field label="Manchete do rodapé (um por linha ou |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Manchete 1 | Manchete 2" rows={2} maxLength={220} /></Field>
+      <Field label="Manchete do rodapé" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Manchete 1" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (

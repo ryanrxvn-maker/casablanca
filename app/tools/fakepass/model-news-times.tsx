@@ -12,6 +12,7 @@
  */
 
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -178,7 +179,9 @@ const TIMES: FakeModel<S> = {
         <Field label="Hora"><TextField value={s.time} onChange={(v) => set({ time: v })} placeholder="15:18" maxLength={12} /></Field>
         <Field label="LIVE"><TextField value={s.live} onChange={(v) => set({ live: v })} placeholder="LIVE" maxLength={10} /></Field>
       </div>
-      <Field label="Ticker cripto (um por linha ou separado por |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Bitcoin 117633.00  0.00% | Ethereum 3542.10  +0.42%" rows={3} maxLength={260} /></Field>
+      <Field label="Ticker cripto" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Bitcoin 117633.00  0.00%" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (

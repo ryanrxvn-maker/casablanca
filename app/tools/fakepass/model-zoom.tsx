@@ -16,6 +16,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { Field, TextField, TextArea, Toggle, Segmented, ImageUpload, FONT_STACK, type FakeModel, type StageDims } from './shared';
+import { LineBuilder } from './builder';
 
 /* ─────────────────────────── Tipos / parse ─────────────────────────── */
 
@@ -525,10 +526,20 @@ const ZOOM: FakeModel<S> = {
           <Field label="ID da reunião"><TextField value={s.meetingId} onChange={(v) => set({ meetingId: v })} placeholder="974-203-885" maxLength={16} /></Field>
         </div>
         <Field
-          label="Participantes (um por linha, máx. 9)"
-          hint="Ponha * no fim de quem está FALANDO (borda verde) e ! em quem está MUTADO (mic vermelho). O 1º é você (reflete no botão Mudo)."
+          label="Participantes (máx. 9)"
+          hint="Use os botões FALA e MUDO de cada linha. O 1º da lista é você (reflete no botão Mudo)."
         >
-          <TextArea value={s.participantes} onChange={(v) => set({ participantes: v })} placeholder={'Você\nScott\nNancy *\nKai !'} rows={6} maxLength={400} />
+          <LineBuilder
+            value={s.participantes}
+            onChange={(v) => set({ participantes: v })}
+            placeholder="Nome do participante"
+            addLabel="Participante"
+            max={9}
+            chips={[
+              { mark: '*', label: 'FALA', title: 'Está falando (borda verde)' },
+              { mark: '!', label: 'MUDO', title: 'Está mutado (mic vermelho)' },
+            ]}
+          />
         </Field>
         <Field label="Fotos dos participantes" hint="Vazio = tela verde (encaixa o vídeo por chroma) ou quadro escuro com a inicial.">
           <div className="grid grid-cols-2 gap-2">

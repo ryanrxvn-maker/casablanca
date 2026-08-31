@@ -9,6 +9,7 @@
  */
 
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -165,7 +166,9 @@ const CNN: FakeModel<S> = {
         <Field label="Hora"><TextField value={s.time} onChange={(v) => set({ time: v })} placeholder="1:21 PM" maxLength={12} /></Field>
       </div>
       <Field label="Local (canto)"><TextField value={s.location} onChange={(v) => set({ location: v })} placeholder="Berlin" maxLength={24} /></Field>
-      <Field label="Ticker (um por linha ou separado por |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1 | Notícia 2" rows={2} maxLength={200} /></Field>
+      <Field label="Ticker" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (

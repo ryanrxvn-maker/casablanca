@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
+import { LineBuilder } from './builder';
 import {
   NewsStage,
   NewsBgControls,
@@ -316,7 +317,9 @@ const GLOBONEWS: FakeModel<S> = {
         <Field label="Data"><TextField value={s.date} onChange={(v) => set({ date: v })} placeholder="8 FEV" maxLength={12} /></Field>
         <Field label="Hora"><TextField value={s.time} onChange={(v) => set({ time: v })} placeholder="11:07" maxLength={8} /></Field>
       </div>
-      <Field label="Ticker (um por linha ou separado por |)"><TextArea value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1 | Notícia 2" rows={2} maxLength={200} /></Field>
+      <Field label="Ticker" hint="Um card por item — botão + pra adicionar, setas pra ordenar.">
+        <LineBuilder value={s.ticker} onChange={(v) => set({ ticker: v })} placeholder="Notícia 1" addLabel="Item" pipe />
+      </Field>
     </div>
   ),
   Preview: ({ s }) => (
