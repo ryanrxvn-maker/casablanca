@@ -13,6 +13,9 @@
 import { notFound } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { CaptionScriptModal } from '@/components/typography/CaptionScriptModal';
+import { FxPanel } from '@/components/typography/FxPanel';
+import { fxDefault, type FxState } from '@/lib/typography/fx';
+import { getPreset } from '@/lib/typography/presets';
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { blockText, groupWords } from '@/lib/typography/group';
 import {
@@ -51,6 +54,11 @@ function Inner() {
   const [onTpls, setOnTpls] = useState(false);
   const [favs, setFavs] = useState<string[]>([]);
   const [log, setLog] = useState<string[]>([]);
+  // painel de EFEITOS solto, pra conferir os 4 cartoes sem precisar logar
+  const [fx, setFx] = useState<FxState>(() => fxDefault());
+  const [mult, setMult] = useState({ fxStroke: 1, fxShadow: 1, fxGlow: 1, fxSmoke: 1 });
+  const [fxPresetId, setFxPresetId] = useState('vermelho-sangue');
+  const fxPreset = getPreset(fxPresetId);
 
   const lockedSet = useMemo(() => new Set(ident.locked), [ident.locked]);
 
@@ -95,6 +103,34 @@ function Inner() {
               Templates
             </button>
           }
+        />
+      </div>
+
+      <div className="mb-6 rounded-[16px] border border-line bg-bg-soft/40 p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[13px] font-bold text-text">Efeitos da legenda</span>
+          {['vermelho-sangue', 'keynote', 'titulo-viral', 'faixa-suave', 'extensao-script'].map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setFxPresetId(id)}
+              className={'fx-chip' + (fxPresetId === id ? ' is-on' : '')}
+            >
+              {getPreset(id).name}
+            </button>
+          ))}
+        </div>
+        <FxPanel
+          preset={fxPreset}
+          fx={fx}
+          onFx={(patch) => setFx((f) => ({ ...f, ...patch }))}
+          fxStroke={mult.fxStroke}
+          fxShadow={mult.fxShadow}
+          fxGlow={mult.fxGlow}
+          fxSmoke={mult.fxSmoke}
+          onMultiplier={(patch) => setMult((m) => ({ ...m, ...patch }))}
+          onCommit={() => undefined}
+          defaultPrimary={fxPreset.defaultPrimary}
         />
       </div>
 

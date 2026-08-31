@@ -61,8 +61,10 @@ import {
   type TWord,
 } from '@/lib/typography/engine';
 import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
+import { fxDefault, normalizeFx, type FxState } from '@/lib/typography/fx';
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { ColorDot } from '@/components/typography/ColorDot';
+import { FxPanel } from '@/components/typography/FxPanel';
 import { LangPicker } from '@/components/typography/LangPicker';
 import { useTypoFavs } from '@/components/typography/useTypoFavs';
 import {
@@ -168,6 +170,7 @@ type SavedSession = {
   lockedBlocks?: string[];
   autoFit?: boolean;
   singleLine?: boolean;
+  fx?: FxState;
   bgMode?: 'preset' | 'on' | 'off';
   bgColor?: string | null;
   bgOpacity?: number;
@@ -201,6 +204,13 @@ function loadSession(file: File): SavedSession | null {
  * vez por carregamento: `useToolState` recebe valor, não fábrica, e chamar
  * defaultSegments() a cada render cunharia ids novos sem parar.
  */
+let FX_SEED: FxState | null = null;
+/** Estado neutro dos efeitos, criado UMA vez (useToolState recebe valor). */
+function fxSeed(): FxState {
+  if (!FX_SEED) FX_SEED = fxDefault();
+  return FX_SEED;
+}
+
 let SCRIPT_SEED: CaptionSegment[] | null = null;
 function scriptSeed(): CaptionSegment[] {
   if (!SCRIPT_SEED) SCRIPT_SEED = defaultSegments();
@@ -254,6 +264,8 @@ function TipografiaInner() {
   const [posX, setPosX] = useToolState<number>('tipografia:posx', 0.5);
   const [autoFitG, setAutoFitG] = useToolState<boolean>('tipografia:autofit', true);
   const [singleLineG, setSingleLineG] = useToolState<boolean>('tipografia:singleline', false);
+  // efeitos LIGAVEIS (traco/sombra/brilho/fumaca) — ver lib/typography/fx.ts
+  const [fxG, setFxG] = useToolState<FxState>('tipografia:fx', fxSeed());
   const [bgModeG, setBgModeG] = useToolState<'preset' | 'on' | 'off'>('tipografia:bgmode', 'preset');
   const [bgColorG, setBgColorG] = useToolState<string | null>('tipografia:bgcolor', null);
   const [bgOpacityG, setBgOpacityG] = useToolState<number>('tipografia:bgopacity', 1);
@@ -394,6 +406,7 @@ function TipografiaInner() {
       posX,
       autoFit: autoFitG,
       singleLine: singleLineG,
+      fx: fxG,
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
@@ -402,7 +415,7 @@ function TipografiaInner() {
       wordStyles,
       perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, singleLineG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, singleLineG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
   );
 
   // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
@@ -428,6 +441,7 @@ function TipografiaInner() {
         if (patch.fontOverride !== undefined) setFontOv(patch.fontOverride ?? null);
         if (patch.autoFit !== undefined) setAutoFitG(patch.autoFit !== false);
         if (patch.singleLine !== undefined) setSingleLineG(patch.singleLine === true);
+        if (patch.fx !== undefined) setFxG(normalizeFx(patch.fx));
         if (patch.bgMode !== undefined) setBgModeG(patch.bgMode ?? 'preset');
         if (patch.bgColor !== undefined) setBgColorG(patch.bgColor ?? null);
         if (patch.bgOpacity !== undefined) setBgOpacityG(patch.bgOpacity ?? 1);
@@ -440,7 +454,7 @@ function TipografiaInner() {
         [editingBlockId]: { ...prev[editingBlockId], ...patch },
       }));
     },
-    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setSingleLineG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setSingleLineG, setFxG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
   );
   // modelo EFETIVO do que o painel está editando: com um bloco travado (ou em
   // edição só-dele), o modelo do bloco vence o global — os rótulos "do modelo"
@@ -547,6 +561,7 @@ function TipografiaInner() {
           fxSmoke: fxSmokeG,
           autoFit: autoFitG,
           singleLine: singleLineG,
+          fx: fxG,
           bgMode: bgModeG,
           bgColor: bgColorG,
           bgOpacity: bgOpacityG,
@@ -558,7 +573,7 @@ function TipografiaInner() {
       }));
       setLockedBlocks((prev) => [...prev, blockId]);
     },
-    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, singleLineG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
+    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, singleLineG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
   );
 
   // ── IDENTIDADE dos blocos (cadeado + os 3 mapas por id) ─────────────────
@@ -701,6 +716,7 @@ function TipografiaInner() {
         }
         setAutoFitG(saved.autoFit ?? true);
         setSingleLineG(saved.singleLine ?? false);
+        setFxG(normalizeFx(saved.fx));
         setBgModeG(saved.bgMode ?? 'preset');
         setBgColorG(saved.bgColor ?? null);
         setBgOpacityG(saved.bgOpacity ?? 1);
@@ -749,6 +765,7 @@ function TipografiaInner() {
       lockedBlocks,
       autoFit: autoFitG,
       singleLine: singleLineG,
+      fx: fxG,
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
@@ -757,7 +774,7 @@ function TipografiaInner() {
       script: scriptSegs,
     }), 400);
     return () => clearTimeout(t);
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -1293,6 +1310,7 @@ function TipografiaInner() {
                     pushHistory();
                     smartSet(patch);
                   }}
+                  onCommit={pushHistory}
                   applyAll={applyAll}
                   setApplyAll={setApplyAll}
                   editingLabel={
@@ -1309,6 +1327,7 @@ function TipografiaInner() {
                   defaultAccent={preset.defaultAccent}
                   autoFit={effOf('autoFit', autoFitG) ?? true}
                   singleLine={effOf('singleLine', singleLineG) ?? false}
+                  fx={normalizeFx(effOf('fx', fxG) ?? fxG)}
                   bgMode={effOf('bgMode', bgModeG) ?? 'preset'}
                   bgColor={effOf('bgColor', bgColorG) ?? null}
                   bgOpacity={effOf('bgOpacity', bgOpacityG) ?? 1}
@@ -1552,7 +1571,7 @@ function PreviewPane({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [cur, setCur] = useState(0);
+  // relógio/barra vivem em refs (escritos pelo rAF) — nao ha estado de tempo
   const [dur, setDur] = useState(0);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   // arrasto AO VIVO: posição/tamanho ficam num ref que o rAF lê e o estado
@@ -1595,6 +1614,31 @@ function PreviewPane({
   const liveRef = useRef({ blocks, preset, style, fontScale, wordSel });
   liveRef.current = { blocks, preset, style, fontScale, wordSel };
 
+  // assinatura do último frame desenhado — o rAF pula o trabalho quando nada
+  // mudou (ver o guard `dirty` no tick)
+  const lastDrawRef = useRef<{
+    t: number;
+    W: number;
+    H: number;
+    blocks: Block[];
+    preset: ReturnType<typeof getPreset>;
+    style: StyleState;
+    fontScale: number;
+    wordSel: { blockId: string; a: number; b: number } | null;
+    sel: boolean;
+    ovX?: number;
+    ovY?: number;
+    ovS?: number;
+    snapX?: boolean;
+    snapY?: boolean;
+  } | null>(null);
+  // barra de tempo e relógio: escritos por REF a 60fps. Antes o `value` vinha
+  // do estado, atualizado só pelo `timeupdate` (~4Hz) — por isso o polegar
+  // "voltava" e só depois pulava quando o user arrastava.
+  const rangeRef = useRef<HTMLInputElement | null>(null);
+  const clockRef = useRef<HTMLSpanElement | null>(null);
+  const scrubbingRef = useRef(false);
+
   useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -1611,7 +1655,52 @@ function PreviewPane({
           c.width = W;
           c.height = H;
         }
-        const ctx = c.getContext('2d');
+        // ⚡ SÓ REDESENHA QUANDO ALGO MUDOU. Cada frame faz até três passadas
+        // de layout de texto (drawCaptions + captionBBoxAt + wordBoxesAt), e
+        // antes isso rodava a 60fps mesmo com o vídeo parado e ninguém
+        // mexendo — era a lentidão de arrastar e redimensionar a legenda.
+        const liveNow = liveRef.current;
+        const edNow = editingRef.current;
+        const ovNow = dragOvRef.current;
+        const dragNow = dragRef.current;
+        const tNow = v.currentTime;
+        const prevDraw = lastDrawRef.current;
+        const dirty =
+          !prevDraw ||
+          !!edNow || // editando: o caret pisca, precisa de frame vivo
+          prevDraw.t !== tNow ||
+          prevDraw.W !== W ||
+          prevDraw.H !== H ||
+          prevDraw.blocks !== liveNow.blocks ||
+          prevDraw.preset !== liveNow.preset ||
+          prevDraw.style !== liveNow.style ||
+          prevDraw.fontScale !== liveNow.fontScale ||
+          prevDraw.wordSel !== liveNow.wordSel ||
+          prevDraw.sel !== selRef.current ||
+          prevDraw.ovX !== ovNow?.posX ||
+          prevDraw.ovY !== ovNow?.posY ||
+          prevDraw.ovS !== ovNow?.fontScale ||
+          prevDraw.snapX !== dragNow?.snapX ||
+          prevDraw.snapY !== dragNow?.snapY;
+        if (dirty) {
+          lastDrawRef.current = {
+            t: tNow,
+            W,
+            H,
+            blocks: liveNow.blocks,
+            preset: liveNow.preset,
+            style: liveNow.style,
+            fontScale: liveNow.fontScale,
+            wordSel: liveNow.wordSel,
+            sel: selRef.current,
+            ovX: ovNow?.posX,
+            ovY: ovNow?.posY,
+            ovS: ovNow?.fontScale,
+            snapX: dragNow?.snapX,
+            snapY: dragNow?.snapY,
+          };
+        }
+        const ctx = dirty ? c.getContext('2d') : null;
         if (ctx) {
           ctx.clearRect(0, 0, W, H);
           const { blocks: b0, preset: p, style: sBase, wordSel: wSel } = liveRef.current;
@@ -1721,6 +1810,19 @@ function PreviewPane({
             ctx.restore();
           }
         }
+        // barra + relógio direto no DOM: acompanham o vídeo a 60fps sem
+        // re-render, e ficam parados enquanto o user arrasta o polegar (senão
+        // o vídeo, que chega atrasado, empurraria o polegar de volta)
+        if (!scrubbingRef.current) {
+          const rg = rangeRef.current;
+          const d = v.duration || 0;
+          if (rg && d > 0) {
+            rg.value = String(v.currentTime);
+            rg.style.setProperty('--range-fill', `${(v.currentTime / d) * 100}%`);
+          }
+          const cl = clockRef.current;
+          if (cl && d > 0) cl.textContent = `${formatTime(v.currentTime)} / ${formatTime(d)}`;
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -1733,7 +1835,8 @@ function PreviewPane({
     const v = videoRef.current;
     if (!v) return;
     const onTime = () => {
-      setCur(v.currentTime);
+      // o relógio e a barra são escritos por ref no rAF — aqui só o bloco
+      // ativo, que é quem a lista lá embaixo precisa destacar
       const t = v.currentTime * 1000;
       const b = liveRef.current.blocks.find((x) => t >= x.start && t < x.end);
       onTimeBlock(b?.id ?? null);
@@ -1945,7 +2048,9 @@ function PreviewPane({
             const px = (e.clientX - rect.left) * dpr;
             const py = (e.clientY - rect.top) * dpr;
             const dist = Math.hypot(px - (bb.x + bb.w / 2), py - (bb.y + bb.h / 2));
-            ov.fontScale = Math.min(4, Math.max(0.3, drag.scale0 * (dist / drag.dist0)));
+            // faixa larga: dá pra encolher de verdade (0.15) pra caber num
+            // canto e crescer até 6× pra hook gigante
+            ov.fontScale = Math.min(6, Math.max(0.15, drag.scale0 * (dist / drag.dist0)));
             return;
           }
           let nx = (e.clientX - rect.left) / rect.width;
@@ -1957,8 +2062,11 @@ function PreviewPane({
           if (drag.snapY) ny = 0.5;
           const ov = dragOvRef.current;
           if (ov) {
-            ov.posX = Math.min(0.95, Math.max(0.05, nx));
-            ov.posY = Math.min(0.95, Math.max(0.05, ny));
+            // trava só no fio da borda (1%). Antes eram 5%, e isso impedia
+            // encostar a legenda no canto — que é justamente onde ela precisa
+            // ficar quando o quadro pede o texto fora do centro.
+            ov.posX = Math.min(0.99, Math.max(0.01, nx));
+            ov.posY = Math.min(0.99, Math.max(0.01, ny));
           }
         }}
         onPointerUp={(e) => {
@@ -2112,23 +2220,46 @@ function PreviewPane({
           )}
         </button>
         <input
+          ref={rangeRef}
           type="range"
           min={0}
           max={Math.max(dur, 0.01)}
-          step={0.01}
-          value={cur}
-          onChange={(e) => {
+          step={0.001}
+          defaultValue={0}
+          // NÃO-CONTROLADO de propósito: quem escreve o `value` é o rAF, a
+          // 60fps e sem re-render. Enquanto o polegar está sendo arrastado o
+          // rAF não escreve, então ele anda colado no dedo e o vídeo segue.
+          onPointerDown={() => {
+            scrubbingRef.current = true;
+          }}
+          onPointerUp={() => {
+            scrubbingRef.current = false;
+          }}
+          onPointerCancel={() => {
+            scrubbingRef.current = false;
+          }}
+          onKeyDown={() => {
+            scrubbingRef.current = true;
+          }}
+          onKeyUp={() => {
+            scrubbingRef.current = false;
+          }}
+          onInput={(e) => {
+            const el = e.currentTarget;
+            const t = parseFloat(el.value);
             const v = videoRef.current;
-            if (v) v.currentTime = parseFloat(e.target.value);
+            if (v) v.currentTime = t;
+            // pinta o preenchimento e o relógio na hora, sem esperar o vídeo
+            const d = v?.duration || dur || 0;
+            if (d > 0) el.style.setProperty('--range-fill', `${(t / d) * 100}%`);
+            const cl = clockRef.current;
+            if (cl && d > 0) cl.textContent = `${formatTime(t)} / ${formatTime(d)}`;
           }}
           className="w-full"
-          style={{
-            accentColor: '#fbbf24',
-            ['--range-fill' as string]: `${dur > 0 ? (cur / dur) * 100 : 0}%`,
-          }}
+          style={{ accentColor: '#fbbf24', ['--range-fill' as string]: '0%' }}
         />
-        <span className="mono shrink-0 text-[11px] text-text-muted">
-          {formatTime(cur)} / {formatTime(dur)}
+        <span ref={clockRef} className="mono shrink-0 text-[11px] text-text-muted">
+          {formatTime(0)} / {formatTime(dur)}
         </span>
       </div>
     </div>
@@ -2284,6 +2415,7 @@ function Timeline({
 
   // playhead + relógio seguem o vídeo sem re-render (via refs)
   const timeReadRef = useRef<HTMLSpanElement | null>(null);
+  const lastTimeRef = useRef(-1); // só auto-rola quando o tempo muda
   useEffect(() => {
     let raf = 0;
     const fmtClock = (s: number) =>
@@ -2294,6 +2426,25 @@ function Timeline({
       if (v && ph && pps > 0) ph.style.transform = `translateX(${v.currentTime * pps}px)`;
       const tr = timeReadRef.current;
       if (v && tr) tr.textContent = `${fmtClock(v.currentTime)} / ${fmtClock(duration)}`;
+      // a faixa ACOMPANHA a agulha, estilo CapCut: se ela encosta na borda da
+      // janela (tocando ou sendo arrastada), a timeline rola junto em vez de
+      // deixar a agulha sumir. Só reage quando o TEMPO muda — com o vídeo
+      // parado, rolar a faixa na mão continua livre.
+      const sc = scrollRef.current;
+      if (v && sc && pps > 0 && pendingScrollRef.current == null) {
+        const t = v.currentTime;
+        if (t !== lastTimeRef.current) {
+          lastTimeRef.current = t;
+          const x = t * pps;
+          const vw = sc.clientWidth;
+          const margin = Math.min(140, Math.max(40, vw * 0.18));
+          if (x < sc.scrollLeft + margin) {
+            sc.scrollLeft = Math.max(0, x - margin);
+          } else if (x > sc.scrollLeft + vw - margin) {
+            sc.scrollLeft = x - vw + margin;
+          }
+        }
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -2422,22 +2573,30 @@ function Timeline({
             const width = Math.max(10, ((b.end - b.start) / 1000) * effPps);
             const sel = b.id === selId;
             const col = CAT_COLORS[presetCat] ?? TL_PALETTE[0];
-            void bi;
+            // ritmo visual: blocos vizinhos alternam um tom, senão a faixa
+            // vira uma mancha só e não dá pra contar os blocos de relance
+            const alt = bi % 2 === 1;
+            const txt = blockText(b);
             return (
               <div
                 key={b.id}
                 data-block="1"
-                title={blockText(b)}
+                title={txt}
                 className={
-                  'absolute top-[27px] h-[44px] cursor-grab overflow-hidden rounded-[8px] border-2 transition-shadow active:cursor-grabbing ' +
-                  (sel ? 'z-10' : 'hover:brightness-125')
+                  'group absolute top-[27px] h-[46px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
+                  (sel ? 'z-10' : 'hover:brightness-[1.18]')
                 }
                 style={{
                   left,
                   width,
-                  backgroundImage: `linear-gradient(180deg, ${col}59 0%, ${col}24 100%)`,
-                  borderColor: sel ? '#fbbf24' : `${col}aa`,
-                  boxShadow: sel ? '0 0 18px -4px rgba(251,191,36,0.7)' : undefined,
+                  transition: 'box-shadow .12s ease, filter .12s ease',
+                  backgroundImage: sel
+                    ? `linear-gradient(180deg, ${col}b0 0%, ${col}6e 100%)`
+                    : `linear-gradient(180deg, ${col}${alt ? '72' : '58'} 0%, ${col}${alt ? '30' : '20'} 100%)`,
+                  border: `1px solid ${sel ? '#fbbf24' : `${col}80`}`,
+                  boxShadow: sel
+                    ? '0 0 0 1px rgba(251,191,36,0.9), 0 4px 18px -6px rgba(251,191,36,0.75)'
+                    : 'inset 0 1px 0 rgba(255,255,255,0.14)',
                 }}
                 onPointerDown={(e) => {
                   if (disabled) return;
@@ -2498,9 +2657,33 @@ function Timeline({
                   if (tooltipRef.current) tooltipRef.current.style.display = 'none';
                 }}
               >
-                {/* alças de corte — o cursor de corte (↔) avisa que ali corta */}
-                <span className="absolute inset-y-0 left-0 w-[7px] cursor-col-resize rounded-l-[6px] bg-white/50" />
-                <span className="absolute inset-y-0 right-0 w-[7px] cursor-col-resize rounded-r-[6px] bg-white/50" />
+                {/* o texto do bloco dentro da barra — é o que faz achar o
+                    trecho sem ficar passando o mouse de bloco em bloco */}
+                {width > 34 ? (
+                  <span
+                    className="pointer-events-none absolute inset-0 flex items-center px-[9px] text-[10px] font-semibold leading-none text-white/90"
+                    style={{
+                      textShadow: '0 1px 2px rgba(0,0,0,0.75)',
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis',
+                      display: 'block',
+                      lineHeight: '46px',
+                    }}
+                  >
+                    {txt}
+                  </span>
+                ) : null}
+                {/* alças de corte — discretas até a barra ser apontada, pra
+                    faixa não virar um zebrado de tracinhos brancos */}
+                <span
+                  className="absolute inset-y-[3px] left-[2px] w-[5px] cursor-col-resize rounded-full bg-white/30 opacity-0 transition-opacity group-hover:opacity-100"
+                  style={sel ? { opacity: 1 } : undefined}
+                />
+                <span
+                  className="absolute inset-y-[3px] right-[2px] w-[5px] cursor-col-resize rounded-full bg-white/30 opacity-0 transition-opacity group-hover:opacity-100"
+                  style={sel ? { opacity: 1 } : undefined}
+                />
               </div>
             );
           })}
@@ -2508,8 +2691,12 @@ function Timeline({
           {/* filmstrip (só visual — vídeo não é editável) */}
           {thumbs.length > 0 ? (
             <div
-              className="pointer-events-none absolute left-0 top-[76px] flex h-[64px] overflow-hidden rounded-[8px] border border-line/60"
-              style={{ width: trackW }}
+              className="pointer-events-none absolute left-0 top-[80px] flex h-[60px] overflow-hidden rounded-[7px]"
+              style={{
+                width: trackW,
+                border: '1px solid rgba(255,255,255,0.10)',
+                boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.35), 0 2px 10px -6px rgba(0,0,0,0.9)',
+              }}
             >
               {thumbs.map((t, i) => (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -2525,14 +2712,25 @@ function Timeline({
             </div>
           ) : null}
 
-          {/* playhead — a zona de pega (12px) reenvia o pointer pro track = scrub */}
+          {/* playhead — a zona de pega (14px) reenvia o pointer pro track = scrub */}
           <div
             ref={playheadRef}
-            className="pointer-events-none absolute top-0 z-20 h-full w-[2px] bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]"
+            className="pointer-events-none absolute top-0 z-20 h-full w-[2px]"
+            style={{
+              background: 'linear-gradient(180deg,#ff5f57 0%,#ef4444 100%)',
+              boxShadow: '0 0 8px rgba(239,68,68,0.85)',
+            }}
           >
-            <div className="absolute -left-[4px] top-0 h-0 w-0 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent border-t-red-500" />
+            {/* cabeça arredondada, no lugar do triangulinho */}
             <div
-              className="pointer-events-auto absolute -left-[5px] top-0 h-full w-[12px] cursor-ew-resize"
+              className="absolute -left-[6px] -top-[1px] h-[13px] w-[14px] rounded-[4px]"
+              style={{
+                background: 'linear-gradient(180deg,#ff7b74 0%,#e5342f 100%)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.55)',
+              }}
+            />
+            <div
+              className="pointer-events-auto absolute -left-[6px] top-0 h-full w-[14px] cursor-ew-resize"
               title="Arrasta pra navegar"
             />
           </div>
@@ -2766,6 +2964,7 @@ function StylePanel({
   fxSmoke,
   onSlide,
   onSet,
+  onCommit,
   applyAll,
   setApplyAll,
   editingLabel,
@@ -2778,6 +2977,7 @@ function StylePanel({
   defaultAccent,
   autoFit,
   singleLine,
+  fx,
   bgMode,
   bgColor,
   bgOpacity,
@@ -2804,6 +3004,8 @@ function StylePanel({
   fxSmoke: number;
   onSlide: (patch: PerBlockStyle) => void;
   onSet: (patch: PerBlockStyle) => void;
+  /** grava um passo no historico antes de mexer (Ctrl+Z) */
+  onCommit: () => void;
   applyAll: boolean;
   setApplyAll: (v: boolean) => void;
   editingLabel: string | null;
@@ -2817,6 +3019,8 @@ function StylePanel({
   defaultAccent: string;
   autoFit: boolean;
   singleLine: boolean;
+  /** efeitos ligaveis (traco/sombra/brilho/fumaca) */
+  fx: FxState;
   bgMode: 'preset' | 'on' | 'off';
   bgColor: string | null;
   bgOpacity: number;
@@ -3031,52 +3235,23 @@ function StylePanel({
         <div
           className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
-          title="Intensidade sobre o que o modelo já tem (100% = padrão · 0% desliga) — só age nos modelos que têm o efeito"
+          title="Liga, desliga e ajusta cada efeito — inclusive nos modelos que não trazem o efeito de fábrica"
         >
-          Efeitos do modelo
+          Efeitos da legenda
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <ToolSlider
-            label="Traço"
-            min={0}
-            max={2}
-            step={0.05}
-            value={fxStroke}
-            onChange={(v) => onSlide({ fxStroke: v })}
-            display={(v) => `${Math.round(v * 100)}%`}
-            disabled={disabled}
-          />
-          <ToolSlider
-            label="Sombra"
-            min={0}
-            max={2}
-            step={0.05}
-            value={fxShadow}
-            onChange={(v) => onSlide({ fxShadow: v })}
-            display={(v) => `${Math.round(v * 100)}%`}
-            disabled={disabled}
-          />
-          <ToolSlider
-            label="Brilho"
-            min={0}
-            max={2}
-            step={0.05}
-            value={fxGlow}
-            onChange={(v) => onSlide({ fxGlow: v })}
-            display={(v) => `${Math.round(v * 100)}%`}
-            disabled={disabled}
-          />
-          <ToolSlider
-            label="Fumaça"
-            min={0}
-            max={2}
-            step={0.05}
-            value={fxSmoke}
-            onChange={(v) => onSlide({ fxSmoke: v })}
-            display={(v) => `${Math.round(v * 100)}%`}
-            disabled={disabled}
-          />
-        </div>
+        <FxPanel
+          preset={previewPreset}
+          fx={fx}
+          onFx={(patch) => onSet({ fx: { ...fx, ...patch } })}
+          fxStroke={fxStroke}
+          fxShadow={fxShadow}
+          fxGlow={fxGlow}
+          fxSmoke={fxSmoke}
+          onMultiplier={(patch) => onSlide(patch)}
+          onCommit={onCommit}
+          defaultPrimary={defaultPrimary}
+          disabled={disabled}
+        />
       </div>
 
       <div className="md:col-span-2">

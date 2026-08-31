@@ -3053,3 +3053,149 @@ html[data-theme='light'] .frame-ver-btn { color: #b91c1c; }
    Tailwind e' quase branco: no tema claro ele sumia no fundo. */
 .label-versao { color: #fca5a5; }
 html[data-theme='light'] .label-versao { color: #b91c1c; }
+
+/* ═══════════════ EFEITOS DA LEGENDA (cartões Traço/Sombra/Brilho/Fumaça) ══
+   Cada cartão liga o efeito num interruptor de verdade e mostra a prévia ao
+   vivo. Hairline no lugar de borda, uma escala de raio, curva de mola. */
+.fx-card {
+  border-radius: 16px;
+  background: rgb(var(--bg));
+  box-shadow: inset 0 0 0 1px rgb(var(--line));
+  transition:
+    box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fx-card:hover { box-shadow: inset 0 0 0 1px rgb(var(--line-strong)); }
+.fx-card.is-on {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 159, 10, 0.4),
+    0 8px 24px -14px rgba(255, 159, 10, 0.55);
+}
+.fx-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 9px;
+  color: rgb(var(--text-muted));
+  background: rgb(var(--bg-soft));
+  box-shadow: inset 0 0 0 1px rgb(var(--line));
+  transition: color 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fx-icon.is-on {
+  color: #f0a520;
+  background: rgba(255, 159, 10, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.4);
+}
+html[data-theme='light'] .fx-icon.is-on { color: #96540a; }
+/* A prévia imita FOOTAGE: um meio-tom com claro e escuro na mesma imagem.
+   Num fundo preto o traço preto (que é o padrão, porque traço serve pra ler
+   sobre vídeo) ficava invisível e o cartão mentia sobre o efeito; num fundo
+   branco sumiria o brilho. O meio-tom mostra os dois. */
+.fx-canvas {
+  border-radius: 11px;
+  background:
+    radial-gradient(120% 140% at 22% 18%, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 58%),
+    linear-gradient(128deg, #6b7280 0%, #3f434c 46%, #23262d 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+/* interruptor */
+.fx-switch {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  background: rgb(var(--bg-soft));
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--line-strong)),
+    inset 0 2px 4px rgba(0, 0, 0, 0.22);
+  transition: background 260ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fx-switch.is-on {
+  background: linear-gradient(150deg, #ffd08a 0%, #ffb340 48%, #f08a12 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 4px 12px -6px rgba(240, 138, 18, 0.9);
+}
+.fx-switch:disabled { opacity: 0.4; cursor: not-allowed; }
+.fx-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #dcdce2 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fx-switch.is-on .fx-switch-knob { transform: translateX(18px); }
+/* chip de TIPO (suave/dura/neon/poeira...) */
+.fx-chip {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgb(var(--text-muted));
+  background: rgb(var(--bg-soft));
+  box-shadow: inset 0 0 0 1px rgb(var(--line));
+  transition:
+    color 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fx-chip:hover:not(:disabled) { color: rgb(var(--text)); transform: translateY(-1px); }
+.fx-chip.is-on {
+  color: #f0a520;
+  background: rgba(255, 159, 10, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.55);
+}
+html[data-theme='light'] .fx-chip.is-on { color: #96540a; }
+.fx-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+/* link discreto (Ajustar tudo / Voltar ao modelo) */
+.fx-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(var(--text-muted));
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgb(var(--line-strong));
+  transition: color 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.fx-link:hover:not(:disabled) { color: #f0a520; }
+html[data-theme='light'] .fx-link:hover:not(:disabled) { color: #96540a; }
+.fx-link:disabled { opacity: 0.4; cursor: not-allowed; }
+/* polegar do slider dos cartões */
+.fx-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #dcdce2 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.fx-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #dcdce2 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-card, .fx-switch, .fx-switch-knob, .fx-chip { transition: none; }
+}

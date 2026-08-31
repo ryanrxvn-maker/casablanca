@@ -20,6 +20,7 @@
  */
 
 import { fontCss, type FontKey } from './fonts';
+import { applyFx, fxMultipliers } from './fx';
 // presets.ts importa só o TIPO daqui, então não há ciclo em runtime.
 import { getPreset } from './presets';
 
@@ -307,8 +308,8 @@ export type TypoPreset = {
     speed: number;
     style?: 'trippy' | 'stripes' | 'bricks' | 'grunge';
   };
-  /** fumaça procedural atrás do bloco */
-  smoke?: { alpha: number };
+  /** fumaça procedural atrás do bloco (kind = comportamento das nuvens) */
+  smoke?: { alpha: number; kind?: 'nevoa' | 'subindo' | 'rasteira' | 'poeira' };
   /**
    * ECOS DO TEXTO: cópias da própria frase em outra escala/posição/estilo —
    * a base dos letterings "frase pequena branca + gigante colorida",
@@ -409,6 +410,35 @@ export type TypoPreset = {
   defaultAccent: string;
 };
 
+/**
+ * Espelho ESTRUTURAL do FxState de lib/typography/fx.ts. Declarado aqui pra
+ * não fechar ciclo de import (fx.ts precisa de TypoPreset daqui). Os dois
+ * lados são compatíveis por estrutura — o TypeScript garante.
+ */
+export type FxStateLike = {
+  stroke?: { mode: 'auto' | 'on' | 'off'; width?: number; color?: string };
+  shadow?: {
+    mode: 'auto' | 'on' | 'off';
+    kind?: 'suave' | 'dura' | 'contorno';
+    color?: string;
+    opacity?: number;
+    blur?: number;
+    dist?: number;
+    angle?: number;
+  };
+  glow?: {
+    mode: 'auto' | 'on' | 'off';
+    kind?: 'suave' | 'neon' | 'halo' | 'pulsante';
+    color?: string | null;
+    blur?: number;
+  };
+  smoke?: {
+    mode: 'auto' | 'on' | 'off';
+    kind?: 'nevoa' | 'subindo' | 'rasteira' | 'poeira';
+    alpha?: number;
+  };
+};
+
 export type StyleState = {
   presetId: string;
   fontScale: number;
@@ -453,6 +483,12 @@ export type StyleState = {
   singleLine?: boolean;
   /** fundo: 'preset' segue o modelo; 'on' força caixa (mesmo sem no modelo); 'off' remove caixa+barra */
   bgMode?: 'preset' | 'on' | 'off';
+  /**
+   * EFEITOS ligáveis/ajustáveis (traço, sombra, brilho, fumaça). O tipo mora
+   * em lib/typography/fx.ts; aqui fica `unknown` porque o engine só o repassa
+   * pro `applyFx` — importar de lá criaria ciclo (fx.ts importa TypoPreset).
+   */
+  fx?: FxStateLike;
   /** cor do fundo (null = a do modelo) */
   bgColor?: string | null;
   /** opacidade do fundo 0..1 (default 1) */
@@ -506,6 +542,7 @@ export type PerBlockStyle = Partial<
     | 'fxSmoke'
     | 'autoFit'
     | 'singleLine'
+    | 'fx'
     | 'bgMode'
     | 'bgColor'
     | 'bgOpacity'
@@ -1257,6 +1294,23 @@ function fillWordText(
     ctx.globalAlpha = prevAlpha;
   }
 
+  // Glow COM sombra: o applyTextStyle só consegue um shadow por vez (canvas),
+  // então quando os DOIS estão ligados (só acontece com o user forçando) o
+  // brilho ganha uma passada própria antes da camada principal — sem ela o
+  // botão de Brilho parecia morto em cima de um modelo que tem sombra.
+  if (preset.glow && preset.shadow && d.fx.glow > 0 && fpx >= d.fontPx * 0.7) {
+    ctx.save();
+    const glowScale = Math.min(1, Math.max(0.45, fpx / d.fontPx));
+    ctx.shadowColor = resolveColor(preset.glow.color, d.primary, d.accent);
+    ctx.shadowBlur = (preset.glow.blur ?? 0) * fpx * glowScale * d.fx.glow;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = fill;
+    ctx.fillText(text, x, y);
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
   // camada principal
   applyTextStyle(d, fill, fpx, fk);
   if (hasStroke) {
@@ -1474,7 +1528,7 @@ export function drawCaptions(
 
   // troca de fonte pelo editor: só a fonte PRINCIPAL muda; o apoio do mix
   // mantém a dele (a composição é parte do modelo)
-  let preset = presetDoBloco(style, basePreset);
+  let preset = applyFx(presetDoBloco(style, basePreset), style.fx);
 
   // Animação escolhida no editor vence a do modelo (null = a do modelo).
   // Mesmo kind do modelo mantém o spec fino do preset; o override vive no
@@ -1546,12 +1600,12 @@ export function drawCaptions(
     glowPx: (preset.glow?.blur ?? 0) * fontPx,
     tMs,
     seedBase,
-    fx: {
+    fx: fxMultipliers(style.fx, {
       stroke: style.fxStroke ?? 1,
       shadow: style.fxShadow ?? 1,
       glow: style.fxGlow ?? 1,
       smoke: style.fxSmoke ?? 1,
-    },
+    }),
     underline: style.underline === true,
     wordStyles: style.wordStyles?.[block.id],
   };
@@ -1880,31 +1934,89 @@ export function drawCaptions(
   }
 
   // ── fumaça procedural (atrás de tudo) ──
+  // Quatro comportamentos, todos com a MESMA semente determinística (seedBase)
+  // pra que preview e export desenhem a nuvem no mesmo lugar em cada frame.
   if (preset.smoke) {
     const gate = outAlpha * clamp01(pBlock * 2);
-    const alpha = preset.smoke.alpha * gate * (style.fxSmoke ?? 1);
+    const alpha = preset.smoke.alpha * gate * d.fx.smoke;
+    const kind = preset.smoke.kind ?? 'nevoa';
     if (alpha > 0.01) {
-      ctx.save();
-      clearShadow(ctx);
-      for (let i = 0; i < 7; i++) {
-        const rx = fontPx * (1.3 + prand(seedBase + i * 31) * 1.6);
-        const bx =
-          cx +
-          (prand(seedBase + i * 17) - 0.5) * W * 0.55 +
-          Math.sin((tMs / 1000) * 0.35 + i * 1.9) * fontPx * 0.9;
-        const by =
-          topY +
-          blockH * (0.1 + prand(seedBase + i * 23) * 0.95) +
-          Math.sin((tMs / 1000) * 0.22 + i * 2.6) * fontPx * 0.5;
-        const g = ctx.createRadialGradient(bx, by, 0, bx, by, rx);
-        const a = alpha * (0.5 + 0.5 * prand(seedBase + i * 41));
+      const seg = tMs / 1000;
+      const puff = (
+        bx: number,
+        by: number,
+        rx: number,
+        a: number,
+        ry = rx,
+      ) => {
+        if (a <= 0.002 || rx <= 0) return;
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.scale(1, ry / rx);
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
         g.addColorStop(0, `rgba(255,255,255,${(a * 0.85).toFixed(3)})`);
         g.addColorStop(0.55, `rgba(205,205,215,${(a * 0.4).toFixed(3)})`);
         g.addColorStop(1, 'rgba(180,180,190,0)');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(bx, by, rx, 0, Math.PI * 2);
+        ctx.arc(0, 0, rx, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+      };
+      ctx.save();
+      clearShadow(ctx);
+      if (kind === 'subindo') {
+        // colunas que nascem embaixo do bloco e sobem sumindo
+        for (let i = 0; i < 8; i++) {
+          const life = ((seg * 0.24 + prand(seedBase + i * 13)) % 1);
+          const rx = fontPx * (0.7 + prand(seedBase + i * 31) * 1.1) * (0.55 + life);
+          const bx =
+            cx +
+            (prand(seedBase + i * 17) - 0.5) * W * 0.5 +
+            Math.sin(seg * 0.5 + i * 1.7) * fontPx * 0.45;
+          const by = topY + blockH * 1.05 - life * (blockH + fontPx * 2.4);
+          puff(bx, by, rx, alpha * (1 - life) * (0.55 + 0.45 * prand(seedBase + i * 41)));
+        }
+      } else if (kind === 'rasteira') {
+        // névoa baixa e achatada, encostada no rodapé do bloco
+        for (let i = 0; i < 7; i++) {
+          const rx = fontPx * (1.5 + prand(seedBase + i * 31) * 1.7);
+          const bx =
+            cx +
+            (prand(seedBase + i * 17) - 0.5) * W * 0.7 +
+            Math.sin(seg * 0.28 + i * 2.1) * fontPx * 1.1;
+          const by =
+            topY + blockH * 0.92 + Math.sin(seg * 0.4 + i * 1.3) * fontPx * 0.12;
+          puff(bx, by, rx, alpha * (0.6 + 0.4 * prand(seedBase + i * 41)), rx * 0.32);
+        }
+      } else if (kind === 'poeira') {
+        // partículas miúdas em suspensão (nada de nuvem grande)
+        for (let i = 0; i < 26; i++) {
+          const rx = fontPx * (0.05 + prand(seedBase + i * 31) * 0.13);
+          const drift = seg * (0.1 + prand(seedBase + i * 53) * 0.16);
+          const bx =
+            cx +
+            ((prand(seedBase + i * 17) + drift) % 1 - 0.5) * W * 0.8;
+          const by =
+            topY +
+            blockH * (prand(seedBase + i * 23) * 1.15 - 0.1) +
+            Math.sin(seg * 0.6 + i) * fontPx * 0.16;
+          puff(bx, by, rx, alpha * (0.5 + 0.5 * prand(seedBase + i * 41)));
+        }
+      } else {
+        // névoa clássica (comportamento histórico, byte a byte)
+        for (let i = 0; i < 7; i++) {
+          const rx = fontPx * (1.3 + prand(seedBase + i * 31) * 1.6);
+          const bx =
+            cx +
+            (prand(seedBase + i * 17) - 0.5) * W * 0.55 +
+            Math.sin(seg * 0.35 + i * 1.9) * fontPx * 0.9;
+          const by =
+            topY +
+            blockH * (0.1 + prand(seedBase + i * 23) * 0.95) +
+            Math.sin(seg * 0.22 + i * 2.6) * fontPx * 0.5;
+          puff(bx, by, rx, alpha * (0.5 + 0.5 * prand(seedBase + i * 41)));
+        }
       }
       ctx.restore();
     }

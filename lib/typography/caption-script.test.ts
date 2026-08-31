@@ -19,6 +19,9 @@ import {
   templateToSegments,
   TEMPLATE_1,
   TEMPLATE_2,
+  TEMPLATE_3,
+  TEMPLATE_4,
+  BUILTIN_TEMPLATES,
   type CaptionSegment,
 } from './caption-script';
 import { groupWords } from './group';
@@ -281,6 +284,41 @@ console.log('\n── templates ──');
   ok(TEMPLATE_1.segments[1].style.posY === 0.7, 'Template 1: body na altura 70%');
   ok(TEMPLATE_2.segments[0].style.presetId === 'extensao-script', 'Template 2: hook Extensão Script');
   ok(TEMPLATE_2.segments[1].style.presetId === 'faixa-suave', 'Template 2: body Faixa Suave');
+  ok(TEMPLATE_3.segments[0].style.presetId === 'contraste', 'Template 3: hook Contraste');
+  ok(TEMPLATE_3.segments[1].style.presetId === 'marca-texto', 'Template 3: body Marca-Texto');
+  ok(TEMPLATE_4.segments[0].style.presetId === 'caixa-vermelha-ouro', 'Template 4: hook Caixa Vermelha Ouro');
+  ok(TEMPLATE_4.segments[1].style.presetId === 'tarja-preta', 'Template 4: body Tarja Preta');
+  ok(BUILTIN_TEMPLATES.length === 4, 'os 4 templates de fábrica estão na lista');
+
+  // a regra que vale pra TODOS: hook centralizado e maior, body mais embaixo
+  // e menor — se um template novo quebrar isso, o lote sai torto
+  for (const t of BUILTIN_TEMPLATES) {
+    const hook = t.segments.find((s) => s.kind === 'hook');
+    const body = t.segments.find((s) => s.kind === 'body');
+    ok(!!hook && !!body, `${t.name}: tem hook e body`);
+    if (!hook || !body) continue;
+    const h = hook.style;
+    const bd = body.style;
+    ok(h.posY === 0.5 && h.posX === 0.5, `${t.name}: hook centralizado`);
+    ok(h.fontScale === 1.2, `${t.name}: hook a 120%`);
+    ok(bd.posY === 0.7, `${t.name}: body mais embaixo`);
+    ok(bd.fontScale === 1, `${t.name}: body a 100%`);
+    ok(
+      (h.fontScale ?? 0) > (bd.fontScale ?? 0) && (bd.posY ?? 0) > (h.posY ?? 0),
+      `${t.name}: hook maior e acima do body`,
+    );
+  }
+
+  // cada template tem de trazer um par PRÓPRIO — repetir lettering entre
+  // templates faz o chip virar enfeite
+  const usados = new Set<string>();
+  for (const t of BUILTIN_TEMPLATES) {
+    for (const s of t.segments) {
+      const pid = s.style.presetId ?? '(sem preset)';
+      ok(!usados.has(pid), `${t.name}: ${pid} não repete em outro template`);
+      usados.add(pid);
+    }
+  }
 
   const atual = relabelSegments([
     seg({ kind: 'hook', text: 'meu hook colado' }),

@@ -28,6 +28,8 @@ import {
 import { getPreset } from '@/lib/typography/presets';
 import { ensureTypoFonts } from '@/lib/typography/fonts';
 import type { BlockIdentity } from '@/lib/typography/blocks-edit';
+import { FxPanel } from '@/components/typography/FxPanel';
+import { normalizeFx, type FxState } from '@/lib/typography/fx';
 import {
   applyCaptionScript,
   countScriptWords,
@@ -209,6 +211,7 @@ function SegPreview({
             underline: s.style.underline,
             autoFit: s.style.autoFit,
             singleLine: s.style.singleLine,
+            fx: s.style.fx,
             bgMode: s.style.bgMode,
             bgColor: s.style.bgColor,
             bgOpacity: s.style.bgOpacity,
@@ -597,6 +600,7 @@ function SegmentCard({
   onPatchStyle: (st: PerBlockStyle) => void;
   onRemove: () => void;
 }) {
+  const [fxOpen, setFxOpen] = useState(false);
   const preset = getPreset(seg.style.presetId ?? fallbackPresetId);
   const isHook = seg.kind === 'hook';
   const contadas = countScriptWords(seg.text);
@@ -649,6 +653,21 @@ function SegmentCard({
         >
           {preset.name}
           <span className="ml-1.5 text-text-muted">{galleryOpen ? 'fechar' : 'trocar'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFxOpen((v) => !v)}
+          className={
+            'rounded-[10px] px-3 py-1.5 text-[12px] font-semibold' +
+            T3D +
+            ' ' +
+            (fxOpen
+              ? 'bg-amber-400/15 roteiro-accent shadow-[inset_0_0_0_1px_rgba(251,191,36,0.55)]'
+              : 'bg-bg-soft text-text-muted shadow-[inset_0_0_0_1px_rgb(var(--line))] hover:text-text')
+          }
+          title="Traço, sombra, brilho e fumaça deste trecho"
+        >
+          Efeitos
         </button>
         {res && res.blockIds.length > 0 ? (
           <span className="mono text-[11px] text-text-muted">
@@ -816,6 +835,25 @@ function SegmentCard({
           </p>
         </div>
       </div>
+
+      {fxOpen ? (
+        <div className="roteiro-field mt-4 rounded-[14px] p-3">
+          <FxPanel
+            preset={preset}
+            fx={normalizeFx(seg.style.fx)}
+            onFx={(patch) =>
+              onPatchStyle({ fx: { ...normalizeFx(seg.style.fx), ...patch } as FxState })
+            }
+            fxStroke={seg.style.fxStroke ?? 1}
+            fxShadow={seg.style.fxShadow ?? 1}
+            fxGlow={seg.style.fxGlow ?? 1}
+            fxSmoke={seg.style.fxSmoke ?? 1}
+            onMultiplier={(patch) => onPatchStyle(patch)}
+            onCommit={() => undefined}
+            defaultPrimary={preset.defaultPrimary}
+          />
+        </div>
+      ) : null}
 
       {galleryOpen ? (
         <div className="roteiro-field mt-4 rounded-[14px] p-3">

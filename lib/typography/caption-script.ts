@@ -352,7 +352,64 @@ export const TEMPLATE_2: CaptionTemplate = {
   ],
 };
 
-export const BUILTIN_TEMPLATES: CaptionTemplate[] = [TEMPLATE_1, TEMPLATE_2];
+/**
+ * Template 3 — o par editorial. Hook em Contraste (Montserrat 900 com a
+ * palavra forte em Playfair itálico dourado): o serif itálico no meio do
+ * sans pesado é o que dá cara de manchete e não de legenda automática.
+ * Body em Marca-Texto, que é o destaque mais simples que existe — texto
+ * minúsculo limpo e só a palavra forte acendendo num marca-texto amarelo.
+ */
+export const TEMPLATE_3: CaptionTemplate = {
+  id: 'tpl-3',
+  name: 'Template 3',
+  builtin: true,
+  hint: 'Hook Contraste · Body Marca-Texto (destaque simples)',
+  segments: [
+    {
+      kind: 'hook',
+      label: 'Hook',
+      style: { presetId: 'contraste', fontScale: 1.2, posY: 0.5, posX: 0.5 },
+    },
+    {
+      kind: 'body',
+      label: 'Body',
+      style: { presetId: 'marca-texto', fontScale: 1, posY: 0.7, posX: 0.5 },
+    },
+  ],
+};
+
+/**
+ * Template 4 — o par de leitura máxima, pra cena clara ou com muito
+ * movimento atrás. Hook em Caixa Vermelha Ouro: a caixa vermelha sólida
+ * garante o contraste que letra com contorno não garante sobre pele,
+ * cozinha branca ou janela estourada. Body em Tarja Preta pelo mesmo
+ * motivo — a tarja lê em cima de qualquer coisa.
+ */
+export const TEMPLATE_4: CaptionTemplate = {
+  id: 'tpl-4',
+  name: 'Template 4',
+  builtin: true,
+  hint: 'Hook Caixa Vermelha Ouro · Body Tarja Preta (fundo difícil)',
+  segments: [
+    {
+      kind: 'hook',
+      label: 'Hook',
+      style: { presetId: 'caixa-vermelha-ouro', fontScale: 1.2, posY: 0.5, posX: 0.5 },
+    },
+    {
+      kind: 'body',
+      label: 'Body',
+      style: { presetId: 'tarja-preta', fontScale: 1, posY: 0.7, posX: 0.5 },
+    },
+  ],
+};
+
+export const BUILTIN_TEMPLATES: CaptionTemplate[] = [
+  TEMPLATE_1,
+  TEMPLATE_2,
+  TEMPLATE_3,
+  TEMPLATE_4,
+];
 
 let segSeq = 0;
 export function newSegmentId(): string {
