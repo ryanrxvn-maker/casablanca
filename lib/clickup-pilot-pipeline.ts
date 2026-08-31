@@ -81,7 +81,17 @@ export type PipelineInputs = {
    *  original e vira aviso, nunca bloqueio. `partesSec` são as durações das
    *  partes na ordem final (fronteiras reais pro reset do zoom); null quando
    *  não deu pra medir. */
-  posProcessar?: (blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>;
+  posProcessar?: (
+    blob: Blob,
+    info: {
+      filename: string;
+      partesSec: number[] | null;
+      /** durações dos PEDAÇOS de cada parte depois da decupagem, na mesma
+       *  ordem. Cada corte de silêncio é um jump cut, e o zoom não pode
+       *  atravessar nenhum. `null` = decupagem desligada ou sem medida. */
+      cortesInternosSec?: number[][] | null;
+    },
+  ) => Promise<Blob | null>;
 
   /** ── Cache de clips intermediários por PARTE (acelera RETOMAR/rebuild) ──
    *  Nivelar e decupar cada parte é o trabalho pesado (ffmpeg-wasm). Num
@@ -693,7 +703,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // vez de depender do user clicar RETOMAR de novo, AUTO-TENTA até 3x, MATANDO
     // o worker entre tentativas (cancelFFmpeg → getFFmpeg reinicia fresco). Só
     // "sem fala detectável" (não é erro) retorna na hora, sem retry.
-    const tryDecupOne = async (src: Blob, label: string): Promise<Blob | null> => {
+    // Durações dos PEDAÇOS de cada parte (o que o planSpeechCut manteve). É a
+    // lista de cortes internos que o zoom precisa pra não atravessar nenhum.
+    const pedacosPorParte: number[][] = [];
+    const tryDecupOne = async (src: Blob, label: string, kIdx: number): Promise<Blob | null> => {
       const MAX = 3;
       for (let attempt = 1; attempt <= MAX; attempt++) {
         try {
@@ -714,6 +727,8 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           }
           decupSavedSec += plan.audit.savedSec;
           if (segments.length === 0) return null; // sem fala → mantém original (NÃO é erro)
+          // guarda o tamanho de cada pedaço mantido — as fronteiras do zoom
+          pedacosPorParte[kIdx] = segments.map((sg: { start: number; end: number }) => sg.end - sg.start);
           // Parte é curta; teto generoso por segurança (não é o tempo esperado).
           const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
           return await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label} (t${attempt})`);
@@ -747,7 +762,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         } catch {}
       }
       if (!cut) {
-        cut = await tryDecupOne(leveled[k], `${item.filename} p${k + 1}/${leveled.length}`);
+        cut = await tryDecupOne(leveled[k], `${item.filename} p${k + 1}/${leveled.length}`, k);
         if (cut && cut.size > 1024 && saveCachedClip && lbl) {
           try { await saveCachedClip('decupado', lbl, cut); } catch {}
         }
@@ -803,6 +818,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       // As partes DECUPADAS na ordem final — é delas que sai a fronteira de
       // cada take pro plano de zoom da pós-produção (reset em corte real).
       (item as any)._partesFinais = decupadoParts;
+      (item as any)._pedacosPorParte = pedacosPorParte;
       console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${cutCount}/${leveled.length} partes cortadas · ${(dec.size / (1024 * 1024)).toFixed(1)}MB`);
     } catch (e) {
       console.error(`[clickup-pilot-pipeline] decup ${item.filename}: concat dos decupados FAIL`, e);
@@ -858,8 +874,16 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         }
       }
 
+      // Cortes internos: só valem quando TODA parte tem a sua lista (um buraco
+      // faria o deslocamento das janelas seguintes sair errado).
+      const pedacos: number[][] | null = (() => {
+        const pp = (item as any)._pedacosPorParte as number[][] | undefined;
+        if (!pp || !partesSec || pp.length !== partesSec.length) return null;
+        return pp.every((x) => Array.isArray(x) && x.length > 0) ? pp : null;
+      })();
+
       try {
-        const novo = await posProcessar(src, { filename: item.filename, partesSec });
+        const novo = await posProcessar(src, { filename: item.filename, partesSec, cortesInternosSec: pedacos });
         if (novo && novo.size > 50_000) {
           // O entregue passa a ser o pós-produzido. `decupado` é o campo que o
           // downstream prefere (camuflado ?? decupado ?? rawAssembled), então
@@ -873,6 +897,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         item.errors = { ...item.errors, posproducao: `legenda/zoom não aplicados: ${msg}` };
       }
       (item as any)._partesFinais = undefined;
+      (item as any)._pedacosPorParte = undefined;
       item._leveledParts = undefined;
     }
   }

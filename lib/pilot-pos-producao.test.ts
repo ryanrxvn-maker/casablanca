@@ -128,5 +128,54 @@ console.log('\nGARANTIA — pós-produção do Pilot (zoom + roteiro):');
   ok(segs[0].text === '' && segs[0].words === null, 'e continua sendo "o resto"');
 }
 
+// (11) O ZOOM RESOLVE ANTES DO CORTE — a regra que separa "zoom de editor" de
+// "zoom automático". A rampa termina em `rampaAte` e a escala fica PARADA até
+// a fronteira, então nenhum corte é atravessado com movimento em curso.
+{
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 23, [10, 5, 8]);
+  for (const seg of plan) {
+    ok(seg.rampaAte != null, 'toda janela tem fim de rampa declarado');
+    ok((seg.rampaAte as number) < seg.end, 'a rampa termina ANTES do fim da janela (respiro)');
+    ok((seg.rampaAte as number) > seg.start, 'e depois do começo (a rampa existe)');
+  }
+  // a escala no ÚLTIMO instante antes do corte já é a final (movimento resolvido)
+  const s0 = plan[0];
+  const esc = (t: number) => {
+    const fim = s0.rampaAte as number;
+    const p = -(Math.cos(Math.PI * Math.min(1, Math.max(0, (t - s0.start) / (fim - s0.start)))) - 1) / 2;
+    return s0.from + (s0.to - s0.from) * p;
+  };
+  ok(aprox(esc(s0.end - 0.01), s0.to, 0.0005), 'no frame anterior ao corte a escala JÁ chegou ao destino');
+  ok(aprox(esc(s0.rampaAte as number), s0.to, 0.0005), 'e chegou exatamente no fim da rampa');
+}
+
+// (12) CORTES DA DECUPAGEM contam como corte: o zoom não atravessa nenhum.
+{
+  // 1 parte de 24s que a decupagem picotou em 4 pedaços de 6s
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 24, [24], [[6, 6, 6, 6]]);
+  ok(plan.length === 4, 'os 4 pedaços da decupagem viram 4 janelas (não 1 rampa por cima de tudo)');
+  ok(aprox(plan[0].end, 6) && aprox(plan[1].end, 12), 'as janelas caem nos cortes internos');
+  // sem os internos, seria UMA rampa de 24s cruzando os 3 cortes
+  const semInternos = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 24, [24]);
+  ok(semInternos.length === 1, 'sem a informação dos cortes internos, era uma rampa só (o defeito)');
+}
+
+// (13) Cortes internos em VÁRIAS partes, com deslocamento correto
+{
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'leve' }, 20, [8, 12], [[4, 4], [6, 6]]);
+  ok(plan.length === 4, '2 partes × 2 pedaços = 4 janelas');
+  ok(aprox(plan[0].end, 4), 'corte 1 da parte 1');
+  ok(aprox(plan[1].end, 8), 'fim da parte 1');
+  ok(aprox(plan[2].end, 14), 'corte 1 da parte 2 desloca pelo tamanho da parte 1');
+  ok(aprox(plan[3].end, 20), 'fecha no fim do vídeo');
+}
+
+// (14) Duração interna inválida NÃO derruba o plano — cai nas partes
+{
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 23, [10, 5, 8], [[NaN, 5], [5], [8]]);
+  ok(plan.length >= 1, 'plano continua existindo com duração interna podre');
+  ok(aprox(plan[plan.length - 1].end, 23), 'e ainda fecha no fim do vídeo');
+}
+
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

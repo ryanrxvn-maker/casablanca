@@ -567,6 +567,10 @@ export type ZoomSeg = {
   /** escala no começo e no fim da janela (1 = sem zoom) */
   from: number;
   to: number;
+  /** instante em que a RAMPA termina; de `rampaAte` até `end` a escala fica
+   *  parada em `to`. É o respiro que faz o movimento RESOLVER antes do corte,
+   *  em vez de ser interrompido por ele. Ausente = rampa até `end`. */
+  rampaAte?: number;
 };
 
 function easeInOutSine(p: number): number {
@@ -577,7 +581,10 @@ export function zoomScaleAt(plan: ZoomSeg[] | undefined, t: number): number {
   if (!plan || plan.length === 0) return 1;
   for (const seg of plan) {
     if (t >= seg.start && t < seg.end) {
-      const dur = Math.max(0.001, seg.end - seg.start);
+      // A rampa vai até `rampaAte` (quando existe) e DESCANSA em `to` até o
+      // corte — o clamp do `p` em 1 é o que segura a escala parada ali.
+      const fim = seg.rampaAte != null && seg.rampaAte > seg.start ? seg.rampaAte : seg.end;
+      const dur = Math.max(0.001, fim - seg.start);
       const p = easeInOutSine(Math.min(1, Math.max(0, (t - seg.start) / dur)));
       return seg.from + (seg.to - seg.from) * p;
     }

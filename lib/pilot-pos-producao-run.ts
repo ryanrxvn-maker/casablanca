@@ -28,7 +28,12 @@ export type PosProducaoCfg = {
   onEtapa?: (msg: string) => void;
 };
 
-export type PosProducaoInfo = { filename: string; partesSec: number[] | null };
+export type PosProducaoInfo = {
+  filename: string;
+  partesSec: number[] | null;
+  /** durações dos pedaços de cada parte depois da decupagem (jump cuts) */
+  cortesInternosSec?: number[][] | null;
+};
 
 /** Palavra do ASR no shape do engine. */
 type PalavraAsr = { text: string; start: number; end: number };
@@ -67,7 +72,7 @@ export async function montarPosProducao(
       return { blob: null, avisos };
     }
 
-    const plano = querZoom ? planejarZoom(cfg.zoom, durSec, info.partesSec) : [];
+    const plano = querZoom ? planejarZoom(cfg.zoom, durSec, info.partesSec, info.cortesInternosSec) : [];
 
     // ── legenda: ASR → correção pela copy → roteiro do template ──
     let blocks: import('./typography/engine').Block[] = [];
@@ -110,14 +115,47 @@ export async function montarPosProducao(
 
     if (blocks.length === 0 && plano.length === 0) return { blob: null, avisos };
 
-    cfg.onEtapa?.(blocks.length ? 'legendando: renderizando' : 'aplicando zoom');
-    const r = await renderTypographyVideo({
-      file: blob,
-      blocks,
-      preset: getPreset(style.presetId),
-      style,
-      zoom: plano,
-    });
+    // ── RENDER com PROGRESSO REAL e TETO DE TEMPO ──
+    // O render de um AD de 90s são ~2.700 frames com legenda desenhada em cada
+    // um: leva minutos. Sem o ratio na tela isso PARECIA travado (era só uma
+    // string parada). E sem teto, um decoder que engasga ficava pra sempre —
+    // agora aborta e entrega o montado original, que é a regra da casa.
+    const verbo = blocks.length ? 'legendando' : 'aplicando zoom';
+    cfg.onEtapa?.(`${verbo}: preparando`);
+    const t0 = Date.now();
+    const ctrl = new AbortController();
+    // Teto PROPORCIONAL: ~6s de render por segundo de vídeo, piso de 4min e
+    // teto de 25min. Régua medida no harness (12s → ~29s por render) com
+    // folga de 2x pra PC carregado.
+    const tetoMs = Math.min(25 * 60_000, Math.max(4 * 60_000, Math.round(durSec * 6_000)));
+    const alarme = setTimeout(() => ctrl.abort(), tetoMs);
+    let r: Awaited<ReturnType<typeof renderTypographyVideo>>;
+    try {
+      r = await renderTypographyVideo({
+        file: blob,
+        blocks,
+        preset: getPreset(style.presetId),
+        style,
+        zoom: plano,
+        signal: ctrl.signal,
+        onProgress: (pr) => {
+          // 'frames' é a fase longa — é dela que sai a porcentagem honesta.
+          const pct = Math.round((pr.ratio || 0) * 100);
+          cfg.onEtapa?.(
+            pr.phase === 'frames'
+              ? `${verbo}: ${pct}% (${pr.frame ?? 0}/${pr.totalFrames ?? 0} frames)`
+              : `${verbo}: ${pr.phase}`,
+          );
+        },
+      });
+    } finally {
+      clearTimeout(alarme);
+    }
+    const seg = ((Date.now() - t0) / 1000).toFixed(0);
+    console.log(
+      `[pos-producao] ${info.filename}: render ${r.mode || '?'} em ${seg}s · ` +
+        `${r.width}x${r.height}@${r.fps} · ${(r.blob.size / 1e6).toFixed(1)}MB · audioOk=${r.audioOk}`,
+    );
     if (!r.blob || r.blob.size < 50_000) {
       avisos.push('pós-produção: render saiu vazio — entregue o montado original');
       return { blob: null, avisos };
@@ -125,7 +163,12 @@ export async function montarPosProducao(
     if (!r.audioOk) avisos.push('pós-produção: o áudio não remuxou — confere o som do montado');
     return { blob: r.blob, avisos };
   } catch (e) {
-    avisos.push(`pós-produção falhou (${(e as Error)?.message?.slice(0, 80)}) — entregue o montado original`);
+    const msg = (e as Error)?.message || String(e);
+    avisos.push(
+      /abort|cancel/i.test(msg)
+        ? 'pós-produção: o render estourou o tempo — entregue o montado original (sem legenda/zoom)'
+        : `pós-produção falhou (${msg.slice(0, 80)}) — entregue o montado original`,
+    );
     return { blob: null, avisos };
   }
 }

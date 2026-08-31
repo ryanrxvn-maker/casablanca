@@ -92,6 +92,9 @@ export type BatchJob3DProps = {
    *  novo). Diferente de `children`, aparece mesmo com o card minimizado: o
    *  user clicou pra editar ESTA task, então não pode depender de lembrar de
    *  expandir. Enquanto ele existe, o card abre sozinho. */
+  /** SELOS do que foi aplicado neste vídeo (31.08): decupagem, legenda, zoom.
+   *  Ícone puro, sem texto — o `title` conta a história no hover. */
+  selos?: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom'; title: string }>;
   topPanel?: React.ReactNode;
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
    *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
@@ -495,6 +498,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     defaultMinimized = true,
     extraActions,
     channels,
+    selos,
     topPanel,
   } = props;
 
@@ -619,6 +623,32 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       title={`Canal: ${ch.label}`}
                     >
                       {ch.label}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+              {selos && selos.length > 0 ? (
+                <span className="flex shrink-0 items-center gap-1">
+                  {selos.map((sl) => (
+                    <span key={sl.tipo} className={`selo-aplicado is-${sl.tipo}`} title={sl.title}>
+                      {sl.tipo === 'decupagem' ? (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+                          <line x1="20" y1="4" x2="8.12" y2="15.88" />
+                          <line x1="14.47" y1="14.48" x2="20" y2="20" />
+                          <line x1="8.12" y1="8.12" x2="12" y2="12" />
+                        </svg>
+                      ) : sl.tipo === 'legenda' ? (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <rect x="3" y="5" width="18" height="14" rx="2" />
+                          <path d="M7 14h4M14 14h3" />
+                        </svg>
+                      ) : (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H8M16 4h3.5A1.5 1.5 0 0 1 21 5.5V8M21 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H4.5A1.5 1.5 0 0 1 3 18.5V16" />
+                          <circle cx="12" cy="12" r="2.6" />
+                        </svg>
+                      )}
                     </span>
                   ))}
                 </span>

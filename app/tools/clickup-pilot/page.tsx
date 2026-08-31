@@ -1621,6 +1621,31 @@ function ClickUpPilotInner() {
   captionTemplatesRef.current = captionTemplates;
 
   /**
+   * SELOS do card (31.08): o que este vídeo LEVOU, em ícone puro. Lê a mesma
+   * config que o disparo usou (com o fallback pra task mãe e pro padrão da
+   * conta), então o selo nunca promete o que não foi aplicado.
+   */
+  function selosDoCard(taskId: string): Array<{ tipo: 'decupagem' | 'legenda' | 'zoom'; title: string }> {
+    const cfgId = taskIdBaseDaVersao(taskId);
+    const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
+    const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
+    const out: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom'; title: string }> = [];
+    if (isDecupagemEnabled(cfgId) || isDecupagemEnabled(taskId)) {
+      out.push({ tipo: 'decupagem', title: `Decupado — silêncios cortados (${getDecupIntensity(cfgId).toFixed(2)}s de respiro)` });
+    }
+    if (leg.on) {
+      const tpl = captionTemplatesRef.current.find((t) => t.id === leg.templateId);
+      out.push({ tipo: 'legenda', title: `Legendado — ${tpl?.name || 'modelo padrão'}, corrigido pela copy do doc` });
+    }
+    if (zm.on) {
+      const movimento = zm.modo === 'in' ? 'zoom in' : zm.modo === 'out' ? 'zoom out' : 'zoom in e out';
+      const forca = zm.forca === 'misto' ? 'leve↔forte' : zm.forca;
+      out.push({ tipo: 'zoom', title: `Com dinâmica de zoom — ${movimento}, ${forca}` });
+    }
+    return out;
+  }
+
+  /**
    * O `posProcessar` desta task, pronto pro pipeline. `null` quando os dois
    * toggles estão desligados — aí o estágio nem roda.
    *
@@ -12024,6 +12049,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               taskId={b.taskId}
                               taskName={b.taskName}
                               channels={channels}
+                              selos={selosDoCard(b.taskId)}
                               phase={b.phase as any}
                               partsTotal={b.parts.length}
                               partsDispatched={partsDispatched}

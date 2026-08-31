@@ -22,7 +22,15 @@ import {
 /** Mesmo shape do ZoomSeg do render (lib/typography/export) — declarado aqui
  *  pra este módulo compilar SOZINHO no harness de teste, sem arrastar o
  *  export.ts (que puxa mp4box/WebCodecs). Tipagem estrutural garante o par. */
-export type ZoomSeg = { start: number; end: number; from: number; to: number };
+export type ZoomSeg = {
+  start: number;
+  end: number;
+  from: number;
+  to: number;
+  /** instante em que a rampa TERMINA; daí até `end` a escala fica parada em
+   *  `to`, pro movimento resolver ANTES do corte. Ausente = rampa até `end`. */
+  rampaAte?: number;
+};
 
 /* ═══════════════════════════ configs (persistidas) ═══════════════════════ */
 
@@ -58,6 +66,15 @@ export const ZOOM_AMP: Record<Exclude<ZoomForca, 'misto'>, number> = {
 const CADENCIA_SEC = 8;
 /** Segmento mais curto que isto funde com o vizinho (zoom não "pisca"). */
 const SEG_MIN_SEC = 1.5;
+/**
+ * RESPIRO ANTES DO CORTE (31.08). O movimento tem que RESOLVER antes do corte
+ * e ficar parado até ele — zoom cruzando um corte é a marca de edição
+ * automática. Fração da janela reservada pro descanso, com piso e teto em
+ * segundos pra valer tanto no take de 2s quanto no de 40s.
+ */
+const RESPIRO_FRACAO = 0.18;
+const RESPIRO_MIN_SEC = 0.25;
+const RESPIRO_MAX_SEC = 0.9;
 
 /** Fronteiras (fim de cada trecho) a partir das durações das partes. */
 export function fronteirasDasPartes(partesSec: number[]): number[] {
@@ -83,11 +100,41 @@ export function fronteirasDasPartes(partesSec: number[]): number[] {
  *  - modo `inout`: alterna in/out por janela.
  *  - força `misto`: alterna leve/forte por janela.
  */
-export function planejarZoom(cfg: ZoomCfg, durSec: number, partesSec: number[] | null | undefined): ZoomSeg[] {
+export function planejarZoom(
+  cfg: ZoomCfg,
+  durSec: number,
+  partesSec: number[] | null | undefined,
+  /** cortes INTERNOS de cada parte (decupagem), na mesma ordem de `partesSec`.
+   *  Cada item é a lista de durações dos pedaços daquela parte. O zoom nunca
+   *  atravessa nenhum deles. */
+  cortesInternosSec?: number[][] | null,
+): ZoomSeg[] {
   if (!cfg.on || !(durSec > 0.5)) return [];
 
+  // ── TODAS as fronteiras de corte: as das partes MAIS as da decupagem ──
+  // Um corte da decupagem é jump cut igual ao de troca de take: o zoom não
+  // pode passar por cima dele. Sem os internos, a rampa de um BODY de 40s
+  // cruzava os 6 cortes de silêncio que a decupagem fez lá dentro.
+  const partes = partesSec || [];
+  const finas: number[] = [];
+  let base = 0;
+  for (let i = 0; i < partes.length; i++) {
+    const internos = cortesInternosSec?.[i];
+    if (internos && internos.length > 1) {
+      let acc = 0;
+      for (const d of internos) {
+        if (!(d > 0) || !isFinite(d)) { finas.length = 0; break; }
+        acc += d;
+        finas.push(base + acc);
+      }
+    } else if (partes[i] > 0 && isFinite(partes[i])) {
+      finas.push(base + partes[i]);
+    }
+    base += partes[i] || 0;
+  }
+
   // janelas: partes reais quando batem com o vídeo; senão cadência
-  let bordas = fronteirasDasPartes(partesSec || []);
+  let bordas = finas.length ? finas : fronteirasDasPartes(partes);
   const soma = bordas.length ? bordas[bordas.length - 1] : 0;
   const confiaveis = bordas.length > 0 && Math.abs(soma - durSec) <= Math.max(1.5, durSec * 0.12);
   if (!confiaveis) {
@@ -121,7 +168,21 @@ export function planejarZoom(cfg: ZoomCfg, durSec: number, partesSec: number[] |
   return janelas.map((j, i) => {
     const amp = ampDe(i);
     const zoomIn = cfg.modo === 'in' || (cfg.modo === 'inout' && i % 2 === 0);
-    return { start: j.start, end: j.end, from: zoomIn ? 1 : amp, to: zoomIn ? amp : 1 };
+    // A RAMPA TERMINA ANTES DO CORTE: `end` recua o respiro e, do respiro até
+    // o corte, o `zoomScaleAt` segura a escala final (a janela continua
+    // cobrindo o trecho, só que já resolvida). É o que separa "zoom de editor"
+    // de "zoom automático atravessando corte".
+    const dur = j.end - j.start;
+    const respiro = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, dur * RESPIRO_FRACAO));
+    // janela curta demais pra ter respiro: encurta a rampa pela metade
+    const fimRampa = dur > respiro * 2 ? j.end - respiro : j.start + dur / 2;
+    return {
+      start: j.start,
+      end: j.end,
+      rampaAte: fimRampa,
+      from: zoomIn ? 1 : amp,
+      to: zoomIn ? amp : 1,
+    };
   });
 }
 
