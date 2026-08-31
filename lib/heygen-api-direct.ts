@@ -800,6 +800,15 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
   //   source_type:"avatar_video_shortcut_modal"
   //   avatar_settings: { use_avatar_iv_model:false, use_unlimited_mode:true }
   if (voiceMirroring) {
+    // O espelho tem submit PROPRIO (sts_pending, Avatar III) — engine e gesto
+    // escolhidos nao viajam nele. Grita no console em vez de sumir calado.
+    if (engine !== 'iii' || motionPrompt) {
+      console.warn(
+        `[HeyGen] Espelhamento de Voz sai em Avatar III: o motor ${eng.label}` +
+          (motionPrompt ? ' e o gesto pedido' : '') +
+          ` nao entram no submit sts_pending ("${title}").`,
+      );
+    }
     if (!voiceId) {
       // Sem voz alvo o STS nao tem pra onde converter -> HeyGen cairia na
       // voz original. Falha CLARA em vez de entregar voz errada de novo.

@@ -8315,7 +8315,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
   /** Análise assíncrona do áudio: sobe pro HeyGen (fast_asr embutido no
    *  uploadAudio) e compara com a copy das partes DESTE avatar. */
-  async function analisarAudioUpado(audioKey: string, file: File, copyDoAvatar: string) {
+  async function analisarAudioUpado(
+    audioKey: string,
+    file: File,
+    copyDoAvatar: string,
+    taskId?: string,
+    roleIdx?: number,
+  ) {
     setRoleAudioInfo((p) => ({ ...p, [audioKey]: { status: 'analisando' } }));
     try {
       const [{ uploadAudio }, { compararCopyComAudio, normalizarPalavrasAsr }] = await Promise.all([
@@ -8338,6 +8344,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           duracao: up.duration,
         },
       }));
+      // O ASR mede a duração de graça: é a rede de segurança da REGRA DOS 30s
+      // quando o metadado local não veio (aba oculta não carrega mídia).
+      if (taskId != null && roleIdx != null) {
+        adotarDuracaoDoAudio(taskId, roleIdx, audioKey, up.duration);
+      }
     } catch (e) {
       // Análise é ADVISORY: falhar aqui não impede o disparo (o upload de
       // verdade acontece de novo no runner, take a take).
@@ -8408,12 +8419,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       console.warn('[clickup-pilot] áudio não foi pro IDB (F5 perderia):', e);
     }
     roleAudioRef.current[audioKey] = { file };
-    // Duração ANTES de pendurar no slot: é ela que decide take único (≤30s)
-    // vs divisão — e precisa estar no plano já no primeiro disparo.
-    const dur = await medirDuracaoDoAudio(file);
-    updateRoleSlot(taskId, roleIdx, { audioKey, audioName: file.name, audioDur: dur });
+    // O arquivo entra no card NA HORA — a medição vem logo atrás. Antes ela
+    // vinha primeiro e, em aba oculta, o card ficava 8s vazio esperando o
+    // timeout do <video> (que lá nunca carrega mídia).
+    updateRoleSlot(taskId, roleIdx, { audioKey, audioName: file.name, audioDur: null });
     setError(null);
-    void analisarAudioUpado(audioKey, file, copyDoSlot(a, roleIdx));
+    void analisarAudioUpado(audioKey, file, copyDoSlot(a, roleIdx), taskId, roleIdx);
+    // Duração: é ela que decide take único (≤30s) vs divisão, e precisa estar
+    // no plano já no primeiro disparo. Quando o <video> não mede (aba oculta,
+    // codec exótico), quem preenche é o ASR — ver adotarDuracaoDoAudio.
+    const dur = await medirDuracaoDoAudio(file);
+    if (dur) adotarDuracaoDoAudio(taskId, roleIdx, audioKey, dur);
+  }
+
+  /** Grava a duração do áudio no slot — de onde quer que ela tenha vindo
+   *  (metadado local ou ASR do HeyGen). É ela que faz a REGRA DOS 30s valer
+   *  no DISPARO: sem duração, o `_takeUnico` não colapsa e um áudio curto
+   *  sairia picotado mesmo com o card prometendo "vai inteiro".
+   *  Só escreve se o slot ainda for DESTE arquivo (o user pode ter trocado no
+   *  meio) e se ainda não houver duração — a medição local, quando vem, é a
+   *  primeira e manda. */
+  function adotarDuracaoDoAudio(taskId: string, roleIdx: number, audioKey: string, dur: number) {
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      const slot = a?.roleSlots?.[roleIdx];
+      if (!slot || slot.audioKey !== audioKey || (slot.audioDur ?? 0) > 0) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...a,
+          roleSlots: a.roleSlots!.map((s, i) => (i === roleIdx ? { ...s, audioDur: dur } : s)),
+        },
+      };
+    });
   }
 
   function removerAudioDoSlot(taskId: string, roleIdx: number) {
@@ -8604,6 +8643,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             youtube: slot.avatarYoutube || null,
           }, canal)
         : null;
+      // Duração do áudio do slot — a MESMA que o card mostra: medida local, e
+      // quando ela falta, a que o ASR do HeyGen devolveu. Ter duas fontes aqui
+      // e lá era o que fazia o card prometer "vai inteiro" e o disparo picotar.
+      const audioDurSlot =
+        slot?.audioDur ?? (slot?.audioKey ? roleAudioInfo[slot.audioKey]?.duracao ?? null : null);
       return {
         label: pt.label,
         text: pt.text,
@@ -8640,7 +8684,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // script + voz), então lá a chave nem entra.
         audioKey: !slot?.imageMode ? (slot?.audioKey || null) : null,
         audioName: !slot?.imageMode ? (slot?.audioName || null) : null,
-        audioDur: !slot?.imageMode ? (slot?.audioDur ?? null) : null,
+        audioDur: !slot?.imageMode ? audioDurSlot : null,
         audioMirror: !slot?.imageMode ? !!slot?.audioMirror : false,
         audioParte: false,
         // Preview do briefing pro painel de reiniciar (quem o copy pediu).
@@ -8659,7 +8703,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           engine: (slot?.engine as 'III' | 'IV' | 'V') || 'III',
           motionPrompt: (slot?.motionPrompt || '').trim() || null,
           imageMode: !!slot?.imageMode,
-        }) || (!slot?.imageMode && !!slot?.audioKey && (slot?.audioDur ?? 0) > 0 && (slot!.audioDur as number) <= 30),
+        }) || (!slot?.imageMode && !!slot?.audioKey && (audioDurSlot ?? 0) > 0 && (audioDurSlot as number) <= 30),
       };
     });
     // TAKE ÚNICO por slot quando a cena NÃO é Avatar III.
@@ -13918,7 +13962,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                             {dur ? `${Math.round(dur)}s · ` : ''}
                                                             {takeUnicoAudio
                                                               ? (curto && motorAudio === 'III' ? 'até 30s: vai inteiro, sem dividir' : `Avatar ${motorAudio}: vai inteiro num take único`)
-                                                              : `divido em ${partsCount || 1} takes pelas pausas, sem cortar fala`}
+                                                              : `dividido em ${partsCount || 1} takes pelas pausas, sem cortar fala`}
                                                           </div>
                                                         </div>
                                                         {/* Motor da cena: com áudio, o seletor mora AQUI (o
@@ -14078,6 +14122,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                             {slot.audioMirror ? 'sai na voz selecionada, com a cadência do arquivo' : 'a voz do take é a do próprio áudio'}
                                                           </span>
                                                         )}
+                                                        {/* O espelho é um submit PRÓPRIO (sts_pending) e sai
+                                                          * sempre no Avatar III — sem isso o chip dizia IV/V e
+                                                          * o HeyGen recebia III, calado. */}
+                                                        {slot.audioMirror && motorAudio !== 'III' ? (
+                                                          <span className="text-[11px] font-semibold text-amber-500">
+                                                            o espelho sai em Avatar III — o {motorAudio} não vale neste take
+                                                          </span>
+                                                        ) : null}
                                                       </div>
                                                     </div>
                                                   )}
