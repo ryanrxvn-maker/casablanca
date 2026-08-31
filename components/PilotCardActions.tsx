@@ -152,6 +152,20 @@ export const IconCamuflagem = ({ size = 16 }: { size?: number }) => (
     <path d="M4 15c2 3 6 3 8 0s6-3 8 0" />
   </svg>
 );
+export const IconLegenda = ({ size = 16 }: { size?: number }) => (
+  // Legenda: retangulo de video com a faixa de texto embaixo.
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M7 15h4M13 15h4M7 11h10" opacity="0.55" />
+  </svg>
+);
+export const IconZoomDinamica = ({ size = 16 }: { size?: number }) => (
+  // Zoom: cantos puxando pra dentro (push-in).
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
+    <path d="M9.5 9.5 12 12m0 0 2.5 2.5M12 12l2.5-2.5M12 12l-2.5 2.5" opacity="0.7" />
+  </svg>
+);
 export const IconNivelar = ({ size = 16 }: { size?: number }) => (
   // Barras iguais sob uma regua: e' o que o normalizador faz — poe todo mundo
   // no MESMO patamar (nao e' "volume", e' NIVELAR).

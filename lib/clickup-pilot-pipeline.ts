@@ -33,7 +33,7 @@ export type AssembledPart = {
   /** Blob apos decupagem + camuflagem audio */
   camuflado?: Blob;
   /** Erros por estagio */
-  errors?: { assemble?: string; nivelamento?: string; decupagem?: string; camuflagem?: string };
+  errors?: { assemble?: string; nivelamento?: string; decupagem?: string; camuflagem?: string; posproducao?: string };
   /** Labels de partes ESPERADAS (expected:true) que faltaram blob e foram
    *  puladas → a montagem saiu INCOMPLETA ("faltando texto"). Se preenchido,
    *  a task NUNCA deve marcar 100% pronto nem liberar download limpo. */
@@ -41,7 +41,7 @@ export type AssembledPart = {
 };
 
 export type PipelineProgress = {
-  stage: 'assembling' | 'regulando' | 'decupando' | 'camuflando' | 'done';
+  stage: 'assembling' | 'regulando' | 'decupando' | 'posproduzindo' | 'camuflando' | 'done';
   currentFilename?: string;
   doneCount: number;
   totalCount: number;
@@ -74,6 +74,15 @@ export type PipelineInputs = {
   /** Callback de progresso */
   onProgress?: (p: PipelineProgress) => void;
 
+  /** ── PÓS-PRODUÇÃO (legenda automática + dinâmica de zoom, 30.08) ──
+   *  Roda DEPOIS da decupagem e ANTES da camuflagem, no vídeo que vai ser
+   *  entregue — assim a versão camuflada sai legendada/zoomada também, com
+   *  UM render só. É REALCE: devolver null (ou lançar) mantém o montado
+   *  original e vira aviso, nunca bloqueio. `partesSec` são as durações das
+   *  partes na ordem final (fronteiras reais pro reset do zoom); null quando
+   *  não deu pra medir. */
+  posProcessar?: (blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>;
+
   /** ── Cache de clips intermediários por PARTE (acelera RETOMAR/rebuild) ──
    *  Nivelar e decupar cada parte é o trabalho pesado (ffmpeg-wasm). Num
    *  re-run (RETOMAR/Atualizar montagem) o conteúdo das partes é o MESMO, então
@@ -87,6 +96,27 @@ export type PipelineInputs = {
   loadCachedClip?: (kind: 'leveled' | 'decupado', label: string) => Promise<Blob | null>;
   saveCachedClip?: (kind: 'leveled' | 'decupado', label: string, blob: Blob) => Promise<void>;
 };
+
+/** Duração (s) de um blob de vídeo via metadata do <video> — 0 se não deu.
+ *  Best-effort: usado só pras fronteiras do zoom; falhou, o plano cai na
+ *  cadência fixa (nunca bloqueia a entrega). */
+async function blobDurSec(blob: Blob): Promise<number> {
+  if (typeof document === 'undefined') return 0;
+  const url = URL.createObjectURL(blob);
+  try {
+    return await new Promise<number>((resolve) => {
+      const v = document.createElement('video');
+      const timer = setTimeout(() => resolve(0), 8000);
+      v.preload = 'metadata';
+      v.muted = true;
+      v.onloadedmetadata = () => { clearTimeout(timer); resolve(isFinite(v.duration) && v.duration > 0 ? v.duration : 0); };
+      v.onerror = () => { clearTimeout(timer); resolve(0); };
+      v.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 /** Insere "G<N>" antes do sufixo final do baseAdId. Ex:
  *  ('AD140GL', 1) -> 'AD140G1GL'
@@ -206,7 +236,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
   // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
   // sem soar robotico — feedback do user em 12/05/2026.
-  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, nivelarVoz = true, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
+  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, nivelarVoz = true, onProgress, posProcessar, readClipCache = false, loadCachedClip, saveCachedClip } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
@@ -738,6 +768,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       // deixa o rawAssembled como entrega (montado sem corte).
       console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: 0/${leveled.length} partes cortadas — entregando montado sem decupagem`);
       item.errors = { ...item.errors, decupagem: 'nenhuma parte com fala detectável pra decupar' };
+      (item as any)._partesFinais = leveled; // o entregue é o concat das niveladas
       item._leveledParts = undefined;
       continue;
     }
@@ -769,6 +800,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       // no montado completo já verificado), nunca entrega decupado quebrado.
       dec = await verifyConcatSync(dec, decupadoParts, `decup ${item.filename}`);
       item.decupado = dec;
+      // As partes DECUPADAS na ordem final — é delas que sai a fronteira de
+      // cada take pro plano de zoom da pós-produção (reset em corte real).
+      (item as any)._partesFinais = decupadoParts;
       console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${cutCount}/${leveled.length} partes cortadas · ${(dec.size / (1024 * 1024)).toFixed(1)}MB`);
     } catch (e) {
       console.error(`[clickup-pilot-pipeline] decup ${item.filename}: concat dos decupados FAIL`, e);
@@ -795,6 +829,51 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         item.decupado = item.rawAssembled;       // fallback: entrega montado completo → task conclui
         console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: SEM corte — entregue montado COMPLETO (task conclui, decupagem é realce)`);
       }
+    }
+  }
+
+  // === Stage 2.5: PÓS-PRODUÇÃO (legenda automática + dinâmica de zoom) ===
+  // No vídeo QUE VAI SER ENTREGUE (decupado quando existe, senão o montado),
+  // antes da camuflagem — assim o camuflado herda legenda/zoom com um render
+  // só. REALCE, nunca conteúdo: falha vira `errors.posproducao` (aviso) e o
+  // vídeo original segue inteiro.
+  if (posProcessar) {
+    for (let g = 0; g < out.length; g++) {
+      const item = out[g] as AssembledPart & { _leveledParts?: Blob[] };
+      if (item.errors?.assemble) continue;
+      const src = item.decupado || item.rawAssembled;
+      if (!src || src.size === 0) continue;
+      onProgress?.({ stage: 'posproduzindo', currentFilename: item.filename, doneCount: g, totalCount: total });
+
+      // Fronteiras: partes finais da decupagem, ou as niveladas (decup OFF).
+      const partesBlobs: Blob[] = (item as any)._partesFinais || item._leveledParts || [];
+      let partesSec: number[] | null = null;
+      if (partesBlobs.length > 0) {
+        const durs: number[] = [];
+        for (const b of partesBlobs) {
+          const d = await blobDurSec(b);
+          if (!(d > 0)) { partesSec = null; break; }
+          durs.push(d);
+          partesSec = durs;
+        }
+      }
+
+      try {
+        const novo = await posProcessar(src, { filename: item.filename, partesSec });
+        if (novo && novo.size > 50_000) {
+          // O entregue passa a ser o pós-produzido. `decupado` é o campo que o
+          // downstream prefere (camuflado ?? decupado ?? rawAssembled), então
+          // vale também com decupagem desligada — rawAssembled fica intocado.
+          item.decupado = novo;
+          console.log(`[clickup-pilot-pipeline] posprod ${item.filename}: OK ${(novo.size / (1024 * 1024)).toFixed(1)}MB`);
+        }
+      } catch (e) {
+        const msg = (e as Error)?.message?.slice(0, 120) || 'falhou';
+        console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: ${msg} — entregue sem legenda/zoom`);
+        item.errors = { ...item.errors, posproducao: `legenda/zoom não aplicados: ${msg}` };
+      }
+      (item as any)._partesFinais = undefined;
+      item._leveledParts = undefined;
     }
   }
 

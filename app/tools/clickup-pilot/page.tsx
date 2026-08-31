@@ -91,6 +91,14 @@ import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 // Botao 3D de VERSOES no card do disparo: uma lista so pra todas as
 // versoes do AD (baixar/ver/renomear), em vez de N cards soltos na fila.
 import { FrameDaVersao } from '@/components/FrameDaVersao';
+import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
+import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
+import {
+  LEGENDA_CFG_DEFAULT,
+  ZOOM_CFG_DEFAULT,
+  type LegendaCfg,
+  type ZoomCfg,
+} from '@/lib/pilot-pos-producao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import type { IndicacaoAvatar, IndicacaoCopy } from '@/lib/pilot-indicacoes';
 // VERSÕES do AD (1..10) — generaliza o "2 versões" sem desfazer o caminho
@@ -112,6 +120,8 @@ import {
   IconScissors as PilotIconScissors,
   IconCamuflagem,
   IconNivelar,
+  IconLegenda,
+  IconZoomDinamica,
   IconDoc as PilotIconDoc,
   IconPlay as PilotIconPlay,
   IconX as PilotIconX,
@@ -1552,6 +1562,104 @@ function ClickUpPilotInner() {
       return next;
     });
   };
+
+  /* ═══════════ LEGENDA AUTOMÁTICA + DINÂMICA DE ZOOM (30.08) ═══════════
+   *  Dois toggles por task, ao lado da tesoura. Rodam no pipeline DEPOIS da
+   *  decupagem, no vídeo que vai ser entregue. São REALCE: falha vira aviso e
+   *  o montado sai inteiro do mesmo jeito. As escolhas persistem em
+   *  localStorage (igual decupagem/normalizador) e o PADRÃO da conta fica na
+   *  chave `:default` — é o "pré-configurar" do zoom. */
+  const LEGENDA_KEY = 'darkolab:clickup-pilot:legenda';
+  const ZOOM_KEY = 'darkolab:clickup-pilot:zoom';
+  const CHAVE_PADRAO = ':default';
+
+  const { templates: captionTemplates } = useCaptionTemplates();
+
+  const [legendaCfgs, setLegendaCfgs] = useState<Record<string, LegendaCfg>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(LEGENDA_KEY) || '{}'); } catch { return {}; }
+  });
+  const [zoomCfgs, setZoomCfgs] = useState<Record<string, ZoomCfg>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(ZOOM_KEY) || '{}'); } catch { return {}; }
+  });
+
+  /** Config da task; sem escolha própria, herda o PADRÃO da conta. */
+  const getLegendaCfg = (taskId: string): LegendaCfg =>
+    legendaCfgs[taskId] || legendaCfgs[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
+  const getZoomCfg = (taskId: string): ZoomCfg =>
+    zoomCfgs[taskId] || zoomCfgs[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
+
+  const setLegendaCfg = (taskId: string, cfg: LegendaCfg, virarPadrao = false) => {
+    setLegendaCfgs((prev) => {
+      const next = { ...prev, [taskId]: cfg };
+      if (virarPadrao) next[CHAVE_PADRAO] = cfg;
+      try { localStorage.setItem(LEGENDA_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const setZoomCfg = (taskId: string, cfg: ZoomCfg, virarPadrao = false) => {
+    setZoomCfgs((prev) => {
+      const next = { ...prev, [taskId]: cfg };
+      if (virarPadrao) next[CHAVE_PADRAO] = cfg;
+      try { localStorage.setItem(ZOOM_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  /** Qual popover está aberto ('legenda' | 'zoom') por task. */
+  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | null>>({});
+  const legendaBtnRefs = useRef<Record<string, HTMLElement | null>>({});
+  const zoomBtnRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  /** Refs pro runner (roda fora do ciclo de render). */
+  const legendaCfgsRef = useRef(legendaCfgs);
+  legendaCfgsRef.current = legendaCfgs;
+  const zoomCfgsRef = useRef(zoomCfgs);
+  zoomCfgsRef.current = zoomCfgs;
+  const captionTemplatesRef = useRef(captionTemplates);
+  captionTemplatesRef.current = captionTemplates;
+
+  /**
+   * O `posProcessar` desta task, pronto pro pipeline. `null` quando os dois
+   * toggles estão desligados — aí o estágio nem roda.
+   *
+   * A copy vem do REPLAN persistido (é o que de fato virou take, sobrevive a
+   * F5 e é o mesmo texto que o HeyGen falou), com fallback pra análise viva.
+   */
+  function fazerPosProcessar(taskId: string): ((blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>) | undefined {
+    // Versão irmã (-yt / -v3...) herda a config da task MÃE — é nela que o
+    // user clicou os botões; a irmã nem aparece na lista.
+    const cfgId = taskIdBaseDaVersao(taskId);
+    const legenda = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
+    const zoom = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
+    if (!legenda.on && !zoom.on) return undefined;
+    return async (blob, info) => {
+      const rp = batchStatesRef.current?.[taskId]?.replan?.parts;
+      const an = taskAnalysesRef.current?.[taskId];
+      const partes = (rp && rp.length ? rp : an?.partTemplates || []).map((x: any) => ({
+        label: String(x.label || ''),
+        text: String(x.text || ''),
+      }));
+      const { montarPosProducao } = await import('@/lib/pilot-pos-producao-run');
+      // Idioma do ASR: o drLang só existe no fluxo DR MILLION (e o default
+      // dele é 'pl'!) — task B2C transcreveria em polonês. Fora do DR
+      // MILLION, é pt.
+      const ehDrMillion = !!an?.drMillion;
+      const r = await montarPosProducao(blob, info, {
+        legenda,
+        zoom,
+        partes,
+        idioma: ehDrMillion && drLangRef.current === 'pl' ? 'pl' : 'pt',
+        templates: captionTemplatesRef.current,
+        onEtapa: (msg) => {
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `${info.filename} · ${msg}` } }));
+        },
+      });
+      for (const av of r.avisos) console.warn(`[clickup-pilot] posprod ${taskId}: ${av}`);
+      return r.blob;
+    };
+  }
 
   // FRAME × AVATAR por VERSÃO (30.08) — override de UI. A VERDADE é a
   // escolha gravada (avatarId → avatar; imageKey → frame); isto só decide o
@@ -4468,6 +4576,7 @@ function ClickUpPilotInner() {
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
           nivelarVoz: isNivelamentoEnabled(taskId),
+          posProcessar: fazerPosProcessar(taskId),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
@@ -5295,6 +5404,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
           nivelarVoz: isNivelamentoEnabled(taskId),
+          posProcessar: fazerPosProcessar(taskId),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
@@ -6931,6 +7041,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         decupagem: isDecupagemEnabled(taskId),
         keepSilenceSec: getDecupIntensity(taskId),
         nivelarVoz: isNivelamentoEnabled(taskId),
+        posProcessar: fazerPosProcessar(taskId),
         camuflagem: _tc.camuflagem,
         whiteAudio: _tc.whiteAudio,
         camuflagemVolume: _tc.camuflagemVolume,
@@ -12478,6 +12589,72 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         : 'Normalizador de volume OFF — o volume sai como veio do HeyGen'}
                                       onClick={() => setNivelamentoFor(a.taskId, !isNivelamentoEnabled(a.taskId))}
                                     />
+                                    {/* LEGENDA AUTOMÁTICA (30.08). O clique abre a mini
+                                        janela: liga/desliga + escolhe o MODELO das Legendas
+                                        Automáticas. Aplica depois de montar e decupar, com
+                                        correção pela copy do doc — hook e body cada um no
+                                        estilo do modelo. */}
+                                    {(() => {
+                                      const cfg = getLegendaCfg(a.taskId);
+                                      const aberto = posPopover[a.taskId] === 'legenda';
+                                      return (
+                                        <span className="relative inline-flex" ref={(el) => { legendaBtnRefs.current[a.taskId] = el; }}>
+                                          <PilotBtn3D
+                                            icon={<IconLegenda size={16} />}
+                                            color={cfg.on ? 'amber' : 'neutral'}
+                                            active={cfg.on}
+                                            title={cfg.on
+                                              ? `Legenda automática ON · modelo: ${captionTemplates.find((t) => t.id === cfg.templateId)?.name || '?'} — clica pra ajustar`
+                                              : 'Legenda automática OFF — clica pra ligar e escolher o modelo'}
+                                            onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'legenda' }))}
+                                          />
+                                          {aberto ? (
+                                            <LegendaZoomPopover
+                                              tipo="legenda"
+                                              anchor={legendaBtnRefs.current[a.taskId]}
+                                              onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                                              legenda={cfg}
+                                              zoom={getZoomCfg(a.taskId)}
+                                              templates={captionTemplates}
+                                              onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
+                                              onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
+                                            />
+                                          ) : null}
+                                        </span>
+                                      );
+                                    })()}
+                                    {/* DINÂMICA DE ZOOM (30.08). Mini janela: in/out/in+out
+                                        e a intensidade (leve/médio/forte/misto). O reset da
+                                        escala cai na troca de take — corte real. */}
+                                    {(() => {
+                                      const cfg = getZoomCfg(a.taskId);
+                                      const aberto = posPopover[a.taskId] === 'zoom';
+                                      return (
+                                        <span className="relative inline-flex" ref={(el) => { zoomBtnRefs.current[a.taskId] = el; }}>
+                                          <PilotBtn3D
+                                            icon={<IconZoomDinamica size={16} />}
+                                            color={cfg.on ? 'violet' : 'neutral'}
+                                            active={cfg.on}
+                                            title={cfg.on
+                                              ? `Dinâmica de zoom ON · ${cfg.modo === 'in' ? 'zoom in' : cfg.modo === 'out' ? 'zoom out' : 'in e out'} · ${cfg.forca} — clica pra ajustar`
+                                              : 'Dinâmica de zoom OFF — clica pra ligar e escolher movimento e intensidade'}
+                                            onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'zoom' }))}
+                                          />
+                                          {aberto ? (
+                                            <LegendaZoomPopover
+                                              tipo="zoom"
+                                              anchor={zoomBtnRefs.current[a.taskId]}
+                                              onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                                              legenda={getLegendaCfg(a.taskId)}
+                                              zoom={cfg}
+                                              templates={captionTemplates}
+                                              onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
+                                              onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
+                                            />
+                                          ) : null}
+                                        </span>
+                                      );
+                                    })()}
                                     {/* Camuflagem toggle (per-task) */}
                                     <PilotBtn3D
                                       icon={<IconCamuflagem size={16} />}

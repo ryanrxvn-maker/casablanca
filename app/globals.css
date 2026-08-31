@@ -3512,3 +3512,199 @@ html[data-theme='light'] .ver-modo-btn:hover {
   background: rgba(16, 16, 24, 0.09);
   box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.3);
 }
+
+/* ═══════════ Mini janelas: LEGENDA AUTOMÁTICA e DINÂMICA DE ZOOM ═══════════
+   ClickUp Pilot, 30.08. Vivem em portal (o card tem transform 3D), então o
+   CSS mora aqui — styled-jsx não atravessa portal. */
+.lz-fora {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+}
+.lz-pop {
+  position: fixed;
+  z-index: 2147483001;
+  width: 288px;
+  max-height: min(72vh, 560px);
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(12, 14, 18, 0.97);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 26px 60px -18px rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(10px);
+  animation: lzAbre 0.2s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+html[data-theme='light'] .lz-pop {
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 16, 24, 0.1),
+    0 26px 60px -22px rgba(16, 16, 24, 0.45);
+}
+@keyframes lzAbre {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .lz-pop { animation: none; } }
+
+.lz-titulo {
+  font-family: var(--font-label), var(--font-display), system-ui;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--text));
+}
+.lz-texto {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(var(--text-muted));
+}
+
+/* switch ligado/desligado */
+.lz-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border-radius: 999px;
+  padding: 5px 12px 5px 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: color 0.16s, background-color 0.16s, box-shadow 0.16s;
+}
+html[data-theme='light'] .lz-switch {
+  background: rgba(16, 16, 24, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
+}
+.lz-switch-bola {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  transition: background-color 0.16s, box-shadow 0.16s;
+}
+.lz-switch.is-on {
+  color: #08210f;
+  background: linear-gradient(150deg, #bbf7d0, #4ade80);
+  box-shadow: 0 3px 12px -4px rgba(74, 222, 128, 0.85);
+}
+.lz-switch.is-on .lz-switch-bola {
+  background: #08210f;
+  box-shadow: 0 0 0 3px rgba(8, 33, 15, 0.15);
+}
+
+.lz-lista { margin-top: 12px; transition: opacity 0.16s; }
+.lz-lista.is-off { opacity: 0.4; pointer-events: none; }
+.lz-rotulo {
+  font-family: var(--font-mono), monospace;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--text-dim));
+}
+.lz-rotulo.mt { margin-top: 10px; }
+
+.lz-item {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  border-radius: 10px;
+  padding: 7px 10px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: background-color 0.15s, box-shadow 0.15s, transform 0.15s cubic-bezier(0.32, 0.72, 0, 1);
+}
+html[data-theme='light'] .lz-item {
+  background: rgba(16, 16, 24, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.08);
+}
+.lz-item:hover { transform: translateY(-1px); }
+.lz-item.is-on {
+  background: rgba(34, 211, 238, 0.14);
+  box-shadow: inset 0 0 0 1.5px rgba(34, 211, 238, 0.7);
+}
+html[data-theme='light'] .lz-item.is-on {
+  background: rgba(34, 211, 238, 0.16);
+  box-shadow: inset 0 0 0 1.5px rgba(14, 116, 144, 0.75);
+}
+.lz-item-nome {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgb(var(--text));
+}
+.lz-item-dica {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgb(var(--text-muted));
+}
+.lz-vazio {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: rgb(var(--text-muted));
+}
+
+.lz-grade { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.lz-chip {
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+html[data-theme='light'] .lz-chip {
+  background: rgba(16, 16, 24, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.1);
+}
+.lz-chip:hover { color: rgb(var(--text)); transform: translateY(-1px); }
+.lz-chip.is-on {
+  color: #16092e;
+  background: linear-gradient(150deg, #ddd6fe, #a78bfa);
+  box-shadow: 0 3px 10px -4px rgba(124, 58, 237, 0.9);
+}
+.lz-dica {
+  margin-top: 7px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgb(var(--text-muted));
+}
+
+.lz-padrao {
+  display: inline-flex;
+  margin-top: 12px;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: var(--font-mono), monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  transition: color 0.15s, box-shadow 0.15s;
+}
+html[data-theme='light'] .lz-padrao { box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.18); }
+.lz-padrao:hover {
+  color: rgb(var(--text));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+html[data-theme='light'] .lz-padrao:hover { box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.45); }

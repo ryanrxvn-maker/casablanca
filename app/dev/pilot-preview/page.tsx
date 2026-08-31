@@ -10,11 +10,14 @@
  */
 
 import { notFound } from 'next/navigation';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
 import { EditPartModal } from '@/components/EditPartModal';
+import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
+import { BUILTIN_TEMPLATES } from '@/lib/typography/caption-script';
+import { LEGENDA_CFG_DEFAULT, ZOOM_CFG_DEFAULT, type LegendaCfg, type ZoomCfg } from '@/lib/pilot-pos-producao';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
 import type { Motor, MotorConfig } from '@/lib/motor-config';
 import { FrameDaVersao } from '@/components/FrameDaVersao';
@@ -79,6 +82,135 @@ const TRECHOS_MOCK = [
   { tipo: 'sobrou-no-audio' as const, audio: 'olha só' },
 ];
 
+/**
+ * PROVA E2E da pós-produção: baixa /dev-tiny.mp4 (testsrc2 12s + tom 440Hz),
+ * fabrica palavras sintéticas (sem depender do ASR logado), monta o roteiro
+ * hook×body no Template 1 e renderiza com plano de zoom FORTE modo in.
+ * O que valida: duração preservada, tamanho plausível, legenda desenhada e
+ * o crop do zoom visível (as bordas do testsrc2 somem ao longo da janela).
+ */
+async function rodarProvaE2E(
+  setMsg: (m: string | null) => void,
+  setUrl: (u: string | null) => void,
+) {
+  try {
+    setUrl(null);
+    setMsg('baixando o vídeo de teste…');
+    const blob = await fetch('/dev-tiny.mp4').then((r) => r.blob());
+
+    const [{ renderTypographyVideo }, engine, roteiroMod, blocksMod, presets, pos] = await Promise.all([
+      import('@/lib/typography/export'),
+      import('@/lib/typography/engine'),
+      import('@/lib/typography/caption-script'),
+      import('@/lib/typography/blocks-edit'),
+      import('@/lib/typography/presets'),
+      import('@/lib/pilot-pos-producao'),
+    ]);
+
+    // palavras sintéticas: 24 palavras em 12s (2/s), hook = 6 primeiras
+    const HOOK = 'como transformar um azeite comum barato'.split(' ');
+    const BODY = 'a maioria das pessoas usa errado e joga fora a parte que importa de verdade agora'.split(' ');
+    const todas = [...HOOK, ...BODY];
+    const words = todas.map((t, i) => ({ text: t, start: i * 500, end: i * 500 + 420 }));
+    const grupo = await import('@/lib/typography/group');
+    let blocks = grupo.groupWords(words, 'rapido');
+
+    const segs = pos.montarRoteiro(roteiroMod.TEMPLATE_1, HOOK.join(' '), BODY.join(' '));
+    const aplicado = roteiroMod.applyCaptionScript(blocks, segs, blocksMod.emptyIdentity());
+    blocks = aplicado.blocks;
+    const style = {
+      ...engine.DEFAULT_STYLE,
+      presetId: 'keynote',
+      perBlock: aplicado.blockStyles,
+      highlights: aplicado.highlights,
+      wordStyles: aplicado.wordStyles,
+    };
+
+    const plano = pos.planejarZoom({ on: true, modo: 'in', forca: 'forte' }, 12, [4, 4, 4]);
+    setMsg(`renderizando… (${blocks.length} blocos de legenda, ${plano.length} janelas de zoom)`);
+
+    const t0 = Date.now();
+    const r = await renderTypographyVideo({
+      file: blob,
+      blocks,
+      preset: presets.getPreset('keynote'),
+      style,
+      zoom: plano,
+      onProgress: (pr) => setMsg(`render COM zoom ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
+    });
+    // SEGUNDO render, SEM zoom — é a régua da prova geométrica: no fim da 1ª
+    // janela (t=3.8, escala 1.16), o frame COM zoom tem que casar com o crop
+    // central 1/1.16 do frame SEM zoom, e não com o frame inteiro.
+    const r0 = await renderTypographyVideo({
+      file: blob,
+      blocks,
+      preset: presets.getPreset('keynote'),
+      style,
+      zoom: [],
+      onProgress: (pr) => setMsg(`render SEM zoom ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
+    });
+    setMsg('comparando frames…');
+    const veredito = await provarZoomGeometrico(r.blob, r0.blob);
+    const seg = ((Date.now() - t0) / 1000).toFixed(1);
+    setUrl(URL.createObjectURL(r.blob));
+    setMsg(
+      `${veredito.ok ? 'PROVA OK' : 'PROVA FALHOU'} em ${seg}s · saída ${(r.blob.size / 1e6).toFixed(2)}MB · ${r.width}x${r.height}@${r.fps} · audioOk=${r.audioOk} · blocos=${blocks.length} · zoom=${plano.length} janelas · ${veredito.detalhe}`,
+    );
+  } catch (e) {
+    setMsg(`PROVA FALHOU: ${(e as Error)?.message || e}`);
+  }
+}
+
+/** Compara COM-zoom × SEM-zoom: t~0.2 iguais; t=3.8 o COM tem que ser o crop
+ *  central ampliado do SEM. Tudo em elementos de blob (decodificam sempre). */
+async function provarZoomGeometrico(comZoom: Blob, semZoom: Blob): Promise<{ ok: boolean; detalhe: string }> {
+  const abrir = (b: Blob) =>
+    new Promise<HTMLVideoElement>((resolve, reject) => {
+      const v = document.createElement('video');
+      v.muted = true;
+      v.preload = 'auto';
+      const timer = setTimeout(() => reject(new Error('metadata timeout')), 10_000);
+      v.onloadeddata = () => { clearTimeout(timer); resolve(v); };
+      v.onerror = () => { clearTimeout(timer); reject(new Error('video invalido')); };
+      v.src = URL.createObjectURL(b);
+    });
+  const seek = (v: HTMLVideoElement, t: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(() => resolve(), 4000);
+      const f = () => { clearTimeout(timer); v.removeEventListener('seeked', f); resolve(); };
+      v.addEventListener('seeked', f);
+      v.currentTime = t;
+    });
+  const grab = (v: HTMLVideoElement, crop?: number) => {
+    const c = document.createElement('canvas');
+    c.width = 180; c.height = 320;
+    const g = c.getContext('2d')!;
+    if (crop && crop > 1) {
+      const vw = v.videoWidth, vh = v.videoHeight, sw = vw / crop, sh = vh / crop;
+      g.drawImage(v, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, 180, 320);
+    } else g.drawImage(v, 0, 0, 180, 320);
+    return g.getImageData(0, 0, 180, 320).data;
+  };
+  const sad = (a: Uint8ClampedArray, b: Uint8ClampedArray) => {
+    let s = 0;
+    for (let i = 0; i < a.length; i += 16) s += Math.abs(a[i] - b[i]);
+    return Math.round(s / 1000);
+  };
+  const vz = await abrir(comZoom);
+  const v0 = await abrir(semZoom);
+  await seek(vz, 0.2); await seek(v0, 0.2);
+  const inicioIgual = sad(grab(vz), grab(v0));
+  await seek(vz, 3.8); await seek(v0, 3.8);
+  const fz = grab(vz);
+  const contraInteiro = sad(fz, grab(v0));
+  const contraCrop = sad(fz, grab(v0, 1.16));
+  const ok = inicioIgual < contraInteiro * 0.5 && contraCrop < contraInteiro * 0.6;
+  return {
+    ok,
+    detalhe: `t0.2 dif=${inicioIgual} · t3.8 vs inteiro=${contraInteiro} vs crop1.16=${contraCrop} (crop tem que ganhar)`,
+  };
+}
+
 export default function PilotPreviewDev() {
   if (process.env.NODE_ENV === 'production') notFound();
   return <Conteudo />;
@@ -101,6 +233,13 @@ function Conteudo() {
     { taskId: 't1-yt', n: 2, nome: 'AD03GL - PRPB12 · YouTube · @joshuagonzalezmd', fase: 'rendering', prontos: 5, total: 8 },
     { taskId: 't1-v3', n: 3, nome: 'AD03GL - PRPB12 · Avatar 3 · @tiagorochaog', fase: 'queued', prontos: 0, total: 8 },
   ]);
+  const [lzAberto, setLzAberto] = useState<'legenda' | 'zoom' | null>(null);
+  const lzRef = useRef<HTMLElement | null>(null);
+  const [lzLegenda, setLzLegenda] = useState<LegendaCfg>({ ...LEGENDA_CFG_DEFAULT, on: true });
+  const [lzZoom, setLzZoom] = useState<ZoomCfg>({ ...ZOOM_CFG_DEFAULT, on: true, forca: 'misto' });
+  const lzTemplates = BUILTIN_TEMPLATES;
+  const [provaMsg, setProvaMsg] = useState<string | null>(null);
+  const [provaUrl, setProvaUrl] = useState<string | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
   const [motorCfg, setMotorCfg] = useState<MotorConfig>({ kind: 'individual', perSlot: {} });
   const [slotsDemo, setSlotsDemo] = useState([
@@ -119,6 +258,32 @@ function Conteudo() {
   return (
     <main className="mx-auto grid max-w-[760px] gap-8 px-4 py-10">
       <h1 className="text-lg font-bold text-text">DEV · preview Pilot 29.08</h1>
+
+      {/* ══════════ 0.1 PROVA E2E: LEGENDA + ZOOM no render ══════════ */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">
+          Prova E2E — pós-produção (zoom + legenda) em /dev-tiny.mp4
+        </div>
+        <button
+          type="button"
+          id="prova-e2e"
+          onClick={() => void rodarProvaE2E(setProvaMsg, setProvaUrl)}
+          className="trecho-add"
+        >
+          <span aria-hidden>▶</span>
+          rodar prova e2e
+        </button>
+        {provaMsg ? <div className="mono mt-2 text-[10px] text-text-muted" id="prova-msg">{provaMsg}</div> : null}
+        {provaUrl ? (
+          <div className="mt-2 flex items-start gap-3">
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video id="prova-out" src={provaUrl} controls muted className="h-[320px] rounded-[10px] border border-line" />
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video id="prova-in" src="/dev-tiny.mp4" controls muted className="h-[320px] rounded-[10px] border border-line opacity-70" />
+          </div>
+        ) : null}
+      </section>
+
 
       {/* ══════════ 0. VERSOES (1..10) ══════════ */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
@@ -201,6 +366,31 @@ function Conteudo() {
           onRegenerate={() => setModalAberto(false)}
         />
       ) : null}
+
+      {/* ========== 0.15 MINI JANELAS legenda + zoom ========== */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Legenda automática + dinâmica de zoom</div>
+        <div className="flex gap-2">
+          <button type="button" id="lz-abre-legenda" ref={(el) => { lzRef.current = el || lzRef.current; }} onClick={() => setLzAberto('legenda')} className="trecho-add">
+            <span aria-hidden>Aa</span> mini janela da legenda
+          </button>
+          <button type="button" id="lz-abre-zoom" onClick={() => setLzAberto('zoom')} className="trecho-add">
+            <span aria-hidden>Z</span> mini janela do zoom
+          </button>
+        </div>
+        {lzAberto ? (
+          <LegendaZoomPopover
+            tipo={lzAberto}
+            anchor={lzRef.current}
+            onFechar={() => setLzAberto(null)}
+            legenda={lzLegenda}
+            zoom={lzZoom}
+            templates={lzTemplates}
+            onLegenda={(c) => setLzLegenda(c)}
+            onZoom={(c) => setLzZoom(c)}
+          />
+        ) : null}
+      </section>
 
       {/* ========== 0.2 PAINEL DO OLHINHO ========== */}
       <section>

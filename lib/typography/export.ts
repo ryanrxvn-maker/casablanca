@@ -225,6 +225,7 @@ async function renderFramesByDecode(opts: {
   blocks: Block[];
   preset: TypoPreset;
   style: StyleState;
+  zoom?: ZoomSeg[];
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   W: number;
@@ -242,6 +243,7 @@ async function renderFramesByDecode(opts: {
     blocks,
     preset,
     style,
+    zoom,
     canvas,
     ctx,
     W,
@@ -288,7 +290,7 @@ async function renderFramesByDecode(opts: {
   const emitTick = (src: VideoFrame) => {
     if (!sink) return;
     const t = Math.min(nextTick / FPS + 0.0001, durationSec - 0.001);
-    ctx.drawImage(src, 0, 0, W, H);
+    drawZoomed(ctx, src, src.displayWidth || W, src.displayHeight || H, W, H, zoom, t);
     ctx.filter = 'none';
     drawCaptions(ctx, blocks, preset, style, t * 1000, W, H);
     const vf = new VideoFrame(canvas, {
@@ -473,6 +475,7 @@ async function renderFramesBySeek(opts: {
   durationSec: number;
   codec: string;
   bitrate: number;
+  zoom?: ZoomSeg[];
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob> {
@@ -481,6 +484,7 @@ async function renderFramesBySeek(opts: {
     blocks,
     preset,
     style,
+    zoom,
     canvas,
     ctx,
     W,
@@ -505,7 +509,7 @@ async function renderFramesBySeek(opts: {
       const t = Math.min(i / FPS + 0.0001, durationSec - 0.001);
       await seekVideo(video, t);
 
-      ctx.drawImage(video, 0, 0, W, H);
+      drawZoomed(ctx, video, video.videoWidth || W, video.videoHeight || H, W, H, zoom, t);
       ctx.filter = 'none';
       drawCaptions(ctx, blocks, preset, style, t * 1000, W, H);
 
@@ -549,6 +553,59 @@ async function renderFramesBySeek(opts: {
   }
 }
 
+/* ───────────────────────────── zoom por segmento ─────────────────────────
+ * DINÂMICA DE ZOOM (30.08): cada segmento é uma rampa de escala (from → to)
+ * aplicada como CROP CENTRAL do frame fonte — o vídeo "empurra pra dentro"
+ * sem borda preta e sem mexer na duração (o áudio continua batendo). A
+ * legenda é desenhada DEPOIS, então ela nunca é ampliada junto. Fora de
+ * qualquer segmento a escala é 1 (frame intocado). */
+
+export type ZoomSeg = {
+  /** janela do segmento em segundos, no tempo do vídeo FINAL */
+  start: number;
+  end: number;
+  /** escala no começo e no fim da janela (1 = sem zoom) */
+  from: number;
+  to: number;
+};
+
+function easeInOutSine(p: number): number {
+  return -(Math.cos(Math.PI * p) - 1) / 2;
+}
+
+export function zoomScaleAt(plan: ZoomSeg[] | undefined, t: number): number {
+  if (!plan || plan.length === 0) return 1;
+  for (const seg of plan) {
+    if (t >= seg.start && t < seg.end) {
+      const dur = Math.max(0.001, seg.end - seg.start);
+      const p = easeInOutSine(Math.min(1, Math.max(0, (t - seg.start) / dur)));
+      return seg.from + (seg.to - seg.from) * p;
+    }
+  }
+  return 1;
+}
+
+/** Desenha o frame fonte com o crop central da escala do instante `t`. */
+function drawZoomed(
+  ctx: CanvasRenderingContext2D,
+  src: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  W: number,
+  H: number,
+  plan: ZoomSeg[] | undefined,
+  t: number,
+) {
+  const s = zoomScaleAt(plan, t);
+  if (s <= 1.0005) {
+    ctx.drawImage(src, 0, 0, W, H);
+    return;
+  }
+  const sw = srcW / s;
+  const sh = srcH / s;
+  ctx.drawImage(src, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, W, H);
+}
+
 /* ───────────────────────────── orquestração ───────────────────────────── */
 
 export async function renderTypographyVideo(opts: {
@@ -556,12 +613,14 @@ export async function renderTypographyVideo(opts: {
   blocks: Block[];
   preset: TypoPreset;
   style: StyleState;
+  /** DINÂMICA DE ZOOM — rampas de escala por janela; vazio/ausente = sem zoom */
+  zoom?: ZoomSeg[];
   onProgress?: (p: RenderProgress) => void;
   signal?: AbortSignal;
   /** força o caminho por seek (QA/harness — não usar na UI) */
   forceSeekPath?: boolean;
 }): Promise<RenderResult> {
-  const { file, blocks, preset, style, onProgress, signal } = opts;
+  const { file, blocks, preset, style, zoom, onProgress, signal } = opts;
 
   if (typeof VideoEncoder === 'undefined') {
     throw new FriendlyError(
@@ -646,6 +705,7 @@ export async function renderTypographyVideo(opts: {
           blocks,
           preset,
           style,
+          zoom,
           canvas,
           ctx,
           W,
@@ -672,6 +732,7 @@ export async function renderTypographyVideo(opts: {
         blocks,
         preset,
         style,
+        zoom,
         canvas,
         ctx,
         W,
