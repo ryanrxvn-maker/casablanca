@@ -3766,6 +3766,13 @@ function ClickUpPilotInner() {
       // avatar (variante `image` do /v3, que nem aceita avatar_id). Sem esta
       // excecao a task inteira falhava aqui: foi o que derrubou o AD43 do WL PL,
       // 100% modo imagem, antes de disparar um take sequer.
+      // TODOS os trechos vazios = nada pra gerar. Sem isto o disparo "terminava"
+      // sem take nenhum e o card dizia PRONTO com um montado vazio.
+      if (plan.parts.length === 0) {
+        const errMsg = 'Nenhum trecho com texto: escreve a fala de algum avatar (👁) antes de disparar.';
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
+        return;
+      }
       const missingAv = plan.parts.findIndex(
         (p: any) => !p.avatarId && !p.imageDataUrl && !p.imageKey,
       );
@@ -8798,6 +8805,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       } as any);
     }
     for (const p of colapsado as any[]) { delete p._slotRole; delete p._imageMode; delete p._takeUnico; }
+    // PARTE SEM TEXTO NÃO VIRA TAKE. A tela já prometia isso ("vazio — esse
+    // part nao vai gerar nada"), mas o plano mandava mesmo assim: o runner faz
+    // `script: job.copy || ''` e o HeyGen aceita — sai uma geração paga com o
+    // avatar mudo. Vale pro trecho que o user esvaziou na mão E pro trecho novo
+    // que ele criou e ainda não escreveu.
+    const comTexto = (colapsado as any[]).filter((p) => String(p.text || '').trim().length > 0);
+    if (comTexto.length !== colapsado.length) {
+      const vazios = (colapsado as any[]).filter((p) => !String(p.text || '').trim()).map((p) => p.label);
+      console.log(`[clickup-pilot] ${vazios.length} trecho(s) sem texto NÃO viram take: ${vazios.join(', ')}`);
+    }
     // Slot em modo imagem não precisa de avatarId — a imagem substitui.
     const unmatchedAvatars = a.roleSlots
       .filter((s) => {
@@ -8807,7 +8824,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         return !idCanal && !(s.imageMode && s.imageDataUrl);
       })
       .map((s) => `${s.role}: @${s.username}`);
-    return { adName, parts: colapsado as any, unmatchedAvatars };
+    return { adName, parts: comTexto as any, unmatchedAvatars };
   }
 
   /** O plano SERIALIZÁVEL (replan) a partir do DispatchPlan.
@@ -12226,7 +12243,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                        respeita (`p.engine || motorConfig`). */
                                     avatarSlots={(a.roleSlots || []).map((sl, i) => ({
                                       id: String(i),
-                                      nome: sl.avatarName || sl.username || sl.role,
+                                      nome: sl.avatarName || sl.role || sl.username,
                                       thumb: sl.avatarThumb || sl.imageThumb || null,
                                       motor: (sl.engine as Motor) || 'III',
                                       motionPrompt: sl.motionPrompt || null,
