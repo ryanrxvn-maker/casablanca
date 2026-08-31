@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { logHistory } from '@/lib/history';
+import { logHistory, type FileRef } from '@/lib/history';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
@@ -256,6 +256,45 @@ async function persistDeliverableOrRescue(
     rescueDownloadToDisk(blob, filename);
     return { persisted: false, rescued: true };
   }
+}
+
+/**
+ * Referências RECUPERÁVEIS da entrega pro Histórico geral (31.08): o registro
+ * "entregue" deixa de ser só visual — carrega onde os pacotes vivem no
+ * navegador (zip-store) E a receita de resgate pelo HeyGen (videoIds), pra o
+ * botão Baixar do histórico funcionar mesmo depois do background ser limpo.
+ */
+function refsDaEntregaPilot(opts: {
+  taskId: string;
+  adNameClean: string;
+  takesFilename?: string;
+  montadoName?: string;
+  camuName?: string;
+  parts?: Array<{ label?: string; renamedTo?: string; videoId?: string | null }>;
+}): FileRef[] {
+  const refs: FileRef[] = [];
+  if (opts.montadoName) {
+    refs.push({ via: 'zip', key: `batch:${opts.taskId}:montado`, name: opts.montadoName, label: 'Montado', taskId: opts.taskId });
+  }
+  if (opts.takesFilename) {
+    refs.push({ via: 'zip', key: `batch:${opts.taskId}:takes`, name: opts.takesFilename, label: 'Takes', taskId: opts.taskId });
+  }
+  if (opts.camuName) {
+    refs.push({ via: 'zip', key: `batch:${opts.taskId}:camo`, name: opts.camuName, label: 'Camuflado', taskId: opts.taskId });
+  }
+  const hgParts = (opts.parts ?? [])
+    .filter((p) => !!p?.videoId)
+    .map((p) => ({ label: p.renamedTo || p.label || 'take', videoId: p.videoId! }));
+  if (hgParts.length > 0) {
+    refs.push({
+      via: 'heygen',
+      parts: hgParts,
+      name: `${opts.adNameClean}_takes_heygen.zip`,
+      label: 'Resgatar takes do HeyGen',
+      taskId: opts.taskId,
+    });
+  }
+  return refs;
 }
 
 /** ANTI-MEMÓRIA DE MODERAÇÃO (fix 2026-07-12): EXCLUI do HeyGen os vídeos com
@@ -1513,6 +1552,11 @@ function ClickUpPilotInner() {
       return next;
     });
   };
+
+  // FRAME × AVATAR por VERSÃO (30.08) — override de UI. A VERDADE é a
+  // escolha gravada (avatarId → avatar; imageKey → frame); isto só decide o
+  // que a linha MOSTRA enquanto o user ainda não escolheu nada.
+  const [modoVersaoUi, setModoVersaoUi] = useState<Record<string, 'frame' | 'avatar'>>({});
 
   // NORMALIZADOR DE VOLUME — toggle por task. Default LIGADO: e' o que iguala
   // HOOK gravado alto com BODY baixo (nivela cada parte a -16 LUFS ANTES de
@@ -4613,6 +4657,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           tool: 'clickup-pilot',
           title: `${adNameClean} entregue`,
           meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
+          ref: refsDaEntregaPilot({
+            taskId,
+            adNameClean,
+            takesFilename,
+            montadoName,
+            camuName,
+            parts: batchStatesRef.current[taskId]?.parts,
+          }),
         });
       }
     } catch (e) {
@@ -5422,6 +5474,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           tool: 'clickup-pilot',
           title: `${adNameClean} entregue`,
           meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
+          ref: refsDaEntregaPilot({
+            taskId,
+            adNameClean,
+            takesFilename,
+            montadoName,
+            camuName,
+            parts: batchStatesRef.current[taskId]?.parts,
+          }),
         });
       }
     } catch (e) {
@@ -8665,22 +8725,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           imageName: sl.imageMode ? sl.imageName : null,
           youtube: sl.avatarYoutube || null,
         }, 'youtube');
+        const v2ComAvatar = !!sl.avatarYoutube?.avatarId;
         return {
           ...sl,
           avatarId: esc.avatarId ?? null,
           avatarName: esc.avatarName ?? null,
           avatarThumb: esc.avatarThumb ?? null,
           avatarVoiceId: esc.avatarVoiceId ?? null,
-          // MODO IMAGEM: a irmã leva o FRAME do canal (ou o mesmo do META).
-          imageKey: sl.imageMode ? (esc.imageKey ?? null) : sl.imageKey,
-          imageDataUrl: sl.imageMode ? (esc.imageDataUrl ?? null) : sl.imageDataUrl,
-          imageName: sl.imageMode ? (esc.imageName ?? null) : sl.imageName,
-          // A irmã JA' E' a versão YouTube: a voz do YouTube vira a voz do
-          // papel aqui dentro. Sem isso, o avatar do YouTube — que é OUTRA
-          // pessoa — sairia falando com a voz escolhida pro META.
-          voiceOverride: (sl.avatarYoutube?.avatarId && sl.voiceOverrideYoutube?.id)
+          // O MODO segue a ESCOLHA da versão, não o slot base: versão 2 que
+          // trocou o frame por avatar da biblioteca dispara como avatar comum.
+          // Sem isto a irmã nascia "modo imagem sem imagem" e nunca aprontava.
+          imageMode: v2ComAvatar ? false : (sl.avatarYoutube?.imageKey || sl.avatarYoutube?.imageDataUrl) ? true : !!sl.imageMode,
+          imageKey: v2ComAvatar ? null : (sl.imageMode ? (esc.imageKey ?? null) : sl.imageKey),
+          imageDataUrl: v2ComAvatar ? null : (sl.imageMode ? (esc.imageDataUrl ?? null) : sl.imageDataUrl),
+          imageName: v2ComAvatar ? null : (sl.imageMode ? (esc.imageName ?? null) : sl.imageName),
+          // A irmã JA' E' a versão 2: a voz da versão vira a voz do papel aqui
+          // dentro. Com avatar próprio numa base de MODO IMAGEM, a voz da base
+          // é a CLONADA DA FOTO — outra pessoa — então NÃO herda: fica a voz
+          // escolhida pra versão, ou a do próprio avatar.
+          voiceOverride: (v2ComAvatar && sl.voiceOverrideYoutube?.id)
             ? sl.voiceOverrideYoutube
-            : sl.voiceOverride,
+            : (v2ComAvatar && sl.imageMode ? null : sl.voiceOverride),
           voiceOverrideYoutube: null,
           avatarYoutube: null,
         };
@@ -10004,10 +10069,25 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         finishedAt: Date.now(),
       });
       if (!vaPartial) {
+        const vaParts = (batchStatesRef.current[taskId]?.parts ?? [])
+          .filter((p) => !!p?.videoId)
+          .map((p) => ({ label: p.renamedTo || p.label || 'take', videoId: p.videoId! }));
         logHistory({
           tool: 'clickup-pilot',
           title: `${adNameClean} (VA) entregue`,
           meta: `${okAvas} avatares`,
+          ref: [
+            { via: 'zip', key: `va:${taskId}:zip`, name: zipName, label: 'ZIP VA', taskId },
+            ...(vaParts.length > 0
+              ? [{
+                  via: 'heygen' as const,
+                  parts: vaParts,
+                  name: `${adNameClean}_VA_heygen.zip`,
+                  label: 'Resgatar do HeyGen',
+                  taskId,
+                }]
+              : []),
+          ],
         });
       }
       const siblings = getSiblingTaskIds(taskId);
@@ -10394,6 +10474,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         montadoZipUrl: zipUrl, montadoZipName: zipName,
         finishedAt: Date.now(),
       });
+      if (!partial) {
+        const vaParts = (batchStatesRef.current[taskId]?.parts ?? [])
+          .filter((p) => !!p?.videoId)
+          .map((p) => ({ label: p.renamedTo || p.label || 'take', videoId: p.videoId! }));
+        logHistory({
+          tool: 'clickup-pilot',
+          title: `${adNameClean} (VA) entregue`,
+          meta: `${okCount} avatares · texto`,
+          ref: [
+            { via: 'zip', key: `va:${taskId}:zip`, name: zipName, label: 'ZIP VA', taskId },
+            ...(vaParts.length > 0
+              ? [{
+                  via: 'heygen' as const,
+                  parts: vaParts,
+                  name: `${adNameClean}_VA_heygen.zip`,
+                  label: 'Resgatar do HeyGen',
+                  taskId,
+                }]
+              : []),
+          ],
+        });
+      }
       const siblings = getSiblingTaskIds(taskId);
       for (const sid of siblings) markDispatched(sid);
       try {
@@ -13773,138 +13875,134 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </div>
                                             </div>
                                             )}
-                                            {/* AVATAR DA VERSÃO YOUTUBE deste papel. Vazio = mesmo do
-                                                META, e aí a versão YouTube não custa geração nenhuma. */}
-                                            {a.duasVersoes && slot.imageMode ? (
-                                              <FrameDaVersao
-                                                titulo="Frame da versão YouTube"
-                                                imageDataUrl={slot.avatarYoutube?.imageDataUrl || null}
-                                                imageName={slot.avatarYoutube?.imageName || null}
-                                                onArquivo={(f) => void subirImagemDaVersao(a.taskId, sIdx, 2, f)}
-                                                onLimpar={() => updateRoleSlot(a.taskId, sIdx, { avatarYoutube: null })}
-                                              />
-                                            ) : null}
-                                            {a.duasVersoes && !slot.imageMode ? (
-                                              <div>
-                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
-                                                  <span className="text-[11px] leading-none">▶</span>
-                                                  Avatar da versão YouTube
-                                                  <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                    {slot.avatarYoutube?.avatarId
-                                                      ? '— gera de novo'
-                                                      : '— vazio: usa o mesmo do META (sem custo)'}
-                                                  </span>
-                                                </div>
-                                                <div className="max-w-[420px]">
-                                                  <CompactAvatarPicker
-                                                    selected={
-                                                      slot.avatarYoutube?.avatarId
-                                                        ? ({
-                                                            id: slot.avatarYoutube.avatarId,
-                                                            name: slot.avatarYoutube.avatarName || '',
-                                                            thumb: slot.avatarYoutube.avatarThumb || '',
-                                                          } as any)
-                                                        : null
-                                                    }
-                                                    setSelected={(newAv) => updateRoleSlot(a.taskId, sIdx, {
-                                                      avatarYoutube: newAv
-                                                        ? {
-                                                            avatarId: newAv.id,
-                                                            avatarName: newAv.name || null,
-                                                            avatarThumb: newAv.thumb || null,
-                                                            avatarVoiceId: (newAv as any)?.voiceId || null,
-                                                          }
-                                                        : null,
-                                                    })}
-                                                    disabled={false}
-                                                    label={`Avatar do YouTube pra ${slot.role}`}
-                                                  />
-                                                </div>
-                                                {/* VOZ DO YOUTUBE. Só aparece com avatar próprio no
-                                                    canal — porque aí é outra pessoa, e ela tem que
-                                                    falar com a voz dela. Vazio = mesma voz do META. */}
-                                                {slot.avatarYoutube?.avatarId ? (
-                                                  <div className="mt-1.5 max-w-[420px]">
-                                                    <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
-                                                      Voz da versão YouTube
-                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                        {slot.voiceOverrideYoutube?.id
-                                                          ? '— voz própria'
-                                                          : '— vazio: usa a mesma voz do META'}
-                                                      </span>
-                                                    </div>
-                                                    <CompactVoiceSelector
-                                                      selected={slot.voiceOverrideYoutube || null}
-                                                      setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverrideYoutube: v })}
-                                                    />
-                                                  </div>
-                                                ) : null}
-                                              </div>
-                                            ) : null}
-                                            {/* AVATAR DAS VERSOES 3..10 (29.08). Mesma regra da 2:
-                                                vazio = usa o da versao 1 (sem custo); escolhido =
-                                                aquela versao gera de novo. */}
-                                            {slot.imageMode
-                                              ? (a.versoes || []).map((ver) => {
-                                                  const esc = ver.porPapel?.[slot.role.toLowerCase()];
+                                            {/* ═══ VERSÕES 2..10 DESTE PAPEL (30.08) ═══
+                                              * Cada versão escolhe FRAME ou AVATAR — independente do
+                                              * modo do slot base — com o toggle icone-only na linha.
+                                              * Vazio = herda a versão 1 (custo zero); escolha própria
+                                              * = task irmã que gera de novo. A versão 2 mora no
+                                              * `avatarYoutube` (caminho de sempre); 3..10 em versoes[]. */}
+                                            {(() => {
+                                              type EscVer = { avatarId?: string | null; avatarName?: string | null; avatarThumb?: string | null; avatarVoiceId?: string | null; imageKey?: string | null; imageDataUrl?: string | null; imageName?: string | null; voiceOverride?: { id: string; name: string } | null };
+                                              const linhas: Array<{ n: number; nome: string | null; esc: EscVer | null; voz: { id: string; name: string } | null }> = [];
+                                              if (a.duasVersoes) linhas.push({ n: 2, nome: null, esc: (slot.avatarYoutube as EscVer) || null, voz: slot.voiceOverrideYoutube || null });
+                                              for (const ver of a.versoes || []) {
+                                                const e = (ver.porPapel?.[slot.role.toLowerCase()] as EscVer) || null;
+                                                linhas.push({ n: ver.n, nome: ver.nome, esc: e, voz: e?.voiceOverride || null });
+                                              }
+                                              const gravaEscolha = (n: number, esc: EscVer | null) => {
+                                                if (n === 2) updateRoleSlot(a.taskId, sIdx, { avatarYoutube: esc as any });
+                                                else setAvatarDaVersao(a.taskId, n, slot.role, esc as any);
+                                              };
+                                              const gravaVoz = (n: number, esc: EscVer | null, v: { id: string; name: string } | null) => {
+                                                if (n === 2) updateRoleSlot(a.taskId, sIdx, { voiceOverrideYoutube: v });
+                                                else if (esc?.avatarId) setAvatarDaVersao(a.taskId, n, slot.role, { ...esc, voiceOverride: v } as any);
+                                              };
+                                              return linhas.map(({ n, nome, esc, voz }) => {
+                                                const chave = `${a.taskId}:${sIdx}:v${n}`;
+                                                const modo: 'frame' | 'avatar' =
+                                                  modoVersaoUi[chave] ||
+                                                  (esc?.avatarId ? 'avatar' : esc?.imageKey || esc?.imageDataUrl ? 'frame' : slot.imageMode ? 'frame' : 'avatar');
+                                                const trocar = () => setModoVersaoUi((prev) => ({ ...prev, [chave]: modo === 'frame' ? 'avatar' : 'frame' }));
+                                                if (modo === 'frame') {
                                                   return (
                                                     <FrameDaVersao
-                                                      key={`img-v${ver.n}`}
-                                                      titulo="Frame da versão"
-                                                      nome={ver.nome}
-                                                      onRenomear={(v) => renomearVersao(a.taskId, ver.n, v)}
+                                                      key={`v${n}`}
+                                                      titulo={`Frame da versão${nome ? '' : ` ${n}`}`}
+                                                      nome={nome}
+                                                      onRenomear={nome !== null ? (v) => renomearVersao(a.taskId, n, v) : undefined}
                                                       imageDataUrl={esc?.imageDataUrl || null}
                                                       imageName={esc?.imageName || null}
-                                                      onArquivo={(f) => void subirImagemDaVersao(a.taskId, sIdx, ver.n, f)}
-                                                      onLimpar={() => setAvatarDaVersao(a.taskId, ver.n, slot.role, null)}
+                                                      onArquivo={(f) => void subirImagemDaVersao(a.taskId, sIdx, n, f)}
+                                                      onLimpar={() => gravaEscolha(n, null)}
+                                                      onTrocarModo={trocar}
+                                                      avisoEscolha={esc?.avatarId ? `— avatar escolhido (${esc.avatarName || '?'}) ainda vale · suba um frame pra substituir, ou ×` : null}
                                                     />
                                                   );
-                                                })
-                                              : null}
-                                            {!slot.imageMode
-                                              ? (a.versoes || []).map((ver) => {
-                                                  const esc = ver.porPapel?.[slot.role.toLowerCase()];
-                                                  return (
-                                                    <div key={ver.n}>
-                                                      <div className="label-tech mb-1 flex flex-wrap items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
-                                                        <span className="text-[11px] leading-none">+</span>
-                                                        Avatar da versão
+                                                }
+                                                return (
+                                                  <div key={`v${n}`}>
+                                                    <div className="label-tech mb-1 flex flex-wrap items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
+                                                      <span className="text-[11px] leading-none">+</span>
+                                                      {`Avatar da versão${nome ? '' : ` ${n}`}`}
+                                                      {nome !== null ? (
                                                         <input
                                                           type="text"
-                                                          value={ver.nome}
-                                                          onChange={(e) => renomearVersao(a.taskId, ver.n, e.target.value)}
+                                                          value={nome}
+                                                          onChange={(e) => renomearVersao(a.taskId, n, e.target.value)}
                                                           className="mono w-[110px] rounded border border-line bg-bg/60 px-1.5 py-[1px] text-[10px] normal-case tracking-normal text-text focus:border-red-400/60 focus:outline-none"
                                                           title="Nome desta versao (aparece no card do disparo e no nome do arquivo)"
                                                         />
-                                                        <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                          {esc?.avatarId ? '— gera de novo' : '— vazio: usa o mesmo da versão 1 (sem custo)'}
-                                                        </span>
-                                                      </div>
-                                                      <div className="max-w-[420px]">
-                                                        <CompactAvatarPicker
-                                                          selected={
-                                                            esc?.avatarId
-                                                              ? ({ id: esc.avatarId, name: esc.avatarName || '', thumb: esc.avatarThumb || '' } as any)
-                                                              : null
-                                                          }
-                                                          setSelected={(novoAv) =>
-                                                            setAvatarDaVersao(a.taskId, ver.n, slot.role, novoAv
+                                                      ) : null}
+                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                        {esc?.avatarId
+                                                          ? '— gera de novo'
+                                                          : esc?.imageKey || esc?.imageDataUrl
+                                                            ? '— frame escolhido ainda vale · escolha um avatar pra substituir'
+                                                            : '— vazio: usa o mesmo da versão 1 (sem custo)'}
+                                                      </span>
+                                                      <button
+                                                        type="button"
+                                                        onClick={trocar}
+                                                        className="ver-modo-btn ml-auto"
+                                                        title="Trocar: esta versão sobe um FRAME (modo imagem) em vez de avatar"
+                                                        aria-label="Trocar pra frame"
+                                                      >
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                          <rect x="3" y="3" width="18" height="18" rx="2" />
+                                                          <circle cx="9" cy="9" r="2" />
+                                                          <path d="m21 15-4.5-4.5L7 20" />
+                                                        </svg>
+                                                      </button>
+                                                    </div>
+                                                    <div className="max-w-[420px]">
+                                                      <CompactAvatarPicker
+                                                        selected={
+                                                          esc?.avatarId
+                                                            ? ({ id: esc.avatarId, name: esc.avatarName || '', thumb: esc.avatarThumb || '' } as any)
+                                                            : null
+                                                        }
+                                                        setSelected={(novoAv) =>
+                                                          gravaEscolha(
+                                                            n,
+                                                            novoAv
                                                               ? {
                                                                   avatarId: novoAv.id,
                                                                   avatarName: novoAv.name || null,
                                                                   avatarThumb: novoAv.thumb || null,
                                                                   avatarVoiceId: (novoAv as any)?.voiceId || null,
                                                                 }
-                                                              : null)
-                                                          }
-                                                          disabled={false}
-                                                          label={`Avatar da versão ${ver.nome} pra ${slot.role}`}
+                                                              : null,
+                                                          )
+                                                        }
+                                                        disabled={false}
+                                                        label={`Avatar da versão ${nome || n} pra ${slot.role}`}
+                                                      />
+                                                    </div>
+                                                    {/* VOZ DA VERSÃO — só com avatar próprio (é outra
+                                                      * pessoa). Vazio: em base de imagem usa a voz do
+                                                      * PRÓPRIO avatar; em base de avatar, a da versão 1. */}
+                                                    {esc?.avatarId ? (
+                                                      <div className="mt-1.5 max-w-[420px]">
+                                                        <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
+                                                          {`Voz da versão${nome ? ` ${nome}` : ` ${n}`}`}
+                                                          <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                            {voz?.id
+                                                              ? '— voz própria'
+                                                              : slot.imageMode
+                                                                ? '— vazio: usa a voz do próprio avatar'
+                                                                : '— vazio: usa a mesma voz da versão 1'}
+                                                          </span>
+                                                        </div>
+                                                        <CompactVoiceSelector
+                                                          selected={voz}
+                                                          setSelected={(v) => gravaVoz(n, esc, v)}
                                                         />
                                                       </div>
-                                                    </div>
-                                                  );
-                                                })
-                                              : null}
+                                                    ) : null}
+                                                  </div>
+                                                );
+                                              });
+                                            })()}
                                             {slot.avatarId || slot.imageMode ? (
                                               // MODO ÁUDIO sem Voice Mirror: a voz do take é a do próprio
                                               // arquivo → o seletor dorme. Liga o Mirror e ele acorda

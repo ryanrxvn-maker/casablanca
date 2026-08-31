@@ -18,6 +18,8 @@ export function FrameDaVersao({
   imageName,
   onArquivo,
   onLimpar,
+  onTrocarModo,
+  avisoEscolha,
 }: {
   titulo: string;
   /** nome editavel da versao — so' as extras (3..10) tem */
@@ -27,6 +29,10 @@ export function FrameDaVersao({
   imageName?: string | null;
   onArquivo: (f: File) => void;
   onLimpar: () => void;
+  /** troca ESTA versao pra escolher AVATAR em vez de frame (icone-only) */
+  onTrocarModo?: () => void;
+  /** aviso quando a escolha atual e de OUTRO modo (ex.: avatar ja escolhido) */
+  avisoEscolha?: string | null;
 }) {
   const temFrame = !!imageDataUrl;
   return (
@@ -44,8 +50,22 @@ export function FrameDaVersao({
           />
         ) : null}
         <span className="font-normal normal-case tracking-normal text-text-muted">
-          {temFrame ? '— gera de novo' : '— vazio: usa o frame da versão 1 (sem custo)'}
+          {temFrame ? '— gera de novo' : avisoEscolha || '— vazio: usa o frame da versão 1 (sem custo)'}
         </span>
+        {onTrocarModo ? (
+          <button
+            type="button"
+            onClick={onTrocarModo}
+            className="ver-modo-btn ml-auto"
+            title="Trocar: esta versão escolhe um AVATAR da biblioteca em vez de frame"
+            aria-label="Trocar pra avatar"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+            </svg>
+          </button>
+        ) : null}
       </div>
       <div
         className={

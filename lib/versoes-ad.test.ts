@@ -217,4 +217,43 @@ if (falhas > 0) {
   console.error(`\n${falhas} teste(s) FALHARAM`);
   process.exit(1);
 }
+// — VERSAO COM AVATAR em base de MODO IMAGEM (30.08) —
+// A versao pode trocar o FRAME por um AVATAR DA BIBLIOTECA. Ai e' OUTRA
+// pessoa: a voz clonada da foto da versao 1 NAO pode vazar pra ela.
+{
+  const baseImg = {
+    avatarId: null,
+    avatarVoiceId: 'voz-clonada-da-foto',
+    voiceOverride: { id: 'voz-clonada-da-foto', name: 'Foto v1' },
+    imageKey: 'pilot:t:img:0',
+    imageDataUrl: 'data:image/png;base64,V1',
+    imageName: 'v1.png',
+  };
+  const verAvatar = {
+    n: 3,
+    nome: 'Versão 3',
+    porPapel: { doutor: { avatarId: 'av-bib', avatarName: 'Dr Bib', avatarVoiceId: 'voz-do-avatar' } },
+  };
+  const esc = avatarDaVersao(baseImg, verAvatar, 'Doutor');
+  ok(esc.avatarId === 'av-bib', 'a versao troca o frame por avatar da biblioteca');
+  ok(esc.imageKey === null && esc.imageDataUrl === null, 'o frame da base NAO viaja junto com o avatar');
+  ok(esc.voiceOverride === null, 'a voz clonada da FOTO nao vaza pro avatar (e outra pessoa)');
+  ok(esc.avatarVoiceId === 'voz-do-avatar', 'a voz e a do proprio avatar');
+
+  // com voz escolhida NA VERSAO, ela vence
+  const verComVoz = {
+    n: 3,
+    nome: 'Versão 3',
+    porPapel: { doutor: { avatarId: 'av-bib', voiceOverride: { id: 'voz-x', name: 'X' } } },
+  };
+  ok(avatarDaVersao(baseImg, verComVoz, 'Doutor').voiceOverride?.id === 'voz-x', 'voz escolhida pra versao vence');
+
+  // base NORMAL (avatar): comportamento antigo intacto — herda a voz da base
+  const baseAv = { avatarId: 'av1', voiceOverride: { id: 'voz-base', name: 'B' } };
+  ok(avatarDaVersao(baseAv, verAvatar, 'Doutor').voiceOverride?.id === 'voz-base', 'base por avatar continua herdando a voz (mesma pessoa nos 2 canais)');
+
+  // e gera de novo: avatar proprio em base de imagem = segunda geracao
+  ok(versaoGeraDeNovo([{ role: 'Doutor', avatarId: null, imageKey: 'pilot:t:img:0' }], verAvatar), 'avatar proprio na base de imagem gera de novo');
+}
+
 console.log('\nversoes-ad: todos os testes passaram ✓');

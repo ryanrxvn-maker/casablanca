@@ -141,15 +141,20 @@ export function avatarDaVersao(
       voiceOverride: esc.voiceOverride ?? base.voiceOverride ?? null,
     };
   }
+  // A versão escolheu um AVATAR DA BIBLIOTECA. Se a base é MODO IMAGEM (tem
+  // frame), o avatar é OUTRA pessoa por definição — herdar a voz clonada da
+  // foto entregaria o take com a voz errada. Nesse caso a voz é a da própria
+  // versão (se escolhida) ou a do avatar; NUNCA a da base.
+  const baseEhImagem = !!(base.imageKey || base.imageDataUrl);
   return {
     avatarId: esc.avatarId,
     avatarName: esc.avatarName ?? base.avatarName ?? null,
     avatarThumb: esc.avatarThumb ?? base.avatarThumb ?? null,
-    avatarVoiceId: esc.avatarVoiceId ?? base.avatarVoiceId ?? null,
-    voiceOverride: esc.voiceOverride ?? base.voiceOverride ?? null,
-    imageKey: esc.imageKey ?? null,
-    imageDataUrl: esc.imageDataUrl ?? null,
-    imageName: esc.imageName ?? null,
+    avatarVoiceId: esc.avatarVoiceId ?? (baseEhImagem ? null : base.avatarVoiceId ?? null),
+    voiceOverride: esc.voiceOverride ?? (baseEhImagem ? null : base.voiceOverride ?? null),
+    imageKey: null,
+    imageDataUrl: null,
+    imageName: null,
   };
 }
 
