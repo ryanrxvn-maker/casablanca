@@ -44,7 +44,14 @@ export type Insert = {
   ancora: string;
   /** índice da palavra DENTRO da parte onde o insert entra (0 = no começo) */
   palavra: number;
-  /** quanto tempo fica no ar. Vídeo: 0 = duração natural do arquivo. */
+  /**
+   * Quanto tempo fica no ar.
+   *
+   * 0 = AUTOMÁTICO: da palavra escolhida até o FIM DA PARTE. É o padrão e o
+   * que o estúdio quer — o insert cobre o trecho da fala a que ele pertence,
+   * sem buraco e sem sobra. Mídia longa demais é CORTADA; curta demais é
+   * DESACELERADA pra caber (ver `planoDeVelocidade`).
+   */
   duracaoSec: number;
   layout: LayoutInsert;
   transicao: TipoTransicao;
@@ -79,7 +86,8 @@ export function insertPadrao(id: string, ancora: string, midia: {
     id,
     ancora,
     palavra: 0,
-    duracaoSec: midia.tipo === 'imagem' ? INSERT_DUR_IMAGEM_PADRAO : (midia.durSec || 0),
+    // 0 = automático: o insert preenche a parte da copy em que foi ancorado.
+    duracaoSec: 0,
     layout: { tipo: 'cheia' },
     transicao: 'escurecer',
     midiaKey: midia.key,
@@ -301,17 +309,35 @@ export function janelasDosInserts(
     return Math.max(0, Math.min(durSec, ((antes + dentro) / total) * durSec));
   };
 
+  /** Fim da PARTE em que o insert está ancorado (a régua do automático). */
+  const fimDaParte = (ancora: string): number => {
+    const iParte = validas.findIndex((p) => p.label === ancora);
+    if (iParte < 0) return durSec;
+    if (faixas && faixas[iParte]) {
+      const w = palavras[Math.max(0, Math.min(palavras.length - 1, faixas[iParte].ate - 1))];
+      if (w) return Math.max(0, Math.min(durSec, w.end / 1000));
+    }
+    const tam = validas.map((p) => p.text.split(/\s+/).filter(Boolean).length);
+    const total = tam.reduce((a, b) => a + b, 0) || 1;
+    const ate = tam.slice(0, iParte + 1).reduce((a, b) => a + b, 0);
+    return Math.max(0, Math.min(durSec, (ate / total) * durSec));
+  };
+
   const brutas = inserts.map((ins) => {
     const start = instanteDe(ins.ancora, ins.palavra);
-    const natural = duracaoNatural?.(ins.id) ?? null;
-    const dur =
-      ins.duracaoSec > 0
-        ? ins.duracaoSec
-        : natural && natural > 0
-          ? natural
-          : INSERT_DUR_IMAGEM_PADRAO;
-    return { id: ins.id, start, end: Math.min(durSec, start + dur) };
+    // DURAÇÃO AUTOMÁTICA (o padrão): o insert cobre da palavra escolhida até o
+    // FIM DA PARTE. Mídia longa é cortada, curta é desacelerada — quem resolve
+    // isso é o `planoDeVelocidade`, na hora de desenhar.
+    let end: number;
+    if (ins.duracaoSec > 0) {
+      end = Math.min(durSec, start + ins.duracaoSec);
+    } else {
+      const fim = fimDaParte(ins.ancora);
+      end = Math.min(durSec, fim > start + 0.3 ? fim : start + INSERT_DUR_IMAGEM_PADRAO);
+    }
+    return { id: ins.id, start, end };
   });
+  void duracaoNatural;
 
   brutas.sort((a, b) => a.start - b.start);
   const out: JanelaInsert[] = [];
@@ -328,6 +354,213 @@ export function janelasDosInserts(
     out.push({ id: j.id, start, end });
   }
   return out;
+}
+
+/* ═════════════ o insert PREENCHE a parte: corta ou desacelera ═════════════ */
+
+/**
+ * Velocidade MÍNIMA do insert. Abaixo disto o slow motion deixa de parecer
+ * escolha e passa a parecer travamento — aí é melhor segurar o último frame.
+ */
+export const INSERT_VEL_MIN = 0.5;
+
+export type PlanoVelocidade = {
+  /** multiplicador aplicado ao tempo da mídia (1 = normal, 0.6 = mais lento) */
+  velocidade: number;
+  /** a mídia é mais longa que a janela e vai ser cortada? */
+  corta: boolean;
+  /** a partir deste instante DA JANELA o último frame congela (0 = nunca) */
+  congelaApos: number;
+  /** pro log/UI: o que foi feito */
+  motivo: 'exato' | 'cortou' | 'desacelerou' | 'desacelerou-e-congelou' | 'sem-duracao';
+};
+
+/**
+ * Como encaixar uma mídia de `naturalSec` numa janela de `janelaSec`.
+ *
+ * Regra do estúdio (31.08):
+ *   • LONGA demais  → corta. O insert morre onde a parte da fala morre.
+ *   • CURTA demais  → desacelera pra caber (slow motion é linguagem de b-roll).
+ *   • curta DEMAIS  → desacelera até o piso e congela o resto, em vez de virar
+ *     um quase-still de 0.1x.
+ *
+ * Imagem (sem duração natural) não tem o que ajustar: ela fica parada mesmo.
+ */
+export function planoDeVelocidade(naturalSec: number, janelaSec: number): PlanoVelocidade {
+  if (!(janelaSec > 0)) {
+    return { velocidade: 1, corta: false, congelaApos: 0, motivo: 'sem-duracao' };
+  }
+  if (!(naturalSec > 0)) {
+    return { velocidade: 1, corta: false, congelaApos: 0, motivo: 'sem-duracao' };
+  }
+  const razao = naturalSec / janelaSec;
+  if (razao >= 0.995 && razao <= 1.005) {
+    return { velocidade: 1, corta: false, congelaApos: 0, motivo: 'exato' };
+  }
+  if (razao > 1) {
+    // sobra mídia: roda normal e corta no fim da janela
+    return { velocidade: 1, corta: true, congelaApos: 0, motivo: 'cortou' };
+  }
+  // falta mídia: desacelera
+  const vel = Math.max(INSERT_VEL_MIN, razao);
+  if (vel <= INSERT_VEL_MIN + 1e-9 && razao < INSERT_VEL_MIN) {
+    // nem no piso cobre: o que a mídia alcança + congelado até o fim
+    const cobre = naturalSec / vel;
+    return {
+      velocidade: vel,
+      corta: false,
+      congelaApos: Math.min(janelaSec, cobre),
+      motivo: 'desacelerou-e-congelou',
+    };
+  }
+  return { velocidade: vel, corta: false, congelaApos: 0, motivo: 'desacelerou' };
+}
+
+/** Que instante da MÍDIA mostrar, dado o instante da JANELA. */
+export function tempoNaMidia(tRelJanela: number, plano: PlanoVelocidade, naturalSec: number): number {
+  const t = Math.max(0, tRelJanela) * plano.velocidade;
+  if (!(naturalSec > 0)) return 0;
+  return Math.min(t, Math.max(0, naturalSec - 0.04));
+}
+
+/* ═══════════ a REGRA DO CORTE: nada entra nem sai no meio da fala ═══════════
+ *
+ * Texto que aparece/some no MEIO de um take é a assinatura do automático: o
+ * olho vê a mudança porque nada mais na tela muda junto. No corte, a troca de
+ * imagem MASCARA a saída — o texto some e o espectador registra só o corte.
+ *
+ * Vale pra headline (entrada e saída) e pra legenda do HOOK (a virada de
+ * estilo hook→body). É a mesma regra, então mora num lugar só.
+ */
+
+/** Tolerância padrão pra puxar uma borda até o corte (segundos). */
+export const ENCAIXE_TOL_SEC = 0.9;
+
+/**
+ * Puxa `t` pro corte mais próximo, se houver um dentro da tolerância.
+ *
+ * Fora da tolerância devolve `t` intacto: é melhor um texto saindo no meio da
+ * fala do que um texto cortado 3s antes do que o editor pediu.
+ */
+export function encaixarNoCorte(t: number, cortes: number[], tol = ENCAIXE_TOL_SEC): number {
+  if (!cortes || cortes.length === 0 || !isFinite(t)) return t;
+  let melhor = t;
+  let dist = Infinity;
+  for (const c of cortes) {
+    const d = Math.abs(c - t);
+    if (d < dist) {
+      dist = d;
+      melhor = c;
+    }
+  }
+  return dist <= tol ? melhor : t;
+}
+
+/** Todos os cortes do vídeo final, em segundos — partes + decupagem. */
+export function cortesDoVideo(
+  partesSec: number[] | null | undefined,
+  cortesInternosSec?: number[][] | null,
+): number[] {
+  const partes = partesSec || [];
+  const out: number[] = [];
+  let base = 0;
+  for (let i = 0; i < partes.length; i++) {
+    if (!(partes[i] > 0) || !isFinite(partes[i])) return [];
+    const internos = cortesInternosSec?.[i];
+    if (internos && internos.length > 1 && internos.every((d) => d > 0 && isFinite(d))) {
+      let acc = 0;
+      for (let k = 0; k < internos.length - 1; k++) {
+        acc += internos[k];
+        out.push(base + acc);
+      }
+    }
+    base += partes[i];
+    out.push(base);
+  }
+  return out;
+}
+
+/* ══════════════════════════ headline no Pilot ═══════════════════════════ */
+
+export type HeadlineCfg = {
+  /** ligada? */
+  on: boolean;
+  /** id do modelo (HEADLINE_PRESETS das Legendas Automáticas) */
+  presetId: string;
+  /** o texto. Vazio = usa a 1ª frase do HOOK. */
+  texto: string;
+  /** centro vertical no frame, 0..1 */
+  posY: number;
+  /** ONDE COMEÇA: label da parte da copy (vazio = do início do vídeo) */
+  ancoraDe: string;
+  /** ATÉ ONDE FICA: label da parte em que ela sai */
+  ancoraAte: string;
+};
+
+export const HEADLINE_CFG_DEFAULT: HeadlineCfg = {
+  on: false,
+  presetId: 'aspas-escura',
+  texto: '',
+  posY: 0.24,
+  ancoraDe: '',
+  ancoraAte: '',
+};
+
+/**
+ * A janela da headline, em segundos, JÁ ENCAIXADA nos cortes.
+ *
+ * Começa no início da parte `ancoraDe` (ou no vídeo) e sai no FIM da parte
+ * `ancoraAte`. As duas bordas são puxadas pro corte mais próximo — é o que
+ * faz a headline sumir escondida pela troca de cena em vez de piscar no meio
+ * da frase.
+ */
+export function janelaDaHeadline(
+  cfg: HeadlineCfg,
+  partes: Array<{ label: string; text: string }>,
+  palavras: PalavraTempo[],
+  durSec: number,
+  cortes: number[],
+): { start: number; end: number } | null {
+  if (!cfg.on || !(durSec > 0)) return null;
+  const validas = partes.filter((p) => (p.text || '').trim().length > 0);
+  if (validas.length === 0) return null;
+  const faixas = mapearPartesNoAsr(palavras.map((w) => w.text), partes);
+
+  const tempoDe = (idx: number, fim: boolean): number => {
+    if (faixas && faixas[idx]) {
+      const f = faixas[idx];
+      const i = fim ? Math.max(0, f.ate - 1) : f.de;
+      const w = palavras[Math.max(0, Math.min(palavras.length - 1, i))];
+      if (w) return Math.max(0, Math.min(durSec, (fim ? w.end : w.start) / 1000));
+    }
+    // sem ASR: rateio proporcional pela copy
+    const tam = validas.map((p) => p.text.split(/\s+/).filter(Boolean).length);
+    const total = tam.reduce((a, b) => a + b, 0) || 1;
+    const antes = tam.slice(0, idx).reduce((a, b) => a + b, 0);
+    const acc = fim ? antes + tam[idx] : antes;
+    return Math.max(0, Math.min(durSec, (acc / total) * durSec));
+  };
+
+  const iDe = cfg.ancoraDe ? validas.findIndex((p) => p.label === cfg.ancoraDe) : -1;
+  const iAte = cfg.ancoraAte ? validas.findIndex((p) => p.label === cfg.ancoraAte) : 0;
+  const start = iDe >= 0 ? tempoDe(iDe, false) : 0;
+  const end = iAte >= 0 ? tempoDe(iAte, true) : tempoDe(0, true);
+
+  // ⭐ AS BORDAS VÃO PRO CORTE: é isto que mascara a entrada e a saída.
+  const s = encaixarNoCorte(start, cortes);
+  const e = encaixarNoCorte(end, cortes);
+  if (!(e > s + 0.3)) return null; // janela degenerada: melhor não pôr nada
+  return { start: Math.max(0, s), end: Math.min(durSec, e) };
+}
+
+/** O texto da headline: o escolhido, ou a 1ª frase do HOOK. */
+export function textoDaHeadline(cfg: HeadlineCfg, partes: Array<{ label: string; text: string }>): string {
+  const escrito = (cfg.texto || '').trim();
+  if (escrito) return escrito;
+  const hook = partes.find((p) => /^(hook|gancho)/i.test(p.label) && (p.text || '').trim());
+  if (!hook) return '';
+  const frase = hook.text.split(/(?<=[.!?])\s+/)[0] || hook.text;
+  return frase.trim().slice(0, 120);
 }
 
 /* ════════════════════ 2. enquadramento (sem borda) ══════════════════════ */

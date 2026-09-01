@@ -1717,6 +1717,15 @@ function ClickUpPilotInner() {
     };
   }
 
+  /**
+   * EXTENSÃO AUSENTE (01.09) — o Pilot resolve aqui, sem mandar pro Hey Auto.
+   *
+   * A análise depende da extensão (é ela que lê o Docs e a biblioteca do
+   * HeyGen). Quando ela não responde, o certo é a própria tela oferecer o
+   * download e o passo a passo — não um texto mandando o user procurar.
+   */
+  const [extFaltando, setExtFaltando] = useState(false);
+
   /* ═══════════════ INSERTS (31.08) ═══════════════
    *  B-roll que entra NA MONTAGEM, ancorado numa palavra da copy. Os bytes
    *  moram no IDB (chave com `:img:`-like pra sobreviver à purga do disparo) e
@@ -2457,6 +2466,7 @@ function ClickUpPilotInner() {
     };
     if (!ext.connected) {
       setAnalyzing(false);
+      setExtFaltando(true);
       setError(
         `Extensao Auto Edit nao detectada neste dominio (darkoautoedit.com). ` +
           `Se voce instalou uma versao antiga, ela so funciona no dominio vercel.app. ` +
@@ -2466,6 +2476,7 @@ function ClickUpPilotInner() {
     }
     if (ext.version && ext.version !== '?' && cmpVer(ext.version, MIN_EXT_VERSION) < 0) {
       setAnalyzing(false);
+      setExtFaltando(true);
       setError(
         `Extensao desatualizada (v${ext.version}). A leitura de docs exige v${MIN_EXT_VERSION}+. ` +
           `Baixe a versao atual em /api/extension/download e recarregue em chrome://extensions.`,
@@ -11304,6 +11315,72 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           })()}
           {/* (Token UI movido pra /configuracoes/clickup-pilot) */}
 
+          {/* ═══ EXTENSÃO AUSENTE: resolve AQUI ═══
+            * Antes isto era um texto vermelho mandando o user achar a URL de
+            * download na mão e ir pro Hey Auto. Agora o próprio Pilot entrega
+            * o .zip e o passo a passo. */}
+          {extFaltando ? (
+            <div className="ext-painel mb-4">
+              <div className="ext-cab">
+                <span className="ext-tile" aria-hidden>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2v6M12 22v-6M2 12h6M22 12h-6" opacity="0.5" />
+                    <rect x="8" y="8" width="8" height="8" rx="2" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="ext-titulo">A extensão Auto Edit não respondeu</span>
+                  <span className="ext-sub">
+                    É ela que lê o Google Docs e a biblioteca do HeyGen — sem ela a análise não roda.
+                    Se você já tem uma instalada, ela é de antes do domínio novo.
+                  </span>
+                </span>
+                <button type="button" className="ext-x" onClick={() => setExtFaltando(false)} aria-label="Fechar">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m6 6 12 12M18 6 6 18" />
+                  </svg>
+                </button>
+              </div>
+              <ol className="ext-passos">
+                <li>
+                  <span className="ext-n">1</span>
+                  <span>
+                    Baixe a versão atual
+                    <a href="/api/extension/download" className="ext-baixar" download>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                      </svg>
+                      baixar .zip
+                    </a>
+                  </span>
+                </li>
+                <li>
+                  <span className="ext-n">2</span>
+                  <span>Descompacte numa pasta que você não vá apagar.</span>
+                </li>
+                <li>
+                  <span className="ext-n">3</span>
+                  <span>
+                    Abra <code className="ext-cod">chrome://extensions</code>, ligue o
+                    <b> Modo do desenvolvedor</b> e clique em <b>Carregar sem compactação</b>,
+                    apontando pra essa pasta. Se já houver uma versão antiga, remova antes.
+                  </span>
+                </li>
+                <li>
+                  <span className="ext-n">4</span>
+                  <span>Volte aqui e recarregue a página (F5).</span>
+                </li>
+              </ol>
+              <div className="ext-rodape">
+                <button type="button" className="ext-recarregar" onClick={() => window.location.reload()}>
+                  já instalei — recarregar
+                </button>
+                <span className="ext-nota">
+                  O <code className="ext-cod">chrome://extensions</code> não abre por link — cole na barra do Chrome.
+                </span>
+              </div>
+            </div>
+          ) : null}
           {error ? (
             <div className="mb-4 error-shake flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
               <span className="flex-1">{error}</span>

@@ -18,6 +18,13 @@ import {
   coberturaDaTransicao,
   coberturaNoInstante,
   insertPadrao,
+  planoDeVelocidade,
+  tempoNaMidia,
+  encaixarNoCorte,
+  cortesDoVideo,
+  janelaDaHeadline,
+  textoDaHeadline,
+  INSERT_VEL_MIN,
   INSERT_FOCO_PADRAO,
   TRANSICAO_DUR_SEC,
   type Insert,
@@ -265,14 +272,117 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 /* ═══════════════════ (6) o insert padrão é sensato ═══════════════════ */
 {
   const img = insertPadrao('i1', 'HOOK 1', { key: 'k', nome: 'foto.jpg', tipo: 'imagem', w: 1920, h: 1080 });
-  ok(img.duracaoSec > 0, 'imagem nasce com duração (senão sumiria do vídeo)');
+  // Desde 01.09 TUDO nasce automático: o insert preenche a PARTE em que foi
+  // ancorado. Antes ele nascia com a duração do arquivo e sobrava/faltava.
+  ok(img.duracaoSec === 0, 'imagem nasce AUTOMÁTICA (preenche a parte)');
   ok(img.layout.tipo === 'cheia', 'e em tela cheia');
   ok(img.focoAvatarY === INSERT_FOCO_PADRAO, 'com o foco no rosto já ligado');
   const vid = insertPadrao('v1', 'BODY 1', { key: 'k', nome: 'v.mp4', tipo: 'video', w: 1920, h: 1080, durSec: 4.2 });
-  ok(aprox(vid.duracaoSec, 4.2), 'vídeo nasce com a duração NATURAL dele');
-  const semDur = insertPadrao('v2', 'BODY 1', { key: 'k', nome: 'v.mp4', tipo: 'video', w: 1, h: 1 });
-  ok(semDur.duracaoSec === 0, 'vídeo sem duração conhecida fica em 0 (o render mede na hora)');
+  ok(vid.duracaoSec === 0, 'vídeo também nasce automático — a duração do arquivo vira velocidade, não janela');
 }
+
+
+/* ══════ (7) o insert PREENCHE a parte: longo CORTA, curto DESACELERA ══════ */
+{
+  // exato
+  const e = planoDeVelocidade(4, 4);
+  ok(e.velocidade === 1 && !e.corta && e.motivo === 'exato', 'mídia do tamanho da janela: nada a fazer');
+
+  // LONGO demais → corta (roda normal e morre no fim da parte)
+  const c = planoDeVelocidade(12, 4);
+  ok(c.velocidade === 1, 'mídia longa NÃO acelera (ficaria cômico) — roda normal');
+  ok(c.corta === true && c.motivo === 'cortou', 'ela é CORTADA onde a parte da fala morre');
+
+  // CURTO demais → desacelera
+  const d = planoDeVelocidade(3, 4);
+  ok(aprox(d.velocidade, 0.75), 'mídia curta desacelera na razão exata (3/4 = 0.75x)');
+  ok(!d.corta && d.congelaApos === 0 && d.motivo === 'desacelerou', 'e cobre a janela inteira');
+
+  // CURTO DEMAIS → desacelera até o piso e congela o resto
+  const x = planoDeVelocidade(1, 10);
+  ok(x.velocidade === INSERT_VEL_MIN, 'não desacelera abaixo do piso (viraria travamento)');
+  ok(x.congelaApos > 0 && x.congelaApos < 10, 'e o resto da janela fica no último frame');
+  ok(x.motivo === 'desacelerou-e-congelou', 'o motivo é honesto');
+  ok(aprox(x.congelaApos, 2), '1s a 0.5x cobre 2s da janela');
+
+  // imagem / mídia sem duração: não há o que ajustar
+  ok(planoDeVelocidade(0, 5).motivo === 'sem-duracao', 'imagem não tem velocidade');
+  ok(planoDeVelocidade(5, 0).velocidade === 1, 'janela zero não quebra');
+}
+
+// o mapeamento tempo-da-janela → tempo-da-mídia
+{
+  const d = planoDeVelocidade(3, 6); // 0.5x
+  ok(aprox(tempoNaMidia(0, d, 3), 0), 'começo da janela = começo da mídia');
+  ok(aprox(tempoNaMidia(2, d, 3), 1), 'a 2s da janela, 1s da mídia (metade da velocidade)');
+  ok(tempoNaMidia(100, d, 3) <= 3, 'NUNCA passa do fim da mídia (seek fora = frame preto)');
+  const c = planoDeVelocidade(12, 4); // corta
+  ok(aprox(tempoNaMidia(3, c, 12), 3), 'cortando, o tempo anda 1:1');
+}
+
+/* ═════════ (8) a duração AUTOMÁTICA vai até o fim da parte ═════════ */
+{
+  const ins: Insert[] = [
+    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'video', w: 1, h: 1, durSec: 99 }), palavra: 0 },
+  ];
+  ok(ins[0].duracaoSec === 0, 'insert nasce com duração AUTOMÁTICA');
+  const j = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
+  // BODY 1 vai da palavra 8 à 16 → 4.0s a ~8.4s
+  ok(aprox(j[0].start, 4.0, 0.05), 'começa no início do BODY 1');
+  ok(j[0].end > 8 && j[0].end < 9, `e morre no FIM do BODY 1 (deu ${j[0].end.toFixed(2)}s), não na duração do arquivo`);
+
+  // com duração manual, ela manda
+  const manual: Insert[] = [{ ...ins[0], duracaoSec: 1.5 }];
+  const jm = janelasDosInserts(manual, PARTES, asrFiel(), DUR);
+  ok(aprox(jm[0].end - jm[0].start, 1.5, 0.05), 'duração manual vence o automático');
+}
+
+/* ═══════════ (9) a REGRA DO CORTE: nada some no meio da fala ═══════════ */
+{
+  const cortes = [3, 7.5, 12, 20];
+  ok(encaixarNoCorte(7.2, cortes) === 7.5, 'borda perto de um corte é PUXADA pra ele');
+  ok(encaixarNoCorte(7.9, cortes) === 7.5, 'e de qualquer um dos lados');
+  ok(encaixarNoCorte(15, cortes) === 15, 'longe de todo corte, fica onde estava (melhor que cortar 3s antes)');
+  ok(encaixarNoCorte(5, [], 1) === 5, 'sem cortes, não mexe');
+  ok(encaixarNoCorte(3.05, cortes, 0.01) === 3.05, 'a tolerância é respeitada');
+}
+
+{
+  const c = cortesDoVideo([10, 5], [[4, 6], [5]]);
+  ok(JSON.stringify(c) === '[4,10,15]', 'cortes = internos da decupagem + fim de cada parte');
+  ok(cortesDoVideo([10, NaN]).length === 0, 'duração podre não vira lista meia-boca');
+  ok(JSON.stringify(cortesDoVideo([8, 7])) === '[8,15]', 'sem decupagem, só as trocas de take');
+}
+
+/* ═══════════════════ (10) HEADLINE: janela e texto ═══════════════════ */
+{
+  const cortes = cortesDoVideo([4, 4.5, 3.5], null); // [4, 8.5, 12]
+  const cfg = { on: true, presetId: 'aspas-escura', texto: '', posY: 0.24, ancoraDe: '', ancoraAte: 'HOOK 1' };
+  const j = janelaDaHeadline(cfg, PARTES, asrFiel(), DUR, cortes);
+  ok(j !== null, 'a headline tem janela');
+  if (j) {
+    ok(j.start === 0, 'sem âncora de início, começa no vídeo');
+    // o hook acaba em ~4.0s e há um corte em 4 → tem que ENCAIXAR
+    ok(cortes.some((c) => aprox(c, j.end, 0.001)), `a SAÍDA cai num corte (${j.end}) — é o que mascara o sumiço`);
+  }
+
+  // desligada não produz nada
+  ok(janelaDaHeadline({ ...cfg, on: false }, PARTES, asrFiel(), DUR, cortes) === null, 'desligada = sem janela');
+  // janela degenerada é recusada
+  ok(
+    janelaDaHeadline({ ...cfg, ancoraDe: 'BODY 2', ancoraAte: 'HOOK 1' }, PARTES, asrFiel(), DUR, cortes) === null,
+    'fim antes do começo é recusado (nada de headline invertida)',
+  );
+}
+
+{
+  const cfg = { on: true, presetId: 'aspas-escura', texto: '', posY: 0.24, ancoraDe: '', ancoraAte: 'HOOK 1' };
+  const t = textoDaHeadline(cfg, PARTES);
+  ok(t.length > 0 && t.startsWith('como transformar'), 'sem texto escrito, usa a 1ª frase do HOOK');
+  ok(textoDaHeadline({ ...cfg, texto: '  MEU TITULO  ' }, PARTES) === 'MEU TITULO', 'texto escrito manda (e vem aparado)');
+  ok(textoDaHeadline(cfg, [{ label: 'BODY 1', text: 'so corpo' }]) === '', 'sem hook, sem texto automático');
+}
+
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-inserts: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

@@ -18,7 +18,13 @@ import {
   janelasDosInserts,
   palcoDoLayout,
   coberturaNoInstante,
+  planoDeVelocidade,
+  tempoNaMidia,
+  cortesDoVideo,
+  janelaDaHeadline,
+  textoDaHeadline,
   type Insert,
+  type HeadlineCfg,
 } from './pilot-inserts';
 
 /* ═══════════════════════════ orquestrador (browser) ══════════════════════ */
@@ -37,6 +43,8 @@ export type PosProducaoCfg = {
   ffmpegJaExclusivo?: boolean;
   /** INSERTS: b-roll na montagem, ancorado numa palavra da copy */
   inserts?: Insert[];
+  /** HEADLINE: texto parado por cima, saindo num corte */
+  headline?: HeadlineCfg;
   /** lê os bytes de uma mídia de insert (IndexedDB) */
   lerMidia?: (key: string) => Promise<Blob | null>;
   onEtapa?: (msg: string) => void;
@@ -82,7 +90,8 @@ export async function montarPosProducao(
   const querLegenda = cfg.legenda.on;
   const querZoom = cfg.zoom.on;
   const temInserts = (cfg.inserts?.length || 0) > 0 && !!cfg.lerMidia;
-  if (!querLegenda && !querZoom && !temInserts) return { blob: null, avisos };
+  const querHeadline = !!cfg.headline?.on;
+  if (!querLegenda && !querZoom && !temInserts && !querHeadline) return { blob: null, avisos };
 
   try {
     const [{ renderTypographyVideo }, engine, grupo, roteiro, copyFix] = await Promise.all([
@@ -112,9 +121,9 @@ export async function montarPosProducao(
     let palavrasParaAncora: PalavraAsr[] = [];
     let blocks: import('./typography/engine').Block[] = [];
     let style: import('./typography/engine').StyleState = { ...DEFAULT_STYLE, presetId: 'keynote' };
-    if (!querLegenda && temInserts) {
+    if (!querLegenda && (temInserts || querHeadline)) {
       try {
-        cfg.onEtapa?.('lendo a fala pra ancorar os inserts');
+        cfg.onEtapa?.('lendo a fala pra ancorar insert/headline');
         palavrasParaAncora = await transcreverMontado(blob, cfg.idioma);
       } catch (e) {
         avisos.push(
@@ -183,6 +192,9 @@ export async function montarPosProducao(
         cfg.onEtapa?.('preparando inserts');
         const fontes = new Map<string, FonteLocal>();
         const durNatural = new Map<string, number>();
+        const videosPorId = new Map<string, { v: HTMLVideoElement; natural: number }>();
+        // preenchido DEPOIS de conhecer as janelas (a velocidade depende delas)
+        const velocidadePorId = new Map<string, ReturnType<typeof planoDeVelocidade>>();
         for (const ins of cfg.inserts!) {
           const blob = await cfg.lerMidia!(ins.midiaKey);
           if (!blob) {
@@ -212,15 +224,19 @@ export async function montarPosProducao(
               v.src = url;
             });
             if (!abriu) { avisos.push(`insert "${ins.midiaNome}" não abriu`); continue; }
-            durNatural.set(ins.id, v.duration || 0);
-            // seek SÍNCRONO-ish: o render pede quadros em ordem crescente, e
-            // o <video> já está carregado, então o currentTime resolve rápido.
+            const natural = v.duration || 0;
+            durNatural.set(ins.id, natural);
+            videosPorId.set(ins.id, { v, natural });
+            // O `quadro` só sabe o tempo DA JANELA; a conversão pro tempo da
+            // MÍDIA depende do plano de velocidade, que só existe depois de a
+            // janela ser calculada. Por isso ele consulta o mapa na hora.
             fontes.set(ins.id, {
               id: ins.id,
               w: v.videoWidth,
               h: v.videoHeight,
               quadro: (tRel: number) => {
-                const alvo = Math.min(Math.max(0, tRel), Math.max(0, (v.duration || 0) - 0.05));
+                const pv = velocidadePorId.get(ins.id);
+                const alvo = pv ? tempoNaMidia(tRel, pv, natural) : Math.min(tRel, Math.max(0, natural - 0.04));
                 if (Math.abs(v.currentTime - alvo) > 0.03) v.currentTime = alvo;
                 return v;
               },
@@ -237,6 +253,29 @@ export async function montarPosProducao(
             durSec,
             (id) => durNatural.get(id) ?? null,
           );
+          // ⭐ AGORA dá pra decidir a velocidade: cada mídia tem que caber na
+          // janela dela. Longa CORTA (roda normal e morre no fim da parte),
+          // curta DESACELERA. É o que faz o insert preencher o trecho da fala
+          // sem buraco e sem sobra.
+          for (const j of janelas) {
+            const nat = durNatural.get(j.id) || 0;
+            const pv = planoDeVelocidade(nat, j.end - j.start);
+            velocidadePorId.set(j.id, pv);
+            if (pv.motivo !== 'exato' && pv.motivo !== 'sem-duracao') {
+              const nome = usaveis.find((x) => x.id === j.id)?.midiaNome || j.id;
+              console.log(
+                `[pos-producao] insert "${nome}": ${nat.toFixed(1)}s em janela de ` +
+                  `${(j.end - j.start).toFixed(1)}s → ${pv.motivo}` +
+                  (pv.velocidade !== 1 ? ` (${pv.velocidade.toFixed(2)}x)` : ''),
+              );
+              if (pv.motivo === 'desacelerou-e-congelou') {
+                avisos.push(
+                  `insert "${nome}" é curto demais pro trecho (${nat.toFixed(1)}s em ${(j.end - j.start).toFixed(1)}s): ` +
+                    'desacelerou até o limite e o resto ficou no último frame',
+                );
+              }
+            }
+          }
           const porId = new Map(usaveis.map((i) => [i.id, i]));
           planoInserts = {
             janelas,
@@ -262,7 +301,44 @@ export async function montarPosProducao(
       }
     }
 
-    if (blocks.length === 0 && plano.length === 0 && !planoInserts) {
+    // ── HEADLINE: texto parado por cima, ENTRANDO E SAINDO NUM CORTE ──
+    // A saída no corte é o ponto: texto que some no meio da fala denuncia o
+    // automático, porque nada mais na tela muda junto. No corte, a troca de
+    // imagem mascara o sumiço.
+    let headlines: import('./typography/headline').Headline[] | undefined;
+    if (querHeadline && cfg.headline) {
+      try {
+        const cortes = cortesDoVideo(info.partesSec, info.cortesInternosSec);
+        const jan = janelaDaHeadline(cfg.headline, cfg.partes, palavrasParaAncora, durSec, cortes);
+        const texto = textoDaHeadline(cfg.headline, cfg.partes);
+        if (jan && texto) {
+          const hl = await import('./typography/headline');
+          headlines = [
+            {
+              id: 'pilot-hl',
+              text: texto,
+              start: jan.start * 1000,
+              end: jan.end * 1000,
+              style: {
+                ...hl.HEADLINE_STYLE_DEFAULT,
+                presetId: cfg.headline.presetId,
+                posY: cfg.headline.posY,
+              },
+            },
+          ];
+          console.log(
+            `[pos-producao] headline: ${jan.start.toFixed(1)}→${jan.end.toFixed(1)}s ` +
+              `(saída ${cortes.some((c) => Math.abs(c - jan.end) < 0.01) ? 'NO CORTE' : 'sem corte por perto'})`,
+          );
+        } else if (!texto) {
+          avisos.push('headline: sem texto (nem escrito, nem hook na copy) — não entrou');
+        }
+      } catch (e) {
+        avisos.push(`headline não entrou (${(e as Error)?.message?.slice(0, 60)})`);
+      }
+    }
+
+    if (blocks.length === 0 && plano.length === 0 && !planoInserts && !headlines) {
       for (const f of fechaveis) f();
       return { blob: null, avisos };
     }
@@ -291,6 +367,7 @@ export async function montarPosProducao(
         zoom: plano,
         ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
         inserts: planoInserts as never,
+        headlines,
         signal: ctrl.signal,
         onProgress: (pr) => {
           // 'frames' é a fase longa — é dela que sai a porcentagem honesta.
