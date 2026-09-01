@@ -256,6 +256,9 @@ function HeyGenAutoInner() {
   // Per-part avatar override (null = usa selectedAvatar global). Indexado
   // pela posicao da parte (text: ordem do split; audio: ordem do array).
   const [partAvatars, setPartAvatars] = useState<(AvatarOption | null)[]>([]);
+  // Per-part VOICE override (modo dinamico). Prioridade por parte:
+  // voz da parte > voz global (selectedVoice) > voz padrao do avatar da parte.
+  const [partVoices, setPartVoices] = useState<({ id: string; name: string } | null)[]>([]);
   // APPLY CUSTOM MOTION por parte (vem do ClickUp Pilot, onde cada cena do AD
   // tem o seu gesto). Vazio/null = cena parada. Quem tem gesto sobe pro
   // Avatar IV sozinho no runner — ver motorEfetivo() em heygen-job-runner.
@@ -610,6 +613,11 @@ function HeyGenAutoInner() {
   useEffect(() => {
     const n = mode === 'copy' ? parts.length : audioParts.length;
     setPartAvatars((prev) => {
+      const next = prev.slice(0, n);
+      while (next.length < n) next.push(null);
+      return next;
+    });
+    setPartVoices((prev) => {
       const next = prev.slice(0, n);
       while (next.length < n) next.push(null);
       return next;
@@ -1258,8 +1266,9 @@ function HeyGenAutoInner() {
             label: makeStructuredLabel(i),
             copy: p,
             avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
+            // Voz da PARTE (se escolhida) > voz global > voz padrao do avatar da parte.
             voiceId: dynamicMode
-              ? (selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
+              ? (partVoices[i]?.id || selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
               : undefined,
             motionPrompt: partMotions[i] || undefined,
             imageDataUrl: imageMode ? partImages[i] || undefined : undefined,
@@ -1601,7 +1610,11 @@ function HeyGenAutoInner() {
         slotIds: results.map((r) => r.label),
         seed: safeName,
       });
-      const voiceId = selectedVoice ? selectedVoice.id : av.voiceId || undefined;
+      // Voz da PARTE (modo dinamico) > voz global > voz padrao do avatar da parte —
+      // mesma prioridade do disparo, senao o re-gerar trocaria a voz do take.
+      const voiceId =
+        (dynamicMode ? partVoices[idx]?.id : undefined) ||
+        (selectedVoice ? selectedVoice.id : av.voiceId || undefined);
       // GESTO E MOTOR DESTA PARTE. Sem opts, mantém o que a cena já tinha —
       // re-gerar o texto não pode devolver o take parado. Com opts, o user
       // pediu um gesto novo (ex: cobrir o peito com a mão) e aí o motor sobe
@@ -2179,8 +2192,10 @@ function HeyGenAutoInner() {
           text,
           avatarId: av?.id || selectedAvatar?.id || null,
           avatarName: av?.name || selectedAvatar?.name || null,
-          // Voz escolhida (global) vale pra todas; senão a voz do avatar da parte.
-          voiceId: dynamicMode && !selectedVoice ? av?.voiceId || null : fixedVoice,
+          // Voz da PARTE (se escolhida) > voz global > voz padrao do avatar da parte.
+          voiceId: dynamicMode
+            ? partVoices[i]?.id || (selectedVoice ? selectedVoice.id : av?.voiceId || null)
+            : fixedVoice,
           motionPrompt: partMotions[i] || null,
           imageDataUrl: imageMode ? partImages[i] || null : null,
           // Avatar do YouTube desta cena. Só entra com a função ligada E com um
@@ -2231,7 +2246,11 @@ function HeyGenAutoInner() {
       decupagem: decupagemEnabled,
       decupIntensity,
       source: 'manual',
-      voiceName: selectedVoice ? selectedVoice.name : null,
+      voiceName: selectedVoice
+        ? selectedVoice.name
+        : dynamicMode && mode === 'copy' && partVoices.some(Boolean)
+          ? 'vozes por parte'
+          : null,
       status: 'pending',
       // Placeholders de preview já na fila (mesma estrutura do Pilot).
       takePreviews: qparts.map((p) => ({
@@ -3349,9 +3368,10 @@ function HeyGenAutoInner() {
                     </span>
                   </div>
                   <div className="mt-1 text-[11px] text-text-muted">
-                    Cada parte (texto OU audio) usa um avatar diferente. Voz de
-                    cada parte = a voz predefinida daquele avatar. Se você
-                    escolher uma voz acima, ela vale pra todas as partes.
+                    Cada parte (texto OU audio) usa um avatar diferente — e cada
+                    parte pode ter a SUA voz (seletor no card da parte). Sem
+                    escolher, vale a voz de cima (se escolhida) ou a voz padrão
+                    do avatar daquela parte.
                   </div>
                 </div>
               </label>
@@ -3455,6 +3475,20 @@ function HeyGenAutoInner() {
                               <div className="mt-1 text-[9px] leading-tight text-text-muted">
                                 {partImages[i] ? 'frame carregado' : 'suba o frame desta cena'} · roda no Avatar IV
                               </div>
+                              {/* Voz DESTA parte — no modo imagem nao ha avatar,
+                                * entao sem voz aqui (nem global) o take nao sai. */}
+                              <div className="mt-2">
+                                <CompactVoiceSelector
+                                  selected={partVoices[i] ?? null}
+                                  setSelected={(v) => {
+                                    setPartVoices((prev) => {
+                                      const next = [...prev];
+                                      next[i] = v;
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              </div>
                             </div>
                           </div>
                         ) : (
@@ -3472,6 +3506,20 @@ function HeyGenAutoInner() {
                             disabled={processing}
                             label={`Avatar pra parte ${i + 1}`}
                           />
+                          {/* Voz DESTA parte — sem escolher, herda a voz global
+                            * (se escolhida) ou a voz padrao do avatar da parte. */}
+                          <div className="mt-2">
+                            <CompactVoiceSelector
+                              selected={partVoices[i] ?? null}
+                              setSelected={(v) => {
+                                setPartVoices((prev) => {
+                                  const next = [...prev];
+                                  next[i] = v;
+                                  return next;
+                                });
+                              }}
+                            />
+                          </div>
                           {duasVersoes ? (
                             <div className="mt-2 rounded-[10px] border border-red-500/30 bg-red-500/[0.06] p-2">
                               <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-red-200">
