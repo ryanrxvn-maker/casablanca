@@ -42,17 +42,18 @@ export type Insert = {
   id: string;
   /** label da parte da copy onde ancora — 'HOOK 1', 'BODY 2'... */
   ancora: string;
-  /** índice da palavra DENTRO da parte onde o insert entra (0 = no começo) */
-  palavra: number;
   /**
-   * Quanto tempo fica no ar.
+   * O TRECHO da copy que o insert cobre — índices de palavra DENTRO da parte,
+   * os dois inclusive.
    *
-   * 0 = AUTOMÁTICO: da palavra escolhida até o FIM DA PARTE. É o padrão e o
-   * que o estúdio quer — o insert cobre o trecho da fala a que ele pertence,
-   * sem buraco e sem sobra. Mídia longa demais é CORTADA; curta demais é
-   * DESACELERADA pra caber (ver `planoDeVelocidade`).
+   * ⚠ Isto substituiu uma "palavra única + duração manual" (01.09). Marcar uma
+   * palavra só não descreve nada: o editor pensa em TRECHO DE FALA ("do 'Para'
+   * até o 'nada'"), e é o trecho que define quanto tempo o insert fica no ar.
+   * A duração deixou de ser controle e virou CONSEQUÊNCIA — a mídia é que se
+   * ajusta a ela (ver `planoDeVelocidade`).
    */
-  duracaoSec: number;
+  palavraDe: number;
+  palavraAte: number;
   layout: LayoutInsert;
   transicao: TipoTransicao;
   /** chave do IndexedDB com os bytes da mídia */
@@ -85,9 +86,8 @@ export function insertPadrao(id: string, ancora: string, midia: {
   return {
     id,
     ancora,
-    palavra: 0,
-    // 0 = automático: o insert preenche a parte da copy em que foi ancorado.
-    duracaoSec: 0,
+    palavraDe: 0,
+    palavraAte: 0,
     layout: { tipo: 'cheia' },
     transicao: 'escurecer',
     midiaKey: midia.key,
@@ -96,6 +96,23 @@ export function insertPadrao(id: string, ancora: string, midia: {
     midiaW: midia.w,
     midiaH: midia.h,
     focoAvatarY: INSERT_FOCO_PADRAO,
+  };
+}
+
+/**
+ * Normaliza um insert vindo do localStorage.
+ *
+ * O formato antigo tinha `palavra` (uma só) e `duracaoSec`. Sem isto, um
+ * insert salvo antes de 01.09 viraria `palavraDe: undefined` e a janela dele
+ * cairia em NaN — o vídeo sairia com o b-roll no lugar errado, calado.
+ */
+export function normalizarInsert(x: Insert & { palavra?: number; duracaoSec?: number }): Insert {
+  const de = Number.isFinite(x.palavraDe) ? x.palavraDe : Number.isFinite(x.palavra) ? (x.palavra as number) : 0;
+  const ate = Number.isFinite(x.palavraAte) ? x.palavraAte : de;
+  return {
+    ...x,
+    palavraDe: Math.max(0, Math.min(de, ate)),
+    palavraAte: Math.max(0, Math.max(de, ate)),
   };
 }
 
@@ -291,51 +308,33 @@ export function janelasDosInserts(
   const faixas = mapearPartesNoAsr(palavras.map((p) => p.text), partes);
   const validas = partes.filter((p) => (p.text || '').trim().length > 0);
 
-  const instanteDe = (ancora: string, palavraIdx: number): number => {
+  /** Instante da palavra `palavraIdx` da parte — começo dela ou fim dela. */
+  const instanteDe = (ancora: string, palavraIdx: number, fim = false): number => {
     const iParte = validas.findIndex((p) => p.label === ancora);
     if (iParte < 0) return 0;
     if (faixas && faixas[iParte]) {
       const f = faixas[iParte];
       const alvo = Math.min(f.ate - 1, f.de + Math.max(0, palavraIdx));
       const w = palavras[Math.max(0, Math.min(palavras.length - 1, alvo))];
-      if (w) return Math.max(0, Math.min(durSec, w.start / 1000));
+      if (w) return Math.max(0, Math.min(durSec, (fim ? w.end : w.start) / 1000));
     }
     // rateio proporcional: cada parte ocupa uma fatia do vídeo do tamanho da
     // sua copy — sem ASR confiável é o melhor palpite honesto.
     const tam = validas.map((p) => p.text.split(/\s+/).filter(Boolean).length);
     const total = tam.reduce((a, b) => a + b, 0) || 1;
     const antes = tam.slice(0, iParte).reduce((a, b) => a + b, 0);
-    const dentro = Math.min(tam[iParte], Math.max(0, palavraIdx));
+    const dentro = Math.min(tam[iParte], Math.max(0, palavraIdx) + (fim ? 1 : 0));
     return Math.max(0, Math.min(durSec, ((antes + dentro) / total) * durSec));
   };
 
-  /** Fim da PARTE em que o insert está ancorado (a régua do automático). */
-  const fimDaParte = (ancora: string): number => {
-    const iParte = validas.findIndex((p) => p.label === ancora);
-    if (iParte < 0) return durSec;
-    if (faixas && faixas[iParte]) {
-      const w = palavras[Math.max(0, Math.min(palavras.length - 1, faixas[iParte].ate - 1))];
-      if (w) return Math.max(0, Math.min(durSec, w.end / 1000));
-    }
-    const tam = validas.map((p) => p.text.split(/\s+/).filter(Boolean).length);
-    const total = tam.reduce((a, b) => a + b, 0) || 1;
-    const ate = tam.slice(0, iParte + 1).reduce((a, b) => a + b, 0);
-    return Math.max(0, Math.min(durSec, (ate / total) * durSec));
-  };
-
-  const brutas = inserts.map((ins) => {
-    const start = instanteDe(ins.ancora, ins.palavra);
-    // DURAÇÃO AUTOMÁTICA (o padrão): o insert cobre da palavra escolhida até o
-    // FIM DA PARTE. Mídia longa é cortada, curta é desacelerada — quem resolve
-    // isso é o `planoDeVelocidade`, na hora de desenhar.
-    let end: number;
-    if (ins.duracaoSec > 0) {
-      end = Math.min(durSec, start + ins.duracaoSec);
-    } else {
-      const fim = fimDaParte(ins.ancora);
-      end = Math.min(durSec, fim > start + 0.3 ? fim : start + INSERT_DUR_IMAGEM_PADRAO);
-    }
-    return { id: ins.id, start, end };
+  // A JANELA É O TRECHO: da primeira palavra marcada ao FIM da última. Não há
+  // duração pra escolher — o texto marcado É a duração.
+  const brutas = inserts.map((raw) => {
+    const ins = normalizarInsert(raw as never);
+    const start = instanteDe(ins.ancora, ins.palavraDe);
+    let end = instanteDe(ins.ancora, ins.palavraAte, true);
+    if (!(end > start + 0.2)) end = Math.min(durSec, start + INSERT_DUR_IMAGEM_PADRAO);
+    return { id: ins.id, start, end: Math.min(durSec, end) };
   });
   void duracaoNatural;
 
@@ -371,9 +370,28 @@ export type PlanoVelocidade = {
   corta: boolean;
   /** a partir deste instante DA JANELA o último frame congela (0 = nunca) */
   congelaApos: number;
+  /**
+   * MASCARAMENTO do slow motion, em px de blur na régua de 1080 de largura.
+   *
+   * Slow motion sem interpolação mostra o mesmo frame várias vezes seguidas — o
+   * olho lê isso como travamento, não como escolha. Um borrão de movimento leve
+   * cobre o degrau: é o que separa "b-roll em câmera lenta" de "vídeo travando".
+   * Cresce com o quanto se desacelerou e satura, pra nunca virar sujeira.
+   */
+  blur: number;
   /** pro log/UI: o que foi feito */
   motivo: 'exato' | 'cortou' | 'desacelerou' | 'desacelerou-e-congelou' | 'sem-duracao';
 };
+
+/** Blur máximo do mascaramento (px na régua de 1080 de largura). */
+export const INSERT_BLUR_MAX = 3.2;
+
+/** Quanto borrar pra esconder o degrau do slow motion. */
+export function blurDoSlowMotion(velocidade: number): number {
+  if (!(velocidade > 0) || velocidade >= 0.92) return 0; // quase normal: nada
+  const t = Math.min(1, (0.92 - velocidade) / (0.92 - INSERT_VEL_MIN));
+  return Math.round(INSERT_BLUR_MAX * t * 10) / 10;
+}
 
 /**
  * Como encaixar uma mídia de `naturalSec` numa janela de `janelaSec`.
@@ -388,18 +406,18 @@ export type PlanoVelocidade = {
  */
 export function planoDeVelocidade(naturalSec: number, janelaSec: number): PlanoVelocidade {
   if (!(janelaSec > 0)) {
-    return { velocidade: 1, corta: false, congelaApos: 0, motivo: 'sem-duracao' };
+    return { velocidade: 1, corta: false, congelaApos: 0, blur: 0, motivo: 'sem-duracao' };
   }
   if (!(naturalSec > 0)) {
-    return { velocidade: 1, corta: false, congelaApos: 0, motivo: 'sem-duracao' };
+    return { velocidade: 1, corta: false, congelaApos: 0, blur: 0, motivo: 'sem-duracao' };
   }
   const razao = naturalSec / janelaSec;
   if (razao >= 0.995 && razao <= 1.005) {
-    return { velocidade: 1, corta: false, congelaApos: 0, motivo: 'exato' };
+    return { velocidade: 1, corta: false, congelaApos: 0, blur: 0, motivo: 'exato' };
   }
   if (razao > 1) {
     // sobra mídia: roda normal e corta no fim da janela
-    return { velocidade: 1, corta: true, congelaApos: 0, motivo: 'cortou' };
+    return { velocidade: 1, corta: true, congelaApos: 0, blur: 0, motivo: 'cortou' };
   }
   // falta mídia: desacelera
   const vel = Math.max(INSERT_VEL_MIN, razao);
@@ -410,10 +428,11 @@ export function planoDeVelocidade(naturalSec: number, janelaSec: number): PlanoV
       velocidade: vel,
       corta: false,
       congelaApos: Math.min(janelaSec, cobre),
+      blur: blurDoSlowMotion(vel),
       motivo: 'desacelerou-e-congelou',
     };
   }
-  return { velocidade: vel, corta: false, congelaApos: 0, motivo: 'desacelerou' };
+  return { velocidade: vel, corta: false, congelaApos: 0, blur: blurDoSlowMotion(vel), motivo: 'desacelerou' };
 }
 
 /** Que instante da MÍDIA mostrar, dado o instante da JANELA. */

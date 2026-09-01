@@ -69,7 +69,7 @@ type FonteLocal = {
 };
 type PlanoInsertLocal = {
   janelas: Array<{ id: string; start: number; end: number }>;
-  porId: (id: string, W: number, H: number) => { palco: unknown; focoAvatarY: number } | null;
+  porId: (id: string, W: number, H: number) => { palco: unknown; focoAvatarY: number; blur?: number } | null;
   cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
   fontes: Map<string, FonteLocal>;
 };
@@ -284,7 +284,11 @@ export async function montarPosProducao(
             porId: (id: string, W: number, H: number) => {
               const ins = porId.get(id);
               if (!ins) return null;
-              return { palco: palcoDoLayout(ins.layout, W, H), focoAvatarY: ins.focoAvatarY };
+              return {
+                palco: palcoDoLayout(ins.layout, W, H),
+                focoAvatarY: ins.focoAvatarY,
+                blur: velocidadePorId.get(id)?.blur ?? 0,
+              };
             },
             cobertura: (t: number) =>
               coberturaNoInstante(t, janelas, (id) => porId.get(id)?.transicao || 'nenhuma'),

@@ -4130,8 +4130,8 @@ html[data-theme='light'] .pi-veu { background: rgba(24, 24, 30, 0.42); }
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(880px, calc(100vw - 32px));
-  max-height: min(88vh, 820px);
+  width: min(1060px, calc(100vw - 32px));
+  max-height: min(90vh, 900px);
   border-radius: 22px;
   background:
     radial-gradient(120% 70% at 50% -8%, rgba(56, 189, 248, 0.07), transparent 55%),
@@ -4171,7 +4171,7 @@ html[data-theme='light'] .pi-janela {
   font-family: var(--font-tech), var(--font-display), system-ui;
   font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: rgb(var(--text));
 }
-.pi-sub { font-size: 12.5px; line-height: 1.5; color: rgb(var(--text-muted)); }
+.pi-sub { font-size: 13px; line-height: 1.5; color: rgb(var(--text-muted)); }
 .pi-conta {
   flex-shrink: 0; border-radius: 999px; padding: 3px 11px;
   font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 800;
@@ -4189,19 +4189,19 @@ html[data-theme='light'] .pi-x { background: rgba(16,16,24,0.05); box-shadow: in
 
 /* corpo em duas colunas */
 .pi-corpo {
-  flex: 1; min-height: 0; display: grid; grid-template-columns: 232px 1fr;
-  gap: 16px; padding: 0 20px 4px; overflow: hidden;
+  flex: 1; min-height: 0; display: grid; grid-template-columns: 256px 1fr;
+  gap: 18px; padding: 0 22px 4px; overflow: hidden;
 }
 .pi-partes { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding-bottom: 8px; }
 .pi-rotulo {
-  font-family: var(--font-mono), monospace; font-size: 9.5px; font-weight: 800;
-  letter-spacing: 0.18em; text-transform: uppercase; color: rgb(var(--text-dim));
-  margin-bottom: 8px;
+  font-family: var(--font-mono), monospace; font-size: 10.5px; font-weight: 800;
+  letter-spacing: 0.16em; text-transform: uppercase; color: rgb(var(--text-muted));
+  margin-bottom: 9px;
 }
 .pi-rotulo.mt { margin-top: 16px; }
 .pi-rotulo-nota {
-  margin-left: 8px; font-family: var(--font-sans), system-ui; font-size: 10px;
-  font-weight: 500; letter-spacing: 0; text-transform: none; color: rgb(var(--text-muted));
+  margin-left: 9px; font-family: var(--font-sans), system-ui; font-size: 11px;
+  font-weight: 500; letter-spacing: 0; text-transform: none; color: rgb(var(--text-dim));
 }
 .pi-parte {
   position: relative; display: flex; flex-direction: column; gap: 2px;
@@ -4217,11 +4217,11 @@ html[data-theme='light'] .pi-parte { background: rgba(16,16,24,0.035); box-shado
 }
 html[data-theme='light'] .pi-parte.is-on { background: rgba(14,165,233,0.1); box-shadow: inset 0 0 0 1.5px rgba(14,116,144,0.7); }
 .pi-parte-nome {
-  font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 800;
-  letter-spacing: 0.1em; color: rgb(var(--text));
+  font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 800;
+  letter-spacing: 0.09em; color: rgb(var(--text));
 }
 .pi-parte-txt {
-  font-size: 10.5px; line-height: 1.4; color: rgb(var(--text-muted));
+  font-size: 11.5px; line-height: 1.45; color: rgb(var(--text-muted));
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .pi-parte-n {
@@ -4234,25 +4234,61 @@ html[data-theme='light'] .pi-parte.is-on { background: rgba(14,165,233,0.1); box
 /* palco da direita */
 .pi-palco { min-width: 0; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 8px; }
 .pi-copy {
-  display: flex; flex-wrap: wrap; gap: 2px 1px; border-radius: 12px; padding: 10px;
+  display: flex; flex-wrap: wrap; gap: 3px 1px; border-radius: 12px; padding: 13px 14px;
   background: rgba(255,255,255,0.035); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
-  max-height: 148px; overflow-y: auto;
+  max-height: 190px; overflow-y: auto;
 }
 html[data-theme='light'] .pi-copy { background: rgba(16,16,24,0.03); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.08); }
+/* A palavra dentro da copy. O TRECHO é contínuo, então as pontas ganham o
+   arredondamento e o miolo fica reto — lê como uma faixa, não como confete. */
 .pi-palavra {
-  position: relative; border-radius: 5px; padding: 2px 4px;
-  font-size: 12.5px; line-height: 1.55; color: rgb(var(--text));
-  transition: background-color 0.12s, color 0.12s;
+  position: relative; border-radius: 3px; padding: 3px 4px;
+  font-size: 14px; line-height: 1.6; font-weight: 500; color: rgb(var(--text));
+  transition: background-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
-.pi-palavra:hover { background: rgba(34,211,238,0.22); }
-.pi-palavra.is-marcada {
+.pi-palavra:hover { background: rgba(34, 211, 238, 0.24); }
+.pi-palavra.is-dentro {
   color: #05202b; font-weight: 700;
   background: linear-gradient(150deg, #a5f3fc, #22d3ee);
 }
-.pi-palavra-marca {
-  position: absolute; left: 50%; bottom: -5px; width: 4px; height: 4px;
-  transform: translateX(-50%); border-radius: 999px; background: #22d3ee;
+.pi-palavra.is-inicio { border-top-left-radius: 999px; border-bottom-left-radius: 999px; padding-left: 8px; }
+.pi-palavra.is-fim { border-top-right-radius: 999px; border-bottom-right-radius: 999px; padding-right: 8px; }
+/* ponta aberta esperando o 2º clique */
+.pi-palavra.is-ancora {
+  color: #05202b; font-weight: 700;
+  background: linear-gradient(150deg, #fde68a, #f59e0b);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.55);
+  border-radius: 999px; padding-left: 8px; padding-right: 8px;
 }
+.pi-copy-dica {
+  margin-top: 8px; font-size: 11.5px; line-height: 1.5; color: rgb(var(--text-muted));
+}
+.pi-copy-dica-on { color: #fbbf24; font-weight: 600; }
+html[data-theme='light'] .pi-copy-dica-on { color: #b45309; }
+
+/* Diagnóstico do encaixe — o que o sistema VAI fazer com a mídia. */
+.pi-encaixe {
+  display: flex; align-items: flex-start; gap: 9px;
+  border-radius: 11px; padding: 10px 12px;
+  font-size: 12px; line-height: 1.5; color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+html[data-theme='light'] .pi-encaixe {
+  background: rgba(16, 16, 24, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.09);
+}
+.pi-encaixe.is-alerta {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.45);
+}
+html[data-theme='light'] .pi-encaixe.is-alerta { color: #92400e; box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.42); }
+.pi-encaixe-icone {
+  flex-shrink: 0; font-size: 13px; line-height: 1.35; color: #22d3ee;
+}
+html[data-theme='light'] .pi-encaixe-icone { color: #0e7490; }
+.pi-encaixe.is-alerta .pi-encaixe-icone { color: inherit; }
 
 /* cards dos inserts */
 .pi-lista { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
@@ -4273,10 +4309,10 @@ html[data-theme='light'] .pi-card { background: rgba(16,16,24,0.035); box-shadow
 .pi-card-thumb-vazia { font-size: 13px; color: rgba(255,255,255,0.35); }
 .pi-card-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .pi-card-nome {
-  font-size: 12.5px; font-weight: 600; color: rgb(var(--text));
+  font-size: 13.5px; font-weight: 700; color: rgb(var(--text));
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.pi-card-meta { font-family: var(--font-mono), monospace; font-size: 9.5px; color: rgb(var(--text-muted)); }
+.pi-card-meta { font-family: var(--font-mono), monospace; font-size: 10.5px; color: rgb(var(--text-muted)); }
 .pi-card-chev { color: rgb(var(--text-muted)); transition: transform 0.22s cubic-bezier(0.32,0.72,0,1); }
 .pi-card.is-aberto .pi-card-chev { transform: rotate(180deg); }
 .pi-card-corpo { padding: 4px 13px 14px; animation: piAbre 0.24s cubic-bezier(0.32,0.72,0,1) both; }
@@ -4297,8 +4333,8 @@ html[data-theme='light'] .pi-layout { background: rgba(16,16,24,0.035); box-shad
   box-shadow: inset 0 0 0 2px rgba(34,211,238,0.75), 0 10px 22px -12px rgba(8,145,178,0.8);
 }
 html[data-theme='light'] .pi-layout.is-on { box-shadow: inset 0 0 0 2px rgba(14,116,144,0.75), 0 10px 22px -14px rgba(8,145,178,0.6); }
-.pi-layout-nome { font-size: 11px; font-weight: 600; color: rgb(var(--text)); }
-.pi-maquete { width: 40px; height: 71px; }
+.pi-layout-nome { font-size: 12px; font-weight: 700; color: rgb(var(--text)); }
+.pi-maquete { width: 46px; height: 82px; }
 .pi-mq-fundo { fill: rgba(255,255,255,0.05); }
 html[data-theme='light'] .pi-mq-fundo { fill: rgba(16,16,24,0.06); }
 .pi-mq-avatar { fill: rgba(255,255,255,0.14); }
@@ -4329,7 +4365,7 @@ html[data-theme='light'] .pi-mq-cabeca { fill: rgba(16,16,24,0.4); }
   transform: translateX(-50%); border-radius: 26% 26% 0 0; background: rgba(74,88,110,0.95);
 }
 .pi-foco-ctrl { display: flex; flex-direction: column; gap: 5px; }
-.pi-foco-rot { font-size: 10.5px; color: rgb(var(--text-muted)); }
+.pi-foco-rot { font-size: 11.5px; font-weight: 500; color: rgb(var(--text-muted)); }
 .pi-slider { width: 158px; accent-color: #22d3ee; }
 .pi-mini {
   align-self: flex-start; border-radius: 999px; padding: 3px 9px;
@@ -4347,7 +4383,7 @@ html[data-theme='light'] .pi-mini { box-shadow: inset 0 0 0 1px rgba(16,16,24,0.
 }
 html[data-theme='light'] .pi-seg { background: rgba(16,16,24,0.07); }
 .pi-seg-item {
-  border-radius: 999px; padding: 5px 13px; font-size: 11.5px; font-weight: 600;
+  border-radius: 999px; padding: 6px 15px; font-size: 12.5px; font-weight: 600;
   color: rgb(var(--text-muted)); transition: background-color 0.16s, color 0.16s;
 }
 .pi-seg-item:hover { color: rgb(var(--text)); }
@@ -4385,7 +4421,7 @@ html[data-theme='light'] .pi-add { color: #0e5063; box-shadow: inset 0 0 0 1.5px
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 14px 20px 18px;
 }
-.pi-rodape-txt { font-size: 11.5px; color: rgb(var(--text-muted)); }
+.pi-rodape-txt { font-size: 12.5px; color: rgb(var(--text-muted)); }
 .pi-ok {
   border-radius: 999px; padding: 9px 22px; font-size: 13px; font-weight: 700;
   color: #0a1206; background: linear-gradient(150deg, #d9f99d, #84cc16);

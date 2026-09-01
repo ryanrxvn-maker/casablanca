@@ -684,6 +684,8 @@ export type PlanoInsert = {
   porId: (id: string, W: number, H: number) => {
     palco: { avatar: Ret | null; insert: Ret; raio: number };
     focoAvatarY: number;
+    /** borrão de movimento que mascara o slow motion (px na régua de 1080) */
+    blur?: number;
   } | null;
   cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
   fontes: Map<string, FonteInsert>;
@@ -771,8 +773,15 @@ function desenharInsert(
           caminhoArredondado(ctx, ri, cfg.palco.raio);
           ctx.clip();
         }
+        // MÁSCARA DO SLOW MOTION: sem interpolação de frames, desacelerar
+        // repete o mesmo frame e o olho lê travamento. O borrão leve cobre o
+        // degrau — é o que separa "câmera lenta" de "vídeo travando".
+        if (cfg.blur && cfg.blur > 0.05) {
+          ctx.filter = `blur(${((cfg.blur * W) / 1080).toFixed(2)}px)`;
+        }
         const rec = recorteCover(fonte.w, fonte.h, ri.w, ri.h, 0.5);
         ctx.drawImage(img, rec.sx, rec.sy, rec.sw, rec.sh, ri.x, ri.y, ri.w, ri.h);
+        ctx.filter = 'none';
         ctx.restore();
       }
     }

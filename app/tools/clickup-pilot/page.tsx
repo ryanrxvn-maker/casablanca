@@ -1732,6 +1732,7 @@ function ClickUpPilotInner() {
                 onMudar={(prox) => setInserts(a.taskId, prox)}
                 onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
                 thumbDaMidia={(k) => insertThumbs[k] || null}
+                duracaoDaMidia={(k) => insertDurs[k] ?? null}
                 thumbAvatar={(a.roleSlots || []).find((sl) => sl.avatarThumb)?.avatarThumb || null}
               />
             ) : null}
@@ -1932,6 +1933,8 @@ function ClickUpPilotInner() {
 
   /** thumbs das mídias dos inserts (dataURL), só pra tela. */
   const [insertThumbs, setInsertThumbs] = useState<Record<string, string>>({});
+  /** duração (s) de cada mídia — o diagnóstico de encaixe da janela lê daqui. */
+  const [insertDurs, setInsertDurs] = useState<Record<string, number>>({});
   const insertThumbsRef = useRef(insertThumbs);
   insertThumbsRef.current = insertThumbs;
 
@@ -2000,6 +2003,7 @@ function ClickUpPilotInner() {
         }
       });
       setInsertThumbs((prev) => ({ ...prev, [key]: medido.thumb }));
+      setInsertDurs((prev) => ({ ...prev, [key]: medido.dur }));
       setError(null);
       void ancora;
       return {

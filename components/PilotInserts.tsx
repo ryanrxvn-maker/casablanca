@@ -25,6 +25,8 @@ import {
   insertPadrao,
   palcoDoLayout,
   coverComFoco,
+  planoDeVelocidade,
+  normalizarInsert,
   INSERT_FOCO_PADRAO,
   type Insert,
   type LayoutInsert,
@@ -130,6 +132,7 @@ export function PilotInsertsModal({
   onMudar,
   onSubirMidia,
   thumbDaMidia,
+  duracaoDaMidia,
   thumbAvatar,
 }: {
   /** a copy JÁ dividida — exatamente o que foi pro HeyGen */
@@ -148,6 +151,8 @@ export function PilotInsertsModal({
   } | null>;
   /** thumb (dataURL) de uma mídia já subida */
   thumbDaMidia: (key: string) => string | null;
+  /** duração (s) de uma mídia já subida — pro diagnóstico de encaixe */
+  duracaoDaMidia?: (key: string) => number | null;
   /** thumb do avatar, pra prévia do foco */
   thumbAvatar?: string | null;
 }) {
@@ -155,6 +160,8 @@ export function PilotInsertsModal({
   const [parteAtiva, setParteAtiva] = useState<string>(partes[0]?.label || '');
   const [selecionado, setSelecionado] = useState<string | null>(null);
   const [subindo, setSubindo] = useState(false);
+  /** Primeira ponta de um trecho em construção (clique 1 de 2). */
+  const [ancorando, setAncorando] = useState<{ id: string; de: number } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => setMontado(true), []);
@@ -251,26 +258,68 @@ export function PilotInsertsModal({
 
             <div className="pi-copy">
               {palavras.map((w, i) => {
-                const donos = insertsDaParte(parteAtiva).filter((x) => x.palavra === i);
-                const marcado = donos.length > 0;
+                // De quem é esta palavra? (o trecho, não uma marca solta)
+                const dono = insertsDaParte(parteAtiva)
+                  .map(normalizarInsert)
+                  .find((x) => i >= x.palavraDe && i <= x.palavraAte);
+                const emConstrucao =
+                  ancorando && insertsDaParte(parteAtiva).some((x) => x.id === ancorando.id)
+                    ? i >= Math.min(ancorando.de, i) && i === ancorando.de
+                    : false;
+                const alvo =
+                  (selecionado && inserts.find((x) => x.id === selecionado && x.ancora === parteAtiva)) ||
+                  insertsDaParte(parteAtiva)[0];
+                const cls =
+                  'pi-palavra' +
+                  (dono ? ' is-dentro' : '') +
+                  (dono && i === dono.palavraDe ? ' is-inicio' : '') +
+                  (dono && i === dono.palavraAte ? ' is-fim' : '') +
+                  (emConstrucao ? ' is-ancora' : '');
                 return (
                   <button
                     key={i}
                     type="button"
-                    className={'pi-palavra' + (marcado ? ' is-marcada' : '')}
+                    className={cls}
                     onClick={() => {
-                      const alvo = selecionado && inserts.find((x) => x.id === selecionado && x.ancora === parteAtiva);
-                      if (alvo) atualizar(alvo.id, { palavra: i });
-                      else if (insertsDaParte(parteAtiva)[0]) atualizar(insertsDaParte(parteAtiva)[0].id, { palavra: i });
-                      else fileRef.current?.click();
+                      if (!alvo) {
+                        fileRef.current?.click();
+                        return;
+                      }
+                      // DOIS CLIQUES definem o trecho: o 1º fixa a ponta, o 2º
+                      // fecha. Marcar palavra a palavra seria insuportável num
+                      // parágrafo de 40 palavras.
+                      if (ancorando && ancorando.id === alvo.id) {
+                        const de = Math.min(ancorando.de, i);
+                        const ate = Math.max(ancorando.de, i);
+                        atualizar(alvo.id, { palavraDe: de, palavraAte: ate });
+                        setAncorando(null);
+                      } else {
+                        setAncorando({ id: alvo.id, de: i });
+                        setSelecionado(alvo.id);
+                      }
                     }}
-                    title={marcado ? 'O insert entra aqui' : 'Pôr o insert nesta palavra'}
+                    title={
+                      ancorando && alvo && ancorando.id === alvo.id
+                        ? 'Clique aqui pra FECHAR o trecho'
+                        : 'Clique pra começar o trecho do insert'
+                    }
                   >
                     {w}
-                    {marcado ? <span className="pi-palavra-marca" aria-hidden /> : null}
                   </button>
                 );
               })}
+            </div>
+            <div className="pi-copy-dica">
+              {ancorando ? (
+                <span className="pi-copy-dica-on">
+                  Trecho aberto — clique na <b>última</b> palavra pra fechar.
+                  <button type="button" className="pi-mini ml-2" onClick={() => setAncorando(null)}>
+                    cancelar
+                  </button>
+                </span>
+              ) : (
+                <>Clique na primeira palavra do trecho e depois na última. O insert cobre exatamente essa fala.</>
+              )}
             </div>
 
             {/* ── os inserts desta parte ── */}
@@ -300,9 +349,11 @@ export function PilotInsertsModal({
                             ? 'tela cheia'
                             : `${ins.layout.tipo === 'faixas' ? 'faixas' : 'cards'} · avatar ${ins.layout.avatar}`}
                           {' · '}
-                          {ins.duracaoSec > 0 ? `${ins.duracaoSec.toFixed(1)}s` : 'duração do arquivo'}
-                          {' · palavra '}
-                          {ins.palavra + 1}
+                          {(() => {
+                            const n = normalizarInsert(ins as never);
+                            const q = n.palavraAte - n.palavraDe + 1;
+                            return `${q} palavra${q === 1 ? '' : 's'} do texto`;
+                          })()}
                         </span>
                       </span>
                       <span className="pi-card-chev" aria-hidden>
@@ -399,29 +450,44 @@ export function PilotInsertsModal({
                           ))}
                         </div>
 
-                        {/* DURAÇÃO */}
-                        <div className="pi-rotulo mt">
-                          Duração
-                          <span className="pi-rotulo-nota">
-                            {ins.duracaoSec > 0 ? `${ins.duracaoSec.toFixed(1)}s` : 'a do arquivo'}
-                          </span>
-                        </div>
-                        <div className="pi-dur">
-                          <input
-                            type="range"
-                            min={0}
-                            max={12}
-                            step={0.5}
-                            value={ins.duracaoSec}
-                            onChange={(e) => atualizar(ins.id, { duracaoSec: parseFloat(e.target.value) })}
-                            className="pi-slider"
-                          />
-                          {ins.midiaTipo === 'video' ? (
-                            <button type="button" className="pi-mini" onClick={() => atualizar(ins.id, { duracaoSec: 0 })}>
-                              usar o arquivo
-                            </button>
-                          ) : null}
-                        </div>
+                        {/* ENCAIXE — não é controle, é DIAGNÓSTICO.
+                          * A duração vem do trecho marcado; o que resta é a
+                          * mídia se ajustar. Aqui o editor vê o que o sistema
+                          * vai fazer, em vez de ter que decidir. */}
+                        <div className="pi-rotulo mt">Encaixe automático</div>
+                        {(() => {
+                          const n = normalizarInsert(ins as never);
+                          const palavrasDaParte = (partes.find((p) => p.label === ins.ancora)?.text || '')
+                            .split(/\s+/)
+                            .filter(Boolean).length || 1;
+                          // estimativa honesta: a parte inteira ≈ nº de palavras × ~0,42s
+                          const janela = Math.max(0.5, (n.palavraAte - n.palavraDe + 1) * 0.42);
+                          const natural = duracaoDaMidia?.(ins.midiaKey) ?? 0;
+                          const pv = planoDeVelocidade(natural, janela);
+                          const rotulo =
+                            ins.midiaTipo === 'imagem'
+                              ? 'Imagem — fica parada o trecho inteiro.'
+                              : pv.motivo === 'cortou'
+                                ? `Arquivo de ${natural.toFixed(1)}s num trecho de ~${janela.toFixed(1)}s: CORTA no fim da fala.`
+                                : pv.motivo === 'desacelerou'
+                                  ? `Arquivo de ${natural.toFixed(1)}s num trecho de ~${janela.toFixed(1)}s: DESACELERA pra ${pv.velocidade.toFixed(2)}x.`
+                                  : pv.motivo === 'desacelerou-e-congelou'
+                                    ? `Curto demais: vai a ${pv.velocidade.toFixed(2)}x e o resto segura no último frame.`
+                                    : natural > 0
+                                      ? 'Cabe exato — sem ajuste.'
+                                      : 'A duração do arquivo é medida na montagem.';
+                          return (
+                            <div className={'pi-encaixe' + (pv.motivo === 'desacelerou-e-congelou' ? ' is-alerta' : '')}>
+                              <span className="pi-encaixe-icone" aria-hidden>
+                                {pv.motivo === 'cortou' ? '✂' : pv.velocidade < 1 ? '◐' : '='}
+                              </span>
+                              <span>
+                                {rotulo}
+                                {pv.blur > 0 ? ' Com borrão leve pra o lento não parecer travado.' : ''}
+                              </span>
+                            </div>
+                          );
+                        })()}
 
                         <button type="button" className="pi-remover" onClick={() => remover(ins.id)}>
                           remover insert

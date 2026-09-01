@@ -19,6 +19,9 @@ import {
   coberturaNoInstante,
   insertPadrao,
   planoDeVelocidade,
+  normalizarInsert,
+  blurDoSlowMotion,
+  INSERT_BLUR_MAX,
   tempoNaMidia,
   encaixarNoCorte,
   cortesDoVideo,
@@ -105,30 +108,31 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 
 /* ══════════════ (2) as janelas caem no ponto certo do vídeo ═════════════ */
 {
+  // trecho: palavras 0..3 do BODY 1 (que começa na palavra 8 do ASR, 0.5s cada)
   const ins: Insert[] = [
-    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 1920, h: 1080 }), palavra: 0, duracaoSec: 2 },
+    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 1920, h: 1080 }), palavraDe: 0, palavraAte: 3 },
   ];
   const j = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
   ok(j.length === 1, 'uma janela');
-  ok(aprox(j[0].start, 4.0, 0.01), 'o insert do BODY 1 entra em 4.0s (palavra 8 × 0.5s)');
-  ok(aprox(j[0].end, 6.0, 0.01), 'e dura os 2s pedidos');
+  ok(aprox(j[0].start, 4.0, 0.01), 'começa no INÍCIO da 1ª palavra do trecho (4.0s)');
+  ok(j[0].end > 5.5 && j[0].end < 6.2, `e termina no FIM da última (deu ${j[0].end.toFixed(2)}s)`);
 }
 
 // a PALAVRA escolhida manda — é o "aparecer antes da parte acabar"
 {
   const ins: Insert[] = [
-    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 100, h: 100 }), palavra: 5, duracaoSec: 2 },
+    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 100, h: 100 }), palavraDe: 5, palavraAte: 6 },
   ];
   const j = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
-  ok(aprox(j[0].start, 6.5, 0.01), 'palavra 5 do BODY 1 → 6.5s (não o começo da parte)');
+  ok(aprox(j[0].start, 6.5, 0.01), 'trecho começando na palavra 5 → 6.5s (não o começo da parte)');
 }
 
 // SOBREPOSIÇÃO: dois inserts no mesmo ponto não podem tocar juntos
 {
   const base = insertPadrao('x', 'HOOK 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 100, h: 100 });
   const ins: Insert[] = [
-    { ...base, id: 'a', palavra: 0, duracaoSec: 3 },
-    { ...base, id: 'b', palavra: 1, duracaoSec: 3 },
+    { ...base, id: 'a', palavraDe: 0, palavraAte: 5 },
+    { ...base, id: 'b', palavraDe: 1, palavraAte: 6 },
   ];
   const j = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
   ok(j.length === 2, 'os dois sobrevivem');
@@ -138,7 +142,7 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 // nada escapa da duração do vídeo
 {
   const ins: Insert[] = [
-    { ...insertPadrao('a', 'BODY 2', { key: 'k', nome: 'n', tipo: 'imagem', w: 100, h: 100 }), palavra: 90, duracaoSec: 30 },
+    { ...insertPadrao('a', 'BODY 2', { key: 'k', nome: 'n', tipo: 'imagem', w: 100, h: 100 }), palavraDe: 90, palavraAte: 99 },
   ];
   const j = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
   ok(j.every((x) => x.start >= 0 && x.end <= DUR + 0.001), 'janela nunca passa do fim do vídeo');
@@ -147,8 +151,8 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 // sem ASR confiável, RATEIA — grosseiro, mas dentro do vídeo e na ordem certa
 {
   const ins: Insert[] = [
-    { ...insertPadrao('a', 'HOOK 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 1, h: 1 }), palavra: 0, duracaoSec: 2 },
-    { ...insertPadrao('b', 'BODY 2', { key: 'k', nome: 'n', tipo: 'imagem', w: 1, h: 1 }), palavra: 0, duracaoSec: 2 },
+    { ...insertPadrao('a', 'HOOK 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 1, h: 1 }), palavraDe: 0, palavraAte: 2 },
+    { ...insertPadrao('b', 'BODY 2', { key: 'k', nome: 'n', tipo: 'imagem', w: 1, h: 1 }), palavraDe: 0, palavraAte: 2 },
   ];
   const semAsr = janelasDosInserts(ins, PARTES, [], 30);
   ok(semAsr.length === 2, 'sem ASR os dois inserts continuam existindo');
@@ -272,13 +276,13 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 /* ═══════════════════ (6) o insert padrão é sensato ═══════════════════ */
 {
   const img = insertPadrao('i1', 'HOOK 1', { key: 'k', nome: 'foto.jpg', tipo: 'imagem', w: 1920, h: 1080 });
-  // Desde 01.09 TUDO nasce automático: o insert preenche a PARTE em que foi
-  // ancorado. Antes ele nascia com a duração do arquivo e sobrava/faltava.
-  ok(img.duracaoSec === 0, 'imagem nasce AUTOMÁTICA (preenche a parte)');
+  // Desde 01.09 não existe "duração do insert": ele cobre o TRECHO marcado na
+  // copy, e a mídia é que se ajusta (corta ou desacelera).
+  ok(img.palavraDe === 0 && img.palavraAte === 0, 'nasce marcando a 1ª palavra — o editor estende dali');
   ok(img.layout.tipo === 'cheia', 'e em tela cheia');
   ok(img.focoAvatarY === INSERT_FOCO_PADRAO, 'com o foco no rosto já ligado');
   const vid = insertPadrao('v1', 'BODY 1', { key: 'k', nome: 'v.mp4', tipo: 'video', w: 1920, h: 1080, durSec: 4.2 });
-  ok(vid.duracaoSec === 0, 'vídeo também nasce automático — a duração do arquivo vira velocidade, não janela');
+  ok(!('duracaoSec' in vid), 'a duração do arquivo NÃO vira campo — ela vira velocidade');
 }
 
 
@@ -322,19 +326,52 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 
 /* ═════════ (8) a duração AUTOMÁTICA vai até o fim da parte ═════════ */
 {
+  // O TRECHO manda: a duração do ARQUIVO (99s) não tem voz nenhuma na janela.
   const ins: Insert[] = [
-    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'video', w: 1, h: 1, durSec: 99 }), palavra: 0 },
+    { ...insertPadrao('a', 'BODY 1', { key: 'k', nome: 'n', tipo: 'video', w: 1, h: 1, durSec: 99 }), palavraDe: 0, palavraAte: 8 },
   ];
-  ok(ins[0].duracaoSec === 0, 'insert nasce com duração AUTOMÁTICA');
   const j = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
-  // BODY 1 vai da palavra 8 à 16 → 4.0s a ~8.4s
-  ok(aprox(j[0].start, 4.0, 0.05), 'começa no início do BODY 1');
-  ok(j[0].end > 8 && j[0].end < 9, `e morre no FIM do BODY 1 (deu ${j[0].end.toFixed(2)}s), não na duração do arquivo`);
+  ok(aprox(j[0].start, 4.0, 0.05), 'começa no início do trecho');
+  ok(j[0].end > 8 && j[0].end < 9, `e morre no FIM do trecho (deu ${j[0].end.toFixed(2)}s), não nos 99s do arquivo`);
 
-  // com duração manual, ela manda
-  const manual: Insert[] = [{ ...ins[0], duracaoSec: 1.5 }];
-  const jm = janelasDosInserts(manual, PARTES, asrFiel(), DUR);
-  ok(aprox(jm[0].end - jm[0].start, 1.5, 0.05), 'duração manual vence o automático');
+  // trecho MAIOR = janela MAIOR. É a única alavanca, e é a certa.
+  const curto: Insert[] = [{ ...ins[0], palavraAte: 2 }];
+  const jc = janelasDosInserts(curto, PARTES, asrFiel(), DUR);
+  ok(jc[0].end < j[0].end, 'marcar menos palavras encurta o insert');
+}
+
+/* ═══════ (8b) MIGRAÇÃO: insert salvo no formato antigo não vira NaN ═══════ */
+{
+  const antigo = {
+    id: 'v', ancora: 'HOOK 1', palavra: 3, duracaoSec: 4,
+    layout: { tipo: 'cheia' as const }, transicao: 'escurecer' as const,
+    midiaKey: 'k', midiaNome: 'n', midiaTipo: 'video' as const,
+    midiaW: 1, midiaH: 1, focoAvatarY: 0.34,
+  };
+  const n = normalizarInsert(antigo as never);
+  ok(n.palavraDe === 3 && n.palavraAte === 3, 'insert velho (palavra única) vira um trecho de 1 palavra');
+  ok(Number.isFinite(n.palavraDe), 'e nunca NaN — NaN poria o b-roll no lugar errado, calado');
+
+  // e ordem invertida é consertada
+  const inv = normalizarInsert({ ...antigo, palavraDe: 9, palavraAte: 2 } as never);
+  ok(inv.palavraDe === 2 && inv.palavraAte === 9, 'trecho invertido é endireitado');
+}
+
+/* ═════ (8c) MASCARAMENTO do slow motion — o que separa lento de travado ═════ */
+{
+  ok(blurDoSlowMotion(1) === 0, 'velocidade normal não borra nada');
+  ok(blurDoSlowMotion(0.95) === 0, 'desaceleração imperceptível também não');
+  const meio = blurDoSlowMotion(0.7);
+  const forte = blurDoSlowMotion(0.5);
+  ok(meio > 0, 'a partir de um ponto, começa a borrar');
+  ok(forte > meio, 'quanto mais lento, mais borrão (o degrau é maior)');
+  ok(forte <= INSERT_BLUR_MAX, 'e satura — borrão demais viraria sujeira');
+
+  // o plano carrega o blur junto
+  const p1 = planoDeVelocidade(2, 4); // 0.5x
+  ok(p1.blur > 0, 'quem desacelera muito sai com máscara');
+  ok(planoDeVelocidade(12, 4).blur === 0, 'quem corta não precisa de máscara');
+  ok(planoDeVelocidade(4, 4).blur === 0, 'e quem cabe exato também não');
 }
 
 /* ═══════════ (9) a REGRA DO CORTE: nada some no meio da fala ═══════════ */
