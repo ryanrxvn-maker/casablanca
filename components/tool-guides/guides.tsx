@@ -252,12 +252,12 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Instale o Motor + a Extensão (uma vez só)',
-        text: 'O Downloader usa duas peças que você instala uma única vez: o Motor (card "Passo 01 — Instalar o Motor": um .exe de 1 clique que instala sozinho e faz o download pesado no seu PC) e a Extensão do Chrome (card "Passo 02 — Baixar Extensão"). O bloco "Instruções detalhadas" mostra cada clique — inclusive o aviso do Windows: se aparecer a tela azul do SmartScreen, clique em "Mais informações" e depois "Executar assim mesmo". Quando tudo estiver certo, o card mostra o ponto verde com "Auto Edit · Downloader" e o selo "✓ motor online".',
+        text: 'O Downloader usa duas peças que você instala uma única vez: o Motor (card "Passo 01 — Instalar o Motor", que faz o download pesado no seu próprio computador) e a Extensão do Chrome (card "Passo 02 — Baixar Extensão"). O passo 01 muda sozinho conforme o seu sistema: no Windows é um .exe de 1 clique — se aparecer a tela azul do SmartScreen, clique em "Mais informações" e depois "Executar assim mesmo"; no Mac é um comando que você copia e cola no Terminal (Command + Espaço, escreva "Terminal"), que instala e no fim testa a si mesmo. O bloco "Instruções detalhadas" mostra cada passo. Quando tudo estiver certo, o card mostra o ponto verde com "Auto Edit · Downloader" e o selo "✓ motor online".',
         visual: (
           <Shot label="Downloader · setup">
             <MStack>
               <MRow>
-                <MBtn tone="primary">Instalar o Motor (.exe)</MBtn>
+                <MBtn tone="primary">Instalar o Motor</MBtn>
                 <MBtn tone="ghost">Baixar Extensão</MBtn>
               </MRow>
               <MRow>
@@ -319,8 +319,8 @@ export const GUIDES: Record<string, ToolGuide> = {
     ],
     tips: [
       'TikTok sai sem marca d’água e em HD; Pinterest baixa a mídia direta.',
-      'Apareceu "Motor desconectado"? Abra o atalho "Auto Edit Downloader" no menu Iniciar do Windows e clique em "↻ Verificar de novo" — a página re-testa sozinha a cada 5 segundos.',
-      'Antivírus bloqueou o instalador? Use o botão "↓ Baixar versão ZIP (alternativa)" no mesmo card.',
+      'Apareceu "Motor desconectado"? No Windows, abra o atalho "Auto Edit Downloader" no menu Iniciar; no Mac, rode de novo o comando do passo 01 no Terminal (ele reinstala por cima sem bagunçar nada). Depois clique em "↻ Verificar de novo" — a página re-testa sozinha a cada 5 segundos.',
+      'Antivírus bloqueou o instalador no Windows? Use o botão "↓ Baixar versão ZIP (alternativa)" no mesmo card. No Mac isso não acontece: o comando do Terminal não passa pela trava do Gatekeeper.',
       'Links privados exigem login na plataforma. Baixe apenas conteúdo que você tem direito de usar.',
     ],
   },
