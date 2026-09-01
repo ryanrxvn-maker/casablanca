@@ -14,6 +14,12 @@ import {
   type ZoomCfg,
 } from './pilot-pos-producao';
 import type { CaptionTemplate } from './typography/caption-script';
+import {
+  janelasDosInserts,
+  palcoDoLayout,
+  coberturaNoInstante,
+  type Insert,
+} from './pilot-inserts';
 
 /* ═══════════════════════════ orquestrador (browser) ══════════════════════ */
 
@@ -29,6 +35,10 @@ export type PosProducaoCfg = {
   /** o caller já segura o lock do ffmpeg (o pipeline SEMPRE segura) — sem
    *  isto o mux de áudio do render pede o lock de novo e trava pra sempre */
   ffmpegJaExclusivo?: boolean;
+  /** INSERTS: b-roll na montagem, ancorado numa palavra da copy */
+  inserts?: Insert[];
+  /** lê os bytes de uma mídia de insert (IndexedDB) */
+  lerMidia?: (key: string) => Promise<Blob | null>;
   onEtapa?: (msg: string) => void;
 };
 
@@ -41,6 +51,22 @@ export type PosProducaoInfo = {
 
 /** Palavra do ASR no shape do engine. */
 type PalavraAsr = { text: string; start: number; end: number };
+
+/** Espelho local do que o render espera (evita import cíclico com export.ts). */
+type FonteLocal = {
+  id: string;
+  w: number;
+  h: number;
+  quadro: (tRel: number) => CanvasImageSource | null;
+};
+type PlanoInsertLocal = {
+  janelas: Array<{ id: string; start: number; end: number }>;
+  porId: (id: string, W: number, H: number) => { palco: unknown; focoAvatarY: number } | null;
+  cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
+  fontes: Map<string, FonteLocal>;
+};
+
+
 
 /**
  * Aplica legenda e/ou zoom num montado. Devolve `null` quando NÃO há nada a
@@ -55,7 +81,8 @@ export async function montarPosProducao(
   const avisos: string[] = [];
   const querLegenda = cfg.legenda.on;
   const querZoom = cfg.zoom.on;
-  if (!querLegenda && !querZoom) return { blob: null, avisos };
+  const temInserts = (cfg.inserts?.length || 0) > 0 && !!cfg.lerMidia;
+  if (!querLegenda && !querZoom && !temInserts) return { blob: null, avisos };
 
   try {
     const [{ renderTypographyVideo }, engine, grupo, roteiro, copyFix] = await Promise.all([
@@ -78,13 +105,29 @@ export async function montarPosProducao(
 
     const plano = querZoom ? planejarZoom(cfg.zoom, durSec, info.partesSec, info.cortesInternosSec) : [];
 
-    // ── legenda: ASR → correção pela copy → roteiro do template ──
+    // ── ASR: serve à legenda E à âncora dos inserts ──
+    // O insert é ancorado numa PALAVRA da copy; sem o ASR não há como saber em
+    // que segundo ela é falada (a lib cai no rateio proporcional, que erra por
+    // segundos). Então transcrevemos também quando só há insert.
+    let palavrasParaAncora: PalavraAsr[] = [];
     let blocks: import('./typography/engine').Block[] = [];
     let style: import('./typography/engine').StyleState = { ...DEFAULT_STYLE, presetId: 'keynote' };
+    if (!querLegenda && temInserts) {
+      try {
+        cfg.onEtapa?.('lendo a fala pra ancorar os inserts');
+        palavrasParaAncora = await transcreverMontado(blob, cfg.idioma);
+      } catch (e) {
+        avisos.push(
+          `inserts: não consegui transcrever (${(e as Error)?.message?.slice(0, 50)}) — ` +
+            'a posição sai por estimativa da copy',
+        );
+      }
+    }
     if (querLegenda) {
       try {
         cfg.onEtapa?.('legendando: transcrevendo');
         const palavras = await transcreverMontado(blob, cfg.idioma);
+        palavrasParaAncora = palavras;
         let bls = grupo.groupWords(palavras, 'rapido');
 
         // correção pela copy do doc (grafia + palavras comidas pelo ASR)
@@ -129,7 +172,100 @@ export async function montarPosProducao(
       }
     }
 
-    if (blocks.length === 0 && plano.length === 0) return { blob: null, avisos };
+    // ── INSERTS: abre as mídias e monta o plano de composição ──
+    // Vídeo vira um <video> que o render busca por seek (o insert é curto —
+    // 2-5s — então o custo é baixo e não precisa decodificar tudo na memória).
+    // Imagem vira um <img> desenhado direto.
+    let planoInserts: PlanoInsertLocal | undefined;
+    const fechaveis: Array<() => void> = [];
+    if (temInserts) {
+      try {
+        cfg.onEtapa?.('preparando inserts');
+        const fontes = new Map<string, FonteLocal>();
+        const durNatural = new Map<string, number>();
+        for (const ins of cfg.inserts!) {
+          const blob = await cfg.lerMidia!(ins.midiaKey);
+          if (!blob) {
+            avisos.push(`insert "${ins.midiaNome}" não voltou do armazenamento — foi ignorado`);
+            continue;
+          }
+          const url = URL.createObjectURL(blob);
+          fechaveis.push(() => URL.revokeObjectURL(url));
+          if (ins.midiaTipo === 'imagem') {
+            const img = await new Promise<HTMLImageElement | null>((res) => {
+              const im = new Image();
+              im.onload = () => res(im);
+              im.onerror = () => res(null);
+              im.src = url;
+            });
+            if (!img) { avisos.push(`insert "${ins.midiaNome}" não abriu`); continue; }
+            fontes.set(ins.id, { id: ins.id, w: img.naturalWidth, h: img.naturalHeight, quadro: () => img });
+          } else {
+            const v = document.createElement('video');
+            v.muted = true;
+            v.preload = 'auto';
+            v.playsInline = true;
+            const abriu = await new Promise<boolean>((res) => {
+              const t = setTimeout(() => res(false), 15000);
+              v.onloadeddata = () => { clearTimeout(t); res(true); };
+              v.onerror = () => { clearTimeout(t); res(false); };
+              v.src = url;
+            });
+            if (!abriu) { avisos.push(`insert "${ins.midiaNome}" não abriu`); continue; }
+            durNatural.set(ins.id, v.duration || 0);
+            // seek SÍNCRONO-ish: o render pede quadros em ordem crescente, e
+            // o <video> já está carregado, então o currentTime resolve rápido.
+            fontes.set(ins.id, {
+              id: ins.id,
+              w: v.videoWidth,
+              h: v.videoHeight,
+              quadro: (tRel: number) => {
+                const alvo = Math.min(Math.max(0, tRel), Math.max(0, (v.duration || 0) - 0.05));
+                if (Math.abs(v.currentTime - alvo) > 0.03) v.currentTime = alvo;
+                return v;
+              },
+            });
+          }
+        }
+
+        const usaveis = cfg.inserts!.filter((i) => fontes.has(i.id));
+        if (usaveis.length > 0) {
+          const janelas = janelasDosInserts(
+            usaveis,
+            cfg.partes,
+            palavrasParaAncora,
+            durSec,
+            (id) => durNatural.get(id) ?? null,
+          );
+          const porId = new Map(usaveis.map((i) => [i.id, i]));
+          planoInserts = {
+            janelas,
+            // W/H vêm do RENDER (o vídeo real), não de uma régua fixa — senão
+            // o card do avatar cai fora da tela em qualquer resolução != 1080p.
+            porId: (id: string, W: number, H: number) => {
+              const ins = porId.get(id);
+              if (!ins) return null;
+              return { palco: palcoDoLayout(ins.layout, W, H), focoAvatarY: ins.focoAvatarY };
+            },
+            cobertura: (t: number) =>
+              coberturaNoInstante(t, janelas, (id) => porId.get(id)?.transicao || 'nenhuma'),
+            fontes,
+          };
+          console.log(
+            `[pos-producao] ${info.filename}: ${janelas.length} insert(s) — ` +
+              janelas.map((j) => `${j.start.toFixed(1)}→${j.end.toFixed(1)}s`).join(', '),
+          );
+        }
+      } catch (e) {
+        avisos.push(`inserts não entraram (${(e as Error)?.message?.slice(0, 60)}) — vídeo segue sem eles`);
+        planoInserts = undefined;
+      }
+    }
+
+    if (blocks.length === 0 && plano.length === 0 && !planoInserts) {
+      for (const f of fechaveis) f();
+      return { blob: null, avisos };
+    }
 
     // ── RENDER com PROGRESSO REAL e TETO DE TEMPO ──
     // O render de um AD de 90s são ~2.700 frames com legenda desenhada em cada
@@ -154,6 +290,7 @@ export async function montarPosProducao(
         style,
         zoom: plano,
         ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
+        inserts: planoInserts as never,
         signal: ctrl.signal,
         onProgress: (pr) => {
           // 'frames' é a fase longa — é dela que sai a porcentagem honesta.
@@ -167,6 +304,7 @@ export async function montarPosProducao(
       });
     } finally {
       clearTimeout(alarme);
+      for (const f of fechaveis) f();
     }
     const seg = ((Date.now() - t0) / 1000).toFixed(0);
     console.log(

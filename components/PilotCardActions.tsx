@@ -166,6 +166,14 @@ export const IconZoomDinamica = ({ size = 16 }: { size?: number }) => (
     <path d="M9.5 9.5 12 12m0 0 2.5 2.5M12 12l2.5-2.5M12 12l-2.5 2.5" opacity="0.7" />
   </svg>
 );
+export const IconInserts = ({ size = 16 }: { size?: number }) => (
+  // Duas telas: a de tras e' o avatar, a da frente e' o b-roll entrando.
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="4" width="14" height="12" rx="2" />
+    <path d="M22 8v10a2 2 0 0 1-2 2H8" opacity="0.5" />
+    <path d="m7 9.5 4 2.5-4 2.5z" fill="currentColor" stroke="none" />
+  </svg>
+);
 export const IconNivelar = ({ size = 16 }: { size?: number }) => (
   // Barras iguais sob uma regua: e' o que o normalizador faz — poe todo mundo
   // no MESMO patamar (nao e' "volume", e' NIVELAR).

@@ -15,6 +15,8 @@ import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPan
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
 import { EditPartModal } from '@/components/EditPartModal';
+import { PilotInsertsModal } from '@/components/PilotInserts';
+import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
 import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
 import { BUILTIN_TEMPLATES } from '@/lib/typography/caption-script';
 import { LEGENDA_CFG_DEFAULT, ZOOM_CFG_DEFAULT, type LegendaCfg, type ZoomCfg } from '@/lib/pilot-pos-producao';
@@ -89,6 +91,154 @@ const TRECHOS_MOCK = [
  * O que valida: duração preservada, tamanho plausível, legenda desenhada e
  * o crop do zoom visível (as bordas do testsrc2 somem ao longo da janela).
  */
+/**
+ * PROVA E2E DO INSERT: renderiza o dev-tiny.mp4 com um insert VERMELHO no
+ * split e confere os PIXELS do frame.
+ *
+ * É o teste que a lib não alcança: prova que a composição chega ao vídeo com
+ * a geometria certa. Verifica três coisas que só o render pode errar:
+ *   • FORA da janela do insert o frame é o vídeo original (nada vazou);
+ *   • DENTRO, a metade do insert está vermelha de ponta a ponta — se houvesse
+ *     borda (o "contain" ingênuo), os cantos não seriam vermelhos;
+ *   • a metade do AVATAR continua sendo vídeo, não vermelho.
+ */
+async function rodarProvaInsert(
+  setMsg: (m: string | null) => void,
+  setUrl: (u: string | null) => void,
+) {
+  try {
+    setUrl(null);
+    setMsg('preparando o insert…');
+    const blob = await fetch('/dev-tiny.mp4').then((r) => r.blob());
+
+    const [{ renderTypographyVideo }, engine, presets, ins] = await Promise.all([
+      import('@/lib/typography/export'),
+      import('@/lib/typography/engine'),
+      import('@/lib/typography/presets'),
+      import('@/lib/pilot-inserts'),
+    ]);
+
+    // mídia do insert: um retângulo VERMELHO 16:9 (o pior caso de aspecto
+    // dentro de um 9:16 — é onde a borda apareceria)
+    const cv = document.createElement('canvas');
+    cv.width = 1920;
+    cv.height = 1080;
+    const g2 = cv.getContext('2d')!;
+    g2.fillStyle = '#ff0000';
+    g2.fillRect(0, 0, 1920, 1080);
+    g2.fillStyle = '#00ff00';
+    g2.fillRect(880, 460, 160, 160); // miolo verde: mostra que o cover centraliza
+    const imgIns = new Image();
+    await new Promise<void>((res) => {
+      imgIns.onload = () => res();
+      imgIns.src = cv.toDataURL('image/png');
+    });
+
+    const layout = { tipo: 'faixas' as const, avatar: 'cima' as const };
+    const janelas = [{ id: 'i1', start: 4, end: 8 }];
+    const plano = {
+      janelas,
+      porId: (_id: string, W: number, H: number) => ({
+        palco: ins.palcoDoLayout(layout, W, H),
+        focoAvatarY: ins.INSERT_FOCO_PADRAO,
+      }),
+      cobertura: (t: number) =>
+        ins.coberturaNoInstante(t, janelas, () => 'escurecer' as const),
+      fontes: new Map([['i1', { id: 'i1', w: 1920, h: 1080, quadro: () => imgIns }]]),
+    };
+
+    setMsg('renderizando com insert…');
+    const t0 = Date.now();
+    const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
+    const r = await runFfmpegExclusive(() =>
+      renderTypographyVideo({
+        file: blob,
+        blocks: [],
+        preset: presets.getPreset('keynote'),
+        style: { ...engine.DEFAULT_STYLE, presetId: 'keynote' },
+        ffmpegJaExclusivo: true,
+        inserts: plano as never,
+        onProgress: (pr) => setMsg(`render insert ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
+      }),
+    );
+
+    setMsg('conferindo os pixels…');
+    const veredito = await provarInsertNosPixels(r.blob);
+    const seg = ((Date.now() - t0) / 1000).toFixed(1);
+    setUrl(URL.createObjectURL(r.blob));
+    setMsg(
+      `${veredito.ok ? 'PROVA OK' : 'FALHOU'} em ${seg}s · ${r.width}x${r.height} · ` +
+        `audioOk=${r.audioOk} · ${veredito.detalhe}`,
+    );
+  } catch (e) {
+    setMsg(`FALHOU: ${(e as Error)?.message || e}`);
+  }
+}
+
+/** Lê frames do resultado e confere onde o vermelho está (e onde NÃO está). */
+async function provarInsertNosPixels(v: Blob): Promise<{ ok: boolean; detalhe: string }> {
+  const url = URL.createObjectURL(v);
+  const vid = document.createElement('video');
+  vid.muted = true;
+  await new Promise<void>((res, rej) => {
+    vid.onloadeddata = () => res();
+    vid.onerror = () => rej(new Error('resultado não abriu'));
+    vid.src = url;
+  });
+  const seek = (t: number) =>
+    new Promise<void>((res) => {
+      vid.onseeked = () => res();
+      vid.currentTime = t;
+    });
+  const c = document.createElement('canvas');
+  c.width = vid.videoWidth;
+  c.height = vid.videoHeight;
+  const g = c.getContext('2d')!;
+  /** fração de pixels VERMELHOS numa faixa vertical [de,ate] da altura */
+  const vermelhoNaFaixa = (de: number, ate: number): number => {
+    const y0 = Math.round(c.height * de);
+    const y1 = Math.round(c.height * ate);
+    const d = g.getImageData(0, y0, c.width, Math.max(1, y1 - y0)).data;
+    let n = 0;
+    let total = 0;
+    for (let i = 0; i < d.length; i += 4 * 37) {
+      total++;
+      if (d[i] > 140 && d[i + 1] < 110 && d[i + 2] < 110) n++;
+    }
+    return total ? n / total : 0;
+  };
+
+  // 1) FORA da janela: nada de vermelho
+  await seek(1.5);
+  g.drawImage(vid, 0, 0);
+  const foraDeCima = vermelhoNaFaixa(0.05, 0.45);
+  const foraDeBaixo = vermelhoNaFaixa(0.55, 0.95);
+
+  // 2) DENTRO: metade de baixo vermelha, metade de cima NÃO
+  await seek(6);
+  g.drawImage(vid, 0, 0);
+  const dentroCima = vermelhoNaFaixa(0.06, 0.42);
+  const dentroBaixo = vermelhoNaFaixa(0.58, 0.94);
+  // cantos da metade de baixo: é aqui que a borda apareceria
+  const dCanto = g.getImageData(2, Math.round(c.height * 0.92), 6, 6).data;
+  const cantoVermelho = dCanto[0] > 140 && dCanto[1] < 110 && dCanto[2] < 110;
+
+  URL.revokeObjectURL(url);
+  // ⚠ O vídeo de teste é o `testsrc2`, que TEM barras vermelhas — por isso a
+  // régua é COMPARATIVA, não um limiar absoluto. O que prova o insert é a
+  // metade de baixo SALTAR de ~16% pra ~100%, enquanto a de cima NÃO muda.
+  const saltou = dentroBaixo - foraDeBaixo;
+  const avatarIntacto = Math.abs(dentroCima - foraDeCima) < 0.1;
+  const ok = dentroBaixo > 0.9 && saltou > 0.5 && avatarIntacto && cantoVermelho;
+  return {
+    ok,
+    detalhe:
+      `insert ${(foraDeBaixo * 100).toFixed(0)}%→${(dentroBaixo * 100).toFixed(0)}% (saltou ${(saltou * 100).toFixed(0)}pp) · ` +
+      `avatar ${(foraDeCima * 100).toFixed(0)}%→${(dentroCima * 100).toFixed(0)}% (${avatarIntacto ? 'INTACTO' : 'VAZOU'}) · ` +
+      `canto ${cantoVermelho ? 'PREENCHIDO' : 'COM BORDA'}`,
+  };
+}
+
 async function rodarProvaE2E(
   setMsg: (m: string | null) => void,
   setUrl: (u: string | null) => void,
@@ -258,6 +408,10 @@ function Conteudo() {
   const [provaMsg, setProvaMsg] = useState<string | null>(null);
   const [provaUrl, setProvaUrl] = useState<string | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
+  const [insAberto, setInsAberto] = useState(false);
+  const [insLista, setInsLista] = useState<Insert[]>([
+    insertPadrao('d1', 'BODY 1', { key: 'demo:broll.mp4', nome: 'broll-azeite.mp4', tipo: 'video', w: 1920, h: 1080, durSec: 4 }),
+  ]);
   const [motorCfg, setMotorCfg] = useState<MotorConfig>({ kind: 'individual', perSlot: {} });
   const [slotsDemo, setSlotsDemo] = useState([
     { id: '0', nome: 'Confident Business Executive', thumb: null as string | null, motor: 'III' as Motor, motionPrompt: null as string | null, imageMode: false },
@@ -289,6 +443,14 @@ function Conteudo() {
         >
           <span aria-hidden>▶</span>
           rodar prova e2e
+        </button>
+        <button
+          id="pi-prova"
+          type="button"
+          className="ml-2 rounded-[10px] border border-cyan-400/50 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest text-cyan-200"
+          onClick={() => void rodarProvaInsert(setProvaMsg, setProvaUrl)}
+        >
+          ▶ prova do insert
         </button>
         {provaMsg ? <div className="mono mt-2 text-[10px] text-text-muted" id="prova-msg">{provaMsg}</div> : null}
         {provaUrl ? (
@@ -469,6 +631,37 @@ function Conteudo() {
           </div>
         </div>
       </section>
+
+      {/* ========== 0.15 JANELA DOS INSERTS ========== */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Inserts</div>
+        <button id="pi-abre" type="button" className="pi-add" onClick={() => setInsAberto(true)}>
+          <span className="pi-add-mais" aria-hidden>+</span>
+          abrir a janela de inserts
+        </button>
+      </section>
+      {insAberto ? (
+        <PilotInsertsModal
+          partes={[
+            { label: 'HOOK 1', text: 'Como transformar um azeite de dez reais no seu proprio remedio de prostata em poucos minutos' },
+            { label: 'BODY 1', text: 'A maioria das pessoas usa o azeite do jeito errado e joga fora justamente a parte que importa' },
+            { label: 'BODY 2', text: 'O composto que interessa se chama oleocantal e ele e destruido pelo calor' },
+          ]}
+          inserts={insLista}
+          onFechar={() => setInsAberto(false)}
+          onMudar={setInsLista}
+          onSubirMidia={async (f) => ({
+            key: 'demo:' + f.name,
+            nome: f.name,
+            tipo: (/^video\//.test(f.type) ? 'video' : 'imagem') as 'video' | 'imagem',
+            w: 1920,
+            h: 1080,
+            durSec: 4,
+          })}
+          thumbDaMidia={() => null}
+          thumbAvatar={null}
+        />
+      ) : null}
 
       {/* ══════════ 0.3 MOTOR POR AVATAR (lista ao vivo) ══════════ */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">

@@ -92,6 +92,8 @@ import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 // versoes do AD (baixar/ver/renomear), em vez de N cards soltos na fila.
 import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
+import { PilotInsertsModal } from '@/components/PilotInserts';
+import type { Insert } from '@/lib/pilot-inserts';
 import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
 import {
   LEGENDA_CFG_DEFAULT,
@@ -120,6 +122,7 @@ import {
   IconScissors as PilotIconScissors,
   IconCamuflagem,
   IconNivelar,
+  IconInserts,
   IconLegenda,
   IconZoomDinamica,
   IconDoc as PilotIconDoc,
@@ -1608,7 +1611,7 @@ function ClickUpPilotInner() {
   };
 
   /** Qual popover está aberto ('legenda' | 'zoom') por task. */
-  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | null>>({});
+  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | null>>({});
   const legendaBtnRefs = useRef<Record<string, HTMLElement | null>>({});
   const zoomBtnRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -1625,17 +1628,24 @@ function ClickUpPilotInner() {
    * config que o disparo usou (com o fallback pra task mãe e pro padrão da
    * conta), então o selo nunca promete o que não foi aplicado.
    */
-  function selosDoCard(taskId: string): Array<{ tipo: 'decupagem' | 'legenda' | 'zoom'; title: string }> {
+  function selosDoCard(taskId: string): Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert'; title: string }> {
     const cfgId = taskIdBaseDaVersao(taskId);
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom'; title: string }> = [];
+    const out: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert'; title: string }> = [];
     if (isDecupagemEnabled(cfgId) || isDecupagemEnabled(taskId)) {
       out.push({ tipo: 'decupagem', title: `Decupado — silêncios cortados (${getDecupIntensity(cfgId).toFixed(2)}s de respiro)` });
     }
     if (leg.on) {
       const tpl = captionTemplatesRef.current.find((t) => t.id === leg.templateId);
       out.push({ tipo: 'legenda', title: `Legendado — ${tpl?.name || 'modelo padrão'}, corrigido pela copy do doc` });
+    }
+    const ins = insertsRef.current[taskId] || insertsRef.current[cfgId] || [];
+    if (ins.length > 0) {
+      out.push({
+        tipo: 'insert',
+        title: `${ins.length} insert${ins.length === 1 ? '' : 's'} na montagem — ${ins.map((x) => x.ancora).join(', ')}`,
+      });
     }
     if (zm.on) {
       const movimento = zm.modo === 'in' ? 'zoom in' : zm.modo === 'out' ? 'zoom out' : 'zoom in e out';
@@ -1686,6 +1696,18 @@ function ClickUpPilotInner() {
         // segura o lock exclusivo do ffmpeg. Sem avisar isto, o mux de áudio
         // do render pediria o mesmo lock e esperaria a si mesmo pra sempre.
         ffmpegJaExclusivo: true,
+        // INSERTS: a config é da task MÃE (a irmã de versão herda), e os bytes
+        // vêm do IDB na hora do render — nunca ficam presos na memória.
+        inserts: insertsRef.current[taskId] || insertsRef.current[cfgId] || [],
+        lerMidia: async (key: string) => {
+          try {
+            const { loadBlob } = await import('@/lib/zip-store');
+            return await loadBlob(key);
+          } catch (e) {
+            console.warn(`[clickup-pilot] insert ${key} não voltou do IDB:`, e);
+            return null;
+          }
+        },
         onEtapa: (msg) => {
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `${info.filename} · ${msg}` } }));
         },
@@ -1693,6 +1715,116 @@ function ClickUpPilotInner() {
       for (const av of r.avisos) console.warn(`[clickup-pilot] posprod ${taskId}: ${av}`);
       return r.blob;
     };
+  }
+
+  /* ═══════════════ INSERTS (31.08) ═══════════════
+   *  B-roll que entra NA MONTAGEM, ancorado numa palavra da copy. Os bytes
+   *  moram no IDB (chave com `:img:`-like pra sobreviver à purga do disparo) e
+   *  a config por task vive em localStorage, igual legenda/zoom. */
+  const INSERTS_KEY = 'darkolab:clickup-pilot:inserts';
+  const [insertsPorTask, setInsertsPorTask] = useState<Record<string, Insert[]>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(INSERTS_KEY) || '{}'); } catch { return {}; }
+  });
+  const insertsRef = useRef(insertsPorTask);
+  insertsRef.current = insertsPorTask;
+  const getInserts = (taskId: string): Insert[] =>
+    insertsPorTask[taskId] || insertsPorTask[taskIdBaseDaVersao(taskId)] || [];
+  const setInserts = (taskId: string, lista: Insert[]) => {
+    setInsertsPorTask((prev) => {
+      const next = { ...prev, [taskId]: lista };
+      try { localStorage.setItem(INSERTS_KEY, JSON.stringify(next)); } catch {}
+      insertsRef.current = next;
+      return next;
+    });
+  };
+
+  /** thumbs das mídias dos inserts (dataURL), só pra tela. */
+  const [insertThumbs, setInsertThumbs] = useState<Record<string, string>>({});
+  const insertThumbsRef = useRef(insertThumbs);
+  insertThumbsRef.current = insertThumbs;
+
+  /**
+   * Sobe a mídia de um insert: guarda os BYTES no IDB e mede dimensões e
+   * duração no navegador (o render precisa delas pro enquadramento).
+   *
+   * A chave leva `:img:` de propósito — é o que o INSERMO_DO_DISPARO reconhece
+   * como INSUMO, então um disparo do zero não apaga o b-roll junto com os
+   * takes velhos.
+   */
+  async function subirMidiaDeInsert(taskId: string, f: File, ancora: string) {
+    const ehVideo = /^video\//.test(f.type);
+    if (!ehVideo && !/^image\//.test(f.type)) {
+      setError(`Formato não suportado (${f.type || '?'}). Use MP4/MOV/WebM ou JPEG/PNG/WebP.`);
+      return null;
+    }
+    if (f.size > 200 * 1024 * 1024) {
+      setError(`Insert muito grande (${(f.size / 1e6).toFixed(0)}MB). Máximo 200MB.`);
+      return null;
+    }
+    const key = `pilot:${taskIdBaseDaVersao(taskId)}:img:insert:${Date.now().toString(36)}`;
+    try {
+      const { saveBlob } = await import('@/lib/zip-store');
+      await saveBlob(key, f, f.type);
+    } catch (e) {
+      console.warn('[clickup-pilot] insert não foi pro IDB (F5 perderia):', e);
+    }
+    // dimensões + duração + thumb
+    const url = URL.createObjectURL(f);
+    try {
+      const medido = await new Promise<{ w: number; h: number; dur: number; thumb: string }>((res, rej) => {
+        const t = setTimeout(() => rej(new Error('não consegui ler a mídia')), 20000);
+        if (ehVideo) {
+          const v = document.createElement('video');
+          v.preload = 'metadata';
+          v.muted = true;
+          v.onloadeddata = () => {
+            // thumb do primeiro frame legível
+            v.currentTime = Math.min(0.2, (v.duration || 1) / 4);
+          };
+          v.onseeked = () => {
+            clearTimeout(t);
+            const c = document.createElement('canvas');
+            const escala = 200 / Math.max(1, v.videoWidth);
+            c.width = Math.max(1, Math.round(v.videoWidth * escala));
+            c.height = Math.max(1, Math.round(v.videoHeight * escala));
+            c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
+            res({ w: v.videoWidth, h: v.videoHeight, dur: v.duration || 0, thumb: c.toDataURL('image/jpeg', 0.7) });
+          };
+          v.onerror = () => { clearTimeout(t); rej(new Error('vídeo não abriu')); };
+          v.src = url;
+        } else {
+          const im = new Image();
+          im.onload = () => {
+            clearTimeout(t);
+            const c = document.createElement('canvas');
+            const escala = 200 / Math.max(1, im.naturalWidth);
+            c.width = Math.max(1, Math.round(im.naturalWidth * escala));
+            c.height = Math.max(1, Math.round(im.naturalHeight * escala));
+            c.getContext('2d')!.drawImage(im, 0, 0, c.width, c.height);
+            res({ w: im.naturalWidth, h: im.naturalHeight, dur: 0, thumb: c.toDataURL('image/jpeg', 0.7) });
+          };
+          im.onerror = () => { clearTimeout(t); rej(new Error('imagem não abriu')); };
+          im.src = url;
+        }
+      });
+      setInsertThumbs((prev) => ({ ...prev, [key]: medido.thumb }));
+      setError(null);
+      void ancora;
+      return {
+        key,
+        nome: f.name,
+        tipo: (ehVideo ? 'video' : 'imagem') as 'video' | 'imagem',
+        w: medido.w,
+        h: medido.h,
+        durSec: medido.dur,
+      };
+    } catch (e) {
+      setError(`Não consegui ler ${f.name}: ${(e as Error)?.message || e}`);
+      return null;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 
   // FRAME × AVATAR por VERSÃO (30.08) — override de UI. A VERDADE é a
@@ -12685,6 +12817,42 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               templates={captionTemplates}
                                               onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
                                               onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
+                                            />
+                                          ) : null}
+                                        </span>
+                                      );
+                                    })()}
+                                    {/* INSERTS (31.08). B-roll na montagem, ancorado numa
+                                        palavra da copy — tela cheia ou dividindo a tela com o
+                                        avatar. Nada disto toca o que foi pro HeyGen. */}
+                                    {(() => {
+                                      const lista = getInserts(a.taskId);
+                                      const aberto = posPopover[a.taskId] === 'inserts';
+                                      const partesDaCopy = (
+                                        batchStates[a.taskId]?.replan?.parts?.length
+                                          ? batchStates[a.taskId]!.replan!.parts!
+                                          : a.partTemplates || []
+                                      ).map((x: any) => ({ label: String(x.label || ''), text: String(x.text || '') }));
+                                      return (
+                                        <span className="relative inline-flex">
+                                          <PilotBtn3D
+                                            icon={<IconInserts size={16} />}
+                                            color={lista.length > 0 ? 'cyan' : 'neutral'}
+                                            active={lista.length > 0}
+                                            title={lista.length > 0
+                                              ? `${lista.length} insert(s) — clica pra ajustar`
+                                              : 'Inserts — b-roll na montagem, ancorado na copy'}
+                                            onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'inserts' }))}
+                                          />
+                                          {aberto ? (
+                                            <PilotInsertsModal
+                                              partes={partesDaCopy}
+                                              inserts={lista}
+                                              onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                                              onMudar={(prox) => setInserts(a.taskId, prox)}
+                                              onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
+                                              thumbDaMidia={(k) => insertThumbs[k] || null}
+                                              thumbAvatar={(a.roleSlots || []).find((sl) => sl.avatarThumb)?.avatarThumb || null}
                                             />
                                           ) : null}
                                         </span>

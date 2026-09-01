@@ -674,8 +674,14 @@ export type FonteInsert = {
 
 export type PlanoInsert = {
   janelas: Array<{ id: string; start: number; end: number }>;
-  /** layout/foco/transição por id — vem de lib/pilot-inserts */
-  porId: (id: string) => {
+  /**
+   * layout/foco por id, JÁ NA RÉGUA DO FRAME.
+   *
+   * ⚠ `W`/`H` são obrigatórios: o palco tem que ser calculado nas dimensões
+   * REAIS do render. Numa versão anterior ele saía fixo em 1080×1920 e, num
+   * vídeo 720×1280, o card do avatar caía fora da tela.
+   */
+  porId: (id: string, W: number, H: number) => {
     palco: { avatar: Ret | null; insert: Ret; raio: number };
     focoAvatarY: number;
   } | null;
@@ -739,7 +745,7 @@ function desenharInsert(
   if (!plano) return;
   const jan = plano.janelas.find((j) => t >= j.start && t < j.end);
   if (jan) {
-    const cfg = plano.porId(jan.id);
+    const cfg = plano.porId(jan.id, W, H);
     const fonte = plano.fontes.get(jan.id);
     if (cfg && fonte) {
       const img = fonte.quadro(t - jan.start);
