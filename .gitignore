@@ -28,7 +28,13 @@
 /.test-tmp/
 /build
 /coverage
-/engine/dist/
+# O bundle do motor PRECISA ir pro git: a rota /api/downloader-engine/mac
+# le esse arquivo do disco em runtime, e a Vercel so embarca o que esta
+# commitado. Foi exatamente assim que o pkg.zip 503ou em producao.
+# Negacao so funciona excluindo o CONTEUDO (/engine/dist/*), nunca o
+# diretorio (/engine/dist/) — git nao re-inclui filho de pasta excluida.
+/engine/dist/*
+!/engine/dist/server.cjs
 /node_modules
 /out/
 /scripts/_*.mjs
@@ -52,3 +58,6 @@ df_test_audio.mp3
 .dev-fp-audit/
 public/dev-tiny.mp4
 .next-verify/
+
+# artefatos do teste do Motor macOS no CI
+/ci-tmp/

@@ -6,6 +6,8 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory } from '@/lib/history';
 import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { createClient } from '@/lib/supabase/client';
+import { useUserEmail } from '@/lib/use-tier';
+import { macMotorLiberado } from '@/lib/mac-motor-beta';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
 import { IconDownloader, IconStepPlug, IconStepLink, IconStepFormat, IconStepDownload } from '@/components/ToolIcons';
 
@@ -202,7 +204,81 @@ function formatBytes(n: number): string {
   return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
+/**
+ * O cliente está num Mac?
+ *
+ * O Motor tem instalador PRÓPRIO por sistema — `.exe` no Windows, comando de
+ * Terminal no Mac. Até aqui a página mandava todo mundo pro `.exe`, o que pro
+ * cliente de Mac é beco sem saída: ele baixa um arquivo que o Mac não executa.
+ *
+ * Começa em `null` (desconhecido) de propósito: o servidor e o 1º render do
+ * cliente batem, e o ajuste vem no efeito — sem erro de hidratação.
+ */
+function useIsMac(): boolean | null {
+  const [isMac, setIsMac] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    const uaData = (
+      navigator as unknown as { userAgentData?: { platform?: string } }
+    ).userAgentData;
+    const plat = uaData?.platform || navigator.platform || '';
+    const ua = navigator.userAgent || '';
+    // iPad em "modo desktop" se declara MacIntel e some com "iPad" do UA — mas
+    // reporta touch, e Mac nenhum reporta. Sem isso, iPad veria um comando de
+    // Terminal que não existe lá.
+    const isIpadPretendingMac =
+      /mac/i.test(plat) && (navigator.maxTouchPoints || 0) > 1;
+    setIsMac(
+      /mac/i.test(plat + ' ' + ua) &&
+        !/iphone|ipad|ipod/i.test(ua) &&
+        !isIpadPretendingMac,
+    );
+  }, []);
+  return isMac;
+}
+
+/** Comando único de instalação do Motor no Mac, com botão de copiar. */
+function MacInstallCommand() {
+  const [copied, setCopied] = useState(false);
+  const [cmd, setCmd] = useState(
+    'curl -fsSL https://www.darkoautoedit.com/api/downloader-engine/mac | bash',
+  );
+  useEffect(() => {
+    // Origem real da página: serve igual em produção, preview e localhost.
+    if (typeof window !== 'undefined') {
+      setCmd(
+        `curl -fsSL ${window.location.origin}/api/downloader-engine/mac | bash`,
+      );
+    }
+  }, []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard bloqueado — dá pra selecionar na mão */
+    }
+  };
+  return (
+    <div className="mt-2.5 flex items-stretch gap-2">
+      <code className="mono flex-1 overflow-x-auto whitespace-nowrap rounded-[10px] border border-line-strong bg-black/45 px-3 py-2.5 text-[11px] leading-relaxed text-lime">
+        {cmd}
+      </code>
+      <button
+        type="button"
+        onClick={copy}
+        className="mono shrink-0 rounded-[10px] border border-blue-400/55 bg-blue-400/15 px-3 text-[10.5px] font-bold uppercase tracking-[0.14em] text-blue-100 transition hover:bg-blue-400/25"
+      >
+        {copied ? '✓ copiado' : 'copiar'}
+      </button>
+    </div>
+  );
+}
+
 export default function DownloaderPage() {
+  const isMac = useIsMac();
+  const userEmail = useUserEmail();
   const [raw, setRaw] = useToolState<string>('downloader:urls', '');
   // LINK VINDO DE FORA (?url=...): o botão BAIXAR das indicações do copy no
   // ClickUp Pilot abre esta página já com a URL colada (YouTube, TikTok,
@@ -372,6 +448,10 @@ export default function DownloaderPage() {
   const [running, setRunning] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adult, setAdult] = useState(false);
+  /* Motor no Mac em TESTE FECHADO: o comando de instalação só aparece pros
+     testadores. Os outros clientes de Mac não veem o .exe do Windows (que
+     eles não conseguem rodar) — veem o que funciona pra eles hoje. */
+  const macMotorOk = macMotorLiberado(userEmail, isAdmin);
   // Timestamp em que a sessão de download começou — usado pra cronometrar
   // o tempo de resolução (sensação de "rápido pra iniciar")
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -809,10 +889,30 @@ export default function DownloaderPage() {
                   </div>
                   <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
                     A extensão do navegador encontrou a página, mas o motor
-                    no seu computador não está rodando. Abre o atalho{' '}
-                    <b className="text-white">Auto Edit Downloader</b> no
-                    menu Iniciar (ou rebaixa o instalador) e depois clica
-                    em <b className="text-white">Verificar de novo</b>.
+                    no seu computador não está rodando.{' '}
+                    {isMac && !macMotorOk ? (
+                      <>
+                        No Mac o Motor ainda está em{' '}
+                        <b className="text-white">teste fechado</b>, então é
+                        esperado ele aparecer desconectado aqui — e não te
+                        atrapalha: <b className="text-white">Instagram</b> e{' '}
+                        <b className="text-white">TikTok</b> baixam sem ele.
+                      </>
+                    ) : isMac ? (
+                      <>
+                        Roda de novo o comando de instalação (passo 01) no
+                        Terminal — ele reinstala por cima sem bagunçar nada — e
+                        depois clica em{' '}
+                        <b className="text-white">Verificar de novo</b>.
+                      </>
+                    ) : (
+                      <>
+                        Abre o atalho{' '}
+                        <b className="text-white">Auto Edit Downloader</b> no
+                        menu Iniciar (ou rebaixa o instalador) e depois clica
+                        em <b className="text-white">Verificar de novo</b>.
+                      </>
+                    )}
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2.5">
                     <button
@@ -831,14 +931,16 @@ export default function DownloaderPage() {
                         <>↻ Verificar de novo</>
                       )}
                     </button>
-                    <a
-                      href="/api/downloader-engine/download"
-                      download
-                      className="inline-flex items-center gap-2 rounded-full border border-blue-400/45 bg-blue-400/[0.08] px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-blue-300 transition hover:bg-blue-400/20"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      ↓ Rebaixar Motor (.exe)
-                    </a>
+                    {!isMac && (
+                      <a
+                        href="/api/downloader-engine/download"
+                        download
+                        className="inline-flex items-center gap-2 rounded-full border border-blue-400/45 bg-blue-400/[0.08] px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-blue-300 transition hover:bg-blue-400/20"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        ↓ Rebaixar Motor (.exe)
+                      </a>
+                    )}
                     <span
                       className="mono ml-1 text-[10px] text-text-muted"
                       title="Verifica a cada 2 segundos enquanto a aba estiver aberta"
@@ -846,6 +948,11 @@ export default function DownloaderPage() {
                       Auto-check: 2s
                     </span>
                   </div>
+                  {/* No Mac o card de instalação não está na tela neste estado,
+                      então o comando precisa estar AQUI — senão o cliente lê
+                      "roda o comando de novo" e não tem o comando em lugar
+                      nenhum. */}
+                  {isMac && macMotorOk && <MacInstallCommand />}
                   <details className="mt-3 group">
                     <summary
                       className="cursor-pointer text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted hover:text-text"
@@ -854,19 +961,52 @@ export default function DownloaderPage() {
                       O motor não abre?
                     </summary>
                     <ol className="mono mt-2 list-decimal space-y-1.5 pl-5 text-[11px] leading-relaxed text-text-muted">
-                      <li>
-                        Vai em <code className="text-white">Iniciar → Auto Edit Downloader</code> e abre.
-                      </li>
-                      <li>
-                        Se não tiver o atalho, rebaixa o <code className="text-white">.exe</code> acima e roda como administrador.
-                      </li>
-                      <li>
-                        Antivírus pode ter colocado em quarentena —
-                        cheque <code className="text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>.
-                      </li>
-                      <li>
-                        Sem solução? Manda print do log no WhatsApp.
-                      </li>
+                      {isMac && !macMotorOk ? (
+                        <>
+                          <li>
+                            No Mac o Motor ainda está em teste fechado — não tem o que abrir aqui ainda.
+                          </li>
+                          <li>
+                            <b className="text-white">Instagram</b> e <b className="text-white">TikTok</b> continuam baixando normalmente, é só colar o link abaixo.
+                          </li>
+                          <li>
+                            Quer entrar no teste do Motor no Mac? Chama no WhatsApp.
+                          </li>
+                        </>
+                      ) : isMac ? (
+                        <>
+                          <li>
+                            Cola o comando acima no <b className="text-white">Terminal</b>. Ele reinstala por cima e no fim diz se ficou de pé.
+                          </li>
+                          <li>
+                            Pra forçar o motor a subir agora:{' '}
+                            <code className="text-white">launchctl kickstart -k gui/$(id -u)/com.autoedit.downloader</code>
+                          </li>
+                          <li>
+                            O log fica em{' '}
+                            <code className="text-white">~/Library/Application Support/AutoEditDownloader/engine.log</code>.
+                          </li>
+                          <li>
+                            Sem solução? Manda print do log no WhatsApp.
+                          </li>
+                        </>
+                      ) : (
+                        <>
+                          <li>
+                            Vai em <code className="text-white">Iniciar → Auto Edit Downloader</code> e abre.
+                          </li>
+                          <li>
+                            Se não tiver o atalho, rebaixa o <code className="text-white">.exe</code> acima e roda como administrador.
+                          </li>
+                          <li>
+                            Antivírus pode ter colocado em quarentena —
+                            cheque <code className="text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>.
+                          </li>
+                          <li>
+                            Sem solução? Manda print do log no WhatsApp.
+                          </li>
+                        </>
+                      )}
                     </ol>
                   </details>
                 </div>
@@ -874,19 +1014,22 @@ export default function DownloaderPage() {
             </div>
           ) : (
             <div>
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                <a
-                  href="/api/downloader-engine/download"
-                  className="group relative flex items-center justify-between gap-3 overflow-hidden rounded-[14px] border border-blue-400/40 bg-blue-400/[0.06] px-4 py-3.5 transition-all hover:-translate-y-[1px] hover:border-blue-400/65"
-                  download
-                  style={{ boxShadow: '0 0 20px -8px rgba(96,165,250,0.4)' }}
-                >
-                  <div>
+              <div className={isMac ? 'grid gap-2.5' : 'grid gap-2.5 sm:grid-cols-2'}>
+                {isMac && macMotorOk ? (
+                  /* MAC — o Motor não é .exe aqui. Instala por UMA linha no
+                     Terminal, e isso é técnico, não preguiça de fazer .pkg: o
+                     que o curl baixa de dentro do script não recebe
+                     `com.apple.quarantine`, então não existe tela de
+                     "desenvolvedor não verificado" pra travar o cliente. */
+                  <div
+                    className="rounded-[14px] border border-blue-400/40 bg-blue-400/[0.06] px-4 py-3.5"
+                    style={{ boxShadow: '0 0 20px -8px rgba(96,165,250,0.4)' }}
+                  >
                     <div
                       className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-blue-300"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      Passo 01
+                      Passo 01 · Mac
                     </div>
                     <div
                       className="text-[14px] font-bold tracking-tight text-white"
@@ -894,14 +1037,81 @@ export default function DownloaderPage() {
                     >
                       Instalar o Motor
                     </div>
-                    <div className="mono text-[10.5px] text-text-muted">
-                      .exe — 1 clique, instala sozinho
-                    </div>
+                    <p className="mono mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
+                      Abre o <b className="text-white">Terminal</b> (aperta{' '}
+                      <b className="text-white">Command + Espaço</b>, escreve{' '}
+                      <i>Terminal</i>, Enter), cola a linha abaixo e aperta Enter.
+                      Leva ~2 minutos e no fim ele mesmo testa se ficou funcionando.
+                    </p>
+                    <MacInstallCommand />
+                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
+                      Serve pros dois chips —{' '}
+                      <b className="text-white">Apple Silicon</b> (M1/M2/M3/M4) e{' '}
+                      <b className="text-white">Intel</b>. O Mac pode pedir sua
+                      senha; é do próprio macOS, não vai pra lugar nenhum. Depois
+                      disso o Motor sobe sozinho toda vez que você liga o Mac.
+                    </p>
                   </div>
-                  <span className="text-2xl text-blue-300 transition-transform group-hover:translate-x-1">
-                    →
-                  </span>
-                </a>
+                ) : isMac ? (
+                  /* MAC FORA DO TESTE — o pior desfecho aqui seria mandar
+                     este cliente baixar o .exe: ele leva um arquivo que o Mac
+                     não executa e conclui que a ferramenta é quebrada. Então
+                     dizemos a verdade e mostramos o que JÁ funciona pra ele. */
+                  <div className="rounded-[14px] border border-line-strong bg-bg-soft/60 px-4 py-3.5">
+                    <div
+                      className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Você está no Mac
+                    </div>
+                    <div
+                      className="text-[14px] font-bold tracking-tight text-white"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Instagram e TikTok já funcionam
+                    </div>
+                    <p className="mono mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
+                      Instala só a <b className="text-white">Extensão</b> (passo 02
+                      aqui do lado) e o Downloader já baixa do{' '}
+                      <b className="text-white">Instagram</b> e do{' '}
+                      <b className="text-white">TikTok</b> normalmente.
+                    </p>
+                    <p className="mono mt-2 text-[10.5px] leading-relaxed text-text-muted">
+                      <b className="text-white">YouTube e Pinterest</b> precisam do
+                      Motor, um programinha que roda no seu computador. A versão pro
+                      Mac está pronta e <b className="text-white">em teste fechado</b>{' '}
+                      agora — te avisamos assim que abrir. No Windows ele já funciona.
+                    </p>
+                  </div>
+                ) : (
+                  <a
+                    href="/api/downloader-engine/download"
+                    className="group relative flex items-center justify-between gap-3 overflow-hidden rounded-[14px] border border-blue-400/40 bg-blue-400/[0.06] px-4 py-3.5 transition-all hover:-translate-y-[1px] hover:border-blue-400/65"
+                    download
+                    style={{ boxShadow: '0 0 20px -8px rgba(96,165,250,0.4)' }}
+                  >
+                    <div>
+                      <div
+                        className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-blue-300"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        Passo 01
+                      </div>
+                      <div
+                        className="text-[14px] font-bold tracking-tight text-white"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        Instalar o Motor
+                      </div>
+                      <div className="mono text-[10.5px] text-text-muted">
+                        .exe — 1 clique, instala sozinho
+                      </div>
+                    </div>
+                    <span className="text-2xl text-blue-300 transition-transform group-hover:translate-x-1">
+                      →
+                    </span>
+                  </a>
+                )}
                 <a
                   href="/api/downloader-extension/download"
                   className="group relative flex items-center justify-between gap-3 overflow-hidden rounded-[14px] border border-line-strong bg-bg-soft/60 px-4 py-3.5 transition-all hover:-translate-y-[1px] hover:border-blue-400/45"
@@ -937,15 +1147,33 @@ export default function DownloaderPage() {
                   Instruções detalhadas
                 </summary>
                 <ol className="mono mt-3 list-decimal space-y-2 pl-5 text-[11px] leading-relaxed text-text-muted">
-                  <li>
-                    Duplo-clique no <code className="mono text-white">AutoEditDownloaderSetup.exe</code>. Abre a janela Auto Edit (preta com accent lime, igual ao site) mostrando o progresso. <span className="text-lime">Sem CMD piscando.</span>
-                  </li>
-                  <li>
-                    Se o SmartScreen avisar: <i>&quot;Mais informações&quot;</i> → <i>&quot;Executar assim mesmo&quot;</i>.
-                  </li>
-                  <li>
-                    Quando o título virar <b className="text-lime">&quot;Instalado e vinculado&quot;</b>, clica <i>Fechar</i>.
-                  </li>
+                  {isMac ? (
+                    /* Fora do teste fechado não existe passo de Motor no Mac —
+                       a lista começa direto na extensão, que é o que ele
+                       realmente vai instalar. */
+                    macMotorOk && (
+                      <>
+                        <li>
+                          Cola o comando do passo 01 no <b className="text-white">Terminal</b> e aperta Enter. Ele baixa o motor, o yt-dlp e o ffmpeg — uns <b className="text-white">100 MB</b>, ~2 minutos numa internet comum.
+                        </li>
+                        <li>
+                          No fim ele roda um <b className="text-white">auto-teste</b> e imprime <b className="text-lime">&quot;Motor instalado e funcionando&quot;</b>. Se algo falhar, ele diz <i>qual peça</i> falhou — não some calado.
+                        </li>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <li>
+                        Duplo-clique no <code className="mono text-white">AutoEditDownloaderSetup.exe</code>. Abre a janela Auto Edit (preta com accent lime, igual ao site) mostrando o progresso. <span className="text-lime">Sem CMD piscando.</span>
+                      </li>
+                      <li>
+                        Se o SmartScreen avisar: <i>&quot;Mais informações&quot;</i> → <i>&quot;Executar assim mesmo&quot;</i>.
+                      </li>
+                      <li>
+                        Quando o título virar <b className="text-lime">&quot;Instalado e vinculado&quot;</b>, clica <i>Fechar</i>.
+                      </li>
+                    </>
+                  )}
                   <li>
                     Extrai o ZIP da extensão, abre <code className="mono text-white">chrome://extensions</code>, ativa <i>Modo desenvolvedor</i>, clica <i>Carregar sem compactação</i>.
                   </li>
@@ -953,34 +1181,77 @@ export default function DownloaderPage() {
                     Abre um vídeo em qualquer site e clica no botão <b className="text-white">⬇ Baixar</b> que aparece na página.
                   </li>
                 </ol>
-                <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
-                  <span className="text-lime">Anti-antivírus:</span> EXE <b className="text-white">assinado digitalmente</b> (Publisher: Auto Edit, timestamp DigiCert), metadata completa (versão 3.0, descrição, copyright), manifest XML <code>asInvoker</code> (sem UAC), PowerShell visível, sem VBS, sem mods em Startup. Auto-start usa Task Scheduler nativo.
-                </p>
+                {isMac ? (
+                  macMotorOk && (
+                  <>
+                    <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
+                      <span className="text-lime">Por que um comando e não um instalador de clicar:</span>{' '}
+                      no Mac, a trava do <b className="text-white">Gatekeeper</b> (&quot;desenvolvedor não verificado&quot;) é acionada por uma marca que o <b className="text-white">navegador</b> põe no arquivo baixado. O que o comando baixa não recebe essa marca — então não tem tela de bloqueio nenhuma pra você furar. É o mesmo caminho que Homebrew e outros instaladores de Mac usam.
+                    </p>
+                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
+                      Quer conferir antes de rodar? O script é texto aberto —{' '}
+                      <a
+                        href="/api/downloader-engine/mac"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-300 underline decoration-dotted underline-offset-2 hover:text-blue-200"
+                      >
+                        abre ele aqui
+                      </a>{' '}
+                      e lê antes.
+                    </p>
+                    <div className="mt-3 rounded-[10px] border border-yellow-500/30 bg-yellow-500/5 px-3 py-2.5">
+                      <div
+                        className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.18em] text-yellow-300"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        Precisa desinstalar?
+                      </div>
+                      <p className="mono text-[10.5px] leading-relaxed text-yellow-200/90">
+                        Mesmo comando com <code>--uninstall</code> no fim. Tira o motor e os arquivos; a extensão do Chrome continua.
+                      </p>
+                    </div>
+                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
+                      Falhou? O log fica em{' '}
+                      <code className="mono text-white">
+                        ~/Library/Application Support/AutoEditDownloader/engine.log
+                      </code>
+                      . Manda no WhatsApp.
+                    </p>
+                  </>
+                  )
+                ) : (
+                  <>
+                    <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
+                      <span className="text-lime">Anti-antivírus:</span> EXE <b className="text-white">assinado digitalmente</b> (Publisher: Auto Edit, timestamp DigiCert), metadata completa (versão 3.0, descrição, copyright), manifest XML <code>asInvoker</code> (sem UAC), PowerShell visível, sem VBS, sem mods em Startup. Auto-start usa Task Scheduler nativo.
+                    </p>
 
-                {/* Fallback: ZIP sem .exe — pra casos extremos onde mesmo o
-                    .exe assinado é bloqueado por AV corporativo paranóico. */}
-                <div className="mt-3 rounded-[10px] border border-yellow-500/30 bg-yellow-500/5 px-3 py-2.5">
-                  <div
-                    className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.18em] text-yellow-300"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Antivírus ainda bloqueia?
-                  </div>
-                  <p className="mono text-[10.5px] leading-relaxed text-yellow-200/90">
-                    Baixa a versão <b>sem .exe</b> (só scripts <code>.cmd</code> + <code>.ps1</code> abertos — você consegue abrir no Notepad). Avast/Defender quase nunca bloqueiam:
-                  </p>
-                  <a
-                    href="/api/downloader-engine/download?format=zip"
-                    download
-                    className="mono mt-2 inline-flex items-center gap-2 rounded-full border border-yellow-500/60 bg-yellow-500/15 px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-yellow-100 transition hover:bg-yellow-500/25"
-                  >
-                    ↓ Baixar versão ZIP (alternativa)
-                  </a>
-                </div>
+                    {/* Fallback: ZIP sem .exe — pra casos extremos onde mesmo o
+                        .exe assinado é bloqueado por AV corporativo paranóico. */}
+                    <div className="mt-3 rounded-[10px] border border-yellow-500/30 bg-yellow-500/5 px-3 py-2.5">
+                      <div
+                        className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.18em] text-yellow-300"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        Antivírus ainda bloqueia?
+                      </div>
+                      <p className="mono text-[10.5px] leading-relaxed text-yellow-200/90">
+                        Baixa a versão <b>sem .exe</b> (só scripts <code>.cmd</code> + <code>.ps1</code> abertos — você consegue abrir no Notepad). Avast/Defender quase nunca bloqueiam:
+                      </p>
+                      <a
+                        href="/api/downloader-engine/download?format=zip"
+                        download
+                        className="mono mt-2 inline-flex items-center gap-2 rounded-full border border-yellow-500/60 bg-yellow-500/15 px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-yellow-100 transition hover:bg-yellow-500/25"
+                      >
+                        ↓ Baixar versão ZIP (alternativa)
+                      </a>
+                    </div>
 
-                <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
-                  Falhou? Log em <code className="mono text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>. Manda no WhatsApp.
-                </p>
+                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
+                      Falhou? Log em <code className="mono text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>. Manda no WhatsApp.
+                    </p>
+                  </>
+                )}
               </details>
             </div>
           )}

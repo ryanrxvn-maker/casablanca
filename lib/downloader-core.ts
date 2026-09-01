@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'child_process';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
@@ -222,23 +222,38 @@ async function resolveYtDlp(): Promise<Tool | null> {
 
     // AUTO-REPARO (motor no PC do cliente): o launcher sempre define
     // YTDLP_PATH -> se o binario sumiu (antivirus apagou/quarentenou,
-    // download original corrompeu), rebaixa o yt-dlp.exe STANDALONE
+    // download original corrompeu), rebaixa o yt-dlp STANDALONE
     // (nao precisa de Python) direto pro caminho esperado. O cliente
     // nao precisa mexer em nada — o proximo download ja funciona.
+    // Windows: yt-dlp.exe | macOS: yt-dlp_macos | Linux: yt-dlp_linux
     const healPath = process.env.YTDLP_PATH;
-    if (healPath && process.platform === 'win32' && !ytDlpSelfHealTried) {
+    const healAsset =
+      process.platform === 'win32'
+        ? 'yt-dlp.exe'
+        : process.platform === 'darwin'
+          ? 'yt-dlp_macos'
+          : 'yt-dlp_linux';
+    if (healPath && !ytDlpSelfHealTried) {
       ytDlpSelfHealTried = true;
       try {
         const r = await fetch(
-          'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
+          `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${healAsset}`,
           { signal: AbortSignal.timeout(180_000), redirect: 'follow' },
         );
         if (r.ok) {
           const buf = Buffer.from(await r.arrayBuffer());
-          // yt-dlp.exe real tem ~18MB; menos que 5MB = pagina de erro/HTML
+          // real: ~18MB (win) / ~37MB (macos); menos que 5MB = HTML de erro
           if (buf.length > 5_000_000) {
             await mkdir(path.dirname(healPath), { recursive: true });
             await writeFile(healPath, buf);
+            // fora do Windows o binario baixado nasce sem bit de execucao
+            if (process.platform !== 'win32') {
+              try {
+                await chmod(healPath, 0o755);
+              } catch {
+                /* best-effort: o tryTool abaixo diz se ficou utilizavel */
+              }
+            }
             const downloaded = await tryTool({ cmd: healPath, pre: [] });
             if (downloaded) {
               console.log('[downloader-core] yt-dlp auto-reparado em', healPath);
