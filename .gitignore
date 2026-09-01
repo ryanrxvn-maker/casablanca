@@ -51,3 +51,4 @@ df_test_audio.mp3
 # saída da auditoria dev do FakePass (/tools/fakepass/audit)
 .dev-fp-audit/
 public/dev-tiny.mp4
+.next-verify/

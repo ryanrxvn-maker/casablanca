@@ -28,6 +28,11 @@ const NOINDEX_HEADER = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // BUILD ISOLADO (31.08): `next build` e `next dev` compartilham o .next e se
+  // atropelam — o build morre em "Cannot find module for page: /_document" com
+  // o dev server no ar. Com NEXT_DIST_DIR o build vai pra outra pasta e os dois
+  // convivem. Sem a env, nada muda (o padrão continua .next).
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : null),
   eslint: { ignoreDuringBuilds: true },
   // Sem source maps em producao — dificulta engenharia reversa do bundle.
   productionBrowserSourceMaps: false,

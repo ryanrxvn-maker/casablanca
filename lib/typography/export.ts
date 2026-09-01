@@ -38,6 +38,7 @@ import {
 } from '@/lib/ffmpeg-worker';
 import { runFfmpegExclusive } from '@/lib/ffmpeg-serial';
 import { drawCaptions, type Block, type StyleState, type TypoPreset } from './engine';
+import { drawHeadlines, type Headline } from './headline';
 import { ensureTypoFonts } from './fonts';
 
 export type RenderPhase = 'fontes' | 'frames' | 'audio' | 'finalizando';
@@ -247,7 +248,10 @@ async function renderFramesByDecode(opts: {
   blocks: Block[];
   preset: TypoPreset;
   style: StyleState;
+  /** headlines: texto PARADO por cima, faixa separada da legenda */
+  headlines?: Headline[];
   zoom?: ZoomSeg[];
+  inserts?: PlanoInsert;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   W: number;
@@ -266,7 +270,9 @@ async function renderFramesByDecode(opts: {
     blocks,
     preset,
     style,
+    headlines,
     zoom,
+    inserts,
     canvas,
     ctx,
     W,
@@ -316,7 +322,9 @@ async function renderFramesByDecode(opts: {
     const t = Math.min(nextTick / FPS + 0.0001, durationSec - 0.001);
     drawZoomed(ctx, src, src.displayWidth || W, src.displayHeight || H, W, H, zoom, t);
     ctx.filter = 'none';
+    desenharInsert(ctx, inserts, t, W, H, src, src.displayWidth || W, src.displayHeight || H);
     drawCaptions(ctx, blocks, preset, style, t * 1000, W, H);
+    if (headlines && headlines.length > 0) drawHeadlines(ctx, headlines, t * 1000, W, H);
     const vf = new VideoFrame(canvas, {
       timestamp: nextTick * frameUs,
       duration: frameUs,
@@ -492,6 +500,8 @@ async function renderFramesBySeek(opts: {
   blocks: Block[];
   preset: TypoPreset;
   style: StyleState;
+  /** headlines: texto PARADO por cima, faixa separada da legenda */
+  headlines?: Headline[];
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   W: number;
@@ -501,6 +511,7 @@ async function renderFramesBySeek(opts: {
   bitrate: number;
   hw?: boolean;
   zoom?: ZoomSeg[];
+  inserts?: PlanoInsert;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob> {
@@ -509,7 +520,9 @@ async function renderFramesBySeek(opts: {
     blocks,
     preset,
     style,
+    headlines,
     zoom,
+    inserts,
     canvas,
     ctx,
     W,
@@ -537,7 +550,9 @@ async function renderFramesBySeek(opts: {
 
       drawZoomed(ctx, video, video.videoWidth || W, video.videoHeight || H, W, H, zoom, t);
       ctx.filter = 'none';
+      desenharInsert(ctx, inserts, t, W, H, video, video.videoWidth || W, video.videoHeight || H);
       drawCaptions(ctx, blocks, preset, style, t * 1000, W, H);
+      if (headlines && headlines.length > 0) drawHeadlines(ctx, headlines, t * 1000, W, H);
 
       const frame = new VideoFrame(canvas, {
         timestamp: i * frameUs,
@@ -639,6 +654,134 @@ function drawZoomed(
   ctx.drawImage(src, (srcW - sw) / 2, (srcH - sh) / 2, sw, sh, 0, 0, W, H);
 }
 
+/* ──────────────────────────── inserts (31.08) ─────────────────────────────
+ * O insert é b-roll que entra POR CIMA do avatar durante uma janela de tempo,
+ * em tela cheia ou dividindo a tela com ele. Tudo o que decide GEOMETRIA mora
+ * em lib/pilot-inserts (testado); aqui é só pintura.
+ *
+ * A ordem importa: zoom → avatar → insert → transição → legenda. A legenda
+ * fica por último porque ela tem que ser lida SEMPRE, inclusive em cima do
+ * insert; e a transição vem antes dela pra não apagar o texto no flash. */
+
+/** Uma fonte de pixels do insert, já pronta pra desenhar num instante t. */
+export type FonteInsert = {
+  id: string;
+  /** o que desenhar no instante `tRel` (segundos desde o começo da janela) */
+  quadro: (tRel: number) => CanvasImageSource | null;
+  w: number;
+  h: number;
+};
+
+export type PlanoInsert = {
+  janelas: Array<{ id: string; start: number; end: number }>;
+  /** layout/foco/transição por id — vem de lib/pilot-inserts */
+  porId: (id: string) => {
+    palco: { avatar: Ret | null; insert: Ret; raio: number };
+    focoAvatarY: number;
+  } | null;
+  cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
+  fontes: Map<string, FonteInsert>;
+};
+
+type Ret = { x: number; y: number; w: number; h: number };
+
+/** COVER com foco — o mesmo cálculo de lib/pilot-inserts, sem import cíclico. */
+function recorteCover(
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+  focoY: number,
+): { sx: number; sy: number; sw: number; sh: number } {
+  if (!(srcW > 0) || !(srcH > 0) || !(dstW > 0) || !(dstH > 0)) {
+    return { sx: 0, sy: 0, sw: Math.max(1, srcW), sh: Math.max(1, srcH) };
+  }
+  const escala = Math.max(dstW / srcW, dstH / srcH);
+  const sw = Math.min(srcW, dstW / escala);
+  const sh = Math.min(srcH, dstH / escala);
+  const fy = Math.min(1, Math.max(0, focoY));
+  const sx = Math.min(srcW - sw, Math.max(0, srcW / 2 - sw / 2));
+  const sy = Math.min(srcH - sh, Math.max(0, srcH * fy - sh / 2));
+  return { sx, sy, sw, sh };
+}
+
+function caminhoArredondado(ctx: CanvasRenderingContext2D, r: Ret, raio: number) {
+  const rr = Math.min(raio, r.w / 2, r.h / 2);
+  ctx.beginPath();
+  ctx.moveTo(r.x + rr, r.y);
+  ctx.arcTo(r.x + r.w, r.y, r.x + r.w, r.y + r.h, rr);
+  ctx.arcTo(r.x + r.w, r.y + r.h, r.x, r.y + r.h, rr);
+  ctx.arcTo(r.x, r.y + r.h, r.x, r.y, rr);
+  ctx.arcTo(r.x, r.y, r.x + r.w, r.y, rr);
+  ctx.closePath();
+}
+
+/**
+ * Compõe o frame do instante `t`: avatar (já desenhado no canvas) + insert.
+ *
+ * Em SPLIT o avatar é redesenhado no retângulo dele — ancorado no ROSTO, não
+ * no centro, senão o corte come a testa. Em TELA CHEIA o insert cobre tudo.
+ * Nos dois casos o desenho é COVER: nunca sobra borda.
+ *
+ * `fonteAvatar` é o frame do vídeo principal (o mesmo que já está no canvas),
+ * necessário pro split poder reposicioná-lo.
+ */
+function desenharInsert(
+  ctx: CanvasRenderingContext2D,
+  plano: PlanoInsert | undefined,
+  t: number,
+  W: number,
+  H: number,
+  fonteAvatar: CanvasImageSource | null,
+  avatarW: number,
+  avatarH: number,
+) {
+  if (!plano) return;
+  const jan = plano.janelas.find((j) => t >= j.start && t < j.end);
+  if (jan) {
+    const cfg = plano.porId(jan.id);
+    const fonte = plano.fontes.get(jan.id);
+    if (cfg && fonte) {
+      const img = fonte.quadro(t - jan.start);
+      if (img) {
+        // SPLIT: o avatar sai do lugar dele e vai pro card, com foco no rosto
+        if (cfg.palco.avatar && fonteAvatar) {
+          ctx.save();
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, W, H);
+          const ra = cfg.palco.avatar;
+          const rec = recorteCover(avatarW, avatarH, ra.w, ra.h, cfg.focoAvatarY);
+          if (cfg.palco.raio > 0) {
+            caminhoArredondado(ctx, ra, cfg.palco.raio);
+            ctx.clip();
+          }
+          ctx.drawImage(fonteAvatar, rec.sx, rec.sy, rec.sw, rec.sh, ra.x, ra.y, ra.w, ra.h);
+          ctx.restore();
+        }
+        // o insert no retângulo dele
+        ctx.save();
+        const ri = cfg.palco.insert;
+        if (cfg.palco.raio > 0) {
+          caminhoArredondado(ctx, ri, cfg.palco.raio);
+          ctx.clip();
+        }
+        const rec = recorteCover(fonte.w, fonte.h, ri.w, ri.h, 0.5);
+        ctx.drawImage(img, rec.sx, rec.sy, rec.sw, rec.sh, ri.x, ri.y, ri.w, ri.h);
+        ctx.restore();
+      }
+    }
+  }
+  // TRANSIÇÃO por último: o flash cobre avatar E insert (é a troca inteira)
+  const cob = plano.cobertura(t);
+  if (cob && cob.alpha > 0.001) {
+    ctx.save();
+    ctx.globalAlpha = cob.alpha;
+    ctx.fillStyle = cob.cor === 'preto' ? '#000' : '#fff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+}
+
 /* ───────────────────────────── orquestração ───────────────────────────── */
 
 export async function renderTypographyVideo(opts: {
@@ -646,8 +789,12 @@ export async function renderTypographyVideo(opts: {
   blocks: Block[];
   preset: TypoPreset;
   style: StyleState;
+  /** headlines: texto PARADO por cima, faixa separada da legenda */
+  headlines?: Headline[];
   /** DINÂMICA DE ZOOM — rampas de escala por janela; vazio/ausente = sem zoom */
   zoom?: ZoomSeg[];
+  /** INSERTS — b-roll por cima do avatar (tela cheia ou split) */
+  inserts?: PlanoInsert;
   onProgress?: (p: RenderProgress) => void;
   signal?: AbortSignal;
   /** força o caminho por seek (QA/harness — não usar na UI) */
@@ -663,7 +810,7 @@ export async function renderTypographyVideo(opts: {
    */
   ffmpegJaExclusivo?: boolean;
 }): Promise<RenderResult> {
-  const { file, blocks, preset, style, zoom, onProgress, signal, ffmpegJaExclusivo } = opts;
+  const { file, blocks, preset, style, headlines, zoom, inserts, onProgress, signal, ffmpegJaExclusivo } = opts;
 
   if (typeof VideoEncoder === 'undefined') {
     throw new FriendlyError(
@@ -748,7 +895,9 @@ export async function renderTypographyVideo(opts: {
           blocks,
           preset,
           style,
+          headlines,
           zoom,
+          inserts,
           canvas,
           ctx,
           W,
@@ -776,7 +925,9 @@ export async function renderTypographyVideo(opts: {
         blocks,
         preset,
         style,
+        headlines,
         zoom,
+        inserts,
         canvas,
         ctx,
         W,
