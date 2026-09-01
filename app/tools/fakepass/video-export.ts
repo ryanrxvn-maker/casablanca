@@ -618,3 +618,87 @@ export async function recordStageVideo(
   finish();
   return { blob, ext: 'webm' };
 }
+
+/* ─────────── Encoder com CANAL ALFA (VP9 + alpha, WebM) ─────────── */
+
+/**
+ * Codifica o canvas em WebM **com transparência REAL** (VP9 `alpha: 'keep'`).
+ *
+ * É a resposta definitiva pro "não pode subtrair nada": em vez de pintar um
+ * fundo verde e mandar o editor RECORTAR por cor — o que sempre come uma borda
+ * do conteúdo e engole qualquer pixel parecido com a chave —, o vídeo já sai
+ * com o fundo VAZIO. No CapCut/Premiere é só jogar por cima: nada é recortado,
+ * nada é subtraído, e as bordas do texto continuam suaves.
+ *
+ * Devolve null quando o navegador não suporta (aí o chamador cai no mp4/chroma).
+ */
+export async function encodeCanvasVideoAlpha(
+  cv: HTMLCanvasElement,
+  opts: { seconds: number; fps?: number; drawFrame: (i: number, t: number) => void },
+): Promise<EncodedVideo | null> {
+  if (typeof (window as any).VideoEncoder === 'undefined') return null;
+  const fps = opts.fps ?? 30;
+  const seconds = Math.max(1, opts.seconds);
+  const total = Math.round(seconds * fps);
+  const cfg: any = {
+    codec: 'vp09.00.10.08',
+    width: cv.width,
+    height: cv.height,
+    bitrate: 10_000_000,
+    framerate: fps,
+    alpha: 'keep',
+  };
+  try {
+    const sup = await (window as any).VideoEncoder.isConfigSupported(cfg);
+    if (!sup?.supported) return null;
+    // alguns Chrome dizem "supported" mas devolvem a config SEM alpha — nesse
+    // caso o vídeo sairia com fundo preto sólido, pior que o chroma.
+    if (sup.config && sup.config.alpha && sup.config.alpha !== 'keep') return null;
+  } catch {
+    return null;
+  }
+  let Muxer: any;
+  let ArrayBufferTarget: any;
+  try {
+    ({ Muxer, ArrayBufferTarget } = await import('webm-muxer'));
+  } catch {
+    return null;
+  }
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'V_VP9', width: cv.width, height: cv.height, frameRate: fps, alpha: true },
+  });
+  let encErr: unknown = null;
+  const encoder = new (window as any).VideoEncoder({
+    output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+    error: (e: unknown) => { encErr = e; },
+  });
+  encoder.configure(cfg);
+  try {
+    for (let i = 0; i < total; i++) {
+      if (encErr) throw encErr;
+      const t = Math.min(i / fps, seconds);
+      opts.drawFrame(i, t);
+      const frame = new (window as any).VideoFrame(cv, {
+        timestamp: Math.round((i * 1e6) / fps),
+        duration: Math.round(1e6 / fps),
+        alpha: 'keep',
+      });
+      encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+      frame.close();
+      if (encoder.encodeQueueSize > 4) {
+        await new Promise<void>((res) => {
+          encoder.ondequeue = () => { encoder.ondequeue = null; res(); };
+        });
+      }
+    }
+    await encoder.flush();
+    if (encErr) throw encErr;
+    muxer.finalize();
+    return { blob: new Blob([muxer.target.buffer], { type: 'video/webm' }), ext: 'webm' };
+  } catch (err) {
+    console.warn('[fakepass] encoder com alfa falhou — caindo pro caminho normal', err);
+    try { encoder.close(); } catch {}
+    return null;
+  }
+}

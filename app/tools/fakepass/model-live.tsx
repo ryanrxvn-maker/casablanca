@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { logHistory } from '@/lib/history';
 import {
   Field,
+  Segmented,
   TextField,
   TextArea,
   Toggle,
@@ -44,13 +45,41 @@ type LiveS = {
   comments: string; // uma linha por comentário: "usuário: mensagem"
   avatar: string; // data URL (fica no navegador)
   accent: string; // cor do selo LIVE / AO VIVO
-  chroma: boolean; // fundo verde pra chroma key
+  chroma: boolean; // (legado) chroma ligado — hoje derivado de `fundo`
+  /** preto | chroma (cor escolhida) | alpha (fundo VAZIO, sem recorte nenhum) */
+  fundo?: FundoMode;
+  chromaColor: string; // cor da chave quando fundo = 'chroma'
   bgVideo: string; // Object URL do vídeo DE FUNDO (opcional; vence o chroma)
   segundos: number; // duração do vídeo exportado
 };
 
 const W = 1080;
 const H = 1920;
+
+/* ───────────────────────── Fundo / chroma key ───────────────────────── */
+
+export type FundoMode = 'preto' | 'chroma' | 'alpha';
+
+/** Cores de chave candidatas — o padrão de cada uma no broadcast. */
+const CHROMA_CORES: { cor: string; nome: string }[] = [
+  { cor: '#00FF00', nome: 'Verde puro' },
+  { cor: '#00B140', nome: 'Verde TV' },
+  { cor: '#0047FF', nome: 'Azul' },
+  { cor: '#FF00FF', nome: 'Magenta' },
+];
+const CHROMA_PADRAO = '#00FF00';
+
+/** Estado antigo (só `chroma: boolean`) continua valendo. */
+function fundoDe(s: LiveS): FundoMode {
+  return s.fundo ?? (s.chroma ? 'chroma' : 'preto');
+}
+
+function hexRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '').trim();
+  const f = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(f.slice(0, 6), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
 
 /* ────────────────── Emojis Apple desenhados no canvas ────────────────── */
 // Mesma fonte de imagem do resto da ferramenta (emoji-datasource-apple), só
@@ -405,7 +434,14 @@ function drawLiveBg(ctx: CanvasRenderingContext2D, s: LiveS, bgVideo: HTMLVideoE
     ctx.drawImage(bgVideo, (bgVideo.videoWidth - sw) / 2, (bgVideo.videoHeight - sh) / 2, sw, sh, 0, 0, W, H);
     return;
   }
-  ctx.fillStyle = s.chroma ? '#00FF00' : '#000000';
+  const modo = fundoDe(s);
+  if (modo === 'alpha') {
+    // FUNDO VAZIO (canal alfa): nada de chave de cor, então o editor não
+    // precisa RECORTAR nada — e nada do conteúdo pode ser subtraído junto.
+    ctx.clearRect(0, 0, W, H);
+    return;
+  }
+  ctx.fillStyle = modo === 'chroma' ? s.chromaColor || CHROMA_PADRAO : '#000000';
   ctx.fillRect(0, 0, W, H);
 }
 
@@ -685,6 +721,9 @@ function drawInstagram(
 const liveCanvas: Partial<Record<LiveKind, HTMLCanvasElement | null>> = {};
 // idem pro <video> de fundo (o export reinicia ele do zero antes de gravar)
 const liveBgVideo: Partial<Record<LiveKind, HTMLVideoElement | null>> = {};
+/** Analisador de conflito da chave de cor (registrado pela tela; ver abaixo). */
+export type ChromaRisco = { cor: string; risco: number };
+const liveAnalise: Partial<Record<LiveKind, (cores: string[]) => ChromaRisco[]>> = {};
 
 function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
   const cvRef = useRef<HTMLCanvasElement | null>(null);
@@ -743,6 +782,46 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
     const cv = cvRef.current;
     if (!cv) return;
     liveCanvas[kind] = cv;
+    // ── Analisador da chave de cor ──
+    // Desenha a live com fundo VAZIO (só o conteúdo) e mede quanto do que está
+    // pintado tem cor PARECIDA com cada chave candidata. É isso que explica o
+    // "o verde come pedaço do comentário": emoji/foto/selo com verde no meio
+    // caem junto no recorte. O que o analisador acha some do risco escolhendo
+    // outra cor — ou o modo Transparente, que não recorta nada.
+    liveAnalise[kind] = (cores: string[]) => {
+      const off = document.createElement('canvas');
+      off.width = W;
+      off.height = H;
+      const octx = off.getContext('2d');
+      if (!octx) return cores.map((c) => ({ cor: c, risco: 0 }));
+      const alvos = cores.map(hexRgb);
+      const perto = new Array(cores.length).fill(0);
+      let total = 0;
+      const sAlpha: LiveS = { ...sRef.current, fundo: 'alpha', bgVideo: '' };
+      const a: Anim = { t: 0, scroll: 0, reactions: [] };
+      // 5 amostras ao longo da animação: os comentários rolam e as reações
+      // nascem em momentos diferentes, então um frame só não veria tudo.
+      for (let amostra = 0; amostra < 5; amostra++) {
+        for (let i = 0; i < 24; i++) {
+          a.t += 1;
+          if (kind === 'tiktok') drawTikTok(octx, sAlpha, a, famRef.current, avatarRef.current.img, null);
+          else drawInstagram(octx, sAlpha, a, famRef.current, avatarRef.current.img, null);
+        }
+        const d = octx.getImageData(0, 0, W, H).data;
+        for (let p = 0; p < d.length; p += 4 * 3) {
+          if (d[p + 3] < 160) continue; // pixel vazio/borda: não é conteúdo sólido
+          total++;
+          for (let k = 0; k < alvos.length; k++) {
+            const dr = d[p] - alvos[k][0];
+            const dg = d[p + 1] - alvos[k][1];
+            const db = d[p + 2] - alvos[k][2];
+            // 110 ≈ tolerância típica de um keyer; abaixo disso o pixel sai junto
+            if (dr * dr + dg * dg + db * db < 110 * 110) perto[k]++;
+          }
+        }
+      }
+      return cores.map((c, k) => ({ cor: c, risco: total ? (perto[k] / total) * 100 : 0 }));
+    };
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     const anim: Anim = { t: 0, scroll: 0, reactions: [] };
@@ -773,8 +852,17 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
       cancelAnimationFrame(raf);
       delete (cv as any).__fpTick;
       if (liveCanvas[kind] === cv) liveCanvas[kind] = null;
+      delete liveAnalise[kind];
     };
   }, [kind]);
+
+  // Repinta na hora que QUALQUER ajuste muda. O loop de animacao roda em rAF, e
+  // o rAF congela em aba de fundo / janela oculta — sem isto, o canvas podia
+  // ficar com o frame ANTIGO e o PNG sair com o fundo antigo (ex.: trocar pra
+  // Transparente e o download ainda vir com a cor do chroma).
+  useEffect(() => {
+    (cvRef.current as any)?.__fpTick?.(1);
+  }, [s]);
 
   return (
     <div style={{ position: 'relative', width: 360, height: 640 }}>
@@ -798,7 +886,7 @@ function LiveScreen({ s, kind }: { s: LiveS; kind: LiveKind }) {
 
 /* ──────────────────── Export de vídeo (.webm) ──────────────────── */
 
-function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number }) {
+function VideoExportButton({ kind, seconds, alpha }: { kind: LiveKind; seconds: number; alpha?: boolean }) {
   const [gravando, setGravando] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -835,17 +923,32 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
     // em vez de esperar o relógio. Com vídeo de fundo, segue o tempo real.
     if (!bgv) {
       setGravando(true);
-      setMsg('Renderizando o vídeo em alta velocidade…');
+      setMsg(alpha ? 'Renderizando com transparência (canal alfa)…' : 'Renderizando o vídeo em alta velocidade…');
       try {
-        const { encodeCanvasVideo } = await import('./video-export');
+        const { encodeCanvasVideo, encodeCanvasVideoAlpha } = await import('./video-export');
         (cv as any).__fpPause = true;
-        const fast = await encodeCanvasVideo(cv, {
+        const opts = {
           seconds: Math.max(1, seconds),
           drawFrame: () => (cv as any).__fpTick?.(2),
-        });
+        };
+        // Fundo transparente → VP9 com canal alfa (nada é recortado no editor).
+        // Se o navegador não suportar, avisa ANTES de entregar um vídeo com
+        // fundo preto no lugar da transparência (senão o usuário só descobre
+        // no editor).
+        let fast = alpha ? await encodeCanvasVideoAlpha(cv, opts) : null;
+        let semAlfa = false;
+        if (!fast) {
+          if (alpha) semAlfa = true;
+          fast = await encodeCanvasVideo(cv, opts);
+        }
         (cv as any).__fpPause = false;
         if (fast) {
           baixa(fast.blob, fast.ext);
+          if (semAlfa) {
+            setMsg(
+              'Baixado, mas SEM transparência: este navegador não codifica vídeo com canal alfa, então o fundo do vídeo saiu preto. O PNG transparente continua saindo certo — pro VÍDEO, use o Chroma key com a cor que o medidor marcar como segura.',
+            );
+          }
           setGravando(false);
           return;
         }
@@ -959,7 +1062,9 @@ function VideoExportButton({ kind, seconds }: { kind: LiveKind; seconds: number 
       </button>
       <p className="mt-1.5 text-[11px] leading-relaxed text-text-dim">
         {msg ||
-          'O vídeo sai animado (reações subindo + comentários rolando) — perfeito pra sobrepor no editor. Com o fundo verde ligado, é só aplicar chroma key.'}
+          (alpha
+          ? 'O vídeo sai animado e com FUNDO VAZIO (.webm com canal alfa): no editor é só sobrepor — nada é recortado, nada some do comentário.'
+          : 'O vídeo sai animado (reações subindo + comentários rolando) — perfeito pra sobrepor no editor. Com o chroma ligado, é só aplicar a chave da cor escolhida.')}
       </p>
     </div>
   );
@@ -971,6 +1076,152 @@ const SWATCHES: Record<LiveKind, string[]> = {
   tiktok: ['#FE2C55', '#7C5CFF', '#E8B14B', '#38E1C6'],
   ig: ['#FF3040', '#C13584', '#7C5CFF', '#E8B14B'],
 };
+
+/**
+ * Bloco de FUNDO da live: preto, chroma (com a COR a escolha) ou transparente.
+ *
+ * O analisador roda a live com fundo vazio e mede quanto do conteudo tem cor
+ * parecida com cada chave — e o que responde ao "esse verde as vezes come os
+ * comentarios". Cada cor mostra o risco medido, e o botao poe a mais segura.
+ */
+function FundoControls({ kind, s, set }: { kind: LiveKind; s: LiveS; set: (p: Partial<LiveS>) => void }) {
+  const modo = fundoDe(s);
+  const cor = s.chromaColor || CHROMA_PADRAO;
+  const [riscos, setRiscos] = useState<ChromaRisco[]>([]);
+
+  // remede sempre que o conteudo muda (com respiro pra nao medir a cada tecla)
+  useEffect(() => {
+    if (modo !== 'chroma') return;
+    const id = window.setTimeout(() => {
+      const fn = liveAnalise[kind];
+      if (!fn) return;
+      const cores = CHROMA_CORES.map((c) => c.cor);
+      if (!cores.includes(cor)) cores.push(cor);
+      try {
+        setRiscos(fn(cores));
+      } catch {
+        setRiscos([]);
+      }
+    }, 450);
+    return () => window.clearTimeout(id);
+  }, [kind, modo, cor, s.comments, s.accent, s.avatar, s.username, s.viewers, s.verified]);
+
+  const riscoDe = (c: string) => riscos.find((r) => r.cor.toLowerCase() === c.toLowerCase())?.risco;
+  const riscoAtual = riscoDe(cor);
+  const melhor = riscos.length ? riscos.slice().sort((a, b) => a.risco - b.risco)[0] : null;
+  const nomeDe = (c: string) =>
+    CHROMA_CORES.find((x) => x.cor.toLowerCase() === c.toLowerCase())?.nome || c.toUpperCase();
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Field
+        label="Fundo"
+        hint="Transparente sai com o fundo VAZIO — no editor e so sobrepor, sem recortar nada."
+      >
+        <Segmented
+          value={modo}
+          options={[
+            { value: 'preto', label: 'Preto' },
+            { value: 'chroma', label: 'Chroma key' },
+            { value: 'alpha', label: 'Transparente' },
+          ]}
+          onChange={(v) => set({ fundo: v as FundoMode, chroma: v === 'chroma' })}
+        />
+      </Field>
+
+      {modo === 'alpha' ? (
+        <p className="rounded-[12px] border border-emerald-400/25 bg-emerald-400/[0.07] px-3 py-2.5 text-[11.5px] leading-relaxed text-emerald-200/90">
+          Nada e subtraido: o PNG sai com transparencia real e o video sai em .webm com canal alfa
+          (VP9). No editor e so jogar por cima — sem chave de cor, sem borda comida, sem perder
+          pedaco do comentario.
+        </p>
+      ) : null}
+
+      {modo === 'chroma' ? (
+        <>
+          <Field label="Cor da chave" hint="O aviso mostra quanto do conteudo sairia junto com essa cor.">
+            <div className="flex flex-wrap items-center gap-2">
+              {CHROMA_CORES.map((c) => {
+                const r = riscoDe(c.cor);
+                const ativo = c.cor.toLowerCase() === cor.toLowerCase();
+                const perigo = typeof r === 'number' && r >= 0.05;
+                return (
+                  <button
+                    key={c.cor}
+                    type="button"
+                    title={c.nome + (typeof r === 'number' ? ` — ${r.toFixed(2)}% do conteudo em risco` : '')}
+                    onClick={() => set({ chromaColor: c.cor })}
+                    className={
+                      'relative h-9 w-9 rounded-full border-2 transition-all duration-200 active:scale-95 ' +
+                      (ativo ? 'border-white ring-2 ring-violet/70' : 'border-white/25 hover:border-white/60')
+                    }
+                    style={{ background: c.cor }}
+                  >
+                    {typeof r === 'number' ? (
+                      <span
+                        className={
+                          'absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ' +
+                          (perigo ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white')
+                        }
+                      >
+                        {perigo ? '!' : '✓'}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+              <label className="relative inline-flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border-2 border-white/25">
+                <span className="absolute inset-0" style={{ background: cor }} />
+                <input
+                  type="color"
+                  value={cor}
+                  onChange={(e) => set({ chromaColor: e.target.value })}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                />
+              </label>
+            </div>
+          </Field>
+
+          {typeof riscoAtual === 'number' ? (
+            riscoAtual >= 0.05 ? (
+              <div className="flex flex-col gap-2 rounded-[12px] border border-amber-400/30 bg-amber-400/[0.07] px-3 py-2.5">
+                <p className="text-[11.5px] leading-relaxed text-amber-200/90">
+                  <strong>{riscoAtual.toFixed(2)}%</strong> do conteudo tem cor parecida com {nomeDe(cor)} — esse
+                  pedaco sai junto no recorte (e o que come parte dos comentarios).
+                  {melhor && melhor.cor.toLowerCase() !== cor.toLowerCase()
+                    ? ` Com ${nomeDe(melhor.cor)} o risco cai pra ${melhor.risco.toFixed(2)}%.`
+                    : ''}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {melhor && melhor.cor.toLowerCase() !== cor.toLowerCase() ? (
+                    <button
+                      type="button"
+                      onClick={() => set({ chromaColor: melhor.cor })}
+                      className="rounded-full border border-amber-300/50 px-3 py-1.5 text-[11.5px] font-bold text-amber-100 transition hover:bg-amber-400/15"
+                    >
+                      Usar cor segura ({nomeDe(melhor.cor)})
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => set({ fundo: 'alpha', chroma: false })}
+                    className="rounded-full border border-emerald-300/40 px-3 py-1.5 text-[11.5px] font-bold text-emerald-100 transition hover:bg-emerald-400/15"
+                  >
+                    Usar fundo transparente
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-[12px] border border-emerald-400/25 bg-emerald-400/[0.07] px-3 py-2 text-[11.5px] text-emerald-200/90">
+                ✓ Nenhuma parte do conteudo tem cor parecida com {nomeDe(cor)} — o recorte nao vai comer nada.
+              </p>
+            )
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 function LiveControls({
   kind,
@@ -1021,9 +1272,7 @@ function LiveControls({
       >
         <VideoUpload value={s.bgVideo} onChange={(v) => set({ bgVideo: v })} label="vídeo" />
       </Field>
-      {!s.bgVideo ? (
-        <Toggle on={s.chroma} onChange={(v) => set({ chroma: v })} label="Fundo verde (chroma key)" />
-      ) : null}
+      {!s.bgVideo ? <FundoControls kind={kind} s={s} set={set} /> : null}
       <RangeField
         label="Duração do vídeo"
         value={s.segundos}
@@ -1032,7 +1281,7 @@ function LiveControls({
         onChange={(v) => set({ segundos: v })}
         display={(v) => v + 's'}
       />
-      <VideoExportButton kind={kind} seconds={s.segundos} />
+      <VideoExportButton kind={kind} seconds={s.segundos} alpha={fundoDe(s) === 'alpha' && !s.bgVideo} />
     </div>
   );
 }
@@ -1057,6 +1306,8 @@ const TIKTOK_LIVE: FakeModel<LiveS> = {
     avatar: '',
     accent: '#FE2C55',
     chroma: false,
+    fundo: 'preto',
+    chromaColor: CHROMA_PADRAO,
     bgVideo: '',
     segundos: 6,
   },
@@ -1082,6 +1333,8 @@ const IG_LIVE: FakeModel<LiveS> = {
     avatar: '',
     accent: '#FF3040',
     chroma: false,
+    fundo: 'preto',
+    chromaColor: CHROMA_PADRAO,
     bgVideo: '',
     segundos: 6,
   },
