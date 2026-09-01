@@ -64,6 +64,17 @@ import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
 import { fxDefault, normalizeFx, type FxState } from '@/lib/typography/fx';
 import { registerCanvasJob } from '@/lib/typography/canvas-loop';
 import {
+  drawHeadlines,
+  headlineAtPoint,
+  headlinePosBounds,
+  headlinesAt,
+  layoutHeadline,
+  makeHeadline,
+  measurerFromCtx,
+  HEADLINE_PRESETS,
+  type Headline,
+} from '@/lib/typography/headline';
+import {
   auditarTranscricao,
   resumoAuditoria,
   type AuditResult,
@@ -71,6 +82,7 @@ import {
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { ColorDot } from '@/components/typography/ColorDot';
 import { FxPanel } from '@/components/typography/FxPanel';
+import { HeadlinePanel } from '@/components/typography/HeadlinePanel';
 import { LangPicker } from '@/components/typography/LangPicker';
 import { useTypoFavs } from '@/components/typography/useTypoFavs';
 import {
@@ -177,6 +189,7 @@ type SavedSession = {
   autoFit?: boolean;
   singleLine?: boolean;
   fx?: FxState;
+  headlines?: Headline[];
   bgMode?: 'preset' | 'on' | 'off';
   bgColor?: string | null;
   bgOpacity?: number;
@@ -296,6 +309,9 @@ function TipografiaInner() {
   // recado honesto do último "trocar o ritmo" (quantos travados sobreviveram)
   const [regroupInfo, setRegroupInfo] = useState<string | null>(null);
   // ⭐ AUDITORIA da transcrição: o vídeo tinha fala sem legenda?
+  // ⭐ HEADLINES: texto PARADO por cima, faixa propria na timeline
+  const [headlines, setHeadlines] = useToolState<Headline[]>('tipografia:headlines', []);
+  const [selHeadlineId, setSelHeadlineId] = useState<string | null>(null);
   const [audit, setAudit] = useState<{ tom: 'ok' | 'aviso' | 'erro'; texto: string } | null>(null);
   const [auditando, setAuditando] = useState(false);
   /** áudio já extraído desta sessão — a re-conferência não re-extrai */
@@ -629,6 +645,11 @@ function TipografiaInner() {
   );
   const hToggleWord = useEvent((id: string, wi: number) => toggleHighlight(id, wi));
   const hToggleLock = useEvent((id: string) => toggleLock(id));
+  const hRetimeHeadline = useEvent((id: string, start: number, end: number) =>
+    setHeadlines((prev) =>
+      prev.map((h) => (h.id === id ? { ...h, start, end } : h)),
+    ),
+  );
   // o chip só depende do processing — nó estável pro memo da galeria
   const galleryExtra = useMemo(
     () => (
@@ -728,6 +749,7 @@ function TipografiaInner() {
         setAutoFitG(saved.autoFit ?? true);
         setSingleLineG(saved.singleLine ?? false);
         setFxG(normalizeFx(saved.fx));
+        setHeadlines(Array.isArray(saved.headlines) ? saved.headlines : []);
         setBgModeG(saved.bgMode ?? 'preset');
         setBgColorG(saved.bgColor ?? null);
         setBgOpacityG(saved.bgOpacity ?? 1);
@@ -777,6 +799,7 @@ function TipografiaInner() {
       autoFit: autoFitG,
       singleLine: singleLineG,
       fx: fxG,
+      headlines,
       bgMode: bgModeG,
       bgColor: bgColorG,
       bgOpacity: bgOpacityG,
@@ -785,7 +808,7 @@ function TipografiaInner() {
       script: scriptSegs,
     }), 400);
     return () => clearTimeout(t);
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, fxG, headlines, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -822,6 +845,8 @@ function TipografiaInner() {
     setWordSel(null);
     setRegroupInfo(null);
     setAudit(null);
+    setHeadlines([]);
+    setSelHeadlineId(null);
     audioRef.current = null;
     preLockRef.current = {};
   }
@@ -999,6 +1024,7 @@ function TipografiaInner() {
         blocks,
         preset,
         style,
+        headlines,
         signal: abortRef.current.signal,
         onProgress: (p: RenderProgress) => {
           if (p.phase === 'fontes') {
@@ -1340,6 +1366,17 @@ function TipografiaInner() {
                   onEditText={editBlockText}
                   wordSel={wordSel}
                   onWordSel={setWordSel}
+                  headlines={headlines}
+                  selHeadlineId={selHeadlineId}
+                  onSelectHeadline={setSelHeadlineId}
+                  onMoveHeadline={(id, x, y) => {
+                    pushHistory();
+                    setHeadlines((prev) =>
+                      prev.map((h) =>
+                        h.id === id ? { ...h, style: { ...h.style, posX: x, posY: y } } : h,
+                      ),
+                    );
+                  }}
                 />
                 <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
                   Arrasta a legenda pra posicionar (snap no centro) · clique
@@ -1453,6 +1490,10 @@ function TipografiaInner() {
               onSelect={hTimelineSelect}
               onRetime={hRetime}
               onDragStart={pushHistory}
+              headlines={headlines}
+              selHeadlineId={selHeadlineId}
+              onSelectHeadline={setSelHeadlineId}
+              onRetimeHeadline={hRetimeHeadline}
               disabled={processing}
             />
 
@@ -1490,6 +1531,32 @@ function TipografiaInner() {
                 setWordSel(null);
                 setSelBlockId(null);
               }}
+            />
+
+            <HeadlinePanel
+              headlines={headlines}
+              selId={selHeadlineId}
+              onSelect={setSelHeadlineId}
+              onAdd={() => {
+                pushHistory();
+                const agora = (videoRef.current?.currentTime ?? 0) * 1000;
+                const nova = makeHeadline(agora, (duration ?? 4) * 1000 - agora);
+                setHeadlines((prev) => [...prev, nova]);
+                setSelHeadlineId(nova.id);
+              }}
+              onRemove={(id) => {
+                pushHistory();
+                setHeadlines((prev) => prev.filter((h) => h.id !== id));
+                setSelHeadlineId((cur) => (cur === id ? null : cur));
+              }}
+              onPatch={(id, patch) =>
+                setHeadlines((prev) => prev.map((h) => (h.id === id ? { ...h, ...patch } : h)))
+              }
+              onCommit={pushHistory}
+              onSeek={seekTo}
+              currentMs={(videoRef.current?.currentTime ?? 0) * 1000}
+              durationMs={(duration ?? 0) * 1000}
+              disabled={processing}
             />
 
             {/* ⭐ o vídeo tinha fala sem legenda? a resposta vem MEDIDA */}
@@ -1663,6 +1730,10 @@ function PreviewPane({
   onEditText,
   wordSel,
   onWordSel,
+  headlines,
+  selHeadlineId,
+  onSelectHeadline,
+  onMoveHeadline,
 }: {
   videoUrl: string;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
@@ -1677,6 +1748,11 @@ function PreviewPane({
   onSelectBlock: (id: string) => void;
   onEditText: (id: string, text: string) => void;
   wordSel: { blockId: string; a: number; b: number } | null;
+  /** headlines: texto parado, arrastavel INDEPENDENTE da legenda */
+  headlines: Headline[];
+  selHeadlineId: string | null;
+  onSelectHeadline: (id: string | null) => void;
+  onMoveHeadline: (id: string, posX: number, posY: number) => void;
   onWordSel: (sel: { blockId: string; a: number; b: number } | null) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1724,8 +1800,10 @@ function PreviewPane({
   editingRef.current = editing;
 
   // refs pros valores vivos dentro do rAF (evita recriar o loop a cada edição)
-  const liveRef = useRef({ blocks, preset, style, fontScale, wordSel });
-  liveRef.current = { blocks, preset, style, fontScale, wordSel };
+  const liveRef = useRef({ blocks, preset, style, fontScale, wordSel, headlines, selHeadlineId });
+  liveRef.current = { blocks, preset, style, fontScale, wordSel, headlines, selHeadlineId };
+  /** arrasto de HEADLINE: override vivo, igual ao da legenda */
+  const hlDragRef = useRef<{ id: string; posX: number; posY: number; moved: boolean } | null>(null);
 
   // assinatura do último frame desenhado — o rAF pula o trabalho quando nada
   // mudou (ver o guard `dirty` no tick)
@@ -1738,6 +1816,10 @@ function PreviewPane({
     style: StyleState;
     fontScale: number;
     wordSel: { blockId: string; a: number; b: number } | null;
+    headlines: Headline[];
+    selHl: string | null;
+    hlX?: number;
+    hlY?: number;
     sel: boolean;
     ovX?: number;
     ovY?: number;
@@ -1788,6 +1870,10 @@ function PreviewPane({
           prevDraw.style !== liveNow.style ||
           prevDraw.fontScale !== liveNow.fontScale ||
           prevDraw.wordSel !== liveNow.wordSel ||
+          prevDraw.headlines !== liveNow.headlines ||
+          prevDraw.selHl !== liveNow.selHeadlineId ||
+          prevDraw.hlX !== hlDragRef.current?.posX ||
+          prevDraw.hlY !== hlDragRef.current?.posY ||
           prevDraw.sel !== selRef.current ||
           prevDraw.ovX !== ovNow?.posX ||
           prevDraw.ovY !== ovNow?.posY ||
@@ -1804,6 +1890,10 @@ function PreviewPane({
             style: liveNow.style,
             fontScale: liveNow.fontScale,
             wordSel: liveNow.wordSel,
+            headlines: liveNow.headlines,
+            selHl: liveNow.selHeadlineId,
+            hlX: hlDragRef.current?.posX,
+            hlY: hlDragRef.current?.posY,
             sel: selRef.current,
             ovX: ovNow?.posX,
             ovY: ovNow?.posY,
@@ -1859,6 +1949,29 @@ function PreviewPane({
                 ctx.fillRect(cxr, box.y + box.h * 0.06, Math.max(2, 2 * dpr), box.h * 0.88);
                 ctx.restore();
               }
+            }
+          }
+          // ── HEADLINES (texto parado) por cima da legenda ──
+          {
+            const hlDrag = hlDragRef.current;
+            const lista = hlDrag
+              ? liveNow.headlines.map((h) =>
+                  h.id === hlDrag.id
+                    ? { ...h, style: { ...h.style, posX: hlDrag.posX, posY: hlDrag.posY } }
+                    : h,
+                )
+              : liveNow.headlines;
+            drawHeadlines(ctx, lista, v.currentTime * 1000, W, H);
+            // moldura da headline selecionada (so no preview, nunca no export)
+            const selHl = lista.find((h) => h.id === liveNow.selHeadlineId);
+            if (selHl && headlinesAt([selHl], v.currentTime * 1000).length > 0) {
+              const L = layoutHeadline(measurerFromCtx(ctx), selHl, W, H);
+              ctx.save();
+              ctx.strokeStyle = 'rgba(34,211,238,0.95)';
+              ctx.lineWidth = Math.max(1.5, dpr);
+              ctx.setLineDash([7 * dpr, 5 * dpr]);
+              ctx.strokeRect(L.box.x, L.box.y, L.box.w, L.box.h);
+              ctx.restore();
             }
           }
           dprRef.current = dpr;
@@ -2053,6 +2166,39 @@ function PreviewPane({
           const px = (e.clientX - rect.left) * dpr;
           const py = (e.clientY - rect.top) * dpr;
           // a bbox não é mais recalculada todo frame — mede agora, pro clique
+          // ── HEADLINE primeiro: ela fica POR CIMA da legenda no desenho,
+          // entao tem que ganhar o clique tambem (senao seria impossivel pegar
+          // uma headline que cobre a legenda)
+          {
+            const c = canvasRef.current;
+            const v = videoRef.current;
+            const cx2 = c?.getContext('2d');
+            if (c && v && cx2) {
+              const hit = headlineAtPoint(
+                measurerFromCtx(cx2),
+                liveRef.current.headlines,
+                v.currentTime * 1000,
+                px,
+                py,
+                c.width,
+                c.height,
+              );
+              if (hit) {
+                onInteractStart();
+                onSelectHeadline(hit.headline.id);
+                selRef.current = false;
+                onWordSel(null);
+                hlDragRef.current = {
+                  id: hit.headline.id,
+                  posX: hit.headline.style.posX,
+                  posY: hit.headline.style.posY,
+                  moved: false,
+                };
+                wrap.style.cursor = 'grabbing';
+                return;
+              }
+            }
+          }
           const bb = selRef.current ? (bboxRef.current ?? medirBBox()) : medirBBox();
           const handleR = 14 * dpr;
           const onHandle =
@@ -2132,6 +2278,27 @@ function PreviewPane({
           const wrap = wrapRef.current;
           const drag = dragRef.current;
           if (!wrap) return;
+          // arrasto de HEADLINE: escreve no ref e o rAF desenha (o estado so
+          // recebe no soltar, igual ao arrasto da legenda)
+          const hd = hlDragRef.current;
+          if (hd) {
+            const r = wrap.getBoundingClientRect();
+            const c = canvasRef.current;
+            const h = liveRef.current.headlines.find((x) => x.id === hd.id);
+            if (c && h) {
+              const cx2 = c.getContext('2d');
+              const L = cx2 ? layoutHeadline(measurerFromCtx(cx2), h, c.width, c.height) : null;
+              const lim = L
+                ? headlinePosBounds(L.box.w, L.box.h, c.width, c.height)
+                : { minX: -0.6, maxX: 1.6, minY: -0.6, maxY: 1.6 };
+              const nx = (e.clientX - r.left) / r.width;
+              const ny = (e.clientY - r.top) / r.height;
+              hd.posX = Math.min(lim.maxX, Math.max(lim.minX, nx));
+              hd.posY = Math.min(lim.maxY, Math.max(lim.minY, ny));
+              hd.moved = true;
+            }
+            return;
+          }
           if (!drag) {
             // hover: cursor certo em cada zona (alça = redimensionar, palavra
             // do bloco selecionado = texto, legenda = mover) — igual CapCut
@@ -2254,6 +2421,15 @@ function PreviewPane({
           }
         }}
         onPointerUp={(e) => {
+          const hd = hlDragRef.current;
+          hlDragRef.current = null;
+          if (hd) {
+            wrapRef.current?.releasePointerCapture(e.pointerId);
+            if (wrapRef.current) wrapRef.current.style.cursor = 'default';
+            if (hd.moved) onMoveHeadline(hd.id, hd.posX, hd.posY);
+            dragRef.current = null;
+            return;
+          }
           const drag = dragRef.current;
           dragRef.current = null;
           wrapRef.current?.releasePointerCapture(e.pointerId);
@@ -2292,6 +2468,7 @@ function PreviewPane({
         onPointerCancel={() => {
           dragRef.current = null;
           dragOvRef.current = null;
+          hlDragRef.current = null;
         }}
         onDoubleClick={(e) => {
           const wrap = wrapRef.current;
@@ -2486,6 +2663,10 @@ function Timeline({
   onSelect,
   onRetime,
   onDragStart,
+  headlines,
+  selHeadlineId,
+  onSelectHeadline,
+  onRetimeHeadline,
   disabled,
 }: {
   blocks: Block[];
@@ -2497,12 +2678,25 @@ function Timeline({
   onSelect: (id: string) => void;
   onRetime: (id: string, start: number, end: number, mode: 'move' | 'trim') => void;
   onDragStart: () => void;
+  /** faixa PROPRIA das headlines (texto parado) */
+  headlines: Headline[];
+  selHeadlineId: string | null;
+  onSelectHeadline: (id: string) => void;
+  onRetimeHeadline: (id: string, start: number, end: number) => void;
   disabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const scrubRef = useRef(false); // arrastando a agulha (fora dos blocos)
+  /** arrasto de uma barra de HEADLINE (mover ou esticar as pontas) */
+  const hlDragRef = useRef<{
+    id: string;
+    mode: 'move' | 'trim-start' | 'trim-end';
+    grabMs: number;
+    start: number;
+    end: number;
+  } | null>(null);
   const [pps, setPps] = useState(0); // px por segundo (0 = ainda não ajustou)
   const dragRef = useRef<{
     id: string;
@@ -2651,7 +2845,7 @@ function Timeline({
         className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
-        <span>Timeline — blocos movem · bordas cortam · agulha navega · scroll do mouse = zoom</span>
+        <span>Timeline — blocos movem · bordas cortam · agulha navega · scroll do mouse = zoom · faixa de baixo = headlines</span>
         <span className="flex items-center gap-3">
           <span
             ref={timeReadRef}
@@ -2683,7 +2877,7 @@ function Timeline({
           className="relative select-none"
           style={{
             width: trackW,
-            height: 150,
+            height: 196,
             backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) ${effPps}px, transparent ${effPps}px, transparent ${effPps * 2}px)`,
           }}
           onPointerDown={(e) => {
@@ -2892,6 +3086,86 @@ function Timeline({
               ))}
             </div>
           ) : null}
+
+          {/* ── FAIXA DAS HEADLINES (texto parado) ── */}
+          <div
+            className="pointer-events-none absolute left-0 top-[148px] h-[40px] rounded-[7px]"
+            style={{ width: trackW, background: 'rgba(34,211,238,0.05)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.16)' }}
+          />
+          {headlines.map((h) => {
+            const left = (h.start / 1000) * effPps;
+            const width = Math.max(12, ((h.end - h.start) / 1000) * effPps);
+            const sel = h.id === selHeadlineId;
+            return (
+              <div
+                key={h.id}
+                data-block="1"
+                title={h.text || 'headline sem texto'}
+                className={
+                  'group absolute top-[150px] h-[36px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
+                  (sel ? 'z-10' : 'hover:brightness-[1.18]')
+                }
+                style={{
+                  left,
+                  width,
+                  backgroundImage: sel
+                    ? 'linear-gradient(180deg, rgba(34,211,238,0.72) 0%, rgba(34,211,238,0.4) 100%)'
+                    : 'linear-gradient(180deg, rgba(34,211,238,0.4) 0%, rgba(34,211,238,0.16) 100%)',
+                  border: sel ? '1px solid #22d3ee' : '1px solid rgba(34,211,238,0.5)',
+                  boxShadow: sel
+                    ? '0 0 0 1px rgba(34,211,238,0.9), 0 4px 18px -6px rgba(34,211,238,0.7)'
+                    : 'inset 0 1px 0 rgba(255,255,255,0.14)',
+                }}
+                onPointerDown={(e) => {
+                  if (disabled) return;
+                  e.stopPropagation();
+                  onDragStart();
+                  onSelectHeadline(h.id);
+                  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const off = e.clientX - rect.left;
+                  const mode: 'move' | 'trim-start' | 'trim-end' =
+                    width > 26 && off < 9
+                      ? 'trim-start'
+                      : width > 26 && off > rect.width - 9
+                        ? 'trim-end'
+                        : 'move';
+                  hlDragRef.current = { id: h.id, mode, grabMs: (off / effPps) * 1000, start: h.start, end: h.end };
+                }}
+                onPointerMove={(e) => {
+                  const d = hlDragRef.current;
+                  if (!d || d.id !== h.id) return;
+                  const sc = scrollRef.current;
+                  if (!sc) return;
+                  const xPx = e.clientX - sc.getBoundingClientRect().left + sc.scrollLeft;
+                  const tMs = Math.max(0, (xPx / effPps) * 1000);
+                  const MIN = 200;
+                  if (d.mode === 'move') {
+                    const dur = d.end - d.start;
+                    const ini = Math.max(0, Math.min(tMs - d.grabMs, duration * 1000 - dur));
+                    onRetimeHeadline(h.id, Math.round(ini), Math.round(ini + dur));
+                  } else if (d.mode === 'trim-start') {
+                    onRetimeHeadline(h.id, Math.round(Math.min(tMs, d.end - MIN)), d.end);
+                  } else {
+                    onRetimeHeadline(h.id, d.start, Math.round(Math.max(tMs, d.start + MIN)));
+                  }
+                }}
+                onPointerUp={(e) => {
+                  hlDragRef.current = null;
+                  (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+                }}
+                onPointerCancel={() => {
+                  hlDragRef.current = null;
+                }}
+              >
+                <span className="pointer-events-none absolute inset-0 flex items-center truncate px-2 text-[11px] font-semibold text-white/90">
+                  {h.text.replace(/\s+/g, ' ').trim() || 'headline'}
+                </span>
+                <span className="pointer-events-none absolute inset-y-0 left-0 w-[7px] bg-white/25 opacity-0 group-hover:opacity-100" />
+                <span className="pointer-events-none absolute inset-y-0 right-0 w-[7px] bg-white/25 opacity-0 group-hover:opacity-100" />
+              </div>
+            );
+          })}
 
           {/* playhead — a zona de pega (14px) reenvia o pointer pro track = scrub */}
           <div
