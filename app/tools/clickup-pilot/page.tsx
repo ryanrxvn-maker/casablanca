@@ -1088,7 +1088,7 @@ type TaskAnalysis = {
    *  seletor de idioma na tela — no B2C fica sempre undefined. */
   drMillion?: boolean;
   /** Quais idiomas ESTE ad realmente tem no doc. */
-  drLangs?: { pt: boolean; pl: boolean };
+  drLangs?: { pt: boolean; pl: boolean; hun?: boolean };
   /** Linhas da copy do idioma escolhido que NÃO entraram em nenhum take.
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
@@ -1843,12 +1843,17 @@ function ClickUpPilotInner() {
       // Idioma do ASR: o drLang só existe no fluxo DR MILLION (e o default
       // dele é 'pl'!) — task B2C transcreveria em polonês. Fora do DR
       // MILLION, é pt.
+      //
+      // ⚠ O ASR quer ISO de 2 letras, e o seletor guarda 'hun' (3 letras, como
+      // o doc escreve). Sem traduzir, o húngaro cairia no fallback e seria
+      // transcrito como português — legenda e âncoras saem erradas.
       const ehDrMillion = !!an?.drMillion;
+      const ASR_DO_DRLANG: Record<string, string> = { pl: 'pl', hun: 'hu', pt: 'pt' };
       const r = await montarPosProducao(blob, info, {
         legenda,
         zoom,
         partes,
-        idioma: ehDrMillion && drLangRef.current === 'pl' ? 'pl' : 'pt',
+        idioma: ehDrMillion ? (ASR_DO_DRLANG[drLangRef.current] || 'pt') : 'pt',
         templates: captionTemplatesRef.current,
         // O pipeline roda INTEIRO dentro do runPostPipelineSerial, que já
         // segura o lock exclusivo do ffmpeg. Sem avisar isto, o mux de áudio
@@ -2325,10 +2330,14 @@ function ClickUpPilotInner() {
    *  Sem análise ainda, deixa os dois livres. */
   const idiomasDaSelecao = useMemo(() => {
     const analisadas = Object.values(taskAnalyses).filter((a) => a?.drMillion && a.drLangs);
-    if (!analisadas.length) return { pt: true, pl: true };
+    // Sem análise ainda: PL e PT livres, HUN travado. O húngaro só acende
+    // quando um AD analisado usa o marcador HUN — acender por padrão daria a
+    // impressão de que o lote polonês também é húngaro.
+    if (!analisadas.length) return { pt: true, pl: true, hun: false };
     return {
       pt: analisadas.some((a) => a.drLangs!.pt),
       pl: analisadas.some((a) => a.drLangs!.pl),
+      hun: analisadas.some((a) => a.drLangs!.hun),
     };
   }, [taskAnalyses]);
 

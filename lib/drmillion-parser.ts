@@ -28,7 +28,24 @@
 
 import type { ParsedDarkoBriefing } from './copy-parser';
 
-export type DrMillionLang = 'pl' | 'pt';
+/**
+ * Idioma escolhido para o disparo.
+ *
+ * ⚠ `pl` e `hun` apontam para o MESMO balde interno — o do idioma que o avatar
+ * FALA. O nome `pl` é herança do primeiro lote (polonês) e virou o nome do
+ * campo em todo o ecossistema; quando o lote é húngaro, é o húngaro que mora
+ * ali. Separar em dois baldes obrigaria a mexer no contrato de `hook`/`body`,
+ * que atravessa parser, briefing, plano de cenas e disparo — e nada disso
+ * ganharia nitidez com a mudança.
+ *
+ * `pt` continua sendo o GUIA que o copy escreve ao lado, nunca o que vai ao ar.
+ */
+export type DrMillionLang = 'pl' | 'pt' | 'hun';
+
+/** `pt` é guia; qualquer outro idioma é o de disparo. */
+function ehDisparo(lang: DrMillionLang): boolean {
+  return lang !== 'pt';
+}
 
 /** Heading de AD: "AD07G1GL - COD WL PL". */
 const AD_HEADING_RE = /^\s*(AD\d+[A-Z0-9]*)\s*[-–—]/i;
@@ -423,9 +440,9 @@ export function parseDrMillionBriefing(
   if (!blocos) return null;
 
   const escolher = (b: { pt: Fala[]; pl: Fala[] }) => {
-    const preferido = lang === 'pl' ? b.pl : b.pt;
+    const preferido = ehDisparo(lang) ? b.pl : b.pt;
     if (preferido.length) return preferido;
-    return lang === 'pl' ? b.pt : b.pl; // fallback: melhor a outra língua que nada
+    return ehDisparo(lang) ? b.pt : b.pl; // fallback: melhor a outra língua que nada
   };
 
   const hookFalas = escolher(blocos.hook);
@@ -477,8 +494,8 @@ export function conferirCoberturaDaCopy(
   const blocos = extrairBlocosComFalante(docText, adId);
   if (!blocos) return { total: 0, faltando: [] };
   const escolher = (b: { pt: Fala[]; pl: Fala[] }) => {
-    const preferido = lang === 'pl' ? b.pl : b.pt;
-    return preferido.length ? preferido : lang === 'pl' ? b.pt : b.pl;
+    const preferido = ehDisparo(lang) ? b.pl : b.pt;
+    return preferido.length ? preferido : ehDisparo(lang) ? b.pt : b.pl;
   };
   const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
   const tudo = norm(textosGerados.join(' '));
@@ -490,11 +507,39 @@ export function conferirCoberturaDaCopy(
 export function idiomasDisponiveis(
   docText: string,
   adId: string,
-): { pt: boolean; pl: boolean } {
+): { pt: boolean; pl: boolean; hun: boolean } {
   const b = extrairBlocos(docText, adId);
-  if (!b) return { pt: false, pl: false };
+  if (!b) return { pt: false, pl: false, hun: false };
+  const temDisparo = b.hook.pl.length > 0 || b.body.pl.length > 0;
+  // ⚠ Qual das duas bandeiras acender vem do MARCADOR que o doc usa, não do
+  // conteúdo: `pl` e `hun` dividem o mesmo balde, então olhar só o balde acende
+  // sempre a polonesa — e o lote húngaro aparecia como se fosse polonês.
+  const ehHun = marcadorDeDisparo(docText, adId) === 'hun';
   return {
     pt: b.hook.pt.length > 0 || b.body.pt.length > 0,
-    pl: b.hook.pl.length > 0 || b.body.pl.length > 0,
+    pl: temDisparo && !ehHun,
+    hun: temDisparo && ehHun,
   };
+}
+
+/**
+ * Qual marcador de idioma de disparo o AD usa no doc — `pl` ou `hun`.
+ *
+ * Olha só a região daquele AD: um doc pode ter lotes de idiomas diferentes, e
+ * varrer o documento inteiro devolveria o marcador do vizinho.
+ */
+export function marcadorDeDisparo(docText: string, adId: string): 'pl' | 'hun' {
+  const linhas = String(docText || '').split(/\r?\n/);
+  const alvo = adGroupOf(adId) || adId;
+  let dentro = false;
+  for (const l of linhas) {
+    const h = l.match(AD_HEADING_RE);
+    if (h) dentro = (adGroupOf(h[1]) || h[1]) === alvo;
+    if (!dentro) continue;
+    const m = l.match(LANG_RE) || l.match(LANG_FIM_RE) || l.match(LANG_INI_RE);
+    if (!m) continue;
+    const marca = (m[2] && /^(PT|PL|HUN|HU)$/i.test(m[2]) ? m[2] : m[1]) || '';
+    if (/^hun?$/i.test(marca.trim())) return 'hun';
+  }
+  return 'pl';
 }

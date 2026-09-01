@@ -18,6 +18,11 @@ const CORES = {
     text: '#1a0710',
     grad: 'linear-gradient(135deg, #fbcfe8 0%, #f472b6 100%)',
   },
+  hun: {
+    rgb: '251,146,60',
+    text: '#1c0d02',
+    grad: 'linear-gradient(135deg, #fed7aa 0%, #fb923c 100%)',
+  },
   pt: {
     rgb: '110,231,183',
     text: '#04140d',
@@ -25,10 +30,12 @@ const CORES = {
   },
 } as const;
 
-export type Lang = 'pl' | 'pt';
+/**  compartilha o balde de disparo com  — ver DrMillionLang. */
+export type Lang = 'pl' | 'pt' | 'hun';
 
 const OPCOES: Array<{ id: Lang; label: string; flag: string; titulo: string }> = [
   { id: 'pl', label: 'PL', flag: '🇵🇱', titulo: 'Polonês — idioma em que o anúncio vai ao ar' },
+  { id: 'hun', label: 'HUN', flag: '🇭🇺', titulo: 'Húngaro — idioma em que o anúncio vai ao ar' },
   { id: 'pt', label: 'PT', flag: '🇧🇷', titulo: 'Português — a tradução que serve de guia' },
 ];
 
@@ -37,12 +44,12 @@ export function LangSwitch3D({
   onChange,
   disabled = false,
   /** Idiomas que o AD realmente tem no doc. O que faltar fica travado. */
-  disponivel = { pt: true, pl: true },
+  disponivel = { pt: true, pl: true, hun: false },
 }: {
   value: Lang;
   onChange: (v: Lang) => void;
   disabled?: boolean;
-  disponivel?: { pt: boolean; pl: boolean };
+  disponivel?: { pt: boolean; pl: boolean; hun?: boolean };
 }) {
   const idx = Math.max(0, OPCOES.findIndex((o) => o.id === value));
   const cor = CORES[OPCOES[idx]?.id ?? 'pl'];
@@ -84,7 +91,7 @@ export function LangSwitch3D({
 
         {OPCOES.map((o) => {
           const ativo = o.id === value;
-          const temNoDoc = disponivel[o.id];
+          const temNoDoc = disponivel[o.id] ?? false;
           const travado = disabled || !temNoDoc;
           return (
             <button

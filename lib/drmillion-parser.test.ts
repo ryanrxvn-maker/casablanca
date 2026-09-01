@@ -10,6 +10,7 @@ import {
   conferirCoberturaDaCopy,
   limparLinhaFalada,
   adGroupOf,
+  marcadorDeDisparo,
 } from './drmillion-parser';
 
 const DOC = [
@@ -83,7 +84,8 @@ eq(limparLinhaFalada('104 quilos foi o meu pico'), '104 quilos foi o meu pico', 
 // ── detecção ──
 ok(isDrMillionFormat(DOC, 'AD07G1GL'), 'detecta formato DR MILLION');
 ok(!isDrMillionFormat('Hook 1\nBody\ntexto normal do B2C', 'AD07G1GL'), 'doc do B2C NÃO é DR MILLION');
-eq(idiomasDisponiveis(DOC, 'AD07G1GL'), { pt: true, pl: true }, 'AD07G1GL tem os dois idiomas');
+eq(idiomasDisponiveis(DOC, 'AD07G1GL'), { pt: true, pl: true, hun: false },
+   'AD07G1GL tem PT e PL — e nao acende a bandeira hungara');
 
 // ── hook certo pra cada task (o problema do "primeiro parecido") ──
 const g1 = extrairBlocos(DOC, 'AD07G1GL')!;
@@ -338,6 +340,18 @@ eq(parseDrMillionBriefing(DOC, 'AD99XX', 'pl'), null, 'AD que não existe devolv
      'HUN: body no balde de disparo');
   ok(!h.hook.pl.join(' ').includes('Senhores'), 'HUN: português NÃO vazou pro disparo');
   ok(!h.hook.pt.join(' ').includes('Uraim'), 'HUN: húngaro NÃO vazou pro guia');
+
+  // a UI precisa saber QUAL bandeira acender: pl e hun dividem o balde, entao
+  // quem decide e o MARCADOR que o doc usa, nao o conteudo do balde.
+  eq(idiomasDisponiveis(DOC_HUN, 'AD01'), { pt: true, pl: false, hun: true },
+     'HUN: acende a bandeira hungara e NAO a polonesa');
+  eq(marcadorDeDisparo(DOC_HUN, 'AD01'), 'hun', 'HUN: marcador detectado');
+  eq(marcadorDeDisparo(DOC, 'AD07G1GL'), 'pl', 'PL: marcador continua polones');
+
+  // e o disparo em hun tem que trazer o hungaro, nao o portugues
+  const phun = parseDrMillionBriefing(DOC_HUN, 'AD01', 'hun')!;
+  ok(/Uraim/.test(phun.hooks[0].text), 'lang=hun traz o hungaro');
+  ok(!/Senhores/.test(phun.hooks[0].text), 'lang=hun nao traz o portugues');
 }
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
