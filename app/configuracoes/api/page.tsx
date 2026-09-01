@@ -47,6 +47,12 @@ const META: Array<{
   steps?: Array<{ t: string; d: string }>;
   /** Recado que evita o erro classico do servico (ex.: achar que precisa de saldo). */
   warn?: string;
+  /**
+   * Aviso SEMPRE visivel logo abaixo do "Usado em". Existe pra dizer quando
+   * duas chaves fazem a MESMA coisa (AssemblyAI x Groq): sem isso o cliente
+   * ve dois cards de transcricao e acha que precisa das duas.
+   */
+  note?: string;
 }> = [
   {
     id: 'assemblyai',
@@ -54,7 +60,10 @@ const META: Array<{
     helper:
       'Chave alfanumerica longa. Pega em assemblyai.com (dashboard, sidebar).',
     link: 'https://www.assemblyai.com/app/account',
-    usedBy: 'Decupagem por Copy · Camuflagem · Gerador de SRT · Diarização de vozes (VA)',
+    usedBy:
+      'Legendas Automáticas · Decupagem por Copy · Gerador de SRT · Camuflagem · Diarização de vozes (VA)',
+    note:
+      'TRANSCRIÇÃO: esta chave e a do Groq fazem a mesma coisa — basta UMA das duas pra Legendas Automáticas, Decupagem por Copy e Gerador de SRT. Só a Camuflagem e a Diarização exigem esta aqui.',
   },
   {
     id: 'heygen',
@@ -103,7 +112,9 @@ const META: Array<{
     helper:
       'Token gsk_... — Whisper-large-v3 a ~$0.04/h (vs $0.45 AssemblyAI). Crie em console.groq.com → API Keys.',
     link: 'https://console.groq.com/keys',
-    usedBy: 'Decupagem por Copy — transcrição barata (fallback do AssemblyAI)',
+    usedBy: 'Legendas Automáticas · Decupagem por Copy · Gerador de SRT',
+    note:
+      'TRANSCRIÇÃO: esta chave e a do AssemblyAI fazem a mesma coisa — basta UMA das duas. Se você já configurou o AssemblyAI, estas ferramentas JÁ funcionam e este card é opcional: com as duas salvas, o AutoEdit usa a Groq (mais barata) e cai pro AssemblyAI se ela falhar.',
   },
 ];
 
@@ -260,6 +271,11 @@ export default function ApiKeysPage() {
                       <p className="mt-0.5 text-[11px] text-text-muted">
                         Usado em: <span className="text-lime">{m.usedBy}</span>
                       </p>
+                      {m.note ? (
+                        <p className="mt-1.5 max-w-[62ch] rounded-[10px] border border-line bg-bg-soft/60 px-2.5 py-1.5 text-[11px] leading-relaxed text-text-muted">
+                          {m.note}
+                        </p>
+                      ) : null}
                       {/* Caminho PRINCIPAL do OAuth: login pelo próprio app, em
                           corrente que o CLI não derruba. O campo de colar
                           continua logo abaixo, como saída manual. */}

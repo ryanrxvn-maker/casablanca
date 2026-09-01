@@ -1267,7 +1267,10 @@ function TipografiaInner() {
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-6">
       <div className="flex flex-col gap-5">
-        <MissingKeyBanner services={['groq']} />
+        {/* Transcrição tem FALLBACK no servidor (Groq primeiro, AssemblyAI
+            se ela falhar/faltar): quem tem só uma das duas está pronto —
+            declarar o grupo evita o alarme falso que perdeu cliente. */}
+        <MissingKeyBanner services={[['groq', 'assemblyai']]} />
 
         {/* ── Passos 1 e 2 lado a lado (economia vertical) ── */}
         <div className="grid gap-5 lg:grid-cols-2">

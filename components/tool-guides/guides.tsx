@@ -242,7 +242,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       'O selo é medido no arquivo real, depois de pronto — não é estimativa. Se ficou verde, é porque a transcrição devolveu o áudio escondido.',
       'A camuflagem funciona em áudio estéreo. Arquivo mono não tem camada pra separar — no Descamuflar a ferramenta avisa e devolve o áudio como está.',
       'A camuflagem mira a transcrição automática das plataformas. Não existe garantia universal contra todo detector — por isso o selo existe: valide sempre antes de publicar.',
-      'A verificação usa a chave de Transcrição — se estiver faltando, o banner "Chave pendente" aponta direto pro botão "Configurar →".',
+      'A verificação usa Transcrição, e aqui é a chave do AssemblyAI especificamente (a Groq não separa os canais) — se estiver faltando, o banner "Chave pendente" aponta direto pro botão "Configurar →".',
     ],
   },
 
@@ -729,7 +729,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
     ],
     tips: [
-      'A ferramenta usa a chave de Transcrição — se faltar, o banner "Chave pendente" aponta o caminho ("Configurar →").',
+      'A ferramenta usa Transcrição, e basta UMA chave: AssemblyAI OU Groq, em Configurações → API. Faltando as duas, o banner "Chave pendente" aponta o caminho ("Configurar →").',
       'Áudio muito longo pode passar do limite do servidor — se acontecer, divida em partes menores e gere um SRT por parte.',
     ],
   },
@@ -788,7 +788,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
     ],
     tips: [
-      'A transcrição usa a chave Groq (Whisper) de /configuracoes/api — se faltar, o banner "Chave pendente" aponta o caminho.',
+      'A transcrição precisa de UMA chave só: AssemblyAI OU Groq, em Configurações → API. Qualquer uma das duas faz a legenda inteira — se você já tem o AssemblyAI configurado, não precisa criar conta na Groq. Com as duas salvas, o AutoEdit usa a Groq (mais barata) e cai pro AssemblyAI se ela falhar. Faltando as duas, o banner "Chave pendente" aponta o caminho ("Configurar →").',
       'O render local precisa de Chrome ou Edge atualizados no computador (WebCodecs). Não feche a aba durante o render.',
       'F5 no meio da edição não perde nada: selecionando o MESMO arquivo de novo, a edição anterior é restaurada.',
       'Trocar o "Ritmo dos blocos" remonta tudo a partir da transcrição — faça isso ANTES de corrigir textos na lista.',

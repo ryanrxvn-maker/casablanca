@@ -204,7 +204,9 @@ export default function CopySrtPage() {
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">
-        <MissingKeyBanner services={['groq']} />
+        {/* /api/mind-ads/transcribe-srt tenta Groq e cai pra AssemblyAI —
+            uma das duas basta. */}
+        <MissingKeyBanner services={[['groq', 'assemblyai']]} />
 
         <ToolStep n={1} icon={<IconStepMic size={18} />} title="Áudio ou vídeo" hint="MP3, WAV, MP4, MOV, WEBM — até 800MB e 60min" hue={HUE}>
           <ToolDropzone
