@@ -6,6 +6,8 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory } from '@/lib/history';
 import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { createClient } from '@/lib/supabase/client';
+import { useUserEmail } from '@/lib/use-tier';
+import { macMotorLiberado } from '@/lib/mac-motor-beta';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
 import { IconDownloader, IconStepPlug, IconStepLink, IconStepFormat, IconStepDownload } from '@/components/ToolIcons';
 
@@ -276,6 +278,7 @@ function MacInstallCommand() {
 
 export default function DownloaderPage() {
   const isMac = useIsMac();
+  const userEmail = useUserEmail();
   const [raw, setRaw] = useToolState<string>('downloader:urls', '');
   // LINK VINDO DE FORA (?url=...): o botão BAIXAR das indicações do copy no
   // ClickUp Pilot abre esta página já com a URL colada (YouTube, TikTok,
@@ -445,6 +448,10 @@ export default function DownloaderPage() {
   const [running, setRunning] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adult, setAdult] = useState(false);
+  /* Motor no Mac em TESTE FECHADO: o comando de instalação só aparece pros
+     testadores. Os outros clientes de Mac não veem o .exe do Windows (que
+     eles não conseguem rodar) — veem o que funciona pra eles hoje. */
+  const macMotorOk = macMotorLiberado(userEmail, isAdmin);
   // Timestamp em que a sessão de download começou — usado pra cronometrar
   // o tempo de resolução (sensação de "rápido pra iniciar")
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -883,7 +890,15 @@ export default function DownloaderPage() {
                   <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
                     A extensão do navegador encontrou a página, mas o motor
                     no seu computador não está rodando.{' '}
-                    {isMac ? (
+                    {isMac && !macMotorOk ? (
+                      <>
+                        No Mac o Motor ainda está em{' '}
+                        <b className="text-white">teste fechado</b>, então é
+                        esperado ele aparecer desconectado aqui — e não te
+                        atrapalha: <b className="text-white">Instagram</b> e{' '}
+                        <b className="text-white">TikTok</b> baixam sem ele.
+                      </>
+                    ) : isMac ? (
                       <>
                         Roda de novo o comando de instalação (passo 01) no
                         Terminal — ele reinstala por cima sem bagunçar nada — e
@@ -937,7 +952,7 @@ export default function DownloaderPage() {
                       então o comando precisa estar AQUI — senão o cliente lê
                       "roda o comando de novo" e não tem o comando em lugar
                       nenhum. */}
-                  {isMac && <MacInstallCommand />}
+                  {isMac && macMotorOk && <MacInstallCommand />}
                   <details className="mt-3 group">
                     <summary
                       className="cursor-pointer text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted hover:text-text"
@@ -946,7 +961,19 @@ export default function DownloaderPage() {
                       O motor não abre?
                     </summary>
                     <ol className="mono mt-2 list-decimal space-y-1.5 pl-5 text-[11px] leading-relaxed text-text-muted">
-                      {isMac ? (
+                      {isMac && !macMotorOk ? (
+                        <>
+                          <li>
+                            No Mac o Motor ainda está em teste fechado — não tem o que abrir aqui ainda.
+                          </li>
+                          <li>
+                            <b className="text-white">Instagram</b> e <b className="text-white">TikTok</b> continuam baixando normalmente, é só colar o link abaixo.
+                          </li>
+                          <li>
+                            Quer entrar no teste do Motor no Mac? Chama no WhatsApp.
+                          </li>
+                        </>
+                      ) : isMac ? (
                         <>
                           <li>
                             Cola o comando acima no <b className="text-white">Terminal</b>. Ele reinstala por cima e no fim diz se ficou de pé.
@@ -988,7 +1015,7 @@ export default function DownloaderPage() {
           ) : (
             <div>
               <div className={isMac ? 'grid gap-2.5' : 'grid gap-2.5 sm:grid-cols-2'}>
-                {isMac ? (
+                {isMac && macMotorOk ? (
                   /* MAC — o Motor não é .exe aqui. Instala por UMA linha no
                      Terminal, e isso é técnico, não preguiça de fazer .pkg: o
                      que o curl baixa de dentro do script não recebe
@@ -1023,6 +1050,37 @@ export default function DownloaderPage() {
                       <b className="text-white">Intel</b>. O Mac pode pedir sua
                       senha; é do próprio macOS, não vai pra lugar nenhum. Depois
                       disso o Motor sobe sozinho toda vez que você liga o Mac.
+                    </p>
+                  </div>
+                ) : isMac ? (
+                  /* MAC FORA DO TESTE — o pior desfecho aqui seria mandar
+                     este cliente baixar o .exe: ele leva um arquivo que o Mac
+                     não executa e conclui que a ferramenta é quebrada. Então
+                     dizemos a verdade e mostramos o que JÁ funciona pra ele. */
+                  <div className="rounded-[14px] border border-line-strong bg-bg-soft/60 px-4 py-3.5">
+                    <div
+                      className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Você está no Mac
+                    </div>
+                    <div
+                      className="text-[14px] font-bold tracking-tight text-white"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Instagram e TikTok já funcionam
+                    </div>
+                    <p className="mono mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
+                      Instala só a <b className="text-white">Extensão</b> (passo 02
+                      aqui do lado) e o Downloader já baixa do{' '}
+                      <b className="text-white">Instagram</b> e do{' '}
+                      <b className="text-white">TikTok</b> normalmente.
+                    </p>
+                    <p className="mono mt-2 text-[10.5px] leading-relaxed text-text-muted">
+                      <b className="text-white">YouTube e Pinterest</b> precisam do
+                      Motor, um programinha que roda no seu computador. A versão pro
+                      Mac está pronta e <b className="text-white">em teste fechado</b>{' '}
+                      agora — te avisamos assim que abrir. No Windows ele já funciona.
                     </p>
                   </div>
                 ) : (
@@ -1090,14 +1148,19 @@ export default function DownloaderPage() {
                 </summary>
                 <ol className="mono mt-3 list-decimal space-y-2 pl-5 text-[11px] leading-relaxed text-text-muted">
                   {isMac ? (
-                    <>
-                      <li>
-                        Cola o comando do passo 01 no <b className="text-white">Terminal</b> e aperta Enter. Ele baixa o motor, o yt-dlp e o ffmpeg — uns <b className="text-white">100 MB</b>, ~2 minutos numa internet comum.
-                      </li>
-                      <li>
-                        No fim ele roda um <b className="text-white">auto-teste</b> e imprime <b className="text-lime">&quot;Motor instalado e funcionando&quot;</b>. Se algo falhar, ele diz <i>qual peça</i> falhou — não some calado.
-                      </li>
-                    </>
+                    /* Fora do teste fechado não existe passo de Motor no Mac —
+                       a lista começa direto na extensão, que é o que ele
+                       realmente vai instalar. */
+                    macMotorOk && (
+                      <>
+                        <li>
+                          Cola o comando do passo 01 no <b className="text-white">Terminal</b> e aperta Enter. Ele baixa o motor, o yt-dlp e o ffmpeg — uns <b className="text-white">100 MB</b>, ~2 minutos numa internet comum.
+                        </li>
+                        <li>
+                          No fim ele roda um <b className="text-white">auto-teste</b> e imprime <b className="text-lime">&quot;Motor instalado e funcionando&quot;</b>. Se algo falhar, ele diz <i>qual peça</i> falhou — não some calado.
+                        </li>
+                      </>
+                    )
                   ) : (
                     <>
                       <li>
@@ -1119,6 +1182,7 @@ export default function DownloaderPage() {
                   </li>
                 </ol>
                 {isMac ? (
+                  macMotorOk && (
                   <>
                     <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
                       <span className="text-lime">Por que um comando e não um instalador de clicar:</span>{' '}
@@ -1155,6 +1219,7 @@ export default function DownloaderPage() {
                       . Manda no WhatsApp.
                     </p>
                   </>
+                  )
                 ) : (
                   <>
                     <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
