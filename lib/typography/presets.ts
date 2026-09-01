@@ -204,7 +204,9 @@ const MANUAL_PRESETS: TypoPreset[] = [
     id: 'papo-amarelo',
     name: 'Papo Amarelo',
     cat: 'Viral',
-    font: 'montserrat900',
+    // Montserrat BOLD (800), nao Black: na referencia o traco e pesado mas
+    // nao ultra-preto, e o Black sai visivelmente mais largo.
+    font: 'montserrat800',
     size: 0.062,
     lineHeight: 1.1,
     uppercase: false,
@@ -212,18 +214,25 @@ const MANUAL_PRESETS: TypoPreset[] = [
     fill: 'primary',
     shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.1, x: 0, y: 0.035 },
     unit: 'word',
-    in: { kind: 'zoom-out', dur: 260, ease: 'outQuint', stagger: 90, amp: 0.5 },
+    // A ENTRADA da referencia nao e um fade: a palavra chega GRANDE, BORRADA
+    // e translucida, e vai focando enquanto assenta no tamanho — por isso
+    // parece "curva, distorcendo, meio baguncado". `blur-zoom` faz os tres ao
+    // mesmo tempo. E a duracao e MAIOR que o intervalo entre palavras, entao
+    // duas ou tres ficam animando juntas: e o que da a bagunca da referencia.
+    in: { kind: 'blur-zoom', dur: 380, ease: 'outQuint', stagger: 130, amp: 1.15 },
     autoEmphasis: true,
     highlightStyle: 'color',
-    // O amarelo da referencia nao e chapado: tem um brilho de leve, como
-    // metal. Sai de um gradiente vertical claro->ouro->ambar dentro da
-    // propria letra, mais um glow curto na cor de destaque.
+    // O amarelo da referencia nao e chapado: tem brilho de metal, com um
+    // canto visivelmente mais claro que o outro. Por isso o gradiente e
+    // DIAGONAL (o vertical puro sai chapado) e comeca quase branco.
     highlightGradient: [
-      [0, '#fff6c9'],
-      [0.34, '#ffd84a'],
-      [0.62, '#f0b21c'],
-      [1, '#e39a10'],
+      [0, '#fffdf0'],
+      [0.22, '#ffe887'],
+      [0.5, '#ffc824'],
+      [0.78, '#f0a80e'],
+      [1, '#d98c07'],
     ],
+    highlightGradientDir: 'diagonal',
     defaultPrimary: '#ffffff',
     defaultAccent: '#f5c518',
   }),

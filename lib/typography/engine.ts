@@ -393,6 +393,12 @@ export type TypoPreset = {
   highlightColor?: PresetColor;
   /** gradiente PRÓPRIO da palavra destacada (ouro no "2026", roxo no "DINÂMICOS") */
   highlightGradient?: Array<[number, PresetColor]>;
+  /**
+   * Direcao do gradiente do destaque. 'diagonal' deixa um canto mais claro
+   * que o outro — e o que da o brilho de metal (o vertical puro parece
+   * chapado).
+   */
+  highlightGradientDir?: 'vertical' | 'diagonal';
   /** FONTE própria da palavra destacada (ex.: texto clean + destaque cartoon) */
   highlightFont?: FontKey;
   /** máscara: painel escurecido com o texto VAZADO mostrando o vídeo através das letras */
@@ -2702,7 +2708,13 @@ function getTrippyPattern(d: DrawCtx): Paint {
 function resolveHighlightFill(d: DrawCtx, lineH: number): Paint {
   const p = d.preset;
   if (p.highlightGradient) {
-    const g = d.ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
+    // DIAGONAL: comeca em cima-a-esquerda e termina embaixo-a-direita, entao
+    // um canto sai mais claro que o outro (o brilho de metal). O vertical
+    // puro deixa a letra chapada.
+    const g =
+      p.highlightGradientDir === 'diagonal'
+        ? d.ctx.createLinearGradient(-lineH * 0.5, -lineH * 0.78, lineH * 0.6, lineH * 0.36)
+        : d.ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
     for (const [o, c] of p.highlightGradient) {
       g.addColorStop(o, resolveColor(c, d.primary, d.accent));
     }

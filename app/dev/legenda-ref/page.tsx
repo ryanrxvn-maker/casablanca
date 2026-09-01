@@ -11,13 +11,29 @@
 import { notFound } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { registerCanvasJob } from '@/lib/typography/canvas-loop';
-import { ensureTypoFonts } from '@/lib/typography/fonts';
+import { ensureTypoFonts, type FontKey } from '@/lib/typography/fonts';
 import { drawCaptions, type Block, type StyleState } from '@/lib/typography/engine';
 import { getPreset } from '@/lib/typography/presets';
 
 const FRASE = 'mas aí eu quero que tu me dê tua opinião, tá?';
-/** palavras pintadas de destaque (indices) — como na referencia */
-const DESTAQUES = [7, 8, 9];
+/**
+ * Palavras em dourado na referencia: de "de" ate "ta?" — o Silas corrigiu
+ * que o amarelo vai ate o fim da frase, nao para em "opiniao".
+ * mas(0) ai(1) eu(2) quero(3) que(4) tu(5) me(6) de(7) tua(8) opiniao,(9) ta?(10)
+ */
+const DESTAQUES = [7, 8, 9, 10];
+
+/** candidatas a fonte da referencia (as pesadas e geometricas do catalogo) */
+const FONTES: FontKey[] = [
+  'montserrat900',
+  'poppins800',
+  'nunito900',
+  'rubik900',
+  'inter800',
+  'dmsans900',
+  'outfit800',
+  'worksans800',
+];
 
 function bloco(texto: string): Block {
   const palavras = texto.split(/\s+/).filter(Boolean);
@@ -35,15 +51,18 @@ function Quadro({
   tMs,
   rodando,
   label,
+  fonte,
 }: {
   presetId: string;
   tMs: number;
   rodando: boolean;
   label: string;
+  /** troca SO a fonte, pra comparar familias com o resto igual */
+  fonte?: FontKey;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
-  const live = useRef({ presetId, tMs, rodando });
-  live.current = { presetId, tMs, rodando };
+  const live = useRef({ presetId, tMs, rodando, fonte });
+  live.current = { presetId, tMs, rodando, fonte };
 
   useEffect(() => {
     void ensureTypoFonts();
@@ -62,7 +81,7 @@ function Quadro({
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
       const s = live.current;
-      const b = bloco(FRASE);
+      const b = bloco(s.fonte ? 'mas aí eu quero' : FRASE);
       const st: StyleState = {
         presetId: s.presetId,
         fontScale: 1,
@@ -73,10 +92,17 @@ function Quadro({
         uppercase: null,
         highlights: { ref: DESTAQUES },
         autoEmphasis: false,
+        fontOverride: s.fonte ?? null,
       };
       const t = s.rodando ? (performance.now() - t0) % (b.end - 3200) : s.tMs;
       try {
         drawCaptions(ctx, [b], getPreset(s.presetId), st, t, W, H);
+        if (s.fonte && !(window as unknown as Record<string, unknown>)['__probe_' + s.fonte]) {
+          (window as unknown as Record<string, unknown>)['__probe_' + s.fonte] = {
+            presetFont: getPreset(s.presetId).font,
+            override: st.fontOverride,
+          };
+        }
       } catch (e) {
         console.error('[legenda-ref]', e);
       }
@@ -131,6 +157,22 @@ function Inner() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {instantes.map((t) => (
           <Quadro key={t} presetId={id} tMs={t} rodando={false} label={`${t} ms`} />
+        ))}
+      </div>
+
+      <h2 className="mb-2 mt-8 text-[16px] font-bold text-text">
+        Qual fonte bate com a referência?
+      </h2>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {FONTES.map((f) => (
+          <Quadro
+            key={f}
+            presetId={id}
+            tMs={4200}
+            rodando={false}
+            fonte={f}
+            label={f}
+          />
         ))}
       </div>
     </div>
