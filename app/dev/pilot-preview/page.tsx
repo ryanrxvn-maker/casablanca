@@ -253,7 +253,7 @@ function Conteudo() {
   const [lzAberto, setLzAberto] = useState<'legenda' | 'zoom' | null>(null);
   const lzRef = useRef<HTMLElement | null>(null);
   const [lzLegenda, setLzLegenda] = useState<LegendaCfg>({ ...LEGENDA_CFG_DEFAULT, on: true });
-  const [lzZoom, setLzZoom] = useState<ZoomCfg>({ ...ZOOM_CFG_DEFAULT, on: true, forca: 'misto' });
+  const [lzZoom, setLzZoom] = useState<ZoomCfg>({ ...ZOOM_CFG_DEFAULT, on: true, forca: 'smart' });
   const lzTemplates = BUILTIN_TEMPLATES;
   const [provaMsg, setProvaMsg] = useState<string | null>(null);
   const [provaUrl, setProvaUrl] = useState<string | null>(null);

@@ -1639,8 +1639,13 @@ function ClickUpPilotInner() {
     }
     if (zm.on) {
       const movimento = zm.modo === 'in' ? 'zoom in' : zm.modo === 'out' ? 'zoom out' : 'zoom in e out';
-      const forca = zm.forca === 'misto' ? 'leve↔forte' : zm.forca;
-      out.push({ tipo: 'zoom', title: `Com dinâmica de zoom — ${movimento}, ${forca}` });
+      out.push({
+        tipo: 'zoom',
+        title:
+          zm.forca === 'smart'
+            ? 'Com Smart Zoom — corte seco, zoom in e zoom out escolhidos a cada corte (100–135%)'
+            : `Com dinâmica de zoom — ${movimento}, ${zm.forca}`,
+      });
     }
     return out;
   }

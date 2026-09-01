@@ -41,7 +41,7 @@ export type LegendaCfg = {
 };
 
 export type ZoomModo = 'in' | 'out' | 'inout';
-export type ZoomForca = 'leve' | 'medio' | 'forte' | 'misto';
+export type ZoomForca = 'leve' | 'medio' | 'forte' | 'smart';
 
 export type ZoomCfg = {
   on: boolean;
@@ -64,7 +64,7 @@ export const ZOOM_CFG_DEFAULT: ZoomCfg = { on: false, modo: 'in', forca: 'medio'
  * borrar: o crop central de 1.26 em fonte 1080p ainda entrega ~857px de
  * origem pro frame final.
  */
-export const ZOOM_AMP: Record<Exclude<ZoomForca, 'misto'>, number> = {
+export const ZOOM_AMP: Record<Exclude<ZoomForca, 'smart'>, number> = {
   leve: 1.08,
   medio: 1.16,
   forte: 1.26,
@@ -93,6 +93,62 @@ const JANELA_MIN_SEC = 4;
  * o enquadramento é quase o mesmo e o salto de escala aparece.
  */
 const ESPERA_POR_FORTE_SEC = 3;
+
+/* ─────────────────────────── SMART ZOOM (31.08) ───────────────────────────
+ * Lido do draft do CapCut que o Silas montou à mão. O que aparece lá:
+ *
+ *   • CORTE SECO é o que MAIS tem: o take inteiro numa escala (100%, depois
+ *     120%, depois 130%, depois 100% de novo) e a troca acontece EXATAMENTE no
+ *     corte, sem rampa. É seco de propósito — dá ritmo sem chamar atenção.
+ *   • ZOOM IN suavizado vem em segundo, e sempre RESOLVE antes do corte.
+ *   • ZOOM OUT existe, mas é raro — um ou dois no AD inteiro.
+ *
+ * As três regras duras: a escala NUNCA passa de 135% (borra) e NUNCA fica
+ * abaixo de 100% (apareceria borda preta); e toda troca de escala cai num
+ * CORTE, nunca no meio da fala.
+ */
+/** Escala máxima — acima disto o upscale começa a borrar. */
+const SMART_MAX = 1.35;
+/** Escala mínima — abaixo de 1 o frame não preenche a tela (borda). */
+const SMART_MIN = 1.0;
+/** Degraus de escala do corte seco (o "100 · 120 · 130" do draft). */
+const SMART_DEGRAUS = [1.0, 1.1, 1.2, 1.3, 1.35];
+/**
+ * A BOLSA de movimentos — 3 secos, 2 in, 1 out por ciclo de 6.
+ *
+ * Sorteio PURO não serve: com ~14 trechos num AD, a variância entregava 6 zoom
+ * in contra 5 secos (medido) — o oposto da prioridade do draft. E sorteio puro
+ * também produz "3 zoom in seguidos", que nenhum editor faz.
+ *
+ * A bolsa é embaralhada e esvaziada: a proporção 50/33/17 vale em QUALQUER
+ * tamanho de AD, e a ordem varia sem nunca amontoar o mesmo movimento.
+ */
+const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'seco', 'in', 'in', 'out'];
+/** Janela do corte seco: curta, é só o take numa escala. */
+const SMART_SEG_SECO_SEC = 3;
+/** Janela do movimento: precisa de tempo pra ser percebido. */
+const SMART_SEG_RAMPA_SEC = 6;
+
+/** PRNG determinístico (mulberry32): o MESMO vídeo dá o MESMO plano — sem
+ *  isso, um RETOMAR entregaria um AD com dinâmica diferente do primeiro. */
+function prng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Semente estável: sai do próprio material (durações), não do relógio. */
+function sementeDoPlano(durSec: number, cortes: Array<{ t: number }>): number {
+  let h = Math.round(durSec * 1000);
+  for (const c of cortes) h = (Math.imul(h, 31) + Math.round(c.t * 1000)) >>> 0;
+  return h || 1;
+}
+
+const clampEscala = (x: number) => Math.min(SMART_MAX, Math.max(SMART_MIN, x));
 /**
  * RESPIRO ANTES DO CORTE (31.08). O movimento tem que RESOLVER antes do corte
  * e ficar parado até ele — zoom cruzando um corte é a marca de edição
@@ -113,6 +169,101 @@ export function fronteirasDasPartes(partesSec: number[]): number[] {
     out.push(acc);
   }
   return out;
+}
+
+/**
+ * SMART ZOOM — o plano com o feeling do editor (31.08).
+ *
+ * Lido do draft que o Silas montou à mão no CapCut. Três movimentos, nesta
+ * ordem de frequência:
+ *
+ *   1. CORTE SECO (metade das janelas) — o trecho inteiro numa escala fixa e a
+ *      troca acontece EXATAMENTE no corte. É o que dá o ritmo do draft:
+ *      100% · 120% · 130% · 100%…
+ *   2. ZOOM IN suavizado (~1/3) — rampa que RESOLVE antes do corte.
+ *   3. ZOOM OUT (~1/6) — o tempero; um ou dois no AD inteiro.
+ *
+ * Invariantes duras (testadas): escala sempre em [100%, 135%]; toda troca cai
+ * num CORTE, nunca no meio da fala; rampa sempre resolvida antes do corte.
+ *
+ * O sorteio é DETERMINÍSTICO (semente vinda das próprias durações): o mesmo
+ * vídeo dá exatamente o mesmo plano, então um RETOMAR não muda a dinâmica.
+ */
+function planejarSmartZoom(
+  durSec: number,
+  cortes: Array<{ t: number; forte: boolean }>,
+): ZoomSeg[] {
+  const rnd = prng(sementeDoPlano(durSec, cortes));
+  const segs: ZoomSeg[] = [];
+  let escala = 1.0; // começa SEMPRE em 100% (nada de borda no primeiro frame)
+  let ini = 0;
+  let c = 0;
+  let bolsa: Array<'seco' | 'in' | 'out'> = [];
+
+  while (ini < durSec - 0.05 && c < cortes.length) {
+    // 1) que movimento vem agora? sai da BOLSA (proporção garantida)
+    if (bolsa.length === 0) {
+      bolsa = [...SMART_BOLSA];
+      // embaralho determinístico (Fisher-Yates com o mesmo PRNG)
+      for (let k = bolsa.length - 1; k > 0; k--) {
+        const j = Math.floor(rnd() * (k + 1));
+        [bolsa[k], bolsa[j]] = [bolsa[j], bolsa[k]];
+      }
+    }
+    let tipo: 'seco' | 'in' | 'out' = bolsa.pop()!;
+    // Sem espaço pro movimento sorteado, cai no SECO — nunca no outro
+    // movimento. Converter out→in inflava o zoom in acima do seco e quebrava a
+    // prioridade do draft (medido: 7 in contra 4 secos).
+    if (tipo === 'out' && escala <= SMART_MIN + 0.02) tipo = 'seco'; // já em 100%: não dá pra descer
+    if (tipo === 'in' && escala >= SMART_MAX - 0.02) tipo = 'seco'; // já no teto: não dá pra subir
+
+    // 2) a janela: o seco é curto (só o take numa escala), a rampa é longa
+    const alvo = tipo === 'seco' ? SMART_SEG_SECO_SEC : SMART_SEG_RAMPA_SEC;
+    let fim = durSec;
+    let usou = cortes.length;
+    for (let k = c; k < cortes.length; k++) {
+      if (cortes[k].t - ini >= alvo || k === cortes.length - 1) {
+        fim = Math.min(cortes[k].t, durSec);
+        usou = k + 1;
+        break;
+      }
+    }
+    // a última janela sempre fecha no fim do vídeo
+    if (usou >= cortes.length) fim = durSec;
+    const dur = fim - ini;
+    if (dur < 0.4) break; // resto insignificante
+
+    // 3) a escala de destino
+    if (tipo === 'seco') {
+      // um degrau DIFERENTE do atual — a troca tem que ser percebida no corte
+      const opcoes = SMART_DEGRAUS.filter((d) => Math.abs(d - escala) >= 0.08);
+      const nova = clampEscala(opcoes.length ? opcoes[Math.floor(rnd() * opcoes.length)] : 1.0);
+      segs.push({ start: ini, end: fim, from: nova, to: nova, rampaAte: fim });
+      escala = nova;
+    } else {
+      // rampa: alguns leves, outros mais curtos e por isso mais agressivos —
+      // mas o teto de 135% e o piso de 100% valem sempre.
+      const passo = 0.07 + rnd() * 0.11; // 7% a 18%
+      const destino = clampEscala(tipo === 'in' ? escala + passo : escala - passo);
+      if (Math.abs(destino - escala) < 0.02) {
+        // não sobrou amplitude: entrega como seco em vez de uma rampa morta
+        segs.push({ start: ini, end: fim, from: escala, to: escala, rampaAte: fim });
+      } else {
+        const respiro = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, dur * RESPIRO_FRACAO));
+        const rampaAte = dur > respiro * 2 ? fim - respiro : ini + dur / 2;
+        segs.push({ start: ini, end: fim, from: escala, to: destino, rampaAte });
+        escala = destino;
+      }
+    }
+
+    ini = fim;
+    c = usou;
+  }
+
+  if (segs.length === 0) segs.push({ start: 0, end: durSec, from: 1, to: 1, rampaAte: durSec });
+  // o plano SEMPRE cobre o vídeo inteiro (buraco = frame sem escala definida)
+  segs[segs.length - 1].end = durSec;
+  return segs;
 }
 
 /**
@@ -172,6 +323,9 @@ export function planejarZoom(
     cortes[cortes.length - 1].t = Math.max(cortes[cortes.length - 1].t, durSec);
   }
 
+  // SMART ZOOM tem o próprio ritmo (seco/in/out) — ele monta as janelas dele.
+  if (cfg.forca === 'smart') return planejarSmartZoom(durSec, cortes);
+
   // ── AGRUPA cortes até a janela ter TEMPO de mostrar o movimento ──
   // O zoom ATRAVESSA os cortes intermediários (num jump cut do mesmo take o
   // movimento contínuo até ajuda: dá continuidade) e só RESETA no corte que
@@ -209,7 +363,7 @@ export function planejarZoom(
   }
 
   const ampDe = (i: number): number =>
-    cfg.forca === 'misto' ? (i % 2 === 0 ? ZOOM_AMP.leve : ZOOM_AMP.forte) : ZOOM_AMP[cfg.forca];
+    cfg.forca === 'smart' ? (i % 2 === 0 ? ZOOM_AMP.leve : ZOOM_AMP.forte) : ZOOM_AMP[cfg.forca];
 
   return janelas.map((j, i) => {
     const amp = ampDe(i);

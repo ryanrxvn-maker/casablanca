@@ -97,11 +97,8 @@ console.log('\nGARANTIA — pós-produção do Pilot (zoom + roteiro):');
   ok(io[2].from === 1, 'inout: janela 2 volta a empurrar');
 }
 
-// (7) força misto alterna leve/forte; e a régua nova DÁ PRA SENTIR
+// (7) a régua de amplitude DÁ PRA SENTIR sem borrar
 {
-  const m = planejarZoom({ on: true, modo: 'in', forca: 'misto' }, 30, [10, 10, 10]);
-  ok(aprox(m[0].to, ZOOM_AMP.leve), 'misto: janela 0 leve');
-  ok(aprox(m[1].to, ZOOM_AMP.forte), 'misto: janela 1 forte');
   ok(ZOOM_AMP.medio >= 1.14, 'médio subiu pra faixa que se percebe no plano fechado');
   ok(ZOOM_AMP.forte <= 1.3, 'forte NÃO passa do ponto em que o upscale borra');
   ok(ZOOM_AMP.leve < ZOOM_AMP.medio && ZOOM_AMP.medio < ZOOM_AMP.forte, 'a escada é monotônica');
@@ -224,6 +221,163 @@ console.log('\nGARANTIA — pós-produção do Pilot (zoom + roteiro):');
   const zero = montarRoteiro(TEMPLATE_1, 'como transformar um azeite', 'corpo', 0);
   ok(zero[0].words === null, 'medida zero é ignorada (não zera o hook)');
 }
+
+// ═══════════════════════ SMART ZOOM (31.08) ═══════════════════════
+// Replica o feeling do draft que o Silas montou à mão no CapCut. As regras
+// que ele deu viraram invariantes: escala 100–135%, troca só em corte, corte
+// SECO como prioridade máxima, in > out, rampa sempre resolvida antes do corte.
+
+/** Todo AD real do estúdio: partes do HeyGen picotadas pela decupagem. */
+function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
+  const partes = [9, 14, 11, 16, 12, 18, 13];
+  const internos = partes.map((p) => {
+    const n = Math.max(2, Math.round(p / 2.6));
+    return Array(n).fill(p / n);
+  });
+  return { dur: partes.reduce((a, b) => a + b, 0), partes, internos };
+}
+
+// (17) A ESCALA NUNCA sai de [100%, 135%] — nem no meio de uma rampa.
+{
+  const { dur, partes, internos } = adRealista();
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  ok(plan.length > 0, 'o smart produz plano');
+  let foraDaFaixa = 0;
+  for (const seg of plan) {
+    if (seg.from < 0.999 || seg.from > 1.3501) foraDaFaixa++;
+    if (seg.to < 0.999 || seg.to > 1.3501) foraDaFaixa++;
+  }
+  ok(foraDaFaixa === 0, 'toda escala do plano está em [100%, 135%]');
+  // varre o vídeo INTEIRO instante a instante (a rampa é interpolação, não só
+  // os extremos) — é o teste que garante "nunca menos que 100%, sem borda"
+  const escalaEm = (t: number): number => {
+    for (const sg of plan) {
+      if (t >= sg.start && t < sg.end) {
+        const fim = sg.rampaAte != null && sg.rampaAte > sg.start ? sg.rampaAte : sg.end;
+        const pr = Math.min(1, Math.max(0, (t - sg.start) / Math.max(0.001, fim - sg.start)));
+        const e = -(Math.cos(Math.PI * pr) - 1) / 2;
+        return sg.from + (sg.to - sg.from) * e;
+      }
+    }
+    return 1;
+  };
+  let pior = 1;
+  let maior = 1;
+  for (let t = 0; t < dur; t += 0.1) {
+    const e = escalaEm(t);
+    pior = Math.min(pior, e);
+    maior = Math.max(maior, e);
+  }
+  ok(pior >= 0.999, `NUNCA abaixo de 100% em nenhum frame (mínimo ${pior.toFixed(3)}) — sem borda preta`);
+  ok(maior <= 1.3501, `NUNCA acima de 135% (máximo ${maior.toFixed(3)}) — não borra`);
+  ok(maior > 1.05, `e o movimento EXISTE (chegou a ${maior.toFixed(2)})`);
+}
+
+// (18) O PLANO COBRE O VÍDEO INTEIRO, sem buraco e sem sobreposição.
+{
+  const { dur, partes, internos } = adRealista();
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  ok(plan[0].start === 0, 'começa no zero');
+  ok(aprox(plan[plan.length - 1].end, dur, 0.02), 'termina no fim do vídeo');
+  let contiguo = true;
+  for (let i = 1; i < plan.length; i++) {
+    if (!aprox(plan[i].start, plan[i - 1].end, 0.02)) contiguo = false;
+  }
+  ok(contiguo, 'as janelas são contíguas — nenhum frame fica sem escala');
+  ok(plan[0].from === 1, 'o vídeo COMEÇA em 100% (primeiro frame sem borda nem salto)');
+}
+
+// (19) TODA troca de escala cai num CORTE — nunca no meio da fala.
+{
+  const { dur, partes, internos } = adRealista();
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  // conjunto dos cortes reais (fim de pedaço da decupagem e fim de parte)
+  const cortes = new Set<number>();
+  let base = 0;
+  partes.forEach((p, i) => {
+    let acc = 0;
+    for (const d of internos[i]) { acc += d; cortes.add(Math.round((base + acc) * 100) / 100); }
+    base += p;
+  });
+  let forcaDeCorte = 0;
+  for (let i = 1; i < plan.length; i++) {
+    const t = Math.round(plan[i].start * 100) / 100;
+    const perto = [...cortes].some((c) => Math.abs(c - t) < 0.05);
+    if (!perto) forcaDeCorte++;
+  }
+  ok(forcaDeCorte === 0, 'toda fronteira de janela é um CORTE real (nenhuma troca no meio da fala)');
+}
+
+// (20) CORTE SECO é PRIORIDADE MÁXIMA; in vem depois; out é o tempero.
+{
+  const { dur, partes, internos } = adRealista();
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  const seco = plan.filter((sg) => Math.abs(sg.to - sg.from) < 0.02).length;
+  const zin = plan.filter((sg) => sg.to - sg.from >= 0.02).length;
+  const zout = plan.filter((sg) => sg.from - sg.to >= 0.02).length;
+  ok(seco + zin + zout === plan.length, 'todo segmento é seco, in ou out');
+  ok(seco >= zin, `corte SECO é o que mais aparece (${seco} secos vs ${zin} in)`);
+  ok(zin >= zout, `zoom IN aparece mais que o OUT (${zin} in vs ${zout} out)`);
+  ok(seco > 0 && zin > 0, 'os dois principais existem no mesmo AD');
+}
+
+// (21) O SECO é SECO MESMO: escala constante no trecho, troca só na fronteira.
+{
+  const { dur, partes, internos } = adRealista();
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  const secos = plan.filter((sg) => Math.abs(sg.to - sg.from) < 0.02);
+  ok(secos.every((sg) => sg.from === sg.to), 'no corte seco a escala não muda DENTRO do trecho');
+  // e há troca de verdade entre trechos vizinhos (senão não é ritmo, é nada)
+  let trocas = 0;
+  for (let i = 1; i < plan.length; i++) {
+    if (Math.abs(plan[i].from - plan[i - 1].to) >= 0.05) trocas++;
+  }
+  ok(trocas > 0, `a escala TROCA no corte (${trocas} trocas secas) — é o ritmo do draft`);
+}
+
+// (22) TODA rampa resolve ANTES do corte (o zoom in morre no corte).
+{
+  const { dur, partes, internos } = adRealista();
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  const rampas = plan.filter((sg) => Math.abs(sg.to - sg.from) >= 0.02);
+  ok(rampas.length > 0, 'existem rampas no plano');
+  ok(
+    rampas.every((sg) => (sg.rampaAte as number) < sg.end && (sg.rampaAte as number) > sg.start),
+    'toda rampa termina ANTES do fim da janela e depois do começo',
+  );
+}
+
+// (23) DETERMINISMO: o mesmo vídeo dá o MESMO plano (RETOMAR não muda o AD).
+{
+  const { dur, partes, internos } = adRealista();
+  const a = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  const b = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  ok(JSON.stringify(a) === JSON.stringify(b), 'duas chamadas iguais dão planos IDÊNTICOS');
+  const c = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur + 3, [...partes, 3], [...internos, [3]]);
+  ok(JSON.stringify(a) !== JSON.stringify(c), 'material diferente dá plano diferente (não é constante)');
+}
+
+// (24) O smart aguenta material DEGENERADO sem quebrar nem sair da faixa.
+{
+  const curtinho = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, 3, [3], [[3]]);
+  ok(curtinho.length >= 1 && aprox(curtinho[curtinho.length - 1].end, 3, 0.02), 'vídeo de 3s: plano válido');
+  ok(curtinho.every((sg) => sg.from >= 0.999 && sg.to <= 1.3501), 'e dentro da faixa');
+
+  const semPartes = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, 40, null);
+  ok(semPartes.length >= 1 && aprox(semPartes[semPartes.length - 1].end, 40, 0.02), 'sem partes: cai na cadência e cobre tudo');
+
+  const podre = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, 20, [10, NaN]);
+  ok(podre.length >= 1 && podre.every((sg) => sg.from >= 0.999), 'duração podre não vira escala inválida');
+}
+
+// (25) O modo (in/out/inout) NÃO manda no smart — ele decide sozinho.
+{
+  const { dur, partes, internos } = adRealista();
+  const comIn = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, dur, partes, internos);
+  const comOut = planejarZoom({ on: true, modo: 'out', forca: 'smart' }, dur, partes, internos);
+  ok(JSON.stringify(comIn) === JSON.stringify(comOut), 'o smart ignora o modo — o ritmo é dele');
+}
+
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

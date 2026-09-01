@@ -36,7 +36,7 @@ const FORCAS: Array<{ v: ZoomForca; label: string; pct: string; dica: string }> 
   { v: 'leve', label: 'Leve', pct: '+4,5%', dica: 'Quase uma respiração — presença sem chamar atenção.' },
   { v: 'medio', label: 'Médio', pct: '+9%', dica: 'O push-in lento do CapCut. O padrão do estúdio.' },
   { v: 'forte', label: 'Forte', pct: '+16%', dica: 'Movimento evidente, pra cena que precisa de energia.' },
-  { v: 'misto', label: 'Misto', pct: '4,5↔16%', dica: 'Alterna leve e forte entre os takes — ritmo de edição manual.' },
+  { v: 'smart', label: 'Smart Zoom', pct: '100→135%', dica: 'O feeling do editor: na maioria dos cortes a escala TROCA SECA (100 · 120 · 130), com zoom in suavizado no meio e um ou outro zoom out. Escolhe sozinho a cada corte.' },
 ];
 
 /* ═══════════════ preview REAL do template (motor das legendas) ═══════════ */
@@ -163,19 +163,41 @@ function PreviaDoZoom({ modo, forca }: { modo: ZoomModo; forca: ZoomForca }) {
     const t0 = performance.now();
     const T = 2600; // uma "troca de take" a cada 2,6s
     const amps: [number, number] =
-      forca === 'misto' ? [ZOOM_AMP.leve, ZOOM_AMP.forte] : [ZOOM_AMP[forca], ZOOM_AMP[forca]];
+      forca === 'smart' ? [1.2, 1.3] : [ZOOM_AMP[forca], ZOOM_AMP[forca]];
+    // SMART: a prévia mostra o ritmo de verdade — seco, seco, in, seco, out…
+    // (os mesmos pesos do planejador, só que numa sequência fixa pra ler bem)
+    const roteiroSmart: Array<{ tipo: 'seco' | 'in' | 'out'; de: number; para: number }> = [
+      { tipo: 'seco', de: 1.0, para: 1.0 },
+      { tipo: 'seco', de: 1.2, para: 1.2 },
+      { tipo: 'in', de: 1.2, para: 1.32 },
+      { tipo: 'seco', de: 1.0, para: 1.0 },
+      { tipo: 'in', de: 1.0, para: 1.15 },
+      { tipo: 'out', de: 1.15, para: 1.0 },
+    ];
     const tick = (agora: number) => {
       const tempo = agora - t0;
       const j = Math.floor(tempo / T);
       const p = (tempo % T) / T;
       const e = -(Math.cos(Math.PI * p) - 1) / 2; // mesmo easing do render
-      const amp = amps[j % 2];
       let s: number;
-      if (modo === 'in') s = 1 + (amp - 1) * e;
-      else if (modo === 'out') s = amp - (amp - 1) * e;
-      else s = j % 2 === 0 ? 1 + (amp - 1) * e : amp - (amp - 1) * e;
+      let rotulo = '';
+      if (forca === 'smart') {
+        const passo = roteiroSmart[j % roteiroSmart.length];
+        // a rampa resolve em 78% da janela e descansa até o corte (como no render)
+        const pr = Math.min(1, p / 0.78);
+        const er = -(Math.cos(Math.PI * pr) - 1) / 2;
+        s = passo.de + (passo.para - passo.de) * er;
+        rotulo = passo.tipo === 'seco' ? 'corte seco' : passo.tipo === 'in' ? 'zoom in' : 'zoom out';
+      } else {
+        const amp = amps[j % 2];
+        if (modo === 'in') s = 1 + (amp - 1) * e;
+        else if (modo === 'out') s = amp - (amp - 1) * e;
+        else s = j % 2 === 0 ? 1 + (amp - 1) * e : amp - (amp - 1) * e;
+      }
       if (ref.current) ref.current.style.transform = `scale(${s.toFixed(4)})`;
-      if (seloRef.current) seloRef.current.textContent = `×${s.toFixed(3)}`;
+      if (seloRef.current) {
+        seloRef.current.textContent = rotulo ? `${rotulo} · ×${s.toFixed(2)}` : `×${s.toFixed(3)}`;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -282,8 +304,11 @@ export function LegendaZoomPopover({
         <div className={'lz-secao' + (zoom.on ? '' : ' is-off')}>
           <PreviaDoZoom modo={zoom.modo} forca={zoom.forca} />
 
-          <div className="lz-rotulo">Movimento</div>
-          <div className="lz-opcoes">
+          <div className={'lz-rotulo' + (zoom.forca === 'smart' ? ' is-mudo' : '')}>
+            Movimento
+            {zoom.forca === 'smart' ? <span className="lz-rotulo-nota">o Smart Zoom decide a cada corte</span> : null}
+          </div>
+          <div className={'lz-opcoes' + (zoom.forca === 'smart' ? ' is-mudo' : '')}>
             {MODOS.map((m) => (
               <button
                 key={m.v}
@@ -296,7 +321,9 @@ export function LegendaZoomPopover({
               </button>
             ))}
           </div>
-          <div className="lz-dica">{MODOS.find((m) => m.v === zoom.modo)?.dica}</div>
+          {zoom.forca !== 'smart' ? (
+            <div className="lz-dica">{MODOS.find((m) => m.v === zoom.modo)?.dica}</div>
+          ) : null}
 
           <div className="lz-rotulo mt">Intensidade</div>
           <div className="lz-opcoes">
