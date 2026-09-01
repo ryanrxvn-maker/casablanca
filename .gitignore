@@ -61,3 +61,6 @@ public/dev-tiny.mp4
 
 # artefatos do teste do Motor macOS no CI
 /ci-tmp/
+
+# prints de conferencia do preview (dev-only)
+.preview-shots/
