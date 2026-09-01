@@ -141,43 +141,59 @@ jobs:
           ls -la ci-tmp/test.mp4
           curl -fsS -o /dev/null "http://127.0.0.1:${CI_SITE_PORT}/test.mp4" && echo "video servido"
 
-      # Caminho completo de verdade: extensao -> /get -> processDownload ->
-      # yt-dlp -> stream de volta. E o que o cliente faz ao clicar Baixar.
-      - name: Download REAL pelo motor (video)
+      # O download e testado em duas metades, de proposito.
+      #
+      # O core so aceita dominio da allowlist (classify(): YouTube, Instagram,
+      # TikTok, Pinterest, +18), entao NAO da pra empurrar um mp4 local pelo
+      # /get — levaria 400 "Dominio nao suportado", que seria falha do teste e
+      # nao do Mac. E apontar pro YouTube daqui tambem nao prova nada: runner
+      # do GitHub sai por IP de datacenter e o YouTube barra datacenter.
+      #
+      # Entao: o que e ESPECIFICO DO MAC (os binarios rodarem naquele chip) e
+      # testado direto no binario, com midia local; e o caminho HTTP do motor
+      # ate o core e testado pelas respostas dele. O que sobra sem cobertura
+      # aqui e so o yt-dlp puxando de site real por IP residencial — que e
+      # justamente o cenario do cliente, e o que o auto-teste do instalador
+      # exercita na maquina dele.
+      - name: yt-dlp baixa de verdade (binario deste chip)
         run: |
-          PORT=${{ steps.porta.outputs.porta }}
-          TOKEN=${{ steps.pair.outputs.token }}
-          URL="http%3A%2F%2F127.0.0.1%3A${CI_SITE_PORT}%2Ftest.mp4"
-          curl -fsS --max-time 180 \
-            "http://127.0.0.1:$PORT/get?t=$TOKEN&url=$URL&mode=video&quality=480" \
-            -o ci-tmp/baixado.mp4
-          SIZE=$(wc -c < ci-tmp/baixado.mp4 | tr -d ' ')
+          "$BASE/bin/yt-dlp" --no-playlist --no-warnings \
+            -o ci-tmp/direto.mp4 "http://127.0.0.1:${CI_SITE_PORT}/test.mp4"
+          SIZE=$(wc -c < ci-tmp/direto.mp4 | tr -d ' ')
           echo "baixado: $SIZE bytes"
-          test "$SIZE" -gt 5000 || { echo "::error::arquivo baixado veio vazio/curto ($SIZE b)"; exit 1; }
-          "$BASE/bin/ffmpeg" -v error -i ci-tmp/baixado.mp4 -f null - \
-            || { echo "::error::o arquivo baixado nao e um video valido"; exit 1; }
-          echo "video valido"
+          test "$SIZE" -gt 5000 || { echo "::error::yt-dlp baixou vazio/curto ($SIZE b)"; exit 1; }
+          "$BASE/bin/ffmpeg" -v error -i ci-tmp/direto.mp4 -f null - \
+            || { echo "::error::o que o yt-dlp baixou nao e video valido"; exit 1; }
+          echo "yt-dlp OK"
 
-      - name: Download REAL pelo motor (audio mp3 — exercita o ffmpeg)
+      - name: ffmpeg converte de verdade (binario deste chip)
+        run: |
+          "$BASE/bin/ffmpeg" -v error -y -i ci-tmp/direto.mp4 -vn -c:a libmp3lame ci-tmp/saida.mp3
+          SIZE=$(wc -c < ci-tmp/saida.mp3 | tr -d ' ')
+          echo "mp3: $SIZE bytes"
+          test "$SIZE" -gt 2000 || { echo "::error::mp3 veio vazio/curto ($SIZE b)"; exit 1; }
+          "$BASE/bin/ffmpeg" -v error -i ci-tmp/saida.mp3 -f null - \
+            || { echo "::error::o mp3 gerado nao e valido"; exit 1; }
+          echo "ffmpeg OK (inclusive libmp3lame, que e o modo audio do Downloader)"
+
+      # Prova que o pedido percorreu motor -> handler -> processDownload e
+      # voltou com erro ESTRUTURADO (nao crash, nao 500, nao timeout).
+      - name: /get chega no core e responde com erro tratado
         run: |
           PORT=${{ steps.porta.outputs.porta }}
           TOKEN=${{ steps.pair.outputs.token }}
-          URL="http%3A%2F%2F127.0.0.1%3A${CI_SITE_PORT}%2Ftest.mp4"
-          curl -fsS --max-time 180 \
-            "http://127.0.0.1:$PORT/get?t=$TOKEN&url=$URL&mode=audio-mp3" \
-            -o ci-tmp/baixado.mp3
-          SIZE=$(wc -c < ci-tmp/baixado.mp3 | tr -d ' ')
-          echo "baixado: $SIZE bytes"
-          test "$SIZE" -gt 2000 || { echo "::error::mp3 veio vazio/curto ($SIZE b)"; exit 1; }
-          "$BASE/bin/ffmpeg" -v error -i ci-tmp/baixado.mp3 -f null - \
-            || { echo "::error::o mp3 baixado nao e valido"; exit 1; }
-          echo "mp3 valido"
+          BODY=$(curl -s --max-time 30 \
+                   "http://127.0.0.1:$PORT/get?t=$TOKEN&url=https%3A%2F%2Fexemplo-nao-suportado.com%2Fv&mode=video")
+          echo "resposta: $BODY"
+          printf '%s' "$BODY" | grep -qi 'dominio nao suportado' \
+            || { echo "::error::esperava erro tratado de dominio, veio: $BODY"; exit 1; }
+          echo "caminho HTTP -> core OK"
 
       - name: Token errado tem que ser recusado
         run: |
           PORT=${{ steps.porta.outputs.porta }}
           CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-                   "http://127.0.0.1:$PORT/get?t=token-invalido&url=http%3A%2F%2F127.0.0.1%3A${CI_SITE_PORT}%2Ftest.mp4&mode=video")
+                   "http://127.0.0.1:$PORT/get?t=token-invalido&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dx&mode=video")
           test "$CODE" = "401" -o "$CODE" = "403" \
             || { echo "::error::token invalido deveria ser negado, veio HTTP $CODE"; exit 1; }
           echo "token invalido negado (HTTP $CODE)"
