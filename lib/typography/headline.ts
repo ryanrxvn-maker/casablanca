@@ -30,7 +30,14 @@ export type HeadlineStyle = {
   posY: number;
   /** largura MÁXIMA do bloco, fração do frame (a quebra de linha sai daqui) */
   width: number;
-  align: HeadlineAlign;
+  /**
+   * null = o alinhamento do MODELO.
+   * ⚠ Isto era `HeadlineAlign` puro com default 'left', e por isso o
+   * alinhamento do modelo NUNCA valia: o estilo sempre trazia um valor
+   * concreto que ganhava do preset. A cartela de citação, que é centralizada,
+   * saía à esquerda.
+   */
+  align: HeadlineAlign | null;
   /** null = a cor do modelo */
   color: string | null;
   /** null = a cor do modelo */
@@ -75,6 +82,14 @@ export type HeadlinePreset = {
   quote: boolean;
   /** tamanho das aspas, fração do corpo da fonte */
   quoteSize: number;
+  /** cor das aspas; null = a mesma do texto */
+  quoteColor: string | null;
+  /**
+   * Painel de BORDA A BORDA: ignora a largura do texto e ocupa o quadro
+   * inteiro na horizontal (cartela de citação). O texto continua respeitando
+   * a largura escolhida pra quebra de linha.
+   */
+  fullBleed: boolean;
   /** letter-spacing, fração do corpo */
   spacing: number;
   /** barra de acento na esquerda (fração do corpo) — 0 = sem barra */
@@ -99,6 +114,8 @@ const base = (p: Partial<HeadlinePreset> & Pick<HeadlinePreset, 'id' | 'name'>):
   padY: 0.52,
   quote: false,
   quoteSize: 1.9,
+  quoteColor: null,
+  fullBleed: false,
   accentBar: 0,
   accentColor: '#ffd60a',
   align: 'left',
@@ -113,10 +130,31 @@ const base = (p: Partial<HeadlinePreset> & Pick<HeadlinePreset, 'id' | 'name'>):
  * esquerda.
  */
 export const HEADLINE_PRESETS: HeadlinePreset[] = [
-  // ⭐ A REFERÊNCIA que o Silas mandou (31.08): cartela escura quase opaca
-  // ocupando quase a largura toda, aspas grandes em serifa no alto à
-  // esquerda, texto branco PESADO em caixa alta, entrelinha apertada e
-  // respiro generoso dentro do painel.
+  // ⭐ A REFERÊNCIA do Silas (01.09), lida no print em tamanho maior. O que
+  // eu tinha errado antes: NÃO é cartela preta arredondada com texto à
+  // esquerda. É uma FAIXA de borda a borda em verde-petróleo dessaturado,
+  // texto branco pesado CENTRALIZADO, e aspas pequenas em verde claro no
+  // canto de cima à esquerda — fora do fluxo do texto.
+  base({
+    id: 'cartela-citacao',
+    name: 'Cartela',
+    panelColor: '#3d5b55',
+    panelOpacity: 1,
+    fullBleed: true,
+    radius: 0,
+    align: 'center',
+    quote: true,
+    quoteSize: 1.15,
+    quoteColor: '#8fb8a4',
+    size: 0.038,
+    lineHeight: 1.3,
+    padX: 0.9,
+    padY: 0.75,
+    spacing: 0.004,
+    shadow: 0,
+  }),
+  // a cartela escura de canto arredondado continua existindo (era o que eu
+  // tinha entendido antes) — serve pra outro tipo de peça
   base({
     id: 'aspas-escura',
     name: 'Aspas',
@@ -178,12 +216,12 @@ export function getHeadlinePreset(id: string): HeadlinePreset {
 }
 
 export const HEADLINE_STYLE_DEFAULT: HeadlineStyle = {
-  presetId: 'aspas-escura',
+  presetId: 'cartela-citacao',
   fontScale: 1,
   posX: 0.5,
   posY: 0.34,
   width: 0.9,
-  align: 'left',
+  align: null,
   color: null,
   panelColor: null,
   panelOpacity: null,
@@ -419,15 +457,15 @@ export function drawHeadline(
     ctx.fill();
   }
 
-  // aspas decorativas
+  // Aspas decorativas — FORA do fluxo do texto: ficam no canto de cima a
+  // esquerda mesmo com o texto centralizado (e assim na referencia), e com
+  // cor propria (na referencia sao verdes, nao brancas).
   if (quote) {
     ctx.save();
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = cor;
+    ctx.fillStyle = preset.quoteColor ?? cor;
     ctx.font = fontCss('playfair900i', L.fontPx * preset.quoteSize);
-    // a aspa serifada tem muito respiro interno: a baseline vai ABAIXO do
-    // topo do painel pra ela encostar no canto, como na referência
-    ctx.fillText('“', L.box.x + L.padX * 0.7, L.box.y + L.quotePx * 0.96);
+    const qx = L.box.x + (preset.fullBleed ? W * 0.07 : L.padX * 0.7);
+    ctx.fillText('“', qx, L.box.y + L.padY + L.quotePx * 0.82);
     ctx.restore();
   }
 

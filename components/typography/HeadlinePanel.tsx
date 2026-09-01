@@ -281,7 +281,7 @@ export function HeadlinePanel({
                         onCommit();
                         setStyle({ align: v });
                       }}
-                      className={'fx-chip' + (sel.style.align === v ? ' is-on' : '')}
+                      className={'fx-chip' + ((sel.style.align ?? preset.align) === v ? ' is-on' : '')}
                     >
                       {label}
                     </button>

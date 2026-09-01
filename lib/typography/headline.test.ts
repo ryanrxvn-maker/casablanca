@@ -166,7 +166,12 @@ console.log('\n-- clique acerta a headline certa --');
 console.log('\n-- modelos --');
 {
   ok(HEADLINE_PRESETS.length >= 5, `tem ${HEADLINE_PRESETS.length} modelos de headline`);
-  ok(HEADLINE_PRESETS[0].id === 'aspas-escura' && HEADLINE_PRESETS[0].quote, 'o primeiro e o do print: painel escuro com aspas');
+  const ref = HEADLINE_PRESETS[0];
+  ok(ref.id === 'cartela-citacao', 'o primeiro modelo e o da REFERENCIA (cartela de citacao)');
+  ok(ref.fullBleed && ref.radius === 0, 'faixa de borda a borda, sem canto arredondado');
+  ok(ref.align === 'center', 'texto centralizado (nao a esquerda)');
+  ok(ref.quote && ref.quoteColor !== null, 'aspas com COR PROPRIA, nao a do texto');
+  ok(ref.panelOpacity === 1 && ref.panelColor !== '#000000', 'painel opaco e colorido (verde-petroleo), nao preto translucido');
   ok(getHeadlinePreset('nao-existe').id === HEADLINE_PRESETS[0].id, 'id desconhecido cai no primeiro (nunca quebra)');
   const ids = HEADLINE_PRESETS.map((p) => p.id);
   ok(new Set(ids).size === ids.length, 'nenhum id repetido');
