@@ -130,14 +130,19 @@ async function rodarProvaE2E(
     setMsg(`renderizando… (${blocks.length} blocos de legenda, ${plano.length} janelas de zoom)`);
 
     const t0 = Date.now();
-    const r = await renderTypographyVideo({
+    // FIEL AO PIPELINE: ele roda TUDO dentro do lock exclusivo do ffmpeg, e a
+    // pós-produção acontece lá dentro. Sem o `ffmpegJaExclusivo`, o mux de
+    // áudio pede o lock de novo e trava pra sempre (deadlock de 31.08).
+    const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
+    const r = await runFfmpegExclusive(() => renderTypographyVideo({
       file: blob,
       blocks,
       preset: presets.getPreset('keynote'),
       style,
+      ffmpegJaExclusivo: true,
       zoom: plano,
       onProgress: (pr) => setMsg(`render COM zoom ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
-    });
+    }));
     // SEGUNDO render, SEM zoom — é a régua da prova geométrica: no fim da 1ª
     // janela (t=3.8, escala 1.16), o frame COM zoom tem que casar com o crop
     // central 1/1.16 do frame SEM zoom, e não com o frame inteiro.

@@ -27,8 +27,33 @@
  */
 let _chain: Promise<unknown> = Promise.resolve();
 
+/**
+ * TETO DE ESPERA NA FILA (31.08). Aninhar `runFfmpegExclusive` dentro de si
+ * mesmo é deadlock — e um deadlock aqui não dava erro nenhum: a operação
+ * simplesmente ficava esperando PARA SEMPRE (foi o que travou a pós-produção
+ * do Pilot na fase de áudio). Nada legítimo espera 40min na fila: o watchdog
+ * do worker é 25min e cada operação tem seu próprio timeout por cima. Então,
+ * passou disso, é bug de aninhamento — e agora ele GRITA em vez de pendurar.
+ */
+const ESPERA_MAX_MS = 40 * 60_000;
+
+/** A espera na fila estourou o teto? (pura, pro teste alcançar a regra) */
+export function esperaEstourou(esperouMs: number, tetoMs: number = ESPERA_MAX_MS): boolean {
+  return esperouMs > tetoMs;
+}
+
 export function runFfmpegExclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const run = _chain.then(() => fn());
+  const entrou = Date.now();
+  const run = _chain.then(() => {
+    const esperou = Date.now() - entrou;
+    if (esperaEstourou(esperou)) {
+      throw new Error(
+        `fila do ffmpeg: esperei ${Math.round(esperou / 60000)}min pelo slot — ` +
+          'provável aninhamento de runFfmpegExclusive (deadlock).',
+      );
+    }
+    return fn();
+  });
   _chain = run.then(
     () => undefined,
     () => undefined,

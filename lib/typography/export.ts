@@ -626,8 +626,18 @@ export async function renderTypographyVideo(opts: {
   signal?: AbortSignal;
   /** força o caminho por seek (QA/harness — não usar na UI) */
   forceSeekPath?: boolean;
+  /**
+   * O CHAMADOR JÁ SEGURA o lock exclusivo do ffmpeg (`runFfmpegExclusive`).
+   *
+   * A fila do ffmpeg NÃO é reentrante: pedir o slot de dentro de quem já o
+   * segura é esperar a si mesmo — deadlock silencioso. É exatamente o que
+   * travava a pós-produção do Pilot na fase de áudio: o pipeline roda inteiro
+   * dentro do lock e o mux daqui pedia o lock de novo. Com isto ligado, o mux
+   * roda DIRETO (a exclusividade já está garantida por quem chamou).
+   */
+  ffmpegJaExclusivo?: boolean;
 }): Promise<RenderResult> {
-  const { file, blocks, preset, style, zoom, onProgress, signal } = opts;
+  const { file, blocks, preset, style, zoom, onProgress, signal, ffmpegJaExclusivo } = opts;
 
   if (typeof VideoEncoder === 'undefined') {
     throw new FriendlyError(
@@ -763,7 +773,10 @@ export async function renderTypographyVideo(opts: {
     let audioOk = false;
     try {
       const vOnly = videoOnly;
-      final = await runFfmpegExclusive(async () => {
+      // Quem já tem o lock roda direto; quem não tem, entra na fila.
+      const comLock = <R,>(f: () => Promise<R>): Promise<R> =>
+        ffmpegJaExclusivo ? f() : runFfmpegExclusive(f);
+      final = await comLock(async () => {
         const wav = await extractAudio(file, {
           onProgress: (p) => onProgress?.({ phase: 'audio', ratio: p.ratio * 0.5 }),
         });

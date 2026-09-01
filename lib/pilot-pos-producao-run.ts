@@ -25,6 +25,9 @@ export type PosProducaoCfg = {
   idioma: string;
   /** templates disponíveis (builtin + salvos) — resolvidos pelo caller */
   templates: CaptionTemplate[];
+  /** o caller já segura o lock do ffmpeg (o pipeline SEMPRE segura) — sem
+   *  isto o mux de áudio do render pede o lock de novo e trava pra sempre */
+  ffmpegJaExclusivo?: boolean;
   onEtapa?: (msg: string) => void;
 };
 
@@ -137,6 +140,7 @@ export async function montarPosProducao(
         preset: getPreset(style.presetId),
         style,
         zoom: plano,
+        ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
         signal: ctrl.signal,
         onProgress: (pr) => {
           // 'frames' é a fase longa — é dela que sai a porcentagem honesta.

@@ -1677,6 +1677,10 @@ function ClickUpPilotInner() {
         partes,
         idioma: ehDrMillion && drLangRef.current === 'pl' ? 'pl' : 'pt',
         templates: captionTemplatesRef.current,
+        // O pipeline roda INTEIRO dentro do runPostPipelineSerial, que já
+        // segura o lock exclusivo do ffmpeg. Sem avisar isto, o mux de áudio
+        // do render pediria o mesmo lock e esperaria a si mesmo pra sempre.
+        ffmpegJaExclusivo: true,
         onEtapa: (msg) => {
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `${info.filename} · ${msg}` } }));
         },
