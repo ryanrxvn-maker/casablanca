@@ -155,7 +155,12 @@ async function rodarProvaE2E(
       onProgress: (pr) => setMsg(`render SEM zoom ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
     });
     setMsg('comparando frames…');
-    const veredito = await provarZoomGeometrico(r.blob, r0.blob);
+    // Mede no fim da 1ª rampa, na escala que o PLANO diz — a régua sai do
+    // próprio plano, então subir a amplitude não invalida a prova.
+    const j0 = plano[0];
+    const tAlvo = Math.min((j0?.rampaAte ?? 3.8) - 0.05, 11.5);
+    const escalaAlvo = j0?.to ?? 1.16;
+    const veredito = await provarZoomGeometrico(r.blob, r0.blob, tAlvo, escalaAlvo);
     const seg = ((Date.now() - t0) / 1000).toFixed(1);
     setUrl(URL.createObjectURL(r.blob));
     setMsg(
@@ -168,7 +173,12 @@ async function rodarProvaE2E(
 
 /** Compara COM-zoom × SEM-zoom: t~0.2 iguais; t=3.8 o COM tem que ser o crop
  *  central ampliado do SEM. Tudo em elementos de blob (decodificam sempre). */
-async function provarZoomGeometrico(comZoom: Blob, semZoom: Blob): Promise<{ ok: boolean; detalhe: string }> {
+async function provarZoomGeometrico(
+  comZoom: Blob,
+  semZoom: Blob,
+  tAlvo: number,
+  escalaAlvo: number,
+): Promise<{ ok: boolean; detalhe: string }> {
   const abrir = (b: Blob) =>
     new Promise<HTMLVideoElement>((resolve, reject) => {
       const v = document.createElement('video');
@@ -205,14 +215,16 @@ async function provarZoomGeometrico(comZoom: Blob, semZoom: Blob): Promise<{ ok:
   const v0 = await abrir(semZoom);
   await seek(vz, 0.2); await seek(v0, 0.2);
   const inicioIgual = sad(grab(vz), grab(v0));
-  await seek(vz, 3.8); await seek(v0, 3.8);
+  await seek(vz, tAlvo); await seek(v0, tAlvo);
   const fz = grab(vz);
   const contraInteiro = sad(fz, grab(v0));
-  const contraCrop = sad(fz, grab(v0, 1.16));
+  const contraCrop = sad(fz, grab(v0, escalaAlvo));
   const ok = inicioIgual < contraInteiro * 0.5 && contraCrop < contraInteiro * 0.6;
   return {
     ok,
-    detalhe: `t0.2 dif=${inicioIgual} · t3.8 vs inteiro=${contraInteiro} vs crop1.16=${contraCrop} (crop tem que ganhar)`,
+    detalhe:
+      `t0.2 dif=${inicioIgual} · t${tAlvo.toFixed(1)} vs inteiro=${contraInteiro} ` +
+      `vs crop${escalaAlvo.toFixed(2)}=${contraCrop} (crop tem que ganhar)`,
   };
 }
 

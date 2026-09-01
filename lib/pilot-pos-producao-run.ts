@@ -9,6 +9,7 @@ import {
   planejarZoom,
   separarHookBody,
   montarRoteiro,
+  palavrasDoHookNoAsr,
   type LegendaCfg,
   type ZoomCfg,
 } from './pilot-pos-producao';
@@ -99,7 +100,19 @@ export async function montarPosProducao(
           cfg.templates[0] ||
           roteiro.BUILTIN_TEMPLATES[0];
         const { hook, body } = separarHookBody(cfg.partes);
-        const segs = montarRoteiro(tpl, hook, body);
+        // FRONTEIRA DO HOOK POR ALINHAMENTO: mede quantas palavras do ÁUDIO o
+        // hook realmente ocupa. Sem isto a fronteira era a contagem da copy do
+        // doc — e uma palavra de diferença do ASR fazia a legenda trocar de
+        // estilo antes da hora (o "daqui." do AD02 saiu com o estilo do body).
+        const palavrasDosBlocos = bls.flatMap((b) => b.words.map((w) => w.text));
+        const fronteira = palavrasDoHookNoAsr(palavrasDosBlocos, hook);
+        if (hook.trim()) {
+          console.log(
+            `[pos-producao] hook: ${fronteira != null ? `${fronteira} palavras no áudio` : 'alinhamento não confiável — usando a contagem da copy'}` +
+              ` (copy tem ${hook.trim().split(/\s+/).length})`,
+          );
+        }
+        const segs = montarRoteiro(tpl, hook, body, fronteira);
         const aplicado = roteiro.applyCaptionScript(bls, segs, emptyIdentity());
         blocks = aplicado.blocks;
         style = {
@@ -157,7 +170,7 @@ export async function montarPosProducao(
     }
     const seg = ((Date.now() - t0) / 1000).toFixed(0);
     console.log(
-      `[pos-producao] ${info.filename}: render ${r.mode || '?'} em ${seg}s · ` +
+      `[pos-producao] ${info.filename}: render ${r.mode || '?'}/${r.hw ? 'hardware' : 'software'} em ${seg}s · ` +
         `${r.width}x${r.height}@${r.fps} · ${(r.blob.size / 1e6).toFixed(1)}MB · audioOk=${r.audioOk}`,
     );
     if (!r.blob || r.blob.size < 50_000) {

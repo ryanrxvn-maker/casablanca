@@ -54,6 +54,8 @@ export type RenderResult = {
   width: number;
   height: number;
   fps: number;
+  /** o encode rodou no HARDWARE da máquina? (só velocidade; QA/telemetria) */
+  hw?: boolean;
   /** que caminho de decode rodou (QA/telemetria) */
   mode: 'decode' | 'seek';
 };
@@ -107,11 +109,24 @@ function seekVideo(video: HTMLVideoElement, t: number): Promise<void> {
   });
 }
 
+/** Codec + de onde ele roda. `hw` só muda velocidade, nunca o resultado. */
+type CodecEscolhido = { codec: string; hw: boolean };
+
+/**
+ * Escolhe o codec E TENTA HARDWARE PRIMEIRO (31.08).
+ *
+ * O encode é a fase mais cara do render — um AD de 90s são ~2.700 frames — e
+ * o padrão do WebCodecs é deixar o navegador decidir, o que na prática cai no
+ * encoder de SOFTWARE. Pedir `prefer-hardware` liga o NVENC/QuickSync da
+ * máquina: mesmo bitrate, mesmo codec, várias vezes mais rápido. Se a máquina
+ * não tiver (ou o perfil não couber no hardware), `isConfigSupported` diz não
+ * e caímos no software exatamente como antes — nada quebra.
+ */
 async function pickCodec(
   width: number,
   height: number,
   bitrate: number,
-): Promise<string> {
+): Promise<CodecEscolhido> {
   const candidates = [
     'avc1.640033', // High 5.1
     'avc1.640032', // High 5.0
@@ -120,18 +135,23 @@ async function pickCodec(
     'avc1.4d0028', // Main 4.0
     'avc1.42e01f', // Baseline 3.1
   ];
-  for (const codec of candidates) {
-    try {
-      const support = await VideoEncoder.isConfigSupported({
-        codec,
-        width,
-        height,
-        bitrate,
-        framerate: FPS,
-      });
-      if (support.supported) return codec;
-    } catch {
-      /* tenta o próximo */
+  // 1ª passada HARDWARE, 2ª passada o que der. A ordem importa: um perfil
+  // mais simples NO HARDWARE ganha de um perfil alto no software.
+  for (const modo of ['prefer-hardware', 'no-preference'] as const) {
+    for (const codec of candidates) {
+      try {
+        const support = await VideoEncoder.isConfigSupported({
+          codec,
+          width,
+          height,
+          bitrate,
+          framerate: FPS,
+          hardwareAcceleration: modo,
+        });
+        if (support.supported) return { codec, hw: modo === 'prefer-hardware' };
+      } catch {
+        /* tenta o próximo */
+      }
     }
   }
   throw new FriendlyError(
@@ -153,6 +173,7 @@ function makeSink(
   W: number,
   H: number,
   bitrate: number,
+  hw = false,
 ): EncodeSink {
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
@@ -175,6 +196,7 @@ function makeSink(
     bitrate,
     framerate: FPS,
     latencyMode: 'quality',
+    ...(hw ? { hardwareAcceleration: 'prefer-hardware' as const } : null),
   });
   return { encoder, muxer, target, err: () => encoderError };
 }
@@ -235,6 +257,7 @@ async function renderFramesByDecode(opts: {
   durationSec: number;
   codec: string;
   bitrate: number;
+  hw?: boolean;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob | null> {
@@ -253,6 +276,7 @@ async function renderFramesByDecode(opts: {
     durationSec,
     codec,
     bitrate,
+    hw,
     onProgress,
     throwIfAborted,
   } = opts;
@@ -412,7 +436,7 @@ async function renderFramesByDecode(opts: {
     if (!supported) return null;
 
     decoder.configure(config);
-    sink = makeSink(codec, W, H, bitrate);
+    sink = makeSink(codec, W, H, bitrate, hw);
     mp4.setExtractionOptions(track.id, null, { nbSamples: 100 });
     mp4.start();
     mp4.flush(); // entrega inclusive o lote final (<nbSamples)
@@ -475,6 +499,7 @@ async function renderFramesBySeek(opts: {
   durationSec: number;
   codec: string;
   bitrate: number;
+  hw?: boolean;
   zoom?: ZoomSeg[];
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
@@ -492,11 +517,12 @@ async function renderFramesBySeek(opts: {
     durationSec,
     codec,
     bitrate,
+    hw,
     onProgress,
     throwIfAborted,
   } = opts;
 
-  const sink = makeSink(codec, W, H, bitrate);
+  const sink = makeSink(codec, W, H, bitrate, hw);
   const totalFrames = Math.max(1, Math.ceil(durationSec * FPS));
   const frameUs = Math.round(1_000_000 / FPS);
 
@@ -704,7 +730,7 @@ export async function renderTypographyVideo(opts: {
       ),
     );
 
-    const codec = await pickCodec(W, H, bitrate);
+    const { codec, hw } = await pickCodec(W, H, bitrate);
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
@@ -732,6 +758,7 @@ export async function renderTypographyVideo(opts: {
           durationSec,
           codec,
           bitrate,
+          hw,
           onProgress,
           throwIfAborted,
         });
@@ -757,6 +784,7 @@ export async function renderTypographyVideo(opts: {
         durationSec,
         codec,
         bitrate,
+        hw,
         onProgress,
         throwIfAborted,
       });
@@ -794,7 +822,7 @@ export async function renderTypographyVideo(opts: {
     }
 
     onProgress?.({ phase: 'finalizando', ratio: 1 });
-    return { blob: final, audioOk, width: W, height: H, fps: FPS, mode };
+    return { blob: final, audioOk, width: W, height: H, fps: FPS, mode, hw };
   } finally {
     try {
       video.removeAttribute('src');

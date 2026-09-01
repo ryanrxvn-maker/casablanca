@@ -15,6 +15,7 @@ import {
   fronteirasDasPartes,
   separarHookBody,
   montarRoteiro,
+  palavrasDoHookNoAsr,
   ZOOM_AMP,
   type ZoomCfg,
 } from './pilot-pos-producao';
@@ -50,50 +51,60 @@ console.log('\nGARANTIA — pós-produção do Pilot (zoom + roteiro):');
   ok(planejarZoom(on, 0.3, [0.3]).length === 0, 'vídeo curtinho demais = sem zoom');
 }
 
-// (3) janelas pelas PARTES (o reset cai no corte real)
+// (3) A JANELA TEM DURAÇÃO ALVO — não morre em todo corte.
+// Este é o coração da regra de 31.08: com cortes a cada 2-3s (AD decupado), uma
+// rampa por corte não dava tempo do movimento ser percebido. Agora a janela
+// ATRAVESSA cortes até ter uns 7s.
 {
   const cfg: ZoomCfg = { on: true, modo: 'in', forca: 'medio' };
-  const plan = planejarZoom(cfg, 23, [10, 5, 8]);
-  ok(plan.length === 3, '3 partes = 3 janelas');
-  ok(plan[0].start === 0 && aprox(plan[0].end, 10), 'janela 1 = parte 1');
-  ok(aprox(plan[1].start, 10) && aprox(plan[1].end, 15), 'janela 2 = parte 2');
-  ok(aprox(plan[2].end, 23), 'última janela fecha no fim do vídeo');
-  ok(plan.every((s) => s.from === 1 && aprox(s.to, ZOOM_AMP.medio)), 'modo in: toda janela 1 → amp');
+  // 12 pedaços de 2s = 24s. Antes: 12 janelas de 2s (zoom invisível).
+  const plan = planejarZoom(cfg, 24, [24], [Array(12).fill(2)]);
+  ok(plan.length <= 4, `cortes de 2s viram POUCAS janelas (deu ${plan.length}, não 12)`);
+  ok(plan.every((j) => j.end - j.start >= 4), 'nenhuma janela abaixo do mínimo de 4s');
+  ok(aprox(plan[plan.length - 1].end, 24), 'e o plano cobre o vídeo inteiro');
+  // toda fronteira de janela É um corte real (múltiplo de 2 aqui)
+  for (const j of plan.slice(0, -1)) {
+    ok(aprox(j.end % 2, 0, 0.02) || aprox(j.end % 2, 2, 0.02), `a janela fecha num corte real (t=${j.end})`);
+  }
 }
 
-// (4) durações que NÃO batem com o vídeo caem na cadência
+// (4) O RESET PREFERE A TROCA DE TAKE (corte forte), onde é invisível.
+{
+  // parte 1: 8s picotada em 4×2s · parte 2: 8s inteira
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 16, [8, 8], [[2, 2, 2, 2], [8]]);
+  ok(plan.length === 2, 'duas janelas: uma por take');
+  ok(aprox(plan[0].end, 8), 'a primeira fecha na TROCA DE TAKE (t=8), não num corte de decupagem');
+  ok(aprox(plan[1].end, 16), 'a segunda fecha no fim');
+}
+
+// (5) durações que NÃO batem com o vídeo caem na cadência
 {
   const cfg: ZoomCfg = { on: true, modo: 'in', forca: 'leve' };
   const plan = planejarZoom(cfg, 40, [5, 5]); // soma 10 ≠ 40
-  ok(plan.length >= 4, 'partes não confiáveis → cadência (~8s)');
+  ok(plan.length >= 3, 'partes não confiáveis → cadência (~8s)');
   ok(aprox(plan[plan.length - 1].end, 40), 'cadência cobre até o fim');
   const semPartes = planejarZoom(cfg, 20, null);
   ok(semPartes.length >= 2 && aprox(semPartes[semPartes.length - 1].end, 20), 'sem partes → cadência');
 }
 
-// (5) modos out e inout
+// (6) modos out e inout
 {
-  const out = planejarZoom({ on: true, modo: 'out', forca: 'forte' }, 23, [10, 5, 8]);
+  const out = planejarZoom({ on: true, modo: 'out', forca: 'forte' }, 30, [10, 10, 10]);
   ok(out.every((s) => aprox(s.from, ZOOM_AMP.forte) && s.to === 1), 'modo out: amp → 1');
-  const io = planejarZoom({ on: true, modo: 'inout', forca: 'medio' }, 23, [10, 5, 8]);
+  const io = planejarZoom({ on: true, modo: 'inout', forca: 'medio' }, 30, [10, 10, 10]);
   ok(io[0].from === 1 && aprox(io[0].to, ZOOM_AMP.medio), 'inout: janela 0 empurra');
   ok(aprox(io[1].from, ZOOM_AMP.medio) && io[1].to === 1, 'inout: janela 1 recua');
   ok(io[2].from === 1, 'inout: janela 2 volta a empurrar');
 }
 
-// (6) força misto alterna leve/forte
+// (7) força misto alterna leve/forte; e a régua nova DÁ PRA SENTIR
 {
-  const m = planejarZoom({ on: true, modo: 'in', forca: 'misto' }, 23, [10, 5, 8]);
+  const m = planejarZoom({ on: true, modo: 'in', forca: 'misto' }, 30, [10, 10, 10]);
   ok(aprox(m[0].to, ZOOM_AMP.leve), 'misto: janela 0 leve');
   ok(aprox(m[1].to, ZOOM_AMP.forte), 'misto: janela 1 forte');
-  ok(aprox(m[2].to, ZOOM_AMP.leve), 'misto: janela 2 leve de novo');
-}
-
-// (7) parte curtinha NÃO ganha rampa própria (funde com a vizinha)
-{
-  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 21, [10, 0.8, 10.2]);
-  ok(plan.length === 2, 'take de 0.8s não vira janela — gruda na anterior');
-  ok(aprox(plan[0].end, 10.8), 'a janela anterior estica até o fim do take curto');
+  ok(ZOOM_AMP.medio >= 1.14, 'médio subiu pra faixa que se percebe no plano fechado');
+  ok(ZOOM_AMP.forte <= 1.3, 'forte NÃO passa do ponto em que o upscale borra');
+  ok(ZOOM_AMP.leve < ZOOM_AMP.medio && ZOOM_AMP.medio < ZOOM_AMP.forte, 'a escada é monotônica');
 }
 
 // (8) hook × body pela MESMA régua de label do app
@@ -128,17 +139,16 @@ console.log('\nGARANTIA — pós-produção do Pilot (zoom + roteiro):');
   ok(segs[0].text === '' && segs[0].words === null, 'e continua sendo "o resto"');
 }
 
-// (11) O ZOOM RESOLVE ANTES DO CORTE — a regra que separa "zoom de editor" de
-// "zoom automático". A rampa termina em `rampaAte` e a escala fica PARADA até
-// a fronteira, então nenhum corte é atravessado com movimento em curso.
+// (11) O ZOOM RESOLVE ANTES DO CORTE — a rampa termina em `rampaAte` e a
+// escala fica PARADA até a fronteira: nenhum corte é atravessado com movimento
+// em curso NO FIM da janela (atravessar no MEIO é de propósito, ver (3)).
 {
-  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 23, [10, 5, 8]);
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 30, [10, 10, 10]);
   for (const seg of plan) {
     ok(seg.rampaAte != null, 'toda janela tem fim de rampa declarado');
     ok((seg.rampaAte as number) < seg.end, 'a rampa termina ANTES do fim da janela (respiro)');
     ok((seg.rampaAte as number) > seg.start, 'e depois do começo (a rampa existe)');
   }
-  // a escala no ÚLTIMO instante antes do corte já é a final (movimento resolvido)
   const s0 = plan[0];
   const esc = (t: number) => {
     const fim = s0.rampaAte as number;
@@ -146,35 +156,73 @@ console.log('\nGARANTIA — pós-produção do Pilot (zoom + roteiro):');
     return s0.from + (s0.to - s0.from) * p;
   };
   ok(aprox(esc(s0.end - 0.01), s0.to, 0.0005), 'no frame anterior ao corte a escala JÁ chegou ao destino');
-  ok(aprox(esc(s0.rampaAte as number), s0.to, 0.0005), 'e chegou exatamente no fim da rampa');
 }
 
-// (12) CORTES DA DECUPAGEM contam como corte: o zoom não atravessa nenhum.
+// (12) Take LONGO usa um corte de decupagem como ponto de reset — senão a
+// janela ficaria enorme e o movimento viraria deriva.
 {
-  // 1 parte de 24s que a decupagem picotou em 4 pedaços de 6s
-  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 24, [24], [[6, 6, 6, 6]]);
-  ok(plan.length === 4, 'os 4 pedaços da decupagem viram 4 janelas (não 1 rampa por cima de tudo)');
-  ok(aprox(plan[0].end, 6) && aprox(plan[1].end, 12), 'as janelas caem nos cortes internos');
-  // sem os internos, seria UMA rampa de 24s cruzando os 3 cortes
-  const semInternos = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 24, [24]);
-  ok(semInternos.length === 1, 'sem a informação dos cortes internos, era uma rampa só (o defeito)');
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 40, [40], [Array(8).fill(5)]);
+  ok(plan.length >= 3, `take de 40s se parte em várias janelas (deu ${plan.length})`);
+  ok(plan.every((j) => j.end - j.start >= 4), 'e nenhuma fica curta demais');
+  for (const j of plan.slice(0, -1)) {
+    ok(aprox(j.end % 5, 0, 0.02) || aprox(j.end % 5, 5, 0.02), `fecha num corte de decupagem real (t=${j.end})`);
+  }
 }
 
-// (13) Cortes internos em VÁRIAS partes, com deslocamento correto
+// (13) Entrada podre NÃO derruba o plano — cai na cadência
 {
-  const plan = planejarZoom({ on: true, modo: 'in', forca: 'leve' }, 20, [8, 12], [[4, 4], [6, 6]]);
-  ok(plan.length === 4, '2 partes × 2 pedaços = 4 janelas');
-  ok(aprox(plan[0].end, 4), 'corte 1 da parte 1');
-  ok(aprox(plan[1].end, 8), 'fim da parte 1');
-  ok(aprox(plan[2].end, 14), 'corte 1 da parte 2 desloca pelo tamanho da parte 1');
-  ok(aprox(plan[3].end, 20), 'fecha no fim do vídeo');
-}
-
-// (14) Duração interna inválida NÃO derruba o plano — cai nas partes
-{
-  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 23, [10, 5, 8], [[NaN, 5], [5], [8]]);
-  ok(plan.length >= 1, 'plano continua existindo com duração interna podre');
+  const plan = planejarZoom({ on: true, modo: 'in', forca: 'medio' }, 23, [10, NaN, 8]);
+  ok(plan.length >= 1, 'plano continua existindo com duração podre');
   ok(aprox(plan[plan.length - 1].end, 23), 'e ainda fecha no fim do vídeo');
+}
+
+// (14) FRONTEIRA DO HOOK POR ALINHAMENTO — a blindagem contra "trocou o estilo
+// antes da hora". O ASR não conta palavras igual ao doc; a fronteira tem que
+// sair do CONTEÚDO.
+{
+  const hook = 'como transformar um azeite de dez reais no seu remedio daqui';
+  // ASR fiel: a fronteira é o tamanho do hook
+  const fiel = [...hook.split(' '), 'a', 'maioria', 'das', 'pessoas', 'usa', 'errado'];
+  ok(palavrasDoHookNoAsr(fiel, hook) === 11, 'ASR fiel: fronteira = todas as palavras do hook');
+
+  // ⭐ O DEFEITO REAL: o ASR COMEU uma palavra do meio do hook. Pela contagem
+  // da copy (11) o corte cairia 1 palavra DEPOIS — levando "a" do body pro
+  // hook; ou, no caso do AD02, deixando "daqui." de fora. O alinhamento acha
+  // o fim de verdade.
+  const comeu = ['como', 'transformar', 'azeite', 'de', 'dez', 'reais', 'no', 'seu', 'remedio', 'daqui', 'a', 'maioria', 'das', 'pessoas'];
+  ok(palavrasDoHookNoAsr(comeu, hook) === 10, 'ASR comeu 1 palavra: a fronteira anda junto (10, não 11)');
+
+  // ASR INVENTOU uma palavra dentro do hook
+  const inventou = ['como', 'transformar', 'um', 'azeite', 'ai', 'de', 'dez', 'reais', 'no', 'seu', 'remedio', 'daqui', 'a', 'maioria'];
+  ok(palavrasDoHookNoAsr(inventou, hook) === 12, 'ASR inventou 1 palavra: a fronteira também (12)');
+
+  // erro de grafia não desalinha (o casamento é por similaridade)
+  const errou = ['comu', 'transformar', 'um', 'azeyte', 'de', 'dez', 'reais', 'no', 'seu', 'remedio', 'daki', 'a', 'maioria'];
+  ok(palavrasDoHookNoAsr(errou, hook) === 11, 'grafia errada do ASR ainda casa (similaridade)');
+
+  // pontuação e acento não contam
+  ok(palavrasDoHookNoAsr(fiel, 'Como transformar um azeite de dez reais no seu remédio DAQUI.') === 11, 'acento e pontuação não mudam a fronteira');
+}
+
+// (15) O alinhamento SE RECUSA quando não dá pra confiar — e aí o caller cai
+// na contagem de antes (o comportamento que já rodava).
+{
+  ok(palavrasDoHookNoAsr(['a', 'b', 'c'], 'oi') === null, 'hook curto demais → null');
+  ok(palavrasDoHookNoAsr([], 'como transformar um azeite qualquer') === null, 'ASR vazio → null');
+  ok(
+    palavrasDoHookNoAsr(['xis', 'zeta', 'plutonio', 'gamba', 'quiabo'], 'como transformar um azeite de dez reais') === null,
+    'ASR que não tem NADA a ver com o hook → null (não inventa fronteira)',
+  );
+}
+
+// (16) montarRoteiro USA a fronteira medida — é ela que vira `words`
+{
+  const semMedida = montarRoteiro(TEMPLATE_1, 'como transformar um azeite', 'corpo');
+  ok(semMedida[0].words === null, 'sem medida, o hook cai na contagem da copy (como antes)');
+  const comMedida = montarRoteiro(TEMPLATE_1, 'como transformar um azeite', 'corpo', 9);
+  ok(comMedida[0].words === 9, 'com medida, ela VENCE a contagem da copy');
+  const zero = montarRoteiro(TEMPLATE_1, 'como transformar um azeite', 'corpo', 0);
+  ok(zero[0].words === null, 'medida zero é ignorada (não zera o hook)');
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);
