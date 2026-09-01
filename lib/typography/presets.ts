@@ -196,6 +196,37 @@ const MANUAL_PRESETS: TypoPreset[] = [
     in: { kind: 'squash', dur: 280, ease: 'outBack', stagger: 100 },
     defaultAccent: ORANGE,
   }),
+  // ⭐ Referencia do Silas (01.09): fala em MINUSCULAS, branca com palavras
+  // em dourado, sombra macia por baixo, e a entrada palavra a palavra em que
+  // cada uma nasce MAIOR e translucida e assenta no tamanho (zoom-out) — e o
+  // que se ve no frame do meio da animacao que ele mandou.
+  p({
+    id: 'papo-amarelo',
+    name: 'Papo Amarelo',
+    cat: 'Viral',
+    font: 'montserrat900',
+    size: 0.062,
+    lineHeight: 1.1,
+    uppercase: false,
+    spacing: -0.012,
+    fill: 'primary',
+    shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.1, x: 0, y: 0.035 },
+    unit: 'word',
+    in: { kind: 'zoom-out', dur: 260, ease: 'outQuint', stagger: 90, amp: 0.5 },
+    autoEmphasis: true,
+    highlightStyle: 'color',
+    // O amarelo da referencia nao e chapado: tem um brilho de leve, como
+    // metal. Sai de um gradiente vertical claro->ouro->ambar dentro da
+    // propria letra, mais um glow curto na cor de destaque.
+    highlightGradient: [
+      [0, '#fff6c9'],
+      [0.34, '#ffd84a'],
+      [0.62, '#f0b21c'],
+      [1, '#e39a10'],
+    ],
+    defaultPrimary: '#ffffff',
+    defaultAccent: '#f5c518',
+  }),
   p({
     id: 'letterings-amarelo',
     emphasisBreak: true,

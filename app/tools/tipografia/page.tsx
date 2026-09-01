@@ -396,13 +396,36 @@ function TipografiaInner() {
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      // ⚠ Digitando? A tecla e' do campo, nunca do player. Vale pra input,
+      // textarea, select e qualquer coisa contenteditable (o texto do bloco
+      // e a copy do roteiro moram em campos assim) — sem isso, dar espaco
+      // enquanto escreve pausaria o video em vez de escrever o espaco.
+      const digitando =
+        !!alvo &&
+        (alvo.tagName === 'INPUT' ||
+          alvo.tagName === 'TEXTAREA' ||
+          alvo.tagName === 'SELECT' ||
+          alvo.isContentEditable);
+
       if (e.key === 'Escape') {
         setWordSel(null);
         return;
       }
+      // ESPACO = play/pausa (atalho de editor). Tambem cobre o caso do foco
+      // estar num BOTAO: ali o espaco "clicaria" o botao, entao o default e'
+      // barrado de proposito.
+      if ((e.key === ' ' || e.code === 'Space') && !digitando && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const v = videoRef.current;
+        if (v && v.readyState > 0) {
+          e.preventDefault();
+          if (v.paused) void v.play();
+          else v.pause();
+        }
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      if (digitando) return;
       e.preventDefault();
       undo();
     };
@@ -2692,6 +2715,24 @@ function Timeline({
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const scrubRef = useRef(false); // arrastando a agulha (fora dos blocos)
+  /** o video esta tocando? vem dos eventos do proprio <video> */
+  const [tocando, setTocando] = useState(false);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const ligar = () => setTocando(true);
+    const desligar = () => setTocando(false);
+    v.addEventListener('play', ligar);
+    v.addEventListener('pause', desligar);
+    v.addEventListener('ended', desligar);
+    // ja pode estar tocando quando a timeline monta
+    setTocando(!v.paused);
+    return () => {
+      v.removeEventListener('play', ligar);
+      v.removeEventListener('pause', desligar);
+      v.removeEventListener('ended', desligar);
+    };
+  }, [videoRef]);
   /** arrasto de uma barra de HEADLINE (mover ou esticar as pontas) */
   const hlDragRef = useRef<{
     id: string;
@@ -2850,6 +2891,36 @@ function Timeline({
       >
         <span>Timeline — blocos movem · bordas cortam · agulha navega · scroll do mouse = zoom · faixa de baixo = headlines</span>
         <span className="flex items-center gap-3">
+          {/* PLAY/PAUSA tambem aqui: antes so existia no card do preview, e
+              com a timeline no fim da pagina dava pra perder o botao de vista.
+              O icone acompanha o estado REAL do <video> (play/pause), nao um
+              estado paralelo que dessincroniza. */}
+          <button
+            type="button"
+            onClick={() => {
+              const v = videoRef.current;
+              if (!v) return;
+              if (v.paused) void v.play();
+              else v.pause();
+            }}
+            title={tocando ? 'Pausar (espaço)' : 'Reproduzir (espaço)'}
+            aria-label={tocando ? 'Pausar' : 'Reproduzir'}
+            className={
+              'flex h-7 w-7 items-center justify-center rounded-[8px] border border-amber-400/50 bg-amber-400/12 text-amber-400 hover:bg-amber-400/20' +
+              T3D
+            }
+          >
+            {tocando ? (
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+                <rect x="1.5" y="1" width="3.2" height="10" rx="1" />
+                <rect x="7.3" y="1" width="3.2" height="10" rx="1" />
+              </svg>
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+                <path d="M2.5 1.4v9.2a.6.6 0 0 0 .92.5l7.2-4.6a.6.6 0 0 0 0-1L3.42.9a.6.6 0 0 0-.92.5z" />
+              </svg>
+            )}
+          </button>
           <span
             ref={timeReadRef}
             className="mono rounded-[8px] border border-line bg-black/40 px-2.5 py-1 text-[13px] normal-case tracking-normal text-amber-200"
