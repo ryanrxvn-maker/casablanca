@@ -257,5 +257,88 @@ eq(parseDrMillionBriefing(DOC, 'AD99XX', 'pl'), null, 'AD que não existe devolv
      'em PT, cobra a copy portuguesa (que nao esta nos takes de PL)');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DIALETO TABELA — os marcadores vêm em linhas CONSECUTIVAS
+//
+// Medido em 01.09 nos docs WL2 e ED BAK HUN: o Docs renderiza a tabela de duas
+// colunas como cabeçalho + células, então o texto sai
+//
+//     PT            <- cabeçalho da coluna 1
+//     PL            <- cabeçalho da coluna 2
+//     <fala pt>     <- célula 1
+//     <fala pl>     <- célula 2
+//
+// e não PT/<fala>/PL/<fala>. Sem tratar, o parser troca de idioma duas vezes
+// seguidas e as DUAS línguas caem no balde do SEGUNDO idioma — a mesma copy
+// bilíngue dos 319 takes de 16/08, com outra cara.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const DOC_TAB = [
+    'AD01GL - WL2',
+    'BRIEFING PARA O COPY: Copy do AD15G1GL - COD WL PL adaptada para a WL2.',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Mulher: WL-VTPAD-POL34H1.mp4',
+    'Tipo de Legenda: Sem legenda.',
+    'Observações:',
+    'Hook - AD1',
+    'PT',
+    'PL',
+    'Ela me disse que em alguns dias eu não ia caber na porta de entrada.',
+    'Powiedziała mi, że za kilka dni nie zmieszczę się w drzwiach wejściowych.',
+    'Body - AD1',
+    'PT',
+    'PL',
+    'Meu marido riu de mim quando contei sobre essa receita.',
+    'Mój mąż śmiał się ze mnie, kiedy opowiedziałam mu o tym przepisie.',
+  ].join('\n');
+
+  const t = extrairBlocos(DOC_TAB, 'AD01')!;
+  ok(!!t, 'dialeto tabela: acha os blocos');
+  eq(t.hook.pt, ['Ela me disse que em alguns dias eu não ia caber na porta de entrada.'],
+     'tabela: o hook PT fica SÓ com a linha portuguesa');
+  eq(t.hook.pl, ['Powiedziała mi, że za kilka dni nie zmieszczę się w drzwiach wejściowych.'],
+     'tabela: o hook PL fica SÓ com a linha polonesa');
+  eq(t.body.pt, ['Meu marido riu de mim quando contei sobre essa receita.'],
+     'tabela: o body PT não leva a linha polonesa junto');
+  eq(t.body.pl, ['Mój mąż śmiał się ze mnie, kiedy opowiedziałam mu o tym przepisie.'],
+     'tabela: o body PL fica só com a polonesa');
+  ok(!t.body.pl.join(' ').includes('Meu marido'),
+     'tabela: NENHUMA linha portuguesa vazou pro balde de disparo');
+}
+
+// ── idioma HUN (3 letras) — o lote ED BAK HUN ────────────────────────────────
+// "HU" não casa "HUN": sem a forma de três letras o marcador virava RÓTULO DE
+// FALANTE e o húngaro inteiro ia parar no balde do português.
+{
+  const DOC_HUN = [
+    'AD01GL - ED BAK HUN',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes: @emelinaweiland 1.mp4',
+    'Observações:',
+    'AD01G1GL - ED BAK HUN',
+    'PT',
+    'HUN',
+    'Senhores, fiquem longe desse segredo dos atores.',
+    'Uraim, tartsátok magatokat távol a pornószínészek titkától.',
+    'Body',
+    'PT',
+    'HUN',
+    'Mulheres, preciso avisá-las.',
+    'Hölgyek, figyelmeztetnem kell benneteket.',
+  ].join('\n');
+
+  const h = extrairBlocos(DOC_HUN, 'AD01')!;
+  ok(!!h, 'HUN: acha os blocos');
+  eq(h.hook.pt, ['Senhores, fiquem longe desse segredo dos atores.'],
+     'HUN: português fica no balde PT');
+  eq(h.hook.pl, ['Uraim, tartsátok magatokat távol a pornószínészek titkától.'],
+     'HUN: o húngaro entra no balde de DISPARO (pl), que é o nome do campo no contrato');
+  eq(h.body.pl, ['Hölgyek, figyelmeztetnem kell benneteket.'],
+     'HUN: body no balde de disparo');
+  ok(!h.hook.pl.join(' ').includes('Senhores'), 'HUN: português NÃO vazou pro disparo');
+  ok(!h.hook.pt.join(' ').includes('Uraim'), 'HUN: húngaro NÃO vazou pro guia');
+}
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
 process.exit(fails ? 1 : 0);

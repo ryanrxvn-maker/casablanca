@@ -32,8 +32,18 @@ export type DrMillionLang = 'pl' | 'pt';
 
 /** Heading de AD: "AD07G1GL - COD WL PL". */
 const AD_HEADING_RE = /^\s*(AD\d+[A-Z0-9]*)\s*[-–—]/i;
-/** Heading do corpo compartilhado. */
-const BODY_HEADING_RE = /^\s*body\s*$/i;
+/**
+ * Heading do corpo compartilhado.
+ *
+ * ⚠ Aceita `Body - AD1` além de `Body` puro: no lote WL2 não existe heading de
+ * hook (`ADnnG1GL`) — quem delimita são as linhas `Hook - ADn` e `Body - ADn`.
+ * Exigindo a linha inteira igual a "Body", o corpo nunca era achado e hook e
+ * body saíam grudados num bloco só.
+ */
+const BODY_HEADING_RE = /^\s*body\s*(?:[-–—]\s*AD\s*\d+\s*)?$/i;
+
+/** `Hook - AD1` — o delimitador de hook do dialeto sem heading de hook. */
+const HOOK_ALT_RE = /^\s*hook\s*[-–—]\s*AD\s*\d+\s*$/i;
 /**
  * Cabeçalho de BLOCO de ADs — "AD42 a 52", "AD01 à 06". Não é um AD: é a capa
  * do lote, seguida das instruções gerais de edição em português. Como não casa
@@ -60,9 +70,10 @@ const LINHA_ESTRUTURAL_RE = new RegExp(
   'i',
 );
 
-/** Uma linha que fecha a seção corrente (AD, Body ou capa de bloco). */
+/** Uma linha que fecha a seção corrente (AD, Body, capa de bloco ou `Hook - ADn`). */
 function ehFimDeSecao(linha: string): boolean {
-  return AD_HEADING_RE.test(linha) || BODY_HEADING_RE.test(linha) || BLOCO_HEADING_RE.test(linha);
+  return AD_HEADING_RE.test(linha) || BODY_HEADING_RE.test(linha)
+    || BLOCO_HEADING_RE.test(linha) || HOOK_ALT_RE.test(linha);
 }
 /**
  * Rótulo de QUEM FALA, nos ADs em diálogo — "Marek Skoczylas:",
@@ -89,8 +100,29 @@ function ehLinhaNaoFalada(linha: string): boolean {
   if (LINHA_ESTRUTURAL_RE.test(linha)) return true;
   return ehRotuloFalante(linha);
 }
-/** Marcador de idioma isolado na linha. */
-const LANG_RE = /^\s*(PT|PL)\s*$/i;
+/**
+ * Marcador de idioma isolado na linha.
+ *
+ * ⚠ `HUN` (três letras) vem ANTES de `HU` na alternância: o regex é ganancioso
+ * da esquerda pra direita e `HU` casaria só o prefixo, deixando um `N` solto.
+ * O lote ED BAK HUN escreve `HUN`, e sem esta forma o marcador não era
+ * reconhecido — virava RÓTULO DE FALANTE (é uma palavra toda maiúscula) e o
+ * húngaro inteiro caía no balde do português.
+ */
+const LANG_RE = /^\s*(PT|PL|HUN|HU)\s*$/i;
+
+/**
+ * Qual balde recebe cada marcador.
+ *
+ * O contrato do briefing tem dois campos por bloco — `pt` (o guia que o copy
+ * escreve) e `pl` (o que o avatar FALA). O nome `pl` é herança do primeiro lote
+ * (polonês) e virou o nome do campo em todo o ecossistema: quando o lote é
+ * húngaro, é o húngaro que entra em `pl`. Regra: **português é guia, qualquer
+ * outro idioma é o de disparo.**
+ */
+function baldeDoMarcador(m: string): 'pt' | 'pl' {
+  return /^pt$/i.test(m.trim()) ? 'pt' : 'pl';
+}
 /**
  * O mesmo marcador, mas GRUDADO no fim da última linha do idioma anterior —
  * `"...quais roupas tamanho XS você comprou. PL"`. É como o doc do WL PL vem
@@ -102,7 +134,7 @@ const LANG_RE = /^\s*(PT|PL)\s*$/i;
  * Exige MAIÚSCULA e fim de linha pra não confundir com texto: "PL" no meio de
  * uma frase polonesa não vira marcador.
  */
-const LANG_FIM_RE = /^(.*?[^\s])[\s.,;:—–-]+(PT|PL)\s*$/;
+const LANG_FIM_RE = /^(.*?[^\s])[\s.,;:—–-]+(PT|PL|HUN|HU)\s*$/;
 /**
  * O mesmo marcador colado no COMEÇO da primeira linha do idioma novo —
  * `"PT Minhas amigas riram de mim..."`. É a forma mais comum no doc do WL PL, e
@@ -113,7 +145,7 @@ const LANG_FIM_RE = /^(.*?[^\s])[\s.,;:—–-]+(PT|PL)\s*$/;
  * Exige maiúscula e um separador depois, pra "PL" iniciando frase polonesa de
  * verdade não virar marcador.
  */
-const LANG_INI_RE = /^\s*(PT|PL)[\s.,;:—–-]+(\S.*)$/;
+const LANG_INI_RE = /^\s*(PT|PL|HUN|HU)[\s.,;:—–-]+(\S.*)$/;
 
 /** "AD07G1GL" → "AD07" (o grupo). É o que decide de quem é o Body. */
 export function adGroupOf(adId: string): string | null {
@@ -154,21 +186,42 @@ function separarIdiomasComFalante(linhas: string[]): { pt: Fala[]; pl: Fala[] } 
   // O rótulo vale até o próximo — e é o MESMO nos dois idiomas, então cada
   // balde carrega o seu para não embaralhar quando as línguas se alternam.
   const falante: { pt: string | null; pl: string | null } = { pt: null, pl: null };
-  const empurrar = (texto: string) => {
+  /** `destino` só é passado no dialeto tabela, onde a coluna manda — nos outros
+   *  a fala vai para o idioma corrente. */
+  const empurrar = (texto: string, destino?: 'pt' | 'pl') => {
+    const alvo = destino ?? atual;
     const limpa = limparLinhaFalada(texto);
     if (!limpa) return;
-    if (atual && ehRotuloFalante(limpa)) {
-      falante[atual] = limpa.replace(/\s*:\s*$/, '');
+    if (alvo && ehRotuloFalante(limpa)) {
+      falante[alvo] = limpa.replace(/\s*:\s*$/, '');
       return;
     }
     if (ehLinhaNaoFalada(limpa)) return;
-    if (atual === 'pt') pt.push({ texto: limpa, falante: falante.pt });
-    else if (atual === 'pl') pl.push({ texto: limpa, falante: falante.pl });
+    if (alvo === 'pt') pt.push({ texto: limpa, falante: falante.pt });
+    else if (alvo === 'pl') pl.push({ texto: limpa, falante: falante.pl });
   };
+  // ── DIALETO TABELA ────────────────────────────────────────────────────────
+  // O Docs renderiza a tabela de duas colunas como CABEÇALHO + células:
+  //
+  //     PT  /  PL  /  <fala pt>  /  <fala pl>
+  //
+  // em vez do intercalado PT / <fala> / PL / <fala>. Quando dois ou mais
+  // marcadores chegam SEGUIDOS, sem fala entre eles, eles são os cabeçalhos das
+  // colunas — e as próximas falas são distribuídas NESSA ORDEM, uma por coluna.
+  //
+  // Sem isto, `atual` troca duas vezes seguidas e as DUAS línguas caem no balde
+  // do segundo marcador: é a copy bilíngue dos 319 takes, com outra cara.
+  // Medido em 01.09: 12 blocos assim no WL2 e 10 no ED BAK HUN, todos com
+  // exatamente duas falas.
+  let colunas: Array<'pt' | 'pl'> = [];   // cabeçalhos vistos em sequência
+  let fila: Array<'pt' | 'pl'> = [];      // colunas ainda por preencher
+
   for (const raw of linhas) {
     const m = raw.match(LANG_RE);
     if (m) {
-      atual = m[1].toLowerCase() as 'pt' | 'pl';
+      const b = baldeDoMarcador(m[1]);
+      colunas.push(b);
+      atual = b;
       continue;
     }
     // marcador grudado no fim da linha: a fala ANTES dele ainda é do idioma
@@ -176,16 +229,31 @@ function separarIdiomasComFalante(linhas: string[]): { pt: Fala[]; pl: Fala[] } 
     const mf = raw.match(LANG_FIM_RE);
     if (mf) {
       empurrar(mf[1]);
-      atual = mf[2].toLowerCase() as 'pt' | 'pl';
+      atual = baldeDoMarcador(mf[2]);
+      colunas = [atual];
+      fila = [];
       continue;
     }
     // marcador no começo: a troca vale JÁ para o resto desta linha.
     const mi = raw.match(LANG_INI_RE);
     if (mi) {
-      atual = mi[1].toLowerCase() as 'pt' | 'pl';
+      atual = baldeDoMarcador(mi[1]);
+      colunas = [atual];
+      fila = [];
       empurrar(mi[2]);
       continue;
     }
+
+    // primeira fala depois de 2+ cabeçalhos seguidos = tabela: abre a fila
+    if (colunas.length > 1 && fila.length === 0) fila = [...colunas];
+    if (fila.length) {
+      const alvo = fila.shift()!;
+      empurrar(raw, alvo);
+      if (fila.length === 0) colunas = [];
+      continue;
+    }
+    // intercalado: uma fala fecha a sequência de cabeçalhos
+    colunas = [];
     empurrar(raw);
   }
   return { pt, pl };
@@ -275,14 +343,25 @@ function extrairBlocosComFalante(
   if (iAd < 0) return null;
 
   // 2. Hook = do heading até o próximo heading (outro AD ou o Body).
-  let iFimHook = linhas.length;
+  //
+  // ⚠ No dialeto sem heading de hook (WL2), entre o heading do GRUPO e a fala
+  // existe a ficha inteira (BRIEFING, INSTRUÇÕES, Avatar e Vozes…) e o hook só
+  // começa depois da linha `Hook - ADn`. Sem pular até ela, o "hook" é a ficha:
+  // não tem fala nenhuma e o AD sai sem gancho.
+  let iIniHook = iAd + 1;
   for (let i = iAd + 1; i < linhas.length; i++) {
+    if (AD_HEADING_RE.test(linhas[i]) || BODY_HEADING_RE.test(linhas[i])
+        || BLOCO_HEADING_RE.test(linhas[i])) break;
+    if (HOOK_ALT_RE.test(linhas[i])) { iIniHook = i + 1; break; }
+  }
+  let iFimHook = linhas.length;
+  for (let i = iIniHook; i < linhas.length; i++) {
     if (ehFimDeSecao(linhas[i])) {
       iFimHook = i;
       break;
     }
   }
-  const hook = separarIdiomasComFalante(linhas.slice(iAd + 1, iFimHook));
+  const hook = separarIdiomasComFalante(linhas.slice(iIniHook, iFimHook));
 
   // 3. Body = o primeiro "Body" a partir daqui, desde que ainda seja do MESMO
   //    grupo. Se aparecer um AD de outro grupo antes, esse AD não tem body
