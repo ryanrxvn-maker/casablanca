@@ -210,7 +210,10 @@ const MANUAL_PRESETS: TypoPreset[] = [
     size: 0.062,
     lineHeight: 1.1,
     uppercase: false,
-    spacing: -0.012,
+    // Na referencia as palavras quase se tocam ("masaieuquero"). O engine
+    // aplica o spacing tanto entre letras quanto no espaco, entao um valor
+    // negativo maior aperta as duas coisas — que e o que a referencia mostra.
+    spacing: -0.03,
     fill: 'primary',
     shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.1, x: 0, y: 0.035 },
     unit: 'word',
