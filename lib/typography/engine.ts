@@ -88,7 +88,8 @@ export type AnimKind =
   | 'rotate-in'
   | 'skew-slide'
   | 'tracking-in'
-  | 'squash';
+  | 'squash'
+  | 'blur-tumble';
 
 export type OutKind =
   | 'none'
@@ -130,6 +131,7 @@ export const IN_SPEC_BY_KIND: Record<AnimKind, AnimSpec> = {
   'slide-right': { kind: 'slide-right', dur: 320, ease: 'outQuint', stagger: 90, amp: 0.7 },
   'blur': { kind: 'blur', dur: 340, ease: 'outQuad', stagger: 90, amp: 1 },
   'blur-zoom': { kind: 'blur-zoom', dur: 340, ease: 'outQuad', stagger: 90, amp: 1 },
+  'blur-tumble': { kind: 'blur-tumble', dur: 380, ease: 'outQuint', stagger: 120, amp: 1 },
   'typewriter': { kind: 'typewriter', dur: 420, ease: 'linear' },
   'glitch': { kind: 'glitch', dur: 320, ease: 'outQuad', amp: 1 },
   'flip': { kind: 'flip', dur: 300, ease: 'outBack', stagger: 90 },
@@ -167,6 +169,7 @@ export const IN_ANIM_OPTIONS: Array<{ kind: AnimKind; label: string }> = [
   { kind: 'slide-right', label: 'Entra da esquerda' },
   { kind: 'blur', label: 'Desfoque' },
   { kind: 'blur-zoom', label: 'Desfoque + zoom' },
+  { kind: 'blur-tumble', label: 'Desfoque + tombo' },
   { kind: 'mask-up', label: 'Máscara subindo' },
   { kind: 'wipe', label: 'Revelar (wipe)' },
   { kind: 'typewriter', label: 'Máquina de escrever' },
@@ -1036,6 +1039,21 @@ function computeInFx(
       fx.sx = fx.sy = 1 + 0.22 * inv;
       fx.alpha = clamp01(p * 1.8);
       break;
+    case 'blur-tumble': {
+      // A palavra NAO entra reta: chega TORTA e grande, borrada, e vai
+      // endireitando enquanto assenta. O angulo alterna de palavra pra
+      // palavra (uma tomba pra um lado, a seguinte pro outro) — e o que da
+      // o ar "baguncado" em vez de um desfile mecanico.
+      // alterna pelo INDICE da palavra (i), que e o que ja chega aqui
+      const lado = i % 2 === 0 ? 1 : -1;
+      fx.rot = inv * amp * 0.13 * lado;
+      fx.skew = inv * amp * 0.16 * lado;
+      fx.blur = inv * amp * fontPx * 0.3;
+      fx.sx = fx.sy = 1 + 0.34 * inv;
+      fx.dy = inv * fontPx * 0.06 * lado;
+      fx.alpha = clamp01(p * 1.7);
+      break;
+    }
     case 'glitch': {
       fx.alpha = p > 0.05 ? 1 : clamp01(p * 12);
       const m = inv * amp;

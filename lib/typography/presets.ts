@@ -217,12 +217,13 @@ const MANUAL_PRESETS: TypoPreset[] = [
     fill: 'primary',
     shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.1, x: 0, y: 0.035 },
     unit: 'word',
-    // A ENTRADA da referencia nao e um fade: a palavra chega GRANDE, BORRADA
-    // e translucida, e vai focando enquanto assenta no tamanho — por isso
-    // parece "curva, distorcendo, meio baguncado". `blur-zoom` faz os tres ao
-    // mesmo tempo. E a duracao e MAIOR que o intervalo entre palavras, entao
-    // duas ou tres ficam animando juntas: e o que da a bagunca da referencia.
-    in: { kind: 'blur-zoom', dur: 380, ease: 'outQuint', stagger: 130, amp: 1.15 },
+    // A ENTRADA da referencia nao e um fade e nao entra RETA: a palavra chega
+    // TORTA, grande e borrada, e vai endireitando e focando enquanto assenta.
+    // O lado do tombo alterna palavra a palavra, por isso parece "curva,
+    // distorcendo, meio baguncado" em vez de um desfile mecanico. A duracao
+    // e MAIOR que o intervalo entre palavras, entao duas ou tres animam ao
+    // mesmo tempo — nos quadros da referencia da pra ver isso.
+    in: { kind: 'blur-tumble', dur: 400, ease: 'outQuint', stagger: 130, amp: 1.1 },
     autoEmphasis: true,
     highlightStyle: 'color',
     // O amarelo da referencia nao e chapado: tem brilho de metal, com um

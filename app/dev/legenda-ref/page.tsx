@@ -12,7 +12,7 @@ import { notFound } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { registerCanvasJob } from '@/lib/typography/canvas-loop';
 import { ensureTypoFonts, type FontKey } from '@/lib/typography/fonts';
-import { drawCaptions, type Block, type StyleState } from '@/lib/typography/engine';
+import { drawCaptions, type AnimKind, type Block, type StyleState } from '@/lib/typography/engine';
 import { getPreset } from '@/lib/typography/presets';
 
 const FRASE = 'mas aí eu quero que tu me dê tua opinião, tá?';
@@ -23,16 +23,32 @@ const FRASE = 'mas aí eu quero que tu me dê tua opinião, tá?';
  */
 const DESTAQUES = [7, 8, 9, 10];
 
+/** entradas candidatas — todas desenhadas no MESMO instante da animacao */
+const ANIMS: AnimKind[] = [
+  'blur-tumble',
+  'blur-zoom',
+  'rotate-in',
+  'skew-slide',
+  'squash',
+  'stretch-x',
+  'pop',
+  'flip',
+  'drop',
+  'rise',
+  'glitch',
+  'blur',
+];
+
 /** candidatas a fonte da referencia (as pesadas e geometricas do catalogo) */
 const FONTES: FontKey[] = [
-  'montserrat900',
-  'poppins800',
-  'nunito900',
-  'rubik900',
-  'inter800',
-  'dmsans900',
+  'montserrat800',
   'outfit800',
+  'nunito900',
+  'inter800',
   'worksans800',
+  'dmsans900',
+  'rubik900',
+  'poppins800',
 ];
 
 function bloco(texto: string): Block {
@@ -52,6 +68,7 @@ function Quadro({
   rodando,
   label,
   fonte,
+  anim,
 }: {
   presetId: string;
   tMs: number;
@@ -59,10 +76,12 @@ function Quadro({
   label: string;
   /** troca SO a fonte, pra comparar familias com o resto igual */
   fonte?: FontKey;
+  /** troca SO a animacao de entrada, pra comparar com o resto igual */
+  anim?: AnimKind;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
-  const live = useRef({ presetId, tMs, rodando, fonte });
-  live.current = { presetId, tMs, rodando, fonte };
+  const live = useRef({ presetId, tMs, rodando, fonte, anim });
+  live.current = { presetId, tMs, rodando, fonte, anim };
 
   useEffect(() => {
     void ensureTypoFonts();
@@ -81,7 +100,7 @@ function Quadro({
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
       const s = live.current;
-      const b = bloco(s.fonte ? 'mas aí eu quero' : FRASE);
+      const b = bloco(FRASE);
       const st: StyleState = {
         presetId: s.presetId,
         fontScale: 1,
@@ -93,6 +112,7 @@ function Quadro({
         highlights: { ref: DESTAQUES },
         autoEmphasis: false,
         fontOverride: s.fonte ?? null,
+        animIn: s.anim ?? null,
       };
       const t = s.rodando ? (performance.now() - t0) % (b.end - 3200) : s.tMs;
       try {
@@ -157,6 +177,18 @@ function Inner() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {instantes.map((t) => (
           <Quadro key={t} presetId={id} tMs={t} rodando={false} label={`${t} ms`} />
+        ))}
+      </div>
+
+      <h2 className="mb-2 mt-8 text-[16px] font-bold text-text">
+        Qual ENTRADA bate com a referência?
+      </h2>
+      <p className="mb-3 text-[12px] text-text-muted">
+        Mesma frase, mesmo instante (600 ms) — só a animação muda.
+      </p>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {ANIMS.map((a) => (
+          <Quadro key={a} presetId={id} tMs={600} rodando={false} anim={a} label={a} />
         ))}
       </div>
 
