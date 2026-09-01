@@ -166,6 +166,13 @@ export const IconZoomDinamica = ({ size = 16 }: { size?: number }) => (
     <path d="M9.5 9.5 12 12m0 0 2.5 2.5M12 12l2.5-2.5M12 12l-2.5 2.5" opacity="0.7" />
   </svg>
 );
+export const IconHeadline = ({ size = 16 }: { size?: number }) => (
+  // Linhas de manchete: a de cima grossa, as de baixo finas.
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 7h16" strokeWidth="3" />
+    <path d="M4 13h11M4 18h7" strokeWidth="2" opacity="0.75" />
+  </svg>
+);
 export const IconInserts = ({ size = 16 }: { size?: number }) => (
   // Duas telas: a de tras e' o avatar, a da frente e' o b-roll entrando.
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

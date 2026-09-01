@@ -168,6 +168,7 @@ export function RedispatchPanel({
   audioInfo,
   indicacoesAvatar = [],
   indicacoesCopy = [],
+  acoesPos,
 }: {
   taskName: string;
   adName: string;
@@ -189,6 +190,16 @@ export function RedispatchPanel({
   /** INDICAÇÕES do copy desta task (comentários do Docs), pros mesmos dois
    *  botões da análise aparecerem aqui no cabeçalho do painel: dourado =
    *  indicação de AVATAR, azul = comentário NO TEXTO. */
+  /**
+   * Os botões de PÓS-PRODUÇÃO (legenda, headline, zoom, inserts) — os MESMOS
+   * do card, renderizados pelo pai.
+   *
+   * Vêm como `ReactNode` de propósito: os popovers deles vivem de estado que
+   * mora na página (config por task, templates, mídias no IDB). Duplicar isso
+   * aqui daria duas fontes de verdade — e o painel mostraria uma coisa
+   * enquanto o disparo usaria outra.
+   */
+  acoesPos?: React.ReactNode;
   indicacoesAvatar?: IndicacaoAvatar[];
   indicacoesCopy?: Array<{ take?: string | null; trecho?: string; nota: string; links?: LinkIndicacao[] }>;
 }) {
@@ -383,6 +394,16 @@ export function RedispatchPanel({
           ) : null}
         </p>
 
+        {/* PÓS-PRODUÇÃO: os mesmos botões do card. Reiniciar um disparo é o
+          * momento em que se troca o modelo da legenda ou o zoom — ter que
+          * fechar o painel pra mexer neles era o caminho errado. */}
+        {acoesPos ? (
+          <div className="rdp-pos">
+            <span className="rdp-pos-rot">Pós-produção</span>
+            <span className="rdp-pos-btns">{acoesPos}</span>
+          </div>
+        ) : null}
+
         {indTaskAberta === 'copy' && indicacoesCopy.length > 0 ? (
           <IndicacaoPanel
             tipo="copy"
@@ -450,7 +471,7 @@ export function RedispatchPanel({
                   ) : undefined
                 }
               >
-                {semBriefing ? 'Quem falou neste disparo' : 'O que o copy pediu no Docs'}
+                {semBriefing ? 'Quem falou neste disparo' : 'Docs'}
               </Campo>
               <div className="grid gap-2 sm:grid-cols-2">
                 {papeis.map((pp, k) => {

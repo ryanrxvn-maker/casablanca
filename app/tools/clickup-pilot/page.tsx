@@ -93,7 +93,8 @@ import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
 import { PilotInsertsModal } from '@/components/PilotInserts';
-import type { Insert } from '@/lib/pilot-inserts';
+import { PilotHeadlineModal } from '@/components/PilotHeadline';
+import { HEADLINE_CFG_DEFAULT, type Insert, type HeadlineCfg } from '@/lib/pilot-inserts';
 import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
 import {
   LEGENDA_CFG_DEFAULT,
@@ -123,6 +124,7 @@ import {
   IconCamuflagem,
   IconNivelar,
   IconInserts,
+  IconHeadline,
   IconLegenda,
   IconZoomDinamica,
   IconDoc as PilotIconDoc,
@@ -1611,7 +1613,7 @@ function ClickUpPilotInner() {
   };
 
   /** Qual popover está aberto ('legenda' | 'zoom') por task. */
-  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | null>>({});
+  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | 'headline' | null>>({});
   const legendaBtnRefs = useRef<Record<string, HTMLElement | null>>({});
   const zoomBtnRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -1624,21 +1626,174 @@ function ClickUpPilotInner() {
   captionTemplatesRef.current = captionTemplates;
 
   /**
+   * OS BOTÕES DE PÓS-PRODUÇÃO (legenda · headline · zoom · inserts).
+   *
+   * Vivem numa função porque saem em DOIS lugares: a barra do card e o painel
+   * de REINICIAR DISPARO — que é justamente o momento em que se troca o modelo
+   * da legenda ou o zoom. Duplicar o JSX daria duas fontes de verdade; assim os
+   * dois leem e escrevem exatamente o mesmo estado.
+   */
+  function acoesDePosProducao(a: TaskAnalysis) {
+    return (
+      <>
+      {/* LEGENDA AUTOMÁTICA (30.08). O clique abre a mini
+          janela: liga/desliga + escolhe o MODELO das Legendas
+          Automáticas. Aplica depois de montar e decupar, com
+          correção pela copy do doc — hook e body cada um no
+          estilo do modelo. */}
+      {(() => {
+        const cfg = getLegendaCfg(a.taskId);
+        const aberto = posPopover[a.taskId] === 'legenda';
+        return (
+          <span className="relative inline-flex" ref={(el) => { legendaBtnRefs.current[a.taskId] = el; }}>
+            <PilotBtn3D
+              icon={<IconLegenda size={16} />}
+              color={cfg.on ? 'amber' : 'neutral'}
+              active={cfg.on}
+              title={cfg.on
+                ? `Legenda automática ON · modelo: ${captionTemplates.find((t) => t.id === cfg.templateId)?.name || '?'} — clica pra ajustar`
+                : 'Legenda automática OFF — clica pra ligar e escolher o modelo'}
+              onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'legenda' }))}
+            />
+            {aberto ? (
+              <LegendaZoomPopover
+                tipo="legenda"
+                anchor={legendaBtnRefs.current[a.taskId]}
+                onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                legenda={cfg}
+                zoom={getZoomCfg(a.taskId)}
+                templates={captionTemplates}
+                onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
+                onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
+              />
+            ) : null}
+          </span>
+        );
+      })()}
+      {/* DINÂMICA DE ZOOM (30.08). Mini janela: in/out/in+out
+          e a intensidade (leve/médio/forte/misto). O reset da
+          escala cai na troca de take — corte real. */}
+      {(() => {
+        const cfg = getZoomCfg(a.taskId);
+        const aberto = posPopover[a.taskId] === 'zoom';
+        return (
+          <span className="relative inline-flex" ref={(el) => { zoomBtnRefs.current[a.taskId] = el; }}>
+            <PilotBtn3D
+              icon={<IconZoomDinamica size={16} />}
+              color={cfg.on ? 'violet' : 'neutral'}
+              active={cfg.on}
+              title={cfg.on
+                ? `Dinâmica de zoom ON · ${cfg.modo === 'in' ? 'zoom in' : cfg.modo === 'out' ? 'zoom out' : 'in e out'} · ${cfg.forca} — clica pra ajustar`
+                : 'Dinâmica de zoom OFF — clica pra ligar e escolher movimento e intensidade'}
+              onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'zoom' }))}
+            />
+            {aberto ? (
+              <LegendaZoomPopover
+                tipo="zoom"
+                anchor={zoomBtnRefs.current[a.taskId]}
+                onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                legenda={getLegendaCfg(a.taskId)}
+                zoom={cfg}
+                templates={captionTemplates}
+                onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
+                onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
+              />
+            ) : null}
+          </span>
+        );
+      })()}
+      {/* INSERTS (31.08). B-roll na montagem, ancorado numa
+          palavra da copy — tela cheia ou dividindo a tela com o
+          avatar. Nada disto toca o que foi pro HeyGen. */}
+      {(() => {
+        const lista = getInserts(a.taskId);
+        const aberto = posPopover[a.taskId] === 'inserts';
+        const partesDaCopy = (
+          batchStates[a.taskId]?.replan?.parts?.length
+            ? batchStates[a.taskId]!.replan!.parts!
+            : a.partTemplates || []
+        ).map((x: any) => ({ label: String(x.label || ''), text: String(x.text || '') }));
+        return (
+          <span className="relative inline-flex">
+            <PilotBtn3D
+              icon={<IconInserts size={16} />}
+              color={lista.length > 0 ? 'cyan' : 'neutral'}
+              active={lista.length > 0}
+              title={lista.length > 0
+                ? `${lista.length} insert(s) — clica pra ajustar`
+                : 'Inserts — b-roll na montagem, ancorado na copy'}
+              onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'inserts' }))}
+            />
+            {aberto ? (
+              <PilotInsertsModal
+                partes={partesDaCopy}
+                inserts={lista}
+                onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                onMudar={(prox) => setInserts(a.taskId, prox)}
+                onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
+                thumbDaMidia={(k) => insertThumbs[k] || null}
+                thumbAvatar={(a.roleSlots || []).find((sl) => sl.avatarThumb)?.avatarThumb || null}
+              />
+            ) : null}
+          </span>
+        );
+      })()}
+      {/* HEADLINE (01.09) — manchete parada por cima do vídeo,
+          saindo num corte pra o sumiço ser mascarado. */}
+      {(() => {
+        const hcfg = getHeadlineCfg(a.taskId);
+        const aberto = posPopover[a.taskId] === 'headline';
+        const partesDaCopy = (
+          batchStates[a.taskId]?.replan?.parts?.length
+            ? batchStates[a.taskId]!.replan!.parts!
+            : a.partTemplates || []
+        ).map((x: any) => ({ label: String(x.label || ''), text: String(x.text || '') }));
+        return (
+          <span className="relative inline-flex">
+            <PilotBtn3D
+              icon={<IconHeadline size={16} />}
+              color={hcfg.on ? 'rose' : 'neutral'}
+              active={hcfg.on}
+              title={hcfg.on
+                ? 'Headline ON — clica pra ajustar modelo, texto e até onde fica'
+                : 'Headline — manchete parada por cima do vídeo'}
+              onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'headline' }))}
+            />
+            {aberto ? (
+              <PilotHeadlineModal
+                cfg={hcfg}
+                partes={partesDaCopy}
+                onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                onMudar={(c, padrao) => setHeadlineCfg(a.taskId, c, padrao)}
+              />
+            ) : null}
+          </span>
+        );
+      })()}
+      </>
+    );
+  }
+
+  /**
    * SELOS do card (31.08): o que este vídeo LEVOU, em ícone puro. Lê a mesma
    * config que o disparo usou (com o fallback pra task mãe e pro padrão da
    * conta), então o selo nunca promete o que não foi aplicado.
    */
-  function selosDoCard(taskId: string): Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert'; title: string }> {
+  function selosDoCard(taskId: string): Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> {
     const cfgId = taskIdBaseDaVersao(taskId);
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert'; title: string }> = [];
+    const out: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> = [];
     if (isDecupagemEnabled(cfgId) || isDecupagemEnabled(taskId)) {
       out.push({ tipo: 'decupagem', title: `Decupado — silêncios cortados (${getDecupIntensity(cfgId).toFixed(2)}s de respiro)` });
     }
     if (leg.on) {
       const tpl = captionTemplatesRef.current.find((t) => t.id === leg.templateId);
       out.push({ tipo: 'legenda', title: `Legendado — ${tpl?.name || 'modelo padrão'}, corrigido pela copy do doc` });
+    }
+    const hl = headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT;
+    if (hl.on) {
+      out.push({ tipo: 'headline', title: `Com headline — sai no fim de ${hl.ancoraAte || 'hook'}, mascarada pelo corte` });
     }
     const ins = insertsRef.current[taskId] || insertsRef.current[cfgId] || [];
     if (ins.length > 0) {
@@ -1673,7 +1828,9 @@ function ClickUpPilotInner() {
     const cfgId = taskIdBaseDaVersao(taskId);
     const legenda = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zoom = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    if (!legenda.on && !zoom.on) return undefined;
+    const hl = headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT;
+    const insDaTask = insertsRef.current[taskId] || insertsRef.current[cfgId] || [];
+    if (!legenda.on && !zoom.on && !hl.on && insDaTask.length === 0) return undefined;
     return async (blob, info) => {
       const rp = batchStatesRef.current?.[taskId]?.replan?.parts;
       const an = taskAnalysesRef.current?.[taskId];
@@ -1699,6 +1856,7 @@ function ClickUpPilotInner() {
         // INSERTS: a config é da task MÃE (a irmã de versão herda), e os bytes
         // vêm do IDB na hora do render — nunca ficam presos na memória.
         inserts: insertsRef.current[taskId] || insertsRef.current[cfgId] || [],
+        headline: headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT,
         lerMidia: async (key: string) => {
           try {
             const { loadBlob } = await import('@/lib/zip-store');
@@ -1744,6 +1902,30 @@ function ClickUpPilotInner() {
       const next = { ...prev, [taskId]: lista };
       try { localStorage.setItem(INSERTS_KEY, JSON.stringify(next)); } catch {}
       insertsRef.current = next;
+      return next;
+    });
+  };
+
+  /* ═══════════════ HEADLINE (01.09) ═══════════════
+   *  Manchete parada por cima do vídeo. Mesma mecânica de legenda/zoom: config
+   *  por task, com fallback pra task mãe e pro padrão da conta. */
+  const HEADLINE_KEY = 'darkolab:clickup-pilot:headline';
+  const [headlineCfgs, setHeadlineCfgs] = useState<Record<string, HeadlineCfg>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(HEADLINE_KEY) || '{}'); } catch { return {}; }
+  });
+  const headlineRef = useRef(headlineCfgs);
+  headlineRef.current = headlineCfgs;
+  const getHeadlineCfg = (taskId: string): HeadlineCfg =>
+    headlineCfgs[taskId] ||
+    headlineCfgs[taskIdBaseDaVersao(taskId)] ||
+    headlineCfgs[CHAVE_PADRAO] ||
+    HEADLINE_CFG_DEFAULT;
+  const setHeadlineCfg = (taskId: string, c: HeadlineCfg, virarPadrao?: boolean) => {
+    setHeadlineCfgs((prev) => {
+      const next = { ...prev, [taskId]: c, ...(virarPadrao ? { [CHAVE_PADRAO]: c } : null) };
+      try { localStorage.setItem(HEADLINE_KEY, JSON.stringify(next)); } catch {}
+      headlineRef.current = next;
       return next;
     });
   };
@@ -11315,73 +11497,64 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           })()}
           {/* (Token UI movido pra /configuracoes/clickup-pilot) */}
 
-          {/* ═══ EXTENSÃO AUSENTE: resolve AQUI ═══
-            * Antes isto era um texto vermelho mandando o user achar a URL de
-            * download na mão e ir pro Hey Auto. Agora o próprio Pilot entrega
-            * o .zip e o passo a passo. */}
+          {/* ═══ EXTENSÃO AUSENTE ═══
+            * Discreto de propósito: o passo a passo fica DOBRADO (o Silas já
+            * instalou isto dezenas de vezes) e só o download aparece de cara.
+            * Quem nunca instalou abre o "como instalar". Mesmo tom do aviso do
+            * Hey Auto — é o mesmo problema, não faz sentido gritar aqui e
+            * sussurrar lá. */}
           {extFaltando ? (
-            <div className="ext-painel mb-4">
-              <div className="ext-cab">
-                <span className="ext-tile" aria-hidden>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2v6M12 22v-6M2 12h6M22 12h-6" opacity="0.5" />
-                    <rect x="8" y="8" width="8" height="8" rx="2" />
-                  </svg>
+            <div className="mb-4 rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="aviso-amarelo text-[13px]" aria-hidden>⚠</span>
+                <span className="aviso-amarelo flex-1 text-xs leading-relaxed">
+                  <strong>Extensão Auto Edit não respondeu.</strong> É ela que lê o Docs e a
+                  biblioteca do HeyGen. Se você tem uma instalada, ela é de antes do domínio novo.
                 </span>
-                <span className="min-w-0 flex-1">
-                  <span className="ext-titulo">A extensão Auto Edit não respondeu</span>
-                  <span className="ext-sub">
-                    É ela que lê o Google Docs e a biblioteca do HeyGen — sem ela a análise não roda.
-                    Se você já tem uma instalada, ela é de antes do domínio novo.
-                  </span>
-                </span>
-                <button type="button" className="ext-x" onClick={() => setExtFaltando(false)} aria-label="Fechar">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m6 6 12 12M18 6 6 18" />
+                <a href="/api/extension/download" download className="ext-baixar" >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
                   </svg>
+                  baixar .zip
+                </a>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="mono shrink-0 rounded-full border border-line-strong px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+                >
+                  já instalei
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExtFaltando(false)}
+                  className="mono shrink-0 rounded border border-line-strong px-2 py-0.5 text-[10px] text-text-muted hover:border-yellow-500/60"
+                  aria-label="Fechar"
+                >
+                  ✕
                 </button>
               </div>
-              <ol className="ext-passos">
-                <li>
-                  <span className="ext-n">1</span>
-                  <span>
-                    Baixe a versão atual
-                    <a href="/api/extension/download" className="ext-baixar" download>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
-                      </svg>
-                      baixar .zip
-                    </a>
-                  </span>
-                </li>
-                <li>
-                  <span className="ext-n">2</span>
-                  <span>Descompacte numa pasta que você não vá apagar.</span>
-                </li>
-                <li>
-                  <span className="ext-n">3</span>
-                  <span>
-                    Abra <code className="ext-cod">chrome://extensions</code>, ligue o
-                    <b> Modo do desenvolvedor</b> e clique em <b>Carregar sem compactação</b>,
-                    apontando pra essa pasta. Se já houver uma versão antiga, remova antes.
-                  </span>
-                </li>
-                <li>
-                  <span className="ext-n">4</span>
-                  <span>Volte aqui e recarregue a página (F5).</span>
-                </li>
-              </ol>
-              <div className="ext-rodape">
-                <button type="button" className="ext-recarregar" onClick={() => window.location.reload()}>
-                  já instalei — recarregar
-                </button>
-                <span className="ext-nota">
-                  O <code className="ext-cod">chrome://extensions</code> não abre por link — cole na barra do Chrome.
-                </span>
-              </div>
+              <details className="mt-2">
+                <summary className="aviso-amarelo cursor-pointer text-[11px] font-semibold">
+                  como instalar
+                </summary>
+                <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-[11px] leading-relaxed text-text-muted">
+                  <li>Descompacta o .zip numa pasta que você não vá apagar.</li>
+                  <li>
+                    Abre <code className="ext-cod">chrome://extensions</code> (cola na barra — link
+                    pra ele não abre) e liga o <b>Modo do desenvolvedor</b>.
+                  </li>
+                  <li>
+                    <b>Carregar sem compactação</b> apontando pra essa pasta. Se houver uma versão
+                    antiga, remove antes.
+                  </li>
+                  <li>Volta aqui e recarrega (F5).</li>
+                </ol>
+              </details>
             </div>
           ) : null}
-          {error ? (
+          {/* O erro da extensão já tem o painel acima — repetir a mesma coisa em
+            * vermelho era só ruído. */}
+          {error && !extFaltando ? (
             <div className="mb-4 error-shake flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
               <span className="flex-1">{error}</span>
               {errorAction ? (
@@ -12352,6 +12525,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     salvarAudioTake={(label, file) => salvarAudioDeTake(b.taskId, label, file)}
                                     analisarAudioTake={(key, file, texto) => void analisarAudioUpado(key, file, texto)}
                                     audioInfo={roleAudioInfo}
+                                    // Os MESMOS botões do card: reiniciar é onde se troca o
+                                    // modelo da legenda, a headline, o zoom ou os inserts.
+                                    acoesPos={(() => {
+                                      const aRef = taskAnalyses[b.taskId] || taskAnalyses[taskIdBaseDaVersao(b.taskId)];
+                                      return aRef ? acoesDePosProducao(aRef) : null;
+                                    })()}
                                   />
                                 ) : undefined
                               }
@@ -12833,108 +13012,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         : 'Normalizador de volume OFF — o volume sai como veio do HeyGen'}
                                       onClick={() => setNivelamentoFor(a.taskId, !isNivelamentoEnabled(a.taskId))}
                                     />
-                                    {/* LEGENDA AUTOMÁTICA (30.08). O clique abre a mini
-                                        janela: liga/desliga + escolhe o MODELO das Legendas
-                                        Automáticas. Aplica depois de montar e decupar, com
-                                        correção pela copy do doc — hook e body cada um no
-                                        estilo do modelo. */}
-                                    {(() => {
-                                      const cfg = getLegendaCfg(a.taskId);
-                                      const aberto = posPopover[a.taskId] === 'legenda';
-                                      return (
-                                        <span className="relative inline-flex" ref={(el) => { legendaBtnRefs.current[a.taskId] = el; }}>
-                                          <PilotBtn3D
-                                            icon={<IconLegenda size={16} />}
-                                            color={cfg.on ? 'amber' : 'neutral'}
-                                            active={cfg.on}
-                                            title={cfg.on
-                                              ? `Legenda automática ON · modelo: ${captionTemplates.find((t) => t.id === cfg.templateId)?.name || '?'} — clica pra ajustar`
-                                              : 'Legenda automática OFF — clica pra ligar e escolher o modelo'}
-                                            onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'legenda' }))}
-                                          />
-                                          {aberto ? (
-                                            <LegendaZoomPopover
-                                              tipo="legenda"
-                                              anchor={legendaBtnRefs.current[a.taskId]}
-                                              onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
-                                              legenda={cfg}
-                                              zoom={getZoomCfg(a.taskId)}
-                                              templates={captionTemplates}
-                                              onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
-                                              onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
-                                            />
-                                          ) : null}
-                                        </span>
-                                      );
-                                    })()}
-                                    {/* DINÂMICA DE ZOOM (30.08). Mini janela: in/out/in+out
-                                        e a intensidade (leve/médio/forte/misto). O reset da
-                                        escala cai na troca de take — corte real. */}
-                                    {(() => {
-                                      const cfg = getZoomCfg(a.taskId);
-                                      const aberto = posPopover[a.taskId] === 'zoom';
-                                      return (
-                                        <span className="relative inline-flex" ref={(el) => { zoomBtnRefs.current[a.taskId] = el; }}>
-                                          <PilotBtn3D
-                                            icon={<IconZoomDinamica size={16} />}
-                                            color={cfg.on ? 'violet' : 'neutral'}
-                                            active={cfg.on}
-                                            title={cfg.on
-                                              ? `Dinâmica de zoom ON · ${cfg.modo === 'in' ? 'zoom in' : cfg.modo === 'out' ? 'zoom out' : 'in e out'} · ${cfg.forca} — clica pra ajustar`
-                                              : 'Dinâmica de zoom OFF — clica pra ligar e escolher movimento e intensidade'}
-                                            onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'zoom' }))}
-                                          />
-                                          {aberto ? (
-                                            <LegendaZoomPopover
-                                              tipo="zoom"
-                                              anchor={zoomBtnRefs.current[a.taskId]}
-                                              onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
-                                              legenda={getLegendaCfg(a.taskId)}
-                                              zoom={cfg}
-                                              templates={captionTemplates}
-                                              onLegenda={(c, padrao) => setLegendaCfg(a.taskId, c, padrao)}
-                                              onZoom={(c, padrao) => setZoomCfg(a.taskId, c, padrao)}
-                                            />
-                                          ) : null}
-                                        </span>
-                                      );
-                                    })()}
-                                    {/* INSERTS (31.08). B-roll na montagem, ancorado numa
-                                        palavra da copy — tela cheia ou dividindo a tela com o
-                                        avatar. Nada disto toca o que foi pro HeyGen. */}
-                                    {(() => {
-                                      const lista = getInserts(a.taskId);
-                                      const aberto = posPopover[a.taskId] === 'inserts';
-                                      const partesDaCopy = (
-                                        batchStates[a.taskId]?.replan?.parts?.length
-                                          ? batchStates[a.taskId]!.replan!.parts!
-                                          : a.partTemplates || []
-                                      ).map((x: any) => ({ label: String(x.label || ''), text: String(x.text || '') }));
-                                      return (
-                                        <span className="relative inline-flex">
-                                          <PilotBtn3D
-                                            icon={<IconInserts size={16} />}
-                                            color={lista.length > 0 ? 'cyan' : 'neutral'}
-                                            active={lista.length > 0}
-                                            title={lista.length > 0
-                                              ? `${lista.length} insert(s) — clica pra ajustar`
-                                              : 'Inserts — b-roll na montagem, ancorado na copy'}
-                                            onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'inserts' }))}
-                                          />
-                                          {aberto ? (
-                                            <PilotInsertsModal
-                                              partes={partesDaCopy}
-                                              inserts={lista}
-                                              onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
-                                              onMudar={(prox) => setInserts(a.taskId, prox)}
-                                              onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
-                                              thumbDaMidia={(k) => insertThumbs[k] || null}
-                                              thumbAvatar={(a.roleSlots || []).find((sl) => sl.avatarThumb)?.avatarThumb || null}
-                                            />
-                                          ) : null}
-                                        </span>
-                                      );
-                                    })()}
+                                    {acoesDePosProducao(a)}
                                     {/* Camuflagem toggle (per-task) */}
                                     <PilotBtn3D
                                       icon={<IconCamuflagem size={16} />}

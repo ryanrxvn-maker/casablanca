@@ -94,7 +94,7 @@ export type BatchJob3DProps = {
    *  expandir. Enquanto ele existe, o card abre sozinho. */
   /** SELOS do que foi aplicado neste vídeo (31.08): decupagem, legenda, zoom.
    *  Ícone puro, sem texto — o `title` conta a história no hover. */
-  selos?: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert'; title: string }>;
+  selos?: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }>;
   topPanel?: React.ReactNode;
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
    *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
@@ -648,10 +648,15 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                           <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H8M16 4h3.5A1.5 1.5 0 0 1 21 5.5V8M21 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H4.5A1.5 1.5 0 0 1 3 18.5V16" />
                           <circle cx="12" cy="12" r="2.6" />
                         </svg>
-                      ) : (
+                      ) : sl.tipo === 'insert' ? (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <rect x="2" y="5" width="13" height="11" rx="2" />
                           <path d="M22 9v9a2 2 0 0 1-2 2H8" opacity="0.55" />
+                        </svg>
+                      ) : (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M4 7h16" strokeWidth="3.4" />
+                          <path d="M4 13h11M4 18h7" strokeWidth="2.2" opacity="0.75" />
                         </svg>
                       )}
                     </span>

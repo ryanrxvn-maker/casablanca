@@ -16,7 +16,8 @@ import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
 import { EditPartModal } from '@/components/EditPartModal';
 import { PilotInsertsModal } from '@/components/PilotInserts';
-import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
+import { insertPadrao, HEADLINE_CFG_DEFAULT, type Insert, type HeadlineCfg } from '@/lib/pilot-inserts';
+import { PilotHeadlineModal } from '@/components/PilotHeadline';
 import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
 import { BUILTIN_TEMPLATES } from '@/lib/typography/caption-script';
 import { LEGENDA_CFG_DEFAULT, ZOOM_CFG_DEFAULT, type LegendaCfg, type ZoomCfg } from '@/lib/pilot-pos-producao';
@@ -409,6 +410,8 @@ function Conteudo() {
   const [provaUrl, setProvaUrl] = useState<string | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
   const [insAberto, setInsAberto] = useState(false);
+  const [hlAberto, setHlAberto] = useState(false);
+  const [hlCfg, setHlCfg] = useState<HeadlineCfg>({ ...HEADLINE_CFG_DEFAULT, on: true, ancoraAte: 'HOOK 1' });
   const [insLista, setInsLista] = useState<Insert[]>([
     insertPadrao('d1', 'BODY 1', { key: 'demo:broll.mp4', nome: 'broll-azeite.mp4', tipo: 'video', w: 1920, h: 1080, durSec: 4 }),
   ]);
@@ -631,6 +634,27 @@ function Conteudo() {
           </div>
         </div>
       </section>
+
+      {/* ========== 0.12 JANELA DA HEADLINE ========== */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Headline</div>
+        <button id="hl-abre" type="button" className="pi-add" onClick={() => setHlAberto(true)}>
+          <span className="pi-add-mais" aria-hidden>+</span>
+          abrir a janela de headline
+        </button>
+      </section>
+      {hlAberto ? (
+        <PilotHeadlineModal
+          cfg={hlCfg}
+          partes={[
+            { label: 'HOOK 1', text: 'Como transformar um azeite de dez reais no seu proprio remedio de prostata.' },
+            { label: 'BODY 1', text: 'A maioria das pessoas usa o azeite do jeito errado.' },
+            { label: 'BODY 2', text: 'O composto que interessa se chama oleocantal.' },
+          ]}
+          onFechar={() => setHlAberto(false)}
+          onMudar={(c) => setHlCfg(c)}
+        />
+      ) : null}
 
       {/* ========== 0.15 JANELA DOS INSERTS ========== */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
