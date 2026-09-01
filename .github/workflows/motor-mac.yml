@@ -1,0 +1,219 @@
+name: Motor macOS
+
+# Prova, num Mac DE VERDADE, que o Motor do Downloader instala e baixa.
+# macos-14 = Apple Silicon (arm64) | macos-13 = Intel (x64) — os dois chips
+# que os clientes tem. Sem isso, "funciona no Mac" seria chute: quem
+# desenvolve esta num Windows.
+
+on:
+  push:
+    paths:
+      - 'engine/install-mac.sh'
+      - 'engine/server.ts'
+      - 'engine/dist/server.cjs'
+      - 'engine/ci/serve-mac-test.cjs'
+      - 'lib/downloader-core.ts'
+      - '.github/workflows/motor-mac.yml'
+  pull_request:
+    paths:
+      - 'engine/install-mac.sh'
+      - 'engine/dist/server.cjs'
+      - 'lib/downloader-core.ts'
+  workflow_dispatch:
+
+jobs:
+  instalar:
+    name: ${{ matrix.rotulo }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            rotulo: Apple Silicon (arm64)
+            arch_esperada: arm64
+          - os: macos-13
+            rotulo: Intel (x64)
+            arch_esperada: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+
+    env:
+      BASE: /Users/runner/Library/Application Support/AutoEditDownloader
+      LABEL: com.autoedit.downloader
+      CI_SITE_PORT: '8099'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Contexto do runner
+        run: |
+          echo "macOS  : $(sw_vers -productVersion)"
+          echo "uname  : $(uname -m)"
+          echo "arm64? : $(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)"
+
+      # O bundle vai commitado, mas se alguem esquecer de rodar o build o
+      # teste tem que gritar aqui — nao la na frente com erro obscuro.
+      - name: O bundle do motor existe?
+        run: |
+          test -f engine/dist/server.cjs \
+            || { echo "::error::engine/dist/server.cjs ausente — rode 'node engine/build.mjs' e commite"; exit 1; }
+          grep -q darkolab-downloader-engine engine/dist/server.cjs \
+            || { echo "::error::server.cjs nao parece o bundle do motor"; exit 1; }
+          echo "bundle OK ($(wc -c < engine/dist/server.cjs) bytes)"
+
+      - name: Sobe o site falso (serve o bundle pro instalador)
+        run: |
+          mkdir -p ci-tmp
+          node engine/ci/serve-mac-test.cjs > ci-tmp/site.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -fsS "http://127.0.0.1:${CI_SITE_PORT}/api/downloader-engine/mac?part=server" -o /dev/null && break
+            sleep 0.5
+          done
+          curl -fsS "http://127.0.0.1:${CI_SITE_PORT}/api/downloader-engine/mac?part=server" -o /dev/null \
+            || { cat ci-tmp/site.log; exit 1; }
+          echo "site falso no ar"
+
+      # ---------------------------------------------------------------
+      # O TESTE DE VERDADE: rodar o instalador exatamente como o cliente
+      # roda. O proprio script ja tem auto-teste e sai != 0 se falhar.
+      # ---------------------------------------------------------------
+      - name: Instalar o Motor
+        run: |
+          AUTOEDIT_SITE="http://127.0.0.1:${CI_SITE_PORT}" bash engine/install-mac.sh
+
+      - name: Binarios sao do chip certo e executam
+        run: |
+          set -e
+          for b in "$BASE/node/node" "$BASE/bin/yt-dlp" "$BASE/bin/ffmpeg"; do
+            echo "--- $b"
+            file "$b"
+            file "$b" | grep -q "${{ matrix.arch_esperada }}" \
+              || { echo "::error::$b nao e ${{ matrix.arch_esperada }}"; exit 1; }
+          done
+          "$BASE/bin/yt-dlp" --version
+          "$BASE/bin/ffmpeg" -version | head -1
+          "$BASE/node/node" --version
+
+      - name: launchd registrou o servico
+        run: |
+          launchctl print "gui/$(id -u)/$LABEL" > ci-tmp/launchd.txt 2>&1 \
+            || { echo "::error::servico nao registrado no launchd"; cat ci-tmp/launchd.txt; exit 1; }
+          grep -E 'state = running|program = ' ci-tmp/launchd.txt || true
+          echo "servico registrado"
+
+      - name: Descobrir a porta do motor (igual a extensao faz)
+        id: porta
+        run: |
+          PORT=""
+          for p in $(seq 47923 47931); do
+            if curl -fsS --max-time 2 "http://127.0.0.1:$p/health" 2>/dev/null | grep -q darkolab-downloader-engine; then
+              PORT=$p; break
+            fi
+          done
+          test -n "$PORT" || { echo "::error::motor nao respondeu em nenhuma porta"; exit 1; }
+          echo "porta=$PORT" >> "$GITHUB_OUTPUT"
+          echo "motor na porta $PORT"
+
+      # A extensao chama /pair com Origin de chrome-extension. Um site
+      # comum tem que levar 403. As duas coisas sao testadas.
+      - name: Pareamento aceita extensao e recusa site
+        id: pair
+        run: |
+          PORT=${{ steps.porta.outputs.porta }}
+          TOKEN=$(curl -fsS -H 'Origin: chrome-extension://ci-selftest' \
+                    "http://127.0.0.1:$PORT/pair" | node -e \
+                    'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).token||"")}catch{}})')
+          test -n "$TOKEN" || { echo "::error::/pair nao devolveu token pra extensao"; exit 1; }
+          echo "token OK (${#TOKEN} chars)"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -H 'Origin: https://site-qualquer.com' \
+                   "http://127.0.0.1:$PORT/pair")
+          test "$CODE" = "403" \
+            || { echo "::error::/pair deveria negar site comum, veio HTTP $CODE"; exit 1; }
+          echo "site comum negado (403) — correto"
+
+      - name: Gerar video de teste com o ffmpeg instalado
+        run: |
+          "$BASE/bin/ffmpeg" -v error -f lavfi -i testsrc=size=320x240:rate=15:duration=3 \
+            -f lavfi -i sine=frequency=440:duration=3 \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y ci-tmp/test.mp4
+          ls -la ci-tmp/test.mp4
+          curl -fsS -o /dev/null "http://127.0.0.1:${CI_SITE_PORT}/test.mp4" && echo "video servido"
+
+      # Caminho completo de verdade: extensao -> /get -> processDownload ->
+      # yt-dlp -> stream de volta. E o que o cliente faz ao clicar Baixar.
+      - name: Download REAL pelo motor (video)
+        run: |
+          PORT=${{ steps.porta.outputs.porta }}
+          TOKEN=${{ steps.pair.outputs.token }}
+          URL="http%3A%2F%2F127.0.0.1%3A${CI_SITE_PORT}%2Ftest.mp4"
+          curl -fsS --max-time 180 \
+            "http://127.0.0.1:$PORT/get?t=$TOKEN&url=$URL&mode=video&quality=480" \
+            -o ci-tmp/baixado.mp4
+          SIZE=$(wc -c < ci-tmp/baixado.mp4 | tr -d ' ')
+          echo "baixado: $SIZE bytes"
+          test "$SIZE" -gt 5000 || { echo "::error::arquivo baixado veio vazio/curto ($SIZE b)"; exit 1; }
+          "$BASE/bin/ffmpeg" -v error -i ci-tmp/baixado.mp4 -f null - \
+            || { echo "::error::o arquivo baixado nao e um video valido"; exit 1; }
+          echo "video valido"
+
+      - name: Download REAL pelo motor (audio mp3 — exercita o ffmpeg)
+        run: |
+          PORT=${{ steps.porta.outputs.porta }}
+          TOKEN=${{ steps.pair.outputs.token }}
+          URL="http%3A%2F%2F127.0.0.1%3A${CI_SITE_PORT}%2Ftest.mp4"
+          curl -fsS --max-time 180 \
+            "http://127.0.0.1:$PORT/get?t=$TOKEN&url=$URL&mode=audio-mp3" \
+            -o ci-tmp/baixado.mp3
+          SIZE=$(wc -c < ci-tmp/baixado.mp3 | tr -d ' ')
+          echo "baixado: $SIZE bytes"
+          test "$SIZE" -gt 2000 || { echo "::error::mp3 veio vazio/curto ($SIZE b)"; exit 1; }
+          "$BASE/bin/ffmpeg" -v error -i ci-tmp/baixado.mp3 -f null - \
+            || { echo "::error::o mp3 baixado nao e valido"; exit 1; }
+          echo "mp3 valido"
+
+      - name: Token errado tem que ser recusado
+        run: |
+          PORT=${{ steps.porta.outputs.porta }}
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+                   "http://127.0.0.1:$PORT/get?t=token-invalido&url=http%3A%2F%2F127.0.0.1%3A${CI_SITE_PORT}%2Ftest.mp4&mode=video")
+          test "$CODE" = "401" -o "$CODE" = "403" \
+            || { echo "::error::token invalido deveria ser negado, veio HTTP $CODE"; exit 1; }
+          echo "token invalido negado (HTTP $CODE)"
+
+      # Cliente reinstalando por cima nao pode quebrar nada — e o que a
+      # propria pagina manda ele fazer quando o motor cai.
+      - name: Reinstalar por cima (idempotencia)
+        run: |
+          AUTOEDIT_SITE="http://127.0.0.1:${CI_SITE_PORT}" bash engine/install-mac.sh
+          PORT=""
+          for p in $(seq 47923 47931); do
+            curl -fsS --max-time 2 "http://127.0.0.1:$p/health" 2>/dev/null | grep -q darkolab-downloader-engine && { PORT=$p; break; }
+          done
+          test -n "$PORT" || { echo "::error::motor nao voltou depois de reinstalar"; exit 1; }
+          echo "reinstalacao OK (porta $PORT)"
+
+      - name: Desinstalar limpa tudo
+        run: |
+          AUTOEDIT_SITE="http://127.0.0.1:${CI_SITE_PORT}" bash engine/install-mac.sh --uninstall
+          test ! -d "$BASE" || { echo "::error::a pasta do motor sobrou"; exit 1; }
+          test ! -f "$HOME/Library/LaunchAgents/$LABEL.plist" || { echo "::error::o plist sobrou"; exit 1; }
+          launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 \
+            && { echo "::error::o servico continua no launchd"; exit 1; } \
+            || echo "servico removido"
+          for p in $(seq 47923 47931); do
+            curl -fsS --max-time 1 "http://127.0.0.1:$p/health" 2>/dev/null | grep -q darkolab-downloader-engine \
+              && { echo "::error::motor continua no ar na porta $p"; exit 1; }
+          done
+          echo "desinstalacao limpa"
+
+      - name: Logs (quando falha)
+        if: failure()
+        run: |
+          echo "=== engine.log ==="
+          cat "$BASE/engine.log" 2>/dev/null || echo "(sem log)"
+          echo "=== site falso ==="
+          cat ci-tmp/site.log 2>/dev/null || echo "(sem log)"
+          echo "=== launchd ==="
+          launchctl print "gui/$(id -u)/$LABEL" 2>&1 | head -40 || true
