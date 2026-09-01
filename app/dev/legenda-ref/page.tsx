@@ -25,7 +25,7 @@ const DESTAQUES = [7, 8, 9, 10];
 
 /** entradas candidatas — todas desenhadas no MESMO instante da animacao */
 const ANIMS: AnimKind[] = [
-  'blur-tumble',
+  'spiral-rise',
   'blur-zoom',
   'rotate-in',
   'skew-slide',
@@ -151,7 +151,7 @@ export default function LegendaRefDev() {
 
 function Inner() {
   const [id, setId] = useState('papo-amarelo');
-  const instantes = [180, 400, 620, 840, 1100, 1400, 1800, 2600];
+  const instantes = [150, 300, 450, 600, 750, 900, 1150, 1500];
   return (
     <div className="mx-auto w-full max-w-[1200px] px-6 py-8">
       <h1 className="mb-1 text-[22px] font-bold text-text">Legenda x referência</h1>

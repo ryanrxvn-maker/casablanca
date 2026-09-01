@@ -89,7 +89,7 @@ export type AnimKind =
   | 'skew-slide'
   | 'tracking-in'
   | 'squash'
-  | 'blur-tumble';
+  | 'spiral-rise';
 
 export type OutKind =
   | 'none'
@@ -131,7 +131,7 @@ export const IN_SPEC_BY_KIND: Record<AnimKind, AnimSpec> = {
   'slide-right': { kind: 'slide-right', dur: 320, ease: 'outQuint', stagger: 90, amp: 0.7 },
   'blur': { kind: 'blur', dur: 340, ease: 'outQuad', stagger: 90, amp: 1 },
   'blur-zoom': { kind: 'blur-zoom', dur: 340, ease: 'outQuad', stagger: 90, amp: 1 },
-  'blur-tumble': { kind: 'blur-tumble', dur: 380, ease: 'outQuint', stagger: 120, amp: 1 },
+  'spiral-rise': { kind: 'spiral-rise', dur: 420, ease: 'outQuint', stagger: 120, amp: 1 },
   'typewriter': { kind: 'typewriter', dur: 420, ease: 'linear' },
   'glitch': { kind: 'glitch', dur: 320, ease: 'outQuad', amp: 1 },
   'flip': { kind: 'flip', dur: 300, ease: 'outBack', stagger: 90 },
@@ -169,7 +169,7 @@ export const IN_ANIM_OPTIONS: Array<{ kind: AnimKind; label: string }> = [
   { kind: 'slide-right', label: 'Entra da esquerda' },
   { kind: 'blur', label: 'Desfoque' },
   { kind: 'blur-zoom', label: 'Desfoque + zoom' },
-  { kind: 'blur-tumble', label: 'Desfoque + tombo' },
+  { kind: 'spiral-rise', label: 'Espiral subindo' },
   { kind: 'mask-up', label: 'Máscara subindo' },
   { kind: 'wipe', label: 'Revelar (wipe)' },
   { kind: 'typewriter', label: 'Máquina de escrever' },
@@ -1039,19 +1039,22 @@ function computeInFx(
       fx.sx = fx.sy = 1 + 0.22 * inv;
       fx.alpha = clamp01(p * 1.8);
       break;
-    case 'blur-tumble': {
-      // A palavra NAO entra reta: chega TORTA e grande, borrada, e vai
-      // endireitando enquanto assenta. O angulo alterna de palavra pra
-      // palavra (uma tomba pra um lado, a seguinte pro outro) — e o que da
-      // o ar "baguncado" em vez de um desfile mecanico.
-      // alterna pelo INDICE da palavra (i), que e o que ja chega aqui
+    case 'spiral-rise': {
+      // ESPIRAL SUBINDO (a entrada da referencia do Silas): a palavra nasce
+      // ABAIXO do lugar dela, grande, TORTA e borrada, e sobe girando ate
+      // assentar — por isso, enquanto varias animam ao mesmo tempo, elas
+      // aparecem "sem alinhamento" e vao se alinhando conforme chegam.
+      //
+      // O lado do giro ALTERNA por palavra: sem isso todas tombam pro mesmo
+      // lado e vira um desfile mecanico, nao a bagunca da referencia.
       const lado = i % 2 === 0 ? 1 : -1;
-      fx.rot = inv * amp * 0.13 * lado;
-      fx.skew = inv * amp * 0.16 * lado;
-      fx.blur = inv * amp * fontPx * 0.3;
-      fx.sx = fx.sy = 1 + 0.34 * inv;
-      fx.dy = inv * fontPx * 0.06 * lado;
-      fx.alpha = clamp01(p * 1.7);
+      fx.dy = inv * fontPx * 0.95;          // vem de BAIXO
+      fx.dx = inv * fontPx * 0.16 * lado;   // com desvio lateral = espiral
+      fx.rot = inv * amp * 0.2 * lado;      // girando
+      fx.skew = inv * amp * 0.1 * lado;     // e distorcida
+      fx.sx = fx.sy = 1 + 0.5 * inv;        // grande, encolhendo
+      fx.blur = inv * amp * fontPx * 0.28;  // borrada, focando
+      fx.alpha = clamp01(p * 1.6);
       break;
     }
     case 'glitch': {

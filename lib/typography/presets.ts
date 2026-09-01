@@ -204,9 +204,10 @@ const MANUAL_PRESETS: TypoPreset[] = [
     id: 'papo-amarelo',
     name: 'Papo Amarelo',
     cat: 'Viral',
-    // Montserrat BOLD (800), nao Black: na referencia o traco e pesado mas
-    // nao ultra-preto, e o Black sai visivelmente mais largo.
-    font: 'montserrat800',
+    // Outfit: a mais ESTREITA e redonda das pesadas do catalogo. Montserrat
+    // (a primeira tentativa) e a mais larga de todas — o Silas apontou que
+    // saia gorda demais perto da referencia.
+    font: 'outfit800',
     size: 0.062,
     lineHeight: 1.1,
     uppercase: false,
@@ -217,13 +218,13 @@ const MANUAL_PRESETS: TypoPreset[] = [
     fill: 'primary',
     shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.1, x: 0, y: 0.035 },
     unit: 'word',
-    // A ENTRADA da referencia nao e um fade e nao entra RETA: a palavra chega
-    // TORTA, grande e borrada, e vai endireitando e focando enquanto assenta.
-    // O lado do tombo alterna palavra a palavra, por isso parece "curva,
-    // distorcendo, meio baguncado" em vez de um desfile mecanico. A duracao
-    // e MAIOR que o intervalo entre palavras, entao duas ou tres animam ao
-    // mesmo tempo — nos quadros da referencia da pra ver isso.
-    in: { kind: 'blur-tumble', dur: 400, ease: 'outQuint', stagger: 130, amp: 1.1 },
+    // A ENTRADA descrita pelo Silas: "vem tipo distorcido em espiral de baixo
+    // pra cima, aparecendo sem alinhamento, vai alinhando conforme aparece".
+    // Cada palavra nasce ABAIXO do lugar dela, grande, torta e borrada, e
+    // sobe girando ate assentar. A duracao (430ms) e MAIOR que o intervalo
+    // entre palavras (125ms), entao tres ou quatro animam ao mesmo tempo em
+    // alturas e angulos diferentes — e dai que vem o "sem alinhamento".
+    in: { kind: 'spiral-rise', dur: 430, ease: 'outQuint', stagger: 125, amp: 1.05 },
     autoEmphasis: true,
     highlightStyle: 'color',
     // O amarelo da referencia nao e chapado: tem brilho de metal, com um
