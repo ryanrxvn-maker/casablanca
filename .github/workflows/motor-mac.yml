@@ -31,7 +31,12 @@ jobs:
           - os: macos-14
             rotulo: Apple Silicon (arm64)
             arch_esperada: arm64
-          - os: macos-13
+          # macos-15-intel e o runner Intel ATUAL. O macos-13 (Ventura) esta
+          # sendo aposentado e na pratica nao aloca mais: ficou 11 minutos em
+          # Queued sem pegar maquina. Se um dia este label tambem sair, o job
+          # falha na hora com "no runner matching labels" — melhor que
+          # pendurar na fila fingindo que vai rodar.
+          - os: macos-15-intel
             rotulo: Intel (x64)
             arch_esperada: x86_64
     runs-on: ${{ matrix.os }}
