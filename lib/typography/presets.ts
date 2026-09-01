@@ -1270,9 +1270,13 @@ const MANUAL_PRESETS: TypoPreset[] = [
   // Print aprovado pelo Silas (31.08): caixa PRETA solida colada no texto,
   // branco pesado em caixa alta, uma linha so. Nada de brilho, nada de
   // destaque automatico pintando palavra de outra cor — e o ponto do modelo.
+  // ⚠ Nome "Preta Solida" de proposito: ja existe uma "Caixa Preta" na
+  // categoria Headline (hl-caixa-preta), e duas com o mesmo nome na galeria
+  // e' impossivel de distinguir. A diferenca real: aquela tem borda clara e
+  // texto de contraste automatico; esta e preto puro, sem borda.
   p({
-    id: 'caixa-preta',
-    name: 'Caixa Preta',
+    id: 'preta-solida',
+    name: 'Preta Sólida',
     cat: 'Destaque',
     font: 'montserrat900',
     size: 0.056,

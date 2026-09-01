@@ -73,6 +73,10 @@ export type HeadlinePreset = {
   padX: number;
   padY: number;
   quote: boolean;
+  /** tamanho das aspas, fração do corpo da fonte */
+  quoteSize: number;
+  /** letter-spacing, fração do corpo */
+  spacing: number;
   /** barra de acento na esquerda (fração do corpo) — 0 = sem barra */
   accentBar: number;
   accentColor: string;
@@ -94,10 +98,12 @@ const base = (p: Partial<HeadlinePreset> & Pick<HeadlinePreset, 'id' | 'name'>):
   padX: 0.62,
   padY: 0.52,
   quote: false,
+  quoteSize: 1.9,
   accentBar: 0,
   accentColor: '#ffd60a',
   align: 'left',
   shadow: 0.06,
+  spacing: 0,
   ...p,
 });
 
@@ -107,7 +113,25 @@ const base = (p: Partial<HeadlinePreset> & Pick<HeadlinePreset, 'id' | 'name'>):
  * esquerda.
  */
 export const HEADLINE_PRESETS: HeadlinePreset[] = [
-  base({ id: 'aspas-escura', name: 'Aspas', quote: true }),
+  // ⭐ A REFERÊNCIA que o Silas mandou (31.08): cartela escura quase opaca
+  // ocupando quase a largura toda, aspas grandes em serifa no alto à
+  // esquerda, texto branco PESADO em caixa alta, entrelinha apertada e
+  // respiro generoso dentro do painel.
+  base({
+    id: 'aspas-escura',
+    name: 'Aspas',
+    quote: true,
+    quoteSize: 2.6,
+    panelColor: '#15161a',
+    panelOpacity: 0.88,
+    radius: 0.05,
+    padX: 0.78,
+    padY: 0.62,
+    size: 0.05,
+    lineHeight: 1.08,
+    spacing: 0.005,
+    shadow: 0,
+  }),
   base({ id: 'faixa-escura', name: 'Painel', quote: false }),
   base({
     id: 'barra-acento',
@@ -157,8 +181,8 @@ export const HEADLINE_STYLE_DEFAULT: HeadlineStyle = {
   presetId: 'aspas-escura',
   fontScale: 1,
   posX: 0.5,
-  posY: 0.28,
-  width: 0.82,
+  posY: 0.34,
+  width: 0.9,
   align: 'left',
   color: null,
   panelColor: null,
@@ -245,7 +269,7 @@ export function layoutHeadline(
   const padY = preset.padY * fontPx;
   const painel = h.style.panel ?? preset.panel;
   const quote = h.style.quote ?? preset.quote;
-  const quotePx = quote ? fontPx * 1.5 : 0;
+  const quotePx = quote ? fontPx * (preset.quoteSize * 0.62) : 0;
 
   const upper = h.style.uppercase ?? preset.uppercase;
   const texto = upper ? h.text.toUpperCase() : h.text;
@@ -400,8 +424,10 @@ export function drawHeadline(
     ctx.save();
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = cor;
-    ctx.font = fontCss('playfair900i', L.fontPx * 1.9);
-    ctx.fillText('“', L.box.x + L.padX, L.box.y + L.quotePx + L.fontPx * 0.32);
+    ctx.font = fontCss('playfair900i', L.fontPx * preset.quoteSize);
+    // a aspa serifada tem muito respiro interno: a baseline vai ABAIXO do
+    // topo do painel pra ela encostar no canto, como na referência
+    ctx.fillText('“', L.box.x + L.padX * 0.7, L.box.y + L.quotePx * 0.96);
     ctx.restore();
   }
 

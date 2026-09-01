@@ -1483,6 +1483,32 @@ function TipografiaInner() {
               </div>
             </div>
 
+            <HeadlinePanel
+              headlines={headlines}
+              selId={selHeadlineId}
+              onSelect={setSelHeadlineId}
+              onAdd={() => {
+                pushHistory();
+                const agora = (videoRef.current?.currentTime ?? 0) * 1000;
+                const nova = makeHeadline(agora, (duration ?? 4) * 1000 - agora);
+                setHeadlines((prev) => [...prev, nova]);
+                setSelHeadlineId(nova.id);
+              }}
+              onRemove={(id) => {
+                pushHistory();
+                setHeadlines((prev) => prev.filter((h) => h.id !== id));
+                setSelHeadlineId((cur) => (cur === id ? null : cur));
+              }}
+              onPatch={(id, patch) =>
+                setHeadlines((prev) => prev.map((h) => (h.id === id ? { ...h, ...patch } : h)))
+              }
+              onCommit={pushHistory}
+              onSeek={seekTo}
+              currentMs={(videoRef.current?.currentTime ?? 0) * 1000}
+              durationMs={(duration ?? 0) * 1000}
+              disabled={processing}
+            />
+
             <TimelineM
               blocks={blocks}
               duration={duration ?? 0}
@@ -1534,32 +1560,6 @@ function TipografiaInner() {
                 setWordSel(null);
                 setSelBlockId(null);
               }}
-            />
-
-            <HeadlinePanel
-              headlines={headlines}
-              selId={selHeadlineId}
-              onSelect={setSelHeadlineId}
-              onAdd={() => {
-                pushHistory();
-                const agora = (videoRef.current?.currentTime ?? 0) * 1000;
-                const nova = makeHeadline(agora, (duration ?? 4) * 1000 - agora);
-                setHeadlines((prev) => [...prev, nova]);
-                setSelHeadlineId(nova.id);
-              }}
-              onRemove={(id) => {
-                pushHistory();
-                setHeadlines((prev) => prev.filter((h) => h.id !== id));
-                setSelHeadlineId((cur) => (cur === id ? null : cur));
-              }}
-              onPatch={(id, patch) =>
-                setHeadlines((prev) => prev.map((h) => (h.id === id ? { ...h, ...patch } : h)))
-              }
-              onCommit={pushHistory}
-              onSeek={seekTo}
-              currentMs={(videoRef.current?.currentTime ?? 0) * 1000}
-              durationMs={(duration ?? 0) * 1000}
-              disabled={processing}
             />
 
             {/* ⭐ o vídeo tinha fala sem legenda? a resposta vem MEDIDA */}
