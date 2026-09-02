@@ -1859,7 +1859,14 @@ function ClickUpPilotInner() {
     });
   }
 
-  function fazerPosProcessar(taskId: string): ((blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>) | undefined {
+  function fazerPosProcessar(
+    taskId: string,
+    /** `ffmpegJaExclusivo`: o pipeline normal roda TUDO dentro de um slot da
+     *  fila do ffmpeg, então a pós-produção não pode pedir o lock de novo
+     *  (esperaria a si mesma). O VA pega o lock por operação — lá ela PRECISA
+     *  pedir. Errar isto é deadlock de um lado, corrida do outro. */
+    opts?: { ffmpegJaExclusivo?: boolean },
+  ): ((blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>) | undefined {
     // Versão irmã (-yt / -v3...) herda a config da task MÃE — é nela que o
     // user clicou os botões; a irmã nem aparece na lista.
     const cfgId = taskIdBaseDaVersao(taskId);
@@ -1894,7 +1901,7 @@ function ClickUpPilotInner() {
         // O pipeline roda INTEIRO dentro do runPostPipelineSerial, que já
         // segura o lock exclusivo do ffmpeg. Sem avisar isto, o mux de áudio
         // do render pediria o mesmo lock e esperaria a si mesmo pra sempre.
-        ffmpegJaExclusivo: true,
+        ffmpegJaExclusivo: opts?.ffmpegJaExclusivo !== false,
         // INSERTS: a config é da task MÃE (a irmã de versão herda), e os bytes
         // vêm do IDB na hora do render — nunca ficam presos na memória.
         inserts: insertsRef.current[taskId] || insertsRef.current[cfgId] || [],
@@ -10493,6 +10500,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         adVideoBytes: dl.bytes,
         avatares,
         smartMode: false,
+        // Legenda/zoom/inserts/headline também no VA (02.09). Aqui o lock do
+        // ffmpeg é por operação, então a pós-produção pega o dela.
+        posProcessar: (limparPosResultado(taskId), fazerPosProcessar(taskId, { ffmpegJaExclusivo: false })),
         isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: (p) => {
           patchVA({ phase: vaPhaseFromStage(p.stage), message: p.message });

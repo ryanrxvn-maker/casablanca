@@ -75,6 +75,17 @@ export type VAPipelineInput = {
   maxSegmentSec?: number;
   /** Callback progresso */
   onProgress?: (msg: VAPipelineProgress) => void;
+  /** PÓS-PRODUÇÃO (02.09): legenda automática, zoom, inserts e headline no
+   *  vídeo final de cada avatar. O VA nasceu sem isto — uma task VA com Smart
+   *  Zoom ligado montava e entregava sem zoom nenhum, calada, porque só o
+   *  pipeline normal chamava a pós-produção.
+   *
+   *  Devolve o vídeo novo, ou `null` pra manter o original (falha aqui é
+   *  REALCE perdido, nunca conteúdo perdido). */
+  posProcessar?: (
+    blob: Blob,
+    info: { filename: string; partesSec: number[] | null },
+  ) => Promise<Blob | null>;
   /** Funcao pra disparar 1 take HeyGen via extension (audio mode).
    *  Recebe (avatarId, audioBlob, label) → resolve com videoBlob.
    *  Caller injeta — pipeline nao tem dependencia direta do bridge. */
@@ -881,6 +892,34 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
       items.push({ avaCode: av.avaCode, filename, blob: mounted });
     } catch (e) {
       items.push({ avaCode: av.avaCode, filename, blob: null, error: 'mount: ' + (e as Error)?.message });
+    }
+  }
+
+  // ── PÓS-PRODUÇÃO: legenda/zoom/inserts/headline no final de cada avatar ──
+  // Roda DEPOIS de tudo montado e FORA do lock do ffmpeg (aqui o lock é por
+  // operação, não pela pipeline inteira) — por isso o chamador passa
+  // `ffmpegJaExclusivo: false` na config dela.
+  if (input.posProcessar) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.blob || it.blob.size === 0) continue;
+      progress({
+        stage: 'mount',
+        message: `Pós-produção de ${it.avaCode} (legenda/zoom)...`,
+        percent: 96,
+      });
+      try {
+        // O VA monta take a take; as durações de cada um não sobrevivem até
+        // aqui, então o plano de zoom usa a cadência própria dele — que é o
+        // mesmo caminho já usado quando a decupagem está desligada.
+        const novo = await input.posProcessar(it.blob, { filename: it.filename, partesSec: null });
+        if (novo && novo.size > 50_000) {
+          items[i] = { ...it, blob: novo };
+          console.log(`[va-pipeline] pós-produção ${it.avaCode}: OK ${(novo.size / (1024 * 1024)).toFixed(1)}MB`);
+        }
+      } catch (e) {
+        console.warn(`[va-pipeline] pós-produção ${it.avaCode} falhou — entregue sem legenda/zoom:`, e);
+      }
     }
   }
 
