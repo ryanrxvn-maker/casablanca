@@ -69,9 +69,21 @@ export type Insert = {
    * terço superior. É o que impede o split de cortar a testa.
    */
   focoAvatarY: number;
+
+  /* ── RECORTE DA MÍDIA (02.09) ────────────────────────────────────────
+   * Qual PEDAÇO do arquivo importado vira o insert, em segundos dentro do
+   * arquivo. Silas: *"se eu tiver um vídeo longo de 3 min e tem um insert lá
+   * no meio, tem que ter como eu selecionar qual parte do vídeo vira insert"*.
+   *
+   * `undefined` nos dois = o arquivo inteiro (é o que todo insert já salvo
+   * tem). Só o pedaço entre eles é lido — o resto do arquivo nunca aparece. */
+  recorteDe?: number;
+  recorteAte?: number;
 };
 
 export const INSERT_FOCO_PADRAO = 0.34;
+/** Recorte não pode ser mais curto que isto — abaixo disso não se vê nada. */
+export const INSERT_RECORTE_MIN_SEC = 0.4;
 export const INSERT_DUR_IMAGEM_PADRAO = 3;
 
 /** Insert novo com os defaults do estúdio. */
@@ -462,11 +474,40 @@ export function planoDeVelocidade(naturalSec: number, janelaSec: number): PlanoV
   return { velocidade: vel, corta: false, congelaApos: 0, blur: blurDoSlowMotion(vel), motivo: 'desacelerou' };
 }
 
-/** Que instante da MÍDIA mostrar, dado o instante da JANELA. */
-export function tempoNaMidia(tRelJanela: number, plano: PlanoVelocidade, naturalSec: number): number {
+/**
+ * O RECORTE efetivo da mídia: início e duração, em segundos do ARQUIVO.
+ *
+ * Devolve o arquivo inteiro quando não há recorte. Prende tudo dentro do
+ * arquivo real — um recorte salvo com um arquivo e reaberto com outro (ou uma
+ * duração lida errada) poria o seek fora do fim, que dá quadro preto.
+ */
+export function recorteDaMidia(
+  ins: Pick<Insert, 'recorteDe' | 'recorteAte'>,
+  arquivoSec: number,
+): { de: number; dur: number } {
+  if (!(arquivoSec > 0)) return { de: 0, dur: 0 };
+  const de = Math.min(Math.max(0, Number(ins.recorteDe) || 0), Math.max(0, arquivoSec - INSERT_RECORTE_MIN_SEC));
+  const ateBruto = Number.isFinite(ins.recorteAte as number) ? (ins.recorteAte as number) : arquivoSec;
+  const ate = Math.min(Math.max(ateBruto, de + INSERT_RECORTE_MIN_SEC), arquivoSec);
+  return { de, dur: Math.max(0, ate - de) };
+}
+
+/**
+ * Que instante do ARQUIVO mostrar, dado o instante da JANELA.
+ *
+ * `naturalSec` aqui é a duração do RECORTE (não a do arquivo) — é ela que o
+ * plano de velocidade usou. `inicioSec` desloca pro ponto onde o recorte
+ * começa dentro do arquivo.
+ */
+export function tempoNaMidia(
+  tRelJanela: number,
+  plano: PlanoVelocidade,
+  naturalSec: number,
+  inicioSec = 0,
+): number {
   const t = Math.max(0, tRelJanela) * plano.velocidade;
-  if (!(naturalSec > 0)) return 0;
-  return Math.min(t, Math.max(0, naturalSec - 0.04));
+  if (!(naturalSec > 0)) return inicioSec;
+  return inicioSec + Math.min(t, Math.max(0, naturalSec - 0.04));
 }
 
 /* ═══════════ a REGRA DO CORTE: nada entra nem sai no meio da fala ═══════════

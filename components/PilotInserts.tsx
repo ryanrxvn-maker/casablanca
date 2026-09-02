@@ -27,11 +27,200 @@ import {
   coverComFoco,
   planoDeVelocidade,
   normalizarInsert,
+  recorteDaMidia,
   INSERT_FOCO_PADRAO,
+  INSERT_RECORTE_MIN_SEC,
   type Insert,
   type LayoutInsert,
   type TipoTransicao,
 } from '@/lib/pilot-inserts';
+
+/* ═══════════════════ RECORTE: que pedaço do arquivo entra ═══════════════
+ *
+ * Silas, 02.09: *"se eu tiver um vídeo longo de sei lá 3 min e tem um insert
+ * lá no meio do vídeo, tem que ter como eu selecionar qual parte do vídeo vai
+ * virar insert"*.
+ *
+ * A interação é a do estúdio: arrasta a agulha pra ver o quadro, arrasta as
+ * pontas pra marcar. Os botões "início/fim aqui" existem porque mira de 1
+ * pixel numa barra de 300px é 0,6s num arquivo de 3min — a agulha dá a
+ * precisão que a ponta não dá.
+ */
+
+function mmss(s: number): string {
+  if (!(s >= 0) || !isFinite(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  const r = Math.floor(s % 60);
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+function RecortadorDeMidia({
+  url,
+  recorteDe,
+  recorteAte,
+  onMudar,
+}: {
+  url: string | null;
+  recorteDe?: number;
+  recorteAte?: number;
+  onMudar: (de: number, ate: number) => void;
+}) {
+  const vid = useRef<HTMLVideoElement | null>(null);
+  const barra = useRef<HTMLDivElement | null>(null);
+  const [dur, setDur] = useState(0);
+  const [agulha, setAgulha] = useState(0);
+  const [pegando, setPegando] = useState<'de' | 'ate' | 'agulha' | null>(null);
+  const [tocando, setTocando] = useState(false);
+
+  const de = Math.max(0, Number(recorteDe) || 0);
+  const ate = Number.isFinite(recorteAte as number) && (recorteAte as number) > de ? (recorteAte as number) : dur;
+
+  // A agulha começa no início do recorte — o 1º quadro do insert é o que
+  // interessa ver.
+  useEffect(() => {
+    if (dur > 0) setAgulha(de);
+  }, [dur, de]);
+
+  // Toca SÓ a seleção, em loop: é assim que se confere um recorte.
+  useEffect(() => {
+    const v = vid.current;
+    if (!v || !tocando) return;
+    let vivo = true;
+    const tick = () => {
+      if (!vivo || !vid.current) return;
+      const t = vid.current.currentTime;
+      setAgulha(t);
+      if (t >= ate - 0.03) {
+        vid.current.currentTime = de;
+      }
+      requestAnimationFrame(tick);
+    };
+    v.currentTime = Math.max(de, Math.min(agulha, ate - 0.05));
+    void v.play().catch(() => setTocando(false));
+    const raf = requestAnimationFrame(tick);
+    return () => {
+      vivo = false;
+      cancelAnimationFrame(raf);
+      v.pause();
+    };
+    // `agulha` de propósito fora: ela muda a cada quadro e reiniciaria o play
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tocando, de, ate]);
+
+  const fracao = useCallback((e: { clientX: number }) => {
+    const el = barra.current;
+    if (!el) return 0;
+    const r = el.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  }, []);
+
+  const mover = useCallback(
+    (e: { clientX: number }, alvo: 'de' | 'ate' | 'agulha') => {
+      if (!(dur > 0)) return;
+      const t = fracao(e) * dur;
+      if (alvo === 'agulha') {
+        const preso = Math.min(Math.max(t, 0), dur);
+        setAgulha(preso);
+        if (vid.current) vid.current.currentTime = preso;
+        return;
+      }
+      if (alvo === 'de') onMudar(Math.min(t, ate - INSERT_RECORTE_MIN_SEC), ate);
+      else onMudar(de, Math.max(t, de + INSERT_RECORTE_MIN_SEC));
+    },
+    [dur, de, ate, fracao, onMudar],
+  );
+
+  if (!url) {
+    return <div className="pi-recorte-vazio">Abrindo o arquivo…</div>;
+  }
+
+  const pct = (t: number) => `${dur > 0 ? (t / dur) * 100 : 0}%`;
+  const selDur = Math.max(0, ate - de);
+
+  return (
+    <div className="pi-recorte">
+      <video
+        ref={vid}
+        src={url}
+        className="pi-recorte-video"
+        muted
+        playsInline
+        preload="metadata"
+        onLoadedMetadata={(e) => {
+          const d = (e.target as HTMLVideoElement).duration;
+          if (isFinite(d) && d > 0) {
+            setDur(d);
+            (e.target as HTMLVideoElement).currentTime = Math.max(0, Number(recorteDe) || 0);
+          }
+        }}
+      />
+
+      <div
+        ref={barra}
+        className="pi-recorte-barra"
+        onPointerDown={(e) => {
+          if (!(dur > 0)) return;
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          const t = fracao(e) * dur;
+          // pega a ponta mais próxima quando o clique cai perto dela; senão é
+          // a agulha (ver o quadro é a ação mais comum)
+          const perto = dur * 0.04;
+          const alvo: 'de' | 'ate' | 'agulha' =
+            Math.abs(t - de) < perto ? 'de' : Math.abs(t - ate) < perto ? 'ate' : 'agulha';
+          setPegando(alvo);
+          mover(e, alvo);
+        }}
+        onPointerMove={(e) => {
+          if (pegando) mover(e, pegando);
+        }}
+        onPointerUp={() => setPegando(null)}
+        onPointerCancel={() => setPegando(null)}
+      >
+        <span className="pi-recorte-fora" style={{ left: 0, width: pct(de) }} aria-hidden />
+        <span className="pi-recorte-fora" style={{ left: pct(ate), right: 0 }} aria-hidden />
+        <span className="pi-recorte-sel" style={{ left: pct(de), width: pct(selDur) }} aria-hidden />
+        <span className="pi-recorte-ponta is-de" style={{ left: pct(de) }} aria-hidden />
+        <span className="pi-recorte-ponta is-ate" style={{ left: pct(ate) }} aria-hidden />
+        <span className="pi-recorte-agulha" style={{ left: pct(agulha) }} aria-hidden />
+      </div>
+
+      <div className="pi-recorte-linha">
+        <button
+          type="button"
+          className="pi-mini"
+          onClick={() => setTocando((v) => !v)}
+          title="Toca só o pedaço marcado, em loop"
+        >
+          {tocando ? '❚❚ parar' : '▶ tocar seleção'}
+        </button>
+        <button
+          type="button"
+          className="pi-mini"
+          onClick={() => onMudar(Math.min(agulha, ate - INSERT_RECORTE_MIN_SEC), ate)}
+          title="O insert começa no quadro que está na tela"
+        >
+          início aqui
+        </button>
+        <button
+          type="button"
+          className="pi-mini"
+          onClick={() => onMudar(de, Math.max(agulha, de + INSERT_RECORTE_MIN_SEC))}
+          title="O insert termina no quadro que está na tela"
+        >
+          fim aqui
+        </button>
+        <span className="pi-recorte-tempo">
+          {mmss(de)} → {mmss(ate)} · <b>{selDur.toFixed(1)}s</b>
+        </span>
+        {de > 0.01 || ate < dur - 0.01 ? (
+          <button type="button" className="pi-mini" onClick={() => onMudar(0, dur)} title="Volta pro arquivo inteiro">
+            usar tudo
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 /* ═════════════════════ maquete de um layout (SVG) ═══════════════════════ */
 
@@ -133,6 +322,7 @@ export function PilotInsertsModal({
   onSubirMidia,
   thumbDaMidia,
   duracaoDaMidia,
+  lerMidia,
   thumbAvatar,
 }: {
   /** a copy JÁ dividida — exatamente o que foi pro HeyGen */
@@ -153,6 +343,8 @@ export function PilotInsertsModal({
   thumbDaMidia: (key: string) => string | null;
   /** duração (s) de uma mídia já subida — pro diagnóstico de encaixe */
   duracaoDaMidia?: (key: string) => number | null;
+  /** bytes de uma mídia já subida — o recortador precisa TOCAR o arquivo */
+  lerMidia?: (key: string) => Promise<Blob | null>;
   /** thumb do avatar, pra prévia do foco */
   thumbAvatar?: string | null;
 }) {
@@ -162,6 +354,7 @@ export function PilotInsertsModal({
   const [subindo, setSubindo] = useState(false);
   /** Primeira ponta de um trecho em construção (clique 1 de 2). */
   const [ancorando, setAncorando] = useState<{ id: string; de: number } | null>(null);
+  const [urlsDeMidia, setUrlsDeMidia] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => setMontado(true), []);
@@ -177,6 +370,37 @@ export function PilotInsertsModal({
   const insertsDaParte = useCallback(
     (label: string) => inserts.filter((i) => i.ancora === label),
     [inserts],
+  );
+
+  /* ── URLs pro recortador ──────────────────────────────────────────────
+   * O recorte precisa TOCAR o arquivo, não só ver a thumb. Os bytes vivem no
+   * IndexedDB; aqui eles viram Object URL uma vez por mídia e são revogados
+   * ao fechar a janela — Object URL esquecido segura o blob na memória pelo
+   * resto da sessão. */
+  const urlsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (!lerMidia) return;
+    let vivo = true;
+    (async () => {
+      for (const ins of inserts) {
+        if (ins.midiaTipo !== 'video' || urlsRef.current[ins.midiaKey]) continue;
+        const b = await lerMidia(ins.midiaKey).catch(() => null);
+        if (!vivo || !b) continue;
+        const u = URL.createObjectURL(b);
+        urlsRef.current = { ...urlsRef.current, [ins.midiaKey]: u };
+        setUrlsDeMidia(urlsRef.current);
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [inserts, lerMidia]);
+  useEffect(
+    () => () => {
+      for (const u of Object.values(urlsRef.current)) URL.revokeObjectURL(u);
+      urlsRef.current = {};
+    },
+    [],
   );
 
   const atualizar = (id: string, mudanca: Partial<Insert>) =>
@@ -450,6 +674,24 @@ export function PilotInsertsModal({
                           ))}
                         </div>
 
+                        {/* RECORTE — QUE PEDAÇO do arquivo vira o insert.
+                          * Sem isto, importar um vídeo de 3 min pra usar 6s do
+                          * meio era impossível: entrava o arquivo do começo. */}
+                        {ins.midiaTipo === 'video' ? (
+                          <>
+                            <div className="pi-rotulo mt">
+                              Recorte do arquivo
+                              <span className="pi-rotulo-nota">arrasta as pontas, ou marca com a agulha</span>
+                            </div>
+                            <RecortadorDeMidia
+                              url={urlsDeMidia[ins.midiaKey] ?? null}
+                              recorteDe={ins.recorteDe}
+                              recorteAte={ins.recorteAte}
+                              onMudar={(de, ate) => atualizar(ins.id, { recorteDe: de, recorteAte: ate })}
+                            />
+                          </>
+                        ) : null}
+
                         {/* ENCAIXE — não é controle, é DIAGNÓSTICO.
                           * A duração vem do trecho marcado; o que resta é a
                           * mídia se ajustar. Aqui o editor vê o que o sistema
@@ -462,7 +704,9 @@ export function PilotInsertsModal({
                             .filter(Boolean).length || 1;
                           // estimativa honesta: a parte inteira ≈ nº de palavras × ~0,42s
                           const janela = Math.max(0.5, (n.palavraAte - n.palavraDe + 1) * 0.42);
-                          const natural = duracaoDaMidia?.(ins.midiaKey) ?? 0;
+                          // o que conta é a duração do RECORTE, não a do arquivo
+                          const arquivo = duracaoDaMidia?.(ins.midiaKey) ?? 0;
+                          const natural = arquivo > 0 ? recorteDaMidia(ins, arquivo).dur : 0;
                           const pv = planoDeVelocidade(natural, janela);
                           const rotulo =
                             ins.midiaTipo === 'imagem'

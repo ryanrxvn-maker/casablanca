@@ -4886,3 +4886,124 @@ html[data-theme='light'] .hl-cor.is-auto {
   .hl-palco-coord { margin-top: 9px; }
   .hl-controles { overflow: visible; }
 }
+
+
+/* ══ RECORTE DO ARQUIVO (02.09) ══════════════════════════════════════════
+ * Qual PEDAÇO do vídeo importado vira o insert. Sem isto, trazer um arquivo
+ * de 3 min pra usar 6s do meio era impossível — entrava do começo. */
+.pi-recorte { display: flex; flex-direction: column; gap: 8px; }
+.pi-recorte-vazio {
+  border-radius: 10px; padding: 14px;
+  font-size: 11.5px; color: rgb(var(--text-dim));
+  background: rgba(255,255,255,0.04);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
+}
+html[data-theme='light'] .pi-recorte-vazio { background: rgba(16,16,24,0.04); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.08); }
+.pi-recorte-video {
+  width: 100%; max-height: 190px; border-radius: 11px;
+  background: #05070b; object-fit: contain;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09);
+}
+
+.pi-recorte-barra {
+  position: relative; height: 30px; border-radius: 8px;
+  cursor: pointer; touch-action: none; overflow: hidden;
+  background: rgba(34,211,238,0.16);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+html[data-theme='light'] .pi-recorte-barra { background: rgba(14,116,144,0.16); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.12); }
+/* o que está FORA do recorte fica apagado — a seleção é o que se lê */
+.pi-recorte-fora { position: absolute; top: 0; bottom: 0; background: rgba(4,6,10,0.62); }
+html[data-theme='light'] .pi-recorte-fora { background: rgba(240,242,248,0.72); }
+.pi-recorte-sel {
+  position: absolute; top: 0; bottom: 0;
+  background: linear-gradient(180deg, rgba(34,211,238,0.36), rgba(34,211,238,0.14));
+  box-shadow: inset 0 0 0 1px rgba(34,211,238,0.55);
+}
+.pi-recorte-ponta {
+  position: absolute; top: 0; bottom: 0; width: 9px; margin-left: -4.5px;
+  border-radius: 3px; background: #22d3ee; cursor: ew-resize;
+  box-shadow: 0 0 0 1px rgba(4,6,10,0.5);
+}
+.pi-recorte-ponta::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 1.5px; height: 11px; margin: -5.5px 0 0 -0.75px;
+  background: rgba(4,6,10,0.55); border-radius: 2px;
+}
+.pi-recorte-agulha {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px;
+  background: #fff; box-shadow: 0 0 0 1px rgba(4,6,10,0.6), 0 0 8px rgba(255,255,255,0.5);
+  pointer-events: none;
+}
+html[data-theme='light'] .pi-recorte-agulha { background: #0b0d12; box-shadow: 0 0 0 1px rgba(255,255,255,0.7); }
+
+.pi-recorte-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.pi-recorte-tempo {
+  margin-left: auto;
+  font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 600;
+  color: rgb(var(--text-muted));
+}
+.pi-recorte-tempo b { color: rgb(var(--text)); font-weight: 800; }
+
+
+/* ══ PAINEL DE MONTAGEM: editar antes de retomar/remontar (02.09) ════════
+ * Retomar e Remontar não tocam no HeyGen — os takes já existem. Por isso
+ * aqui não há avatar nem voz: só o que a MONTAGEM decide. É o que permite
+ * montar o mesmo AD com outra legenda/insert/headline sem gerar de novo. */
+.mtg-painel {
+  border-radius: 14px; padding: 14px 15px 12px;
+  background: rgba(132, 204, 22, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(132, 204, 22, 0.32);
+}
+html[data-theme='light'] .mtg-painel {
+  background: rgba(101, 163, 13, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(101, 163, 13, 0.35);
+}
+.mtg-cab { display: flex; flex-direction: column; gap: 3px; margin-bottom: 11px; }
+.mtg-titulo {
+  font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 800;
+  letter-spacing: 0.14em; text-transform: uppercase; color: rgb(var(--text));
+}
+.mtg-sub { font-size: 11.5px; line-height: 1.45; color: rgb(var(--text-muted)); }
+
+.mtg-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mtg-acoes { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.mtg-chip {
+  border-radius: 999px; padding: 6px 14px;
+  font-size: 11.5px; font-weight: 700; line-height: 1.2;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  transition: color 0.14s, background-color 0.14s, box-shadow 0.14s;
+}
+html[data-theme='light'] .mtg-chip { background: rgba(16,16,24,0.045); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.mtg-chip:hover { color: rgb(var(--text)); }
+.mtg-chip.is-on {
+  color: #05200b; background: linear-gradient(140deg, #bef264, #84cc16);
+  box-shadow: 0 6px 16px -10px rgba(132, 204, 22, 0.9);
+}
+
+.mtg-aviso {
+  margin-top: 10px; border-radius: 10px; padding: 9px 11px;
+  font-size: 11.5px; line-height: 1.45; color: #fde68a;
+  background: rgba(245, 158, 11, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.38);
+}
+html[data-theme='light'] .mtg-aviso { color: #92400e; box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.36); }
+
+.mtg-rodape { display: flex; align-items: center; gap: 10px; margin-top: 13px; }
+.mtg-cancelar {
+  font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; color: rgb(var(--text-dim));
+  transition: color 0.14s;
+}
+.mtg-cancelar:hover { color: rgb(var(--text)); }
+.mtg-ok {
+  margin-left: auto; border-radius: 999px; padding: 8px 20px;
+  font-size: 12.5px; font-weight: 700; color: #05200b;
+  background: linear-gradient(140deg, #bef264, #84cc16);
+  box-shadow: 0 10px 24px -14px rgba(132, 204, 22, 0.95);
+  transition: transform 0.14s, filter 0.14s;
+}
+.mtg-ok:hover { transform: translateY(-1px); filter: saturate(1.1); }

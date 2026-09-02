@@ -19,6 +19,8 @@ import {
   coberturaNoInstante,
   insertPadrao,
   planoDeVelocidade,
+  recorteDaMidia,
+  INSERT_RECORTE_MIN_SEC,
   normalizarInsert,
   blurDoSlowMotion,
   INSERT_BLUR_MAX,
@@ -445,6 +447,62 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
   ok(textoDaHeadline({ ...cfg, texto: '  MEU TITULO  ' }, PARTES) === 'MEU TITULO', 'texto escrito manda (e vem aparado)');
   ok(textoDaHeadline(cfg, [{ label: 'BODY 1', text: 'so corpo' }]) === '', 'sem hook, sem texto automático');
 }
+
+
+
+
+/* ═══ (8d) RECORTE DA MÍDIA: qual pedaço do arquivo vira o insert (02.09) ═══
+ *
+ * Silas: *"se eu tiver um vídeo longo de 3 min e tem um insert lá no meio do
+ * vídeo, tem que ter como eu selecionar qual parte do vídeo vai virar insert"*.
+ *
+ * Daqui pra frente TUDO enxerga a duração do RECORTE, não a do arquivo: o
+ * encaixe, o plano de velocidade e o seek. O resto do arquivo não existe.
+ */
+{
+  const ARQ = 180; // 3 min
+
+  // sem recorte = arquivo inteiro (é o que todo insert já salvo tem)
+  const inteiro = recorteDaMidia({}, ARQ);
+  ok(inteiro.de === 0 && aprox(inteiro.dur, ARQ), 'sem recorte, o insert é o arquivo inteiro');
+
+  // um pedaço do meio
+  const meio = recorteDaMidia({ recorteDe: 92, recorteAte: 98 }, ARQ);
+  ok(aprox(meio.de, 92) && aprox(meio.dur, 6), 'pedaço do meio: começa em 92s e dura 6s');
+
+  // só o começo definido → vai até o fim do arquivo
+  const soDe = recorteDaMidia({ recorteDe: 150 }, ARQ);
+  ok(aprox(soDe.de, 150) && aprox(soDe.dur, 30), 'só o início marcado corre até o fim do arquivo');
+
+  // ── nada pode cair fora do arquivo (seek fora do fim = quadro preto) ──
+  const estourou = recorteDaMidia({ recorteDe: 170, recorteAte: 900 }, ARQ);
+  ok(estourou.de + estourou.dur <= ARQ + 1e-6, 'fim além do arquivo é preso no fim real');
+  const negativo = recorteDaMidia({ recorteDe: -50, recorteAte: 10 }, ARQ);
+  ok(negativo.de === 0, 'início negativo vira 0');
+  const invertido = recorteDaMidia({ recorteDe: 100, recorteAte: 40 }, ARQ);
+  ok(invertido.dur >= INSERT_RECORTE_MIN_SEC - 1e-9, 'recorte invertido não vira duração negativa');
+  const zerado = recorteDaMidia({ recorteDe: 5, recorteAte: 5 }, ARQ);
+  ok(zerado.dur >= INSERT_RECORTE_MIN_SEC - 1e-9, 'recorte de duração zero recebe o mínimo');
+  ok(recorteDaMidia({ recorteDe: 1, recorteAte: 2 }, 0).dur === 0, 'arquivo sem duração não inventa recorte');
+  const naN = recorteDaMidia({ recorteDe: Number.NaN, recorteAte: Number.NaN }, ARQ);
+  ok(naN.de === 0 && aprox(naN.dur, ARQ), 'NaN vindo de config velha não estraga o recorte');
+
+  // ── o SEEK anda dentro do recorte, nunca fora ──
+  const pv = planoDeVelocidade(6, 6); // exato
+  ok(aprox(tempoNaMidia(0, pv, 6, 92), 92), 'o insert começa no ponto marcado do arquivo, não no 0');
+  ok(aprox(tempoNaMidia(3, pv, 6, 92), 95), 'e anda de lá pra frente');
+  ok(tempoNaMidia(999, pv, 6, 92) <= 98, 'nunca passa do fim do recorte (passaria = frame de outra cena)');
+
+  // ── um recorte de 6s num trecho de fala de 3s CORTA, não acelera ──
+  const cortou = planoDeVelocidade(recorteDaMidia({ recorteDe: 92, recorteAte: 98 }, ARQ).dur, 3);
+  ok(cortou.velocidade === 1 && cortou.corta, 'recorte que sobra corta, como qualquer mídia longa');
+
+  // ── e o recorte é que manda: 3 min de arquivo NÃO faz o insert desacelerar ──
+  const curto = recorteDaMidia({ recorteDe: 10, recorteAte: 11.2 }, ARQ);
+  ok(planoDeVelocidade(curto.dur, 9).velocidade === 1,
+    'recorte de 1,2s não é esticado pra 9s — vale a mesma regra do clipe curto');
+}
+
 
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-inserts: ${passed} ok, ${failed} fail\n`);

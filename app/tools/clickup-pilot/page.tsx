@@ -1634,6 +1634,9 @@ function ClickUpPilotInner() {
    * os `avisos`. O card lê isto pra riscar o selo e mostrar o porquê.
    */
   const [posResultado, setPosResultado] = useState<Record<string, { aplicou: boolean; avisos: string[] }>>({});
+
+  /** Qual task está com o painel "editar antes de retomar/remontar" aberto. */
+  const [pedindoMontagem, setPedindoMontagem] = useState<{ taskId: string; acao: 'retomar' | 'remontar' } | null>(null);
   const captionTemplatesRef = useRef(captionTemplates);
   captionTemplatesRef.current = captionTemplates;
 
@@ -1645,6 +1648,83 @@ function ClickUpPilotInner() {
    * da legenda ou o zoom. Duplicar o JSX daria duas fontes de verdade; assim os
    * dois leem e escrevem exatamente o mesmo estado.
    */
+  /**
+   * PAINEL DE MONTAGEM — "editar antes de retomar / remontar" (02.09).
+   *
+   * Silas: *"caso eu queira montar um AD com legenda, insert, headline ou algo
+   * diferente não precisar gerar ele do zero de novo"*. Retomar e Remontar
+   * NÃO tocam no HeyGen: os takes já existem. Então aqui não tem avatar nem
+   * voz — só o que a MONTAGEM decide: normalizador, decupagem, legenda, zoom,
+   * inserts e headline.
+   *
+   * É o mesmo conjunto de botões do card (`acoesDePosProducao`), pra config
+   * ser uma só: mudar aqui muda o que o disparo usa, e vice-versa.
+   */
+  function PainelDeMontagem({
+    taskId,
+    acao,
+    onCancelar,
+    onSeguir,
+  }: {
+    taskId: string;
+    acao: 'retomar' | 'remontar';
+    onCancelar: () => void;
+    onSeguir: () => void;
+  }) {
+    const aRef = taskAnalyses[taskId] || taskAnalyses[taskIdBaseDaVersao(taskId)];
+    const nivel = isNivelamentoEnabled(taskId);
+    const decup = isDecupagemEnabled(taskId) || isDecupagemEnabled(taskIdBaseDaVersao(taskId));
+    return (
+      <div className="mtg-painel">
+        <div className="mtg-cab">
+          <span className="mtg-titulo">
+            {acao === 'retomar' ? 'Retomar este disparo' : 'Montar de novo'}
+          </span>
+          <span className="mtg-sub">
+            Os takes do HeyGen não são gerados de novo — nada de avatar ou voz muda aqui.
+            Ajusta a montagem e segue.
+          </span>
+        </div>
+
+        <div className="mtg-linha">
+          <button
+            type="button"
+            className={'mtg-chip' + (nivel ? ' is-on' : '')}
+            onClick={() => setNivelamentoFor(taskId, !nivel)}
+            title="Nivela o volume de cada parte a -16 LUFS antes de juntar"
+          >
+            Normalizador
+          </button>
+          <button
+            type="button"
+            className={'mtg-chip' + (decup ? ' is-on' : '')}
+            onClick={() => setDecupagemFor(taskId, !decup)}
+            title="Corta os silêncios entre as falas"
+          >
+            Decupagem
+          </button>
+          {aRef ? <span className="mtg-acoes">{acoesDePosProducao(aRef)}</span> : null}
+        </div>
+
+        {!aRef ? (
+          <div className="mtg-aviso">
+            A análise desta task não está aberta nesta aba — legenda, zoom, inserts e headline
+            seguem com o que já estava salvo. Abre a task no Pilot se quiser mexer neles.
+          </div>
+        ) : null}
+
+        <div className="mtg-rodape">
+          <button type="button" className="mtg-cancelar" onClick={onCancelar}>
+            cancelar
+          </button>
+          <button type="button" className="mtg-ok" onClick={onSeguir}>
+            {acao === 'retomar' ? 'Retomar agora' : 'Montar agora'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function acoesDePosProducao(a: TaskAnalysis) {
     return (
       <>
@@ -1745,6 +1825,15 @@ function ClickUpPilotInner() {
                 onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
                 thumbDaMidia={(k) => insertThumbs[k] || null}
                 duracaoDaMidia={(k) => insertDurs[k] ?? null}
+                lerMidia={async (k) => {
+                  try {
+                    const { loadBlob } = await import('@/lib/zip-store');
+                    return await loadBlob(k);
+                  } catch (e) {
+                    console.warn(`[clickup-pilot] recorte: mídia ${k} não voltou do IDB:`, e);
+                    return null;
+                  }
+                }}
                 thumbAvatar={(a.roleSlots || []).find((sl) => sl.avatarThumb)?.avatarThumb || null}
               />
             ) : null}
@@ -12639,7 +12728,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               // TROCA em 'queued' tem driver próprio (não é dirigida pelo promoter):
                               // libera Retomar/Debug pra nunca ficar sem botão útil se o loop serial cair.
                               queuedRecoverable={b.kind === 'troca'}
-                              onRetomar={() => retomarTaskBatch(b.taskId)}
+                              onRetomar={() => setPedindoMontagem({ taskId: b.taskId, acao: 'retomar' })}
                               onPausar={() => pausarTaskBatch(b.taskId)}
                               // REINICIAR: passa pela mini janela ("editar antes
                               // de reiniciar?") em vez de re-disparar direto.
@@ -12648,7 +12737,20 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               // cima dos previews desta task — nunca lá embaixo
                               // junto da fila.
                               topPanel={
-                                reinicioPainelTaskId === b.taskId && reinicioPlano ? (
+                                pedindoMontagem?.taskId === b.taskId ? (
+                                  <PainelDeMontagem
+                                    key={`montagem:${b.taskId}`}
+                                    taskId={b.taskId}
+                                    acao={pedindoMontagem.acao}
+                                    onCancelar={() => setPedindoMontagem(null)}
+                                    onSeguir={() => {
+                                      const acao = pedindoMontagem.acao;
+                                      setPedindoMontagem(null);
+                                      if (acao === 'retomar') retomarTaskBatch(b.taskId);
+                                      else void rebuildMontage(b.taskId);
+                                    }}
+                                  />
+                                ) : reinicioPainelTaskId === b.taskId && reinicioPlano ? (
                                   <RedispatchPanel
                                     key={`reinicio:${b.taskId}`}
                                     taskName={reinicioPlano.taskName || b.taskName}
@@ -12723,7 +12825,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   + 'algum take mudou depois da montagem. Clique "Atualizar '
                                   + 'montagem", espere terminar, e baixe de novo.';
                               }}
-                              onRebuild={() => void rebuildMontage(b.taskId)}
+                              onRebuild={() => setPedindoMontagem({ taskId: b.taskId, acao: 'remontar' })}
                               isRebuilding={rebuildingTaskId === b.taskId}
                               docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}
                               taskUrl={b.taskUrl || taskAnalyses[b.taskId]?.taskUrl}

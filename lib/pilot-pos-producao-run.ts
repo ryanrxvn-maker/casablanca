@@ -21,6 +21,7 @@ import {
   coberturaNoInstante,
   planoDeVelocidade,
   tempoNaMidia,
+  recorteDaMidia,
   cortesDoVideo,
   janelaDaHeadline,
   textoDaHeadline,
@@ -202,6 +203,8 @@ export async function montarPosProducao(
         const videosPorId = new Map<string, { v: HTMLVideoElement; natural: number }>();
         // preenchido DEPOIS de conhecer as janelas (a velocidade depende delas)
         const velocidadePorId = new Map<string, ReturnType<typeof planoDeVelocidade>>();
+        /** onde o recorte de cada insert começa dentro do arquivo (segundos) */
+        const recortePorId = new Map<string, number>();
         for (const ins of cfg.inserts!) {
           const blob = await cfg.lerMidia!(ins.midiaKey);
           if (!blob) {
@@ -237,7 +240,13 @@ export async function montarPosProducao(
             // que a real fazia o encaixe achar que faltava mídia e entregar
             // uma câmera lenta extrema num insert que na verdade SOBRAVA.
             const doCabecalho = await duracaoDeVideo(blob, 0).catch(() => 0);
-            const natural = doCabecalho > 0 ? doCabecalho : (isFinite(v.duration) ? v.duration : 0) || 0;
+            const arquivoSec = doCabecalho > 0 ? doCabecalho : (isFinite(v.duration) ? v.duration : 0) || 0;
+            // RECORTE: só o pedaço escolhido do arquivo é o insert. Tudo
+            // daqui pra frente enxerga a duração do RECORTE — o encaixe, a
+            // velocidade e o seek. O resto do arquivo não existe.
+            const rec = recorteDaMidia(ins, arquivoSec);
+            const natural = rec.dur;
+            recortePorId.set(ins.id, rec.de);
             durNatural.set(ins.id, natural);
             videosPorId.set(ins.id, { v, natural });
             // O `quadro` só sabe o tempo DA JANELA; a conversão pro tempo da
@@ -249,7 +258,10 @@ export async function montarPosProducao(
               h: v.videoHeight,
               quadro: (tRel: number) => {
                 const pv = velocidadePorId.get(ins.id);
-                const alvo = pv ? tempoNaMidia(tRel, pv, natural) : Math.min(tRel, Math.max(0, natural - 0.04));
+                const inicio = recortePorId.get(ins.id) || 0;
+                const alvo = pv
+                  ? tempoNaMidia(tRel, pv, natural, inicio)
+                  : inicio + Math.min(tRel, Math.max(0, natural - 0.04));
                 if (Math.abs(v.currentTime - alvo) > 0.03) v.currentTime = alvo;
                 return v;
               },
