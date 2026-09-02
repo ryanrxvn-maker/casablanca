@@ -2845,7 +2845,24 @@ function ClickUpPilotInner() {
           }
 
           const docField = (det.custom_fields || ([] as any[])).find((f: any) => /DOC DA COPY/i.test(f.name || ''));
-          const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0];
+          // Override MANUAL de doc por nome de task (01.09): tasks de lote (WL2 /
+          // ED BAK HUN) chegam sem "DOC DA COPY" e sem link na descricao — e o
+          // ClickUp e' read-only pra nos. localStorage
+          // 'darkolab:pilot:doc-override' = { "<trecho do nome>": "<url do doc>" };
+          // primeiro trecho que casar (case-insensitive) vence. So' e' consultado
+          // quando a task NAO tem doc proprio, entao nao muda nada pra quem tem.
+          const docOverride = (() => {
+            try {
+              const raw = localStorage.getItem('darkolab:pilot:doc-override');
+              if (!raw) return undefined;
+              const mapa = JSON.parse(raw) as Record<string, string>;
+              for (const [pat, url] of Object.entries(mapa)) {
+                if (pat && url && task.name.toUpperCase().includes(pat.toUpperCase())) return url;
+              }
+            } catch { /* json invalido = sem override */ }
+            return undefined;
+          })();
+          const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0] || docOverride;
           // Persiste docUrl + taskUrl pra UI poder abrir direto sem ter q ir no ClickUp.
           setTaskAnalyses((prev) => ({
             ...prev,
