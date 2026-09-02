@@ -361,7 +361,17 @@ export function janelasDosInserts(
  * Velocidade MÍNIMA do insert. Abaixo disto o slow motion deixa de parecer
  * escolha e passa a parecer travamento — aí é melhor segurar o último frame.
  */
-export const INSERT_VEL_MIN = 0.5;
+export const INSERT_VEL_MIN = 0.75;
+
+/**
+ * Clipe mais curto que isto NÃO é esticado — nem um pouco.
+ *
+ * Silas, 02.09, sobre uma tela dividida que saiu em câmera lenta extrema:
+ * *"super câmera lenta parece que tá indo de quadro em quadro, horrível"*.
+ * Esticar 1s sobre 8s é 0,12x: o olho vê os quadros um a um. Abaixo deste
+ * piso o clipe roda na velocidade dele e o último quadro segura o resto.
+ */
+export const INSERT_DUR_MIN_PARA_ESTICAR = 2.0;
 
 export type PlanoVelocidade = {
   /** multiplicador aplicado ao tempo da mídia (1 = normal, 0.6 = mais lento) */
@@ -416,10 +426,27 @@ export function planoDeVelocidade(naturalSec: number, janelaSec: number): PlanoV
     return { velocidade: 1, corta: false, congelaApos: 0, blur: 0, motivo: 'exato' };
   }
   if (razao > 1) {
-    // sobra mídia: roda normal e corta no fim da janela
+    // SOBRA mídia: roda na velocidade dela e corta no fim da janela. Nunca
+    // mexe na velocidade — Silas, 02.09: *"se o vídeo do insert tem tamanho
+    // maior que o tempo de duração de onde ele está, não deveria nem mexer na
+    // velocidade dele"*.
     return { velocidade: 1, corta: true, congelaApos: 0, blur: 0, motivo: 'cortou' };
   }
-  // falta mídia: desacelera
+
+  // CLIPE CURTO DEMAIS: não estica. Um clipe de 1s sobre 8s viraria 0,12x e o
+  // olho conta os quadros. Ele roda inteiro, no tempo dele, e o último quadro
+  // segura até o corte.
+  if (naturalSec < INSERT_DUR_MIN_PARA_ESTICAR) {
+    return {
+      velocidade: 1,
+      corta: false,
+      congelaApos: Math.min(janelaSec, naturalSec),
+      blur: 0,
+      motivo: 'desacelerou-e-congelou',
+    };
+  }
+
+  // falta mídia: desacelera — mas só até o piso, que agora é suave (0,75x).
   const vel = Math.max(INSERT_VEL_MIN, razao);
   if (vel <= INSERT_VEL_MIN + 1e-9 && razao < INSERT_VEL_MIN) {
     // nem no piso cobre: o que a mídia alcança + congelado até o fim
@@ -514,6 +541,32 @@ export type HeadlineCfg = {
   ancoraDe: string;
   /** ATÉ ONDE FICA: label da parte em que ela sai */
   ancoraAte: string;
+
+  /* ── APARÊNCIA (02.09) ───────────────────────────────────────────────
+   * O motor de headline já sabia posicionar, redimensionar, alinhar e
+   * pintar — mas a janela do Pilot só mandava `presetId` e `posY`, e todo o
+   * resto ia no default. Silas: *"aqui eu escolho a headline, mas não
+   * escolho a posição, tamanho, nem nada"*.
+   *
+   * Tudo aqui é OPCIONAL: `null`/ausente = o que o MODELO manda. Sem isso o
+   * ajuste fino apagaria a identidade do preset (foi o bug do alinhamento da
+   * cartela de citação, que saía à esquerda por causa de um default concreto). */
+  /** centro horizontal, 0..1 (0.5 = centro) */
+  posX?: number;
+  /** multiplicador do corpo da fonte (1 = o do modelo) */
+  fontScale?: number;
+  /** largura máxima do bloco, fração do frame — é daqui que sai a quebra */
+  width?: number;
+  /** null/ausente = o alinhamento do modelo */
+  align?: 'left' | 'center' | 'right' | null;
+  /** null/ausente = a caixa do modelo */
+  uppercase?: boolean | null;
+  /** fundo atrás do texto; null/ausente = o do modelo */
+  panel?: 'solido' | 'faixa' | 'nenhum' | null;
+  /** 0..1; null/ausente = a do modelo */
+  panelOpacity?: number | null;
+  /** cor do texto (hex); null/ausente = a do modelo */
+  color?: string | null;
 };
 
 export const HEADLINE_CFG_DEFAULT: HeadlineCfg = {
@@ -523,7 +576,38 @@ export const HEADLINE_CFG_DEFAULT: HeadlineCfg = {
   posY: 0.24,
   ancoraDe: '',
   ancoraAte: '',
+  // aparência: tudo herdado do modelo até alguém mexer
+  posX: 0.5,
+  fontScale: 1,
+  width: 0.9,
+  align: null,
+  uppercase: null,
+  panel: null,
+  panelOpacity: null,
+  color: null,
 };
+
+/** Limites do ajuste fino — fora deles a headline sai da tela ou ilegível. */
+export const HEADLINE_LIMITES = {
+  fontScale: { min: 0.55, max: 2.0 },
+  width: { min: 0.35, max: 1.0 },
+  pos: { min: 0.04, max: 0.96 },
+} as const;
+
+/** Prende a aparência dentro do que é desenhável. Config vinda do
+ *  localStorage de uma versão antiga não tem estes campos — e um `undefined`
+ *  virando NaN poria a headline fora do frame, calada. */
+export function normalizarHeadlineCfg(cfg: HeadlineCfg): HeadlineCfg {
+  const prender = (v: number | undefined, lim: { min: number; max: number }, padrao: number) =>
+    Number.isFinite(v as number) ? Math.min(lim.max, Math.max(lim.min, v as number)) : padrao;
+  return {
+    ...cfg,
+    posX: prender(cfg.posX, HEADLINE_LIMITES.pos, 0.5),
+    posY: prender(cfg.posY, HEADLINE_LIMITES.pos, 0.24),
+    fontScale: prender(cfg.fontScale, HEADLINE_LIMITES.fontScale, 1),
+    width: prender(cfg.width, HEADLINE_LIMITES.width, 0.9),
+  };
+}
 
 /**
  * A janela da headline, em segundos, JÁ ENCAIXADA nos cortes.

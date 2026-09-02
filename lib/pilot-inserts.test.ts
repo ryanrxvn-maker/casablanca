@@ -302,12 +302,38 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
   ok(aprox(d.velocidade, 0.75), 'mídia curta desacelera na razão exata (3/4 = 0.75x)');
   ok(!d.corta && d.congelaApos === 0 && d.motivo === 'desacelerou', 'e cobre a janela inteira');
 
-  // CURTO DEMAIS → desacelera até o piso e congela o resto
+  /* ── CLIPE CURTO DEMAIS: não estica NADA (02.09) ────────────────────
+   * Silas fez uma tela dividida com o insert mais longo que o hook e o AD
+   * saiu numa câmera lenta que *"parece que tá indo de quadro em quadro"*.
+   * Duas regras nasceram daí: mídia que SOBRA nunca muda de velocidade, e
+   * clipe abaixo de 2s nunca é esticado — ele roda no tempo dele e o último
+   * quadro segura. */
   const x = planoDeVelocidade(1, 10);
-  ok(x.velocidade === INSERT_VEL_MIN, 'não desacelera abaixo do piso (viraria travamento)');
-  ok(x.congelaApos > 0 && x.congelaApos < 10, 'e o resto da janela fica no último frame');
+  ok(x.velocidade === 1, 'clipe de 1s NÃO é esticado — rodaria a 0,1x e viraria slideshow');
+  ok(aprox(x.congelaApos, 1), 'ele roda inteiro (1s) e o último quadro segura o resto');
   ok(x.motivo === 'desacelerou-e-congelou', 'o motivo é honesto');
-  ok(aprox(x.congelaApos, 2), '1s a 0.5x cobre 2s da janela');
+  ok(x.blur === 0, 'e sem borrão: não há câmera lenta pra mascarar');
+
+  // no limite do piso de esticar
+  ok(planoDeVelocidade(1.9, 12).velocidade === 1, '1,9s ainda é curto demais pra esticar');
+  ok(planoDeVelocidade(2.5, 3).velocidade < 1, '2,5s já pode desacelerar de leve');
+
+  // ── a desaceleração NUNCA passa do piso suave ──
+  for (const [nat, jan] of [[3, 20], [2.5, 30], [4, 9], [2.2, 100]] as Array<[number, number]>) {
+    const pv = planoDeVelocidade(nat, jan);
+    ok(pv.velocidade >= INSERT_VEL_MIN - 1e-9,
+      `${nat}s em ${jan}s não desce de ${INSERT_VEL_MIN}x (deu ${pv.velocidade.toFixed(2)}x)`);
+  }
+  ok(INSERT_VEL_MIN >= 0.7, 'o piso é SUAVE: abaixo de 0,7x o olho começa a contar quadro');
+  const quase = planoDeVelocidade(8.01, 8);
+  ok(quase.velocidade === 1 && quase.motivo === 'exato', 'diferença de 1 centésimo é "exato" — não corta nem desacelera');
+
+  // ── mídia que SOBRA jamais muda de velocidade ──
+  for (const [nat, jan] of [[12, 4], [180, 6], [8.2, 8]] as Array<[number, number]>) {
+    const pv = planoDeVelocidade(nat, jan);
+    ok(pv.velocidade === 1 && pv.corta && pv.blur === 0,
+      `${nat}s numa janela de ${jan}s: corta a 1x, sem câmera lenta nenhuma`);
+  }
 
   // imagem / mídia sem duração: não há o que ajustar
   ok(planoDeVelocidade(0, 5).motivo === 'sem-duracao', 'imagem não tem velocidade');
@@ -316,9 +342,9 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 
 // o mapeamento tempo-da-janela → tempo-da-mídia
 {
-  const d = planoDeVelocidade(3, 6); // 0.5x
+  const d = planoDeVelocidade(3, 4); // 0.75x
   ok(aprox(tempoNaMidia(0, d, 3), 0), 'começo da janela = começo da mídia');
-  ok(aprox(tempoNaMidia(2, d, 3), 1), 'a 2s da janela, 1s da mídia (metade da velocidade)');
+  ok(aprox(tempoNaMidia(2, d, 3), 1.5), 'a 2s da janela, 1,5s da mídia (0,75x)');
   ok(tempoNaMidia(100, d, 3) <= 3, 'NUNCA passa do fim da mídia (seek fora = frame preto)');
   const c = planoDeVelocidade(12, 4); // corta
   ok(aprox(tempoNaMidia(3, c, 12), 3), 'cortando, o tempo anda 1:1');
@@ -361,15 +387,15 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 {
   ok(blurDoSlowMotion(1) === 0, 'velocidade normal não borra nada');
   ok(blurDoSlowMotion(0.95) === 0, 'desaceleração imperceptível também não');
-  const meio = blurDoSlowMotion(0.7);
-  const forte = blurDoSlowMotion(0.5);
+  const meio = blurDoSlowMotion(0.86);
+  const forte = blurDoSlowMotion(INSERT_VEL_MIN);
   ok(meio > 0, 'a partir de um ponto, começa a borrar');
   ok(forte > meio, 'quanto mais lento, mais borrão (o degrau é maior)');
   ok(forte <= INSERT_BLUR_MAX, 'e satura — borrão demais viraria sujeira');
 
   // o plano carrega o blur junto
-  const p1 = planoDeVelocidade(2, 4); // 0.5x
-  ok(p1.blur > 0, 'quem desacelera muito sai com máscara');
+  const p1 = planoDeVelocidade(3, 4); // 0.75x
+  ok(p1.blur > 0, 'quem desacelera sai com máscara');
   ok(planoDeVelocidade(12, 4).blur === 0, 'quem corta não precisa de máscara');
   ok(planoDeVelocidade(4, 4).blur === 0, 'e quem cabe exato também não');
 }

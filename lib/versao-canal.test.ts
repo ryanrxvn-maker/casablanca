@@ -53,7 +53,7 @@ console.log('\nGARANTIA — duas versões por AD (META × YouTube):');
 
 // (2) O YouTube NUNCA colide com o META — nem nome, nem chave.
 {
-  ok(nomeComCanal('AD06G1GL.mp4', 'youtube') === 'AD06G1GL_YOUTUBE.mp4', 'YouTube sufixa antes da extensão');
+  ok(nomeComCanal('AD06G1GL.mp4', 'youtube') === 'AD06G1GL_V2.mp4', 'a 2ª versão sufixa _V2 antes da extensão');
   ok(
     nomeComCanal('AD06G1GL.mp4', 'youtube') !== nomeComCanal('AD06G1GL.mp4', 'meta'),
     'nome do YouTube difere do nome do META',
@@ -77,12 +77,12 @@ console.log('\nGARANTIA — duas versões por AD (META × YouTube):');
 
 // (3) Nome sem extensão e nome com ponto no meio não quebram.
 {
-  ok(nomeComCanal('AD06G1GL', 'youtube') === 'AD06G1GL_YOUTUBE', 'nome sem extensão recebe o sufixo no fim');
+  ok(nomeComCanal('AD06G1GL', 'youtube') === 'AD06G1GL_V2', 'nome sem extensão recebe o sufixo no fim');
   ok(
-    nomeComCanal('AD06.G1.GL.mp4', 'youtube') === 'AD06.G1.GL_YOUTUBE.mp4',
+    nomeComCanal('AD06.G1.GL.mp4', 'youtube') === 'AD06.G1.GL_V2.mp4',
     'sufixo entra antes da ÚLTIMA extensão',
   );
-  ok(nomeComCanal('.gitignore', 'youtube') === '.gitignore_YOUTUBE', 'nome que começa com ponto não vira extensão');
+  ok(nomeComCanal('.gitignore', 'youtube') === '.gitignore_V2', 'nome que começa com ponto não vira extensão');
 }
 
 // (4) precisaGerarDeNovo é conservadora — cada true a mais é crédito gasto.
@@ -173,7 +173,9 @@ console.log('\nGARANTIA — duas versões por AD (META × YouTube):');
 // (8) Sanidade da lista de canais e dos rótulos.
 {
   ok(CANAIS.length === 2 && CANAIS[0] === 'meta', 'META vem primeiro (o YouTube pode reaproveitar o resultado dele)');
-  ok(rotuloCanal('meta') === 'META' && rotuloCanal('youtube') === 'YouTube', 'rótulos legíveis pra UI');
+  // 02.09: o canal virou detalhe interno. Na tela e no arquivo é Versão 1 e 2.
+  ok(rotuloCanal('meta') === 'Versão 1' && rotuloCanal('youtube') === 'Versão 2',
+    'o rótulo da UI é Versão N — META/YouTube não aparecem pro usuário');
 }
 
 // (9) MODO IMAGEM (30.08): no DR MILLION o AD nao tem avatar de biblioteca — a

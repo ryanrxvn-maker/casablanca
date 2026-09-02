@@ -9,8 +9,8 @@
  *  1. A versão 1 é a de HOJE: mesmo nome de arquivo, mesma chave, mesmo
  *     taskId. Ninguém que já funciona é desfeito.
  *  2. Versão N>1 nunca colide com a 1 — nem em nome, nem em chave, nem em id
- *     de task. A versão 2 mantém o sufixo `-yt`/`_YOUTUBE` histórico quando
- *     é a versão de YouTube (compatibilidade com o que já foi entregue).
+ *     de task. Toda versão >= 2 sai como `-v<n>` / `_V<n>`; o rótulo do doc
+ *     (META, YouTube) é só um INDICADOR de ordem e nunca vaza pro nome.
  *  3. Versão sem avatar próprio em papel nenhum NÃO gera de novo: ela é a
  *     mesma entrega da versão 1 (a diferença mora na edição).
  *
@@ -55,13 +55,9 @@ export type VersaoAd = {
 /* ═══════════════ Identidade: nome de arquivo, chave e task ═══════════════ */
 
 /** Sufixo do arquivo entregue. Versão 1 = SEM sufixo (o nome de hoje). */
-export function sufixoVersao(v: VersaoAd | number, nomeVersao?: string): string {
+export function sufixoVersao(v: VersaoAd | number, _nomeVersao?: string): string {
   const n = typeof v === 'number' ? v : v.n;
   if (n <= 1) return '';
-  const nome = (typeof v === 'number' ? nomeVersao : v.nome) || '';
-  // A versão 2 chamada "YouTube" mantém o sufixo histórico — os arquivos já
-  // entregues, a skill de entrega e o Drive esperam `_YOUTUBE`.
-  if (n === 2 && /youtube/i.test(nome)) return '_YOUTUBE';
   return `_V${n}`;
 }
 
@@ -75,11 +71,9 @@ export function nomeComVersao(filename: string, v: VersaoAd | number, nomeVersao
 }
 
 /** Segmento de id/chave da versão. Versão 1 = vazio (id/chave de hoje). */
-function segmentoVersao(v: VersaoAd | number, nomeVersao?: string): string {
+function segmentoVersao(v: VersaoAd | number, _nomeVersao?: string): string {
   const n = typeof v === 'number' ? v : v.n;
   if (n <= 1) return '';
-  const nome = (typeof v === 'number' ? nomeVersao : v.nome) || '';
-  if (n === 2 && /youtube/i.test(nome)) return 'yt';
   return `v${n}`;
 }
 
@@ -198,15 +192,20 @@ export type BlocoDeVersao = {
   papeis: PapelDoDoc[];
 };
 
-/** Nome padrão de uma versão a partir do rótulo do doc. */
-function nomeDoRotulo(rotulo: string, indice: number): string {
-  const r = rotulo.toLowerCase();
-  if (/meta|facebook/.test(r)) return 'META';
-  if (/you\s*tube|yt/.test(r)) return /kwai/.test(r) ? 'YouTube / Kwai' : 'YouTube';
-  if (/kwai/.test(r)) return 'Kwai';
-  if (/tik\s*tok/.test(r)) return 'TikTok';
-  const m = /(\d{1,2})/.exec(r);
-  if (m) return `Avatar ${m[1]}`;
+/**
+ * Nome de uma versão. É SEMPRE "Versão N".
+ *
+ * O doc escreve META, YouTube, Kwai — e isso é só um INDICADOR de quantas
+ * versões ele pede e em que ordem: META é a 1, YouTube é a 2. Silas, 02.09:
+ * *"NUNCA COLOCAR NA NOMENCLATURA: YOUTUBE, NEM META E SIM VERSÃO 1, 2"*.
+ * O canal onde o AD vai rodar é decisão da entrega, não do disparo — e amarrar
+ * o nome do arquivo a ele fazia a versão 2 herdar um caminho de código
+ * separado (o `-yt`), que é de onde vinham as falhas.
+ *
+ * O rótulo do doc continua guardado em `rotuloDoDoc` pra tela mostrar de onde
+ * a versão saiu.
+ */
+function nomeDoRotulo(_rotulo: string, indice: number): string {
   return `Versão ${indice + 1}`;
 }
 
@@ -309,7 +308,10 @@ export function mapearVersoesDoDoc(secaoDoAd: string): MapeamentoVersoes {
   return {
     total: versoes.length,
     versoes,
-    motivo: `O doc pede ${versoes.length} versões: ${versoes.map((v) => v.nome).join(', ')} (avatares diferentes entre elas).`,
+    motivo: `O doc pede ${versoes.length} versões (${blocos
+      .slice(0, MAX_VERSOES)
+      .map((b, i) => `Versão ${i + 1} = ${b.rotulo}`)
+      .join(', ')}) — avatares diferentes entre elas.`,
   };
 }
 

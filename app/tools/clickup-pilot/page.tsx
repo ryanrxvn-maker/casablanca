@@ -4226,8 +4226,59 @@ function ClickUpPilotInner() {
    *  2. Poll videos until ready
    *  3. Download MP4 + zipar com nomes GANCHO/PARTE
    *  4. Salva blob URL no state pra download manual depois */
+  /**
+   * A ANÁLISE DE UMA VERSÃO, RECONSTRUÍDA A PARTIR DA MÃE (02.09).
+   *
+   * Silas disparou um AD com 3 versões e a 2 morreu em "Sem plano salvo pra
+   * re-disparar", enquanto a 1 e a 3 geravam: *"NÃO É PRA FALHAR CARA, MESMO
+   * QUE EU GERE 10, NENHUM É PRA FALHAR"*.
+   *
+   * A irmã de versão não tem análise própria — ela NASCE da análise da mãe no
+   * momento do disparo. Se essa derivação não tiver acontecido (ou o plano
+   * dela não tiver sido persistido), o disparo não tem por que desistir: a mãe
+   * está logo ali e a receita de derivar é a mesma de sempre.
+   *
+   * Devolve null só quando nem a mãe existe — aí é task que precisa ser
+   * analisada mesmo.
+   */
+  function analiseDerivadaDaMae(taskId: string): TaskAnalysis | null {
+    const base = taskIdBaseDaVersao(taskId);
+    if (base === taskId) return null;              // não é versão
+    const mae = taskAnalysesRef.current?.[base] || taskAnalyses[base];
+    if (!mae) return null;
+    const n = versaoDoTaskId(taskId);
+
+    // versão 2 do doc com avatar próprio: é a irmã do canal (id `-yt` legado)
+    if (n === 2 && (mae.duasVersoes || /-yt$/.test(taskId))) {
+      const ir = analiseYoutube(mae);
+      if (ir.roleSlots?.length && ir.partTemplates?.length) {
+        console.warn(`[clickup-pilot] versão 2 de ${base} sem plano — RECONSTRUÍDA da mãe`);
+        return { ...ir, taskId };
+      }
+    }
+    // versões 2..10 do painel
+    const ver = (mae.versoes || []).find((v) => v.n === n);
+    if (ver) {
+      const ir = analiseDaVersao(mae, ver);
+      if (ir.roleSlots?.length && ir.partTemplates?.length) {
+        console.warn(`[clickup-pilot] versão ${n} de ${base} sem plano — RECONSTRUÍDA da mãe`);
+        return { ...ir, taskId };
+      }
+    }
+    // Última linha: a versão existe mas não tem escolha própria registrada —
+    // ela é a mesma geração da mãe. Gerar com o avatar da mãe é o certo aqui,
+    // e é exatamente o que a regra "versão sem avatar próprio não gera de
+    // novo" já diz.
+    if (mae.roleSlots?.length && mae.partTemplates?.length) {
+      console.warn(`[clickup-pilot] versão ${n} de ${base} sem escolha própria — usa o plano da mãe`);
+      return { ...mae, taskId, taskName: `${mae.taskName} - Versão ${n}`, versoes: undefined, duasVersoes: false, canalVersao: undefined };
+    }
+    return null;
+  }
+
   async function runTaskInBackground(taskId: string) {
-    const a = taskAnalyses[taskId];
+    // A versão que perdeu o plano se reconstrói da mãe em vez de falhar.
+    const a = taskAnalyses[taskId] || analiseDerivadaDaMae(taskId) || undefined;
     // VARIACAO DE AVATAR: roteia pro runner VA (pipeline proprio que tambem
     // escreve batchStates). Detecta por taskAnalyses OU pela flag isVA no
     // batchStates (sobrevive reload). Sem essa guarda, runTaskInBackground
@@ -4264,7 +4315,9 @@ function ClickUpPilotInner() {
           [taskId]: {
             ...(prev[taskId] || { taskId, taskName: taskId, baseAdId: taskId, parts: [], startedAt: Date.now() }),
             phase: 'failed',
-            message: 'Sem plano salvo pra re-disparar. Abra essa task no ClickUp Pilot e analise de novo.',
+            message: taskIdBaseDaVersao(taskId) !== taskId
+              ? `Versão ${versaoDoTaskId(taskId)}: não achei o plano dela nem o da task mãe nesta aba. Abra a task no Pilot e analise de novo — as outras versões seguem normal.`
+              : 'Sem plano salvo pra re-disparar. Abra essa task no ClickUp Pilot e analise de novo.',
             finishedAt: Date.now(),
           } as BatchTaskState,
         }));
@@ -4285,7 +4338,7 @@ function ClickUpPilotInner() {
     // título do vídeo no HeyGen — já sai distinguível.
     const canalVersao = canalDoTaskId(taskId);
     const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_')
-      + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
+      + (canalVersao === 'youtube' ? '_V2' : '');
 
     // Re-run da mesma task: revoga blob URLs antigos pra nao vazar memoria
     for (const url of [batchStates[taskId]?.zipBlobUrl, batchStates[taskId]?.montadoZipUrl, batchStates[taskId]?.camufladoZipUrl]) {
@@ -5051,11 +5104,10 @@ function ClickUpPilotInner() {
         }));
         return;
       }
-      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
-      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
-      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
-      // Versao 1 (META) sai sem sufixo; a 2 continua _YOUTUBE; 3..10 saem
-      // _V3.._V10 (o taskId da irma carrega a versao).
+      // Cada versão entrega com sufixo PRÓPRIO: as versões do mesmo AD vão
+      // pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // A versão 1 sai sem sufixo — é o nome que a edição e o Drive esperam;
+      // as demais saem _V2.._V10 (o taskId da irmã carrega a versão).
       const nVersao = versaoDoTaskId(taskId);
       const assembled = canalVersao === 'meta' && nVersao <= 1
         ? pipeRes.items
@@ -5280,7 +5332,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     const canalVersao = canalDoTaskId(taskId);
     const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_')
-      + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
+      + (canalVersao === 'youtube' ? '_V2' : '');
     const validIds = validParts.map((p) => p.videoId!);
 
     try {
@@ -5879,11 +5931,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }));
         return;
       }
-      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
-      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
-      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
-      // Versao 1 (META) sai sem sufixo; a 2 continua _YOUTUBE; 3..10 saem
-      // _V3.._V10 (o taskId da irma carrega a versao).
+      // Cada versão entrega com sufixo PRÓPRIO: as versões do mesmo AD vão
+      // pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // A versão 1 sai sem sufixo — é o nome que a edição e o Drive esperam;
+      // as demais saem _V2.._V10 (o taskId da irmã carrega a versão).
       const nVersao = versaoDoTaskId(taskId);
       const assembled = canalVersao === 'meta' && nVersao <= 1
         ? pipeRes.items
@@ -6260,6 +6311,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // enfileiramento → sobrevive reload → a task até AUTO-RETOMA (o promoter
         // reencontra o plano), sem nem precisar clicar Retomar.
         const qplan = buildPlan(a, canalDoTaskId(id));
+        if (!qplan) {
+          // Era daqui que a versão saía sem plano e morria depois em "Sem
+          // plano salvo": o enfileiramento aceitava o undefined calado.
+          console.error(
+            `[clickup-pilot] ENFILEIRANDO SEM PLANO: ${id} (roleSlots=${a.roleSlots?.length ?? 0}, ` +
+              `partTemplates=${a.partTemplates?.length ?? 0}) — o run vai reconstruir pela mãe`,
+          );
+        }
         const qreplan: BatchTaskState['replan'] = qplan
           ? replanDoPlano(a.taskName, baseAdId, qplan)
           : undefined;
@@ -7503,12 +7562,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const JSZip = (await import('jszip')).default;
       const canalVersao = canalDoTaskId(taskId);
       const adNameClean = b.baseAdId.replace(/[^A-Z0-9]/gi, '_')
-        + (canalVersao === 'youtube' ? '_YOUTUBE' : '');
-      // A versão YouTube entrega com sufixo PRÓPRIO: as duas versões do mesmo
-      // AD vão pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
-      // O META continua sem sufixo — é o nome que a edição e o Drive esperam.
-      // Versao 1 (META) sai sem sufixo; a 2 continua _YOUTUBE; 3..10 saem
-      // _V3.._V10 (o taskId da irma carrega a versao).
+        + (canalVersao === 'youtube' ? '_V2' : '');
+      // Cada versão entrega com sufixo PRÓPRIO: as versões do mesmo AD vão
+      // pra mesma pasta e, com o mesmo nome, uma sobrescreveria a outra.
+      // A versão 1 sai sem sufixo — é o nome que a edição e o Drive esperam;
+      // as demais saem _V2.._V10 (o taskId da irmã carrega a versão).
       const nVersao = versaoDoTaskId(taskId);
       const assembled = canalVersao === 'meta' && nVersao <= 1
         ? pipeRes.items
@@ -8008,7 +8066,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const prontos = (b?.parts || []).filter((x) => x.videoStatus === 'completed').length;
         const temEntrega = !!(b?.montadoZipUrl || b?.montadoZipName || b?.camufladoZipUrl || b?.zipBlobUrl || b?.zipFilename);
         const avatarPrincipal = b?.replan?.parts?.find((x) => x.avatarName)?.avatarName || null;
-        const nomeVersao = n === 1 ? 'META' : n === 2 ? 'YouTube' : `Versão ${n}`;
+        // SEMPRE "Versão N" (02.09). META/YouTube era o rótulo do doc vazando
+        // pra dentro do produto — e escondia que a versão 2 rodava por um
+        // caminho de código próprio.
+        const nomeVersao = `Versão ${n}`;
         return {
           taskId: id,
           n,
@@ -9265,7 +9326,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     return {
       ...a,
       taskId: taskIdDoCanal(a.taskId, 'youtube'),
-      taskName: `${a.taskName} · YouTube`,
+      taskName: `${a.taskName} - Versão 2`,
       canalVersao: 'youtube',
       duasVersoes: false,
       dispatchedAt: undefined,
@@ -12892,6 +12953,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           // Filtra siblings G2/G3 que ja foram analisadas como parte do
                           // primary (G1) — assim aparece UM card so por base task (G1+G2 = 1 card)
                           .filter((a) => !a.sharedWithPrimaryId)
+                          // IRMÃ DE VERSÃO não é análise (02.09): ela é criada pelo
+                          // DISPARO, a partir da análise da mãe, só pra separar fila e
+                          // chaves. Ela entrava em `taskAnalyses` e o AD que tinha 1
+                          // card virava 3 no instante em que o Silas disparava. A fila
+                          // de produção já colapsa por AD (`batchStatesVisiveis`); a
+                          // lista de análise passa a colapsar do mesmo jeito.
+                          .filter((a) => taskIdBaseDaVersao(a.taskId) === a.taskId)
                           .map((a) => {
                           const sym = a.status === 'ready' ? '✓' : a.status === 'partial' ? '⚠' : a.status === 'error' ? '✗' : a.status === 'analyzing' ? '◷' : '·';
                           const color = a.status === 'ready' ? 'border-lime/40 bg-lime/5' :

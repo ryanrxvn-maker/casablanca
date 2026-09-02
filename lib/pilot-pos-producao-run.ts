@@ -24,6 +24,7 @@ import {
   cortesDoVideo,
   janelaDaHeadline,
   textoDaHeadline,
+  normalizarHeadlineCfg,
   type Insert,
   type HeadlineCfg,
 } from './pilot-inserts';
@@ -230,7 +231,13 @@ export async function montarPosProducao(
               v.src = url;
             });
             if (!abriu) { avisos.push(`insert "${ins.midiaNome}" não abriu`); continue; }
-            const natural = v.duration || 0;
+            // A duração vem do CABEÇALHO do arquivo, não do `v.duration`
+            // (02.09). O `onloadeddata` dispara com o 1º quadro pronto, e aí a
+            // duração ainda pode vir errada ou infinita — e uma duração menor
+            // que a real fazia o encaixe achar que faltava mídia e entregar
+            // uma câmera lenta extrema num insert que na verdade SOBRAVA.
+            const doCabecalho = await duracaoDeVideo(blob, 0).catch(() => 0);
+            const natural = doCabecalho > 0 ? doCabecalho : (isFinite(v.duration) ? v.duration : 0) || 0;
             durNatural.set(ins.id, natural);
             videosPorId.set(ins.id, { v, natural });
             // O `quadro` só sabe o tempo DA JANELA; a conversão pro tempo da
@@ -323,16 +330,29 @@ export async function montarPosProducao(
         const texto = textoDaHeadline(cfg.headline, cfg.partes);
         if (jan && texto) {
           const hl = await import('./typography/headline');
+          const est = normalizarHeadlineCfg(cfg.headline);
           headlines = [
             {
               id: 'pilot-hl',
               text: texto,
               start: jan.start * 1000,
               end: jan.end * 1000,
+              // A aparência inteira vai pro render (02.09). `null`/ausente
+              // continua significando "o que o modelo manda" — por isso o ??
+              // e não um valor concreto: um default duro apagaria a
+              // identidade do preset.
               style: {
                 ...hl.HEADLINE_STYLE_DEFAULT,
-                presetId: cfg.headline.presetId,
-                posY: cfg.headline.posY,
+                presetId: est.presetId,
+                posX: est.posX ?? 0.5,
+                posY: est.posY,
+                fontScale: est.fontScale ?? 1,
+                width: est.width ?? 0.9,
+                align: est.align ?? null,
+                uppercase: est.uppercase ?? null,
+                panel: est.panel ?? null,
+                panelOpacity: est.panelOpacity ?? null,
+                color: est.color ?? null,
               },
             },
           ];

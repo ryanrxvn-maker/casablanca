@@ -36,14 +36,27 @@ console.log('— INVARIANTE 1: a versão 1 é o caminho de hoje, intocado —');
   ok(versaoDoTaskId('868k') === 1, 'task sem sufixo é a versão 1');
 }
 
-console.log('— compatibilidade: a versão 2 "YouTube" mantém o sufixo histórico —');
+console.log('— nomenclatura: NUNCA YouTube/META, sempre Versão N (02.09) —');
 {
-  ok(sufixoVersao(V(2, 'YouTube')) === '_YOUTUBE', 'arquivo continua _YOUTUBE');
-  ok(nomeComVersao('AD06G1GL.mp4', V(2, 'YouTube / Kwai')) === 'AD06G1GL_YOUTUBE.mp4', 'YouTube/Kwai também');
-  ok(taskIdDaVersao('868k', V(2, 'YouTube')) === '868k-yt', 'task irmã continua -yt');
-  ok(chaveEntregaVersao('batch:868k:montado', V(2, 'YouTube')) === 'batch:868k:yt:montado', 'chave continua :yt');
-  ok(versaoDoTaskId('868k-yt') === 2, '-yt é a versão 2');
-  ok(taskIdBaseDaVersao('868k-yt') === '868k', 'volta pra task mãe');
+  // Silas: *"o fato de pedir versão YouTube e META no docs significa que META
+  // seria versão 1 e YouTube a versão 2, mas NUNCA colocar na nomenclatura"*.
+  // O canal é decisão da entrega; amarrar o arquivo a ele fazia a versão 2
+  // herdar um caminho de código separado — de onde vinham as falhas.
+  ok(sufixoVersao(V(2, 'YouTube')) === '_V2', 'o arquivo da versão 2 é _V2, não _YOUTUBE');
+  ok(nomeComVersao('AD06G1GL.mp4', V(2, 'YouTube / Kwai')) === 'AD06G1GL_V2.mp4', 'nem "YouTube / Kwai" vaza pro nome');
+  ok(nomeComVersao('AD06G1GL.mp4', V(2, 'META')) === 'AD06G1GL_V2.mp4', 'META também não vaza');
+  ok(taskIdDaVersao('868k', V(2, 'YouTube')) === '868k-v2', 'a task irmã é -v2');
+  ok(chaveEntregaVersao('batch:868k:montado', V(2, 'YouTube')) === 'batch:868k:v2:montado', 'a chave é :v2');
+  ok(versaoDoTaskId('868k-v2') === 2, '-v2 é a versão 2');
+  ok(taskIdBaseDaVersao('868k-v2') === '868k', 'volta pra task mãe');
+}
+
+console.log('— mas o id LEGADO -yt continua sendo lido (AD já disparado) —');
+{
+  // Trocar a nomenclatura não pode órfãozar o que já está no localStorage e no
+  // IndexedDB: quem disparou ontem tem irmãs com id `-yt` gravadas.
+  ok(versaoDoTaskId('868k-yt') === 2, 'id velho -yt ainda é a versão 2');
+  ok(taskIdBaseDaVersao('868k-yt') === '868k', 'e ainda colapsa no card da mãe');
 }
 
 console.log('— versões 3..10 —');
@@ -148,8 +161,11 @@ console.log('— avatar DIFERENTE entre Meta e YouTube → DUAS versões —');
 {
   const m = mapearVersoesDoDoc(DOC_DIFERENTE);
   ok(m.total === 2, `2 versões (veio ${m.total})`);
-  ok(m.versoes[0].nome === 'META', '1ª = META');
-  ok(m.versoes[1].nome === 'YouTube / Kwai', `2ª = YouTube / Kwai (veio ${m.versoes[1].nome})`);
+  ok(m.versoes[0].nome === 'Versão 1', `1ª = Versão 1 (veio ${m.versoes[0].nome})`);
+  ok(m.versoes[1].nome === 'Versão 2', `2ª = Versão 2 (veio ${m.versoes[1].nome})`);
+  // o rótulo do doc sobrevive como PROCEDÊNCIA, só não vira nome
+  ok(/meta/i.test(m.versoes[0].rotuloDoDoc || ''), 'o rótulo META do doc fica guardado');
+  ok(/you\s*tube/i.test(m.versoes[1].rotuloDoDoc || ''), 'e o do YouTube também');
   ok(m.versoes[1].papeis[0].username === 'joshuagonzalezmd', 'papel da 2ª leva o avatar dela');
 }
 
@@ -157,7 +173,7 @@ console.log('— "Avatar 1/2/3:" também vira versão (mesma regra) —');
 {
   const m = mapearVersoesDoDoc(DOC_AVATAR_N);
   ok(m.total === 3, `3 versões (veio ${m.total})`);
-  ok(m.versoes.map((v) => v.nome).join(',') === 'Avatar 1,Avatar 2,Avatar 3', 'nomes vêm do rótulo');
+  ok(m.versoes.map((v) => v.nome).join(',') === 'Versão 1,Versão 2,Versão 3', 'a numeração vem da ORDEM do doc, não do rótulo');
 }
 {
   const doc = ['Avatar 1:', 'Doutor: mesmo.mp4', 'Avatar 2:', 'Doutor: mesmo.mp4'].join('\n');

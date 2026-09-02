@@ -30,18 +30,24 @@ export const CANAIS: VersaoCanal[] = ['meta', 'youtube'];
 
 /** Rótulo pra UI e pra mensagem de progresso. */
 export function rotuloCanal(canal: VersaoCanal): string {
-  return canal === 'youtube' ? 'YouTube' : 'META';
+  // O canal virou detalhe INTERNO (02.09): na tela e no arquivo isto é
+  // "Versão 1" e "Versão 2". Ver [[lib/versoes-ad.ts]].
+  return canal === 'youtube' ? 'Versão 2' : 'Versão 1';
 }
 
 /**
- * Sufixo no nome do arquivo entregue. META fica SEM sufixo de propósito: é o
- * nome que a edição, a entrega e o Drive já esperam (`AD06G1GL.mp4`).
+ * Sufixo no nome do arquivo entregue. A versão 1 fica SEM sufixo de propósito:
+ * é o nome que a edição, a entrega e o Drive já esperam (`AD06G1GL.mp4`).
+ *
+ * A 2 saía `_YOUTUBE`. Virou `_V2` em 02.09 — o mesmo sufixo que as versões
+ * 3..10 já usavam. Silas: *"nunca colocar na nomenclatura: YouTube, nem META
+ * e sim versão 1, 2 e etc"*.
  */
 export function sufixoCanal(canal: VersaoCanal): string {
-  return canal === 'youtube' ? '_YOUTUBE' : '';
+  return canal === 'youtube' ? '_V2' : '';
 }
 
-/** `AD06G1GL.mp4` + youtube → `AD06G1GL_YOUTUBE.mp4`. META devolve igual. */
+/** `AD06G1GL.mp4` + a 2ª versão → `AD06G1GL_V2.mp4`. A 1ª devolve igual. */
 export function nomeComCanal(filename: string, canal: VersaoCanal): string {
   const sufixo = sufixoCanal(canal);
   if (!sufixo) return filename;
