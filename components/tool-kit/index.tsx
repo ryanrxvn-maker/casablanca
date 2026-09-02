@@ -170,6 +170,7 @@ export function ToolStep({
   hue = 'rgba(167,139,250,0.45)',
   icon,
   action,
+  still,
   children,
 }: {
   /** Mantido só pra compat — não é mais renderizado. */
@@ -180,11 +181,20 @@ export function ToolStep({
   icon?: ReactNode;
   /** Elemento opcional alinhado à direita do header (ex.: um toggle). */
   action?: ReactNode;
+  /**
+   * Cartão PARADO: sem overflow-hidden e sem o levanta-no-hover. Existe pro
+   * passo que carrega uma coluna position:sticky por dentro (o editor de
+   * legendas) — overflow-hidden e transform em ancestral MATAM o sticky.
+   */
+  still?: boolean;
   children: ReactNode;
 }) {
   return (
     <section
-      className="tool-step group relative overflow-hidden rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:-translate-y-[2px] hover:border-violet/35 hover:shadow-depth-2 md:p-7"
+      className={
+        'tool-step group relative rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:border-violet/35 hover:shadow-depth-2 md:p-7 ' +
+        (still ? '' : 'overflow-hidden hover:-translate-y-[2px]')
+      }
       style={{
         background:
           'linear-gradient(180deg, rgba(255,255,255,0.028), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',

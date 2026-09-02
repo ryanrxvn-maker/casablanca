@@ -29,6 +29,7 @@ import {
   spliceRecovered,
   type AsrGap,
 } from './asr-gaps';
+import { afinarTempos } from './asr-tempo';
 
 /** Teto de janelas re-enviadas — cada uma é uma chamada a mais na API. */
 const MAX_RECUPERACOES = 6;
@@ -86,6 +87,11 @@ export async function auditarTranscricao(
   const { mask } = detectSpeechMask(f);
   const fala = maskToSpans(mask, f.frameSec);
 
+  // ⭐ AFINA os tempos contra a fala medida ANTES de medir os vãos: palavra
+  // que nascia no silêncio (legenda piscando cedo) encosta na voz. Covarde
+  // por contrato — ver lib/typography/asr-tempo.ts.
+  words = afinarTempos(words, fala);
+
   const gaps = findAsrGaps(words, fala, dur);
   const { falhas, silencios } = describeGaps(gaps);
   const base: AuditResult = {
@@ -128,6 +134,8 @@ export async function auditarTranscricao(
   }
 
   // mede DE NOVO com as palavras novas: o que ainda ficou sem legenda?
+  // (as recuperadas também passam pela afinação — chegaram cruas do Whisper)
+  atual = afinarTempos(atual, fala);
   const depois = describeGaps(findAsrGaps(atual, fala, dur));
   return {
     words: atual,

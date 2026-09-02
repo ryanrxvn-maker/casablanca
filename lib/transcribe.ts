@@ -82,6 +82,11 @@ async function transcribeViaGroq(
   fd.append('model', 'whisper-large-v3');
   fd.append('response_format', 'verbose_json');
   fd.append('timestamp_granularities[]', 'word');
+  // temperatura 0 = decodificação gulosa determinística. O default do
+  // Whisper escala a temperatura quando "acha que travou" e é aí que nascem
+  // as viajadas (palavra inventada em trecho difícil). Preferimos o vão —
+  // a auditoria recupera vão; palavra errada ninguém detecta.
+  fd.append('temperature', '0');
   // 'auto' = Whisper detecta o idioma sozinho (omite o parâmetro)
   if (language !== 'auto') fd.append('language', language);
   if (vocab.length > 0) {

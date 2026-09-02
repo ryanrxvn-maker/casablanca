@@ -20,6 +20,7 @@ import {
   drawHeadline,
   getHeadlinePreset,
   HEADLINE_PRESETS,
+  HEADLINE_STYLE_DEFAULT,
   type Headline,
   type HeadlineAlign,
   type HeadlineStyle,
@@ -29,7 +30,63 @@ import { formatTime } from '@/lib/utils';
 const T3D =
   ' shadow-[0_2px_0_rgba(0,0,0,0.16),0_6px_12px_-6px_rgba(0,0,0,0.25)] hover:-translate-y-[1.5px] hover:shadow-[0_3.5px_0_rgba(0,0,0,0.16),0_10px_18px_-8px_rgba(0,0,0,0.3)] active:translate-y-[1px] active:shadow-[inset_0_2px_5px_rgba(0,0,0,0.28)] transition-all duration-150 will-change-transform';
 
+/** Amostra desenhada quando a headline ainda não tem texto. */
+const TEXTO_AMOSTRA = 'Texto escrito aqui da headline';
+
 /* ───────────────────────────── prévia ao vivo ─────────────────────────── */
+
+/**
+ * Miniatura de UM modelo, desenhada pelo motor real — escolher modelo lendo
+ * nome ("Rasgado"?) obrigava a testar um por um. Estática: desenha uma vez
+ * quando as fontes chegam.
+ */
+function ModeloThumb({ presetId }: { presetId: string }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void ensureTypoFonts().then(() => {
+      if (!vivo) return;
+      const c = ref.current;
+      const ctx = c?.getContext('2d');
+      if (!c || !ctx) return;
+      ctx.clearRect(0, 0, c.width, c.height);
+      try {
+        drawHeadline(
+          ctx,
+          {
+            id: 'thumb-' + presetId,
+            text: 'Sua headline aqui',
+            start: 0,
+            end: 1,
+            style: {
+              ...HEADLINE_STYLE_DEFAULT,
+              presetId,
+              posX: 0.5,
+              posY: 0.5,
+              width: 0.94,
+              fontScale: 2.1,
+            },
+          },
+          c.width,
+          c.height,
+        );
+      } catch {
+        /* thumb quebrada não derruba o painel */
+      }
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [presetId]);
+  return (
+    <canvas
+      ref={ref}
+      width={220}
+      height={116}
+      className="block h-[58px] w-full rounded-[8px]"
+    />
+  );
+}
 
 function HeadlinePreview({ headline }: { headline: Headline }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
@@ -45,9 +102,16 @@ function HeadlinePreview({ headline }: { headline: Headline }) {
       ctx.clearRect(0, 0, c.width, c.height);
       const h = live.current;
       // a prévia mostra a headline no MEIO do quadrinho, no tamanho relativo
-      // certo — quem manda na posição real é o arrasto no preview do vídeo
+      // certo — quem manda na posição real é o arrasto no preview do vídeo.
+      // Sem texto ainda, entra a AMOSTRA: prévia vazia não mostra o modelo.
+      const texto = h.text.trim() ? h.text : TEXTO_AMOSTRA;
       try {
-        drawHeadline(ctx, { ...h, style: { ...h.style, posX: 0.5, posY: 0.5 } }, c.width, c.height);
+        drawHeadline(
+          ctx,
+          { ...h, text: texto, style: { ...h.style, posX: 0.5, posY: 0.5 } },
+          c.width,
+          c.height,
+        );
       } catch {
         /* um frame ruim não pode derrubar o relógio compartilhado */
       }
@@ -156,9 +220,11 @@ export function HeadlinePanel({
     <div className="mt-5 rounded-[16px] bg-bg-soft/40 p-4 shadow-[inset_0_0_0_1px_rgb(var(--line))]">
       <div className="mb-3 flex flex-wrap items-center gap-2.5">
         <span className="hl-badge">Headlines</span>
-        <span className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-text-muted">
-          Texto parado por cima do vídeo. Arrasta no preview pra posicionar e
-          usa a faixa azul da timeline pra dizer quando entra e quando sai.
+        <span
+          className="min-w-0 flex-1 truncate text-[11.5px] text-text-muted"
+          title="Arrasta no preview pra posicionar; a faixa azul da timeline diz quando entra e quando sai."
+        >
+          Texto parado por cima do vídeo
         </span>
         <button
           type="button"
@@ -222,7 +288,7 @@ export function HeadlinePanel({
                   <span className="field-label mb-1.5 block text-[11.5px] text-text-muted">
                     Modelo
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {HEADLINE_PRESETS.map((p) => (
                       <button
                         key={p.id}
@@ -232,9 +298,25 @@ export function HeadlinePanel({
                           onCommit();
                           setStyle({ presetId: p.id });
                         }}
-                        className={'fx-chip' + (sel.style.presetId === p.id ? ' is-on' : '')}
+                        className={
+                          'group flex flex-col items-center gap-1 rounded-[12px] p-1.5 pb-1 transition-all ' +
+                          (sel.style.presetId === p.id
+                            ? 'bg-cyan-400/[0.09] shadow-[inset_0_0_0_1.5px_rgba(34,211,238,0.7)]'
+                            : 'bg-black/25 shadow-[inset_0_0_0_1px_rgb(var(--line))] hover:shadow-[inset_0_0_0_1px_rgba(34,211,238,0.4)]')
+                        }
+                        title={p.name}
                       >
-                        {p.name}
+                        <span className="w-full overflow-hidden rounded-[8px] bg-[linear-gradient(135deg,#23272e,#141619)]">
+                          <ModeloThumb presetId={p.id} />
+                        </span>
+                        <span
+                          className={
+                            'text-[10.5px] font-bold ' +
+                            (sel.style.presetId === p.id ? 'text-cyan-500' : 'text-text-muted group-hover:text-text')
+                          }
+                        >
+                          {p.name}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -376,9 +458,6 @@ export function HeadlinePanel({
                   >
                     {formatTime(sel.end / 1000)}
                   </button>
-                  <span className="text-[11px] text-text-muted">
-                    (clica pra usar o ponto atual do vídeo, ou arrasta a barra azul na timeline)
-                  </span>
                   <button
                     type="button"
                     disabled={disabled}

@@ -882,15 +882,18 @@ export async function renderTypographyVideo(opts: {
 
     // bitrate: régua por bpp, mas ACOMPANHA a fonte quando ela é mais pesada
     // que a régua (re-encodar acima do bitrate original não deixa nada na
-    // mesa). Teto de 20M + orçamento de MEMFS seguram arquivo e memória; a
-    // régua nunca desce abaixo do próprio piso (legenda nítida mesmo com
-    // fonte fraca). srcRate inclui áudio/container (~5-10% a mais) — inócuo.
-    const bppRate = W * H * FPS * 0.12;
+    // mesa). A fonte ganha 1,5x DE FOLGA: celular grava HEVC, e H.264 no
+    // MESMO bitrate de um HEVC perde nitidez visível — era o "legendou e o
+    // vídeo perdeu qualidade" (02.09). Teto de 26M + orçamento de MEMFS
+    // seguram arquivo e memória; a régua nunca desce abaixo do próprio piso
+    // (0,14 bpp — legenda nítida mesmo com fonte fraca). srcRate inclui
+    // áudio/container (~5-10% a mais) — só reforça a folga.
+    const bppRate = W * H * FPS * 0.14;
     const srcRate = (file.size * 8) / durationSec;
     const budgetRate = (RENDER_BYTES_BUDGET * 8) / durationSec;
     const bitrate = Math.round(
       Math.min(
-        Math.max(bppRate, Math.min(srcRate, 20_000_000), 2_500_000),
+        Math.max(bppRate, Math.min(srcRate * 1.5, 26_000_000), 2_500_000),
         budgetRate,
       ),
     );

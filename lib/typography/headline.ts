@@ -65,6 +65,26 @@ export type Headline = {
 export type HeadlinePreset = {
   id: string;
   name: string;
+  /**
+   * COMO o painel e desenhado. Cada referencia do Silas pedia um desenho que
+   * um retangulo com raio nao faz:
+   *  - 'rasgado': papel rasgado — a borda e um polígono serrilhado
+   *    deterministico (semente = id da headline, entao nao formiga entre
+   *    frames nem muda entre preview e export)
+   *  - 'news': barra de plantao de jornal — gradiente vertical + brilho
+   *    de vidro na metade de cima + filete de luz na borda
+   *  - 'padrao': retangulo (com ou sem raio) de sempre
+   */
+  kind: 'padrao' | 'rasgado' | 'news';
+  /** gradiente VERTICAL do painel (stops 0..1) — quando presente, vence panelColor */
+  panelGrad: Array<[number, string]> | null;
+  /**
+   * Aspas como SELO: um quadradinho arredondado na cor quoteColor montado
+   * SOBRE a borda de cima do painel (metade pra fora), com as aspas brancas
+   * dentro — como na cartela de citacao da referencia. false = aspas soltas
+   * desenhadas dentro do painel (estilo antigo).
+   */
+  quoteBadge: boolean;
   font: FontKey;
   /** corpo da fonte como fração da ALTURA do frame */
   size: number;
@@ -101,6 +121,9 @@ export type HeadlinePreset = {
 };
 
 const base = (p: Partial<HeadlinePreset> & Pick<HeadlinePreset, 'id' | 'name'>): HeadlinePreset => ({
+  kind: 'padrao',
+  panelGrad: null,
+  quoteBadge: false,
   font: 'montserrat900',
   size: 0.052,
   lineHeight: 1.14,
@@ -125,36 +148,108 @@ const base = (p: Partial<HeadlinePreset> & Pick<HeadlinePreset, 'id' | 'name'>):
 });
 
 /**
- * O primeiro é o do print que o Silas mandou (31.08): painel escuro,
- * aspas grandes no topo, texto branco pesado em caixa alta alinhado à
- * esquerda.
+ * Modelos — cada um copia UMA referência real que o Silas mandou em print
+ * (02.09), e o pedido foi fidelidade máxima: "0 diferenças". Por isso os
+ * comentários citam a referência, não gosto meu.
  */
 export const HEADLINE_PRESETS: HeadlinePreset[] = [
-  // ⭐ A REFERÊNCIA do Silas (01.09), lida no print em tamanho maior. O que
-  // eu tinha errado antes: NÃO é cartela preta arredondada com texto à
-  // esquerda. É uma FAIXA de borda a borda em verde-petróleo dessaturado,
-  // texto branco pesado CENTRALIZADO, e aspas pequenas em verde claro no
-  // canto de cima à esquerda — fora do fluxo do texto.
+  // ⭐ REF 1 — cartela de citação: faixa verde-sálvia de borda a borda, texto
+  // branco pesado CENTRALIZADO em caixa alta, e um SELO quadradinho verde-
+  // claro com aspas brancas montado sobre a borda de cima, à esquerda.
   base({
     id: 'cartela-citacao',
-    name: 'Cartela',
-    panelColor: '#3d5b55',
+    name: 'Citação',
+    panelColor: '#587568',
     panelOpacity: 1,
     fullBleed: true,
     radius: 0,
     align: 'center',
     quote: true,
-    quoteSize: 1.15,
-    quoteColor: '#8fb8a4',
+    quoteBadge: true,
+    quoteSize: 1.5,
+    quoteColor: '#7fa693',
     size: 0.038,
-    lineHeight: 1.3,
+    lineHeight: 1.32,
     padX: 0.9,
-    padY: 0.75,
+    padY: 0.8,
     spacing: 0.004,
     shadow: 0,
   }),
-  // a cartela escura de canto arredondado continua existindo (era o que eu
-  // tinha entendido antes) — serve pra outro tipo de peça
+  // ⭐ REF 2 — papel RASGADO vermelho: retalho de papel de borda serrilhada,
+  // texto branco arredondado em caixa BAIXA, centralizado. O rasgo é o
+  // desenho inteiro — retângulo arredondado não parece papel.
+  base({
+    id: 'rasgado-vermelho',
+    name: 'Rasgado',
+    kind: 'rasgado',
+    font: 'poppins800',
+    uppercase: false,
+    panelColor: '#c0111c',
+    panelGrad: [
+      [0, '#d31420'],
+      [1, '#a90d18'],
+    ],
+    panelOpacity: 1,
+    align: 'center',
+    quote: false,
+    size: 0.044,
+    lineHeight: 1.3,
+    padX: 0.85,
+    padY: 0.55,
+    radius: 0,
+    shadow: 0.05,
+  }),
+  // ⭐ REF 3 — TARJA vermelha inteira: banda sólida de borda a borda, canto
+  // RETO, texto branco em caixa baixa alinhado à ESQUERDA com respiro grande.
+  base({
+    id: 'tarja-vermelha',
+    name: 'Tarja',
+    font: 'poppins800',
+    uppercase: false,
+    panelColor: '#b31217',
+    panelGrad: [
+      [0, '#c2151b'],
+      [1, '#8f0e13'],
+    ],
+    panelOpacity: 1,
+    fullBleed: true,
+    radius: 0,
+    align: 'left',
+    quote: false,
+    size: 0.042,
+    lineHeight: 1.32,
+    padX: 1.1,
+    padY: 0.62,
+    shadow: 0,
+  }),
+  // ⭐ REF 4 — barra NEWS azul: gradiente azul-claro→azul-fundo com brilho de
+  // vidro em cima e filete de luz na borda, de ponta a ponta, texto branco
+  // pesado à esquerda — a cartela de plantão de telejornal.
+  base({
+    id: 'news-azul',
+    name: 'News',
+    kind: 'news',
+    font: 'archivo',
+    uppercase: false,
+    panelColor: '#2f6fd6',
+    panelGrad: [
+      [0, '#6fb0f5'],
+      [0.45, '#2f6fd6'],
+      [1, '#173f96'],
+    ],
+    panelOpacity: 1,
+    fullBleed: true,
+    radius: 0.3,
+    align: 'left',
+    quote: false,
+    size: 0.04,
+    lineHeight: 1.25,
+    padX: 1.0,
+    padY: 0.6,
+    shadow: 0,
+  }),
+  // cartela escura de canto arredondado com aspas grandes soltas — pra
+  // depoimento em vídeo escuro
   base({
     id: 'aspas-escura',
     name: 'Aspas',
@@ -170,14 +265,16 @@ export const HEADLINE_PRESETS: HeadlinePreset[] = [
     spacing: 0.005,
     shadow: 0,
   }),
-  base({ id: 'faixa-escura', name: 'Painel', quote: false }),
+  // cartela CLARA (texto escuro em papel claro) — vídeo escuro demais pro resto
   base({
-    id: 'barra-acento',
-    name: 'Barra',
-    quote: false,
-    accentBar: 0.16,
-    padX: 0.7,
+    id: 'aspas-clara',
+    name: 'Clara',
+    quote: true,
+    color: '#12131a',
+    panelColor: '#f4f4f0',
+    panelOpacity: 0.92,
   }),
+  // uma faixinha POR LINHA, colada no texto — legenda de jornal
   base({
     id: 'faixa-linha',
     name: 'Faixa',
@@ -187,27 +284,13 @@ export const HEADLINE_PRESETS: HeadlinePreset[] = [
     padY: 0.3,
     radius: 0.06,
   }),
+  // só o texto com sombra — pra quando o vídeo já é o fundo
   base({
     id: 'limpa',
-    name: 'Sem painel',
+    name: 'Sem fundo',
     panel: 'nenhum',
     quote: false,
     shadow: 0.14,
-  }),
-  base({
-    id: 'aspas-clara',
-    name: 'Aspas clara',
-    quote: true,
-    color: '#12131a',
-    panelColor: '#f4f4f0',
-    panelOpacity: 0.92,
-  }),
-  base({
-    id: 'centro',
-    name: 'Centro',
-    align: 'center',
-    quote: false,
-    panelOpacity: 0.66,
   }),
 ];
 
@@ -307,7 +390,8 @@ export function layoutHeadline(
   const padY = preset.padY * fontPx;
   const painel = h.style.panel ?? preset.panel;
   const quote = h.style.quote ?? preset.quote;
-  const quotePx = quote ? fontPx * (preset.quoteSize * 0.62) : 0;
+  // selo: metade dele mora FORA do painel, então a folga interna é menor
+  const quotePx = quote ? fontPx * preset.quoteSize * (preset.quoteBadge ? 0.4 : 0.62) : 0;
 
   const upper = h.style.uppercase ?? preset.uppercase;
   const texto = upper ? h.text.toUpperCase() : h.text;
@@ -320,17 +404,23 @@ export function layoutHeadline(
 
   const textW = Math.max(1, ...lines.map((l) => l.width));
   const textH = lines.length * lineH;
-  const boxW = painel === 'nenhum' ? textW : textW + padX * 2;
+  // fullBleed: o PAINEL vai de borda a borda do quadro (tarja, news,
+  // cartela). Antes o flag so mexia nas aspas e a "tarja" saia caixinha
+  // solta no meio — nada a ver com a referencia.
+  const bleed = preset.fullBleed && painel !== 'nenhum';
+  const boxW = bleed ? W : painel === 'nenhum' ? textW : textW + padX * 2;
   const boxH = (painel === 'nenhum' ? textH : textH + padY * 2) + quotePx;
 
   // âncora: posX/posY é o CENTRO do bloco, com a mesma promessa do arrasto da
   // legenda — dá pra pendurar pra fora, mas nunca some inteiro
   const restoX = Math.max(8, Math.min(boxW, W) * 0.14);
   const restoY = Math.max(8, Math.min(boxH, H) * 0.14);
-  const cx = Math.min(
-    W - restoX + boxW / 2,
-    Math.max(restoX - boxW / 2, h.style.posX * W),
-  );
+  const cx = bleed
+    ? W / 2 // borda a borda: so a ALTURA e do user
+    : Math.min(
+        W - restoX + boxW / 2,
+        Math.max(restoX - boxW / 2, h.style.posX * W),
+      );
   const cy = Math.min(
     H - restoY + boxH / 2,
     Math.max(restoY - boxH / 2, h.style.posY * H),
@@ -402,6 +492,83 @@ function roundRectPath(
   ctx.closePath();
 }
 
+/* ── papel rasgado ──
+ * A borda serrilhada nasce de um PRNG semeado pelo id da headline: o rasgo é
+ * sempre o MESMO em todo frame, no preview e no export — rasgo que formiga
+ * entre frames vira ruído, não papel. */
+function prngDe(seed: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), h | 1);
+    h ^= h + Math.imul(h ^ (h >>> 7), h | 61);
+    return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Polígono de papel rasgado ao redor da caixa (dente ~fração do corpo). */
+function tornPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  dente: number,
+  seed: string,
+) {
+  const rnd = prngDe(seed);
+  // ondas LARGAS e suaves (a referência é papel rasgado de verdade, não
+  // selo picotado): poucos dentes, amplitude irregular, e o contorno passa
+  // por curvas quadráticas em vez de retas — rasgo tem fibra, não vértice.
+  const passo = dente * 2.6;
+  const pts: Array<[number, number]> = [];
+  const nTop = Math.max(3, Math.round(w / passo));
+  const nSide = Math.max(2, Math.round(h / passo));
+  const amp = () => (rnd() - 0.5) * dente * (0.9 + rnd() * 1.6);
+  for (let i = 0; i <= nTop; i++)
+    pts.push([x + (w * i) / nTop, y + amp() * (i === 0 || i === nTop ? 0.5 : 1)]);
+  for (let i = 1; i <= nSide; i++)
+    pts.push([x + w + amp(), y + (h * i) / nSide]);
+  for (let i = 1; i <= nTop; i++)
+    pts.push([x + w - (w * i) / nTop, y + h + amp() * (i === nTop ? 0.5 : 1)]);
+  for (let i = 1; i < nSide; i++)
+    pts.push([x + amp(), y + h - (h * i) / nSide]);
+  // metade dos vértices é PONTA (lineTo), metade é fibra (curva) — tudo
+  // curva vira balão, tudo reta vira serra de picote; o rasgo real mistura.
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i];
+    if (rnd() < 0.5) {
+      ctx.lineTo(a[0], a[1]);
+    } else {
+      const b = pts[(i + 1) % pts.length];
+      ctx.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    }
+  }
+  ctx.closePath();
+}
+
+/** Preenchimento do painel: gradiente vertical quando o modelo pede. */
+function panelPaint(
+  ctx: CanvasRenderingContext2D,
+  preset: HeadlinePreset,
+  corPainel: string,
+  opac: number,
+  y: number,
+  h: number,
+): string | CanvasGradient {
+  if (preset.panelGrad && preset.panelGrad.length > 1) {
+    const g = ctx.createLinearGradient(0, y, 0, y + h);
+    for (const [o, c] of preset.panelGrad) g.addColorStop(o, comAlpha(c, opac));
+    return g;
+  }
+  return comAlpha(corPainel, opac);
+}
+
 /** Desenha UMA headline. Não mexe em nada fora do próprio save/restore. */
 export function drawHeadline(
   ctx: CanvasRenderingContext2D,
@@ -443,8 +610,53 @@ export function drawHeadline(
         roundRectPath(ctx, x, y, w, L.lineH, preset.radius * L.fontPx);
         ctx.fill();
       }
+    } else if (preset.kind === 'rasgado') {
+      // papel rasgado: sombra macia por baixo + polígono serrilhado estável
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = L.fontPx * 0.35;
+      ctx.shadowOffsetY = L.fontPx * 0.16;
+      tornPath(ctx, L.box.x, L.box.y, L.box.w, L.box.h, L.fontPx * 0.34, h.id);
+      ctx.fillStyle = panelPaint(ctx, preset, corPainel, opac, L.box.y, L.box.h);
+      ctx.fill();
+      ctx.restore();
+    } else if (preset.kind === 'news') {
+      // barra de plantão: gradiente + BRILHO de vidro em cima + filete de luz
+      const r = preset.radius * L.fontPx;
+      roundRectPath(ctx, L.box.x, L.box.y, L.box.w, L.box.h, r);
+      ctx.fillStyle = panelPaint(ctx, preset, corPainel, opac, L.box.y, L.box.h);
+      ctx.fill();
+      ctx.save();
+      roundRectPath(ctx, L.box.x, L.box.y, L.box.w, L.box.h, r);
+      ctx.clip();
+      const gloss = ctx.createLinearGradient(0, L.box.y, 0, L.box.y + L.box.h * 0.52);
+      gloss.addColorStop(0, 'rgba(255,255,255,0.34)');
+      gloss.addColorStop(1, 'rgba(255,255,255,0.03)');
+      ctx.fillStyle = gloss;
+      ctx.fillRect(L.box.x, L.box.y, L.box.w, L.box.h * 0.52);
+      // sombra interna no pé — dá o corpo 3D da cartela de TV
+      const pe = ctx.createLinearGradient(0, L.box.y + L.box.h * 0.7, 0, L.box.y + L.box.h);
+      pe.addColorStop(0, 'rgba(0,0,0,0)');
+      pe.addColorStop(1, 'rgba(0,0,0,0.28)');
+      ctx.fillStyle = pe;
+      ctx.fillRect(L.box.x, L.box.y + L.box.h * 0.7, L.box.w, L.box.h * 0.3);
+      ctx.restore();
+      ctx.save();
+      roundRectPath(
+        ctx,
+        L.box.x + 1,
+        L.box.y + 1,
+        L.box.w - 2,
+        L.box.h - 2,
+        Math.max(0, r - 1),
+      );
+      ctx.strokeStyle = 'rgba(190,220,255,0.55)';
+      ctx.lineWidth = Math.max(1, L.fontPx * 0.035);
+      ctx.stroke();
+      ctx.restore();
     } else {
       roundRectPath(ctx, L.box.x, L.box.y, L.box.w, L.box.h, preset.radius * L.fontPx);
+      ctx.fillStyle = panelPaint(ctx, preset, corPainel, opac, L.box.y, L.box.h);
       ctx.fill();
     }
   }
@@ -460,7 +672,23 @@ export function drawHeadline(
   // Aspas decorativas — FORA do fluxo do texto: ficam no canto de cima a
   // esquerda mesmo com o texto centralizado (e assim na referencia), e com
   // cor propria (na referencia sao verdes, nao brancas).
-  if (quote) {
+  if (quote && preset.quoteBadge) {
+    // SELO da referência: quadradinho arredondado verde-claro montado SOBRE a
+    // borda de cima do painel (metade pra fora), aspas brancas dentro.
+    ctx.save();
+    const lado = L.fontPx * preset.quoteSize;
+    const qx = L.box.x + (preset.fullBleed ? W * 0.06 : L.padX * 0.7);
+    const qy = L.box.y - lado / 2;
+    roundRectPath(ctx, qx, qy, lado, lado, lado * 0.22);
+    ctx.fillStyle = preset.quoteColor ?? cor;
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = fontCss('playfair900i', lado * 1.05);
+    ctx.textAlign = 'center';
+    // o glifo “ mora acima da baseline — 1.18*lado centra o par no selo
+    ctx.fillText('“', qx + lado / 2, qy + lado * 1.18);
+    ctx.restore();
+  } else if (quote) {
     ctx.save();
     ctx.fillStyle = preset.quoteColor ?? cor;
     ctx.font = fontCss('playfair900i', L.fontPx * preset.quoteSize);
@@ -477,7 +705,8 @@ export function drawHeadline(
     ctx.shadowBlur = preset.shadow * L.fontPx;
     ctx.shadowOffsetY = preset.shadow * L.fontPx * 0.35;
   }
-  const interno = painel === 'nenhum' ? 0 : L.padX;
+  const bleed = preset.fullBleed && painel !== 'nenhum';
+  const interno = painel === 'nenhum' ? 0 : bleed ? Math.max(L.padX, W * 0.055) : L.padX;
   const topo = L.box.y + L.quotePx + (painel === 'nenhum' ? 0 : L.padY);
   for (let i = 0; i < L.lines.length; i++) {
     const ln = L.lines[i];

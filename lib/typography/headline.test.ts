@@ -182,6 +182,37 @@ console.log('\n-- modelos --');
     }
   }
   ok(true, 'todo modelo produz um layout valido');
+
+  // ⭐ os 3 modelos de BORDA A BORDA dos prints (02.09): o painel tem que
+  // ocupar o quadro INTEIRO na horizontal — o fullBleed ficava so nas aspas
+  // e a "tarja" saia caixinha solta no meio do video
+  for (const id of ['cartela-citacao', 'tarja-vermelha', 'news-azul']) {
+    const L = layoutHeadline(medir, hl({ style: { ...HEADLINE_STYLE_DEFAULT, presetId: id } }), W, H);
+    ok(L.box.x === 0 && L.box.w === W, `${id}: painel de borda a borda (x=${Math.round(L.box.x)}, w=${Math.round(L.box.w)})`);
+  }
+  // e o arrasto horizontal nao desloca um painel de borda a borda
+  {
+    const L = layoutHeadline(
+      medir,
+      hl({ style: { ...HEADLINE_STYLE_DEFAULT, presetId: 'tarja-vermelha', posX: 0.1 } }),
+      W,
+      H,
+    );
+    ok(L.box.x === 0, 'arrastar pro lado nao desloca a tarja (so a altura e do user)');
+  }
+  // o RASGADO e um retalho solto (nao borda a borda) em caixa BAIXA
+  {
+    const p2 = getHeadlinePreset('rasgado-vermelho');
+    ok(p2.kind === 'rasgado' && !p2.fullBleed, 'rasgado e retalho solto com desenho proprio');
+    ok(!p2.uppercase, 'rasgado escreve em caixa baixa (como a referencia)');
+  }
+  // NEWS: gradiente azul (o brilho de vidro e do desenho, nao do layout)
+  {
+    const p3 = getHeadlinePreset('news-azul');
+    ok(p3.kind === 'news' && (p3.panelGrad?.length ?? 0) >= 2, 'news tem gradiente vertical');
+  }
+  // CITACAO: selo de aspas (quadradinho), nao glifo solto
+  ok(getHeadlinePreset('cartela-citacao').quoteBadge, 'citacao usa o SELO de aspas');
 }
 
 console.log('\n-- headline nova --');

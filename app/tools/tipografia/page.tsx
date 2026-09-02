@@ -242,8 +242,15 @@ export default function TipografiaPage() {
   return <TipografiaInner />;
 }
 
+/** Quantos vídeos a fila desta ferramenta aceita de uma vez. */
+const MAX_VIDEOS = 10;
+
 function TipografiaInner() {
   const [file, setFile] = useToolState<File | null>('tipografia:file', null);
+  // ⭐ FILA DE VÍDEOS: até 10 sobem juntos; um é legendado por vez e a troca
+  // não perde nada — a edição de cada um vive na sessão por assinatura do
+  // arquivo (saveSession/loadSession), o mesmo caminho do F5.
+  const [fila, setFila] = useToolState<File[]>('tipografia:fila', []);
   const [duration, setDuration] = useToolState<number | null>('tipografia:dur', null);
   const [words, setWords] = useToolState<TWord[]>('tipografia:words', []);
   const [blocks, setBlocks] = useToolState<Block[]>('tipografia:blocks', []);
@@ -880,6 +887,41 @@ function TipografiaInner() {
     cancelFFmpeg();
   }
 
+  /** Junta vídeos na fila (dedupe por nome+tamanho, teto de 10). */
+  function addVideos(fs: File[]) {
+    const soVideo = fs.filter((f) => /^video\//.test(f.type) || /\.(mp4|mov|webm|mkv)$/i.test(f.name));
+    if (soVideo.length === 0) return;
+    const vistos = new Set(fila.map(sigOf));
+    const novos = soVideo.filter((f) => !vistos.has(sigOf(f)));
+    const lista = [...fila, ...novos].slice(0, MAX_VIDEOS);
+    setFila(lista);
+    if (novos.length > 0 && (!file || !lista.some((f) => file && sigOf(f) === sigOf(file)))) {
+      resetAll();
+      setFile(novos[0]);
+    } else if (!file && lista.length > 0) {
+      resetAll();
+      setFile(lista[0]);
+    }
+  }
+
+  /** Troca o vídeo em edição. A edição do atual já está salva na sessão. */
+  function trocarVideo(f: File) {
+    if (processing) return;
+    if (file && sigOf(f) === sigOf(file)) return;
+    resetAll();
+    setFile(f);
+  }
+
+  function removerVideo(f: File) {
+    if (processing) return;
+    const resto = fila.filter((x) => sigOf(x) !== sigOf(f));
+    setFila(resto);
+    if (file && sigOf(f) === sigOf(file)) {
+      resetAll();
+      setFile(resto[0] ?? null);
+    }
+  }
+
   /**
    * Manda UMA janela de áudio pro Whisper (a recuperação de um trecho que
    * ficou sem legenda). Mesma rota da transcrição cheia; devolve as palavras
@@ -1276,9 +1318,7 @@ function TipografiaInner() {
     setSelBlockId((cur) => (cur && r.blocks.some((b) => b.id === cur) ? cur : null));
     setActiveBlockId((cur) => (cur && r.blocks.some((b) => b.id === cur) ? cur : null));
     setRegroupInfo(
-      r.kept > 0
-        ? `${r.remade} bloco${r.remade === 1 ? '' : 's'} remontado${r.remade === 1 ? '' : 's'} no ritmo novo · ${r.kept} travado${r.kept === 1 ? '' : 's'} ficou${r.kept === 1 ? '' : 'ram'} intacto${r.kept === 1 ? '' : 's'}`
-        : null,
+      r.kept > 0 ? `${r.remade} no ritmo novo · ${r.kept} com cadeado (intactos)` : null,
     );
   }
 
@@ -1312,19 +1352,68 @@ function TipografiaInner() {
           n={1}
           icon={<IconStepMic size={18} />}
           title="Vídeo"
-          hint="MP4, MOV ou WEBM — até 800MB e 20min"
+          hint="MP4, MOV ou WEBM — até 800MB e 20min · dá pra subir até 10 e legendar um por vez"
           hue={HUE}
         >
           <ToolDropzone
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             file={file}
             onFile={(f) => {
-              resetAll();
-              setFile(f);
+              if (f) addVideos([f]);
             }}
+            multiple
+            onFiles={addVideos}
             disabled={processing}
             hue={HUE}
           />
+          {fila.length > 1 || (fila.length === 1 && !file) ? (
+            <div className="mt-3">
+              <div
+                className="mb-1.5 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                <span>Fila — clica pra trocar o vídeo em edição</span>
+                <span className="mono">{fila.length}/{MAX_VIDEOS}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {fila.map((f, i) => {
+                  const atual = !!file && sigOf(f) === sigOf(file);
+                  return (
+                    <span
+                      key={sigOf(f)}
+                      className={
+                        'group inline-flex max-w-full items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1 text-[11.5px] font-semibold transition-all ' +
+                        (atual
+                          ? 'bg-amber-400/15 text-amber-500 shadow-[inset_0_0_0_1.5px_rgba(251,191,36,0.65)]'
+                          : 'bg-bg-soft text-text-muted shadow-[inset_0_0_0_1px_rgb(var(--line))] hover:text-text')
+                      }
+                    >
+                      <button
+                        type="button"
+                        disabled={processing}
+                        onClick={() => trocarVideo(f)}
+                        className="inline-flex min-w-0 items-center gap-1.5 disabled:cursor-not-allowed"
+                        title={f.name}
+                      >
+                        <span className="mono opacity-60">{i + 1}</span>
+                        <span className="max-w-[160px] truncate">{f.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={processing}
+                        onClick={() => removerVideo(f)}
+                        title="Tirar da fila (a edição salva continua na sessão)"
+                        aria-label={`Tirar ${f.name} da fila`}
+                        className="flex h-5 w-5 items-center justify-center rounded-full text-[12px] opacity-50 hover:bg-red-500/15 hover:text-red-400 hover:opacity-100"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           {file ? (
             <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-3">
               <ToolMetric value={formatBytes(file.size)} label="Tamanho" />
@@ -1378,13 +1467,14 @@ function TipografiaInner() {
         {blocks.length > 0 && videoUrl ? (
           <ToolStep
             n={3}
+            still
             icon={<IconStepText size={18} />}
             title="Modelo e edição"
             hint="Clica no modelo pra ver ao vivo — o preview é exatamente o que sai no MP4"
             hue={HUE}
           >
-            <div className="grid gap-6 xl:grid-cols-[minmax(380px,500px)_minmax(0,1fr)]">
-              <div className="min-w-0">
+            <div className="grid gap-6 xl:grid-cols-[minmax(350px,420px)_minmax(0,1fr)]">
+              <div className="min-w-0 xl:sticky xl:top-[64px] xl:self-start">
                 <PreviewPane
                   videoUrl={videoUrl}
                   videoRef={videoRef}
@@ -1416,11 +1506,9 @@ function TipografiaInner() {
                   }}
                 />
                 <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
-                  Arrasta a legenda pra posicionar (snap no centro) · clique
-                  seleciona e mostra a alça de tamanho · com ela selecionada,
-                  clica numa palavra e arrasta pra marcar um trecho (cor,
-                  caixa, tamanho e fonte agem só nele) · duplo clique edita o
-                  texto ali mesmo
+                  Arrasta pra mover · clica NUMA PALAVRA pra digitar ali ·
+                  com a legenda selecionada, arrasta sobre as palavras pra
+                  marcar um trecho (cor, caixa, tamanho e fonte agem só nele)
                 </p>
               </div>
               <div className="min-w-0 flex flex-col gap-5">
@@ -1514,10 +1602,8 @@ function TipografiaInner() {
                   }
                   disabled={processing}
                 />
-              </div>
-            </div>
 
-            <HeadlinePanel
+                <HeadlinePanel
               headlines={headlines}
               selId={selHeadlineId}
               onSelect={setSelHeadlineId}
@@ -1644,6 +1730,8 @@ function TipografiaInner() {
                 }
               }}
             />
+              </div>
+            </div>
           </ToolStep>
         ) : null}
 
@@ -2188,12 +2276,62 @@ function PreviewPane({
     else v.pause();
   };
 
+  /**
+   * Abre o editor inline em cima da legenda, com o caret no FIM da palavra
+   * clicada (era só no duplo clique, com caret sempre no fim do texto — o
+   * Silas pediu: "clicar em cima do texto" já é digitar, sem 2 cliques).
+   */
+  const abrirEditor = useCallback(
+    (blockId: string, bb: { x: number; y: number; w: number; h: number }, wordIdx: number | null) => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.pause();
+      const block = liveRef.current.blocks.find((x) => x.id === blockId);
+      if (!block) return;
+      selRef.current = true;
+      onSelectBlock(blockId);
+      onWordSel(null);
+      const dpr = dprRef.current;
+      const txt = blockText(block);
+      let caret = txt.length;
+      if (wordIdx !== null && wordIdx >= 0 && wordIdx < block.words.length) {
+        const ate = block.words
+          .slice(0, wordIdx + 1)
+          .map((w) => w.text)
+          .join(' ');
+        caret = Math.min(txt.length, ate.length);
+      }
+      setEditing({
+        id: blockId,
+        value: txt,
+        caret,
+        left: bb.x / dpr,
+        top: bb.y / dpr,
+        width: Math.max(120, bb.w / dpr),
+        height: Math.max(36, bb.h / dpr),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [videoRef],
+  );
+
   return (
     <div className="min-w-0">
       <div
         ref={wrapRef}
         className="relative w-full touch-none overflow-hidden rounded-[14px] border border-line bg-black"
-        style={dims ? { aspectRatio: `${dims.w} / ${dims.h}` } : { minHeight: 220 }}
+        style={
+          dims
+            ? {
+                aspectRatio: `${dims.w} / ${dims.h}`,
+                // coluna sticky: o preview INTEIRO precisa caber na janela
+                // (com folga pro transporte embaixo) — vídeo vertical numa
+                // tela baixa encolhe em vez de estourar o sticky
+                maxWidth: `min(100%, calc((100vh - 240px) * ${(dims.w / Math.max(1, dims.h)).toFixed(4)}))`,
+                marginInline: 'auto',
+              }
+            : { minHeight: 220 }
+        }
         onPointerDown={(e) => {
           const wrap = wrapRef.current;
           if (!wrap || editing) return;
@@ -2266,31 +2404,33 @@ function PreviewPane({
             };
             return;
           }
-          // legenda JÁ selecionada + clique EM CIMA de uma palavra = seleção
-          // parcial (arrasta pra marcar o trecho — estilo CapCut). Clicar no
-          // respiro ao redor continua movendo a legenda.
-          const wb = selRef.current ? (wordBoxesRef.current ?? medirPalavras()) : null;
-          if (selRef.current && wb && bb && wb.blockId === bb.blockId) {
-            const hitWord = wb.boxes.find(
-              (bx) =>
-                px >= bx.x - 4 * dpr &&
-                px <= bx.x + bx.w + 4 * dpr &&
-                py >= bx.y &&
-                py <= bx.y + bx.h,
-            );
-            if (hitWord) {
-              onWordSel({ blockId: wb.blockId, a: hitWord.i, b: hitWord.i });
-              dragRef.current = {
-                mode: 'wordsel',
-                moved: false,
-                snapX: false,
-                snapY: false,
-                dist0: 0,
-                scale0: 1,
-                wordAnchor: hitWord.i,
-              };
-              return;
-            }
+          // Clique EM CIMA de uma palavra: com o bloco selecionado vira
+          // seleção parcial (arrasta pra marcar o trecho — estilo CapCut) e o
+          // clique seco abre o editor; sem seleção, o arrasto move a legenda
+          // e o clique seco também abre o editor (o cursor já avisou: texto).
+          const wb = wordBoxesRef.current ?? medirPalavras();
+          const hitWord =
+            wb && bb && wb.blockId === bb.blockId
+              ? wb.boxes.find(
+                  (bx) =>
+                    px >= bx.x - 4 * dpr &&
+                    px <= bx.x + bx.w + 4 * dpr &&
+                    py >= bx.y &&
+                    py <= bx.y + bx.h,
+                )
+              : undefined;
+          if (selRef.current && hitWord && wb) {
+            onWordSel({ blockId: wb.blockId, a: hitWord.i, b: hitWord.i });
+            dragRef.current = {
+              mode: 'wordsel',
+              moved: false,
+              snapX: false,
+              snapY: false,
+              dist0: 0,
+              scale0: 1,
+              wordAnchor: hitWord.i,
+            };
+            return;
           }
           {
             const st0 = liveRef.current.style;
@@ -2308,8 +2448,14 @@ function PreviewPane({
             snapY: false,
             dist0: 0,
             scale0: 1,
-            wordAnchor: -1,
+            // guarda a palavra sob o dedo: clique seco nela = abrir o editor
+            wordAnchor: hitWord ? hitWord.i : -1,
           };
+          // o punho fecha JÁ no clique (antes só depois do primeiro
+          // movimento, e parecia que o arrasto não tinha pegado)
+          const dentro =
+            bb && px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h;
+          if (dentro && !hitWord) wrap.style.cursor = 'grabbing';
         }}
         onPointerMove={(e) => {
           const wrap = wrapRef.current;
@@ -2349,13 +2495,14 @@ function PreviewPane({
             if (agora - hoverMedidoRef.current > 120) {
               hoverMedidoRef.current = agora;
               medirBBox();
-              if (selRef.current) medirPalavras();
+              // palavras SEMPRE: o cursor de digitar aparece ao passar por
+              // cima do texto, selecionado ou não (clicar ali já edita)
+              medirPalavras();
             }
             const bb0 = bboxRef.current;
             const wb0 = wordBoxesRef.current;
             const hr = 14 * dpr0;
             const overWord =
-              selRef.current &&
               wb0 &&
               bb0 &&
               wb0.blockId === bb0.blockId &&
@@ -2478,10 +2625,22 @@ function PreviewPane({
             if (drag.mode === 'scale') onFontScale(ov.fontScale);
             else if (drag.mode === 'move') onPosChange(ov.posX, ov.posY);
           }
-          if (!drag || drag.mode === 'wordsel' || drag.moved) return;
-          // clique seco: dentro da legenda = selecionar; fora = play/deselect
+          if (wrapRef.current && drag?.mode === 'move') {
+            wrapRef.current.style.cursor = 'default';
+          }
+          if (!drag || drag.moved) return;
+          // clique seco NUMA PALAVRA = digitar ali (com ou sem seleção prévia)
           const wrap = wrapRef.current;
           const bb = bboxRef.current ?? medirBBox();
+          if (drag.mode === 'wordsel') {
+            if (bb) abrirEditor(bb.blockId, bb, drag.wordAnchor);
+            return;
+          }
+          if (drag.wordAnchor >= 0 && bb) {
+            abrirEditor(bb.blockId, bb, drag.wordAnchor);
+            return;
+          }
+          // clique seco no respiro: dentro da legenda = selecionar; fora = play
           if (wrap && bb) {
             const rect = wrap.getBoundingClientRect();
             const dpr = dprRef.current;
@@ -2508,32 +2667,16 @@ function PreviewPane({
           hlDragRef.current = null;
         }}
         onDoubleClick={(e) => {
+          // atalho legado — o clique simples numa palavra já abre o editor
           const wrap = wrapRef.current;
           const bb = bboxRef.current ?? medirBBox();
-          const v = videoRef.current;
-          if (!wrap || !bb || !v) return;
+          if (!wrap || !bb) return;
           const rect = wrap.getBoundingClientRect();
           const dpr = dprRef.current;
           const px = (e.clientX - rect.left) * dpr;
           const py = (e.clientY - rect.top) * dpr;
           if (px < bb.x || px > bb.x + bb.w || py < bb.y || py > bb.y + bb.h) return;
-          v.pause();
-          const block = liveRef.current.blocks.find((x) => x.id === bb.blockId);
-          if (!block) return;
-          selRef.current = true;
-          onWordSel(null);
-          // input INVISÍVEL cobrindo a legenda: o texto digitado renderiza
-          // AO VIVO com o lettering real no canvas (o input só captura teclas)
-          const txt = blockText(block);
-          setEditing({
-            id: bb.blockId,
-            value: txt,
-            caret: txt.length,
-            left: bb.x / dpr,
-            top: bb.y / dpr,
-            width: Math.max(120, bb.w / dpr),
-            height: Math.max(36, bb.h / dpr),
-          });
+          abrirEditor(bb.blockId, bb, null);
         }}
       >
         <video
@@ -2900,7 +3043,7 @@ function Timeline({
         className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
-        <span>Timeline — blocos movem · bordas cortam · agulha navega · scroll do mouse = zoom · faixa de baixo = headlines</span>
+        <span>Timeline — blocos movem · bordas cortam · agulha navega · scroll do mouse = zoom · faixa de cima = headlines</span>
         <span className="flex items-center gap-3">
           {/* PLAY/PAUSA tambem aqui: antes so existia no card do preview, e
               com a timeline no fim da pagina dava pra perder o botao de vista.
@@ -2959,7 +3102,7 @@ function Timeline({
         className="overflow-x-auto rounded-[14px] border border-line bg-black/30"
       >
         <div
-          className="relative select-none"
+          className="relative select-none overflow-hidden"
           style={{
             width: trackW,
             height: 196,
@@ -3029,8 +3172,8 @@ function Timeline({
 
           {/* blocos */}
           {blocks.map((b, bi) => {
-            const left = (b.start / 1000) * effPps;
-            const width = Math.max(10, ((b.end - b.start) / 1000) * effPps);
+            const left = Math.max(0, Math.min((b.start / 1000) * effPps, trackW - 10));
+            const width = Math.max(10, Math.min(((b.end - b.start) / 1000) * effPps, trackW - left));
             const sel = b.id === selId;
             const col = CAT_COLORS[presetCat] ?? TL_PALETTE[0];
             // ritmo visual: blocos vizinhos alternam um tom, senão a faixa
@@ -3043,7 +3186,7 @@ function Timeline({
                 data-block="1"
                 title={txt}
                 className={
-                  'group absolute top-[27px] h-[46px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
+                  'group absolute top-[70px] h-[46px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
                   (sel ? 'z-10' : 'hover:brightness-[1.18]')
                 }
                 style={{
@@ -3151,7 +3294,7 @@ function Timeline({
           {/* filmstrip (só visual — vídeo não é editável) */}
           {thumbs.length > 0 ? (
             <div
-              className="pointer-events-none absolute left-0 top-[80px] flex h-[60px] overflow-hidden rounded-[7px]"
+              className="pointer-events-none absolute left-0 top-[123px] flex h-[60px] overflow-hidden rounded-[7px]"
               style={{
                 width: trackW,
                 border: '1px solid rgba(255,255,255,0.10)',
@@ -3174,12 +3317,14 @@ function Timeline({
 
           {/* ── FAIXA DAS HEADLINES (texto parado) ── */}
           <div
-            className="pointer-events-none absolute left-0 top-[148px] h-[40px] rounded-[7px]"
+            className="pointer-events-none absolute left-0 top-[25px] h-[40px] rounded-[7px]"
             style={{ width: trackW, background: 'rgba(34,211,238,0.05)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.16)' }}
           />
           {headlines.map((h) => {
-            const left = (h.start / 1000) * effPps;
-            const width = Math.max(12, ((h.end - h.start) / 1000) * effPps);
+            // clamp NA PISTA: um chip além do fim do vídeo (trim largado, F5
+            // no meio) vazava pra fora do trilho e parecia quebrado
+            const left = Math.max(0, Math.min((h.start / 1000) * effPps, trackW - 12));
+            const width = Math.max(12, Math.min(((h.end - h.start) / 1000) * effPps, trackW - left));
             const sel = h.id === selHeadlineId;
             return (
               <div
@@ -3187,7 +3332,7 @@ function Timeline({
                 data-block="1"
                 title={h.text || 'headline sem texto'}
                 className={
-                  'group absolute top-[150px] h-[36px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
+                  'group absolute top-[27px] h-[36px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
                   (sel ? 'z-10' : 'hover:brightness-[1.18]')
                 }
                 style={{
@@ -3232,7 +3377,8 @@ function Timeline({
                   } else if (d.mode === 'trim-start') {
                     onRetimeHeadline(h.id, Math.round(Math.min(tMs, d.end - MIN)), d.end);
                   } else {
-                    onRetimeHeadline(h.id, d.start, Math.round(Math.max(tMs, d.start + MIN)));
+                    const fim = Math.min(Math.max(tMs, d.start + MIN), Math.max(duration * 1000, d.start + MIN));
+                    onRetimeHeadline(h.id, d.start, Math.round(fim));
                   }
                 }}
                 onPointerUp={(e) => {
@@ -3635,29 +3781,34 @@ function StylePanel({
       </div>
 
       {sel ? (
-        <div className="md:col-span-2 flex flex-wrap items-center gap-2.5 rounded-[10px] border-2 border-blue-500/60 bg-blue-500/10 px-3 py-2">
-          <span className="text-[11.5px] font-bold text-blue-600">
-            ✂ {sel.count} palavra{sel.count > 1 ? 's' : ''} selecionada
-            {sel.count > 1 ? 's' : ''} — Tamanho, cor do Texto, B/U/I, Caixa e
-            Fonte agem SÓ nelas
+        <div
+          className="md:col-span-2 flex items-center gap-2.5 rounded-full bg-blue-500/10 py-1.5 pl-3.5 pr-1.5 shadow-[inset_0_0_0_1.5px_rgba(59,130,246,0.5)]"
+          title="Enquanto o trecho está marcado, tamanho, cores, B/U/I, caixa e fonte mudam SÓ essas palavras"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/20 text-[11px]" aria-hidden>
+            ✂
           </span>
+          <span className="min-w-0 flex-1 truncate text-[12px] font-bold text-blue-600">
+            editando {sel.count === 1 ? '1 palavra' : `${sel.count} palavras`} do trecho
+          </span>
+          <button
+            onClick={sel.reset}
+            title="Volta essas palavras pro visual normal do bloco"
+            className={
+              'rounded-full px-3 py-1 text-[11px] font-semibold text-text-muted hover:text-red-400' +
+              T3D
+            }
+          >
+            limpar estilos
+          </button>
           <button
             onClick={sel.clear}
             className={
-              'rounded-[8px] border border-blue-500/60 bg-blue-500/15 px-2.5 py-1 text-[10.5px] font-bold text-blue-600 hover:bg-blue-500/25' +
+              'rounded-full bg-blue-500/85 px-3.5 py-1 text-[11px] font-bold text-white hover:bg-blue-500' +
               T3D
             }
           >
-            concluir seleção
-          </button>
-          <button
-            onClick={sel.reset}
-            className={
-              'rounded-[8px] border border-line bg-bg-soft px-2.5 py-1 text-[10.5px] font-semibold text-text-muted hover:text-text' +
-              T3D
-            }
-          >
-            remover estilos do trecho
+            pronto
           </button>
         </div>
       ) : null}
@@ -4001,7 +4152,11 @@ function StylePanel({
           ]}
         />
         {regroupInfo ? (
-          <div className="mt-2 rounded-[10px] border border-violet-400/40 bg-violet-500/10 px-3 py-1.5 text-[11px] text-violet-300">
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-violet-500/10 px-3 py-1.5 text-[11px] font-semibold text-violet-300 shadow-[inset_0_0_0_1px_rgba(167,139,250,0.4)]">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
+              <rect x="4" y="10" width="16" height="11" rx="2.5" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+            </svg>
             {regroupInfo}
           </div>
         ) : null}
