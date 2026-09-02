@@ -14319,7 +14319,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   🖼 Baixar print
                                                 </a>
                                               ) : (
-                                                <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted">
+                                                <span
+                                                  className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted"
+                                                  title="O doc não tinha link clicável nesse arquivo NA HORA da análise (o card é um retrato daquele momento). Se o copy adicionou/corrigiu o link depois, re-analise a task (seleciona → Start) que ele entra sozinho."
+                                                >
                                                   sem link
                                                 </span>
                                               )}
