@@ -334,28 +334,39 @@ function extrairBlocosComFalante(
   // O fallback só vale quando o id pedido é o GRUPO puro ("AD37"): id com
   // sufixo ("AD07G1GL") continua exigindo casamento exato, senão um hook
   // pegaria a copy do irmão.
+  // Id com token de variante ("AD07G1GL") exige casamento exato SEMPRE —
+  // fallback de grupo aqui pegaria a copy do irmão (G2/G3).
+  const ehVariante = /^AD\d+G\d/i.test(alvo);
   const candidatos: number[] = [];
-  let iAd = -1;
+  let iAdExato = -1;
   for (let i = 0; i < linhas.length; i++) {
     const m = linhas[i].match(AD_HEADING_RE);
     if (!m) continue;
     const id = m[1].toUpperCase();
-    if (id === alvo) {
-      iAd = i;
-      break;
+    if (id === alvo && iAdExato < 0) {
+      iAdExato = i;
+      if (ehVariante) break;
+      continue;
     }
-    if (alvo === grupo && adGroupOf(id) === grupo) candidatos.push(i);
+    if (!ehVariante && adGroupOf(id) === grupo) candidatos.push(i);
   }
-  if (iAd < 0 && candidatos.length) {
-    // Entre os headings do grupo, fica o primeiro que realmente tem fala —
-    // pular o de briefing é o ponto todo do fallback.
-    const proxHeading = (i: number) => {
-      for (let j = i + 1; j < linhas.length; j++) {
-        if (ehFimDeSecao(linhas[j])) return j;
-      }
-      return linhas.length;
-    };
-    iAd = candidatos.find((i) => secaoTemFala(linhas, i + 1, proxHeading(i))) ?? candidatos[0];
+  const proxHeading = (i: number) => {
+    for (let j = i + 1; j < linhas.length; j++) {
+      if (ehFimDeSecao(linhas[j])) return j;
+    }
+    return linhas.length;
+  };
+  const temFala = (i: number) => secaoTemFala(linhas, i + 1, proxHeading(i));
+  // ⚠ O doc pode ter DOIS headings com o id da task: a FICHA do grupo
+  // ("AD01GL", só briefing) e o do hook ("AD01G1GL"). Casar exato com a ficha
+  // deixava o hook de fora (lote ED BAK HUN, 01.09) — o exato só vence se a
+  // seção dele tiver FALA; senão vale o primeiro heading do grupo que tem.
+  let iAd = -1;
+  if (iAdExato >= 0 && (ehVariante || temFala(iAdExato))) {
+    iAd = iAdExato;
+  } else {
+    const fila = iAdExato >= 0 ? [iAdExato, ...candidatos] : candidatos;
+    iAd = fila.find(temFala) ?? (fila.length ? fila[0] : -1);
   }
   if (iAd < 0) return null;
 
