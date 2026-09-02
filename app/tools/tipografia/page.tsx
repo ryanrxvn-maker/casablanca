@@ -47,6 +47,7 @@ import {
   drawCaptions,
   captionBBoxAt,
   wordBoxesAt,
+  destaquesDoBloco,
   DEFAULT_STYLE,
   IN_ANIM_OPTIONS,
   OUT_ANIM_OPTIONS,
@@ -1241,12 +1242,22 @@ function TipografiaInner() {
 
   function toggleHighlight(blockId: string, wordIdx: number) {
     pushHistory();
-    setHighlights((h) => {
-      const cur = new Set(h[blockId] ?? []);
-      if (cur.has(wordIdx)) cur.delete(wordIdx);
-      else cur.add(wordIdx);
-      return { ...h, [blockId]: Array.from(cur).sort((a, b) => a - b) };
-    });
+    // 1º clique num bloco que ainda estava no AUTOMÁTICO parte do que o
+    // automático escolheu, em vez de zerar. Nos modelos de trecho (Papo
+    // Amarelo pinta o fecho inteiro) zerar trocava o dourado todo por uma
+    // palavra só, e parecia que o clique tinha quebrado o modelo.
+    // Calculado FORA do updater — no StrictMode o updater roda duas vezes.
+    let base = highlights[blockId];
+    if (!base) {
+      const bloco = blocks.find((b) => b.id === blockId);
+      const pb = getPreset(blockStyles[blockId]?.presetId ?? presetId);
+      base = bloco ? [...destaquesDoBloco(bloco, pb, style)] : [];
+    }
+    const cur = new Set(base);
+    if (cur.has(wordIdx)) cur.delete(wordIdx);
+    else cur.add(wordIdx);
+    const arr = Array.from(cur).sort((a, b) => a - b);
+    setHighlights((h) => ({ ...h, [blockId]: arr }));
   }
 
   // ⭐ trocar o RITMO respeitando o CADEADO (bug relatado em 30.08: marcar o

@@ -211,10 +211,11 @@ const MANUAL_PRESETS: TypoPreset[] = [
     size: 0.062,
     lineHeight: 1.1,
     uppercase: false,
-    // Na referencia as palavras quase se tocam ("masaieuquero"). O engine
-    // aplica o spacing tanto entre letras quanto no espaco, entao um valor
-    // negativo maior aperta as duas coisas — que e o que a referencia mostra.
-    spacing: -0.03,
+    // Letras levemente apertadas (o ar condensado da referencia), mas as
+    // PALAVRAS separadas: o `spacing` negativo tambem comia o espaco e saia
+    // "Essetruquedoquiabo" — por isso o wordSpacing existe em separado.
+    spacing: -0.015,
+    wordSpacing: 0.05,
     fill: 'primary',
     shadow: { color: 'rgba(0,0,0,0.55)', blur: 0.1, x: 0, y: 0.035 },
     unit: 'word',
@@ -226,15 +227,19 @@ const MANUAL_PRESETS: TypoPreset[] = [
     // alturas e angulos diferentes — e dai que vem o "sem alinhamento".
     in: { kind: 'spiral-rise', dur: 430, ease: 'outQuint', stagger: 125, amp: 1.05 },
     autoEmphasis: true,
+    // O dourado marca o FECHO da frase, nao uma palavra solta — "...me de tua
+    // opiniao, TA?", "...do quiabo". Uma palavra so' lia como erro.
+    autoEmphasisMode: 'trecho',
     highlightStyle: 'color',
-    // O amarelo da referencia nao e chapado: tem brilho de metal, com um
-    // canto visivelmente mais claro que o outro. Por isso o gradiente e
-    // DIAGONAL (o vertical puro sai chapado) e comeca quase branco.
+    // Brilho de metal: um canto mais claro que o outro, por isso DIAGONAL (o
+    // vertical puro sai chapado). Mas todo stop e' DOURADO — a primeira
+    // versao comecava em quase-branco e, como o gradiente e' por palavra, a
+    // letra inicial saia BRANCA no meio do dourado. Onde e' dourado, e' ouro.
     highlightGradient: [
-      [0, '#fffdf0'],
-      [0.22, '#ffe887'],
-      [0.5, '#ffc824'],
-      [0.78, '#f0a80e'],
+      [0, '#ffe9a8'],
+      [0.28, '#ffd76a'],
+      [0.55, '#fbc22b'],
+      [0.8, '#eda50f'],
       [1, '#d98c07'],
     ],
     highlightGradientDir: 'diagonal',

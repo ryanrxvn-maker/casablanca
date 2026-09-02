@@ -246,6 +246,14 @@ export type TypoPreset = {
   uppercase?: boolean;
   /** letter-spacing extra em frações do fontSize */
   spacing?: number;
+  /**
+   * Espaço entre PALAVRAS, em frações do fontSize, somado à largura do espaço.
+   * Existe separado do `spacing` porque o letter-spacing negativo — que é o
+   * que dá o ar condensado — também come o espaço entre as palavras e cola
+   * tudo ("Essetruquedoquiabo"). Com este, as letras ficam apertadas e as
+   * palavras continuam separadas.
+   */
+  wordSpacing?: number;
   lineHeight?: number;
   fill: PresetColor | 'gradient';
   gradient?: [string, string];
@@ -280,6 +288,12 @@ export type TypoPreset = {
    * variação de cor e tamanho sem o user clicar em nada.
    */
   autoEmphasis?: boolean;
+  /**
+   * COMO o destaque automático escolhe: 'palavra' (padrão — só a mais forte
+   * do bloco) ou 'trecho' (o fecho da frase inteiro). Modelos de fala corrida
+   * marcam o PAYOFF, não uma palavra solta: "...me dê tua opinião, TÁ?".
+   */
+  autoEmphasisMode?: 'palavra' | 'trecho';
   /**
    * TIPOGRAFIA MISTA (estilo "hoje VOCÊ VAI aprender"): a palavra destacada
    * usa a fonte/estilo principal do preset em tamanho cheio; as DEMAIS usam
@@ -631,6 +645,44 @@ export function autoEmphasisIndex(block: Block): number | null {
   return best >= 0 ? best : null;
 }
 
+/**
+ * TRECHO forte do bloco — a cauda da frase, não uma palavra solta.
+ *
+ * Os modelos de fala corrida (Papo Amarelo e cia.) pintam o FECHO: em
+ * "mas aí eu quero que tu me dê tua opinião, tá?" o dourado começa em "dê" e
+ * vai até o fim; em "Esse truque do quiabo" pega "do quiabo". Uma palavra só
+ * não lê como destaque nesses modelos, lê como erro.
+ *
+ * ~40% das palavras, mínimo 2, e NUNCA o bloco inteiro — sempre sobra pelo
+ * menos uma palavra na cor principal, senão não existe contraste.
+ */
+export function autoEmphasisTail(block: Block): number[] {
+  const n = block.words.length;
+  if (n < 2) return [];
+  const qtd = Math.min(Math.max(2, Math.round(n * 0.4)), n - 1);
+  return Array.from({ length: qtd }, (_, k) => n - qtd + k);
+}
+
+/**
+ * Palavras em destaque do bloco — UMA fonte de verdade.
+ *
+ * Estava copiada em três lugares (desenho, caixa de seleção e caixas de
+ * palavra); mexer em um só fazia a seleção desencontrar do que aparece na
+ * tela. Destaque manual do user sempre vence o automático.
+ */
+export function destaquesDoBloco(
+  block: Block,
+  preset: TypoPreset,
+  style: StyleState,
+): Set<number> {
+  const manual = style.highlights[block.id] ?? [];
+  if (manual.length > 0) return new Set(manual);
+  if (!preset.autoEmphasis || style.autoEmphasis === false) return new Set();
+  if (preset.autoEmphasisMode === 'trecho') return new Set(autoEmphasisTail(block));
+  const auto = autoEmphasisIndex(block);
+  return new Set(auto === null ? [] : [auto]);
+}
+
 // ─── Easings ────────────────────────────────────────────────────────────────
 
 const EASE: Record<EaseName, (t: number) => number> = {
@@ -820,7 +872,8 @@ function measureLayout(
   });
 
   ctx.font = fs(preset.font, fontPx);
-  const spaceW = ctx.measureText(' ').width + (preset.spacing ?? 0) * fontPx;
+  const spaceW =
+    ctx.measureText(' ').width + (preset.wordSpacing ?? preset.spacing ?? 0) * fontPx;
 
   // Wrap greedy + quebras estruturais (stack = pirâmide; emphasisBreak = a
   // palavra forte ganha a PRÓPRIA linha, como nas composições de título)
@@ -1645,18 +1698,7 @@ export function drawCaptions(
 
   const primary = style.primary ?? preset.defaultPrimary;
   const accent = style.accent ?? preset.defaultAccent;
-  // destaque manual do user vence; sem ele, o preset com autoEmphasis escolhe
-  // a palavra forte do bloco sozinho (variação de cor/tamanho automática)
-  let hiList = style.highlights[block.id] ?? [];
-  if (
-    hiList.length === 0 &&
-    preset.autoEmphasis &&
-    style.autoEmphasis !== false
-  ) {
-    const auto = autoEmphasisIndex(block);
-    if (auto !== null) hiList = [auto];
-  }
-  const highlights = new Set(hiList);
+  const highlights = destaquesDoBloco(block, preset, style);
   const layout = measureLayout(realCtx, block, preset, style, W, highlights);
   const { fontPx, lineH } = layout;
   const seedBase = hashStr(block.id);
@@ -2383,7 +2425,7 @@ export function drawCaptions(
           // apoio usam a cor do mix
           if (isHi) {
             fill = preset.highlightGradient
-              ? resolveHighlightFill(d, lineH)
+              ? resolveHighlightFill(d, lineH, wl.w)
               : resolveFill(d, lineH);
           } else {
             fill = resolveColor(preset.mix.color ?? 'primary', primary, accent);
@@ -2400,7 +2442,7 @@ export function drawCaptions(
           ) {
             fill = accent;
           }
-          if (isHi) fill = resolveHighlightFill(d, lineH);
+          if (isHi) fill = resolveHighlightFill(d, lineH, wl.w);
         }
         if (lineBoxText) {
           fill =
@@ -2726,15 +2768,24 @@ function getTrippyPattern(d: DrawCtx): Paint {
 }
 
 /** Fill da palavra DESTACADA: gradiente próprio quando o preset define. */
-function resolveHighlightFill(d: DrawCtx, lineH: number): Paint {
+function resolveHighlightFill(d: DrawCtx, lineH: number, wordW?: number): Paint {
   const p = d.preset;
   if (p.highlightGradient) {
     // DIAGONAL: comeca em cima-a-esquerda e termina embaixo-a-direita, entao
     // um canto sai mais claro que o outro (o brilho de metal). O vertical
     // puro deixa a letra chapada.
+    //
+    // O gradiente ABRE PELA LARGURA DA PALAVRA. A pintura acontece com a
+    // origem no CENTRO da palavra, e antes o vao era fixo (~1.1x a altura da
+    // linha): em palavra larga ("opiniao") tudo que caia a esquerda do
+    // inicio do gradiente era pintado com o PRIMEIRO stop, entao as
+    // primeiras letras saiam mais claras que o resto e a palavra lia como
+    // BICOLOR, nao como brilho. Com o vao seguindo a palavra, o mesmo
+    // caminho de luz cabe inteiro em qualquer largura.
+    const meia = Math.max(wordW ?? lineH, lineH * 0.6) / 2;
     const g =
       p.highlightGradientDir === 'diagonal'
-        ? d.ctx.createLinearGradient(-lineH * 0.5, -lineH * 0.78, lineH * 0.6, lineH * 0.36)
+        ? d.ctx.createLinearGradient(-meia, -lineH * 0.62, meia, lineH * 0.3)
         : d.ctx.createLinearGradient(0, -lineH * 0.75, 0, lineH * 0.35);
     for (const [o, c] of p.highlightGradient) {
       g.addColorStop(o, resolveColor(c, d.primary, d.accent));
@@ -3030,12 +3081,7 @@ export function captionBBoxAt(
   FAUX_BOLD = style.bold === true;
 
   const preset = presetDoBloco(style, basePreset);
-  let hiList = style.highlights[block.id] ?? [];
-  if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
-    const auto = autoEmphasisIndex(block);
-    if (auto !== null) hiList = [auto];
-  }
-  const highlights = new Set(hiList);
+  const highlights = destaquesDoBloco(block, preset, style);
   const layout = measureLayout(ctx, block, preset, style, W, highlights);
   const isSolo = (preset.karaoke ?? 'none') === 'solo';
   const blockH = isSolo ? layout.lineH : layout.totalH;
@@ -3089,12 +3135,7 @@ export function wordBoxesAt(
   FAUX_ITALIC = style.italic === true;
   FAUX_BOLD = style.bold === true;
   const preset = presetDoBloco(style, basePreset);
-  let hiList = style.highlights[block.id] ?? [];
-  if (hiList.length === 0 && preset.autoEmphasis && style.autoEmphasis !== false) {
-    const auto = autoEmphasisIndex(block);
-    if (auto !== null) hiList = [auto];
-  }
-  const highlights = new Set(hiList);
+  const highlights = destaquesDoBloco(block, preset, style);
   const layout = measureLayout(ctx, block, preset, style, W, highlights);
   const isSolo = (preset.karaoke ?? 'none') === 'solo';
   const blockH = isSolo ? layout.lineH : layout.totalH;

@@ -849,27 +849,44 @@ export async function renderTypographyVideo(opts: {
   video.playsInline = true;
 
   try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new FriendlyError('Não consegui abrir o vídeo. Confere o arquivo e tenta de novo.')),
-        15000,
-      );
+    // ── metadata: <video> primeiro, CABEÇALHO do MP4 como reserva ──
+    // Numa aba em segundo plano o Chrome estrangula o pipeline de mídia e o
+    // `loadedmetadata` nunca chega. Isso derrubava o render inteiro (e, no
+    // Pilot, o AD saía sem legenda e sem zoom sem ninguém saber). O moov do
+    // MP4 tem os mesmos números e não depende de aba nenhuma.
+    const videoAbriu = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), 15000);
       video.onloadedmetadata = () => {
         clearTimeout(timer);
-        resolve();
+        resolve(true);
       };
       video.onerror = () => {
         clearTimeout(timer);
-        reject(new FriendlyError('Formato de vídeo não suportado pelo navegador. Converte pra MP4 (H.264) e tenta de novo.'));
+        resolve(false);
       };
       video.src = url;
     });
 
-    const srcW = video.videoWidth;
-    const srcH = video.videoHeight;
-    const durationSec = video.duration;
-    if (!srcW || !srcH || !isFinite(durationSec) || durationSec <= 0) {
-      throw new FriendlyError('Não consegui ler as dimensões do vídeo. Converte pra MP4 (H.264) e tenta de novo.');
+    let srcW = video.videoWidth;
+    let srcH = video.videoHeight;
+    let durationSec = video.duration;
+    if (!videoAbriu || !srcW || !srcH || !isFinite(durationSec) || durationSec <= 0) {
+      const { metaPeloCabecalho } = await import('../video-duracao');
+      const meta = await metaPeloCabecalho(file);
+      if (!meta) {
+        throw new FriendlyError(
+          videoAbriu
+            ? 'Não consegui ler as dimensões do vídeo. Converte pra MP4 (H.264) e tenta de novo.'
+            : 'Não consegui abrir o vídeo. Confere o arquivo e tenta de novo.',
+        );
+      }
+      srcW = meta.width;
+      srcH = meta.height;
+      durationSec = meta.durSec;
+      console.warn(
+        `[typo-export] <video> não respondeu (aba em segundo plano?) — metadata lida do cabeçalho: ` +
+          `${srcW}x${srcH} ${durationSec.toFixed(1)}s`,
+      );
     }
 
     const longSide = Math.max(srcW, srcH);
@@ -933,6 +950,15 @@ export async function renderTypographyVideo(opts: {
       }
     }
     if (!videoOnly) {
+      // O seek pinta os frames DO <video>. Se ele nem abriu (aba em segundo
+      // plano), esse caminho não desenha nada — ficaria esperando um seek que
+      // nunca completa. Falhar aqui, alto e claro, é melhor que travar.
+      if (!videoAbriu) {
+        throw new FriendlyError(
+          'O navegador não abriu o vídeo pra renderizar (a aba precisa ficar VISÍVEL durante o render). ' +
+            'Deixa esta aba na frente e roda de novo.',
+        );
+      }
       mode = 'seek';
       onProgress?.({ phase: 'frames', ratio: 0, frame: 0, totalFrames: Math.ceil(durationSec * FPS) });
       videoOnly = await renderFramesBySeek({

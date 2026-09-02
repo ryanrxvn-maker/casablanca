@@ -16,12 +16,8 @@ import { drawCaptions, type AnimKind, type Block, type StyleState } from '@/lib/
 import { getPreset } from '@/lib/typography/presets';
 
 const FRASE = 'mas aí eu quero que tu me dê tua opinião, tá?';
-/**
- * Palavras em dourado na referencia: de "de" ate "ta?" — o Silas corrigiu
- * que o amarelo vai ate o fim da frase, nao para em "opiniao".
- * mas(0) ai(1) eu(2) quero(3) que(4) tu(5) me(6) de(7) tua(8) opiniao,(9) ta?(10)
- */
-const DESTAQUES = [7, 8, 9, 10];
+/** a frase do print que o Silas mandou pronto, com o defeito das palavras coladas */
+const FRASE2 = 'Esse truque do quiabo';
 
 /** entradas candidatas — todas desenhadas no MESMO instante da animacao */
 const ANIMS: AnimKind[] = [
@@ -69,19 +65,22 @@ function Quadro({
   label,
   fonte,
   anim,
+  frase,
 }: {
   presetId: string;
   tMs: number;
   rodando: boolean;
   label: string;
+  /** frase desenhada (default: a da referencia) */
+  frase?: string;
   /** troca SO a fonte, pra comparar familias com o resto igual */
   fonte?: FontKey;
   /** troca SO a animacao de entrada, pra comparar com o resto igual */
   anim?: AnimKind;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
-  const live = useRef({ presetId, tMs, rodando, fonte, anim });
-  live.current = { presetId, tMs, rodando, fonte, anim };
+  const live = useRef({ presetId, tMs, rodando, fonte, anim, frase });
+  live.current = { presetId, tMs, rodando, fonte, anim, frase };
 
   useEffect(() => {
     void ensureTypoFonts();
@@ -100,7 +99,7 @@ function Quadro({
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
       const s = live.current;
-      const b = bloco(FRASE);
+      const b = bloco(s.frase ?? FRASE);
       const st: StyleState = {
         presetId: s.presetId,
         fontScale: 1,
@@ -109,8 +108,8 @@ function Quadro({
         primary: null,
         accent: null,
         uppercase: null,
-        highlights: { ref: DESTAQUES },
-        autoEmphasis: false,
+        highlights: {},
+        autoEmphasis: true,
         fontOverride: s.fonte ?? null,
         animIn: s.anim ?? null,
       };
@@ -178,6 +177,17 @@ function Inner() {
         {instantes.map((t) => (
           <Quadro key={t} presetId={id} tMs={t} rodando={false} label={`${t} ms`} />
         ))}
+      </div>
+
+      <h2 className="mb-2 mt-8 text-[16px] font-bold text-text">
+        A frase do print (&quot;Esse truque do quiabo&quot;)
+      </h2>
+      <p className="mb-3 text-[12px] text-text-muted">
+        Destaque AUTOMÁTICO, como sai na ferramenta — sem eu escolher as
+        palavras na mão.
+      </p>
+      <div className="mb-5">
+        <Quadro presetId={id} tMs={4200} rodando={false} frase={FRASE2} label="parado" />
       </div>
 
       <h2 className="mb-2 mt-8 text-[16px] font-bold text-text">
