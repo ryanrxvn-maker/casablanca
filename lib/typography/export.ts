@@ -614,24 +614,10 @@ export type ZoomSeg = {
   rampaAte?: number;
 };
 
-function easeInOutSine(p: number): number {
-  return -(Math.cos(Math.PI * p) - 1) / 2;
-}
-
-export function zoomScaleAt(plan: ZoomSeg[] | undefined, t: number): number {
-  if (!plan || plan.length === 0) return 1;
-  for (const seg of plan) {
-    if (t >= seg.start && t < seg.end) {
-      // A rampa vai até `rampaAte` (quando existe) e DESCANSA em `to` até o
-      // corte — o clamp do `p` em 1 é o que segura a escala parada ali.
-      const fim = seg.rampaAte != null && seg.rampaAte > seg.start ? seg.rampaAte : seg.end;
-      const dur = Math.max(0.001, fim - seg.start);
-      const p = easeInOutSine(Math.min(1, Math.max(0, (t - seg.start) / dur)));
-      return seg.from + (seg.to - seg.from) * p;
-    }
-  }
-  return 1;
-}
+// A curva mora em [[lib/pilot-pos-producao.ts]], junto do planejador — assim o
+// teste do plano mede a MESMA escala que o render desenha.
+export { escalaNoInstante as zoomScaleAt } from '../pilot-pos-producao';
+import { escalaNoInstante as zoomScaleAt } from '../pilot-pos-producao';
 
 /** Desenha o frame fonte com o crop central da escala do instante `t`. */
 function drawZoomed(

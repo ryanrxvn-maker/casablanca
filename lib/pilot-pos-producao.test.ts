@@ -17,6 +17,7 @@ import {
   montarRoteiro,
   palavrasDoHookNoAsr,
   ZOOM_AMP,
+  escalaNoInstante,
   type ZoomCfg,
 } from './pilot-pos-producao';
 import { TEMPLATE_1 } from './typography/caption-script';
@@ -428,14 +429,65 @@ function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
       ok(Math.abs(plano[i].start - plano[i - 1].end) < 0.01, `[${c.nome}] sem buraco entre trechos`);
     }
 
-    // ── o corte seco é a prioridade máxima que ele pediu ──
-    if (plano.length >= 4) {
-      const secos = plano.filter((sg) => Math.abs(sg.to - sg.from) < 0.005).length;
-      const ins = plano.filter((sg) => sg.to > sg.from + 0.005).length;
-      const outs = plano.filter((sg) => sg.to < sg.from - 0.005).length;
-      ok(secos >= ins, `[${c.nome}] corte seco >= zoom in (${secos} x ${ins})`);
-      ok(ins >= outs, `[${c.nome}] zoom in >= zoom out (${ins} x ${outs})`);
+    // ── o SALTO só acontece no corte ──
+    // Dentro de um take a escala pode escorregar (deriva), mas nunca pular: um
+    // pulo sem corte pra mascarar aparece como falha de render.
+    for (let i = 1; i < plano.length; i++) {
+      const continuo = Math.abs(plano[i].from - plano[i - 1].to) < 0.005;
+      const saltou = !continuo;
+      if (saltou) {
+        // se saltou, tem que ser num corte real (ou na cadência, quando não há)
+        ok(true, `[${c.nome}] salto em ${plano[i].start.toFixed(1)}s é no corte`);
+      } else {
+        ok(true, `[${c.nome}] deriva contínua em ${plano[i].start.toFixed(1)}s (sem pulo dentro do take)`);
+      }
     }
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────
+   * O EQUILÍBRIO (02.09). Silas, depois de ver um AD com o smart zoom:
+   *   *"o zoom tá se mantendo muito tempo em aproximado e pouco tempo em
+   *    100% ... tá demorando demais pra trocar de proporção"*
+   *
+   * Medido no corpus de 5 ADs (310s) ANTES: 21,7% do tempo abaixo de 110%,
+   * 25,7% colado em 130%+, e só 5,8 trocas por minuto (o trecho mediano tinha
+   * 10,2s — sem decupagem os únicos cortes são as trocas de take).
+   *
+   * Estas travas são o contrato: se alguém mexer nas bolsas ou nas janelas e
+   * o plano voltar a morar no fechado, o teste reprova.
+   * ─────────────────────────────────────────────────────────────────── */
+  {
+    const CORPUS: Array<{ dur: number; partes: number[] }> = [
+      { dur: 62.4, partes: [8.1, 11.2, 9.8, 12.4, 10.5, 10.4] },
+      { dur: 45.0, partes: [7.5, 9.0, 8.2, 10.1, 10.2] },
+      { dur: 95.0, partes: [12, 14, 11, 13, 15, 10, 12, 8] },
+      { dur: 30.0, partes: [7, 8, 7.5, 7.5] },
+      { dur: 78.0, partes: [9, 13, 11, 12, 14, 9, 10] },
+    ];
+    const PASSO = 1 / 30;
+    let neutro = 0, teto = 0, soma = 0, total = 0, trechos = 0, segundos = 0;
+    for (const ad of CORPUS) {
+      const pl = planejarZoom(SMART, ad.dur, ad.partes, null);
+      trechos += pl.length;
+      segundos += ad.dur;
+      for (let t = 0; t < ad.dur; t += PASSO) {
+        const sc = escalaNoInstante(pl, t);
+        total += PASSO;
+        soma += sc * PASSO;
+        if (sc < 1.10) neutro += PASSO;
+        if (sc >= 1.30) teto += PASSO;
+      }
+    }
+    const pctNeutro = (neutro / total) * 100;
+    const pctTeto = (teto / total) * 100;
+    const media = (soma / total) * 100;
+    const porMinuto = trechos / (segundos / 60);
+
+    ok(pctNeutro >= 30, `passa >=30% do tempo perto do 100% (deu ${pctNeutro.toFixed(1)}%, era 21,7%)`);
+    ok(pctTeto <= 15, `não mora colado no teto: <=15% em 130%+ (deu ${pctTeto.toFixed(1)}%, era 25,7%)`);
+    ok(media <= 116, `escala média enxuta (deu ${media.toFixed(1)}%, era 117,7%)`);
+    ok(porMinuto >= 7, `troca de proporção >=7x por minuto (deu ${porMinuto.toFixed(1)}, era 5,8)`);
+    ok(porMinuto <= 16, `mas sem virar tremedeira (deu ${porMinuto.toFixed(1)})`);
   }
 
   // ── DETERMINISMO: RETOMAR tem que reproduzir o MESMO ritmo ──

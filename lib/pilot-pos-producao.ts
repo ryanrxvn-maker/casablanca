@@ -111,8 +111,6 @@ const ESPERA_POR_FORTE_SEC = 3;
 const SMART_MAX = 1.35;
 /** Escala mínima — abaixo de 1 o frame não preenche a tela (borda). */
 const SMART_MIN = 1.0;
-/** Degraus de escala do corte seco (o "100 · 120 · 130" do draft). */
-const SMART_DEGRAUS = [1.0, 1.1, 1.2, 1.3, 1.35];
 /**
  * A BOLSA de movimentos — 3 secos, 2 in, 1 out por ciclo de 6.
  *
@@ -124,10 +122,79 @@ const SMART_DEGRAUS = [1.0, 1.1, 1.2, 1.3, 1.35];
  * tamanho de AD, e a ordem varia sem nunca amontoar o mesmo movimento.
  */
 const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'seco', 'in', 'in', 'out'];
+/**
+ * A BOLSA DE DEGRAUS do corte seco.
+ *
+ * Sorteio uniforme entre os 5 degraus parecia justo e não era: medido em 5 ADs
+ * (310s), o vídeo passava 33% do tempo em 121-135% e só 20% em 100-105% —
+ * Silas, 02.09: *"o zoom tá se mantendo muito tempo em aproximado e pouco
+ * tempo em 100%"*. As rampas empurram a escala pra cima e nada a trazia de
+ * volta com regularidade.
+ *
+ * O 100% agora tem peso DOBRADO na bolsa. Mesma mecânica da bolsa de
+ * movimentos: proporção garantida em qualquer tamanho de AD.
+ */
+const SMART_BOLSA_DEGRAUS = [1.0, 1.0, 1.0, 1.1, 1.2, 1.35];
+/** A partir daqui o plano conta como "fechado" — e o próximo seco tem que abrir. */
+const SMART_ALTO = 1.26;
+/** O alívio depois de um trecho fechado: nada acima disto serve. */
+const SMART_ALIVIO_MAX = 1.12;
+/** Rampa com menos amplitude que isto pela frente vira seco: 4% em 5s não é
+ *  movimento, é o vídeo parecendo travado num zoom que não acontece. */
+const SMART_RAMPA_MIN_ESPACO = 0.06;
+/**
+ * Take mais longo que isto ganha DERIVA: a escala entra no corte, segura, e
+ * escorrega de leve até o fim do take.
+ *
+ * Sem decupagem, os únicos cortes são as trocas de take — a cada ~10s. A
+ * janela alvo de 2,3s não tinha onde terminar e o trecho saía com 10s de
+ * mediana: o vídeo ficava parado numa escala só o take inteiro. Silas, 02.09:
+ * *"tá demorando demais pra trocar de proporção"*.
+ *
+ * A deriva é uma RAMPA contínua (o `from` dela é o `to` do trecho anterior),
+ * então nada pula no meio do take — o salto continua acontecendo só no corte,
+ * onde é invisível.
+ */
+const SMART_SUBDIV_SEC = 6.0;
+/** Onde o take longo troca de segurar pra derivar.
+ *  O ABERTO segura mais: 100% é o estado de repouso do plano, e se ele
+ *  escorregasse cedo o vídeo voltava a morar no fechado (medido: 17% de tempo
+ *  aberto contra os 34% que a bolsa de degraus tinha conquistado). */
+const SMART_SUBDIV_FRACAO = 0.42;
+const SMART_SUBDIV_FRACAO_ABERTO = 0.64;
+/** Amplitude da deriva — leve: ela acompanha a fala, não disputa com ela. */
+const SMART_DERIVA_MIN = 0.06;
+const SMART_DERIVA_MAX = 0.13;
 /** Janela do corte seco: curta, é só o take numa escala. */
-const SMART_SEG_SECO_SEC = 3;
+const SMART_SEG_SECO_SEC = 2.3;
 /** Janela do movimento: precisa de tempo pra ser percebido. */
-const SMART_SEG_RAMPA_SEC = 6;
+const SMART_SEG_RAMPA_SEC = 4.6;
+
+function easeInOutSine(p: number): number {
+  return -(Math.cos(Math.PI * p) - 1) / 2;
+}
+
+/**
+ * A ESCALA no instante `t` — a mesma conta que o render usa por frame.
+ *
+ * Mora aqui, no arquivo puro, porque é ela que traduz o plano em movimento: um
+ * teste que reimplementasse essa curva poderia passar enquanto o vídeo saía
+ * diferente. [[lib/typography/export.ts]] importa daqui.
+ */
+export function escalaNoInstante(plano: ZoomSeg[] | undefined, t: number): number {
+  if (!plano || plano.length === 0) return 1;
+  for (const seg of plano) {
+    if (t >= seg.start && t < seg.end) {
+      // A rampa vai até `rampaAte` (quando existe) e DESCANSA em `to` até o
+      // corte — o clamp do `p` em 1 é o que segura a escala parada ali.
+      const fim = seg.rampaAte != null && seg.rampaAte > seg.start ? seg.rampaAte : seg.end;
+      const dur = Math.max(0.001, fim - seg.start);
+      const p = easeInOutSine(Math.min(1, Math.max(0, (t - seg.start) / dur)));
+      return seg.from + (seg.to - seg.from) * p;
+    }
+  }
+  return 1;
+}
 
 /** PRNG determinístico (mulberry32): o MESMO vídeo dá o MESMO plano — sem
  *  isso, um RETOMAR entregaria um AD com dinâmica diferente do primeiro. */
@@ -189,6 +256,41 @@ export function fronteirasDasPartes(partesSec: number[]): number[] {
  * O sorteio é DETERMINÍSTICO (semente vinda das próprias durações): o mesmo
  * vídeo dá exatamente o mesmo plano, então um RETOMAR não muda a dinâmica.
  */
+/**
+ * Próximo degrau do corte seco.
+ *
+ * Duas regras, nesta ordem: (1) vindo de um trecho FECHADO, o corte abre — é o
+ * que devolve o 100% ao vídeo; (2) senão, o primeiro da bolsa que seja
+ * diferente o bastante da escala atual pra troca ser percebida no corte.
+ */
+function proximoDegrau(bolsa: number[], escala: number, encher: () => void): number {
+  if (bolsa.length === 0) encher();
+  const tirar = (i: number) => bolsa.splice(i, 1)[0];
+
+  if (escala >= SMART_ALTO) {
+    const i = bolsa.findIndex((d) => d <= SMART_ALIVIO_MAX);
+    if (i >= 0) return tirar(i);
+    // a bolsa não tem alívio agora: enche de novo e procura outra vez, senão
+    // o vídeo ficaria fechado por mais um trecho inteiro.
+    encher();
+    const j = bolsa.findIndex((d) => d <= SMART_ALIVIO_MAX);
+    if (j >= 0) return tirar(j);
+  }
+
+  // A VOLTA AO 100% é exceção do filtro (02.09). Com a escala em 1,06 depois
+  // de uma deriva, o 100% ficava a 6% de distância e o filtro de "diferente o
+  // bastante" o descartava — o plano nunca voltava ao repouso e morava no
+  // meio (medido: 55% do tempo em 106-120%). Voltar pro 100% não é uma troca
+  // qualquer, é o respiro do vídeo: ele passa com 4,5%.
+  const serve = (d: number) =>
+    Math.abs(d - escala) >= 0.08 || (d <= SMART_MIN + 0.001 && escala >= 1.045);
+  const i = bolsa.findIndex(serve);
+  if (i >= 0) return tirar(i);
+  encher();
+  const j = bolsa.findIndex(serve);
+  return j >= 0 ? tirar(j) : 1.0;
+}
+
 function planejarSmartZoom(
   durSec: number,
   cortes: Array<{ t: number; forte: boolean }>,
@@ -199,6 +301,16 @@ function planejarSmartZoom(
   let ini = 0;
   let c = 0;
   let bolsa: Array<'seco' | 'in' | 'out'> = [];
+  // bolsa PARALELA, dos degraus — é ela que devolve o 100% ao vídeo
+  const bolsaDeg: number[] = [];
+  const encherDegraus = () => {
+    bolsaDeg.length = 0;
+    bolsaDeg.push(...SMART_BOLSA_DEGRAUS);
+    for (let k = bolsaDeg.length - 1; k > 0; k--) {
+      const j = Math.floor(rnd() * (k + 1));
+      [bolsaDeg[k], bolsaDeg[j]] = [bolsaDeg[j], bolsaDeg[k]];
+    }
+  };
 
   while (ini < durSec - 0.05 && c < cortes.length) {
     // 1) que movimento vem agora? sai da BOLSA (proporção garantida)
@@ -211,11 +323,19 @@ function planejarSmartZoom(
       }
     }
     let tipo: 'seco' | 'in' | 'out' = bolsa.pop()!;
-    // Sem espaço pro movimento sorteado, cai no SECO — nunca no outro
+    // Sem ESPAÇO pra uma rampa que se perceba, cai no seco — nunca no outro
     // movimento. Converter out→in inflava o zoom in acima do seco e quebrava a
-    // prioridade do draft (medido: 7 in contra 4 secos).
-    if (tipo === 'out' && escala <= SMART_MIN + 0.02) tipo = 'seco'; // já em 100%: não dá pra descer
-    if (tipo === 'in' && escala >= SMART_MAX - 0.02) tipo = 'seco'; // já no teto: não dá pra subir
+    // prioridade do draft (medido: 7 in contra 4 secos). O piso subiu de 2%
+    // pra 6% em 02.09: uma rampa de 4% em 5s lê como vídeo travado.
+    //
+    // EXCEÇÃO do out (02.09): com o vídeo passando muito mais tempo em 100%, o
+    // out no piso virava seco SEMPRE e o zoom out sumiu do plano (0 em 310s de
+    // medição). Mas o corte já mascara um salto — então o out no piso vira
+    // "entra fechado no corte e abre": pula pra cima NO CORTE (invisível) e
+    // desce. É movimento de verdade, e a prioridade do seco continua intacta.
+    let outDoPiso = false;
+    if (tipo === 'out' && escala <= SMART_MIN + SMART_RAMPA_MIN_ESPACO) outDoPiso = true;
+    if (tipo === 'in' && escala >= SMART_MAX - SMART_RAMPA_MIN_ESPACO) tipo = 'seco';
 
     // 2) a janela: o seco é curto (só o take numa escala), a rampa é longa
     const alvo = tipo === 'seco' ? SMART_SEG_SECO_SEC : SMART_SEG_RAMPA_SEC;
@@ -236,22 +356,46 @@ function planejarSmartZoom(
     // 3) a escala de destino
     if (tipo === 'seco') {
       // um degrau DIFERENTE do atual — a troca tem que ser percebida no corte
-      const opcoes = SMART_DEGRAUS.filter((d) => Math.abs(d - escala) >= 0.08);
-      const nova = clampEscala(opcoes.length ? opcoes[Math.floor(rnd() * opcoes.length)] : 1.0);
-      segs.push({ start: ini, end: fim, from: nova, to: nova, rampaAte: fim });
-      escala = nova;
+      const nova = clampEscala(proximoDegrau(bolsaDeg, escala, encherDegraus));
+      if (dur >= SMART_SUBDIV_SEC) {
+        // TAKE LONGO: o corte entrega a escala nova, ela SEGURA, e depois
+        // escorrega. Duas leituras de proporção onde antes havia uma só.
+        const aberto = nova <= 1.08;
+        const meio = ini + dur * (aberto ? SMART_SUBDIV_FRACAO_ABERTO : SMART_SUBDIV_FRACAO);
+        // Saindo do aberto a deriva é MENOR: senão o 100% dura um sopro e o
+        // plano volta a morar no meio — era o que a medição mostrava.
+        const dMin = aberto ? 0.04 : SMART_DERIVA_MIN;
+        const dMax = aberto ? 0.08 : SMART_DERIVA_MAX;
+        const deriva = dMin + rnd() * (dMax - dMin);
+        // Fechado desce, aberto sobe, e o meio pende pra baixo — é o conjunto
+        // disso que impede o plano de morar no teto.
+        const paraBaixo = nova >= 1.2 ? true : aberto ? false : rnd() < 0.68;
+        const alvoDeriva = clampEscala(paraBaixo ? nova - deriva : nova + deriva);
+        segs.push({ start: ini, end: meio, from: nova, to: nova, rampaAte: meio });
+        const durB = fim - meio;
+        const respiroB = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, durB * RESPIRO_FRACAO));
+        const rampaAteB = durB > respiroB * 2 ? fim - respiroB : meio + durB / 2;
+        segs.push({ start: meio, end: fim, from: nova, to: alvoDeriva, rampaAte: rampaAteB });
+        escala = alvoDeriva;
+      } else {
+        segs.push({ start: ini, end: fim, from: nova, to: nova, rampaAte: fim });
+        escala = nova;
+      }
     } else {
       // rampa: alguns leves, outros mais curtos e por isso mais agressivos —
       // mas o teto de 135% e o piso de 100% valem sempre.
       const passo = 0.07 + rnd() * 0.11; // 7% a 18%
-      const destino = clampEscala(tipo === 'in' ? escala + passo : escala - passo);
-      if (Math.abs(destino - escala) < 0.02) {
+      // no out-do-piso a ENTRADA é que sobe (no corte); o destino é o piso
+      const partida = outDoPiso ? clampEscala(escala + passo + 0.06) : escala;
+      const destino = clampEscala(tipo === 'in' ? partida + passo : partida - passo);
+      if (Math.abs(destino - partida) < 0.02) {
         // não sobrou amplitude: entrega como seco em vez de uma rampa morta
-        segs.push({ start: ini, end: fim, from: escala, to: escala, rampaAte: fim });
+        segs.push({ start: ini, end: fim, from: partida, to: partida, rampaAte: fim });
+        escala = partida;
       } else {
         const respiro = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, dur * RESPIRO_FRACAO));
         const rampaAte = dur > respiro * 2 ? fim - respiro : ini + dur / 2;
-        segs.push({ start: ini, end: fim, from: escala, to: destino, rampaAte });
+        segs.push({ start: ini, end: fim, from: partida, to: destino, rampaAte });
         escala = destino;
       }
     }
