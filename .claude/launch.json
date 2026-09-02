@@ -4,9 +4,37 @@
     {
       "name": "autoedit-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "briefings",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8099",
+        "--directory",
+        "D:/B2C/BRIEFINGS"
+      ],
+      "port": 8099
+    },
+    {
+      "name": "autoedit-dev-isolado",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 3000,
+      "autoPort": true,
+      "env": {
+        "NEXT_DIST_DIR": ".next-dev2"
+      }
     }
   ]
 }

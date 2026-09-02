@@ -683,6 +683,15 @@ function Conteudo() {
             durSec: 4,
           })}
           thumbDaMidia={() => null}
+          // O RECORTADOR precisa tocar o arquivo — sem isto o harness não
+          // exercita a feature que ele existe pra provar.
+          // a duração REAL de /dev-tiny.mp4 — mentir aqui faria o diagnóstico
+          // de encaixe discordar do recorte, que é justamente o que se quer ver
+          duracaoDaMidia={() => 12}
+          lerMidia={async () => {
+            const r = await fetch('/dev-tiny.mp4');
+            return r.ok ? await r.blob() : null;
+          }}
           thumbAvatar={null}
         />
       ) : null}
