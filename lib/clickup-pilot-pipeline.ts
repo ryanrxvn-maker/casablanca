@@ -111,21 +111,11 @@ export type PipelineInputs = {
  *  Best-effort: usado só pras fronteiras do zoom; falhou, o plano cai na
  *  cadência fixa (nunca bloqueia a entrega). */
 async function blobDurSec(blob: Blob): Promise<number> {
-  if (typeof document === 'undefined') return 0;
-  const url = URL.createObjectURL(blob);
-  try {
-    return await new Promise<number>((resolve) => {
-      const v = document.createElement('video');
-      const timer = setTimeout(() => resolve(0), 8000);
-      v.preload = 'metadata';
-      v.muted = true;
-      v.onloadedmetadata = () => { clearTimeout(timer); resolve(isFinite(v.duration) && v.duration > 0 ? v.duration : 0); };
-      v.onerror = () => { clearTimeout(timer); resolve(0); };
-      v.src = url;
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  // Cabeçalho do MP4 primeiro: numa aba em segundo plano o <video> não carrega
+  // metadata, e sem estas durações o zoom perde as fronteiras dos takes (cai
+  // na cadência cega de 8 em 8s) ou nem chega a ser planejado.
+  const { duracaoDeVideo } = await import('./video-duracao');
+  return await duracaoDeVideo(blob);
 }
 
 /** Insere "G<N>" antes do sufixo final do baseAdId. Ex:

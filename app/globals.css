@@ -4678,3 +4678,42 @@ html[data-theme='light'] .rdp-pos {
   color: rgb(var(--text-dim));
 }
 .rdp-pos-btns { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+
+/* ── PÓS-PRODUÇÃO que não entrou (02.09) ──────────────────────────────────
+ * O selo dizia o que foi CONFIGURADO. Quando o render falhava, o AD saía sem
+ * legenda/zoom com o ícone aceso do mesmo jeito — e o motivo morria no
+ * console. Agora o selo se risca e o motivo aparece no card. */
+.selo-aplicado.is-falhou {
+  color: #fbbf24 !important;
+  background: rgba(245, 158, 11, 0.14) !important;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.55) !important;
+  position: relative;
+}
+.selo-aplicado.is-falhou::after {
+  content: ''; position: absolute; left: 12%; right: 12%; top: 50%;
+  height: 1.6px; border-radius: 2px; background: currentColor;
+  transform: rotate(-38deg); transform-origin: center; opacity: 0.95;
+}
+html[data-theme='light'] .selo-aplicado.is-falhou {
+  color: #b45309 !important;
+  background: rgba(245, 158, 11, 0.16) !important;
+  box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.5) !important;
+}
+
+.aviso-pos {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin-top: 7px; border-radius: 9px; padding: 7px 10px;
+  font-size: 11.5px; line-height: 1.45; font-weight: 500;
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.4);
+}
+html[data-theme='light'] .aviso-pos {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.38);
+}
+.aviso-pos svg { flex-shrink: 0; margin-top: 1px; }
+.aviso-pos-item { display: block; }
+.aviso-pos-item + .aviso-pos-item { margin-top: 3px; }

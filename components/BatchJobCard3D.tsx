@@ -94,7 +94,16 @@ export type BatchJob3DProps = {
    *  expandir. Enquanto ele existe, o card abre sozinho. */
   /** SELOS do que foi aplicado neste vídeo (31.08): decupagem, legenda, zoom.
    *  Ícone puro, sem texto — o `title` conta a história no hover. */
-  selos?: Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }>;
+  selos?: Array<{
+    tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline';
+    title: string;
+    /** LIGADO na config mas NÃO aplicado no vídeo entregue (02.09). O selo
+     *  vira âmbar e riscado. Sem isto o card exibia o ícone de zoom sobre um
+     *  AD que saiu sem zoom nenhum — a mesma mentira do "PRONTO" de 23.08. */
+    falhou?: boolean;
+  }>;
+  /** Por que a pós-produção não aplicou (aparece em âmbar sob os selos). */
+  avisosPos?: string[];
   topPanel?: React.ReactNode;
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
    *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
@@ -499,6 +508,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     extraActions,
     channels,
     selos,
+    avisosPos,
     topPanel,
   } = props;
 
@@ -630,7 +640,11 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {selos && selos.length > 0 ? (
                 <span className="flex shrink-0 items-center gap-1">
                   {selos.map((sl) => (
-                    <span key={sl.tipo} className={`selo-aplicado is-${sl.tipo}`} title={sl.title}>
+                    <span
+                      key={sl.tipo}
+                      className={`selo-aplicado is-${sl.tipo}${sl.falhou ? ' is-falhou' : ''}`}
+                      title={sl.falhou ? `NÃO aplicado neste vídeo — ${sl.title}` : sl.title}
+                    >
                       {sl.tipo === 'normalizador' ? (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
@@ -675,6 +689,23 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 {formatElapsed(elapsedMs)}
               </span>
             </div>
+            {/* POR QUE o realce não entrou. Um AD entregue sem o zoom/legenda
+             *  que foram pedidos é um defeito — e ficava só no console. */}
+            {avisosPos && avisosPos.length > 0 ? (
+              <div className="aviso-pos">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 9v4M12 17h.01" />
+                  <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                </svg>
+                <span>
+                  {avisosPos.map((a, i) => (
+                    <span key={i} className="aviso-pos-item">
+                      {a}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center gap-1.5">
               {/* BOTAO GOOGLE DOCS — vai direto pro Google Doc da copy.
                *  Fluxo:

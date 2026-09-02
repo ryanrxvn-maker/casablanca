@@ -5,6 +5,7 @@
  * este arquivo arrasta export.ts/ffmpeg e por isso vive separado.
  */
 
+import { duracaoDeVideo } from './video-duracao';
 import {
   planejarZoom,
   separarHookBody,
@@ -106,9 +107,14 @@ export async function montarPosProducao(
     const { emptyIdentity } = await import('./typography/blocks-edit');
 
     // duração do vídeo final (pro plano de zoom)
-    const durSec = await duracaoDoBlob(blob);
+    // A duração vem do CABEÇALHO do MP4 (aritmética pura). O <video> só entra
+    // de reserva, e a soma das partes — que o pipeline já mediu — é a última
+    // linha. Antes disto, uma aba em segundo plano zerava a duração e a
+    // pós-produção abortava sem dizer nada a ninguém.
+    const somaPartes = (info.partesSec || []).reduce((a, b) => a + (b > 0 ? b : 0), 0);
+    const durSec = await duracaoDeVideo(blob, somaPartes > 0.5 ? somaPartes : null);
     if (!durSec) {
-      avisos.push('pós-produção: não consegui ler a duração do montado — entregue sem legenda/zoom');
+      avisos.push('não consegui ler a duração do montado (nem cabeçalho, nem player) — entregue sem legenda/zoom');
       return { blob: null, avisos };
     }
 
@@ -410,29 +416,7 @@ export async function montarPosProducao(
 }
 
 /** Duração (s) de um blob de vídeo via metadata — 0 quando não dá pra ler. */
-async function duracaoDoBlob(blob: Blob): Promise<number> {
-  if (typeof document === 'undefined') return 0;
-  const url = URL.createObjectURL(blob);
-  try {
-    return await new Promise<number>((resolve) => {
-      const v = document.createElement('video');
-      const timer = setTimeout(() => resolve(0), 12_000);
-      v.preload = 'metadata';
-      v.muted = true;
-      v.onloadedmetadata = () => {
-        clearTimeout(timer);
-        resolve(isFinite(v.duration) && v.duration > 0 ? v.duration : 0);
-      };
-      v.onerror = () => {
-        clearTimeout(timer);
-        resolve(0);
-      };
-      v.src = url;
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+
 
 /** ASR do montado: extrai o áudio e chama a MESMA rota das Legendas Automáticas. */
 async function transcreverMontado(blob: Blob, idioma: string): Promise<PalavraAsr[]> {

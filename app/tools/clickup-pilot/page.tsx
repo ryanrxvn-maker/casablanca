@@ -1622,6 +1622,18 @@ function ClickUpPilotInner() {
   legendaCfgsRef.current = legendaCfgs;
   const zoomCfgsRef = useRef(zoomCfgs);
   zoomCfgsRef.current = zoomCfgs;
+
+  /**
+   * O QUE A PÓS-PRODUÇÃO REALMENTE FEZ (02.09).
+   *
+   * Silas disparou um AD com SMART ZOOM e não veio zoom nenhum — e o card
+   * dizia PRONTO com o selo de zoom aceso. O motivo existia (avisos do
+   * `montarPosProducao`), mas só ia pro console: na prática o Pilot mentia.
+   *
+   * Aqui fica o resultado por task: `aplicou` (o render entrou no entregue) e
+   * os `avisos`. O card lê isto pra riscar o selo e mostrar o porquê.
+   */
+  const [posResultado, setPosResultado] = useState<Record<string, { aplicou: boolean; avisos: string[] }>>({});
   const captionTemplatesRef = useRef(captionTemplates);
   captionTemplatesRef.current = captionTemplates;
 
@@ -1780,11 +1792,17 @@ function ClickUpPilotInner() {
    * config que o disparo usou (com o fallback pra task mãe e pro padrão da
    * conta), então o selo nunca promete o que não foi aplicado.
    */
-  function selosDoCard(taskId: string): Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> {
+  function selosDoCard(
+    taskId: string,
+  ): Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> {
     const cfgId = taskIdBaseDaVersao(taskId);
+    // Legenda, zoom, inserts e headline saem TODOS do mesmo render. Se ele não
+    // entrou no vídeo entregue, nenhum deles foi aplicado — o selo tem que
+    // dizer isso, não repetir a configuração.
+    const posFalhou = posResultado[taskId] ? !posResultado[taskId].aplicou : false;
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> = [];
+    const out: Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> = [];
     // Primeiro na ordem do pipeline: o nivelamento roda POR PARTE, antes de
     // juntar. Mesma chamada que o disparo usa (isNivelamentoEnabled(taskId)),
     // então o selo conta exatamente o que foi aplicado.
@@ -1796,17 +1814,18 @@ function ClickUpPilotInner() {
     }
     if (leg.on) {
       const tpl = captionTemplatesRef.current.find((t) => t.id === leg.templateId);
-      out.push({ tipo: 'legenda', title: `Legendado — ${tpl?.name || 'modelo padrão'}, corrigido pela copy do doc` });
+      out.push({ tipo: 'legenda', title: `Legendado — ${tpl?.name || 'modelo padrão'}, corrigido pela copy do doc`, falhou: posFalhou });
     }
     const hl = headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT;
     if (hl.on) {
-      out.push({ tipo: 'headline', title: `Com headline — sai no fim de ${hl.ancoraAte || 'hook'}, mascarada pelo corte` });
+      out.push({ tipo: 'headline', title: `Com headline — sai no fim de ${hl.ancoraAte || 'hook'}, mascarada pelo corte`, falhou: posFalhou });
     }
     const ins = insertsRef.current[taskId] || insertsRef.current[cfgId] || [];
     if (ins.length > 0) {
       out.push({
         tipo: 'insert',
         title: `${ins.length} insert${ins.length === 1 ? '' : 's'} na montagem — ${ins.map((x) => x.ancora).join(', ')}`,
+        falhou: posFalhou,
       });
     }
     if (zm.on) {
@@ -1817,6 +1836,7 @@ function ClickUpPilotInner() {
           zm.forca === 'smart'
             ? 'Com Smart Zoom — corte seco, zoom in e zoom out escolhidos a cada corte (100–135%)'
             : `Com dinâmica de zoom — ${movimento}, ${zm.forca}`,
+        falhou: posFalhou,
       });
     }
     return out;
@@ -1829,6 +1849,16 @@ function ClickUpPilotInner() {
    * A copy vem do REPLAN persistido (é o que de fato virou take, sobrevive a
    * F5 e é o mesmo texto que o HeyGen falou), com fallback pra análise viva.
    */
+  /** Zera o veredito da pós-produção — todo disparo novo recomeça limpo. */
+  function limparPosResultado(taskId: string) {
+    setPosResultado((prev) => {
+      if (!prev[taskId]) return prev;
+      const n = { ...prev };
+      delete n[taskId];
+      return n;
+    });
+  }
+
   function fazerPosProcessar(taskId: string): ((blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>) | undefined {
     // Versão irmã (-yt / -v3...) herda a config da task MÃE — é nela que o
     // user clicou os botões; a irmã nem aparece na lista.
@@ -1883,6 +1913,16 @@ function ClickUpPilotInner() {
         },
       });
       for (const av of r.avisos) console.warn(`[clickup-pilot] posprod ${taskId}: ${av}`);
+      // O card precisa saber. Um AD entregue sem o zoom que foi pedido é
+      // defeito, não detalhe — e antes disto só o console sabia.
+      const aplicou = !!r.blob;
+      setPosResultado((prev) => ({ ...prev, [taskId]: { aplicou, avisos: r.avisos } }));
+      if (!aplicou && r.avisos.length === 0) {
+        setPosResultado((prev) => ({
+          ...prev,
+          [taskId]: { aplicou: false, avisos: ['a pós-produção não gerou vídeo novo — o AD saiu sem legenda/zoom'] },
+        }));
+      }
       return r.blob;
     };
   }
@@ -4971,7 +5011,7 @@ function ClickUpPilotInner() {
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
           nivelarVoz: isNivelamentoEnabled(taskId),
-          posProcessar: fazerPosProcessar(taskId),
+          posProcessar: (limparPosResultado(taskId), fazerPosProcessar(taskId)),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
@@ -5799,7 +5839,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
           nivelarVoz: isNivelamentoEnabled(taskId),
-          posProcessar: fazerPosProcessar(taskId),
+          posProcessar: (limparPosResultado(taskId), fazerPosProcessar(taskId)),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
@@ -7436,7 +7476,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         decupagem: isDecupagemEnabled(taskId),
         keepSilenceSec: getDecupIntensity(taskId),
         nivelarVoz: isNivelamentoEnabled(taskId),
-        posProcessar: fazerPosProcessar(taskId),
+        posProcessar: (limparPosResultado(taskId), fazerPosProcessar(taskId)),
         camuflagem: _tc.camuflagem,
         whiteAudio: _tc.whiteAudio,
         camuflagemVolume: _tc.camuflagemVolume,
@@ -12477,6 +12517,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               taskName={b.taskName}
                               channels={channels}
                               selos={selosDoCard(b.taskId)}
+                              avisosPos={posResultado[b.taskId]?.aplicou === false ? posResultado[b.taskId].avisos : undefined}
                               phase={b.phase as any}
                               partsTotal={b.parts.length}
                               partsDispatched={partsDispatched}

@@ -16,7 +16,10 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-/** @type {{ tsc: string, run: string[] }[]} */
+/** Etapa: ou compila com tsc e roda o JS (`tsc` + `run`), ou roda o TS direto
+ *  pelo tsx (`tsx`). O tsx existe pros testes que dependem de pacote ESM de
+ *  verdade — mp4box, por exemplo — que nao sobrevive ao --module commonjs.
+ *  @type {{ tsc?: string, run?: string[], tsx?: string[] }[]} */
 const ETAPAS = [
   { tsc: "lib/speech-detect.ts lib/speech-detect.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/speech-detect.test.js"] },
   { tsc: "lib/decupagem-matcher.ts lib/decupagem-matcher.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck", run: [".test-tmp/decupagem-matcher.test.js"] },
@@ -26,6 +29,7 @@ const ETAPAS = [
   { tsc: "lib/pilot-indicacoes.ts lib/pilot-indicacoes.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/pilot-indicacoes.test.js"] },
   { tsc: "lib/versoes-ad.ts lib/versoes-ad.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/versoes-ad.test.js"] },
   { tsc: "lib/pilot-pos-producao.ts lib/pilot-pos-producao.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-pos-producao.test.js"] },
+  { tsx: ["lib/video-duracao.test.ts"] },
   { tsc: "lib/pilot-inserts.ts lib/pilot-inserts.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-inserts.test.js"] },
   { tsc: "lib/ffmpeg-serial.ts lib/ffmpeg-serial.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom", run: [".test-tmp/ffmpeg-serial.test.js"] },
   { tsc: "lib/ffmpeg-worker.ts lib/ffmpeg-worker.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/ffmpeg-worker.test.js"] },
@@ -58,7 +62,7 @@ const ETAPAS = [
 
 const filtro = process.argv[2];
 const alvo = filtro
-  ? ETAPAS.filter((e) => (e.tsc + ' ' + e.run.join(' ')).includes(filtro))
+  ? ETAPAS.filter((e) => [e.tsc || '', ...(e.run || []), ...(e.tsx || [])].join(' ').includes(filtro))
   : ETAPAS;
 
 if (alvo.length === 0) {
@@ -80,6 +84,16 @@ const TSC = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.m
 let falhou = 0;
 
 for (const etapa of alvo) {
+  if (etapa.tsx) {
+    for (const arquivo of etapa.tsx) {
+      const r = spawnSync('npx', ['tsx', arquivo], { stdio: 'inherit', shell: true });
+      if (r.status !== 0) {
+        console.error('\n[test] FALHOU: ' + arquivo);
+        falhou++;
+      }
+    }
+    continue;
+  }
   const args = etapa.tsc.split(/\s+/).filter(Boolean);
   const tsc = spawnSync(process.execPath, [TSC, ...args], { stdio: 'inherit' });
   if (tsc.status !== 0) {

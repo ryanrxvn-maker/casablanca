@@ -379,5 +379,79 @@ function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
 }
 
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * SMART ZOOM CHEGA NO VÍDEO (02.09)
+ *
+ * Silas disparou um AD com Smart Zoom ligado e não veio zoom nenhum. O plano
+ * estava certo; o que falhava era ANTES — a duração do montado era medida por
+ * um <video>, que numa aba em segundo plano nunca carrega metadata. Devolvia
+ * 0 e a pós-produção abortava calada.
+ *
+ * Estes testes prendem as duas pontas: o plano nunca sai parado, e a duração
+ * tem de onde vir quando o <video> falha.
+ * ═════════════════════════════════════════════════════════════════════════ */
+{
+  const SMART: ZoomCfg = { on: true, modo: 'in', forca: 'smart' };
+
+  // ADs de verdade: com e sem decupagem, curtos e longos, medidos e não.
+  const CASOS: Array<{ nome: string; dur: number; partes: number[] | null; internos: number[][] | null }> = [
+    { nome: '6 partes decupadas', dur: 62.4, partes: [8.1, 11.2, 9.8, 12.4, 10.5, 10.4],
+      internos: [[4.0, 4.1], [5.5, 5.7], [9.8], [6.1, 6.3], [10.5], [5.2, 5.2]] },
+    { nome: 'sem partes medidas', dur: 62.4, partes: null, internos: null },
+    { nome: 'partes podres (uma zerada)', dur: 40, partes: [10, 0, 12, 18], internos: null },
+    { nome: 'curto de 18s', dur: 18, partes: [6, 6, 6], internos: null },
+    { nome: 'longo de 95s', dur: 95, partes: [12, 14, 11, 13, 15, 10, 12, 8], internos: null },
+    { nome: 'soma das partes não bate com a duração', dur: 62.4, partes: [3, 3, 3], internos: null },
+  ];
+
+  for (const c of CASOS) {
+    const plano = planejarZoom(SMART, c.dur, c.partes, c.internos);
+    ok(plano.length > 0, `[${c.nome}] o plano não sai vazio`);
+
+    // ── nunca parado: um plano todo em 100% é "sem zoom nenhum" ──
+    const temMovimento = plano.some(
+      (sg) => Math.abs(sg.to - sg.from) > 0.005 || Math.abs(sg.from - 1) > 0.005,
+    );
+    ok(temMovimento, `[${c.nome}] o plano tem movimento de verdade (não é tudo 100%)`);
+
+    // ── limites do draft do Silas: 100% a 135%, sempre ──
+    for (const sg of plano) {
+      ok(sg.from >= 0.999 && sg.to >= 0.999, `[${c.nome}] nunca abaixo de 100% (borda)`);
+      ok(sg.from <= 1.351 && sg.to <= 1.351, `[${c.nome}] nunca acima de 135%`);
+    }
+
+    // ── cobre o vídeo inteiro, sem buraco (frame sem escala = pulo) ──
+    ok(Math.abs(plano[0].start) < 0.01, `[${c.nome}] começa em 0`);
+    ok(Math.abs(plano[plano.length - 1].end - c.dur) < 0.01, `[${c.nome}] termina no fim do vídeo`);
+    for (let i = 1; i < plano.length; i++) {
+      ok(Math.abs(plano[i].start - plano[i - 1].end) < 0.01, `[${c.nome}] sem buraco entre trechos`);
+    }
+
+    // ── o corte seco é a prioridade máxima que ele pediu ──
+    if (plano.length >= 4) {
+      const secos = plano.filter((sg) => Math.abs(sg.to - sg.from) < 0.005).length;
+      const ins = plano.filter((sg) => sg.to > sg.from + 0.005).length;
+      const outs = plano.filter((sg) => sg.to < sg.from - 0.005).length;
+      ok(secos >= ins, `[${c.nome}] corte seco >= zoom in (${secos} x ${ins})`);
+      ok(ins >= outs, `[${c.nome}] zoom in >= zoom out (${ins} x ${outs})`);
+    }
+  }
+
+  // ── DETERMINISMO: RETOMAR tem que reproduzir o MESMO ritmo ──
+  const a = planejarZoom(SMART, 62.4, [8.1, 11.2, 9.8, 12.4, 10.5, 10.4], null);
+  const b = planejarZoom(SMART, 62.4, [8.1, 11.2, 9.8, 12.4, 10.5, 10.4], null);
+  ok(JSON.stringify(a) === JSON.stringify(b), 'o mesmo AD dá o mesmo plano (RETOMAR não muda o vídeo)');
+
+  // ── o desligado continua desligado ──
+  ok(planejarZoom({ ...SMART, on: false }, 62.4, null, null).length === 0, 'zoom off não planeja nada');
+
+  // ── a amplitude é PERCEPTÍVEL: um AD real precisa passar de 110% ──
+  const maiorEscala = Math.max(...a.flatMap((sg) => [sg.from, sg.to]));
+  ok(maiorEscala >= 1.15, `o movimento é visível — chega a ${(maiorEscala * 100).toFixed(0)}% (>=115%)`);
+}
+
+
+
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);
