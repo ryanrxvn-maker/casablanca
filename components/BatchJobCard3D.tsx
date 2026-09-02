@@ -94,7 +94,7 @@ export type BatchJob3DProps = {
    *  expandir. Enquanto ele existe, o card abre sozinho. */
   /** SELOS do que foi aplicado neste vídeo (31.08): decupagem, legenda, zoom.
    *  Ícone puro, sem texto — o `title` conta a história no hover. */
-  selos?: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }>;
+  selos?: Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }>;
   topPanel?: React.ReactNode;
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
    *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
@@ -631,7 +631,14 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 <span className="flex shrink-0 items-center gap-1">
                   {selos.map((sl) => (
                     <span key={sl.tipo} className={`selo-aplicado is-${sl.tipo}`} title={sl.title}>
-                      {sl.tipo === 'decupagem' ? (
+                      {sl.tipo === 'normalizador' ? (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
+                          <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
+                          <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
+                          <line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
+                        </svg>
+                      ) : sl.tipo === 'decupagem' ? (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
                           <line x1="20" y1="4" x2="8.12" y2="15.88" />

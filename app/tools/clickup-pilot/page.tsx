@@ -1780,11 +1780,17 @@ function ClickUpPilotInner() {
    * config que o disparo usou (com o fallback pra task mãe e pro padrão da
    * conta), então o selo nunca promete o que não foi aplicado.
    */
-  function selosDoCard(taskId: string): Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> {
+  function selosDoCard(taskId: string): Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> {
     const cfgId = taskIdBaseDaVersao(taskId);
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> = [];
+    const out: Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string }> = [];
+    // Primeiro na ordem do pipeline: o nivelamento roda POR PARTE, antes de
+    // juntar. Mesma chamada que o disparo usa (isNivelamentoEnabled(taskId)),
+    // então o selo conta exatamente o que foi aplicado.
+    if (isNivelamentoEnabled(taskId)) {
+      out.push({ tipo: 'normalizador', title: 'Volume normalizado — cada parte nivelada a -16 LUFS antes de juntar' });
+    }
     if (isDecupagemEnabled(cfgId) || isDecupagemEnabled(taskId)) {
       out.push({ tipo: 'decupagem', title: `Decupado — silêncios cortados (${getDecupIntensity(cfgId).toFixed(2)}s de respiro)` });
     }
