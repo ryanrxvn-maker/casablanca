@@ -1331,7 +1331,7 @@ function TipografiaInner() {
   const totalWords = words.length;
 
   return (
-    <div className="mx-auto w-full max-w-[1920px] px-5 pt-6 md:px-8">
+    <div className="mx-auto w-full max-w-[2400px] px-4 pt-6 md:px-6">
       <ToolHero
         title="Legendas Automáticas"
         eyebrow="Legendas animadas"
@@ -1629,23 +1629,6 @@ function TipografiaInner() {
               disabled={processing}
             />
 
-            <TimelineM
-              blocks={blocks}
-              duration={duration ?? 0}
-              videoRef={videoRef}
-              videoUrl={videoUrl}
-              presetCat={preset.cat}
-              selId={selBlockId}
-              onSelect={hTimelineSelect}
-              onRetime={hRetime}
-              onDragStart={pushHistory}
-              headlines={headlines}
-              selHeadlineId={selHeadlineId}
-              onSelectHeadline={setSelHeadlineId}
-              onRetimeHeadline={hRetimeHeadline}
-              disabled={processing}
-            />
-
             <BlockListM
               blocks={blocks}
               selId={selBlockId}
@@ -1731,6 +1714,34 @@ function TipografiaInner() {
               }}
             />
               </div>
+            </div>
+
+            {/* ⭐ TIMELINE DOCADA: presa no pe da janela enquanto o passo 3
+                esta na tela — role a configuracao a vontade que a regua, o
+                play e as faixas nao saem do lugar (pedido de 02.09) */}
+            <div
+              className={
+                // no celular o dock roubaria a tela inteira — la ele volta pro fluxo
+                ((duration ?? 0) > 0 ? '' : 'hidden ') +
+                'relative bottom-0 z-30 -mx-2 mt-4 rounded-t-[16px] border-t border-line/70 px-2 pb-1 shadow-[0_-14px_34px_-16px_rgba(0,0,0,0.65)] backdrop-blur-md [background:linear-gradient(180deg,rgba(var(--bg-softer),0.94),rgba(var(--bg-soft),0.97))] md:sticky'
+              }
+            >
+              <TimelineM
+                blocks={blocks}
+                duration={duration ?? 0}
+                videoRef={videoRef}
+                videoUrl={videoUrl}
+                presetCat={preset.cat}
+                selId={selBlockId}
+                onSelect={hTimelineSelect}
+                onRetime={hRetime}
+                onDragStart={pushHistory}
+                headlines={headlines}
+                selHeadlineId={selHeadlineId}
+                onSelectHeadline={setSelHeadlineId}
+                onRetimeHeadline={hRetimeHeadline}
+                disabled={processing}
+              />
             </div>
           </ToolStep>
         ) : null}
@@ -2327,7 +2338,8 @@ function PreviewPane({
                 // coluna sticky: o preview INTEIRO precisa caber na janela
                 // (com folga pro transporte embaixo) — vídeo vertical numa
                 // tela baixa encolhe em vez de estourar o sticky
-                maxWidth: `min(100%, calc((100vh - 240px) * ${(dims.w / Math.max(1, dims.h)).toFixed(4)}))`,
+                // 64px de topo + ~260px do dock da timeline + transporte
+                maxWidth: `min(100%, calc((100vh - 410px) * ${(dims.w / Math.max(1, dims.h)).toFixed(4)}))`,
                 marginInline: 'auto',
               }
             : { minHeight: 220 }
@@ -3038,7 +3050,7 @@ function Timeline({
     `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
   return (
-    <div className="mt-5">
+    <div className="mt-2 pt-2">
       <div
         className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
@@ -4440,7 +4452,7 @@ function BlockList({
 }) {
   const lockedSet = new Set(locked);
   return (
-    <div className="mt-5">
+    <div className="mt-2 pt-2">
       <div
         className="mb-2 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
