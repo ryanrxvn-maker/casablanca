@@ -116,8 +116,12 @@ async function rodarProvaFluidez(
 ) {
   try {
     setUrl(null);
-    setMsg('preparando a prova de fluidez…');
-    const blob = await fetch('/dev-tiny.mp4').then((r) => r.blob());
+    // GOP LONGO de propósito (03.09): o dev-tiny é minúsculo e quase
+    // all-intra — esconde exatamente o defeito que o Silas viu num insert
+    // real ("pulando de frame em frame"). O dev-gop é 1080x1920 H.264 com
+    // keyframe a cada 10s: o pior caso honesto.
+    setMsg('preparando a prova de fluidez (GOP longo)…');
+    const blob = await fetch('/dev-gop.mp4').then((r) => r.blob());
 
     const [{ renderTypographyVideo }, engine, presets, ins] = await Promise.all([
       import('@/lib/typography/export'),
@@ -188,20 +192,23 @@ async function rodarProvaFluidez(
       },
     };
 
-    setMsg('renderizando (caminho de seek)…');
     const t0 = Date.now();
     const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
-    const r = await runFfmpegExclusive(() =>
-      renderTypographyVideo({
-        file: blob,
-        blocks: [],
-        preset: presets.getPreset('keynote'),
-        style: { ...engine.DEFAULT_STYLE, presetId: 'keynote' },
-        ffmpegJaExclusivo: true,
-        inserts: plano as never,
-        onProgress: (pr) => setMsg(`fluidez ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
-      }),
-    );
+    const renderiza = (forcarSeek: boolean) =>
+      runFfmpegExclusive(() =>
+        renderTypographyVideo({
+          file: blob,
+          blocks: [],
+          preset: presets.getPreset('keynote'),
+          style: { ...engine.DEFAULT_STYLE, presetId: 'keynote' },
+          ffmpegJaExclusivo: true,
+          inserts: plano as never,
+          forceSeekPath: forcarSeek,
+          onProgress: (pr) => setMsg(`fluidez ${forcarSeek ? 'SEEK' : 'REPRODUÇÃO'} ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
+        }),
+      );
+    setMsg('renderizando 1/2 (reprodução)…');
+    const r = await renderiza(false);
 
     // ── o VEREDITO: quadros distintos por segundo na área do insert ──
     setMsg('medindo a fluidez da saída…');
@@ -241,12 +248,48 @@ async function rodarProvaFluidez(
       amostras++;
     }
     const porSeg = mudancas / (ATE - DE);
+
+    // ── 2º render: caminho de SEEK forçado (o fallback tem que ser fluido) ──
+    setMsg('renderizando 2/2 (seek forçado)…');
+    const r2 = await renderiza(true);
+    setMsg('medindo a fluidez do seek…');
+    const vOut2 = document.createElement('video');
+    vOut2.muted = true;
+    vOut2.preload = 'auto';
+    vOut2.src = URL.createObjectURL(r2.blob);
+    await new Promise<void>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('saída 2 não abriu')), 15000);
+      vOut2.onloadeddata = () => { clearTimeout(t); res(); };
+      vOut2.onerror = () => { clearTimeout(t); rej(new Error('saída 2 não abriu')); };
+    });
+    let mudancas2 = 0;
+    let anterior2: Uint8ClampedArray | null = null;
+    for (let t = DE; t < ATE; t += PASSO) {
+      await new Promise<void>((res) => {
+        let ok2 = false;
+        const fim = () => { if (ok2) return; ok2 = true; vOut2.removeEventListener('seeked', fim); clearTimeout(tm); res(); };
+        const tm = setTimeout(fim, 1600);
+        vOut2.addEventListener('seeked', fim);
+        vOut2.currentTime = t;
+      });
+      gs.drawImage(vOut2, 0, 0, 64, 64);
+      const px2 = gs.getImageData(0, 0, 64, 64).data;
+      if (anterior2) {
+        let dif = 0;
+        for (let k = 0; k < px2.length; k += 16) dif += Math.abs(px2[k] - anterior2[k]);
+        if (dif > 900) mudancas2++;
+      }
+      anterior2 = new Uint8ClampedArray(px2);
+    }
+    const porSeg2 = mudancas2 / (ATE - DE);
+
     const seg = ((Date.now() - t0) / 1000).toFixed(1);
-    const ok = porSeg >= 12;
+    const ok = porSeg >= 12 && porSeg2 >= 12;
     setUrl(URL.createObjectURL(r.blob));
     setMsg(
-      `${ok ? 'FLUIDEZ OK' : 'FLUIDEZ REPROVADA'} em ${seg}s · ${porSeg.toFixed(1)} quadros distintos/s ` +
-        `no insert (mínimo 12; o defeito dava ~5) · ${amostras} amostras · ${r.mode}`,
+      `${ok ? 'FLUIDEZ OK' : 'FLUIDEZ REPROVADA'} em ${seg}s · ` +
+        `${r.mode}: ${porSeg.toFixed(1)}/s · seek: ${porSeg2.toFixed(1)}/s ` +
+        `(mínimo 12 nos dois; o defeito dava ~5) · GOP 10s · ${amostras} amostras`,
     );
   } catch (e) {
     setMsg(`FLUIDEZ FALHOU: ${(e as Error)?.message || e}`);

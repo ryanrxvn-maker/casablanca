@@ -381,9 +381,19 @@ export async function montarPosProducao(
                 }
                 const rate = pv?.velocidade ?? 1;
                 if (Math.abs(vv.playbackRate - rate) > 0.01) vv.playbackRate = rate;
-                // deriva justa: 0,12s. Com o pause em sincronia ela quase não
-                // acontece; acima disso o pulo já aparece na tela.
-                if (Math.abs(vv.currentTime - alvo) > 0.12) vv.currentTime = alvo;
+                // CORREÇÃO DE DERIVA SEM SNAP-BACK (03.09/2): seek pra TRÁS no
+                // meio do play é o "piscando/travando" que saiu num AD real —
+                // o quadro volta, anda, volta. Regra nova:
+                //   ADIANTOU (> 1,5 frame) → PAUSA e deixa o alvo alcançar
+                //     (segurar um quadro por alguns ticks é invisível);
+                //   ATRASOU (> 0,12s)      → seek pra FRENTE (decode
+                //     incremental, barato) e segue tocando.
+                const deriva = vv.currentTime - alvo;
+                if (deriva > 0.05) {
+                  if (!vv.paused) vv.pause();
+                  continue;
+                }
+                if (deriva < -0.12) vv.currentTime = alvo;
                 if (vv.paused) void vv.play().catch(() => { /* quadro() cobre com seek */ });
               }
             },
@@ -410,10 +420,12 @@ export async function montarPosProducao(
                   clearTimeout(tm);
                   res();
                 };
-                // teto curto: um seek que engasgar não pode travar o render —
-                // melhor um frame repetido de vez em quando do que um render
-                // pendurado (é o mesmo padrão do seekVideo do export).
-                const tm = setTimeout(fim, 350);
+                // Teto do seek (03.09/2): 350ms era POUCO pra H.264 de GOP
+                // longo (o seek re-decodifica do keyframe) — o timeout vencia,
+                // o quadro VELHO era desenhado e o insert "pulava de frame em
+                // frame". 1,5s cobre o pior GOP real; um seek que passar disso
+                // repete UM frame e o render segue (nunca pendura).
+                const tm = setTimeout(fim, 1500);
                 v.addEventListener('seeked', fim);
                 v.currentTime = alvo;
               });
