@@ -4264,7 +4264,12 @@ function ClickUpPilotInner() {
   const batchStatesDaEmpresa = useMemo(() => {
     const out: Record<string, BatchTaskState> = {};
     for (const [id, b] of Object.entries(batchStates)) {
-      if (!b.teamId || !selectedTeam || b.teamId === selectedTeam) out[id] = b;
+      // IRMÃ DE VERSÃO sem teamId herda o da MÃE (03.09): a irmã nascia sem
+      // empresa e o fallback "sem time = mostra em todas" fazia uma task do
+      // B2C vazar na fila do DR MILLION. Só depois de herdar é que vale o
+      // fallback permissivo (estados antigos de verdade, pré-teamId).
+      const team = b.teamId ?? batchStates[taskIdBaseDaVersao(id)]?.teamId;
+      if (!team || !selectedTeam || team === selectedTeam) out[id] = b;
     }
     return out;
   }, [batchStates, selectedTeam]);
@@ -6493,6 +6498,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           : undefined;
         next[id] = {
           ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
+          // A EMPRESA nasce junto com o estado (03.09) — inclusive nas irmãs
+          // de versão, que antes ficavam sem e vazavam em toda workspace.
+          teamId: next[id]?.teamId ?? selectedTeam ?? undefined,
           phase: 'queued',
           message: 'Na fila — aguardando vaga...',
           // não sobrescreve um replan já bom se buildPlan falhar por algum motivo
