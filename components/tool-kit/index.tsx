@@ -192,8 +192,11 @@ export function ToolStep({
   return (
     <section
       className={
-        'tool-step group relative rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:border-violet/35 hover:shadow-depth-2 md:p-7 ' +
-        (still ? '' : 'overflow-hidden hover:-translate-y-[2px]')
+        // `still` também pula a animação de entrada: com fill both o
+        // transform final (translateY(0)) fica pra SEMPRE no computed style,
+        // e transform em ancestral prende position:fixed/sticky do filho
+        (still ? '' : 'tool-step overflow-hidden hover:-translate-y-[2px] ') +
+        'group relative rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:border-violet/35 hover:shadow-depth-2 md:p-7'
       }
       style={{
         background:

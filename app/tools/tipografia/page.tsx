@@ -80,6 +80,7 @@ import {
   resumoAuditoria,
   type AuditResult,
 } from '@/lib/typography/asr-audit';
+import { useSubSidebarActive } from '@/components/SubSidebar';
 import { PresetGallery } from '@/components/typography/PresetGallery';
 import { ColorDot } from '@/components/typography/ColorDot';
 import { FxPanel } from '@/components/typography/FxPanel';
@@ -326,6 +327,8 @@ function TipografiaInner() {
   const audioRef = useRef<Blob | null>(null);
   // ⭐ favoritos POR CONTA (hook compartilhado com o Auto Cortes)
   const { favs, toggleFav } = useTypoFavs();
+  // o dock da timeline encosta na lista de ferramentas — que muda de largura
+  const subSidebar = useSubSidebarActive();
 
   const abortRef = useRef<AbortController | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -1339,7 +1342,9 @@ function TipografiaInner() {
         hue={HUE}
         icon={<IconTipografia size={30} />}
       />
-      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-6">
+      {/* sem backdrop-blur aqui: backdrop-filter cria containing block e
+          prenderia a timeline fixa (dock) dentro do cartão */}
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-6">
       <div className="flex flex-col gap-5">
         {/* Transcrição tem FALLBACK no servidor (Groq primeiro, AssemblyAI
             se ela falhar/faltar): quem tem só uma das duas está pronto —
@@ -1721,9 +1726,12 @@ function TipografiaInner() {
                 play e as faixas nao saem do lugar (pedido de 02.09) */}
             <div
               className={
-                // no celular o dock roubaria a tela inteira — la ele volta pro fluxo
+                // DE CANTO A CANTO (pedido 02.09): fixo no pé da janela,
+                // esquerda barrando na lista de ferramentas, direita até o
+                // fim da tela. No celular volta pro fluxo (roubaria a tela).
                 ((duration ?? 0) > 0 ? '' : 'hidden ') +
-                'relative bottom-0 z-30 -mx-2 mt-4 rounded-t-[16px] border-t border-line/70 px-2 pb-1 shadow-[0_-14px_34px_-16px_rgba(0,0,0,0.65)] backdrop-blur-md [background:linear-gradient(180deg,rgba(var(--bg-softer),0.94),rgba(var(--bg-soft),0.97))] md:sticky'
+                'relative z-30 mt-4 border-t border-line/70 px-4 pb-1.5 shadow-[0_-14px_34px_-16px_rgba(0,0,0,0.65)] backdrop-blur-md [background:linear-gradient(180deg,rgba(var(--bg-softer),0.94),rgba(var(--bg-soft),0.985))] md:fixed md:bottom-0 md:right-0 md:mt-0 ' +
+                (subSidebar ? 'md:left-[328px]' : 'md:left-[84px]')
               }
             >
               <TimelineM
@@ -1743,6 +1751,11 @@ function TipografiaInner() {
                 disabled={processing}
               />
             </div>
+            {/* o dock é fixed no desktop: este espaçador devolve a altura
+                dele ao fluxo, senão o fim da lista de blocos morre escondido */}
+            {(duration ?? 0) > 0 ? (
+              <div aria-hidden className="hidden md:block md:h-[268px]" />
+            ) : null}
           </ToolStep>
         ) : null}
 
