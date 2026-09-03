@@ -72,6 +72,7 @@ import {
   layoutHeadline,
   makeHeadline,
   measurerFromCtx,
+  newHeadlineId,
   HEADLINE_PRESETS,
   type Headline,
   type HeadlineStyle,
@@ -97,6 +98,7 @@ import {
 import {
   groupWords,
   blockText,
+  mintBlockId,
   retimeBlockText,
   type GroupPace,
 } from '@/lib/typography/group';
@@ -694,6 +696,13 @@ function TipografiaInner() {
   const hSplit = useEvent((id: string) => doSplit(id));
   const hMerge = useEvent((id: string) => doMerge(id));
   const hDelete = useEvent((id: string) => doDelete(id));
+  const hDuplicate = useEvent((id: string) => doDuplicate(id));
+  const hDuplicateHeadline = useEvent((id: string) => doDuplicateHeadline(id));
+  const hDeleteHeadline = useEvent((id: string) => {
+    pushHistory();
+    setHeadlines((prev) => prev.filter((h) => h.id !== id));
+    setSelHeadlineId((cur) => (cur === id ? null : cur));
+  });
   const hNudge = useEvent((id: string, edge: 'start' | 'end', delta: number) =>
     nudge(id, edge, delta),
   );
@@ -1278,6 +1287,47 @@ function TipografiaInner() {
     setWordSel((w) => (w && w.blockId === id ? null : w));
   }
 
+  /**
+   * Duplica um bloco: a cópia nasce COLADA depois do original, com as mesmas
+   * palavras re-cronometradas e o MESMO visual (estilo congelado, destaques e
+   * estilos por palavra vêm junto — duplicar sem o visual não duplica nada).
+   */
+  function doDuplicate(id: string) {
+    const src = blocks.find((b) => b.id === id);
+    if (!src) return;
+    pushHistory();
+    const durMs = src.end - src.start;
+    const fimVideo = Math.max((duration ?? 0) * 1000, src.end);
+    let start = src.end;
+    if (start + 200 > fimVideo) start = Math.max(0, fimVideo - durMs);
+    const shift = start - src.start;
+    const novoId = mintBlockId();
+    const novo: Block = {
+      id: novoId,
+      start,
+      end: Math.min(start + durMs, Math.max(fimVideo, start + 200)),
+      words: src.words.map((w) => ({ ...w, start: w.start + shift, end: w.end + shift })),
+    };
+    setBlocks((prev) =>
+      [...prev, novo].sort((a, b) => a.start - b.start || a.end - b.end),
+    );
+    if (highlights[id]) setHighlights((prev) => ({ ...prev, [novoId]: [...(prev[id] ?? [])] }));
+    if (blockStyles[id]) setBlockStyles((prev) => ({ ...prev, [novoId]: { ...prev[id] } }));
+    if (wordStyles[id]) setWordStyles((prev) => ({ ...prev, [novoId]: { ...prev[id] } }));
+    if (lockedBlocks.includes(id)) setLockedBlocks((prev) => [...prev, novoId]);
+    setSelBlockId(novoId);
+  }
+
+  /** Duplica uma headline: mesma janela e visual — ela nasce na CAMADA de cima. */
+  function doDuplicateHeadline(id: string) {
+    const src = headlines.find((h) => h.id === id);
+    if (!src) return;
+    pushHistory();
+    const nova: Headline = { ...src, id: newHeadlineId(), style: { ...src.style } };
+    setHeadlines((prev) => [...prev, nova]);
+    setSelHeadlineId(nova.id);
+  }
+
   function nudge(id: string, edge: 'start' | 'end', delta: number) {
     pushHistory();
     updateBlock(id, (b) => {
@@ -1808,6 +1858,10 @@ function TipografiaInner() {
               }
             >
               <TimelineM
+                onDuplicateBlock={hDuplicate}
+                onDeleteBlock={hDelete}
+                onDuplicateHeadline={hDuplicateHeadline}
+                onDeleteHeadline={hDeleteHeadline}
                 blocks={blocks}
                 duration={duration ?? 0}
                 videoRef={videoRef}
@@ -3426,6 +3480,10 @@ function Timeline({
   selHeadlineId,
   onSelectHeadline,
   onRetimeHeadline,
+  onDuplicateBlock,
+  onDeleteBlock,
+  onDuplicateHeadline,
+  onDeleteHeadline,
   disabled,
 }: {
   blocks: Block[];
@@ -3442,6 +3500,11 @@ function Timeline({
   selHeadlineId: string | null;
   onSelectHeadline: (id: string) => void;
   onRetimeHeadline: (id: string, start: number, end: number) => void;
+  /** menu do botão direito nos chips (duplicar/excluir) */
+  onDuplicateBlock: (id: string) => void;
+  onDeleteBlock: (id: string) => void;
+  onDuplicateHeadline: (id: string) => void;
+  onDeleteHeadline: (id: string) => void;
   disabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -3602,6 +3665,27 @@ function Timeline({
     };
     return registerCanvasJob(tick, { fps: 30, el: scrollRef.current });
   }, [videoRef, pps, duration]);
+
+  // menu do botão direito (duplicar/excluir) — fecha em clique fora ou Esc
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    tipo: 'bloco' | 'headline';
+    id: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const fecha = () => setCtxMenu(null);
+    const tecla = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setCtxMenu(null);
+    };
+    window.addEventListener('pointerdown', fecha);
+    window.addEventListener('keydown', tecla);
+    return () => {
+      window.removeEventListener('pointerdown', fecha);
+      window.removeEventListener('keydown', tecla);
+    };
+  }, [ctxMenu]);
 
   if (duration <= 0) return null;
   const effPps = pps || 40;
@@ -3801,8 +3885,16 @@ function Timeline({
                     ? '0 0 0 1px rgba(251,191,36,0.9), 0 4px 18px -6px rgba(251,191,36,0.75)'
                     : 'inset 0 1px 0 rgba(255,255,255,0.14)',
                 }}
+                onContextMenu={(e) => {
+                  if (disabled) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSelect(b.id);
+                  setCtxMenu({ x: e.clientX, y: e.clientY, tipo: 'bloco', id: b.id });
+                }}
                 onPointerDown={(e) => {
                   if (disabled) return;
+                  if (e.button === 2) return; // botão direito = menu, não arrasto
                   e.stopPropagation();
                   onDragStart();
                   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -3951,8 +4043,16 @@ function Timeline({
                     ? '0 0 0 1px rgba(34,211,238,0.9), 0 4px 18px -6px rgba(34,211,238,0.7)'
                     : 'inset 0 1px 0 rgba(255,255,255,0.14)',
                 }}
+                onContextMenu={(e) => {
+                  if (disabled) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSelectHeadline(h.id);
+                  setCtxMenu({ x: e.clientX, y: e.clientY, tipo: 'headline', id: h.id });
+                }}
                 onPointerDown={(e) => {
                   if (disabled) return;
+                  if (e.button === 2) return; // botão direito = menu
                   e.stopPropagation();
                   onDragStart();
                   onSelectHeadline(h.id);
@@ -4033,6 +4133,47 @@ function Timeline({
         className="mono pointer-events-none fixed z-50 hidden rounded-[7px] border border-amber-400/60 bg-black/90 px-2 py-1 text-[11px] text-amber-200 shadow-lg"
         style={{ display: 'none' }}
       />
+      {/* menu do botão direito: duplicar/excluir o chip apontado */}
+      {ctxMenu ? (
+        <div
+          className="fixed z-[70] min-w-[150px] overflow-hidden rounded-[11px] border border-line-strong bg-bg-softer py-1 shadow-[0_14px_36px_-10px_rgba(0,0,0,0.7)]"
+          style={{
+            left: Math.min(ctxMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 170),
+            top: Math.min(ctxMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 96),
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[12.5px] font-semibold text-text hover:bg-amber-400/10 hover:text-amber-500"
+            onClick={() => {
+              if (ctxMenu.tipo === 'bloco') onDuplicateBlock(ctxMenu.id);
+              else onDuplicateHeadline(ctxMenu.id);
+              setCtxMenu(null);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <rect x="9" y="9" width="12" height="12" rx="2.5" />
+              <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+            </svg>
+            Duplicar
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[12.5px] font-semibold text-text hover:bg-red-500/10 hover:text-red-400"
+            onClick={() => {
+              if (ctxMenu.tipo === 'bloco') onDeleteBlock(ctxMenu.id);
+              else onDeleteHeadline(ctxMenu.id);
+              setCtxMenu(null);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+            </svg>
+            Excluir
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
