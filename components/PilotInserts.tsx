@@ -119,6 +119,7 @@ function RecortadorDeMidia({
   const mover = useCallback(
     (e: { clientX: number }, alvo: 'de' | 'ate' | 'agulha') => {
       if (!(dur > 0)) return;
+      setTocando(false); // scrub manda: arrastar qualquer coisa pausa o play
       const t = fracao(e) * dur;
       if (alvo === 'agulha') {
         const preso = Math.min(Math.max(t, 0), dur);
@@ -154,6 +155,16 @@ function RecortadorDeMidia({
 
   return (
     <div className="pi-recorte">
+      {/* CLICAR NO VÍDEO dá play/pausa na SELEÇÃO (03.09) — como no CapCut.
+        * O overlay de ▶ some enquanto toca; o pill "tocar seleção" continua
+        * embaixo pra quem procura por texto. */}
+      <div
+        className="pi-recorte-palco"
+        onClick={() => {
+          if (dur > 0) setTocando((x) => !x);
+        }}
+        title={tocando ? 'Pausar' : 'Tocar a seleção (em loop)'}
+      >
       <video
         ref={vid}
         src={url}
@@ -184,6 +195,20 @@ function RecortadorDeMidia({
           }
         }}
       />
+      {!tocando ? (
+        <span className="pi-recorte-play" aria-hidden>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5.5v13l11-6.5-11-6.5z" />
+          </svg>
+        </span>
+      ) : (
+        <span className="pi-recorte-pausa" aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+          </svg>
+        </span>
+      )}
+      </div>
 
       <div
         ref={barra}

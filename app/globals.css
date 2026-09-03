@@ -5326,3 +5326,29 @@ html[data-theme='light'] .frame-ver-vazio { background: repeating-linear-gradien
 }
 .mtg-respiro-btn:hover { color: rgb(var(--text)); background: rgba(255, 255, 255, 0.14); }
 html[data-theme='light'] .mtg-respiro-btn { background: rgba(16,16,24,0.07); }
+
+
+/* play/pausa direto no vídeo do recorte (03.09) — como no CapCut */
+.pi-recorte-palco { position: relative; cursor: pointer; border-radius: 11px; overflow: hidden; }
+.pi-recorte-palco .pi-recorte-video { border-radius: 0; }
+.pi-recorte-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 46px; height: 46px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; background: rgba(4, 6, 10, 0.55);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.35), 0 10px 26px -10px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  transition: transform 0.14s, background-color 0.14s;
+  pointer-events: none;
+}
+.pi-recorte-palco:hover .pi-recorte-play { transform: translate(-50%, -50%) scale(1.07); background: rgba(4, 6, 10, 0.7); }
+.pi-recorte-pausa {
+  position: absolute; right: 8px; top: 8px;
+  width: 26px; height: 26px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; background: rgba(4, 6, 10, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+  opacity: 0; transition: opacity 0.14s;
+  pointer-events: none;
+}
+.pi-recorte-palco:hover .pi-recorte-pausa { opacity: 1; }

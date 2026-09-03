@@ -676,6 +676,7 @@ async function renderFramesByPlayback(opts: {
         } catch { /* já cancelado */ }
         video.onended = null;
         video.pause();
+        inserts?.pausar?.();
         fn();
       };
       // O backpressure PAUSA o vídeo quando o encoder afoga; este relógio o
@@ -715,7 +716,10 @@ async function renderFramesByPlayback(opts: {
             encerrar(resolve);
             return;
           }
-          if (sink.encoder.encodeQueueSize > 10 && !video.paused) video.pause();
+          if (sink.encoder.encodeQueueSize > 10 && !video.paused) {
+            video.pause();
+            inserts?.pausar?.(); // os inserts pausam JUNTO — senão adiantam
+          }
           rvfcId = v.requestVideoFrameCallback!(passo);
         } catch (err) {
           encerrar(() => reject(err));
@@ -852,6 +856,12 @@ export type PlanoInsert = {
    * não é usado.
    */
   aoVivo?: (t: number) => void;
+  /** PAUSA todos os vídeos de insert JÁ — chamado sempre que o vídeo
+   *  principal pausa (backpressure do encoder). Sem isto o insert seguia
+   *  tocando enquanto o principal esperava o encoder: ele adiantava, a
+   *  correção de deriva puxava de volta, adiantava de novo — o "acelerado e
+   *  piscando" que saiu num download real (03.09). */
+  pausar?: () => void;
 };
 
 type Ret = { x: number; y: number; w: number; h: number };

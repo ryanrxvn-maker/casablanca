@@ -80,6 +80,8 @@ type PlanoInsertLocal = {
   preparar?: (t: number) => Promise<void>;
   /** dirige os vídeos dos inserts em tempo real (caminho de reprodução) */
   aoVivo?: (t: number) => void;
+  /** pausa todos os vídeos de insert (o principal pausou — backpressure) */
+  pausar?: () => void;
 };
 
 
@@ -349,6 +351,11 @@ export async function montarPosProducao(
             // playbackRate = velocidade do plano enquanto a janela dele está
             // viva; congela no ponto certo; pausa fora. A deriva grande
             // (>0,25s) é corrigida com um seek — o resto é o play cuidando.
+            pausar: () => {
+              for (const ent of videosPorId.values()) {
+                if (!ent.v.paused) ent.v.pause();
+              }
+            },
             aoVivo: (t: number) => {
               for (const jan of janelas) {
                 const ent = videosPorId.get(jan.id);
@@ -374,7 +381,9 @@ export async function montarPosProducao(
                 }
                 const rate = pv?.velocidade ?? 1;
                 if (Math.abs(vv.playbackRate - rate) > 0.01) vv.playbackRate = rate;
-                if (Math.abs(vv.currentTime - alvo) > 0.25) vv.currentTime = alvo;
+                // deriva justa: 0,12s. Com o pause em sincronia ela quase não
+                // acontece; acima disso o pulo já aparece na tela.
+                if (Math.abs(vv.currentTime - alvo) > 0.12) vv.currentTime = alvo;
                 if (vv.paused) void vv.play().catch(() => { /* quadro() cobre com seek */ });
               }
             },
