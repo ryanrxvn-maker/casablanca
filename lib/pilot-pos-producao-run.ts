@@ -81,6 +81,8 @@ type PlanoInsertLocal = {
   preparar?: (t: number) => Promise<void>;
   /** dirige os vídeos dos inserts em tempo real (caminho de reprodução) */
   aoVivo?: (t: number) => void;
+  /** todos os inserts de vídeo têm leitor exato → libera o caminho RÁPIDO */
+  exatos?: boolean;
   /** som dos inserts que o editor ligou */
   sons?: Array<{ blob: Blob; entraEm: number; saiEm: number; deSec: number; volume: number; velocidade: number }>;
   /** pausa todos os vídeos de insert (o principal pausou — backpressure) */
@@ -365,8 +367,24 @@ export async function montarPosProducao(
             }
           }
           const porId = new Map(usaveis.map((i) => [i.id, i]));
+          /* ⚠⚠ CAMINHO RÁPIDO SÓ COM INSERT DE IMAGEM (03.09).
+           *
+           * O caminho rápido sabe esperar o quadro do insert (dreno
+           * assíncrono), e por um momento ele foi liberado também pra insert
+           * de VÍDEO usando o leitor exato. Mas aí passam a existir DOIS
+           * decoders de hardware + o encoder disputando o mesmo pool de
+           * quadros do chip: cada um segura quadros abertos, todos ficam sem
+           * buffer e o render TRAVA — reproduzido aqui, parando perto do fim
+           * (91%, sem erro nenhum). Entregar travamento é pior que entregar
+           * lento, então insert de VÍDEO continua na REPRODUÇÃO, que está
+           * provada. Imagem não abre decoder nenhum: essa vai no rápido. */
+          const exatos = usaveis.every((i) => !videosPorId.has(i.id));
+          console.log(
+            `[pos-producao] inserts: ${usaveis.length} · ${exatos ? 'só imagem — caminho rápido' : 'tem vídeo — caminho de reprodução'}`,
+          );
           planoInserts = {
             janelas,
+            exatos,
             // W/H vêm do RENDER (o vídeo real), não de uma régua fixa — senão
             // o card do avatar cai fora da tela em qualquer resolução != 1080p.
             porId: (id: string, W: number, H: number) => {
@@ -643,6 +661,8 @@ export async function montarPosProducao(
         style,
         zoom: plano,
         ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
+        // MAX QUALITY é escolha do editor; o padrão é o render rápido.
+        qualidadeMax: !!cfg.legenda.qualidadeMax,
         inserts: planoInserts as never,
         headlines,
         signal: ctrl.signal,

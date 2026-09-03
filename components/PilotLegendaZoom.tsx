@@ -406,6 +406,37 @@ export function LegendaZoomPopover({
 
         <div className="lz-corpo">{corpo}</div>
 
+        {/* MAX QUALITY (03.09) — o render normal é o RÁPIDO. Este botão liga a
+          * análise multi-passagem do encoder + resolução e bitrate cheios:
+          * bem mais lento, pra quando o AD vai pra tela grande. */}
+        {tipo === 'legenda' ? (
+          <button
+            type="button"
+            onClick={() => onLegenda({ ...legenda, qualidadeMax: !legenda.qualidadeMax })}
+            className={'lz-maxq' + (legenda.qualidadeMax ? ' is-on' : '')}
+            aria-pressed={!!legenda.qualidadeMax}
+            title={legenda.qualidadeMax
+              ? 'MAX QUALITY ligado: render bem mais LENTO, qualidade máxima'
+              : 'Render rápido (padrão): a diferença de qualidade não se enxerga no feed'}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {legenda.qualidadeMax ? (
+                <>
+                  <path d="M12 3l2.4 5.6L20 10l-4.4 3.8L17 20l-5-3-5 3 1.4-6.2L4 10l5.6-1.4z" />
+                </>
+              ) : (
+                <>
+                  <path d="M13 2 4.1 13H11l-1 9 8.9-11H12l1-9z" />
+                </>
+              )}
+            </svg>
+            <span className="lz-maxq-txt">
+              {legenda.qualidadeMax ? 'MAX QUALITY — render lento' : 'RENDER RÁPIDO — recomendado'}
+            </span>
+            <span className="lz-maxq-pill">{legenda.qualidadeMax ? 'ON' : 'OFF'}</span>
+          </button>
+        ) : null}
+
         {/* ── rodapé ── */}
         <div className="lz-rodape">
           <button

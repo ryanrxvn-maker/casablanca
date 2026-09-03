@@ -110,16 +110,29 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
   const altura = trilha.video?.height || trilha.track_height || 0;
   if (!(largura > 0) || !(altura > 0)) return null;
 
-  const config: VideoDecoderConfig = {
+  // mesma dica do render principal: sem ela o Chrome decodifica por SOFTWARE
+  const base: VideoDecoderConfig = {
     codec: trilha.codec,
     description: desc,
   };
-  try {
-    const sup = await VideoDecoder.isConfigSupported(config);
-    if (!sup.supported) return null;
-  } catch {
-    return null;
-  }
+  const cabe = async (c: VideoDecoderConfig) => {
+    try {
+      return (await VideoDecoder.isConfigSupported(c)).supported === true;
+    } catch {
+      return false;
+    }
+  };
+  const rapida: VideoDecoderConfig = {
+    ...base,
+    hardwareAcceleration: 'prefer-hardware',
+    optimizeForLatency: false,
+  };
+  const config: VideoDecoderConfig = (await cabe(rapida))
+    ? rapida
+    : (await cabe(base))
+      ? base
+      : (null as unknown as VideoDecoderConfig);
+  if (!config) return null;
 
   /* ── estado da decodificação ── */
   let decoder: VideoDecoder | null = null;
@@ -159,6 +172,7 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
           return;
         }
         prontos.push(f);
+        avisarNovoQuadro?.();
       },
       error: () => {
         falhou = true;
@@ -193,12 +207,37 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
     }
   };
 
-  const esperarFila = async () => {
-    let voltas = 0;
-    while (decoder && decoder.decodeQueueSize > 0 && voltas < 600 && !falhou) {
-      await new Promise((r) => setTimeout(r, 1));
-      voltas++;
-    }
+  /* ⚠ ESPERAR O QUADRO, NÃO A FILA (03.09). A 1ª versão drenava a fila
+   * INTEIRA a cada quadro pedido (`while decodeQueueSize > 0` com sleep de
+   * 1ms): isso serializa o decoder — ele nunca trabalha adiantado e o render
+   * com insert ficou ~25x tempo real. Agora o `output` avisa quem espera, e
+   * a decodificação segue PIPELINE: enquanto o render compõe um quadro, o
+   * decoder já está produzindo os próximos. */
+  let avisarNovoQuadro: (() => void) | null = null;
+  /* ⚠ CORRIDA DO AVISO (03.09). A 1ª versão registrava o aviso DEPOIS de
+   * mandar decodificar; quando o quadro chegava nesse meio-tempo o aviso não
+   * existia ainda, ninguém era acordado e a espera pagava o timer inteiro.
+   * Medido: ~366ms por quadro de insert, quase o teto do timer. Agora quem
+   * espera passa a CONDIÇÃO: se ela já vale, volta na hora; e o timer é curto,
+   * então mesmo um aviso perdido custa pouco. */
+  const esperarQuadro = (jaTem: () => boolean) => {
+    if (jaTem()) return Promise.resolve();
+    return new Promise<void>((res) => {
+      let fim = false;
+      const terminar = () => {
+        if (fim) return;
+        fim = true;
+        clearTimeout(tm);
+        avisarNovoQuadro = null;
+        res();
+      };
+      // acorda a CADA quadro novo, não só quando o alvo chegou: é o laço de
+      // fora que decide continuar — e é lá que o decoder é realimentado. Só
+      // esperar o alvo fazia cada volta intermediária dormir o timer inteiro.
+      const tm = setTimeout(terminar, 50);
+      avisarNovoQuadro = terminar;
+      if (jaTem()) terminar();
+    });
   };
 
   novoDecoder();
@@ -218,7 +257,7 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
 
       // decodifica pra frente até ter um quadro DEPOIS do alvo (ou acabar)
       let voltas = 0;
-      while (!falhou && voltas < 240) {
+      while (!falhou && voltas < 400) {
         const ultimo = prontos[prontos.length - 1];
         if (ultimo && ultimo.timestamp > alvoUs) break;
         if (proxAmostra >= amostras.length) {
@@ -231,9 +270,42 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
           }
           break;
         }
-        alimentar(8);
-        await esperarFila();
+        /* ⚠⚠ PODAR ENQUANTO BUSCA (03.09). O VideoDecoder PARA de produzir
+         * quando o app segura quadros de saída demais — e este laço acumulava
+         * `prontos` sem soltar nada até o fim da chamada. Com fila funda dava
+         * impasse: o decoder parava, ninguém era avisado, e a busca queimava
+         * as 400 voltas. O render travava perto do fim (visto em 96%).
+         * Aqui só interessam o quadro <= alvo e os DEPOIS dele; tudo que
+         * ficou pra trás é solto na hora, e o decoder nunca fica sem buffer. */
+        let corte = -1;
+        for (let i = 0; i < prontos.length; i++) {
+          if (prontos[i].timestamp <= alvoUs) corte = i;
+          else break;
+        }
+        if (corte > 0) {
+          for (let i = 0; i < corte; i++) {
+            try {
+              prontos[i].close();
+            } catch {
+              /* já fechado */
+            }
+          }
+          prontos = prontos.slice(corte);
+        }
+        // mantém o decoder abastecido sem afogá-lo em quadros de saída
+        if (decoder && decoder.decodeQueueSize < 8) alimentar(6);
+        await esperarQuadro(() => {
+          const u = prontos[prontos.length - 1];
+          return !!u && u.timestamp > alvoUs;
+        });
         voltas++;
+      }
+      if (voltas >= 400) {
+        console.warn(
+          `[insert-decoder] busca esgotou as voltas · alvo=${(alvoUs / 1e6).toFixed(2)}s ` +
+            `prontos=${prontos.length} proxAmostra=${proxAmostra}/${amostras.length} ` +
+            `fila=${decoder ? decoder.decodeQueueSize : -1} estado=${decoder ? decoder.state : 'nulo'}`,
+        );
       }
       if (falhou) return null;
 

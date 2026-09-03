@@ -110,6 +110,77 @@ const TRECHOS_MOCK = [
  * área do insert mostra. Com o defeito original (~5 quadros/s, "frame a
  * frame") ela reprova; fluido de verdade passa de 12/s.
  */
+/**
+ * PROVA DE VELOCIDADE (03.09): renderiza o MESMO arquivo nos dois modos e
+ * devolve os dois tempos. É a resposta honesta pro "quanto mais rápido?".
+ */
+async function rodarProvaVelocidade(
+  setMsg: (m: string | null) => void,
+  setUrl: (u: string | null) => void,
+) {
+  try {
+    setUrl(null);
+    setMsg('preparando a prova de velocidade…');
+    const blob = await fetch('/dev-gop.mp4').then((r) => r.blob());
+    const [{ renderTypographyVideo }, engine, presets] = await Promise.all([
+      import('@/lib/typography/export'),
+      import('@/lib/typography/engine'),
+      import('@/lib/typography/presets'),
+    ]);
+    const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
+    // legenda de verdade: é o caso que o Silas usa (desenho por frame)
+    const blocks = [
+      { id: 'b1', words: [{ text: 'PROVA', start: 500, end: 1200 }, { text: 'DE', start: 1200, end: 1500 }, { text: 'VELOCIDADE', start: 1500, end: 2600 }], start: 500, end: 2600 },
+      { id: 'b2', words: [{ text: 'RENDER', start: 5000, end: 5800 }, { text: 'RAPIDO', start: 5800, end: 6900 }], start: 5000, end: 6900 },
+    ];
+    const roda = async (qualidadeMax: boolean, semLegenda = false) => {
+      const t = Date.now();
+      // TEMPO POR FASE: é o que diz ONDE o render gasta de verdade.
+      const marcos: Record<string, number> = {};
+      let faseAtual = '';
+      let inicioFase = Date.now();
+      const r = await runFfmpegExclusive(() =>
+        renderTypographyVideo({
+          file: blob,
+          blocks: (semLegenda ? [] : blocks) as never,
+          preset: presets.getPreset('keynote'),
+          style: { ...engine.DEFAULT_STYLE, presetId: 'keynote' },
+          ffmpegJaExclusivo: true,
+          qualidadeMax,
+          onProgress: (pr) => {
+            if (pr.phase !== faseAtual) {
+              if (faseAtual) marcos[faseAtual] = (marcos[faseAtual] || 0) + (Date.now() - inicioFase) / 1000;
+              faseAtual = pr.phase;
+              inicioFase = Date.now();
+            }
+            setMsg(`${qualidadeMax ? 'MAX QUALITY' : 'RÁPIDO'}: ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`);
+          },
+        }),
+      );
+      if (faseAtual) marcos[faseAtual] = (marcos[faseAtual] || 0) + (Date.now() - inicioFase) / 1000;
+      return { seg: (Date.now() - t) / 1000, r, marcos };
+    };
+    const rapido = await roda(false);
+    const maxq = await roda(true);
+    const ganho = maxq.seg / Math.max(0.01, rapido.seg);
+    setUrl(URL.createObjectURL(rapido.r.blob));
+    const nada = await roda(false, true);
+    const fases = (m: Record<string, number>) =>
+      Object.entries(m)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${k} ${v.toFixed(1)}s`)
+        .join(' + ');
+    setMsg(
+      `RÁPIDO ${rapido.seg.toFixed(1)}s [${fases(rapido.marcos)}] ${rapido.r.width}x${rapido.r.height} ` +
+        `${(rapido.r.blob.size / 1e6).toFixed(1)}MB · ` +
+        `MAX ${maxq.seg.toFixed(1)}s [${fases(maxq.marcos)}] · ${ganho.toFixed(1)}x` +
+        ` · SEM LEGENDA ${nada.seg.toFixed(1)}s [${fases(nada.marcos)}]`,
+    );
+  } catch (e) {
+    setMsg(`VELOCIDADE FALHOU: ${(e as Error)?.message || e}`);
+  }
+}
+
 async function rodarProvaFluidez(
   setMsg: (m: string | null) => void,
   setUrl: (u: string | null) => void,
@@ -666,6 +737,13 @@ function Conteudo() {
           onClick={() => void rodarProvaFluidez(setProvaMsg, setProvaUrl)}
         >
           ▶ prova de FLUIDEZ do insert
+        </button>
+        <button
+          type="button"
+          className="btn-ghost-compact ml-2 text-[10px]"
+          onClick={() => void rodarProvaVelocidade(setProvaMsg, setProvaUrl)}
+        >
+          ▶ prova de VELOCIDADE (rápido x max)
         </button>
         {provaMsg ? <div className="mono mt-2 text-[10px] text-text-muted" id="prova-msg">{provaMsg}</div> : null}
         {provaUrl ? (

@@ -5448,3 +5448,30 @@ html[data-theme='light'] .pi-som-btn { background: rgba(16,16,24,0.05); box-shad
   font-size: 11px; font-weight: 700; color: rgb(var(--text-muted));
   font-variant-numeric: tabular-nums;
 }
+
+
+/* MAX QUALITY na janela de legenda do Pilot (03.09) */
+.lz-maxq {
+  display: flex; align-items: center; gap: 9px;
+  margin: 0 22px 4px; border-radius: 12px; padding: 10px 13px;
+  font-size: 12px; font-weight: 700; text-align: left;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  transition: color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+html[data-theme='light'] .lz-maxq { background: rgba(16,16,24,0.04); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.lz-maxq:hover { color: rgb(var(--text)); }
+.lz-maxq.is-on {
+  color: #2b1a02;
+  background: linear-gradient(140deg, #fde68a, #fbbf24);
+  box-shadow: 0 8px 20px -12px rgba(251, 191, 36, 0.95);
+}
+.lz-maxq-txt { flex: 1; min-width: 0; }
+.lz-maxq-pill {
+  flex-shrink: 0; border-radius: 999px; padding: 2px 9px;
+  font-family: var(--font-mono), monospace; font-size: 9px; font-weight: 800;
+  letter-spacing: 0.12em;
+  background: rgba(0, 0, 0, 0.22);
+}
+.lz-maxq:not(.is-on) .lz-maxq-pill { background: rgba(255, 255, 255, 0.08); }

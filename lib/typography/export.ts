@@ -77,18 +77,50 @@ function even(n: number): number {
 }
 
 /**
- * Yield de backpressure IMUNE ao throttle de aba oculta: setTimeout em aba
- * de fundo é clampado pra 1s+ (render cairia pra ~1fps se o user trocar de
- * aba); mensagens de MessageChannel não sofrem esse clamp.
+ * ⚡ ESPERA A FILA BAIXAR — POR EVENTO, NÃO POR GIRO EM FALSO (03.09).
+ *
+ * O render era 10x mais lento do que devia e a culpa não era do encoder nem do
+ * decoder. Medido no arquivo real: de 43,8s de render, DESENHO 0,6s, DECODE
+ * 2,3s — e **40,9s parado esperando a fila**. O laço antigo girava em falso
+ * (`while (fila cheia) await nextTask()`), criando um MessageChannel novo a
+ * cada volta, milhares de vezes por segundo. O efeito é perverso: essa espera
+ * ocupada monopoliza a thread principal e ROUBA dela justamente os callbacks
+ * do decoder e do encoder — o render passava o tempo todo impedindo os codecs
+ * de trabalhar.
+ *
+ * Agora a espera é passiva: o WebCodecs avisa pelo evento `dequeue` quando a
+ * fila anda, e a thread fica LIVRE até lá. Com timer de segurança curto pra
+ * nunca travar caso o evento não venha (navegador antigo sem `dequeue`).
  */
-function nextTask(): Promise<void> {
+function esperarFilaBaixar(
+  decoder: VideoDecoder | null,
+  encoder: VideoEncoder | null,
+  tetoDecode: number,
+  tetoEncode: number,
+): Promise<void> {
+  const cabe = () =>
+    (!decoder || decoder.decodeQueueSize <= tetoDecode) &&
+    (!encoder || encoder.encodeQueueSize <= tetoEncode);
+  if (cabe()) return Promise.resolve();
   return new Promise((resolve) => {
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      ch.port1.close();
+    let fechado = false;
+    const terminar = () => {
+      if (fechado) return;
+      fechado = true;
+      clearTimeout(rede);
+      decoder?.removeEventListener('dequeue', olhar);
+      encoder?.removeEventListener('dequeue', olhar);
       resolve();
     };
-    ch.port2.postMessage(0);
+    const olhar = () => {
+      if (cabe()) terminar();
+    };
+    // rede de segurança: navegador sem `dequeue` continua funcionando, só
+    // volta ao ritmo antigo em vez de travar.
+    const rede = setTimeout(terminar, 60);
+    decoder?.addEventListener('dequeue', olhar);
+    encoder?.addEventListener('dequeue', olhar);
+    olhar(); // a fila pode ter baixado entre o teste e o registro
   });
 }
 
@@ -175,6 +207,7 @@ function makeSink(
   H: number,
   bitrate: number,
   hw = false,
+  qualidadeMax = false,
 ): EncodeSink {
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
@@ -196,7 +229,13 @@ function makeSink(
     height: H,
     bitrate,
     framerate: FPS,
-    latencyMode: 'quality',
+    // ⚡ O MAIOR CUSTO DO RENDER (03.09). `quality` liga a análise
+    // multi-passagem do encoder — ela pesa MUITO e o ganho é invisível num
+    // vídeo vertical de anúncio. `realtime` codifica em uma passada: várias
+    // vezes mais rápido, com perda que não se enxerga no feed. Silas:
+    // *"temos que sacrificar um pouco de qualidade (imperceptível) pra ganhar
+    // uma boa velocidade"*. Quem quiser o máximo liga MAX QUALITY.
+    latencyMode: qualidadeMax ? 'quality' : 'realtime',
     ...(hw ? { hardwareAcceleration: 'prefer-hardware' as const } : null),
   });
   return { encoder, muxer, target, err: () => encoderError };
@@ -262,6 +301,7 @@ async function renderFramesByDecode(opts: {
   codec: string;
   bitrate: number;
   hw?: boolean;
+  qualidadeMax?: boolean;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob | null> {
@@ -283,6 +323,7 @@ async function renderFramesByDecode(opts: {
     codec,
     bitrate,
     hw,
+    qualidadeMax,
     onProgress,
     throwIfAborted,
   } = opts;
@@ -317,9 +358,14 @@ async function renderFramesByDecode(opts: {
   let basePtsUs: number | null = null;
   let sizeChecked = false;
 
+  let _msDesenho = 0;
+  let _msEspera = 0;
+  let _msEncode = 0;
+  const _tRender = performance.now();
   const emitTick = (src: VideoFrame) => {
     if (!sink) return;
     const t = Math.min(nextTick / FPS + 0.0001, durationSec - 0.001);
+    const _m0 = performance.now();
     drawZoomed(ctx, src, src.displayWidth || W, src.displayHeight || H, W, H, zoom, t);
     ctx.filter = 'none';
     desenharInsert(ctx, inserts, t, W, H, src, src.displayWidth || W, src.displayHeight || H);
@@ -329,8 +375,11 @@ async function renderFramesByDecode(opts: {
       timestamp: nextTick * frameUs,
       duration: frameUs,
     });
+    const _m1 = performance.now();
     sink.encoder.encode(vf, { keyFrame: nextTick % (FPS * 4) === 0 });
     vf.close();
+    _msDesenho += _m1 - _m0;
+    _msEncode += performance.now() - _m1;
     nextTick++;
     if (nextTick % 3 === 0 || nextTick === totalFrames) {
       onProgress?.({
@@ -339,6 +388,54 @@ async function renderFramesByDecode(opts: {
         frame: nextTick,
         totalFrames,
       });
+    }
+  };
+
+  /* ⚡ INSERT NO CAMINHO RÁPIDO (03.09). Antes, ter insert PROIBIA este
+   * caminho: a composição acontecia DENTRO do callback do decoder, que é
+   * síncrono, e não havia onde esperar o quadro do insert. Sobrava a
+   * REPRODUÇÃO (que anda a 1x e congela em aba oculta) e, quando ela parava
+   * de progredir, o SEEK — que re-decodifica desde o keyframe A CADA QUADRO.
+   * Foi essa cascata que produziu o AD de 1154 minutos entregue sem legenda.
+   *
+   * Agora o callback só ENFILEIRA o quadro decodificado, e quem compõe é um
+   * dreno assíncrono: ele pode esperar o `preparar` do insert antes de cada
+   * tick. O insert entra no caminho rápido, com o quadro EXATO, sem relógio e
+   * sem depender de a aba estar visível. */
+  const chegados: VideoFrame[] = [];
+  const prepararInsert = inserts?.preparar;
+
+  const drenar = async () => {
+    while (chegados.length > 0) {
+      const f = chegados[0];
+      if (basePtsUs == null) basePtsUs = f.timestamp;
+      const ptsUs = f.timestamp - basePtsUs;
+      while (
+        nextTick < totalFrames &&
+        Math.round((nextTick * 1_000_000) / FPS) < ptsUs
+      ) {
+        if (prepararInsert) {
+          const t = Math.min(nextTick / FPS + 0.0001, durationSec - 0.001);
+          const _w = performance.now();
+          await prepararInsert(t);
+          _msEspera += performance.now() - _w;
+        }
+        emitTick(lastFrame ?? f);
+      }
+      chegados.shift();
+      lastFrame?.close();
+      lastFrame = f;
+      if (nextTick >= totalFrames) {
+        for (const x of chegados) {
+          try {
+            x.close();
+          } catch {
+            /* já fechado */
+          }
+        }
+        chegados.length = 0;
+        return;
+      }
     }
   };
 
@@ -364,16 +461,7 @@ async function renderFramesByDecode(opts: {
         return;
       }
     }
-    if (basePtsUs == null) basePtsUs = f.timestamp;
-    const ptsUs = f.timestamp - basePtsUs;
-    while (
-      nextTick < totalFrames &&
-      Math.round((nextTick * 1_000_000) / FPS) < ptsUs
-    ) {
-      emitTick(lastFrame ?? f);
-    }
-    lastFrame?.close();
-    lastFrame = f;
+    chegados.push(f);
   };
 
   const decoder = new VideoDecoder({
@@ -404,11 +492,18 @@ async function renderFramesByDecode(opts: {
           data: s.data,
         });
         decoder.decode(chunk);
-        while (
-          decoder.decodeQueueSize > 12 ||
-          (sink !== null && sink.encoder.encodeQueueSize > 6)
-        ) {
-          await nextTask();
+        await drenar(); // compõe o que já saiu (é aqui que o insert pode esperar)
+        if (nextTick >= totalFrames) break;
+        /* ⚡ FILAS FUNDAS (03.09). Com teto 12/6 o decoder e o encoder de
+         * hardware ficavam ociosos: a cada punhado de quadros o laço parava pra
+         * esperar. Chip de vídeo trabalha em LOTE — filas fundas mantêm os dois
+         * saturados e o render deixa de ser uma fila indiana. Os quadros do
+         * encoder são fechados na hora (`vf.close()`), então a memória não
+         * cresce com o tamanho da fila. */
+        if (decoder.decodeQueueSize > 30 || (sink && sink.encoder.encodeQueueSize > 24)) {
+          const _w = performance.now();
+          await esperarFilaBaixar(decoder, sink ? sink.encoder : null, 30, 24);
+          _msEspera += performance.now() - _w;
           checkErrors();
         }
       }
@@ -431,20 +526,37 @@ async function renderFramesByDecode(opts: {
     if (!track) return null;
     const { desc } = trackDescription(mp4.getTrackById(track.id));
     if (!desc) return null; // sem avcC/hvcC/vpcC/av1C não tem decode
+    /* ⚠ DECODE ERA 99% DO RENDER (03.09). Medido no arquivo real: 420 quadros
+     * em 30,3s — desenho 0,3s, encode 0,0s, DECODE 30,0s. Sem dica nenhuma o
+     * Chrome escolhia decodificação por SOFTWARE, ~70ms por quadro em 1080x1920.
+     * Duas dicas resolvem: `prefer-hardware` usa o decoder do chip, e
+     * `optimizeForLatency: false` deixa ele encher o buffer de reordenação e
+     * trabalhar em lote (com `true` ele entrega quadro a quadro e perde vazão).
+     * Se a máquina não tiver decoder de hardware, cai na config simples — nunca
+     * falha por causa da dica. */
     const config: VideoDecoderConfig = {
       codec: track.codec,
       description: desc,
     };
-    let supported = false;
-    try {
-      supported = (await VideoDecoder.isConfigSupported(config)).supported === true;
-    } catch {
-      supported = false;
-    }
-    if (!supported) return null;
+    const rapida: VideoDecoderConfig = {
+      ...config,
+      hardwareAcceleration: 'prefer-hardware',
+      optimizeForLatency: false,
+    };
+    const cabe = async (c: VideoDecoderConfig) => {
+      try {
+        return (await VideoDecoder.isConfigSupported(c)).supported === true;
+      } catch {
+        return false;
+      }
+    };
+    let escolhida: VideoDecoderConfig | null = null;
+    if (await cabe(rapida)) escolhida = rapida;
+    else if (await cabe(config)) escolhida = config;
+    if (!escolhida) return null;
 
-    decoder.configure(config);
-    sink = makeSink(codec, W, H, bitrate, hw);
+    decoder.configure(escolhida);
+    sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax);
     mp4.setExtractionOptions(track.id, null, { nbSamples: 100 });
     mp4.start();
     mp4.flush(); // entrega inclusive o lote final (<nbSamples)
@@ -456,6 +568,7 @@ async function renderFramesByDecode(opts: {
       // flush rejeita quando o decoder morreu — decodeError conta a história
       if (!decodeError) throw e;
     });
+    await drenar();
     checkErrors();
 
     if (!lastFrame && nextTick === 0) {
@@ -463,9 +576,12 @@ async function renderFramesByDecode(opts: {
     }
     // rabo: repete o último frame até fechar a duração do container
     while (nextTick < totalFrames && lastFrame) {
+      if (prepararInsert) {
+        await prepararInsert(Math.min(nextTick / FPS + 0.0001, durationSec - 0.001));
+      }
       emitTick(lastFrame);
-      if (sink && sink.encoder.encodeQueueSize > 6) {
-        await nextTask();
+      if (sink && sink.encoder.encodeQueueSize > 24) {
+        await esperarFilaBaixar(null, sink.encoder, 30, 24);
         checkErrors();
       }
     }
@@ -474,6 +590,15 @@ async function renderFramesByDecode(opts: {
     await sink.encoder.flush();
     checkErrors();
     sink.encoder.close();
+    {
+      const total = performance.now() - _tRender;
+      console.log(
+        `[tipografia] quadros ${nextTick} em ${(total / 1000).toFixed(1)}s · ` +
+          `desenho ${(_msDesenho / 1000).toFixed(1)}s · encode ${(_msEncode / 1000).toFixed(1)}s · ` +
+          `espera-fila ${(_msEspera / 1000).toFixed(1)}s · ` +
+          `decode ${((total - _msDesenho - _msEncode - _msEspera) / 1000).toFixed(1)}s`,
+      );
+    }
     sink.muxer.finalize();
     return new Blob([sink.target.buffer], { type: 'video/mp4' });
   } finally {
@@ -510,6 +635,7 @@ async function renderFramesBySeek(opts: {
   codec: string;
   bitrate: number;
   hw?: boolean;
+  qualidadeMax?: boolean;
   zoom?: ZoomSeg[];
   inserts?: PlanoInsert;
   onProgress?: (p: RenderProgress) => void;
@@ -531,11 +657,12 @@ async function renderFramesBySeek(opts: {
     codec,
     bitrate,
     hw,
+    qualidadeMax,
     onProgress,
     throwIfAborted,
   } = opts;
 
-  const sink = makeSink(codec, W, H, bitrate, hw);
+  const sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax);
   const totalFrames = Math.max(1, Math.ceil(durationSec * FPS));
   const frameUs = Math.round(1_000_000 / FPS);
 
@@ -563,9 +690,9 @@ async function renderFramesBySeek(opts: {
       sink.encoder.encode(frame, { keyFrame: i % (FPS * 4) === 0 });
       frame.close();
 
-      // backpressure: não deixa a fila do encoder crescer sem limite
-      while (sink.encoder.encodeQueueSize > 6) {
-        await nextTask();
+      // backpressure POR EVENTO (nunca girando em falso — ver esperarFilaBaixar)
+      if (sink.encoder.encodeQueueSize > 24) {
+        await esperarFilaBaixar(null, sink.encoder, 30, 24);
         const e1 = sink.err();
         if (e1) throw e1;
         throwIfAborted();
@@ -623,12 +750,13 @@ async function renderFramesByPlayback(opts: {
   codec: string;
   bitrate: number;
   hw?: boolean;
+  qualidadeMax?: boolean;
   zoom?: ZoomSeg[];
   inserts?: PlanoInsert;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob> {
-  const { video, blocks, preset, style, headlines, zoom, inserts, canvas, ctx, W, H, durationSec, codec, bitrate, hw, onProgress, throwIfAborted } = opts;
+  const { video, blocks, preset, style, headlines, zoom, inserts, canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax, onProgress, throwIfAborted } = opts;
   type ComRvfc = HTMLVideoElement & {
     requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
     cancelVideoFrameCallback?: (id: number) => void;
@@ -638,7 +766,7 @@ async function renderFramesByPlayback(opts: {
     throw new Error('navegador sem requestVideoFrameCallback');
   }
 
-  const sink = makeSink(codec, W, H, bitrate, hw);
+  const sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax);
   const totalFrames = Math.max(1, Math.ceil(durationSec * FPS));
   const frameUs = Math.round(1_000_000 / FPS);
   let nextTick = 0;
@@ -865,6 +993,13 @@ export type PlanoInsert = {
    * não é usado.
    */
   aoVivo?: (t: number) => void;
+  /**
+   * TODOS os inserts têm leitor de quadros EXATO — logo `preparar` sozinho dá
+   * conta e o render pode usar o caminho RÁPIDO de decode. Quando algum insert
+   * depende de `<video>` (arquivo grande, codec que o decoder não abre), isto
+   * vem false e o render usa a REPRODUÇÃO, como antes.
+   */
+  exatos?: boolean;
   /** PAUSA todos os vídeos de insert JÁ — chamado sempre que o vídeo
    *  principal pausa (backpressure do encoder). Sem isto o insert seguia
    *  tocando enquanto o principal esperava o encoder: ele adiantava, a
@@ -996,6 +1131,10 @@ export async function renderTypographyVideo(opts: {
   signal?: AbortSignal;
   /** força o caminho por seek (QA/harness — não usar na UI) */
   forceSeekPath?: boolean;
+  /** MAX QUALITY: análise multi-passagem do encoder, 1920px e 0,14 bpp.
+   *  Desligado (o PADRÃO) o render é várias vezes mais rápido com perda que
+   *  não se enxerga no feed. */
+  qualidadeMax?: boolean;
   /**
    * O CHAMADOR JÁ SEGURA o lock exclusivo do ffmpeg (`runFfmpegExclusive`).
    *
@@ -1071,8 +1210,19 @@ export async function renderTypographyVideo(opts: {
       );
     }
 
+    // MODO DE RENDER (03.09). MAX QUALITY = a régua de sempre; padrão = rápido.
+    // Silas: *"tem que ser rápido esse render... sacrificar um pouco de
+    // qualidade (imperceptível) pra ganhar uma boa velocidade"*.
+    const qualidadeMax = opts.qualidadeMax === true;
+    // RESOLUÇÃO: no rápido o lado maior fica em 1600 (1080x1920 → 900x1600,
+    // ~30% menos pixels pra compor E codificar). Num celular não se enxerga.
+    // A resolução é a MESMA nos dois modos: rebaixar pra 1600 borrava a
+    // legenda e, com o gargalo real corrigido (ver esperarFilaBaixar), não
+    // comprava velocidade nenhuma. O que MAX QUALITY muda é o bitrate e a
+    // análise do encoder — o que o Silas autorizou sacrificar.
+    const tetoLado = 1920;
     const longSide = Math.max(srcW, srcH);
-    const scale = longSide > 1920 ? 1920 / longSide : 1;
+    const scale = longSide > tetoLado ? tetoLado / longSide : 1;
     const W = even(srcW * scale);
     const H = even(srcH * scale);
 
@@ -1084,17 +1234,27 @@ export async function renderTypographyVideo(opts: {
     // seguram arquivo e memória; a régua nunca desce abaixo do próprio piso
     // (0,14 bpp — legenda nítida mesmo com fonte fraca). srcRate inclui
     // áudio/container (~5-10% a mais) — só reforça a folga.
-    const bppRate = W * H * FPS * 0.14;
+    // BITRATE: no modo rápido a régua cai de 0,14 pra 0,08 bpp e o teto de
+    // acompanhar a fonte cai de 26M pra 10M. Menos bits = menos trabalho do
+    // encoder; num vertical de anúncio a diferença é invisível.
+    const bpp = qualidadeMax ? 0.14 : 0.08;
+    const tetoFonte = qualidadeMax ? 26_000_000 : 10_000_000;
+    const fatorFonte = qualidadeMax ? 1.5 : 1.0;
+    const bppRate = W * H * FPS * bpp;
     const srcRate = (file.size * 8) / durationSec;
     const budgetRate = (RENDER_BYTES_BUDGET * 8) / durationSec;
     const bitrate = Math.round(
       Math.min(
-        Math.max(bppRate, Math.min(srcRate * 1.5, 26_000_000), 2_500_000),
+        Math.max(bppRate, Math.min(srcRate * fatorFonte, tetoFonte), 2_000_000),
         budgetRate,
       ),
     );
 
     const { codec, hw } = await pickCodec(W, H, bitrate);
+    console.log(
+      `[tipografia] render ${qualidadeMax ? 'MAX QUALITY' : 'RÁPIDO'} · ${W}x${H} · ` +
+        `${(bitrate / 1e6).toFixed(1)}Mbps · ${hw ? 'hardware' : 'software'}`,
+    );
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
@@ -1105,13 +1265,17 @@ export async function renderTypographyVideo(opts: {
     // ── frames: caminho rápido primeiro; qualquer tropeço cai pro seek ──
     let videoOnly: Blob | null = null;
     let mode: 'decode' | 'seek' | 'playback' = 'decode';
-    // INSERT liga o caminho por seek: o decode compõe frames dentro do
-    // callback do decoder (síncrono) e não tem onde esperar o seek do vídeo
-    // do insert. O seek path já espera o frame do vídeo principal — esperar o
-    // do insert junto é uma linha. Mais lento, mas o insert sai FLUIDO.
-    const insertsPrecisamEsperar = !!(inserts && inserts.janelas.length > 0 && inserts.preparar);
-    if (insertsPrecisamEsperar) {
-      console.log('[tipografia] inserts presentes — tentando o caminho de REPRODUÇÃO (tempo real); seek é a reserva');
+    // Insert com leitor EXATO roda no caminho rápido (o dreno assíncrono
+    // espera o quadro). Só quando algum insert depende de `<video>` é que
+    // ainda vale a REPRODUÇÃO — e o seek continua sendo a última reserva.
+    const temInsert = !!(inserts && inserts.janelas.length > 0 && inserts.preparar);
+    const insertsPrecisamEsperar = temInsert && inserts?.exatos !== true;
+    if (temInsert) {
+      console.log(
+        insertsPrecisamEsperar
+          ? '[tipografia] inserts sem leitor exato — caminho de REPRODUÇÃO (tempo real); seek é a reserva'
+          : '[tipografia] inserts com leitor EXATO — caminho RÁPIDO de decode',
+      );
     }
     if (!opts.forceSeekPath && !insertsPrecisamEsperar) {
       try {

@@ -261,6 +261,21 @@ function TipografiaInner() {
   const [words, setWords] = useToolState<TWord[]>('tipografia:words', []);
   const [blocks, setBlocks] = useToolState<Block[]>('tipografia:blocks', []);
   const [phase, setPhase] = useToolState<Phase>('tipografia:phase', 'idle');
+  /** MAX QUALITY (03.09): o render padrão é o RÁPIDO. Este liga a análise
+   *  multi-passagem do encoder + resolução e bitrate cheios — bem mais lento.
+   *  A escolha fica gravada pras próximas exportações. */
+  const [qualidadeMax, setQualidadeMax] = useState(false);
+  useEffect(() => {
+    try {
+      setQualidadeMax(localStorage.getItem('darkolab:tipografia:maxq') === '1');
+    } catch { /* sem localStorage: fica no rápido */ }
+  }, []);
+  const trocarQualidade = () =>
+    setQualidadeMax((v) => {
+      const n = !v;
+      try { localStorage.setItem('darkolab:tipografia:maxq', n ? '1' : '0'); } catch { /* quota */ }
+      return n;
+    });
   const [stage, setStage] = useToolState<string | null>('tipografia:stage', null);
   const [progress, setProgress] = useToolState<number | null>('tipografia:progress', null);
   const [error, setError] = useToolState<string | null>('tipografia:error', null);
@@ -1137,6 +1152,7 @@ function TipografiaInner() {
         preset,
         style,
         headlines,
+        qualidadeMax,
         signal: abortRef.current.signal,
         onProgress: (p: RenderProgress) => {
           if (p.phase === 'fontes') {
@@ -1910,6 +1926,30 @@ function TipografiaInner() {
                   Renderizar vídeo
                 </ToolAction>
               )}
+              {/* MAX QUALITY — o padrão é o render RÁPIDO. */}
+              <button
+                type="button"
+                onClick={trocarQualidade}
+                disabled={phase === 'rendering'}
+                className={'lz-maxq' + (qualidadeMax ? ' is-on' : '')}
+                style={{ margin: 0, flex: '0 1 auto' }}
+                aria-pressed={qualidadeMax}
+                title={qualidadeMax
+                  ? 'MAX QUALITY ligado: render bem mais LENTO, qualidade máxima'
+                  : 'Render rápido (padrão): a diferença de qualidade não se enxerga no feed'}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  {qualidadeMax ? (
+                    <path d="M12 3l2.4 5.6L20 10l-4.4 3.8L17 20l-5-3-5 3 1.4-6.2L4 10l5.6-1.4z" />
+                  ) : (
+                    <path d="M13 2 4.1 13H11l-1 9 8.9-11H12l1-9z" />
+                  )}
+                </svg>
+                <span className="lz-maxq-txt">
+                  {qualidadeMax ? 'MAX QUALITY — render lento' : 'RENDER RÁPIDO — recomendado'}
+                </span>
+                <span className="lz-maxq-pill">{qualidadeMax ? 'ON' : 'OFF'}</span>
+              </button>
             </div>
           </ToolStep>
         ) : null}

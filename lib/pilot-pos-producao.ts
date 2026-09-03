@@ -38,6 +38,8 @@ export type LegendaCfg = {
   on: boolean;
   /** id do template das Legendas Automáticas (builtin ou salvo do user) */
   templateId: string;
+  /** MAX QUALITY no render (mais lento). Ausente = render RÁPIDO. */
+  qualidadeMax?: boolean;
 };
 
 export type ZoomModo = 'in' | 'out' | 'inout';
