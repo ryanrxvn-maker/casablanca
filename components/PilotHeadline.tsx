@@ -155,7 +155,11 @@ function PalcoDaHeadline({
         ref={caixaRef}
         className={'hl-palco-quadro' + (arrastando ? ' is-arrastando' : '')}
         onPointerDown={(e) => {
-          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          try {
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          } catch {
+            /* ponteiro já solto: o arrasto segue pelos onPointerMove mesmo */
+          }
           setArrastando(true);
           daPonta(e);
         }}
@@ -356,6 +360,14 @@ export function PilotHeadlineModal({
   const [montado, setMontado] = useState(false);
   const [presets, setPresets] = useState<Array<{ id: string; name: string }>>([]);
   useEffect(() => setMontado(true), []);
+  // trava o scroll da página — a roda do mouse rolava o fundo (02.09)
+  useEffect(() => {
+    const antes = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = antes;
+    };
+  }, []);
   useEffect(() => {
     void import('@/lib/typography/headline').then((m) =>
       setPresets(m.HEADLINE_PRESETS.map((p) => ({ id: p.id, name: p.name }))),

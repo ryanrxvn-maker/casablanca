@@ -253,6 +253,14 @@ export function LegendaZoomPopover({
 }) {
   const [montado, setMontado] = useState(false);
   useEffect(() => setMontado(true), []);
+  // trava o scroll da página — a roda do mouse rolava o fundo (02.09)
+  useEffect(() => {
+    const antes = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = antes;
+    };
+  }, []);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onFechar();

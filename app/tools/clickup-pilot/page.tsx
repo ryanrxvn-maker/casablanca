@@ -14653,6 +14653,20 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
                                                 </svg>
                                                 Avatar HeyGen
+                                                {/* NOME da versão 1 (02.09): "assim como a versão 3 é
+                                                  * editável, a 2 e a 1 também". Só aparece quando o AD
+                                                  * TEM versões — sem elas o campo seria ruído. Grava no
+                                                  * mesmo lugar que o card do disparo lê. */}
+                                                {a.duasVersoes || (a.versoes || []).length > 0 ? (
+                                                  <input
+                                                    type="text"
+                                                    value={nomesDeVersao[a.taskId] || ''}
+                                                    placeholder="Versão 1"
+                                                    onChange={(e) => renomearVersaoNoCard(a.taskId, e.target.value)}
+                                                    className="mono w-[110px] rounded border border-line bg-bg/60 px-1.5 py-[1px] text-[10px] normal-case tracking-normal text-text focus:border-cyan-400/60 focus:outline-none"
+                                                    title="Nome desta versão (aparece na lista de versões do card)"
+                                                  />
+                                                ) : null}
                                               </div>
                                               <div className="max-w-[420px]">
                                                 <CompactAvatarPicker
@@ -14670,6 +14684,42 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               </div>
                                             </div>
                                             )}
+                                            {/* A VOZ DA VERSÃO 1 mora AQUI, colada no avatar dela
+                                              * (02.09). Ela vivia depois das versões 2..10, então a
+                                              * tela lia: avatar 1, avatar 2, voz 2, avatar 3, voz 3…
+                                              * e a voz 1 POR ÚLTIMO — parecia a voz da versão 3.
+                                              * A ordem é sempre: avatar da versão, voz da versão. */}
+                                            {slot.avatarId || slot.imageMode ? (
+                                              // MODO ÁUDIO sem Voice Mirror: a voz do take é a do próprio
+                                              // arquivo → o seletor dorme. Liga o Mirror e ele acorda
+                                              // (vira a voz alvo do espelho).
+                                              <div className={slot.audioKey && !slot.imageMode && !slot.audioMirror ? 'pointer-events-none select-none opacity-35' : ''}>
+                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                                                  </svg>
+                                                  Voz
+                                                  {slot.audioKey && !slot.imageMode ? (
+                                                    <span className="font-normal normal-case tracking-normal text-text-muted">
+                                                      {slot.audioMirror ? '— voz alvo do Voice Mirror' : '— dorme: a voz é a do áudio'}
+                                                    </span>
+                                                  ) : null}
+                                                  <span className={`ml-auto normal-case tracking-normal ${slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted/70'}`}>
+                                                    {effectiveVoiceLabel}
+                                                  </span>
+                                                  {noVoice && !slot.voiceOverride ? (
+                                                    <span className="rounded-full border border-red-400/50 bg-red-500/15 px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-widest text-red-300">
+                                                      ⚠ escolha
+                                                    </span>
+                                                  ) : null}
+                                                </div>
+                                                <CompactVoiceSelector
+                                                  selected={slot.voiceOverride}
+                                                  setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverride: v })}
+                                                />
+                                              </div>
+                                            ) : null}
                                             {/* ═══ VERSÕES 2..10 DESTE PAPEL (30.08) ═══
                                               * Cada versão escolhe FRAME ou AVATAR — independente do
                                               * modo do slot base — com o toggle icone-only na linha.
@@ -14719,6 +14769,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     <div className="label-tech mb-1 flex flex-wrap items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
                                                       <span className="text-[11px] leading-none">+</span>
                                                       {`Avatar da versão${nome ? '' : ` ${n}`}`}
+                                                      {/* NOME: a 3..10 grava na análise (ver.nome); a 2
+                                                        * não tem esse campo — grava no mesmo registro que
+                                                        * o card do disparo lê (por taskId da versão). */}
                                                       {nome !== null ? (
                                                         <input
                                                           type="text"
@@ -14726,6 +14779,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           onChange={(e) => renomearVersao(a.taskId, n, e.target.value)}
                                                           className="mono w-[110px] rounded border border-line bg-bg/60 px-1.5 py-[1px] text-[10px] normal-case tracking-normal text-text focus:border-red-400/60 focus:outline-none"
                                                           title="Nome desta versao (aparece no card do disparo e no nome do arquivo)"
+                                                        />
+                                                      ) : n === 2 ? (
+                                                        <input
+                                                          type="text"
+                                                          value={nomesDeVersao[taskIdDoCanal(a.taskId, 'youtube')] || ''}
+                                                          placeholder="Versão 2"
+                                                          onChange={(e) => renomearVersaoNoCard(taskIdDoCanal(a.taskId, 'youtube'), e.target.value)}
+                                                          className="mono w-[110px] rounded border border-line bg-bg/60 px-1.5 py-[1px] text-[10px] normal-case tracking-normal text-text focus:border-red-400/60 focus:outline-none"
+                                                          title="Nome desta versão (aparece na lista de versões do card)"
                                                         />
                                                       ) : null}
                                                       <span className="font-normal normal-case tracking-normal text-text-muted">
@@ -14798,37 +14860,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 );
                                               });
                                             })()}
-                                            {slot.avatarId || slot.imageMode ? (
-                                              // MODO ÁUDIO sem Voice Mirror: a voz do take é a do próprio
-                                              // arquivo → o seletor dorme. Liga o Mirror e ele acorda
-                                              // (vira a voz alvo do espelho).
-                                              <div className={slot.audioKey && !slot.imageMode && !slot.audioMirror ? 'pointer-events-none select-none opacity-35' : ''}>
-                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
-                                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
-                                                  </svg>
-                                                  Voz
-                                                  {slot.audioKey && !slot.imageMode ? (
-                                                    <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                      {slot.audioMirror ? '— voz alvo do Voice Mirror' : '— dorme: a voz é a do áudio'}
-                                                    </span>
-                                                  ) : null}
-                                                  <span className={`ml-auto normal-case tracking-normal ${slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted/70'}`}>
-                                                    {effectiveVoiceLabel}
-                                                  </span>
-                                                  {noVoice && !slot.voiceOverride ? (
-                                                    <span className="rounded-full border border-red-400/50 bg-red-500/15 px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-widest text-red-300">
-                                                      ⚠ escolha
-                                                    </span>
-                                                  ) : null}
-                                                </div>
-                                                <CompactVoiceSelector
-                                                  selected={slot.voiceOverride}
-                                                  setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverride: v })}
-                                                />
-                                              </div>
-                                            ) : null}
                                             {/* APPLY CUSTOM MOTION — o campo de movimento do HeyGen.
                                                 No DR MILLION cada cena do AD é um avatar próprio, então
                                                 o gesto é por avatar: preenchido, ESTA cena sobe pro

@@ -86,16 +86,18 @@ function RecortadorDeMidia({
     const v = vid.current;
     if (!v || !tocando) return;
     let vivo = true;
+    // O rAF aqui é SÓ pra agulha correr lisa. O loop de verdade mora no
+    // `onTimeUpdate` do <video>: requestAnimationFrame congela com o painel
+    // oculto e o vídeo estourava a seleção e tocava até o fim do arquivo.
     const tick = () => {
       if (!vivo || !vid.current) return;
-      const t = vid.current.currentTime;
-      setAgulha(t);
-      if (t >= ate - 0.03) {
-        vid.current.currentTime = de;
-      }
+      setAgulha(vid.current.currentTime);
       requestAnimationFrame(tick);
     };
-    v.currentTime = Math.max(de, Math.min(agulha, ate - 0.05));
+    // agulha parada no fim (acabou de marcar o "até")? parte do começo — dar
+    // play e ver 0,05s antes do loop não conta como conferir a seleção.
+    const partida = agulha >= ate - 0.15 ? de : Math.max(de, Math.min(agulha, ate - 0.05));
+    v.currentTime = partida;
     void v.play().catch(() => setTocando(false));
     const raf = requestAnimationFrame(tick);
     return () => {
@@ -124,8 +126,21 @@ function RecortadorDeMidia({
         if (vid.current) vid.current.currentTime = preso;
         return;
       }
-      if (alvo === 'de') onMudar(Math.min(t, ate - INSERT_RECORTE_MIN_SEC), ate);
-      else onMudar(de, Math.max(t, de + INSERT_RECORTE_MIN_SEC));
+      // Arrastando uma PONTA, o vídeo mostra o quadro dela AO VIVO: na
+      // esquerda se vê exatamente onde começa, na direita onde termina.
+      const seek = (alvoT: number) => {
+        setAgulha(alvoT);
+        if (vid.current) vid.current.currentTime = alvoT;
+      };
+      if (alvo === 'de') {
+        const novoDe = Math.min(t, ate - INSERT_RECORTE_MIN_SEC);
+        seek(novoDe);
+        onMudar(novoDe, ate);
+      } else {
+        const novoAte = Math.max(t, de + INSERT_RECORTE_MIN_SEC);
+        seek(novoAte);
+        onMudar(de, novoAte);
+      }
     },
     [dur, de, ate, fracao, onMudar],
   );
@@ -146,6 +161,21 @@ function RecortadorDeMidia({
         muted
         playsInline
         preload="metadata"
+        onTimeUpdate={(e) => {
+          // prende o play DENTRO da seleção — dispara mesmo em aba oculta
+          if (!tocando) return;
+          const el = e.target as HTMLVideoElement;
+          if (el.currentTime >= ate - 0.05 || el.ended) {
+            el.currentTime = de;
+            if (el.paused) void el.play().catch(() => setTocando(false));
+          }
+        }}
+        onEnded={(e) => {
+          if (!tocando) return;
+          const el = e.target as HTMLVideoElement;
+          el.currentTime = de;
+          void el.play().catch(() => setTocando(false));
+        }}
         onLoadedMetadata={(e) => {
           const d = (e.target as HTMLVideoElement).duration;
           if (isFinite(d) && d > 0) {
@@ -160,7 +190,11 @@ function RecortadorDeMidia({
         className="pi-recorte-barra"
         onPointerDown={(e) => {
           if (!(dur > 0)) return;
-          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          try {
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          } catch {
+            /* ponteiro já solto: o arrasto segue pelos onPointerMove mesmo */
+          }
           const t = fracao(e) * dur;
           // pega a ponta mais próxima quando o clique cai perto dela; senão é
           // a agulha (ver o quadro é a ação mais comum)
@@ -350,6 +384,15 @@ export function PilotInsertsModal({
 }) {
   const [montado, setMontado] = useState(false);
   const [parteAtiva, setParteAtiva] = useState<string>(partes[0]?.label || '');
+  // A roda do mouse sobre a janela rolava a PÁGINA por trás (Silas, 02.09).
+  // Com o body travado, o scroll só existe dentro da janela.
+  useEffect(() => {
+    const antes = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = antes;
+    };
+  }, []);
   const [selecionado, setSelecionado] = useState<string | null>(null);
   const [subindo, setSubindo] = useState(false);
   /** Primeira ponta de um trecho em construção (clique 1 de 2). */
