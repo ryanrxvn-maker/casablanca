@@ -428,7 +428,14 @@ export function layoutHeadline(
   // cartela). Antes o flag so mexia nas aspas e a "tarja" saia caixinha
   // solta no meio — nada a ver com a referencia.
   const bleed = preset.fullBleed && painel !== 'nenhum';
-  const boxW = bleed ? W : painel === 'nenhum' ? textW : textW + padX * 2;
+  // painel solido/faixa: a caixa SEGUE a largura escolhida (alça lateral /
+  // slider), como no CapCut — texto curto nao encolhe a caixa. Palavra
+  // sozinha maior que a caixa ainda estica (nunca corta palavra no meio).
+  const boxW = bleed
+    ? W
+    : painel === 'nenhum'
+      ? textW
+      : Math.max(h.style.width * W, textW + padX * 2);
   const boxH = (painel === 'nenhum' ? textH : textH + padY * 2) + quotePx;
 
   // âncora: posX/posY é o CENTRO do bloco, com a mesma promessa do arrasto da

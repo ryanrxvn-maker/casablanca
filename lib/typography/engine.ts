@@ -3114,10 +3114,19 @@ export function captionBBoxAt(
   const topY = ancora.topY;
   const cx = ancora.cx;
   const pad = layout.fontPx * 0.45;
+  // CAIXA FIXA estilo CapCut: com largura escolhida (<100%), a caixa DA UI é
+  // a largura escolhida — não o abraço do texto. Sem isso, bloco curto tinha
+  // zona morta: arrastava a alça e nada acontecia até a quebra alcançar o
+  // texto (pedido 02.09: "a caixa deve seguir isso").
+  const bwSty = style.boxWidth;
+  const caixaFixa = bwSty !== undefined && bwSty < 0.999;
+  const wVis = caixaFixa
+    ? Math.max(blockWmax, W * 0.86 * Math.min(1, Math.max(0.3, bwSty)))
+    : blockWmax;
   return {
-    x: cx - blockWmax / 2 - pad,
+    x: cx - wVis / 2 - pad,
     y: topY - pad,
-    w: blockWmax + pad * 2,
+    w: wVis + pad * 2,
     h: blockH + pad * 2,
     blockId: block.id,
     rot: ((style.rotation ?? 0) * Math.PI) / 180,

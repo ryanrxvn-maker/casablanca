@@ -129,6 +129,12 @@ body > * {
 html:not([data-theme='light']) main {
   filter: saturate(0.72);
 }
+/* ⚠ filter em ancestral vira CONTAINING BLOCK e prende position:fixed dos
+   filhos. A página de legendas doca a timeline com fixed (.tl-dock) — nela o
+   saturate sai do main (o dock preso rolava junto e encolhia, 02.09). */
+html:not([data-theme='light']) main:has(.tl-dock) {
+  filter: none;
+}
 
 /* No CLARO os ícones cinza da sidebar somem (gray claro em fundo claro) →
    mais visíveis. NUNCA aplica no item ATIVO (.sb-icon-active) — esse fica

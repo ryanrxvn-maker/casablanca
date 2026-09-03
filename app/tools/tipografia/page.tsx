@@ -337,6 +337,8 @@ function TipografiaInner() {
   const subSidebar = useSubSidebarActive();
 
   const abortRef = useRef<AbortController | null>(null);
+  /** input escondido do botão "+ Adicionar vídeo" da fila */
+  const addInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // override que o bloco JÁ tinha antes do cadeado fechar — soltar o cadeado
   // devolve só ele, em vez de zerar o ajuste manual do user
@@ -912,6 +914,16 @@ function TipografiaInner() {
     cancelFFmpeg();
   }
 
+  // arquivo que subiu sem passar pela fila (fluxo antigo / F5) vira fila de 1
+  useEffect(() => {
+    if (file && !fila.some((f) => sigOf(f) === sigOf(file))) {
+      setFila((prev) =>
+        prev.some((f) => sigOf(f) === sigOf(file)) ? prev : [...prev, file].slice(0, MAX_VIDEOS),
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file]);
+
   /** Junta vídeos na fila (dedupe por nome+tamanho, teto de 10). */
   function addVideos(fs: File[]) {
     const soVideo = fs.filter((f) => /^video\//.test(f.type) || /\.(mp4|mov|webm|mkv)$/i.test(f.name));
@@ -1393,17 +1405,17 @@ function TipografiaInner() {
             disabled={processing}
             hue={HUE}
           />
-          {fila.length > 1 || (fila.length === 1 && !file) ? (
+          {file || fila.length > 0 ? (
             <div className="mt-3">
               <div
                 className="mb-1.5 flex items-center justify-between text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 <span>Fila — clica pra trocar o vídeo em edição</span>
-                <span className="mono">{fila.length}/{MAX_VIDEOS}</span>
+                <span className="mono">{Math.max(fila.length, 1)}/{MAX_VIDEOS}</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {fila.map((f, i) => {
+                {(fila.length > 0 ? fila : file ? [file] : []).map((f, i) => {
                   const atual = !!file && sigOf(f) === sigOf(file);
                   return (
                     <span
@@ -1438,6 +1450,32 @@ function TipografiaInner() {
                     </span>
                   );
                 })}
+                {fila.length < MAX_VIDEOS ? (
+                  <button
+                    type="button"
+                    disabled={processing}
+                    onClick={() => addInputRef.current?.click()}
+                    className={
+                      'inline-flex items-center gap-1 rounded-full border border-dashed border-line-strong px-3 py-1 text-[11.5px] font-bold text-text-muted hover:border-amber-400/60 hover:text-amber-500 disabled:opacity-40' +
+                      T3D
+                    }
+                    title="Adiciona mais vídeos na fila (até 10) — cada um guarda a própria edição"
+                  >
+                    + Adicionar vídeo
+                  </button>
+                ) : null}
+                <input
+                  ref={addInputRef}
+                  type="file"
+                  accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const fs = Array.from(e.target.files ?? []);
+                    if (fs.length) addVideos(fs);
+                    e.target.value = '';
+                  }}
+                />
               </div>
             </div>
           ) : null}
@@ -1543,10 +1581,10 @@ function TipografiaInner() {
                   }}
                 />
                 <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
-                  Arrasta pra mover · clica NUMA PALAVRA pra digitar ali · a
-                  bolinha de cima GIRA · as alças laterais mudam onde o texto
-                  quebra · selecionada, arrasta sobre as palavras pra marcar
-                  um trecho
+                  Arrasta pra mover · clica NUMA PALAVRA pra digitar ali ·
+                  bolinha de cima GIRA · cantos = tamanho · laterais = caixa
+                  do texto · com o texto em edição, arrasta sobre as palavras
+                  pra marcar um trecho
                 </p>
               </div>
               <div className="min-w-0 flex flex-col gap-5">
@@ -1765,14 +1803,11 @@ function TipografiaInner() {
                 // esquerda barrando na lista de ferramentas, direita até o
                 // fim da tela. No celular volta pro fluxo (roubaria a tela).
                 ((duration ?? 0) > 0 ? '' : 'hidden ') +
-                'relative z-30 mt-4 border-t border-line/70 px-4 pb-1.5 shadow-[0_-14px_34px_-16px_rgba(0,0,0,0.65)] backdrop-blur-md [background:linear-gradient(180deg,rgba(var(--bg-softer),0.94),rgba(var(--bg-soft),0.985))] md:fixed md:bottom-0 md:right-0 md:mt-0 ' +
+                'tl-dock relative z-30 mt-4 border-t border-line/70 px-4 pb-1.5 shadow-[0_-14px_34px_-16px_rgba(0,0,0,0.65)] backdrop-blur-md [background:linear-gradient(180deg,rgba(var(--bg-softer),0.94),rgba(var(--bg-soft),0.985))] md:fixed md:bottom-0 md:right-0 md:mt-0 ' +
                 (subSidebar ? 'md:left-[328px]' : 'md:left-[84px]')
               }
             >
               <TimelineM
-                onRender={renderFinal}
-                rendering={phase === 'rendering'}
-                onCancelRender={handleCancel}
                 blocks={blocks}
                 duration={duration ?? 0}
                 videoRef={videoRef}
@@ -1894,7 +1929,7 @@ function TipografiaInner() {
       {/* o dock da timeline é fixed: este respiro no PÉ da página deixa o
           passo 4 e o resultado rolarem pra cima da linha do dock */}
       {blocks.length > 0 && (duration ?? 0) > 0 ? (
-        <div aria-hidden className="hidden md:block md:h-[270px]" />
+        <div aria-hidden className="hidden md:block md:h-[320px]" />
       ) : null}
     </div>
   );
@@ -2243,12 +2278,19 @@ function PreviewPane({
               ctx.setLineDash([7 * dpr, 5 * dpr]);
               ctx.strokeRect(L.box.x, L.box.y, L.box.w, L.box.h);
               ctx.setLineDash([]);
-              // alça de TAMANHO (canto), LARGURA (laterais) e GIRAR (nó)
+              // alças de TAMANHO nos 4 cantos, LARGURA (laterais) e GIRAR (nó)
               const hs = 9 * dpr;
               ctx.fillStyle = '#22d3ee';
               ctx.strokeStyle = '#0a2a30';
-              ctx.fillRect(L.box.x + L.box.w - hs / 2, L.box.y + L.box.h - hs / 2, hs, hs);
-              ctx.strokeRect(L.box.x + L.box.w - hs / 2, L.box.y + L.box.h - hs / 2, hs, hs);
+              for (const [hx2, hy2] of [
+                [L.box.x, L.box.y],
+                [L.box.x + L.box.w, L.box.y],
+                [L.box.x, L.box.y + L.box.h],
+                [L.box.x + L.box.w, L.box.y + L.box.h],
+              ] as Array<[number, number]>) {
+                ctx.fillRect(hx2 - hs / 2, hy2 - hs / 2, hs, hs);
+                ctx.strokeRect(hx2 - hs / 2, hy2 - hs / 2, hs, hs);
+              }
               const ph = 22 * dpr;
               const pw = 6 * dpr;
               for (const hx of [L.box.x, L.box.x + L.box.w]) {
@@ -2328,12 +2370,19 @@ function PreviewPane({
               ctx.setLineDash([7 * dpr, 5 * dpr]);
               ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
               ctx.setLineDash([]);
-              // alça de TAMANHO (canto inferior direito)
+              // alças de TAMANHO nos 4 cantos (pedido 02.09)
               const hs = 9 * dpr;
               ctx.fillStyle = '#fbbf24';
               ctx.strokeStyle = '#1a1a1a';
-              ctx.fillRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
-              ctx.strokeRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
+              for (const [hx2, hy2] of [
+                [bb.x, bb.y],
+                [bb.x + bb.w, bb.y],
+                [bb.x, bb.y + bb.h],
+                [bb.x + bb.w, bb.y + bb.h],
+              ] as Array<[number, number]>) {
+                ctx.fillRect(hx2 - hs / 2, hy2 - hs / 2, hs, hs);
+                ctx.strokeRect(hx2 - hs / 2, hy2 - hs / 2, hs, hs);
+              }
               // alças LATERAIS de largura da caixa (pílulas no meio das bordas)
               const ph = 22 * dpr;
               const pw = 6 * dpr;
@@ -2605,8 +2654,9 @@ function PreviewPane({
                 // coluna sticky: o preview INTEIRO precisa caber na janela
                 // (com folga pro transporte embaixo) — vídeo vertical numa
                 // tela baixa encolhe em vez de estourar o sticky
-                // 64px de topo + ~260px do dock da timeline + transporte
-                maxWidth: `min(100%, calc((100vh - 410px) * ${(dims.w / Math.max(1, dims.h)).toFixed(4)}))`,
+                // 64px de topo + dock da timeline (que cresce com camadas
+                // de headline) + transporte
+                maxWidth: `min(100%, calc((100vh - 430px) * ${(dims.w / Math.max(1, dims.h)).toFixed(4)}))`,
                 marginInline: 'auto',
               }
             : { minHeight: 220 }
@@ -2641,6 +2691,21 @@ function PreviewPane({
               wbE && bbE && wbE.blockId === bbE.blockId
                 ? wbE.boxes.find((bx) => naPalavra(plE.x, plE.y, bx))
                 : undefined;
+            // EDITANDO + palavra = seleção de trecho (azul, estilo editor de
+            // texto). Fora do texto, arrasta a legenda com o editor aberto.
+            if (hitW && wbE && bbE) {
+              onWordSel({ blockId: wbE.blockId, a: hitW.i, b: hitW.i });
+              dragRef.current = {
+                mode: 'wordsel',
+                moved: false,
+                snapX: false,
+                snapY: false,
+                dist0: 0,
+                scale0: 1,
+                wordAnchor: hitW.i,
+              };
+              return;
+            }
             const st0 = liveRef.current.style;
             const pb0 = bbE ? st0.perBlock?.[bbE.blockId] : undefined;
             dragOvRef.current = {
@@ -2657,9 +2722,9 @@ function PreviewPane({
               snapY: false,
               dist0: 0,
               scale0: 1,
-              wordAnchor: hitW ? hitW.i : -1,
+              wordAnchor: -1,
             };
-            if (!hitW) wrap.style.cursor = 'grabbing';
+            wrap.style.cursor = 'grabbing';
             return;
           }
           // a bbox não é mais recalculada todo frame — mede agora, pro clique
@@ -2713,10 +2778,13 @@ function PreviewPane({
                   arma('rotate', 0, selH.style.rotation ?? 0, 'grabbing');
                   return;
                 }
-                if (
-                  Math.abs(plh.x - (L.box.x + L.box.w)) < kR &&
-                  Math.abs(plh.y - (L.box.y + L.box.h)) < kR
-                ) {
+                const cantosH: Array<[number, number]> = [
+                  [L.box.x, L.box.y],
+                  [L.box.x + L.box.w, L.box.y],
+                  [L.box.x, L.box.y + L.box.h],
+                  [L.box.x + L.box.w, L.box.y + L.box.h],
+                ];
+                if (cantosH.some(([hx2, hy2]) => Math.hypot(plh.x - hx2, plh.y - hy2) < kR)) {
                   arma(
                     'scale',
                     Math.max(12, Math.hypot(plh.x - chx, plh.y - chy)),
@@ -2818,11 +2886,17 @@ function PreviewPane({
               return;
             }
           }
+          const nosCantos = (bx: { x: number; y: number; w: number; h: number }) =>
+            [
+              [bx.x, bx.y],
+              [bx.x + bx.w, bx.y],
+              [bx.x, bx.y + bx.h],
+              [bx.x + bx.w, bx.y + bx.h],
+            ] as Array<[number, number]>;
           const onHandle =
             !!bb &&
             selRef.current &&
-            Math.abs(pl.x - (bb.x + bb.w)) < handleR &&
-            Math.abs(pl.y - (bb.y + bb.h)) < handleR;
+            nosCantos(bb).some(([hx2, hy2]) => Math.hypot(pl.x - hx2, pl.y - hy2) < handleR);
           if (onHandle && bb) {
             onInteractStart();
             wrap.style.cursor = 'nwse-resize';
@@ -2849,19 +2923,8 @@ function PreviewPane({
             wb && bb && wb.blockId === bb.blockId
               ? wb.boxes.find((bx) => naPalavra(pl.x, pl.y, bx))
               : undefined;
-          if (selRef.current && hitWord && wb) {
-            onWordSel({ blockId: wb.blockId, a: hitWord.i, b: hitWord.i });
-            dragRef.current = {
-              mode: 'wordsel',
-              moved: false,
-              snapX: false,
-              snapY: false,
-              dist0: 0,
-              scale0: 1,
-              wordAnchor: hitWord.i,
-            };
-            return;
-          }
+          // SEM edição aberta, arrastar SEMPRE move (pedido 02.09) — a
+          // seleção azul de trecho só existe com o editor aberto.
           dragOvRef.current = ovBase();
           dragRef.current = {
             mode: 'move',
@@ -2919,7 +2982,8 @@ function PreviewPane({
                   hd.fontScale = Math.min(4, Math.max(0.3, hd.base0 * (dist / hd.dist0)));
                 } else {
                   const meia = Math.max(12, Math.abs(plh.x - chx));
-                  hd.width = Math.min(0.98, Math.max(0.2, hd.base0 * (meia / hd.dist0)));
+                  // absoluta: a borda segue a mão
+                  hd.width = Math.min(0.98, Math.max(0.2, (meia * 2) / c.width));
                 }
                 hd.moved = true;
                 return;
@@ -2982,8 +3046,14 @@ function PreviewPane({
             } else if (
               bb0 &&
               selRef.current &&
-              Math.abs(pl0.x - (bb0.x + bb0.w)) < hr &&
-              Math.abs(pl0.y - (bb0.y + bb0.h)) < hr
+              (
+                [
+                  [bb0.x, bb0.y],
+                  [bb0.x + bb0.w, bb0.y],
+                  [bb0.x, bb0.y + bb0.h],
+                  [bb0.x + bb0.w, bb0.y + bb0.h],
+                ] as Array<[number, number]>
+              ).some(([hx2, hy2]) => Math.hypot(pl0.x - hx2, pl0.y - hy2) < hr)
             ) {
               wrap.style.cursor = 'nwse-resize';
             } else if (overWord) {
@@ -3059,14 +3129,16 @@ function PreviewPane({
           if (drag.mode === 'boxw') {
             const bb = bboxRef.current ?? medirBBox();
             const ov = dragOvRef.current;
-            if (!bb || !ov) return;
+            const c = canvasRef.current;
+            if (!bb || !ov || !c) return;
             const dpr = dprRef.current;
             const px = (e.clientX - rect.left) * dpr;
             const py = (e.clientY - rect.top) * dpr;
             const pl2 = paraLocal(px, py, bb);
             const meia = Math.max(12, Math.abs(pl2.x - (bb.cx ?? bb.x + bb.w / 2)));
-            // proporcional ao ponto onde a alça foi AGARRADA — sem salto
-            ov.boxWidth = Math.min(1, Math.max(0.3, drag.scale0 * (meia / drag.dist0)));
+            // ABSOLUTA: a borda da caixa segue a mão (estilo CapCut) — a
+            // versão proporcional tinha zona morta em bloco curto
+            ov.boxWidth = Math.min(1, Math.max(0.3, (meia * 2) / (c.width * 0.86)));
             return;
           }
           if (drag.mode === 'scale') {
@@ -3354,9 +3426,6 @@ function Timeline({
   selHeadlineId,
   onSelectHeadline,
   onRetimeHeadline,
-  onRender,
-  rendering,
-  onCancelRender,
   disabled,
 }: {
   blocks: Block[];
@@ -3373,10 +3442,6 @@ function Timeline({
   selHeadlineId: string | null;
   onSelectHeadline: (id: string) => void;
   onRetimeHeadline: (id: string, start: number, end: number) => void;
-  /** RENDERIZAR sempre à vista: o dock cobria o passo 4 e o botão sumia */
-  onRender?: () => void;
-  rendering?: boolean;
-  onCancelRender?: () => void;
   disabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -3542,6 +3607,26 @@ function Timeline({
   const effPps = pps || 40;
   const trackW = Math.max(200, duration * effPps);
 
+  // CAMADAS das headlines: sobrepôs no tempo → ganha uma linha ACIMA. A
+  // barra mantém o tamanho cheio; quem cresce é a PISTA (pedido 02.09).
+  const hlLinhas = new Map<string, number>();
+  {
+    const fins: number[] = [];
+    for (const h of headlines.slice().sort((a, b) => a.start - b.start || a.end - b.end)) {
+      let row = fins.findIndex((f) => h.start >= f);
+      if (row === -1) {
+        row = fins.length;
+        fins.push(h.end);
+      } else {
+        fins[row] = h.end;
+      }
+      hlLinhas.set(h.id, row);
+    }
+  }
+  const nLinhas = Math.max(1, ...Array.from(hlLinhas.values()).map((r) => r + 1));
+  /** quanto a pista cresceu pra cima por causa das camadas extras */
+  const extraLanes = (nLinhas - 1) * 38;
+
   // régua: passo escolhido pra no máx ~240 ticks
   const stepOptions = [1, 2, 5, 10, 30, 60];
   const step = stepOptions.find((s) => duration / s <= 240) ?? 120;
@@ -3609,33 +3694,6 @@ function Timeline({
           >
             +
           </button>
-          {onRender ? (
-            rendering ? (
-              <button
-                type="button"
-                onClick={onCancelRender}
-                className={
-                  'ml-1 rounded-[9px] border border-red-400/60 bg-red-500/10 px-3.5 py-1.5 text-[11.5px] font-bold normal-case tracking-normal text-red-300 hover:bg-red-500/20' +
-                  T3D
-                }
-              >
-                Cancelar render
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onRender}
-                disabled={disabled}
-                title="Gera o MP4 com a legenda queimada (o download começa sozinho)"
-                className={
-                  'ml-1 rounded-[9px] bg-amber-400 px-4 py-1.5 text-[11.5px] font-black normal-case tracking-normal text-black hover:bg-amber-300 disabled:opacity-40' +
-                  T3D_GLOW
-                }
-              >
-                ⚡ Renderizar
-              </button>
-            )
-          ) : null}
         </span>
       </div>
       <div
@@ -3646,7 +3704,7 @@ function Timeline({
           className="relative select-none overflow-hidden"
           style={{
             width: trackW,
-            height: 196,
+            height: 196 + extraLanes,
             backgroundImage: `repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) ${effPps}px, transparent ${effPps}px, transparent ${effPps * 2}px)`,
           }}
           onPointerDown={(e) => {
@@ -3727,12 +3785,13 @@ function Timeline({
                 data-block="1"
                 title={txt}
                 className={
-                  'group absolute top-[70px] h-[46px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
+                  'group absolute h-[46px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
                   (sel ? 'z-10' : 'hover:brightness-[1.18]')
                 }
                 style={{
                   left,
                   width,
+                  top: 70 + extraLanes,
                   transition: 'box-shadow .12s ease, filter .12s ease',
                   backgroundImage: sel
                     ? `linear-gradient(180deg, ${col}b0 0%, ${col}6e 100%)`
@@ -3835,9 +3894,10 @@ function Timeline({
           {/* filmstrip (só visual — vídeo não é editável) */}
           {thumbs.length > 0 ? (
             <div
-              className="pointer-events-none absolute left-0 top-[123px] flex h-[60px] overflow-hidden rounded-[7px]"
+              className="pointer-events-none absolute left-0 flex h-[60px] overflow-hidden rounded-[7px]"
               style={{
                 width: trackW,
+                top: 123 + extraLanes,
                 border: '1px solid rgba(255,255,255,0.10)',
                 boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.35), 0 2px 10px -6px rgba(0,0,0,0.9)',
               }}
@@ -3858,34 +3918,17 @@ function Timeline({
 
           {/* ── FAIXA DAS HEADLINES (texto parado) ── */}
           <div
-            className="pointer-events-none absolute left-0 top-[25px] h-[40px] rounded-[7px]"
-            style={{ width: trackW, background: 'rgba(34,211,238,0.05)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.16)' }}
+            className="pointer-events-none absolute left-0 top-[25px] rounded-[7px]"
+            style={{ width: trackW, height: 40 + extraLanes, background: 'rgba(34,211,238,0.05)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.16)' }}
           />
-          {(() => {
-            // CAMADAS: duas headlines no mesmo trecho nunca dividem a mesma
-            // linha — a segunda sobe pra camada de cima (pedido 02.09)
-            const linhas = new Map<string, number>();
-            const fins: number[] = [];
-            for (const h of headlines.slice().sort((a, b) => a.start - b.start || a.end - b.end)) {
-              let row = fins.findIndex((f) => h.start >= f);
-              if (row === -1) {
-                row = fins.length;
-                fins.push(h.end);
-              } else {
-                fins[row] = h.end;
-              }
-              linhas.set(h.id, row);
-            }
-            const nLinhas = Math.max(1, fins.length);
-            const chipH = nLinhas > 1 ? Math.max(11, Math.floor((36 - (nLinhas - 1) * 2) / nLinhas)) : 36;
-            return headlines.map((h) => {
+          {headlines.map((h) => {
             // clamp NA PISTA: um chip além do fim do vídeo (trim largado, F5
             // no meio) vazava pra fora do trilho e parecia quebrado
             const left = Math.max(0, Math.min((h.start / 1000) * effPps, trackW - 12));
             const width = Math.max(12, Math.min(((h.end - h.start) / 1000) * effPps, trackW - left));
             const sel = h.id === selHeadlineId;
-            const row = linhas.get(h.id) ?? 0;
-            const topo = 27 + (nLinhas - 1 - row) * (chipH + 2);
+            const row = hlLinhas.get(h.id) ?? 0;
+            const topo = 27 + (nLinhas - 1 - row) * 38;
             return (
               <div
                 key={h.id}
@@ -3899,7 +3942,7 @@ function Timeline({
                   left,
                   width,
                   top: topo,
-                  height: chipH,
+                  height: 36,
                   backgroundImage: sel
                     ? 'linear-gradient(180deg, rgba(34,211,238,0.72) 0%, rgba(34,211,238,0.4) 100%)'
                     : 'linear-gradient(180deg, rgba(34,211,238,0.4) 0%, rgba(34,211,238,0.16) 100%)',
@@ -3951,18 +3994,14 @@ function Timeline({
                   hlDragRef.current = null;
                 }}
               >
-                <span
-                  className="pointer-events-none absolute inset-0 flex items-center truncate px-2 font-semibold text-white/90"
-                  style={{ fontSize: chipH < 20 ? 9 : 11 }}
-                >
+                <span className="pointer-events-none absolute inset-0 flex items-center truncate px-2 text-[11px] font-semibold text-white/90">
                   {h.text.replace(/\s+/g, ' ').trim() || 'headline'}
                 </span>
                 <span className="pointer-events-none absolute inset-y-0 left-0 w-[7px] bg-white/25 opacity-0 group-hover:opacity-100" />
                 <span className="pointer-events-none absolute inset-y-0 right-0 w-[7px] bg-white/25 opacity-0 group-hover:opacity-100" />
               </div>
             );
-            });
-          })()}
+          })}
 
           {/* playhead — a zona de pega (14px) reenvia o pointer pro track = scrub */}
           <div
