@@ -173,7 +173,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="fx-range h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none disabled:opacity-40"
         style={{
-          background: `linear-gradient(90deg, rgb(var(--cyan)) ${pct}%, rgba(255,255,255,0.14) ${pct}%)`,
+          background: `linear-gradient(90deg, rgb(var(--cyan)) ${pct}%, var(--range-rest) ${pct}%)`,
         }}
       />
     </div>
