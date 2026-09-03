@@ -50,7 +50,27 @@ export type HeadlineStyle = {
   uppercase: boolean | null;
   /** aspas decorativas no canto (null = o do modelo) */
   quote: boolean | null;
+  /** rotação em graus (0 = reta) — a alça de girar do preview escreve aqui */
+  rotation?: number;
+  /** animação de ENTRADA (0.35s) — 'nenhuma' = aparece seca */
+  animIn?: HeadlineAnim;
+  /** animação de SAÍDA (0.3s) */
+  animOut?: HeadlineAnim;
 };
+
+/** Animações da headline — poucas e sóbrias (headline é texto PARADO). */
+export type HeadlineAnim = 'nenhuma' | 'fade' | 'sobe' | 'zoom' | 'varre';
+
+export const HEADLINE_ANIMS: Array<{ kind: HeadlineAnim; label: string }> = [
+  { kind: 'nenhuma', label: 'Nenhuma' },
+  { kind: 'fade', label: 'Fade' },
+  { kind: 'sobe', label: 'Sobe' },
+  { kind: 'zoom', label: 'Zoom' },
+  { kind: 'varre', label: 'Varredura' },
+];
+
+const ANIM_IN_MS = 350;
+const ANIM_OUT_MS = 300;
 
 export type Headline = {
   id: string;
@@ -569,17 +589,31 @@ function panelPaint(
   return comAlpha(corPainel, opac);
 }
 
-/** Desenha UMA headline. Não mexe em nada fora do próprio save/restore. */
+/**
+ * Desenha UMA headline. Não mexe em nada fora do próprio save/restore.
+ * `tMs` liga as animações de entrada/saída; sem ele, desenha parada (thumbs).
+ */
 export function drawHeadline(
   ctx: CanvasRenderingContext2D,
   h: Headline,
   W: number,
   H: number,
   layoutPronto?: HeadlineLayout,
+  tMs?: number,
 ): void {
   const preset = getHeadlinePreset(h.style.presetId);
   const L = layoutPronto ?? layoutHeadline(measurerFromCtx(ctx), h, W, H);
   if (L.lines.length === 0) return;
+
+  // progresso das animações (0..1); fora das janelas fica 1
+  let pIn = 1;
+  let pOut = 1;
+  if (tMs !== undefined) {
+    const ai = h.style.animIn ?? 'nenhuma';
+    const ao = h.style.animOut ?? 'nenhuma';
+    if (ai !== 'nenhuma') pIn = Math.min(1, Math.max(0, (tMs - h.start) / ANIM_IN_MS));
+    if (ao !== 'nenhuma') pOut = Math.min(1, Math.max(0, (h.end - tMs) / ANIM_OUT_MS));
+  }
 
   const painel = h.style.panel ?? preset.panel;
   const cor = h.style.color ?? preset.color;
@@ -592,6 +626,41 @@ export function drawHeadline(
   ctx.save();
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
+
+  const cxB = L.box.x + L.box.w / 2;
+  const cyB = L.box.y + L.box.h / 2;
+
+  // rotação da alça de girar — o hit-test desfaz a mesma conta
+  const rotDeg = h.style.rotation ?? 0;
+  if (rotDeg !== 0) {
+    ctx.translate(cxB, cyB);
+    ctx.rotate((rotDeg * Math.PI) / 180);
+    ctx.translate(-cxB, -cyB);
+  }
+
+  // entrada/saída: easing suave, transform em volta do centro
+  if (pIn < 1 || pOut < 1) {
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    const eIn = ease(pIn);
+    const eOut = ease(pOut);
+    const modo = pIn < 1 ? (h.style.animIn ?? 'nenhuma') : (h.style.animOut ?? 'nenhuma');
+    const e = pIn < 1 ? eIn : eOut;
+    ctx.globalAlpha *= Math.min(eIn, eOut);
+    if (modo === 'sobe') {
+      ctx.translate(0, (1 - e) * L.fontPx * (pIn < 1 ? 1.2 : -1.2));
+    } else if (modo === 'zoom') {
+      const sc = 0.85 + 0.15 * e;
+      ctx.translate(cxB, cyB);
+      ctx.scale(sc, sc);
+      ctx.translate(-cxB, -cyB);
+    } else if (modo === 'varre') {
+      // recorte que abre da esquerda pra direita (fecha na saída)
+      ctx.beginPath();
+      ctx.rect(L.box.x - L.fontPx, L.box.y - L.fontPx * 2, (L.box.w + L.fontPx * 2) * e, L.box.h + L.fontPx * 4);
+      ctx.clip();
+      ctx.globalAlpha = Math.min(1, ctx.globalAlpha * 3);
+    }
+  }
 
   // painel
   if (painel !== 'nenhum') {
@@ -731,7 +800,7 @@ export function drawHeadlines(
   W: number,
   H: number,
 ): void {
-  for (const h of headlinesAt(list, tMs)) drawHeadline(ctx, h, W, H);
+  for (const h of headlinesAt(list, tMs)) drawHeadline(ctx, h, W, H, undefined, tMs);
 }
 
 /** Qual headline está sob o ponto (canvas px)? A de cima ganha. */
@@ -747,7 +816,21 @@ export function headlineAtPoint(
   const vivas = headlinesAt(list, tMs);
   for (let i = vivas.length - 1; i >= 0; i--) {
     const L = layoutHeadline(measure, vivas[i], W, H);
-    if (px >= L.box.x && px <= L.box.x + L.box.w && py >= L.box.y && py <= L.box.y + L.box.h) {
+    const rot = ((vivas[i].style.rotation ?? 0) * Math.PI) / 180;
+    let lx = px;
+    let ly = py;
+    if (rot !== 0) {
+      // a caixa é reta no espaço local; quem gira ao contrário é o ponto
+      const cx = L.box.x + L.box.w / 2;
+      const cy = L.box.y + L.box.h / 2;
+      const cos = Math.cos(-rot);
+      const sin = Math.sin(-rot);
+      const dx = px - cx;
+      const dy = py - cy;
+      lx = cx + dx * cos - dy * sin;
+      ly = cy + dx * sin + dy * cos;
+    }
+    if (lx >= L.box.x && lx <= L.box.x + L.box.w && ly >= L.box.y && ly <= L.box.y + L.box.h) {
       return { headline: vivas[i], layout: L };
     }
   }

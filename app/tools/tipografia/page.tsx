@@ -74,6 +74,7 @@ import {
   measurerFromCtx,
   HEADLINE_PRESETS,
   type Headline,
+  type HeadlineStyle,
 } from '@/lib/typography/headline';
 import {
   auditarTranscricao,
@@ -1532,6 +1533,14 @@ function TipografiaInner() {
                       ),
                     );
                   }}
+                  onPatchHeadlineStyle={(id, patch) => {
+                    pushHistory();
+                    setHeadlines((prev) =>
+                      prev.map((h) =>
+                        h.id === id ? { ...h, style: { ...h.style, ...patch } } : h,
+                      ),
+                    );
+                  }}
                 />
                 <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
                   Arrasta pra mover · clica NUMA PALAVRA pra digitar ali · a
@@ -1761,6 +1770,9 @@ function TipografiaInner() {
               }
             >
               <TimelineM
+                onRender={renderFinal}
+                rendering={phase === 'rendering'}
+                onCancelRender={handleCancel}
                 blocks={blocks}
                 duration={duration ?? 0}
                 videoRef={videoRef}
@@ -1777,11 +1789,6 @@ function TipografiaInner() {
                 disabled={processing}
               />
             </div>
-            {/* o dock é fixed no desktop: este espaçador devolve a altura
-                dele ao fluxo, senão o fim da lista de blocos morre escondido */}
-            {(duration ?? 0) > 0 ? (
-              <div aria-hidden className="hidden md:block md:h-[268px]" />
-            ) : null}
           </ToolStep>
         ) : null}
 
@@ -1884,6 +1891,11 @@ function TipografiaInner() {
         ) : null}
       </div>
       </div>
+      {/* o dock da timeline é fixed: este respiro no PÉ da página deixa o
+          passo 4 e o resultado rolarem pra cima da linha do dock */}
+      {blocks.length > 0 && (duration ?? 0) > 0 ? (
+        <div aria-hidden className="hidden md:block md:h-[270px]" />
+      ) : null}
     </div>
   );
 }
@@ -1911,6 +1923,7 @@ function PreviewPane({
   selHeadlineId,
   onSelectHeadline,
   onMoveHeadline,
+  onPatchHeadlineStyle,
 }: {
   videoUrl: string;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
@@ -1932,6 +1945,7 @@ function PreviewPane({
   selHeadlineId: string | null;
   onSelectHeadline: (id: string | null) => void;
   onMoveHeadline: (id: string, posX: number, posY: number) => void;
+  onPatchHeadlineStyle: (id: string, patch: Partial<HeadlineStyle>) => void;
   onWordSel: (sel: { blockId: string; a: number; b: number } | null) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1999,7 +2013,20 @@ function PreviewPane({
   const liveRef = useRef({ blocks, preset, style, fontScale, wordSel, headlines, selHeadlineId });
   liveRef.current = { blocks, preset, style, fontScale, wordSel, headlines, selHeadlineId };
   /** arrasto de HEADLINE: override vivo, igual ao da legenda */
-  const hlDragRef = useRef<{ id: string; posX: number; posY: number; moved: boolean } | null>(null);
+  const hlDragRef = useRef<{
+    id: string;
+    mode: 'move' | 'scale' | 'rotate' | 'width';
+    posX: number;
+    posY: number;
+    fontScale: number;
+    rotation: number;
+    width: number;
+    moved: boolean;
+    /** distância inicial ao centro (scale/width) */
+    dist0: number;
+    /** valor inicial da grandeza sendo arrastada */
+    base0: number;
+  } | null>(null);
 
   // assinatura do último frame desenhado — o rAF pula o trabalho quando nada
   // mudou (ver o guard `dirty` no tick)
@@ -2016,6 +2043,9 @@ function PreviewPane({
     selHl: string | null;
     hlX?: number;
     hlY?: number;
+    hlS?: number;
+    hlR?: number;
+    hlW2?: number;
     sel: boolean;
     ovX?: number;
     ovY?: number;
@@ -2072,6 +2102,9 @@ function PreviewPane({
           prevDraw.selHl !== liveNow.selHeadlineId ||
           prevDraw.hlX !== hlDragRef.current?.posX ||
           prevDraw.hlY !== hlDragRef.current?.posY ||
+          prevDraw.hlS !== hlDragRef.current?.fontScale ||
+          prevDraw.hlR !== hlDragRef.current?.rotation ||
+          prevDraw.hlW2 !== hlDragRef.current?.width ||
           prevDraw.sel !== selRef.current ||
           prevDraw.ovX !== ovNow?.posX ||
           prevDraw.ovY !== ovNow?.posY ||
@@ -2094,6 +2127,9 @@ function PreviewPane({
             selHl: liveNow.selHeadlineId,
             hlX: hlDragRef.current?.posX,
             hlY: hlDragRef.current?.posY,
+            hlS: hlDragRef.current?.fontScale,
+            hlR: hlDragRef.current?.rotation,
+            hlW2: hlDragRef.current?.width,
             sel: selRef.current,
             ovX: ovNow?.posX,
             ovY: ovNow?.posY,
@@ -2174,7 +2210,17 @@ function PreviewPane({
             const lista = hlDrag
               ? liveNow.headlines.map((h) =>
                   h.id === hlDrag.id
-                    ? { ...h, style: { ...h.style, posX: hlDrag.posX, posY: hlDrag.posY } }
+                    ? {
+                        ...h,
+                        style: {
+                          ...h.style,
+                          posX: hlDrag.posX,
+                          posY: hlDrag.posY,
+                          fontScale: hlDrag.fontScale,
+                          rotation: hlDrag.rotation,
+                          width: hlDrag.width,
+                        },
+                      }
                     : h,
                 )
               : liveNow.headlines;
@@ -2183,11 +2229,47 @@ function PreviewPane({
             const selHl = lista.find((h) => h.id === liveNow.selHeadlineId);
             if (selHl && headlinesAt([selHl], v.currentTime * 1000).length > 0) {
               const L = layoutHeadline(measurerFromCtx(ctx), selHl, W, H);
+              const rotH = ((selHl.style.rotation ?? 0) * Math.PI) / 180;
+              const chx = L.box.x + L.box.w / 2;
+              const chy = L.box.y + L.box.h / 2;
               ctx.save();
+              if (rotH !== 0) {
+                ctx.translate(chx, chy);
+                ctx.rotate(rotH);
+                ctx.translate(-chx, -chy);
+              }
               ctx.strokeStyle = 'rgba(34,211,238,0.95)';
               ctx.lineWidth = Math.max(1.5, dpr);
               ctx.setLineDash([7 * dpr, 5 * dpr]);
               ctx.strokeRect(L.box.x, L.box.y, L.box.w, L.box.h);
+              ctx.setLineDash([]);
+              // alça de TAMANHO (canto), LARGURA (laterais) e GIRAR (nó)
+              const hs = 9 * dpr;
+              ctx.fillStyle = '#22d3ee';
+              ctx.strokeStyle = '#0a2a30';
+              ctx.fillRect(L.box.x + L.box.w - hs / 2, L.box.y + L.box.h - hs / 2, hs, hs);
+              ctx.strokeRect(L.box.x + L.box.w - hs / 2, L.box.y + L.box.h - hs / 2, hs, hs);
+              const ph = 22 * dpr;
+              const pw = 6 * dpr;
+              for (const hx of [L.box.x, L.box.x + L.box.w]) {
+                ctx.beginPath();
+                ctx.roundRect(hx - pw / 2, chy - ph / 2, pw, ph, pw / 2);
+                ctx.fill();
+                ctx.stroke();
+              }
+              const kx = L.box.x + L.box.w / 2;
+              const ky = L.box.y - 26 * dpr;
+              ctx.strokeStyle = 'rgba(34,211,238,0.8)';
+              ctx.beginPath();
+              ctx.moveTo(kx, L.box.y);
+              ctx.lineTo(kx, ky + 7 * dpr);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.arc(kx, ky, 7 * dpr, 0, Math.PI * 2);
+              ctx.fillStyle = '#22d3ee';
+              ctx.fill();
+              ctx.strokeStyle = '#0a2a30';
+              ctx.stroke();
               ctx.restore();
             }
           }
@@ -2589,6 +2671,70 @@ function PreviewPane({
             const v = videoRef.current;
             const cx2 = c?.getContext('2d');
             if (c && v && cx2) {
+              const hdBase = (h: Headline) => ({
+                posX: h.style.posX,
+                posY: h.style.posY,
+                fontScale: h.style.fontScale,
+                rotation: h.style.rotation ?? 0,
+                width: h.style.width,
+              });
+              // ALÇAS da headline selecionada primeiro (tamanho/girar/largura
+              // — a legenda já tinha, a headline agora também)
+              const selH = liveRef.current.headlines.find(
+                (x) => x.id === liveRef.current.selHeadlineId,
+              );
+              if (selH && headlinesAt([selH], v.currentTime * 1000).length > 0) {
+                const L = layoutHeadline(measurerFromCtx(cx2), selH, c.width, c.height);
+                const rotH = ((selH.style.rotation ?? 0) * Math.PI) / 180;
+                const chx = L.box.x + L.box.w / 2;
+                const chy = L.box.y + L.box.h / 2;
+                const plh = paraLocal(px, py, { rot: rotH, cx: chx, cy: chy });
+                const arma = (
+                  mode: 'scale' | 'rotate' | 'width',
+                  dist0: number,
+                  base0: number,
+                  cursor: string,
+                ) => {
+                  onInteractStart();
+                  wrap.style.cursor = cursor;
+                  hlDragRef.current = {
+                    id: selH.id,
+                    mode,
+                    ...hdBase(selH),
+                    moved: false,
+                    dist0,
+                    base0,
+                  };
+                };
+                const kR = 14 * dpr;
+                if (
+                  Math.hypot(plh.x - (L.box.x + L.box.w / 2), plh.y - (L.box.y - 26 * dpr)) < kR
+                ) {
+                  arma('rotate', 0, selH.style.rotation ?? 0, 'grabbing');
+                  return;
+                }
+                if (
+                  Math.abs(plh.x - (L.box.x + L.box.w)) < kR &&
+                  Math.abs(plh.y - (L.box.y + L.box.h)) < kR
+                ) {
+                  arma(
+                    'scale',
+                    Math.max(12, Math.hypot(plh.x - chx, plh.y - chy)),
+                    selH.style.fontScale,
+                    'nwse-resize',
+                  );
+                  return;
+                }
+                const midYH = L.box.y + L.box.h / 2;
+                if (
+                  (Math.abs(plh.x - L.box.x) < 10 * dpr ||
+                    Math.abs(plh.x - (L.box.x + L.box.w)) < 10 * dpr) &&
+                  Math.abs(plh.y - midYH) < 18 * dpr
+                ) {
+                  arma('width', Math.max(12, Math.abs(plh.x - chx)), selH.style.width, 'ew-resize');
+                  return;
+                }
+              }
               const hit = headlineAtPoint(
                 measurerFromCtx(cx2),
                 liveRef.current.headlines,
@@ -2605,9 +2751,11 @@ function PreviewPane({
                 onWordSel(null);
                 hlDragRef.current = {
                   id: hit.headline.id,
-                  posX: hit.headline.style.posX,
-                  posY: hit.headline.style.posY,
+                  mode: 'move',
+                  ...hdBase(hit.headline),
                   moved: false,
+                  dist0: 0,
+                  base0: 0,
                 };
                 wrap.style.cursor = 'grabbing';
                 return;
@@ -2745,6 +2893,37 @@ function PreviewPane({
             if (c && h) {
               const cx2 = c.getContext('2d');
               const L = cx2 ? layoutHeadline(measurerFromCtx(cx2), h, c.width, c.height) : null;
+              const dprH = dprRef.current;
+              const pxH = (e.clientX - r.left) * dprH;
+              const pyH = (e.clientY - r.top) * dprH;
+              if (hd.mode === 'rotate' && L) {
+                const chx = L.box.x + L.box.w / 2;
+                const chy = L.box.y + L.box.h / 2;
+                let deg = (Math.atan2(pyH - chy, pxH - chx) * 180) / Math.PI + 90;
+                if (deg > 180) deg -= 360;
+                if (deg < -180) deg += 360;
+                for (const alvo of [0, 90, -90, 180, -180]) {
+                  if (Math.abs(deg - alvo) < 4) deg = alvo;
+                }
+                hd.rotation = Math.round(deg * 10) / 10;
+                hd.moved = true;
+                return;
+              }
+              if ((hd.mode === 'scale' || hd.mode === 'width') && L) {
+                const rotH = ((h.style.rotation ?? 0) * Math.PI) / 180;
+                const chx = L.box.x + L.box.w / 2;
+                const chy = L.box.y + L.box.h / 2;
+                const plh = paraLocal(pxH, pyH, { rot: rotH, cx: chx, cy: chy });
+                if (hd.mode === 'scale') {
+                  const dist = Math.max(12, Math.hypot(plh.x - chx, plh.y - chy));
+                  hd.fontScale = Math.min(4, Math.max(0.3, hd.base0 * (dist / hd.dist0)));
+                } else {
+                  const meia = Math.max(12, Math.abs(plh.x - chx));
+                  hd.width = Math.min(0.98, Math.max(0.2, hd.base0 * (meia / hd.dist0)));
+                }
+                hd.moved = true;
+                return;
+              }
               const lim = L
                 ? headlinePosBounds(L.box.w, L.box.h, c.width, c.height)
                 : { minX: -0.6, maxX: 1.6, minY: -0.6, maxY: 1.6 };
@@ -2930,7 +3109,12 @@ function PreviewPane({
           if (hd) {
             wrapRef.current?.releasePointerCapture(e.pointerId);
             if (wrapRef.current) wrapRef.current.style.cursor = 'default';
-            if (hd.moved) onMoveHeadline(hd.id, hd.posX, hd.posY);
+            if (hd.moved) {
+              if (hd.mode === 'move') onMoveHeadline(hd.id, hd.posX, hd.posY);
+              else if (hd.mode === 'scale') onPatchHeadlineStyle(hd.id, { fontScale: hd.fontScale });
+              else if (hd.mode === 'rotate') onPatchHeadlineStyle(hd.id, { rotation: hd.rotation });
+              else onPatchHeadlineStyle(hd.id, { width: hd.width });
+            }
             dragRef.current = null;
             return;
           }
@@ -3170,6 +3354,9 @@ function Timeline({
   selHeadlineId,
   onSelectHeadline,
   onRetimeHeadline,
+  onRender,
+  rendering,
+  onCancelRender,
   disabled,
 }: {
   blocks: Block[];
@@ -3186,6 +3373,10 @@ function Timeline({
   selHeadlineId: string | null;
   onSelectHeadline: (id: string) => void;
   onRetimeHeadline: (id: string, start: number, end: number) => void;
+  /** RENDERIZAR sempre à vista: o dock cobria o passo 4 e o botão sumia */
+  onRender?: () => void;
+  rendering?: boolean;
+  onCancelRender?: () => void;
   disabled?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -3418,6 +3609,33 @@ function Timeline({
           >
             +
           </button>
+          {onRender ? (
+            rendering ? (
+              <button
+                type="button"
+                onClick={onCancelRender}
+                className={
+                  'ml-1 rounded-[9px] border border-red-400/60 bg-red-500/10 px-3.5 py-1.5 text-[11.5px] font-bold normal-case tracking-normal text-red-300 hover:bg-red-500/20' +
+                  T3D
+                }
+              >
+                Cancelar render
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onRender}
+                disabled={disabled}
+                title="Gera o MP4 com a legenda queimada (o download começa sozinho)"
+                className={
+                  'ml-1 rounded-[9px] bg-amber-400 px-4 py-1.5 text-[11.5px] font-black normal-case tracking-normal text-black hover:bg-amber-300 disabled:opacity-40' +
+                  T3D_GLOW
+                }
+              >
+                ⚡ Renderizar
+              </button>
+            )
+          ) : null}
         </span>
       </div>
       <div
@@ -3643,24 +3861,45 @@ function Timeline({
             className="pointer-events-none absolute left-0 top-[25px] h-[40px] rounded-[7px]"
             style={{ width: trackW, background: 'rgba(34,211,238,0.05)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.16)' }}
           />
-          {headlines.map((h) => {
+          {(() => {
+            // CAMADAS: duas headlines no mesmo trecho nunca dividem a mesma
+            // linha — a segunda sobe pra camada de cima (pedido 02.09)
+            const linhas = new Map<string, number>();
+            const fins: number[] = [];
+            for (const h of headlines.slice().sort((a, b) => a.start - b.start || a.end - b.end)) {
+              let row = fins.findIndex((f) => h.start >= f);
+              if (row === -1) {
+                row = fins.length;
+                fins.push(h.end);
+              } else {
+                fins[row] = h.end;
+              }
+              linhas.set(h.id, row);
+            }
+            const nLinhas = Math.max(1, fins.length);
+            const chipH = nLinhas > 1 ? Math.max(11, Math.floor((36 - (nLinhas - 1) * 2) / nLinhas)) : 36;
+            return headlines.map((h) => {
             // clamp NA PISTA: um chip além do fim do vídeo (trim largado, F5
             // no meio) vazava pra fora do trilho e parecia quebrado
             const left = Math.max(0, Math.min((h.start / 1000) * effPps, trackW - 12));
             const width = Math.max(12, Math.min(((h.end - h.start) / 1000) * effPps, trackW - left));
             const sel = h.id === selHeadlineId;
+            const row = linhas.get(h.id) ?? 0;
+            const topo = 27 + (nLinhas - 1 - row) * (chipH + 2);
             return (
               <div
                 key={h.id}
                 data-block="1"
                 title={h.text || 'headline sem texto'}
                 className={
-                  'group absolute top-[27px] h-[36px] cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
+                  'group absolute cursor-grab overflow-hidden rounded-[7px] active:cursor-grabbing ' +
                   (sel ? 'z-10' : 'hover:brightness-[1.18]')
                 }
                 style={{
                   left,
                   width,
+                  top: topo,
+                  height: chipH,
                   backgroundImage: sel
                     ? 'linear-gradient(180deg, rgba(34,211,238,0.72) 0%, rgba(34,211,238,0.4) 100%)'
                     : 'linear-gradient(180deg, rgba(34,211,238,0.4) 0%, rgba(34,211,238,0.16) 100%)',
@@ -3712,14 +3951,18 @@ function Timeline({
                   hlDragRef.current = null;
                 }}
               >
-                <span className="pointer-events-none absolute inset-0 flex items-center truncate px-2 text-[11px] font-semibold text-white/90">
+                <span
+                  className="pointer-events-none absolute inset-0 flex items-center truncate px-2 font-semibold text-white/90"
+                  style={{ fontSize: chipH < 20 ? 9 : 11 }}
+                >
                   {h.text.replace(/\s+/g, ' ').trim() || 'headline'}
                 </span>
                 <span className="pointer-events-none absolute inset-y-0 left-0 w-[7px] bg-white/25 opacity-0 group-hover:opacity-100" />
                 <span className="pointer-events-none absolute inset-y-0 right-0 w-[7px] bg-white/25 opacity-0 group-hover:opacity-100" />
               </div>
             );
-          })}
+            });
+          })()}
 
           {/* playhead — a zona de pega (14px) reenvia o pointer pro track = scrub */}
           <div

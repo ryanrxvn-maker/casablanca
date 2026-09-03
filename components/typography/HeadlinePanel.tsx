@@ -19,6 +19,7 @@ import { ensureTypoFonts } from '@/lib/typography/fonts';
 import {
   drawHeadline,
   getHeadlinePreset,
+  HEADLINE_ANIMS,
   HEADLINE_PRESETS,
   HEADLINE_STYLE_DEFAULT,
   type Headline,
@@ -409,7 +410,18 @@ export function HeadlinePanel({
                   </button>
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <Slider
+                    label="Rotação"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={sel.style.rotation ?? 0}
+                    display={(v) => `${Math.round(v)}°`}
+                    onChange={(v) => setStyle({ rotation: v })}
+                    onCommit={onCommit}
+                    disabled={disabled}
+                  />
                   <Slider
                     label="Opacidade do painel"
                     min={0}
@@ -421,6 +433,41 @@ export function HeadlinePanel({
                     onCommit={onCommit}
                     disabled={disabled}
                   />
+                </div>
+
+                {/* animação de entrada/saída — sóbria, é texto parado */}
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {(
+                    [
+                      ['animIn', 'Entrada'],
+                      ['animOut', 'Saída'],
+                    ] as Array<['animIn' | 'animOut', string]>
+                  ).map(([campo, rotulo]) => (
+                    <div key={campo}>
+                      <span className="field-label mb-1.5 block text-[11.5px] text-text-muted">
+                        {rotulo}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {HEADLINE_ANIMS.map((a) => (
+                          <button
+                            key={a.kind}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => {
+                              onCommit();
+                              setStyle({ [campo]: a.kind } as Partial<HeadlineStyle>);
+                            }}
+                            className={
+                              'fx-chip' +
+                              ((sel.style[campo] ?? 'nenhuma') === a.kind ? ' is-on' : '')
+                            }
+                          >
+                            {a.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
                 {/* tempo */}

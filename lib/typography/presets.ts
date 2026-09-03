@@ -2897,7 +2897,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-caixa-branca',
     name: 'Caixa Branca',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'montserrat800',
     size: 0.058,
     uppercase: false,
@@ -2912,7 +2912,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-caixa-preta',
     name: 'Caixa Preta',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'montserrat800',
     size: 0.054,
     uppercase: true,
@@ -2938,7 +2938,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-marca-texto',
     name: 'Marca-texto',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'inter800',
     size: 0.056,
     uppercase: false,
@@ -2954,7 +2954,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-faixa-vermelha',
     name: 'Faixa Vermelha',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'anton',
     size: 0.062,
     uppercase: true,
@@ -2971,7 +2971,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-pilula',
     name: 'Pílula',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'dmsans900',
     size: 0.055,
     uppercase: false,
@@ -2988,7 +2988,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-jornal',
     name: 'Manchete',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'merriweather900',
     size: 0.055,
     uppercase: false,
@@ -3005,7 +3005,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-gradiente',
     name: 'Gradiente Ouro',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'archivo',
     size: 0.064,
     uppercase: true,
@@ -3031,7 +3031,7 @@ const MANUAL_PRESETS: TypoPreset[] = [
   p({
     id: 'hl-contorno',
     name: 'Contorno',
-    cat: 'Headline',
+    cat: 'Manchete',
     font: 'anton',
     size: 0.068,
     uppercase: true,
