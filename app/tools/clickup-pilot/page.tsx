@@ -1671,21 +1671,58 @@ function ClickUpPilotInner() {
     onCancelar: () => void;
     onSeguir: () => void;
   }) {
-    const aRef = taskAnalyses[taskId] || taskAnalyses[taskIdBaseDaVersao(taskId)];
+    // A análise pode não estar aberta nesta aba (F5, outra sessão) — mas o
+    // PLANO persistido tem a copy, e é só disso que os botões de legenda,
+    // zoom, inserts e headline precisam. Uma análise mínima reconstruída do
+    // replan deixa TUDO editável aqui; a versão anterior desistia e mostrava
+    // um aviso — Silas, 02.09: *"tem que ser possível sim mexer em legenda,
+    // headline, inserts e tudo isso no retomar"*.
+    const aReal = taskAnalyses[taskId] || taskAnalyses[taskIdBaseDaVersao(taskId)];
+    const replanSalvo =
+      batchStates[taskId]?.replan ||
+      batchStates[taskIdBaseDaVersao(taskId)]?.replan ||
+      loadPersistedReplan(taskId) ||
+      loadPersistedReplan(taskIdBaseDaVersao(taskId));
+    const aMontagem: TaskAnalysis | null =
+      aReal ||
+      (replanSalvo?.parts?.length
+        ? ({
+            taskId,
+            taskName: replanSalvo.taskName || batchStates[taskId]?.taskName || taskId,
+            baseAdId: replanSalvo.baseAdId || batchStates[taskId]?.baseAdId || taskId,
+            status: 'ready',
+            partTemplates: replanSalvo.parts.map((x) => ({ label: String(x.label || ''), text: String(x.text || '') })),
+            roleSlots: [],
+          } as unknown as TaskAnalysis)
+        : null);
     const nivel = isNivelamentoEnabled(taskId);
     const decup = isDecupagemEnabled(taskId) || isDecupagemEnabled(taskIdBaseDaVersao(taskId));
     return (
       <div className="mtg-painel">
         <div className="mtg-cab">
-          <span className="mtg-titulo">
-            {acao === 'retomar' ? 'Retomar este disparo' : 'Montar de novo'}
+          <span className="mtg-tile" aria-hidden>
+            {acao === 'retomar' ? (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-3-6.7" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            ) : (
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v6m0 6v6M3 12h6m6 0h6" />
+                <circle cx="12" cy="12" r="9" />
+              </svg>
+            )}
           </span>
-          <span className="mtg-sub">
-            Os takes do HeyGen não são gerados de novo — nada de avatar ou voz muda aqui.
-            Ajusta a montagem e segue.
+          <span className="mtg-cab-textos">
+            <span className="mtg-titulo">{acao === 'retomar' ? 'Retomar este disparo' : 'Montar de novo'}</span>
+            <span className="mtg-sub">
+              Os takes do HeyGen <b>não</b> são gerados de novo — avatar e voz ficam como estão. O que
+              muda aqui é a <b>montagem</b>.
+            </span>
           </span>
         </div>
 
+        <div className="mtg-rotulo">Realces da montagem</div>
         <div className="mtg-linha">
           <button
             type="button"
@@ -1693,6 +1730,9 @@ function ClickUpPilotInner() {
             onClick={() => setNivelamentoFor(taskId, !nivel)}
             title="Nivela o volume de cada parte a -16 LUFS antes de juntar"
           >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+              <path d="M4 14v-4M9 17V7M14 15V9M19 18V6" />
+            </svg>
             Normalizador
           </button>
           <button
@@ -1701,15 +1741,27 @@ function ClickUpPilotInner() {
             onClick={() => setDecupagemFor(taskId, !decup)}
             title="Corta os silêncios entre as falas"
           >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="6" cy="6" r="2.6" />
+              <circle cx="6" cy="18" r="2.6" />
+              <path d="M20 4 8.2 15.8M14.6 14.5 20 20M8.2 8.2 12 12" />
+            </svg>
             Decupagem
           </button>
-          {aRef ? <span className="mtg-acoes">{acoesDePosProducao(aRef)}</span> : null}
+          <span className="mtg-sep" aria-hidden />
+          {aMontagem ? (
+            <span className="mtg-acoes">{acoesDePosProducao(aMontagem)}</span>
+          ) : (
+            <span className="mtg-nota">
+              legenda, zoom, inserts e headline seguem com o que está salvo — o plano desta task não
+              está nesta aba (analisa ela de novo pra editar)
+            </span>
+          )}
         </div>
-
-        {!aRef ? (
-          <div className="mtg-aviso">
-            A análise desta task não está aberta nesta aba — legenda, zoom, inserts e headline
-            seguem com o que já estava salvo. Abre a task no Pilot se quiser mexer neles.
+        {aMontagem ? (
+          <div className="mtg-dica">
+            Legenda, headline, zoom e inserts: os mesmos botões do card — o que você mudar aqui é o
+            que a montagem usa.
           </div>
         ) : null}
 
@@ -1718,6 +1770,9 @@ function ClickUpPilotInner() {
             cancelar
           </button>
           <button type="button" className="mtg-ok" onClick={onSeguir}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m5 12 5 5L20 7" />
+            </svg>
             {acao === 'retomar' ? 'Retomar agora' : 'Montar agora'}
           </button>
         </div>

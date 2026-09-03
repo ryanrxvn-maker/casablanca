@@ -4962,63 +4962,95 @@ html[data-theme='light'] .pi-recorte-agulha { background: #0b0d12; box-shadow: 0
 
 
 /* ══ PAINEL DE MONTAGEM: editar antes de retomar/remontar (02.09) ════════
- * Retomar e Remontar não tocam no HeyGen — os takes já existem. Por isso
- * aqui não há avatar nem voz: só o que a MONTAGEM decide. É o que permite
- * montar o mesmo AD com outra legenda/insert/headline sem gerar de novo. */
+ * Retomar e Remontar não tocam no HeyGen — os takes já existem. Aqui mora
+ * TUDO que a montagem decide: normalizador, decupagem, legenda, zoom, inserts
+ * e headline (os mesmos botões do card, mesma config). Redesenho 02.09:
+ * fontes maiores, tile de ícone e hierarquia de verdade — a v1 era só texto
+ * miúdo empilhado. */
 .mtg-painel {
-  border-radius: 14px; padding: 14px 15px 12px;
-  background: rgba(132, 204, 22, 0.05);
-  box-shadow: inset 0 0 0 1px rgba(132, 204, 22, 0.32);
+  border-radius: 16px; padding: 16px 18px 14px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(132, 204, 22, 0.08), transparent 55%),
+    rgba(132, 204, 22, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(132, 204, 22, 0.3);
 }
 html[data-theme='light'] .mtg-painel {
-  background: rgba(101, 163, 13, 0.07);
-  box-shadow: inset 0 0 0 1px rgba(101, 163, 13, 0.35);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(101, 163, 13, 0.09), transparent 55%),
+    rgba(101, 163, 13, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(101, 163, 13, 0.33);
 }
-.mtg-cab { display: flex; flex-direction: column; gap: 3px; margin-bottom: 11px; }
-.mtg-titulo {
-  font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 800;
-  letter-spacing: 0.14em; text-transform: uppercase; color: rgb(var(--text));
-}
-.mtg-sub { font-size: 11.5px; line-height: 1.45; color: rgb(var(--text-muted)); }
 
+.mtg-cab { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.mtg-tile {
+  flex-shrink: 0; width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 11px; color: #05200b;
+  background: linear-gradient(140deg, #bef264, #84cc16);
+  box-shadow: 0 10px 22px -12px rgba(132, 204, 22, 0.9);
+}
+.mtg-cab-textos { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mtg-titulo {
+  font-size: 15px; font-weight: 800; letter-spacing: -0.01em; color: rgb(var(--text));
+}
+.mtg-sub { font-size: 12.5px; line-height: 1.5; color: rgb(var(--text-muted)); }
+.mtg-sub b { color: rgb(var(--text)); font-weight: 700; }
+
+.mtg-rotulo {
+  font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 800;
+  letter-spacing: 0.16em; text-transform: uppercase; color: rgb(var(--text-dim));
+  margin-bottom: 8px;
+}
 .mtg-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mtg-sep {
+  width: 1px; height: 22px; margin: 0 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+html[data-theme='light'] .mtg-sep { background: rgba(16, 16, 24, 0.16); }
 .mtg-acoes { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .mtg-chip {
-  border-radius: 999px; padding: 6px 14px;
-  font-size: 11.5px; font-weight: 700; line-height: 1.2;
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 999px; padding: 7px 15px;
+  font-size: 12.5px; font-weight: 700; line-height: 1.2;
   color: rgb(var(--text-muted));
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  transition: color 0.14s, background-color 0.14s, box-shadow 0.14s;
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+  transition: color 0.14s, background-color 0.14s, box-shadow 0.14s, transform 0.14s;
 }
-html[data-theme='light'] .mtg-chip { background: rgba(16,16,24,0.045); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
-.mtg-chip:hover { color: rgb(var(--text)); }
+html[data-theme='light'] .mtg-chip { background: rgba(16,16,24,0.05); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.11); }
+.mtg-chip:hover { color: rgb(var(--text)); transform: translateY(-1px); }
 .mtg-chip.is-on {
   color: #05200b; background: linear-gradient(140deg, #bef264, #84cc16);
-  box-shadow: 0 6px 16px -10px rgba(132, 204, 22, 0.9);
+  box-shadow: 0 8px 18px -10px rgba(132, 204, 22, 0.95);
 }
 
-.mtg-aviso {
-  margin-top: 10px; border-radius: 10px; padding: 9px 11px;
-  font-size: 11.5px; line-height: 1.45; color: #fde68a;
-  background: rgba(245, 158, 11, 0.09);
-  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.38);
+.mtg-nota {
+  flex: 1; min-width: 220px;
+  font-size: 12px; line-height: 1.5; color: #fde68a;
 }
-html[data-theme='light'] .mtg-aviso { color: #92400e; box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.36); }
+html[data-theme='light'] .mtg-nota { color: #92400e; }
+.mtg-dica {
+  margin-top: 10px; font-size: 11.5px; line-height: 1.5; color: rgb(var(--text-dim));
+}
 
-.mtg-rodape { display: flex; align-items: center; gap: 10px; margin-top: 13px; }
+.mtg-rodape {
+  display: flex; align-items: center; gap: 12px; margin-top: 15px;
+  padding-top: 13px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+html[data-theme='light'] .mtg-rodape { border-top-color: rgba(16, 16, 24, 0.1); }
 .mtg-cancelar {
-  font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 700;
+  font-family: var(--font-mono), monospace; font-size: 10.5px; font-weight: 700;
   letter-spacing: 0.12em; text-transform: uppercase; color: rgb(var(--text-dim));
   transition: color 0.14s;
 }
 .mtg-cancelar:hover { color: rgb(var(--text)); }
 .mtg-ok {
-  margin-left: auto; border-radius: 999px; padding: 8px 20px;
-  font-size: 12.5px; font-weight: 700; color: #05200b;
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  border-radius: 999px; padding: 9px 22px;
+  font-size: 13px; font-weight: 800; color: #05200b;
   background: linear-gradient(140deg, #bef264, #84cc16);
-  box-shadow: 0 10px 24px -14px rgba(132, 204, 22, 0.95);
+  box-shadow: 0 12px 26px -14px rgba(132, 204, 22, 0.95);
   transition: transform 0.14s, filter 0.14s;
 }
-.mtg-ok:hover { transform: translateY(-1px); filter: saturate(1.1); }
+.mtg-ok:hover { transform: translateY(-1px); filter: saturate(1.12); }
