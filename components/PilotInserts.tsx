@@ -83,6 +83,100 @@ function RecortadorDeMidia({
    * é o que dá o sincronismo de CapCut. */
   const seekando = useRef(false);
   const seekPendente = useRef<number | null>(null);
+
+  /* FILMSTRIP (03.09): seek em H.264 re-decodifica desde o keyframe — nunca
+   * acompanha a mão. O truque do estúdio: extrair MINIATURAS do arquivo
+   * inteiro assim que ele abre (num <video> clone, sem roubar o preview) e,
+   * durante o arrasto, pintar a miniatura mais próxima num canvas POR CIMA do
+   * vídeo — resposta de 0ms. O seek real continua por baixo e assume o quadro
+   * exato quando chega. */
+  const tirasRef = useRef<{ bitmaps: (ImageBitmap | null)[]; passo: number; prontas: number }>({ bitmaps: [], passo: 0, prontas: 0 });
+  const scrubRef = useRef<HTMLCanvasElement | null>(null);
+  const [esfregando, setEsfregando] = useState(false);
+
+  useEffect(() => {
+    if (!url) return;
+    let vivo = true;
+    const clone = document.createElement('video');
+    clone.muted = true;
+    clone.preload = 'auto';
+    clone.playsInline = true;
+    (async () => {
+      const abriu = await new Promise<boolean>((res) => {
+        const tm = setTimeout(() => res(false), 12_000);
+        clone.onloadeddata = () => { clearTimeout(tm); res(true); };
+        clone.onerror = () => { clearTimeout(tm); res(false); };
+        clone.src = url;
+      });
+      if (!vivo || !abriu) return;
+      const total = clone.duration;
+      if (!(total > 0) || !isFinite(total)) return;
+      // ~4 quadros/s de granularidade, teto de 120 (3min+ = 1 a cada 1,5s —
+      // o seek real refina depois; memória ~25MB no pior caso, fechada no unmount)
+      const n = Math.min(120, Math.max(36, Math.round(total * 4)));
+      const passo = total / n;
+      tirasRef.current = { bitmaps: new Array(n).fill(null), passo, prontas: 0 };
+      for (let i = 0; i < n; i++) {
+        if (!vivo) return;
+        const alvo = Math.min(total - 0.05, i * passo + passo / 2);
+        const ok = await new Promise<boolean>((res) => {
+          const tm = setTimeout(() => res(false), 900);
+          const fim = () => { clearTimeout(tm); clone.removeEventListener('seeked', fim); res(true); };
+          clone.addEventListener('seeked', fim);
+          clone.currentTime = alvo;
+        });
+        if (!vivo) return;
+        if (ok) {
+          try {
+            const alturaMax = 240;
+            const escala = Math.min(1, alturaMax / (clone.videoHeight || alturaMax));
+            tirasRef.current.bitmaps[i] = await createImageBitmap(clone, {
+              resizeWidth: Math.max(2, Math.round((clone.videoWidth || 2) * escala)),
+              resizeHeight: Math.max(2, Math.round((clone.videoHeight || 2) * escala)),
+            });
+            tirasRef.current.prontas++;
+          } catch { /* frame indisponível: o vizinho cobre */ }
+        }
+      }
+    })();
+    return () => {
+      vivo = false;
+      try { clone.removeAttribute('src'); clone.load(); } catch { /* solta o decoder */ }
+      for (const b of tirasRef.current.bitmaps) b?.close();
+      tirasRef.current = { bitmaps: [], passo: 0, prontas: 0 };
+    };
+  }, [url]);
+
+  /** Pinta a miniatura mais próxima de `t` no canvas de scrub — 0ms. */
+  const mostrarScrub = useCallback((t: number) => {
+    const { bitmaps, passo } = tirasRef.current;
+    const c = scrubRef.current;
+    if (!c || !passo || bitmaps.length === 0) return false;
+    let idx = Math.min(bitmaps.length - 1, Math.max(0, Math.round(t / passo - 0.5)));
+    // sem a miniatura exata ainda? usa a vizinha mais próxima já extraída
+    if (!bitmaps[idx]) {
+      let d = 1;
+      while (d < bitmaps.length && !bitmaps[idx - d] && !bitmaps[idx + d]) d++;
+      idx = bitmaps[idx - d] ? idx - d : idx + d;
+    }
+    const bm = bitmaps[idx];
+    if (!bm) return false;
+    const caixa = c.parentElement?.getBoundingClientRect();
+    if (!caixa || caixa.width < 4) return false;
+    if (c.width !== Math.round(caixa.width)) {
+      c.width = Math.round(caixa.width);
+      c.height = Math.round(caixa.height);
+    }
+    const g = c.getContext('2d');
+    if (!g) return false;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, c.width, c.height);
+    const esc = Math.min(c.width / bm.width, c.height / bm.height);
+    const w = bm.width * esc;
+    const h = bm.height * esc;
+    g.drawImage(bm, (c.width - w) / 2, (c.height - h) / 2, w, h);
+    return true;
+  }, []);
   const seekSuave = useCallback((t: number) => {
     const v = vid.current;
     if (!v) return;
@@ -184,13 +278,15 @@ function RecortadorDeMidia({
       if (alvo === 'agulha') {
         const preso = Math.min(Math.max(t, 0), dur);
         setAgulha(preso);
-        seekSuave(preso);
+        setEsfregando(mostrarScrub(preso)); // miniatura: 0ms
+        seekSuave(preso);                   // quadro exato: assume quando chega
         return;
       }
       // Arrastando uma PONTA, o vídeo mostra o quadro dela AO VIVO: na
       // esquerda se vê exatamente onde começa, na direita onde termina.
       const seek = (alvoT: number) => {
         setAgulha(alvoT);
+        setEsfregando(mostrarScrub(alvoT));
         seekSuave(alvoT);
       };
       if (alvo === 'de') {
@@ -203,7 +299,7 @@ function RecortadorDeMidia({
         onMudar(de, novoAte);
       }
     },
-    [dur, de, ate, fracao, onMudar, seekSuave],
+    [dur, de, ate, fracao, onMudar, seekSuave, mostrarScrub],
   );
 
   if (!url) {
@@ -264,6 +360,7 @@ function RecortadorDeMidia({
           }
         }}
       />
+      <canvas ref={scrubRef} className={'pi-recorte-scrub' + (esfregando ? ' is-on' : '')} aria-hidden />
       {!tocando && !assistindo ? (
         <span className="pi-recorte-play" aria-hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
@@ -318,6 +415,7 @@ function RecortadorDeMidia({
             const r = trilho.current!.getBoundingClientRect();
             const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * dur;
             setAgulha(t);
+            setEsfregando(mostrarScrub(t));
             seekSuave(t);
           }}
           onPointerMove={(e) => {
@@ -325,10 +423,11 @@ function RecortadorDeMidia({
             const r = trilho.current!.getBoundingClientRect();
             const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * dur;
             setAgulha(t);
+            setEsfregando(mostrarScrub(t));
             seekSuave(t);
           }}
-          onPointerUp={() => setPegandoPlayer(false)}
-          onPointerCancel={() => setPegandoPlayer(false)}
+          onPointerUp={() => { setPegandoPlayer(false); setEsfregando(false); }}
+          onPointerCancel={() => { setPegandoPlayer(false); setEsfregando(false); }}
           title="Clica ou arrasta pra ir pra qualquer ponto do arquivo"
         >
           <span className="pi-player-sel" style={{ left: pct(de), width: pct(selDur) }} aria-hidden />
@@ -360,8 +459,8 @@ function RecortadorDeMidia({
         onPointerMove={(e) => {
           if (pegando) mover(e, pegando);
         }}
-        onPointerUp={() => setPegando(null)}
-        onPointerCancel={() => setPegando(null)}
+        onPointerUp={() => { setPegando(null); setEsfregando(false); }}
+        onPointerCancel={() => { setPegando(null); setEsfregando(false); }}
       >
         <span className="pi-recorte-fora" style={{ left: 0, width: pct(de) }} aria-hidden />
         <span className="pi-recorte-fora" style={{ left: pct(ate), right: 0 }} aria-hidden />

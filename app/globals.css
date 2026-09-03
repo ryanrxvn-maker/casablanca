@@ -5408,3 +5408,12 @@ html[data-theme='light'] .pi-player-agulha { background: #0b0d12; box-shadow: 0 
   letter-spacing: 0.05em; color: rgb(var(--text-muted));
   font-variant-numeric: tabular-nums;
 }
+
+
+/* canvas de SCRUB: a miniatura do filmstrip por cima do vídeo — resposta de
+ * 0ms durante o arrasto; some quando solta (o quadro real está por baixo). */
+.pi-recorte-scrub {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; pointer-events: none; transition: opacity 0.08s;
+}
+.pi-recorte-scrub.is-on { opacity: 1; }
