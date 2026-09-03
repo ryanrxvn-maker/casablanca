@@ -194,6 +194,54 @@ export function escalaNoInstante(plano: ZoomSeg[] | undefined, t: number): numbe
   return 1;
 }
 
+/**
+ * ENCAIXA a fronteira hook→body da LEGENDA num corte (03.09).
+ *
+ * A regra é a mesma da headline: mudança de estilo no MEIO da fala denuncia o
+ * automático, porque nada mais na tela muda junto. No corte, a troca de
+ * imagem mascara — e o primeiro corte costuma ser exatamente a troca de take
+ * hook→body, então quase sempre há um corte a fração de segundo da fronteira
+ * que o alinhamento achou.
+ *
+ * `finsDasPalavras` = fim (s) de cada palavra do ASR, na ordem. `fronteira` =
+ * quantas palavras são do hook. Devolve a fronteira ajustada: a palavra cujo
+ * fim cai mais perto do corte vizinho — deslocando NO MÁXIMO `maxDesloc`
+ * palavras, e só quando existe corte a até `tolSec` da troca original.
+ * Fora disso, devolve intacta: melhor trocar no meio da fala do que engolir
+ * meia frase de hook no estilo do body.
+ */
+export function encaixarFronteiraNoCorte(
+  finsDasPalavras: number[],
+  fronteira: number,
+  cortes: number[],
+  tolSec = 0.9,
+  maxDesloc = 3,
+): number {
+  const n = finsDasPalavras.length;
+  if (fronteira <= 0 || fronteira >= n || cortes.length === 0) return fronteira;
+  const tTroca = finsDasPalavras[fronteira - 1];
+  if (!(tTroca > 0) || !isFinite(tTroca)) return fronteira;
+
+  let corte = cortes[0];
+  for (const c of cortes) if (Math.abs(c - tTroca) < Math.abs(corte - tTroca)) corte = c;
+  if (Math.abs(corte - tTroca) > tolSec) return fronteira;
+
+  let melhor = fronteira;
+  let melhorDist = Math.abs(tTroca - corte);
+  const de = Math.max(1, fronteira - maxDesloc);
+  const ate = Math.min(n - 1, fronteira + maxDesloc);
+  for (let idx = de; idx <= ate; idx++) {
+    const fim = finsDasPalavras[idx - 1];
+    if (!(fim > 0) || !isFinite(fim)) continue;
+    const d = Math.abs(fim - corte);
+    if (d < melhorDist) {
+      melhorDist = d;
+      melhor = idx;
+    }
+  }
+  return melhor;
+}
+
 /** PRNG determinístico (mulberry32): o MESMO vídeo dá o MESMO plano — sem
  *  isso, um RETOMAR entregaria um AD com dinâmica diferente do primeiro. */
 function prng(seed: number): () => number {

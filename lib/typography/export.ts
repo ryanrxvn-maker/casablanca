@@ -58,7 +58,7 @@ export type RenderResult = {
   /** o encode rodou no HARDWARE da máquina? (só velocidade; QA/telemetria) */
   hw?: boolean;
   /** que caminho de decode rodou (QA/telemetria) */
-  mode: 'decode' | 'seek';
+  mode: 'decode' | 'seek' | 'playback';
 };
 
 const FPS = 30;
@@ -596,6 +596,162 @@ async function renderFramesBySeek(opts: {
   }
 }
 
+/* ─────────────────── caminho por REPRODUÇÃO (03.09) ──────────────────────
+ *
+ * Por que existe: com INSERTS o render caía no caminho de seek, e seek em
+ * H.264 de GOP longo re-decodifica desde o keyframe anterior — no montado
+ * (keyframe a cada 4s) isso deu 0,7 quadro/s num AD REAL: o Silas viu
+ * "aplicando zoom: 19% (175/918 frames)" morrer no teto de tempo.
+ *
+ * Aqui o vídeo TOCA a 1x (mudo) e cada frame APRESENTADO é capturado via
+ * requestVideoFrameCallback — decodificação sequencial, sem seek nenhum. Os
+ * inserts também TOCAM (aoVivo), com playbackRate = velocidade do plano.
+ * Um AD de 30s renderiza em ~30s + folga. Precisa de aba visível (rvfc
+ * congela oculto — o watchdog de progresso da pós-produção cuida disso).
+ */
+async function renderFramesByPlayback(opts: {
+  video: HTMLVideoElement;
+  blocks: Block[];
+  preset: TypoPreset;
+  style: StyleState;
+  headlines?: Headline[];
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  W: number;
+  H: number;
+  durationSec: number;
+  codec: string;
+  bitrate: number;
+  hw?: boolean;
+  zoom?: ZoomSeg[];
+  inserts?: PlanoInsert;
+  onProgress?: (p: RenderProgress) => void;
+  throwIfAborted: () => void;
+}): Promise<Blob> {
+  const { video, blocks, preset, style, headlines, zoom, inserts, canvas, ctx, W, H, durationSec, codec, bitrate, hw, onProgress, throwIfAborted } = opts;
+  type ComRvfc = HTMLVideoElement & {
+    requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
+    cancelVideoFrameCallback?: (id: number) => void;
+  };
+  const v = video as ComRvfc;
+  if (typeof v.requestVideoFrameCallback !== 'function') {
+    throw new Error('navegador sem requestVideoFrameCallback');
+  }
+
+  const sink = makeSink(codec, W, H, bitrate, hw);
+  const totalFrames = Math.max(1, Math.ceil(durationSec * FPS));
+  const frameUs = Math.round(1_000_000 / FPS);
+  let nextTick = 0;
+
+  const compor = () => {
+    const t = Math.min(nextTick / FPS + 0.0001, durationSec - 0.001);
+    inserts?.aoVivo?.(t);
+    drawZoomed(ctx, video, video.videoWidth || W, video.videoHeight || H, W, H, zoom, t);
+    ctx.filter = 'none';
+    desenharInsert(ctx, inserts, t, W, H, video, video.videoWidth || W, video.videoHeight || H);
+    drawCaptions(ctx, blocks, preset, style, t * 1000, W, H);
+    if (headlines && headlines.length > 0) drawHeadlines(ctx, headlines, t * 1000, W, H);
+    const frame = new VideoFrame(canvas, { timestamp: nextTick * frameUs, duration: frameUs });
+    sink.encoder.encode(frame, { keyFrame: nextTick % (FPS * 4) === 0 });
+    frame.close();
+    nextTick++;
+    if (nextTick % 3 === 0 || nextTick === totalFrames) {
+      onProgress?.({ phase: 'frames', ratio: nextTick / totalFrames, frame: nextTick, totalFrames });
+    }
+  };
+
+  video.pause();
+  await seekVideo(video, 0);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let vivo = true;
+      let rvfcId = 0;
+      const encerrar = (fn: () => void) => {
+        if (!vivo) return;
+        vivo = false;
+        clearInterval(retomador);
+        try {
+          if (rvfcId && v.cancelVideoFrameCallback) v.cancelVideoFrameCallback(rvfcId);
+        } catch { /* já cancelado */ }
+        video.onended = null;
+        video.pause();
+        fn();
+      };
+      // O backpressure PAUSA o vídeo quando o encoder afoga; este relógio o
+      // retoma quando a fila esvazia. É o que mantém A/V em dia sem perder
+      // frame: quem dita o tempo é o mediaTime, não o relógio de parede.
+      //
+      // E é também a GUARDA DE ABA OCULTA: o rvfc congela com a aba fora da
+      // frente — sem esta desistência o caminho de reprodução penduraria em
+      // silêncio. 8s sem NENHUM tick composto = desiste e o chamador cai pro
+      // caminho de seek (que aguenta oculto, só devagar).
+      let ultimoTickEm = Date.now();
+      let ultimoTickVisto = -1;
+      const retomador = setInterval(() => {
+        if (!vivo) return;
+        if (nextTick !== ultimoTickVisto) {
+          ultimoTickVisto = nextTick;
+          ultimoTickEm = Date.now();
+        } else if (Date.now() - ultimoTickEm > 8_000) {
+          encerrar(() => reject(new Error('reprodução sem progresso (aba oculta?) — seek assume')));
+          return;
+        }
+        if (video.paused && !video.ended && sink.encoder.encodeQueueSize <= 4) {
+          void video.play().catch(() => { /* o rvfc/onended decide */ });
+        }
+      }, 120);
+
+      const passo = (_agora: number, meta: { mediaTime: number }) => {
+        if (!vivo) return;
+        try {
+          throwIfAborted();
+          const e = sink.err();
+          if (e) throw e;
+          // compõe todo tick cujo instante já foi APRESENTADO (frame repetido
+          // quando o decode pulou — CFR preservado)
+          while (nextTick < totalFrames && nextTick / FPS <= meta.mediaTime + 0.5 / FPS) compor();
+          if (nextTick >= totalFrames) {
+            encerrar(resolve);
+            return;
+          }
+          if (sink.encoder.encodeQueueSize > 10 && !video.paused) video.pause();
+          rvfcId = v.requestVideoFrameCallback!(passo);
+        } catch (err) {
+          encerrar(() => reject(err));
+        }
+      };
+
+      video.onended = () => {
+        if (!vivo) return;
+        try {
+          // cauda: o vídeo acabou antes do último tick (arredondamento) — os
+          // ticks restantes saem do último frame apresentado
+          while (nextTick < totalFrames) compor();
+          encerrar(resolve);
+        } catch (err) {
+          encerrar(() => reject(err as Error));
+        }
+      };
+
+      rvfcId = v.requestVideoFrameCallback!(passo);
+      void video.play().catch((err) => encerrar(() => reject(err instanceof Error ? err : new Error(String(err)))));
+    });
+
+    await sink.encoder.flush();
+    const e2 = sink.err();
+    if (e2) throw e2;
+    sink.encoder.close();
+    sink.muxer.finalize();
+    return new Blob([sink.target.buffer], { type: 'video/mp4' });
+  } finally {
+    try {
+      if (sink.encoder.state !== 'closed') sink.encoder.close();
+    } catch { /* já fechado */ }
+    video.pause();
+  }
+}
+
 /* ───────────────────────────── zoom por segmento ─────────────────────────
  * DINÂMICA DE ZOOM (30.08): cada segmento é uma rampa de escala (from → to)
  * aplicada como CROP CENTRAL do frame fonte — o vídeo "empurra pra dentro"
@@ -688,6 +844,14 @@ export type PlanoInsert = {
    * quadro que nunca chegava.
    */
   preparar?: (t: number) => Promise<void>;
+  /**
+   * DIRIGE os vídeos dos inserts em tempo real (03.09) — usado pelo caminho
+   * de REPRODUÇÃO: em vez de seek por frame, cada insert TOCA com
+   * playbackRate = velocidade do plano; este hook (chamado a cada frame
+   * apresentado) liga/pausa/corrige deriva. Sem ele o caminho de reprodução
+   * não é usado.
+   */
+  aoVivo?: (t: number) => void;
 };
 
 type Ret = { x: number; y: number; w: number; h: number };
@@ -921,7 +1085,7 @@ export async function renderTypographyVideo(opts: {
 
     // ── frames: caminho rápido primeiro; qualquer tropeço cai pro seek ──
     let videoOnly: Blob | null = null;
-    let mode: 'decode' | 'seek' = 'decode';
+    let mode: 'decode' | 'seek' | 'playback' = 'decode';
     // INSERT liga o caminho por seek: o decode compõe frames dentro do
     // callback do decoder (síncrono) e não tem onde esperar o seek do vídeo
     // do insert. O seek path já espera o frame do vídeo principal — esperar o
@@ -960,15 +1124,36 @@ export async function renderTypographyVideo(opts: {
       }
     }
     if (!videoOnly) {
-      // O seek pinta os frames DO <video>. Se ele nem abriu (aba em segundo
-      // plano), esse caminho não desenha nada — ficaria esperando um seek que
-      // nunca completa. Falhar aqui, alto e claro, é melhor que travar.
+      // O seek/playback pintam os frames DO <video>. Se ele nem abriu (aba em
+      // segundo plano), nenhum dos dois desenha nada — falhar alto é melhor
+      // que travar.
       if (!videoAbriu) {
         throw new FriendlyError(
           'O navegador não abriu o vídeo pra renderizar (a aba precisa ficar VISÍVEL durante o render). ' +
             'Deixa esta aba na frente e roda de novo.',
         );
       }
+      // REPRODUÇÃO primeiro quando há inserts com driver aoVivo: decode
+      // sequencial em vez de seek por frame (que re-decodifica o GOP inteiro
+      // — 0,7 quadro/s medido num AD real). Qualquer tropeço cai pro seek.
+      if (insertsPrecisamEsperar && inserts?.aoVivo && !opts.forceSeekPath) {
+        try {
+          videoOnly = await renderFramesByPlayback({
+            video, blocks, preset, style, headlines, zoom, inserts,
+            canvas, ctx, W, H, durationSec, codec, bitrate, hw,
+            onProgress, throwIfAborted,
+          });
+          mode = 'playback';
+        } catch (e) {
+          if (isCancellationError(e) || signal?.aborted) throw e;
+          console.warn('[tipografia] reprodução falhou — caindo pro seek:', e);
+          videoOnly = null;
+          // o <video> pode ter ficado no meio: volta pro início pro seek path
+          try { video.pause(); } catch { /* segue */ }
+        }
+      }
+    }
+    if (!videoOnly) {
       mode = 'seek';
       onProgress?.({ phase: 'frames', ratio: 0, frame: 0, totalFrames: Math.ceil(durationSec * FPS) });
       videoOnly = await renderFramesBySeek({

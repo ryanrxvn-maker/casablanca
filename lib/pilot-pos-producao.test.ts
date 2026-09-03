@@ -18,6 +18,7 @@ import {
   palavrasDoHookNoAsr,
   ZOOM_AMP,
   escalaNoInstante,
+  encaixarFronteiraNoCorte,
   type ZoomCfg,
 } from './pilot-pos-producao';
 import { TEMPLATE_1 } from './typography/caption-script';
@@ -508,6 +509,31 @@ function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
 }
 
 
+
+/* ═══ A VIRADA DA LEGENDA CAI NO CORTE (03.09) ═══════════════════════════
+ * Mesma regra da headline: mudar o estilo hook→body no meio da fala denuncia
+ * o automático. O corte hook→body mascara — e o alinhamento erra por fração
+ * de segundo, então a fronteira desliza até a palavra que ENCOSTA no corte. */
+{
+  // 10 palavras de 0,5s: fins em 0.5, 1.0, ..., 5.0
+  const fins = Array.from({ length: 10 }, (_, i) => (i + 1) * 0.5);
+
+  // fronteira em 4 (troca a 2,0s) e corte real a 2,55s → desliza pra 5
+  ok(encaixarFronteiraNoCorte(fins, 4, [2.55]) === 5, 'a fronteira desliza pra palavra que encosta no corte');
+  // corte exatamente na troca → fica
+  ok(encaixarFronteiraNoCorte(fins, 4, [2.0]) === 4, 'corte já na troca: nada muda');
+  // corte LONGE (3s de distância) → fica onde o alinhamento mandou
+  ok(encaixarFronteiraNoCorte(fins, 4, [5.0]) === 4, 'sem corte perto, a fronteira do alinhamento vale');
+  // deslocamento tem teto: corte a 0,9s = ~2 palavras, nunca mais que ±3
+  ok(Math.abs(encaixarFronteiraNoCorte(fins, 4, [2.9]) - 4) <= 3, 'o deslize nunca passa de 3 palavras');
+  // bordas não explodem
+  ok(encaixarFronteiraNoCorte(fins, 0, [2.0]) === 0, 'sem hook, sem ajuste');
+  ok(encaixarFronteiraNoCorte(fins, 10, [2.0]) === 10, 'hook = tudo, sem ajuste');
+  ok(encaixarFronteiraNoCorte([], 3, [2.0]) === 3, 'sem palavras, devolve intacta');
+  ok(encaixarFronteiraNoCorte(fins, 4, []) === 4, 'sem cortes, devolve intacta');
+  // escolhe o corte MAIS PRÓXIMO quando há vários
+  ok(encaixarFronteiraNoCorte(fins, 4, [0.4, 2.45, 4.8]) === 5, 'vários cortes: encaixa no vizinho');
+}
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

@@ -156,11 +156,23 @@ async function rodarProvaFluidez(
           id: 'f1', w: vIns.videoWidth, h: vIns.videoHeight,
           quadro: (tRel: number) => {
             const alvo = ins.tempoNaMidia(tRel, pv, natural, 0);
-            if (Math.abs(vIns.currentTime - alvo) > 0.03) vIns.currentTime = alvo;
+            const tol = vIns.paused ? 0.03 : 0.3;
+            if (Math.abs(vIns.currentTime - alvo) > tol) vIns.currentTime = alvo;
             return vIns;
           },
         }],
       ]),
+      // ESPELHO da produção (03.09): o driver aoVivo liga o caminho de
+      // REPRODUÇÃO — é ele que a prova precisa exercitar agora.
+      aoVivo: (t: number) => {
+        const jan = janelas.find((j) => t >= j.start - 0.3 && t < j.end);
+        if (!jan) { if (!vIns.paused) vIns.pause(); return; }
+        const alvo = ins.tempoNaMidia(Math.max(0, t - jan.start), pv, natural, 0);
+        const rate = pv.velocidade ?? 1;
+        if (Math.abs(vIns.playbackRate - rate) > 0.01) vIns.playbackRate = rate;
+        if (Math.abs(vIns.currentTime - alvo) > 0.25) vIns.currentTime = alvo;
+        if (vIns.paused) void vIns.play().catch(() => {});
+      },
       preparar: async (t: number) => {
         const jan = janelas.find((j) => t >= j.start && t < j.end);
         if (!jan) return;

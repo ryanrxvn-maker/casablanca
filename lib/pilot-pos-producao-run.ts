@@ -8,6 +8,7 @@
 import { duracaoDeVideo } from './video-duracao';
 import {
   planejarZoom,
+  encaixarFronteiraNoCorte,
   separarHookBody,
   montarRoteiro,
   palavrasDoHookNoAsr,
@@ -77,6 +78,8 @@ type PlanoInsertLocal = {
   fontes: Map<string, FonteLocal>;
   /** espera o quadro do instante `t` (seek do <video> do insert) */
   preparar?: (t: number) => Promise<void>;
+  /** dirige os vídeos dos inserts em tempo real (caminho de reprodução) */
+  aoVivo?: (t: number) => void;
 };
 
 
@@ -167,12 +170,25 @@ export async function montarPosProducao(
         // doc — e uma palavra de diferença do ASR fazia a legenda trocar de
         // estilo antes da hora (o "daqui." do AD02 saiu com o estilo do body).
         const palavrasDosBlocos = bls.flatMap((b) => b.words.map((w) => w.text));
-        const fronteira = palavrasDoHookNoAsr(palavrasDosBlocos, hook);
+        let fronteira = palavrasDoHookNoAsr(palavrasDosBlocos, hook);
         if (hook.trim()) {
           console.log(
             `[pos-producao] hook: ${fronteira != null ? `${fronteira} palavras no áudio` : 'alinhamento não confiável — usando a contagem da copy'}` +
               ` (copy tem ${hook.trim().split(/\s+/).length})`,
           );
+        }
+        // A TROCA DE ESTILO CAI NUM CORTE (03.09) — a mesma regra da
+        // headline: o corte hook→body mascara a virada da legenda. Ajusta a
+        // fronteira pra palavra cujo fim encosta no corte vizinho (±3
+        // palavras, corte a até 0,9s); sem corte perto, fica como está.
+        if (fronteira != null && info.partesSec?.length) {
+          const cortesLegenda = cortesDoVideo(info.partesSec, info.cortesInternosSec);
+          const finsSec = bls.flatMap((b) => b.words.map((w) => w.end / 1000));
+          const ajustada = encaixarFronteiraNoCorte(finsSec, fronteira, cortesLegenda);
+          if (ajustada !== fronteira) {
+            console.log(`[pos-producao] hook: fronteira ${fronteira} → ${ajustada} pra virada cair no corte`);
+            fronteira = ajustada;
+          }
         }
         const segs = montarRoteiro(tpl, hook, body, fronteira);
         const aplicado = roteiro.applyCaptionScript(bls, segs, emptyIdentity());
@@ -264,7 +280,11 @@ export async function montarPosProducao(
                 const alvo = pv
                   ? tempoNaMidia(tRel, pv, natural, inicio)
                   : inicio + Math.min(tRel, Math.max(0, natural - 0.04));
-                if (Math.abs(v.currentTime - alvo) > 0.03) v.currentTime = alvo;
+                // TOCANDO (caminho de reprodução), o vídeo anda sozinho: seek
+                // aqui brigaria com o play a cada frame. A correção de deriva
+                // grande é do aoVivo; parado, o seek fino continua valendo.
+                const tolerancia = v.paused ? 0.03 : 0.3;
+                if (Math.abs(v.currentTime - alvo) > tolerancia) v.currentTime = alvo;
                 return v;
               },
             });
@@ -325,6 +345,39 @@ export async function montarPosProducao(
             // mais rápido do que o <video> completava seeks e o insert saía
             // "frame a frame, parece 5fps", no take longo e no curto. Aqui o
             // render espera o 'seeked' de verdade antes de desenhar.
+            // DRIVER do caminho de reprodução (03.09): cada insert TOCA com
+            // playbackRate = velocidade do plano enquanto a janela dele está
+            // viva; congela no ponto certo; pausa fora. A deriva grande
+            // (>0,25s) é corrigida com um seek — o resto é o play cuidando.
+            aoVivo: (t: number) => {
+              for (const jan of janelas) {
+                const ent = videosPorId.get(jan.id);
+                if (!ent) continue; // imagem: nada a dirigir
+                const vv = ent.v;
+                const dentro = t >= jan.start - 0.3 && t < jan.end;
+                if (!dentro) {
+                  if (!vv.paused) vv.pause();
+                  continue;
+                }
+                const pv = velocidadePorId.get(jan.id);
+                const natural = durNatural.get(jan.id) || ent.natural;
+                const inicio = recortePorId.get(jan.id) || 0;
+                const tRel = Math.max(0, t - jan.start);
+                const alvo = pv
+                  ? tempoNaMidia(tRel, pv, natural, inicio)
+                  : inicio + Math.min(tRel, Math.max(0, natural - 0.04));
+                const congelou = !!pv && pv.congelaApos > 0 && tRel >= pv.congelaApos - 0.02;
+                if (congelou) {
+                  if (!vv.paused) vv.pause();
+                  if (Math.abs(vv.currentTime - alvo) > 0.08) vv.currentTime = alvo;
+                  continue;
+                }
+                const rate = pv?.velocidade ?? 1;
+                if (Math.abs(vv.playbackRate - rate) > 0.01) vv.playbackRate = rate;
+                if (Math.abs(vv.currentTime - alvo) > 0.25) vv.currentTime = alvo;
+                if (vv.paused) void vv.play().catch(() => { /* quadro() cobre com seek */ });
+              }
+            },
             preparar: async (t: number) => {
               const jan = janelas.find((j) => t >= j.start && t < j.end);
               if (!jan) return;
@@ -442,11 +495,36 @@ export async function montarPosProducao(
     cfg.onEtapa?.(`${verbo}: preparando`);
     const t0 = Date.now();
     const ctrl = new AbortController();
-    // Teto PROPORCIONAL: ~6s de render por segundo de vídeo, piso de 4min e
-    // teto de 25min. Régua medida no harness (12s → ~29s por render) com
-    // folga de 2x pra PC carregado.
-    const tetoMs = Math.min(25 * 60_000, Math.max(4 * 60_000, Math.round(durSec * 6_000)));
-    const alarme = setTimeout(() => ctrl.abort(), tetoMs);
+    // WATCHDOG DE PROGRESSO (03.09) — o teto fixo de tempo matou um AD REAL.
+    //
+    // A régua antiga (~6s de render por segundo de vídeo, teto 25min) foi
+    // medida no caminho RÁPIDO. Com INSERTS o render vai pelo caminho de
+    // seek — e em aba de segundo plano o Chrome estrangula os seeks a ponto
+    // de 12s de vídeo levarem 11min (medido). O AD do Silas estava ANDANDO e
+    // o relógio o matou: "pós-produção: o render estourou o tempo".
+    //
+    // A regra certa: um render LENTO nunca é abortado; um render PARADO é.
+    // Aborta só quando o progresso não anda por 4min (fase de frames viva
+    // manda sinal a cada ~3 ticks), com um teto absoluto de 35min — ABAIXO
+    // dos 40min de ESPERA_MAX_MS da fila do ffmpeg, senão quem espera o lock
+    // morreria antes de este render soltar.
+    const PARADO_MS = 4 * 60_000;
+    const TETO_ABSOLUTO_MS = 35 * 60_000;
+    let ultimoSinal = Date.now();
+    let ultimoFrame = -1;
+    const inicioRender = Date.now();
+    const vigia = setInterval(() => {
+      const agora = Date.now();
+      if (agora - inicioRender > TETO_ABSOLUTO_MS) {
+        console.warn('[pos-producao] teto absoluto de 35min — abortando');
+        ctrl.abort();
+        return;
+      }
+      if (agora - ultimoSinal > PARADO_MS) {
+        console.warn(`[pos-producao] render sem progresso há ${Math.round((agora - ultimoSinal) / 1000)}s — abortando (parado, não lento)`);
+        ctrl.abort();
+      }
+    }, 15_000);
     let r: Awaited<ReturnType<typeof renderTypographyVideo>>;
     try {
       r = await renderTypographyVideo({
@@ -460,6 +538,11 @@ export async function montarPosProducao(
         headlines,
         signal: ctrl.signal,
         onProgress: (pr) => {
+          // qualquer avanço de fase/frame alimenta o watchdog
+          if (pr.phase !== 'frames' || (pr.frame ?? 0) !== ultimoFrame) {
+            ultimoFrame = pr.frame ?? ultimoFrame;
+            ultimoSinal = Date.now();
+          }
           // 'frames' é a fase longa — é dela que sai a porcentagem honesta.
           const pct = Math.round((pr.ratio || 0) * 100);
           cfg.onEtapa?.(
@@ -470,7 +553,7 @@ export async function montarPosProducao(
         },
       });
     } finally {
-      clearTimeout(alarme);
+      clearInterval(vigia);
       for (const f of fechaveis) f();
     }
     const seg = ((Date.now() - t0) / 1000).toFixed(0);
@@ -488,7 +571,7 @@ export async function montarPosProducao(
     const msg = (e as Error)?.message || String(e);
     avisos.push(
       /abort|cancel/i.test(msg)
-        ? 'pós-produção: o render estourou o tempo — entregue o montado original (sem legenda/zoom)'
+        ? 'pós-produção: o render ficou PARADO (sem progresso por 4min) — entregue o montado original. Deixa a aba visível e clica RETOMAR.'
         : `pós-produção falhou (${msg.slice(0, 80)}) — entregue o montado original`,
     );
     return { blob: null, avisos };

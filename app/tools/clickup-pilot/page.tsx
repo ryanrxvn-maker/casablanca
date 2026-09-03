@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { logHistory, type FileRef } from '@/lib/history';
 import { toFriendlyMessage } from '@/lib/friendly-error';
@@ -1637,6 +1638,11 @@ function ClickUpPilotInner() {
 
   /** Qual task está com o painel "editar antes de retomar/remontar" aberto. */
   const [pedindoMontagem, setPedindoMontagem] = useState<{ taskId: string; acao: 'retomar' | 'remontar' } | null>(null);
+
+  /** Mini-janela de ÁUDIO POR AVATAR aberta — chave `taskId:slotIdx` (03.09).
+   *  O bloco "Colocar áudio" que morava fixo no rodapé do slot virou esta
+   *  janela: um botão ao lado da voz de cada slot decide o áudio DELE. */
+  const [audioPopover, setAudioPopover] = useState<string | null>(null);
   const captionTemplatesRef = useRef(captionTemplates);
   captionTemplatesRef.current = captionTemplates;
 
@@ -1724,29 +1730,31 @@ function ClickUpPilotInner() {
 
         <div className="mtg-rotulo">Realces da montagem</div>
         <div className="mtg-linha">
+          {/* ÍCONE-ONLY como os quatro da direita (03.09) — "por que um é
+            * texto e outro ícone? todos têm que ser ícone". O title conta. */}
           <button
             type="button"
-            className={'mtg-chip' + (nivel ? ' is-on' : '')}
+            className={'mtg-icone' + (nivel ? ' is-on' : '')}
             onClick={() => setNivelamentoFor(taskId, !nivel)}
-            title="Nivela o volume de cada parte a -16 LUFS antes de juntar"
+            title={nivel ? 'Normalizador LIGADO — cada parte nivelada a -16 LUFS antes de juntar' : 'Normalizador desligado — clica pra nivelar o volume'}
+            aria-label="Normalizador"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
               <path d="M4 14v-4M9 17V7M14 15V9M19 18V6" />
             </svg>
-            Normalizador
           </button>
           <button
             type="button"
-            className={'mtg-chip' + (decup ? ' is-on' : '')}
+            className={'mtg-icone' + (decup ? ' is-on' : '')}
             onClick={() => setDecupagemFor(taskId, !decup)}
-            title="Corta os silêncios entre as falas"
+            title={decup ? 'Decupagem LIGADA — os silêncios entre as falas são cortados' : 'Decupagem desligada — clica pra cortar os silêncios'}
+            aria-label="Decupagem"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <circle cx="6" cy="6" r="2.6" />
               <circle cx="6" cy="18" r="2.6" />
               <path d="M20 4 8.2 15.8M14.6 14.5 20 20M8.2 8.2 12 12" />
             </svg>
-            Decupagem
           </button>
           <span className="mtg-sep" aria-hidden />
           {aMontagem ? (
@@ -9438,17 +9446,24 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           sl.role,
         );
         const escRaw = ver.porPapel?.[sl.role.toLowerCase()];
+        // A versão escolheu um FRAME (sem avatar)? Então a irmã é MODO IMAGEM
+        // — custe o que custar. Sem isto (03.09), a irmã herdava `imageMode`
+        // e `avatarId` da versão 1 e DISPARAVA O AVATAR DA VERSÃO 1 DE NOVO,
+        // ignorando o frame calada. Versão que escolheu AVATAR próprio é o
+        // inverso: modo imagem desliga mesmo com a base sendo imagem.
+        const versaoEhFrame = !!(escRaw && !escRaw.avatarId && (escRaw.imageKey || escRaw.imageDataUrl));
         return {
           ...sl,
-          avatarId: esc.avatarId ?? null,
-          avatarName: esc.avatarName ?? null,
-          avatarThumb: esc.avatarThumb ?? null,
+          avatarId: versaoEhFrame ? null : (esc.avatarId ?? null),
+          avatarName: versaoEhFrame ? null : (esc.avatarName ?? null),
+          avatarThumb: versaoEhFrame ? null : (esc.avatarThumb ?? null),
           avatarVoiceId: esc.avatarVoiceId ?? null,
           voiceOverride: esc.voiceOverride ?? null,
           // MOTOR da versão (02.09): escolhido no painel POR AVATAR; vazio
           // herda o motor do slot da versão 1.
           engine: (escRaw?.engine as 'III' | 'IV' | 'V' | undefined) ?? sl.engine,
           // MODO IMAGEM: a irmã leva o FRAME da versão (ou o da 1).
+          imageMode: versaoEhFrame ? true : esc.avatarId ? false : !!sl.imageMode,
           imageKey: esc.imageKey ?? null,
           imageDataUrl: esc.imageDataUrl ?? null,
           imageName: esc.imageName ?? null,
@@ -9516,7 +9531,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           // dentro. Com avatar próprio numa base de MODO IMAGEM, a voz da base
           // é a CLONADA DA FOTO — outra pessoa — então NÃO herda: fica a voz
           // escolhida pra versão, ou a do próprio avatar.
-          voiceOverride: (v2ComAvatar && sl.voiceOverrideYoutube?.id)
+          // A voz da versão 2 vale pro AVATAR próprio E pro FRAME próprio
+          // (03.09): frame é outra pessoa — sem isto a v2 de frame herdava a
+          // voz da versão 1 sem opção de trocar.
+          voiceOverride: sl.voiceOverrideYoutube?.id
             ? sl.voiceOverrideYoutube
             : (v2ComAvatar && sl.imageMode ? null : sl.voiceOverride),
           voiceOverrideYoutube: null,
@@ -14788,7 +14806,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               // MODO ÁUDIO sem Voice Mirror: a voz do take é a do próprio
                                               // arquivo → o seletor dorme. Liga o Mirror e ele acorda
                                               // (vira a voz alvo do espelho).
-                                              <div className={slot.audioKey && !slot.imageMode && !slot.audioMirror ? 'pointer-events-none select-none opacity-35' : ''}>
+                                              <div className="flex items-end gap-2">
+                                              <div className={'min-w-0 flex-1' + (slot.audioKey && !slot.imageMode && !slot.audioMirror ? ' pointer-events-none select-none opacity-35' : '')}>
                                                 <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -14814,6 +14833,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverride: v })}
                                                 />
                                               </div>
+                                              {/* ÁUDIO POR AVATAR (03.09): o botão abre a mini-janela
+                                                * que decide o áudio DESTE slot — o bloco fixo do rodapé
+                                                * ("Colocar áudio") morreu. Aceso = tem áudio. Fica FORA
+                                                * do wrapper que dorme, senão com áudio ativo não daria
+                                                * pra reabrir a janela. */}
+                                              {slot.avatarId && !slot.imageMode ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setAudioPopover(`${a.taskId}:${sIdx}`)}
+                                                  className={'au-btn' + (slot.audioKey ? ' is-on' : '')}
+                                                  title={slot.audioKey
+                                                    ? `Áudio ativo (${slot.audioName || 'arquivo'}) — clica pra ajustar ou tirar`
+                                                    : 'Colocar um ÁUDIO pra este avatar falar (no lugar do texto)'}
+                                                  aria-label="Áudio do avatar"
+                                                >
+                                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                                                  </svg>
+                                                </button>
+                                              ) : null}
+                                              </div>
                                             ) : null}
                                             {/* ═══ VERSÕES 2..10 DESTE PAPEL (30.08) ═══
                                               * Cada versão escolhe FRAME ou AVATAR — independente do
@@ -14835,7 +14876,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               };
                                               const gravaVoz = (n: number, esc: EscVer | null, v: { id: string; name: string } | null) => {
                                                 if (n === 2) updateRoleSlot(a.taskId, sIdx, { voiceOverrideYoutube: v });
-                                                else if (esc?.avatarId) setAvatarDaVersao(a.taskId, n, slot.role, { ...esc, voiceOverride: v } as any);
+                                                // vale pra versão de AVATAR e de FRAME — frame é outra
+                                                // pessoa, a voz dela se escolhe aqui (03.09)
+                                                else if (esc?.avatarId || esc?.imageKey || esc?.imageDataUrl)
+                                                  setAvatarDaVersao(a.taskId, n, slot.role, { ...esc, voiceOverride: v } as any);
                                               };
                                               return linhas.map(({ n, nome, esc, voz }) => {
                                                 const chave = `${a.taskId}:${sIdx}:v${n}`;
@@ -15072,16 +15116,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               const temVozPraMirror = !!(slot.voiceOverride?.id || slot.avatarVoiceId);
                                               const diffAberto = !!(akey && audioDiffOpen[akey]);
                                               const pct = info?.pct ?? null;
-                                              return (
-                                                <div>
-                                                  <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
-                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                                                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                                                      <path d="M12 19v4" />
-                                                    </svg>
-                                                    Áudio do avatar
+                                              const chaveAudio = `${a.taskId}:${sIdx}`;
+                                              if (audioPopover !== chaveAudio) return null;
+                                              return createPortal(
+                                                <div className="au-camada" role="dialog" aria-modal="true" aria-label="Áudio do avatar">
+                                                  <div className="au-veu" onClick={() => setAudioPopover(null)} aria-hidden />
+                                                  <div className="au-janela">
+                                                  <div className="au-cab">
+                                                    <span className="au-tile" aria-hidden>
+                                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                                                      </svg>
+                                                    </span>
+                                                    <span className="au-cab-textos">
+                                                      <span className="au-titulo">Áudio do avatar</span>
+                                                      <span className="au-sub">{slot.avatarName || slot.role} — o áudio fala no lugar do texto (TTS)</span>
+                                                    </span>
+                                                    <button type="button" className="au-x" onClick={() => setAudioPopover(null)} aria-label="Fechar">
+                                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                                                    </button>
                                                   </div>
+                                                  <div className="au-corpo">
                                                   {!akey ? (
                                                     <label className="group/upaudio inline-flex cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-bg-soft/70 px-4 py-2 text-[11.5px] font-semibold text-text transition hover:-translate-y-[1px] hover:border-cyan-500/60 hover:text-cyan-500 active:translate-y-[1px]" style={{ fontFamily: 'var(--font-tech)' }}>
                                                       <PilotIconUpload size={13} />
@@ -15294,6 +15350,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     </div>
                                                   )}
                                                 </div>
+                                                  </div>
+                                                </div>,
+                                                document.body,
                                               );
                                             })() : null}
                                           </div>
