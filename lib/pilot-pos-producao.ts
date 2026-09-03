@@ -121,7 +121,11 @@ const SMART_MIN = 1.0;
  * A bolsa é embaralhada e esvaziada: a proporção 50/33/17 vale em QUALQUER
  * tamanho de AD, e a ordem varia sem nunca amontoar o mesmo movimento.
  */
-const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'seco', 'in', 'in', 'out'];
+// Retune 02.09 (2ª rodada): Silas viu o AD e pediu MAIS dinâmica — "demora
+// até acontecer um zoom, tem que transicionar mais e ter mais zoom in".
+// A bolsa foi de 3/2/1 pra 2/3/1: o zoom in vira o movimento mais comum,
+// o corte seco continua à frente do out.
+const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'in', 'in', 'in', 'out'];
 /**
  * A BOLSA DE DEGRAUS do corte seco.
  *
@@ -155,20 +159,14 @@ const SMART_RAMPA_MIN_ESPACO = 0.06;
  * então nada pula no meio do take — o salto continua acontecendo só no corte,
  * onde é invisível.
  */
-const SMART_SUBDIV_SEC = 6.0;
-/** Onde o take longo troca de segurar pra derivar.
- *  O ABERTO segura mais: 100% é o estado de repouso do plano, e se ele
- *  escorregasse cedo o vídeo voltava a morar no fechado (medido: 17% de tempo
- *  aberto contra os 34% que a bolsa de degraus tinha conquistado). */
-const SMART_SUBDIV_FRACAO = 0.42;
-const SMART_SUBDIV_FRACAO_ABERTO = 0.64;
+const SMART_SUBDIV_SEC = 4.2;
 /** Amplitude da deriva — leve: ela acompanha a fala, não disputa com ela. */
-const SMART_DERIVA_MIN = 0.06;
-const SMART_DERIVA_MAX = 0.13;
+const SMART_DERIVA_MIN = 0.08;
+const SMART_DERIVA_MAX = 0.16;
 /** Janela do corte seco: curta, é só o take numa escala. */
-const SMART_SEG_SECO_SEC = 2.3;
+const SMART_SEG_SECO_SEC = 1.8;
 /** Janela do movimento: precisa de tempo pra ser percebido. */
-const SMART_SEG_RAMPA_SEC = 4.6;
+const SMART_SEG_RAMPA_SEC = 3.4;
 
 function easeInOutSine(p: number): number {
   return -(Math.cos(Math.PI * p) - 1) / 2;
@@ -358,25 +356,42 @@ function planejarSmartZoom(
       // um degrau DIFERENTE do atual — a troca tem que ser percebida no corte
       const nova = clampEscala(proximoDegrau(bolsaDeg, escala, encherDegraus));
       if (dur >= SMART_SUBDIV_SEC) {
-        // TAKE LONGO: o corte entrega a escala nova, ela SEGURA, e depois
-        // escorrega. Duas leituras de proporção onde antes havia uma só.
-        const aberto = nova <= 1.08;
-        const meio = ini + dur * (aberto ? SMART_SUBDIV_FRACAO_ABERTO : SMART_SUBDIV_FRACAO);
-        // Saindo do aberto a deriva é MENOR: senão o 100% dura um sopro e o
-        // plano volta a morar no meio — era o que a medição mostrava.
-        const dMin = aberto ? 0.04 : SMART_DERIVA_MIN;
-        const dMax = aberto ? 0.08 : SMART_DERIVA_MAX;
-        const deriva = dMin + rnd() * (dMax - dMin);
-        // Fechado desce, aberto sobe, e o meio pende pra baixo — é o conjunto
-        // disso que impede o plano de morar no teto.
-        const paraBaixo = nova >= 1.2 ? true : aberto ? false : rnd() < 0.68;
-        const alvoDeriva = clampEscala(paraBaixo ? nova - deriva : nova + deriva);
-        segs.push({ start: ini, end: meio, from: nova, to: nova, rampaAte: meio });
-        const durB = fim - meio;
-        const respiroB = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, durB * RESPIRO_FRACAO));
-        const rampaAteB = durB > respiroB * 2 ? fim - respiroB : meio + durB / 2;
-        segs.push({ start: meio, end: fim, from: nova, to: alvoDeriva, rampaAte: rampaAteB });
-        escala = alvoDeriva;
+        // TAKE LONGO: cadeia de SEGURA→ESCORREGA→SEGURA→ESCORREGA até o fim
+        // do take (02.09, 2ª rodada — Silas: "tem que transicionar mais entre
+        // as proporções"). Cada elo é rampa CONTÍNUA: nada pula no meio do
+        // take, mas a proporção nunca fica parada por muito tempo.
+        let cursor = ini;
+        let escalaAtual = nova;
+        let elo = 0;
+        while (fim - cursor > 0.35 && elo < 8) {
+          const resta = fim - cursor;
+          // segura curto, escorrega um pouco mais longo
+          const durSegura = Math.min(resta, SMART_SEG_SECO_SEC * (0.7 + rnd() * 0.5));
+          segs.push({ start: cursor, end: Math.min(fim, cursor + durSegura), from: escalaAtual, to: escalaAtual, rampaAte: Math.min(fim, cursor + durSegura) });
+          cursor = Math.min(fim, cursor + durSegura);
+          if (fim - cursor <= 0.35) break;
+
+          const aberto = escalaAtual <= 1.08;
+          // Saindo do aberto a deriva é menor: senão o 100% dura um sopro.
+          const dMin = aberto ? 0.05 : SMART_DERIVA_MIN;
+          const dMax = aberto ? 0.1 : SMART_DERIVA_MAX;
+          const deriva = dMin + rnd() * (dMax - dMin);
+          // Fechado desce, aberto sobe, o meio pende pra baixo — é o conjunto
+          // que impede o plano de morar no teto.
+          const paraBaixo = escalaAtual >= 1.2 ? true : aberto ? false : rnd() < 0.62;
+          const alvoDeriva = clampEscala(paraBaixo ? escalaAtual - deriva : escalaAtual + deriva);
+          const durDeriva = Math.min(fim - cursor, SMART_SEG_RAMPA_SEC * (0.6 + rnd() * 0.5));
+          const fimDeriva = Math.min(fim, cursor + durDeriva);
+          segs.push({ start: cursor, end: fimDeriva, from: escalaAtual, to: alvoDeriva, rampaAte: fimDeriva });
+          cursor = fimDeriva;
+          escalaAtual = alvoDeriva;
+          elo++;
+        }
+        // resto do take (se sobrou um fiapo) segura na escala em que parou
+        if (fim - cursor > 0.01) {
+          segs.push({ start: cursor, end: fim, from: escalaAtual, to: escalaAtual, rampaAte: fim });
+        }
+        escala = escalaAtual;
       } else {
         segs.push({ start: ini, end: fim, from: nova, to: nova, rampaAte: fim });
         escala = nova;

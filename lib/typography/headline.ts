@@ -58,6 +58,23 @@ export type HeadlineStyle = {
   animIn?: HeadlineAnim;
   /** animação de SAÍDA (0.3s) */
   animOut?: HeadlineAnim;
+
+  /* ── TEXTO AVANÇADO (02.09) — tudo opcional; ausente/null = o modelo ── */
+  /** força peso máximo da família */
+  bold?: boolean | null;
+  /** inclina (itálico sintético quando a família não tem) */
+  italic?: boolean | null;
+  /** linha sob cada linha de texto */
+  underline?: boolean | null;
+  /** contorno: 0..1 (fração do corpo). 0/null = sem traço */
+  stroke?: number | null;
+  strokeColor?: string | null;
+  /** sombra dura 0..1 — sobrepõe a do modelo quando definida */
+  shadowForca?: number | null;
+  shadowColor?: string | null;
+  /** brilho (glow) 0..1 */
+  glow?: number | null;
+  glowColor?: string | null;
 };
 
 /** Animações da headline — poucas e sóbrias (headline é texto PARADO). */
@@ -334,6 +351,15 @@ export const HEADLINE_STYLE_DEFAULT: HeadlineStyle = {
   font: null,
   uppercase: null,
   quote: null,
+  bold: null,
+  italic: null,
+  underline: null,
+  stroke: null,
+  strokeColor: null,
+  shadowForca: null,
+  shadowColor: null,
+  glow: null,
+  glowColor: null,
 };
 
 /* ──────────────────────────────── layout ──────────────────────────────── */
@@ -702,7 +728,10 @@ export function drawHeadline(
             : align === 'right'
               ? L.box.x + L.box.w - w
               : L.box.x;
-        const y = L.box.y + L.quotePx + i * L.lineH;
+        // ⚠ o TEXTO desenha a partir de `box.y + quotePx + padY` — a tira tem
+        // que partir do MESMO topo. Sem o padY aqui, cada linha de texto caía
+        // meio corpo abaixo da sua tira (a "tarja bugada desalinhada", 02.09).
+        const y = L.box.y + L.quotePx + L.padY + i * L.lineH;
         roundRectPath(ctx, x, y, w, L.lineH, preset.radius * L.fontPx);
         ctx.fill();
       }
@@ -794,12 +823,18 @@ export function drawHeadline(
   }
 
   // texto
-  ctx.font = fontCss(fontKey, L.fontPx);
+  let fonteCssTexto = fontCss(fontKey, L.fontPx);
+  // Negrito/itálico POR CIMA da família: peso 900 e 'italic' no prefixo —
+  // sintético quando a família não tem a variante (o canvas emula).
+  if (h.style.bold) fonteCssTexto = fonteCssTexto.replace(/^(italic\s+)?\d+/, (m0) => (m0.startsWith('italic') ? 'italic 900' : '900'));
+  if (h.style.italic && !/^italic/.test(fonteCssTexto)) fonteCssTexto = 'italic ' + fonteCssTexto;
+  ctx.font = fonteCssTexto;
   ctx.fillStyle = cor;
-  if (preset.shadow > 0) {
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = preset.shadow * L.fontPx;
-    ctx.shadowOffsetY = preset.shadow * L.fontPx * 0.35;
+  const sombraForca = h.style.shadowForca ?? preset.shadow;
+  if (sombraForca > 0) {
+    ctx.shadowColor = h.style.shadowColor ?? 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = sombraForca * L.fontPx;
+    ctx.shadowOffsetY = sombraForca * L.fontPx * 0.35;
   }
   const bleed = preset.fullBleed && painel !== 'nenhum';
   const interno = painel === 'nenhum' ? 0 : bleed ? Math.max(L.padX, W * 0.055) : L.padX;
@@ -813,8 +848,41 @@ export function drawHeadline(
         : align === 'right'
           ? L.box.x + interno + (faixa - ln.width)
           : L.box.x + interno;
-    // 0.76 põe a baseline dentro da caixa da linha (mesma proporção da legenda)
-    ctx.fillText(ln.text, x, topo + i * L.lineH + L.lineH * 0.76);
+    const baseY = topo + i * L.lineH + L.lineH * 0.76; // 0.76 = baseline dentro da caixa
+    // BRILHO: passe extra de sombra colorida por baixo do preenchimento
+    const glow = h.style.glow ?? 0;
+    if (glow > 0.01) {
+      ctx.save();
+      ctx.shadowColor = h.style.glowColor ?? cor;
+      ctx.shadowBlur = glow * L.fontPx * 0.9;
+      ctx.shadowOffsetY = 0;
+      ctx.fillText(ln.text, x, baseY);
+      ctx.fillText(ln.text, x, baseY); // 2x adensa o halo sem estourar
+      ctx.restore();
+    }
+    // TRAÇO por baixo do preenchimento (contorno de fora)
+    const traco = h.style.stroke ?? 0;
+    if (traco > 0.01) {
+      ctx.save();
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = h.style.strokeColor ?? '#000000';
+      ctx.lineWidth = Math.max(1, traco * L.fontPx * 0.22);
+      ctx.lineJoin = 'round';
+      ctx.strokeText(ln.text, x, baseY);
+      ctx.restore();
+    }
+    ctx.fillText(ln.text, x, baseY);
+    if (h.style.underline) {
+      ctx.save();
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = cor;
+      ctx.lineWidth = Math.max(1.5, L.fontPx * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(x, baseY + L.fontPx * 0.13);
+      ctx.lineTo(x + ln.width, baseY + L.fontPx * 0.13);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
   ctx.restore();
 }

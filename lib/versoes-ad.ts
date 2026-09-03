@@ -39,6 +39,8 @@ export type EscolhaAvatarVersao = {
   imageKey?: string | null;
   imageDataUrl?: string | null;
   imageName?: string | null;
+  /** MOTOR desta versão (III/IV/V) — null herda o do slot da versão 1. */
+  engine?: 'III' | 'IV' | 'V' | null;
 };
 
 export type VersaoAd = {

@@ -84,6 +84,9 @@ export type Insert = {
 export const INSERT_FOCO_PADRAO = 0.34;
 /** Recorte não pode ser mais curto que isto — abaixo disso não se vê nada. */
 export const INSERT_RECORTE_MIN_SEC = 0.4;
+/** Vão entre dois inserts MENOR que isto é emendado — um buraco de poucos
+ *  frames entre janelas fazia o avatar inteiro vazar num piscar. */
+export const INSERT_EMENDA_SEC = 0.45;
 export const INSERT_DUR_IMAGEM_PADRAO = 3;
 
 /** Insert novo com os defaults do estúdio. */
@@ -362,6 +365,13 @@ export function janelasDosInserts(
       end = Math.min(durSec, start + dur);
     }
     if (end - start < 0.25 || start >= durSec) continue; // não cabe mais: descarta
+    // EMENDA (02.09): dois inserts quase encostados deixavam um VÃO de alguns
+    // frames onde nenhum insert era desenhado — o avatar inteiro vazava num
+    // piscar entre a tela dividida e o insert seguinte (Silas viu no AD).
+    // Vão menor que a emenda = as janelas se colam; a transição cobre a troca.
+    if (ultimo && start - ultimo.end > 0 && start - ultimo.end <= INSERT_EMENDA_SEC) {
+      ultimo.end = start;
+    }
     out.push({ id: j.id, start, end });
   }
   return out;
@@ -608,6 +618,21 @@ export type HeadlineCfg = {
   panelOpacity?: number | null;
   /** cor do texto (hex); null/ausente = a do modelo */
   color?: string | null;
+  /** cor do fundo/painel (hex); null/ausente = a do modelo */
+  panelColor?: string | null;
+  /** fonte (FontKey das Legendas Automáticas); null/ausente = a do modelo */
+  font?: string | null;
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  /** contorno 0..1; null/ausente = sem traço */
+  stroke?: number | null;
+  strokeColor?: string | null;
+  /** sombra 0..1; null/ausente = a do modelo */
+  shadowForca?: number | null;
+  /** brilho 0..1; null/ausente = sem brilho */
+  glow?: number | null;
+  glowColor?: string | null;
 };
 
 export const HEADLINE_CFG_DEFAULT: HeadlineCfg = {

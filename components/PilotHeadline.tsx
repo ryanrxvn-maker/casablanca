@@ -1,28 +1,18 @@
 'use client';
 
 /**
- * JANELA DA HEADLINE do ClickUp Pilot (01.09 · controles em 02.09).
+ * JANELA DA HEADLINE do ClickUp Pilot (01.09 · controles 02.09 · v3 02.09).
  *
- * Headline é o texto PARADO por cima do vídeo — a manchete que segura o olho
- * enquanto o avatar fala.
+ * O PALCO é o controle principal: arrasta a manchete no preview do motor REAL
+ * (drawHeadline num canvas 9:16) — o que se vê aqui é o que sai no MP4. A
+ * proporção do palco é medida por ResizeObserver: CSS puro com aspect-ratio
+ * esticava o quadro na coluna estreita e o preview mentia sobre a quebra.
  *
- * A saída dela é puxada pro CORTE mais próximo (lib/pilot-inserts). Texto que
- * some no meio da fala denuncia o automático, porque nada mais na tela muda
- * junto; no corte, a troca de imagem mascara.
- *
- * 02.09 — Silas: *"aqui eu escolho a headline, mas não escolho a posição,
- * tamanho, nem nada"*. O motor (`drawHeadline`) sempre soube posicionar,
- * dimensionar, alinhar e pintar; a janela é que só mandava modelo e altura.
- * Agora ela manda tudo, e o PALCO é o controle principal: arrasta a manchete
- * onde ela tem que ficar, no preview do motor REAL — o que se vê aqui é o que
- * sai no MP4.
- *
- * Todo ajuste fino aceita "do modelo" (null). Sem esse estado, mexer numa
- * coisa só apagaria a identidade do preset — foi assim que a cartela de
- * citação, que é centralizada, passou a sair à esquerda.
+ * Todo ajuste fino aceita "padrão" (null = o que o MODELO manda). Sem esse
+ * estado, mexer numa coisa só apagaria a identidade do preset.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { HEADLINE_LIMITES, normalizarHeadlineCfg, type HeadlineCfg } from '@/lib/pilot-inserts';
 
@@ -50,7 +40,7 @@ function cenaDeFundo(g: CanvasRenderingContext2D, W: number, H: number) {
 }
 
 /** O estilo que vai pro motor — o MESMO que a pós-produção monta. */
-function estiloDaCfg(base: Record<string, unknown>, cfg: HeadlineCfg) {
+export function estiloDaHeadlineCfg(base: Record<string, unknown>, cfg: HeadlineCfg) {
   const c = normalizarHeadlineCfg(cfg);
   return {
     ...base,
@@ -64,10 +54,20 @@ function estiloDaCfg(base: Record<string, unknown>, cfg: HeadlineCfg) {
     panel: c.panel ?? null,
     panelOpacity: c.panelOpacity ?? null,
     color: c.color ?? null,
+    panelColor: c.panelColor ?? null,
+    font: c.font ?? null,
+    bold: c.bold ?? null,
+    italic: c.italic ?? null,
+    underline: c.underline ?? null,
+    stroke: c.stroke ?? null,
+    strokeColor: c.strokeColor ?? null,
+    shadowForca: c.shadowForca ?? null,
+    glow: c.glow ?? null,
+    glowColor: c.glowColor ?? null,
   };
 }
 
-/* ═════════════ PALCO: preview grande, com arrasto pra posicionar ═════════ */
+/* ═════════════ PALCO: preview 9:16 de verdade, com arrasto ══════════════ */
 
 function PalcoDaHeadline({
   cfg,
@@ -79,10 +79,31 @@ function PalcoDaHeadline({
   onMover: (posX: number, posY: number) => void;
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const areaRef = useRef<HTMLDivElement | null>(null);
   const caixaRef = useRef<HTMLDivElement | null>(null);
   const [pronto, setPronto] = useState(false);
   const [arrastando, setArrastando] = useState(false);
+  const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const rafRef = useRef<number | null>(null);
+
+  // 9:16 SEMPRE: mede a área disponível e escolhe a MAIOR caixa 9:16 que
+  // cabe. CSS com aspect-ratio + max-width quebrava a proporção na coluna
+  // estreita — e um preview fora de 9:16 mente sobre a quebra de linha.
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const medir = () => {
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 20) || !(r.height > 20)) return;
+      const h = Math.min(r.height, (r.width * 16) / 9);
+      const w = (h * 9) / 16;
+      setBox((prev) => (Math.abs(prev.w - w) < 1 && Math.abs(prev.h - h) < 1 ? prev : { w, h }));
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     let morto = false;
@@ -115,7 +136,7 @@ function PalcoDaHeadline({
             text: texto || 'SUA MANCHETE AQUI',
             start: 0,
             end: 9999,
-            style: estiloDaCfg(hl.HEADLINE_STYLE_DEFAULT as never, cfg) as never,
+            style: estiloDaHeadlineCfg(hl.HEADLINE_STYLE_DEFAULT as never, cfg) as never,
           },
           W,
           H,
@@ -126,8 +147,6 @@ function PalcoDaHeadline({
         if (!morto) setPronto(true);
       }
     };
-    // rAF: o arrasto redesenha a cada movimento do dedo; sem isto a janela
-    // engasgava enfileirando desenhos que já nasciam velhos.
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => void desenhar());
     return () => {
@@ -151,36 +170,38 @@ function PalcoDaHeadline({
 
   return (
     <div className="hl-palco">
-      <div
-        ref={caixaRef}
-        className={'hl-palco-quadro' + (arrastando ? ' is-arrastando' : '')}
-        onPointerDown={(e) => {
-          try {
-            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-          } catch {
-            /* ponteiro já solto: o arrasto segue pelos onPointerMove mesmo */
-          }
-          setArrastando(true);
-          daPonta(e);
-        }}
-        onPointerMove={(e) => {
-          if (arrastando) daPonta(e);
-        }}
-        onPointerUp={() => setArrastando(false)}
-        onPointerCancel={() => setArrastando(false)}
-        title="Arrasta pra posicionar a manchete"
-      >
-        <canvas ref={ref} className="hl-palco-canvas" aria-hidden />
-        {!pronto ? <span className="hl-palco-skel" aria-hidden /> : null}
-        {/* mira: mostra o CENTRO do bloco, que é o que posX/posY controlam */}
-        <span
-          className="hl-mira"
-          style={{ left: `${(cfg.posX ?? 0.5) * 100}%`, top: `${cfg.posY * 100}%` }}
-          aria-hidden
-        />
-        <span className="hl-palco-dica" aria-hidden>
-          arrasta pra posicionar
-        </span>
+      <div ref={areaRef} className="hl-palco-area">
+        <div
+          ref={caixaRef}
+          className={'hl-palco-quadro' + (arrastando ? ' is-arrastando' : '')}
+          style={box.w > 0 ? { width: box.w, height: box.h } : undefined}
+          onPointerDown={(e) => {
+            try {
+              (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            } catch {
+              /* ponteiro já solto: o arrasto segue pelos onPointerMove */
+            }
+            setArrastando(true);
+            daPonta(e);
+          }}
+          onPointerMove={(e) => {
+            if (arrastando) daPonta(e);
+          }}
+          onPointerUp={() => setArrastando(false)}
+          onPointerCancel={() => setArrastando(false)}
+          title="Arrasta pra posicionar a manchete"
+        >
+          <canvas ref={ref} className="hl-palco-canvas" aria-hidden />
+          {!pronto ? <span className="hl-palco-skel" aria-hidden /> : null}
+          <span
+            className="hl-mira"
+            style={{ left: `${(cfg.posX ?? 0.5) * 100}%`, top: `${cfg.posY * 100}%` }}
+            aria-hidden
+          />
+          <span className="hl-palco-dica" aria-hidden>
+            arrasta pra posicionar
+          </span>
+        </div>
       </div>
       <div className="hl-palco-coord">
         <span>x {Math.round((cfg.posX ?? 0.5) * 100)}%</span>
@@ -220,8 +241,6 @@ function MiniModelo({ presetId, texto, ativo }: { presetId: string; texto: strin
         c.height = H;
         const g = c.getContext('2d')!;
         cenaDeFundo(g, W, H);
-        // A miniatura mostra o MODELO puro (posição neutra): ela é escolha de
-        // ESTILO, não de posição — quem posiciona é o palco.
         hl.drawHeadline(
           g,
           {
@@ -255,8 +274,8 @@ function MiniModelo({ presetId, texto, ativo }: { presetId: string; texto: strin
 
 function Regua({
   rotulo,
-  nota,
   valor,
+  mostra,
   min,
   max,
   passo,
@@ -264,7 +283,8 @@ function Regua({
   aoZerar,
 }: {
   rotulo: string;
-  nota: string;
+  /** o número exibido no chip (ex.: "70%") */
+  mostra: string;
   valor: number;
   min: number;
   max: number;
@@ -276,10 +296,13 @@ function Regua({
     <>
       <div className="hl-rotulo mt">
         {rotulo}
-        <span className="hl-rotulo-nota">{nota}</span>
+        <span className="hl-valor">{mostra}</span>
         {aoZerar ? (
-          <button type="button" className="hl-zerar" onClick={aoZerar} title="Volta ao padrão">
-            padrão
+          <button type="button" className="hl-zerar" onClick={aoZerar} title="Volta ao padrão do modelo" aria-label="Voltar ao padrão">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v5h5" />
+            </svg>
           </button>
         ) : null}
       </div>
@@ -298,23 +321,18 @@ function Regua({
 
 function Segmentado<T extends string | boolean | null>({
   rotulo,
-  nota,
   opcoes,
   valor,
   onMudar,
 }: {
   rotulo: string;
-  nota?: string;
-  opcoes: Array<{ v: T; txt: string; title?: string }>;
+  opcoes: Array<{ v: T; txt?: string; icone?: ReactNode; title?: string }>;
   valor: T;
   onMudar: (v: T) => void;
 }) {
   return (
     <>
-      <div className="hl-rotulo mt">
-        {rotulo}
-        {nota ? <span className="hl-rotulo-nota">{nota}</span> : null}
-      </div>
+      <div className="hl-rotulo mt">{rotulo}</div>
       <div className="hl-seg">
         {opcoes.map((o) => (
           <button
@@ -324,7 +342,7 @@ function Segmentado<T extends string | boolean | null>({
             className={'hl-seg-item' + (valor === o.v ? ' is-on' : '')}
             onClick={() => onMudar(o.v)}
           >
-            {o.txt}
+            {o.icone ?? o.txt}
           </button>
         ))}
       </div>
@@ -332,16 +350,67 @@ function Segmentado<T extends string | boolean | null>({
   );
 }
 
-/** Cores do texto. "do modelo" é a primeira — é o estado que preserva o preset. */
-const CORES: Array<{ v: string | null; nome: string }> = [
-  { v: null, nome: 'do modelo' },
-  { v: '#ffffff', nome: 'branco' },
-  { v: '#0b0d12', nome: 'preto' },
-  { v: '#fbbf24', nome: 'âmbar' },
-  { v: '#22d3ee', nome: 'ciano' },
-  { v: '#4ade80', nome: 'verde' },
-  { v: '#f87171', nome: 'vermelho' },
-];
+/** Paleta + cor livre. O input nativo dá o quadrado de tom, a barra de matiz
+ *  e o CONTA-GOTAS do Chrome — e por ser overlay nativo fica acima de
+ *  qualquer portal, coisa que um popover custom não garante aqui. */
+function Cores({
+  rotulo,
+  valor,
+  onMudar,
+}: {
+  rotulo: string;
+  valor: string | null;
+  onMudar: (v: string | null) => void;
+}) {
+  const SW = [
+    '#ffffff', '#0b0d12', '#fbbf24', '#ff9f0a', '#e8192c', '#f472b6',
+    '#22d3ee', '#31c4ff', '#4ade80', '#2edb84', '#a78bfa', '#7c5cff',
+  ];
+  const custom = valor !== null && !SW.includes(valor);
+  return (
+    <>
+      <div className="hl-rotulo mt">{rotulo}</div>
+      <div className="hl-cores">
+        <button
+          type="button"
+          title="padrão do modelo"
+          className={'hl-cor is-auto' + (valor === null ? ' is-on' : '')}
+          onClick={() => onMudar(null)}
+        >
+          A
+        </button>
+        {SW.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={c}
+            className={'hl-cor' + (valor === c ? ' is-on' : '')}
+            style={{ background: c }}
+            onClick={() => onMudar(c)}
+          />
+        ))}
+        <label
+          className={'hl-cor is-livre' + (custom ? ' is-on' : '')}
+          title="Cor livre — abre o seletor com conta-gotas"
+          style={custom && valor ? { background: valor } : undefined}
+        >
+          <input
+            type="color"
+            value={valor && /^#[0-9a-f]{6}$/i.test(valor) ? valor : '#ffffff'}
+            onChange={(e) => onMudar(e.target.value)}
+            className="hl-cor-input"
+          />
+          {!custom ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m2 22 1-5L16 4l4 4L7 21l-5 1z" />
+              <path d="m14 6 4 4" />
+            </svg>
+          ) : null}
+        </label>
+      </div>
+    </>
+  );
+}
 
 /* ═════════════════════════════ a janela ═════════════════════════════════ */
 
@@ -359,6 +428,7 @@ export function PilotHeadlineModal({
 }) {
   const [montado, setMontado] = useState(false);
   const [presets, setPresets] = useState<Array<{ id: string; name: string }>>([]);
+  const [fontes, setFontes] = useState<Array<{ k: string; label: string }>>([]);
   useEffect(() => setMontado(true), []);
   // trava o scroll da página — a roda do mouse rolava o fundo (02.09)
   useEffect(() => {
@@ -371,6 +441,9 @@ export function PilotHeadlineModal({
   useEffect(() => {
     void import('@/lib/typography/headline').then((m) =>
       setPresets(m.HEADLINE_PRESETS.map((p) => ({ id: p.id, name: p.name }))),
+    );
+    void import('@/lib/typography/fonts').then((m) =>
+      setFontes(Object.entries(m.TYPO_FONTS).map(([k, f]) => ({ k, label: (f as { label: string }).label }))),
     );
   }, []);
   useEffect(() => {
@@ -400,9 +473,6 @@ export function PilotHeadlineModal({
           </span>
           <span className="hl-cab-textos">
             <span className="hl-titulo">Headline</span>
-            <span className="hl-sub">
-              Texto parado por cima do vídeo. A saída dela cai num corte — é o corte que mascara o sumiço.
-            </span>
           </span>
           <button type="button" className="hl-x" onClick={onFechar} aria-label="Fechar">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
@@ -460,9 +530,49 @@ export function PilotHeadlineModal({
               ))}
             </div>
 
+            {/* FONTE + B/I/U numa linha só, como num editor de texto */}
+            <div className="hl-rotulo mt">Fonte</div>
+            <div className="hl-linha-fonte">
+              <select
+                value={cfg.font ?? ''}
+                onChange={(e) => mudar({ on: true, font: e.target.value || null })}
+                className="hl-select"
+                title="Fonte da headline"
+              >
+                <option value="">padrão do modelo</option>
+                {fontes.map((f) => (
+                  <option key={f.k} value={f.k}>{f.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={'hl-biu font-black' + (cfg.bold ? ' is-on' : '')}
+                onClick={() => mudar({ on: true, bold: !cfg.bold })}
+                title="Negrito"
+              >
+                B
+              </button>
+              <button
+                type="button"
+                className={'hl-biu italic' + (cfg.italic ? ' is-on' : '')}
+                onClick={() => mudar({ on: true, italic: !cfg.italic })}
+                title="Itálico"
+              >
+                I
+              </button>
+              <button
+                type="button"
+                className={'hl-biu underline' + (cfg.underline ? ' is-on' : '')}
+                onClick={() => mudar({ on: true, underline: !cfg.underline })}
+                title="Sublinhado"
+              >
+                S
+              </button>
+            </div>
+
             <Regua
               rotulo="Tamanho"
-              nota={`${Math.round((cfg.fontScale ?? 1) * 100)}%`}
+              mostra={`${Math.round((cfg.fontScale ?? 1) * 100)}%`}
               valor={cfg.fontScale ?? 1}
               min={HEADLINE_LIMITES.fontScale.min}
               max={HEADLINE_LIMITES.fontScale.max}
@@ -473,7 +583,7 @@ export function PilotHeadlineModal({
 
             <Regua
               rotulo="Largura do bloco"
-              nota={`${Math.round((cfg.width ?? 0.9) * 100)}% da tela — daqui sai a quebra de linha`}
+              mostra={`${Math.round((cfg.width ?? 0.9) * 100)}%`}
               valor={cfg.width ?? 0.9}
               min={HEADLINE_LIMITES.width.min}
               max={HEADLINE_LIMITES.width.max}
@@ -485,10 +595,16 @@ export function PilotHeadlineModal({
             <Segmentado<Alinhamento | null>
               rotulo="Alinhamento"
               opcoes={[
-                { v: null, txt: 'do modelo' },
-                { v: 'left', txt: '⟨', title: 'à esquerda' },
-                { v: 'center', txt: '≡', title: 'centralizado' },
-                { v: 'right', txt: '⟩', title: 'à direita' },
+                { v: null, txt: 'padrão' },
+                { v: 'left', title: 'à esquerda', icone: (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M4 6h16M4 12h10M4 18h13" /></svg>
+                ) },
+                { v: 'center', title: 'centralizado', icone: (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M4 6h16M7 12h10M5.5 18h13" /></svg>
+                ) },
+                { v: 'right', title: 'à direita', icone: (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M4 6h16M10 12h10M7 18h13" /></svg>
+                ) },
               ]}
               valor={(cfg.align ?? null) as Alinhamento | null}
               onMudar={(v) => mudar({ on: true, align: v })}
@@ -497,9 +613,9 @@ export function PilotHeadlineModal({
             <Segmentado<boolean | null>
               rotulo="Caixa"
               opcoes={[
-                { v: null, txt: 'do modelo' },
-                { v: true, txt: 'MAIÚSCULA' },
-                { v: false, txt: 'como escrito' },
+                { v: null, txt: 'padrão' },
+                { v: true, txt: 'AA', title: 'tudo em maiúscula' },
+                { v: false, txt: 'Aa', title: 'como escrito' },
               ]}
               valor={cfg.uppercase ?? null}
               onMudar={(v) => mudar({ on: true, uppercase: v })}
@@ -507,9 +623,8 @@ export function PilotHeadlineModal({
 
             <Segmentado<'solido' | 'faixa' | 'nenhum' | null>
               rotulo="Fundo"
-              nota="a caixa atrás do texto"
               opcoes={[
-                { v: null, txt: 'do modelo' },
+                { v: null, txt: 'padrão' },
                 { v: 'solido', txt: 'sólido' },
                 { v: 'faixa', txt: 'faixa' },
                 { v: 'nenhum', txt: 'nenhum' },
@@ -519,41 +634,63 @@ export function PilotHeadlineModal({
             />
 
             {(cfg.panel ?? null) !== 'nenhum' ? (
-              <Regua
-                rotulo="Opacidade do fundo"
-                nota={cfg.panelOpacity == null ? 'do modelo' : `${Math.round(cfg.panelOpacity * 100)}%`}
-                valor={cfg.panelOpacity ?? 0.85}
-                min={0}
-                max={1}
-                passo={0.05}
-                onMudar={(v) => mudar({ on: true, panelOpacity: v })}
-                aoZerar={cfg.panelOpacity != null ? () => mudar({ panelOpacity: null }) : undefined}
-              />
+              <>
+                <Regua
+                  rotulo="Opacidade do fundo"
+                  mostra={cfg.panelOpacity == null ? 'padrão' : `${Math.round(cfg.panelOpacity * 100)}%`}
+                  valor={cfg.panelOpacity ?? 0.85}
+                  min={0}
+                  max={1}
+                  passo={0.05}
+                  onMudar={(v) => mudar({ on: true, panelOpacity: v })}
+                  aoZerar={cfg.panelOpacity != null ? () => mudar({ panelOpacity: null }) : undefined}
+                />
+                <Cores rotulo="Cor do fundo" valor={cfg.panelColor ?? null} onMudar={(v) => mudar({ on: true, panelColor: v })} />
+              </>
             ) : null}
 
-            <div className="hl-rotulo mt">
-              Cor do texto
-              <span className="hl-rotulo-nota">{CORES.find((c) => c.v === (cfg.color ?? null))?.nome || 'personalizada'}</span>
-            </div>
-            <div className="hl-cores">
-              {CORES.map((c) => (
-                <button
-                  key={c.nome}
-                  type="button"
-                  title={c.nome}
-                  className={'hl-cor' + ((cfg.color ?? null) === c.v ? ' is-on' : '') + (c.v === null ? ' is-auto' : '')}
-                  style={c.v ? { background: c.v } : undefined}
-                  onClick={() => mudar({ on: true, color: c.v })}
-                >
-                  {c.v === null ? 'A' : ''}
-                </button>
-              ))}
-            </div>
+            <Cores rotulo="Cor do texto" valor={cfg.color ?? null} onMudar={(v) => mudar({ on: true, color: v })} />
 
-            <div className="hl-rotulo mt">
-              Fica até o fim de
-              <span className="hl-rotulo-nota">a saída pula pro corte mais próximo</span>
-            </div>
+            <Regua
+              rotulo="Traço (contorno)"
+              mostra={(cfg.stroke ?? 0) > 0 ? `${Math.round((cfg.stroke ?? 0) * 100)}%` : 'off'}
+              valor={cfg.stroke ?? 0}
+              min={0}
+              max={1}
+              passo={0.05}
+              onMudar={(v) => mudar({ on: true, stroke: v })}
+              aoZerar={(cfg.stroke ?? 0) > 0 ? () => mudar({ stroke: null, strokeColor: null }) : undefined}
+            />
+            {(cfg.stroke ?? 0) > 0 ? (
+              <Cores rotulo="Cor do traço" valor={cfg.strokeColor ?? null} onMudar={(v) => mudar({ strokeColor: v })} />
+            ) : null}
+
+            <Regua
+              rotulo="Sombra"
+              mostra={cfg.shadowForca == null ? 'padrão' : cfg.shadowForca > 0 ? `${Math.round(cfg.shadowForca * 100)}%` : 'off'}
+              valor={cfg.shadowForca ?? 0}
+              min={0}
+              max={1}
+              passo={0.05}
+              onMudar={(v) => mudar({ on: true, shadowForca: v })}
+              aoZerar={cfg.shadowForca != null ? () => mudar({ shadowForca: null }) : undefined}
+            />
+
+            <Regua
+              rotulo="Brilho"
+              mostra={(cfg.glow ?? 0) > 0 ? `${Math.round((cfg.glow ?? 0) * 100)}%` : 'off'}
+              valor={cfg.glow ?? 0}
+              min={0}
+              max={1}
+              passo={0.05}
+              onMudar={(v) => mudar({ on: true, glow: v })}
+              aoZerar={(cfg.glow ?? 0) > 0 ? () => mudar({ glow: null, glowColor: null }) : undefined}
+            />
+            {(cfg.glow ?? 0) > 0 ? (
+              <Cores rotulo="Cor do brilho" valor={cfg.glowColor ?? null} onMudar={(v) => mudar({ glowColor: v })} />
+            ) : null}
+
+            <div className="hl-rotulo mt">Fica até o fim de</div>
             <div className="hl-partes">
               {comTexto.map((p) => (
                 <button
@@ -567,6 +704,7 @@ export function PilotHeadlineModal({
                 </button>
               ))}
             </div>
+            <div className="hl-nota-fim">a saída pula pro corte mais próximo — o corte mascara o sumiço</div>
           </div>
         </div>
 

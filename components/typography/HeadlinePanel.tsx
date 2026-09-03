@@ -26,6 +26,7 @@ import {
   type HeadlineAlign,
   type HeadlineStyle,
 } from '@/lib/typography/headline';
+import { TYPO_FONTS, type FontKey } from '@/lib/typography/fonts';
 import { formatTime } from '@/lib/utils';
 
 const T3D =
@@ -442,6 +443,95 @@ export function HeadlinePanel({
                     value={sel.style.panelOpacity ?? preset.panelOpacity}
                     display={(v) => `${Math.round(v * 100)}%`}
                     onChange={(v) => setStyle({ panelOpacity: v })}
+                    onCommit={onCommit}
+                    disabled={disabled}
+                  />
+                </div>
+
+                {/* ── TEXTO AVANÇADO (02.09): fonte, B/I/U, traço, sombra, brilho ── */}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <select
+                    value={sel.style.font ?? preset.font}
+                    disabled={disabled}
+                    onChange={(e) => {
+                      onCommit();
+                      setStyle({ font: e.target.value as FontKey });
+                    }}
+                    className="rounded-[10px] bg-bg-soft px-2.5 py-1.5 text-[11.5px] font-semibold text-text shadow-[inset_0_0_0_1px_rgb(var(--line))]"
+                    title="Fonte da headline"
+                  >
+                    {Object.entries(TYPO_FONTS).map(([k, f]) => (
+                      <option key={k} value={k}>{f.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => { onCommit(); setStyle({ bold: !(sel.style.bold ?? false) }); }}
+                    className={'fx-chip font-black' + ((sel.style.bold ?? false) ? ' is-on' : '')}
+                    title="Negrito"
+                  >B</button>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => { onCommit(); setStyle({ italic: !(sel.style.italic ?? false) }); }}
+                    className={'fx-chip italic' + ((sel.style.italic ?? false) ? ' is-on' : '')}
+                    title="Itálico"
+                  >I</button>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => { onCommit(); setStyle({ underline: !(sel.style.underline ?? false) }); }}
+                    className={'fx-chip underline' + ((sel.style.underline ?? false) ? ' is-on' : '')}
+                    title="Sublinhado"
+                  >S</button>
+                  <span className="h-6 w-px bg-line" />
+                  <ColorDot
+                    label="Traço"
+                    value={sel.style.strokeColor ?? null}
+                    fallback="#000000"
+                    onPick={(v) => setStyle({ strokeColor: v, stroke: (sel.style.stroke ?? 0) > 0 ? sel.style.stroke : 0.4 })}
+                    disabled={disabled}
+                  />
+                  <ColorDot
+                    label="Brilho"
+                    value={sel.style.glowColor ?? null}
+                    fallback={sel.style.color ?? preset.color}
+                    onPick={(v) => setStyle({ glowColor: v, glow: (sel.style.glow ?? 0) > 0 ? sel.style.glow : 0.5 })}
+                    disabled={disabled}
+                  />
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <Slider
+                    label="Traço"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={sel.style.stroke ?? 0}
+                    display={(v) => (v > 0 ? `${Math.round(v * 100)}%` : 'off')}
+                    onChange={(v) => setStyle({ stroke: v })}
+                    onCommit={onCommit}
+                    disabled={disabled}
+                  />
+                  <Slider
+                    label="Sombra"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={sel.style.shadowForca ?? preset.shadow}
+                    display={(v) => (v > 0 ? `${Math.round(v * 100)}%` : 'off')}
+                    onChange={(v) => setStyle({ shadowForca: v })}
+                    onCommit={onCommit}
+                    disabled={disabled}
+                  />
+                  <Slider
+                    label="Brilho"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={sel.style.glow ?? 0}
+                    display={(v) => (v > 0 ? `${Math.round(v * 100)}%` : 'off')}
+                    onChange={(v) => setStyle({ glow: v })}
                     onCommit={onCommit}
                     disabled={disabled}
                   />

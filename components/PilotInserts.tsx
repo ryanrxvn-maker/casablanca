@@ -518,6 +518,11 @@ export function PilotInsertsModal({
 
           {/* ── DIREITA: a copy da parte + os inserts dela ── */}
           <section className="pi-palco">
+            {/* COPY STICKY (02.09): a coluna INTEIRA rola — é o que garante que
+              * recorte, encaixe e foco sejam alcançáveis em qualquer altura de
+              * tela — e a copy gruda no topo com fundo sólido, então marcar o
+              * trecho continua possível com o card aberto. */}
+            <div className="pi-copy-fixa">
             <div className="pi-rotulo">
               Clique na palavra em que o insert entra
               <span className="pi-rotulo-nota">o texto do HeyGen não muda — isto é só a montagem</span>
@@ -587,6 +592,7 @@ export function PilotInsertsModal({
               ) : (
                 <>Clique na primeira palavra do trecho e depois na última. O insert cobre exatamente essa fala.</>
               )}
+            </div>
             </div>
 
             {/* ── os inserts desta parte ── */}

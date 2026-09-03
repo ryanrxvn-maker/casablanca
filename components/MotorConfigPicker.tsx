@@ -286,7 +286,7 @@ export function MotorConfigPicker({
                                 key={m}
                                 type="button"
                                 onClick={() => setAvatarMotor(sl.id, m)}
-                                className={'motor-slot-chip' + (sl.motor === m ? ' is-on' : '')}
+                                className={'motor-slot-chip' + (sl.motor === m ? ` is-on is-${m.toLowerCase()}` : '')}
                                 title={`Avatar ${m} pra ${sl.nome}`}
                               >
                                 {m}
@@ -296,9 +296,6 @@ export function MotorConfigPicker({
                         </div>
                       );
                     })}
-                  </div>
-                  <div className="mt-2 text-[10.5px] leading-snug text-foreground/70">
-                    É o mesmo motor dos chips no card de cada avatar — mexer aqui mexe lá.
                   </div>
                 </>
               ) : (

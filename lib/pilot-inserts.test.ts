@@ -505,5 +505,29 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
 
 
 
+/* ═══ (8e) EMENDA: vão de frames entre dois inserts não vaza o avatar ═══ */
+{
+  // dois trechos vizinhos no BODY 1: o fim de um e o começo do outro ficam a
+  // ~meio segundo — antes disso virava um VÃO onde o avatar inteiro piscava.
+  const base = insertPadrao('x', 'BODY 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 1, h: 1 });
+  const vizinhos: Insert[] = [
+    { ...base, id: 'a', palavraDe: 0, palavraAte: 2 },
+    { ...base, id: 'b', palavraDe: 3, palavraAte: 6 },
+  ];
+  const jv = janelasDosInserts(vizinhos, PARTES, asrFiel(), DUR);
+  ok(jv.length === 2, 'as duas janelas existem');
+  ok(Math.abs(jv[1].start - jv[0].end) < 0.01,
+    `sem vão entre inserts vizinhos (era ${(jv[1].start - jv[0].end).toFixed(2)}s de avatar vazando)`);
+
+  // mas um vão GRANDE (trechos distantes) continua sendo avatar de verdade
+  const distantes: Insert[] = [
+    { ...base, id: 'a', palavraDe: 0, palavraAte: 1 },
+    { ...base, id: 'b', palavraDe: 7, palavraAte: 8 },
+  ];
+  const jd = janelasDosInserts(distantes, PARTES, asrFiel(), DUR);
+  ok(jd.length === 2 && jd[1].start - jd[0].end > 0.5,
+    'trechos distantes não são emendados — o avatar entre eles é conteúdo');
+}
+
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-inserts: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

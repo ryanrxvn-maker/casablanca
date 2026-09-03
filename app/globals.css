@@ -3492,22 +3492,29 @@ html[data-theme='light'] .btn-olho {
 
 /* Toggle FRAME × AVATAR de uma versao (icone-only) — os dois temas. */
 .ver-modo-btn {
+  /* +visível em 02.09 (26px, borda fúcsia no hover): agora ele é o ÚNICO
+   * caminho pro modo imagem — o botão grande saiu. */
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   flex-shrink: 0;
   border-radius: 999px;
   color: rgb(var(--text-muted));
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  background: rgba(232, 121, 249, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(232, 121, 249, 0.3);
   transition: color 0.15s, box-shadow 0.15s, background-color 0.15s, transform 0.15s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.ver-modo-btn.is-on {
+  color: #12040f;
+  background: linear-gradient(135deg, #f0abfc, #e879f9);
+  box-shadow: 0 4px 12px -6px rgba(232, 121, 249, 0.8);
 }
 .ver-modo-btn:hover {
   color: rgb(var(--text));
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(232, 121, 249, 0.16);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
 }
 html[data-theme='light'] .ver-modo-btn {
@@ -4246,8 +4253,14 @@ html[data-theme='light'] .pi-parte.is-on { background: rgba(14,165,233,0.1); box
  * A COPY é fixa e SÓ A LISTA de cards rola (02.09): antes a coluna inteira
  * rolava e a copy — que é flex e encolhe — era esmagada quando um card abria;
  * o Silas ficava sem conseguir marcar o trecho do texto. */
-.pi-palco { min-width: 0; display: flex; flex-direction: column; overflow: hidden; padding-bottom: 8px; }
-.pi-palco > .pi-rotulo { flex-shrink: 0; }
+.pi-palco { min-width: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px; }
+.pi-copy-fixa {
+  position: sticky; top: 0; z-index: 6; flex-shrink: 0;
+  padding-bottom: 8px;
+  background: rgba(13, 15, 20, 0.99);
+  box-shadow: 0 10px 14px -12px rgba(0, 0, 0, 0.8);
+}
+html[data-theme='light'] .pi-copy-fixa { background: rgba(252, 252, 250, 1); box-shadow: 0 10px 14px -12px rgba(16, 16, 24, 0.25); }
 .pi-copy {
   flex-shrink: 0;
   display: flex; flex-wrap: wrap; gap: 3px 1px; border-radius: 12px; padding: 13px 14px;
@@ -4309,7 +4322,6 @@ html[data-theme='light'] .pi-encaixe-icone { color: #0e7490; }
 
 /* cards dos inserts */
 .pi-lista {
-  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-right: 4px;
 }
 .pi-card {
@@ -4628,20 +4640,7 @@ html[data-theme='light'] .hl-card.is-on { box-shadow: inset 0 0 0 2px rgba(190,2
 
 .hl-slider { width: 100%; accent-color: #f472b6; }
 
-.hl-partes { display: flex; flex-wrap: wrap; gap: 6px; }
-.hl-parte {
-  border-radius: 999px; padding: 6px 13px;
-  font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 700;
-  letter-spacing: 0.08em; color: rgb(var(--text-muted));
-  background: rgba(255,255,255,0.045); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09);
-  transition: transform 0.15s cubic-bezier(0.32,0.72,0,1), color 0.15s, background-color 0.15s;
-}
-html[data-theme='light'] .hl-parte { background: rgba(16,16,24,0.04); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
-.hl-parte:hover { transform: translateY(-1px); color: rgb(var(--text)); }
-.hl-parte.is-on {
-  color: #2b0716; background: linear-gradient(150deg, #fbcfe8, #f472b6);
-  box-shadow: 0 6px 16px -8px rgba(219,39,119,0.9);
-}
+/* .hl-parte v3 mora no fim do bloco da headline (redesenho 02.09) */
 
 .hl-rodape { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 20px 18px; }
 .hl-padrao {
@@ -4753,12 +4752,14 @@ html[data-theme='light'] .aviso-pos {
 
 /* ── o palco ── */
 .hl-palco { display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+.hl-palco-area {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+}
 .hl-palco-quadro {
-  /* A PROPORÇÃO manda na largura, não o contrário. Com `width: 100%` o
-   * quadro esticava na coluna única e o `object-fit: cover` do canvas comia
-   * as laterais da manchete — o preview mentia sobre a quebra de linha. */
-  position: relative; flex: 1; min-height: 0;
-  aspect-ratio: 9 / 16; height: 100%; width: auto; max-width: 100%; margin: 0 auto;
+  /* O tamanho vem POR JS (ResizeObserver): a maior caixa 9:16 que cabe na
+   * área. CSS puro com aspect-ratio + max-width quebrava a proporção na
+   * coluna estreita e o preview mentia sobre a quebra de linha. */
+  position: relative;
   border-radius: 16px; overflow: hidden;
   cursor: crosshair; touch-action: none;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 22px 48px -30px rgba(0,0,0,0.9);
@@ -4886,6 +4887,74 @@ html[data-theme='light'] .hl-cor.is-auto {
   transform: translateY(-1px);
 }
 
+/* valor da régua + reset por ícone (o texto "70%PADRÃO" colado era ilegível) */
+.hl-valor {
+  margin-left: auto;
+  border-radius: 999px; padding: 2px 9px;
+  font-family: var(--font-mono), monospace; font-size: 10px; font-weight: 800;
+  letter-spacing: 0.06em; color: rgb(var(--text));
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+html[data-theme='light'] .hl-valor { background: rgba(16,16,24,0.06); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.hl-zerar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin-left: 6px; border-radius: 999px;
+  color: rgb(var(--text-dim));
+  background: rgba(255, 255, 255, 0.05);
+  transition: color 0.14s, background-color 0.14s;
+}
+.hl-zerar:hover { color: #f472b6; background: rgba(244, 114, 182, 0.12); }
+
+/* fonte + negrito/itálico/sublinhado */
+.hl-linha-fonte { display: flex; align-items: center; gap: 6px; }
+.hl-select {
+  flex: 1; min-width: 0;
+  border-radius: 10px; padding: 7px 10px;
+  font-size: 12px; font-weight: 600; color: rgb(var(--text));
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+}
+html[data-theme='light'] .hl-select { background: rgba(16,16,24,0.05); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.11); }
+.hl-select option { background: #14161c; color: #f2f4f8; }
+html[data-theme='light'] .hl-select option { background: #fff; color: #16181d; }
+.hl-biu {
+  width: 30px; height: 30px; border-radius: 9px;
+  font-size: 13px; line-height: 1; color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11);
+  transition: color 0.14s, background-color 0.14s, box-shadow 0.14s;
+}
+html[data-theme='light'] .hl-biu { background: rgba(16,16,24,0.05); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.11); }
+.hl-biu:hover { color: rgb(var(--text)); }
+.hl-biu.is-on {
+  color: #fff; background: linear-gradient(140deg, #db2777, #9333ea);
+  box-shadow: 0 6px 16px -10px rgba(219, 39, 119, 0.9);
+}
+
+/* cor livre: o input nativo (conta-gotas + gradiente do Chrome) */
+.hl-cor.is-livre { position: relative; overflow: hidden; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.hl-cor-input { position: absolute; inset: -6px; opacity: 0; cursor: pointer; }
+
+/* os chips de HOOK/BODY — antes eram texto cru apertado */
+.hl-partes { display: flex; flex-wrap: wrap; gap: 6px; }
+.hl-parte {
+  border-radius: 999px; padding: 6px 14px;
+  font-family: var(--font-mono), monospace; font-size: 10.5px; font-weight: 800;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  transition: color 0.14s, background-color 0.14s, box-shadow 0.14s, transform 0.14s;
+}
+html[data-theme='light'] .hl-parte { background: rgba(16,16,24,0.05); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.hl-parte:hover { color: rgb(var(--text)); transform: translateY(-1px); }
+.hl-parte.is-on {
+  color: #fff; background: linear-gradient(140deg, #db2777, #9333ea);
+  box-shadow: 0 8px 18px -10px rgba(219, 39, 119, 0.95);
+}
+.hl-nota-fim { margin-top: 7px; font-size: 11px; line-height: 1.45; color: rgb(var(--text-dim)); }
+
 /* ── JANELA ESTREITA: coluna única ────────────────────────────────────────
  * Tem que vir DEPOIS das regras do palco. Na primeira tentativa este bloco
  * ficou ANTES e as regras base (mesma especificidade, ordem maior) ganhavam:
@@ -4897,7 +4966,7 @@ html[data-theme='light'] .hl-cor.is-auto {
     align-content: start; overflow-y: auto;
   }
   .hl-palco { display: block; }
-  .hl-palco-quadro { flex: none; height: auto; width: 100%; max-width: 216px; }
+  .hl-palco-area { height: 400px; }
   .hl-palco-coord { margin-top: 9px; }
   .hl-controles { overflow: visible; }
 }
@@ -5054,3 +5123,48 @@ html[data-theme='light'] .mtg-rodape { border-top-color: rgba(16, 16, 24, 0.1); 
   transition: transform 0.14s, filter 0.14s;
 }
 .mtg-ok:hover { transform: translateY(-1px); filter: saturate(1.12); }
+
+
+/* ══ CARD DE ANÁLISE v2 (02.09) ══════════════════════════════════════════ */
+/* Base OPACA + tint por status: o card era translúcido e a grade de 52px do
+ * body vazava por ele — o "gradeado" que o Silas pediu pra tirar. */
+.analise-ok { background: linear-gradient(rgba(163, 230, 53, 0.055), rgba(163, 230, 53, 0.055)), rgb(var(--bg)); }
+.analise-parcial { background: linear-gradient(rgba(234, 179, 8, 0.055), rgba(234, 179, 8, 0.055)), rgb(var(--bg)); }
+.analise-erro { background: linear-gradient(rgba(239, 68, 68, 0.055), rgba(239, 68, 68, 0.055)), rgb(var(--bg)); }
+.analise-neutra { background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)), rgb(var(--bg)); }
+html[data-theme='light'] .analise-neutra { background: linear-gradient(rgba(16, 16, 24, 0.025), rgba(16, 16, 24, 0.025)), rgb(var(--bg)); }
+
+/* chips de informação — substituem os textos corridos "8 takes (1 hook + ...)" */
+.info-linha { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.info-linha b { font-weight: 800; color: rgb(var(--text)); }
+.info-chip {
+  display: inline-flex; align-items: center;
+  border-radius: 999px; padding: 2px 9px;
+  font-family: var(--font-mono), monospace; font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+html[data-theme='light'] .info-chip { background: rgba(16,16,24,0.05); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.info-chip.is-motor {
+  color: #ddd6fe; background: rgba(124, 92, 246, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(124, 92, 246, 0.45);
+}
+html[data-theme='light'] .info-chip.is-motor { color: #5b21b6; }
+.info-nota { font-size: 10px; color: rgb(var(--text-dim)); }
+
+/* estado da versão: um PONTO no lugar dos textos "— gera de novo" etc. */
+.ver-estado {
+  display: inline-block; width: 8px; height: 8px; border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+.ver-estado.is-gera { background: #f87171; box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25), 0 0 8px rgba(248, 113, 113, 0.6); }
+.ver-estado.is-frame { background: #e879f9; box-shadow: 0 0 0 2px rgba(232, 121, 249, 0.25); }
+.ver-estado.is-herda { background: rgba(255, 255, 255, 0.28); }
+html[data-theme='light'] .ver-estado.is-herda { background: rgba(16, 16, 24, 0.25); }
+
+/* cores POR MOTOR nos chips do painel "Por avatar" */
+.motor-slot-chip.is-on.is-iii { color: #fff; background: #7c3aed; }
+.motor-slot-chip.is-on.is-iv { color: #06222b; background: #22d3ee; }
+.motor-slot-chip.is-on.is-v { color: #2b1a02; background: #fbbf24; }

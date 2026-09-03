@@ -2035,12 +2035,22 @@ function ClickUpPilotInner() {
       // o doc escreve). Sem traduzir, o húngaro cairia no fallback e seria
       // transcrito como português — legenda e âncoras saem erradas.
       const ehDrMillion = !!an?.drMillion;
-      const ASR_DO_DRLANG: Record<string, string> = { pl: 'pl', hun: 'hu', pt: 'pt' };
+      const ASR_DO_DRLANG: Record<string, 'pl' | 'hu' | 'pt'> = { pl: 'pl', hun: 'hu', pt: 'pt' };
+      // IDIOMA (02.09): fora do DR MILLION a copy era SEMPRE transcrita como
+      // pt — uma copy B2C em espanhol/inglês saía com legenda e âncora
+      // erradas. Agora o idioma é DETECTADO da própria copy (stopwords +
+      // diacríticos, determinístico); a escolha explícita do DR MILLION
+      // continua vencendo, e sem evidência o fallback segue pt.
+      const { idiomaDaCopy } = await import('@/lib/idioma');
+      const idioma = idiomaDaCopy(partes, ehDrMillion ? ASR_DO_DRLANG[drLangRef.current] || 'pt' : null);
+      if (!ehDrMillion && idioma !== 'pt') {
+        console.log(`[clickup-pilot] posprod ${taskId}: copy detectada como "${idioma}" — ASR e legenda neste idioma`);
+      }
       const r = await montarPosProducao(blob, info, {
         legenda,
         zoom,
         partes,
-        idioma: ehDrMillion ? (ASR_DO_DRLANG[drLangRef.current] || 'pt') : 'pt',
+        idioma,
         templates: captionTemplatesRef.current,
         // O pipeline roda INTEIRO dentro do runPostPipelineSerial, que já
         // segura o lock exclusivo do ffmpeg. Sem avisar isto, o mux de áudio
@@ -9427,6 +9437,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ver,
           sl.role,
         );
+        const escRaw = ver.porPapel?.[sl.role.toLowerCase()];
         return {
           ...sl,
           avatarId: esc.avatarId ?? null,
@@ -9434,6 +9445,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarThumb: esc.avatarThumb ?? null,
           avatarVoiceId: esc.avatarVoiceId ?? null,
           voiceOverride: esc.voiceOverride ?? null,
+          // MOTOR da versão (02.09): escolhido no painel POR AVATAR; vazio
+          // herda o motor do slot da versão 1.
+          engine: (escRaw?.engine as 'III' | 'IV' | 'V' | undefined) ?? sl.engine,
           // MODO IMAGEM: a irmã leva o FRAME da versão (ou o da 1).
           imageKey: esc.imageKey ?? null,
           imageDataUrl: esc.imageDataUrl ?? null,
@@ -9490,6 +9504,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarName: esc.avatarName ?? null,
           avatarThumb: esc.avatarThumb ?? null,
           avatarVoiceId: esc.avatarVoiceId ?? null,
+          engine: ((sl.avatarYoutube as { engine?: 'III' | 'IV' | 'V' } | null)?.engine) ?? sl.engine,
           // O MODO segue a ESCOLHA da versão, não o slot base: versão 2 que
           // trocou o frame por avatar da biblioteca dispara como avatar comum.
           // Sem isto a irmã nascia "modo imagem sem imagem" e nunca aprontava.
@@ -13119,10 +13134,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           .filter((a) => taskIdBaseDaVersao(a.taskId) === a.taskId)
                           .map((a) => {
                           const sym = a.status === 'ready' ? '✓' : a.status === 'partial' ? '⚠' : a.status === 'error' ? '✗' : a.status === 'analyzing' ? '◷' : '·';
-                          const color = a.status === 'ready' ? 'border-lime/40 bg-lime/5' :
-                                         a.status === 'partial' ? 'border-yellow-500/40 bg-yellow-500/5' :
-                                         a.status === 'error' ? 'border-red-500/40 bg-red-500/5' :
-                                         'border-line bg-bg-soft/30';
+                          // Fundo OPACO (02.09): o card era translúcido e a grade de 52px
+                          // do body vazava por ele — o "gradeado" que o Silas pediu pra
+                          // tirar. As classes .analise-* põem o tint POR CIMA de uma base
+                          // sólida (globals.css).
+                          const color = a.status === 'ready' ? 'border-lime/40 analise-ok' :
+                                         a.status === 'partial' ? 'border-yellow-500/40 analise-parcial' :
+                                         a.status === 'error' ? 'border-red-500/40 analise-erro' :
+                                         'border-line analise-neutra';
                           // Acha os siblings que compartilham essa analise (G2, G3, etc)
                           const sharedSiblings = Object.values(taskAnalyses).filter(
                             (s) => s.sharedWithPrimaryId === a.taskId
@@ -13189,15 +13208,52 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                        adicionar/remover avatar aparece na hora. Escreve no MESMO
                                        `slot.engine` dos chips do card — que e' quem o disparo
                                        respeita (`p.engine || motorConfig`). */
-                                    avatarSlots={(a.roleSlots || []).map((sl, i) => ({
-                                      id: String(i),
-                                      nome: sl.avatarName || sl.role || sl.username,
-                                      thumb: sl.avatarThumb || sl.imageThumb || null,
-                                      motor: (sl.engine as Motor) || 'III',
-                                      motionPrompt: sl.motionPrompt || null,
-                                      imageMode: !!sl.imageMode,
-                                    }))}
-                                    setAvatarMotor={(id, m) => updateRoleSlot(a.taskId, Number(id), { engine: m })}
+                                    avatarSlots={[
+                                      ...(a.roleSlots || []).map((sl, i) => ({
+                                        id: String(i),
+                                        nome: sl.avatarName || sl.role || sl.username,
+                                        thumb: sl.avatarThumb || sl.imageThumb || null,
+                                        motor: (sl.engine as Motor) || 'III',
+                                        motionPrompt: sl.motionPrompt || null,
+                                        imageMode: !!sl.imageMode,
+                                      })),
+                                      // VERSÕES com avatar próprio (02.09): cada uma escolhe o
+                                      // próprio motor aqui — antes só a versão 1 aparecia e o
+                                      // IV/V não tinha como valer nas irmãs.
+                                      ...(a.roleSlots || []).flatMap((sl, i) => {
+                                        const linhas: Array<{ n: number; esc: { avatarId?: string | null; avatarName?: string | null; avatarThumb?: string | null; engine?: 'III' | 'IV' | 'V' | null } }> = [];
+                                        if (a.duasVersoes && sl.avatarYoutube?.avatarId) linhas.push({ n: 2, esc: sl.avatarYoutube as never });
+                                        for (const ver of a.versoes || []) {
+                                          const e = ver.porPapel?.[sl.role.toLowerCase()];
+                                          if (e?.avatarId) linhas.push({ n: ver.n, esc: e });
+                                        }
+                                        return linhas.map(({ n, esc }) => ({
+                                          id: `${i}:v${n}`,
+                                          nome: `${esc.avatarName || sl.role} · Versão ${n}`,
+                                          thumb: esc.avatarThumb || null,
+                                          motor: (esc.engine as Motor) || 'III',
+                                          motionPrompt: sl.motionPrompt || null,
+                                          imageMode: false,
+                                        }));
+                                      }),
+                                    ]}
+                                    setAvatarMotor={(id, m) => {
+                                      const [sIdxStr, vTag] = id.split(':');
+                                      const sIdx = Number(sIdxStr);
+                                      if (!vTag) {
+                                        updateRoleSlot(a.taskId, sIdx, { engine: m });
+                                        return;
+                                      }
+                                      const n = Number(vTag.slice(1));
+                                      const sl = a.roleSlots?.[sIdx];
+                                      if (!sl) return;
+                                      if (n === 2) {
+                                        updateRoleSlot(a.taskId, sIdx, { avatarYoutube: { ...(sl.avatarYoutube || {}), engine: m } as never });
+                                      } else {
+                                        const esc = (a.versoes || []).find((v) => v.n === n)?.porPapel?.[sl.role.toLowerCase()];
+                                        if (esc?.avatarId) setAvatarDaVersao(a.taskId, n, sl.role, { ...esc, engine: m } as never);
+                                      }
+                                    }}
                                   />
                                 </div>
                               ) : null}
@@ -14133,7 +14189,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         {onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}
                                       </span>
                                     ) : (
-                                    <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}){onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}</span>
+                                    <span className="info-linha">
+                                      <b>{a.totalParts} takes</b>
+                                      <span className="info-chip">{a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'}</span>
+                                      <span className="info-chip">{a.bodyPartsCount} body</span>
+                                      {onlyMagnificMode ? <span className="info-chip">só copy (B-Rolls)</span> : <span className="info-chip is-motor">Avatar III</span>}
+                                    </span>
                                     )}
                                   </div>
                                   {/* A copy saiu INTEIRA? Um filtro do parser comendo fala
@@ -14299,7 +14360,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
                                             <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
                                             <span className="text-white/70">{refLabel}</span>
-                                            <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
+                                            <span className="info-chip">{partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
                                               <span className="chip-alerta ml-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest">
                                                 <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
@@ -14612,61 +14673,24 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           </div>
                                           {/* ═══ SELETORES (Avatar + Voz) — grid limpo ═══ */}
                                           <div className="mt-2.5 grid gap-2">
-                                            {/* BOTÃO 3D — MODO IMAGEM. Liga quando o avatar não existe
-                                              * na biblioteca (inclusive rosto que a moderação reprovou,
-                                              * caso em que o caminho normal morre no 0x0). Aí em vez de
-                                              * escolher avatar, sobe a imagem: o HeyGen anima ela pela
-                                              * variante `image`, que dispensa avatar_id. Cada slot tem a
-                                              * SUA imagem, então N avatares por AD continuam valendo e a
-                                              * montagem junta igual. */}
-                                            <button
-                                              type="button"
-                                              disabled={!!slot.audioKey && !slot.imageMode}
-                                              onClick={() => updateRoleSlot(a.taskId, sIdx, { imageMode: !slot.imageMode })}
-                                              className={
-                                                'group relative inline-flex items-center gap-2 self-start rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px] ' +
-                                                // MODO ÁUDIO: imagem e áudio são mutuamente exclusivos — dorme.
-                                                (slot.audioKey && !slot.imageMode ? 'pointer-events-none opacity-35' : '')
-                                              }
-                                              style={
-                                                slot.imageMode
-                                                  ? {
-                                                      fontFamily: 'var(--font-tech)',
-                                                      color: '#12040f',
-                                                      borderColor: 'rgba(232,121,249,0.55)',
-                                                      background: 'linear-gradient(135deg, #f0abfc 0%, #e879f9 100%)',
-                                                      boxShadow:
-                                                        '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(232,121,249,0.7), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
-                                                    }
-                                                  : {
-                                                      fontFamily: 'var(--font-tech)',
-                                                      color: 'rgba(255,255,255,0.55)',
-                                                      borderColor: 'rgba(255,255,255,0.12)',
-                                                      background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
-                                                      boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
-                                                    }
-                                              }
-                                              title={
-                                                slot.imageMode
-                                                  ? 'Ligado: sobe a imagem e o HeyGen anima ela (sem avatar da biblioteca). A fala desta cena sai num take único.'
-                                                  : 'Ligue quando o avatar não existir na biblioteca — aí você sobe a imagem em vez de escolher avatar.'
-                                              }
-                                            >
-                                              <span className="text-[12px] leading-none">🖼</span>
-                                              Modo imagem
-                                              <span
-                                                className={
-                                                  'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
-                                                  (slot.imageMode ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
-                                                }
-                                              >
-                                                {slot.imageMode ? 'ON' : 'OFF'}
-                                              </span>
-                                            </button>
+                                            {/* MODO IMAGEM virou o ícone ao lado do rótulo do
+                                              * avatar (02.09) — o botão grande sumiu a pedido. */}
                                             {slot.imageMode ? (
                                               <div className="rounded-[12px] border border-fuchsia-400/35 bg-fuchsia-500/[0.07] p-2.5">
                                                 <div className="label-tech mb-1.5 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-fuchsia-200">
                                                   Imagem desta cena (frame inicial)
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => updateRoleSlot(a.taskId, sIdx, { imageMode: false })}
+                                                    className="ver-modo-btn is-on ml-auto"
+                                                    title="Voltar pro avatar da biblioteca"
+                                                    aria-label="Desligar modo imagem"
+                                                  >
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                      <circle cx="12" cy="8" r="4" />
+                                                      <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                                                    </svg>
+                                                  </button>
                                                 </div>
                                                 <div className="flex items-start gap-2.5">
                                                   {slot.imageDataUrl ? (
@@ -14708,6 +14732,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
                                                 </svg>
                                                 Avatar HeyGen
+                                                <button
+                                                  type="button"
+                                                  disabled={!!slot.audioKey && !slot.imageMode}
+                                                  onClick={() => updateRoleSlot(a.taskId, sIdx, { imageMode: !slot.imageMode })}
+                                                  className={'ver-modo-btn' + (slot.imageMode ? ' is-on' : '') + (slot.audioKey && !slot.imageMode ? ' pointer-events-none opacity-35' : '')}
+                                                  title={slot.imageMode
+                                                    ? 'Modo imagem LIGADO — o HeyGen anima a imagem (sem avatar da biblioteca); clica pra voltar pro avatar'
+                                                    : 'Trocar pra MODO IMAGEM: sobe uma imagem em vez de escolher avatar'}
+                                                  aria-label="Modo imagem"
+                                                >
+                                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                                    <circle cx="9" cy="9" r="2" />
+                                                    <path d="m21 15-4.5-4.5L7 20" />
+                                                  </svg>
+                                                </button>
                                                 {/* NOME da versão 1 (02.09): "assim como a versão 3 é
                                                   * editável, a 2 e a 1 também". Só aparece quando o AD
                                                   * TEM versões — sem elas o campo seria ruído. Grava no
@@ -14845,13 +14885,20 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           title="Nome desta versão (aparece na lista de versões do card)"
                                                         />
                                                       ) : null}
-                                                      <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                        {esc?.avatarId
-                                                          ? '— gera de novo'
+                                                      {/* Sem texto (02.09): o estado vira um PONTO colorido
+                                                        * com a história no hover. */}
+                                                      <span
+                                                        className={
+                                                          'ver-estado ' +
+                                                          (esc?.avatarId ? 'is-gera' : esc?.imageKey || esc?.imageDataUrl ? 'is-frame' : 'is-herda')
+                                                        }
+                                                        title={esc?.avatarId
+                                                          ? 'Avatar próprio — esta versão gera de novo no HeyGen'
                                                           : esc?.imageKey || esc?.imageDataUrl
-                                                            ? '— frame escolhido ainda vale · escolha um avatar pra substituir'
-                                                            : '— vazio: usa o mesmo da versão 1 (sem custo)'}
-                                                      </span>
+                                                            ? 'Frame escolhido ainda vale — escolha um avatar pra substituir'
+                                                            : 'Vazia — usa o mesmo da versão 1, sem custo'}
+                                                        aria-hidden
+                                                      />
                                                       <button
                                                         type="button"
                                                         onClick={trocar}
@@ -14894,9 +14941,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       * pessoa). Vazio: em base de imagem usa a voz do
                                                       * PRÓPRIO avatar; em base de avatar, a da versão 1. */}
                                                     {esc?.avatarId ? (
-                                                      <div className="mt-1.5 max-w-[420px]">
+                                                      <div className={'mt-1.5 max-w-[420px]' + (slot.audioKey && !slot.imageMode && !slot.audioMirror ? ' pointer-events-none select-none opacity-35' : '')}>
                                                         <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] label-versao">
                                                           {`Voz da versão${nome ? ` ${nome}` : ` ${n}`}`}
+                                                          {slot.audioKey && !slot.imageMode ? (
+                                                            <span className="font-normal normal-case tracking-normal text-text-muted">— o ÁUDIO do avatar vale pra TODAS as versões</span>
+                                                          ) : null}
                                                           <span className="font-normal normal-case tracking-normal text-text-muted">
                                                             {voz?.id
                                                               ? '— voz própria'
@@ -15062,10 +15112,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                             {slot.audioName || 'áudio'}
                                                           </div>
                                                           <div className="mt-0.5 text-[10.5px] leading-tight text-text-muted">
-                                                            {dur ? `${Math.round(dur)}s · ` : ''}
-                                                            {takeUnicoAudio
-                                                              ? (curto && motorAudio === 'III' ? 'até 30s: vai inteiro, sem dividir' : `Avatar ${motorAudio}: vai inteiro num take único`)
-                                                              : `dividido em ${partsCount || 1} takes pelas pausas, sem cortar fala`}
+                                                            {dur ? <span className="info-chip">{Math.round(dur)}s</span> : null}
+                                                            {takeUnicoAudio ? (
+                                                              <span className="info-chip">{curto && motorAudio === 'III' ? 'vai inteiro (até 30s)' : 'take único'}</span>
+                                                            ) : (
+                                                              <span className="info-chip">{partsCount || 1} takes pelas pausas</span>
+                                                            )}
+                                                            {!takeUnicoAudio ? <span className="info-nota">sem cortar fala</span> : null}
                                                           </div>
                                                         </div>
                                                         {/* Motor da cena: com áudio, o seletor mora AQUI (o
@@ -15083,7 +15136,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                                 className={
                                                                   'mono rounded-full border px-2 py-[2px] text-[8.5px] font-bold uppercase tracking-widest transition ' +
                                                                   (aceso
-                                                                    ? 'border-violet-500/70 bg-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(124,92,246,0.7)]'
+                                                                    ? op === 'III'
+                                                                      ? 'border-violet-500/70 bg-violet-600 text-white shadow-[0_2px_8px_-2px_rgba(124,92,246,0.7)]'
+                                                                      : op === 'IV'
+                                                                        ? 'border-cyan-500/70 bg-cyan-600 text-white shadow-[0_2px_8px_-2px_rgba(34,211,238,0.7)]'
+                                                                        : 'border-amber-500/70 bg-amber-500 text-black shadow-[0_2px_8px_-2px_rgba(245,158,11,0.7)]'
                                                                     : 'border-line bg-bg-soft/50 text-text-muted hover:border-violet-400/50')
                                                                 }
                                                                 title={
