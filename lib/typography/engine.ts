@@ -498,6 +498,17 @@ export type StyleState = {
    */
   autoFit?: boolean;
   /**
+   * Rotação da COMPOSIÇÃO do bloco em graus (alça de girar / painel).
+   * Soma com a rotação estética do modelo (blockRotate). O bbox devolve o
+   * ângulo pra UI girar a caixa de seleção e o hit-test junto.
+   */
+  rotation?: number;
+  /**
+   * Largura da CAIXA DE TEXTO como fração da largura útil (0.3..1) — a alça
+   * lateral estilo CapCut: em vez de escalar o texto, muda ONDE ele quebra.
+   */
+  boxWidth?: number;
+  /**
    * LINHA ÚNICA (default DESLIGADO): o bloco nunca quebra pra uma segunda
    * linha — a linha encolhe pra caber no frame e a frase seguinte entra no
    * PRÓXIMO bloco, em vez de descer. Vence o empilhado/quebra-de-ênfase do
@@ -565,6 +576,8 @@ export type PerBlockStyle = Partial<
     | 'fxSmoke'
     | 'autoFit'
     | 'singleLine'
+    | 'rotation'
+    | 'boxWidth'
     | 'fx'
     | 'bgMode'
     | 'bgColor'
@@ -811,14 +824,15 @@ function measureLayout(
   const wsKey = ws ? hashStr(JSON.stringify(ws)) : 0;
   const fit = style.autoFit !== false;
   const single = style.singleLine === true;
-  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}|${fit ? 1 : 0}${single ? 'u' : ''}|${wsKey}`;
+  const boxW = Math.min(1, Math.max(0.3, style.boxWidth ?? 1));
+  const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}|${fit ? 1 : 0}${single ? 'u' : ''}|${wsKey}|${boxW}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
   if (layoutCache.size > 300) layoutCache.clear();
 
   const fontPx = preset.size * W * style.fontScale;
   const lineH = fontPx * (preset.lineHeight ?? 1.16);
-  const maxLineW = W * 0.86;
+  const maxLineW = W * 0.86 * boxW;
   // ajuste automático DESLIGADO: quebras congeladas como no tamanho 100%
   // (limiar de quebra escala junto com a fonte → mesmos pontos de quebra)
   // LINHA ÚNICA: nunca quebra — o encolhimento lá embaixo garante que cabe
@@ -1825,6 +1839,7 @@ export function drawCaptions(
   const rotSeed = isSolo ? seedBase + activeIdx * 13 : seedBase;
   const rotDeg =
     (preset.blockRotate ?? 0) +
+    (style.rotation ?? 0) +
     (preset.blockRotateJitter
       ? (prand(rotSeed * 7 + 3) - 0.5) * 2 * preset.blockRotateJitter
       : 0);
@@ -3061,6 +3076,11 @@ export function captionBBoxAt(
   w: number;
   h: number;
   blockId: string;
+  /** rotação do USER em radianos (a estética do modelo fica de fora) */
+  rot: number;
+  /** centro da composição — o pivô da rotação */
+  cx: number;
+  cy: number;
   /** limites de posX/posY deste bloco — a UI do arrasto usa EXATAMENTE estes */
   bounds: { minX: number; maxX: number; minY: number; maxY: number };
 } | null {
@@ -3100,6 +3120,9 @@ export function captionBBoxAt(
     w: blockWmax + pad * 2,
     h: blockH + pad * 2,
     blockId: block.id,
+    rot: ((style.rotation ?? 0) * Math.PI) / 180,
+    cx,
+    cy: topY + blockH / 2,
     bounds: captionPosBounds(larguraAncora, blockH, W, H),
   };
 }

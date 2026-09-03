@@ -190,6 +190,8 @@ type SavedSession = {
   lockedBlocks?: string[];
   autoFit?: boolean;
   singleLine?: boolean;
+  rotation?: number;
+  boxWidth?: number;
   fx?: FxState;
   headlines?: Headline[];
   bgMode?: 'preset' | 'on' | 'off';
@@ -291,6 +293,9 @@ function TipografiaInner() {
   const [fontOv, setFontOv] = useToolState<FontKey | null>('tipografia:fontov', null);
   const [posX, setPosX] = useToolState<number>('tipografia:posx', 0.5);
   const [autoFitG, setAutoFitG] = useToolState<boolean>('tipografia:autofit', true);
+  // rotação e largura da caixa de texto (alças estilo CapCut no preview)
+  const [rotG, setRotG] = useToolState<number>('tipografia:rot', 0);
+  const [boxWG, setBoxWG] = useToolState<number>('tipografia:boxw', 1);
   const [singleLineG, setSingleLineG] = useToolState<boolean>('tipografia:singleline', false);
   // efeitos LIGAVEIS (traco/sombra/brilho/fumaca) — ver lib/typography/fx.ts
   const [fxG, setFxG] = useToolState<FxState>('tipografia:fx', fxSeed());
@@ -355,6 +360,8 @@ function TipografiaInner() {
     fontOv: FontKey | null;
     animIn: AnimKind | null;
     animOut: OutKind | null;
+    rot: number;
+    boxW: number;
   };
   const historyRef = useRef<Snapshot[]>([]);
   const snapRef = useRef<Snapshot | null>(null);
@@ -376,6 +383,8 @@ function TipografiaInner() {
     fontOv,
     animIn: animInG,
     animOut: animOutG,
+    rot: rotG,
+    boxW: boxWG,
   };
   const pushHistory = useCallback(() => {
     const s = snapRef.current;
@@ -403,6 +412,8 @@ function TipografiaInner() {
     setFontOv(s.fontOv);
     setAnimInG(s.animIn);
     setAnimOutG(s.animOut);
+    setRotG(s.rot ?? 0);
+    setBoxWG(s.boxW ?? 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -467,6 +478,8 @@ function TipografiaInner() {
       posX,
       autoFit: autoFitG,
       singleLine: singleLineG,
+      rotation: rotG,
+      boxWidth: boxWG,
       fx: fxG,
       bgMode: bgModeG,
       bgColor: bgColorG,
@@ -476,7 +489,7 @@ function TipografiaInner() {
       wordStyles,
       perBlock: blockStyles,
     }),
-    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, singleLineG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
+    [presetId, fontScale, posY, primary, accent, textCase, bold, italic, underlineG, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, highlights, autoEmph, fontOv, posX, autoFitG, singleLineG, rotG, boxWG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, wordStyles, blockStyles],
   );
 
   // ── "Aplicar a todas" × edição por bloco ─────────────────────────────────
@@ -501,6 +514,8 @@ function TipografiaInner() {
         if (patch.fxSmoke !== undefined) setFxSmokeG(patch.fxSmoke);
         if (patch.fontOverride !== undefined) setFontOv(patch.fontOverride ?? null);
         if (patch.autoFit !== undefined) setAutoFitG(patch.autoFit !== false);
+        if (patch.rotation !== undefined) setRotG(patch.rotation ?? 0);
+        if (patch.boxWidth !== undefined) setBoxWG(patch.boxWidth ?? 1);
         if (patch.singleLine !== undefined) setSingleLineG(patch.singleLine === true);
         if (patch.fx !== undefined) setFxG(normalizeFx(patch.fx));
         if (patch.bgMode !== undefined) setBgModeG(patch.bgMode ?? 'preset');
@@ -515,7 +530,7 @@ function TipografiaInner() {
         [editingBlockId]: { ...prev[editingBlockId], ...patch },
       }));
     },
-    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setSingleLineG, setFxG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
+    [editingBlockId, setFontScale, setPrimary, setAccent, setPosX, setPosY, setTextCase, setBold, setItalic, setUnderlineG, setFxStrokeG, setFxShadowG, setFxGlowG, setFxSmokeG, setFontOv, setAutoFitG, setSingleLineG, setRotG, setBoxWG, setFxG, setBgModeG, setBgColorG, setBgOpacityG, setAnimInG, setAnimOutG, setBlockStyles],
   );
   // modelo EFETIVO do que o painel está editando: com um bloco travado (ou em
   // edição só-dele), o modelo do bloco vence o global — os rótulos "do modelo"
@@ -622,6 +637,8 @@ function TipografiaInner() {
           fxSmoke: fxSmokeG,
           autoFit: autoFitG,
           singleLine: singleLineG,
+          rotation: rotG,
+          boxWidth: boxWG,
           fx: fxG,
           bgMode: bgModeG,
           bgColor: bgColorG,
@@ -634,7 +651,7 @@ function TipografiaInner() {
       }));
       setLockedBlocks((prev) => [...prev, blockId]);
     },
-    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, singleLineG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
+    [pushHistory, lockedBlocks, blockStyles, setLockedBlocks, setBlockStyles, presetId, fontScale, primary, accent, posX, posY, textCase, bold, italic, underlineG, fontOv, fxStrokeG, fxShadowG, fxGlowG, fxSmokeG, autoFitG, singleLineG, rotG, boxWG, fxG, bgModeG, bgColorG, bgOpacityG, animInG, animOutG],
   );
 
   // ── IDENTIDADE dos blocos (cadeado + os 3 mapas por id) ─────────────────
@@ -782,6 +799,8 @@ function TipografiaInner() {
         }
         setAutoFitG(saved.autoFit ?? true);
         setSingleLineG(saved.singleLine ?? false);
+        setRotG(saved.rotation ?? 0);
+        setBoxWG(saved.boxWidth ?? 1);
         setFxG(normalizeFx(saved.fx));
         setHeadlines(Array.isArray(saved.headlines) ? saved.headlines : []);
         setBgModeG(saved.bgMode ?? 'preset');
@@ -832,6 +851,8 @@ function TipografiaInner() {
       lockedBlocks,
       autoFit: autoFitG,
       singleLine: singleLineG,
+      rotation: rotG,
+      boxWidth: boxWG,
       fx: fxG,
       headlines,
       bgMode: bgModeG,
@@ -842,7 +863,7 @@ function TipografiaInner() {
       script: scriptSegs,
     }), 400);
     return () => clearTimeout(t);
-  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, fxG, headlines, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
+  }, [file, phase, words, blocks, presetId, fontScale, posY, primary, accent, pace, language, highlights, autoEmph, fontOv, posX, textCase, bold, italic, blockStyles, wordStyles, lockedBlocks, autoFitG, singleLineG, rotG, boxWG, fxG, headlines, bgModeG, bgColorG, bgOpacityG, animInG, animOutG, scriptSegs]);
 
   const validation = useMemo(() => {
     if (!file) return null;
@@ -1488,6 +1509,8 @@ function TipografiaInner() {
                   style={style}
                   fontScale={effOf('fontScale', fontScale) ?? fontScale}
                   onFontScale={(v) => smartSet({ fontScale: v })}
+                  onRotate={(deg) => smartSet({ rotation: deg })}
+                  onBoxWidth={(v) => smartSet({ boxWidth: v })}
                   onTimeBlock={setActiveBlockId}
                   onPosChange={(x, y) => smartSet({ posX: x, posY: y })}
                   onInteractStart={pushHistory}
@@ -1511,9 +1534,10 @@ function TipografiaInner() {
                   }}
                 />
                 <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
-                  Arrasta pra mover · clica NUMA PALAVRA pra digitar ali ·
-                  com a legenda selecionada, arrasta sobre as palavras pra
-                  marcar um trecho (cor, caixa, tamanho e fonte agem só nele)
+                  Arrasta pra mover · clica NUMA PALAVRA pra digitar ali · a
+                  bolinha de cima GIRA · as alças laterais mudam onde o texto
+                  quebra · selecionada, arrasta sobre as palavras pra marcar
+                  um trecho
                 </p>
               </div>
               <div className="min-w-0 flex flex-col gap-5">
@@ -1546,6 +1570,8 @@ function TipografiaInner() {
                 <StylePanel
                   fontScale={effOf('fontScale', fontScale) ?? fontScale}
                   posY={effOf('posY', posY) ?? posY}
+                  rotation={effOf('rotation', rotG) ?? 0}
+                  boxWidth={effOf('boxWidth', boxWG) ?? 1}
                   primary={effOf('primary', primary) ?? null}
                   accent={effOf('accent', accent) ?? null}
                   textCase={(effOf('textCase', textCase === 'auto' ? null : textCase) ?? null) as CaseMode | null}
@@ -1872,6 +1898,8 @@ function PreviewPane({
   style,
   fontScale,
   onFontScale,
+  onRotate,
+  onBoxWidth,
   onTimeBlock,
   onPosChange,
   onInteractStart,
@@ -1891,6 +1919,8 @@ function PreviewPane({
   style: StyleState;
   fontScale: number;
   onFontScale: (v: number) => void;
+  onRotate: (deg: number) => void;
+  onBoxWidth: (v: number) => void;
   onTimeBlock: (id: string | null) => void;
   onPosChange: (x: number, y: number) => void;
   onInteractStart: () => void;
@@ -1914,10 +1944,16 @@ function PreviewPane({
   // do React só é gravado ao SOLTAR. Antes, cada pointermove commitava no
   // estado global e re-renderizava a página inteira (galeria de centenas de
   // canvases, timeline, lista de blocos) — era a lentidão de mover a legenda.
-  const dragOvRef = useRef<{ posX: number; posY: number; fontScale: number } | null>(null);
+  const dragOvRef = useRef<{
+    posX: number;
+    posY: number;
+    fontScale: number;
+    rotation: number;
+    boxWidth: number;
+  } | null>(null);
   // drag da legenda: estado vivo pro rAF desenhar as guias sem re-render
   const dragRef = useRef<{
-    mode: 'move' | 'scale' | 'wordsel';
+    mode: 'move' | 'scale' | 'wordsel' | 'rotate' | 'boxw';
     moved: boolean;
     snapX: boolean;
     snapY: boolean;
@@ -1928,7 +1964,16 @@ function PreviewPane({
   } | null>(null);
   // seleção (caixa + alça) e bbox vivos pro rAF
   const selRef = useRef(false);
-  const bboxRef = useRef<{ x: number; y: number; w: number; h: number; blockId: string } | null>(null);
+  const bboxRef = useRef<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    blockId: string;
+    rot?: number;
+    cx?: number;
+    cy?: number;
+  } | null>(null);
   const wordBoxesRef = useRef<{
     blockId: string;
     boxes: Array<{ i: number; x: number; y: number; w: number; h: number }>;
@@ -1936,6 +1981,8 @@ function PreviewPane({
   const dprRef = useRef(1);
   /** último instante em que o hover remediu a caixa (throttle) */
   const hoverMedidoRef = useRef(0);
+  /** onde o mouse estava na última medição — tremidinha não paga layout */
+  const hoverPosRef = useRef<{ x: number; y: number } | null>(null);
   const [editing, setEditing] = useState<{
     id: string;
     value: string;
@@ -1973,6 +2020,8 @@ function PreviewPane({
     ovX?: number;
     ovY?: number;
     ovS?: number;
+    ovR?: number;
+    ovBW?: number;
     snapX?: boolean;
     snapY?: boolean;
   } | null>(null);
@@ -2027,6 +2076,8 @@ function PreviewPane({
           prevDraw.ovX !== ovNow?.posX ||
           prevDraw.ovY !== ovNow?.posY ||
           prevDraw.ovS !== ovNow?.fontScale ||
+          prevDraw.ovR !== ovNow?.rotation ||
+          prevDraw.ovBW !== ovNow?.boxWidth ||
           prevDraw.snapX !== dragNow?.snapX ||
           prevDraw.snapY !== dragNow?.snapY;
         if (dirty) {
@@ -2047,6 +2098,8 @@ function PreviewPane({
             ovX: ovNow?.posX,
             ovY: ovNow?.posY,
             ovS: ovNow?.fontScale,
+            ovR: ovNow?.rotation,
+            ovBW: ovNow?.boxWidth,
             snapX: dragNow?.snapX,
             snapY: dragNow?.snapY,
           };
@@ -2063,10 +2116,25 @@ function PreviewPane({
             let pb = sBase.perBlock;
             const curBB = bboxRef.current;
             if (curBB && pb && pb[curBB.blockId]) {
-              const { posX: _px, posY: _py, fontScale: _pf, ...resto } = pb[curBB.blockId];
+              const {
+                posX: _px,
+                posY: _py,
+                fontScale: _pf,
+                rotation: _pr,
+                boxWidth: _pb,
+                ...resto
+              } = pb[curBB.blockId];
               pb = { ...pb, [curBB.blockId]: resto };
             }
-            s = { ...sBase, posX: ov.posX, posY: ov.posY, fontScale: ov.fontScale, perBlock: pb };
+            s = {
+              ...sBase,
+              posX: ov.posX,
+              posY: ov.posY,
+              fontScale: ov.fontScale,
+              rotation: ov.rotation,
+              boxWidth: ov.boxWidth,
+              perBlock: pb,
+            };
           }
           // edição AO VIVO: o texto digitado renderiza com o lettering REAL
           // (mesmo engine), atualizando a cada tecla — estilo CapCut
@@ -2134,39 +2202,83 @@ function PreviewPane({
             bboxRef.current = null;
             wordBoxesRef.current = null;
           }
+          // overlay da seleção: tudo gira junto com a legenda (a caixa é
+          // reta no espaço LOCAL; quem gira é o mundo)
+          const bb = bboxRef.current;
+          const rotOv = (fn: () => void) => {
+            const rot = bb?.rot ?? 0;
+            if (rot && bb && bb.cx !== undefined && bb.cy !== undefined) {
+              ctx.save();
+              ctx.translate(bb.cx, bb.cy);
+              ctx.rotate(rot);
+              ctx.translate(-bb.cx, -bb.cy);
+              fn();
+              ctx.restore();
+            } else {
+              fn();
+            }
+          };
           // realce da seleção de palavras (só preview, nunca no export)
           const wb = wordBoxesRef.current;
           if (wSel && wb && wb.blockId === wSel.blockId) {
             const lo = Math.min(wSel.a, wSel.b);
             const hi = Math.max(wSel.a, wSel.b);
-            ctx.save();
-            ctx.fillStyle = 'rgba(96,165,250,0.28)';
-            ctx.strokeStyle = 'rgba(96,165,250,0.9)';
-            ctx.lineWidth = Math.max(1, dpr);
-            for (const box of wb.boxes) {
-              if (box.i < lo || box.i > hi) continue;
-              const px = 4 * dpr;
-              ctx.fillRect(box.x - px, box.y, box.w + px * 2, box.h);
-              ctx.strokeRect(box.x - px, box.y, box.w + px * 2, box.h);
-            }
-            ctx.restore();
+            rotOv(() => {
+              ctx.save();
+              ctx.fillStyle = 'rgba(96,165,250,0.28)';
+              ctx.strokeStyle = 'rgba(96,165,250,0.9)';
+              ctx.lineWidth = Math.max(1, dpr);
+              for (const box of wb.boxes) {
+                if (box.i < lo || box.i > hi) continue;
+                const px = 4 * dpr;
+                ctx.fillRect(box.x - px, box.y, box.w + px * 2, box.h);
+                ctx.strokeRect(box.x - px, box.y, box.w + px * 2, box.h);
+              }
+              ctx.restore();
+            });
           }
           // caixa de seleção estilo CapCut (só preview, nunca no export)
-          const bb = bboxRef.current;
           if (selRef.current && bb) {
-            ctx.save();
-            ctx.strokeStyle = 'rgba(251,191,36,0.95)';
-            ctx.lineWidth = Math.max(1.5, dpr);
-            ctx.setLineDash([7 * dpr, 5 * dpr]);
-            ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
-            ctx.setLineDash([]);
-            // alça de redimensionar (canto inferior direito)
-            const hs = 9 * dpr;
-            ctx.fillStyle = '#fbbf24';
-            ctx.strokeStyle = '#1a1a1a';
-            ctx.fillRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
-            ctx.strokeRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
-            ctx.restore();
+            rotOv(() => {
+              ctx.save();
+              ctx.strokeStyle = 'rgba(251,191,36,0.95)';
+              ctx.lineWidth = Math.max(1.5, dpr);
+              ctx.setLineDash([7 * dpr, 5 * dpr]);
+              ctx.strokeRect(bb.x, bb.y, bb.w, bb.h);
+              ctx.setLineDash([]);
+              // alça de TAMANHO (canto inferior direito)
+              const hs = 9 * dpr;
+              ctx.fillStyle = '#fbbf24';
+              ctx.strokeStyle = '#1a1a1a';
+              ctx.fillRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
+              ctx.strokeRect(bb.x + bb.w - hs / 2, bb.y + bb.h - hs / 2, hs, hs);
+              // alças LATERAIS de largura da caixa (pílulas no meio das bordas)
+              const ph = 22 * dpr;
+              const pw = 6 * dpr;
+              const midY = bb.y + bb.h / 2;
+              ctx.fillStyle = '#fbbf24';
+              for (const hx of [bb.x, bb.x + bb.w]) {
+                ctx.beginPath();
+                ctx.roundRect(hx - pw / 2, midY - ph / 2, pw, ph, pw / 2);
+                ctx.fill();
+                ctx.stroke();
+              }
+              // nó de ROTAÇÃO: haste + bolinha acima do topo
+              const kx = bb.x + bb.w / 2;
+              const ky = bb.y - 26 * dpr;
+              ctx.strokeStyle = 'rgba(251,191,36,0.8)';
+              ctx.beginPath();
+              ctx.moveTo(kx, bb.y);
+              ctx.lineTo(kx, ky + 7 * dpr);
+              ctx.stroke();
+              ctx.beginPath();
+              ctx.arc(kx, ky, 7 * dpr, 0, Math.PI * 2);
+              ctx.fillStyle = '#fbbf24';
+              ctx.fill();
+              ctx.strokeStyle = '#1a1a1a';
+              ctx.stroke();
+              ctx.restore();
+            });
           }
           // réguas de centralização (só no preview, nunca no export)
           const drag = dragRef.current;
@@ -2244,24 +2356,84 @@ function PreviewPane({
    * Mede a caixa da legenda AGORA (hit-test de clique/arrasto/duplo clique).
    * Fora do frame de desenho, porque medir é caro e só o evento precisa.
    */
+  /** blocos com o texto EM EDIÇÃO aplicado — hit-test tem que bater com o desenho */
+  const blocosVivos = useCallback(() => {
+    const { blocks: b } = liveRef.current;
+    const ed = editingRef.current;
+    return ed
+      ? b.map((x) => (x.id === ed.id ? retimeBlockText(x, ed.value.trim() || '…') : x))
+      : b;
+  }, []);
   const medirBBox = useCallback(() => {
     const c = canvasRef.current;
     const v = videoRef.current;
     const ctx = c?.getContext('2d');
     if (!c || !v || !ctx) return null;
-    const { blocks: b, preset: p, style: s } = liveRef.current;
-    bboxRef.current = captionBBoxAt(ctx, b, p, s, v.currentTime * 1000, c.width, c.height);
+    const { preset: p, style: s } = liveRef.current;
+    bboxRef.current = captionBBoxAt(ctx, blocosVivos(), p, s, v.currentTime * 1000, c.width, c.height);
     return bboxRef.current;
-  }, [videoRef]);
+  }, [videoRef, blocosVivos]);
   const medirPalavras = useCallback(() => {
     const c = canvasRef.current;
     const v = videoRef.current;
     const ctx = c?.getContext('2d');
     if (!c || !v || !ctx) return null;
-    const { blocks: b, preset: p, style: s } = liveRef.current;
-    wordBoxesRef.current = wordBoxesAt(ctx, b, p, s, v.currentTime * 1000, c.width, c.height);
+    const { preset: p, style: s } = liveRef.current;
+    wordBoxesRef.current = wordBoxesAt(ctx, blocosVivos(), p, s, v.currentTime * 1000, c.width, c.height);
     return wordBoxesRef.current;
-  }, [videoRef]);
+  }, [videoRef, blocosVivos]);
+
+  /**
+   * Ponto do mouse no ESPAÇO LOCAL da legenda: com rotação, a caixa continua
+   * reta no espaço local e é o ponteiro que gira ao contrário em volta do
+   * centro — um hit-test, dois mundos.
+   */
+  const paraLocal = useCallback(
+    (px: number, py: number, bb: { rot?: number; cx?: number; cy?: number } | null) => {
+      const rot = bb?.rot ?? 0;
+      if (!bb || !rot || bb.cx === undefined || bb.cy === undefined) return { x: px, y: py };
+      const cos = Math.cos(-rot);
+      const sin = Math.sin(-rot);
+      const dx = px - bb.cx;
+      const dy = py - bb.cy;
+      return { x: bb.cx + dx * cos - dy * sin, y: bb.cy + dx * sin + dy * cos };
+    },
+    [],
+  );
+
+  /**
+   * A palavra está mesmo sob o dedo? Zona JUSTA de propósito: sem gordura
+   * horizontal e com 15% de recuo em cima/embaixo — antes qualquer canto da
+   * pílula virava "texto" e não dava pra pegar a legenda pra mover.
+   */
+  const naPalavra = (
+    lx: number,
+    ly: number,
+    bx: { x: number; y: number; w: number; h: number },
+  ) => lx >= bx.x && lx <= bx.x + bx.w && ly >= bx.y + bx.h * 0.15 && ly <= bx.y + bx.h * 0.85;
+
+  /** caret no FIM da palavra `idx` do texto `valor` (pra clique em palavra) */
+  const caretNaPalavra = (valor: string, idx: number) => {
+    const parts = valor.split(' ');
+    const upto = parts.slice(0, Math.min(idx, parts.length - 1) + 1).join(' ');
+    return Math.min(valor.length, upto.length);
+  };
+
+  /** fecha o editor UMA vez (Enter, blur, clique fora) — sem commit duplo */
+  const commitEditing = useCallback(
+    (salvar: boolean) => {
+      const ed = editingRef.current;
+      if (!ed) return;
+      editingRef.current = null;
+      setEditing(null);
+      if (salvar) {
+        const v2 = ed.value.trim();
+        if (v2) onEditText(ed.id, v2);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   // bloco ativo (4Hz via timeupdate — não re-renderiza a 60fps)
   useEffect(() => {
@@ -2359,12 +2531,55 @@ function PreviewPane({
         }
         onPointerDown={(e) => {
           const wrap = wrapRef.current;
-          if (!wrap || editing) return;
+          if (!wrap) return;
           wrap.setPointerCapture(e.pointerId);
           const rect = wrap.getBoundingClientRect();
           const dpr = dprRef.current;
           const px = (e.clientX - rect.left) * dpr;
           const py = (e.clientY - rect.top) * dpr;
+          // ── EDITANDO: clicar e arrastar TAMBÉM move (pedido 02.09). Fora
+          // da caixa = commit e fecha; dentro = arrasta com o editor aberto
+          // (preventDefault segura o foco no input invisível).
+          if (editingRef.current) {
+            const bbE = medirBBox();
+            const plE = paraLocal(px, py, bbE);
+            const dentroE =
+              bbE &&
+              plE.x >= bbE.x &&
+              plE.x <= bbE.x + bbE.w &&
+              plE.y >= bbE.y &&
+              plE.y <= bbE.y + bbE.h;
+            if (!dentroE) {
+              commitEditing(true);
+              return;
+            }
+            e.preventDefault();
+            const wbE = medirPalavras();
+            const hitW =
+              wbE && bbE && wbE.blockId === bbE.blockId
+                ? wbE.boxes.find((bx) => naPalavra(plE.x, plE.y, bx))
+                : undefined;
+            const st0 = liveRef.current.style;
+            const pb0 = bbE ? st0.perBlock?.[bbE.blockId] : undefined;
+            dragOvRef.current = {
+              posX: pb0?.posX ?? st0.posX ?? 0.5,
+              posY: pb0?.posY ?? st0.posY ?? 0.76,
+              fontScale: liveRef.current.fontScale,
+              rotation: pb0?.rotation ?? st0.rotation ?? 0,
+              boxWidth: pb0?.boxWidth ?? st0.boxWidth ?? 1,
+            };
+            dragRef.current = {
+              mode: 'move',
+              moved: false,
+              snapX: false,
+              snapY: false,
+              dist0: 0,
+              scale0: 1,
+              wordAnchor: hitW ? hitW.i : -1,
+            };
+            if (!hitW) wrap.style.cursor = 'grabbing';
+            return;
+          }
           // a bbox não é mais recalculada todo frame — mede agora, pro clique
           // ── HEADLINE primeiro: ela fica POR CIMA da legenda no desenho,
           // entao tem que ganhar o clique tambem (senao seria impossivel pegar
@@ -2400,30 +2615,78 @@ function PreviewPane({
             }
           }
           const bb = selRef.current ? (bboxRef.current ?? medirBBox()) : medirBBox();
+          const pl = paraLocal(px, py, bb);
           const handleR = 14 * dpr;
+          const ovBase = () => {
+            const st0 = liveRef.current.style;
+            const pb0 = bb ? st0.perBlock?.[bb.blockId] : undefined;
+            return {
+              posX: pb0?.posX ?? st0.posX ?? 0.5,
+              posY: pb0?.posY ?? st0.posY ?? 0.76,
+              fontScale: liveRef.current.fontScale,
+              rotation: pb0?.rotation ?? st0.rotation ?? 0,
+              boxWidth: pb0?.boxWidth ?? st0.boxWidth ?? 1,
+            };
+          };
+          // nó de ROTAÇÃO (bolinha acima do topo, estilo CapCut)
+          if (bb && selRef.current) {
+            const kx = bb.x + bb.w / 2;
+            const ky = bb.y - 26 * dpr;
+            if (Math.hypot(pl.x - kx, pl.y - ky) < handleR) {
+              onInteractStart();
+              wrap.style.cursor = 'grabbing';
+              dragOvRef.current = ovBase();
+              dragRef.current = {
+                mode: 'rotate',
+                moved: false,
+                snapX: false,
+                snapY: false,
+                dist0: 0,
+                scale0: 1,
+                wordAnchor: -1,
+              };
+              return;
+            }
+            // alças LATERAIS: mudam a LARGURA DA CAIXA (onde o texto quebra),
+            // não o tamanho do texto
+            const midY = bb.y + bb.h / 2;
+            const naEsq = Math.abs(pl.x - bb.x) < 10 * dpr && Math.abs(pl.y - midY) < 18 * dpr;
+            const naDir =
+              Math.abs(pl.x - (bb.x + bb.w)) < 10 * dpr && Math.abs(pl.y - midY) < 18 * dpr;
+            if (naEsq || naDir) {
+              onInteractStart();
+              wrap.style.cursor = 'ew-resize';
+              const ov0 = ovBase();
+              dragOvRef.current = ov0;
+              dragRef.current = {
+                mode: 'boxw',
+                moved: false,
+                snapX: false,
+                snapY: false,
+                dist0: Math.max(12, Math.abs(pl.x - (bb.cx ?? bb.x + bb.w / 2))),
+                scale0: ov0.boxWidth,
+                wordAnchor: -1,
+              };
+              return;
+            }
+          }
           const onHandle =
             !!bb &&
             selRef.current &&
-            Math.abs(px - (bb.x + bb.w)) < handleR &&
-            Math.abs(py - (bb.y + bb.h)) < handleR;
+            Math.abs(pl.x - (bb.x + bb.w)) < handleR &&
+            Math.abs(pl.y - (bb.y + bb.h)) < handleR;
           if (onHandle && bb) {
             onInteractStart();
             wrap.style.cursor = 'nwse-resize';
             const cxB = bb.x + bb.w / 2;
             const cyB = bb.y + bb.h / 2;
-            const st0 = liveRef.current.style;
-            const pb0 = st0.perBlock?.[bb.blockId];
-            dragOvRef.current = {
-              posX: pb0?.posX ?? st0.posX ?? 0.5,
-              posY: pb0?.posY ?? st0.posY ?? 0.76,
-              fontScale: liveRef.current.fontScale,
-            };
+            dragOvRef.current = ovBase();
             dragRef.current = {
               mode: 'scale',
               moved: false,
               snapX: false,
               snapY: false,
-              dist0: Math.max(12, Math.hypot(px - cxB, py - cyB)),
+              dist0: Math.max(12, Math.hypot(pl.x - cxB, pl.y - cyB)),
               scale0: liveRef.current.fontScale,
               wordAnchor: -1,
             };
@@ -2436,13 +2699,7 @@ function PreviewPane({
           const wb = wordBoxesRef.current ?? medirPalavras();
           const hitWord =
             wb && bb && wb.blockId === bb.blockId
-              ? wb.boxes.find(
-                  (bx) =>
-                    px >= bx.x - 4 * dpr &&
-                    px <= bx.x + bx.w + 4 * dpr &&
-                    py >= bx.y &&
-                    py <= bx.y + bx.h,
-                )
+              ? wb.boxes.find((bx) => naPalavra(pl.x, pl.y, bx))
               : undefined;
           if (selRef.current && hitWord && wb) {
             onWordSel({ blockId: wb.blockId, a: hitWord.i, b: hitWord.i });
@@ -2457,15 +2714,7 @@ function PreviewPane({
             };
             return;
           }
-          {
-            const st0 = liveRef.current.style;
-            const pb0 = bb ? st0.perBlock?.[bb.blockId] : undefined;
-            dragOvRef.current = {
-              posX: pb0?.posX ?? st0.posX ?? 0.5,
-              posY: pb0?.posY ?? st0.posY ?? 0.76,
-              fontScale: liveRef.current.fontScale,
-            };
-          }
+          dragOvRef.current = ovBase();
           dragRef.current = {
             mode: 'move',
             moved: false,
@@ -2479,7 +2728,7 @@ function PreviewPane({
           // o punho fecha JÁ no clique (antes só depois do primeiro
           // movimento, e parecia que o arrasto não tinha pegado)
           const dentro =
-            bb && px >= bb.x && px <= bb.x + bb.w && py >= bb.y && py <= bb.y + bb.h;
+            bb && pl.x >= bb.x && pl.x <= bb.x + bb.w && pl.y >= bb.y && pl.y <= bb.y + bb.h;
           if (dentro && !hitWord) wrap.style.cursor = 'grabbing';
         }}
         onPointerMove={(e) => {
@@ -2517,42 +2766,55 @@ function PreviewPane({
             // hover: medir a cada movimento do mouse seria caro; mede no
             // máximo a cada 120ms e reaproveita entre os movimentos
             const agora = performance.now();
-            if (agora - hoverMedidoRef.current > 120) {
+            // mede no máximo a cada 150ms E só se o mouse andou de verdade —
+            // tremidinha de 2px não paga duas passadas de layout
+            const mv = hoverPosRef.current;
+            const andou = !mv || Math.hypot(hx - mv.x, hy - mv.y) > 6 * dpr0;
+            if (agora - hoverMedidoRef.current > 150 && andou) {
               hoverMedidoRef.current = agora;
+              hoverPosRef.current = { x: hx, y: hy };
               medirBBox();
-              // palavras SEMPRE: o cursor de digitar aparece ao passar por
-              // cima do texto, selecionado ou não (clicar ali já edita)
               medirPalavras();
             }
             const bb0 = bboxRef.current;
             const wb0 = wordBoxesRef.current;
             const hr = 14 * dpr0;
+            const pl0 = paraLocal(hx, hy, bb0);
             const overWord =
               wb0 &&
               bb0 &&
               wb0.blockId === bb0.blockId &&
-              wb0.boxes.some(
-                (bx) =>
-                  hx >= bx.x - 4 * dpr0 &&
-                  hx <= bx.x + bx.w + 4 * dpr0 &&
-                  hy >= bx.y &&
-                  hy <= bx.y + bx.h,
-              );
+              wb0.boxes.some((bx) => naPalavra(pl0.x, pl0.y, bx));
+            const midY0 = bb0 ? bb0.y + bb0.h / 2 : 0;
             if (
               bb0 &&
               selRef.current &&
-              Math.abs(hx - (bb0.x + bb0.w)) < hr &&
-              Math.abs(hy - (bb0.y + bb0.h)) < hr
+              Math.hypot(pl0.x - (bb0.x + bb0.w / 2), pl0.y - (bb0.y - 26 * dpr0)) < hr
+            ) {
+              wrap.style.cursor = 'grab';
+            } else if (
+              bb0 &&
+              selRef.current &&
+              ((Math.abs(pl0.x - bb0.x) < 10 * dpr0 && Math.abs(pl0.y - midY0) < 18 * dpr0) ||
+                (Math.abs(pl0.x - (bb0.x + bb0.w)) < 10 * dpr0 &&
+                  Math.abs(pl0.y - midY0) < 18 * dpr0))
+            ) {
+              wrap.style.cursor = 'ew-resize';
+            } else if (
+              bb0 &&
+              selRef.current &&
+              Math.abs(pl0.x - (bb0.x + bb0.w)) < hr &&
+              Math.abs(pl0.y - (bb0.y + bb0.h)) < hr
             ) {
               wrap.style.cursor = 'nwse-resize';
             } else if (overWord) {
               wrap.style.cursor = 'text';
             } else if (
               bb0 &&
-              hx >= bb0.x &&
-              hx <= bb0.x + bb0.w &&
-              hy >= bb0.y &&
-              hy <= bb0.y + bb0.h
+              pl0.x >= bb0.x &&
+              pl0.x <= bb0.x + bb0.w &&
+              pl0.y >= bb0.y &&
+              pl0.y <= bb0.y + bb0.h
             ) {
               wrap.style.cursor = 'move';
             } else {
@@ -2596,6 +2858,38 @@ function PreviewPane({
             }
           }
           if (!drag.moved) return;
+          if (drag.mode === 'rotate') {
+            const bb = bboxRef.current ?? medirBBox();
+            const ov = dragOvRef.current;
+            if (!bb || !ov) return;
+            const dpr = dprRef.current;
+            const px = (e.clientX - rect.left) * dpr;
+            const py = (e.clientY - rect.top) * dpr;
+            const cx0 = bb.cx ?? bb.x + bb.w / 2;
+            const cy0 = bb.cy ?? bb.y + bb.h / 2;
+            let deg = (Math.atan2(py - cy0, px - cx0) * 180) / Math.PI + 90;
+            if (deg > 180) deg -= 360;
+            if (deg < -180) deg += 360;
+            // ímã nos ângulos que importam (reto e de lado)
+            for (const alvo of [0, 90, -90, 180, -180]) {
+              if (Math.abs(deg - alvo) < 4) deg = alvo;
+            }
+            ov.rotation = Math.round(deg * 10) / 10;
+            return;
+          }
+          if (drag.mode === 'boxw') {
+            const bb = bboxRef.current ?? medirBBox();
+            const ov = dragOvRef.current;
+            if (!bb || !ov) return;
+            const dpr = dprRef.current;
+            const px = (e.clientX - rect.left) * dpr;
+            const py = (e.clientY - rect.top) * dpr;
+            const pl2 = paraLocal(px, py, bb);
+            const meia = Math.max(12, Math.abs(pl2.x - (bb.cx ?? bb.x + bb.w / 2)));
+            // proporcional ao ponto onde a alça foi AGARRADA — sem salto
+            ov.boxWidth = Math.min(1, Math.max(0.3, drag.scale0 * (meia / drag.dist0)));
+            return;
+          }
           if (drag.mode === 'scale') {
             const bb = bboxRef.current ?? medirBBox();
             const ov = dragOvRef.current;
@@ -2603,7 +2897,8 @@ function PreviewPane({
             const dpr = dprRef.current;
             const px = (e.clientX - rect.left) * dpr;
             const py = (e.clientY - rect.top) * dpr;
-            const dist = Math.hypot(px - (bb.x + bb.w / 2), py - (bb.y + bb.h / 2));
+            const pl2 = paraLocal(px, py, bb);
+            const dist = Math.hypot(pl2.x - (bb.x + bb.w / 2), pl2.y - (bb.y + bb.h / 2));
             // faixa larga: dá pra encolher de verdade (0.15) pra caber num
             // canto e crescer até 6× pra hook gigante
             ov.fontScale = Math.min(6, Math.max(0.15, drag.scale0 * (dist / drag.dist0)));
@@ -2649,9 +2944,22 @@ function PreviewPane({
           if (drag && drag.moved && ov) {
             if (drag.mode === 'scale') onFontScale(ov.fontScale);
             else if (drag.mode === 'move') onPosChange(ov.posX, ov.posY);
+            else if (drag.mode === 'rotate') onRotate(ov.rotation);
+            else if (drag.mode === 'boxw') onBoxWidth(ov.boxWidth);
           }
-          if (wrapRef.current && drag?.mode === 'move') {
+          if (wrapRef.current && drag && drag.mode !== 'wordsel') {
             wrapRef.current.style.cursor = 'default';
+          }
+          // com o EDITOR ABERTO: arrastou = só posiciona (editor fica);
+          // clique seco numa palavra = caret vai pra ela; no respiro = nada
+          if (editingRef.current) {
+            const edNow = editingRef.current;
+            if (drag && !drag.moved && drag.wordAnchor >= 0 && edNow) {
+              const caret = caretNaPalavra(edNow.value, drag.wordAnchor);
+              editingRef.current = { ...edNow, caret };
+              setEditing((cur) => (cur ? { ...cur, caret } : cur));
+            }
+            return;
           }
           if (!drag || drag.moved) return;
           // clique seco NUMA PALAVRA = digitar ali (com ou sem seleção prévia)
@@ -2729,25 +3037,15 @@ function PreviewPane({
                   : ed,
               )
             }
-            onPointerDown={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const v = editing.value.trim();
-                if (v) onEditText(editing.id, v);
-                setEditing(null);
-              } else if (e.key === 'Escape') {
-                setEditing(null);
-              }
+              if (e.key === 'Enter') commitEditing(true);
+              else if (e.key === 'Escape') commitEditing(false);
             }}
-            onBlur={() => {
-              const v = editing.value.trim();
-              if (v) onEditText(editing.id, v);
-              setEditing(null);
-            }}
-            // INVISÍVEL de propósito: só captura teclado/caret — quem mostra o
-            // texto é o canvas, com o lettering real do modelo em tempo real
-            className="absolute z-30 cursor-text opacity-0 outline-none"
+            onBlur={() => commitEditing(true)}
+            // INVISÍVEL e ATRAVESSÁVEL: só captura teclado — mouse vai pro
+            // wrapper (mover/arrastar funciona MESMO editando; quem mostra o
+            // texto é o canvas, com o lettering real em tempo real)
+            className="pointer-events-none absolute z-30 opacity-0 outline-none"
             style={{
               left: editing.left,
               top: editing.top,
@@ -3663,6 +3961,8 @@ function CopyFixPanel({
 function StylePanel({
   fontScale,
   posY,
+  rotation,
+  boxWidth,
   primary,
   accent,
   textCase,
@@ -3703,6 +4003,8 @@ function StylePanel({
 }: {
   fontScale: number;
   posY: number;
+  rotation: number;
+  boxWidth: number;
   primary: string | null;
   accent: string | null;
   textCase: CaseMode | null;
@@ -3855,6 +4157,26 @@ function StylePanel({
         step={0.01}
         value={posY}
         onChange={(v) => onSlide({ posY: v })}
+        display={(v) => `${Math.round(v * 100)}%`}
+        disabled={disabled}
+      />
+      <ToolSlider
+        label="Rotação"
+        min={-180}
+        max={180}
+        step={1}
+        value={rotation}
+        onChange={(v) => onSlide({ rotation: v })}
+        display={(v) => `${Math.round(v)}°`}
+        disabled={disabled}
+      />
+      <ToolSlider
+        label="Largura da caixa"
+        min={0.3}
+        max={1}
+        step={0.01}
+        value={boxWidth}
+        onChange={(v) => onSlide({ boxWidth: v })}
         display={(v) => `${Math.round(v * 100)}%`}
         disabled={disabled}
       />
