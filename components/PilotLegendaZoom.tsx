@@ -407,8 +407,9 @@ export function LegendaZoomPopover({
         <div className="lz-corpo">{corpo}</div>
 
         {/* MAX QUALITY (03.09) — o render normal é o RÁPIDO. Este botão liga a
-          * análise multi-passagem do encoder + resolução e bitrate cheios:
-          * bem mais lento, pra quando o AD vai pra tela grande. */}
+          * análise multi-passagem do encoder e o bitrate alto. A RESOLUÇÃO é
+          * cheia nos dois modos: o que fazia o render arrastar era uma espera
+          * ocupada (ver esperarFilaBaixar), não a qualidade. */}
         {tipo === 'legenda' ? (
           <button
             type="button"
