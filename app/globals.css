@@ -5360,3 +5360,51 @@ html[data-theme='light'] .mtg-respiro-btn { background: rgba(16,16,24,0.07); }
   pointer-events: none;
 }
 .pi-recorte-palco:hover .pi-recorte-pausa { opacity: 1; }
+
+
+/* ══ PLAYER do recortador (03.09) ════════════════════════════════════════
+ * Assistir qualquer parte do arquivo sem mexer no corte. O trilho mostra o
+ * arquivo inteiro com a SELEÇÃO acesa por cima. */
+.pi-player { display: flex; align-items: center; gap: 9px; margin-top: 2px; }
+.pi-player-btn {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgb(var(--text));
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  transition: color 0.14s, background-color 0.14s, transform 0.14s;
+}
+html[data-theme='light'] .pi-player-btn { background: rgba(16,16,24,0.06); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.12); }
+.pi-player-btn:hover { transform: translateY(-1px); }
+.pi-player-btn.is-on {
+  color: #06222b;
+  background: linear-gradient(140deg, #67e8f9, #22d3ee);
+  box-shadow: 0 6px 14px -8px rgba(34, 211, 238, 0.9);
+}
+.pi-player-trilho {
+  position: relative; flex: 1; height: 14px; border-radius: 999px;
+  cursor: pointer; touch-action: none; overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+html[data-theme='light'] .pi-player-trilho { background: rgba(16,16,24,0.06); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.pi-player-sel {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(34, 211, 238, 0.28);
+}
+.pi-player-feito {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  background: linear-gradient(90deg, rgba(103, 232, 249, 0.35), rgba(34, 211, 238, 0.45));
+}
+.pi-player-agulha {
+  position: absolute; top: -1px; bottom: -1px; width: 2.5px; margin-left: -1.25px;
+  border-radius: 2px; background: #fff;
+  box-shadow: 0 0 0 1px rgba(4, 6, 10, 0.55), 0 0 7px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+html[data-theme='light'] .pi-player-agulha { background: #0b0d12; box-shadow: 0 0 0 1px rgba(255,255,255,0.7); }
+.pi-player-tempo {
+  flex-shrink: 0; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.05em; color: rgb(var(--text-muted));
+  font-variant-numeric: tabular-nums;
+}

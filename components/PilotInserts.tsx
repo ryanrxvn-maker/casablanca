@@ -67,10 +67,47 @@ function RecortadorDeMidia({
 }) {
   const vid = useRef<HTMLVideoElement | null>(null);
   const barra = useRef<HTMLDivElement | null>(null);
+  const trilho = useRef<HTMLDivElement | null>(null);
   const [dur, setDur] = useState(0);
   const [agulha, setAgulha] = useState(0);
   const [pegando, setPegando] = useState<'de' | 'ate' | 'agulha' | null>(null);
+  const [pegandoPlayer, setPegandoPlayer] = useState(false);
+  /** tocando = a SELEÇÃO em loop; assistindo = play LIVRE (player) */
   const [tocando, setTocando] = useState(false);
+  const [assistindo, setAssistindo] = useState(false);
+
+  /* SEEK SEM FILA (03.09): setar currentTime a cada pointermove enfileira
+   * seeks que o Chrome resolve em série — o preview ficava SEGUNDOS atrás da
+   * ponta ("muito delay"). Aqui um seek só entra quando o anterior terminou;
+   * no meio do arrasto os alvos velhos são DESCARTADOS e só o último vale —
+   * é o que dá o sincronismo de CapCut. */
+  const seekando = useRef(false);
+  const seekPendente = useRef<number | null>(null);
+  const seekSuave = useCallback((t: number) => {
+    const v = vid.current;
+    if (!v) return;
+    if (seekando.current) {
+      seekPendente.current = t;
+      return;
+    }
+    seekando.current = true;
+    let ok = false;
+    const fim = () => {
+      if (ok) return;
+      ok = true;
+      v.removeEventListener('seeked', fim);
+      clearTimeout(tm);
+      seekando.current = false;
+      if (seekPendente.current != null) {
+        const prox = seekPendente.current;
+        seekPendente.current = null;
+        seekSuave(prox);
+      }
+    };
+    const tm = setTimeout(fim, 600); // seek que engasgar não trava o arrasto
+    v.addEventListener('seeked', fim);
+    v.currentTime = t;
+  }, []);
 
   const de = Math.max(0, Number(recorteDe) || 0);
   const ate = Number.isFinite(recorteAte as number) && (recorteAte as number) > de ? (recorteAte as number) : dur;
@@ -86,6 +123,7 @@ function RecortadorDeMidia({
     const v = vid.current;
     if (!v || !tocando) return;
     let vivo = true;
+    setAssistindo(false); // um play de cada vez
     // O rAF aqui é SÓ pra agulha correr lisa. O loop de verdade mora no
     // `onTimeUpdate` do <video>: requestAnimationFrame congela com o painel
     // oculto e o vídeo estourava a seleção e tocava até o fim do arquivo.
@@ -109,6 +147,27 @@ function RecortadorDeMidia({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tocando, de, ate]);
 
+  // PLAY LIVRE (o player): toca de onde a agulha está até o FIM DO ARQUIVO —
+  // é como se assiste "exatamente tal parte" sem cortar nada.
+  useEffect(() => {
+    const v = vid.current;
+    if (!v || !assistindo) return;
+    setTocando(false);
+    let vivo = true;
+    const tick = () => {
+      if (!vivo || !vid.current) return;
+      setAgulha(vid.current.currentTime);
+      requestAnimationFrame(tick);
+    };
+    void v.play().catch(() => setAssistindo(false));
+    const raf = requestAnimationFrame(tick);
+    return () => {
+      vivo = false;
+      cancelAnimationFrame(raf);
+      v.pause();
+    };
+  }, [assistindo]);
+
   const fracao = useCallback((e: { clientX: number }) => {
     const el = barra.current;
     if (!el) return 0;
@@ -120,18 +179,19 @@ function RecortadorDeMidia({
     (e: { clientX: number }, alvo: 'de' | 'ate' | 'agulha') => {
       if (!(dur > 0)) return;
       setTocando(false); // scrub manda: arrastar qualquer coisa pausa o play
+      setAssistindo(false);
       const t = fracao(e) * dur;
       if (alvo === 'agulha') {
         const preso = Math.min(Math.max(t, 0), dur);
         setAgulha(preso);
-        if (vid.current) vid.current.currentTime = preso;
+        seekSuave(preso);
         return;
       }
       // Arrastando uma PONTA, o vídeo mostra o quadro dela AO VIVO: na
       // esquerda se vê exatamente onde começa, na direita onde termina.
       const seek = (alvoT: number) => {
         setAgulha(alvoT);
-        if (vid.current) vid.current.currentTime = alvoT;
+        seekSuave(alvoT);
       };
       if (alvo === 'de') {
         const novoDe = Math.min(t, ate - INSERT_RECORTE_MIN_SEC);
@@ -143,7 +203,7 @@ function RecortadorDeMidia({
         onMudar(de, novoAte);
       }
     },
-    [dur, de, ate, fracao, onMudar],
+    [dur, de, ate, fracao, onMudar, seekSuave],
   );
 
   if (!url) {
@@ -161,9 +221,14 @@ function RecortadorDeMidia({
       <div
         className="pi-recorte-palco"
         onClick={() => {
-          if (dur > 0) setTocando((x) => !x);
+          if (!(dur > 0)) return;
+          if (assistindo) {
+            setAssistindo(false);
+            return;
+          }
+          setTocando((x) => !x);
         }}
-        title={tocando ? 'Pausar' : 'Tocar a seleção (em loop)'}
+        title={tocando || assistindo ? 'Pausar' : 'Tocar a seleção (em loop)'}
       >
       <video
         ref={vid}
@@ -182,6 +247,10 @@ function RecortadorDeMidia({
           }
         }}
         onEnded={(e) => {
+          if (assistindo) {
+            setAssistindo(false);
+            return;
+          }
           if (!tocando) return;
           const el = e.target as HTMLVideoElement;
           el.currentTime = de;
@@ -195,7 +264,7 @@ function RecortadorDeMidia({
           }
         }}
       />
-      {!tocando ? (
+      {!tocando && !assistindo ? (
         <span className="pi-recorte-play" aria-hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5.5v13l11-6.5-11-6.5z" />
@@ -208,6 +277,65 @@ function RecortadorDeMidia({
           </svg>
         </span>
       )}
+      </div>
+
+      {/* PLAYER (03.09): assistir QUALQUER parte do arquivo sem mexer no
+        * corte. O trilho mostra o arquivo inteiro com a SELEÇÃO acesa; clicar
+        * ou arrastar leva a agulha (seek sem fila) e o ▶ toca dali até o fim. */}
+      <div className="pi-player">
+        <button
+          type="button"
+          className={'pi-player-btn' + (assistindo || tocando ? ' is-on' : '')}
+          onClick={() => {
+            if (!(dur > 0)) return;
+            if (assistindo || tocando) {
+              setAssistindo(false);
+              setTocando(false);
+            } else {
+              setAssistindo(true);
+            }
+          }}
+          title={assistindo || tocando ? 'Pausar' : 'Assistir daqui (play livre — não corta nada)'}
+          aria-label="Play/Pausa"
+        >
+          {assistindo || tocando ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5-11-6.5z" /></svg>
+          )}
+        </button>
+        <div
+          ref={trilho}
+          className="pi-player-trilho"
+          onPointerDown={(e) => {
+            if (!(dur > 0)) return;
+            try {
+              (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            } catch { /* segue pelos moves */ }
+            setPegandoPlayer(true);
+            setTocando(false);
+            setAssistindo(false);
+            const r = trilho.current!.getBoundingClientRect();
+            const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * dur;
+            setAgulha(t);
+            seekSuave(t);
+          }}
+          onPointerMove={(e) => {
+            if (!pegandoPlayer || !(dur > 0)) return;
+            const r = trilho.current!.getBoundingClientRect();
+            const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * dur;
+            setAgulha(t);
+            seekSuave(t);
+          }}
+          onPointerUp={() => setPegandoPlayer(false)}
+          onPointerCancel={() => setPegandoPlayer(false)}
+          title="Clica ou arrasta pra ir pra qualquer ponto do arquivo"
+        >
+          <span className="pi-player-sel" style={{ left: pct(de), width: pct(selDur) }} aria-hidden />
+          <span className="pi-player-feito" style={{ width: pct(agulha) }} aria-hidden />
+          <span className="pi-player-agulha" style={{ left: pct(agulha) }} aria-hidden />
+        </div>
+        <span className="pi-player-tempo mono">{mmss(agulha)} / {mmss(dur)}</span>
       </div>
 
       <div
