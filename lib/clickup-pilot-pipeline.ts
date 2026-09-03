@@ -882,7 +882,24 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           console.log(`[clickup-pilot-pipeline] posprod ${item.filename}: OK ${(novo.size / (1024 * 1024)).toFixed(1)}MB`);
         }
       } catch (e) {
-        const msg = (e as Error)?.message?.slice(0, 120) || 'falhou';
+        const msg1 = (e as Error)?.message || 'falhou';
+        if (/terminat/i.test(msg1)) {
+          console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: ffmpeg terminado POR FORA — refazendo uma vez`);
+          try {
+            const novo2 = await posProcessar(src, { filename: item.filename, partesSec, cortesInternosSec: pedacos });
+            if (novo2 && novo2.size > 50_000) {
+              item.decupado = novo2;
+              console.log(`[clickup-pilot-pipeline] posprod ${item.filename}: OK na retentativa ${(novo2.size / (1024 * 1024)).toFixed(1)}MB`);
+              (item as any)._partesFinais = undefined;
+              (item as any)._pedacosPorParte = undefined;
+              item._leveledParts = undefined;
+              continue;
+            }
+          } catch (e2) {
+            console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: retentativa também falhou:`, e2);
+          }
+        }
+        const msg = msg1.slice(0, 120);
         console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: ${msg} — entregue sem legenda/zoom`);
         item.errors = { ...item.errors, posproducao: `legenda/zoom não aplicados: ${msg}` };
       }

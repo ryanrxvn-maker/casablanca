@@ -1197,26 +1197,47 @@ export async function renderTypographyVideo(opts: {
     throwIfAborted();
     let final = videoOnly;
     let audioOk = false;
-    try {
+    {
       const vOnly = videoOnly;
       // Quem já tem o lock roda direto; quem não tem, entra na fila.
       const comLock = <R,>(f: () => Promise<R>): Promise<R> =>
         ffmpegJaExclusivo ? f() : runFfmpegExclusive(f);
-      final = await comLock(async () => {
-        const wav = await extractAudio(file, {
-          onProgress: (p) => onProgress?.({ phase: 'audio', ratio: p.ratio * 0.5 }),
+      const tentarAudio = () =>
+        comLock(async () => {
+          const wav = await extractAudio(file, {
+            onProgress: (p) => onProgress?.({ phase: 'audio', ratio: p.ratio * 0.5 }),
+          });
+          throwIfAborted();
+          return muxAudioIntoVideo(vOnly, wav, {
+            onProgress: (p) => onProgress?.({ phase: 'audio', ratio: 0.5 + p.ratio * 0.5 }),
+          });
         });
-        throwIfAborted();
-        return muxAudioIntoVideo(vOnly, wav, {
-          onProgress: (p) => onProgress?.({ phase: 'audio', ratio: 0.5 + p.ratio * 0.5 }),
-        });
-      });
-      audioOk = true;
-    } catch (e) {
-      if (isCancellationError(e) || signal?.aborted) throw e;
-      // Vídeo sem trilha de áudio (ou extração falhou): entrega o render
-      // mudo em vez de morrer no fim — o caller informa o user.
-      console.warn('[tipografia] mux de áudio falhou, entregando sem áudio:', e);
+      try {
+        final = await tentarAudio();
+        audioOk = true;
+      } catch (e) {
+        // Cancelamento NOSSO (o AbortController deste render) morre de vez.
+        if (signal?.aborted) throw e;
+        if (isCancellationError(e)) {
+          // TERMINATE EXTERNO (03.09): "called FFmpeg.terminate()" chegava
+          // aqui quando um cancel de OUTRA ferramenta/task (mesma aba SPA)
+          // matava o singleton no meio do nosso mux — e um AD REAL saiu com
+          // "pós-produção falhou". Não é cancelamento nosso: a instância nova
+          // sobe sozinha na próxima chamada. Uma retentativa resolve.
+          console.warn('[tipografia] ffmpeg terminado POR FORA durante o áudio — refazendo o mux:', e);
+          try {
+            final = await tentarAudio();
+            audioOk = true;
+          } catch (e2) {
+            if (signal?.aborted) throw e2;
+            console.warn('[tipografia] mux de áudio falhou 2x, entregando sem áudio:', e2);
+          }
+        } else {
+          // Vídeo sem trilha de áudio (ou extração falhou): entrega o render
+          // mudo em vez de morrer no fim — o caller informa o user.
+          console.warn('[tipografia] mux de áudio falhou, entregando sem áudio:', e);
+        }
+      }
     }
 
     onProgress?.({ phase: 'finalizando', ratio: 1 });
