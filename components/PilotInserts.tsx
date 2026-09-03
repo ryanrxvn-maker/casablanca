@@ -94,6 +94,31 @@ function RecortadorDeMidia({
   const tirasRef = useRef<{ bitmaps: (ImageBitmap | null)[]; passo: number; prontas: number }>({ bitmaps: [], passo: 0, prontas: 0 });
   const scrubRef = useRef<HTMLCanvasElement | null>(null);
   const [esfregando, setEsfregando] = useState(false);
+  /* ⚠ A extração do filmstrip DISPUTA o decodificador com o preview: 120 seeks
+   * num 1080p travam a reprodução ("parece frame a frame" — Silas, 03.09, e
+   * ele achou que a importação tinha danificado o arquivo; não tinha, o
+   * arquivo é salvo byte a byte). Enquanto o vídeo TOCA a extração dorme; ela
+   * retoma sozinha na pausa. */
+  const tocandoRef = useRef(false);
+  /* ⚠ A agulha NÃO passa pelo React durante o play (03.09): `setAgulha` a cada
+   * quadro re-renderizava a janela INTEIRA 60x/s — com centenas de palavras da
+   * copy na tela, isso engasga a reprodução e faz o preview parecer "frame a
+   * frame". Durante o play os elementos são movidos direto pelo DOM; o estado
+   * só é sincronizado ao pausar. */
+  const agulhaBarraRef = useRef<HTMLSpanElement | null>(null);
+  const agulhaPlayerRef = useRef<HTMLSpanElement | null>(null);
+  const feitoPlayerRef = useRef<HTMLSpanElement | null>(null);
+  const tempoPlayerRef = useRef<HTMLSpanElement | null>(null);
+  const durRef = useRef(0);
+  const pintarAgulha = useCallback((t: number) => {
+    const d = durRef.current;
+    if (!(d > 0)) return;
+    const pctS = `${(t / d) * 100}%`;
+    if (agulhaBarraRef.current) agulhaBarraRef.current.style.left = pctS;
+    if (agulhaPlayerRef.current) agulhaPlayerRef.current.style.left = pctS;
+    if (feitoPlayerRef.current) feitoPlayerRef.current.style.width = pctS;
+    if (tempoPlayerRef.current) tempoPlayerRef.current.textContent = `${mmss(t)} / ${mmss(d)}`;
+  }, []);
 
   useEffect(() => {
     if (!url) return;
@@ -119,6 +144,11 @@ function RecortadorDeMidia({
       tirasRef.current = { bitmaps: new Array(n).fill(null), passo, prontas: 0 };
       for (let i = 0; i < n; i++) {
         if (!vivo) return;
+        // dá passagem ao preview: enquanto ele toca, a extração espera
+        while (vivo && tocandoRef.current) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (!vivo) return;
         const alvo = Math.min(total - 0.05, i * passo + passo / 2);
         const ok = await new Promise<boolean>((res) => {
           const tm = setTimeout(() => res(false), 900);
@@ -138,6 +168,8 @@ function RecortadorDeMidia({
             tirasRef.current.prontas++;
           } catch { /* frame indisponível: o vizinho cobre */ }
         }
+        // respiro: a extração é trabalho de FUNDO, nunca dona da thread
+        await new Promise((r) => setTimeout(r, 16));
       }
     })();
     return () => {
@@ -214,6 +246,14 @@ function RecortadorDeMidia({
   }, [dur, de]);
 
   // Toca SÓ a seleção, em loop: é assim que se confere um recorte.
+  // o ref é o que a extração do filmstrip consulta (ela não re-renderiza)
+  useEffect(() => {
+    tocandoRef.current = tocando || assistindo;
+  }, [tocando, assistindo]);
+  useEffect(() => {
+    durRef.current = dur;
+  }, [dur]);
+
   useEffect(() => {
     const v = vid.current;
     if (!v || !tocando) return;
@@ -224,7 +264,7 @@ function RecortadorDeMidia({
     // oculto e o vídeo estourava a seleção e tocava até o fim do arquivo.
     const tick = () => {
       if (!vivo || !vid.current) return;
-      setAgulha(vid.current.currentTime);
+      pintarAgulha(vid.current.currentTime); // DOM direto — sem re-render
       requestAnimationFrame(tick);
     };
     // agulha parada no fim (acabou de marcar o "até")? parte do começo — dar
@@ -237,6 +277,7 @@ function RecortadorDeMidia({
       vivo = false;
       cancelAnimationFrame(raf);
       v.pause();
+      setAgulha(v.currentTime); // sincroniza o estado UMA vez, ao parar
     };
     // `agulha` de propósito fora: ela muda a cada quadro e reiniciaria o play
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -251,7 +292,7 @@ function RecortadorDeMidia({
     let vivo = true;
     const tick = () => {
       if (!vivo || !vid.current) return;
-      setAgulha(vid.current.currentTime);
+      pintarAgulha(vid.current.currentTime); // DOM direto — sem re-render
       requestAnimationFrame(tick);
     };
     void v.play().catch(() => setAssistindo(false));
@@ -260,8 +301,9 @@ function RecortadorDeMidia({
       vivo = false;
       cancelAnimationFrame(raf);
       v.pause();
+      setAgulha(v.currentTime);
     };
-  }, [assistindo]);
+  }, [assistindo, pintarAgulha]);
 
   const fracao = useCallback((e: { clientX: number }) => {
     const el = barra.current;
@@ -432,10 +474,10 @@ function RecortadorDeMidia({
           title="Clica ou arrasta pra ir pra qualquer ponto do arquivo"
         >
           <span className="pi-player-sel" style={{ left: pct(de), width: pct(selDur) }} aria-hidden />
-          <span className="pi-player-feito" style={{ width: pct(agulha) }} aria-hidden />
-          <span className="pi-player-agulha" style={{ left: pct(agulha) }} aria-hidden />
+          <span ref={feitoPlayerRef} className="pi-player-feito" style={{ width: pct(agulha) }} aria-hidden />
+          <span ref={agulhaPlayerRef} className="pi-player-agulha" style={{ left: pct(agulha) }} aria-hidden />
         </div>
-        <span className="pi-player-tempo mono">{mmss(agulha)} / {mmss(dur)}</span>
+        <span ref={tempoPlayerRef} className="pi-player-tempo mono">{mmss(agulha)} / {mmss(dur)}</span>
       </div>
 
       <div
@@ -468,7 +510,7 @@ function RecortadorDeMidia({
         <span className="pi-recorte-sel" style={{ left: pct(de), width: pct(selDur) }} aria-hidden />
         <span className="pi-recorte-ponta is-de" style={{ left: pct(de) }} aria-hidden />
         <span className="pi-recorte-ponta is-ate" style={{ left: pct(ate) }} aria-hidden />
-        <span className="pi-recorte-agulha" style={{ left: pct(agulha) }} aria-hidden />
+        <span ref={agulhaBarraRef} className="pi-recorte-agulha" style={{ left: pct(agulha) }} aria-hidden />
       </div>
 
       <div className="pi-recorte-linha">
