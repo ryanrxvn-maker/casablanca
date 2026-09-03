@@ -75,6 +75,8 @@ type PlanoInsertLocal = {
   porId: (id: string, W: number, H: number) => { palco: unknown; focoAvatarY: number; blur?: number } | null;
   cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
   fontes: Map<string, FonteLocal>;
+  /** espera o quadro do instante `t` (seek do <video> do insert) */
+  preparar?: (t: number) => Promise<void>;
 };
 
 
@@ -318,6 +320,42 @@ export async function montarPosProducao(
             cobertura: (t: number) =>
               coberturaNoInstante(t, janelas, (id) => porId.get(id)?.transicao || 'nenhuma'),
             fontes,
+            // ESPERA o quadro do insert chegar (02.09). O quadro() síncrono
+            // disparava o seek e desenhava o frame VELHO — o render compunha
+            // mais rápido do que o <video> completava seeks e o insert saía
+            // "frame a frame, parece 5fps", no take longo e no curto. Aqui o
+            // render espera o 'seeked' de verdade antes de desenhar.
+            preparar: async (t: number) => {
+              const jan = janelas.find((j) => t >= j.start && t < j.end);
+              if (!jan) return;
+              const ent = videosPorId.get(jan.id);
+              if (!ent) return; // imagem: sempre pronta
+              const pv = velocidadePorId.get(jan.id);
+              const natural = durNatural.get(jan.id) || ent.natural;
+              const inicio = recortePorId.get(jan.id) || 0;
+              const tRel = t - jan.start;
+              const alvo = pv
+                ? tempoNaMidia(tRel, pv, natural, inicio)
+                : inicio + Math.min(tRel, Math.max(0, natural - 0.04));
+              const v = ent.v;
+              if (Math.abs(v.currentTime - alvo) <= 1 / 60) return; // já está no quadro
+              await new Promise<void>((res) => {
+                let feito = false;
+                const fim = () => {
+                  if (feito) return;
+                  feito = true;
+                  v.removeEventListener('seeked', fim);
+                  clearTimeout(tm);
+                  res();
+                };
+                // teto curto: um seek que engasgar não pode travar o render —
+                // melhor um frame repetido de vez em quando do que um render
+                // pendurado (é o mesmo padrão do seekVideo do export).
+                const tm = setTimeout(fim, 350);
+                v.addEventListener('seeked', fim);
+                v.currentTime = alvo;
+              });
+            },
           };
           console.log(
             `[pos-producao] ${info.filename}: ${janelas.length} insert(s) — ` +

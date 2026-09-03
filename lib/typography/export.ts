@@ -547,6 +547,8 @@ async function renderFramesBySeek(opts: {
 
       const t = Math.min(i / FPS + 0.0001, durationSec - 0.001);
       await seekVideo(video, t);
+      // o quadro do INSERT também tem que estar pronto antes de desenhar
+      if (inserts?.preparar) await inserts.preparar(t);
 
       drawZoomed(ctx, video, video.videoWidth || W, video.videoHeight || H, W, H, zoom, t);
       ctx.filter = 'none';
@@ -675,6 +677,17 @@ export type PlanoInsert = {
   } | null;
   cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
   fontes: Map<string, FonteInsert>;
+  /**
+   * ESPERA o quadro do instante `t` ficar pronto (02.09).
+   *
+   * O `quadro()` é síncrono e não pode esperar seek de `<video>`. Sem este
+   * gancho, o caminho rápido compunha frames muito mais depressa do que o
+   * vídeo do insert completava seeks — o insert repetia o MESMO quadro por
+   * vários frames de saída e o AD saía "passando frame a frame, parece 5fps"
+   * (Silas, 02.09), no take longo E no curto. Não era a velocidade: era o
+   * quadro que nunca chegava.
+   */
+  preparar?: (t: number) => Promise<void>;
 };
 
 type Ret = { x: number; y: number; w: number; h: number };
@@ -909,7 +922,15 @@ export async function renderTypographyVideo(opts: {
     // ── frames: caminho rápido primeiro; qualquer tropeço cai pro seek ──
     let videoOnly: Blob | null = null;
     let mode: 'decode' | 'seek' = 'decode';
-    if (!opts.forceSeekPath) {
+    // INSERT liga o caminho por seek: o decode compõe frames dentro do
+    // callback do decoder (síncrono) e não tem onde esperar o seek do vídeo
+    // do insert. O seek path já espera o frame do vídeo principal — esperar o
+    // do insert junto é uma linha. Mais lento, mas o insert sai FLUIDO.
+    const insertsPrecisamEsperar = !!(inserts && inserts.janelas.length > 0 && inserts.preparar);
+    if (insertsPrecisamEsperar) {
+      console.log('[tipografia] inserts presentes — render pelo caminho de seek (frame a frame do insert esperado)');
+    }
+    if (!opts.forceSeekPath && !insertsPrecisamEsperar) {
       try {
         videoOnly = await renderFramesByDecode({
           file,

@@ -103,6 +103,144 @@ const TRECHOS_MOCK = [
  *     borda (o "contain" ingênuo), os cantos não seriam vermelhos;
  *   • a metade do AVATAR continua sendo vídeo, não vermelho.
  */
+/**
+ * PROVA DE FLUIDEZ DO INSERT (02.09): renderiza um insert de VÍDEO usando o
+ * MESMO encanamento da produção (quadro síncrono + preparar que espera o
+ * seek) e conta, no MP4 DE SAÍDA, quantos quadros DISTINTOS por segundo a
+ * área do insert mostra. Com o defeito original (~5 quadros/s, "frame a
+ * frame") ela reprova; fluido de verdade passa de 12/s.
+ */
+async function rodarProvaFluidez(
+  setMsg: (m: string | null) => void,
+  setUrl: (u: string | null) => void,
+) {
+  try {
+    setUrl(null);
+    setMsg('preparando a prova de fluidez…');
+    const blob = await fetch('/dev-tiny.mp4').then((r) => r.blob());
+
+    const [{ renderTypographyVideo }, engine, presets, ins] = await Promise.all([
+      import('@/lib/typography/export'),
+      import('@/lib/typography/engine'),
+      import('@/lib/typography/presets'),
+      import('@/lib/pilot-inserts'),
+    ]);
+
+    // a mídia do insert é o PRÓPRIO dev-tiny (testsrc2 tem agulha andando —
+    // todo quadro é diferente do anterior, perfeito pra medir fluidez)
+    const vIns = document.createElement('video');
+    vIns.muted = true;
+    vIns.preload = 'auto';
+    vIns.src = URL.createObjectURL(blob);
+    await new Promise<void>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('insert não abriu')), 15000);
+      vIns.onloadeddata = () => { clearTimeout(t); res(); };
+      vIns.onerror = () => { clearTimeout(t); rej(new Error('insert não abriu')); };
+    });
+    const natural = vIns.duration || 12;
+
+    const layout = { tipo: 'cheia' as const };
+    const janelas = [{ id: 'f1', start: 2, end: 6 }];
+    const pv = ins.planoDeVelocidade(natural, 4); // 12s em 4s → corta a 1x
+    const plano = {
+      janelas,
+      porId: (_id: string, W: number, H: number) => ({
+        palco: ins.palcoDoLayout(layout, W, H),
+        focoAvatarY: ins.INSERT_FOCO_PADRAO,
+        blur: pv.blur,
+      }),
+      cobertura: () => null,
+      // EXATAMENTE como a produção: quadro síncrono; quem espera é o preparar
+      fontes: new Map([
+        ['f1', {
+          id: 'f1', w: vIns.videoWidth, h: vIns.videoHeight,
+          quadro: (tRel: number) => {
+            const alvo = ins.tempoNaMidia(tRel, pv, natural, 0);
+            if (Math.abs(vIns.currentTime - alvo) > 0.03) vIns.currentTime = alvo;
+            return vIns;
+          },
+        }],
+      ]),
+      preparar: async (t: number) => {
+        const jan = janelas.find((j) => t >= j.start && t < j.end);
+        if (!jan) return;
+        const alvo = ins.tempoNaMidia(t - jan.start, pv, natural, 0);
+        if (Math.abs(vIns.currentTime - alvo) <= 1 / 60) return;
+        await new Promise<void>((res) => {
+          let ok = false;
+          const fim = () => { if (ok) return; ok = true; vIns.removeEventListener('seeked', fim); clearTimeout(tm); res(); };
+          const tm = setTimeout(fim, 350);
+          vIns.addEventListener('seeked', fim);
+          vIns.currentTime = alvo;
+        });
+      },
+    };
+
+    setMsg('renderizando (caminho de seek)…');
+    const t0 = Date.now();
+    const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
+    const r = await runFfmpegExclusive(() =>
+      renderTypographyVideo({
+        file: blob,
+        blocks: [],
+        preset: presets.getPreset('keynote'),
+        style: { ...engine.DEFAULT_STYLE, presetId: 'keynote' },
+        ffmpegJaExclusivo: true,
+        inserts: plano as never,
+        onProgress: (pr) => setMsg(`fluidez ${pr.phase} ${(pr.ratio * 100).toFixed(0)}%`),
+      }),
+    );
+
+    // ── o VEREDITO: quadros distintos por segundo na área do insert ──
+    setMsg('medindo a fluidez da saída…');
+    const vOut = document.createElement('video');
+    vOut.muted = true;
+    vOut.preload = 'auto';
+    vOut.src = URL.createObjectURL(r.blob);
+    await new Promise<void>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('saída não abriu')), 15000);
+      vOut.onloadeddata = () => { clearTimeout(t); res(); };
+      vOut.onerror = () => { clearTimeout(t); rej(new Error('saída não abriu')); };
+    });
+    const cs = document.createElement('canvas');
+    cs.width = 64;
+    cs.height = 64;
+    const gs = cs.getContext('2d', { willReadFrequently: true })!;
+    let mudancas = 0;
+    let anterior: Uint8ClampedArray | null = null;
+    const DE = 2.2, ATE = 5.8, PASSO = 1 / 30;
+    let amostras = 0;
+    for (let t = DE; t < ATE; t += PASSO) {
+      await new Promise<void>((res) => {
+        let ok = false;
+        const fim = () => { if (ok) return; ok = true; vOut.removeEventListener('seeked', fim); clearTimeout(tm); res(); };
+        const tm = setTimeout(fim, 800);
+        vOut.addEventListener('seeked', fim);
+        vOut.currentTime = t;
+      });
+      gs.drawImage(vOut, 0, 0, 64, 64);
+      const px = gs.getImageData(0, 0, 64, 64).data;
+      if (anterior) {
+        let dif = 0;
+        for (let k = 0; k < px.length; k += 16) dif += Math.abs(px[k] - anterior[k]);
+        if (dif > 900) mudancas++;
+      }
+      anterior = new Uint8ClampedArray(px);
+      amostras++;
+    }
+    const porSeg = mudancas / (ATE - DE);
+    const seg = ((Date.now() - t0) / 1000).toFixed(1);
+    const ok = porSeg >= 12;
+    setUrl(URL.createObjectURL(r.blob));
+    setMsg(
+      `${ok ? 'FLUIDEZ OK' : 'FLUIDEZ REPROVADA'} em ${seg}s · ${porSeg.toFixed(1)} quadros distintos/s ` +
+        `no insert (mínimo 12; o defeito dava ~5) · ${amostras} amostras · ${r.mode}`,
+    );
+  } catch (e) {
+    setMsg(`FLUIDEZ FALHOU: ${(e as Error)?.message || e}`);
+  }
+}
+
 async function rodarProvaInsert(
   setMsg: (m: string | null) => void,
   setUrl: (u: string | null) => void,
@@ -454,6 +592,13 @@ function Conteudo() {
           onClick={() => void rodarProvaInsert(setProvaMsg, setProvaUrl)}
         >
           ▶ prova do insert
+        </button>
+        <button
+          type="button"
+          className="btn-ghost-compact ml-2 text-[10px]"
+          onClick={() => void rodarProvaFluidez(setProvaMsg, setProvaUrl)}
+        >
+          ▶ prova de FLUIDEZ do insert
         </button>
         {provaMsg ? <div className="mono mt-2 text-[10px] text-text-muted" id="prova-msg">{provaMsg}</div> : null}
         {provaUrl ? (
