@@ -95,13 +95,15 @@ export async function montarPosProducao(
   blob: Blob,
   info: PosProducaoInfo,
   cfg: PosProducaoCfg,
-): Promise<{ blob: Blob | null; avisos: string[] }> {
+): Promise<{ blob: Blob | null; avisos: string[]; insertsOrfaos?: string[] }> {
   const avisos: string[] = [];
+  /** ids de insert cuja MÍDIA sumiu do cache — o Pilot limpa a config. */
+  const orfaos: string[] = [];
   const querLegenda = cfg.legenda.on;
   const querZoom = cfg.zoom.on;
   const temInserts = (cfg.inserts?.length || 0) > 0 && !!cfg.lerMidia;
   const querHeadline = !!cfg.headline?.on;
-  if (!querLegenda && !querZoom && !temInserts && !querHeadline) return { blob: null, avisos };
+  if (!querLegenda && !querZoom && !temInserts && !querHeadline) return { blob: null, avisos, insertsOrfaos: orfaos };
 
   try {
     const [{ renderTypographyVideo }, engine, grupo, roteiro, copyFix] = await Promise.all([
@@ -123,8 +125,8 @@ export async function montarPosProducao(
     const somaPartes = (info.partesSec || []).reduce((a, b) => a + (b > 0 ? b : 0), 0);
     const durSec = await duracaoDeVideo(blob, somaPartes > 0.5 ? somaPartes : null);
     if (!durSec) {
-      avisos.push('não consegui ler a duração do montado (nem cabeçalho, nem player) — entregue sem legenda/zoom');
-      return { blob: null, avisos };
+      avisos.push('não consegui medir a duração do vídeo montado — ele saiu sem legenda e sem zoom. Clica RETOMAR com a aba do Pilot visível.');
+      return { blob: null, avisos, insertsOrfaos: orfaos };
     }
 
     const plano = querZoom ? planejarZoom(cfg.zoom, durSec, info.partesSec, info.cortesInternosSec) : [];
@@ -139,18 +141,16 @@ export async function montarPosProducao(
     if (!querLegenda && (temInserts || querHeadline)) {
       try {
         cfg.onEtapa?.('lendo a fala pra ancorar insert/headline');
-        palavrasParaAncora = await transcreverMontado(blob, cfg.idioma);
+        palavrasParaAncora = await transcreverComRetentativa(blob, cfg.idioma);
       } catch (e) {
-        avisos.push(
-          `inserts: não consegui transcrever (${(e as Error)?.message?.slice(0, 50)}) — ` +
-            'a posição sai por estimativa da copy',
-        );
+        console.warn('[pos-producao] ASR das âncoras falhou:', e);
+        avisos.push('não consegui ouvir a fala pra posicionar insert/headline — eles entraram pela estimativa da copy (podem ficar alguns segundos fora do lugar)');
       }
     }
     if (querLegenda) {
       try {
         cfg.onEtapa?.('legendando: transcrevendo');
-        const palavras = await transcreverMontado(blob, cfg.idioma);
+        const palavras = await transcreverComRetentativa(blob, cfg.idioma);
         palavrasParaAncora = palavras;
         let bls = grupo.groupWords(palavras, 'rapido');
 
@@ -159,7 +159,8 @@ export async function montarPosProducao(
         try {
           bls = copyFix.correctBlocksByCopy(bls, copyToda).blocks;
         } catch (e) {
-          avisos.push(`legenda: correção pela copy não rodou (${(e as Error)?.message?.slice(0, 60)}) — segue o ASR puro`);
+          console.warn('[pos-producao] correção pela copy falhou:', e);
+          avisos.push('a legenda saiu do que foi FALADO, sem a correção pela copy do doc — confere a grafia dos nomes próprios.');
         }
 
         const tpl =
@@ -203,9 +204,10 @@ export async function montarPosProducao(
           wordStyles: aplicado.wordStyles,
         };
       } catch (e) {
-        avisos.push(`legenda falhou (${(e as Error)?.message?.slice(0, 80)}) — vídeo segue sem legenda`);
+        console.warn('[pos-producao] legenda falhou:', e);
+        avisos.push('a legenda não entrou nesta montagem — o vídeo saiu sem ela. Clica RETOMAR pra tentar de novo.');
         blocks = [];
-        if (!querZoom) return { blob: null, avisos };
+        if (!querZoom) return { blob: null, avisos, insertsOrfaos: orfaos };
       }
     }
 
@@ -223,12 +225,21 @@ export async function montarPosProducao(
         const videosPorId = new Map<string, { v: HTMLVideoElement; natural: number }>();
         // preenchido DEPOIS de conhecer as janelas (a velocidade depende delas)
         const velocidadePorId = new Map<string, ReturnType<typeof planoDeVelocidade>>();
+        /** quadro já decodificado pro instante atual (o `quadro()` é síncrono) */
+        const quadroProntoPorId = new Map<string, CanvasImageSource>();
         /** onde o recorte de cada insert começa dentro do arquivo (segundos) */
         const recortePorId = new Map<string, number>();
+        /** LEITOR DE QUADROS por insert (decodificação exata) — quando existe,
+         *  ele manda: o <video> vira reserva pra arquivo que não decodifica. */
+        const leitorPorId = new Map<string, import('./insert-decoder').LeitorDeQuadros>();
         for (const ins of cfg.inserts!) {
           const blob = await cfg.lerMidia!(ins.midiaKey);
           if (!blob) {
-            avisos.push(`insert "${ins.midiaNome}" não voltou do armazenamento — foi ignorado`);
+            // Mídia varrida pela faxina do cache (o AD ficou parado tempo
+            // demais). Mensagem HUMANA + o que fazer — "não voltou do
+            // armazenamento" não diz nada a ninguém.
+            orfaos.push(ins.id);
+            avisos.push(`o arquivo do insert "${ins.midiaNome}" não está mais salvo no navegador — sobe ele de novo na janela de inserts. O AD saiu sem esse insert.`);
             continue;
           }
           const url = URL.createObjectURL(blob);
@@ -240,7 +251,7 @@ export async function montarPosProducao(
               im.onerror = () => res(null);
               im.src = url;
             });
-            if (!img) { avisos.push(`insert "${ins.midiaNome}" não abriu`); continue; }
+            if (!img) { avisos.push(`a imagem do insert "${ins.midiaNome}" não abriu — troca o arquivo na janela de inserts`); continue; }
             fontes.set(ins.id, { id: ins.id, w: img.naturalWidth, h: img.naturalHeight, quadro: () => img });
           } else {
             const v = document.createElement('video');
@@ -253,7 +264,7 @@ export async function montarPosProducao(
               v.onerror = () => { clearTimeout(t); res(false); };
               v.src = url;
             });
-            if (!abriu) { avisos.push(`insert "${ins.midiaNome}" não abriu`); continue; }
+            if (!abriu) { avisos.push(`o vídeo do insert "${ins.midiaNome}" não abriu — converte pra MP4 (H.264) e sobe de novo`); continue; }
             // A duração vem do CABEÇALHO do arquivo, não do `v.duration`
             // (02.09). O `onloadeddata` dispara com o 1º quadro pronto, e aí a
             // duração ainda pode vir errada ou infinita — e uma duração menor
@@ -269,6 +280,24 @@ export async function montarPosProducao(
             recortePorId.set(ins.id, rec.de);
             durNatural.set(ins.id, natural);
             videosPorId.set(ins.id, { v, natural });
+            // LEITOR DE QUADROS (03.09): decodifica em ordem e entrega o quadro
+            // EXATO de cada instante — sem relógio (que fazia o insert correr
+            // à frente do render e trancar) e sem seek (que estourava o
+            // orçamento em GOP longo e repetia quadro). Falhou? o <video>
+            // continua valendo, nada regride.
+            try {
+              const { abrirLeitorDeQuadros } = await import('./insert-decoder');
+              const leitor = await abrirLeitorDeQuadros(blob);
+              if (leitor) {
+                leitorPorId.set(ins.id, leitor);
+                fechaveis.push(() => leitor.fechar());
+                console.log(`[pos-producao] insert "${ins.midiaNome}": decodificação exata ligada`);
+              } else {
+                console.warn(`[pos-producao] insert "${ins.midiaNome}": sem decodificação exata — usando o player`);
+              }
+            } catch (e) {
+              console.warn(`[pos-producao] insert "${ins.midiaNome}": leitor falhou, usando o player:`, e);
+            }
             // O `quadro` só sabe o tempo DA JANELA; a conversão pro tempo da
             // MÍDIA depende do plano de velocidade, que só existe depois de a
             // janela ser calculada. Por isso ele consulta o mapa na hora.
@@ -277,6 +306,9 @@ export async function montarPosProducao(
               w: v.videoWidth,
               h: v.videoHeight,
               quadro: (tRel: number) => {
+                // o leitor exato já deixou o quadro pronto no `preparar`
+                const doLeitor = quadroProntoPorId.get(ins.id);
+                if (doLeitor) return doLeitor;
                 const pv = velocidadePorId.get(ins.id);
                 const inicio = recortePorId.get(ins.id) || 0;
                 const alvo = pv
@@ -301,6 +333,7 @@ export async function montarPosProducao(
             palavrasParaAncora,
             durSec,
             (id) => durNatural.get(id) ?? null,
+            cortesDoVideo(info.partesSec, info.cortesInternosSec),
           );
           // ⭐ AGORA dá pra decidir a velocidade: cada mídia tem que caber na
           // janela dela. Longa CORTA (roda normal e morre no fim da parte),
@@ -358,6 +391,10 @@ export async function montarPosProducao(
             },
             aoVivo: (t: number) => {
               for (const jan of janelas) {
+                // com LEITOR EXATO não há vídeo pra dirigir: o quadro vem do
+                // decoder no `preparar`. Era este liga-desliga (o insert corre
+                // à frente do render, pausa, retoma) que aparecia como tranco.
+                if (leitorPorId.has(jan.id)) continue;
                 const ent = videosPorId.get(jan.id);
                 if (!ent) continue; // imagem: nada a dirigir
                 const vv = ent.v;
@@ -402,6 +439,31 @@ export async function montarPosProducao(
               if (!jan) return;
               const ent = videosPorId.get(jan.id);
               if (!ent) return; // imagem: sempre pronta
+
+              // ── CAMINHO EXATO: o leitor entrega o quadro do instante ──
+              const leitor = leitorPorId.get(jan.id);
+              if (leitor) {
+                const pvL = velocidadePorId.get(jan.id);
+                const naturalL = durNatural.get(jan.id) || ent.natural;
+                const inicioL = recortePorId.get(jan.id) || 0;
+                const alvoL = pvL
+                  ? tempoNaMidia(t - jan.start, pvL, naturalL, inicioL)
+                  : inicioL + Math.min(t - jan.start, Math.max(0, naturalL - 0.04));
+                // MISTURA só quando há câmera lenta de verdade: é ela que tira
+                // o "frame a frame". Em velocidade normal misturar borraria o
+                // movimento sem motivo.
+                const suavizar = !!pvL && pvL.velocidade < 0.99;
+                try {
+                  const quadro = await leitor.irPara(alvoL, suavizar);
+                  if (quadro) {
+                    quadroProntoPorId.set(jan.id, quadro);
+                    return;
+                  }
+                } catch (e) {
+                  console.warn('[pos-producao] leitor exato falhou no meio — caindo pro player:', e);
+                }
+                quadroProntoPorId.delete(jan.id);
+              }
               const pv = velocidadePorId.get(jan.id);
               const natural = durNatural.get(jan.id) || ent.natural;
               const inicio = recortePorId.get(jan.id) || 0;
@@ -437,7 +499,8 @@ export async function montarPosProducao(
           );
         }
       } catch (e) {
-        avisos.push(`inserts não entraram (${(e as Error)?.message?.slice(0, 60)}) — vídeo segue sem eles`);
+        console.warn('[pos-producao] inserts falharam:', e);
+        avisos.push('os inserts não entraram nesta montagem — o vídeo saiu com o resto (legenda, zoom) normal. Clica RETOMAR pra tentar de novo.');
         planoInserts = undefined;
       }
     }
@@ -498,13 +561,14 @@ export async function montarPosProducao(
           avisos.push('headline: sem texto (nem escrito, nem hook na copy) — não entrou');
         }
       } catch (e) {
-        avisos.push(`headline não entrou (${(e as Error)?.message?.slice(0, 60)})`);
+        console.warn('[pos-producao] headline falhou:', e);
+        avisos.push('a headline não entrou nesta montagem — clica RETOMAR pra tentar de novo.');
       }
     }
 
     if (blocks.length === 0 && plano.length === 0 && !planoInserts && !headlines) {
       for (const f of fechaveis) f();
-      return { blob: null, avisos };
+      return { blob: null, avisos, insertsOrfaos: orfaos };
     }
 
     // ── RENDER com PROGRESSO REAL e TETO DE TEMPO ──
@@ -583,19 +647,22 @@ export async function montarPosProducao(
         `${r.width}x${r.height}@${r.fps} · ${(r.blob.size / 1e6).toFixed(1)}MB · audioOk=${r.audioOk}`,
     );
     if (!r.blob || r.blob.size < 50_000) {
-      avisos.push('pós-produção: render saiu vazio — entregue o montado original');
-      return { blob: null, avisos };
+      avisos.push('o render saiu vazio — o AD foi entregue sem legenda/zoom. Clica RETOMAR; se repetir, fecha as outras abas pesadas.');
+      return { blob: null, avisos, insertsOrfaos: orfaos };
     }
-    if (!r.audioOk) avisos.push('pós-produção: o áudio não remuxou — confere o som do montado');
-    return { blob: r.blob, avisos };
+    if (!r.audioOk) avisos.push('o vídeo saiu SEM ÁUDIO — confere antes de entregar e, se estiver mudo, clica RETOMAR.');
+    return { blob: r.blob, avisos, insertsOrfaos: orfaos };
   } catch (e) {
     const msg = (e as Error)?.message || String(e);
+    console.warn('[pos-producao] falhou:', e);
     avisos.push(
       /abort|cancel/i.test(msg)
-        ? 'pós-produção: o render ficou PARADO (sem progresso por 4min) — entregue o montado original. Deixa a aba visível e clica RETOMAR.'
-        : `pós-produção falhou (${msg.slice(0, 80)}) — entregue o montado original`,
+        ? 'o render ficou parado e foi interrompido — o AD saiu sem legenda/zoom. Deixa a aba do Pilot VISÍVEL e clica RETOMAR.'
+        : /terminat/i.test(msg)
+          ? 'outra ferramenta interrompeu o motor de vídeo no meio da montagem — o AD saiu sem legenda/zoom. Clica RETOMAR (não custa geração nova).'
+          : 'não consegui aplicar legenda/zoom nesta montagem — o AD saiu com o vídeo normal. Clica RETOMAR pra tentar de novo.',
     );
-    return { blob: null, avisos };
+    return { blob: null, avisos, insertsOrfaos: orfaos };
   }
 }
 
@@ -603,6 +670,25 @@ export async function montarPosProducao(
 
 
 /** ASR do montado: extrai o áudio e chama a MESMA rota das Legendas Automáticas. */
+/**
+ * ASR com UMA retentativa quando o ffmpeg é terminado POR FORA (03.09).
+ *
+ * O singleton do ffmpeg é global à aba: um cancel de outra ferramenta mata a
+ * instância no meio da extração de áudio da transcrição. A instância nova
+ * sobe sozinha — desistir aqui custava a âncora dos inserts (a posição caía
+ * pro rateio da copy, que erra por segundos). Mesma regra do mux.
+ */
+async function transcreverComRetentativa(blob: Blob, idioma: string): Promise<PalavraAsr[]> {
+  try {
+    return await transcreverMontado(blob, idioma);
+  } catch (e) {
+    const msg = (e as Error)?.message || '';
+    if (!/terminat/i.test(msg)) throw e;
+    console.warn('[pos-producao] ffmpeg terminado POR FORA na transcrição — refazendo');
+    return await transcreverMontado(blob, idioma);
+  }
+}
+
 async function transcreverMontado(blob: Blob, idioma: string): Promise<PalavraAsr[]> {
   const { extractAudioForTranscription } = await import('./ffmpeg-worker');
   const audio = await extractAudioForTranscription(blob, {}, undefined);

@@ -2089,6 +2089,23 @@ function ClickUpPilotInner() {
         },
       });
       for (const av of r.avisos) console.warn(`[clickup-pilot] posprod ${taskId}: ${av}`);
+      // INSERT ÓRFÃO (03.09): a mídia foi varrida da faxina do cache do
+      // navegador (o AD ficou parado tempo demais). O card já avisa em
+      // português; aqui a config se limpa sozinha, senão o MESMO erro voltaria
+      // em todo RETOMAR — para sempre.
+      if (r.insertsOrfaos?.length) {
+        const mortos = new Set(r.insertsOrfaos);
+        const cfgIdIns = taskIdBaseDaVersao(taskId);
+        for (const alvo of [taskId, cfgIdIns]) {
+          const lista = insertsRef.current[alvo];
+          if (!lista?.length) continue;
+          const vivos = lista.filter((x) => !mortos.has(x.id));
+          if (vivos.length !== lista.length) {
+            console.warn(`[clickup-pilot] ${lista.length - vivos.length} insert(s) sem mídia removidos de ${alvo}`);
+            setInserts(alvo, vivos);
+          }
+        }
+      }
       // O card precisa saber. Um AD entregue sem o zoom que foi pedido é
       // defeito, não detalhe — e antes disto só o console sabia.
       const aplicou = !!r.blob;

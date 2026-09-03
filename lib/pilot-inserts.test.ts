@@ -20,6 +20,7 @@ import {
   insertPadrao,
   planoDeVelocidade,
   recorteDaMidia,
+  INSERT_ENCAIXE_TOL_SEC,
   INSERT_RECORTE_MIN_SEC,
   normalizarInsert,
   blurDoSlowMotion,
@@ -527,6 +528,40 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
   const jd = janelasDosInserts(distantes, PARTES, asrFiel(), DUR);
   ok(jd.length === 2 && jd[1].start - jd[0].end > 0.5,
     'trechos distantes não são emendados — o avatar entre eles é conteúdo');
+}
+
+/* ═══ (8f) A JANELA ENCAIXA NO CORTE — transição não vaza o avatar ═══════
+ * Silas, 03.09: *"a transição tá vazando a mulher UGC antes do insert"*. A
+ * palavra do ASR cai alguns frames DEPOIS do corte que troca o take, e esses
+ * frames mostravam o avatar antes de o insert entrar. */
+{
+  const base = insertPadrao('c', 'BODY 1', { key: 'k', nome: 'n', tipo: 'imagem', w: 1, h: 1 });
+  const ins: Insert[] = [{ ...base, palavraDe: 0, palavraAte: 3 }];
+
+  // sem cortes: a janela é o trecho de fala puro (comportamento de sempre)
+  const semCortes = janelasDosInserts(ins, PARTES, asrFiel(), DUR);
+  ok(semCortes.length === 1, 'uma janela');
+
+  // com um corte 0,2s ANTES do início: a janela recua pra ele
+  const perto = semCortes[0].start - 0.2;
+  const comCorte = janelasDosInserts(ins, PARTES, asrFiel(), DUR, undefined, [perto]);
+  ok(Math.abs(comCorte[0].start - perto) < 0.01,
+    `a borda encaixa no corte vizinho (${semCortes[0].start.toFixed(2)}s → ${comCorte[0].start.toFixed(2)}s)`);
+
+  // corte LONGE: a janela não se mexe — o trecho marcado manda
+  const longe = semCortes[0].start - (INSERT_ENCAIXE_TOL_SEC + 1.5);
+  const semMexer = janelasDosInserts(ins, PARTES, asrFiel(), DUR, undefined, [longe]);
+  ok(Math.abs(semMexer[0].start - semCortes[0].start) < 0.01,
+    'corte fora da tolerância não desloca a janela');
+
+  // encaixe NUNCA inverte nem zera a janela
+  const colados = janelasDosInserts(ins, PARTES, asrFiel(), DUR, undefined, [semCortes[0].start, semCortes[0].start + 0.05]);
+  ok(colados[0].end > colados[0].start + 0.2, 'a janela continua com duração de verdade');
+
+  // as duas bordas podem encaixar
+  const dois = janelasDosInserts(ins, PARTES, asrFiel(), DUR, undefined, [semCortes[0].start - 0.15, semCortes[0].end + 0.2]);
+  ok(dois[0].end - dois[0].start > semCortes[0].end - semCortes[0].start,
+    'com corte dos dois lados a janela abraça o take inteiro');
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-inserts: ${passed} ok, ${failed} fail\n`);

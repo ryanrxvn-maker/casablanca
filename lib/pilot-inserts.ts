@@ -87,6 +87,9 @@ export const INSERT_RECORTE_MIN_SEC = 0.4;
 /** Vão entre dois inserts MENOR que isto é emendado — um buraco de poucos
  *  frames entre janelas fazia o avatar inteiro vazar num piscar. */
 export const INSERT_EMENDA_SEC = 0.45;
+/** Quanto uma borda de insert pode andar pra cair NUM CORTE. Curto de
+ *  propósito: além disso o trecho de fala marcado é que manda. */
+export const INSERT_ENCAIXE_TOL_SEC = 0.5;
 export const INSERT_DUR_IMAGEM_PADRAO = 3;
 
 /** Insert novo com os defaults do estúdio. */
@@ -318,6 +321,8 @@ export function janelasDosInserts(
   palavras: PalavraTempo[],
   durSec: number,
   duracaoNatural?: (id: string) => number | null,
+  /** cortes reais do vídeo — as bordas da janela encaixam neles (03.09) */
+  cortes?: number[] | null,
 ): JanelaInsert[] {
   if (inserts.length === 0 || !(durSec > 0)) return [];
   const faixas = mapearPartesNoAsr(palavras.map((p) => p.text), partes);
@@ -346,10 +351,26 @@ export function janelasDosInserts(
   // duração pra escolher — o texto marcado É a duração.
   const brutas = inserts.map((raw) => {
     const ins = normalizarInsert(raw as never);
-    const start = instanteDe(ins.ancora, ins.palavraDe);
+    let start = instanteDe(ins.ancora, ins.palavraDe);
     let end = instanteDe(ins.ancora, ins.palavraAte, true);
     if (!(end > start + 0.2)) end = Math.min(durSec, start + INSERT_DUR_IMAGEM_PADRAO);
-    return { id: ins.id, start, end: Math.min(durSec, end) };
+    end = Math.min(durSec, end);
+    /* BORDAS NO CORTE (03.09): a palavra do ASR cai alguns frames DEPOIS do
+     * corte que troca o take — e esses frames mostravam o AVATAR antes de o
+     * insert entrar. Silas: *"a transição tá vazando a mulher UGC antes do
+     * insert"*. Encaixar as duas bordas no corte vizinho faz a troca inteira
+     * (avatar → tela dividida → avatar) acontecer NO corte, que é o que a
+     * transição mascara. Tolerância curta: fora dela a janela é do trecho de
+     * fala que o editor marcou, e ela manda. */
+    if (cortes && cortes.length > 0) {
+      const s2 = encaixarNoCorte(start, cortes, INSERT_ENCAIXE_TOL_SEC);
+      const e2 = encaixarNoCorte(end, cortes, INSERT_ENCAIXE_TOL_SEC);
+      if (e2 > s2 + 0.25) {
+        start = Math.max(0, s2);
+        end = Math.min(durSec, e2);
+      }
+    }
+    return { id: ins.id, start, end };
   });
   void duracaoNatural;
 

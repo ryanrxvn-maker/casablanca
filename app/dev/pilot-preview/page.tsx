@@ -146,6 +146,11 @@ async function rodarProvaFluidez(
     const layout = { tipo: 'cheia' as const };
     const janelas = [{ id: 'f1', start: 2, end: 6 }];
     const pv = ins.planoDeVelocidade(natural, 4); // 12s em 4s → corta a 1x
+    // ESPELHO DA PRODUÇÃO (03.09): o leitor de quadros exato é quem manda; o
+    // <video> só entra se ele não abrir.
+    const { abrirLeitorDeQuadros } = await import('@/lib/insert-decoder');
+    const leitor = await abrirLeitorDeQuadros(blob);
+    let quadroPronto: CanvasImageSource | null = null;
     const plano = {
       janelas,
       porId: (_id: string, W: number, H: number) => ({
@@ -159,6 +164,7 @@ async function rodarProvaFluidez(
         ['f1', {
           id: 'f1', w: vIns.videoWidth, h: vIns.videoHeight,
           quadro: (tRel: number) => {
+            if (quadroPronto) return quadroPronto;
             const alvo = ins.tempoNaMidia(tRel, pv, natural, 0);
             const tol = vIns.paused ? 0.03 : 0.3;
             if (Math.abs(vIns.currentTime - alvo) > tol) vIns.currentTime = alvo;
@@ -169,6 +175,7 @@ async function rodarProvaFluidez(
       // ESPELHO da produção (03.09): o driver aoVivo liga o caminho de
       // REPRODUÇÃO — é ele que a prova precisa exercitar agora.
       aoVivo: (t: number) => {
+        if (leitor) return; // com leitor exato não há vídeo pra dirigir
         const jan = janelas.find((j) => t >= j.start - 0.3 && t < j.end);
         if (!jan) { if (!vIns.paused) vIns.pause(); return; }
         const alvo = ins.tempoNaMidia(Math.max(0, t - jan.start), pv, natural, 0);
@@ -181,6 +188,10 @@ async function rodarProvaFluidez(
         const jan = janelas.find((j) => t >= j.start && t < j.end);
         if (!jan) return;
         const alvo = ins.tempoNaMidia(t - jan.start, pv, natural, 0);
+        if (leitor) {
+          quadroPronto = await leitor.irPara(alvo, pv.velocidade < 0.99);
+          if (quadroPronto) return;
+        }
         if (Math.abs(vIns.currentTime - alvo) <= 1 / 60) return;
         await new Promise<void>((res) => {
           let ok = false;
@@ -286,8 +297,9 @@ async function rodarProvaFluidez(
     const seg = ((Date.now() - t0) / 1000).toFixed(1);
     const ok = porSeg >= 12 && porSeg2 >= 12;
     setUrl(URL.createObjectURL(r.blob));
+    leitor?.fechar();
     setMsg(
-      `${ok ? 'FLUIDEZ OK' : 'FLUIDEZ REPROVADA'} em ${seg}s · ` +
+      `${ok ? 'FLUIDEZ OK' : 'FLUIDEZ REPROVADA'} em ${seg}s · ${leitor ? 'leitor EXATO' : 'player'} · ` +
         `${r.mode}: ${porSeg.toFixed(1)}/s · seek: ${porSeg2.toFixed(1)}/s ` +
         `(mínimo 12 nos dois; o defeito dava ~5) · GOP 10s · ${amostras} amostras`,
     );

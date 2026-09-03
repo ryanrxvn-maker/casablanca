@@ -214,7 +214,7 @@ async function looksLikeMp4(file: Blob): Promise<boolean> {
 }
 
 /** Description (avcC/hvcC/vpcC/av1C) da entry do stsd — o VideoDecoder exige. */
-function trackDescription(
+export function trackDescription(
   trak: unknown,
 ): { desc: Uint8Array | undefined; needsDesc: boolean } {
   type DescBoxes = {
