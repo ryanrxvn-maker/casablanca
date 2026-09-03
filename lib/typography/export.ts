@@ -1092,7 +1092,7 @@ export async function renderTypographyVideo(opts: {
     // do insert junto é uma linha. Mais lento, mas o insert sai FLUIDO.
     const insertsPrecisamEsperar = !!(inserts && inserts.janelas.length > 0 && inserts.preparar);
     if (insertsPrecisamEsperar) {
-      console.log('[tipografia] inserts presentes — render pelo caminho de seek (frame a frame do insert esperado)');
+      console.log('[tipografia] inserts presentes — tentando o caminho de REPRODUÇÃO (tempo real); seek é a reserva');
     }
     if (!opts.forceSeekPath && !insertsPrecisamEsperar) {
       try {
@@ -1144,6 +1144,7 @@ export async function renderTypographyVideo(opts: {
             onProgress, throwIfAborted,
           });
           mode = 'playback';
+          console.log('[tipografia] REPRODUÇÃO assumiu — render em ~tempo real');
         } catch (e) {
           if (isCancellationError(e) || signal?.aborted) throw e;
           console.warn('[tipografia] reprodução falhou — caindo pro seek:', e);

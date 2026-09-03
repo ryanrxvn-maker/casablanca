@@ -614,8 +614,8 @@ export function PilotHeadlineModal({
               rotulo="Caixa"
               opcoes={[
                 { v: null, txt: 'padrão' },
-                { v: true, txt: 'AA', title: 'tudo em maiúscula' },
-                { v: false, txt: 'Aa', title: 'como escrito' },
+                { v: true, txt: 'TT', title: 'tudo em maiúscula' },
+                { v: false, txt: 'Tt', title: 'como escrito' },
               ]}
               valor={cfg.uppercase ?? null}
               onMudar={(v) => mudar({ on: true, uppercase: v })}

@@ -605,10 +605,139 @@ function loadPersistedBatchStates(): Record<string, unknown> {
   }
 }
 
+/**
+ * PAINEL DE MONTAGEM — "editar antes de retomar/remontar" (02.09 · içado 03.09).
+ *
+ * ⚠ MORA NO TOPO DO MÓDULO DE PROPÓSITO. A primeira versão era uma função
+ * DENTRO do componente da página: a cada tecla o React via um "componente
+ * novo" e REMONTAVA a árvore inteira — as janelas de legenda/headline/inserts
+ * abertas por aqui piscavam a cada clique, o card do insert fechava sozinho no
+ * meio do arrasto do recorte e o play morria (Silas, 03.09: "a janela pisca",
+ * "clico nas pontas e volta pra outra tela"). Componente de topo = identidade
+ * estável = reconciliação normal.
+ *
+ * É PURO: tudo que precisa chega por props; quem computa é o call-site.
+ */
+function PainelDeMontagem({
+  acao,
+  nivel,
+  decup,
+  respiro,
+  semPlano,
+  acoesPos,
+  onNivel,
+  onDecup,
+  onRespiro,
+  onCancelar,
+  onSeguir,
+}: {
+  acao: 'retomar' | 'remontar';
+  nivel: boolean;
+  decup: boolean;
+  /** keepSilence da decupagem (s) — só faz sentido com ela ligada */
+  respiro: number;
+  /** nem análise nem replan: os botões de pós-produção não têm copy */
+  semPlano: boolean;
+  acoesPos: React.ReactNode;
+  onNivel: () => void;
+  onDecup: () => void;
+  onRespiro: (sec: number) => void;
+  onCancelar: () => void;
+  onSeguir: () => void;
+}) {
+  return (
+    <div className="mtg-painel">
+      <div className="mtg-cab">
+        <span className="mtg-tile" aria-hidden>
+          {acao === 'retomar' ? (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-3-6.7" />
+              <path d="M21 3v6h-6" />
+            </svg>
+          ) : (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v6m0 6v6M3 12h6m6 0h6" />
+              <circle cx="12" cy="12" r="9" />
+            </svg>
+          )}
+        </span>
+        <span className="mtg-cab-textos">
+          <span className="mtg-titulo">{acao === 'retomar' ? 'Retomar este disparo' : 'Montar de novo'}</span>
+          <span className="mtg-sub">
+            Os takes do HeyGen <b>não</b> são gerados de novo — avatar e voz ficam como estão. O que
+            muda aqui é a <b>montagem</b>.
+          </span>
+        </span>
+      </div>
+
+      <div className="mtg-rotulo">Realces da montagem</div>
+      <div className="mtg-linha">
+        <button
+          type="button"
+          className={'mtg-icone' + (nivel ? ' is-on' : '')}
+          onClick={onNivel}
+          title={nivel ? 'Normalizador LIGADO — cada parte nivelada a -16 LUFS antes de juntar' : 'Normalizador desligado — clica pra nivelar o volume'}
+          aria-label="Normalizador"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+            <path d="M4 14v-4M9 17V7M14 15V9M19 18V6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={'mtg-icone' + (decup ? ' is-on' : '')}
+          onClick={onDecup}
+          title={decup ? 'Decupagem LIGADA — os silêncios entre as falas são cortados' : 'Decupagem desligada — clica pra cortar os silêncios'}
+          aria-label="Decupagem"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="6" cy="6" r="2.6" />
+            <circle cx="6" cy="18" r="2.6" />
+            <path d="M20 4 8.2 15.8M14.6 14.5 20 20M8.2 8.2 12 12" />
+          </svg>
+        </button>
+        {decup ? (
+          <span className="mtg-respiro" title="Quanta pausa FICA entre as falas (o respiro da decupagem)">
+            <button type="button" className="mtg-respiro-btn" onClick={() => onRespiro(respiro - 0.02)} aria-label="Menos respiro">−</button>
+            <span className="mono">{respiro.toFixed(2)}s</span>
+            <button type="button" className="mtg-respiro-btn" onClick={() => onRespiro(respiro + 0.02)} aria-label="Mais respiro">+</button>
+          </span>
+        ) : null}
+        <span className="mtg-sep" aria-hidden />
+        {!semPlano ? (
+          <span className="mtg-acoes">{acoesPos}</span>
+        ) : (
+          <span className="mtg-nota">
+            legenda, zoom, inserts e headline seguem com o que está salvo — o plano desta task não
+            está nesta aba (analisa ela de novo pra editar)
+          </span>
+        )}
+      </div>
+      {!semPlano ? (
+        <div className="mtg-dica">
+          Legenda, headline, zoom e inserts: os mesmos botões do card — o que você mudar aqui é o
+          que a montagem usa.
+        </div>
+      ) : null}
+
+      <div className="mtg-rodape">
+        <button type="button" className="mtg-cancelar" onClick={onCancelar}>
+          cancelar
+        </button>
+        <button type="button" className="mtg-ok" onClick={onSeguir}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m5 12 5 5L20 7" />
+          </svg>
+          {acao === 'retomar' ? 'Retomar agora' : 'Montar agora'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Le o `replan` persistido de uma task direto do localStorage —
  *  fonte autoritativa pra re-disparar mesmo apos reload/navegacao
- *  (quando taskAnalyses esta vazio e o estado React ainda nao
- *  reidratou). */
+ *  (quando taskAnalyses esta vazio e o estado React ainda nao reidratou). */
 function loadPersistedReplan(taskId: string): NonNullable<BatchTaskState['replan']> | null {
   try {
     const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
@@ -1666,128 +1795,6 @@ function ClickUpPilotInner() {
    * É o mesmo conjunto de botões do card (`acoesDePosProducao`), pra config
    * ser uma só: mudar aqui muda o que o disparo usa, e vice-versa.
    */
-  function PainelDeMontagem({
-    taskId,
-    acao,
-    onCancelar,
-    onSeguir,
-  }: {
-    taskId: string;
-    acao: 'retomar' | 'remontar';
-    onCancelar: () => void;
-    onSeguir: () => void;
-  }) {
-    // A análise pode não estar aberta nesta aba (F5, outra sessão) — mas o
-    // PLANO persistido tem a copy, e é só disso que os botões de legenda,
-    // zoom, inserts e headline precisam. Uma análise mínima reconstruída do
-    // replan deixa TUDO editável aqui; a versão anterior desistia e mostrava
-    // um aviso — Silas, 02.09: *"tem que ser possível sim mexer em legenda,
-    // headline, inserts e tudo isso no retomar"*.
-    const aReal = taskAnalyses[taskId] || taskAnalyses[taskIdBaseDaVersao(taskId)];
-    const replanSalvo =
-      batchStates[taskId]?.replan ||
-      batchStates[taskIdBaseDaVersao(taskId)]?.replan ||
-      loadPersistedReplan(taskId) ||
-      loadPersistedReplan(taskIdBaseDaVersao(taskId));
-    const aMontagem: TaskAnalysis | null =
-      aReal ||
-      (replanSalvo?.parts?.length
-        ? ({
-            taskId,
-            taskName: replanSalvo.taskName || batchStates[taskId]?.taskName || taskId,
-            baseAdId: replanSalvo.baseAdId || batchStates[taskId]?.baseAdId || taskId,
-            status: 'ready',
-            partTemplates: replanSalvo.parts.map((x) => ({ label: String(x.label || ''), text: String(x.text || '') })),
-            roleSlots: [],
-          } as unknown as TaskAnalysis)
-        : null);
-    const nivel = isNivelamentoEnabled(taskId);
-    const decup = isDecupagemEnabled(taskId) || isDecupagemEnabled(taskIdBaseDaVersao(taskId));
-    return (
-      <div className="mtg-painel">
-        <div className="mtg-cab">
-          <span className="mtg-tile" aria-hidden>
-            {acao === 'retomar' ? (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 12a9 9 0 1 1-3-6.7" />
-                <path d="M21 3v6h-6" />
-              </svg>
-            ) : (
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 3v6m0 6v6M3 12h6m6 0h6" />
-                <circle cx="12" cy="12" r="9" />
-              </svg>
-            )}
-          </span>
-          <span className="mtg-cab-textos">
-            <span className="mtg-titulo">{acao === 'retomar' ? 'Retomar este disparo' : 'Montar de novo'}</span>
-            <span className="mtg-sub">
-              Os takes do HeyGen <b>não</b> são gerados de novo — avatar e voz ficam como estão. O que
-              muda aqui é a <b>montagem</b>.
-            </span>
-          </span>
-        </div>
-
-        <div className="mtg-rotulo">Realces da montagem</div>
-        <div className="mtg-linha">
-          {/* ÍCONE-ONLY como os quatro da direita (03.09) — "por que um é
-            * texto e outro ícone? todos têm que ser ícone". O title conta. */}
-          <button
-            type="button"
-            className={'mtg-icone' + (nivel ? ' is-on' : '')}
-            onClick={() => setNivelamentoFor(taskId, !nivel)}
-            title={nivel ? 'Normalizador LIGADO — cada parte nivelada a -16 LUFS antes de juntar' : 'Normalizador desligado — clica pra nivelar o volume'}
-            aria-label="Normalizador"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-              <path d="M4 14v-4M9 17V7M14 15V9M19 18V6" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={'mtg-icone' + (decup ? ' is-on' : '')}
-            onClick={() => setDecupagemFor(taskId, !decup)}
-            title={decup ? 'Decupagem LIGADA — os silêncios entre as falas são cortados' : 'Decupagem desligada — clica pra cortar os silêncios'}
-            aria-label="Decupagem"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <circle cx="6" cy="6" r="2.6" />
-              <circle cx="6" cy="18" r="2.6" />
-              <path d="M20 4 8.2 15.8M14.6 14.5 20 20M8.2 8.2 12 12" />
-            </svg>
-          </button>
-          <span className="mtg-sep" aria-hidden />
-          {aMontagem ? (
-            <span className="mtg-acoes">{acoesDePosProducao(aMontagem)}</span>
-          ) : (
-            <span className="mtg-nota">
-              legenda, zoom, inserts e headline seguem com o que está salvo — o plano desta task não
-              está nesta aba (analisa ela de novo pra editar)
-            </span>
-          )}
-        </div>
-        {aMontagem ? (
-          <div className="mtg-dica">
-            Legenda, headline, zoom e inserts: os mesmos botões do card — o que você mudar aqui é o
-            que a montagem usa.
-          </div>
-        ) : null}
-
-        <div className="mtg-rodape">
-          <button type="button" className="mtg-cancelar" onClick={onCancelar}>
-            cancelar
-          </button>
-          <button type="button" className="mtg-ok" onClick={onSeguir}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="m5 12 5 5L20 7" />
-            </svg>
-            {acao === 'retomar' ? 'Retomar agora' : 'Montar agora'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   function acoesDePosProducao(a: TaskAnalysis) {
     return (
       <>
@@ -12825,20 +12832,63 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               // cima dos previews desta task — nunca lá embaixo
                               // junto da fila.
                               topPanel={
-                                pedindoMontagem?.taskId === b.taskId ? (
-                                  <PainelDeMontagem
-                                    key={`montagem:${b.taskId}`}
-                                    taskId={b.taskId}
-                                    acao={pedindoMontagem.acao}
-                                    onCancelar={() => setPedindoMontagem(null)}
-                                    onSeguir={() => {
-                                      const acao = pedindoMontagem.acao;
-                                      setPedindoMontagem(null);
-                                      if (acao === 'retomar') retomarTaskBatch(b.taskId);
-                                      else void rebuildMontage(b.taskId);
-                                    }}
-                                  />
-                                ) : reinicioPainelTaskId === b.taskId && reinicioPlano ? (
+                                pedindoMontagem?.taskId === b.taskId ? (() => {
+                                  const tId = b.taskId;
+                                  const base = taskIdBaseDaVersao(tId);
+                                  // A análise pode não estar aberta nesta aba — o PLANO
+                                  // persistido tem a copy, e é só disso que os botões de
+                                  // legenda/zoom/inserts/headline precisam.
+                                  const aReal = taskAnalyses[tId] || taskAnalyses[base];
+                                  const replanSalvo =
+                                    batchStates[tId]?.replan ||
+                                    batchStates[base]?.replan ||
+                                    loadPersistedReplan(tId) ||
+                                    loadPersistedReplan(base);
+                                  const aMontagem: TaskAnalysis | null =
+                                    aReal ||
+                                    (replanSalvo?.parts?.length
+                                      ? ({
+                                          taskId: tId,
+                                          taskName: replanSalvo.taskName || batchStates[tId]?.taskName || tId,
+                                          baseAdId: replanSalvo.baseAdId || batchStates[tId]?.baseAdId || tId,
+                                          status: 'ready',
+                                          partTemplates: replanSalvo.parts.map((x) => ({ label: String(x.label || ''), text: String(x.text || '') })),
+                                          roleSlots: [],
+                                        } as unknown as TaskAnalysis)
+                                      : null);
+                                  const decupOn = isDecupagemEnabled(tId) || isDecupagemEnabled(base);
+                                  return (
+                                    <PainelDeMontagem
+                                      key={`montagem:${tId}`}
+                                      acao={pedindoMontagem.acao}
+                                      nivel={isNivelamentoEnabled(tId)}
+                                      decup={decupOn}
+                                      respiro={getDecupIntensity(base)}
+                                      semPlano={!aMontagem}
+                                      acoesPos={aMontagem ? acoesDePosProducao(aMontagem) : null}
+                                      onNivel={() => setNivelamentoFor(tId, !isNivelamentoEnabled(tId))}
+                                      // Escreve nos DOIS ids (03.09): numa VERSÃO, ler caía no
+                                      // id da mãe e o toggle "não desligava nunca" — desligava a
+                                      // irmã e a mãe reacendia a leitura.
+                                      onDecup={() => {
+                                        const alvo = !decupOn;
+                                        setDecupagemFor(tId, alvo);
+                                        if (base !== tId) setDecupagemFor(base, alvo);
+                                      }}
+                                      onRespiro={(sec) => {
+                                        setDecupIntensityFor(base, sec);
+                                        if (base !== tId) setDecupIntensityFor(tId, sec);
+                                      }}
+                                      onCancelar={() => setPedindoMontagem(null)}
+                                      onSeguir={() => {
+                                        const acao = pedindoMontagem.acao;
+                                        setPedindoMontagem(null);
+                                        if (acao === 'retomar') retomarTaskBatch(tId);
+                                        else void rebuildMontage(tId);
+                                      }}
+                                    />
+                                  );
+                                })() : reinicioPainelTaskId === b.taskId && reinicioPlano ? (
                                   <RedispatchPanel
                                     key={`reinicio:${b.taskId}`}
                                     taskName={reinicioPlano.taskName || b.taskName}
