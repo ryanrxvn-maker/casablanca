@@ -73,9 +73,12 @@ console.log('\n-- clamp da caixa --');
   const zero = captionBBoxAt(fakeCtx(), [b], preset, estilo({ boxWidth: 0.01 }), 100, W, H)!;
   const meio = captionBBoxAt(fakeCtx(), [b], preset, estilo({ boxWidth: 0.3 }), 100, W, H)!;
   ok(Math.abs(zero.w - meio.w) < 1, 'abaixo de 30% trava em 30% (nunca vira um fio)');
+  // teto NOVO (02.09): 1.163 — a caixa alcanca a BORDA da tela (0.86x1.163
+  // = 1.0); antes parava em 86% e "voltava pro centro"
   const dois = captionBBoxAt(fakeCtx(), [b], preset, estilo({ boxWidth: 2 }), 100, W, H)!;
-  const um = captionBBoxAt(fakeCtx(), [b], preset, estilo({ boxWidth: 1 }), 100, W, H)!;
-  ok(Math.abs(dois.w - um.w) < 1, 'acima de 100% trava em 100%');
+  const teto = captionBBoxAt(fakeCtx(), [b], preset, estilo({ boxWidth: 1.163 }), 100, W, H)!;
+  ok(Math.abs(dois.w - teto.w) < 1, 'acima do teto trava no teto (borda da tela)');
+  ok(teto.w >= W * 0.99, `no teto a caixa alcanca a borda (${Math.round(teto.w)} >= ${Math.round(W * 0.99)})`);
 }
 
 console.log('\n-- rotação sai no bbox pro overlay girar junto --');

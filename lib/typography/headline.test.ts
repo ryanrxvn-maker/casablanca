@@ -64,8 +64,13 @@ console.log('\n-- quebra de linha --');
   ok(linhas[0] === 'linha um' && linhas[1] === 'linha dois', 'e cada paragrafo fica na sua linha');
 }
 {
+  // CONTRATO NOVO (02.09): palavra maior que a linha quebra NO MEIO — o
+  // Silas digitou um palavrao de teclado e o balao esticou pros lados
+  // infinitamente; o balao tem que crescer em ALTURA.
   const linhas = wrapHeadline('PNEUMOULTRAMICROSCOPICOSSILICOVULCANOCONIOTICO', 50, (s) => s.length * 10);
-  ok(linhas.length === 1, 'palavra gigante nao e partida no meio');
+  ok(linhas.length > 1, `palavra gigante e partida no meio (${linhas.length} linhas)`);
+  ok(linhas.every((l) => l.length * 10 <= 50), 'nenhum pedaco estoura a linha');
+  ok(linhas.join('') === 'PNEUMOULTRAMICROSCOPICOSSILICOVULCANOCONIOTICO', 'nenhuma letra some');
 }
 {
   ok(wrapHeadline('', 100, (s) => s.length).length === 1, 'texto vazio devolve uma linha vazia (nao quebra)');

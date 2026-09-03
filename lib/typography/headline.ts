@@ -52,6 +52,8 @@ export type HeadlineStyle = {
   quote: boolean | null;
   /** rotação em graus (0 = reta) — a alça de girar do preview escreve aqui */
   rotation?: number;
+  /** borda a borda: null = como o modelo; false solta a cartela pra mover */
+  fullBleed?: boolean | null;
   /** animação de ENTRADA (0.35s) — 'nenhuma' = aparece seca */
   animIn?: HeadlineAnim;
   /** animação de SAÍDA (0.3s) */
@@ -383,6 +385,24 @@ export function wrapHeadline(
     }
     let linha = '';
     for (const p of palavras) {
+      // palavra SOZINHA maior que a linha quebra NO MEIO: sem isso, um
+      // "palavrão" de teclado esticava o balão pros lados infinitamente
+      // (02.09) — o balão tem que crescer em ALTURA
+      if (measure(p) > maxW) {
+        if (linha) {
+          out.push(linha);
+          linha = '';
+        }
+        let resto = p;
+        while (measure(resto) > maxW && resto.length > 1) {
+          let corte = resto.length - 1;
+          while (corte > 1 && measure(resto.slice(0, corte)) > maxW) corte--;
+          out.push(resto.slice(0, corte));
+          resto = resto.slice(corte);
+        }
+        linha = resto;
+        continue;
+      }
       const tentativa = linha ? `${linha} ${p}` : p;
       if (linha && measure(tentativa) > maxW) {
         out.push(linha);
@@ -427,7 +447,7 @@ export function layoutHeadline(
   // fullBleed: o PAINEL vai de borda a borda do quadro (tarja, news,
   // cartela). Antes o flag so mexia nas aspas e a "tarja" saia caixinha
   // solta no meio — nada a ver com a referencia.
-  const bleed = preset.fullBleed && painel !== 'nenhum';
+  const bleed = (h.style.fullBleed ?? preset.fullBleed) && painel !== 'nenhum';
   // painel solido/faixa: a caixa SEGUE a largura escolhida (alça lateral /
   // slider), como no CapCut — texto curto nao encolhe a caixa. Palavra
   // sozinha maior que a caixa ainda estica (nunca corta palavra no meio).

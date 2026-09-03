@@ -824,7 +824,9 @@ function measureLayout(
   const wsKey = ws ? hashStr(JSON.stringify(ws)) : 0;
   const fit = style.autoFit !== false;
   const single = style.singleLine === true;
-  const boxW = Math.min(1, Math.max(0.3, style.boxWidth ?? 1));
+  // teto 1.163: 0.86 × 1.163 ≈ 1.0 — a caixa alcança a borda da tela
+  // (parava em 86% e "voltava pro centro", 02.09)
+  const boxW = Math.min(1.163, Math.max(0.3, style.boxWidth ?? 1));
   const key = `${block.id}|${block.words.length}|${blockTextKey(block)}|${preset.id}|${preset.font}|${style.fontScale}|${tcase}|${style.bold ? 1 : 0}${style.italic ? 1 : 0}|${W}|${hlKey}|${fit ? 1 : 0}${single ? 'u' : ''}|${wsKey}|${boxW}`;
   const hit = layoutCache.get(key);
   if (hit) return hit;
@@ -3119,9 +3121,9 @@ export function captionBBoxAt(
   // zona morta: arrastava a alça e nada acontecia até a quebra alcançar o
   // texto (pedido 02.09: "a caixa deve seguir isso").
   const bwSty = style.boxWidth;
-  const caixaFixa = bwSty !== undefined && bwSty < 0.999;
+  const caixaFixa = bwSty !== undefined && Math.abs(bwSty - 1) > 0.001;
   const wVis = caixaFixa
-    ? Math.max(blockWmax, W * 0.86 * Math.min(1, Math.max(0.3, bwSty)))
+    ? Math.max(blockWmax, W * 0.86 * Math.min(1.163, Math.max(0.3, bwSty)))
     : blockWmax;
   return {
     x: cx - wVis / 2 - pad,

@@ -172,7 +172,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="fx-range h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none disabled:opacity-40"
         style={{
-          background: `linear-gradient(90deg, rgb(var(--cyan)) ${pct}%, rgb(var(--line-strong)) ${pct}%)`,
+          background: `linear-gradient(90deg, rgb(var(--cyan)) ${pct}%, rgba(255,255,255,0.14) ${pct}%)`,
         }}
       />
     </div>
@@ -407,6 +407,18 @@ export function HeadlinePanel({
                     title="Tudo em caixa alta"
                   >
                     TT
+                  </button>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      onCommit();
+                      setStyle({ fullBleed: !(sel.style.fullBleed ?? preset.fullBleed) });
+                    }}
+                    className={'fx-chip' + ((sel.style.fullBleed ?? preset.fullBleed) ? ' is-on' : '')}
+                    title="Painel de borda a borda da tela — desliga pra soltar a cartela e mover pros lados"
+                  >
+                    Borda a borda
                   </button>
                 </div>
 

@@ -342,9 +342,6 @@ function FxCard({
           <span className="block text-[13px] font-bold tracking-tight text-text" style={{ fontFamily: 'var(--font-display)' }}>
             {title}
           </span>
-          <span className="mono block text-[9.5px] uppercase tracking-wider text-text-muted">
-            {mode === 'auto' ? (presetHas ? 'do modelo' : 'o modelo não tem') : mode === 'on' ? 'personalizado' : 'desligado'}
-          </span>
         </span>
         <FxSwitch
           on={ligado}
@@ -359,12 +356,7 @@ function FxCard({
       </div>
 
       <div className="px-3 pb-3 pt-2.5">
-        {!ligado ? (
-          <p className="text-[11px] leading-relaxed text-text-muted">
-            Liga o interruptor pra {title.toLowerCase()} aparecer nesta legenda,
-            mesmo que o modelo não traga.
-          </p>
-        ) : mode === 'auto' ? (
+        {!ligado ? null : mode === 'auto' ? (
           <div className="flex flex-col gap-2.5">
             <FxSlider
               label="Intensidade"

@@ -1471,21 +1471,31 @@ function TipografiaInner() {
                     <span
                       key={sigOf(f)}
                       className={
-                        'group inline-flex max-w-full items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1 text-[11.5px] font-semibold transition-all ' +
+                        'group inline-flex max-w-full items-center gap-2 rounded-[11px] py-1.5 pl-2.5 pr-1.5 text-[12px] font-semibold transition-all ' +
                         (atual
-                          ? 'bg-amber-400/15 text-amber-500 shadow-[inset_0_0_0_1.5px_rgba(251,191,36,0.65)]'
-                          : 'bg-bg-soft text-text-muted shadow-[inset_0_0_0_1px_rgb(var(--line))] hover:text-text')
+                          ? 'bg-amber-400/12 text-amber-500 shadow-[inset_0_0_0_1.5px_rgba(251,191,36,0.65),0_4px_14px_-8px_rgba(251,191,36,0.6)]'
+                          : 'bg-bg-soft text-text-muted shadow-[inset_0_0_0_1px_rgb(var(--line))] hover:text-text hover:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.35)]')
                       }
                     >
                       <button
                         type="button"
                         disabled={processing}
                         onClick={() => trocarVideo(f)}
-                        className="inline-flex min-w-0 items-center gap-1.5 disabled:cursor-not-allowed"
+                        className="inline-flex min-w-0 items-center gap-2 disabled:cursor-not-allowed"
                         title={f.name}
                       >
-                        <span className="mono opacity-60">{i + 1}</span>
-                        <span className="max-w-[160px] truncate">{f.name}</span>
+                        <span
+                          className={
+                            'flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] ' +
+                            (atual ? 'bg-amber-400/20' : 'bg-black/25')
+                          }
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
+                            <rect x="3" y="5" width="13" height="14" rx="2.5" />
+                            <path d="M16 10l5-3v10l-5-3" />
+                          </svg>
+                        </span>
+                        <span className="max-w-[170px] truncate">{f.name}</span>
                       </button>
                       <button
                         type="button"
@@ -1493,7 +1503,7 @@ function TipografiaInner() {
                         onClick={() => removerVideo(f)}
                         title="Tirar da fila (a edição salva continua na sessão)"
                         aria-label={`Tirar ${f.name} da fila`}
-                        className="flex h-5 w-5 items-center justify-center rounded-full text-[12px] opacity-50 hover:bg-red-500/15 hover:text-red-400 hover:opacity-100"
+                        className="flex h-5 w-5 items-center justify-center rounded-full text-[13px] opacity-45 hover:bg-red-500/15 hover:text-red-400 hover:opacity-100"
                       >
                         ×
                       </button>
@@ -1506,7 +1516,7 @@ function TipografiaInner() {
                     disabled={processing}
                     onClick={() => addInputRef.current?.click()}
                     className={
-                      'inline-flex items-center gap-1 rounded-full border border-dashed border-line-strong px-3 py-1 text-[11.5px] font-bold text-text-muted hover:border-amber-400/60 hover:text-amber-500 disabled:opacity-40' +
+                      'inline-flex items-center gap-1.5 rounded-[11px] border border-dashed border-line-strong px-3 py-2 text-[12px] font-bold text-text-muted hover:border-amber-400/60 hover:text-amber-500 disabled:opacity-40' +
                       T3D
                     }
                     title="Adiciona mais vídeos na fila (até 10) — cada um guarda a própria edição"
@@ -1630,12 +1640,6 @@ function TipografiaInner() {
                     );
                   }}
                 />
-                <p className="mt-2 text-[10.5px] leading-relaxed text-text-muted">
-                  Arrasta pra mover · clica NUMA PALAVRA pra digitar ali ·
-                  bolinha de cima GIRA · cantos = tamanho · laterais = caixa
-                  do texto · com o texto em edição, arrasta sobre as palavras
-                  pra marcar um trecho
-                </p>
               </div>
               <div className="min-w-0 flex flex-col gap-5">
                 <PresetGalleryM
@@ -1797,7 +1801,7 @@ function TipografiaInner() {
             {audit ? (
               <div
                 className={
-                  'mt-5 flex flex-wrap items-center gap-3 rounded-[14px] px-4 py-3 text-[12.5px] leading-relaxed ' +
+                  'mt-5 flex items-center gap-2.5 rounded-full py-2 pl-3.5 pr-2 text-[12px] font-semibold leading-snug ' +
                   (audit.tom === 'ok'
                     ? 'bg-lime/[0.07] text-lime shadow-[inset_0_0_0_1px_rgba(200,232,124,0.32)]'
                     : audit.tom === 'erro'
@@ -1805,6 +1809,20 @@ function TipografiaInner() {
                       : 'bg-amber-400/[0.07] text-amber-500 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.35)]')
                 }
               >
+                <span
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-current/10"
+                  aria-hidden
+                >
+                  {audit.tom === 'ok' ? (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M4 12.5l5 5L20 6.5" />
+                    </svg>
+                  ) : (
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6">
+                      <path d="M12 5v9M12 17.5v.5" />
+                    </svg>
+                  )}
+                </span>
                 <span className="min-w-0 flex-1">{audit.texto}</span>
                 <button
                   type="button"
@@ -1893,10 +1911,6 @@ function TipografiaInner() {
                 </ToolAction>
               )}
             </div>
-            <p className="mt-2 text-[11.5px] text-text-muted">
-              O render roda no seu navegador, acelerado por hardware — quando
-              terminar, o download começa sozinho. Deixa a aba aberta até o fim.
-            </p>
           </ToolStep>
         ) : null}
 
@@ -3019,9 +3033,13 @@ function PreviewPane({
                 let deg = (Math.atan2(pyH - chy, pxH - chx) * 180) / Math.PI + 90;
                 if (deg > 180) deg -= 360;
                 if (deg < -180) deg += 360;
-                for (const alvo of [0, 90, -90, 180, -180]) {
-                  if (Math.abs(deg - alvo) < 4) deg = alvo;
-                }
+                // ímã FORTE no reto (7°) e normal nos lados — acertar o 0°
+                // no braço tem que ser fácil (02.09)
+                if (Math.abs(deg) < 7) deg = 0;
+                else
+                  for (const alvo of [90, -90, 180, -180]) {
+                    if (Math.abs(deg - alvo) < 5) deg = alvo;
+                  }
                 hd.rotation = Math.round(deg * 10) / 10;
                 hd.moved = true;
                 return;
@@ -3033,7 +3051,11 @@ function PreviewPane({
                 const plh = paraLocal(pxH, pyH, { rot: rotH, cx: chx, cy: chy });
                 if (hd.mode === 'scale') {
                   const dist = Math.max(12, Math.hypot(plh.x - chx, plh.y - chy));
-                  hd.fontScale = Math.min(4, Math.max(0.3, hd.base0 * (dist / hd.dist0)));
+                  // expoente 0.75 = mesmo amortecimento da legenda
+                  hd.fontScale = Math.min(
+                    4,
+                    Math.max(0.3, hd.base0 * Math.pow(dist / hd.dist0, 0.75)),
+                  );
                 } else {
                   const meia = Math.max(12, Math.abs(plh.x - chx));
                   // absoluta: a borda segue a mão
@@ -3173,10 +3195,12 @@ function PreviewPane({
             let deg = (Math.atan2(py - cy0, px - cx0) * 180) / Math.PI + 90;
             if (deg > 180) deg -= 360;
             if (deg < -180) deg += 360;
-            // ímã nos ângulos que importam (reto e de lado)
-            for (const alvo of [0, 90, -90, 180, -180]) {
-              if (Math.abs(deg - alvo) < 4) deg = alvo;
-            }
+            // ímã FORTE no reto (7°) e normal nos lados
+            if (Math.abs(deg) < 7) deg = 0;
+            else
+              for (const alvo of [90, -90, 180, -180]) {
+                if (Math.abs(deg - alvo) < 5) deg = alvo;
+              }
             ov.rotation = Math.round(deg * 10) / 10;
             return;
           }
@@ -3191,8 +3215,9 @@ function PreviewPane({
             const pl2 = paraLocal(px, py, bb);
             const meia = Math.max(12, Math.abs(pl2.x - (bb.cx ?? bb.x + bb.w / 2)));
             // ABSOLUTA: a borda da caixa segue a mão (estilo CapCut) — a
-            // versão proporcional tinha zona morta em bloco curto
-            ov.boxWidth = Math.min(1, Math.max(0.3, (meia * 2) / (c.width * 0.86)));
+            // versão proporcional tinha zona morta em bloco curto. Teto
+            // 1.163 = a caixa alcança a BORDA da tela (0.86×1.163 ≈ 1)
+            ov.boxWidth = Math.min(1.163, Math.max(0.3, (meia * 2) / (c.width * 0.86)));
             return;
           }
           if (drag.mode === 'scale') {
@@ -3205,8 +3230,13 @@ function PreviewPane({
             const pl2 = paraLocal(px, py, bb);
             const dist = Math.hypot(pl2.x - (bb.x + bb.w / 2), pl2.y - (bb.y + bb.h / 2));
             // faixa larga: dá pra encolher de verdade (0.15) pra caber num
-            // canto e crescer até 6× pra hook gigante
-            ov.fontScale = Math.min(6, Math.max(0.15, drag.scale0 * (dist / drag.dist0)));
+            // canto e crescer até 6× pra hook gigante. O expoente 0.75
+            // amortece: bloco pequeno tem dist0 curto e qualquer arrasto
+            // virava o dobro do tamanho ("muito sensível", 02.09)
+            ov.fontScale = Math.min(
+              6,
+              Math.max(0.15, drag.scale0 * Math.pow(dist / drag.dist0, 0.75)),
+            );
             return;
           }
           let nx = (e.clientX - rect.left) / rect.width;
@@ -4596,11 +4626,11 @@ function StylePanel({
       <ToolSlider
         label="Largura da caixa"
         min={0.3}
-        max={1}
+        max={1.163}
         step={0.01}
         value={boxWidth}
         onChange={(v) => onSlide({ boxWidth: v })}
-        display={(v) => `${Math.round(v * 100)}%`}
+        display={(v) => `${Math.round(v * 86)}% da tela`}
         disabled={disabled}
       />
 
@@ -4915,10 +4945,10 @@ function StylePanel({
           disabled={disabled}
           hue={HUE}
           options={[
-            { value: 'palavra', label: 'Palavra', sub: '1 por vez' },
-            { value: 'rapido', label: 'Rápido', sub: '1-3 palavras' },
-            { value: 'equilibrado', label: 'Equilibrado', sub: '3-5 palavras' },
-            { value: 'frases', label: 'Frases', sub: 'blocos longos' },
+            { value: 'palavra', label: 'Palavra' },
+            { value: 'rapido', label: 'Rápido' },
+            { value: 'equilibrado', label: 'Equilibrado' },
+            { value: 'frases', label: 'Frases' },
           ]}
         />
         {regroupInfo ? (
@@ -5216,13 +5246,16 @@ function BlockList({
         style={{ fontFamily: 'var(--font-tech)' }}
       >
         <span>Blocos de legenda — {blocks.length}</span>
-        <span className="flex items-center gap-1.5 normal-case tracking-normal font-normal">
-          clica na palavra pra pintar de destaque ·
+        <span
+          className="flex items-center gap-1.5 text-[11px] font-medium normal-case tracking-normal text-text-muted"
+          style={{ fontFamily: 'inherit' }}
+          title="Clica numa palavra pra pintar o destaque. O cadeado congela o bloco: nem o 'aplicar a todas', nem trocar o ritmo, nem dividir ou juntar mexem no visual dele."
+        >
+          palavra = destaque ·
           <span className="inline-flex items-center text-violet-400">
             <IconPadlock locked size={11} />
           </span>
-          congela o bloco: nem o “aplicar a todas”, nem trocar o ritmo, nem
-          dividir ou juntar mexem no visual dele
+          = congela o bloco
         </span>
       </div>
       <div className="max-h-[280px] overflow-y-auto rounded-[14px] border border-line">
