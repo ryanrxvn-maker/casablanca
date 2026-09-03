@@ -848,6 +848,15 @@ export type PlanoInsert = {
    * quadro que nunca chegava.
    */
   preparar?: (t: number) => Promise<void>;
+  /** SOM dos inserts que o editor ligou — misturado na trilha antes do mux */
+  sons?: Array<{
+    blob: Blob;
+    entraEm: number;
+    saiEm: number;
+    deSec: number;
+    volume: number;
+    velocidade: number;
+  }>;
   /**
    * DIRIGE os vídeos dos inserts em tempo real (03.09) — usado pelo caminho
    * de REPRODUÇÃO: em vez de seek por frame, cada insert TOCA com
@@ -1208,7 +1217,24 @@ export async function renderTypographyVideo(opts: {
             onProgress: (p) => onProgress?.({ phase: 'audio', ratio: p.ratio * 0.5 }),
           });
           throwIfAborted();
-          return muxAudioIntoVideo(vOnly, wav, {
+          // SOM DOS INSERTS (03.09): misturado na trilha do AD antes do mux.
+          // Falhar aqui NUNCA custa a entrega — devolve null e segue com a
+          // trilha original (a fala do avatar é o que não pode faltar).
+          let trilha = wav;
+          if (inserts?.sons?.length) {
+            try {
+              const { misturarSomDosInserts } = await import('../audio-mix-insert');
+              const mix = await misturarSomDosInserts(wav, inserts.sons);
+              if (mix) {
+                trilha = mix;
+                console.log(`[tipografia] som de ${inserts.sons.length} insert(s) misturado na trilha`);
+              }
+            } catch (e) {
+              console.warn('[tipografia] mistura do som dos inserts falhou — trilha original:', e);
+            }
+          }
+          throwIfAborted();
+          return muxAudioIntoVideo(vOnly, trilha, {
             onProgress: (p) => onProgress?.({ phase: 'audio', ratio: 0.5 + p.ratio * 0.5 }),
           });
         });

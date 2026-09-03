@@ -30,6 +30,7 @@ import {
   recorteDaMidia,
   INSERT_FOCO_PADRAO,
   INSERT_RECORTE_MIN_SEC,
+  INSERT_VOLUME_PADRAO,
   type Insert,
   type LayoutInsert,
   type TipoTransicao,
@@ -990,6 +991,54 @@ export function PilotInsertsModal({
                               recorteAte={ins.recorteAte}
                               onMudar={(de, ate) => atualizar(ins.id, { recorteDe: de, recorteAte: ate })}
                             />
+                          </>
+                        ) : null}
+
+                        {/* SOM DO INSERT (03.09): b-roll entra MUDO por padrão
+                          * (a fala do avatar é que manda), mas tem insert que só
+                          * funciona com o som dele. */}
+                        {ins.midiaTipo === 'video' ? (
+                          <>
+                            <div className="pi-rotulo mt">
+                              Som do insert
+                              <span className="pi-rotulo-nota">
+                                {ins.audio ? 'entra junto com a fala do avatar' : 'mudo — só a fala do avatar'}
+                              </span>
+                            </div>
+                            <div className="pi-som">
+                              <button
+                                type="button"
+                                className={'pi-som-btn' + (ins.audio ? ' is-on' : '')}
+                                onClick={() => atualizar(ins.id, { audio: !ins.audio })}
+                                title={ins.audio ? 'Desligar o som deste insert' : 'Ligar o som deste insert'}
+                                aria-label="Som do insert"
+                              >
+                                {ins.audio ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                    <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                                    <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+                                  </svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                    <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                                    <path d="m17 9 4 6M21 9l-4 6" />
+                                  </svg>
+                                )}
+                              </button>
+                              <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO}
+                                onChange={(e) => atualizar(ins.id, { audio: true, volume: parseFloat(e.target.value) })}
+                                className={'pi-slider pi-som-vol' + (ins.audio ? '' : ' is-off')}
+                                title="Volume do som do insert"
+                              />
+                              <span className="pi-som-num mono">
+                                {Math.round((typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO) * 100)}%
+                              </span>
+                            </div>
                           </>
                         ) : null}
 

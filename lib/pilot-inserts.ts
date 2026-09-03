@@ -79,6 +79,17 @@ export type Insert = {
    * tem). Só o pedaço entre eles é lido — o resto do arquivo nunca aparece. */
   recorteDe?: number;
   recorteAte?: number;
+
+  /* ── ÁUDIO DO INSERT (03.09) ─────────────────────────────────────────
+   * B-roll costuma entrar MUDO (a fala do avatar é que manda), mas há
+   * insert que só funciona com o som dele — a colher mexendo, o barulho do
+   * produto. `audio: true` mistura o som do arquivo na trilha final, no
+   * ponto exato da janela, no `volume` escolhido.
+   *
+   * Ausente = MUDO (é o comportamento de sempre; nenhum AD já montado muda). */
+  audio?: boolean;
+  /** 0..1 — quanto do som do insert entra por cima da fala. */
+  volume?: number;
 };
 
 export const INSERT_FOCO_PADRAO = 0.34;
@@ -90,6 +101,9 @@ export const INSERT_EMENDA_SEC = 0.45;
 /** Quanto uma borda de insert pode andar pra cair NUM CORTE. Curto de
  *  propósito: além disso o trecho de fala marcado é que manda. */
 export const INSERT_ENCAIXE_TOL_SEC = 0.5;
+/** Volume padrão do som do insert quando ele é ligado. Abaixo da fala de
+ *  propósito: b-roll acompanha, não disputa com o avatar. */
+export const INSERT_VOLUME_PADRAO = 0.5;
 export const INSERT_DUR_IMAGEM_PADRAO = 3;
 
 /** Insert novo com os defaults do estúdio. */
@@ -127,10 +141,17 @@ export function insertPadrao(id: string, ancora: string, midia: {
 export function normalizarInsert(x: Insert & { palavra?: number; duracaoSec?: number }): Insert {
   const de = Number.isFinite(x.palavraDe) ? x.palavraDe : Number.isFinite(x.palavra) ? (x.palavra as number) : 0;
   const ate = Number.isFinite(x.palavraAte) ? x.palavraAte : de;
+  // volume vindo de config velha (ou editado à mão) nunca sai da faixa —
+  // um NaN aqui viraria silêncio ou estouro na mixagem, calado.
+  const vol = Number.isFinite(x.volume as number)
+    ? Math.min(1, Math.max(0, x.volume as number))
+    : INSERT_VOLUME_PADRAO;
   return {
     ...x,
     palavraDe: Math.max(0, Math.min(de, ate)),
     palavraAte: Math.max(0, Math.max(de, ate)),
+    audio: !!x.audio,
+    volume: vol,
   };
 }
 

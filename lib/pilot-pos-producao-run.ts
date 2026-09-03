@@ -24,6 +24,7 @@ import {
   tempoNaMidia,
   recorteDaMidia,
   cortesDoVideo,
+  INSERT_VOLUME_PADRAO,
   janelaDaHeadline,
   textoDaHeadline,
   normalizarHeadlineCfg,
@@ -80,6 +81,8 @@ type PlanoInsertLocal = {
   preparar?: (t: number) => Promise<void>;
   /** dirige os vídeos dos inserts em tempo real (caminho de reprodução) */
   aoVivo?: (t: number) => void;
+  /** som dos inserts que o editor ligou */
+  sons?: Array<{ blob: Blob; entraEm: number; saiEm: number; deSec: number; volume: number; velocidade: number }>;
   /** pausa todos os vídeos de insert (o principal pausou — backpressure) */
   pausar?: () => void;
 };
@@ -227,6 +230,8 @@ export async function montarPosProducao(
         const velocidadePorId = new Map<string, ReturnType<typeof planoDeVelocidade>>();
         /** quadro já decodificado pro instante atual (o `quadro()` é síncrono) */
         const quadroProntoPorId = new Map<string, CanvasImageSource>();
+        /** bytes de cada insert — a mixagem do som precisa deles */
+        const blobPorId = new Map<string, Blob>();
         /** onde o recorte de cada insert começa dentro do arquivo (segundos) */
         const recortePorId = new Map<string, number>();
         /** LEITOR DE QUADROS por insert (decodificação exata) — quando existe,
@@ -244,6 +249,7 @@ export async function montarPosProducao(
           }
           const url = URL.createObjectURL(blob);
           fechaveis.push(() => URL.revokeObjectURL(url));
+          blobPorId.set(ins.id, blob);
           if (ins.midiaTipo === 'imagem') {
             const img = await new Promise<HTMLImageElement | null>((res) => {
               const im = new Image();
@@ -375,6 +381,24 @@ export async function montarPosProducao(
             cobertura: (t: number) =>
               coberturaNoInstante(t, janelas, (id) => porId.get(id)?.transicao || 'nenhuma'),
             fontes,
+            // SOM: só dos inserts que o editor LIGOU. Vídeo mudo entra mudo,
+            // como sempre — nenhum AD já montado muda de som sozinho.
+            sons: janelas
+              .map((j) => {
+                const ins = porId.get(j.id);
+                const b = blobPorId.get(j.id);
+                if (!ins?.audio || !b || ins.midiaTipo !== 'video') return null;
+                const pv = velocidadePorId.get(j.id);
+                return {
+                  blob: b,
+                  entraEm: j.start,
+                  saiEm: j.end,
+                  deSec: recortePorId.get(j.id) || 0,
+                  volume: typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO,
+                  velocidade: pv?.velocidade ?? 1,
+                };
+              })
+              .filter((x): x is NonNullable<typeof x> => !!x),
             // ESPERA o quadro do insert chegar (02.09). O quadro() síncrono
             // disparava o seek e desenhava o frame VELHO — o render compunha
             // mais rápido do que o <video> completava seeks e o insert saía
