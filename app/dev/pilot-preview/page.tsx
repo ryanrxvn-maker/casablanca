@@ -243,6 +243,10 @@ async function rodarProvaFluidez(
           },
         }],
       ]),
+      // Espelha a produção: com leitor exato o render usa o caminho RÁPIDO,
+      // inclusive com insert de VÍDEO (liberado em 04.09, depois que o impasse
+      // do flush sem dreno foi corrigido).
+      exatos: !!leitor,
       // ESPELHO da produção (03.09): o driver aoVivo liga o caminho de
       // REPRODUÇÃO — é ele que a prova precisa exercitar agora.
       aoVivo: (t: number) => {

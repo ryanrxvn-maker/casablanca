@@ -480,6 +480,20 @@ async function renderFramesByDecode(opts: {
     },
   });
 
+  // batimento de diagnostico: se o quadro parar de andar, diz ONDE parou
+  let _ultimoTick = -1;
+  const _bat = setInterval(() => {
+    if (nextTick === _ultimoTick) {
+      console.warn(
+        `[tipografia] PARADO em tick ${nextTick}/${totalFrames} · chegados=${chegados.length} ` +
+          `filaDec=${decoder.decodeQueueSize} filaEnc=${sink ? sink.encoder.encodeQueueSize : -1} ` +
+          `pending=${pending.length} lastFrame=${lastFrame ? 'sim' : 'nao'} ` +
+          `decState=${decoder.state} encState=${sink ? sink.encoder.state : '-'}`,
+      );
+    }
+    _ultimoTick = nextTick;
+  }, 3000);
+
   try {
     const checkErrors = () => {
       throwIfAborted();
@@ -573,10 +587,57 @@ async function renderFramesByDecode(opts: {
 
     await pump();
 
-    await decoder.flush().catch((e) => {
-      // flush rejeita quando o decoder morreu — decodeError conta a história
-      if (!decodeError) throw e;
-    });
+    /* ⚠⚠ DRENAR DURANTE O FLUSH (04.09). Antes era `await decoder.flush()` e
+     * SÓ DEPOIS `drenar()`. Impasse: durante o flush o decoder entrega os
+     * quadros que faltavam pelo callback, eles empilham em `chegados`, e o
+     * VideoDecoder PARA de produzir quando o app segura quadros de saída
+     * demais — então o flush nunca resolve e o render trava perto do fim.
+     * Visto em 387/420 com chegados=7, filaDec=19 travada, encoder ocioso.
+     * (Foi este travamento que eu li errado como "dois decoders de hardware
+     * disputando o pool"; era o dreno parado, não o segundo decoder.)
+     * Agora o flush corre JUNTO com o dreno: o decoder nunca fica sem buffer. */
+    let flushOk = false;
+    let flushErro: unknown = null;
+    const pFlush = decoder
+      .flush()
+      .then(() => {
+        flushOk = true;
+      })
+      .catch((e) => {
+        flushOk = true;
+        flushErro = e;
+      });
+    /* A espera aqui NAO pode ser `esperarFilaBaixar(decoder, null, 0, 0)`: com
+     * a fila ja em zero ela volta na hora, o laco gira em falso e TRAVA a
+     * thread (o mesmo pecado que fazia o render ser 5x mais lento). Esperar
+     * um sinal de verdade — quadro novo do decoder, ou 30ms — mantem o laco
+     * barato e deixa a promessa do flush assentar. */
+    const esperarSinal = () =>
+      new Promise<void>((res) => {
+        let pronto = false;
+        const fim = () => {
+          if (pronto) return;
+          pronto = true;
+          clearTimeout(tm);
+          try {
+            decoder.removeEventListener('dequeue', fim);
+          } catch {
+            /* decoder ja fechado */
+          }
+          res();
+        };
+        const tm = setTimeout(fim, 30);
+        decoder.addEventListener('dequeue', fim);
+      });
+    while (!flushOk) {
+      await drenar();
+      if (nextTick >= totalFrames) break;
+      if (flushOk) break;
+      await esperarSinal();
+    }
+    await pFlush;
+    // flush rejeita quando o decoder morreu — decodeError conta a história
+    if (flushErro && !decodeError) throw flushErro;
     await drenar();
     checkErrors();
 
@@ -611,6 +672,7 @@ async function renderFramesByDecode(opts: {
     sink.muxer.finalize();
     return new Blob([sink.target.buffer], { type: 'video/mp4' });
   } finally {
+    clearInterval(_bat);
     // (cast: o TS não enxerga as atribuições feitas dentro do callback output)
     (lastFrame as VideoFrame | null)?.close();
     lastFrame = null;
@@ -871,7 +933,7 @@ async function renderFramesByPlayback(opts: {
         }
       }, 120);
 
-      const passo = (_agora: number, meta: { mediaTime: number }) => {
+      const passo = async (_agora: number, meta: { mediaTime: number }) => {
         if (!vivo) return;
         try {
           throwIfAborted();
@@ -879,7 +941,23 @@ async function renderFramesByPlayback(opts: {
           if (e) throw e;
           // compõe todo tick cujo instante já foi APRESENTADO (frame repetido
           // quando o decode pulou — CFR preservado)
-          while (nextTick < totalFrames && nextTick / FPS <= meta.mediaTime + 0.5 / FPS) compor();
+          while (nextTick < totalFrames && nextTick / FPS <= meta.mediaTime + 0.5 / FPS) {
+            /* ⚡ INSERT PELO LEITOR EXATO TAMBÉM AQUI (04.09). Este caminho só
+             * chamava `aoVivo`, então o insert era DIRIGIDO por <video>: play,
+             * pause a cada backpressure e seek quando derivava. Em mídia de GOP
+             * longo cada seek re-decodifica desde o keyframe — medido 0,05x do
+             * tempo real. Chamando `preparar`, o quadro vem do decoder do
+             * insert (exato e sequencial), o <video> dele nem precisa tocar, e
+             * `aoVivo` volta a pular quem tem leitor com razão de ser.
+             * Aqui só existe UM VideoDecoder (o do insert) — o vídeo principal
+             * é decodificado pelo próprio <video> —, então não recai no impasse
+             * de dois decoders de hardware disputando o pool de quadros. */
+            if (inserts?.preparar) {
+              await inserts.preparar(Math.min(nextTick / FPS + 0.0001, durationSec - 0.001));
+              if (!vivo) return;
+            }
+            compor();
+          }
           if (nextTick >= totalFrames) {
             encerrar(resolve);
             return;
@@ -888,7 +966,9 @@ async function renderFramesByPlayback(opts: {
             video.pause();
             inserts?.pausar?.(); // os inserts pausam JUNTO — senão adiantam
           }
-          rvfcId = v.requestVideoFrameCallback!(passo);
+          rvfcId = v.requestVideoFrameCallback!((a, m) => {
+            void passo(a, m);
+          });
         } catch (err) {
           encerrar(() => reject(err));
         }

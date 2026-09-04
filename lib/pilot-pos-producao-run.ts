@@ -367,20 +367,29 @@ export async function montarPosProducao(
             }
           }
           const porId = new Map(usaveis.map((i) => [i.id, i]));
-          /* ⚠⚠ CAMINHO RÁPIDO SÓ COM INSERT DE IMAGEM (03.09).
+          /* CAMINHO RÁPIDO TAMBÉM COM INSERT DE VÍDEO (04.09).
            *
-           * O caminho rápido sabe esperar o quadro do insert (dreno
-           * assíncrono), e por um momento ele foi liberado também pra insert
-           * de VÍDEO usando o leitor exato. Mas aí passam a existir DOIS
-           * decoders de hardware + o encoder disputando o mesmo pool de
-           * quadros do chip: cada um segura quadros abertos, todos ficam sem
-           * buffer e o render TRAVA — reproduzido aqui, parando perto do fim
-           * (91%, sem erro nenhum). Entregar travamento é pior que entregar
-           * lento, então insert de VÍDEO continua na REPRODUÇÃO, que está
-           * provada. Imagem não abre decoder nenhum: essa vai no rápido. */
-          const exatos = usaveis.every((i) => !videosPorId.has(i.id));
+           * Por algumas horas isto ficou restrito a imagem, porque o render
+           * travava perto do fim (91%) e eu li aquilo como "dois decoders de
+           * hardware disputando o pool de quadros do chip". Era diagnóstico
+           * errado: o travamento era o `flush` do decoder principal esperando
+           * sem ninguém drenar os quadros que chegavam — corrigido no
+           * export.ts. Medido depois, com insert de VÍDEO no caminho rápido:
+           * 420 quadros em 8,7s, a mesma velocidade do render sem insert.
+           *
+           * Ganho real: o caminho rápido não depende de <video> tocando nem de
+           * requestVideoFrameCallback, os dois estrangulados em ABA OCULTA —
+           * que é como o Pilot roda de verdade. Era essa cascata (reprodução
+           * travada -> seek re-decodificando desde o keyframe a cada quadro)
+           * que produzia AD de horas.
+           *
+           * Insert que NÃO conseguiu leitor (arquivo grande demais, codec que
+           * o decoder não abre) continua caindo na reprodução, intacta. */
+          const exatos = usaveis.every(
+            (i) => !videosPorId.has(i.id) || leitorPorId.has(i.id),
+          );
           console.log(
-            `[pos-producao] inserts: ${usaveis.length} · ${exatos ? 'só imagem — caminho rápido' : 'tem vídeo — caminho de reprodução'}`,
+            `[pos-producao] inserts: ${usaveis.length} · ${exatos ? 'todos com quadro exato — caminho rápido' : 'algum sem leitor — caminho de reprodução'}`,
           );
           planoInserts = {
             janelas,
@@ -433,17 +442,15 @@ export async function montarPosProducao(
             },
             aoVivo: (t: number) => {
               for (const jan of janelas) {
-                /* ⚠⚠ NÃO PULAR QUEM TEM LEITOR (04.09). Antes este laço fazia
-                 * `if (leitorPorId.has(jan.id)) continue`, partindo de que o
-                 * quadro viria do leitor exato no `preparar`. Só que `aoVivo`
-                 * é chamado por UM caminho só — o de REPRODUÇÃO — e esse
-                 * caminho NUNCA chama `preparar` (quem chama são o decode e o
-                 * seek). Resultado: o insert de vídeo ficava sem motorista
-                 * nenhum, o <video> nunca tocava, `quadroProntoPorId` ficava
-                 * vazio e o b-roll entrava CONGELADO no AD, sem um aviso.
-                 * Apareceu quando o insert de vídeo voltou pro caminho de
-                 * reprodução (dois decoders de hardware travam o render).
-                 * Se `aoVivo` está rodando, é reprodução: dirige sempre. */
+                /* Com LEITOR EXATO não há vídeo pra dirigir: o quadro vem do
+                 * decoder no `preparar`, e os TRÊS caminhos do render chamam
+                 * `preparar` (decode, seek e — desde 04.09 — reprodução).
+                 * ⚠ Este `continue` só é correto ENQUANTO isso for verdade: por
+                 * algumas horas de 04.09 a reprodução não chamava `preparar`, e
+                 * então o insert de vídeo ficava sem motorista nenhum e entrava
+                 * CONGELADO no AD, calado. Se um caminho novo aparecer sem
+                 * `preparar`, este pulo volta a ser um bug. */
+                if (leitorPorId.has(jan.id)) continue;
                 const ent = videosPorId.get(jan.id);
                 if (!ent) continue; // imagem: nada a dirigir
                 const vv = ent.v;

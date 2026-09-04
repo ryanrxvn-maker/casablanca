@@ -181,8 +181,14 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
     decoder.configure(config);
   };
 
+  let _recomecos = 0;
+  let _chamadas = 0;
   /** Volta pro keyframe <= `alvoUs` e recomeça dali. */
   const recomecarEm = (alvoUs: number) => {
+    _recomecos++;
+    if (_recomecos <= 5 || _recomecos % 20 === 0) {
+      console.warn(`[insert-decoder] RECOMECO #${_recomecos} em ${(alvoUs / 1e6).toFixed(2)}s (chamada ${_chamadas})`);
+    }
     let k = 0;
     for (let i = 0; i < amostras.length; i++) {
       if (amostras[i].ctsUs > alvoUs) break;
@@ -248,7 +254,9 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
 
     async irPara(t: number, suavizar: boolean): Promise<CanvasImageSource | null> {
       if (morto || falhou) return null;
+      _chamadas++;
       const alvoUs = Math.max(0, Math.round(t * 1_000_000));
+      const _t0 = performance.now();
 
       // pediu ANTES do que já temos? volta pro keyframe (raro: só no laço)
       const primeiro = prontos[0];
@@ -299,6 +307,14 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
           return !!u && u.timestamp > alvoUs;
         });
         voltas++;
+      }
+      const _dur = performance.now() - _t0;
+      if (_dur > 120) {
+        console.warn(
+          `[insert-decoder] LENTO ${_dur.toFixed(0)}ms · alvo=${(alvoUs / 1e6).toFixed(2)}s ` +
+            `voltas=${voltas} prontos=${prontos.length} amostra=${proxAmostra}/${amostras.length} ` +
+            `fila=${decoder ? decoder.decodeQueueSize : -1}`,
+        );
       }
       if (voltas >= 400) {
         console.warn(
