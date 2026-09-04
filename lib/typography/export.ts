@@ -15,20 +15,22 @@
  *   3. Encode H.264 via WebCodecs (VideoEncoder, acelerado por hardware) +
  *      mux MP4 com mp4-muxer. MUITO mais rápido e leve que re-encodar no
  *      ffmpeg-wasm.
- *   4. Áudio: extractAudio (wav) + muxAudioIntoVideo (ffmpeg-wasm, -c:v copy
- *      -c:a aac) — infra já blindada do repo (watchdog + assertValidMp4).
+ *   4. Áudio: decodeAudioData + AudioEncoder (WebCodecs) → AAC muxado na
+ *      MESMA passada do vídeo (lib/typography/audio-aac.ts). Sem ffmpeg, sem
+ *      arquivo intermediário, sem fila global. Se o WebCodecs de áudio não
+ *      estiver disponível ou falhar, cai no caminho antigo: extractAudio (wav)
+ *      + muxAudioIntoVideo (ffmpeg-wasm, -c:v copy -c:a aac).
  *
- * ⏸ IDEIA EM ABERTO: muxar o áudio no PRÓPRIO mp4-muxer, com o `AudioEncoder`
- * do WebCodecs, dispensaria as duas passadas de ffmpeg-wasm, o arquivo
- * intermediário e a espera na fila global — e de quebra tiraria o teto de
- * 300MB, que hoje empurra arquivo grande pro caminho lento por seek.
- * Foi implementado em 04.09 e FUNCIONOU (a trilha saiu correta, 657 pedaços
- * AAC), mas NÃO FOI POSSÍVEL MEDIR: a máquina estava com dois processos do
- * Chrome zumbis queimando ~17h de CPU cada, e nesse estado o render media
- * 33-38s COM e SEM a mudança — o mesmo arquivo que media 4,1s com a máquina
- * limpa. Ou seja: o A/B deu empate porque o gargalo era outro.
- * Ficou de fora por não ter prova, não por ter falhado. Pra retomar: limpar a
- * máquina, medir o baseline, e só então comparar.
+ * ⚡ MEDIDO em 04.09 com a máquina limpa, mesmo arquivo (14s, 1080x1920):
+ *   ffmpeg     → render 5,2s [quadros 3,2 + áudio 1,1 + fontes 0,8]
+ *   WebCodecs  → render 3,4s [quadros 2,6 + áudio 0,4 + fontes 0,4], trilha ✓
+ * 1,5x no total, e o passo de VÍDEO ficou mais rápido também.
+ *
+ * ⚠ Lição que custou uma tarde: uma primeira medição deu 33-38s e eu culpei o
+ * muxer ("segura os pedaços de vídeo pra intercalar"). Era mentira da
+ * máquina — dois processos do Chrome zumbis com ~17h de CPU. Depois do revert
+ * o mesmo arquivo continuou em 33s. Conferir o AMBIENTE antes de atribuir
+ * causa ao código.
  */
 
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
@@ -52,6 +54,7 @@ import { runFfmpegExclusive } from '@/lib/ffmpeg-serial';
 import { drawCaptions, type Block, type StyleState, type TypoPreset } from './engine';
 import { drawHeadlines, type Headline } from './headline';
 import { ensureTypoFonts } from './fonts';
+import { aacDeAudio, type TrilhaAac } from './audio-aac';
 
 export type RenderPhase = 'fontes' | 'frames' | 'audio' | 'finalizando';
 export type RenderProgress = {
@@ -211,6 +214,16 @@ async function pickCodec(
   );
 }
 
+/**
+ * Entrega o AAC ao muxer ANTES do vídeo começar: o muxer fica com a linha do
+ * tempo de áudio completa e escoa o vídeo à medida que chega, em vez de segurar
+ * pedaços esperando intercalar.
+ */
+function entregarAudio(muxer: Muxer<ArrayBufferTarget>, trilha?: TrilhaAac | null): void {
+  if (!trilha) return;
+  for (const pe of trilha.pedacos) muxer.addAudioChunk(pe.chunk, pe.meta);
+}
+
 /* ───────────── encoder + muxer (compartilhado pelos dois caminhos) ───────────── */
 
 type EncodeSink = {
@@ -227,11 +240,23 @@ function makeSink(
   bitrate: number,
   hw = false,
   qualidadeMax = false,
+  /** AAC já pronto (WebCodecs). Quando vem, a faixa de áudio é declarada aqui
+   *  e o mux acontece na MESMA passada do vídeo — sem ffmpeg nenhum. */
+  trilha?: TrilhaAac | null,
 ): EncodeSink {
   const target = new ArrayBufferTarget();
   const muxer = new Muxer({
     target,
     video: { codec: 'avc', width: W, height: H },
+    ...(trilha
+      ? {
+          audio: {
+            codec: 'aac' as const,
+            sampleRate: trilha.sampleRate,
+            numberOfChannels: trilha.numberOfChannels,
+          },
+        }
+      : null),
     fastStart: 'in-memory',
     firstTimestampBehavior: 'offset',
   });
@@ -321,6 +346,8 @@ async function renderFramesByDecode(opts: {
   bitrate: number;
   hw?: boolean;
   qualidadeMax?: boolean;
+  /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
+  trilhaAac?: TrilhaAac | null;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob | null> {
@@ -343,6 +370,7 @@ async function renderFramesByDecode(opts: {
     bitrate,
     hw,
     qualidadeMax,
+    trilhaAac,
     onProgress,
     throwIfAborted,
   } = opts;
@@ -598,7 +626,8 @@ async function renderFramesByDecode(opts: {
     if (!escolhida) return null;
 
     decoder.configure(escolhida);
-    sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax);
+    sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax, trilhaAac);
+    entregarAudio(sink.muxer, trilhaAac);
     mp4.setExtractionOptions(track.id, null, { nbSamples: 100 });
     mp4.start();
     mp4.flush(); // entrega inclusive o lote final (<nbSamples)
@@ -737,6 +766,8 @@ async function renderFramesBySeek(opts: {
   bitrate: number;
   hw?: boolean;
   qualidadeMax?: boolean;
+  /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
+  trilhaAac?: TrilhaAac | null;
   zoom?: ZoomSeg[];
   inserts?: PlanoInsert;
   onProgress?: (p: RenderProgress) => void;
@@ -759,11 +790,13 @@ async function renderFramesBySeek(opts: {
     bitrate,
     hw,
     qualidadeMax,
+    trilhaAac,
     onProgress,
     throwIfAborted,
   } = opts;
 
-  const sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax);
+  const sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax, trilhaAac);
+  entregarAudio(sink.muxer, trilhaAac);
   const totalFrames = Math.max(1, Math.ceil(durationSec * FPS));
   const frameUs = Math.round(1_000_000 / FPS);
 
@@ -852,12 +885,14 @@ async function renderFramesByPlayback(opts: {
   bitrate: number;
   hw?: boolean;
   qualidadeMax?: boolean;
+  /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
+  trilhaAac?: TrilhaAac | null;
   zoom?: ZoomSeg[];
   inserts?: PlanoInsert;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob> {
-  const { video, blocks, preset, style, headlines, zoom, inserts, canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax, onProgress, throwIfAborted } = opts;
+  const { video, blocks, preset, style, headlines, zoom, inserts, canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax, trilhaAac, onProgress, throwIfAborted } = opts;
   type ComRvfc = HTMLVideoElement & {
     requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
     cancelVideoFrameCallback?: (id: number) => void;
@@ -867,7 +902,8 @@ async function renderFramesByPlayback(opts: {
     throw new Error('navegador sem requestVideoFrameCallback');
   }
 
-  const sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax);
+  const sink = makeSink(codec, W, H, bitrate, hw, qualidadeMax, trilhaAac);
+  entregarAudio(sink.muxer, trilhaAac);
   const totalFrames = Math.max(1, Math.ceil(durationSec * FPS));
   const frameUs = Math.round(1_000_000 / FPS);
   let nextTick = 0;
@@ -1412,6 +1448,42 @@ export async function renderTypographyVideo(opts: {
     if (!ctx) throw new FriendlyError('Não consegui criar o canvas de composição.');
 
     // ── frames: caminho rápido primeiro; qualquer tropeço cai pro seek ──
+    /* ⚡ ÁUDIO SEM FFMPEG (04.09). Preparado ANTES do vídeo porque o muxer
+     * precisa declarar a faixa na construção. Some com as duas passadas de
+     * ffmpeg-wasm (extrair WAV + remuxar), com o arquivo intermediário e com
+     * a espera na fila global — o áudio é gravado na MESMA passada do vídeo.
+     * Som de INSERT ligado? A mistura roda antes (OfflineAudioContext, também
+     * sem ffmpeg) e o resultado é o que vira AAC. Qualquer tropeço deixa
+     * `trilhaAac` null e o caminho de ffmpeg de sempre assume. */
+    onProgress?.({ phase: 'audio', ratio: 0 });
+    let trilhaAac: TrilhaAac | null = null;
+    let somInsertOk = true;
+    try {
+      let fonteDoAudio: Blob = file;
+      if (inserts?.sons?.length) {
+        const { misturarSomDosInserts } = await import('../audio-mix-insert');
+        const mix = await misturarSomDosInserts(file, inserts.sons);
+        if (mix) {
+          fonteDoAudio = mix;
+          console.log(`[tipografia] som de ${inserts.sons.length} insert(s) misturado na trilha`);
+        } else {
+          somInsertOk = false;
+        }
+      }
+      trilhaAac = await aacDeAudio(fonteDoAudio, signal);
+      if (trilhaAac) {
+        console.log(
+          `[tipografia] áudio por WebCodecs: ${trilhaAac.pedacos.length} pedaços AAC ` +
+            `${trilhaAac.sampleRate}Hz/${trilhaAac.numberOfChannels}ch — sem ffmpeg`,
+        );
+      }
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      console.warn('[tipografia] preparo do áudio por WebCodecs falhou — vai de ffmpeg:', e);
+      trilhaAac = null;
+    }
+    throwIfAborted();
+
     let videoOnly: Blob | null = null;
     let mode: 'decode' | 'seek' | 'playback' = 'decode';
     // Insert com leitor EXATO roda no caminho rápido (o dreno assíncrono
@@ -1447,6 +1519,7 @@ export async function renderTypographyVideo(opts: {
           bitrate,
           hw,
           qualidadeMax,
+          trilhaAac,
           onProgress,
           throwIfAborted,
         });
@@ -1478,7 +1551,7 @@ export async function renderTypographyVideo(opts: {
         try {
           videoOnly = await renderFramesByPlayback({
             video, blocks, preset, style, headlines, zoom, inserts,
-            canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax,
+            canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax, trilhaAac,
             onProgress, throwIfAborted,
           });
           mode = 'playback';
@@ -1512,6 +1585,7 @@ export async function renderTypographyVideo(opts: {
         bitrate,
         hw,
         qualidadeMax,
+        trilhaAac,
         onProgress,
         throwIfAborted,
       });
@@ -1521,14 +1595,16 @@ export async function renderTypographyVideo(opts: {
       throw new FriendlyError('O render saiu vazio — tenta de novo. Se repetir, fecha outras abas pesadas.');
     }
 
-    // ── áudio original de volta (ffmpeg-wasm, infra blindada do repo) ──
+    // ── áudio ──
     onProgress?.({ phase: 'audio', ratio: 0 });
     throwIfAborted();
     let final = videoOnly;
     let audioOk = false;
-    // o editor pediu som de insert e ele entrou? (vira aviso lá em cima)
-    let somInsertOk = true;
-    {
+    if (trilhaAac) {
+      // já foi muxado junto do vídeo — não há segunda passada
+      audioOk = true;
+      onProgress?.({ phase: 'audio', ratio: 1 });
+    } else {
       const vOnly = videoOnly;
       // Quem já tem o lock roda direto; quem não tem, entra na fila.
       const comLock = <R,>(f: () => Promise<R>): Promise<R> =>

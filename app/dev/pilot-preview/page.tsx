@@ -158,7 +158,17 @@ async function rodarProvaVelocidade(
         }),
       );
       if (faseAtual) marcos[faseAtual] = (marcos[faseAtual] || 0) + (Date.now() - inicioFase) / 1000;
-      return { seg: (Date.now() - t) / 1000, r, marcos };
+      // O MP4 saiu COM áudio? decodeAudioData no resultado é a prova direta —
+      // velocidade sem trilha não vale nada.
+      let audioSeg = 0;
+      try {
+        const ctx = new OfflineAudioContext(1, 1, 48000);
+        const ab = await ctx.decodeAudioData(await r.blob.arrayBuffer());
+        audioSeg = ab.duration;
+      } catch {
+        audioSeg = 0;
+      }
+      return { seg: (Date.now() - t) / 1000, r, marcos, audioSeg };
     };
     const rapido = await roda(false);
     const maxq = await roda(true);
@@ -172,7 +182,7 @@ async function rodarProvaVelocidade(
         .join(' + ');
     setMsg(
       `RÁPIDO ${rapido.seg.toFixed(1)}s [${fases(rapido.marcos)}] ${rapido.r.width}x${rapido.r.height} ` +
-        `${(rapido.r.blob.size / 1e6).toFixed(1)}MB · ` +
+        `${(rapido.r.blob.size / 1e6).toFixed(1)}MB · áudio ${rapido.audioSeg > 0 ? rapido.audioSeg.toFixed(1) + 's' : 'AUSENTE'} · ` +
         `MAX ${maxq.seg.toFixed(1)}s [${fases(maxq.marcos)}] · ${ganho.toFixed(1)}x` +
         ` · SEM LEGENDA ${nada.seg.toFixed(1)}s [${fases(nada.marcos)}]`,
     );
