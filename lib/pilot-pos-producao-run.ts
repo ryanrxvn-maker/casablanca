@@ -211,6 +211,14 @@ export async function montarPosProducao(
       } catch (e) {
         console.warn('[pos-producao] legenda falhou:', e);
         avisos.push('a legenda não entrou nesta montagem — o vídeo saiu sem ela. Clica RETOMAR pra tentar de novo.');
+        // Sem transcrição, insert e headline perdem a âncora e são posicionados
+        // pela ESTIMATIVA da copy — podem sair alguns segundos fora do lugar.
+        // Isso precisa ser dito, senão o editor acha que ele marcou errado.
+        if ((cfg.inserts && cfg.inserts.length > 0) || cfg.headline) {
+          avisos.push(
+            'sem a transcrição, os inserts e a headline entraram pela estimativa da copy — podem ficar alguns segundos fora do lugar.',
+          );
+        }
         blocks = [];
         if (!querZoom) return { blob: null, avisos, insertsOrfaos: orfaos };
       }
@@ -280,6 +288,18 @@ export async function montarPosProducao(
               v.src = url;
             });
             if (!abriu) { avisos.push(`o vídeo do insert "${ins.midiaNome}" não abriu — converte pra MP4 (H.264) e sobe de novo`); continue; }
+            /* SOLTAR O <video> NO FIM (04.09). Revogar a object URL não basta:
+             * o elemento continua segurando a mídia DECODIFICADA. Numa fila de
+             * várias tasks, cada montagem deixava um player vivo por insert. */
+            fechaveis.push(() => {
+              try {
+                v.pause();
+                v.removeAttribute('src');
+                v.load();
+              } catch {
+                /* já solto */
+              }
+            });
             // A duração vem do CABEÇALHO do arquivo, não do `v.duration`
             // (02.09). O `onloadeddata` dispara com o 1º quadro pronto, e aí a
             // duração ainda pode vir errada ou infinita — e uma duração menor
@@ -666,6 +686,13 @@ export async function montarPosProducao(
           );
         } else if (!texto) {
           avisos.push('headline: sem texto (nem escrito, nem hook na copy) — não entrou');
+        } else {
+          // Tinha texto, mas a janela saiu degenerada (o trecho de fala não
+          // deu tempo útil). Sumia CALADA: o editor escrevia a headline e ela
+          // simplesmente não aparecia no AD.
+          avisos.push(
+            'a headline tinha texto mas não achou um trecho válido pra aparecer nesta montagem — ela não entrou. Confere o gancho na janela de headline.',
+          );
         }
       } catch (e) {
         console.warn('[pos-producao] headline falhou:', e);

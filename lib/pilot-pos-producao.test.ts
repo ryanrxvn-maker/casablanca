@@ -535,5 +535,98 @@ function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
   ok(encaixarFronteiraNoCorte(fins, 4, [0.4, 2.45, 4.8]) === 5, 'vários cortes: encaixa no vizinho');
 }
 
+
+/* (24) O AD ABRE EM 100% — EM TODA SEMENTE, não só numa (04.09).
+ *
+ * O teste (18) checava `plan[0].from === 1` com UMA duração. O plano é
+ * sorteado por um PRNG semeado pela duração, e o tipo do primeiro trecho sai
+ * de uma bolsa embaralhada: quando calhava de sair "seco", `proximoDegrau`
+ * devolvia por definição um degrau DIFERENTE do atual, e o vídeo começava em
+ * 110/120/135%. O gancho — os 3 segundos que mais importam — abria no
+ * enquadramento mais fechado e mais borrado, sem corte nenhum antes que
+ * justificasse o salto. Passava no teste porque aquela semente sorteava outro
+ * tipo. Agora a invariante é varrida em muitas durações. */
+{
+  let comecaFechado = 0;
+  let comBorda = 0;
+  let planos = 0;
+  for (let d = 12; d <= 96; d += 1.5) {
+    // 3 partes iguais, cada uma picotada em pedaços de ~2,6s (a decupagem)
+    const partes = [d / 3, d / 3, d / 3];
+    const internos = partes.map((pd) => {
+      const ps: number[] = [];
+      for (let r = pd; r > 0; r -= 2.6) ps.push(Math.min(2.6, r));
+      return ps;
+    });
+    const plan = planejarZoom({ on: true, modo: 'in', forca: 'smart' }, d, partes, internos);
+    if (plan.length === 0) continue;
+    planos++;
+    if (plan[0].from > 1.0001) comecaFechado++;
+    // e nenhum instante pode ficar abaixo de 100% (borda preta na tela)
+    for (let t = 0; t < d; t += 0.5) {
+      if (escalaNoInstante(plan, t) < 0.999) {
+        comBorda++;
+        break;
+      }
+    }
+  }
+  ok(planos > 40, `varredura gerou planos suficientes (${planos})`);
+  ok(
+    comecaFechado === 0,
+    `o AD abre em 100% em TODAS as ${planos} durações (${comecaFechado} abriram ampliadas)`,
+  );
+  ok(comBorda === 0, `nenhum plano desce abaixo de 100% em nenhum instante (${comBorda} desceram)`);
+}
+
+/* (25) O PLANO NÃO TEM BURACO — nem de milissegundos.
+ *
+ * Uma fresta entre dois segmentos faz `escalaNoInstante` devolver 1: o AD dá
+ * uma PISCADA de volta ao tamanho natural no meio do movimento. O teto de
+ * 0,01s que existia deixava passar exatamente esse tamanho de fresta (um
+ * quadro tem 33ms, então a fresta cai DENTRO de um quadro). */
+{
+  let frestas = 0;
+  let maiorFresta = 0;
+  for (let d = 15; d <= 90; d += 2.5) {
+    const partes = [d / 2, d / 2];
+    const internos = partes.map((pd) => {
+      const ps: number[] = [];
+      for (let r = pd; r > 0; r -= 3.1) ps.push(Math.min(3.1, r));
+      return ps;
+    });
+    const plan = planejarZoom({ on: true, modo: 'inout', forca: 'smart' }, d, partes, internos);
+    for (let i = 1; i < plan.length; i++) {
+      const g = plan[i].start - plan[i - 1].end;
+      if (g > 1e-9) {
+        frestas++;
+        if (g > maiorFresta) maiorFresta = g;
+      }
+    }
+  }
+  ok(frestas === 0, `nenhuma fresta entre segmentos (${frestas}, maior ${maiorFresta.toFixed(4)}s)`);
+}
+
+/* (26) `forca` INVÁLIDA não pode apagar o AD.
+ *
+ * O `getZoomCfg` do Pilot devolve o localStorage VERBATIM. Uma config antiga
+ * (o `misto` que existiu) fazia `ZOOM_AMP[forca]` virar undefined, a
+ * amplitude virava NaN e o render entregava a tela apagada, calado. */
+{
+  const cfgRuim = { on: true, modo: 'in', forca: 'misto' } as unknown as Parameters<typeof planejarZoom>[0];
+  const plan = planejarZoom(cfgRuim, 14, [14], [[2.5, 3, 3, 2.5, 3]]);
+  ok(plan.length > 0, 'força desconhecida ainda produz plano (cai no médio)');
+  const todosFinitos = plan.every(
+    (s) => Number.isFinite(s.from) && Number.isFinite(s.to) && Number.isFinite(s.start) && Number.isFinite(s.end),
+  );
+  ok(todosFinitos, 'nenhum valor do plano é NaN com força desconhecida');
+  let piorEscala = 1;
+  for (let t = 0; t < 14; t += 0.25) {
+    const e = escalaNoInstante(plan, t);
+    ok(Number.isFinite(e), `escala finita em ${t.toFixed(2)}s`);
+    if (e < piorEscala) piorEscala = e;
+  }
+  ok(piorEscala >= 0.999, `nunca abaixo de 100% com força inválida (mínimo ${piorEscala.toFixed(3)})`);
+}
+
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

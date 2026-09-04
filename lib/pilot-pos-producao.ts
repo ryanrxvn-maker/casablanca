@@ -375,6 +375,12 @@ function planejarSmartZoom(
       }
     }
     let tipo: 'seco' | 'in' | 'out' = bolsa.pop()!;
+    /* ⚠ O PRIMEIRO TRECHO NUNCA É `out` (04.09). `out` por definição começa
+     * FECHADO e abre — no instante zero isso faz o AD abrir no enquadramento
+     * mais fechado e mais borrado, e sem corte nenhum antes que justifique.
+     * Vira `in`, que começa em 100% e fecha: mesmo movimento, sentido certo
+     * pro gancho. Os `out` seguintes continuam intactos. */
+    if (segs.length === 0 && ini === 0 && tipo === 'out') tipo = 'in';
     // Sem ESPAÇO pra uma rampa que se perceba, cai no seco — nunca no outro
     // movimento. Converter out→in inflava o zoom in acima do seco e quebrava a
     // prioridade do draft (medido: 7 in contra 4 secos). O piso subiu de 2%
@@ -407,8 +413,19 @@ function planejarSmartZoom(
 
     // 3) a escala de destino
     if (tipo === 'seco') {
-      // um degrau DIFERENTE do atual — a troca tem que ser percebida no corte
-      const nova = clampEscala(proximoDegrau(bolsaDeg, escala, encherDegraus));
+      /* ⚠ O AD ABRE EM 100% (04.09). `proximoDegrau` devolve por definição um
+       * degrau DIFERENTE do atual — então, quando o primeiro trecho saía
+       * "seco", o vídeo COMEÇAVA em 110/120/135%: o gancho (os 3 segundos que
+       * mais importam) abria no enquadramento mais fechado e mais borrado, e
+       * ainda por cima sem corte nenhum antes que justificasse o salto. O
+       * comentário do topo e o teste (18) já afirmavam "começa SEMPRE em
+       * 100%" — só não era verdade em todo sorteio.
+       * Vale só pro SECO no instante zero: `in` e `out` são movimentos
+       * deliberados e continuam como o Silas aprovou. */
+      const nova =
+        segs.length === 0 && ini === 0
+          ? 1.0
+          : clampEscala(proximoDegrau(bolsaDeg, escala, encherDegraus));
       if (dur >= SMART_SUBDIV_SEC) {
         // TAKE LONGO: cadeia de SEGURA→ESCORREGA→SEGURA→ESCORREGA até o fim
         // do take (02.09, 2ª rodada — Silas: "tem que transicionar mais entre
@@ -441,8 +458,12 @@ function planejarSmartZoom(
           escalaAtual = alvoDeriva;
           elo++;
         }
-        // resto do take (se sobrou um fiapo) segura na escala em que parou
-        if (fim - cursor > 0.01) {
+        /* ⚠ NADA DE BURACO NO PLANO (04.09). O teto de 0,01s deixava uma
+         * fresta de até 10ms sem nenhum segmento cobrindo. Um quadro tem 33ms,
+         * então essa fresta cai DENTRO de um quadro: o `escalaNoInstante` não
+         * acha segmento, devolve 1, e o AD dá uma PISCADA de volta ao 100% no
+         * meio do movimento. Qualquer sobra vira segmento. */
+        if (fim - cursor > 0) {
           segs.push({ start: cursor, end: fim, from: escalaAtual, to: escalaAtual, rampaAte: fim });
         }
         escala = escalaAtual;

@@ -33,10 +33,16 @@ const MODOS: Array<{ v: ZoomModo; label: string; dica: string }> = [
   { v: 'inout', label: 'In e out', dica: 'Alterna: um take entra, o seguinte abre. Movimento que nunca cansa.' },
 ];
 
+/** O quanto o motor REALMENTE aplica, formatado pro rótulo. */
+const pctDe = (f: 'leve' | 'medio' | 'forte'): string =>
+  `+${Math.round((ZOOM_AMP[f] - 1) * 100)}%`;
+
 const FORCAS: Array<{ v: ZoomForca; label: string; pct: string; dica: string }> = [
-  { v: 'leve', label: 'Leve', pct: '+4,5%', dica: 'Quase uma respiração — presença sem chamar atenção.' },
-  { v: 'medio', label: 'Médio', pct: '+9%', dica: 'O push-in lento do CapCut. O padrão do estúdio.' },
-  { v: 'forte', label: 'Forte', pct: '+16%', dica: 'Movimento evidente, pra cena que precisa de energia.' },
+  // O `pct` sai do MOTOR (ZOOM_AMP), não escrito à mão: os três estavam
+  // mentindo — diziam +4,5/+9/+16% enquanto o render aplicava +8/+16/+26%.
+  { v: 'leve', label: 'Leve', pct: pctDe('leve'), dica: 'Quase uma respiração — presença sem chamar atenção.' },
+  { v: 'medio', label: 'Médio', pct: pctDe('medio'), dica: 'O push-in lento do CapCut. O padrão do estúdio.' },
+  { v: 'forte', label: 'Forte', pct: pctDe('forte'), dica: 'Movimento evidente, pra cena que precisa de energia.' },
   { v: 'smart', label: 'Smart Zoom', pct: '100→135%', dica: 'O feeling do editor: na maioria dos cortes a escala TROCA SECA (100 · 120 · 130), com zoom in suavizado no meio e um ou outro zoom out. Escolhe sozinho a cada corte.' },
 ];
 
