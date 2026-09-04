@@ -695,16 +695,6 @@ function TipografiaSlide() {
         <div aria-hidden className="tgs-beams absolute inset-0" />
         <div aria-hidden className="tgs-blob tgs-blob-a" />
         <div aria-hidden className="tgs-blob tgs-blob-b" />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.05]"
-          style={{
-            backgroundImage:
-              'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
-            backgroundSize: '44px 44px',
-          }}
-        />
-
         {/* O ENGINE ao vivo, com parallax sutil do mouse + zoom no hover */}
         <div
           className="absolute inset-0 transition-transform duration-[900ms] ease-out group-hover:scale-[1.05]"
