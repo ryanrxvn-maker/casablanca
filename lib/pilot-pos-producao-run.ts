@@ -433,10 +433,17 @@ export async function montarPosProducao(
             },
             aoVivo: (t: number) => {
               for (const jan of janelas) {
-                // com LEITOR EXATO não há vídeo pra dirigir: o quadro vem do
-                // decoder no `preparar`. Era este liga-desliga (o insert corre
-                // à frente do render, pausa, retoma) que aparecia como tranco.
-                if (leitorPorId.has(jan.id)) continue;
+                /* ⚠⚠ NÃO PULAR QUEM TEM LEITOR (04.09). Antes este laço fazia
+                 * `if (leitorPorId.has(jan.id)) continue`, partindo de que o
+                 * quadro viria do leitor exato no `preparar`. Só que `aoVivo`
+                 * é chamado por UM caminho só — o de REPRODUÇÃO — e esse
+                 * caminho NUNCA chama `preparar` (quem chama são o decode e o
+                 * seek). Resultado: o insert de vídeo ficava sem motorista
+                 * nenhum, o <video> nunca tocava, `quadroProntoPorId` ficava
+                 * vazio e o b-roll entrava CONGELADO no AD, sem um aviso.
+                 * Apareceu quando o insert de vídeo voltou pro caminho de
+                 * reprodução (dois decoders de hardware travam o render).
+                 * Se `aoVivo` está rodando, é reprodução: dirige sempre. */
                 const ent = videosPorId.get(jan.id);
                 if (!ent) continue; // imagem: nada a dirigir
                 const vv = ent.v;

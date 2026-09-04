@@ -421,6 +421,15 @@ async function renderFramesByDecode(opts: {
           _msEspera += performance.now() - _w;
         }
         emitTick(lastFrame ?? f);
+        // FREIO AQUI TAMBÉM: uma lacuna grande de PTS (vídeo com quadro
+        // faltando, VFR) faz este laço emitir dezenas de quadros de uma vez.
+        // Sem o freio, a fila do encoder estoura e a memória vai junto — o
+        // freio do `pump` só age DEPOIS do dreno inteiro.
+        if (sink && sink.encoder.encodeQueueSize > 24) {
+          const _w2 = performance.now();
+          await esperarFilaBaixar(null, sink.encoder, 30, 24);
+          _msEspera += performance.now() - _w2;
+        }
       }
       chegados.shift();
       lastFrame?.close();
@@ -605,6 +614,17 @@ async function renderFramesByDecode(opts: {
     // (cast: o TS não enxerga as atribuições feitas dentro do callback output)
     (lastFrame as VideoFrame | null)?.close();
     lastFrame = null;
+    // Quadros que ficaram na fila do dreno quando algo falhou no meio. Sem
+    // isto o VideoDecoder segue segurando memória do chip depois do erro —
+    // e um render seguinte pode nem conseguir configurar o decoder.
+    for (const f of chegados) {
+      try {
+        f.close();
+      } catch {
+        /* já fechado */
+      }
+    }
+    chegados.length = 0;
     try {
       if (decoder.state !== 'closed') decoder.close();
     } catch {
@@ -795,10 +815,30 @@ async function renderFramesByPlayback(opts: {
     await new Promise<void>((resolve, reject) => {
       let vivo = true;
       let rvfcId = 0;
+      /* ⚡ RETOMAR NA HORA, NÃO NO PRÓXIMO POLL (04.09). O vídeo pausa pra
+       * esperar o encoder e voltava só quando o timer de 120ms passasse por
+       * ali de novo. Como a pausa acontece muitas vezes durante o render, o
+       * caminho de reprodução andava a uma fração do tempo real (medido: 68%
+       * de um vídeo de 14s depois de ~3min). O encoder avisa pelo evento
+       * `dequeue` assim que a fila anda — retomar aí devolve o ritmo. O timer
+       * acima continua como rede de segurança. */
+      const retomarJa = () => {
+        if (!vivo) return;
+        if (video.paused && !video.ended && sink.encoder.encodeQueueSize <= 12) {
+          void video.play().catch(() => { /* o rvfc/onended decide */ });
+        }
+      };
+      sink.encoder.addEventListener('dequeue', retomarJa);
+
       const encerrar = (fn: () => void) => {
         if (!vivo) return;
         vivo = false;
         clearInterval(retomador);
+        try {
+          sink.encoder.removeEventListener('dequeue', retomarJa);
+        } catch {
+          /* encoder já fechado */
+        }
         try {
           if (rvfcId && v.cancelVideoFrameCallback) v.cancelVideoFrameCallback(rvfcId);
         } catch { /* já cancelado */ }
@@ -826,7 +866,7 @@ async function renderFramesByPlayback(opts: {
           encerrar(() => reject(new Error('reprodução sem progresso (aba oculta?) — seek assume')));
           return;
         }
-        if (video.paused && !video.ended && sink.encoder.encodeQueueSize <= 4) {
+        if (video.paused && !video.ended && sink.encoder.encodeQueueSize <= 12) {
           void video.play().catch(() => { /* o rvfc/onended decide */ });
         }
       }, 120);
@@ -844,7 +884,7 @@ async function renderFramesByPlayback(opts: {
             encerrar(resolve);
             return;
           }
-          if (sink.encoder.encodeQueueSize > 10 && !video.paused) {
+          if (sink.encoder.encodeQueueSize > 24 && !video.paused) {
             video.pause();
             inserts?.pausar?.(); // os inserts pausam JUNTO — senão adiantam
           }
@@ -1297,6 +1337,7 @@ export async function renderTypographyVideo(opts: {
           codec,
           bitrate,
           hw,
+          qualidadeMax,
           onProgress,
           throwIfAborted,
         });
@@ -1323,7 +1364,7 @@ export async function renderTypographyVideo(opts: {
         try {
           videoOnly = await renderFramesByPlayback({
             video, blocks, preset, style, headlines, zoom, inserts,
-            canvas, ctx, W, H, durationSec, codec, bitrate, hw,
+            canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax,
             onProgress, throwIfAborted,
           });
           mode = 'playback';
@@ -1356,6 +1397,7 @@ export async function renderTypographyVideo(opts: {
         codec,
         bitrate,
         hw,
+        qualidadeMax,
         onProgress,
         throwIfAborted,
       });
