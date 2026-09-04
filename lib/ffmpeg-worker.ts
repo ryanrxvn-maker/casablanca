@@ -2225,7 +2225,7 @@ const TRUE_PEAK_LIMITER =
  *   ganho = min( alvoLUFS − I ,  (alvoTP − TP) + headroom )
  * Sem medição (raro) cai no loudnorm de sempre — não pior que hoje.
  */
-function computeStaticGainDb(
+export function computeStaticGainDb(
   stats: LoudnormStats | null,
   withLimiter: boolean,
 ): number | null {
@@ -2239,7 +2239,7 @@ function computeStaticGainDb(
   return Math.min(gainToTarget, gainNoClip, MAX_STATIC_GAIN_DB);
 }
 
-function buildFinalGain(stats: LoudnormStats | null, withLimiter: boolean): string {
+export function buildFinalGain(stats: LoudnormStats | null, withLimiter: boolean): string {
   const gainDb = computeStaticGainDb(stats, withLimiter);
   if (gainDb === null) return `loudnorm=${LOUDNORM_TARGET}`;
   const vol = `volume=${gainDb.toFixed(2)}dB`;
@@ -2348,7 +2348,7 @@ export type NormalizeEngineInfo = {
   measuredTruePeakDb: number | null;
 };
 
-type LoudnormStats = {
+export type LoudnormStats = {
   input_i: string;
   input_tp: string;
   input_lra: string;
@@ -2361,7 +2361,7 @@ type LoudnormStats = {
  * de log do FFmpeg. O JSON do loudnorm é plano (sem chaves aninhadas), então
  * varremos do fim pro começo pegando o último `{...}` que contém input_i.
  */
-function parseLoudnormStats(logText: string): LoudnormStats | null {
+export function parseLoudnormStats(logText: string): LoudnormStats | null {
   const blocks = logText.match(/\{[^{}]*\}/g);
   if (!blocks) return null;
   for (let i = blocks.length - 1; i >= 0; i--) {
