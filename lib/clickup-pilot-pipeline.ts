@@ -429,7 +429,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // quase sempre transitória (heap do wasm), e instância limpa costuma resolver.
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        return await withTimeout(
+        const saida = await withTimeout(
           // profile 'full' = o MESMO motor da ferramenta Normalizador (dynaudnorm +
           // speechnorm): é ele que iguala trecho alto com trecho baixo DENTRO da
           // parte. O 'natural' de antes só acertava a média e deixava o contraste.
@@ -437,6 +437,23 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           levelMs,
           'regulagemVoz',
         );
+        /* ⚠⚠ FALHA ENGOLIDA (04.09). `prepareVoiceForDecupagem` NÃO lança
+         * quando o nivelamento quebra: ela avisa no console e devolve o
+         * arquivo ORIGINAL — o MESMO objeto que recebeu. Como ela resolve, o
+         * `catch` daqui nunca disparava: não havia 2ª tentativa, `nivelFalhou`
+         * ficava vazio e a task saía SEM aviso, com uma parte crua (ex.: -24
+         * LUFS) no meio de partes a -16. Ou seja: a promessa do comentário
+         * acima ("se falhar 2x, devolve o original E REGISTRA") só valia pro
+         * timeout, que é o modo de falha menos comum — heap do wasm estourado,
+         * saída truncada (assertValidMp4) e rc≠0 do ffmpeg passavam calados.
+         * O nivelamento de verdade sempre devolve um Blob NOVO (toBlob), então
+         * identidade é o sinal exato de que ele não rodou.
+         * Não mexer em prepareVoiceForDecupagem: a decupagem depende do
+         * fallback silencioso dela. */
+        if (saida === blob) {
+          throw new Error('nivelamento devolveu o áudio original (falha engolida pelo motor)');
+        }
+        return saida;
       } catch (e) {
         const msg = (e as Error)?.message?.slice(0, 80);
         try { cancelFFmpeg(); } catch { /* ignora */ }
@@ -484,7 +501,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       }
       const leveled = await regularVoz(blobs[i], `${groupLabel} parte ${i + 1}/${blobs.length}`);
       out2.push(leveled);
-      if (saveCachedClip && lbl) {
+      // SÓ guarda no cache o que foi MESMO nivelado. Guardar o clipe cru sob a
+      // chave 'leveled' carimbava o defeito: o RETOMAR dava CACHE HIT, pulava o
+      // nivelamento pra sempre e nem re-rodar consertava.
+      if (saveCachedClip && lbl && leveled !== blobs[i]) {
         try { await saveCachedClip('leveled', lbl, leveled); } catch {}
       }
     }
