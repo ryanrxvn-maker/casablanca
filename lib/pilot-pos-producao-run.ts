@@ -150,7 +150,7 @@ export async function montarPosProducao(
     if (!querLegenda && (temInserts || querHeadline)) {
       try {
         cfg.onEtapa?.('lendo a fala pra ancorar insert/headline');
-        palavrasParaAncora = await transcreverComRetentativa(blob, cfg.idioma);
+        palavrasParaAncora = await transcreverComRetentativa(blob, cfg.idioma, durSec);
       } catch (e) {
         console.warn('[pos-producao] ASR das âncoras falhou:', e);
         avisos.push('não consegui ouvir a fala pra posicionar insert/headline — eles entraram pela estimativa da copy (podem ficar alguns segundos fora do lugar)');
@@ -159,7 +159,7 @@ export async function montarPosProducao(
     if (querLegenda) {
       try {
         cfg.onEtapa?.('legendando: transcrevendo');
-        const palavras = await transcreverComRetentativa(blob, cfg.idioma);
+        const palavras = await transcreverComRetentativa(blob, cfg.idioma, durSec);
         palavrasParaAncora = palavras;
         let bls = grupo.groupWords(palavras, 'rapido');
 
@@ -852,20 +852,33 @@ export async function montarPosProducao(
  * sobe sozinha — desistir aqui custava a âncora dos inserts (a posição caía
  * pro rateio da copy, que erra por segundos). Mesma regra do mux.
  */
-async function transcreverComRetentativa(blob: Blob, idioma: string): Promise<PalavraAsr[]> {
+async function transcreverComRetentativa(
+  blob: Blob,
+  idioma: string,
+  durSec?: number,
+): Promise<PalavraAsr[]> {
   try {
-    return await transcreverMontado(blob, idioma);
+    return await transcreverMontado(blob, idioma, durSec);
   } catch (e) {
     const msg = (e as Error)?.message || '';
     if (!/terminat/i.test(msg)) throw e;
     console.warn('[pos-producao] ffmpeg terminado POR FORA na transcrição — refazendo');
-    return await transcreverMontado(blob, idioma);
+    return await transcreverMontado(blob, idioma, durSec);
   }
 }
 
-async function transcreverMontado(blob: Blob, idioma: string): Promise<PalavraAsr[]> {
+async function transcreverMontado(
+  blob: Blob,
+  idioma: string,
+  durSec?: number,
+): Promise<PalavraAsr[]> {
   const { extractAudioForTranscription } = await import('./ffmpeg-worker');
-  const audio = await extractAudioForTranscription(blob, {}, undefined);
+  /* ⚠ A DURAÇÃO JÁ FOI MEDIDA — usa ela (04.09). Sem esse parâmetro o extrator
+   * fica num bitrate fixo, e um AD longo estoura o teto de 4,4MB do ASR. O
+   * erro que sai é "áudio grande demais", e o conselho do card é RETOMAR —
+   * que ia falhar exatamente igual, pra sempre, porque nada muda entre as
+   * tentativas. Com a duração, o extrator escolhe um bitrate que cabe. */
+  const audio = await extractAudioForTranscription(blob, {}, durSec);
   if (audio.size > 4_400_000) {
     throw new Error(`áudio grande demais pro ASR (${(audio.size / 1e6).toFixed(1)}MB)`);
   }

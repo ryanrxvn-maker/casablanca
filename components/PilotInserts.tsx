@@ -313,6 +313,15 @@ function RecortadorDeMidia({
     return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
   }, []);
 
+  /* ⚠ ARRASTO NÃO GRAVA A CADA PIXEL (04.09). `onMudar` sobe pro Pilot, que
+   * grava no localStorage e re-renderiza a página INTEIRA — e ele era chamado
+   * a cada `pointermove` (mouse de 1000Hz dispara ~8x por quadro). Durante o
+   * arrasto as pontas ficam em estado LOCAL (só este componente re-renderiza)
+   * e o pai é avisado UMA vez, ao soltar. */
+  const [arrasto, setArrasto] = useState<{ de: number; ate: number } | null>(null);
+  const deVis = arrasto ? arrasto.de : de;
+  const ateVis = arrasto ? arrasto.ate : ate;
+
   const mover = useCallback(
     (e: { clientX: number }, alvo: 'de' | 'ate' | 'agulha') => {
       if (!(dur > 0)) return;
@@ -336,22 +345,32 @@ function RecortadorDeMidia({
       if (alvo === 'de') {
         const novoDe = Math.min(t, ate - INSERT_RECORTE_MIN_SEC);
         seek(novoDe);
-        onMudar(novoDe, ate);
+        setArrasto({ de: novoDe, ate });
       } else {
         const novoAte = Math.max(t, de + INSERT_RECORTE_MIN_SEC);
         seek(novoAte);
-        onMudar(de, novoAte);
+        setArrasto({ de, ate: novoAte });
       }
     },
-    [dur, de, ate, fracao, onMudar, seekSuave, mostrarScrub],
+    [dur, de, ate, fracao, seekSuave, mostrarScrub],
   );
+
+  /** Solta a ponta: avisa o pai UMA vez com o valor final. */
+  const soltar = useCallback(() => {
+    setPegando(null);
+    setEsfregando(false);
+    setArrasto((a) => {
+      if (a) onMudar(a.de, a.ate);
+      return null;
+    });
+  }, [onMudar]);
 
   if (!url) {
     return <div className="pi-recorte-vazio">Abrindo o arquivo…</div>;
   }
 
   const pct = (t: number) => `${dur > 0 ? (t / dur) * 100 : 0}%`;
-  const selDur = Math.max(0, ate - de);
+  const selDur = Math.max(0, ateVis - deVis);
 
   return (
     <div className="pi-recorte">
@@ -503,14 +522,14 @@ function RecortadorDeMidia({
         onPointerMove={(e) => {
           if (pegando) mover(e, pegando);
         }}
-        onPointerUp={() => { setPegando(null); setEsfregando(false); }}
-        onPointerCancel={() => { setPegando(null); setEsfregando(false); }}
+        onPointerUp={soltar}
+        onPointerCancel={soltar}
       >
-        <span className="pi-recorte-fora" style={{ left: 0, width: pct(de) }} aria-hidden />
-        <span className="pi-recorte-fora" style={{ left: pct(ate), right: 0 }} aria-hidden />
-        <span className="pi-recorte-sel" style={{ left: pct(de), width: pct(selDur) }} aria-hidden />
-        <span className="pi-recorte-ponta is-de" style={{ left: pct(de) }} aria-hidden />
-        <span className="pi-recorte-ponta is-ate" style={{ left: pct(ate) }} aria-hidden />
+        <span className="pi-recorte-fora" style={{ left: 0, width: pct(deVis) }} aria-hidden />
+        <span className="pi-recorte-fora" style={{ left: pct(ateVis), right: 0 }} aria-hidden />
+        <span className="pi-recorte-sel" style={{ left: pct(deVis), width: pct(selDur) }} aria-hidden />
+        <span className="pi-recorte-ponta is-de" style={{ left: pct(deVis) }} aria-hidden />
+        <span className="pi-recorte-ponta is-ate" style={{ left: pct(ateVis) }} aria-hidden />
         <span ref={agulhaBarraRef} className="pi-recorte-agulha" style={{ left: pct(agulha) }} aria-hidden />
       </div>
 
@@ -550,7 +569,7 @@ function RecortadorDeMidia({
           fim aqui
         </button>
         <span className="pi-recorte-tempo">
-          {mmss(de)} → {mmss(ate)} · <b>{selDur.toFixed(1)}s</b>
+          {mmss(deVis)} → {mmss(ateVis)} · <b>{selDur.toFixed(1)}s</b>
         </span>
         {de > 0.01 || ate < dur - 0.01 ? (
           <button type="button" className="pi-mini" onClick={() => onMudar(0, dur)} title="Volta pro arquivo inteiro">
