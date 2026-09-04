@@ -1437,10 +1437,15 @@ export async function renderTypographyVideo(opts: {
             'Deixa esta aba na frente e roda de novo.',
         );
       }
-      // REPRODUÇÃO primeiro quando há inserts com driver aoVivo: decode
-      // sequencial em vez de seek por frame (que re-decodifica o GOP inteiro
-      // — 0,7 quadro/s medido num AD real). Qualquer tropeço cai pro seek.
-      if (insertsPrecisamEsperar && inserts?.aoVivo && !opts.forceSeekPath) {
+      /* REPRODUÇÃO antes do SEEK — SEMPRE, não só quando há insert (04.09).
+       * A condição exigia `insertsPrecisamEsperar`, então um vídeo SEM insert
+       * que não serve pro caminho rápido (acima de 300MB, ou com matriz de
+       * rotação no container — qualquer gravação de celular em pé) pulava
+       * direto pro SEEK, que re-decodifica desde o keyframe A CADA QUADRO
+       * (0,7 quadro/s medido num AD real). A reprodução faz decode sequencial
+       * e é ordens de grandeza mais rápida; ela já trata insert ausente com
+       * optional-chaining em todo hook. O seek continua como última reserva. */
+      if (!opts.forceSeekPath) {
         try {
           videoOnly = await renderFramesByPlayback({
             video, blocks, preset, style, headlines, zoom, inserts,

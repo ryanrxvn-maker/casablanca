@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import {
   insertPadrao,
   palcoDoLayout,
@@ -525,7 +526,14 @@ function RecortadorDeMidia({
         <button
           type="button"
           className="pi-mini"
-          onClick={() => onMudar(Math.min(agulha, ate - INSERT_RECORTE_MIN_SEC), ate)}
+          onClick={() => {
+            // ⚠ A AGULHA DE ESTADO FICA PARADA DURANTE O PLAY (04.09): ela é
+            // pintada direto no DOM pra não re-renderizar 60x/s. Quem lê
+            // `agulha` aqui marca o corte onde o play COMEÇOU, não onde o
+            // editor parou de assistir. O tempo verdadeiro está no <video>.
+            const t = vid.current?.currentTime ?? agulha;
+            onMudar(Math.min(t, ate - INSERT_RECORTE_MIN_SEC), ate);
+          }}
           title="O insert começa no quadro que está na tela"
         >
           início aqui
@@ -533,7 +541,10 @@ function RecortadorDeMidia({
         <button
           type="button"
           className="pi-mini"
-          onClick={() => onMudar(de, Math.max(agulha, de + INSERT_RECORTE_MIN_SEC))}
+          onClick={() => {
+            const t = vid.current?.currentTime ?? agulha; // ver a nota do "início aqui"
+            onMudar(de, Math.max(t, de + INSERT_RECORTE_MIN_SEC));
+          }}
           title="O insert termina no quadro que está na tela"
         >
           fim aqui
@@ -681,13 +692,7 @@ export function PilotInsertsModal({
   const [parteAtiva, setParteAtiva] = useState<string>(partes[0]?.label || '');
   // A roda do mouse sobre a janela rolava a PÁGINA por trás (Silas, 02.09).
   // Com o body travado, o scroll só existe dentro da janela.
-  useEffect(() => {
-    const antes = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = antes;
-    };
-  }, []);
+  useEffect(() => travarScrollDaPagina(), []);
   const [selecionado, setSelecionado] = useState<string | null>(null);
   const [subindo, setSubindo] = useState(false);
   /** Primeira ponta de um trecho em construção (clique 1 de 2). */

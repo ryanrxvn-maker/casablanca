@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { TakeState } from '@/lib/magnific-pipeline';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 /**
  * TakeCard — card individual de cada take em geração.
@@ -375,11 +376,10 @@ function ExpandedVideoModal({
       if (e.key === 'Escape') onClose();
     }
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const destravarScroll = travarScrollDaPagina();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      destravarScroll();
     };
   }, [onClose]);
 

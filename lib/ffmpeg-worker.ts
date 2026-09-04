@@ -2474,8 +2474,16 @@ export async function normalizeVolume(
         ff.on('log', logHandler);
         let rc = -1;
         try {
+          // ⚡ `-vn` NA MEDIÇÃO (04.09). Sem ele o ffmpeg DECODIFICA o vídeo
+          // inteiro só pra jogar fora no muxer null — e esta passada roda de 1
+          // a 3 vezes POR PARTE (escada de fallback denoise x leveling). Numa
+          // parte de 90s em 1080x1920 são 2.700 quadros decodificados à toa,
+          // vezes o número de partes. O áudio medido é IDÊNTICO: `-vn` só tira
+          // o vídeo da saída nula. Mesma correção que o `extractReportPcm` já
+          // tinha (com o comentário explicando) e que nunca chegou aqui.
           rc = await ff.exec([
             '-i', inputName,
+            '-vn',
             '-af', `${buildPrefilter(cand.denoise, cand.level)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
             '-f', 'null', '-',
           ]);
@@ -2535,8 +2543,10 @@ export async function normalizeVolume(
           ff.on('log', logHandler);
           let rc = -1;
           try {
+            // `-vn` aqui também — ver a nota da medição acima.
             rc = await ff.exec([
               '-i', inputName,
+              '-vn',
               '-af', `${buildPrefilter(denoiseUsed, escalatedLevel)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
               '-f', 'null', '-',
             ]);

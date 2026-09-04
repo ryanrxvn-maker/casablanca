@@ -240,7 +240,14 @@ export async function montarPosProducao(
          *  ele manda: o <video> vira reserva pra arquivo que não decodifica. */
         const leitorPorId = new Map<string, import('./insert-decoder').LeitorDeQuadros>();
         for (const ins of cfg.inserts!) {
-          const blob = await cfg.lerMidia!(ins.midiaKey);
+          /* ⚠ `lerMidia` devolve null TANTO pra "não existe" QUANTO pra "a
+           * leitura falhou" (o catch dele engole o erro). E o IndexedDB
+           * rejeita quando o banco está travado por um upgrade de OUTRA aba do
+           * Pilot — sessão paralela é rotina aqui. Uma tentativa a mais separa
+           * o transitório do definitivo; abaixo, "sumiram TODOS" é tratado
+           * como problema de banco, não como mídia apagada. */
+          let blob = await cfg.lerMidia!(ins.midiaKey);
+          if (!blob) blob = await cfg.lerMidia!(ins.midiaKey);
           if (!blob) {
             // Mídia varrida pela faxina do cache (o AD ficou parado tempo
             // demais). Mensagem HUMANA + o que fazer — "não voltou do
@@ -296,7 +303,23 @@ export async function montarPosProducao(
             try {
               const { abrirLeitorDeQuadros } = await import('./insert-decoder');
               const leitor = await abrirLeitorDeQuadros(blob);
-              if (leitor) {
+              /* ⚠ ROTAÇÃO DO CONTAINER (04.09). B-roll de celular vem
+               * codificado 1920x1080 com matriz de rotação de 90° no
+               * container. O `VideoFrame` IGNORA essa matriz, então o leitor
+               * enxerga 1920x1080 deitado; já o `<video>` reporta
+               * `videoWidth/Height` JÁ rotacionados (1080x1920) — e é esse par
+               * que registramos como tamanho da fonte. O recorte sairia
+               * calculado contra a medida errada e o insert entrava deitado e
+               * cortado, calado. Quando as duas medidas divergem, o leitor é
+               * descartado e o `<video>` assume: ele desenha rotacionado
+               * certo. */
+              if (leitor && (leitor.largura !== v.videoWidth || leitor.altura !== v.videoHeight)) {
+                console.warn(
+                  `[pos-producao] insert "${ins.midiaNome}": container rotacionado ` +
+                    `(leitor ${leitor.largura}x${leitor.altura} != player ${v.videoWidth}x${v.videoHeight}) — usando o player`,
+                );
+                leitor.fechar();
+              } else if (leitor) {
                 leitorPorId.set(ins.id, leitor);
                 fechaveis.push(() => leitor.fechar());
                 console.log(`[pos-producao] insert "${ins.midiaNome}": decodificação exata ligada`);
@@ -333,6 +356,23 @@ export async function montarPosProducao(
           }
         }
 
+        /* ⚠ SUMIRAM TODOS = BANCO, NÃO MÍDIA (04.09). Quando o IndexedDB está
+         * travado (upgrade de outra aba do Pilot), TODA leitura falha e todo
+         * insert vira "órfão". Quem chama usa `insertsOrfaos` pra LIMPAR a
+         * configuração do editor — então um problema passageiro apagava o
+         * trabalho de marcação pra sempre. Mídia realmente apagada pela faxina
+         * do cache some UMA de cada vez; todas de uma vez é o banco. */
+        if (cfg.inserts!.length > 1 && orfaos.length === cfg.inserts!.length) {
+          orfaos.length = 0;
+          // tira SÓ os avisos de órfão — os outros (legenda, ASR) continuam
+          for (let k = avisos.length - 1; k >= 0; k--) {
+            if (avisos[k].includes('não está mais salvo no navegador')) avisos.splice(k, 1);
+          }
+          avisos.push(
+            'não consegui ler os arquivos dos inserts agora (o armazenamento do navegador ficou ocupado, normalmente por outra aba do Pilot aberta). Os inserts foram MANTIDOS na configuração — fecha as outras abas do Pilot e clica RETOMAR. O AD saiu sem eles.',
+          );
+        }
+
         const usaveis = cfg.inserts!.filter((i) => fontes.has(i.id));
         if (usaveis.length > 0) {
           const janelas = janelasDosInserts(
@@ -347,6 +387,17 @@ export async function montarPosProducao(
           // janela dela. Longa CORTA (roda normal e morre no fim da parte),
           // curta DESACELERA. É o que faz o insert preencher o trecho da fala
           // sem buraco e sem sobra.
+          /* Um insert pode ser DESCARTADO no cálculo da janela (não sobrou
+           * 0,25s no trecho, duas marcações na mesma parte se empurrando, ou a
+           * parte da copy não existe mais). Isso acontecia em SILÊNCIO: o AD
+           * saía sem o insert e o editor só descobria assistindo. */
+          for (const i of usaveis) {
+            if (!janelas.some((j) => j.id === i.id)) {
+              avisos.push(
+                `o insert "${i.midiaNome}" não coube no trecho de copy marcado — ele não entrou nesta montagem. Marca outro trecho na janela de inserts.`,
+              );
+            }
+          }
           for (const j of janelas) {
             const nat = durNatural.get(j.id) || 0;
             const pv = planoDeVelocidade(nat, j.end - j.start);
@@ -713,6 +764,16 @@ export async function montarPosProducao(
   } catch (e) {
     const msg = (e as Error)?.message || String(e);
     console.warn('[pos-producao] falhou:', e);
+    /* ⚠ MENSAGEM AMIGÁVEL PASSA DIRETO (04.09). `FriendlyError` já vem escrita
+     * pro usuário ("Usa o Chrome ou Edge atualizados no computador", por
+     * exemplo). Ela não casa com nenhum dos dois regex abaixo, então era
+     * DESCARTADA e virava "clica RETOMAR pra tentar de novo" — um conselho que
+     * ia falhar identicamente em todos os ADs do lote, pra sempre, sem nunca
+     * dizer o motivo real. */
+    if ((e as Error)?.name === 'FriendlyError' && msg) {
+      avisos.push(msg);
+      return { blob: null, avisos, insertsOrfaos: orfaos };
+    }
     avisos.push(
       /abort|cancel/i.test(msg)
         ? 'o render ficou parado e foi interrompido — o AD saiu sem legenda/zoom. Deixa a aba do Pilot VISÍVEL e clica RETOMAR.'

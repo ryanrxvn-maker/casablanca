@@ -48,6 +48,7 @@ import {
 } from './ToolIcons';
 import { createClient } from '@/lib/supabase/client';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 type Entry = {
   id: string;
@@ -490,10 +491,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   // Foca o input ao abrir
   useEffect(() => {
     inputRef.current?.focus();
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = '';
-    };
+    return travarScrollDaPagina();
   }, []);
 
   // Ferramentas adminOnly (uso interno) só aparecem pra admin — ou pra

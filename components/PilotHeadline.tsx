@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { HEADLINE_LIMITES, normalizarHeadlineCfg, type HeadlineCfg } from '@/lib/pilot-inserts';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 type Alinhamento = 'left' | 'center' | 'right';
 
@@ -431,13 +432,7 @@ export function PilotHeadlineModal({
   const [fontes, setFontes] = useState<Array<{ k: string; label: string }>>([]);
   useEffect(() => setMontado(true), []);
   // trava o scroll da página — a roda do mouse rolava o fundo (02.09)
-  useEffect(() => {
-    const antes = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = antes;
-    };
-  }, []);
+  useEffect(() => travarScrollDaPagina(), []);
   useEffect(() => {
     void import('@/lib/typography/headline').then((m) =>
       setPresets(m.HEADLINE_PRESETS.map((p) => ({ id: p.id, name: p.name }))),

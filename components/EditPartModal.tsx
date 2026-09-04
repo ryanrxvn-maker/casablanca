@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motorEfetivo } from '@/lib/heygen-motion-motor';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 /**
  * EditPartModal — modal pra re-gerar 1 take especifico do batch HeyGen
@@ -75,11 +76,10 @@ export function EditPartModal({
       if (e.key === 'Escape' && !busy) onClose();
     }
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const destravar = travarScrollDaPagina();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+      destravar();
     };
   }, [onClose, busy]);
 

@@ -190,7 +190,11 @@ export function escalaNoInstante(plano: ZoomSeg[] | undefined, t: number): numbe
       const fim = seg.rampaAte != null && seg.rampaAte > seg.start ? seg.rampaAte : seg.end;
       const dur = Math.max(0.001, fim - seg.start);
       const p = easeInOutSine(Math.min(1, Math.max(0, (t - seg.start) / dur)));
-      return seg.from + (seg.to - seg.from) * p;
+      const e = seg.from + (seg.to - seg.from) * p;
+      // DEFESA DE FUNDO: escala não-finita chega no drawImage como NaN e
+      // apaga o quadro. Nenhum plano corrompido pode apagar a entrega —
+      // 1 (tamanho natural) é sempre uma saída válida.
+      return Number.isFinite(e) ? e : 1;
     }
   }
   return 1;
@@ -571,8 +575,18 @@ export function planejarZoom(
     }
   }
 
+  /* ⚠ `forca` VINDA DO localStorage NÃO É CONFIÁVEL (04.09). O `getZoomCfg`
+   * do Pilot devolve o objeto salvo VERBATIM, sem merge com o padrão. Uma
+   * config antiga (o `misto` que existiu antes) ou qualquer valor estranho
+   * fazia `ZOOM_AMP[cfg.forca]` virar `undefined` — daí a amplitude vira NaN,
+   * o plano inteiro fica NaN e o render entrega o AD com a tela apagada, sem
+   * um erro. Cair no `medio` é sempre melhor que apagar a entrega. */
   const ampDe = (i: number): number =>
-    cfg.forca === 'smart' ? (i % 2 === 0 ? ZOOM_AMP.leve : ZOOM_AMP.forte) : ZOOM_AMP[cfg.forca];
+    cfg.forca === 'smart'
+      ? i % 2 === 0
+        ? ZOOM_AMP.leve
+        : ZOOM_AMP.forte
+      : (ZOOM_AMP[cfg.forca] ?? ZOOM_AMP.medio);
 
   return janelas.map((j, i) => {
     const amp = ampDe(i);

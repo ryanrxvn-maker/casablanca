@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { GUIDES } from './guides';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 /**
  * Card flutuante do guia — abre por cima de tudo, com passo a passo visual.
@@ -31,12 +32,11 @@ export function GuidePanel({
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const destravarScroll = travarScrollDaPagina();
     closeRef.current?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+      destravarScroll();
     };
   }, [onClose]);
 

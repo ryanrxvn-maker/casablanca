@@ -352,7 +352,14 @@ export function janelasDosInserts(
   /** Instante da palavra `palavraIdx` da parte — começo dela ou fim dela. */
   const instanteDe = (ancora: string, palavraIdx: number, fim = false): number => {
     const iParte = validas.findIndex((p) => p.label === ancora);
-    if (iParte < 0) return 0;
+    /* ⚠ PARTE SUMIU = SEM ÂNCORA, NÃO ZERO (04.09). Devolver 0 aqui fazia o
+     * início E o fim caírem em 0; a guarda de duração logo abaixo esticava a
+     * janela pra ~3s e o insert entrava EM CIMA DO GANCHO, calado. Acontece de
+     * verdade: apagar um card da análise (ou esvaziar o texto dele) tira o
+     * label da lista sem renumerar os outros, então o insert marcado em
+     * "BODY 2" fica órfão. NaN se propaga, a janela é descartada abaixo e o
+     * chamador avisa o editor pelo nome do arquivo. */
+    if (iParte < 0) return NaN;
     if (faixas && faixas[iParte]) {
       const f = faixas[iParte];
       const alvo = Math.min(f.ate - 1, f.de + Math.max(0, palavraIdx));
@@ -395,9 +402,15 @@ export function janelasDosInserts(
   });
   void duracaoNatural;
 
-  brutas.sort((a, b) => a.start - b.start);
+  // janela sem âncora (a parte da copy não existe mais) é DESCARTADA aqui —
+  // melhor o insert não entrar e o editor ser avisado do que ele aparecer por
+  // cima do gancho.
+  const validasJanelas = brutas.filter(
+    (j) => Number.isFinite(j.start) && Number.isFinite(j.end),
+  );
+  validasJanelas.sort((a, b) => a.start - b.start);
   const out: JanelaInsert[] = [];
-  for (const j of brutas) {
+  for (const j of validasJanelas) {
     const ultimo = out[out.length - 1];
     let { start, end } = j;
     if (ultimo && start < ultimo.end) {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 /** Re-gerando overlay (shimmer + spinner) — reutilizado nos estados ready E
  *  failed, pra dar feedback enquanto a parte re-renderiza (texto ou áudio). */
@@ -516,11 +517,10 @@ function ExpandedVideoModal({
       if (e.key === 'Escape') onClose();
     }
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const destravar = travarScrollDaPagina();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+      destravar();
     };
   }, [onClose]);
 

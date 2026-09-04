@@ -45,6 +45,7 @@ import {
   type ResolvedSegment,
 } from '@/lib/typography/caption-script';
 import { formatTime } from '@/lib/utils';
+import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 const T3D =
   ' shadow-[0_2px_0_rgba(0,0,0,0.16),0_6px_12px_-6px_rgba(0,0,0,0.25)] hover:-translate-y-[1.5px] hover:shadow-[0_3.5px_0_rgba(0,0,0,0.16),0_10px_18px_-8px_rgba(0,0,0,0.3)] active:translate-y-[1px] active:shadow-[inset_0_2px_5px_rgba(0,0,0,0.28)] transition-all duration-150 will-change-transform';
@@ -307,11 +308,10 @@ export function CaptionScriptModal({
       }
     };
     window.addEventListener('keydown', onKey);
-    const antes = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const destravarScroll = travarScrollDaPagina();
     return () => {
       window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = antes;
+      destravarScroll();
     };
   }, [open, onClose]);
 

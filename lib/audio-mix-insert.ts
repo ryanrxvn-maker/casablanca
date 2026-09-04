@@ -113,6 +113,37 @@ export async function misturarSomDosInserts(
     }
 
     const rendido = await offline.startRendering();
+
+    /* ⚠ ANTI-ESTOURO (04.09). O montado JÁ saiu do normalizador com brickwall
+     * de true-peak em -1.5 dBTP — ou seja, ele usa quase todo o espaço que
+     * tem. Somar o som de um insert por cima (b-roll com música ou impacto,
+     * no volume padrão de 50%) passa de 1.0 e o WAV grava CLIPADO: estala no
+     * AD entregue, e não havia limiter nem checagem nenhuma aqui.
+     * A correção é a mais conservadora possível: mede o pico do resultado e,
+     * SÓ se passou de 1, escala o buffer inteiro pelo mesmo fator. A mistura
+     * relativa entre voz e insert fica idêntica — só sai o estouro. Quando não
+     * há estouro (o caso normal) nada é tocado. */
+    let pico = 0;
+    for (let c = 0; c < rendido.numberOfChannels; c++) {
+      const dados = rendido.getChannelData(c);
+      for (let i = 0; i < dados.length; i++) {
+        const a = Math.abs(dados[i]);
+        if (a > pico) pico = a;
+      }
+    }
+    const TETO = 0.99;
+    if (pico > TETO) {
+      const fator = TETO / pico;
+      for (let c = 0; c < rendido.numberOfChannels; c++) {
+        const dados = rendido.getChannelData(c);
+        for (let i = 0; i < dados.length; i++) dados[i] *= fator;
+      }
+      console.log(
+        `[audio-mix] o som do insert estourava (pico ${pico.toFixed(3)}) — trilha abaixada ` +
+          `${(20 * Math.log10(fator)).toFixed(1)} dB pra não clipar`,
+      );
+    }
+
     return encodeWAV(rendido);
   } catch (e) {
     console.warn('[audio-mix] mistura do som dos inserts falhou — trilha original mantida:', e);
