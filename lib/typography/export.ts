@@ -17,6 +17,18 @@
  *      ffmpeg-wasm.
  *   4. Áudio: extractAudio (wav) + muxAudioIntoVideo (ffmpeg-wasm, -c:v copy
  *      -c:a aac) — infra já blindada do repo (watchdog + assertValidMp4).
+ *
+ * ⚠ NÃO TENTE MUXAR O ÁUDIO NO MESMO mp4-muxer (medido em 04.09). Parece a
+ * otimização óbvia — tirar as duas passadas de ffmpeg-wasm, o arquivo
+ * intermediário e a fila global, deixando o WebCodecs (`AudioEncoder`) gravar
+ * AAC direto na passada do vídeo. Foi implementado e MEDIDO: o mesmo render
+ * de 420 quadros foi de **4,1s para 33-38s**, com a espera pela fila do
+ * encoder subindo de 3,6s para ~32s. Com uma faixa de áudio declarada, o
+ * mp4-muxer segura os pedaços de vídeo pra poder intercalar, e o
+ * `addVideoChunk` roda DENTRO do callback de saída do encoder — então esse
+ * custo estrangula o vídeo inteiro. Entregar todo o AAC ANTES do vídeo também
+ * foi testado e não mudou nada (33,5s).
+ * O passo de ffmpeg custa ~1s no mesmo arquivo. Ele fica.
  */
 
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';

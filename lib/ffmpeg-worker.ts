@@ -2831,13 +2831,29 @@ export async function prepareVoiceForDecupagem(
   opts: RunOptions = {},
   format: NormalizeOutFormat = 'mp4',
   profile: NormalizeProfile = 'natural',
+  /**
+   * ⚠ CONTRATO EXPLÍCITO (04.09). Esta função DEGRADA EM SILÊNCIO de propósito:
+   * quando o nivelamento quebra ela avisa no console e devolve o arquivo
+   * ORIGINAL, porque as ferramentas de decupagem preferem áudio cru a não ter
+   * áudio. Só que o ClickUp Pilot PRECISA saber — uma parte crua no meio de
+   * partes niveladas sai ~8 dB mais baixa e o cliente ouve.
+   *
+   * Até 04.09 o Pilot descobria isso comparando IDENTIDADE do objeto
+   * (`saida === entrada`). Funciona, mas é frágil: bastava alguém trocar o
+   * `return file` por `return new Blob([file])` numa limpeza pra checagem
+   * passar a mentir, calada. Este callback torna o sinal explícito — quem
+   * não passa nada continua com o comportamento de sempre.
+   */
+  aoFalhar?: (motivo: string) => void,
 ): Promise<Blob> {
   try {
     opts.onStage?.('Regulando a voz (nível + limpeza)...');
     return await normalizeVolume(file, { output: format, profile }, opts);
   } catch (e) {
     if (isCancellationError(e)) throw e;
-    console.warn('[ffmpeg-worker] prepareVoiceForDecupagem falhou, usando áudio original:', (e as Error)?.message);
+    const motivo = (e as Error)?.message || String(e);
+    console.warn('[ffmpeg-worker] prepareVoiceForDecupagem falhou, usando áudio original:', motivo);
+    aoFalhar?.(motivo);
     return file;
   }
 }

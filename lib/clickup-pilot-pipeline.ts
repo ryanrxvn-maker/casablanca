@@ -430,12 +430,21 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // "uma parte muito alta e outra muito baixa" que o cliente ouve. Falha aqui é
     // quase sempre transitória (heap do wasm), e instância limpa costuma resolver.
     for (let attempt = 1; attempt <= 2; attempt++) {
+      let falhouDeVerdade: string | null = null;
       try {
         const saida = await withTimeout(
           // profile 'full' = o MESMO motor da ferramenta Normalizador (dynaudnorm +
           // speechnorm): é ele que iguala trecho alto com trecho baixo DENTRO da
           // parte. O 'natural' de antes só acertava a média e deixava o contraste.
-          prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }, 'mp4', 'full'),
+          prepareVoiceForDecupagem(
+            blob,
+            { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) },
+            'mp4',
+            'full',
+            (motivo) => {
+              falhouDeVerdade = motivo;
+            },
+          ),
           levelMs,
           'regulagemVoz',
         );
@@ -452,6 +461,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
          * identidade é o sinal exato de que ele não rodou.
          * Não mexer em prepareVoiceForDecupagem: a decupagem depende do
          * fallback silencioso dela. */
+        // O callback é o sinal PRIMÁRIO; a identidade fica de rede de
+        // segurança pro caso de a função voltar o original por outro caminho.
+        if (falhouDeVerdade) {
+          throw new Error(`nivelamento falhou no motor: ${String(falhouDeVerdade).slice(0, 90)}`);
+        }
         if (saida === blob) {
           throw new Error('nivelamento devolveu o áudio original (falha engolida pelo motor)');
         }
