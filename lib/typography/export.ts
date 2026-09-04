@@ -59,6 +59,13 @@ export type RenderResult = {
   hw?: boolean;
   /** que caminho de decode rodou (QA/telemetria) */
   mode: 'decode' | 'seek' | 'playback';
+  /**
+   * O som dos inserts que o editor LIGOU entrou na trilha? `false` quando
+   * havia som pedido e a mistura falhou (o AD sai com o áudio do avatar, que
+   * é o que não pode faltar). Quem chama transforma isso em aviso — antes a
+   * falha morria num console.warn e o editor achava que a opção não funcionava.
+   */
+  somInsertOk?: boolean;
 };
 
 const FPS = 30;
@@ -1321,8 +1328,18 @@ export async function renderTypographyVideo(opts: {
             : 'Não consegui abrir o vídeo. Confere o arquivo e tenta de novo.',
         );
       }
-      srcW = meta.width;
-      srcH = meta.height;
+      /* ⚠ ROTAÇÃO + ABA OCULTA = AD DEITADO, CALADO (04.09). Aqui a metadata
+       * veio do CABEÇALHO, ou seja, o tamanho CODIFICADO (sem rotação). A
+       * guarda de rotação lá no decode compara o VideoFrame (codificado)
+       * contra `srcW/srcH` — se estes também forem codificados, a comparação é
+       * codificado-contra-codificado, passa sempre, e o vídeo sai deitado.
+       * Guardando o tamanho de EXIBIÇÃO, a guarda volta a funcionar e o render
+       * cai no caminho por seek, que desenha rotacionado certo. */
+      srcW = meta.rotacionado ? meta.height : meta.width;
+      srcH = meta.rotacionado ? meta.width : meta.height;
+      if (meta.rotacionado) {
+        console.warn('[typo-export] container ROTACIONADO — o caminho rápido não serve, vai por seek');
+      }
       durationSec = meta.durSec;
       console.warn(
         `[typo-export] <video> não respondeu (aba em segundo plano?) — metadata lida do cabeçalho: ` +
@@ -1497,6 +1514,8 @@ export async function renderTypographyVideo(opts: {
     throwIfAborted();
     let final = videoOnly;
     let audioOk = false;
+    // o editor pediu som de insert e ele entrou? (vira aviso lá em cima)
+    let somInsertOk = true;
     {
       const vOnly = videoOnly;
       // Quem já tem o lock roda direto; quem não tem, entra na fila.
@@ -1519,8 +1538,11 @@ export async function renderTypographyVideo(opts: {
               if (mix) {
                 trilha = mix;
                 console.log(`[tipografia] som de ${inserts.sons.length} insert(s) misturado na trilha`);
+              } else {
+                somInsertOk = false;
               }
             } catch (e) {
+              somInsertOk = false;
               console.warn('[tipografia] mistura do som dos inserts falhou — trilha original:', e);
             }
           }
@@ -1558,7 +1580,7 @@ export async function renderTypographyVideo(opts: {
     }
 
     onProgress?.({ phase: 'finalizando', ratio: 1 });
-    return { blob: final, audioOk, width: W, height: H, fps: FPS, mode, hw };
+    return { blob: final, audioOk, somInsertOk, width: W, height: H, fps: FPS, mode, hw };
   } finally {
     try {
       video.removeAttribute('src');

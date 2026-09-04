@@ -104,6 +104,10 @@ export async function montarPosProducao(
   const avisos: string[] = [];
   /** ids de insert cuja MÍDIA sumiu do cache — o Pilot limpa a config. */
   const orfaos: string[] = [];
+  // Por que o vigia abortou — o aviso tem que dizer a verdade: "ficou parado" e
+  // "demorou demais" pedem coisas diferentes do editor. Fica no escopo da
+  // função porque quem lê é o `catch`, lá embaixo.
+  let motivoAborto: 'parado' | 'teto' | null = null;
   const querLegenda = cfg.legenda.on;
   const querZoom = cfg.zoom.on;
   const temInserts = (cfg.inserts?.length || 0) > 0 && !!cfg.lerMidia;
@@ -369,7 +373,13 @@ export async function montarPosProducao(
                 // aqui brigaria com o play a cada frame. A correção de deriva
                 // grande é do aoVivo; parado, o seek fino continua valendo.
                 const tolerancia = v.paused ? 0.03 : 0.3;
-                if (Math.abs(v.currentTime - alvo) > tolerancia) v.currentTime = alvo;
+                /* ⚠ SÓ CORRIGE QUANDO ESTÁ ATRASADO (04.09). O `aoVivo` PAUSA
+                 * de propósito o insert que correu à frente e espera o render
+                 * alcançar. Um seek "pra trás" aqui desfazia justamente essa
+                 * espera: o insert voltava um quadro e andava de novo, que é o
+                 * tranco que a pausa existe pra evitar. Adiantado, deixa o
+                 * alvo chegar até ele. */
+                if (alvo - v.currentTime > tolerancia) v.currentTime = alvo;
                 return v;
               },
             });
@@ -487,10 +497,19 @@ export async function montarPosProducao(
                 const b = blobPorId.get(j.id);
                 if (!ins?.audio || !b || ins.midiaTipo !== 'video') return null;
                 const pv = velocidadePorId.get(j.id);
+                /* O som acaba onde a IMAGEM acaba. Quando a mídia é mais
+                 * curta que a janela, o plano CONGELA o último quadro a partir
+                 * de `congelaApos` — mas o som seguia tocando até o fim da
+                 * janela, ou seja, continuava depois de a imagem já ter
+                 * parado. */
+                const fimReal =
+                  pv && pv.congelaApos > 0
+                    ? Math.min(j.end, j.start + pv.congelaApos)
+                    : j.end;
                 return {
                   blob: b,
                   entraEm: j.start,
-                  saiEm: j.end,
+                  saiEm: fimReal,
                   deSec: recortePorId.get(j.id) || 0,
                   volume: typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO,
                   velocidade: pv?.velocidade ?? 1,
@@ -736,11 +755,13 @@ export async function montarPosProducao(
       const agora = Date.now();
       if (agora - inicioRender > TETO_ABSOLUTO_MS) {
         console.warn('[pos-producao] teto absoluto de 35min — abortando');
+        motivoAborto = 'teto';
         ctrl.abort();
         return;
       }
       if (agora - ultimoSinal > PARADO_MS) {
         console.warn(`[pos-producao] render sem progresso há ${Math.round((agora - ultimoSinal) / 1000)}s — abortando (parado, não lento)`);
+        motivoAborto = 'parado';
         ctrl.abort();
       }
     }, 15_000);
@@ -787,6 +808,11 @@ export async function montarPosProducao(
       return { blob: null, avisos, insertsOrfaos: orfaos };
     }
     if (!r.audioOk) avisos.push('o vídeo saiu SEM ÁUDIO — confere antes de entregar e, se estiver mudo, clica RETOMAR.');
+    if (r.somInsertOk === false) {
+      avisos.push(
+        'não consegui misturar o som dos inserts nesta montagem — o AD saiu só com o áudio do avatar. Clica RETOMAR pra tentar de novo.',
+      );
+    }
     return { blob: r.blob, avisos, insertsOrfaos: orfaos };
   } catch (e) {
     const msg = (e as Error)?.message || String(e);
@@ -802,7 +828,9 @@ export async function montarPosProducao(
       return { blob: null, avisos, insertsOrfaos: orfaos };
     }
     avisos.push(
-      /abort|cancel/i.test(msg)
+      motivoAborto === 'teto'
+        ? 'a montagem passou de 35 minutos e foi interrompida — o AD saiu sem legenda/zoom. Ela estava progredindo, só devagar: deixa a aba do Pilot VISÍVEL (em segundo plano o navegador segura o vídeo) e clica RETOMAR.'
+        : /abort|cancel/i.test(msg)
         ? 'o render ficou parado e foi interrompido — o AD saiu sem legenda/zoom. Deixa a aba do Pilot VISÍVEL e clica RETOMAR.'
         : /terminat/i.test(msg)
           ? 'outra ferramenta interrompeu o motor de vídeo no meio da montagem — o AD saiu sem legenda/zoom. Clica RETOMAR (não custa geração nova).'

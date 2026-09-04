@@ -103,8 +103,10 @@ export type PipelineInputs = {
    *  ter mudado — recomputa) mas SEMPRE escreve, populando p/ o próximo resume.
    *  Resume/rebuild passa true (conteúdo idêntico → reusa). */
   readClipCache?: boolean;
-  loadCachedClip?: (kind: 'leveled' | 'decupado', label: string) => Promise<Blob | null>;
-  saveCachedClip?: (kind: 'leveled' | 'decupado', label: string, blob: Blob) => Promise<void>;
+  /** `pedacos` guarda o JSON das durações dos pedaços do corte, não vídeo —
+   *  é o que faz o RETOMAR reproduzir o MESMO plano de zoom (ver abaixo). */
+  loadCachedClip?: (kind: 'leveled' | 'decupado' | 'pedacos', label: string) => Promise<Blob | null>;
+  saveCachedClip?: (kind: 'leveled' | 'decupado' | 'pedacos', label: string, blob: Blob) => Promise<void>;
 };
 
 /** Duração (s) de um blob de vídeo via metadata do <video> — 0 se não deu.
@@ -737,11 +739,16 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           }
           decupSavedSec += plan.audit.savedSec;
           if (segments.length === 0) return null; // sem fala → mantém original (NÃO é erro)
-          // guarda o tamanho de cada pedaço mantido — as fronteiras do zoom
-          pedacosPorParte[kIdx] = segments.map((sg: { start: number; end: number }) => sg.end - sg.start);
           // Parte é curta; teto generoso por segurança (não é o tempo esperado).
           const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
-          return await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label} (t${attempt})`);
+          const cortado = await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label} (t${attempt})`);
+          /* ⚠ SÓ DEPOIS DE O CORTE DAR CERTO (04.09). Isto era gravado ANTES
+           * do `cutVideoSegments`. Quando o corte falhava nas 3 tentativas, a
+           * parte seguia INTEIRA (fallback pro nivelado) — mas o zoom já tinha
+           * recebido as fronteiras internas de um corte que nunca aconteceu, e
+           * saltava a escala no meio da fala. */
+          pedacosPorParte[kIdx] = segments.map((sg: { start: number; end: number }) => sg.end - sg.start);
+          return cortado;
         } catch (e) {
           const msg = (e as Error)?.message?.slice(0, 70);
           // Mata o worker pra a PRÓXIMA tentativa pegar instância LIMPA (timeout
@@ -768,13 +775,40 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       if (readClipCache && loadCachedClip && lbl) {
         try {
           const c = await loadCachedClip('decupado', lbl);
-          if (c && c.size > 1024) { cut = c; console.log(`[clickup-pilot-pipeline] decup ${lbl}: CACHE HIT (pulou corte)`); }
+          if (c && c.size > 1024) {
+            cut = c;
+            console.log(`[clickup-pilot-pipeline] decup ${lbl}: CACHE HIT (pulou corte)`);
+            /* ⚠ REIDRATA AS FRONTEIRAS DO ZOOM (04.09). No cache hit o
+             * `tryDecupOne` nem roda, então `pedacosPorParte[k]` ficava VAZIO
+             * e o RETOMAR montava um plano de zoom COMPLETAMENTE diferente do
+             * 1º disparo — o oposto do que o código e o teste prometem
+             * ("RETOMAR reproduz o mesmo plano"). */
+            try {
+              const pj = await loadCachedClip('pedacos', lbl);
+              if (pj) {
+                const arr = JSON.parse(await pj.text());
+                if (Array.isArray(arr) && arr.every((n) => typeof n === 'number' && isFinite(n))) {
+                  pedacosPorParte[k] = arr as number[];
+                }
+              }
+            } catch {
+              /* sem os pedaços o zoom só perde as fronteiras internas */
+            }
+          }
         } catch {}
       }
       if (!cut) {
         cut = await tryDecupOne(leveled[k], `${item.filename} p${k + 1}/${leveled.length}`, k);
         if (cut && cut.size > 1024 && saveCachedClip && lbl) {
           try { await saveCachedClip('decupado', lbl, cut); } catch {}
+          // guarda as fronteiras JUNTO — é o que o RETOMAR precisa pra
+          // reproduzir o mesmo plano de zoom
+          try {
+            const ped = pedacosPorParte[k];
+            if (ped && ped.length > 0) {
+              await saveCachedClip('pedacos', lbl, new Blob([JSON.stringify(ped)], { type: 'application/json' }));
+            }
+          } catch {}
         }
       }
       if (cut && cut.size > 1024) { decupadoParts.push(cut); cutCount++; }

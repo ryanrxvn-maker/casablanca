@@ -446,7 +446,13 @@ function planejarSmartZoom(
           // Saindo do aberto a deriva é menor: senão o 100% dura um sopro.
           const dMin = aberto ? 0.05 : SMART_DERIVA_MIN;
           const dMax = aberto ? 0.1 : SMART_DERIVA_MAX;
-          const deriva = dMin + rnd() * (dMax - dMin);
+          /* A deriva é uma RAMPA: ela precisa de tempo pra ser lida como
+           * movimento. Espremida no fiapo final de um take (0,35s), a mesma
+           * amplitude vira um TRANCO de escala em cima do corte. Encolhe a
+           * amplitude junto com o tempo disponível. */
+          const derivaCheia = dMin + rnd() * (dMax - dMin);
+          const espacoRampa = Math.min(1, (fim - cursor) / SMART_SEG_RAMPA_SEC);
+          const deriva = derivaCheia * espacoRampa;
           // Fechado desce, aberto sobe, o meio pende pra baixo — é o conjunto
           // que impede o plano de morar no teto.
           const paraBaixo = escalaAtual >= 1.2 ? true : aberto ? false : rnd() < 0.62;

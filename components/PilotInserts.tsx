@@ -721,17 +721,33 @@ export function PilotInsertsModal({
    * ao fechar a janela — Object URL esquecido segura o blob na memória pelo
    * resto da sessão. */
   const urlsRef = useRef<Record<string, string>>({});
+  /* ⚠ RESERVA A CHAVE ANTES DO await (04.09). A guarda
+   * `urlsRef.current[midiaKey]` era testada ANTES da leitura assíncrona. Como
+   * este efeito re-roda a cada mudança de `inserts` (prop nova a cada render
+   * do pai), duas execuções passavam pela guarda com a MESMA chave antes de
+   * qualquer uma gravar: nasciam duas Object URLs pro mesmo arquivo e a
+   * primeira nunca era revogada — o blob ficava preso na memória o resto da
+   * sessão. `emVoo` fecha essa janela. */
+  const emVooRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!lerMidia) return;
     let vivo = true;
     (async () => {
       for (const ins of inserts) {
-        if (ins.midiaTipo !== 'video' || urlsRef.current[ins.midiaKey]) continue;
-        const b = await lerMidia(ins.midiaKey).catch(() => null);
-        if (!vivo || !b) continue;
-        const u = URL.createObjectURL(b);
-        urlsRef.current = { ...urlsRef.current, [ins.midiaKey]: u };
-        setUrlsDeMidia(urlsRef.current);
+        if (ins.midiaTipo !== 'video') continue;
+        if (urlsRef.current[ins.midiaKey] || emVooRef.current.has(ins.midiaKey)) continue;
+        emVooRef.current.add(ins.midiaKey);
+        try {
+          const b = await lerMidia(ins.midiaKey).catch(() => null);
+          if (!vivo || !b) continue;
+          const anterior = urlsRef.current[ins.midiaKey];
+          if (anterior) URL.revokeObjectURL(anterior); // nunca deixa órfã
+          const u = URL.createObjectURL(b);
+          urlsRef.current = { ...urlsRef.current, [ins.midiaKey]: u };
+          setUrlsDeMidia(urlsRef.current);
+        } finally {
+          emVooRef.current.delete(ins.midiaKey);
+        }
       }
     })();
     return () => {

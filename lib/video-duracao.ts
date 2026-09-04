@@ -20,7 +20,9 @@ const CABECA_BYTES = 2 * 1024 * 1024;
 const CAUDA_BYTES = 8 * 1024 * 1024;
 const VIDEO_TIMEOUT_MS = 12_000;
 
-export type MetaVideo = { durSec: number; width: number; height: number };
+export type MetaVideo = { durSec: number; width: number; height: number   /** o container tem matriz de rotação 90°/270° (gravação de celular) */
+  rotacionado?: boolean;
+};
 
 /** Lê duração E dimensões no `moov` do MP4. `null` quando não é MP4/MOV. */
 export async function metaPeloCabecalho(blob: Blob): Promise<MetaVideo | null> {
@@ -35,7 +37,19 @@ export async function metaPeloCabecalho(blob: Blob): Promise<MetaVideo | null> {
       // o canvas do render precisa.
       const w = Math.round(vt?.video?.width || vt?.track_width || 0);
       const h = Math.round(vt?.video?.height || vt?.track_height || 0);
-      if (dur > 0 && isFinite(dur) && w > 0 && h > 0) achou = { durSec: dur, width: w, height: h };
+      /* ROTAÇÃO DO CONTAINER (04.09). `track_width/height` já vem com a matriz
+       * aplicada; `video.width/height` é o codificado. Quando os dois trocam
+       * de lado, o arquivo tem rotação de 90°/270° — típico de gravação de
+       * celular. Quem lê a metadata pelo cabeçalho (aba em segundo plano, que
+       * é como o Pilot roda) PRECISA saber disso: sem essa informação a guarda
+       * de rotação do render comparava codificado com codificado, passava
+       * sempre, e o AD saía DEITADO sem nenhum aviso. */
+      const tw = Math.round(vt?.track_width || 0);
+      const th = Math.round(vt?.track_height || 0);
+      const rotacionado = tw > 0 && th > 0 && w > 0 && h > 0 && Math.abs(tw - h) <= 2 && Math.abs(th - w) <= 2 && tw !== th;
+      if (dur > 0 && isFinite(dur) && w > 0 && h > 0) {
+        achou = { durSec: dur, width: w, height: h, rotacionado };
+      }
     };
     mp4.onError = () => {};
 

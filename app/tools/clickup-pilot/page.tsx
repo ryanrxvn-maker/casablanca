@@ -540,21 +540,40 @@ function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.05, genId
   // Normalizador (profile 'full'). Trocar o nome da chave invalida de uma vez os
   // clips nivelados pelo motor antigo — senão um RETOMAR reusaria o áudio velho e
   // o conserto não apareceria pra quem já tinha rodado a task.
-  const keyFor = (kind: 'leveled' | 'decupado', label: string) =>
+  // `pedacos` acompanha o clipe decupado (mesma tag de motor): guarda o JSON
+  // das fronteiras do corte, que é o que o RETOMAR precisa pra reproduzir o
+  // MESMO plano de zoom do 1º disparo.
+  const keyFor = (kind: 'leveled' | 'decupado' | 'pedacos', label: string) =>
     kind === 'decupado'
       ? `${pfx}decupado:${label}@k${kTag}`
-      : `${pfx}leveled2:${label}`;
+      : kind === 'pedacos'
+        ? `${pfx}pedacos:${label}@k${kTag}`
+        : `${pfx}leveled2:${label}`;
   return {
-    loadCachedClip: async (kind: 'leveled' | 'decupado', label: string): Promise<Blob | null> => {
+    loadCachedClip: async (
+      kind: 'leveled' | 'decupado' | 'pedacos',
+      label: string,
+    ): Promise<Blob | null> => {
       try {
         const { loadBlob } = await import('@/lib/zip-store');
-        return await loadBlob(keyFor(kind, label), 'video/mp4');
+        return await loadBlob(
+          keyFor(kind, label),
+          kind === 'pedacos' ? 'application/json' : 'video/mp4',
+        );
       } catch { return null; }
     },
-    saveCachedClip: async (kind: 'leveled' | 'decupado', label: string, blob: Blob): Promise<void> => {
+    saveCachedClip: async (
+      kind: 'leveled' | 'decupado' | 'pedacos',
+      label: string,
+      blob: Blob,
+    ): Promise<void> => {
       try {
         const { saveBlob } = await import('@/lib/zip-store');
-        await saveBlob(keyFor(kind, label), blob, 'video/mp4');
+        await saveBlob(
+          keyFor(kind, label),
+          blob,
+          kind === 'pedacos' ? 'application/json' : 'video/mp4',
+        );
       } catch {}
     },
   };
@@ -1764,6 +1783,11 @@ function ClickUpPilotInner() {
    * os `avisos`. O card lê isto pra riscar o selo e mostrar o porquê.
    */
   const [posResultado, setPosResultado] = useState<Record<string, { aplicou: boolean; avisos: string[] }>>({});
+  /* Partes que entraram SEM nivelar (o pipeline registra em `errors.nivelamento`).
+   * Antes isso só aparecia no txt de diagnóstico dentro do zip: o card mostrava
+   * o selo verde de "Volume normalizado" mesmo quando o nivelamento tinha
+   * falhado, porque o selo lia a CONFIGURAÇÃO, não o que foi aplicado. */
+  const [nivelFalhouPorTask, setNivelFalhouPorTask] = useState<Record<string, string>>({});
 
   /** Qual task está com o painel "editar antes de retomar/remontar" aberto. */
   const [pedindoMontagem, setPedindoMontagem] = useState<{ taskId: string; acao: 'retomar' | 'remontar' } | null>(null);
@@ -1966,7 +1990,14 @@ function ClickUpPilotInner() {
     // juntar. Mesma chamada que o disparo usa (isNivelamentoEnabled(taskId)),
     // então o selo conta exatamente o que foi aplicado.
     if (isNivelamentoEnabled(taskId)) {
-      out.push({ tipo: 'normalizador', title: 'Volume normalizado — cada parte nivelada a -16 LUFS antes de juntar' });
+      const nivelRuim = nivelFalhouPorTask[taskId];
+      out.push({
+        tipo: 'normalizador',
+        title: nivelRuim
+          ? `Volume NÃO nivelado — ${nivelRuim}. Alguma parte entrou no nível original; clica RETOMAR.`
+          : 'Volume normalizado — cada parte nivelada a -16 LUFS antes de juntar',
+        falhou: !!nivelRuim,
+      });
     }
     if (isDecupagemEnabled(cfgId) || isDecupagemEnabled(taskId)) {
       out.push({ tipo: 'decupagem', title: `Decupado — silêncios cortados (${getDecupIntensity(cfgId).toFixed(2)}s de respiro)` });
@@ -5320,6 +5351,15 @@ function ClickUpPilotInner() {
       // honesto no card — nunca um "PRONTO" mudo que perde o arquivo no F5.
       let deliveryRescued = false;
       {
+        // o que o pipeline disse sobre o nivelamento vira selo no card
+        const nivelRuim: Record<string, string> = {};
+        for (const it of assembled) {
+          const tid = (it as { taskId?: string }).taskId;
+          if (tid && it.errors?.nivelamento) nivelRuim[tid] = it.errors.nivelamento;
+        }
+        if (Object.keys(nivelRuim).length > 0) {
+          setNivelFalhouPorTask((prev) => ({ ...prev, ...nivelRuim }));
+        }
         const zipMont = new JSZip();
         for (const item of assembled) {
           if (item.decupado) {
