@@ -18,17 +18,17 @@
  *   4. Áudio: extractAudio (wav) + muxAudioIntoVideo (ffmpeg-wasm, -c:v copy
  *      -c:a aac) — infra já blindada do repo (watchdog + assertValidMp4).
  *
- * ⚠ NÃO TENTE MUXAR O ÁUDIO NO MESMO mp4-muxer (medido em 04.09). Parece a
- * otimização óbvia — tirar as duas passadas de ffmpeg-wasm, o arquivo
- * intermediário e a fila global, deixando o WebCodecs (`AudioEncoder`) gravar
- * AAC direto na passada do vídeo. Foi implementado e MEDIDO: o mesmo render
- * de 420 quadros foi de **4,1s para 33-38s**, com a espera pela fila do
- * encoder subindo de 3,6s para ~32s. Com uma faixa de áudio declarada, o
- * mp4-muxer segura os pedaços de vídeo pra poder intercalar, e o
- * `addVideoChunk` roda DENTRO do callback de saída do encoder — então esse
- * custo estrangula o vídeo inteiro. Entregar todo o AAC ANTES do vídeo também
- * foi testado e não mudou nada (33,5s).
- * O passo de ffmpeg custa ~1s no mesmo arquivo. Ele fica.
+ * ⏸ IDEIA EM ABERTO: muxar o áudio no PRÓPRIO mp4-muxer, com o `AudioEncoder`
+ * do WebCodecs, dispensaria as duas passadas de ffmpeg-wasm, o arquivo
+ * intermediário e a espera na fila global — e de quebra tiraria o teto de
+ * 300MB, que hoje empurra arquivo grande pro caminho lento por seek.
+ * Foi implementado em 04.09 e FUNCIONOU (a trilha saiu correta, 657 pedaços
+ * AAC), mas NÃO FOI POSSÍVEL MEDIR: a máquina estava com dois processos do
+ * Chrome zumbis queimando ~17h de CPU cada, e nesse estado o render media
+ * 33-38s COM e SEM a mudança — o mesmo arquivo que media 4,1s com a máquina
+ * limpa. Ou seja: o A/B deu empate porque o gargalo era outro.
+ * Ficou de fora por não ter prova, não por ter falhado. Pra retomar: limpar a
+ * máquina, medir o baseline, e só então comparar.
  */
 
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
