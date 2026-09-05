@@ -127,7 +127,15 @@ const SMART_MIN = 1.0;
 // até acontecer um zoom, tem que transicionar mais e ter mais zoom in".
 // A bolsa foi de 3/2/1 pra 2/3/1: o zoom in vira o movimento mais comum,
 // o corte seco continua à frente do out.
-const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'in', 'in', 'in', 'out'];
+/* ⭐ RE-EQUILÍBRIO 04.09 — Silas viu o AD real: "parece um zoom in leve o tempo
+ * todo, não uma dinâmica com proporções diferentes". Medido no plano: 73% do
+ * tempo a escala estava SE MOVENDO e só 27% parada — os saltos secos existiam
+ * mas ficavam enterrados num deslize contínuo. O modelo dele é o inverso:
+ * proporção PARADA na maior parte, troca SECA no corte (100 · 120 · 130).
+ * Então: mais seco na bolsa (4/7), sem o degrau de 1.1 (salto de 10% não se
+ * lê — só 1.0/1.2/1.35), e a deriva dentro do take cai pra 4-8% (respiração,
+ * não zoom). A dinâmica passa a vir dos saltos, não das rampas. */
+const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'seco', 'seco', 'in', 'in', 'out'];
 /**
  * A BOLSA DE DEGRAUS do corte seco.
  *
@@ -140,7 +148,7 @@ const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'in', 'in', '
  * O 100% agora tem peso DOBRADO na bolsa. Mesma mecânica da bolsa de
  * movimentos: proporção garantida em qualquer tamanho de AD.
  */
-const SMART_BOLSA_DEGRAUS = [1.0, 1.0, 1.0, 1.1, 1.2, 1.35];
+const SMART_BOLSA_DEGRAUS = [1.0, 1.0, 1.0, 1.2, 1.2, 1.35];
 /** A partir daqui o plano conta como "fechado" — e o próximo seco tem que abrir. */
 const SMART_ALTO = 1.26;
 /** O alívio depois de um trecho fechado: nada acima disto serve. */
@@ -163,12 +171,23 @@ const SMART_RAMPA_MIN_ESPACO = 0.06;
  */
 const SMART_SUBDIV_SEC = 4.2;
 /** Amplitude da deriva — leve: ela acompanha a fala, não disputa com ela. */
-const SMART_DERIVA_MIN = 0.08;
-const SMART_DERIVA_MAX = 0.16;
+const SMART_DERIVA_MIN = 0.04;
+const SMART_DERIVA_MAX = 0.08;
 /** Janela do corte seco: curta, é só o take numa escala. */
+// ⚠ 1,8 e nao mais: com decupagem os pedacos tem ~2,6s, e uma janela de seco
+// que fecha no 1o corte >= 1,8s vale UM pedaco — escala parada, troca no corte.
+// Subir isto pra 2,6 (tentado em 04.09) fazia a janela abarcar DOIS pedacos,
+// ligava a cadeia de deriva (feita pra take de 10s sem decupagem) e as
+// fronteiras dela caiam no meio da fala — reprovou os testes 19 e 22.
 const SMART_SEG_SECO_SEC = 1.8;
 /** Janela do movimento: precisa de tempo pra ser percebido. */
 const SMART_SEG_RAMPA_SEC = 3.4;
+/** Quanto uma janela de RAMPA (in/out) acumula antes de fechar no próximo
+ *  corte. Separado da deriva da cadeia (acima) em 04.09: encurtar os dois
+ *  juntos pra 2,6 fazia a cadeia dos takes longos picar mais (24 trocas/min,
+ *  teto 22 — tremedeira). A janela curta é o que interessa no AD decupado:
+ *  a rampa ocupa UM pedaço, não dois. */
+const SMART_JANELA_RAMPA_SEC = 2.6;
 
 function easeInOutSine(p: number): number {
   return -(Math.cos(Math.PI * p) - 1) / 2;
@@ -396,7 +415,7 @@ function planejarSmartZoom(
     if (tipo === 'in' && escala >= SMART_MAX - SMART_RAMPA_MIN_ESPACO) tipo = 'seco';
 
     // 2) a janela: o seco é curto (só o take numa escala), a rampa é longa
-    const alvo = tipo === 'seco' ? SMART_SEG_SECO_SEC : SMART_SEG_RAMPA_SEC;
+    const alvo = tipo === 'seco' ? SMART_SEG_SECO_SEC : SMART_JANELA_RAMPA_SEC;
     let fim = durSec;
     let usou = cortes.length;
     for (let k = c; k < cortes.length; k++) {
@@ -444,8 +463,8 @@ function planejarSmartZoom(
 
           const aberto = escalaAtual <= 1.08;
           // Saindo do aberto a deriva é menor: senão o 100% dura um sopro.
-          const dMin = aberto ? 0.05 : SMART_DERIVA_MIN;
-          const dMax = aberto ? 0.1 : SMART_DERIVA_MAX;
+          const dMin = aberto ? 0.03 : SMART_DERIVA_MIN;
+          const dMax = aberto ? 0.06 : SMART_DERIVA_MAX;
           /* A deriva é uma RAMPA: ela precisa de tempo pra ser lida como
            * movimento. Espremida no fiapo final de um take (0,35s), a mesma
            * amplitude vira um TRANCO de escala em cima do corte. Encolhe a
