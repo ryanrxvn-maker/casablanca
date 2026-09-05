@@ -450,48 +450,74 @@ function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
   }
 
   /* ─────────────────────────────────────────────────────────────────────
-   * O EQUILÍBRIO (02.09). Silas, depois de ver um AD com o smart zoom:
-   *   *"o zoom tá se mantendo muito tempo em aproximado e pouco tempo em
-   *    100% ... tá demorando demais pra trocar de proporção"*
+   * O MODELO v3 (04.09). Silas, depois do 1º AD real com o render novo:
+   *   "1 TAKE 100% SEM ZOOM, DEPOIS EM ALGUM CORTE 135/130%, AI DEPOIS CORTE
+   *    PRA 100% DE NOVO, ISSO SEM ZOOM. AI EM ALGUM, MENOS QUE ESSA DINAMICA
+   *    DE SO MUDAR PROPORCAO, ALGUNS ZOOM IN DO 100% AO 135% — CUIDADO NAO
+   *    DEIXAR MUITO LONGO E NEM MUITO CURTO."
    *
-   * Medido no corpus de 5 ADs (310s) ANTES: 21,7% do tempo abaixo de 110%,
-   * 25,7% colado em 130%+, e só 5,8 trocas por minuto (o trecho mediano tinha
-   * 10,2s — sem decupagem os únicos cortes são as trocas de take).
-   *
-   * Estas travas são o contrato: se alguém mexer nas bolsas ou nas janelas e
-   * o plano voltar a morar no fechado, o teste reprova.
+   * O contrato anterior (02.09) protegia "<=15% em 130%+" porque a 1ª versão
+   * morava no fechado com deriva. Neste modelo o 130/135 PARADO é um dos dois
+   * níveis — então o contrato mudou junto com o pedido. Medido em DOIS corpos:
+   * o AD decupado (o caso real do Pilot) e o sem decupagem (takes de 7-15s).
    * ─────────────────────────────────────────────────────────────────── */
   {
-    const CORPUS: Array<{ dur: number; partes: number[] }> = [
-      { dur: 62.4, partes: [8.1, 11.2, 9.8, 12.4, 10.5, 10.4] },
-      { dur: 45.0, partes: [7.5, 9.0, 8.2, 10.1, 10.2] },
-      { dur: 95.0, partes: [12, 14, 11, 13, 15, 10, 12, 8] },
-      { dur: 30.0, partes: [7, 8, 7.5, 7.5] },
-      { dur: 78.0, partes: [9, 13, 11, 12, 14, 9, 10] },
+    const decupado = (d: number) => {
+      const partes = [d / 3, d / 3, d / 3];
+      const internos = partes.map((pd) => {
+        const ps: number[] = [];
+        for (let r = pd; r > 0; r -= 2.6) ps.push(Math.min(2.6, r));
+        return ps;
+      });
+      return { dur: d, partes, internos };
+    };
+    const CORPUS: Array<{ dur: number; partes: number[]; internos: number[][] | null }> = [
+      ...[24, 33, 45, 60, 75, 90].map(decupado),
+      { dur: 62.4, partes: [8.1, 11.2, 9.8, 12.4, 10.5, 10.4], internos: null },
+      { dur: 95.0, partes: [12, 14, 11, 13, 15, 10, 12, 8], internos: null },
     ];
     const PASSO = 1 / 30;
-    let neutro = 0, teto = 0, soma = 0, total = 0, trechos = 0, segundos = 0;
+    let aberto = 0, fechado = 0, movendo = 0, total = 0, trechos = 0, segundos = 0;
+    const rampasRuins: string[] = [];
+    let derivaEmParado = 0;
     for (const ad of CORPUS) {
-      const pl = planejarZoom(SMART, ad.dur, ad.partes, null);
+      const pl = planejarZoom(SMART, ad.dur, ad.partes, ad.internos);
       trechos += pl.length;
       segundos += ad.dur;
+      for (const sg of pl) {
+        const rampa = Math.abs(sg.to - sg.from) >= 0.02;
+        if (!rampa) {
+          if (sg.to !== sg.from) derivaEmParado++;
+          continue;
+        }
+        const durRampa = (sg.rampaAte as number) - sg.start;
+        if (sg.to < sg.from) rampasRuins.push(`out ${sg.from.toFixed(2)}→${sg.to.toFixed(2)}`);
+        if (Math.abs(sg.from - 1) > 0.001) rampasRuins.push(`parte de ${sg.from.toFixed(2)}, não de 100%`);
+        if (sg.to < 1.28) rampasRuins.push(`chega só em ${sg.to.toFixed(2)}`);
+        if (durRampa < 2.0 || durRampa > 4.4) rampasRuins.push(`rampa de ${durRampa.toFixed(1)}s`);
+      }
       for (let t = 0; t < ad.dur; t += PASSO) {
         const sc = escalaNoInstante(pl, t);
         total += PASSO;
-        soma += sc * PASSO;
-        if (sc < 1.10) neutro += PASSO;
-        if (sc >= 1.30) teto += PASSO;
+        if (sc < 1.02) aberto += PASSO;
+        if (sc >= 1.28) fechado += PASSO;
+        // "se movendo" = dentro de uma rampa ainda não resolvida
+        const seg = pl.find((x) => t >= x.start && t < x.end);
+        if (seg && Math.abs(seg.to - seg.from) >= 0.02 && t < (seg.rampaAte as number)) movendo += PASSO;
       }
     }
-    const pctNeutro = (neutro / total) * 100;
-    const pctTeto = (teto / total) * 100;
-    const media = (soma / total) * 100;
+    const pctAberto = (aberto / total) * 100;
+    const pctFechado = (fechado / total) * 100;
+    const pctMovendo = (movendo / total) * 100;
     const porMinuto = trechos / (segundos / 60);
 
-    ok(pctNeutro >= 30, `passa >=30% do tempo perto do 100% (deu ${pctNeutro.toFixed(1)}%, era 21,7%)`);
-    ok(pctTeto <= 15, `não mora colado no teto: <=15% em 130%+ (deu ${pctTeto.toFixed(1)}%, era 25,7%)`);
-    ok(media <= 116, `escala média enxuta (deu ${media.toFixed(1)}%, era 117,7%)`);
-    ok(porMinuto >= 7, `troca de proporção >=7x por minuto (deu ${porMinuto.toFixed(1)}, era 5,8)`);
+    ok(pctAberto >= 35, `"1 take 100% SEM ZOOM": >=35% do tempo parado em 100% (deu ${pctAberto.toFixed(1)}%)`);
+    ok(pctFechado >= 25 && pctFechado <= 55, `"em algum corte 135/130": 25-55% do tempo parado no fechado (deu ${pctFechado.toFixed(1)}%)`);
+    ok(pctMovendo >= 8 && pctMovendo <= 30, `"alguns zoom in, menos que a troca": 8-30% do tempo em rampa (deu ${pctMovendo.toFixed(1)}%)`);
+    ok(pctMovendo < pctAberto && pctMovendo < pctFechado, 'a rampa é minoria: menos tempo que qualquer nível parado');
+    ok(derivaEmParado === 0, `take parado é PARADO — zero deriva (${derivaEmParado} com deriva)`);
+    ok(rampasRuins.length === 0, `toda rampa é IN, do 100% ao 130/135, com 2,0-4,4s (${rampasRuins.length} fora: ${rampasRuins.slice(0, 3).join(' · ')})`);
+    ok(porMinuto >= 6, `troca de proporção >=6x por minuto (deu ${porMinuto.toFixed(1)})`);
     ok(porMinuto <= 22, `mas sem virar tremedeira (deu ${porMinuto.toFixed(1)})`);
   }
 

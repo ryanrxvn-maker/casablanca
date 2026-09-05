@@ -43,7 +43,7 @@ const FORCAS: Array<{ v: ZoomForca; label: string; pct: string; dica: string }> 
   { v: 'leve', label: 'Leve', pct: pctDe('leve'), dica: 'Quase uma respiração — presença sem chamar atenção.' },
   { v: 'medio', label: 'Médio', pct: pctDe('medio'), dica: 'O push-in lento do CapCut. O padrão do estúdio.' },
   { v: 'forte', label: 'Forte', pct: pctDe('forte'), dica: 'Movimento evidente, pra cena que precisa de energia.' },
-  { v: 'smart', label: 'Smart Zoom', pct: '100→135%', dica: 'O feeling do editor: na maioria dos cortes a escala TROCA SECA (100 · 120 · 130), com zoom in suavizado no meio e um ou outro zoom out. Escolhe sozinho a cada corte.' },
+  { v: 'smart', label: 'Smart Zoom', pct: '100→135%', dica: 'O feeling do editor: take parado em 100%, corte seco pra 130/135% parado, corte de volta pro 100% — e, de vez em quando, um zoom in do 100 ao 135 com duração calibrada. Escolhe sozinho a cada corte.' },
 ];
 
 /* ═══════════════ preview REAL do template (motor das legendas) ═══════════ */

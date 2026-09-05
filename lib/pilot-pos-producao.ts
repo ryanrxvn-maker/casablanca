@@ -127,67 +127,37 @@ const SMART_MIN = 1.0;
 // até acontecer um zoom, tem que transicionar mais e ter mais zoom in".
 // A bolsa foi de 3/2/1 pra 2/3/1: o zoom in vira o movimento mais comum,
 // o corte seco continua à frente do out.
-/* ⭐ RE-EQUILÍBRIO 04.09 — Silas viu o AD real: "parece um zoom in leve o tempo
- * todo, não uma dinâmica com proporções diferentes". Medido no plano: 73% do
- * tempo a escala estava SE MOVENDO e só 27% parada — os saltos secos existiam
- * mas ficavam enterrados num deslize contínuo. O modelo dele é o inverso:
- * proporção PARADA na maior parte, troca SECA no corte (100 · 120 · 130).
- * Então: mais seco na bolsa (4/7), sem o degrau de 1.1 (salto de 10% não se
- * lê — só 1.0/1.2/1.35), e a deriva dentro do take cai pra 4-8% (respiração,
- * não zoom). A dinâmica passa a vir dos saltos, não das rampas. */
-const SMART_BOLSA: Array<'seco' | 'in' | 'out'> = ['seco', 'seco', 'seco', 'seco', 'in', 'in', 'out'];
-/**
- * A BOLSA DE DEGRAUS do corte seco.
+/* ⭐ SMART ZOOM v3 (04.09) — o modelo do Silas, nas palavras dele:
+ *   "1 TAKE 100% SEM ZOOM, DEPOIS EM ALGUM CORTE 135/130%, AI DEPOIS CORTE
+ *    PRA 100% DE NOVO, ISSO SEM ZOOM. AI EM ALGUM, MENOS QUE ESSA DINAMICA DE
+ *    SO MUDAR PROPORCAO, ALGUNS QUE VAO SER ZOOM IN, DO 100% AO 135% —
+ *    CUIDADO NAO DEIXAR MUITO LONGO E NEM MUITO CURTO."
  *
- * Sorteio uniforme entre os 5 degraus parecia justo e não era: medido em 5 ADs
- * (310s), o vídeo passava 33% do tempo em 121-135% e só 20% em 100-105% —
- * Silas, 02.09: *"o zoom tá se mantendo muito tempo em aproximado e pouco
- * tempo em 100%"*. As rampas empurram a escala pra cima e nada a trazia de
- * volta com regularidade.
+ * Dois NÍVEIS parados — ABERTO (100%) e FECHADO (130 ou 135%) — e três ações
+ * por corte: SEGURA (mesmo nível, corte sem troca), TROCA (seca pro outro
+ * nível) e IN (rampa 100→fechado com duração calibrada, depois PARA no fechado
+ * até o corte). Não há deriva nos takes parados: "sem zoom" é sem zoom. Não
+ * há zoom out em rampa: a troca seca 135→100 já é o "abre" do modelo.
  *
- * O 100% agora tem peso DOBRADO na bolsa. Mesma mecânica da bolsa de
- * movimentos: proporção garantida em qualquer tamanho de AD.
- */
-const SMART_BOLSA_DEGRAUS = [1.0, 1.0, 1.0, 1.2, 1.2, 1.35];
-/** A partir daqui o plano conta como "fechado" — e o próximo seco tem que abrir. */
-const SMART_ALTO = 1.26;
-/** O alívio depois de um trecho fechado: nada acima disto serve. */
-const SMART_ALIVIO_MAX = 1.12;
-/** Rampa com menos amplitude que isto pela frente vira seco: 4% em 5s não é
- *  movimento, é o vídeo parecendo travado num zoom que não acontece. */
-const SMART_RAMPA_MIN_ESPACO = 0.06;
-/**
- * Take mais longo que isto ganha DERIVA: a escala entra no corte, segura, e
- * escorrega de leve até o fim do take.
- *
- * Sem decupagem, os únicos cortes são as trocas de take — a cada ~10s. A
- * janela alvo de 2,3s não tinha onde terminar e o trecho saía com 10s de
- * mediana: o vídeo ficava parado numa escala só o take inteiro. Silas, 02.09:
- * *"tá demorando demais pra trocar de proporção"*.
- *
- * A deriva é uma RAMPA contínua (o `from` dela é o `to` do trecho anterior),
- * então nada pula no meio do take — o salto continua acontecendo só no corte,
- * onde é invisível.
- */
-const SMART_SUBDIV_SEC = 4.2;
-/** Amplitude da deriva — leve: ela acompanha a fala, não disputa com ela. */
-const SMART_DERIVA_MIN = 0.04;
-const SMART_DERIVA_MAX = 0.08;
-/** Janela do corte seco: curta, é só o take numa escala. */
-// ⚠ 1,8 e nao mais: com decupagem os pedacos tem ~2,6s, e uma janela de seco
-// que fecha no 1o corte >= 1,8s vale UM pedaco — escala parada, troca no corte.
-// Subir isto pra 2,6 (tentado em 04.09) fazia a janela abarcar DOIS pedacos,
-// ligava a cadeia de deriva (feita pra take de 10s sem decupagem) e as
-// fronteiras dela caiam no meio da fala — reprovou os testes 19 e 22.
-const SMART_SEG_SECO_SEC = 1.8;
-/** Janela do movimento: precisa de tempo pra ser percebido. */
-const SMART_SEG_RAMPA_SEC = 3.4;
-/** Quanto uma janela de RAMPA (in/out) acumula antes de fechar no próximo
- *  corte. Separado da deriva da cadeia (acima) em 04.09: encurtar os dois
- *  juntos pra 2,6 fazia a cadeia dos takes longos picar mais (24 trocas/min,
- *  teto 22 — tremedeira). A janela curta é o que interessa no AD decupado:
- *  a rampa ocupa UM pedaço, não dois. */
-const SMART_JANELA_RAMPA_SEC = 2.6;
+ * A versão anterior (bolsa seco/in/out + deriva dentro do take) media 73% do
+ * tempo com a escala se movendo — ele viu como "zoom in leve o tempo todo". */
+const SMART_FECHADO = [1.3, 1.35];
+/** Quanto uma janela acumula antes de fechar no próximo corte: SEGURA/TROCA
+ *  valem um pedaço da decupagem; a rampa IN precisa de mais pra não sair curta. */
+const SMART_JANELA_SECA_SEC = 1.8;
+const SMART_JANELA_IN_SEC = 2.4;
+/** A rampa IN 100→135: "nem muito longo nem muito curto". Abaixo do mínimo a
+ *  janela vira TROCA (um pulo de 35% em 1,5s é tranco, não zoom). Acima do
+ *  máximo a rampa para e o take SEGURA no fechado até o corte. */
+const SMART_IN_MIN_SEC = 2.2;
+const SMART_IN_MAX_SEC = 3.6;
+/** Take LONGO (vídeo sem decupagem) aberto vira IN mesmo sem a bolsa pedir —
+ *  10 segundos parados em 100% seria vídeo morto. */
+const SMART_TAKE_LONGO_SEC = 5.5;
+/** Bolsa de ações. "TRABALHA MAIS COM A TROCA DE PROPORÇÃO E ALGUNS ZOOM IN
+ *  ÀS VEZES": troca 4/8, segura 2/8 (é o que dá o "1 take 100%... depois em
+ *  ALGUM corte"), in 2/8 — menos que a troca, como ele pediu. */
+const SMART_ACOES: Array<'troca' | 'segura' | 'in'> = ['troca', 'troca', 'troca', 'troca', 'segura', 'segura', 'in', 'in'];
 
 function easeInOutSine(p: number): number {
   return -(Math.cos(Math.PI * p) - 1) / 2;
@@ -334,88 +304,50 @@ export function fronteirasDasPartes(partesSec: number[]): number[] {
  * que devolve o 100% ao vídeo; (2) senão, o primeiro da bolsa que seja
  * diferente o bastante da escala atual pra troca ser percebida no corte.
  */
-function proximoDegrau(bolsa: number[], escala: number, encher: () => void): number {
-  if (bolsa.length === 0) encher();
-  const tirar = (i: number) => bolsa.splice(i, 1)[0];
-
-  if (escala >= SMART_ALTO) {
-    const i = bolsa.findIndex((d) => d <= SMART_ALIVIO_MAX);
-    if (i >= 0) return tirar(i);
-    // a bolsa não tem alívio agora: enche de novo e procura outra vez, senão
-    // o vídeo ficaria fechado por mais um trecho inteiro.
-    encher();
-    const j = bolsa.findIndex((d) => d <= SMART_ALIVIO_MAX);
-    if (j >= 0) return tirar(j);
-  }
-
-  // A VOLTA AO 100% é exceção do filtro (02.09). Com a escala em 1,06 depois
-  // de uma deriva, o 100% ficava a 6% de distância e o filtro de "diferente o
-  // bastante" o descartava — o plano nunca voltava ao repouso e morava no
-  // meio (medido: 55% do tempo em 106-120%). Voltar pro 100% não é uma troca
-  // qualquer, é o respiro do vídeo: ele passa com 4,5%.
-  const serve = (d: number) =>
-    Math.abs(d - escala) >= 0.08 || (d <= SMART_MIN + 0.001 && escala >= 1.045);
-  const i = bolsa.findIndex(serve);
-  if (i >= 0) return tirar(i);
-  encher();
-  const j = bolsa.findIndex(serve);
-  return j >= 0 ? tirar(j) : 1.0;
-}
-
 function planejarSmartZoom(
   durSec: number,
   cortes: Array<{ t: number; forte: boolean }>,
 ): ZoomSeg[] {
   const rnd = prng(sementeDoPlano(durSec, cortes));
   const segs: ZoomSeg[] = [];
-  let escala = 1.0; // começa SEMPRE em 100% (nada de borda no primeiro frame)
+  const ABERTO = SMART_MIN;
+
+  // estado: em que nível o vídeo está PARADO agora
+  let nivel: 'aberto' | 'fechado' = 'aberto';
+  let escala = ABERTO; // começa SEMPRE em 100% — "1 take 100% sem zoom"
   let ini = 0;
   let c = 0;
-  let bolsa: Array<'seco' | 'in' | 'out'> = [];
-  // bolsa PARALELA, dos degraus — é ela que devolve o 100% ao vídeo
-  const bolsaDeg: number[] = [];
-  const encherDegraus = () => {
-    bolsaDeg.length = 0;
-    bolsaDeg.push(...SMART_BOLSA_DEGRAUS);
-    for (let k = bolsaDeg.length - 1; k > 0; k--) {
-      const j = Math.floor(rnd() * (k + 1));
-      [bolsaDeg[k], bolsaDeg[j]] = [bolsaDeg[j], bolsaDeg[k]];
-    }
-  };
+  let bolsa: Array<'troca' | 'segura' | 'in'> = [];
+  let inPendente = false; // um IN sorteado no nível fechado espera o próximo take aberto
 
-  while (ini < durSec - 0.05 && c < cortes.length) {
-    // 1) que movimento vem agora? sai da BOLSA (proporção garantida)
+  const sortearFechado = () => clampEscala(SMART_FECHADO[Math.floor(rnd() * SMART_FECHADO.length)]);
+
+  const proximaAcao = (): 'troca' | 'segura' | 'in' => {
     if (bolsa.length === 0) {
-      bolsa = [...SMART_BOLSA];
-      // embaralho determinístico (Fisher-Yates com o mesmo PRNG)
+      bolsa = [...SMART_ACOES];
       for (let k = bolsa.length - 1; k > 0; k--) {
         const j = Math.floor(rnd() * (k + 1));
         [bolsa[k], bolsa[j]] = [bolsa[j], bolsa[k]];
       }
     }
-    let tipo: 'seco' | 'in' | 'out' = bolsa.pop()!;
-    /* ⚠ O PRIMEIRO TRECHO NUNCA É `out` (04.09). `out` por definição começa
-     * FECHADO e abre — no instante zero isso faz o AD abrir no enquadramento
-     * mais fechado e mais borrado, e sem corte nenhum antes que justifique.
-     * Vira `in`, que começa em 100% e fecha: mesmo movimento, sentido certo
-     * pro gancho. Os `out` seguintes continuam intactos. */
-    if (segs.length === 0 && ini === 0 && tipo === 'out') tipo = 'in';
-    // Sem ESPAÇO pra uma rampa que se perceba, cai no seco — nunca no outro
-    // movimento. Converter out→in inflava o zoom in acima do seco e quebrava a
-    // prioridade do draft (medido: 7 in contra 4 secos). O piso subiu de 2%
-    // pra 6% em 02.09: uma rampa de 4% em 5s lê como vídeo travado.
-    //
-    // EXCEÇÃO do out (02.09): com o vídeo passando muito mais tempo em 100%, o
-    // out no piso virava seco SEMPRE e o zoom out sumiu do plano (0 em 310s de
-    // medição). Mas o corte já mascara um salto — então o out no piso vira
-    // "entra fechado no corte e abre": pula pra cima NO CORTE (invisível) e
-    // desce. É movimento de verdade, e a prioridade do seco continua intacta.
-    let outDoPiso = false;
-    if (tipo === 'out' && escala <= SMART_MIN + SMART_RAMPA_MIN_ESPACO) outDoPiso = true;
-    if (tipo === 'in' && escala >= SMART_MAX - SMART_RAMPA_MIN_ESPACO) tipo = 'seco';
+    return bolsa.pop()!;
+  };
 
-    // 2) a janela: o seco é curto (só o take numa escala), a rampa é longa
-    const alvo = tipo === 'seco' ? SMART_SEG_SECO_SEC : SMART_JANELA_RAMPA_SEC;
+  let primeira = true;
+  while (ini < durSec - 0.05 && c < cortes.length) {
+    // 1) a ação deste take
+    let acao: 'troca' | 'segura' | 'in';
+    if (primeira) {
+      acao = 'segura'; // o AD abre num take de 100% parado
+    } else if (inPendente && nivel === 'aberto') {
+      acao = 'in';
+      inPendente = false;
+    } else {
+      acao = proximaAcao();
+    }
+
+    // 2) até onde a janela vai: fecha no 1º corte depois do alvo
+    const alvo = acao === 'in' ? SMART_JANELA_IN_SEC : SMART_JANELA_SECA_SEC;
     let fim = durSec;
     let usou = cortes.length;
     for (let k = c; k < cortes.length; k++) {
@@ -425,96 +357,46 @@ function planejarSmartZoom(
         break;
       }
     }
-    // a última janela sempre fecha no fim do vídeo
     if (usou >= cortes.length) fim = durSec;
     const dur = fim - ini;
     if (dur < 0.4) break; // resto insignificante
 
-    // 3) a escala de destino
-    if (tipo === 'seco') {
-      /* ⚠ O AD ABRE EM 100% (04.09). `proximoDegrau` devolve por definição um
-       * degrau DIFERENTE do atual — então, quando o primeiro trecho saía
-       * "seco", o vídeo COMEÇAVA em 110/120/135%: o gancho (os 3 segundos que
-       * mais importam) abria no enquadramento mais fechado e mais borrado, e
-       * ainda por cima sem corte nenhum antes que justificasse o salto. O
-       * comentário do topo e o teste (18) já afirmavam "começa SEMPRE em
-       * 100%" — só não era verdade em todo sorteio.
-       * Vale só pro SECO no instante zero: `in` e `out` são movimentos
-       * deliberados e continuam como o Silas aprovou. */
-      const nova =
-        segs.length === 0 && ini === 0
-          ? 1.0
-          : clampEscala(proximoDegrau(bolsaDeg, escala, encherDegraus));
-      if (dur >= SMART_SUBDIV_SEC) {
-        // TAKE LONGO: cadeia de SEGURA→ESCORREGA→SEGURA→ESCORREGA até o fim
-        // do take (02.09, 2ª rodada — Silas: "tem que transicionar mais entre
-        // as proporções"). Cada elo é rampa CONTÍNUA: nada pula no meio do
-        // take, mas a proporção nunca fica parada por muito tempo.
-        let cursor = ini;
-        let escalaAtual = nova;
-        let elo = 0;
-        while (fim - cursor > 0.35 && elo < 8) {
-          const resta = fim - cursor;
-          // segura curto, escorrega um pouco mais longo
-          const durSegura = Math.min(resta, SMART_SEG_SECO_SEC * (0.7 + rnd() * 0.5));
-          segs.push({ start: cursor, end: Math.min(fim, cursor + durSegura), from: escalaAtual, to: escalaAtual, rampaAte: Math.min(fim, cursor + durSegura) });
-          cursor = Math.min(fim, cursor + durSegura);
-          if (fim - cursor <= 0.35) break;
-
-          const aberto = escalaAtual <= 1.08;
-          // Saindo do aberto a deriva é menor: senão o 100% dura um sopro.
-          const dMin = aberto ? 0.03 : SMART_DERIVA_MIN;
-          const dMax = aberto ? 0.06 : SMART_DERIVA_MAX;
-          /* A deriva é uma RAMPA: ela precisa de tempo pra ser lida como
-           * movimento. Espremida no fiapo final de um take (0,35s), a mesma
-           * amplitude vira um TRANCO de escala em cima do corte. Encolhe a
-           * amplitude junto com o tempo disponível. */
-          const derivaCheia = dMin + rnd() * (dMax - dMin);
-          const espacoRampa = Math.min(1, (fim - cursor) / SMART_SEG_RAMPA_SEC);
-          const deriva = derivaCheia * espacoRampa;
-          // Fechado desce, aberto sobe, o meio pende pra baixo — é o conjunto
-          // que impede o plano de morar no teto.
-          const paraBaixo = escalaAtual >= 1.2 ? true : aberto ? false : rnd() < 0.62;
-          const alvoDeriva = clampEscala(paraBaixo ? escalaAtual - deriva : escalaAtual + deriva);
-          const durDeriva = Math.min(fim - cursor, SMART_SEG_RAMPA_SEC * (0.6 + rnd() * 0.5));
-          const fimDeriva = Math.min(fim, cursor + durDeriva);
-          segs.push({ start: cursor, end: fimDeriva, from: escalaAtual, to: alvoDeriva, rampaAte: fimDeriva });
-          cursor = fimDeriva;
-          escalaAtual = alvoDeriva;
-          elo++;
-        }
-        /* ⚠ NADA DE BURACO NO PLANO (04.09). O teto de 0,01s deixava uma
-         * fresta de até 10ms sem nenhum segmento cobrindo. Um quadro tem 33ms,
-         * então essa fresta cai DENTRO de um quadro: o `escalaNoInstante` não
-         * acha segmento, devolve 1, e o AD dá uma PISCADA de volta ao 100% no
-         * meio do movimento. Qualquer sobra vira segmento. */
-        if (fim - cursor > 0) {
-          segs.push({ start: cursor, end: fim, from: escalaAtual, to: escalaAtual, rampaAte: fim });
-        }
-        escala = escalaAtual;
-      } else {
-        segs.push({ start: ini, end: fim, from: nova, to: nova, rampaAte: fim });
-        escala = nova;
-      }
-    } else {
-      // rampa: alguns leves, outros mais curtos e por isso mais agressivos —
-      // mas o teto de 135% e o piso de 100% valem sempre.
-      const passo = 0.07 + rnd() * 0.11; // 7% a 18%
-      // no out-do-piso a ENTRADA é que sobe (no corte); o destino é o piso
-      const partida = outDoPiso ? clampEscala(escala + passo + 0.06) : escala;
-      const destino = clampEscala(tipo === 'in' ? partida + passo : partida - passo);
-      if (Math.abs(destino - partida) < 0.02) {
-        // não sobrou amplitude: entrega como seco em vez de uma rampa morta
-        segs.push({ start: ini, end: fim, from: partida, to: partida, rampaAte: fim });
-        escala = partida;
-      } else {
-        const respiro = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, dur * RESPIRO_FRACAO));
-        const rampaAte = dur > respiro * 2 ? fim - respiro : ini + dur / 2;
-        segs.push({ start: ini, end: fim, from: partida, to: destino, rampaAte });
-        escala = destino;
+    // 3) um IN só nasce do ABERTO e só se couber a rampa; senão vira troca
+    //    (e, se estava fechado, o IN fica pendente pro próximo take aberto —
+    //    a sequência lê 135 →corte→ 100 →rampa→ 135, que é o desenho dele)
+    if (acao === 'in') {
+      if (nivel === 'fechado') {
+        inPendente = true;
+        acao = 'troca';
+      } else if (dur < SMART_IN_MIN_SEC) {
+        acao = 'troca';
       }
     }
+    // take LONGO aberto (vídeo sem decupagem): parado em 100% por 6-10s é
+    // vídeo morto — vira IN. Fechado longo fica parado: "sem zoom".
+    if (acao !== 'in' && nivel === 'aberto' && dur >= SMART_TAKE_LONGO_SEC && !primeira) acao = 'in';
 
+    // 4) emite o trecho
+    if (acao === 'segura') {
+      segs.push({ start: ini, end: fim, from: escala, to: escala, rampaAte: fim });
+    } else if (acao === 'troca') {
+      const nova = nivel === 'aberto' ? sortearFechado() : ABERTO;
+      segs.push({ start: ini, end: fim, from: nova, to: nova, rampaAte: fim });
+      escala = nova;
+      nivel = nivel === 'aberto' ? 'fechado' : 'aberto';
+    } else {
+      // IN: rampa do 100% ao fechado com duração calibrada; o que sobrar do
+      // take SEGURA no fechado. A rampa sempre termina ANTES do corte.
+      const destino = sortearFechado();
+      const respiro = Math.min(RESPIRO_MAX_SEC, Math.max(RESPIRO_MIN_SEC, dur * RESPIRO_FRACAO));
+      const durRampa = Math.min(SMART_IN_MAX_SEC, dur - respiro);
+      const rampaAte = ini + durRampa;
+      segs.push({ start: ini, end: fim, from: ABERTO, to: destino, rampaAte });
+      escala = destino;
+      nivel = 'fechado';
+    }
+
+    primeira = false;
     ini = fim;
     c = usou;
   }
