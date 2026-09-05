@@ -1935,8 +1935,8 @@ function TipografiaInner() {
                 style={{ margin: 0, flex: '0 1 auto' }}
                 aria-pressed={qualidadeMax}
                 title={qualidadeMax
-                  ? 'MAX QUALITY ligado: render bem mais LENTO, qualidade máxima'
-                  : 'Render rápido (padrão): a diferença de qualidade não se enxerga no feed'}
+                  ? 'MAX QUALITY ligado: bitrate alto e análise completa do encoder'
+                  : 'Render padrão: bitrate ajustado ao feed — a diferença não se enxerga no celular'}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   {qualidadeMax ? (
@@ -1946,7 +1946,7 @@ function TipografiaInner() {
                   )}
                 </svg>
                 <span className="lz-maxq-txt">
-                  {qualidadeMax ? 'MAX QUALITY — render lento' : 'RENDER RÁPIDO — recomendado'}
+                  {qualidadeMax ? 'MAX QUALITY' : 'RENDER RÁPIDO — recomendado'}
                 </span>
                 <span className="lz-maxq-pill">{qualidadeMax ? 'ON' : 'OFF'}</span>
               </button>

@@ -418,8 +418,8 @@ export function LegendaZoomPopover({
             className={'lz-maxq' + (legenda.qualidadeMax ? ' is-on' : '')}
             aria-pressed={!!legenda.qualidadeMax}
             title={legenda.qualidadeMax
-              ? 'MAX QUALITY ligado: render bem mais LENTO, qualidade máxima'
-              : 'Render rápido (padrão): a diferença de qualidade não se enxerga no feed'}
+              ? 'MAX QUALITY ligado: bitrate alto e análise completa do encoder'
+              : 'Render padrão: bitrate ajustado ao feed — a diferença não se enxerga no celular'}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               {legenda.qualidadeMax ? (
@@ -433,7 +433,7 @@ export function LegendaZoomPopover({
               )}
             </svg>
             <span className="lz-maxq-txt">
-              {legenda.qualidadeMax ? 'MAX QUALITY — render lento' : 'RENDER RÁPIDO — recomendado'}
+              {legenda.qualidadeMax ? 'MAX QUALITY' : 'RENDER RÁPIDO — recomendado'}
             </span>
             <span className="lz-maxq-pill">{legenda.qualidadeMax ? 'ON' : 'OFF'}</span>
           </button>
