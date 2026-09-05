@@ -54,7 +54,7 @@ export default function PilotPage() {
                 className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
                 style={{ boxShadow: '0 0 10px rgba(200,232,124,0.95)' }}
               />
-              ClickUp Pilot
+              Pilot
             </div>
             <h1
               className="text-[40px] font-extrabold leading-[1] tracking-tight text-white md:text-[68px]"

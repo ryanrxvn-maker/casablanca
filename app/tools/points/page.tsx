@@ -138,7 +138,7 @@ export default function PointsPage() {
         allMine = best?.tasks || [];
         console.log('[points] auto-selected team:', best?.team?.name, '(' + allMine.length + ' tasks)');
       }
-      if (!teamId) { setPointsError('Não achei seu espaço no ClickUp. Confira o token no ClickUp Pilot.'); return; }
+      if (!teamId) { setPointsError('Não achei seu espaço no ClickUp. Confira o token no Pilot.'); return; }
 
       // ─── ESCOPO (espelha o recorte do dashboard) ────────────────────────
       // O dashboard "Silas | Tarefas time" conta um RECORTE das tasks do user

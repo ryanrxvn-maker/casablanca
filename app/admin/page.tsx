@@ -83,7 +83,7 @@ const TOOL_LABELS: Record<string, string> = {
   'auto-cortes': 'Auto Cortes',
   'auto-broll': 'Auto B-roll',
   'heygen-auto': 'Hey Auto',
-  'clickup-pilot': 'ClickUp Pilot',
+  'clickup-pilot': 'Pilot',
   'remover-elementos': 'Remover Legenda',
   'separador-audio': 'Separador de Áudio',
   'ltx-video': 'LTX Video',

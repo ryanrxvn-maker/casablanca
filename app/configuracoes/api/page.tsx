@@ -104,7 +104,7 @@ const META: Array<{
     helper:
       'NÃO é a API key acima. A diferença é de COBRANÇA: a key cai no tier de API (saldo USD à parte) e o OAuth sai do crédito do plano, que você já paga. Use o botão "Conectar HeyGen agora" — ele tira um login PRÓPRIO do app e renova sozinho todo dia. Colar o token do CLI aqui também funciona, mas aí o CLI e o app disputam a MESMA corrente (o refresh é de uso único): quem renovar primeiro derruba o outro, e é por isso que o login vivia expirando.',
     link: 'https://developers.heygen.com/docs/cli',
-    usedBy: 'ClickUp Pilot — MODO IMAGEM (animar imagem sem avatar da biblioteca)',
+    usedBy: 'Pilot · MODO IMAGEM (animar imagem sem avatar da biblioteca)',
   },
   {
     id: 'groq',

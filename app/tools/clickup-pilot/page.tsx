@@ -159,6 +159,8 @@ import {
   setPilotTeamNames,
 } from '@/lib/clickup-pilot-config';
 import { WorkspaceSwitch3D } from '@/components/WorkspaceSwitch3D';
+import { PilotModeHub } from '@/components/PilotModeHub';
+import { DocsBar, CreatorBar } from '@/components/PilotFontesBar';
 import {
   isDrMillionFormat,
   parseDrMillionBriefing,
@@ -167,8 +169,25 @@ import {
   adGroupOf,
   type DrMillionLang,
 } from '@/lib/drmillion-parser';
-import { LangSwitch3D } from '@/components/LangSwitch3D';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
+import {
+  isTaskLocal,
+  lerTasksLocais,
+  salvarTasksLocais,
+  lerDocsLocais,
+  salvarDocLocal,
+  taskSintetica,
+  tasksDoDoc,
+  idTaskCreator,
+  proximoNomeCreator,
+  docDaCopyColada,
+  docDeTexto,
+  textoDeArquivo,
+  baseAdIdDoNome,
+  type ModoPilot,
+  type TaskLocal,
+  type DocLocal,
+} from '@/lib/pilot-fontes';
 import { takeUnicoPorLook, motorEfetivo } from '@/lib/heygen-motion-motor';
 import { revisarCopy, contarGraves } from '@/lib/revisar-copy';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
@@ -1238,6 +1257,10 @@ type TaskAnalysis = {
   drMillion?: boolean;
   /** Quais idiomas ESTE ad realmente tem no doc. */
   drLangs?: { pt: boolean; pl: boolean; hun?: boolean };
+  /** Idioma em que ESTA task foi lida (voz + ASR). Detectado do doc: PT é
+   *  sempre a tradução, a voz sai na outra língua — salvo quando o user
+   *  pediu "usar português" nesta task. */
+  drLang?: DrMillionLang;
   /** Linhas da copy do idioma escolhido que NÃO entraram em nenhum take.
    *  Vazio = a copy saiu inteira. Ver conferirCoberturaDaCopy. */
   copyFaltando?: string[];
@@ -1346,7 +1369,7 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
               Sua conta é <span className="text-violet">{tier.toUpperCase()}</span>.
             </h3>
             <p className="mt-2 max-w-[480px] text-[14.5px] leading-relaxed text-text-muted">
-              O ClickUp Pilot dispara automação em massa no HeyGen — disponível
+              O Pilot dispara automação em massa no HeyGen — disponível
               só no plano <span className="font-bold text-white">Pro</span>.
             </p>
           </div>
@@ -1377,7 +1400,7 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
 
 export default function ClickUpPilotPage() {
   return (
-    <TierGate require="admin" toolName="ClickUp Pilot" toolPath="/tools/clickup-pilot">
+    <TierGate require="admin" toolName="Pilot" toolPath="/tools/clickup-pilot">
       <ClickUpPilotInner />
     </TierGate>
   );
@@ -1674,6 +1697,231 @@ function ClickUpPilotInner() {
     setIncludeReviewRaw(v);
     try { localStorage.setItem(INCLUDE_REVIEW_KEY, v ? '1' : '0'); } catch {}
   }
+
+  /* ========== MODO do Pilot: CREATOR / DOCS / CLICKUP (05.09) ==========
+   *  Muda só DE ONDE vem a task. Análise, disparo, pós-produção e fila são os
+   *  mesmos. As tasks do CREATOR e do DOCS moram neste navegador (localStorage,
+   *  ver lib/pilot-fontes) e nunca dependem do token do ClickUp. */
+  const MODO_KEY = 'darkolab:clickup-pilot:modo';
+  const DOC_ATIVO_KEY = 'darkolab:clickup-pilot:doc-ativo';
+  const [modo, setModoRaw] = useState<ModoPilot>('clickup');
+  const modoRef = useRef<ModoPilot>('clickup');
+  modoRef.current = modo;
+  const [tasksLocais, setTasksLocaisState] = useState<TaskLocal[]>([]);
+  const tasksLocaisRef = useRef<TaskLocal[]>([]);
+  tasksLocaisRef.current = tasksLocais;
+  const [docsLocais, setDocsLocaisState] = useState<DocLocal[]>([]);
+  const docsLocaisRef = useRef<DocLocal[]>([]);
+  docsLocaisRef.current = docsLocais;
+  /** Doc importado que está na tela no modo DOCS (chave em DocLocal.key). */
+  const [docAtivoKey, setDocAtivoKeyRaw] = useState<string | null>(null);
+  const docAtivo = docsLocais.find((d) => d.key === docAtivoKey) || null;
+  const [docLinkInput, setDocLinkInput] = useState('');
+  const [importandoDoc, setImportandoDoc] = useState(false);
+
+  /** Lista do modo local: CREATOR = todas as tasks criadas; DOCS = as do doc ativo. */
+  function tasksSinteticasDoModo(m: ModoPilot, locais: TaskLocal[], docs: DocLocal[], docKey: string | null): ClickUpTask[] {
+    if (m === 'clickup') return [];
+    return locais
+      .filter((t) => t.modo === m && (m !== 'docs' || t.docKey === docKey))
+      .map((t) => taskSintetica(t, docs.find((d) => d.key === t.docKey)));
+  }
+  function persistirLocais(locais: TaskLocal[]) {
+    tasksLocaisRef.current = locais;
+    setTasksLocaisState(locais);
+    salvarTasksLocais(locais);
+  }
+  function setDocAtivoKey(k: string | null) {
+    setDocAtivoKeyRaw(k);
+    try {
+      if (k) localStorage.setItem(DOC_ATIVO_KEY, k);
+      else localStorage.removeItem(DOC_ATIVO_KEY);
+    } catch {}
+  }
+  /** Põe na tela o que o modo local tem guardado (troca de modo, import, F5). */
+  function mostrarTasksLocais(
+    m: ModoPilot,
+    locais: TaskLocal[] = tasksLocaisRef.current,
+    docs: DocLocal[] = docsLocaisRef.current,
+    docKey: string | null = docAtivoKey,
+  ) {
+    setTasks(tasksSinteticasDoModo(m, locais, docs, docKey));
+    setSelectedTaskIds(new Set());
+  }
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const locais = lerTasksLocais();
+    const docs = Object.values(lerDocsLocais());
+    let m: ModoPilot = 'clickup';
+    try {
+      const salvo = localStorage.getItem(MODO_KEY);
+      if (salvo === 'docs' || salvo === 'creator' || salvo === 'clickup') m = salvo;
+    } catch {}
+    let docKey: string | null = null;
+    try { docKey = localStorage.getItem(DOC_ATIVO_KEY); } catch {}
+    if (docKey && !docs.some((d) => d.key === docKey)) docKey = null;
+    if (!docKey) docKey = docs.find((d) => d.origem !== 'colado')?.key ?? null;
+    tasksLocaisRef.current = locais;
+    setTasksLocaisState(locais);
+    docsLocaisRef.current = docs;
+    setDocsLocaisState(docs);
+    setDocAtivoKeyRaw(docKey);
+    modoRef.current = m;
+    setModoRaw(m);
+    if (m !== 'clickup') mostrarTasksLocais(m, locais, docs, docKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  function trocarModo(m: ModoPilot) {
+    if (m === modo) return;
+    modoRef.current = m;
+    setModoRaw(m);
+    try { localStorage.setItem(MODO_KEY, m); } catch {}
+    setSelectedTask(null);
+    setError(null);
+    if (m === 'clickup') {
+      // Volta pro fluxo de sempre: a lista é recarregada do ClickUp (se der).
+      setTasks([]);
+      setSelectedTaskIds(new Set());
+      if (hasToken && selectedTeam && selectedEditor) void loadTasks();
+    } else {
+      mostrarTasksLocais(m);
+    }
+  }
+
+  /* ---- DOCS: importar doc (link ou arquivo) e listar os ADs como tasks ---- */
+  const docsRecentes = docsLocais
+    .filter((d) => d.origem !== 'colado')
+    .sort((a, b) => b.criadoEm - a.criadoEm);
+  function rotuloDoDoc(d: DocLocal): string {
+    const quando = new Date(d.criadoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    return `${d.nomeArquivo || (d.docUrl ? 'Google Docs' : 'Doc')} · ${quando}`;
+  }
+  /** Guarda o doc, cria uma task por AD e põe a lista na tela. */
+  function adotarDoc(doc: DocLocal): boolean {
+    const novas = tasksDoDoc(doc, null);
+    if (!novas.length) {
+      setError('Não achei nenhum AD nesse doc. O Pilot lista os headings no padrão "AD12VN - NOME", o mesmo das tasks do ClickUp.');
+      return false;
+    }
+    const locais = [...tasksLocaisRef.current.filter((t) => t.docKey !== doc.key), ...novas];
+    const docs = Object.values(salvarDocLocal(doc, locais));
+    docsLocaisRef.current = docs;
+    setDocsLocaisState(docs);
+    persistirLocais(locais);
+    setDocAtivoKey(doc.key);
+    mostrarTasksLocais('docs', locais, docs, doc.key);
+    console.log(`[pilot] doc importado (${doc.origem}): ${novas.length} task(s) — ${novas.slice(0, 5).map((t) => t.baseAdId).join(', ')}${novas.length > 5 ? '…' : ''}`);
+    return true;
+  }
+  async function importarDocPorLink() {
+    const url = docLinkInput.trim();
+    if (!/docs\.google\.com\/document\/d\/[\w-]+/.test(url)) {
+      setError('Cole um link de Google Docs (docs.google.com/document/d/…).');
+      return;
+    }
+    setImportandoDoc(true);
+    setError(null);
+    try {
+      // Lê pela extensão (sessão Google logada): é o mesmo caminho do ClickUp.
+      const ext = await detectExtension();
+      if (!ext.connected) {
+        setExtFaltando(true);
+        return;
+      }
+      const r = await fetchDocViaExtension(url);
+      if (!r.ok || !r.text) {
+        setError(`Não consegui ler o doc: ${r.error || 'sem texto'}. Você precisa estar logado no Google com acesso a ele.`);
+        return;
+      }
+      const doc = docDeTexto(r.text, 'link', { docUrl: url, driveLinks: r.driveLinks, headings: r.headings, comments: r.comments });
+      if (adotarDoc(doc)) setDocLinkInput('');
+    } catch (e) {
+      setError(toFriendlyMessage(e, 'Não consegui ler esse doc agora. Tenta de novo em instantes.'));
+    } finally {
+      setImportandoDoc(false);
+    }
+  }
+  async function importarDocPorArquivo(file: File) {
+    setImportandoDoc(true);
+    setError(null);
+    try {
+      const text = await textoDeArquivo(file);
+      if (!text.trim()) {
+        setError(`"${file.name}" veio vazio. Exporte o doc como .docx ou .txt e tente de novo.`);
+        return;
+      }
+      adotarDoc(docDeTexto(text, 'arquivo', { nomeArquivo: file.name }));
+    } catch (e) {
+      setError(toFriendlyMessage(e, `Não consegui ler "${file.name}".`));
+    } finally {
+      setImportandoDoc(false);
+    }
+  }
+  function removerTaskLocal(id: string) {
+    persistirLocais(tasksLocaisRef.current.filter((t) => t.id !== id));
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+    setSelectedTaskIds((prev) => {
+      const n = new Set(prev);
+      n.delete(id);
+      return n;
+    });
+    setTaskAnalyses((prev) => {
+      const n = { ...prev };
+      delete n[id];
+      return n;
+    });
+  }
+
+  /* ---- CREATOR: nome + copy colada viram uma task com doc próprio ---- */
+  const [composer, setComposer] = useState<{ taskId?: string; nome: string; copy: string } | null>(null);
+  function abrirComposer(taskId?: string) {
+    if (taskId) {
+      const t = tasksLocaisRef.current.find((x) => x.id === taskId);
+      if (!t) return;
+      const doc = t.docKey ? docsLocaisRef.current.find((d) => d.key === t.docKey) : undefined;
+      // Devolve a copy sem a linha de heading que a gente mesmo pôs.
+      const linhas = doc ? doc.text.split('\n') : [];
+      const copy = linhas.length && linhas[0].trim() === t.nome ? linhas.slice(1).join('\n').replace(/^\n+/, '') : linhas.join('\n');
+      setComposer({ taskId, nome: t.nome, copy });
+    } else {
+      setComposer({ nome: proximoNomeCreator(tasksLocaisRef.current.filter((t) => t.modo === 'creator')), copy: '' });
+    }
+  }
+  async function salvarComposer() {
+    if (!composer) return;
+    const nome = composer.nome.trim();
+    const base = baseAdIdDoNome(nome);
+    if (!base) {
+      setError('O nome precisa começar com AD e um número (ex.: AD01 - CREATOR): é ele que batiza os arquivos.');
+      return;
+    }
+    if (!composer.copy.trim()) {
+      setError('Cole a copy antes de salvar.');
+      return;
+    }
+    setError(null);
+    const doc = docDaCopyColada(nome, composer.copy);
+    const id = composer.taskId || idTaskCreator();
+    const antiga = tasksLocaisRef.current.find((t) => t.id === id);
+    const t: TaskLocal = { id, modo: 'creator', nome, baseAdId: base, docKey: doc.key, teamId: null, criadoEm: antiga?.criadoEm || Date.now() };
+    const locais = antiga ? tasksLocaisRef.current.map((x) => (x.id === id ? t : x)) : [...tasksLocaisRef.current, t];
+    const docs = Object.values(salvarDocLocal(doc, locais));
+    docsLocaisRef.current = docs;
+    setDocsLocaisState(docs);
+    persistirLocais(locais);
+    const lista = tasksSinteticasDoModo('creator', locais, docs, docAtivoKey);
+    setTasks(lista);
+    setSelectedTaskIds(new Set([id]));
+    // Copy nova = análise velha inválida.
+    setTaskAnalyses((prev) => {
+      const n = { ...prev };
+      delete n[id];
+      return n;
+    });
+    setComposer(null);
+    const sint = lista.find((x) => x.id === id);
+    if (sint) await analyzeSelected([sint]);
+  }
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
 
@@ -1708,7 +1956,10 @@ function ClickUpPilotInner() {
     if (typeof window === 'undefined') return {};
     try { return JSON.parse(localStorage.getItem(DECUPAGEM_KEY) || '{}'); } catch { return {}; }
   });
-  const isDecupagemEnabled = (taskId: string) => !!decupagemEnabled[taskId];
+  // VERSÃO herda da mãe até ter escolha própria (05.09): `id in map` decide.
+  // Antes a irmã lia SÓ a própria chave, então nascia sempre desligada.
+  const isDecupagemEnabled = (taskId: string) =>
+    !!(taskId in decupagemEnabled ? decupagemEnabled[taskId] : decupagemEnabled[taskIdBaseDaVersao(taskId)]);
   const setDecupagemFor = (taskId: string, enabled: boolean) => {
     setDecupagemEnabled((prev) => {
       const next = { ...prev, [taskId]: enabled };
@@ -1739,10 +1990,11 @@ function ClickUpPilotInner() {
   });
 
   /** Config da task; sem escolha própria, herda o PADRÃO da conta. */
+  // Ordem: a própria task > a MÃE (versão herda até ter escolha própria) > padrão da conta.
   const getLegendaCfg = (taskId: string): LegendaCfg =>
-    legendaCfgs[taskId] || legendaCfgs[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
+    legendaCfgs[taskId] || legendaCfgs[taskIdBaseDaVersao(taskId)] || legendaCfgs[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
   const getZoomCfg = (taskId: string): ZoomCfg =>
-    zoomCfgs[taskId] || zoomCfgs[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
+    zoomCfgs[taskId] || zoomCfgs[taskIdBaseDaVersao(taskId)] || zoomCfgs[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
 
   const setLegendaCfg = (taskId: string, cfg: LegendaCfg, virarPadrao = false) => {
     setLegendaCfgs((prev) => {
@@ -2088,7 +2340,9 @@ function ClickUpPilotInner() {
       // diacríticos, determinístico); a escolha explícita do DR MILLION
       // continua vencendo, e sem evidência o fallback segue pt.
       const { idiomaDaCopy } = await import('@/lib/idioma');
-      const idioma = idiomaDaCopy(partes, ehDrMillion ? ASR_DO_DRLANG[drLangRef.current] || 'pt' : null);
+      // O idioma vem da PRÓPRIA análise da task (detectado do doc, ou o "usar
+      // português" que o user pediu nela) — não de um seletor global.
+      const idioma = idiomaDaCopy(partes, ehDrMillion ? ASR_DO_DRLANG[an?.drLang || 'pl'] || 'pt' : null);
       if (!ehDrMillion && idioma !== 'pt') {
         console.log(`[clickup-pilot] posprod ${taskId}: copy detectada como "${idioma}" — ASR e legenda neste idioma`);
       }
@@ -2313,7 +2567,8 @@ function ClickUpPilotInner() {
     try { return JSON.parse(localStorage.getItem(NIVELAMENTO_KEY) || '{}'); } catch { return {}; }
   });
   /** LIGADO por padrao: so' fica desligado quando o user desliga na mao. */
-  const isNivelamentoEnabled = (taskId: string) => nivelamentoEnabled[taskId] !== false;
+  const isNivelamentoEnabled = (taskId: string) =>
+    (taskId in nivelamentoEnabled ? nivelamentoEnabled[taskId] : nivelamentoEnabled[taskIdBaseDaVersao(taskId)]) !== false;
   const setNivelamentoFor = (taskId: string, enabled: boolean) => {
     setNivelamentoEnabled((prev) => {
       const next = { ...prev, [taskId]: enabled };
@@ -2338,7 +2593,7 @@ function ClickUpPilotInner() {
     try { return JSON.parse(localStorage.getItem(DECUP_INTENSITY_KEY) || '{}'); } catch { return {}; }
   });
   const getDecupIntensity = (taskId: string) => {
-    const v = decupIntensity[taskId];
+    const v = taskId in decupIntensity ? decupIntensity[taskId] : decupIntensity[taskIdBaseDaVersao(taskId)];
     return typeof v === 'number' && isFinite(v) ? v : DEFAULT_KEEP_SILENCE;
   };
   const setDecupIntensityFor = (taskId: string, sec: number) => {
@@ -2565,51 +2820,52 @@ function ClickUpPilotInner() {
     Map<string, { promise: Promise<string | null>; resolve: (v: string | null) => void }>
   >(new Map());
 
-  /* ========== Idioma da copy (DR MILLION) ==========
-   *  O DR MILLION dispara em POLONÊS — o português vem no doc só pra guiar.
-   *  Por isso o default é 'pl'. O seletor troca quando você quiser conferir
-   *  ou disparar em português. Vale só pros docs bilíngues; o B2C não passa
-   *  por aqui. `ref` porque analyzeSelected lê fora do ciclo de render. */
-  const DR_LANG_KEY = 'darkolab:clickup-pilot:dr-lang';
-  const [drLang, setDrLangState] = useState<DrMillionLang>('pl');
-  const drLangRef = useRef<DrMillionLang>('pl');
-  drLangRef.current = drLang;
+  /* ========== Idioma da copy (docs bilíngues) (05.09) ==========
+   *  Antes era um seletor GLOBAL (PL/HUN/PT) — não fazia sentido: o idioma é
+   *  do DOC, não da conta. Agora é detectado POR TASK na análise
+   *  (`idiomasDisponiveis`): quando o doc traz PL ou HUN, o português é a
+   *  tradução e a voz sai na outra língua. Doc de uma língua só = essa língua.
+   *  `langDaTask` guarda só a EXCEÇÃO: a task em que o user apertou "usar
+   *  português". `ref` porque analyzeSelected lê fora do ciclo de render. */
+  const LANG_TASK_KEY = 'darkolab:clickup-pilot:lang-por-task';
+  const [langDaTask, setLangDaTaskState] = useState<Record<string, DrMillionLang>>({});
+  const langDaTaskRef = useRef<Record<string, DrMillionLang>>({});
+  langDaTaskRef.current = langDaTask;
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const salvo = localStorage.getItem(DR_LANG_KEY);
-    if (salvo === 'pt' || salvo === 'pl') setDrLangState(salvo);
-  }, []);
-  function setDrLang(v: DrMillionLang) {
-    setDrLangState(v);
     try {
-      localStorage.setItem(DR_LANG_KEY, v);
+      const salvo = JSON.parse(localStorage.getItem(LANG_TASK_KEY) || '{}');
+      if (salvo && typeof salvo === 'object' && !Array.isArray(salvo)) {
+        setLangDaTaskState(salvo);
+        langDaTaskRef.current = salvo;
+      }
+    } catch {
+      /* json inválido = sem exceções */
+    }
+  }, []);
+  function setLangDaTask(taskId: string, v: DrMillionLang | null) {
+    const next = { ...langDaTaskRef.current };
+    if (v) next[taskId] = v;
+    else delete next[taskId];
+    langDaTaskRef.current = next;
+    setLangDaTaskState(next);
+    try {
+      localStorage.setItem(LANG_TASK_KEY, JSON.stringify(next));
     } catch {
       /* sem storage: vale só nesta sessão */
     }
   }
-
-  /** Mostra o seletor de idioma quando a empresa ativa é a do doc bilíngue
-   *  (DR MILLION) ou quando alguma análise já veio bilíngue. No B2C, nunca. */
-  const mostrarSeletorIdioma = useMemo(() => {
-    const nome = teams.find((t) => t.id === selectedTeam)?.name || '';
-    if (/mil+i?on/i.test(nome)) return true;
-    return Object.values(taskAnalyses).some((a) => a?.drMillion);
-  }, [teams, selectedTeam, taskAnalyses]);
-
-  /** Idiomas presentes nos ADs analisados — o que faltar aparece travado.
-   *  Sem análise ainda, deixa os dois livres. */
-  const idiomasDaSelecao = useMemo(() => {
-    const analisadas = Object.values(taskAnalyses).filter((a) => a?.drMillion && a.drLangs);
-    // Sem análise ainda: PL e PT livres, HUN travado. O húngaro só acende
-    // quando um AD analisado usa o marcador HUN — acender por padrão daria a
-    // impressão de que o lote polonês também é húngaro.
-    if (!analisadas.length) return { pt: true, pl: true, hun: false };
-    return {
-      pt: analisadas.some((a) => a.drLangs!.pt),
-      pl: analisadas.some((a) => a.drLangs!.pl),
-      hun: analisadas.some((a) => a.drLangs!.hun),
-    };
-  }, [taskAnalyses]);
+  /** Idioma da VOZ desta task: exceção do user (se o doc tem) > língua
+   *  original do doc (PL, depois HUN) > português. */
+  function idiomaDaTask(taskId: string, langs: { pt: boolean; pl: boolean; hun?: boolean }): DrMillionLang {
+    const pedido = langDaTaskRef.current[taskId];
+    if (pedido === 'pt' && langs.pt) return 'pt';
+    if (pedido === 'pl' && langs.pl) return 'pl';
+    if (pedido === 'hun' && langs.hun) return 'hun';
+    if (langs.pl) return 'pl';
+    if (langs.hun) return 'hun';
+    return 'pt';
+  }
 
   function resolveEditorForTeam(teamId: string): string | null {
     // ESTRITO de propósito: sem escolha própria pra essa empresa, o certo é
@@ -2677,7 +2933,7 @@ function ClickUpPilotInner() {
     setParsed(null);
     setParseError(null);
     try {
-      const d = await getTask(t.id);
+      const d = isTaskLocal(t.id) ? (t as any) : await getTask(t.id);
       setTaskDetail(d);
     } catch (e) {
       setError(toFriendlyMessage(e, 'Não consegui abrir essa task agora. Tenta de novo em instantes.'));
@@ -2901,8 +3157,11 @@ function ClickUpPilotInner() {
   }
 
   /** Analisa N tasks em paralelo (max 3): pega doc, parsea, monta plano. */
-  async function analyzeSelected() {
-    if (selectedTaskIds.size === 0) {
+  async function analyzeSelected(explicitas?: ClickUpTask[]) {
+    // `explicitas`: analisar ESTAS tasks, sem depender do state `tasks`/`selectedTaskIds`
+    // (que ainda não atualizou no mesmo tick — caso da task recém-criada no CREATOR).
+    const pedidas = Array.isArray(explicitas) ? explicitas : null;
+    if ((pedidas ? pedidas.length : selectedTaskIds.size) === 0) {
       setError('Selecione pelo menos uma task primeiro.');
       return;
     }
@@ -2919,7 +3178,12 @@ function ClickUpPilotInner() {
     // porque o HG_PING do preflight e respondido pelo bridge SEM tocar o
     // background, entao o preflight passava mesmo com a extensao quebrada).
     const MIN_EXT_VERSION = '4.16.2';
-    const ext = await detectExtension();
+    // Task LOCAL (CREATOR / DOCS) já tem o texto do doc neste navegador — a
+    // extensão só é necessária pra ler Google Docs pelo link do ClickUp.
+    const soLocais = (pedidas ? pedidas.map((t) => t.id) : Array.from(selectedTaskIds)).every((id) => isTaskLocal(id));
+    const ext = soLocais
+      ? ({ connected: true, version: '?' } as Awaited<ReturnType<typeof detectExtension>>)
+      : await detectExtension();
     const cmpVer = (a: string, b: string) => {
       const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
       const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
@@ -2998,7 +3262,7 @@ function ClickUpPilotInner() {
     for (const v of voiceLibrary) {
       voiceByNorm.set(normalizeVoiceName(v.name), { id: v.id, name: v.name });
     }
-    const allSelected = tasks.filter((t) => selectedTaskIds.has(t.id));
+    const allSelected = pedidas ?? tasks.filter((t) => selectedTaskIds.has(t.id));
     // DEDUP G1/G2: tasks com mesmo baseTaskKey compartilham o doc.
     // So precisamos analisar uma — as siblings copiam o resultado.
     const seenKeys = new Set<string>();
@@ -3041,7 +3305,11 @@ function ClickUpPilotInner() {
         setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'analyzing' } }));
         try {
           // 1. Pega detalhes da task → encontra doc URL no custom field "DOC DA COPY"
-          const det = await getTask(task.id);
+          // Task LOCAL (CREATOR / DOCS): não existe no ClickUp — o "detalhe" é
+          // a própria task sintética e o doc está guardado neste navegador.
+          const local = isTaskLocal(task.id) ? tasksLocaisRef.current.find((t) => t.id === task.id) : undefined;
+          const docLocal = local ? docsLocaisRef.current.find((d) => d.key === local.docKey) : undefined;
+          const det = isTaskLocal(task.id) ? (task as any) : await getTask(task.id);
 
           // === TROCA DE ÁUDIO: pipeline proprio, SEM doc de copy ===
           // Essas tasks so tem o link do criativo original no Drive (em
@@ -3132,18 +3400,30 @@ function ClickUpPilotInner() {
             } catch { /* json invalido = sem override */ }
             return undefined;
           })();
-          const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0] || docOverride;
+          const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0] || docOverride || docLocal?.docUrl;
           // Persiste docUrl + taskUrl pra UI poder abrir direto sem ter q ir no ClickUp.
           setTaskAnalyses((prev) => ({
             ...prev,
             [task.id]: { ...prev[task.id], docUrl: docUrl || undefined, taskUrl: (det as any).url || (task as any).url || undefined },
           }));
-          if (!docUrl) {
-            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Task sem link de copy: preencha o campo "DOC DA COPY" ou cole o link do doc na descrição.' } }));
+          if (!docUrl && !docLocal) {
+            setTaskAnalyses((prev) => ({
+              ...prev,
+              [task.id]: {
+                ...prev[task.id],
+                status: 'error',
+                error: local
+                  ? 'Esta task ainda não tem copy: cole a copy no card (botão "Colar copy") e analise de novo.'
+                  : 'Task sem link de copy: preencha o campo "DOC DA COPY" ou cole o link do doc na descrição.',
+              },
+            }));
             continue;
           }
-          // 2. Fetch doc via extensao (sessao Google logada) + Drive links pros videos
-          const docR = await fetchDocViaExtension(docUrl);
+          // 2. Fetch doc via extensao (sessao Google logada) + Drive links pros videos.
+          //    Task LOCAL: o doc já está aqui (importado por arquivo/link ou copy colada).
+          const docR: Awaited<ReturnType<typeof fetchDocViaExtension>> = docLocal
+            ? { ok: true, text: docLocal.text, driveLinks: docLocal.driveLinks, headings: docLocal.headings, comments: docLocal.comments }
+            : await fetchDocViaExtension(docUrl as string);
           if (!docR.ok || !docR.text) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Doc fetch: ${docR.error || 'sem texto'}` } }));
             continue;
@@ -3388,14 +3668,18 @@ function ClickUpPilotInner() {
           // o doc TEM essa estrutura — doc do B2C nunca tem, então o fluxo de
           // sempre segue idêntico.
           const ehDrMillion = isDrMillionFormat(docR.text, baseAdId);
+          // IDIOMA POR TASK: os marcadores do doc dizem quais línguas existem;
+          // PT é a tradução, a voz sai na outra — salvo "usar português" pedido
+          // nesta task. Sem marcador de outra língua, fica pt.
+          const langs = ehDrMillion ? idiomasDisponiveis(docR.text, baseAdId) : null;
+          const idiomaTask: DrMillionLang = langs ? idiomaDaTask(task.id, langs) : 'pt';
           const briefing = ehDrMillion
-            ? parseDrMillionBriefing(docR.text, baseAdId, drLangRef.current)
+            ? parseDrMillionBriefing(docR.text, baseAdId, idiomaTask)
             : parseDarkoBriefing(docR.text, baseAdId, variantToken, docR.driveLinks || []);
-          if (ehDrMillion) {
-            const langs = idiomasDisponiveis(docR.text, baseAdId);
+          if (ehDrMillion && langs) {
             setTaskAnalyses((prev) => ({
               ...prev,
-              [task.id]: { ...prev[task.id], drMillion: true, drLangs: langs },
+              [task.id]: { ...prev[task.id], drMillion: true, drLangs: langs, drLang: idiomaTask },
             }));
           }
           if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
@@ -3623,7 +3907,7 @@ function ClickUpPilotInner() {
           // errado comeria copy sem que contagem, avatar ou voz denunciassem.
           // Se faltar, a task mostra o trecho perdido em vermelho.
           const copyFaltando = ehDrMillion
-            ? conferirCoberturaDaCopy(docR.text, baseAdId, drLangRef.current, partTemplates.map((p) => p.text)).faltando
+            ? conferirCoberturaDaCopy(docR.text, baseAdId, idiomaTask, partTemplates.map((p) => p.text)).faltando
             : [];
           // ═══ INDICAÇÕES DO COPY (v3, 29.08) — comentários do Docs ═══
           // Roda DEPOIS dos partTemplates: a indicação de COPY precisa deles
@@ -4276,6 +4560,7 @@ function ClickUpPilotInner() {
       !!b.taskId &&
       !b.teamId &&
       !b.taskId.startsWith('heygenauto:') &&
+      !isTaskLocal(b.taskId) && // CREATOR/DOCS não existem no ClickUp
       !teamBackfillTriedRef.current.has(b.taskId);
     if (!Object.values(batchStatesRef.current).some(pendente)) return;
     teamBackfillRunningRef.current = true;
@@ -4539,7 +4824,7 @@ function ClickUpPilotInner() {
             phase: 'failed',
             message: taskIdBaseDaVersao(taskId) !== taskId
               ? `Versão ${versaoDoTaskId(taskId)}: não achei o plano dela nem o da task mãe nesta aba. Abra a task no Pilot e analise de novo — as outras versões seguem normal.`
-              : 'Sem plano salvo pra re-disparar. Abra essa task no ClickUp Pilot e analise de novo.',
+              : 'Sem plano salvo pra re-disparar. Abra essa task no Pilot e analise de novo.',
             finishedAt: Date.now(),
           } as BatchTaskState,
         }));
@@ -4606,6 +4891,9 @@ function ClickUpPilotInner() {
         // Preserva docUrl/taskUrl se ja existiam (re-run) OU pega da analise
         docUrl: prev[taskId]?.docUrl || aForUrl?.docUrl,
         taskUrl: prev[taskId]?.taskUrl || aForUrl?.taskUrl,
+        // A EMPRESA sobrevive ao re-disparo (antes se perdia aqui e o card
+        // vazava em toda workspace até o backfill). Task local não tem empresa.
+        teamId: isTaskLocal(taskId) ? undefined : (prev[taskId]?.teamId ?? selectedTeam ?? undefined),
       },
     }));
 
@@ -6557,7 +6845,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
           // A EMPRESA nasce junto com o estado (03.09) — inclusive nas irmãs
           // de versão, que antes ficavam sem e vazavam em toda workspace.
-          teamId: next[id]?.teamId ?? selectedTeam ?? undefined,
+          teamId: isTaskLocal(id) ? undefined : (next[id]?.teamId ?? selectedTeam ?? undefined),
           phase: 'queued',
           message: 'Na fila — aguardando vaga...',
           // não sobrescreve um replan já bom se buildPlan falhar por algum motivo
@@ -10645,7 +10933,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setBatchStates((prev) => {
         const cur = prev[taskId];
         if (!cur) return prev;
-        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'VA: reabra a task no ClickUp Pilot e analise de novo (briefing nao sobrevive reload).', finishedAt: Date.now() } };
+        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'VA: reabra a task no Pilot e analise de novo (briefing nao sobrevive reload).', finishedAt: Date.now() } };
       });
       return;
     }
@@ -11004,7 +11292,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       setBatchStates((prev) => {
         const cur = prev[taskId];
         if (!cur) return prev;
-        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'VA: reabra a task no ClickUp Pilot e analise de novo (briefing nao sobrevive reload).', finishedAt: Date.now() } };
+        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'VA: reabra a task no Pilot e analise de novo (briefing nao sobrevive reload).', finishedAt: Date.now() } };
       });
       return;
     }
@@ -11772,7 +12060,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
   return (
     <>
       <ToolShell
-        title="ClickUp Pilot"
+        title="Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
         description="O cérebro do estúdio. Conecta no ClickUp, lê cada task e dispara os avatares no HeyGen — com decupagem e camuflagem em fila, sem você abrir uma aba sequer."
         hue="rgba(200,232,124,0.45)"
@@ -11782,9 +12070,31 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               ANTES do disparo. Silencioso quando esta tudo certo. */}
           <HeyGenContaAviso />
 
+          {/* VISOR DE ENTRADA (05.09) — de onde vem a task: CREATOR / DOCS /
+              CLICKUP. Só muda a origem; o resto do Pilot é o mesmo. */}
+          <PilotModeHub
+            value={modo}
+            onChange={trocarModo}
+            disabled={analyzing || loadingTasks || switchingTeam || importandoDoc}
+            meta={{
+              clickup: hasToken && selectedTeam && selectedEditor
+                ? (currentTeam?.name ? shortWorkspaceLabel(currentTeam.name) : 'Conectado')
+                : 'Falta configurar',
+              docs: docAtivo
+                ? `${docAtivo.nomeArquivo || 'Google Docs'} · ${tasksLocais.filter((t) => t.docKey === docAtivo.key).length} tasks`
+                : 'Nenhum doc importado',
+              creator: (() => {
+                const n = tasksLocais.filter((t) => t.modo === 'creator').length;
+                return n ? `${n} task${n === 1 ? '' : 's'}` : 'Comece pelo +';
+              })(),
+            }}
+          />
+
           {/* Command Center — chip de status + métricas ao vivo */}
           {(() => {
-            const setupOK = hasToken && selectedTeam && selectedEditor;
+            // CREATOR e DOCS não dependem do ClickUp: estão sempre "online".
+            const clickupOK = hasToken && selectedTeam && selectedEditor;
+            const setupOK = modo !== 'clickup' || clickupOK;
             const editorName = editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?';
             return (
               <div
@@ -11840,19 +12150,33 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-text-muted"
                         style={{ fontFamily: 'var(--font-tech)' }}
                       >
-                        {setupOK ? 'Pilot Online' : 'Pilot Offline'}
+                        {setupOK
+                          ? modo === 'clickup' ? 'Pilot Online · ClickUp' : modo === 'docs' ? 'Pilot Online · Docs' : 'Pilot Online · Creator'
+                          : 'Pilot Offline'}
                       </div>
                       <div
                         className="mt-0.5 truncate text-[16px] font-bold tracking-tight text-white"
                         style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
                       >
-                        {setupOK ? (currentTeam?.name || '—') : 'Configure pra começar'}
+                        {!setupOK
+                          ? 'Configure pra começar'
+                          : modo === 'clickup'
+                            ? (currentTeam?.name || '—')
+                            : modo === 'docs'
+                              ? (docAtivo?.nomeArquivo || (docAtivo?.docUrl ? 'Google Docs importado' : 'Nenhum doc importado'))
+                              : 'Tasks criadas do zero'}
                       </div>
                       <div className="mt-0.5 text-[11.5px] text-text-muted">
                         {setupOK ? (
                           <>
-                            Editor:{' '}
-                            <span className="mono text-white">{editorName}</span>
+                            {modo === 'clickup' ? (
+                              <>
+                                Editor:{' '}
+                                <span className="mono text-white">{editorName}</span>
+                              </>
+                            ) : (
+                              <span>{modo === 'docs' ? 'Lidas do doc' : 'Sem ClickUp'} · salvas neste navegador</span>
+                            )}
                             {tasks.length > 0 ? (
                               <>
                                 {' · '}
@@ -11873,6 +12197,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {modo === 'clickup' ? (
                     <a
                       href="/configuracoes/clickup-pilot"
                       className={
@@ -11886,6 +12211,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       {setupOK ? 'Configurar' : 'Configurar agora'}
                       <span className="transition-transform group-hover:translate-x-1">→</span>
                     </a>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -11972,7 +12298,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             </div>
           ) : null}
 
-          {hasToken && selectedTeam && selectedEditor ? (
+          {modo !== 'clickup' || (hasToken && selectedTeam && selectedEditor) ? (
             <div className="grid gap-6">
               {/* Modos + Carregar tasks (UI principal enxuta) */}
               <section
@@ -11985,7 +12311,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-35 blur-3xl"
-                  style={{ background: 'rgba(167,139,250,0.45)' }}
+                  style={{ background: modo === 'docs' ? 'rgba(34,211,238,0.40)' : modo === 'creator' ? 'rgba(251,191,36,0.38)' : 'rgba(167,139,250,0.45)' }}
                 />
                 {/* PAINEL "Modos de Geração" REMOVIDO (user pediu):
                  *  - Camuflagem agora eh PER-TASK (botao 3D na action bar do card)
@@ -11997,6 +12323,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 {/* Seletor de EMPRESA — só aparece quando o token enxerga
                  *  mais de um workspace. Trocar aqui recarrega as tasks da
                  *  outra empresa na hora. */}
+                {modo === 'clickup' ? (
+                <>
                 {teams.length > 1 ? (
                   <div className="relative mb-3.5 flex flex-wrap items-center gap-3">
                     <WorkspaceSwitch3D
@@ -12016,30 +12344,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         trocando…
                       </span>
                     ) : null}
-                    {/* IDIOMA — só pra empresa com copy bilíngue (DR MILLION).
-                     *  Trocar re-analisa as tasks marcadas, porque a copy sai
-                     *  do doc já no idioma escolhido. */}
-                    {mostrarSeletorIdioma ? (
-                      <>
-                        <span aria-hidden className="hidden h-6 w-px bg-line sm:block" />
-                        <LangSwitch3D
-                          value={drLang}
-                          disabled={analyzing || switchingTeam}
-                          disponivel={idiomasDaSelecao}
-                          onChange={(v) => {
-                            setDrLang(v);
-                            // Re-analisa o que estiver marcado pra copy vir no
-                            // idioma novo (o texto é extraído do doc no parse).
-                            if (selectedTaskIds.size > 0) void analyzeSelected();
-                          }}
-                        />
-                        {analyzing ? (
-                          <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
-                            relendo copy…
-                          </span>
-                        ) : null}
-                      </>
-                    ) : null}
+                    {/* O seletor GLOBAL de idioma (PL/HUN/PT) saiu em 05.09: o
+                     *  idioma é detectado por task no doc; "usar português"
+                     *  fica no card de quem importou doc bilíngue. */}
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center gap-3">
@@ -12102,6 +12409,41 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     <span>→</span>
                   </a>
                 </div>
+                </>
+                ) : null}
+
+                {/* ═══ DOCS — importa o doc (link ou arquivo) e lista os ADs ═══ */}
+                {modo === 'docs' ? (
+                  <DocsBar
+                    link={docLinkInput}
+                    onLink={setDocLinkInput}
+                    onImportarLink={() => void importarDocPorLink()}
+                    onImportarArquivo={(f) => void importarDocPorArquivo(f)}
+                    importando={importandoDoc}
+                    docs={docsRecentes.map((d) => ({
+                      key: d.key,
+                      rotulo: rotuloDoDoc(d),
+                      n: tasksLocais.filter((t) => t.docKey === d.key).length,
+                      ativo: d.key === docAtivoKey,
+                      title: d.docUrl || d.nomeArquivo || d.key,
+                    }))}
+                    onEscolherDoc={(k) => {
+                      setDocAtivoKey(k);
+                      mostrarTasksLocais('docs', undefined, undefined, k);
+                    }}
+                  />
+                ) : null}
+                {/* ═══ CREATOR — task do zero: nome + copy colada ═══ */}
+                {modo === 'creator' ? (
+                  <CreatorBar
+                    composer={composer}
+                    onComposer={setComposer}
+                    onNova={() => abrirComposer()}
+                    onSalvar={() => void salvarComposer()}
+                    onCancelar={() => setComposer(null)}
+                    nomeValido={(nome) => !!baseAdIdDoNome(nome)}
+                  />
+                ) : null}
               </section>
 
               {/* Lista de tasks */}
@@ -12304,6 +12646,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     {tasks
                       .filter((t) => {
                         // Aplica filtros client-side
+                        // Task local (CREATOR/DOCS) não tem prioridade nem prazo: filtro nunca a esconde.
+                        if (isTaskLocal(t.id)) return true;
                         if (priorityFilter !== 'all' && t.priority?.priority !== priorityFilter) return false;
                         if (dateFilter !== 'all') {
                           const due = t.due_date ? Number(t.due_date) : 0;
@@ -12515,6 +12859,37 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             </div>
                             {/* SUBTITLE REMOVIDO pelo user (folder/list info era ruido). */}
                           </button>
+                          {/* Task LOCAL (CREATOR/DOCS): editar copy (só CREATOR) e remover.
+                              Só deste navegador — nada disso toca o ClickUp. */}
+                          {isTaskLocal(t.id) ? (
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {modo === 'creator' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => abrirComposer(t.id)}
+                                  title="Editar nome e copy desta task"
+                                  aria-label="Editar nome e copy"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line/70 text-text-muted transition hover:border-amber-400/70 hover:text-amber-200"
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                  </svg>
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => removerTaskLocal(t.id)}
+                                title="Remover esta task (só deste navegador)"
+                                aria-label="Remover task"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line/70 text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                  <path d="M18 6 6 18M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -12556,7 +12931,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         </button>
                         <button
                           type="button"
-                          onClick={analyzeSelected}
+                          onClick={() => void analyzeSelected()}
                           disabled={analyzing}
                           className="mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,232,124,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,232,124,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                           style={{ fontFamily: 'var(--font-tech)' }}
@@ -12921,29 +13296,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           roleSlots: [],
                                         } as unknown as TaskAnalysis)
                                       : null);
-                                  const decupOn = isDecupagemEnabled(tId) || isDecupagemEnabled(base);
+                                  // Os getters já herdam da mãe quando a versão não tem escolha
+                                  // própria — então aqui é SÓ o id da versão (05.09).
+                                  const decupOn = isDecupagemEnabled(tId);
                                   return (
                                     <PainelDeMontagem
                                       key={`montagem:${tId}`}
                                       acao={pedindoMontagem.acao}
                                       nivel={isNivelamentoEnabled(tId)}
                                       decup={decupOn}
-                                      respiro={getDecupIntensity(base)}
+                                      respiro={getDecupIntensity(tId)}
                                       semPlano={!aMontagem}
-                                      acoesPos={aMontagem ? acoesDePosProducao(aMontagem) : null}
+                                      // taskId = a VERSÃO (05.09): a análise pode ser a da mãe, mas
+                                      // legenda/zoom/inserts têm que ler e gravar na irmã.
+                                      acoesPos={aMontagem ? acoesDePosProducao({ ...aMontagem, taskId: tId }) : null}
                                       onNivel={() => setNivelamentoFor(tId, !isNivelamentoEnabled(tId))}
-                                      // Escreve nos DOIS ids (03.09): numa VERSÃO, ler caía no
-                                      // id da mãe e o toggle "não desligava nunca" — desligava a
-                                      // irmã e a mãe reacendia a leitura.
-                                      onDecup={() => {
-                                        const alvo = !decupOn;
-                                        setDecupagemFor(tId, alvo);
-                                        if (base !== tId) setDecupagemFor(base, alvo);
-                                      }}
-                                      onRespiro={(sec) => {
-                                        setDecupIntensityFor(base, sec);
-                                        if (base !== tId) setDecupIntensityFor(tId, sec);
-                                      }}
+                                      // Escreve SÓ no id da versão (05.09). Em 03.09 escrevia nos
+                                      // dois porque a leitura caía na mãe; agora a leitura herda
+                                      // da mãe só enquanto a versão não tem escolha própria — e
+                                      // mexer na irmã não pode mudar a mãe (1 versão com
+                                      // decupagem, outra sem).
+                                      onDecup={() => setDecupagemFor(tId, !decupOn)}
+                                      onRespiro={(sec) => setDecupIntensityFor(tId, sec)}
                                       onCancelar={() => setPedindoMontagem(null)}
                                       onSeguir={() => {
                                         const acao = pedindoMontagem.acao;
@@ -12982,7 +13356,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     // modelo da legenda, a headline, o zoom ou os inserts.
                                     acoesPos={(() => {
                                       const aRef = taskAnalyses[b.taskId] || taskAnalyses[taskIdBaseDaVersao(b.taskId)];
-                                      return aRef ? acoesDePosProducao(aRef) : null;
+                                      // taskId = a VERSÃO: config própria da irmã, herdando da mãe.
+                                      return aRef ? acoesDePosProducao({ ...aRef, taskId: b.taskId }) : null;
                                     })()}
                                   />
                                 ) : undefined
@@ -13033,7 +13408,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}
                               taskUrl={b.taskUrl || taskAnalyses[b.taskId]?.taskUrl}
                               folderUrl={b.kind === 'troca' ? (b.trocaOutputFolderUrl || taskAnalyses[b.taskId]?.trocaBriefing?.driveFolderUrl || undefined) : undefined}
-                              resolveDocUrl={b.kind === 'troca' ? undefined : async () => {
+                              resolveDocUrl={b.kind === 'troca' || isTaskLocal(b.taskId) ? undefined : async () => {
                                 // Lazy fetch: pega o docUrl ao vivo do ClickUp.
                                 // Usado quando o batch antigo nao tem docUrl em cache.
                                 // Apos resolver, persiste no state pra futuras chamadas.
@@ -14330,6 +14705,30 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </span>
                                     )}
                                   </div>
+                                  {/* IDIOMA (05.09) — só em doc bilíngue (PT + PL/HUN): mostra a
+                                   *  língua da voz e deixa trocar pro português SÓ nesta task.
+                                   *  Doc de uma língua só não mostra nada: foi detectado. */}
+                                  {a.drLangs && a.drLangs.pt && (a.drLangs.pl || a.drLangs.hun) ? (
+                                    <div className="mono flex flex-wrap items-center gap-2 text-[10.5px]">
+                                      <span className="info-chip" title="Idioma em que a copy desta task foi lida (voz e ASR). O português do doc é a tradução.">
+                                        voz: {a.drLang === 'pt' ? 'PORTUGUÊS' : a.drLang === 'hun' ? 'HÚNGARO' : 'POLONÊS'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={analyzing}
+                                        onClick={() => {
+                                          const proximo: DrMillionLang | null = a.drLang === 'pt' ? null : 'pt';
+                                          setLangDaTask(a.taskId, proximo);
+                                          const alvo = tasks.find((x) => x.id === a.taskId);
+                                          if (alvo) void analyzeSelected([alvo]);
+                                        }}
+                                        className="rounded-full border border-line-strong px-2.5 py-0.5 uppercase tracking-widest text-text-muted transition hover:border-violet-400/70 hover:text-violet-200 disabled:opacity-50"
+                                        title={a.drLang === 'pt' ? 'Voltar a ler a copy no idioma original do doc' : 'Ler a copy em português (a tradução do doc) só nesta task'}
+                                      >
+                                        {a.drLang === 'pt' ? 'voltar pro idioma original' : 'usar português (tradução)'}
+                                      </button>
+                                    </div>
+                                  ) : null}
                                   {/* A copy saiu INTEIRA? Um filtro do parser comendo fala
                                    *  não aparece na contagem nem no avatar — só lendo. Aqui
                                    *  o que ficou de fora aparece sozinho, antes do disparo. */}
@@ -14409,7 +14808,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             {aberto ? (
                                               <>
                                                 <div className="fixed inset-0 z-30" onClick={() => setVersoesPickerOpen((pp) => ({ ...pp, [a.taskId]: false }))} aria-hidden />
-                                                <div className="vp-pop absolute right-0 top-full z-40 mt-2">
+                                                <div className={'vp-pop absolute right-0 top-full z-40 mt-2' + (total > 1 ? ' is-largo' : '')}>
                                                   <div className="vp-titulo">Quantas versões deste AD</div>
                                                   <div className="vp-grade">
                                                     {Array.from({ length: MAX_VERSOES }, (_, i) => i + 1).map((n) => (
@@ -14428,6 +14827,56 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     <div className="vp-doc">
                                                       <span className="vp-doc-tag">indicador do docs</span>
                                                       <span className="vp-doc-txt">{a.mapaVersoes.motivo}</span>
+                                                    </div>
+                                                  ) : null}
+                                                  {/* PÓS-PRODUÇÃO POR VERSÃO (05.09). Cada linha é uma
+                                                      versão com os MESMOS botões do card, gravando na
+                                                      chave da versão. Sem escolha própria, a versão herda
+                                                      a v1 (os getters caem na mãe) — então dá pra ter uma
+                                                      com decupagem e outra sem, inserts e legendas
+                                                      diferentes, sem duplicar nada. */}
+                                                  {total > 1 ? (
+                                                    <div className="vp-versoes">
+                                                      <div className="vp-titulo">Pós-produção por versão</div>
+                                                      <div className="vp-dica">
+                                                        Cada versão herda a v1 até você mexer nela. Decupagem, nivelamento, legenda, zoom e inserts podem ser diferentes em cada uma.
+                                                      </div>
+                                                      {Array.from({ length: total }, (_, i) => i + 1).map((n) => {
+                                                        const vid = taskIdDaVersao(a.taskId, n);
+                                                        const propria =
+                                                          n === 1 ||
+                                                          vid in decupagemEnabled ||
+                                                          vid in nivelamentoEnabled ||
+                                                          !!legendaCfgs[vid] ||
+                                                          !!zoomCfgs[vid];
+                                                        const decupV = isDecupagemEnabled(vid);
+                                                        const nivelV = isNivelamentoEnabled(vid);
+                                                        return (
+                                                          <div key={vid} className="vp-linha">
+                                                            <span className="vp-vnum">v{n}</span>
+                                                            <span className={'vp-vestado' + (propria ? ' is-propria' : '')}>
+                                                              {n === 1 ? 'base' : propria ? 'própria' : 'herda v1'}
+                                                            </span>
+                                                            <span className="vp-vacoes">
+                                                              <PilotBtn3D
+                                                                icon={<PilotIconScissors size={14} />}
+                                                                color={decupV ? 'lime' : 'neutral'}
+                                                                active={decupV}
+                                                                title={decupV ? `Decupagem ON na v${n}` : `Decupagem OFF na v${n}`}
+                                                                onClick={() => setDecupagemFor(vid, !decupV)}
+                                                              />
+                                                              <PilotBtn3D
+                                                                icon={<IconNivelar size={14} />}
+                                                                color={nivelV ? 'cyan' : 'neutral'}
+                                                                active={nivelV}
+                                                                title={nivelV ? `Normalizador de volume ON na v${n}` : `Normalizador de volume OFF na v${n}`}
+                                                                onClick={() => setNivelamentoFor(vid, !nivelV)}
+                                                              />
+                                                              {acoesDePosProducao({ ...a, taskId: vid })}
+                                                            </span>
+                                                          </div>
+                                                        );
+                                                      })}
                                                     </div>
                                                   ) : null}
                                                 </div>

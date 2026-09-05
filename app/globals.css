@@ -2944,6 +2944,57 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.86);
 }
+/* Pós-produção POR VERSÃO (05.09): a janela alarga pra caber uma linha de
+   botões por versão. */
+.vp-pop.is-largo {
+  width: 460px;
+  max-width: calc(100vw - 32px);
+}
+.vp-versoes {
+  margin-top: 12px;
+  padding-top: 11px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.vp-dica {
+  margin: -4px 0 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+}
+.vp-linha {
+  display: grid;
+  grid-template-columns: 34px 66px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+}
+.vp-linha:last-child {
+  box-shadow: none;
+}
+.vp-vnum {
+  font-family: var(--font-tech), system-ui;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #fff;
+}
+.vp-vestado {
+  font-family: var(--font-mono), monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+.vp-vestado.is-propria {
+  color: #c8e87c;
+}
+.vp-vacoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
 
 /* Chip "Templates" — a porta única do roteiro de legenda, ao lado dos
    ⭐ Favoritos. Mesma linguagem de relevo do .roteiro-orb, em pílula. */

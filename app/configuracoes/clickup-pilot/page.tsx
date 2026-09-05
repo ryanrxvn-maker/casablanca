@@ -114,7 +114,7 @@ export default function ClickUpPilotConfigPage() {
           <Link href="/configuracoes" className="text-text-muted hover:text-lime">← Configuracoes</Link>
         </div>
         <ToolShell
-          title="ClickUp Pilot — Configuracoes"
+          title="Pilot · Configurações"
           description="Token ClickUp, workspace + editor padrao, filtro de status e memoria de voz<->avatar. O painel da ferramenta fica enxuto pra acelerar o uso diario."
         >
           {error ? (
@@ -232,7 +232,7 @@ export default function ClickUpPilotConfigPage() {
               <h2 className="label-field !mb-3">Memoria voz ↔ avatar</h2>
               <div className="rounded-[12px] border border-line bg-bg-soft/40 p-4 text-[12px] text-text-muted">
                 <p className="mb-2">
-                  Quando voce escolhe um avatar pra uma voz no ClickUp Pilot, salvamos
+                  Quando voce escolhe um avatar pra uma voz no Pilot, salvamos
                   o pareamento. Proxima vez que o copy mencionar <code className="mono text-lime">@x.mp4</code>
                   e a voz <code className="mono text-lime">@x</code> existir no HeyGen, o Pilot
                   ja resolve o avatar correto sozinho.
@@ -265,7 +265,7 @@ export default function ClickUpPilotConfigPage() {
                 onClick={() => router.push('/tools/clickup-pilot')}
                 className="btn-primary"
               >
-                ▶ Voltar pro ClickUp Pilot
+                ▶ Voltar pro Pilot
               </button>
             </div>
           </div>

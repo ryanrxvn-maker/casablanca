@@ -276,7 +276,7 @@ export default function BackgroundTasksPage() {
               href="/tools/clickup-pilot"
               className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
             >
-              ← ClickUp Pilot
+              ← Pilot
             </Link>
             <button
               type="button"
@@ -319,7 +319,7 @@ export default function BackgroundTasksPage() {
               Nenhum trabalho em andamento
             </div>
             <div className="mt-3 text-[13px] text-text-muted">
-              Volte pro <Link href="/tools/clickup-pilot" className="text-lime hover:underline">ClickUp Pilot</Link> e dispare
+              Volte pro <Link href="/tools/clickup-pilot" className="text-lime hover:underline">Pilot</Link> e dispare
               uma task analisada — ela aparece aqui ao vivo.
             </div>
           </div>
@@ -407,7 +407,7 @@ export default function BackgroundTasksPage() {
                               ↓ takes ({b.zipFilename})
                             </a>
                           ) : b.zipFilename ? (
-                            <span className="mono rounded border border-text-muted/30 bg-bg/30 px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted" title="O ZIP foi gerado, mas o link se perdeu ao recarregar a página. Gere de novo pelo ClickUp Pilot.">
+                            <span className="mono rounded border border-text-muted/30 bg-bg/30 px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted" title="O ZIP foi gerado, mas o link se perdeu ao recarregar a página. Gere de novo pelo Pilot.">
                               takes (perdido no reload)
                             </span>
                           ) : null}
@@ -538,12 +538,12 @@ export default function BackgroundTasksPage() {
             Como funciona
           </div>
           <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
-            Tasks iniciadas no ClickUp Pilot aparecem aqui ao vivo. O andamento fica salvo
+            Tasks iniciadas no Pilot aparecem aqui ao vivo. O andamento fica salvo
             no seu navegador, então sobrevive se você recarregar a página. Os ZIPs gerados
-            ficam disponíveis na própria aba do ClickUp Pilot (o link de download se perde
+            ficam disponíveis na própria aba do Pilot (o link de download se perde
             ao recarregar — gere de novo se precisar).
             <br/><br/>
-            Cancelar avisa a aba do ClickUp Pilot pra parar aquele item.
+            Cancelar avisa a aba do Pilot pra parar aquele item.
             Se aquela aba já foi fechada, não tem mais nada rodando — aí o &quot;cancelar&quot;
             só ajusta o estado visual.
           </div>

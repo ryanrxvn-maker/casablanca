@@ -337,7 +337,7 @@ export default function LipsyncHistoryPage() {
               className="input-field text-xs flex-1"
             >
               <option value="all">Tipo: todos</option>
-              <option value="batch">Lote (ClickUp Pilot)</option>
+              <option value="batch">Lote (Pilot)</option>
               <option value="va">Variação de Avatar</option>
             </select>
             <select
@@ -381,7 +381,7 @@ export default function LipsyncHistoryPage() {
               href="/tools/clickup-pilot"
               className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
             >
-              → ClickUp Pilot
+              → Pilot
             </Link>
             <Link
               href="/tools/background"
@@ -405,7 +405,7 @@ export default function LipsyncHistoryPage() {
               Nenhum lipsync no histórico
             </div>
             <div className="mt-2 text-[13px] text-text-muted">
-              Gere lipsyncs via <Link href="/tools/clickup-pilot" className="text-lime hover:underline">ClickUp Pilot</Link> — eles aparecem aqui automaticamente.
+              Gere lipsyncs via <Link href="/tools/clickup-pilot" className="text-lime hover:underline">Pilot</Link> — eles aparecem aqui automaticamente.
             </div>
           </div>
         ) : (
@@ -564,7 +564,7 @@ export default function LipsyncHistoryPage() {
                             type="button"
                             onClick={() => { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'retomar'); navigateToEngine(); }}
                             className="label-tech rounded-md border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-                            title="Retomar no motor (abre o ClickUp Pilot e re-checa/baixa ou re-roda do zero)"
+                            title="Retomar no motor (abre o Pilot e re-checa/baixa ou re-roda do zero)"
                           >
                             🔄 Retomar
                           </button>
@@ -607,7 +607,7 @@ export default function LipsyncHistoryPage() {
             • O histórico fica salvo no seu navegador. Limpar os dados do site apaga tudo.<br/>
             • ZIPs marcados como &quot;perdido&quot; foram gerados numa sessão anterior e o link de
             download se perdeu. Os vídeos em si ficam salvos, então dá pra re-gerar o ZIP
-            via &quot;Retomar&quot; no ClickUp Pilot por até 60 dias após a geração.<br/>
+            via &quot;Retomar&quot; no Pilot por até 60 dias após a geração.<br/>
             • Pra ver status atual ao vivo dos batches rodando, use{' '}
             <Link href="/tools/background" className="text-fuchsia-300 hover:underline">Background</Link>.
           </div>

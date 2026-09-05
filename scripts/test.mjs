@@ -34,6 +34,8 @@ const ETAPAS = [
   { tsc: "lib/pilot-inserts.ts lib/pilot-inserts.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-inserts.test.js"] },
   { tsc: "lib/ffmpeg-serial.ts lib/ffmpeg-serial.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom", run: [".test-tmp/ffmpeg-serial.test.js"] },
   { tsc: "lib/ffmpeg-worker.ts lib/ffmpeg-worker.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/ffmpeg-worker.test.js"] },
+  // fontes de task do Pilot (05.09): DOCS / CREATOR — doc real vira N tasks, ids seguros, .docx, persistencia
+  { tsc: "lib/pilot-fontes.ts lib/pilot-fontes.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom,dom.iterable", run: [".test-tmp/pilot-fontes.test.js"] },
   // trava de scroll com CONTADOR (04.09): 10 modais dependem dela; duas janelas abertas nao podem travar a pagina pra sempre
   { tsc: "lib/trava-scroll.ts lib/trava-scroll.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/trava-scroll.test.js"] },
   { tsc: "lib/downloader-extension-guard.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/downloader-extension-guard.test.js"] },
