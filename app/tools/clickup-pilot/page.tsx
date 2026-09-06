@@ -12281,7 +12281,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       <ToolShell
         title="Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
-        description="O cérebro do estúdio. Conecta no ClickUp, lê cada task e dispara os avatares no HeyGen — com decupagem e camuflagem em fila, sem você abrir uma aba sequer."
+        description="O cérebro do estúdio. A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com decupagem e legenda em fila, sem você abrir uma aba sequer."
         hue="rgba(200,232,124,0.45)"
         icon={<IconClickUpPilot size={56} />}
       >
