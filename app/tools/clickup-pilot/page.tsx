@@ -4732,6 +4732,15 @@ function ClickUpPilotInner() {
   const batchStatesDaEmpresa = useMemo(() => {
     const out: Record<string, BatchTaskState> = {};
     for (const [id, b] of Object.entries(batchStates)) {
+      // POR MODO (05.09): coisa do ClickUp só aparece no modo ClickUp; no
+      // CREATOR e no DOCS só os disparos das tasks daquele modo. A EXECUÇÃO
+      // continua igual pra todos — é só o que vai pra tela.
+      const modoDaTask = modoDaTaskLocal(taskIdBaseDaVersao(id));
+      if (modo !== 'clickup') {
+        if (modoDaTask === modo) out[id] = b;
+        continue;
+      }
+      if (modoDaTask) continue;
       // IRMÃ DE VERSÃO sem teamId herda o da MÃE (03.09): a irmã nascia sem
       // empresa e o fallback "sem time = mostra em todas" fazia uma task do
       // B2C vazar na fila do DR MILLION. Só depois de herdar é que vale o
@@ -4740,7 +4749,7 @@ function ClickUpPilotInner() {
       if (!team || !selectedTeam || team === selectedTeam) out[id] = b;
     }
     return out;
-  }, [batchStates, selectedTeam]);
+  }, [batchStates, selectedTeam, modo]);
 
   /** A fila COLAPSADA por AD (30.08): as versões do mesmo anúncio (`-yt`,
    *  `-v3`…) deixam de ocupar um card cada — sobra UM card por AD, o da
@@ -4769,11 +4778,12 @@ function ClickUpPilotInner() {
   /** Disparos rodando NAS OUTRAS empresas — some da lista, mas você precisa
    *  saber que continuam de pé. Vira um aviso discreto no painel. */
   const batchesEmOutrasEmpresas = useMemo(() => {
-    if (!selectedTeam) return [] as BatchTaskState[];
+    // Empresa é coisa do ClickUp: no CREATOR e no DOCS não existe esse aviso.
+    if (!selectedTeam || modo !== 'clickup') return [] as BatchTaskState[];
     return Object.values(batchStates).filter(
       (b) => b.teamId && b.teamId !== selectedTeam && b.phase !== 'done' && b.phase !== 'failed',
     );
-  }, [batchStates, selectedTeam]);
+  }, [batchStates, selectedTeam, modo]);
 
   /** Backfill do snapshot de CANAL nos cards da fila quando o board carrega.
    *  Cards criados antes do board (ou de versoes antigas) ficam sem
@@ -12683,6 +12693,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                      *  Estado bulkMode mantido por compat com handlers existentes
                      *  mas UI nao expoe mais o toggle. */}
                   </div>
+                  {/* Filtros de periodo/prioridade sao do ClickUp: task local nao tem prazo nem prioridade. */}
+                  {modo === 'clickup' ? (
+                  <>
                   {/* Filtros premium — Período + Prioridade + Data específica */}
                   <div
                     className="cp-filters-bar mb-4 relative overflow-hidden rounded-[16px] border border-line/60 p-4"
@@ -12857,6 +12870,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       </div>
                     </div>
                   </div>
+                  </>
+                  ) : null}
                   <ul className="grid gap-2">
                     {tasks
                       .filter((t) => {
@@ -16230,6 +16245,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         * concêntrico por dentro. Mesma gramática do painel de
                         * reiniciar disparo: rótulo em sentença, um acento só,
                         * hairline no lugar de borda cinza. */}
+                      {/* Plano de cenas vem do briefing (DR MILLION/DOCS); no CREATOR nao ha doc. */}
+                      {modo !== 'creator' ? (
                       <div className="plano-shell mt-3 rounded-[18px] p-[5px]">
                         <div className="plano-core group/plano rounded-[13px] p-3">
                         <button
@@ -16346,6 +16363,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         ) : null}
                         </div>
                       </div>
+                      ) : null}
 
                       {/* Start batch — abaixo da lista, mais perto das tasks ready (CTA principal).
                        *  Usa selectedTaskIds porque startBatch filtra por isso — UI tem que bater. */}
