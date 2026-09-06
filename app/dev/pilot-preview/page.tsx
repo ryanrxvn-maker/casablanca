@@ -27,7 +27,7 @@ import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
 import { PilotModeHub } from '@/components/PilotModeHub';
-import { DocsBar, CreatorBar, type DocChip, type ComposerState } from '@/components/PilotFontesBar';
+import { DocsBar, CreatorBar, type DocChip } from '@/components/PilotFontesBar';
 import type { ModoPilot } from '@/lib/pilot-fontes';
 
 const FRAME_FAKE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="160"><rect width="90" height="160" fill="#3b1d5e"/><circle cx="45" cy="58" r="22" fill="#c4b5fd"/><rect x="18" y="88" width="54" height="60" rx="14" fill="#a78bfa"/></svg>');
@@ -683,10 +683,7 @@ function Conteudo() {
   const [modoDemo, setModoDemo] = useState<ModoPilot>('docs');
   const [linkDemo, setLinkDemo] = useState('');
   const [importandoDemo, setImportandoDemo] = useState(false);
-  const [composerDemo, setComposerDemo] = useState<ComposerState | null>({
-    nome: 'AD04 - CREATOR',
-    copy: 'Doutor: @drrobertokalil\n\nHOOK 1\nComo transformar um azeite de R$10 no seu remédio de próstata.\n\nBODY\nA maioria usa azeite do jeito errado.',
-  });
+  const [criadasDemo, setCriadasDemo] = useState(3);
   const [docsDemo, setDocsDemo] = useState<DocChip[]>([
     { key: 'a', rotulo: 'RIPTVWA.docx · 05/09', n: 51, ativo: true },
     { key: 'b', rotulo: 'Google Docs · 04/09', n: 12, ativo: false },
@@ -749,14 +746,7 @@ function Conteudo() {
         <PilotModeHub
           value={modoDemo}
           onChange={setModoDemo}
-          meta={{ clickup: 'B2C', docs: 'RIPTVWA.docx · 51 tasks', creator: '3 tasks' }}
-        />
-        <div
-          className="cp-modes-bar relative overflow-hidden rounded-[18px] border border-line/60 p-4 md:p-5"
-          style={{
-            background:
-              'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-          }}
+          contagem={{ clickup: 12, docs: 51, creator: criadasDemo }}
         >
           {modoDemo === 'docs' ? (
             <DocsBar
@@ -769,20 +759,9 @@ function Conteudo() {
               onEscolherDoc={(k) => setDocsDemo((ds) => ds.map((d) => ({ ...d, ativo: d.key === k })))}
             />
           ) : modoDemo === 'creator' ? (
-            <CreatorBar
-              composer={composerDemo}
-              onComposer={setComposerDemo}
-              onNova={() => setComposerDemo({ nome: 'AD04 - CREATOR', copy: '' })}
-              onSalvar={() => setComposerDemo(null)}
-              onCancelar={() => setComposerDemo(null)}
-              nomeValido={(n) => /\bAD\d+/i.test(n)}
-            />
-          ) : (
-            <div className="text-[12.5px] text-text-muted">
-              Modo ClickUp: a barra de sempre (empresa + Carregar tasks) fica na página real.
-            </div>
-          )}
-        </div>
+            <CreatorBar onNova={() => setCriadasDemo((n) => n + 1)} />
+          ) : null}
+        </PilotModeHub>
       </section>
 
       {/* ══════════ 0.1 PROVA E2E: LEGENDA + ZOOM no render ══════════ */}

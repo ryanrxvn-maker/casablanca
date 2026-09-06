@@ -326,6 +326,69 @@ export function salvarTasksLocais(tasks: TaskLocal[], store: Armazem | null = ar
   }
 }
 
+/* ───────────── card do CREATOR (avatares + trechos) ─────────────
+ * O card do CREATOR não vem de análise (não tem doc), então ele é o que precisa
+ * sobreviver a F5. Guarda só a forma serializável: sem imageDataUrl (quota do
+ * localStorage) — a imagem do modo imagem volta pela imageKey do IDB, igual ao
+ * replan do disparo. O tipo de RoleSlot mora em page.tsx; aqui é opaco. */
+export const ANALISES_CREATOR_KEY = 'darkolab:clickup-pilot:analises-creator';
+
+export type AnaliseCreatorSalva = {
+  taskId: string;
+  taskName: string;
+  baseAdId?: string;
+  status: 'ready' | 'partial';
+  roleSlots: unknown[];
+  partTemplates: Array<{ label: string; text: string; matchByRole: string | null; speaker?: string | null }>;
+  hookCount?: number;
+  bodyPartsCount?: number;
+  totalParts?: number;
+  /** "+ versões": a 2ª mora no slot (avatarYoutube); 3..N e a flag moram aqui. */
+  duasVersoes?: boolean;
+  versoes?: unknown;
+};
+
+export function lerAnalisesCreator(store: Armazem | null = armazem()): Record<string, AnaliseCreatorSalva> {
+  if (!store) return {};
+  try {
+    const obj = JSON.parse(store.getItem(ANALISES_CREATOR_KEY) || '{}');
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+    const out: Record<string, AnaliseCreatorSalva> = {};
+    for (const [id, a] of Object.entries(obj as Record<string, AnaliseCreatorSalva>)) {
+      if (a && typeof a === 'object' && isTaskLocal(id) && Array.isArray(a.roleSlots) && Array.isArray(a.partTemplates)) out[id] = a;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Tira o que não pode ir pro localStorage (imagem em base64) e grava. */
+export function salvarAnalisesCreator(
+  analises: Record<string, AnaliseCreatorSalva>,
+  store: Armazem | null = armazem(),
+): void {
+  if (!store) return;
+  // `imageDataUrl` (JPEG em base64) pode morar no slot, em `avatarYoutube`, nas
+  // `versoes[n].porPapel` — em qualquer nível. O replacer descarta a chave onde
+  // ela estiver; o `imageKey` fica e é por ele que a imagem volta do IDB.
+  const semImagem = (k: string, v: unknown) => (k === 'imageDataUrl' ? undefined : v);
+  let json: string;
+  try {
+    json = JSON.stringify(analises, semImagem);
+  } catch (e) {
+    console.warn('[pilot-fontes] análise do CREATOR não serializou (nada gravado):', e);
+    return;
+  }
+  try {
+    store.setItem(ANALISES_CREATOR_KEY, json);
+  } catch (e) {
+    // Sem quota o card vive só nesta sessão — mas falha calada já custou caro
+    // demais neste projeto pra não avisar.
+    console.warn(`[pilot-fontes] análises do CREATOR não couberam no localStorage (${json.length} chars):`, e);
+  }
+}
+
 export function lerDocsLocais(store: Armazem | null = armazem()): Record<string, DocLocal> {
   if (!store) return {};
   try {

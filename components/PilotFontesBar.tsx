@@ -1,21 +1,18 @@
 'use client';
 
 /**
- * PilotFontesBar — as barras de ação dos modos DOCS e CREATOR do Pilot.
+ * PilotFontesBar — a AÇÃO de cada modo do Pilot, logo abaixo do trilho.
  *
- *  DocsBar    · link do Google Docs ou arquivo (.docx/.txt) → "Carregar tasks";
- *               chips dos docs já importados pra voltar a qualquer um deles.
- *  CreatorBar · "+ Nova task" e o compositor (nome + copy colada).
+ *  CreatorBar · o "+" grande: cada clique cria uma task do zero e abre o card
+ *               de análise (avatares primeiro, copy depois, pelo olhinho).
+ *  DocsBar    · link do Google Docs ou arquivo (.docx/.txt, também arrastando)
+ *               → "Carregar tasks"; chips dos docs já importados.
  *
  * Só apresentação: quem guarda estado e fala com o resto do Pilot é a página.
- * Mesma linguagem do CTA "Carregar tasks" do ClickUp (pílula com brilho), cada
- * modo na sua cor: ciano pro DOCS, âmbar pro CREATOR.
+ * Sem frases: ícone, campo, botão. Cada modo na sua cor (âmbar, ciano).
  */
 
-import type { ReactNode } from 'react';
-
-const CTA_BASE =
-  'cp-load-cta group relative overflow-hidden rounded-[14px] border px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-60';
+import { useState, type DragEvent } from 'react';
 
 function Brilho() {
   return (
@@ -26,8 +23,82 @@ function Brilho() {
   );
 }
 
-function Spinner() {
-  return <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />;
+/* ═══════════════════════════ CREATOR ═══════════════════════════ */
+
+export function CreatorBar({
+  onNova,
+  disabled = false,
+  criando = false,
+}: {
+  onNova: () => void;
+  disabled?: boolean;
+  /** Task sendo criada/aberta agora (trava o clique duplo). */
+  criando?: boolean;
+}) {
+  const travado = disabled || criando;
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={onNova}
+        disabled={travado}
+        title="Nova task"
+        aria-label="Nova task"
+        className="pfb-plus group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[14px] text-black disabled:opacity-60"
+        style={{
+          background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
+          boxShadow:
+            '0 0 34px -8px rgba(251,191,36,0.75), inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.22)',
+        }}
+      >
+        {criando ? (
+          <span className="h-5 w-5 animate-spin rounded-full border-[2.5px] border-black/55 border-t-transparent" />
+        ) : (
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="relative z-10">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        )}
+        <Brilho />
+      </button>
+      <span
+        className="text-[12.5px] font-semibold uppercase tracking-[0.14em] text-text-muted"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        Nova task
+      </span>
+      <style jsx>{`
+        .pfb-plus {
+          transition:
+            transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+            box-shadow 220ms ease;
+        }
+        .pfb-plus:not(:disabled):hover {
+          transform: translateY(-2px);
+          box-shadow:
+            0 0 44px -8px rgba(251, 191, 36, 0.85),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+            inset 0 1px 0 rgba(255, 255, 255, 0.45),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.22) !important;
+        }
+        .pfb-plus:not(:disabled):active {
+          transform: translateY(1px) scale(0.97);
+          transition-duration: 80ms;
+        }
+        .pfb-plus:focus-visible {
+          outline: 2px solid rgba(255, 255, 255, 0.55);
+          outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .pfb-plus,
+          .pfb-plus:not(:disabled):hover,
+          .pfb-plus:not(:disabled):active {
+            transform: none;
+            transition: none;
+          }
+        }
+      `}</style>
+    </div>
+  );
 }
 
 /* ═══════════════════════════ DOCS ═══════════════════════════ */
@@ -40,6 +111,8 @@ export type DocChip = {
   ativo: boolean;
   title?: string;
 };
+
+const ACEITA = /\.(docx|txt|md)$/i;
 
 export function DocsBar({
   link,
@@ -58,38 +131,79 @@ export function DocsBar({
   docs: DocChip[];
   onEscolherDoc: (key: string) => void;
 }) {
+  const [arrastando, setArrastando] = useState(false);
+
+  function soltar(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setArrastando(false);
+    if (importando) return;
+    const f = Array.from(e.dataTransfer.files || []).find((x) => ACEITA.test(x.name));
+    if (f) onImportarArquivo(f);
+  }
+
   return (
-    <div className="relative grid gap-3.5">
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          type="url"
-          value={link}
-          onChange={(e) => onLink(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onImportarLink();
-          }}
-          placeholder="Cole o link do Google Docs da copy"
-          disabled={importando}
-          spellCheck={false}
-          aria-label="Link do Google Docs"
-          className="mono min-w-[240px] flex-1 rounded-[14px] border border-line/70 bg-bg/40 px-4 py-3 text-[12.5px] text-text outline-none transition focus:border-cyan-400/70 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.15)] disabled:opacity-60"
-        />
+    <div className="grid gap-3">
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!arrastando) setArrastando(true);
+        }}
+        onDragLeave={() => setArrastando(false)}
+        onDrop={soltar}
+        className="pfb-drop flex flex-wrap items-center gap-2.5 rounded-[14px] p-1.5"
+        style={{
+          boxShadow: arrastando
+            ? 'inset 0 0 0 2px rgba(34,211,238,0.75), 0 0 40px -12px rgba(34,211,238,0.6)'
+            : 'inset 0 0 0 1px rgba(34,211,238,0)',
+          background: arrastando ? 'rgba(34,211,238,0.06)' : 'transparent',
+          transition: 'box-shadow 200ms ease, background 200ms ease',
+        }}
+      >
+        <label className="relative flex min-w-[220px] flex-1 items-center">
+          <span className="pointer-events-none absolute left-4 text-cyan-300/80" aria-hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+              <path d="M14 3v5h5" />
+              <path d="M9 13h6M9 17h6" />
+            </svg>
+          </span>
+          <input
+            type="url"
+            value={link}
+            onChange={(e) => onLink(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onImportarLink();
+            }}
+            placeholder="Link do Google Docs"
+            disabled={importando}
+            spellCheck={false}
+            aria-label="Link do Google Docs"
+            className="mono w-full rounded-[12px] bg-bg/40 py-3 pl-11 pr-4 text-[12.5px] text-text outline-none transition disabled:opacity-60"
+            style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+            onFocus={(e) => {
+              e.currentTarget.style.boxShadow = 'inset 0 0 0 1px rgba(34,211,238,0.7), 0 0 0 3px rgba(34,211,238,0.14)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.boxShadow = 'inset 0 0 0 1px rgb(var(--line) / 0.7)';
+            }}
+          />
+        </label>
         <button
           type="button"
           onClick={onImportarLink}
           disabled={importando || !link.trim()}
-          className={CTA_BASE + ' border-cyan-400/60'}
+          className="cp-load-cta group relative h-12 overflow-hidden rounded-[12px] px-5 text-[12.5px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-50"
           style={{
             fontFamily: 'var(--font-tech)',
             background: 'linear-gradient(135deg, #7fe4f5 0%, #22d3ee 100%)',
-            boxShadow: '0 0 28px -6px rgba(34,211,238,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
+            boxShadow: '0 0 28px -6px rgba(34,211,238,0.55), inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
           }}
         >
           <span className="relative z-10 flex items-center gap-2">
             {importando ? (
               <>
-                <Spinner />
-                Lendo doc…
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
+                Lendo…
               </>
             ) : (
               <>
@@ -101,15 +215,16 @@ export function DocsBar({
           <Brilho />
         </button>
         <label
+          title="Importar arquivo (.docx ou .txt). Também dá pra arrastar o arquivo aqui."
           className={
-            'mono inline-flex items-center gap-2 rounded-full border border-line-strong px-3.5 py-2 text-[10px] uppercase tracking-widest text-text-muted transition ' +
-            (importando ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-cyan-400 hover:text-cyan-200')
+            'flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] text-text-muted transition ' +
+            (importando ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:text-cyan-200')
           }
+          style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 16V4m0 0-4 4m4-4 4 4M4 20h16" />
           </svg>
-          importar arquivo (.docx / .txt)
           <input
             type="file"
             accept=".docx,.txt,.md,text/plain"
@@ -125,8 +240,7 @@ export function DocsBar({
         </label>
       </div>
       {docs.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="field-label mr-1">Docs importados</span>
+        <div className="flex flex-wrap items-center gap-2 px-1.5">
           {docs.map((d) => (
             <button
               key={d.key}
@@ -135,137 +249,23 @@ export function DocsBar({
               title={d.title || d.rotulo}
               aria-pressed={d.ativo}
               className={
-                'mono inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10.5px] uppercase tracking-[0.12em] transition ' +
-                (d.ativo
-                  ? 'border-cyan-400/70 bg-cyan-500/15 text-cyan-100 shadow-[0_0_14px_-6px_rgba(34,211,238,0.7)]'
-                  : 'border-line-strong text-text-muted hover:border-cyan-400/60 hover:text-cyan-200')
+                'mono inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[10.5px] uppercase tracking-[0.1em] transition ' +
+                (d.ativo ? 'bg-cyan-500/15 text-cyan-100' : 'text-text-muted hover:text-cyan-200')
               }
-            >
-              {d.rotulo}
-              <span className={'tabular-nums ' + (d.ativo ? 'text-cyan-200' : 'text-text-muted')}>· {d.n}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <p className="text-[12.5px] leading-relaxed text-text-muted">
-        Cada heading no padrão <span className="mono text-text">AD12VN - NOME</span> vira uma task, como no ClickUp. O idioma é
-        detectado por task: com PL ou HUN no doc, o português é a tradução e a voz sai na outra língua.
-      </p>
-    </div>
-  );
-}
-
-/* ═══════════════════════════ CREATOR ═══════════════════════════ */
-
-export type ComposerState = { taskId?: string; nome: string; copy: string };
-
-export function CreatorBar({
-  composer,
-  onComposer,
-  onNova,
-  onSalvar,
-  onCancelar,
-  nomeValido,
-  extra,
-}: {
-  composer: ComposerState | null;
-  onComposer: (c: ComposerState) => void;
-  onNova: () => void;
-  onSalvar: () => void;
-  onCancelar: () => void;
-  /** O nome começa com AD<n>? (é ele que batiza os arquivos) */
-  nomeValido: (nome: string) => boolean;
-  /** Espaço opcional ao lado do botão (ex.: contagem). */
-  extra?: ReactNode;
-}) {
-  const ok = composer ? nomeValido(composer.nome) : false;
-  return (
-    <div className="relative grid gap-3.5">
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onNova}
-          disabled={!!composer && !composer.taskId}
-          className={CTA_BASE + ' border-amber-400/60'}
-          style={{
-            fontFamily: 'var(--font-tech)',
-            background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
-            boxShadow: '0 0 28px -6px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
-          }}
-        >
-          <span className="relative z-10 flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Nova task
-          </span>
-          <Brilho />
-        </button>
-        <span className="text-[12.5px] leading-relaxed text-text-muted">
-          Task do zero: nome e copy colada. O resto é igual ao ClickUp: avatares, versões, decupagem, legendas.
-        </span>
-        {extra}
-      </div>
-      {composer ? (
-        <div
-          className="grid gap-3 rounded-[14px] border border-amber-400/35 p-4"
-          style={{
-            background: 'linear-gradient(180deg, rgba(251,191,36,0.06), rgba(0,0,0,0.12))',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
-          }}
-        >
-          <div className="grid gap-3 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
-            <label className="grid gap-1.5">
-              <span className="field-label">Nome da task</span>
-              <input
-                value={composer.nome}
-                onChange={(e) => onComposer({ ...composer, nome: e.target.value })}
-                spellCheck={false}
-                className="mono rounded-[12px] border border-line/70 bg-bg/40 px-3.5 py-2.5 text-[13px] font-semibold text-text outline-none transition focus:border-amber-400/70 focus:shadow-[0_0_0_3px_rgba(251,191,36,0.14)]"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              />
-            </label>
-            <span className="text-[12.5px] leading-relaxed text-text-muted">
-              Começa com AD e um número: é ele que batiza os arquivos (AD01 vira AD01G1.mp4). Depois do traço, o nome que você quiser.
-            </span>
-          </div>
-          <label className="grid gap-1.5">
-            <span className="field-label">Copy</span>
-            <textarea
-              value={composer.copy}
-              onChange={(e) => onComposer({ ...composer, copy: e.target.value })}
-              rows={9}
-              spellCheck={false}
-              placeholder={'Doutor: @nome_do_avatar\n\nHOOK 1\nTexto do gancho...\n\nBODY\nTexto do corpo...'}
-              className="mono min-h-[180px] resize-y rounded-[12px] border border-line/70 bg-bg/40 px-3.5 py-3 text-[12.5px] leading-relaxed text-text outline-none transition focus:border-amber-400/70 focus:shadow-[0_0_0_3px_rgba(251,191,36,0.14)]"
-            />
-          </label>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={onSalvar}
-              disabled={!composer.copy.trim() || !ok}
-              className="group relative overflow-hidden rounded-[12px] border border-amber-400/60 px-4 py-2.5 text-[11.5px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-50"
               style={{
-                fontFamily: 'var(--font-tech)',
-                background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
-                boxShadow: '0 0 22px -6px rgba(251,191,36,0.5), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                boxShadow: d.ativo
+                  ? 'inset 0 0 0 1px rgba(34,211,238,0.7), 0 0 16px -8px rgba(34,211,238,0.8)'
+                  : 'inset 0 0 0 1px rgb(var(--line) / 0.7)',
               }}
             >
-              <span className="relative z-10 flex items-center gap-2">
-                {composer.taskId ? 'Salvar e analisar de novo' : 'Criar e analisar'}
-                <span className="transition-transform group-hover:translate-x-1">→</span>
-              </span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                <path d="M14 3v5h5" />
+              </svg>
+              <span className="max-w-[220px] truncate normal-case tracking-normal">{d.rotulo}</span>
+              <span className={'tabular-nums ' + (d.ativo ? 'text-cyan-200' : '')}>{d.n}</span>
             </button>
-            <button
-              type="button"
-              onClick={onCancelar}
-              className="mono rounded-full border border-line-strong px-3.5 py-2 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300"
-            >
-              cancelar
-            </button>
-            {!ok ? <span className="text-[12px] text-amber-300">O nome precisa começar com AD e um número.</span> : null}
-          </div>
+          ))}
         </div>
       ) : null}
     </div>

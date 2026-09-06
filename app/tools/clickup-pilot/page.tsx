@@ -36,6 +36,7 @@ import {
   extractYouTubeId,
   youTubeThumb,
   findAdSection,
+  parseParts,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
   type ParsedVABriefing,
@@ -172,6 +173,10 @@ import {
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
 import {
   isTaskLocal,
+  modoDaTaskLocal,
+  lerAnalisesCreator,
+  salvarAnalisesCreator,
+  type AnaliseCreatorSalva,
   lerTasksLocais,
   salvarTasksLocais,
   lerDocsLocais,
@@ -1769,6 +1774,7 @@ function ClickUpPilotInner() {
     modoRef.current = m;
     setModoRaw(m);
     if (m !== 'clickup') mostrarTasksLocais(m, locais, docs, docKey);
+    if (m === 'creator') restaurarAnalisesCreator(locais);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   function trocarModo(m: ModoPilot) {
@@ -1778,13 +1784,32 @@ function ClickUpPilotInner() {
     try { localStorage.setItem(MODO_KEY, m); } catch {}
     setSelectedTask(null);
     setError(null);
+    // Saindo do CREATOR: os cards dele saem da tela (já estão salvos) pra não
+    // aparecerem misturados na análise dos outros modos.
+    if (modo === 'creator') {
+      setTaskAnalyses((prev) => {
+        const next: Record<string, TaskAnalysis> = {};
+        for (const [id, an] of Object.entries(prev)) if (modoDaTaskLocal(id) !== 'creator') next[id] = an;
+        taskAnalysesRef.current = next;
+        return next;
+      });
+    }
+    // Mesma regra do switchWorkspace: o painel "Tasks em produção" mora dentro
+    // de `tasks.length > 0`. Com disparo rodando, a lista nunca é ESVAZIADA —
+    // só substituída — senão o painel some no meio da fila.
+    const filaAtiva = Object.values(batchStatesRef.current || {}).some(
+      (b) => b && b.phase !== 'done' && b.phase !== 'failed',
+    );
     if (m === 'clickup') {
       // Volta pro fluxo de sempre: a lista é recarregada do ClickUp (se der).
-      setTasks([]);
+      if (!filaAtiva) setTasks([]);
       setSelectedTaskIds(new Set());
       if (hasToken && selectedTeam && selectedEditor) void loadTasks();
     } else {
-      mostrarTasksLocais(m);
+      const lista = tasksSinteticasDoModo(m, tasksLocaisRef.current, docsLocaisRef.current, docAtivoKey);
+      if (lista.length > 0 || !filaAtiva) setTasks(lista);
+      setSelectedTaskIds(new Set());
+      if (m === 'creator') restaurarAnalisesCreator();
     }
   }
 
@@ -1859,6 +1884,11 @@ function ClickUpPilotInner() {
   }
   function removerTaskLocal(id: string) {
     persistirLocais(tasksLocaisRef.current.filter((t) => t.id !== id));
+    // Insumos no IDB (imagens do modo imagem, áudios por take) ficariam órfãos
+    // pra sempre — o id local nunca se repete. Melhor esforço.
+    void import('@/lib/zip-store')
+      .then(({ deletePrefix }) => deletePrefix(`pilot:${id}:`))
+      .catch(() => {});
     setTasks((prev) => prev.filter((t) => t.id !== id));
     setSelectedTaskIds((prev) => {
       const n = new Set(prev);
@@ -1872,55 +1902,98 @@ function ClickUpPilotInner() {
     });
   }
 
-  /* ---- CREATOR: nome + copy colada viram uma task com doc próprio ---- */
-  const [composer, setComposer] = useState<{ taskId?: string; nome: string; copy: string } | null>(null);
-  function abrirComposer(taskId?: string) {
-    if (taskId) {
-      const t = tasksLocaisRef.current.find((x) => x.id === taskId);
-      if (!t) return;
-      const doc = t.docKey ? docsLocaisRef.current.find((d) => d.key === t.docKey) : undefined;
-      // Devolve a copy sem a linha de heading que a gente mesmo pôs.
-      const linhas = doc ? doc.text.split('\n') : [];
-      const copy = linhas.length && linhas[0].trim() === t.nome ? linhas.slice(1).join('\n').replace(/^\n+/, '') : linhas.join('\n');
-      setComposer({ taskId, nome: t.nome, copy });
-    } else {
-      setComposer({ nome: proximoNomeCreator(tasksLocaisRef.current.filter((t) => t.modo === 'creator')), copy: '' });
+  /* ---- CREATOR (05.09): a task nasce SEM copy e já abre o card de análise.
+   *  Avatares entram pelo "Adicionar outro avatar"; a copy entra pelo olhinho
+   *  de cada um. Cada clique no "+" cria mais uma (AD01, AD02...). ---- */
+  /** Card do CREATOR antes de qualquer coisa: o mesmo shape que a análise
+   *  produz, vazio. 'partial' renderiza o corpo (avatares) e trava o Play. */
+  function analiseCreatorVazia(t: TaskLocal): TaskAnalysis {
+    return {
+      taskId: t.id,
+      taskName: t.nome,
+      baseAdId: t.baseAdId,
+      status: 'partial',
+      roleSlots: [],
+      partTemplates: [],
+      hookCount: 0,
+      bodyPartsCount: 0,
+      totalParts: 0,
+    };
+  }
+  function criarTaskCreator() {
+    // Síncrono de ponta a ponta (tasksLocaisRef é atualizado na hora), então
+    // clique duplo cria AD01 e AD02 sem colidir — não precisa de trava.
+    {
+      const nome = proximoNomeCreator(tasksLocaisRef.current.filter((t) => t.modo === 'creator'));
+      const base = baseAdIdDoNome(nome) || 'AD01';
+      const id = idTaskCreator();
+      const t: TaskLocal = { id, modo: 'creator', nome, baseAdId: base, docKey: null, teamId: null, criadoEm: Date.now() };
+      const locais = [...tasksLocaisRef.current, t];
+      persistirLocais(locais);
+      setTasks(tasksSinteticasDoModo('creator', locais, docsLocaisRef.current, docAtivoKey));
+      // Marca a nova (mantendo as outras): é o que o Start lê.
+      setSelectedTaskIds((prev) => new Set([...Array.from(prev), id]));
+      // SEM analyzeSelected: o card nasce direto, vazio e editável.
+      setTaskAnalyses((prev) => {
+        const next = { ...prev, [id]: analiseCreatorVazia(t) };
+        taskAnalysesRef.current = next;
+        return next;
+      });
+      creatorRestauradoRef.current = true;
+      setError(null);
     }
   }
-  async function salvarComposer() {
-    if (!composer) return;
-    const nome = composer.nome.trim();
-    const base = baseAdIdDoNome(nome);
-    if (!base) {
-      setError('O nome precisa começar com AD e um número (ex.: AD01 - CREATOR): é ele que batiza os arquivos.');
-      return;
-    }
-    if (!composer.copy.trim()) {
-      setError('Cole a copy antes de salvar.');
-      return;
-    }
-    setError(null);
-    const doc = docDaCopyColada(nome, composer.copy);
-    const id = composer.taskId || idTaskCreator();
-    const antiga = tasksLocaisRef.current.find((t) => t.id === id);
-    const t: TaskLocal = { id, modo: 'creator', nome, baseAdId: base, docKey: doc.key, teamId: null, criadoEm: antiga?.criadoEm || Date.now() };
-    const locais = antiga ? tasksLocaisRef.current.map((x) => (x.id === id ? t : x)) : [...tasksLocaisRef.current, t];
-    const docs = Object.values(salvarDocLocal(doc, locais));
-    docsLocaisRef.current = docs;
-    setDocsLocaisState(docs);
-    persistirLocais(locais);
-    const lista = tasksSinteticasDoModo('creator', locais, docs, docAtivoKey);
-    setTasks(lista);
-    setSelectedTaskIds(new Set([id]));
-    // Copy nova = análise velha inválida.
+  /** F5 / entrar no CREATOR: repõe os cards salvos (ou vazios) de cada task
+   *  local do modo e marca todas — é o que o Start lê. */
+  function restaurarAnalisesCreator(locais: TaskLocal[] = tasksLocaisRef.current) {
+    const salvas = lerAnalisesCreator();
+    const minhas = locais.filter((t) => t.modo === 'creator');
     setTaskAnalyses((prev) => {
-      const n = { ...prev };
-      delete n[id];
-      return n;
+      const next = { ...prev };
+      for (const t of minhas) {
+        if (next[t.id]) continue;
+        const s = salvas[t.id];
+        const base = s
+          ? ({ ...analiseCreatorVazia(t), ...(s as unknown as Partial<TaskAnalysis>), taskId: t.id, taskName: t.nome } as TaskAnalysis)
+          : analiseCreatorVazia(t);
+        // O status é RECALCULADO, não herdado: a imagem do modo imagem não vai
+        // pro storage (volta do IDB abaixo), então um 'ready' salvo mentiria e
+        // o Play prometeria um disparo que o guard barra.
+        const slots = base.roleSlots || [];
+        next[t.id] = { ...base, status: slots.length > 0 && slots.every(slotPronto) ? 'ready' : 'partial' };
+      }
+      taskAnalysesRef.current = next;
+      return next;
     });
-    setComposer(null);
-    const sint = lista.find((x) => x.id === id);
-    if (sint) await analyzeSelected([sint]);
+    setSelectedTaskIds(new Set(minhas.map((t) => t.id)));
+    creatorRestauradoRef.current = true;
+    void rehidratarImagensCreator(minhas.map((t) => t.id));
+  }
+  /** Slot em MODO IMAGEM restaurado vem só com `imageKey`: a imagem volta do
+   *  IDB, como o RETOMAR faz, e updateRoleSlot recalcula o status. */
+  async function rehidratarImagensCreator(ids: string[]) {
+    for (const id of ids) {
+      const a = taskAnalysesRef.current[id];
+      if (!a) continue;
+      for (let i = 0; i < (a.roleSlots || []).length; i++) {
+        const s = a.roleSlots[i];
+        if (!s?.imageMode || !s.imageKey || s.imageDataUrl) continue;
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          const blob = await loadBlob(s.imageKey, 'image/jpeg');
+          if (!blob) continue;
+          const dataUrl = await new Promise<string>((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(String(fr.result));
+            fr.onerror = () => rej(fr.error);
+            fr.readAsDataURL(blob);
+          });
+          updateRoleSlot(id, i, { imageDataUrl: dataUrl });
+        } catch (e) {
+          console.warn(`[pilot] imagem do slot ${i} de ${id} não voltou do IDB (sobe de novo se precisar):`, e);
+        }
+      }
+    }
   }
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -1933,6 +2006,41 @@ function ClickUpPilotInner() {
    *  de render) — usado pra não perder o avatar escolhido na mão ao reanalisar. */
   const taskAnalysesRef = useRef<Record<string, TaskAnalysis>>({});
   taskAnalysesRef.current = taskAnalyses;
+  /* CREATOR (05.09): o card não vem de análise, então é ELE que sobrevive a F5.
+   * Grava só depois que o restauro rodou (senão o mapa vazio do primeiro render
+   * apagaria o que estava salvo) e só as tasks CREATOR que ainda existem —
+   * remover a task limpa a persistência de graça. */
+  const creatorRestauradoRef = useRef(false);
+  useEffect(() => {
+    if (modoRef.current !== 'creator' || !creatorRestauradoRef.current) return;
+    const vivas = new Set(tasksLocaisRef.current.filter((t) => t.modo === 'creator').map((t) => t.id));
+    const salvar: Record<string, AnaliseCreatorSalva> = {};
+    for (const [id, a] of Object.entries(taskAnalyses)) {
+      if (!vivas.has(id) || modoDaTaskLocal(id) !== 'creator') continue;
+      if (!a) continue;
+      salvar[id] = {
+        taskId: a.taskId,
+        taskName: a.taskName,
+        baseAdId: a.baseAdId,
+        status: a.status === 'ready' ? 'ready' : 'partial',
+        roleSlots: a.roleSlots,
+        partTemplates: a.partTemplates,
+        hookCount: a.hookCount,
+        bodyPartsCount: a.bodyPartsCount,
+        totalParts: a.totalParts,
+        // Versões escolhidas no "+ versões" (3..N moram aqui; a 2ª mora no slot).
+        duasVersoes: a.duasVersoes,
+        versoes: a.versoes,
+      };
+    }
+    // Task CREATOR viva que não está no mapa (F5 antes do restauro, "Limpar")
+    // mantém o que já estava salvo: a gravação nunca é destrutiva por ausência.
+    // Só removerTaskLocal (tira o id de `vivas`) apaga do storage.
+    const salvas = lerAnalisesCreator();
+    for (const id of vivas) if (!salvar[id] && salvas[id]) salvar[id] = salvas[id];
+    if (vivas.size > 0 && Object.keys(salvar).length === 0) return;
+    salvarAnalisesCreator(salvar);
+  }, [taskAnalyses]);
 
   // Motor config por task (III/IV/V — global, %, individual)
   const [motorConfigs, setMotorConfigs] = useState<Record<string, MotorConfig>>({});
@@ -2648,6 +2756,12 @@ function ClickUpPilotInner() {
    *  Usado pelo botao X em cada card da previsibilidade — user pode
    *  limpar uma sem ter que "Limpar tudo". */
   function removeTaskFromAnalysis(taskId: string) {
+    // CREATOR: o card É a task (não existe análise separada dela). Tirar o
+    // card sem tirar a task faria o F5 devolver um card vazio, sem os avatares.
+    if (modoDaTaskLocal(taskId) === 'creator') {
+      removerTaskLocal(taskId);
+      return;
+    }
     // Remove tambem TODAS siblings (G1/G2 etc) que compartilharam analise
     // com essa task primary OU eram primary dela
     setTaskAnalyses((prev) => {
@@ -2687,7 +2801,16 @@ function ClickUpPilotInner() {
   }
   function clearSelected() {
     setSelectedTaskIds(new Set());
-    setTaskAnalyses({});
+    // CREATOR: o card É a task — "Limpar" só desmarca; apagar de verdade é o
+    // × do card (removerTaskLocal). Derrubar o mapa aqui sumia com os cards e
+    // nada os repunha até trocar de modo.
+    setTaskAnalyses((prev) => {
+      if (modoRef.current !== 'creator') return {};
+      const next: Record<string, TaskAnalysis> = {};
+      for (const [id, an] of Object.entries(prev)) if (modoDaTaskLocal(id) === 'creator') next[id] = an;
+      taskAnalysesRef.current = next;
+      return next;
+    });
   }
 
   /** Extrai a "chave base" da task name pra detectar siblings G1/G2/etc.
@@ -3287,10 +3410,19 @@ function ClickUpPilotInner() {
       const anteriores = (taskAnalysesRef.current[t.id]?.roleSlots || []).filter((s) => s.manual);
       if (anteriores.length) manuaisAntes.set(t.id, anteriores);
     }
+    // CREATOR sem copy: o card não vem de análise (o usuário monta avatares e
+    // cola a copy pelo olhinho) — a análise nunca pode zerá-lo nem marcá-lo erro.
+    const creatorSemDoc = (id: string) =>
+      modoDaTaskLocal(id) === 'creator' && !tasksLocaisRef.current.find((t) => t.id === id)?.docKey;
     // Init status pendente pra TODAS (inclui siblings nao-primary pra UI mostrar consistente)
-    setTaskAnalyses(() => {
+    setTaskAnalyses((prev) => {
       const init: Record<string, TaskAnalysis> = {};
+      // Cards do CREATOR são preservados como estão (nunca existem no fluxo ClickUp).
+      for (const [id, an] of Object.entries(prev)) {
+        if (modoDaTaskLocal(id) === 'creator') init[id] = an;
+      }
       for (const t of allSelected) {
+        if (creatorSemDoc(t.id)) continue;
         init[t.id] = { taskId: t.id, taskName: t.name, status: 'pending', roleSlots: [], partTemplates: [] };
       }
       return init;
@@ -3302,6 +3434,9 @@ function ClickUpPilotInner() {
       while (cursor < targets.length) {
         const idx = cursor++;
         const task = targets[idx];
+        // CREATOR sem copy colada: não há doc pra ler — o card fica como o
+        // usuário montou (avatares + copy pelo olhinho).
+        if (creatorSemDoc(task.id)) continue;
         setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'analyzing' } }));
         try {
           // 1. Pega detalhes da task → encontra doc URL no custom field "DOC DA COPY"
@@ -3413,7 +3548,7 @@ function ClickUpPilotInner() {
                 ...prev[task.id],
                 status: 'error',
                 error: local
-                  ? 'Esta task ainda não tem copy: cole a copy no card (botão "Colar copy") e analise de novo.'
+                  ? 'Esta task ainda não tem copy: adiciona o avatar no card e cola a copy dele pelo olhinho.'
                   : 'Task sem link de copy: preencha o campo "DOC DA COPY" ou cole o link do doc na descrição.',
               },
             }));
@@ -6771,6 +6906,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         !taskAnalyses[id]?.vaBriefing &&
         !taskAnalyses[id]?.trocaBriefing,
     );
+    // CREATOR: escolher o avatar já deixa 'ready' antes de existir copy. Sem
+    // trecho, a task entraria na fila só pra falhar em 'Nenhum trecho com texto'.
+    const creatorSemCopy = normalTasks.filter(
+      (id) => modoDaTaskLocal(id) === 'creator' && (taskAnalyses[id]?.partTemplates?.length ?? 0) === 0,
+    );
+    if (creatorSemCopy.length > 0) {
+      setError(
+        `${creatorSemCopy.length === 1 ? 'A task' : `${creatorSemCopy.length} tasks`} do CREATOR ainda ${creatorSemCopy.length === 1 ? 'está' : 'estão'} sem copy: cola a copy no olhinho de um avatar antes de iniciar.`,
+      );
+      return;
+    }
 
     // DUAS VERSÕES: cada task com a função ligada E avatar diferente no YouTube
     // ganha uma task IRMÃ que dispara a versão do YouTube. Task sem a função,
@@ -9194,6 +9340,67 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
+  /** Texto colado no olhinho de cada avatar (CREATOR), chave `${taskId}:${sIdx}`. */
+  const [copyColada, setCopyColada] = useState<Record<string, string>>({});
+  /** CREATOR (05.09): a copy colada no olhinho vira os takes DESTE avatar.
+   *  Mesmo corte da análise: hook inteiro, body em ~20s sem quebrar frase.
+   *  Substitui os trechos que já eram deste avatar; não mexe nos dos outros. */
+  function colarCopyNoSlot(taskId: string, sIdx: number, texto: string) {
+    const bruto = texto.replace(/\r\n/g, '\n').trim();
+    if (!bruto) return;
+    // Calcula FORA do updater (lendo o espelho síncrono): se a copy não render
+    // trecho nenhum, avisa e NÃO apaga o que foi colado.
+    const a = taskAnalysesRef.current[taskId];
+    const slot = a?.roleSlots?.[sIdx];
+    if (!a || !slot) return;
+    const roleLc = slot.role.toLowerCase();
+    // parseParts pula a 1ª linha (heading do AD) — daí o prefixo. Aceita
+    // HOOK/GANCHO/BODY/CORPO/PARTE/TAKE com ou sem ":"; sem heading = 1 bloco.
+    const blocos = parseParts(`COPY\n${bruto}`);
+    // "Outros" pela MESMA regra do disparo (ownerSlotIdx): trecho órfão de um
+    // avatar removido pertence ao 1º slot e é substituído junto, não duplicado.
+    const outros = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) !== sIdx);
+    const maior = (re: RegExp) =>
+      outros.reduce((mx, p) => {
+        const m = re.exec(p.label || '');
+        return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+      }, 0);
+    let hookN = maior(/^(?:HOOK|GANCHO)\s+(\d+)/i);
+    let bodyN = maior(/^(?:BODY|PARTE)\s+(\d+)/i);
+    const novas: TaskAnalysis['partTemplates'] = [];
+    for (const b of blocos) {
+      const t = b.text.trim();
+      if (!t) continue;
+      if (/^(HOOK|GANCHO)/i.test(b.label)) {
+        hookN++;
+        novas.push({ label: `HOOK ${hookN}`, text: t, matchByRole: roleLc, speaker: slot.role });
+        continue;
+      }
+      for (const pedaco of splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 })) {
+        bodyN++;
+        novas.push({ label: `BODY ${bodyN}`, text: pedaco, matchByRole: roleLc, speaker: slot.role });
+      }
+    }
+    if (!novas.length) {
+      setError('Não achei texto falado nessa copy. Confere se sobrou algo além dos títulos (HOOK/BODY).');
+      return;
+    }
+    const partTemplates = [...outros, ...novas];
+    const hookCount = partTemplates.filter((p) => /^(hook|gancho)/i.test(p.label)).length;
+    setTaskAnalyses((prev) => {
+      const atual = prev[taskId];
+      if (!atual) return prev;
+      const next = {
+        ...prev,
+        [taskId]: { ...atual, partTemplates, totalParts: partTemplates.length, hookCount, bodyPartsCount: partTemplates.length - hookCount },
+      };
+      taskAnalysesRef.current = next;
+      return next;
+    });
+    setError(null);
+    setCopyColada((p) => ({ ...p, [`${taskId}:${sIdx}`]: '' }));
+  }
+
   /** Remove uma PART inteira (card) do que vai pro HeyGen. Usado pra tirar
    *  cards que sao lixo de producao que escapou do parser (ex "CRIATIVOS",
    *  "Os criativos sao para META..."). Recalcula as contagens de hook/body
@@ -9255,13 +9462,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setTaskAnalyses((prev) => {
       const a = prev[taskId];
       if (!a?.roleSlots) return prev;
+      const removido = a.roleSlots[roleIdx];
       const newSlots = a.roleSlots.filter((_, i) => i !== roleIdx);
       const allHaveAvatar = newSlots.length > 0 && newSlots.every(slotPronto);
+      // CREATOR: a copy é DO avatar (entrou pelo olhinho dele). Sem isto, os
+      // trechos ficavam órfãos: o 1º avatar falava tudo no disparo, o chip não
+      // contava e colar de novo duplicava.
+      const ehCreator = modoDaTaskLocal(taskId) === 'creator';
+      const partTemplates =
+        ehCreator && removido
+          ? (a.partTemplates || []).filter((p) => p.matchByRole !== removido.role.toLowerCase())
+          : a.partTemplates;
+      const hookCount = ehCreator ? (partTemplates || []).filter((p) => /^(hook|gancho)/i.test(p.label)).length : a.hookCount;
       return {
         ...prev,
         [taskId]: {
           ...a,
           roleSlots: newSlots,
+          partTemplates,
+          ...(ehCreator
+            ? { hookCount, totalParts: partTemplates?.length ?? 0, bodyPartsCount: (partTemplates?.length ?? 0) - (hookCount ?? 0) }
+            : {}),
           status: newSlots.length === 0 ? 'partial' : allHaveAvatar ? 'ready' : 'partial',
         },
       };
@@ -10111,6 +10332,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const plan = buildPlan(a);
     if (!plan || plan.parts.some((p: any) => !p.avatarId && !p.imageDataUrl)) {
       setError(`Tem avatar sem selecionar. Click no slot e escolhe.`);
+      return;
+    }
+    // CREATOR: o avatar escolhido já deixa o card 'ready' antes de existir copy —
+    // sem trecho, o handoff iria vazio.
+    if (plan.parts.length === 0) {
+      setError(
+        modoDaTaskLocal(taskId) === 'creator'
+          ? 'Nenhum trecho com texto: cola a copy no olhinho de um avatar antes de disparar.'
+          : 'Nenhum trecho com texto pra disparar: a task ficou sem takes. Analise de novo ou acrescente uma fala pelo olhinho.',
+      );
       return;
     }
     // ÁUDIO POR AVATAR (29.08): o handoff pro Hey Auto é por TEXTO — mandaria
@@ -12076,22 +12307,40 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             value={modo}
             onChange={trocarModo}
             disabled={analyzing || loadingTasks || switchingTeam || importandoDoc}
-            meta={{
-              clickup: hasToken && selectedTeam && selectedEditor
-                ? (currentTeam?.name ? shortWorkspaceLabel(currentTeam.name) : 'Conectado')
-                : 'Falta configurar',
-              docs: docAtivo
-                ? `${docAtivo.nomeArquivo || 'Google Docs'} · ${tasksLocais.filter((t) => t.docKey === docAtivo.key).length} tasks`
-                : 'Nenhum doc importado',
-              creator: (() => {
-                const n = tasksLocais.filter((t) => t.modo === 'creator').length;
-                return n ? `${n} task${n === 1 ? '' : 's'}` : 'Comece pelo +';
-              })(),
+            contagem={{
+              clickup: modo === 'clickup' ? tasks.length : 0,
+              docs: docAtivo ? tasksLocais.filter((t) => t.docKey === docAtivo.key).length : 0,
+              creator: tasksLocais.filter((t) => t.modo === 'creator').length,
             }}
-          />
+          >
+            {modo === 'docs' ? (
+              <DocsBar
+                link={docLinkInput}
+                onLink={setDocLinkInput}
+                onImportarLink={() => void importarDocPorLink()}
+                onImportarArquivo={(f) => void importarDocPorArquivo(f)}
+                importando={importandoDoc}
+                docs={docsRecentes.map((d) => ({
+                  key: d.key,
+                  rotulo: rotuloDoDoc(d),
+                  n: tasksLocais.filter((t) => t.docKey === d.key).length,
+                  ativo: d.key === docAtivoKey,
+                  title: d.docUrl || d.nomeArquivo || d.key,
+                }))}
+                onEscolherDoc={(k) => {
+                  setDocAtivoKey(k);
+                  mostrarTasksLocais('docs', undefined, undefined, k);
+                }}
+              />
+            ) : modo === 'creator' ? (
+              <CreatorBar onNova={() => void criarTaskCreator()} disabled={analyzing} />
+            ) : null}
+          </PilotModeHub>
 
-          {/* Command Center — chip de status + métricas ao vivo */}
-          {(() => {
+          {/* Command Center — chip de status + métricas ao vivo. Só no modo
+              CLICKUP: é o estado da conexão com o ClickUp (token, empresa,
+              editor); CREATOR e DOCS não têm o que mostrar aqui. */}
+          {modo === 'clickup' ? (() => {
             // CREATOR e DOCS não dependem do ClickUp: estão sempre "online".
             const clickupOK = hasToken && selectedTeam && selectedEditor;
             const setupOK = modo !== 'clickup' || clickupOK;
@@ -12216,7 +12465,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 </div>
               </div>
             );
-          })()}
+          })() : null}
           {/* (Token UI movido pra /configuracoes/clickup-pilot) */}
 
           {/* ═══ EXTENSÃO AUSENTE ═══
@@ -12300,7 +12549,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
           {modo !== 'clickup' || (hasToken && selectedTeam && selectedEditor) ? (
             <div className="grid gap-6">
-              {/* Modos + Carregar tasks (UI principal enxuta) */}
+              {/* Modos + Carregar tasks (UI principal enxuta). Só no modo
+                  CLICKUP: a ação do CREATOR e do DOCS mora dentro do visor. */}
+              {modo === 'clickup' ? (
               <section
                 className="cp-modes-bar relative overflow-hidden rounded-[18px] border border-line/60 p-4 md:p-5"
                 style={{
@@ -12311,7 +12562,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-35 blur-3xl"
-                  style={{ background: modo === 'docs' ? 'rgba(34,211,238,0.40)' : modo === 'creator' ? 'rgba(251,191,36,0.38)' : 'rgba(167,139,250,0.45)' }}
+                  style={{ background: 'rgba(167,139,250,0.45)' }}
                 />
                 {/* PAINEL "Modos de Geração" REMOVIDO (user pediu):
                  *  - Camuflagem agora eh PER-TASK (botao 3D na action bar do card)
@@ -12323,8 +12574,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 {/* Seletor de EMPRESA — só aparece quando o token enxerga
                  *  mais de um workspace. Trocar aqui recarrega as tasks da
                  *  outra empresa na hora. */}
-                {modo === 'clickup' ? (
-                <>
                 {teams.length > 1 ? (
                   <div className="relative mb-3.5 flex flex-wrap items-center gap-3">
                     <WorkspaceSwitch3D
@@ -12409,42 +12658,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     <span>→</span>
                   </a>
                 </div>
-                </>
-                ) : null}
-
-                {/* ═══ DOCS — importa o doc (link ou arquivo) e lista os ADs ═══ */}
-                {modo === 'docs' ? (
-                  <DocsBar
-                    link={docLinkInput}
-                    onLink={setDocLinkInput}
-                    onImportarLink={() => void importarDocPorLink()}
-                    onImportarArquivo={(f) => void importarDocPorArquivo(f)}
-                    importando={importandoDoc}
-                    docs={docsRecentes.map((d) => ({
-                      key: d.key,
-                      rotulo: rotuloDoDoc(d),
-                      n: tasksLocais.filter((t) => t.docKey === d.key).length,
-                      ativo: d.key === docAtivoKey,
-                      title: d.docUrl || d.nomeArquivo || d.key,
-                    }))}
-                    onEscolherDoc={(k) => {
-                      setDocAtivoKey(k);
-                      mostrarTasksLocais('docs', undefined, undefined, k);
-                    }}
-                  />
-                ) : null}
-                {/* ═══ CREATOR — task do zero: nome + copy colada ═══ */}
-                {modo === 'creator' ? (
-                  <CreatorBar
-                    composer={composer}
-                    onComposer={setComposer}
-                    onNova={() => abrirComposer()}
-                    onSalvar={() => void salvarComposer()}
-                    onCancelar={() => setComposer(null)}
-                    nomeValido={(nome) => !!baseAdIdDoNome(nome)}
-                  />
-                ) : null}
               </section>
+              ) : null}
 
               {/* Lista de tasks */}
               {tasks.length > 0 ? (
@@ -12863,20 +13078,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               Só deste navegador — nada disso toca o ClickUp. */}
                           {isTaskLocal(t.id) ? (
                             <div className="flex shrink-0 items-center gap-1.5">
-                              {modo === 'creator' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => abrirComposer(t.id)}
-                                  title="Editar nome e copy desta task"
-                                  aria-label="Editar nome e copy"
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line/70 text-text-muted transition hover:border-amber-400/70 hover:text-amber-200"
-                                >
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                    <path d="M12 20h9" />
-                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                                  </svg>
-                                </button>
-                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => removerTaskLocal(t.id)}
@@ -13668,6 +13869,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             : a.drMillion
                               ? `${adGroupOf(a.baseAdId || a.taskName) || a.taskName} · ${1 + sharedSiblings.length} hooks`
                               : a.taskName.replace(/\s*[-–—]\s*G\d+\s*$/i, '').trim();
+                          // CREATOR (05.09): a task nasceu SEM doc — nada do Docs aparece
+                          // neste card (briefing do avatar, indicações, botão de doc).
+                          const ehCreator = modoDaTaskLocal(a.taskId) === 'creator';
                           return (
                             <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
                               <div className="flex items-center justify-between gap-2">
@@ -13691,7 +13895,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     type="button"
                                     onClick={() => removeTaskFromAnalysis(a.taskId)}
                                     className="mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
-                                    title="Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois."
+                                    title={ehCreator
+                                      ? 'Apaga esta task do CREATOR: avatares e copy somem (só deste navegador).'
+                                      : 'Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois.'}
                                   >
                                     × Remover
                                   </button>
@@ -14696,7 +14902,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         <span className="text-lime"> · corpo gerado 1x</span>
                                         {onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}
                                       </span>
-                                    ) : (
+                                    ) : ehCreator && (a.partTemplates || []).length === 0 ? null : (
                                     <span className="info-linha">
                                       <b>{a.totalParts} takes</b>
                                       <span className="info-chip">{a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'}</span>
@@ -14823,7 +15029,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </button>
                                                     ))}
                                                   </div>
-                                                  {a.mapaVersoes ? (
+                                                  {a.mapaVersoes && !ehCreator ? (
                                                     <div className="vp-doc">
                                                       <span className="vp-doc-tag">indicador do docs</span>
                                                       <span className="vp-doc-txt">{a.mapaVersoes.motivo}</span>
@@ -14886,7 +15092,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         );
                                       })()}
                                     </div>
-                                    {a.roleSlots.length === 0 ? (
+                                    {a.roleSlots.length === 0 && !ehCreator ? (
                                       <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px]">
                                         <div className="aviso-amarelo mono text-[9px] uppercase tracking-widest">
                                           ⚠ Nenhum avatar identificado automaticamente
@@ -14941,7 +15147,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         <div key={sIdx} className="hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]">
                                           <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
                                             <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
-                                            <span className="text-white/70">{refLabel}</span>
+                                            {ehCreator ? null : <span className="text-white/70">{refLabel}</span>}
                                             <span className="info-chip">{partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
                                               <span className="chip-alerta ml-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest">
@@ -15158,6 +15364,43 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   </div>
                                                 );
                                               })()}
+                                              {/* CREATOR (05.09): a copy entra AQUI, depois do avatar.
+                                                * Cola a copy deste avatar (HOOK/BODY) e ela vira os
+                                                * takes dele, com o mesmo corte da análise. */}
+                                              {ehCreator ? (
+                                                <div className="mt-2 rounded-[10px] border border-amber-400/35 bg-amber-400/[0.05] p-2.5">
+                                                  <textarea
+                                                    value={copyColada[`${a.taskId}:${sIdx}`] || ''}
+                                                    onChange={(e) => setCopyColada((p) => ({ ...p, [`${a.taskId}:${sIdx}`]: e.target.value }))}
+                                                    rows={7}
+                                                    spellCheck={false}
+                                                    placeholder={'HOOK 1\nTexto do gancho\n\nBODY\nTexto do corpo (vira takes de ~20s)'}
+                                                    className="mono w-full resize-y rounded-[8px] bg-bg/50 px-2.5 py-2 text-[12.5px] leading-relaxed text-text outline-none"
+                                                    style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                                                  />
+                                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                    <button
+                                                      type="button"
+                                                      disabled={!(copyColada[`${a.taskId}:${sIdx}`] || '').trim()}
+                                                      onClick={() => colarCopyNoSlot(a.taskId, sIdx, copyColada[`${a.taskId}:${sIdx}`] || '')}
+                                                      className="rounded-[10px] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black transition disabled:opacity-40"
+                                                      style={{
+                                                        fontFamily: 'var(--font-tech)',
+                                                        background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
+                                                        boxShadow: '0 0 20px -6px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                      }}
+                                                      title={`Divide em takes e atribui a ${slot.role}. Substitui os trechos que já eram dele.`}
+                                                    >
+                                                      Virar takes
+                                                    </button>
+                                                    {partsCount > 0 ? (
+                                                      <span className="mono text-[10.5px] uppercase tracking-widest text-text-muted">
+                                                        <b className="tabular-nums text-text">{partsCount}</b> take{partsCount === 1 ? '' : 's'} deste avatar
+                                                      </span>
+                                                    ) : null}
+                                                  </div>
+                                                </div>
+                                              ) : null}
                                               {/* TRECHO NOVO (30.08). O doc manda o que manda; aqui
                                                 * dá pra ACRESCENTAR fala pra este avatar — inclusive
                                                 * pra um avatar adicionado na mão, que nasce sem
@@ -15178,6 +15421,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             </div>
                                           ) : null}
                                           {/* ═══ PREVIEW AVATAR (thumb maior + info clean) ═══ */}
+                                          {ehCreator ? null : (
                                           <div className="mt-3 flex items-center gap-3 rounded-[14px] border border-white/8 bg-gradient-to-br from-white/[0.06] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                                             <div className="relative shrink-0">
                                               {briefingThumbUrl ? (
@@ -15253,6 +15497,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               )}
                                             </div>
                                           </div>
+                                          )}
                                           {/* ═══ SELETORES (Avatar + Voz) — grid limpo ═══ */}
                                           <div className="mt-2.5 grid gap-2">
                                             {/* MODO IMAGEM virou o ícone ao lado do rótulo do
