@@ -12,7 +12,7 @@
  *   node .test-tmp/doc-to-disparos.real.test.js
  */
 import { buildDisparosFromNomenclatures, buildDisparosFromDoc, type AvatarCandidate } from './doc-to-disparos';
-import { matchAvatar, parseDarkoBriefing } from './copy-parser';
+import { matchAvatar, parseDarkoBriefing, extractVariantToken } from './copy-parser';
 
 let fails = 0;
 function ok(cond: boolean, msg: string) {
@@ -273,6 +273,104 @@ ok(!!b18 && /gancho do AD18/i.test(b18.hooks[0]?.text || ''), 'AD18VN tambem ide
 // O AD de REFERENCIA nao pode virar uma seção própria roubando a copy do AD17.
 const b65 = parseDarkoBriefing(DOC_RIPTVWA, 'AD65VN', null, []);
 ok(!b65 || (b65.hooks.length === 0 && !b65.body), 'AD65VN (referência) nao abre seção com a copy do AD17');
+
+// ---------------------------------------------------------------------------
+// GARANTIA — task "AD80GL-RIPTVWA-V2" (06.09.26). A SEGUNDA VERSAO de um
+// criativo traz "-V2" no NOME DA TASK; o doc nao sabe disso (la o AD e
+// "AD80G1GL - RIPTVWA"). O "V2" casa a forma de token de variante (1-3 letras
+// + 1-3 digitos), virava FILTRO de heading, nenhum heading tinha "V2" e a
+// task morria em "Parser nao achou hooks nem body pra AD80GL no doc" — com a
+// copy inteira no doc. Filtro que nao deixa nada de pe e' filtro errado.
+// ---------------------------------------------------------------------------
+// Estrutura EXATA do doc (hook colado no heading, "Body" numa linha, ficha
+// entre separadores) — só as falas foram encurtadas.
+const DOC_V2 = `AD79 a 82
+AD79GL - RIPTVWA
+BRIEFING: AD14G1GL-RIPTVWA c/ troca de avatar para Doutor.
+_______________________________________________________________________
+INSTRUÇÕES PARA EDIÇÃO:
+Avatar e Vozes:
+Meta Ads
+Doutor: @drromaoyouseff5.mp4
+Youtube Ads / Kwai Ads
+Doutor: @drromaoyouseff5.mp4
+
+AD79G1GL - RIPTVWA
+Gancho do AD79, que NAO pode vazar pro AD80.
+Body
+Corpo do AD79, que tambem nao pode vazar.
+
+AD80GL - RIPTVWA
+BRIEFING: AD14G1GL-RIPTVWA c/ troca de avatar para Doutor.
+_______________________________________________________________________
+INSTRUÇÕES PARA EDIÇÃO:
+Avatar e Vozes:
+Meta Ads
+Doutor: 7651210164560973076.mp4
+Youtube Ads / Kwai Ads
+Doutor: surgery-2.mp4
+Manter a mesma voz dos avatares, a não ser que seja um avatar gringo.
+_______________________________________________________________________
+Observações:
+
+AD80G1GL - RIPTVWA
+Se voce usar o vick e seu amigao nao ficar igual uma bengala.
+Body
+Ja apareceu pra voce o truque do vick que ta viralizando.
+Entao pega papel e caneta que eu vou ensinar uma vez so.
+
+AD81GL - RIPTVWA
+BRIEFING: Pegar AD32G1VN-RIPTVWA e reescrever.
+_______________________________________________________________________
+Avatar e Vozes:
+Meta Ads
+Doutor: @drromaoyouseff5.mp4`;
+
+console.log('\nGARANTIA — task com sufixo de VERSAO ("AD80GL-RIPTVWA-V2"):');
+const v2 = extractVariantToken('AD80GL-RIPTVWA-V2');
+ok(v2 === 'V2', `"-V2" e lido como token de variante (got ${String(v2)})`);
+const b80 = parseDarkoBriefing(DOC_V2, 'AD80GL', v2, []);
+ok(!!b80, 'achou a seção do AD80GL mesmo com a variante "V2" ausente do doc');
+if (b80) {
+  ok(b80.hooks.length === 1, `1 hook (got ${b80.hooks.length})`);
+  ok(/bengala/i.test(b80.hooks[0]?.text || ''), 'HOOK = o gancho do AD80');
+  ok(!!b80.body && /viralizando/i.test(b80.body), 'BODY do AD80 presente');
+  ok(!/AD79/i.test(b80.body || '') && !/vazar pro AD80/i.test(b80.body || ''), 'copy do AD79 NAO vazou');
+  ok(b80.avatars.some((a) => /7651210164560973076/.test(a.username)), 'avatar META identificado');
+  ok(b80.avatars.some((a) => /surgery-2/i.test(a.username)), 'avatar YouTube identificado');
+}
+// O fallback NAO pode afrouxar o filtro quando a variante EXISTE no doc: ali
+// ele continua discriminando (era o motivo de o filtro existir).
+const DOC_VAR = `AD14GL - VRWA02 - F2
+
+Avatar e Vozes:
+
+Mulher: @mulher.mp4
+
+HOOK
+
+Gancho da variante F2.
+
+BODY
+
+Corpo da F2.
+
+AD14GL - VRWA02 - P1
+
+Avatar e Vozes:
+
+Homem: @homem.mp4
+
+HOOK
+
+Gancho da variante P1.
+
+BODY
+
+Corpo da P1.`;
+const bF2 = parseDarkoBriefing(DOC_VAR, 'AD14GL', 'F2', []);
+ok(!!bF2 && /variante F2/i.test(bF2.hooks[0]?.text || ''), 'variante EXISTENTE (F2) continua isolada');
+ok(!!bF2 && !/variante P1/i.test(bF2.body || ''), 'copy da P1 nao vazou pra F2');
 
 console.log('');
 if (fails > 0) {

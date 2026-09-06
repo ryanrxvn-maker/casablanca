@@ -227,6 +227,32 @@ function headingHasVariant(headingLine: string, variant: string | null | undefin
   return tokens.includes(variant.toUpperCase());
 }
 
+/**
+ * ⭐ 2026-09-06 — O TOKEN DE VARIANTE SO' DISCRIMINA SE O DOC O CONHECE.
+ *
+ * A task "AD80GL-RIPTVWA-V2" e a SEGUNDA VERSAO do criativo: o "-V2" e rotulo
+ * de versao, nao variante do doc. Mas ele casa a forma de variante (1-3 letras
+ * + 1-3 digitos), virava filtro de heading, e como NENHUM heading do doc tem
+ * "V2" (la o AD e "AD80G1GL - RIPTVWA"), o filtro descartava TODO candidato:
+ * a task morria em "Parser nao achou hooks nem body pra AD80GL no doc" com a
+ * copy inteira ali no doc.
+ *
+ * O filtro existe pra separar variantes que CONVIVEM no mesmo doc (F2 x P1).
+ * Se o doc nunca escreveu esse token, nao ha o que separar — e filtrar por ele
+ * so' pode zerar o resultado. Entao: variante ausente do doc = sem filtro.
+ * Onde a variante existe de verdade, nada muda.
+ */
+function varianteConhecidaNoDoc(text: string, variant: string | null | undefined): boolean {
+  if (!variant) return false;
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!isAdHeadingLine(t)) continue;
+    if (headingHasVariant(t.toUpperCase(), variant)) return true;
+  }
+  return false;
+}
+
 export function findAdSection(text: string, adIdOrPrefix: string, variant?: string | null): string | null {
   if (!text) return null;
   const lines = text.split(/\r?\n/);
@@ -239,43 +265,49 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
   // Coleta TODOS os candidatos com score + tamanho da section + presença
   // de copy. Em empate de score, prefere quem tem hook/body real.
   type Cand = { idx: number; score: number; line: string; sectionLen: number; hasCopy: boolean };
-  const cands: Cand[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim().toUpperCase();
-    if (!isAdHeadingLine(line)) continue;
-    // Linha de REFERENCIA ("AD65VN[T] - VFPB02" logo abaixo do heading real)
-    // NAO abre seção — a copy dela pertence ao AD de cima.
-    if (isReferenceHeadingLine(lines, i)) continue;
-    // Filtro de VARIANTE: docs com varias variantes do mesmo AD (F2/P1/AVA05)
-    // — so casa headings da variante pedida. Sem variant = sem filtro. Isso
-    // impede o merge de poçar avatares/copy de variantes diferentes.
-    if (!headingHasVariant(line, variant)) continue;
-    const lineUnpad = unpadAdNum(line);
-    let score = 0;
-    if (line === targetUp || lineUnpad === targetUnpad) {
-      score = 100;
-    } else if (lineUnpad.startsWith(targetUnpad + ' ') || lineUnpad.startsWith(targetUnpad + '-')) {
-      score = 90;
-    } else if (headingMatchesTaskFuzzy(line, targetUp)) {
-      // Mesmo AD número + chars task ⊆ chars heading. Cobre o caso onde o
-      // copywriter funde sufixo no meio (AD23VN-RIPSZ-G1 ↔ AD23G1VN-RIPSZ)
-      // OU usa heading completo onde o target é só base AD (AD23VN ↔ AD23G1VN-RIPSZ).
-      const taskLen = targetUp.replace(/[^A-Z0-9]/g, '').length;
-      const headLen = line.replace(/[^A-Z0-9]/g, '').length;
-      const extra = headLen - taskLen;
-      score = Math.max(60, 80 - Math.floor(extra / 2));
+  const coletar = (v: string | null | undefined): Cand[] => {
+    const out: Cand[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim().toUpperCase();
+      if (!isAdHeadingLine(line)) continue;
+      // Linha de REFERENCIA ("AD65VN[T] - VFPB02" logo abaixo do heading real)
+      // NAO abre seção — a copy dela pertence ao AD de cima.
+      if (isReferenceHeadingLine(lines, i)) continue;
+      // Filtro de VARIANTE: docs com varias variantes do mesmo AD (F2/P1/AVA05)
+      // — so casa headings da variante pedida. Sem variant = sem filtro. Isso
+      // impede o merge de poçar avatares/copy de variantes diferentes.
+      if (!headingHasVariant(line, v)) continue;
+      const lineUnpad = unpadAdNum(line);
+      let score = 0;
+      if (line === targetUp || lineUnpad === targetUnpad) {
+        score = 100;
+      } else if (lineUnpad.startsWith(targetUnpad + ' ') || lineUnpad.startsWith(targetUnpad + '-')) {
+        score = 90;
+      } else if (headingMatchesTaskFuzzy(line, targetUp)) {
+        // Mesmo AD número + chars task ⊆ chars heading. Cobre o caso onde o
+        // copywriter funde sufixo no meio (AD23VN-RIPSZ-G1 ↔ AD23G1VN-RIPSZ)
+        // OU usa heading completo onde o target é só base AD (AD23VN ↔ AD23G1VN-RIPSZ).
+        const taskLen = targetUp.replace(/[^A-Z0-9]/g, '').length;
+        const headLen = line.replace(/[^A-Z0-9]/g, '').length;
+        const extra = headLen - taskLen;
+        score = Math.max(60, 80 - Math.floor(extra / 2));
+      }
+      if (score === 0) continue;
+      const endIdx = findNextAdHeading(lines, i);
+      const section = lines.slice(i, endIdx).join('\n');
+      out.push({
+        idx: i,
+        score,
+        line,
+        sectionLen: endIdx - i,
+        hasCopy: sectionHasCopyContent(section),
+      });
     }
-    if (score === 0) continue;
-    const endIdx = findNextAdHeading(lines, i);
-    const section = lines.slice(i, endIdx).join('\n');
-    cands.push({
-      idx: i,
-      score,
-      line,
-      sectionLen: endIdx - i,
-      hasCopy: sectionHasCopyContent(section),
-    });
-  }
+    return out;
+  };
+
+  // Variante que o doc nao conhece nao filtra (ver varianteConhecidaNoDoc).
+  const cands = coletar(varianteConhecidaNoDoc(text, variant) ? variant : null);
 
   if (cands.length === 0) return null;
 
@@ -1040,11 +1072,15 @@ export function findGSiblings(fullDocText: string, baseAdId: string, variant?: s
   // O separador [-\s]? entre G<N> e o sufixo e OPCIONAL.
   const lines = fullDocText.split(/\r?\n/);
   const re = new RegExp(`^AD0*${numDigits}G(\\d+)[-\\s]?${suffix}\\b`, 'i');
+  // Variante que o doc nao conhece nao filtra (ver varianteConhecidaNoDoc).
+  // Sem isto, o "-V2" da task filtrava tambem os G-siblings: a secao do AD era
+  // achada mas o HOOK ficava de fora (0 hooks, 0 body).
+  const varFiltro = varianteConhecidaNoDoc(fullDocText, variant) ? variant : null;
   const found: Array<{ gNum: number; lineStart: number; heading: string }> = [];
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     const mm = t.match(re);
-    if (mm && headingHasVariant(t, variant) && !isReferenceHeadingLine(lines, i)) {
+    if (mm && headingHasVariant(t, varFiltro) && !isReferenceHeadingLine(lines, i)) {
       found.push({ gNum: parseInt(mm[1], 10), lineStart: i, heading: t });
     }
   }
