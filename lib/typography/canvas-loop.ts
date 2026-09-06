@@ -18,6 +18,8 @@
  * `lib/typography/canvas-loop.test.ts`; só a cola com o DOM mora aqui.
  */
 
+import { criarMedidorDeQuadros } from './player-control';
+
 export type JobLike = {
   id: number;
   /** teto de quadros por segundo deste trabalho */
@@ -135,9 +137,16 @@ function loop() {
     // média móvel: o custo real varia com o modelo desenhado
     j.cost = j.cost === 0 ? gasto : j.cost * 0.7 + gasto * 0.3;
     j.last = t0;
+    // Rastro de quadro LENTO (>50ms): é o que separa "player travado" de
+    // "desenho pesado" (sombra/brilho grande, animação com blur). A prévia
+    // do vídeo é prio 10; o resto (galeria, cartões, timeline) é 0.
+    (j.prio >= 10 ? medidorPrevia : medidorResto).registrar(gasto, t0);
   }
   raf = requestAnimationFrame(loop);
 }
+
+const medidorPrevia = criarMedidorDeQuadros({ rotulo: 'prévia do vídeo' });
+const medidorResto = criarMedidorDeQuadros({ rotulo: 'galeria/cartões/timeline' });
 
 function kick() {
   if (raf === 0 && jobs.size > 0) raf = requestAnimationFrame(loop);

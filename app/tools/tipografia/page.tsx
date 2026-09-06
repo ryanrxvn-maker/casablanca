@@ -64,6 +64,23 @@ import {
 import { TYPO_PRESETS, getPreset } from '@/lib/typography/presets';
 import { fxDefault, normalizeFx, type FxState } from '@/lib/typography/fx';
 import { registerCanvasJob } from '@/lib/typography/canvas-loop';
+import { alternarPlay, pausar, diagnosticoDoVideo, criarVigiaDoPlayer } from '@/lib/typography/player-control';
+
+/** O foco está num campo onde se DIGITA? Só aí o teclado é do campo, não do
+ *  player. Slider (range), checkbox, radio e botão são INPUT/BUTTON, mas não
+ *  escrevem nada — e ficam com o foco depois do arrasto/clique. */
+const TIPOS_DE_TEXTO = new Set([
+  '', 'text', 'search', 'url', 'email', 'password', 'number', 'tel',
+  'date', 'time', 'datetime-local', 'month', 'week',
+]);
+function ehCampoDeTexto(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag !== 'INPUT') return false;
+  return TIPOS_DE_TEXTO.has(((el as HTMLInputElement).type || 'text').toLowerCase());
+}
 import {
   drawHeadlines,
   headlineAtPoint,
@@ -443,12 +460,11 @@ function TipografiaInner() {
       // textarea, select e qualquer coisa contenteditable (o texto do bloco
       // e a copy do roteiro moram em campos assim) — sem isso, dar espaco
       // enquanto escreve pausaria o video em vez de escrever o espaco.
-      const digitando =
-        !!alvo &&
-        (alvo.tagName === 'INPUT' ||
-          alvo.tagName === 'TEXTAREA' ||
-          alvo.tagName === 'SELECT' ||
-          alvo.isContentEditable);
+      // ⚠ Só campo de TEXTO conta como digitando. Slider (type=range),
+      // checkbox e botão são INPUT/BUTTON mas não escrevem nada — e ficam com
+      // o foco depois do arrasto/clique: era o "mexi no tamanho/intensidade e
+      // o espaço parou de dar play".
+      const digitando = ehCampoDeTexto(alvo);
 
       if (e.key === 'Escape') {
         setWordSel(null);
@@ -459,10 +475,11 @@ function TipografiaInner() {
       // barrado de proposito.
       if ((e.key === ' ' || e.code === 'Space') && !digitando && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const v = videoRef.current;
-        if (v && v.readyState > 0) {
+        if (v) {
           e.preventDefault();
-          if (v.paused) void v.play();
-          else v.pause();
+          // Sem gate de readyState: se a mídia não está pronta, o alternarPlay
+          // recarrega e avisa — antes o espaço morria em silêncio.
+          void alternarPlay(v);
         }
         return;
       }
@@ -471,8 +488,22 @@ function TipografiaInner() {
       e.preventDefault();
       undo();
     };
+    // ⚠ O clique sintético do ESPAÇO num botão/checkbox acontece no KEYUP, e o
+    // preventDefault do keydown não o cancela. Sem isto, com o foco no botão de
+    // play (ele fica focado depois do clique), o espaço tocava no keydown e o
+    // botão pausava no keyup — "aperto espaço e não acontece nada".
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== ' ' && e.code !== 'Space') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (ehCampoDeTexto(e.target as HTMLElement | null)) return;
+      e.preventDefault();
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+    };
   }, [undo]);
 
   const preset = useMemo(() => getPreset(presetId), [presetId]);
@@ -2696,7 +2727,19 @@ function PreviewPane({
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
     if (v.readyState >= 1) onMeta();
+    // Erro de mídia nunca mais passa calado: é o que diferencia "travou" de
+    // "o arquivo/decoder quebrou".
+    const onErr = () => {
+      console.warn(`[legendas] erro de mídia no <video> da prévia — ${diagnosticoDoVideo(v)}`);
+    };
+    v.addEventListener('error', onErr);
+    // VIGIA (1x/s): vídeo dizendo que toca com o tempo parado = decoder
+    // travado; avisa com diagnóstico e dá o empurrão de 1ms.
+    const vigia = criarVigiaDoPlayer(v);
+    const vigiaId = setInterval(() => vigia.tick(performance.now()), 1000);
     return () => {
+      clearInterval(vigiaId);
+      v.removeEventListener('error', onErr);
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('loadedmetadata', onMeta);
       v.removeEventListener('play', onPlay);
@@ -2707,8 +2750,7 @@ function PreviewPane({
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) void v.play();
-    else v.pause();
+    void alternarPlay(v);
   };
 
   /**
@@ -2720,7 +2762,7 @@ function PreviewPane({
     (blockId: string, bb: { x: number; y: number; w: number; h: number }, wordIdx: number | null) => {
       const v = videoRef.current;
       if (!v) return;
-      v.pause();
+      void pausar(v);
       const block = liveRef.current.blocks.find((x) => x.id === blockId);
       if (!block) return;
       selRef.current = true;
@@ -3807,8 +3849,7 @@ function Timeline({
             onClick={() => {
               const v = videoRef.current;
               if (!v) return;
-              if (v.paused) void v.play();
-              else v.pause();
+              void alternarPlay(v);
             }}
             title={tocando ? 'Pausar (espaço)' : 'Reproduzir (espaço)'}
             aria-label={tocando ? 'Pausar' : 'Reproduzir'}
