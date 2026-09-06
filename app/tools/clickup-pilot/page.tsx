@@ -35,7 +35,6 @@ import {
   extractYouTubeId,
   youTubeThumb,
   findAdSection,
-  parseParts,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
   type ParsedVABriefing,
@@ -170,6 +169,14 @@ import {
   type DrMillionLang,
 } from '@/lib/drmillion-parser';
 import { planejarDisparo, montarResultados, chaveConteudo } from '@/lib/pilot-dedup';
+import {
+  MAX_HOOKS,
+  copyDasPartes,
+  partesDaCopy,
+  problemaDaCopy,
+  videosDaMontagem,
+  type CopyDoAvatar,
+} from '@/lib/pilot-copy-creator';
 import {
   isTaskLocal,
   modoDaTaskLocal,
@@ -9348,49 +9355,43 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
-  /** Texto colado no olhinho de cada avatar (CREATOR), chave `${taskId}:${sIdx}`. */
-  const [copyColada, setCopyColada] = useState<Record<string, string>>({});
-  /** CREATOR (05.09): a copy colada no olhinho vira os takes DESTE avatar.
-   *  Mesmo corte da análise: hook inteiro, body em ~20s sem quebrar frase.
-   *  Substitui os trechos que já eram deste avatar; não mexe nos dos outros. */
-  function colarCopyNoSlot(taskId: string, sIdx: number, texto: string) {
-    const bruto = texto.replace(/\r\n/g, '\n').trim();
-    if (!bruto) return;
-    // Calcula FORA do updater (lendo o espelho síncrono): se a copy não render
-    // trecho nenhum, avisa e NÃO apaga o que foi colado.
+  /** CREATOR (06.09): a copy de cada avatar vive em CAIXAS — hooks (0..10) e
+   *  body — e vira os takes DESTE avatar pelo modelo da montagem: um vídeo por
+   *  HOOK n, todos com o mesmo body; sem hook, full body. Rascunho por slot,
+   *  chave `${taskId}:${sIdx}`; sem rascunho, as caixas nascem das partes que
+   *  já são do avatar (ida e volta testada em lib/pilot-copy-creator). */
+  const [copyRascunho, setCopyRascunho] = useState<Record<string, CopyDoAvatar>>({});
+  function rascunhoDoSlot(a: TaskAnalysis, sIdx: number): CopyDoAvatar {
+    const r = copyRascunho[`${a.taskId}:${sIdx}`];
+    if (r) return r;
+    // MESMA regra do disparo (ownerSlotIdx): trecho órfão de avatar removido
+    // pertence ao 1º slot e aparece nas caixas dele.
+    return copyDasPartes((a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) === sIdx));
+  }
+  function setRascunho(chave: string, copy: CopyDoAvatar) {
+    setCopyRascunho((p) => ({ ...p, [chave]: copy }));
+  }
+  function aplicarCopyNoSlot(taskId: string, sIdx: number) {
+    // Lê o espelho síncrono: se a copy não render trecho, avisa e NÃO apaga o
+    // que foi escrito.
     const a = taskAnalysesRef.current[taskId];
     const slot = a?.roleSlots?.[sIdx];
     if (!a || !slot) return;
-    const roleLc = slot.role.toLowerCase();
-    // parseParts pula a 1ª linha (heading do AD) — daí o prefixo. Aceita
-    // HOOK/GANCHO/BODY/CORPO/PARTE/TAKE com ou sem ":"; sem heading = 1 bloco.
-    const blocos = parseParts(`COPY\n${bruto}`);
-    // "Outros" pela MESMA regra do disparo (ownerSlotIdx): trecho órfão de um
-    // avatar removido pertence ao 1º slot e é substituído junto, não duplicado.
-    const outros = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) !== sIdx);
-    const maior = (re: RegExp) =>
-      outros.reduce((mx, p) => {
-        const m = re.exec(p.label || '');
-        return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
-      }, 0);
-    let hookN = maior(/^(?:HOOK|GANCHO)\s+(\d+)/i);
-    let bodyN = maior(/^(?:BODY|PARTE)\s+(\d+)/i);
-    const novas: TaskAnalysis['partTemplates'] = [];
-    for (const b of blocos) {
-      const t = b.text.trim();
-      if (!t) continue;
-      if (/^(HOOK|GANCHO)/i.test(b.label)) {
-        hookN++;
-        novas.push({ label: `HOOK ${hookN}`, text: t, matchByRole: roleLc, speaker: slot.role });
-        continue;
-      }
-      for (const pedaco of splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 })) {
-        bodyN++;
-        novas.push({ label: `BODY ${bodyN}`, text: pedaco, matchByRole: roleLc, speaker: slot.role });
-      }
+    const copy = rascunhoDoSlot(a, sIdx);
+    const problema = problemaDaCopy(copy);
+    if (problema === 'hooks-demais') {
+      setError(`Até ${MAX_HOOKS} hooks por avatar.`);
+      return;
     }
+    if (problema === 'sem-texto') {
+      setError('Escreve pelo menos um hook ou o body antes de virar takes.');
+      return;
+    }
+    const outros = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) !== sIdx);
+    // Mesmo corte do body da análise: ~20s, sem quebrar frase.
+    const novas = partesDaCopy(copy, slot.role, outros, (t) => splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 }));
     if (!novas.length) {
-      setError('Não achei texto falado nessa copy. Confere se sobrou algo além dos títulos (HOOK/BODY).');
+      setError('Não achei texto falado nessa copy.');
       return;
     }
     const partTemplates = [...outros, ...novas];
@@ -9406,7 +9407,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return next;
     });
     setError(null);
-    setCopyColada((p) => ({ ...p, [`${taskId}:${sIdx}`]: '' }));
+    // O rascunho passa a ser o que foi aplicado (remontado das partes).
+    setCopyRascunho((p) => {
+      const n = { ...p };
+      delete n[`${taskId}:${sIdx}`];
+      return n;
+    });
   }
 
   /** Remove uma PART inteira (card) do que vai pro HeyGen. Usado pra tirar
@@ -15204,9 +15210,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 type="button"
                                                 onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
                                                 className="btn-olho rounded-full px-2 py-0.5 text-[11px] active:translate-y-[1px]"
-                                                title="Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)"
+                                                title={ehCreator
+                                                  ? 'Escrever a copy deste avatar: hooks e body'
+                                                  : 'Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)'}
+                                                aria-label={ehCreator ? 'Escrever a copy deste avatar' : 'Preview do texto deste avatar'}
                                               >
-                                                👁
+                                                {ehCreator ? (
+                                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="inline-block align-[-2px]">
+                                                    <path d="M12 20h9" />
+                                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                                  </svg>
+                                                ) : (
+                                                  '👁'
+                                                )}
                                               </button>
                                               <button
                                                 type="button"
@@ -15242,7 +15258,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           {previewOpen[`${a.taskId}:${sIdx}`] ? (
                                             <div className="olho-painel mt-2 rounded-[10px] p-3">
                                               <div className="olho-titulo mono mb-2 text-[9px] uppercase tracking-widest">
-                                                preview do texto pro HeyGen ({slot.role}) — editavel
+                                                {ehCreator ? `copy deste avatar (${slot.role})` : `preview do texto pro HeyGen (${slot.role}) — editavel`}
                                               </div>
                                               {(() => {
                                                 // MESMA regra do disparo (ownerSlotIdx): inclui as
@@ -15253,6 +15269,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   .map((pt, idx) => ({ pt, idx }))
                                                   .filter(({ pt }) => ownerSlotIdx(a, pt) === sIdx);
                                                 if (matched.length === 0) {
+                                                  // CREATOR: as caixas de hook/body logo abaixo são o caminho.
+                                                  if (ehCreator) return null;
                                                   return (
                                                     <div className="aviso-amarelo rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2.5 text-[11px] leading-relaxed">
                                                       ⚠ Nenhum trecho é falado por este avatar.
@@ -15354,40 +15372,128 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               {/* CREATOR (05.09): a copy entra AQUI, depois do avatar.
                                                 * Cola a copy deste avatar (HOOK/BODY) e ela vira os
                                                 * takes dele, com o mesmo corte da análise. */}
-                                              {ehCreator ? (
-                                                <div className="mt-2 rounded-[10px] border border-amber-400/35 bg-amber-400/[0.05] p-2.5">
-                                                  <textarea
-                                                    value={copyColada[`${a.taskId}:${sIdx}`] || ''}
-                                                    onChange={(e) => setCopyColada((p) => ({ ...p, [`${a.taskId}:${sIdx}`]: e.target.value }))}
-                                                    rows={7}
-                                                    spellCheck={false}
-                                                    placeholder={'HOOK 1\nTexto do gancho\n\nBODY\nTexto do corpo (vira takes de ~20s)'}
-                                                    className="mono w-full resize-y rounded-[8px] bg-bg/50 px-2.5 py-2 text-[12.5px] leading-relaxed text-text outline-none"
-                                                    style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
-                                                  />
-                                                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                    <button
-                                                      type="button"
-                                                      disabled={!(copyColada[`${a.taskId}:${sIdx}`] || '').trim()}
-                                                      onClick={() => colarCopyNoSlot(a.taskId, sIdx, copyColada[`${a.taskId}:${sIdx}`] || '')}
-                                                      className="rounded-[10px] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black transition disabled:opacity-40"
-                                                      style={{
-                                                        fontFamily: 'var(--font-tech)',
-                                                        background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
-                                                        boxShadow: '0 0 20px -6px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
-                                                      }}
-                                                      title={`Divide em takes e atribui a ${slot.role}. Substitui os trechos que já eram dele.`}
-                                                    >
-                                                      Virar takes
-                                                    </button>
-                                                    {partsCount > 0 ? (
-                                                      <span className="mono text-[10.5px] uppercase tracking-widest text-text-muted">
-                                                        <b className="tabular-nums text-text">{partsCount}</b> take{partsCount === 1 ? '' : 's'} deste avatar
+                                              {ehCreator ? (() => {
+                                                const chave = `${a.taskId}:${sIdx}`;
+                                                const r = rascunhoDoSlot(a, sIdx);
+                                                const problema = problemaDaCopy(r);
+                                                const hooksValidos = r.hooks.filter((h) => h.trim()).length;
+                                                const videos = videosDaMontagem(a.partTemplates || []);
+                                                const caixa =
+                                                  'mono w-full resize-y rounded-[8px] bg-bg/50 px-2.5 py-2 text-[12.5px] leading-relaxed text-text outline-none transition focus:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.7),0_0_0_3px_rgba(251,191,36,0.12)]';
+                                                return (
+                                                  <div
+                                                    className="mt-2 grid gap-3 rounded-[12px] p-3"
+                                                    style={{
+                                                      boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.32), inset 0 1px 0 rgba(255,255,255,0.05)',
+                                                      background: 'linear-gradient(180deg, rgba(251,191,36,0.06), rgba(0,0,0,0.10))',
+                                                    }}
+                                                  >
+                                                    {/* HOOKS — um vídeo por caixa, todos com o mesmo body */}
+                                                    <div className="grid gap-2">
+                                                      <div className="flex items-center justify-between gap-2">
+                                                        <span className="field-label">
+                                                          Hooks{' '}
+                                                          <span className="mono tabular-nums text-text-muted">
+                                                            {hooksValidos}/{MAX_HOOKS}
+                                                          </span>
+                                                        </span>
+                                                        <button
+                                                          type="button"
+                                                          disabled={r.hooks.length >= MAX_HOOKS}
+                                                          onClick={() => setRascunho(chave, { ...r, hooks: [...r.hooks, ''] })}
+                                                          title={r.hooks.length >= MAX_HOOKS ? `Até ${MAX_HOOKS} hooks` : 'Mais um hook: outra versão do mesmo AD, com o mesmo body'}
+                                                          className="mono inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] uppercase tracking-widest text-amber-200 transition hover:bg-amber-400/15 disabled:opacity-40"
+                                                          style={{ boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.5)' }}
+                                                        >
+                                                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                                                            <path d="M12 5v14M5 12h14" />
+                                                          </svg>
+                                                          hook
+                                                        </button>
+                                                      </div>
+                                                      {r.hooks.length === 0 ? (
+                                                        <div className="rounded-[8px] px-2.5 py-2 text-[12px] text-text-muted" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.6)' }}>
+                                                          Full body: sem gancho, a montagem sai um vídeo só com o body.
+                                                        </div>
+                                                      ) : (
+                                                        r.hooks.map((h, i) => (
+                                                          <div key={i} className="flex items-start gap-2">
+                                                            <span
+                                                              className="mono mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold tabular-nums text-amber-200"
+                                                              style={{ boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.5)' }}
+                                                              title={`Hook ${i + 1} → vídeo G${i + 1}`}
+                                                            >
+                                                              {i + 1}
+                                                            </span>
+                                                            <textarea
+                                                              value={h}
+                                                              onChange={(e) => setRascunho(chave, { ...r, hooks: r.hooks.map((x, j) => (j === i ? e.target.value : x)) })}
+                                                              rows={2}
+                                                              spellCheck={false}
+                                                              placeholder="Texto do gancho"
+                                                              className={caixa + ' min-h-[44px] flex-1'}
+                                                              style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                                                            />
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => setRascunho(chave, { ...r, hooks: r.hooks.filter((_, j) => j !== i) })}
+                                                              title="Remover este hook"
+                                                              aria-label="Remover hook"
+                                                              className="mt-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-text-muted transition hover:text-red-300"
+                                                              style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                                                            >
+                                                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                                                                <path d="M18 6 6 18M6 6l12 12" />
+                                                              </svg>
+                                                            </button>
+                                                          </div>
+                                                        ))
+                                                      )}
+                                                    </div>
+                                                    {/* BODY — o mesmo pra todos os hooks, cortado em takes de ~20s */}
+                                                    <div className="grid gap-1.5">
+                                                      <span className="field-label">
+                                                        Body <span className="mono text-text-muted">vira takes de ~20s</span>
                                                       </span>
-                                                    ) : null}
+                                                      <textarea
+                                                        value={r.body}
+                                                        onChange={(e) => setRascunho(chave, { ...r, body: e.target.value })}
+                                                        rows={7}
+                                                        spellCheck={false}
+                                                        placeholder="Texto do corpo. Um vídeo por hook, todos com este body."
+                                                        className={caixa + ' min-h-[140px]'}
+                                                        style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                                                      />
+                                                    </div>
+                                                    <div className="flex flex-wrap items-center gap-3">
+                                                      <button
+                                                        type="button"
+                                                        disabled={!!problema}
+                                                        onClick={() => aplicarCopyNoSlot(a.taskId, sIdx)}
+                                                        className="rounded-[10px] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black transition disabled:opacity-40"
+                                                        style={{
+                                                          fontFamily: 'var(--font-tech)',
+                                                          background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
+                                                          boxShadow: '0 0 20px -6px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                        }}
+                                                        title={`Vira takes deste avatar (${slot.role}). Substitui os que já eram dele.`}
+                                                      >
+                                                        Virar takes
+                                                      </button>
+                                                      {problema === 'hooks-demais' ? (
+                                                        <span className="text-[12px] text-amber-300">Até {MAX_HOOKS} hooks.</span>
+                                                      ) : null}
+                                                      {partsCount > 0 ? (
+                                                        <span className="mono text-[10.5px] uppercase tracking-widest text-text-muted">
+                                                          <b className="tabular-nums text-text">{partsCount}</b> take{partsCount === 1 ? '' : 's'} deste avatar
+                                                          {' · '}
+                                                          <b className="tabular-nums text-text">{videos}</b> vídeo{videos === 1 ? '' : 's'} na montagem
+                                                        </span>
+                                                      ) : null}
+                                                    </div>
                                                   </div>
-                                                </div>
-                                              ) : null}
+                                                );
+                                              })() : null}
                                               {/* TRECHO NOVO (30.08). O doc manda o que manda; aqui
                                                 * dá pra ACRESCENTAR fala pra este avatar — inclusive
                                                 * pra um avatar adicionado na mão, que nasce sem
