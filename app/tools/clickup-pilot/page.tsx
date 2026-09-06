@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
 import { logHistory, type FileRef } from '@/lib/history';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
@@ -1412,7 +1411,6 @@ export default function ClickUpPilotPage() {
 }
 
 function ClickUpPilotInner() {
-  const router = useRouter();
   const tier = useTier();
 
   // ─── BLOQUEIO: só Pro/Admin podem usar ───
@@ -10313,7 +10311,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     };
   }
 
-  /** Dispara UMA task pra HeyGen Auto Dynamic */
+  /** Dispara UMA task (botão Play do card) — pela fila em background do Pilot. */
   function dispatchTaskToHeyGen(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a) return;
@@ -10354,49 +10352,32 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       );
       return;
     }
-    // ÁUDIO POR AVATAR (29.08): o handoff pro Hey Auto é por TEXTO — mandaria
-    // a task de áudio pro TTS em silêncio (voz errada). Task com áudio upado
-    // dispara pela MESMA fila em background do START, que fala áudio.
-    if (plan.parts.some((p: any) => p.audioKey)) {
-      setBatchStates((prev) => ({
-        ...prev,
-        [taskId]: {
-          ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName, parts: [], startedAt: Date.now() }),
-          phase: 'queued',
-          message: 'Na fila — task com áudio upado roda em background...',
-          finishedAt: undefined,
-        } as BatchTaskState,
-      }));
-      for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
-      void runHeyGenGated(taskId, 'run');
-      return;
-    }
-    const handoff = {
-      adName: plan.adName,
-      motor: 'III',
-      mode: 'copy',
-      dynamic: true,
-      partTexts: plan.parts.map((p: any) => p.text),
-      partLabels: plan.parts.map((p: any) => p.label),
-      partAvatarIds: plan.parts.map((p: any) => p.avatarId),
-      partVoiceIds: plan.parts.map((p: any) => p.voiceId), // NOVO: voz por parte
-      // Apply Custom Motion por parte. O `motor: 'III'` acima continua sendo o
-      // default do disparo: quem tem gesto sobe pro IV sozinho no runner.
-      partMotionPrompts: plan.parts.map((p: any) => p.motionPrompt || null),
-      copy: plan.parts.map((p: any) => p.text).join('\n\n'),
-    };
-    sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
+    // DISPARO SÓ PELO PILOT (06.09): o Play entra na MESMA fila em background
+    // do Start (runHeyGenGated → runTaskInBackground), que já sabe áudio por
+    // avatar, gesto (motor IV), versões, decupagem e pós-produção. Antes, task
+    // só de texto pulava pro Hey Auto com um handoff por sessionStorage — duas
+    // telas pra mesma coisa, e o Hey Auto deixou de ser ferramenta separada.
+    setBatchStates((prev) => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName, parts: [], startedAt: Date.now() }),
+        teamId: isTaskLocal(taskId) ? undefined : (prev[taskId]?.teamId ?? selectedTeam ?? undefined),
+        phase: 'queued',
+        message: 'Na fila — aguardando vaga...',
+        finishedAt: undefined,
+      } as BatchTaskState,
+    }));
     // Marca task + siblings G1/G2 como disparadas (compartilham conteudo)
     const siblings = getSiblingTaskIds(taskId);
     for (const sid of siblings) markDispatched(sid);
-    setTaskAnalyses(prev => {
+    setTaskAnalyses((prev) => {
       const next = { ...prev };
       for (const sid of siblings) {
         if (next[sid]) next[sid] = { ...next[sid], dispatchedAt: Date.now() };
       }
       return next;
     });
-    router.push('/tools/heygen-auto?from=clickup-pilot');
+    void runHeyGenGated(taskId, 'run');
   }
 
   /** Dispara SO o Auto B-roll (Magnific) dessa task — standalone, ungated.
@@ -10721,23 +10702,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       );
       return;
     }
-    const handoff = {
-      adName: dispatchPlan.adName,
-      motor: 'III',
-      mode: 'copy',
-      dynamic: true,
-      // Passa partes EXATAS do parser (texto + label + avatar). HeyGen Auto
-      // usa direto, sem re-split. Isso garante que mapping avatar↔parte
-      // sobreviva e que HOOK 1, HOOK 2, BODY virem partes separadas como
-      // o parser identificou.
-      partTexts: dispatchPlan.parts.map((p) => p.text),
-      partLabels: dispatchPlan.parts.map((p) => p.label),
-      partAvatarIds: dispatchPlan.parts.map((p) => p.avatarId),
-      // Tambem manda copy concat como fallback
-      copy: dispatchPlan.parts.map((p) => p.text).join('\n\n'),
-    };
-    sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
-    router.push('/tools/heygen-auto?from=clickup-pilot');
+    // DISPARO SÓ PELO PILOT (06.09): o painel antigo não pula mais pro Hey
+    // Auto — manda a task pra análise do Pilot (card com avatares/takes) e o
+    // disparo sai pelo Play ou pelo Start, na fila em background.
+    if (!selectedTask) return;
+    const alvo = selectedTask;
+    setSelectedTaskIds((prev) => new Set([...Array.from(prev), alvo.id]));
+    setSelectedTask(null);
+    void analyzeSelected([alvo]);
   }
 
   /* ========== UI ========== */
@@ -16629,9 +16601,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               className="btn-primary mt-3"
                               title={dispatchPlan.parts.some((p) => !p.avatarId)
                                 ? 'Resolva os avatares pendentes primeiro'
-                                : 'Abre Hey Auto Dynamic com tudo pre-preenchido'}
+                                : 'Analisa a task no Pilot: o disparo sai pelo Play do card ou pelo Start'}
                             >
-                              ▶ Disparar via Hey Auto Dynamic (motor III)
+                              ▶ Analisar e disparar pelo Pilot
                             </button>
                           </div>
                         ) : null}

@@ -2786,12 +2786,29 @@ function HeyGenAutoInner() {
             ANTES do disparo. Silencioso quando esta tudo certo. */}
         <HeyGenContaAviso />
 
+        {/* 06.09: o Hey Auto deixou de ser ferramenta separada. Todo disparo no
+            HeyGen sai pelo Pilot (CREATOR, DOCS ou CLICKUP); esta tela fica como
+            motor interno, sem porta no hub, no menu ou na busca. */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-amber-400/40 bg-amber-400/10 px-4 py-3">
+          <div className="text-[12.5px] leading-relaxed text-amber-100">
+            <strong className="text-amber-200">O disparo agora é pelo Pilot.</strong> O Hey Auto virou motor
+            interno: cole a copy, escolha avatares e dispare de lá, em fila e com pós-produção.
+          </div>
+          <a
+            href="/tools/clickup-pilot"
+            className="mono inline-flex items-center gap-2 rounded-full border border-amber-400/60 bg-amber-400/15 px-3.5 py-1.5 text-[10.5px] uppercase tracking-widest text-amber-100 transition hover:bg-amber-400/25"
+          >
+            Abrir o Pilot
+            <span>→</span>
+          </a>
+        </div>
+
         <ToolHeroVideo
           src="/cards/hey-auto.mp4"
           poster="/cards/hey-auto.jpg"
-          eyebrow="HeyGen em série"
+          eyebrow="Motor interno do Pilot"
           title="Hey Auto"
-          subtitle="Lipsync no HeyGen em lote, num clique. Você nunca mais abre o HeyGen."
+          subtitle="Lipsync no HeyGen em lote. Hoje é o Pilot quem dispara por aqui."
           glow="rgba(34,211,238,0.5)"
         />
         <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">

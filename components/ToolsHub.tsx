@@ -214,19 +214,12 @@ const TOOLS: ToolEntry[] = [
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
   },
-  {
-    href: '/tools/heygen-auto',
-    label: 'Hey Auto',
-    description: 'Lipsync no HeyGen em lote, num clique — sem abrir o HeyGen.',
-    icon: <IconHeyGenAuto size={26} />,
-    hue: 'rgba(103, 232, 249, 0.42)',
-    badge: 'ADMIN',
-    adminOnly: true,
-  },
+  // Hey Auto saiu do hub (06.09): todo disparo no HeyGen é pelo Pilot. A rota
+  // continua como motor interno, sem porta própria.
   {
     href: '/tools/clickup-pilot',
-    label: 'ClickUp Pilot',
-    description: 'Lê o briefing de cada task e dispara os lipsyncs em fila.',
+    label: 'Pilot',
+    description: 'Lê a copy de cada task e dispara os lipsyncs em fila.',
     icon: <IconClickUpPilot size={26} />,
     hue: 'rgba(167, 139, 250, 0.42)',
     badge: 'ADMIN',

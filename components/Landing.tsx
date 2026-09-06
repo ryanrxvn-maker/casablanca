@@ -1790,8 +1790,8 @@ function SuiteSection() {
   const featured = [
     {
       img: '/cards/fluxo-automatico.jpg',
-      title: 'ClickUp Pilot',
-      desc: 'Do briefing na task ao vídeo pronto, em fila, sem clique manual.',
+      title: 'Pilot',
+      desc: 'Da copy na task ao vídeo pronto, em fila, sem clique manual.',
     },
     {
       img: '/cards/auto-broll.jpg',
@@ -1801,9 +1801,9 @@ function SuiteSection() {
   ];
   const tools = [
     {
-      img: '/cards/hey-auto.jpg',
-      title: 'Hey Auto',
-      desc: 'Lipsync em lote no HeyGen, sem abrir o HeyGen.',
+      img: '/cards/decupagem-inteligente.jpg',
+      title: 'Decupagem Inteligente',
+      desc: 'Corta o vídeo seguindo a sua copy, sem comer palavra.',
     },
     {
       img: '/cards/lipsync.jpg',

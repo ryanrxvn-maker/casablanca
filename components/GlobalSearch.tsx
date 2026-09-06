@@ -85,7 +85,6 @@ const ENTRIES: Entry[] = [
   { id: 'copy-srt', group: 'Ferramentas', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
   { id: 'tipografia', group: 'Ferramentas', label: 'Legendas Automáticas', hint: 'Legendas animadas no tempo do áudio', href: '/tools/tipografia', icon: <IconTipografia size={20} />, keywords: ['tipografia', 'lettering', 'legenda animada', 'caption', 'texto', 'kinetic'] },
   { id: 'auto-cortes', group: 'Ferramentas', label: 'Auto Cortes', hint: 'Vídeo longo vira cortes com legenda e headline', href: '/tools/auto-cortes', icon: <IconAutoCortes size={20} />, keywords: ['cortes', 'podcast', 'clipes', 'opus', 'reels', 'shorts', 'tiktok'], adminOnly: true },
-  { id: 'heygen-auto', group: 'Ferramentas', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'], adminOnly: true },
   { id: 'famous-hey', group: 'Ferramentas', label: 'Famous Hey', hint: 'Anima uma foto sem cadastrar avatar', href: '/tools/famous-hey', icon: <IconFamousHey size={20} />, keywords: ['imagem', 'foto', 'famoso', 'moderacao', 'moderação', 'avatar'], adminOnly: true },
 
   // Atalhos
@@ -141,16 +140,6 @@ const FEATURED: FeaturedDef[] = [
     primary: '#c084fc',
     secondary: '#6d4ee8',
     glowRgb: '167, 139, 250',
-  },
-  {
-    id: 'heygen-auto',
-    label: 'Hey Auto',
-    hint: 'Lipsync em lote',
-    href: '/tools/heygen-auto',
-    Icon: IconHeyGenAuto,
-    primary: '#5eead4',
-    secondary: '#06b6d4',
-    glowRgb: '45, 212, 191',
   },
   {
     id: 'auto-broll',
