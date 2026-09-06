@@ -15270,9 +15270,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             * Diff visual: texto identico ao que sera enviado, 1:1. */}
                                           {previewOpen[`${a.taskId}:${sIdx}`] ? (
                                             <div className="olho-painel mt-2 rounded-[10px] p-3">
-                                              <div className="olho-titulo mono mb-2 text-[9px] uppercase tracking-widest">
-                                                {ehCreator ? `copy deste avatar (${slot.role})` : `preview do texto pro HeyGen (${slot.role}) — editavel`}
-                                              </div>
+                                              {ehCreator ? null : (
+                                                <div className="olho-titulo mono mb-2 text-[9px] uppercase tracking-widest">
+                                                  preview do texto pro HeyGen ({slot.role}) — editavel
+                                                </div>
+                                              )}
                                               {(() => {
                                                 // MESMA regra do disparo (ownerSlotIdx): inclui as
                                                 // parts órfãs que caem no 1º avatar. Sem isso o
@@ -15392,118 +15394,126 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 const problema = problemaDaCopy(r);
                                                 const hooksValidos = r.hooks.filter((h) => h.trim()).length;
                                                 const videos = videosDaMontagem(a.partTemplates || []);
-                                                const caixa =
-                                                  'mono w-full resize-y rounded-[8px] bg-bg/50 px-2.5 py-2 text-[12.5px] leading-relaxed text-text outline-none transition focus:shadow-[inset_0_0_0_1px_rgba(251,191,36,0.7),0_0_0_3px_rgba(251,191,36,0.12)]';
                                                 return (
-                                                  <div
-                                                    className="mt-2 grid gap-3 rounded-[12px] p-3"
-                                                    style={{
-                                                      boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.32), inset 0 1px 0 rgba(255,255,255,0.05)',
-                                                      background: 'linear-gradient(180deg, rgba(251,191,36,0.06), rgba(0,0,0,0.10))',
-                                                    }}
-                                                  >
-                                                    {/* HOOKS — um vídeo por caixa, todos com o mesmo body */}
-                                                    <div className="grid gap-2">
-                                                      <div className="flex items-center justify-between gap-2">
-                                                        <span className="field-label">
-                                                          Hooks{' '}
-                                                          <span className="mono tabular-nums text-text-muted">
-                                                            {hooksValidos}/{MAX_HOOKS}
+                                                  <div className="cc-shell">
+                                                    <div className="cc-core">
+                                                      <div className="cc-head">
+                                                        <span className="cc-title">
+                                                          <span className="cc-title-ico" aria-hidden>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                                              <path d="M12 20h9" />
+                                                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                                            </svg>
+                                                          </span>
+                                                          Copy do avatar
+                                                          <span className="cc-role">{slot.role}</span>
+                                                        </span>
+                                                        <span className="cc-pills">
+                                                          <span className="cc-pill" title="Takes deste avatar já aplicados">
+                                                            <b>{partsCount}</b> take{partsCount === 1 ? '' : 's'}
+                                                          </span>
+                                                          <span className="cc-pill" title="Vídeos que a montagem vai gerar (um por hook; sem hook, um só)">
+                                                            <b>{videos}</b> vídeo{videos === 1 ? '' : 's'}
                                                           </span>
                                                         </span>
+                                                      </div>
+
+                                                      {/* HOOKS — um vídeo por caixa, todos com o mesmo body */}
+                                                      <div className="cc-sec">
+                                                        <div className="cc-label">
+                                                          <span className="cc-label-txt">
+                                                            Hooks
+                                                            <span className="cc-label-hint">
+                                                              {hooksValidos} de {MAX_HOOKS} · um vídeo por hook
+                                                            </span>
+                                                          </span>
+                                                          <button
+                                                            type="button"
+                                                            className="cc-add"
+                                                            disabled={r.hooks.length >= MAX_HOOKS}
+                                                            onClick={() => setRascunho(chave, { ...r, hooks: [...r.hooks, ''] })}
+                                                            title={r.hooks.length >= MAX_HOOKS ? `Até ${MAX_HOOKS} hooks` : 'Mais um hook: outra versão do mesmo AD, com o mesmo body'}
+                                                          >
+                                                            <span className="cc-add-ico" aria-hidden>
+                                                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                                                                <path d="M12 5v14M5 12h14" />
+                                                              </svg>
+                                                            </span>
+                                                            Hook
+                                                          </button>
+                                                        </div>
+                                                        {r.hooks.length === 0 ? (
+                                                          <div className="cc-empty">Full body: sem gancho, a montagem sai um vídeo só com o body.</div>
+                                                        ) : (
+                                                          r.hooks.map((h, i) => (
+                                                            <div key={i} className="cc-row">
+                                                              <span className={'cc-num' + (h.trim() ? ' is-on' : '')} title={`Hook ${i + 1} vira o vídeo G${i + 1}`}>
+                                                                {i + 1}
+                                                              </span>
+                                                              <textarea
+                                                                className="cc-box"
+                                                                value={h}
+                                                                onChange={(e) => setRascunho(chave, { ...r, hooks: r.hooks.map((x, j) => (j === i ? e.target.value : x)) })}
+                                                                rows={2}
+                                                                spellCheck={false}
+                                                                placeholder={`Texto do hook ${i + 1}`}
+                                                                style={{ minHeight: 48 }}
+                                                              />
+                                                              <button
+                                                                type="button"
+                                                                className="cc-del"
+                                                                onClick={() => setRascunho(chave, { ...r, hooks: r.hooks.filter((_, j) => j !== i) })}
+                                                                title="Remover este hook"
+                                                                aria-label="Remover hook"
+                                                              >
+                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                                                                  <path d="M18 6 6 18M6 6l12 12" />
+                                                                </svg>
+                                                              </button>
+                                                            </div>
+                                                          ))
+                                                        )}
+                                                      </div>
+
+                                                      {/* BODY — o mesmo pra todos os hooks, cortado em takes de ~20s */}
+                                                      <div className="cc-sec">
+                                                        <div className="cc-label">
+                                                          <span className="cc-label-txt">
+                                                            Body
+                                                            <span className="cc-label-hint">o mesmo pra todos os hooks · corte automático em takes de ~20s</span>
+                                                          </span>
+                                                        </div>
+                                                        <textarea
+                                                          className="cc-box"
+                                                          value={r.body}
+                                                          onChange={(e) => setRascunho(chave, { ...r, body: e.target.value })}
+                                                          rows={7}
+                                                          spellCheck={false}
+                                                          placeholder="Texto do corpo"
+                                                          style={{ minHeight: 150 }}
+                                                        />
+                                                      </div>
+
+                                                      <div className="cc-foot">
                                                         <button
                                                           type="button"
-                                                          disabled={r.hooks.length >= MAX_HOOKS}
-                                                          onClick={() => setRascunho(chave, { ...r, hooks: [...r.hooks, ''] })}
-                                                          title={r.hooks.length >= MAX_HOOKS ? `Até ${MAX_HOOKS} hooks` : 'Mais um hook: outra versão do mesmo AD, com o mesmo body'}
-                                                          className="mono inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] uppercase tracking-widest text-amber-200 transition hover:bg-amber-400/15 disabled:opacity-40"
-                                                          style={{ boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.5)' }}
+                                                          className="cc-cta"
+                                                          disabled={!!problema}
+                                                          onClick={() => aplicarCopyNoSlot(a.taskId, sIdx)}
+                                                          title={`Divide o body em takes e monta um vídeo por hook pra ${slot.role}. Substitui os takes que já eram dele.`}
                                                         >
-                                                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-                                                            <path d="M12 5v14M5 12h14" />
-                                                          </svg>
-                                                          hook
+                                                          <span className="cc-cta-ico" aria-hidden>
+                                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                                              <path d="M4 7h16" />
+                                                              <path d="M4 17h16" />
+                                                              <path d="M12 3v18" strokeDasharray="2.5 3" />
+                                                            </svg>
+                                                          </span>
+                                                          Smart Division
+                                                          <span className="cc-brilho" aria-hidden />
                                                         </button>
+                                                        {problema === 'hooks-demais' ? <span className="cc-erro">Até {MAX_HOOKS} hooks.</span> : null}
                                                       </div>
-                                                      {r.hooks.length === 0 ? (
-                                                        <div className="rounded-[8px] px-2.5 py-2 text-[12px] text-text-muted" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.6)' }}>
-                                                          Full body: sem gancho, a montagem sai um vídeo só com o body.
-                                                        </div>
-                                                      ) : (
-                                                        r.hooks.map((h, i) => (
-                                                          <div key={i} className="flex items-start gap-2">
-                                                            <span
-                                                              className="mono mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10.5px] font-bold tabular-nums text-amber-200"
-                                                              style={{ boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.5)' }}
-                                                              title={`Hook ${i + 1} → vídeo G${i + 1}`}
-                                                            >
-                                                              {i + 1}
-                                                            </span>
-                                                            <textarea
-                                                              value={h}
-                                                              onChange={(e) => setRascunho(chave, { ...r, hooks: r.hooks.map((x, j) => (j === i ? e.target.value : x)) })}
-                                                              rows={2}
-                                                              spellCheck={false}
-                                                              placeholder="Texto do gancho"
-                                                              className={caixa + ' min-h-[44px] flex-1'}
-                                                              style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
-                                                            />
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => setRascunho(chave, { ...r, hooks: r.hooks.filter((_, j) => j !== i) })}
-                                                              title="Remover este hook"
-                                                              aria-label="Remover hook"
-                                                              className="mt-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-text-muted transition hover:text-red-300"
-                                                              style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
-                                                            >
-                                                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                                                                <path d="M18 6 6 18M6 6l12 12" />
-                                                              </svg>
-                                                            </button>
-                                                          </div>
-                                                        ))
-                                                      )}
-                                                    </div>
-                                                    {/* BODY — o mesmo pra todos os hooks, cortado em takes de ~20s */}
-                                                    <div className="grid gap-1.5">
-                                                      <span className="field-label">
-                                                        Body <span className="mono text-text-muted">vira takes de ~20s</span>
-                                                      </span>
-                                                      <textarea
-                                                        value={r.body}
-                                                        onChange={(e) => setRascunho(chave, { ...r, body: e.target.value })}
-                                                        rows={7}
-                                                        spellCheck={false}
-                                                        placeholder="Texto do corpo. Um vídeo por hook, todos com este body."
-                                                        className={caixa + ' min-h-[140px]'}
-                                                        style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
-                                                      />
-                                                    </div>
-                                                    <div className="flex flex-wrap items-center gap-3">
-                                                      <button
-                                                        type="button"
-                                                        disabled={!!problema}
-                                                        onClick={() => aplicarCopyNoSlot(a.taskId, sIdx)}
-                                                        className="rounded-[10px] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black transition disabled:opacity-40"
-                                                        style={{
-                                                          fontFamily: 'var(--font-tech)',
-                                                          background: 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)',
-                                                          boxShadow: '0 0 20px -6px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
-                                                        }}
-                                                        title={`Vira takes deste avatar (${slot.role}). Substitui os que já eram dele.`}
-                                                      >
-                                                        Virar takes
-                                                      </button>
-                                                      {problema === 'hooks-demais' ? (
-                                                        <span className="text-[12px] text-amber-300">Até {MAX_HOOKS} hooks.</span>
-                                                      ) : null}
-                                                      {partsCount > 0 ? (
-                                                        <span className="mono text-[10.5px] uppercase tracking-widest text-text-muted">
-                                                          <b className="tabular-nums text-text">{partsCount}</b> take{partsCount === 1 ? '' : 's'} deste avatar
-                                                          {' · '}
-                                                          <b className="tabular-nums text-text">{videos}</b> vídeo{videos === 1 ? '' : 's'} na montagem
-                                                        </span>
-                                                      ) : null}
                                                     </div>
                                                   </div>
                                                 );

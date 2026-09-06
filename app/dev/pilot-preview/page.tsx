@@ -684,6 +684,14 @@ function Conteudo() {
   const [linkDemo, setLinkDemo] = useState('');
   const [importandoDemo, setImportandoDemo] = useState(false);
   const [criadasDemo, setCriadasDemo] = useState(3);
+  // 06.09 — painel de copy do avatar no CREATOR (hooks + body), só a pele
+  const [ccHooks, setCcHooks] = useState<string[]>([
+    'Você usa azeite todo dia e nunca soube que ele pode virar remédio pra próstata.',
+    '',
+  ]);
+  const [ccBody, setCcBody] = useState(
+    'A maioria das pessoas usa azeite do jeito errado e joga fora justamente a parte que importa.\n\nEu vou te mostrar como preparar em 2 minutos, na sua cozinha.',
+  );
   const [docsDemo, setDocsDemo] = useState<DocChip[]>([
     { key: 'a', rotulo: 'RIPTVWA.docx · 05/09', n: 51, ativo: true },
     { key: 'b', rotulo: 'Google Docs · 04/09', n: 12, ativo: false },
@@ -762,6 +770,97 @@ function Conteudo() {
             <CreatorBar onNova={() => setCriadasDemo((n) => n + 1)} />
           ) : null}
         </PilotModeHub>
+      </section>
+
+      {/* ══════════ 0.0b CREATOR: painel de copy do avatar (hooks + body) ══════════ */}
+      <section
+        id="cc"
+        className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3"
+      >
+        <div className="label-tech mb-3 text-[9.5px] tracking-[0.18em] text-text-muted">
+          CREATOR 06.09 — copy do avatar em caixas (hooks + body) e Smart Division
+        </div>
+        <div className="olho-painel rounded-[10px] p-3">
+          <div className="cc-shell">
+            <div className="cc-core">
+              <div className="cc-head">
+                <span className="cc-title">
+                  <span className="cc-title-ico" aria-hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </span>
+                  Copy do avatar
+                  <span className="cc-role">Avatar 1</span>
+                </span>
+                <span className="cc-pills">
+                  <span className="cc-pill"><b>3</b> takes</span>
+                  <span className="cc-pill"><b>{Math.max(1, ccHooks.filter((h) => h.trim()).length)}</b> vídeo{ccHooks.filter((h) => h.trim()).length === 1 ? '' : 's'}</span>
+                </span>
+              </div>
+              <div className="cc-sec">
+                <div className="cc-label">
+                  <span className="cc-label-txt">
+                    Hooks<span className="cc-label-hint">{ccHooks.filter((h) => h.trim()).length} de 10 · um vídeo por hook</span>
+                  </span>
+                  <button type="button" className="cc-add" disabled={ccHooks.length >= 10} onClick={() => setCcHooks((h) => [...h, ''])}>
+                    <span className="cc-add-ico" aria-hidden>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    </span>
+                    Hook
+                  </button>
+                </div>
+                {ccHooks.length === 0 ? (
+                  <div className="cc-empty">Full body: sem gancho, a montagem sai um vídeo só com o body.</div>
+                ) : (
+                  ccHooks.map((h, i) => (
+                    <div key={i} className="cc-row">
+                      <span className={'cc-num' + (h.trim() ? ' is-on' : '')}>{i + 1}</span>
+                      <textarea
+                        className="cc-box"
+                        value={h}
+                        onChange={(e) => setCcHooks((hs) => hs.map((x, j) => (j === i ? e.target.value : x)))}
+                        rows={2}
+                        spellCheck={false}
+                        placeholder={`Texto do hook ${i + 1}`}
+                        style={{ minHeight: 48 }}
+                      />
+                      <button type="button" className="cc-del" onClick={() => setCcHooks((hs) => hs.filter((_, j) => j !== i))} aria-label="Remover hook">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="cc-sec">
+                <div className="cc-label">
+                  <span className="cc-label-txt">
+                    Body<span className="cc-label-hint">o mesmo pra todos os hooks · corte automático em takes de ~20s</span>
+                  </span>
+                </div>
+                <textarea className="cc-box" value={ccBody} onChange={(e) => setCcBody(e.target.value)} rows={6} spellCheck={false} placeholder="Texto do corpo" style={{ minHeight: 150 }} />
+              </div>
+              <div className="cc-foot">
+                <button type="button" className="cc-cta">
+                  <span className="cc-cta-ico" aria-hidden>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 7h16" />
+                      <path d="M4 17h16" />
+                      <path d="M12 3v18" strokeDasharray="2.5 3" />
+                    </svg>
+                  </span>
+                  Smart Division
+                  <span className="cc-brilho" aria-hidden />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* ══════════ 0.1 PROVA E2E: LEGENDA + ZOOM no render ══════════ */}
