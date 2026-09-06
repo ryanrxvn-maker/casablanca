@@ -389,6 +389,76 @@ export function salvarAnalisesCreator(
   }
 }
 
+/* ───────────── análises por ESCOPO (auto-save do card) ─────────────
+ * Escopo = 'creator' | 'docs:<docKey>' | 'clickup:<teamId>'. Cada escopo tem o
+ * SEU mapa de análises; trocar de modo, de empresa ou de doc troca o mapa
+ * inteiro — nada se mistura, e o F5 devolve cada card como ficou. Mesma regra
+ * do CREATOR: `imageDataUrl` (base64) nunca vai pro localStorage. */
+export const ANALISES_KEY = 'darkolab:clickup-pilot:analises';
+
+export type AnaliseSalva = AnaliseCreatorSalva & Record<string, unknown>;
+
+function lerTodasAnalises(store: Armazem | null): Record<string, Record<string, AnaliseSalva>> {
+  if (!store) return {};
+  try {
+    const obj = JSON.parse(store.getItem(ANALISES_KEY) || '{}');
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+export function lerAnalisesDoEscopo(escopo: string, store: Armazem | null = armazem()): Record<string, AnaliseSalva> {
+  const todas = lerTodasAnalises(store);
+  const doEscopo = todas[escopo];
+  if (!doEscopo || typeof doEscopo !== 'object') return {};
+  const out: Record<string, AnaliseSalva> = {};
+  for (const [id, a] of Object.entries(doEscopo)) {
+    if (a && typeof a === 'object' && Array.isArray(a.roleSlots) && Array.isArray(a.partTemplates)) out[id] = a;
+  }
+  return out;
+}
+
+export function salvarAnalisesDoEscopo(
+  escopo: string,
+  analises: Record<string, unknown>,
+  store: Armazem | null = armazem(),
+): void {
+  if (!store) return;
+  const todas = lerTodasAnalises(store);
+  if (Object.keys(analises).length === 0) delete todas[escopo];
+  else todas[escopo] = analises as Record<string, AnaliseSalva>;
+  const semImagem = (k: string, v: unknown) => (k === 'imageDataUrl' ? undefined : v);
+  let json: string;
+  try {
+    json = JSON.stringify(todas, semImagem);
+  } catch (e) {
+    console.warn('[pilot-fontes] análises não serializaram (nada gravado):', e);
+    return;
+  }
+  try {
+    store.setItem(ANALISES_KEY, json);
+  } catch (e) {
+    console.warn(`[pilot-fontes] análises não couberam no localStorage (${json.length} chars):`, e);
+  }
+}
+
+/** Tira um doc importado (e nada mais): as tasks dele e as análises são do
+ *  chamador, que sabe o que está na tela. Devolve o mapa que ficou. */
+export function removerDocLocal(key: string, store: Armazem | null = armazem()): Record<string, DocLocal> {
+  const docs = lerDocsLocais(store);
+  if (!(key in docs)) return docs;
+  delete docs[key];
+  if (store) {
+    try {
+      store.setItem(DOCS_LOCAIS_KEY, JSON.stringify(docs));
+    } catch {
+      /* sem quota: some da tela, volta no F5 */
+    }
+  }
+  return docs;
+}
+
 export function lerDocsLocais(store: Armazem | null = armazem()): Record<string, DocLocal> {
   if (!store) return {};
   try {

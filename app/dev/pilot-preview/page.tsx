@@ -693,8 +693,8 @@ function Conteudo() {
     'A maioria das pessoas usa azeite do jeito errado e joga fora justamente a parte que importa.\n\nEu vou te mostrar como preparar em 2 minutos, na sua cozinha.',
   );
   const [docsDemo, setDocsDemo] = useState<DocChip[]>([
-    { key: 'a', rotulo: 'RIPTVWA.docx · 05/09', n: 51, ativo: true },
-    { key: 'b', rotulo: 'Google Docs · 04/09', n: 12, ativo: false },
+    { key: 'a', rotulo: 'RIPTVWA.docx', quando: '05/09', origem: 'arquivo', n: 51, ativo: true },
+    { key: 'b', rotulo: 'Google Docs', quando: '04/09', origem: 'link', n: 13, ativo: false },
   ]);
   const [engine, setEngine] = useState<'III' | 'IV' | 'V' | undefined>(undefined);
   const [diffAberto, setDiffAberto] = useState(false);
@@ -765,6 +765,7 @@ function Conteudo() {
               importando={importandoDemo}
               docs={docsDemo}
               onEscolherDoc={(k) => setDocsDemo((ds) => ds.map((d) => ({ ...d, ativo: d.key === k })))}
+              onRemoverDoc={(k) => setDocsDemo((ds) => ds.filter((d) => d.key !== k))}
             />
           ) : modoDemo === 'creator' ? (
             <CreatorBar onNova={() => setCriadasDemo((n) => n + 1)} />

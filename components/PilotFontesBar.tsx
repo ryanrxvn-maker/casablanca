@@ -110,6 +110,10 @@ export type DocChip = {
   n: number;
   ativo: boolean;
   title?: string;
+  /** "05/09" ou similar; vai na linha de apoio do cartão */
+  quando?: string;
+  /** link | arquivo */
+  origem?: 'link' | 'arquivo' | 'colado';
 };
 
 const ACEITA = /\.(docx|txt|md)$/i;
@@ -122,6 +126,7 @@ export function DocsBar({
   importando,
   docs,
   onEscolherDoc,
+  onRemoverDoc,
 }: {
   link: string;
   onLink: (v: string) => void;
@@ -130,6 +135,8 @@ export function DocsBar({
   importando: boolean;
   docs: DocChip[];
   onEscolherDoc: (key: string) => void;
+  /** Tira o doc importado (e as tasks dele) — só deste navegador. */
+  onRemoverDoc?: (key: string) => void;
 }) {
   const [arrastando, setArrastando] = useState(false);
 
@@ -240,34 +247,116 @@ export function DocsBar({
         </label>
       </div>
       {docs.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 px-1.5">
+        <div className="grid gap-2 px-1.5 sm:grid-cols-2">
           {docs.map((d) => (
-            <button
+            <div
               key={d.key}
-              type="button"
-              onClick={() => onEscolherDoc(d.key)}
-              title={d.title || d.rotulo}
+              role="button"
+              tabIndex={0}
               aria-pressed={d.ativo}
+              onClick={() => onEscolherDoc(d.key)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onEscolherDoc(d.key);
+                }
+              }}
+              title={d.title || d.rotulo}
               className={
-                'mono inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[10.5px] uppercase tracking-[0.1em] transition ' +
-                (d.ativo ? 'bg-cyan-500/15 text-cyan-100' : 'text-text-muted hover:text-cyan-200')
+                'pfb-doc group relative flex cursor-pointer items-center gap-3 rounded-[14px] p-2.5 pr-2 text-left outline-none transition ' +
+                (d.ativo ? 'is-on' : '')
               }
               style={{
+                background: d.ativo
+                  ? 'linear-gradient(180deg, rgba(34,211,238,0.14), rgba(34,211,238,0.04)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))'
+                  : 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.12)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
                 boxShadow: d.ativo
-                  ? 'inset 0 0 0 1px rgba(34,211,238,0.7), 0 0 16px -8px rgba(34,211,238,0.8)'
-                  : 'inset 0 0 0 1px rgb(var(--line) / 0.7)',
+                  ? 'inset 0 0 0 1px rgba(34,211,238,0.6), inset 0 1px 0 rgba(255,255,255,0.08), 0 14px 30px -20px rgba(34,211,238,0.7)'
+                  : 'inset 0 0 0 1px rgb(var(--line) / 0.7), inset 0 1px 0 rgba(255,255,255,0.04)',
               }}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-                <path d="M14 3v5h5" />
-              </svg>
-              <span className="max-w-[220px] truncate normal-case tracking-normal">{d.rotulo}</span>
-              <span className={'tabular-nums ' + (d.ativo ? 'text-cyan-200' : '')}>{d.n}</span>
-            </button>
+              {/* tile do doc: acende em ciano quando é o ativo */}
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px]"
+                style={
+                  d.ativo
+                    ? {
+                        color: '#04121a',
+                        background: 'linear-gradient(135deg, #7fe4f5 0%, #22d3ee 100%)',
+                        boxShadow: '0 0 20px -6px rgba(34,211,238,0.75), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                      }
+                    : { color: 'rgb(var(--text) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.8)' }
+                }
+                aria-hidden
+              >
+                {d.origem === 'arquivo' ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5" />
+                    <path d="M9 13h6M9 17h6" />
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                  </svg>
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className={'block truncate text-[13px] font-bold ' + (d.ativo ? 'text-white' : 'text-text')}
+                  style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+                >
+                  {d.rotulo}
+                </span>
+                <span className="mono mt-0.5 block text-[10.5px] uppercase tracking-[0.1em] text-text-muted">
+                  {d.quando ? `${d.quando} · ` : ''}
+                  <b className={'tabular-nums ' + (d.ativo ? 'text-cyan-200' : 'text-text')}>{d.n}</b> task{d.n === 1 ? '' : 's'}
+                  {d.ativo ? <span className="text-cyan-300"> · na tela</span> : null}
+                </span>
+              </span>
+              {onRemoverDoc ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoverDoc(d.key);
+                  }}
+                  title="Remover este doc e as tasks dele (só deste navegador)"
+                  aria-label="Remover doc"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-text-muted transition hover:text-red-300"
+                  style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
           ))}
         </div>
       ) : null}
+      <style jsx>{`
+        .pfb-doc {
+          transition:
+            transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+            box-shadow 220ms ease;
+        }
+        .pfb-doc:hover {
+          transform: translateY(-1px);
+        }
+        .pfb-doc:focus-visible {
+          outline: 2px solid rgba(255, 255, 255, 0.55);
+          outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .pfb-doc,
+          .pfb-doc:hover {
+            transform: none;
+            transition: none;
+          }
+        }
+      `}</style>
     </div>
   );
 }

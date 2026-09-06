@@ -1599,141 +1599,120 @@ export const GUIDES: Record<string, ToolGuide> = {
   },
 
   '/tools/clickup-pilot': {
-    title: 'ClickUp Pilot',
+    title: 'Pilot',
     tagline:
-      'Lê o briefing das suas tasks no ClickUp e dispara os avatares de cada uma, em fila, sozinho — entregando o vídeo montado.',
+      'A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, em fila.',
     size: 'large',
     steps: [
       {
-        title: 'Conecte e configure (uma vez só)',
-        text: 'Clique em "Configurar" pra abrir a página de ajustes: lá entram o token pessoal do ClickUp (fica salvo só no seu navegador), o workspace e o Editor que você opera. Com tudo certo, o painel mostra o chip "Pilot Online" com o nome do workspace e do editor. Dois avisos importantes: o Pilot só LÊ o ClickUp — nada é escrito de volta —, e ele usa a mesma extensão + aba logada no HeyGen que o Hey Auto.',
+        title: 'Escolha de onde vem a task',
+        text: 'No topo da página fica o trilho com três modos. CREATOR: você monta o AD do zero, escrevendo a copy aqui mesmo. DOCS: você importa um Google Docs e todos os ADs dele viram tasks. CLICKUP: as tasks vêm da fila do editor no ClickUp, como sempre. Cada modo tem a própria tela: as tasks, as análises e a fila em produção de um modo nunca aparecem no outro, e tudo fica salvo neste navegador, inclusive depois de recarregar a página.',
         visual: (
-          <Shot label="Pilot · conexão">
+          <Shot label="Pilot · trilho de modos">
             <MRow>
-              <MChip tone="lime">PILOT ONLINE</MChip>
-              <MField label="Workspace" value="Estúdio" grow />
-              <MField label="Editor" value="João" grow />
+              <MChip tone="amber">CREATOR</MChip>
+              <MChip tone="dim">DOCS</MChip>
+              <MChip tone="lime">CLICKUP</MChip>
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Carregue e selecione as tasks',
-        text: 'Clique em "Carregar tasks" e a lista aparece com o nome exato do ClickUp, ordenada por vencimento. O botão redondo com o olho, ao lado, liga a leitura das tasks em REVISÃO: com ele aceso, as tasks com status de revisão entram na lista junto com as de edição — útil pra redisparar um ad que voltou da revisão. Os filtros ajudam nos dias cheios: "Período" (Todas, Ontem, Hoje, Amanhã, Atrasadas, Próximos 7 dias ou uma data específica) e "Prioridade" (Urgente, Alta). Marque as que entram no disparo — uma, algumas ou todas. Tasks irmãs (G1/G2 do mesmo AD) são selecionadas e analisadas juntas, sem duplicar trabalho.',
+        title: 'Creator: monte o AD do zero',
+        text: 'Clique no botão "+" e uma task nova aparece já com o card de análise aberto (AD01, AD02 e assim por diante; o lápis ao lado do nome renomeia). Primeiro adicione o avatar em "Adicionar outro avatar" e escolha avatar e voz. Depois clique no lápis do avatar: no primeiro avatar você escreve os hooks (um por caixa, até dez; cada hook vira um vídeo, todos com o mesmo body) e o body; os outros avatares entram só no body. Sem hook, sai um vídeo só com o body. "Smart Division" corta o body em takes de cerca de vinte segundos no Avatar III; no Avatar IV ou V o bloco vai inteiro, sem picotar. Depois disso o lápis vira o olho de sempre, onde você ajusta take por take.',
         visual: (
-          <Shot label="Pilot · seleção">
+          <Shot label="Creator · copy do avatar">
             <MStack>
-              <MQueueItem name="☑ AD15VN_PRPB06" status="selecionada" pct={100} tone="violet" />
-              <MQueueItem name="☑ AD16VN_PRPB07" status="selecionada" pct={100} tone="violet" />
-              <MQueueItem name="☐ AD17VN_PRPB08" status="—" pct={0} />
+              <MField label="Hook 1" value="Você usa azeite todo dia e nunca soube que ele pode virar remédio." grow />
+              <MField label="Hook 2" value="Meu tio de 71 anos me contou esse truque em segredo." grow />
+              <MField label="Body" value="A maioria usa azeite do jeito errado e joga fora a parte que importa..." grow />
+              <MBtn tone="primary">Smart Division</MBtn>
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Monte o Docs no modelo que o parser lê perfeito',
-        text: 'O Start lê o Google Docs vinculado à task — e a leitura sai perfeita quando o doc segue este modelo. A capa abre com a MESMA nomenclatura do nome da task ("AD01GL - VFPB04") e declara os avatares, um por linha, no formato "Papel: @arquivo.mp4" — o nome do arquivo deve ser o MESMO nome do avatar na sua biblioteca HeyGen, porque é por ele que o Pilot casa avatar e voz sozinho. Com um avatar só, "Link do avatar: arquivo.mp4" também vale. Cada variação de gancho vive numa seção própria "AD01G1GL - VFPB04": G1 vira o HOOK 1, G2 vira o HOOK 2, e assim por diante. Antes de cada fala, o rótulo do locutor em linha própria ("Mulher:") — ele diz quem fala e NÃO é lido como fala. A palavra "Body" sozinha numa linha marca onde o corpo começa (fica na última seção G); trocou o locutor no meio do corpo, abra um novo rótulo. Regra de ouro: fala é SÓ fala — nada de .mp4, link ou nomenclatura no meio do texto, porque o parser trata referência como fim da fala. Linhas de produção ("Instruções para edição:", "Música:", "Referência:") podem existir — são ignoradas de propósito. Depoimento entra como "Depoimento com avatar: arquivo.mp4" com o texto dele embaixo.',
+        title: 'Docs: importe o Google Docs',
+        text: 'Cole o link do doc e clique em "Carregar tasks", ou importe o arquivo (.docx ou .txt), arrastando ou pelo botão de upload. Cada heading no padrão "AD12VN - NOME" vira uma task, igual ao ClickUp. Os docs importados ficam em cartões: clique num deles pra voltar às tasks dele, ou no "×" pra remover o doc e as tasks. O idioma é detectado por task: quando o doc traz polonês ou húngaro, o português é a tradução e a voz sai na outra língua; o botão "usar português" no card troca só aquela task.',
         visual: (
-          <Shot label="Google Docs · modelo de briefing">
-            <MDoc>
-              <MDocL k="h">AD01GL - VFPB04</MDocL>
-              <MDocL k="label">Avatar e Vozes:</MDocL>
-              <MDocL k="label">Doutor: @doutorexemplo1.mp4</MDocL>
-              <MDocL k="label">Mulher: @mulherexemplo2.mp4</MDocL>
-              <MDocL k="label">Instruções para edição: <span className="font-normal text-[#3c3c38]">edição limpa (o parser ignora)</span></MDocL>
-              <MDocL k="gap" />
-              <MDocL k="h">AD01G1GL - VFPB04</MDocL>
-              <MDocL k="label">Mulher:</MDocL>
-              <MDocL k="hl">Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
-              <MDocL k="gap" />
-              <MDocL k="h">AD01G2GL - VFPB04</MDocL>
-              <MDocL k="label">Mulher:</MDocL>
-              <MDocL k="hl">Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
-              <MDocL k="gap" />
-              <MDocL k="marker">Body</MDocL>
-              <MDocL k="label">Doutor:</MDocL>
-              <MDocL>O problema quase nunca é falta de esforço, e sim de um sistema simples...</MDocL>
-              <MDocL k="label">Mulher:</MDocL>
-              <MDocL>Depois que eu testei, minhas manhãs mudaram. Toca no botão e começa hoje.</MDocL>
-            </MDoc>
+          <Shot label="Docs · importar">
+            <MStack>
+              <MDrop label="Link do Google Docs ou arquivo .docx" sub="Arraste o arquivo ou cole o link." />
+              <MQueueItem name="AD11VN - VRWA07" status="docs" pct={100} tone="violet" />
+              <MQueueItem name="AD12VN - VRWA07" status="docs" pct={100} tone="violet" />
+            </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Analise com o Start',
-        text: 'Com as tasks marcadas, clique em "Start (N)". O Pilot busca o doc da copy de cada task (pelo campo de doc da task ou pelo botão "⬇ Buscar automatico"), interpreta o briefing, separa hooks e body (partes de ~20s sem cortar frase), identifica o avatar — por link, print ou nome — e casa a voz memorizada. Cada task ganha um selo: ✓ pronta pra disparar; ⚠ parcial (normalmente falta você confirmar o avatar no seletor); ✗ erro, com o motivo exato escrito no card.',
+        title: 'ClickUp: o fluxo de sempre',
+        text: 'Configure uma vez em "Configurar": o token pessoal do ClickUp (fica só no seu navegador), o workspace e o editor. Depois clique em "Carregar tasks": a lista chega com o nome exato do ClickUp, ordenada por vencimento. O botão redondo com o olho inclui as tasks em revisão. Com duas empresas no mesmo login, o seletor de empresa troca a lista, e a fila em produção mostra só a empresa ativa. Filtros de período e prioridade, empresa e link do doc só existem neste modo.',
+        visual: (
+          <Shot label="ClickUp · conexão">
+            <MRow>
+              <MChip tone="lime">PILOT ONLINE</MChip>
+              <MField label="Empresa" value="B2C" grow />
+              <MField label="Editor" value="Silas" grow />
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Analise e ajuste cada task',
+        text: 'Marque as tasks e clique em "Start": o Pilot lê a copy de cada uma, separa hooks e body em takes, identifica os avatares e monta o card. Puxou três e mudou de ideia? Marque mais uma a qualquer momento: ela entra sem reiniciar o que já está rodando. No card você escolhe avatar e voz por papel, o motor (III, IV ou V), a decupagem e a intensidade do corte, o normalizador de volume, a legenda automática, o zoom, os inserts, a headline e a camuflagem. Em "+ versões" cada versão pode ter pós-produção própria: uma com decupagem, outra sem; inserts e legendas diferentes. Tudo isso fica salvo sozinho: recarregou a página, o card volta como estava.',
         visual: (
           <Shot label="Pilot · análise">
             <MStack>
               <MRow>
-                <MField label="Avatar" value="identificado ✓" grow />
-                <MField label="Voz" value="memorizada ✓" grow />
-                <MChip tone="lime">✓ PRONTA</MChip>
+                <MField label="Avatar" value="escolhido" grow />
+                <MField label="Voz" value="Bianca" grow />
+                <MChip tone="lime">PRONTA</MChip>
               </MRow>
               <MRow>
-                <MField label="Copy" value="1 hook + 3 partes de body (~20s)" grow />
+                <MToggle on={true} label="Decupagem" />
+                <MToggle on={true} label="Legenda" />
+                <MChip tone="dim">MOTOR III</MChip>
               </MRow>
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Refine cada task antes de disparar',
-        text: 'Tudo é ajustável por task na barra de ações do card: o motor (III/IV/V), a Decupagem — que aqui vem DESLIGADA por padrão (o vídeo sai montado sem cortar silêncios; ligue a tesoura e escolha a intensidade se quiser o corte automático) —, a Camuflagem (suba o áudio escondido e o volume) e o Auto B-roll (cole o JSON de prompts da task pra gerar os b-rolls junto). Dá também pra abrir o doc da copy direto do card.',
+        title: 'Dispare e acompanhe',
+        text: 'O botão de play no card dispara aquela task; "Iniciar N tasks em background" dispara todas as prontas. Todo disparo no HeyGen sai por aqui, em fila e em segundo plano: envia take por take, acompanha a renderização, baixa, monta e aplica a pós-produção. O painel "Tasks em produção" mostra as fases (na fila, enviando, renderizando, baixando, montando, pronto), e cada card tem pausar, retomar e remover. A mesma fila aparece em "Tarefas em segundo plano".',
         visual: (
-          <Shot label="Pilot · opções por task">
-            <MRow>
-              <MToggle on={false} label="Decupagem" />
-              <MToggle on={false} label="Camuflagem" />
-              <MChip tone="dim">MOTOR V</MChip>
-              <MChip tone="dim">✨ AUTO B-ROLL</MChip>
-            </MRow>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Dispare em background',
-        text: 'Clique em "▶ Iniciar N tasks em background". O Pilot assume tudo: dispara parte por parte no HeyGen respeitando os slots, acompanha a renderização, baixa cada vídeo e monta o resultado — com auto-cura no meio (parte travada no render é re-disparada sozinha). Você pode trocar de aba e seguir trabalhando; só não feche a aba do Pilot, que é onde o motor vive.',
-        visual: (
-          <Shot label="Pilot · disparo">
+          <Shot label="Pilot · fila">
             <MStack>
-              <MBtn tone="primary">▶ Iniciar 2 tasks em background</MBtn>
-              <MQueueItem name="AD15VN · parte 2/4" status="Renderizando" pct={38} />
+              <MBtn tone="primary">Iniciar 2 tasks em background</MBtn>
+              <MQueueItem name="AD15VN · take 2/4" status="Renderizando" pct={38} />
               <MQueueItem name="AD16VN" status="Na fila" pct={0} />
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Acompanhe de onde preferir',
-        text: 'Pelos cards de "Tasks em produção" na própria página — com as fases Na fila → Enviando → Renderizando → Baixando → Montando → Pronto — ou pela tela "Tarefas em segundo plano" (atalho no Histórico geral). Pausar, Retomar e Remover funcionam por task, a qualquer momento; pausar não perde nada do que já rendeu.',
-      },
-      {
-        title: 'Receba o vídeo MONTADO em MP4',
-        text: 'Task pronta = vídeo pronto. O botão "Baixar MP4" do card entrega o lipsync final MONTADO (hook + body emendados; decupado, se você ligou a decupagem), nomeado pelo AD da task — é o arquivo de entrega, sem etapa manual de edição. Com camuflagem ligada, a versão camuflada vem junto. E se alguma parte não veio (limite do HeyGen no meio do caminho), o Pilot NÃO entrega vídeo furado: o download trava com o aviso "Incompleto — clique Retomar pra completar", e o Retomar termina só o que faltou. Os takes brutos ficam guardados no Histórico de avatares, como reserva.',
+        title: 'Receba o vídeo montado',
+        text: 'Task pronta é vídeo pronto: o botão "Baixar MP4" entrega o lipsync montado, um vídeo por hook, com decupagem, legenda e o resto do que você ligou. O nome do arquivo vem do AD da task. Faltou alguma parte? O "Retomar" completa só o que falta, sem gerar de novo o que já ficou pronto.',
         visual: (
           <Shot label="Pilot · entrega">
             <MStack>
-              <MQueueItem name="AD15VN_PRPB06 · montado" status="Pronto" pct={100} tone="lime" />
-              <MRow>
-                <MBtn tone="lime">Baixar MP4</MBtn>
-                <MChip tone="amber">INCOMPLETO? O RETOMAR COMPLETA</MChip>
-              </MRow>
+              <MQueueItem name="AD15VN_PRPB06 · G1 montado" status="Pronto" pct={100} tone="lime" />
+              <MQueueItem name="AD15VN_PRPB06 · G2 montado" status="Pronto" pct={100} tone="lime" />
+              <MBtn tone="lime">Baixar MP4</MBtn>
             </MStack>
           </Shot>
         ),
       },
     ],
     tips: [
-      'Pré-requisitos: extensão instalada e uma aba logada no HeyGen (os mesmos do Hey Auto).',
-      'F5 no meio do disparo não perde nada: o plano fica salvo e a task retoma sozinha do checkpoint.',
-      '"Travou" no meio do dia? Normalmente é o limite diário do HeyGen — o Retomar continua depois do reset, sem regenerar o que já ficou pronto.',
-      'Avatar de outro workspace do HeyGen aparece como "not accessible" — troque o workspace na aba do HeyGen e retome.',
-      'O Pilot também cuida de variação de avatar (VA) e troca de áudio — os cards especiais aparecem na análise e rodam pela mesma fila.',
-      'O Pilot nunca escreve no seu ClickUp — leitura apenas.',
+      'Pré-requisitos: a extensão Auto Edit instalada e uma aba logada no HeyGen. O disparo roda pela sua conta, sem custo extra por vídeo.',
+      'Creator e Docs vivem neste navegador: as tasks, os docs e as análises ficam salvos aqui, inclusive depois de recarregar.',
+      'F5 no meio do disparo não perde nada: o plano fica salvo e a task retoma do ponto em que parou.',
+      'Travou no meio do dia? Costuma ser o limite diário do HeyGen. O Retomar continua depois do reset, sem gerar de novo o que já ficou pronto.',
+      'Avatar de outro workspace do HeyGen aparece como "not accessible": troque o workspace na aba do HeyGen e retome.',
+      'O Pilot nunca escreve no seu ClickUp, só lê.',
     ],
   },
-
   '/tools/auto-broll': {
     title: 'Auto B-roll',
     tagline:

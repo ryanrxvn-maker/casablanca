@@ -181,12 +181,14 @@ import {
   isTaskLocal,
   modoDaTaskLocal,
   lerAnalisesCreator,
-  salvarAnalisesCreator,
-  type AnaliseCreatorSalva,
+  lerAnalisesDoEscopo,
+  salvarAnalisesDoEscopo,
+  type AnaliseSalva,
   lerTasksLocais,
   salvarTasksLocais,
   lerDocsLocais,
   salvarDocLocal,
+  removerDocLocal,
   taskSintetica,
   tasksDoDoc,
   idTaskCreator,
@@ -1779,7 +1781,7 @@ function ClickUpPilotInner() {
     modoRef.current = m;
     setModoRaw(m);
     if (m !== 'clickup') mostrarTasksLocais(m, locais, docs, docKey);
-    if (m === 'creator') restaurarAnalisesCreator(locais);
+    // as análises do escopo voltam pelo efeito de escopo (modo/empresa/doc)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   function trocarModo(m: ModoPilot) {
@@ -1814,7 +1816,7 @@ function ClickUpPilotInner() {
       const lista = tasksSinteticasDoModo(m, tasksLocaisRef.current, docsLocaisRef.current, docAtivoKey);
       if (lista.length > 0 || !filaAtiva) setTasks(lista);
       setSelectedTaskIds(new Set());
-      if (m === 'creator') restaurarAnalisesCreator();
+      // as análises do escopo novo voltam pelo efeito de escopo
     }
   }
 
@@ -1822,10 +1824,6 @@ function ClickUpPilotInner() {
   const docsRecentes = docsLocais
     .filter((d) => d.origem !== 'colado')
     .sort((a, b) => b.criadoEm - a.criadoEm);
-  function rotuloDoDoc(d: DocLocal): string {
-    const quando = new Date(d.criadoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    return `${d.nomeArquivo || (d.docUrl ? 'Google Docs' : 'Doc')} · ${quando}`;
-  }
   /** Guarda o doc, cria uma task por AD e põe a lista na tela. */
   function adotarDoc(doc: DocLocal): boolean {
     const novas = tasksDoDoc(doc, null);
@@ -1886,6 +1884,57 @@ function ClickUpPilotInner() {
     } finally {
       setImportandoDoc(false);
     }
+  }
+  /** Remove um doc importado do DOCS: o doc, as tasks dele, as análises salvas
+   *  do escopo e os insumos no IDB. Se era o ativo, passa pro mais recente. */
+  function removerDoc(key: string) {
+    const tasksDoDocRemovido = tasksLocaisRef.current.filter((t) => t.docKey === key);
+    const locais = tasksLocaisRef.current.filter((t) => t.docKey !== key);
+    persistirLocais(locais);
+    const docs = Object.values(removerDocLocal(key)).sort((a, b) => b.criadoEm - a.criadoEm);
+    docsLocaisRef.current = docs;
+    setDocsLocaisState(docs);
+    salvarAnalisesDoEscopo(`docs:${key}`, {});
+    for (const t of tasksDoDocRemovido) {
+      void import('@/lib/zip-store')
+        .then(({ deletePrefix }) => deletePrefix(`pilot:${t.id}:`))
+        .catch(() => {});
+    }
+    const ids = new Set(tasksDoDocRemovido.map((t) => t.id));
+    setTaskAnalyses((prev) => {
+      const n: Record<string, TaskAnalysis> = {};
+      for (const [id, a] of Object.entries(prev)) if (!ids.has(taskIdBaseDaVersao(id))) n[id] = a;
+      taskAnalysesRef.current = n;
+      return n;
+    });
+    if (docAtivoKey === key) {
+      const proximo = docs.find((d) => d.origem !== 'colado')?.key ?? null;
+      setDocAtivoKey(proximo);
+      mostrarTasksLocais('docs', locais, docs, proximo);
+    }
+  }
+  /* ---- CREATOR: renomear a task (ela não vem de lugar nenhum) ---- */
+  const [renomeando, setRenomeando] = useState<{ id: string; valor: string } | null>(null);
+  function renomearTaskLocal(id: string, nomeBruto: string) {
+    const nome = nomeBruto.replace(/\s+/g, ' ').trim();
+    setRenomeando(null);
+    const t = tasksLocaisRef.current.find((x) => x.id === id);
+    if (!t || !nome || nome === t.nome) return;
+    const base = baseAdIdDoNome(nome);
+    if (!base) {
+      setError('O nome precisa começar com AD e um número (ex.: AD03 - MEU AD): é ele que batiza os arquivos.');
+      return;
+    }
+    setError(null);
+    persistirLocais(tasksLocaisRef.current.map((x) => (x.id === id ? { ...x, nome, baseAdId: base } : x)));
+    setTasks((prev) => prev.map((x) => (x.id === id ? { ...x, name: nome } : x)));
+    setTaskAnalyses((prev) => {
+      const a = prev[id];
+      if (!a) return prev;
+      const next = { ...prev, [id]: { ...a, taskName: nome, baseAdId: base } };
+      taskAnalysesRef.current = next;
+      return next;
+    });
   }
   function removerTaskLocal(id: string) {
     persistirLocais(tasksLocaisRef.current.filter((t) => t.id !== id));
@@ -1948,35 +1997,45 @@ function ClickUpPilotInner() {
       setError(null);
     }
   }
-  /** F5 / entrar no CREATOR: repõe os cards salvos (ou vazios) de cada task
-   *  local do modo e marca todas — é o que o Start lê. */
-  function restaurarAnalisesCreator(locais: TaskLocal[] = tasksLocaisRef.current) {
-    const salvas = lerAnalisesCreator();
-    const minhas = locais.filter((t) => t.modo === 'creator');
-    setTaskAnalyses((prev) => {
-      const next = { ...prev };
-      for (const t of minhas) {
-        if (next[t.id]) continue;
-        const s = salvas[t.id];
-        const base = s
-          ? ({ ...analiseCreatorVazia(t), ...(s as unknown as Partial<TaskAnalysis>), taskId: t.id, taskName: t.nome } as TaskAnalysis)
-          : analiseCreatorVazia(t);
-        // O status é RECALCULADO, não herdado: a imagem do modo imagem não vai
-        // pro storage (volta do IDB abaixo), então um 'ready' salvo mentiria e
-        // o Play prometeria um disparo que o guard barra.
-        const slots = base.roleSlots || [];
-        next[t.id] = { ...base, status: slots.length > 0 && slots.every(slotPronto) ? 'ready' : 'partial' };
+  /** Restaura o mapa de análises de um ESCOPO ('creator' | 'docs:<doc>' |
+   *  'clickup:<empresa>') — F5 devolve cada card como ficou; trocar de modo,
+   *  empresa ou doc troca o mapa inteiro, sem misturar. Status é RECALCULADO
+   *  por slotPronto (a imagem do modo imagem não vai pro storage; volta do IDB). */
+  function restaurarAnalises(esc: string) {
+    let salvas: Record<string, AnaliseSalva> = lerAnalisesDoEscopo(esc);
+    // legado 05.09: o CREATOR gravava numa chave própria
+    if (esc === 'creator' && Object.keys(salvas).length === 0) salvas = lerAnalisesCreator() as Record<string, AnaliseSalva>;
+    const next: Record<string, TaskAnalysis> = {};
+    for (const [id, s] of Object.entries(salvas)) {
+      if (!pertenceAoEscopo(id, esc)) continue;
+      const a = s as unknown as TaskAnalysis;
+      if (!a || a.status === 'pending' || a.status === 'analyzing') continue; // em voo no F5 = refaz
+      if (a.status === 'ready' || a.status === 'partial') {
+        const slots = a.roleSlots || [];
+        next[id] = { ...a, status: slots.length > 0 && slots.every(slotPronto) ? 'ready' : 'partial' };
+      } else {
+        next[id] = a;
       }
-      taskAnalysesRef.current = next;
-      return next;
-    });
-    setSelectedTaskIds(new Set(minhas.map((t) => t.id)));
+    }
+    if (esc === 'creator') {
+      for (const t of tasksLocaisRef.current) if (t.modo === 'creator' && !next[t.id]) next[t.id] = analiseCreatorVazia(t);
+      for (const id of Object.keys(next)) if (!tasksLocaisRef.current.some((t) => t.id === id)) delete next[id];
+    }
+    // O que já está em memória DESTE escopo vence o salvo (análise que acabou
+    // de terminar enquanto você estava em outro modo).
+    for (const [id, a] of Object.entries(taskAnalysesRef.current)) {
+      if (a && pertenceAoEscopo(id, esc) && a.status !== 'pending' && a.status !== 'analyzing') next[id] = a;
+    }
+    taskAnalysesRef.current = next;
+    setTaskAnalyses(next);
+    setSelectedTaskIds(new Set(Object.keys(next)));
+    restauradosRef.current.add(esc);
     creatorRestauradoRef.current = true;
-    void rehidratarImagensCreator(minhas.map((t) => t.id));
+    void rehidratarImagens(Object.keys(next));
   }
   /** Slot em MODO IMAGEM restaurado vem só com `imageKey`: a imagem volta do
    *  IDB, como o RETOMAR faz, e updateRoleSlot recalcula o status. */
-  async function rehidratarImagensCreator(ids: string[]) {
+  async function rehidratarImagens(ids: string[]) {
     for (const id of ids) {
       const a = taskAnalysesRef.current[id];
       if (!a) continue;
@@ -1994,8 +2053,8 @@ function ClickUpPilotInner() {
             fr.readAsDataURL(blob);
           });
           updateRoleSlot(id, i, { imageDataUrl: dataUrl });
-        } catch (e) {
-          console.warn(`[pilot] imagem do slot ${i} de ${id} não voltou do IDB (sobe de novo se precisar):`, e);
+        } catch (err) {
+          console.warn(`[pilot] imagem do slot ${i} de ${id} não voltou do IDB (sobe de novo se precisar):`, err);
         }
       }
     }
@@ -2011,41 +2070,51 @@ function ClickUpPilotInner() {
    *  de render) — usado pra não perder o avatar escolhido na mão ao reanalisar. */
   const taskAnalysesRef = useRef<Record<string, TaskAnalysis>>({});
   taskAnalysesRef.current = taskAnalyses;
-  /* CREATOR (05.09): o card não vem de análise, então é ELE que sobrevive a F5.
-   * Grava só depois que o restauro rodou (senão o mapa vazio do primeiro render
-   * apagaria o que estava salvo) e só as tasks CREATOR que ainda existem —
-   * remover a task limpa a persistência de graça. */
+  /* ═══ ESCOPO das análises (06.09) ═══
+   * 'creator' | 'docs:<doc>' | 'clickup:<empresa>'. Cada escopo tem o SEU mapa:
+   * trocar de modo, de empresa ou de doc troca o mapa inteiro (nada se mistura),
+   * e o AUTO-SAVE devolve cada card como ficou depois do F5. */
+  const escopoAtual =
+    modo === 'creator' ? 'creator' : modo === 'docs' ? `docs:${docAtivoKey ?? 'sem-doc'}` : `clickup:${selectedTeam ?? 'sem-empresa'}`;
+  const escopoRef = useRef(escopoAtual);
+  escopoRef.current = escopoAtual;
+  function pertenceAoEscopo(taskId: string, esc: string = escopoRef.current): boolean {
+    const base = taskIdBaseDaVersao(taskId);
+    const m = modoDaTaskLocal(base);
+    if (esc === 'creator') return m === 'creator';
+    if (esc.startsWith('docs:')) return m === 'docs' && base.startsWith(`pilot_docs_${esc.slice(5)}_`);
+    return m === null;
+  }
+  const restauradosRef = useRef<Set<string>>(new Set());
   const creatorRestauradoRef = useRef(false);
+  // AUTO-SAVE: grava o mapa do escopo a cada mudança — só depois do restauro
+  // dele (senão o mapa vazio do primeiro render apagaria o salvo) e só o que
+  // pertence ao escopo (análise em voo de outro modo não vaza pra cá).
   useEffect(() => {
-    if (modoRef.current !== 'creator' || !creatorRestauradoRef.current) return;
-    const vivas = new Set(tasksLocaisRef.current.filter((t) => t.modo === 'creator').map((t) => t.id));
-    const salvar: Record<string, AnaliseCreatorSalva> = {};
+    const esc = escopoRef.current;
+    if (!restauradosRef.current.has(esc)) return;
+    const mapa: Record<string, unknown> = {};
     for (const [id, a] of Object.entries(taskAnalyses)) {
-      if (!vivas.has(id) || modoDaTaskLocal(id) !== 'creator') continue;
-      if (!a) continue;
-      salvar[id] = {
-        taskId: a.taskId,
-        taskName: a.taskName,
-        baseAdId: a.baseAdId,
-        status: a.status === 'ready' ? 'ready' : 'partial',
-        roleSlots: a.roleSlots,
-        partTemplates: a.partTemplates,
-        hookCount: a.hookCount,
-        bodyPartsCount: a.bodyPartsCount,
-        totalParts: a.totalParts,
-        // Versões escolhidas no "+ versões" (3..N moram aqui; a 2ª mora no slot).
-        duasVersoes: a.duasVersoes,
-        versoes: a.versoes,
-      };
+      if (!a || !pertenceAoEscopo(id, esc)) continue;
+      if (a.status === 'pending' || a.status === 'analyzing') continue;
+      mapa[id] = a;
     }
-    // Task CREATOR viva que não está no mapa (F5 antes do restauro, "Limpar")
-    // mantém o que já estava salvo: a gravação nunca é destrutiva por ausência.
-    // Só removerTaskLocal (tira o id de `vivas`) apaga do storage.
-    const salvas = lerAnalisesCreator();
-    for (const id of vivas) if (!salvar[id] && salvas[id]) salvar[id] = salvas[id];
-    if (vivas.size > 0 && Object.keys(salvar).length === 0) return;
-    salvarAnalisesCreator(salvar);
+    if (esc === 'creator') {
+      // Task CREATOR viva sem card ("Limpar") mantém o salvo; só removerTaskLocal apaga.
+      const salvas = lerAnalisesDoEscopo('creator');
+      for (const t of tasksLocaisRef.current) if (t.modo === 'creator' && !mapa[t.id] && salvas[t.id]) mapa[t.id] = salvas[t.id];
+      for (const id of Object.keys(mapa)) if (!tasksLocaisRef.current.some((t) => t.id === id)) delete mapa[id];
+    }
+    salvarAnalisesDoEscopo(esc, mapa);
   }, [taskAnalyses]);
+  // TROCA DE ESCOPO: modo, empresa ou doc mudou = restaura o mapa daquele escopo.
+  const escopoAplicadoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (escopoAplicadoRef.current === escopoAtual) return;
+    escopoAplicadoRef.current = escopoAtual;
+    restaurarAnalises(escopoAtual);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [escopoAtual]);
 
   // Motor config por task (III/IV/V — global, %, individual)
   const [motorConfigs, setMotorConfigs] = useState<Record<string, MotorConfig>>({});
@@ -2748,8 +2817,11 @@ function ClickUpPilotInner() {
         // Defer setTimeout pra esperar setSelectedTaskIds aplicar
         setTimeout(() => {
           const unanalyzed = newlySelected.filter((id) => !taskAnalyses[id]);
-          if (unanalyzed.length > 0 && !analyzing) {
-            analyzeSelected();
+          if (unanalyzed.length > 0) {
+            // Só as NOVAS, mesmo com outra análise em voo: o resto do mapa
+            // fica como está (analyzeSelected com lista explícita preserva).
+            const novas = tasks.filter((t) => unanalyzed.includes(t.id));
+            if (novas.length > 0) void analyzeSelected(novas);
           }
         }, 100);
       }
@@ -3285,6 +3357,14 @@ function ClickUpPilotInner() {
   }
 
   /** Analisa N tasks em paralelo (max 3): pega doc, parsea, monta plano. */
+  /** Análises EM VOO (06.09). Puxar mais tasks no meio de um lote soma um novo
+   *  pool sem zerar o que está rodando; o "Analisando…" só apaga quando o
+   *  último pool termina. */
+  const analisesEmVooRef = useRef(0);
+  function terminarAnalise() {
+    analisesEmVooRef.current = Math.max(0, analisesEmVooRef.current - 1);
+    if (analisesEmVooRef.current === 0) setAnalyzing(false);
+  }
   async function analyzeSelected(explicitas?: ClickUpTask[]) {
     // `explicitas`: analisar ESTAS tasks, sem depender do state `tasks`/`selectedTaskIds`
     // (que ainda não atualizou no mesmo tick — caso da task recém-criada no CREATOR).
@@ -3295,6 +3375,7 @@ function ClickUpPilotInner() {
     }
     setError(null);
     setAnalyzing(true);
+    analisesEmVooRef.current += 1;
     // PREFLIGHT: a leitura do doc depende do bridge da extensao injetado
     // NESTE dominio. Extensoes antigas (<4.15.2) so injetam em *.vercel.app,
     // entao em darkoautoedit.com o bridge nao carrega e o HG_FETCH_DOC cai no
@@ -3322,7 +3403,7 @@ function ClickUpPilotInner() {
       return 0;
     };
     if (!ext.connected) {
-      setAnalyzing(false);
+      terminarAnalise();
       setExtFaltando(true);
       setError(
         `Extensao Auto Edit nao detectada neste dominio (darkoautoedit.com). ` +
@@ -3332,7 +3413,7 @@ function ClickUpPilotInner() {
       return;
     }
     if (ext.version && ext.version !== '?' && cmpVer(ext.version, MIN_EXT_VERSION) < 0) {
-      setAnalyzing(false);
+      terminarAnalise();
       setExtFaltando(true);
       setError(
         `Extensao desatualizada (v${ext.version}). A leitura de docs exige v${MIN_EXT_VERSION}+. ` +
@@ -3390,7 +3471,23 @@ function ClickUpPilotInner() {
     for (const v of voiceLibrary) {
       voiceByNorm.set(normalizeVoiceName(v.name), { id: v.id, name: v.name });
     }
-    const allSelected = pedidas ?? tasks.filter((t) => selectedTaskIds.has(t.id));
+    // INCREMENTAL (06.09): com outra análise EM VOO, puxar mais tasks analisa
+    // só as que ainda não têm card — antes o mapa era zerado e o lote em
+    // andamento morria no meio ("tinha que reiniciar a página").
+    const emVoo = analisesEmVooRef.current > 1; // esta chamada já contou
+    const vivo = (id: string) => {
+      const st = taskAnalysesRef.current[id]?.status;
+      return st === 'ready' || st === 'partial' || st === 'analyzing' || st === 'pending';
+    };
+    const selecionadas = pedidas ?? tasks.filter((t) => selectedTaskIds.has(t.id));
+    const allSelected = emVoo && !pedidas ? selecionadas.filter((t) => !vivo(t.id)) : selecionadas;
+    if (allSelected.length === 0) {
+      terminarAnalise();
+      return;
+    }
+    // Preserva o que já está no mapa quando é acréscimo (em voo ou tasks
+    // explícitas); só o "analisar tudo de novo" parte do zero.
+    const preservarMapa = emVoo || !!pedidas;
     // DEDUP G1/G2: tasks com mesmo baseTaskKey compartilham o doc.
     // So precisamos analisar uma — as siblings copiam o resultado.
     const seenKeys = new Set<string>();
@@ -3422,9 +3519,9 @@ function ClickUpPilotInner() {
     // Init status pendente pra TODAS (inclui siblings nao-primary pra UI mostrar consistente)
     setTaskAnalyses((prev) => {
       const init: Record<string, TaskAnalysis> = {};
-      // Cards do CREATOR são preservados como estão (nunca existem no fluxo ClickUp).
+      // Acréscimo preserva o mapa inteiro; cards do CREATOR sempre ficam.
       for (const [id, an] of Object.entries(prev)) {
-        if (modoDaTaskLocal(id) === 'creator') init[id] = an;
+        if (preservarMapa || modoDaTaskLocal(id) === 'creator') init[id] = an;
       }
       for (const t of allSelected) {
         if (creatorSemDoc(t.id)) continue;
@@ -4218,7 +4315,7 @@ function ClickUpPilotInner() {
       return mudou ? next : prev;
     });
 
-    setAnalyzing(false);
+    terminarAnalise();
   }
 
   /** Batch state — tasks rodando em background (dispatch + poll + download + zip) */
@@ -9371,13 +9468,34 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   function setRascunho(chave: string, copy: CopyDoAvatar) {
     setCopyRascunho((p) => ({ ...p, [chave]: copy }));
   }
+  /** Volta pras caixas: os takes deste avatar viram rascunho (hooks + body) e
+   *  saem da task — nada se perde, só volta a ser editável em bloco. */
+  function reabrirCaixas(taskId: string, sIdx: number) {
+    const a = taskAnalysesRef.current[taskId];
+    if (!a) return;
+    const minhas = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) === sIdx);
+    setRascunho(`${taskId}:${sIdx}`, copyDasPartes(minhas));
+    const partTemplates = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) !== sIdx);
+    const hookCount = partTemplates.filter((p) => /^(hook|gancho)/i.test(p.label)).length;
+    setTaskAnalyses((prev) => {
+      const atual = prev[taskId];
+      if (!atual) return prev;
+      const next = {
+        ...prev,
+        [taskId]: { ...atual, partTemplates, totalParts: partTemplates.length, hookCount, bodyPartsCount: partTemplates.length - hookCount },
+      };
+      taskAnalysesRef.current = next;
+      return next;
+    });
+  }
   function aplicarCopyNoSlot(taskId: string, sIdx: number) {
     // Lê o espelho síncrono: se a copy não render trecho, avisa e NÃO apaga o
     // que foi escrito.
     const a = taskAnalysesRef.current[taskId];
     const slot = a?.roleSlots?.[sIdx];
     if (!a || !slot) return;
-    const copy = rascunhoDoSlot(a, sIdx);
+    // Hook só no PRIMEIRO avatar: o vídeo abre com ele; os outros entram no body.
+    const copy = sIdx === 0 ? rascunhoDoSlot(a, sIdx) : { ...rascunhoDoSlot(a, sIdx), hooks: [] };
     const problema = problemaDaCopy(copy);
     if (problema === 'hooks-demais') {
       setError(`Até ${MAX_HOOKS} hooks por avatar.`);
@@ -9388,8 +9506,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return;
     }
     const outros = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) !== sIdx);
-    // Mesmo corte do body da análise: ~20s, sem quebrar frase.
-    const novas = partesDaCopy(copy, slot.role, outros, (t) => splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 }));
+    // Smart Division é do Avatar III: body em takes de ~20s sem quebrar frase.
+    // Avatar IV/V fala o bloco INTEIRO num take só (não picota).
+    const motor = slot.engine || 'III';
+    const cortar = motor === 'III' ? (t: string) => splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 }) : (t: string) => [t];
+    const novas = partesDaCopy(copy, slot.role, outros, cortar);
     if (!novas.length) {
       setError('Não achei texto falado nessa copy.');
       return;
@@ -12310,7 +12431,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 importando={importandoDoc}
                 docs={docsRecentes.map((d) => ({
                   key: d.key,
-                  rotulo: rotuloDoDoc(d),
+                  rotulo: d.nomeArquivo || 'Google Docs',
+                  quando: new Date(d.criadoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+                  origem: d.origem,
                   n: tasksLocais.filter((t) => t.docKey === d.key).length,
                   ativo: d.key === docAtivoKey,
                   title: d.docUrl || d.nomeArquivo || d.key,
@@ -12319,6 +12442,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   setDocAtivoKey(k);
                   mostrarTasksLocais('docs', undefined, undefined, k);
                 }}
+                onRemoverDoc={removerDoc}
               />
             ) : modo === 'creator' ? (
               <CreatorBar onNova={() => void criarTaskCreator()} disabled={analyzing} />
@@ -12939,12 +13063,32 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     <path d="m5 13 4 4L19 7" />
                                   </svg>
                                 </span>
-                                <span
-                                  className="mono text-[13px] font-semibold text-white dark:text-white text-foreground truncate"
-                                  style={{ fontFamily: 'var(--font-tech)' }}
-                                >
-                                  {t.name}
-                                </span>
+                                {renomeando?.id === t.id ? (
+                                  <input
+                                    autoFocus
+                                    value={renomeando.valor}
+                                    onChange={(e) => setRenomeando({ id: t.id, valor: e.target.value })}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => {
+                                      e.stopPropagation();
+                                      if (e.key === 'Enter') renomearTaskLocal(t.id, renomeando.valor);
+                                      else if (e.key === 'Escape') setRenomeando(null);
+                                    }}
+                                    onBlur={() => renomearTaskLocal(t.id, renomeando.valor)}
+                                    spellCheck={false}
+                                    aria-label="Nome da task"
+                                    className="mono min-w-[220px] rounded-[8px] bg-bg/60 px-2.5 py-1 text-[13px] font-semibold text-white outline-none"
+                                    style={{ fontFamily: 'var(--font-tech)', boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.7), 0 0 0 3px rgba(251,191,36,0.12)' }}
+                                  />
+                                ) : (
+                                  <span
+                                    className="mono text-[13px] font-semibold text-white dark:text-white text-foreground truncate"
+                                    style={{ fontFamily: 'var(--font-tech)' }}
+                                  >
+                                    {t.name}
+                                  </span>
+                                )}
                                 {/* === BADGES separados por significado ===
                                     User: "ICONE É APENAS PRA INFORMAR QUE É URGENTE / ICONE AMARELO
                                     É ALTA / ICONE VERMELHO URGENCIA / ISSO É SEPARADO DO NUMERO
@@ -13071,6 +13215,21 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               Só deste navegador — nada disso toca o ClickUp. */}
                           {isTaskLocal(t.id) ? (
                             <div className="flex shrink-0 items-center gap-1.5">
+                              {modo === 'creator' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setRenomeando({ id: t.id, valor: t.name })}
+                                  title="Renomear a task (o AD do nome batiza os arquivos)"
+                                  aria-label="Renomear task"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-text-muted transition hover:text-amber-200"
+                                  style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                  </svg>
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => removerTaskLocal(t.id)}
@@ -13824,6 +13983,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       </div>
                       <ul className="grid gap-2">
                         {Object.values(taskAnalyses)
+                          // ESCOPO (06.09): só cards do modo/empresa/doc atual — nada de
+                          // análise do ClickUp sobrando na tela do CREATOR.
+                          .filter((a) => pertenceAoEscopo(a.taskId))
                           // Filtra siblings G2/G3 que ja foram analisadas como parte do
                           // primary (G1) — assim aparece UM card so por base task (G1+G2 = 1 card)
                           .filter((a) => !a.sharedWithPrimaryId)
@@ -15098,6 +15260,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     ) : null}
                                     {a.roleSlots.map((slot, sIdx) => {
                                       const partsCount = (a.partTemplates || []).filter(p => p.matchByRole === slot.role.toLowerCase()).length;
+                                      // CREATOR: sem take ainda = lápis + caixas (hooks/body). Com takes
+                                      // aplicados = olhinho normal, editando o que já virou take.
+                                      const caixasAbertas = ehCreator && partsCount === 0;
                                       // Comentários de COPY nos takes DESTE avatar — botão azul
                                       // do lado do olhinho (pedido 29.08).
                                       const copyIndsDoSlot = (a.indicacoesCopy || []).filter((ic) => {
@@ -15209,10 +15374,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               <button
                                                 type="button"
                                                 onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
-                                                className={ehCreator
+                                                className={caixasAbertas
                                                   ? 'btn-lapis inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-black transition-all hover:-translate-y-[1px] active:translate-y-[1px]'
                                                   : 'btn-olho rounded-full px-2 py-0.5 text-[11px] active:translate-y-[1px]'}
-                                                style={ehCreator
+                                                style={caixasAbertas
                                                   ? {
                                                       background: previewOpen[`${a.taskId}:${sIdx}`]
                                                         ? 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)'
@@ -15222,13 +15387,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         : '0 0 18px -8px rgba(251,191,36,0.6), inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
                                                     }
                                                   : undefined}
-                                                title={ehCreator
+                                                title={caixasAbertas
                                                   ? 'Escrever a copy deste avatar: hooks e body'
                                                   : 'Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)'}
-                                                aria-label={ehCreator ? 'Escrever a copy deste avatar' : 'Preview do texto deste avatar'}
-                                                aria-expanded={ehCreator ? !!previewOpen[`${a.taskId}:${sIdx}`] : undefined}
+                                                aria-label={caixasAbertas ? 'Escrever a copy deste avatar' : 'Preview do texto deste avatar'}
+                                                aria-expanded={!!previewOpen[`${a.taskId}:${sIdx}`]}
                                               >
-                                                {ehCreator ? (
+                                                {caixasAbertas ? (
                                                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                                                     <path d="M12 20h9" />
                                                     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
@@ -15270,7 +15435,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             * Diff visual: texto identico ao que sera enviado, 1:1. */}
                                           {previewOpen[`${a.taskId}:${sIdx}`] ? (
                                             <div className="olho-painel mt-2 rounded-[10px] p-3">
-                                              {ehCreator ? null : (
+                                              {caixasAbertas ? null : (
                                                 <div className="olho-titulo mono mb-2 text-[9px] uppercase tracking-widest">
                                                   preview do texto pro HeyGen ({slot.role}) — editavel
                                                 </div>
@@ -15283,9 +15448,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 const matched = (a.partTemplates || [])
                                                   .map((pt, idx) => ({ pt, idx }))
                                                   .filter(({ pt }) => ownerSlotIdx(a, pt) === sIdx);
-                                                // CREATOR: a copy mora nas CAIXAS (hooks + body) logo abaixo;
-                                                // a lista de takes aqui em cima só confundia a ordem.
-                                                if (ehCreator) return null;
+                                                // CREATOR sem take: a copy mora nas CAIXAS (hooks + body)
+                                                // logo abaixo; a lista aqui em cima só confundia a ordem.
+                                                if (caixasAbertas) return null;
                                                 if (matched.length === 0) {
                                                   return (
                                                     <div className="aviso-amarelo rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2.5 text-[11px] leading-relaxed">
@@ -15388,8 +15553,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               {/* CREATOR (05.09): a copy entra AQUI, depois do avatar.
                                                 * Cola a copy deste avatar (HOOK/BODY) e ela vira os
                                                 * takes dele, com o mesmo corte da análise. */}
-                                              {ehCreator ? (() => {
+                                              {caixasAbertas ? (() => {
                                                 const chave = `${a.taskId}:${sIdx}`;
+                                                const motor = slot.engine || 'III';
+                                                // O hook abre o vídeo: só o PRIMEIRO avatar tem hooks. Os
+                                                // outros entram no body (o vídeo não tem gancho no meio).
+                                                const soBody = sIdx > 0;
                                                 const r = rascunhoDoSlot(a, sIdx);
                                                 const problema = problemaDaCopy(r);
                                                 const hooksValidos = r.hooks.filter((h) => h.trim()).length;
@@ -15410,7 +15579,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         </span>
                                                         <span className="cc-pills">
                                                           <span className="cc-pill" title="Takes deste avatar já aplicados">
-                                                            <b>{partsCount}</b> take{partsCount === 1 ? '' : 's'}
+                                                            <b>{partsCount}</b> takes
                                                           </span>
                                                           <span className="cc-pill" title="Vídeos que a montagem vai gerar (um por hook; sem hook, um só)">
                                                             <b>{videos}</b> vídeo{videos === 1 ? '' : 's'}
@@ -15419,6 +15588,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </div>
 
                                                       {/* HOOKS — um vídeo por caixa, todos com o mesmo body */}
+                                                      {soBody ? (
+                                                        <div className="cc-empty">Os hooks ficam no Avatar 1. Este avatar entra no body.</div>
+                                                      ) : (
                                                       <div className="cc-sec">
                                                         <div className="cc-label">
                                                           <span className="cc-label-txt">
@@ -15474,14 +15646,35 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           ))
                                                         )}
                                                       </div>
+                                                      )}
 
                                                       {/* BODY — o mesmo pra todos os hooks, cortado em takes de ~20s */}
                                                       <div className="cc-sec">
                                                         <div className="cc-label">
                                                           <span className="cc-label-txt">
                                                             Body
-                                                            <span className="cc-label-hint">o mesmo pra todos os hooks · corte automático em takes de ~20s</span>
+                                                            <span className="cc-label-hint">
+                                                              {!r.body.trim()
+                                                                ? 'sem body: cada hook vira um vídeo sozinho'
+                                                                : motor === 'III'
+                                                                  ? 'o mesmo pra todos os hooks · corte automático em takes de ~20s'
+                                                                  : `o mesmo pra todos os hooks · Avatar ${motor}: bloco inteiro, sem picotar`}
+                                                            </span>
                                                           </span>
+                                                          {r.body.trim() ? (
+                                                            <button
+                                                              type="button"
+                                                              className="cc-del"
+                                                              style={{ marginTop: 0 }}
+                                                              onClick={() => setRascunho(chave, { ...r, body: '' })}
+                                                              title="Remover o body: só hooks"
+                                                              aria-label="Remover o body"
+                                                            >
+                                                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                                                                <path d="M18 6 6 18M6 6l12 12" />
+                                                              </svg>
+                                                            </button>
+                                                          ) : null}
                                                         </div>
                                                         <textarea
                                                           className="cc-box"
@@ -15489,7 +15682,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                           onChange={(e) => setRascunho(chave, { ...r, body: e.target.value })}
                                                           rows={7}
                                                           spellCheck={false}
-                                                          placeholder="Texto do corpo"
+                                                          placeholder="Texto do corpo (opcional: sem body, cada hook vira um vídeo sozinho)"
                                                           style={{ minHeight: 150 }}
                                                         />
                                                       </div>
@@ -15522,19 +15715,37 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 * dá pra ACRESCENTAR fala pra este avatar — inclusive
                                                 * pra um avatar adicionado na mão, que nasce sem
                                                 * nenhuma parte. Vira take igual aos outros. */}
-                                              {/* No CREATOR as caixas acima já são a copy inteira: sem
-                                                  "+ trecho" solto nem rodapé de leak. */}
-                                              {ehCreator ? null : (
+                                              {/* Com as caixas abertas (CREATOR sem take) elas já são a
+                                                  copy inteira: sem "+ trecho" solto nem rodapé de leak. */}
+                                              {caixasAbertas ? null : (
                                                 <>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => addPartTemplate(a.taskId, slot.role)}
-                                                    className="trecho-add mt-2"
-                                                    title={`Acrescenta um trecho pra ${slot.role} falar — vira um take novo no HeyGen`}
-                                                  >
-                                                    <span aria-hidden>+</span>
-                                                    trecho pra este avatar falar
-                                                  </button>
+                                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => addPartTemplate(a.taskId, slot.role)}
+                                                      className="trecho-add"
+                                                      title={`Acrescenta um trecho pra ${slot.role} falar — vira um take novo no HeyGen`}
+                                                    >
+                                                      <span aria-hidden>+</span>
+                                                      trecho pra este avatar falar
+                                                    </button>
+                                                    {ehCreator ? (
+                                                      <button
+                                                        type="button"
+                                                        className="cc-add"
+                                                        onClick={() => reabrirCaixas(a.taskId, sIdx)}
+                                                        title="Volta os takes deste avatar pras caixas de hooks e body, pra reescrever em bloco"
+                                                      >
+                                                        <span className="cc-add-ico" aria-hidden>
+                                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                                                            <path d="M12 20h9" />
+                                                            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                                          </svg>
+                                                        </span>
+                                                        Reescrever em caixas
+                                                      </button>
+                                                    ) : null}
+                                                  </div>
                                                   <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
                                                     este é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
                                                     edita pra corrigir leak, × pra remover, ou + pra acrescentar fala.
