@@ -15209,14 +15209,27 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               <button
                                                 type="button"
                                                 onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
-                                                className="btn-olho rounded-full px-2 py-0.5 text-[11px] active:translate-y-[1px]"
+                                                className={ehCreator
+                                                  ? 'btn-lapis inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-black transition-all hover:-translate-y-[1px] active:translate-y-[1px]'
+                                                  : 'btn-olho rounded-full px-2 py-0.5 text-[11px] active:translate-y-[1px]'}
+                                                style={ehCreator
+                                                  ? {
+                                                      background: previewOpen[`${a.taskId}:${sIdx}`]
+                                                        ? 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)'
+                                                        : 'linear-gradient(135deg, rgba(252,213,122,0.92) 0%, rgba(240,180,41,0.92) 100%)',
+                                                      boxShadow: previewOpen[`${a.taskId}:${sIdx}`]
+                                                        ? '0 0 26px -6px rgba(251,191,36,0.85), inset 0 0 0 1px rgba(255,255,255,0.35), inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -2px 0 rgba(0,0,0,0.22)'
+                                                        : '0 0 18px -8px rgba(251,191,36,0.6), inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                    }
+                                                  : undefined}
                                                 title={ehCreator
                                                   ? 'Escrever a copy deste avatar: hooks e body'
                                                   : 'Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)'}
                                                 aria-label={ehCreator ? 'Escrever a copy deste avatar' : 'Preview do texto deste avatar'}
+                                                aria-expanded={ehCreator ? !!previewOpen[`${a.taskId}:${sIdx}`] : undefined}
                                               >
                                                 {ehCreator ? (
-                                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="inline-block align-[-2px]">
+                                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                                                     <path d="M12 20h9" />
                                                     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
                                                   </svg>
@@ -15268,9 +15281,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 const matched = (a.partTemplates || [])
                                                   .map((pt, idx) => ({ pt, idx }))
                                                   .filter(({ pt }) => ownerSlotIdx(a, pt) === sIdx);
+                                                // CREATOR: a copy mora nas CAIXAS (hooks + body) logo abaixo;
+                                                // a lista de takes aqui em cima só confundia a ordem.
+                                                if (ehCreator) return null;
                                                 if (matched.length === 0) {
-                                                  // CREATOR: as caixas de hook/body logo abaixo são o caminho.
-                                                  if (ehCreator) return null;
                                                   return (
                                                     <div className="aviso-amarelo rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2.5 text-[11px] leading-relaxed">
                                                       ⚠ Nenhum trecho é falado por este avatar.
@@ -15498,19 +15512,25 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 * dá pra ACRESCENTAR fala pra este avatar — inclusive
                                                 * pra um avatar adicionado na mão, que nasce sem
                                                 * nenhuma parte. Vira take igual aos outros. */}
-                                              <button
-                                                type="button"
-                                                onClick={() => addPartTemplate(a.taskId, slot.role)}
-                                                className="trecho-add mt-2"
-                                                title={`Acrescenta um trecho pra ${slot.role} falar — vira um take novo no HeyGen`}
-                                              >
-                                                <span aria-hidden>+</span>
-                                                trecho pra este avatar falar
-                                              </button>
-                                              <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
-                                                este é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
-                                                edita pra corrigir leak, × pra remover, ou + pra acrescentar fala.
-                                              </div>
+                                              {/* No CREATOR as caixas acima já são a copy inteira: sem
+                                                  "+ trecho" solto nem rodapé de leak. */}
+                                              {ehCreator ? null : (
+                                                <>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => addPartTemplate(a.taskId, slot.role)}
+                                                    className="trecho-add mt-2"
+                                                    title={`Acrescenta um trecho pra ${slot.role} falar — vira um take novo no HeyGen`}
+                                                  >
+                                                    <span aria-hidden>+</span>
+                                                    trecho pra este avatar falar
+                                                  </button>
+                                                  <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
+                                                    este é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
+                                                    edita pra corrigir leak, × pra remover, ou + pra acrescentar fala.
+                                                  </div>
+                                                </>
+                                              )}
                                             </div>
                                           ) : null}
                                           {/* ═══ PREVIEW AVATAR (thumb maior + info clean) ═══ */}
