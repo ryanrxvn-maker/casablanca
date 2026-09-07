@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.21.1';
+const DARKO_EXT_VERSION = '4.21.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1434,6 +1434,22 @@ function reportError(requestId, error) {
     requestId,
     error,
   });
+}
+
+/** Visibilidade que funciona com position:fixed.
+ *  ⚠ `offsetParent === null` — o teste usado no resto deste arquivo — da FALSO
+ *  NEGATIVO em elemento `position: fixed`, e o menu do Radix e fixed. Foi por
+ *  isso que o confirmador dizia "menu nao abriu" com o menu ABERTO na tela,
+ *  queimando tentativa a toa. Medido 07.09.2026 no create-v4 real. */
+function estaNaTela(el) {
+  if (!el) return false;
+  try {
+    if (el.getClientRects().length === 0) return false;
+    const cs = window.getComputedStyle(el);
+    return cs.visibility !== 'hidden' && cs.display !== 'none';
+  } catch (e) {
+    return false;
+  }
 }
 
 function sleepLocal(ms) {
@@ -3234,7 +3250,7 @@ function studioAbortIfPaywall(where) {
  *  posicao vertical (painel direito varia). Prefere o que estiver
  *  perto de um rotulo "Motion Engine". */
 function findStudioMotorControl() {
-  const cands = [];
+  let cands = [];
   for (const el of document.querySelectorAll('button, [role="button"], div[tabindex], div, span, a')) {
     if (el.offsetParent === null || el.disabled) continue;
     const t = (el.textContent || '').trim();
@@ -3246,7 +3262,18 @@ function findStudioMotorControl() {
     // pedacos dele viravam os unicos candidatos.
     if (dentroDeAnuncio(el)) continue;
     const r = el.getBoundingClientRect();
-    if (r.width < 40 || r.height < 16 || r.width > 420) continue;
+    if (r.width < 40 || r.height < 16) continue;
+    // O gatilho real e um Radix com aria-haspopup="menu". Quando essa evidencia
+    // ESTRUTURAL existe, geometria nao decide nada.
+    //
+    // ⚠ MEDIDO 07.09.2026 e era um defeito ANTIGO, latente: o teto fixo de
+    // 420px estava amarrado a UM tamanho de janela. Na janela de automacao
+    // (1280px) e em tela larga o botao do Motion Engine mede 492px e era
+    // REPROVADO — `findStudioMotorControl` devolvia null e o job morria em
+    // "controle nao achado". Numero magico em pixel nao sobrevive a mudanca de
+    // layout; o teto agora e relativo e so vale pra candidato SEM o atributo.
+    const ehGatilhoDeMenu = el.getAttribute('aria-haspopup') === 'menu';
+    if (!ehGatilhoDeMenu && r.width > Math.max(420, window.innerWidth * 0.4)) continue;
     const style = window.getComputedStyle(el);
     const clickable = style.cursor.includes('pointer') || el.tagName === 'BUTTON' ||
       el.getAttribute('role') === 'button' || (el.className || '').includes('cursor-pointer');
@@ -3261,10 +3288,19 @@ function findStudioMotorControl() {
     // ele e <button aria-haspopup="menu" data-state="closed">. Isso e o sinal
     // mais forte que existe aqui — um clique no candidato errado abriu o menu
     // do PROJETO ("Copy ID / Edit as New / ...") em vez do de motor.
-    const ehGatilhoDeMenu = el.getAttribute('aria-haspopup') === 'menu';
     cands.push({ el, ehGatilhoDeMenu, clickable, nearLabel, right: r.right });
   }
   if (!cands.length) return null;
+  // BLINDAGEM ESTRUTURAL, nao por texto: se existe candidato com
+  // aria-haspopup="menu", os que NAO tem sao DESCARTADOS, nao apenas
+  // despriorizados. O gatilho real do Motion Engine e um Radix e sempre tem o
+  // atributo (medido no create-v4). Assim, texto solto na tela — o anuncio de
+  // planos de hoje ou qualquer banner que a HeyGen invente amanha — nunca pode
+  // ser escolhido como controle, seja qual for a redacao dele.
+  // Se NENHUM candidato tiver o atributo (a HeyGen mudou o componente), cai na
+  // pontuacao antiga em vez de parar de funcionar.
+  const comGatilho = cands.filter((c) => c.ehGatilhoDeMenu);
+  if (comGatilho.length) cands = comGatilho;
   cands.sort((a, b) =>
     (a.ehGatilhoDeMenu !== b.ehGatilhoDeMenu ? (a.ehGatilhoDeMenu ? -1 : 1)
       : a.nearLabel !== b.nearLabel ? (a.nearLabel ? -1 : 1)
@@ -3320,9 +3356,18 @@ async function setStudioMotorAvatarIII(sceneLabel) {
     // abriu o menu do PROJETO ("Copy ID / Edit as New / Collaborate / Rename /
     // Trash") e, se bastasse "algum menu aberto", isso contaria como sucesso —
     // o laco seguiria procurando "Avatar III" num menu que nunca o teria.
+    // ⚠ SEM . MEDIDO: o texto do menu vem concatenado — "Avatar VPremium
+    // Character consistent...", "Avatar IIIApplies lip sync". Entre o "V" e o
+    // "P" NAO existe fronteira de palavra, entao /Avatar V/ NAO casa e o
+    // confirmador dizia "menu nao abriu" com o menu ABERTO na tela, queimando
+    // tentativa a toa. Exigir III E IV juntos identifica o menu do motor sem
+    // ambiguidade (e sem casar com um "Avatar Video" da vida).
     const menuDoMotorAberto = () =>
       [...document.querySelectorAll('[role="menu"]')].some(
-        (m) => m.offsetParent !== null && /Avatar\s*(III|IV|V)/.test(m.textContent || ''),
+        (m) =>
+          estaNaTela(m) &&
+          /Avatar\s*III/.test(m.textContent || '') &&
+          /Avatar\s*IV/.test(m.textContent || ''),
       );
     const menuAbriu = () =>
       menuDoMotorAberto() ||
@@ -3342,7 +3387,7 @@ async function setStudioMotorAvatarIII(sceneLabel) {
     // dao falso-positivo (nao comecam com "Avatar III").
     let item = null, bestN = Infinity;
     for (const o of document.querySelectorAll('[role="menuitem"], [role="option"], li, button, div[tabindex], div, span, p')) {
-      if (o.offsetParent === null) continue;
+      if (o.offsetParent === null && !estaNaTela(o)) continue;
       const t = (o.textContent || '').trim();
       if (!t.startsWith('Avatar III')) continue;
       const n = o.querySelectorAll('*').length;

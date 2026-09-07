@@ -52,6 +52,15 @@
       return;
     }
 
+    // Recarrega a extensao (le os arquivos do disco de novo). Serve pro ciclo
+    // de desenvolvimento nao depender de alguem clicar "Reload" na
+    // chrome://extensions. Este bridge so roda em darkoautoedit.com.
+    if (data.type === 'HG_RELOAD_EXT') {
+      sendToPage({ type: 'HG_RELOAD_ACK', version: VERSION });
+      try { chrome.runtime.sendMessage({ type: 'HG_RELOAD_EXT' }); } catch {}
+      return;
+    }
+
     if (data.type === 'HG_GENERATE') {
       const requestId = data.requestId;
       relayToBg(

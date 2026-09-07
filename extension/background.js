@@ -528,6 +528,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // PARA). O service worker nao e uma pagina e nao sofre isso, entao a espera
   // do laco do Studio passa por aqui. Teto de 25s por pedaco: sono curto
   // mantem o worker vivo e o content script refatia o que faltar.
+  // RECARGA DA PROPRIA EXTENSAO. Existe pra fechar o ciclo de desenvolvimento
+  // sem depender de alguem ir na chrome://extensions clicar em "Reload": o
+  // agente copia os arquivos novos pra pasta unpacked e manda esta mensagem.
+  // Chrome re-le os arquivos do disco no reload. So chega aqui via bridge.js,
+  // que roda exclusivamente em darkoautoedit.com (host_permissions), e a unica
+  // coisa que faz e recarregar — nao toca em dado nenhum.
+  if (msg.type === 'HG_RELOAD_EXT') {
+    console.log('[DARKO LAB BG] recarregando a extensao a pedido da pagina');
+    try { sendResponse({ ok: true }); } catch (e) {}
+    setTimeout(() => { try { chrome.runtime.reload(); } catch (e) {} }, 150);
+    return true;
+  }
   if (msg.type === 'HG_SLEEP') {
     const ms = Math.max(0, Math.min(25000, Number(msg.ms) || 0));
     setTimeout(() => { try { sendResponse({ ok: true }); } catch (e) {} }, ms);
