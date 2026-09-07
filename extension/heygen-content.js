@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.19.0';
+const DARKO_EXT_VERSION = '4.19.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1410,6 +1410,12 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// NOTA (07.09.2026): o laco avalia o predicado ANTES de dormir e, ao acordar
+// depois do prazo, sairia sem reavaliar — jogando fora um elemento que nasceu
+// durante o ultimo sono. Isso e barulho de milissegundos numa aba visivel, mas
+// a aba do Studio roda em SEGUNDO PLANO (background.js abre com active:false)
+// e o Chrome prende todo timer em >=1s la: um interval de 200/400/500ms vira
+// ~1s, e a ultima soneca quase sempre atravessa o prazo. Dai a releitura final.
 async function waitFor(predicate, timeoutMs = 15000, interval = 250) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1417,6 +1423,8 @@ async function waitFor(predicate, timeoutMs = 15000, interval = 250) {
     if (v) return v;
     await sleep(interval);
   }
+  const ultima = predicate();
+  if (ultima) return ultima;
   throw new Error('Timeout esperando elemento.');
 }
 
@@ -1428,7 +1436,7 @@ async function waitForOrNull(predicate, timeoutMs = 5000, interval = 200) {
     if (v) return v;
     await sleep(interval);
   }
-  return null;
+  return predicate() || null;
 }
 
 /**
@@ -2474,17 +2482,137 @@ async function cdpClick(x, y) {
     });
   });
 }
-async function cdpClickEl(el, label) {
+/** O clique do CDP vai por COORDENADA. Se algo estiver por cima do ponto, o
+ *  evento entra no que esta por cima — e o CDP responde ok do mesmo jeito.
+ *  Falha silenciosa: o controle nunca recebe nada e nada no log acusa.
+ *  Este teste diz se o ponto entrega mesmo no elemento pretendido. */
+/** Classifica o que esta no topo do ponto. Tres casos, e a diferenca entre
+ *  eles importa:
+ *   - entrega : e o proprio elemento ou um DESCENDENTE (icone/label dentro do
+ *               botao). O evento nasce nele e borbulha ate o alvo. Tudo certo.
+ *   - ancestral: o topo e um PAI do alvo. Formalmente o clique nao chega no
+ *               alvo (evento borbulha filho -> pai, nunca o contrario), mas
+ *               isso ja acontecia ANTES deste fix em varios controles do
+ *               Studio e o caminho pago funciona assim ha meses. Nao vamos
+ *               mudar o comportamento de quem esta funcionando: segue no CDP.
+ *               Se o clique nao surtir efeito, o `confirmar` pega.
+ *   - coberto : tem um TERCEIRO elemento por cima (a cortina opaca da aba
+ *               oculta e o caso real). Aqui o clique por coordenada
+ *               comprovadamente vai pro lugar errado — desvia pro sintetico. */
+function topoNoPonto(el, x, y) {
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+    return { caso: 'coberto', at: null };
+  }
+  const at = document.elementFromPoint(x, y);
+  if (!at) return { caso: 'coberto', at: null };
+  if (at === el || el.contains(at)) return { caso: 'entrega', at };
+  if (at.contains(el)) return { caso: 'ancestral', at };
+  return { caso: 'coberto', at };
+}
+
+/** Ultimo recurso quando o ponto continua coberto: sequencia COMPLETA de
+ *  ponteiro direto no elemento, sem coordenada.
+ *  NAO e el.click(): os menus do Studio sao Radix, que abrem no POINTERDOWN e
+ *  ignoram um click solto. VALIDADO 07.09.2026 no Motion Engine — com a
+ *  sequencia abaixo o data-state do trigger passou de "closed" pra "open" e o
+ *  item "Avatar III" apareceu; com el.click() nao acontecia nada. */
+function cliqueSinteticoEm(el) {
+  try {
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const base = {
+      bubbles: true, cancelable: true, composed: true, view: window,
+      clientX: cx, clientY: cy, button: 0, detail: 1,
+      pointerId: 1, pointerType: 'mouse', isPrimary: true,
+    };
+    const press = { ...base, buttons: 1 };
+    const release = { ...base, buttons: 0 };
+    el.dispatchEvent(new PointerEvent('pointerover', press));
+    el.dispatchEvent(new MouseEvent('mouseover', press));
+    el.dispatchEvent(new MouseEvent('mousemove', press));
+    el.dispatchEvent(new PointerEvent('pointerdown', press));
+    el.dispatchEvent(new MouseEvent('mousedown', press));
+    el.dispatchEvent(new PointerEvent('pointerup', release));
+    el.dispatchEvent(new MouseEvent('mouseup', release));
+    el.dispatchEvent(new MouseEvent('click', release));
+    return true;
+  } catch (e) {
+    studioWarn('cliqueSinteticoEm falhou:', e && e.message);
+    return false;
+  }
+}
+
+/** NAO EXISTE "preferencia global de clique sintetico" — e proposital.
+ *  A 1a versao deste fix tinha um latch: quando o sintetico funcionasse uma
+ *  vez, TODOS os cliques seguintes do job sairiam por ele. A revisao mostrou o
+ *  estrago: o sintetico e isTrusted=false, e este mesmo arquivo documenta
+ *  controles que SO respondem a evento confiavel — "Add audio", a linha da
+ *  biblioteca (lib-row), a pilula "Use avatar voice", o Generate. O latch
+ *  armado no Motion Engine (que e Radix, aceita qualquer pointerdown) mataria
+ *  esses outros logo depois, num caminho PAGO que funciona hoje.
+ *  Generalizar do controle mais permissivo pro mais exigente e o erro.
+ *  Cada clique decide sozinho, olhando o proprio ponto. */
+async function esperarConfirmacao(confirmar, ms) {
+  const ate = Date.now() + ms;
+  while (Date.now() < ate) {
+    try { if (confirmar()) return true; } catch (e) {}
+    await sleep(120);
+  }
+  try { return !!confirmar(); } catch (e) { return false; }
+}
+
+/**
+ * Clica um elemento. `confirmar` (opcional) e uma funcao que devolve true
+ * quando o clique FEZ EFEITO — sem ela o comportamento e o de antes.
+ *
+ * Por que confirmar: o CDP responde ok mesmo quando o evento cai num overlay
+ * ou nao produz nada. Foi assim que o MODO ECONOMIA morreu calado em
+ * "nao consegui confirmar Avatar III": o clique era "OK" e o menu nunca abria.
+ * Com `confirmar`, um clique sem efeito cai no sintetico em vez de virar um
+ * timeout de 8 minutos la na frente.
+ */
+async function cdpClickEl(el, label, confirmar) {
   if (!el) { studioWarn(`cdpClickEl ${label || ''}: elemento nulo`); return false; }
   try { el.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch {}
   await sleep(150);
-  const r = el.getBoundingClientRect();
+  let r = el.getBoundingClientRect();
   if (r.width === 0 || r.height === 0) { studioWarn(`cdpClickEl ${label || ''}: rect zero`); return false; }
-  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  let x = r.left + r.width / 2, y = r.top + r.height / 2;
+  // Coberto? Tenta limpar a cortina ANTES de gastar o clique — o dismiss ja
+  // conhece a cortina opaca de aba oculta (caso C).
+  if (topoNoPonto(el, x, y).caso === 'coberto') {
+    studioDismissPaywallIfShown(`cdpClick ${label || ''}`);
+    await sleep(150);
+    r = el.getBoundingClientRect();
+    x = r.left + r.width / 2; y = r.top + r.height / 2;
+  }
+  const topo = topoNoPonto(el, x, y);
+  if (topo.caso === 'coberto') {
+    const at = topo.at;
+    const quem = at
+      ? `${at.tagName}.${String(at.className || '').split(' ')[0]} z=${window.getComputedStyle(at).zIndex}`
+      : 'fora do viewport';
+    studioWarn(`cdpClickEl ${label || ''}: ponto @${Math.round(x)},${Math.round(y)} coberto por ${quem} — clique sintetico direto no elemento`);
+    // Sem coordenada util, o sintetico e a unica carta. Devolve true igual o
+    // CDP devolvia neste mesmo caso (ele respondia ok clicando na cortina):
+    // o retorno nao piora, e quem passa `confirmar` ganha a checagem de fato.
+    const okS = cliqueSinteticoEm(el);
+    if (!confirmar) return okS;
+    return await esperarConfirmacao(confirmar, 2500);
+  }
   const res = await cdpClick(x, y);
   if (!res.ok) studioWarn(`cdpClickEl ${label || ''}: falhou - ${res.error}`);
   else studioLog(`cdpClick ${label || ''} @${Math.round(x)},${Math.round(y)} OK`);
-  return !!res.ok;
+  if (!confirmar) return !!res.ok;
+  if (await esperarConfirmacao(confirmar, 2500)) return true;
+  // CDP disse ok e nada aconteceu. Antes de repetir, confere DE NOVO: numa aba
+  // de fundo os timers ficam presos em >=1s e o efeito do proprio CDP pode
+  // chegar atrasado. Sem esta releitura, o retry clicaria um Radix ja aberto e
+  // o FECHARIA — trocando um sucesso tardio por uma falha.
+  try { if (confirmar()) return true; } catch (e) {}
+  studioWarn(`cdpClickEl ${label || ''}: CDP nao surtiu efeito — uma tentativa sintetica`);
+  cliqueSinteticoEm(el);
+  return await esperarConfirmacao(confirmar, 2500);
 }
 async function cdpDetachBg() {
   try {
@@ -2808,7 +2936,26 @@ function studioDismissPaywallIfShown(where) {
     // HeyGen overlay sticky: z=999999 com video animations
     const hasAnimVideo = !!d.querySelector('video[src*="animations"]');
     const isStuckHeygenOverlay = z >= 999999 && hasAnimVideo;
-    if (!isSemiTrans && !isStuckHeygenOverlay) continue;
+    // C) CORTINA OPACA de aba em segundo plano.
+    //    MEDIDO 07.09.2026 no create-v4 real: com a aba oculta
+    //    (document.visibilityState === 'hidden') o HeyGen deixa um DIV fixed
+    //    z=999999, bg rgb(22,23,26) SOLIDO, cobrindo 2133x950 — o viewport
+    //    inteiro. Nao e semitransparente e nao tem o video de animacao, entao
+    //    escapava das regras A e B e ficava la pra sempre.
+    //    Consequencia: cdpClickEl clica por COORDENADA, o clique caia na
+    //    cortina, o CDP respondia ok e o controle nunca recebia nada. Era isso
+    //    que matava o MODO ECONOMIA em "nao consegui confirmar Avatar III".
+    //    Assinatura conservadora: uma cortina nao tem texto nem controle
+    //    nenhum dentro. Qualquer painel de verdade tem um dos dois.
+    const opaca = /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/.test(bg);
+    const semConteudo = (d.textContent || '').trim() === '' &&
+      d.querySelectorAll('button, a, input, textarea, select, [role="button"]').length === 0;
+    const cobreTudo = r.width >= window.innerWidth * 0.95 &&
+      r.height >= window.innerHeight * 0.95;
+    const isCortinaOpaca = z >= 1000 && opaca && semConteudo && cobreTudo &&
+      !d.closest('[role="dialog"]');
+    if (!isSemiTrans && !isStuckHeygenOverlay && !isCortinaOpaca) continue;
+    if (isCortinaOpaca) studioLog(`paywall (${where}): cortina opaca z=${z} removida (aba oculta)`);
     // Backdrop puro / overlay nao tem muitos botoes; dialog legit tem
     const btnsInside = d.querySelectorAll('button').length;
     if (btnsInside > 10) continue;
@@ -2897,7 +3044,16 @@ async function setStudioMotorAvatarIII(sceneLabel) {
       return true;
     }
     studioLog(`${sceneLabel}: Motion Engine em "${cur}" — trocando pra Avatar III (tentativa ${attempt}) via CDP`);
-    await cdpClickEl(ctrl, 'motor-ctrl');
+    // O trigger e um Radix (aria-haspopup=menu / data-state). Confirmar que o
+    // menu ABRIU e o que separa "cliquei" de "o clique chegou": este e o
+    // primeiro clique por coordenada de cada cena, entao serve de canario pro
+    // resto do job.
+    const menuAbriu = () =>
+      ctrl.getAttribute('data-state') === 'open' ||
+      ctrl.getAttribute('aria-expanded') === 'true' ||
+      [...document.querySelectorAll('[role="menu"]')].some((m) => m.offsetParent !== null);
+    const abriu = await cdpClickEl(ctrl, 'motor-ctrl', menuAbriu);
+    if (!abriu) studioWarn(`${sceneLabel}: menu do Motion Engine nao abriu (tentativa ${attempt})`);
     await sleep(900);
     // procura item "Avatar III" no menu (portalado no body).
     // VALIDADO EM TESTE REAL: o menu lista "Avatar V/IV/III" com
@@ -2920,7 +3076,14 @@ async function setStudioMotorAvatarIII(sceneLabel) {
             c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
         c = c.parentElement;
       }
-      await cdpClickEl(c || item, 'Avatar III');
+      // Confirmacao = o proprio controle passou a mostrar Avatar III. E o
+      // mesmo teste que o laco faz logo abaixo, so que aqui ele habilita o
+      // fallback sintetico ANTES de queimar a tentativa.
+      const virouIII = () => {
+        const a = findStudioMotorControl();
+        return !!a && /^Avatar III\b/.test((a.textContent || '').trim());
+      };
+      await cdpClickEl(c || item, 'Avatar III', virouIII);
       await sleep(1100);
     } else {
       studioWarn(`${sceneLabel}: item "Avatar III" nao apareceu no menu`);
