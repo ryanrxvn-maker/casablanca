@@ -21,6 +21,10 @@ async function fetchWithTimeout(url, opts, timeoutMs = 30000) {
   }
 }
 
+/** Janela dedicada a automacao. Existe pra a aba do Studio nao ficar 'hidden'
+ *  — ver a explicacao longa em findOrCreateHeyGenTab. */
+let janelaAutomacaoId = null;
+
 async function findOrCreateHeyGenTab() {
   const tabs = await chrome.tabs.query({
     url: ['https://app.heygen.com/*'],
@@ -38,7 +42,29 @@ async function findOrCreateHeyGenTab() {
   // fila, entao reinstalar a extensao / recarregar a pagina nao curava nada.
   // Agora cada candidata e VALIDADA (acorda se estiver dormindo, injeta o
   // content script) e a que nao servir e PULADA — no fim, cria uma aba nova.
-  const candidates = tabs.filter((t) => t.active === false);
+  // Quem pode ser automatizada:
+  //  - qualquer aba de FUNDO (t.active === false); ou
+  //  - uma aba ATIVA que esteja numa janela que NAO e a que o usuario esta
+  //    usando. Esse segundo caso e a nossa janela de automacao — e reconhece-la
+  //    pela janela em foco (e nao so por `janelaAutomacaoId`) evita criar uma
+  //    janela nova toda vez que o service worker do Chrome reinicia e perde a
+  //    variavel.
+  // NUNCA uma aba que o user esteja olhando agora.
+  let janelaEmFoco = null;
+  try { janelaEmFoco = (await chrome.windows.getLastFocused()).id; } catch (e) {}
+  const daAutomacao = (t) =>
+    t.windowId === janelaAutomacaoId || (t.active === true && janelaEmFoco != null && t.windowId !== janelaEmFoco);
+  const candidates = tabs
+    .filter((t) => t.active === false || daAutomacao(t))
+    .sort((a, b) => (daAutomacao(a) ? -1 : daAutomacao(b) ? 1 : 0));
+  // Reencontrou a janela depois de um restart do worker? Readota.
+  if (janelaAutomacaoId == null) {
+    const readotar = candidates.find((t) => daAutomacao(t));
+    if (readotar) {
+      janelaAutomacaoId = readotar.windowId;
+      console.log('[DARKO LAB BG] readotando janela de automacao', janelaAutomacaoId);
+    }
+  }
   for (const t of candidates) {
     try {
       if (t.discarded || t.status === 'unloaded') {
@@ -67,9 +93,57 @@ async function findOrCreateHeyGenTab() {
       );
     }
   }
-  // Nenhuma aba de fundo utilizavel (ou so existem abas ativas) — cria uma
-  // fresh inativa. Aba recem-criada sempre aceita o content script.
-  console.log('[DARKO LAB BG] nenhuma aba HeyGen reaproveitavel — criando uma nova (inativa)');
+  // Nenhuma aba reaproveitavel — cria a JANELA DE AUTOMACAO.
+  //
+  // POR QUE JANELA E NAO ABA (medido 07.09.2026, e foi o que travava tudo):
+  // uma aba de fundo tem document.visibilityState 'hidden', e o Chrome aplica
+  // throttling por ORCAMENTO nos timers dela. Medido na aba real do Studio:
+  // setTimeout(200) virava ~1000ms e, depois de ~6 disparos, a cadeia PARAVA
+  // de vez. Como todo o laco do Studio e `await sleep(...)`, o job morria no
+  // meio — sem progresso, sem erro. Sintoma: card em ENVIANDO por 19 min sem
+  // uma unica mensagem.
+  // Web Lock NAO resolve (testado: mesmo resultado, 6 ticks e para).
+  // O que resolve e a aba nao ser 'hidden'. A aba ATIVA de uma janela propria
+  // nao-minimizada e 'visible' mesmo com a janela atras da do usuario — e
+  // `focused: false` garante que o foco dele nao e roubado.
+  const jaTem = janelaAutomacaoId != null;
+  if (jaTem) {
+    try {
+      const w = await chrome.windows.get(janelaAutomacaoId, { populate: true });
+      const t = (w.tabs || []).find((x) => (x.url || '').includes('app.heygen.com'));
+      if (t) {
+        if (w.state === 'minimized') {
+          // Minimizada volta a ser 'hidden' — desminimiza SEM focar.
+          try { await chrome.windows.update(janelaAutomacaoId, { state: 'normal', focused: false }); } catch (e) {}
+        }
+        await chrome.tabs.update(t.id, { active: true });
+        await waitForTabReady(t.id);
+        return t;
+      }
+    } catch (e) {
+      janelaAutomacaoId = null;
+    }
+  }
+  console.log('[DARKO LAB BG] criando JANELA de automacao (sem foco, pra a aba ficar visible)');
+  try {
+    const win = await chrome.windows.create({
+      url: HEYGEN_CREATE_URL,
+      focused: false,
+      type: 'normal',
+      state: 'normal',
+      width: 1280,
+      height: 900,
+    });
+    janelaAutomacaoId = win.id;
+    const t = (win.tabs || [])[0];
+    if (t) {
+      await waitForTabReady(t.id);
+      return t;
+    }
+  } catch (e) {
+    console.warn('[DARKO LAB BG] nao consegui criar janela, caindo pra aba inativa:', e?.message || e);
+  }
+  // Ultimo recurso: aba inativa (throttled, mas melhor que nao rodar).
   const fresh = await chrome.tabs.create({
     url: HEYGEN_CREATE_URL,
     active: false,
@@ -394,6 +468,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return false; }
     cdpTrustedClick(tabId, msg.x, msg.y)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+    return true;
+  }
+  // Anexa o debugger sem clicar em nada. Serve pra (a) tirar o custo do attach
+  // do primeiro clique e (b) marcar a aba como "sob debugger", estado em que o
+  // Chrome NAO a congela.
+  if (msg.type === 'HG_CDP_WARMUP') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return false; }
+    cdpAttach(tabId)
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
     return true;

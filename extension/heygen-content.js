@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.19.3';
+const DARKO_EXT_VERSION = '4.20.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2475,6 +2475,44 @@ function studioWarn(...a) { console.warn('[DARKO LAB STUDIO]', ...a); }
 /** Click CONFIAVEL (isTrusted=true) via CDP Input.dispatchMouseEvent.
  *  Usado pros botoes que so respondem a eventos confiaveis (Add audio,
  *  linha da biblioteca, pilula Use avatar voice no create-v4). */
+/* ============ POR QUE ESTE JOB PRECISA DE ABA VISIVEL ============
+ * MEDIDO 07.09.2026 na aba real do Studio, com visibilityState 'hidden':
+ *   setTimeout(200) disparava em ~1000ms E A CADEIA PARAVA depois de ~6
+ *   disparos (throttling por orcamento do Chrome pra aba oculta).
+ * Como todo o laco do Studio e `await sleep(...)`, o job simplesmente morre no
+ * meio: sem progresso, sem erro. Sintoma real: card em ENVIANDO por 19 min sem
+ * uma unica mensagem da extensao.
+ *
+ * TESTADO E DESCARTADO: Web Lock (navigator.locks) NAO isenta do throttling —
+ * mesmo teste, mesmos 6 ticks e para. Nao adianta segurar lock aqui.
+ *
+ * A CORRECAO E NO background.js: a aba passa a nascer como aba ATIVA de uma
+ * JANELA propria sem foco, o que a deixa 'visible' sem roubar o foco do
+ * usuario. Aqui embaixo so avisamos quando, ainda assim, a aba estiver oculta
+ * — pra a falha ter nome em vez de virar silencio.
+ */
+function avisoDeAbaOculta() {
+  return document.visibilityState === 'hidden'
+    ? ' (aviso: esta aba esta OCULTA e o Chrome desacelera os tempos dela — deixe a janela do HeyGen visivel)'
+    : '';
+}
+
+/** Anexa o debugger JA no comeco do job. Dois ganhos: aba sob debugger nao e
+ *  congelada pelo Chrome, e o primeiro clique nao paga o custo do attach. */
+async function aquecerCdp() {
+  return new Promise((resolve) => {
+    let pronto = false;
+    const t = setTimeout(() => { if (!pronto) { pronto = true; resolve(false); } }, 8000);
+    try {
+      chrome.runtime.sendMessage({ type: 'HG_CDP_WARMUP' }, (res) => {
+        if (pronto) return;
+        pronto = true; clearTimeout(t);
+        resolve(!!(res && res.ok));
+      });
+    } catch (e) { if (!pronto) { pronto = true; clearTimeout(t); resolve(false); } }
+  });
+}
+
 // TETO OBRIGATORIO. Sem ele o job fica pendurado PRA SEMPRE, sem progresso e
 // sem erro: `chrome.runtime.sendMessage` nao tem timeout, e do outro lado o
 // `chrome.debugger.attach` tambem nao — se o service worker (MV3) for suspenso
@@ -2928,9 +2966,14 @@ async function enterStudioForAvatar(avatarId, avatarName, groupName, onEtapa) {
     const t = at.tagName + ' z=' + (window.getComputedStyle(at).zIndex || '?');
     if (t !== lastTopText) { lastTopText = t; studioLog('overlay topo no Upload audio: ' + t); }
     return false;
-  }, 60000, 1000);
+    // 15s, nao 60s. Esta espera nasceu quando um clique coberto era FATAL: ele
+    // caia no overlay e ninguem percebia. Hoje cdpClickEl resolve cobertura por
+    // clique (limpa a cortina, re-testa o ponto e, se preciso, vai de sintetico),
+    // entao esperar 60s no escuro so adiciona um minuto morto a CADA disparo —
+    // e era um minuto em que a aba podia dormir antes de qualquer trabalho.
+  }, 15000, 1000);
   if (!clickableOk) {
-    studioWarn('Upload audio btn nao ficou clicavel em 60s — seguindo mesmo assim');
+    studioWarn('Upload audio btn nao ficou clicavel em 15s — seguindo (o clique se vira sozinho)');
   }
   await sleep(800);
   etapa('editor pronto');
@@ -3464,6 +3507,7 @@ async function runStudioJob(requestId, payload) {
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
     if (!Array.isArray(parts) || parts.length === 0) throw new Error('payload invalido: parts vazio.');
 
+    await aquecerCdp();
     reportProgress(requestId, `VA Studio: abrindo editor de ${avatarName || avatarId}...`);
     await enterStudioForAvatar(avatarId, avatarName, groupName, (m) =>
       reportProgress(requestId, `VA Studio: ${m}...`));
@@ -3873,7 +3917,9 @@ async function runEconomyJob(requestId, payload) {
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
     if (!Array.isArray(cenas) || cenas.length === 0) throw new Error('payload invalido: cenas vazio.');
 
-    reportProgress(requestId, `Economia: abrindo o Studio de ${avatarName || avatarId}...`, 2);
+    // Aquece o debugger: tira o custo do attach do primeiro clique.
+    await aquecerCdp();
+    reportProgress(requestId, `Economia: abrindo o Studio de ${avatarName || avatarId}...${avisoDeAbaOculta()}`, 2);
     await enterStudioForAvatar(avatarId, avatarName, groupName, (m) =>
       reportProgress(requestId, `Economia: ${m}...`, 3));
 
