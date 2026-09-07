@@ -200,6 +200,37 @@ console.log('pilot-economia:');
   eq(r[1].videoId, 'v2', 'o take 3 do plano casa com a cena de idx 2');
 }
 
+/* ─── 8b. índices do PLANO: o caso do dedup (minhasIdx esparso) ─── */
+{
+  // O Pilot manda só um subconjunto do plano (as outras falas a task irmã já
+  // está gerando). A posição no array enviado NÃO é o índice do plano.
+  const enviadas = [take({ label: 'HOOK 1' }), take({ label: 'BODY 3' }), take({ label: 'BODY 4' })];
+  const minhasIdx = [0, 5, 6];
+  const p = planejarEconomia(enviadas, { indicesDoPlano: minhasIdx });
+  eq(p.projetos[0].cenas.map((c) => c.idx), [0, 5, 6], 'as cenas saem numeradas pelo índice do PLANO, não pela posição enviada');
+  // e o casamento de volta fecha certo
+  const cenas = p.projetos[0].cenas.map((c) => ({ idx: c.idx, videoId: `v${c.idx}` }));
+  const planoInteiro = [
+    take({ label: 'HOOK 1' }), take({ label: 'X' }), take({ label: 'X' }),
+    take({ label: 'X' }), take({ label: 'X' }), take({ label: 'BODY 3' }), take({ label: 'BODY 4' }),
+  ];
+  const rs = resultadosParaRunner(minhasIdx, planoInteiro, cenas);
+  eq(rs.map((r) => r.videoId), ['v0', 'v5', 'v6'], 'cada take recebe o vídeo da SUA cena');
+  eq(rs.map((r) => r.label), ['HOOK 1', 'BODY 3', 'BODY 4'], 'e o label vem do plano, casado com o índice certo');
+  ok(rs.every((r) => r.error === null), 'nenhum take some com "a cena não voltou"');
+}
+{
+  // recusa também sai no espaço do plano
+  const p = planejarEconomia([take({ label: 'HOOK 1' }), take({ label: 'BODY 9', audioKey: 'k' })], { indicesDoPlano: [3, 8] });
+  eq(p.recusas, [{ idx: 8, label: 'BODY 9', motivo: 'audio-upado' }], 'a recusa aponta o índice do plano');
+  eq(p.projetos[0].cenas[0].idx, 3, 'a cena boa também');
+}
+{
+  // sem a opção, continua identidade (o caso de sempre)
+  const p = planejarEconomia([take({ label: 'a' }), take({ label: 'b' })]);
+  eq(p.projetos[0].cenas.map((c) => c.idx), [0, 1], 'sem indicesDoPlano, a posição é o índice');
+}
+
 /* ─── 9. resumo e travas ─── */
 {
   const p = planejarEconomia([take({ label: 'a' }), take({ label: 'b', avatarId: 'av2' })]);

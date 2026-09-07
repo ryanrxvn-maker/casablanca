@@ -163,6 +163,7 @@ import { PilotEconomiaBtn } from '@/components/PilotEconomiaBtn';
 import { DocsBar, CreatorBar } from '@/components/PilotFontesBar';
 import {
   MOTOR_ECONOMIA,
+  ehIdSintetico,
   motivoLegivel,
   planejarEconomia,
   podeEconomia,
@@ -2608,6 +2609,33 @@ function ClickUpPilotInner() {
    * download e o passo a passo — não um texto mandando o user procurar.
    */
   const [extFaltando, setExtFaltando] = useState(false);
+  /* A extensão é o motor de TUDO que o Pilot dispara. Até 06.09 o aviso de
+   * "falta a extensão" só nascia dentro da análise — quem estava no CREATOR
+   * (que nem passa por lá) desinstalava a extensão e a tela não dizia nada.
+   * Agora a checagem é na abertura, em qualquer modo, e refeita quando a aba
+   * volta ao foco: instalou, o aviso some sozinho. */
+  useEffect(() => {
+    let vivo = true;
+    const conferir = async () => {
+      try {
+        const ext = await detectExtension();
+        if (vivo) setExtFaltando(!ext.connected);
+      } catch {
+        if (vivo) setExtFaltando(true);
+      }
+    };
+    void conferir();
+    const aoVoltar = () => {
+      if (document.visibilityState === 'visible') void conferir();
+    };
+    window.addEventListener('focus', aoVoltar);
+    document.addEventListener('visibilitychange', aoVoltar);
+    return () => {
+      vivo = false;
+      window.removeEventListener('focus', aoVoltar);
+      document.removeEventListener('visibilitychange', aoVoltar);
+    };
+  }, []);
 
   /* ═══════════════ INSERTS (31.08) ═══════════════
    *  B-roll que entra NA MONTAGEM, ancorado numa palavra da copy. Os bytes
@@ -2798,27 +2826,16 @@ function ClickUpPilotInner() {
       return next;
     });
   };
-  /** Ligar o modo economia numa task apaga o gesto de todos os avatares dela:
-   *  gesto ficaria guardado e voltaria a valer no disparo normal, mas aqui ele
-   *  subiria a cena pro Avatar IV. Melhor tirar na hora, à vista. */
+  /** Liga/desliga o modo economia numa task.
+   *
+   *  ⚠ NÃO apaga o gesto nem o motor dos avatares. A primeira versão apagava
+   *  "pra garantir", e isso era destrutivo e irreversível: quem ligava por
+   *  engano perdia o gesto que tinha escrito, e desligar não trazia de volta.
+   *  Não precisa: o `buildPlan` já zera gesto e força Avatar III enquanto o
+   *  modo estiver ligado, e a tela esconde os dois. O dado fica onde está e
+   *  volta a valer sozinho quando o modo é desligado. */
   const ligarEconomia = (taskId: string, ligado: boolean) => {
     setEconomiaFor(taskId, ligado);
-    if (!ligado) return;
-    setTaskAnalyses((prev) => {
-      const a = prev[taskId];
-      if (!a?.roleSlots?.length) return prev;
-      const precisa = a.roleSlots.some((s) => (s.motionPrompt || '').trim() || (s.engine && s.engine !== 'III'));
-      if (!precisa) return prev;
-      const next = {
-        ...prev,
-        [taskId]: {
-          ...a,
-          roleSlots: a.roleSlots.map((s) => ({ ...s, motionPrompt: null, engine: 'III' as const })),
-        },
-      };
-      taskAnalysesRef.current = next;
-      return next;
-    });
   };
 
   // INTENSIDADE da decupagem (keepSilence em segundos) — por task, persistida.
@@ -5451,10 +5468,19 @@ function ClickUpPilotInner() {
             avatarName: p.avatarName ?? null,
             voiceId: p.voiceId ?? null, voiceName: p.voiceName ?? null,
             motionPrompt: null, engine: MOTOR_ECONOMIA,
-            imageKey: p.imageKey ?? null, audioKey: p.audioKey ?? null,
+            // imageDataUrl junto: buildPlan preenche os dois de forma
+            // independente, e cena de imagem com dataUrl e sem key passaria
+            // como cena de texto — o AD sairia com o avatar no lugar do frame.
+            imageKey: p.imageKey ?? null,
+            imageDataUrl: p.imageDataUrl ? 'x' : null,
+            audioKey: p.audioKey ?? null,
           };
         });
-        const planoEco = planejarEconomia(partesEco);
+        // ⚠ `indicesDoPlano` é obrigatório aqui: `partesEco` vem de `minhasIdx`,
+        // que no dedup do DR MILLION é ESPARSO (ex.: [0,2,5]). Sem ele a cena
+        // voltaria casada com o take ERRADO e a montagem sairia completa,
+        // dizendo PRONTO com a fala trocada.
+        const planoEco = planejarEconomia(partesEco, { indicesDoPlano: minhasIdx });
         for (const av of planoEco.avisos) console.warn(`[clickup-pilot] economia ${av.label}: ${av.detalhe}`);
         if (planoEco.recusas.length > 0) {
           const r = planoEco.recusas[0];
@@ -5475,10 +5501,15 @@ function ClickUpPilotInner() {
                 avatarName: proj.avatarName, voiceName: proj.voiceName,
                 jobLabel: adNameClean,
                 cenas: proj.cenas.map((c) => ({ idx: c.idx, label: c.label, texto: c.texto })),
+                // Teto de parede pelo TAMANHO do job. Fixo em 90 min, um AD de
+                // 10 cenas estourava e a página jogava fora as cenas que já
+                // tinham renderizado de graça.
+                tetoJobMs: proj.cenas.length * 8 * 60 * 1000 + 12 * 60 * 1000,
               },
               (stage) => {
                 setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}${stage}` } } : prev));
               },
+              { isCancelled: () => !!batchCancelRef.current[taskId] },
             );
             cenasFeitas.push(...(res.cenas || []));
             if (res.erro) erroParcial = res.erro;
@@ -5582,7 +5613,11 @@ function ClickUpPilotInner() {
       // não há o que esperar no HeyGen. Ela entra em `finalStatuses` como
       // 'completed' e fica de fora do poll (o id sintético `eco:` não existe na
       // API e o poll só ficaria girando à toa).
-      const idsPraPoll = validIds.filter((id) => !statusEconomia[id]);
+      // `ehIdSintetico` além do mapa: a task IRMÃ do dedup herda o `eco:N` pela
+      // reserva de conteúdo, mas o mapa de status é local a quem disparou. Sem
+      // este filtro ela consultaria na API um id que nunca existiu e ficaria
+      // até 15 min por take esperando um render fantasma.
+      const idsPraPoll = validIds.filter((id) => !statusEconomia[id] && !ehIdSintetico(id));
       const finalStatuses: Record<string, VideoStatus> = { ...statusEconomia };
       Object.assign(finalStatuses, idsPraPoll.length === 0 ? {} : await pollVideosUntilReady(idsPraPoll, {
         intervalMs: 8000,
@@ -6243,7 +6278,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const canalVersao = canalDoTaskId(taskId);
     const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_')
       + (canalVersao === 'youtube' ? '_V2' : '');
-    const validIds = validParts.map((p) => p.videoId!);
+    // Take renderizado pelo modo economia carrega um id SINTÉTICO (`eco:N`),
+    // que não existe na API do HeyGen. Consultá-lo no poll só queimaria 15 min
+    // por take até virar falso 'failed'. O blob dele já está no IDB; se não
+    // estiver, a saída é renderizar de novo pelo Studio.
+    const validIds = validParts.map((p) => p.videoId!).filter((id) => !ehIdSintetico(id));
 
     try {
       // === PRÉ-HIDRATAÇÃO do IDB (fix 2026-05-28) ===
@@ -8076,6 +8115,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   async function regenerateSinglePart(newText: string, opts?: { engine: 'auto' | 'III' | 'IV' | 'V'; motionPrompt: string | null }) {
     if (!editingPart) return;
     const { taskId, partIdx, label } = editingPart;
+    // MODO ECONOMIA: re-gerar UM take sozinho sai pela API, que COBRA — e era
+    // a última porta paga aberta (auto-cura e retomar já param). Depois de
+    // renderizar o AD inteiro de graça, o gesto natural é corrigir uma frase
+    // por aqui, e o crédito sairia calado.
+    if (isEconomiaEnabled(taskId)) {
+      setRegenError('Modo economia ligado: re-gerar este take sozinho sai pela API e cobra. Renderize o AD de novo pelo Studio, ou desligue o modo economia no card.');
+      return;
+    }
     const b = batchStates[taskId];
     const genId = b?.genId; // isolação por geração: grava/invalida na geração atual
     const replanPart = b?.replan?.parts[partIdx];
@@ -8290,6 +8337,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  manda no MP4 final); se ESTE disparo falhar, a parte volta a 'failed' com o
    *  erro no card e o RETOMAR ainda pode tentar pelo texto. */
   async function regenerateSinglePartFromAudio(taskId: string, partIdx: number, file: File) {
+    // MODO ECONOMIA: mesma regra do lápis por texto — este caminho também sai
+    // pela API e cobra.
+    if (isEconomiaEnabled(taskId)) {
+      setError('Modo economia ligado: re-gerar este take com áudio sai pela API e cobra. Desligue o modo economia no card pra usar este caminho.');
+      return;
+    }
     const b = batchStates[taskId];
     const genId = b?.genId; // isolação por geração: grava/invalida na geração atual
     const part = b?.parts[partIdx];
@@ -12778,8 +12831,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <span className="aviso-amarelo text-[13px]" aria-hidden>⚠</span>
                 <span className="aviso-amarelo flex-1 text-xs leading-relaxed">
-                  <strong>Extensão Auto Edit não respondeu.</strong> É ela que lê o Docs e a
-                  biblioteca do HeyGen. Se você tem uma instalada, ela é de antes do domínio novo.
+                  <strong>Falta a extensão Auto Edit.</strong> É ela que dispara no HeyGen, lê o
+                  Google Docs e traz a sua biblioteca de avatares. Sem ela o Pilot analisa, mas não
+                  dispara. Se você já tem uma instalada e este aviso continua, ela é de uma versão
+                  antiga: baixe de novo.
                 </span>
                 <a href="/api/extension/download" download className="ext-baixar" >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -14440,7 +14495,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         cena por cena, sem consumir crédito. Só entra quando o AD
                                         inteiro pode ir por texto em Avatar III. */}
                                     {(() => {
-                                      const partes = partesParaEconomia(a);
+                                      // Trecho ainda em branco não conta: o buildPlan já o descarta
+                                      // antes do disparo, e ele travava o modo num AD que cabe.
+                                      const partes = partesParaEconomia(a).filter((p) => (p.text || '').trim());
                                       const impedimento = partes.length === 0
                                         ? 'Analise a task primeiro: sem take não há o que renderizar.'
                                         : podeEconomia(partes)
@@ -14452,7 +14509,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       return (
                                         <PilotEconomiaBtn
                                           on={isEconomiaEnabled(a.taskId)}
-                                          disabled={!!impedimento}
+                                          // DESLIGAR sempre pode. Travar o botão com o modo LIGADO
+                                          // prendia o usuário: o AD deixava de caber (subiu um
+                                          // áudio), o disparo passava a falhar, e a própria
+                                          // mensagem mandava desligar um botão que não respondia.
+                                          disabled={!!impedimento && !isEconomiaEnabled(a.taskId)}
                                           motivoBloqueio={impedimento || undefined}
                                           onToggle={() => ligarEconomia(a.taskId, !isEconomiaEnabled(a.taskId))}
                                         />

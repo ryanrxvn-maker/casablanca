@@ -110,6 +110,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return false;
   }
+  if (msg && msg.type === 'HG_CANCEL') {
+    // Cancelar de verdade: o laço do modo economia lê este flag entre cenas e
+    // dentro da espera do render.
+    ecoPedirCancelamento(msg.requestId);
+    return false;
+  }
   if (msg && msg.type === 'HG_RUN_ECONOMY_JOB') {
     // MODO ECONOMIA: Studio por TEXTO, uma cena por take, Render Scene em cada
     // (sem crédito no Avatar III). NUNCA clica Generate.
@@ -3428,8 +3434,25 @@ async function runStudioJob(requestId, payload) {
 function ecoLog(...a) { console.log('[DARKO LAB ECONOMIA]', ...a); }
 function ecoWarn(...a) { console.warn('[DARKO LAB ECONOMIA]', ...a); }
 
-/** Extensões de mídia que interessam (o take renderizado). */
-const ECO_MIDIA_RE = /\.(mp4|webm|m3u8|mov)(\?|$)/i;
+/** Pedido de cancelamento do job de economia em andamento. Sem isto, cancelar
+ *  a task na página não parava nada aqui: o laço seguia dirigindo o Studio por
+ *  até uma hora e travava o próximo job com "Outra geracao em andamento". */
+let ecoCancelado = false;
+function ecoPedirCancelamento(requestId) {
+  if (!requestId || requestId === currentJob) {
+    ecoCancelado = true;
+    ecoWarn('cancelamento pedido — vou parar na próxima cena');
+  }
+}
+
+/** O QUE CONTA COMO O TAKE RENDERIZADO — lista de permissão, não de exclusão.
+ *  Antes isto era permissivo (aceitava webm, m3u8 e blob:) e qualquer mídia
+ *  nova virava "a cena ficou pronta": o .webm de animação do editor, o preview
+ *  do look, ou o stream que o nosso próprio play carregava. O AD sairia
+ *  MONTADO e dizendo PRONTO com o clipe errado — pior que sair incompleto. */
+const ECO_MIDIA_OK_RE = /^https:\/\/[^\s]+\.(mp4|mov)(\?|$)/i;
+/** Nunca é o take: preview de look, animação da UI, miniatura, forma de onda. */
+const ECO_MIDIA_NAO_RE = /(preview|animations?\/|thumb|poster|sprite|waveform|placeholder)/i;
 
 /** Fotografia das mídias que a página JÁ carregou: recursos baixados +
  *  qualquer <video src>. É a base de comparação pra saber o que é novo. */
@@ -3438,7 +3461,7 @@ function ecoMidiasConhecidas() {
   try {
     for (const e of performance.getEntriesByType('resource')) {
       const u = e.name || '';
-      if (ECO_MIDIA_RE.test(u) || (e.initiatorType === 'video' && u)) set.add(u);
+      if (u) set.add(u);
     }
   } catch (e) { /* performance indisponível: sobra o DOM */ }
   try {
@@ -3450,16 +3473,19 @@ function ecoMidiasConhecidas() {
   return set;
 }
 
-/** A primeira mídia que apareceu DEPOIS da foto `antes`. */
+/** A mídia nova que É o take. Devolve { url } quando acha, ou { blob:true }
+ *  quando a única coisa nova foi um blob: (que a página do Pilot não consegue
+ *  baixar) — aí o erro sai NOMEADO em vez de entregar um vídeo quebrado. */
 function ecoMidiaNova(antes) {
   const agora = ecoMidiasConhecidas();
+  let viuBlob = false;
   for (const u of agora) {
     if (antes.has(u)) continue;
-    // descarta o que claramente não é o take (sprite, poster, preview de UI)
-    if (/thumb|poster|sprite|avatar_preview|waveform/i.test(u)) continue;
-    if (ECO_MIDIA_RE.test(u) || u.startsWith('blob:')) return u;
+    if (u.startsWith('blob:')) { viuBlob = true; continue; }
+    if (ECO_MIDIA_NAO_RE.test(u)) continue;
+    if (ECO_MIDIA_OK_RE.test(u)) return { url: u };
   }
-  return null;
+  return { url: null, blob: viuBlob };
 }
 
 /** Botão "Render Scene". VETO em Generate: clicar nele cobraria a conta, que
@@ -3501,9 +3527,38 @@ function ecoCamposDeTexto() {
     if (el.offsetParent === null) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 80 || r.height < 18) continue;
+    // Modal do HeyGen é renderizado por PORTAL no fim do body, ou seja DEPOIS
+    // do editor: sem este descarte, o "último campo do documento" vira a caixa
+    // de um diálogo aberto e a fala da cena seria escrita lá.
+    if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
     out.push(el);
   }
   return out;
+}
+
+/** Play SÓ no player da cena, com o mesmo veto do Render Scene. O play do
+ *  fluxo pago varre por ícone (polygon no SVG) e por aria-label com "preview",
+ *  sem veto nenhum — chamando com o documento inteiro, ele poderia alcançar a
+ *  barra de topo, onde mora o botão que cobra. */
+async function ecoPlayCena(sceneLabel) {
+  const H = window.innerHeight;
+  for (const b of document.querySelectorAll('button, [role="button"]')) {
+    if (b.disabled || b.offsetParent === null) continue;
+    const r = b.getBoundingClientRect();
+    if (r.width < 16 || r.width > 90 || r.height < 16 || r.height > 90) continue;
+    if (r.top < H * 0.2) continue; // barra de topo: onde mora o Generate
+    const t = (b.textContent || '').trim().toLowerCase();
+    const al = (b.getAttribute('aria-label') || '').toLowerCase();
+    const dt = (b.getAttribute('data-testid') || '').toLowerCase();
+    const tudo = `${t} ${al} ${dt}`;
+    if (/\b(generate|gerar|submit|export|publish|upgrade|switch|render)\b/.test(tudo)) continue;
+    if (!/\bplay\b|reproduzir/.test(tudo)) continue;
+    ecoLog(`${sceneLabel}: play pra forçar o carregamento`);
+    await cdpClickEl(b, 'play da cena');
+    return true;
+  }
+  ecoLog(`${sceneLabel}: não achei um play seguro — sigo só esperando`);
+  return false;
 }
 
 /** Escreve a fala na cena ATIVA (a última criada). */
@@ -3523,8 +3578,15 @@ async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
   await pasteScriptIntoTextarea(alvo, texto);
   await sleep(400);
   const escrito = (alvo.value !== undefined ? alvo.value : alvo.textContent) || '';
+  // ABORTA, não avisa. Texto que não entrou vira take mudo ou take repetindo a
+  // cena anterior — e isso só apareceria na revisão do montado, depois de todo
+  // o trabalho feito.
   if (escrito.trim().slice(0, 24) !== texto.trim().slice(0, 24)) {
-    ecoWarn(`${sceneLabel}: o campo ficou com "${escrito.slice(0, 40)}" e eu escrevi "${texto.slice(0, 40)}"`);
+    ecoDumpDiag('texto-nao-entrou');
+    throw new Error(
+      `${sceneLabel}: o texto não entrou no campo da cena (ficou "${escrito.slice(0, 40)}"). ` +
+      `Parei antes de renderizar pra não gerar take mudo.`,
+    );
   }
   return alvo;
 }
@@ -3571,6 +3633,12 @@ async function runEconomyJob(requestId, payload) {
     return;
   }
   currentJob = requestId;
+  ecoCancelado = false;
+  // O buffer de resource timing enche (250 entradas por padrão) e para de
+  // registrar — num SPA pesado como o create-v4 isso acontece rápido, e daí em
+  // diante o mp4 do render nunca apareceria na comparação: TODAS as cenas
+  // seguintes falhariam por tempo esgotado.
+  try { performance.setResourceTimingBufferSize(6000); } catch (e) {}
   // O buffer de video_ids é COMPARTILHADO com o Quick Create. O que este job
   // fizer entrar lá é removido no fim: um id de cena sobrando envenenaria a
   // janela anti-duplicação de 90s do disparo normal na mesma aba.
@@ -3590,6 +3658,7 @@ async function runEconomyJob(requestId, payload) {
       const cena = cenas[i];
       const rot = `${jobLabel || 'ECO'} cena ${i + 1}/${total}`;
       const base = Math.round((i / total) * 90);
+      if (ecoCancelado) throw new Error(`Cancelado na cena ${i + 1}/${total}. As cenas já prontas foram guardadas.`);
       reportProgress(requestId, `${rot}: montando...`, base);
 
       const dlg = ecoTextoDeDialogoAberto();
@@ -3604,8 +3673,17 @@ async function runEconomyJob(requestId, payload) {
           ecoDumpDiag('no-add-scene');
           throw new Error(`${rot}: botão "Add scene" não encontrado. Cola os logs [DARKO LAB ECONOMIA].`);
         }
+        const camposAntes = ecoCamposDeTexto().length;
         await cdpClickEl(addBtn, 'Add scene');
-        await sleep(2400);
+        // CONFIRMA que a cena nasceu. Sem isto, um clique que não pegou faria
+        // a fala da cena 2 ser escrita POR CIMA da cena 1 — e a cena 1 sumiria
+        // do AD sem nenhum erro.
+        const nasceu = await waitForOrNull(() => (ecoCamposDeTexto().length > camposAntes ? true : null), 12000, 400);
+        if (!nasceu) {
+          ecoDumpDiag('cena-nao-nasceu');
+          throw new Error(`${rot}: cliquei "Add scene" e nenhuma cena nova apareceu. Parei pra não escrever por cima da cena anterior.`);
+        }
+        await sleep(900);
         studioDismissPaywallIfShown(`${rot} apos add-scene`);
       }
 
@@ -3627,7 +3705,7 @@ async function runEconomyJob(requestId, payload) {
       if (voiceName) await studioTrySelectVoice(voiceName, rot);
 
       // FOTO das mídias ANTES de renderizar: o que aparecer de novo é o take.
-      const antes = ecoMidiasConhecidas();
+      let antes = ecoMidiasConhecidas();
       const btn = await waitForOrNull(() => findRenderSceneButton(), 15000, 500);
       if (!btn) {
         ecoDumpDiag('no-render-scene');
@@ -3644,24 +3722,38 @@ async function runEconomyJob(requestId, payload) {
       // Espera o vídeo da cena aparecer. A mídia nova É o sinal de pronto.
       const t0 = Date.now();
       let url = null;
+      let viuBlob = false;
       let jaDeuPlay = false;
       while (Date.now() - t0 < tetoCena) {
-        url = ecoMidiaNova(antes);
-        if (url) break;
+        if (ecoCancelado) throw new Error(`Cancelado enquanto a cena ${i + 1}/${total} renderizava. As cenas já prontas foram guardadas.`);
+        const achado = ecoMidiaNova(antes);
+        if (achado.url) { url = achado.url; break; }
+        if (achado.blob) viuBlob = true;
         await sleep(2500);
         const seg = Math.round((Date.now() - t0) / 1000);
         if (seg % 20 < 3) reportProgress(requestId, `${rot}: renderizando há ${seg}s...`, base + 5);
         // Meio do caminho sem mídia: alguns players só baixam o arquivo quando
-        // tocam. Um play força o download sem custo nenhum.
+        // tocam. Um play força o download, sem custo nenhum.
         if (!jaDeuPlay && Date.now() - t0 > tetoCena / 2) {
           jaDeuPlay = true;
-          ecoLog(`${rot}: sem mídia até agora — dando play pra forçar o carregamento`);
-          try { await playStudioScene(document, rot); } catch (e) {}
+          try { await ecoPlayCena(rot); } catch (e) {}
+          await sleep(3000);
+          // O que o PRÓPRIO play carregou (o stream do preview) não pode ser
+          // confundido com o take: confere uma vez e, se não for o take,
+          // absorve tudo na foto de "conhecidas".
+          const depois = ecoMidiaNova(antes);
+          if (depois.url) { url = depois.url; break; }
+          if (depois.blob) viuBlob = true;
+          antes = ecoMidiasConhecidas();
         }
       }
       if (!url) {
         ecoDumpDiag('sem-midia');
-        throw new Error(`${rot}: a cena não ficou pronta em ${Math.round(tetoCena / 60000)} min. Parei aqui — nada foi cobrado.`);
+        throw new Error(
+          viuBlob
+            ? `${rot}: a cena renderizou, mas o vídeo só apareceu como blob: (o Pilot não consegue baixar essa forma). Nada foi cobrado. Manda os logs [DARKO LAB ECONOMIA] que eu ajusto a captura.`
+            : `${rot}: a cena não ficou pronta em ${Math.round(tetoCena / 60000)} min. Parei aqui — nada foi cobrado.`,
+        );
       }
       ecoLog(`${rot}: vídeo capturado — ${url.slice(0, 120)}`);
       resultados.push({ idx: cena.idx, videoUrl: url });

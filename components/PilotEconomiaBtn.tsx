@@ -32,7 +32,9 @@ export function PilotEconomiaBtn({
   motivoBloqueio?: string;
   size?: number;
 }) {
-  const title = disabled
+  const title = on && motivoBloqueio
+    ? `Modo economia LIGADO, mas este AD não cabe mais nele: ${motivoBloqueio} Clique pra desligar.`
+    : disabled
     ? motivoBloqueio || 'Modo economia indisponível neste AD'
     : on
       ? 'Modo economia LIGADO: o disparo vai pelo Studio do HeyGen e renderiza cena por cena, sem consumir crédito. Trava o Avatar III e desliga o gesto. Clique pra voltar ao disparo normal.'

@@ -320,6 +320,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'HG_CANCEL') {
     const job = activeJobs.get(msg.requestId);
+    // AVISA A ABA. Antes o cancelamento só desligava o relatório: o laço do
+    // Studio continuava dirigindo a página do HeyGen até o fim e travava o
+    // job seguinte com "Outra geracao em andamento".
+    if (job && job.tabId) {
+      chrome.tabs.sendMessage(job.tabId, { type: 'HG_CANCEL', requestId: msg.requestId }).catch(() => {});
+    }
     if (job) {
       activeJobs.delete(msg.requestId);
       reportToPage(job.bridgeTabId, msg.requestId, 'HG_ERROR', {

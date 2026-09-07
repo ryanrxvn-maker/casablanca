@@ -94,6 +94,16 @@ export type OpcoesEconomia = {
    *  num projeto só). Existe porque um projeto gigante pode pesar o editor;
    *  o valor certo depende de medição ao vivo. */
   maxCenasPorProjeto?: number;
+  /**
+   * Índice de cada parte NO PLANO do Pilot, quando `partes` não é o plano
+   * inteiro. O chamador costuma enviar só um subconjunto (no dedup do
+   * DR MILLION as falas que a task irmã já está gerando ficam de fora), e aí a
+   * posição no array enviado NÃO é o índice do plano.
+   *
+   * ⚠ Sem isto a cena voltaria casada com o take ERRADO: a montagem sairia
+   * completa, o card diria PRONTO e a fala estaria trocada.
+   */
+  indicesDoPlano?: number[];
 };
 
 const MOTIVO_TEXTO: Record<MotivoRecusa, string> = {
@@ -135,8 +145,11 @@ export function planejarEconomia(partes: ParteDoPlano[], opts: OpcoesEconomia = 
   // posição do projeto. Sem isto, dois avatares alternados embaralhariam a fila.
   const ordem: string[] = [];
   const porAvatar = new Map<string, ProjetoEconomia>();
+  // Posição no array enviado → índice no plano do Pilot.
+  const noPlano = (pos: number) => opts.indicesDoPlano?.[pos] ?? pos;
 
-  partes.forEach((p, idx) => {
+  partes.forEach((p, pos) => {
+    const idx = noPlano(pos);
     const motivo = recusaDaParte(p);
     if (motivo) {
       recusas.push({ idx, label: p.label, motivo });

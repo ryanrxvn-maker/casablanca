@@ -243,6 +243,8 @@ export type EconomiaPayload = {
   cenas: CenaEconomiaPayload[];
   /** teto por cena na extensão (default 8 min) */
   tetoPorCenaMs?: number;
+  /** teto de parede do job inteiro; sem ele, o default é pelo nº de cenas */
+  tetoJobMs?: number;
 };
 
 export type CenaRenderizada = {
@@ -261,11 +263,15 @@ export type EconomiaResultado = {
 export function gerarPelaEconomia(
   payload: EconomiaPayload,
   onProgress?: (stage: string, percent?: number) => void,
-  opts: { ackMs?: number; tetoJobMs?: number } = {},
+  opts: { ackMs?: number; tetoJobMs?: number; isCancelled?: () => boolean } = {},
 ): Promise<EconomiaResultado> {
   installListener();
   const ackMs = opts.ackMs ?? 4000;
-  const tetoJobMs = opts.tetoJobMs ?? 90 * 60 * 1000;
+  // O teto tem que crescer com o job: fixo em 90 min, um AD de 10 cenas
+  // estourava DEPOIS de renderizar tudo, e a promessa rejeitada fazia a página
+  // descartar as cenas já prontas.
+  const porCena = payload.tetoPorCenaMs ?? 8 * 60 * 1000;
+  const tetoJobMs = opts.tetoJobMs ?? payload.tetoJobMs ?? payload.cenas.length * porCena + 12 * 60 * 1000;
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
       reject(new Error('Sem window — a ponte só funciona no navegador.'));
@@ -274,11 +280,24 @@ export function gerarPelaEconomia(
     const requestId = `hgeco_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     let acked = false;
     let vivo = true;
+    // Cancelou a task? Avisa a EXTENSÃO — só parar de escutar deixaria o laço
+    // do Studio rodando na aba e travando o próximo job.
+    const vigiaCancelamento = opts.isCancelled
+      ? setInterval(() => {
+          if (!vivo || !opts.isCancelled?.()) return;
+          try {
+            window.postMessage({ source: 'darkolab', type: 'HG_CANCEL', requestId }, '*');
+          } catch {
+            /* sem ponte: o teto de parede resolve */
+          }
+        }, 4000)
+      : null;
     const encerrar = () => {
       vivo = false;
       pending.delete(requestId);
       clearTimeout(tAck);
       clearTimeout(tJob);
+      if (vigiaCancelamento) clearInterval(vigiaCancelamento);
     };
     const tAck = setTimeout(() => {
       if (acked || !vivo) return;
