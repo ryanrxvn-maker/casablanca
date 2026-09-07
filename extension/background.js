@@ -523,6 +523,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
     return true;
   }
+  // Espera delegada: o content script de uma aba OCULTA/OCLUIDA tem os timers
+  // estrangulados pelo Chrome (medido: setTimeout(200) -> ~1000ms e depois
+  // PARA). O service worker nao e uma pagina e nao sofre isso, entao a espera
+  // do laco do Studio passa por aqui. Teto de 25s por pedaco: sono curto
+  // mantem o worker vivo e o content script refatia o que faltar.
+  if (msg.type === 'HG_SLEEP') {
+    const ms = Math.max(0, Math.min(25000, Number(msg.ms) || 0));
+    setTimeout(() => { try { sendResponse({ ok: true }); } catch (e) {} }, ms);
+    return true;
+  }
   if (msg.type === 'HG_CDP_DETACH') {
     cdpDetach().finally(() => sendResponse({ ok: true }));
     return true;

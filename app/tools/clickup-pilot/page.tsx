@@ -5540,7 +5540,7 @@ function ClickUpPilotInner() {
         // Cena pronta já nasce 'completed' com a URL: o poll pula e o download
         // do pipeline pega no lugar de sempre.
         statusEconomia = statusDasCenas(cenasFeitas);
-        const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas);
+        const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas, erroParcial);
         for (const r of rs) registrarResultado(r);
         return rs;
       };

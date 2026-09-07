@@ -301,6 +301,11 @@ export function resultadosParaRunner(
   enviados: number[],
   partes: ParteDoPlano[],
   cenas: ResultadoCena[],
+  /** Motivo pelo qual o Studio parou, quando houve um. Vira o erro das cenas
+   *  que NÃO voltaram — senão o card mostrava só "a cena não voltou do
+   *  Studio", que é o sintoma, e o motivo de verdade ("New HeyGen plans are
+   *  here", "Outra geracao em andamento") ficava só no console do F12. */
+  motivoGeral?: string | null,
 ): ResultadoRunner[] {
   const porIdx = new Map<number, ResultadoCena>();
   for (const c of cenas) porIdx.set(c.idx, c);
@@ -308,7 +313,13 @@ export function resultadosParaRunner(
     const c = porIdx.get(idx);
     const label = partes[idx]?.label ?? `take ${idx + 1}`;
     if (!c) {
-      return { index: i + 1, label, videoId: null, error: 'a cena não voltou do Studio' };
+      const motivo = (motivoGeral || '').trim();
+      return {
+        index: i + 1,
+        label,
+        videoId: null,
+        error: motivo ? `a cena não voltou do Studio: ${motivo}` : 'a cena não voltou do Studio',
+      };
     }
     if (c.error) return { index: i + 1, label, videoId: null, error: c.error };
     const id = idDaCena(c);

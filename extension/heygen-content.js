@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.20.3';
+const DARKO_EXT_VERSION = '4.21.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1436,8 +1436,64 @@ function reportError(requestId, error) {
   });
 }
 
-function sleep(ms) {
+function sleepLocal(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/* ============ A ESPERA NAO PODE MORAR NA PAGINA ============
+ * MEDIDO 07.09.2026 na aba real do Studio, com visibilityState 'hidden':
+ *   setTimeout(200) disparava em ~1000ms E A CADEIA PARAVA depois de ~6
+ *   disparos (throttling por orcamento do Chrome).
+ * Como o laco do Studio inteiro e `await sleep(...)`, o job morria no meio —
+ * sem progresso e sem erro.
+ *
+ * TENTATIVA 1 (descartada): Web Lock. Nao isenta — mesmos 6 ticks e para.
+ * TENTATIVA 2 (insuficiente): rodar numa JANELA propria sem foco. Boa ideia,
+ *   mas no Windows o Chrome rastreia OCLUSAO: janela totalmente coberta pela
+ *   janela maximizada do usuario conta como oculta do mesmo jeito. Medido: o
+ *   aviso "esta aba esta OCULTA" apareceu em todas as mensagens mesmo com a
+ *   janela criada.
+ *
+ * O QUE RESOLVE DE VERDADE: o service worker NAO e uma pagina e nao sofre
+ * throttling de visibilidade. A espera passa a ser um round-trip ate ele.
+ * Assim o fluxo fica INDEPENDENTE de a aba estar visivel, oculta ou ocluida.
+ *
+ * Se a ponte falhar (worker morto, contexto invalidado), cai no timer local e
+ * nao tenta de novo — degradado, mas nunca travado.
+ */
+let esperaPeloWorkerFalhou = false;
+async function sleep(ms) {
+  const alvo = Number(ms) || 0;
+  if (alvo <= 0) return;
+  // Aba visivel: o timer local ja e confiavel e e mais barato.
+  if (esperaPeloWorkerFalhou || document.visibilityState === 'visible') {
+    return sleepLocal(alvo);
+  }
+  const t0 = Date.now();
+  // Fatiado: sono curto mantem o service worker vivo e cabe no orcamento dele.
+  const pedaco = Math.min(alvo, 20000);
+  const ok = await new Promise((resolve) => {
+    let pronto = false;
+    try {
+      chrome.runtime.sendMessage({ type: 'HG_SLEEP', ms: pedaco }, () => {
+        if (pronto) return;
+        pronto = true;
+        resolve(!chrome.runtime.lastError);
+      });
+    } catch (e) {
+      if (!pronto) { pronto = true; resolve(false); }
+    }
+  });
+  if (!ok) {
+    if (!esperaPeloWorkerFalhou) {
+      esperaPeloWorkerFalhou = true;
+      console.warn('[DARKO LAB] espera pelo service worker falhou — voltando pro timer local (a aba oculta vai desacelerar)');
+    }
+    const falta1 = alvo - (Date.now() - t0);
+    return falta1 > 0 ? sleepLocal(falta1) : undefined;
+  }
+  const falta = alvo - (Date.now() - t0);
+  if (falta > 30) return sleep(falta);
 }
 
 // NOTA (07.09.2026): o laco avalia o predicado ANTES de dormir e, ao acordar

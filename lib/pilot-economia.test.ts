@@ -150,6 +150,25 @@ console.log('pilot-economia:');
   const partes = [take({ label: 'HOOK 1' }), take({ label: 'BODY 1' })];
   const r = resultadosParaRunner([0, 1], partes, [{ idx: 0, videoId: 'v1' }]);
   eq(r[1].error, 'a cena não voltou do Studio', 'cena que sumiu vira erro explícito, nunca silêncio');
+
+  // O MOTIVO tem que viajar até o card. Sem isto o usuário lia o sintoma
+  // ("a cena não voltou") e o porquê ficava preso no console do F12.
+  const rComMotivo = resultadosParaRunner(
+    [0, 1],
+    [{ label: 'HOOK 1' } as never, { label: 'BODY 1' } as never],
+    [],
+    'New HeyGen plans are here',
+  );
+  eq(
+    rComMotivo[0].error,
+    'a cena não voltou do Studio: New HeyGen plans are here',
+    'o motivo real entra no erro da cena que não voltou',
+  );
+  eq(
+    resultadosParaRunner([0], [{ label: 'HOOK 1' } as never], [], '   ')[0].error,
+    'a cena não voltou do Studio',
+    'motivo vazio/em branco não suja a mensagem',
+  );
   ok(r[1].videoId === null, 'e sem videoId');
 }
 {
