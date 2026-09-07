@@ -700,7 +700,7 @@ export default function LipSyncTool() {
         poster="/cards/lipsync.jpg"
         eyebrow="Ferramenta Pro"
         title="Lipsync Video to Video"
-        subtitle="Vídeo entra. Áudio encaixa. Boca fala."
+        subtitle="Sincronize os movimentos da boca com seu áudio. Adicione o vídeo, escolha a fala e acompanhe a geração."
         glow="rgba(232,121,249,0.55)"
       />
 
@@ -775,13 +775,13 @@ export default function LipSyncTool() {
               className="label-tech text-[10px] font-bold tracking-[0.22em] text-fuchsia-300"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              SUA BOCA VAI FALAR
+              SINCRONIZAÇÃO DA FALA
             </div>
             <h2
               className="mt-1 text-[20px] font-extrabold tracking-tight text-white"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
             >
-              Configure e gera
+              Configure e gere
             </h2>
           </div>
 
@@ -985,15 +985,15 @@ export default function LipSyncTool() {
           className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          Pra sair perfeito
+          Para um resultado melhor
         </div>
         <ul className="mt-2 grid gap-1 text-[11.5px] text-text-muted md:grid-cols-2">
           <li>· Rosto frontal, centralizado, sem mão na boca.</li>
           <li>· Iluminação uniforme — luz lateral cria sombra.</li>
           <li>· Áudio limpo, sem música por trás.</li>
-          <li>· 720p ou mais pra boca ficar nítida.</li>
+          <li>· Use 720p ou mais para preservar os detalhes do rosto.</li>
           <li>· Mesma pessoa, mesma língua do áudio.</li>
-          <li>· Pode disparar vários — vão aparecendo prontos embaixo.</li>
+          <li>· Acompanhe o resultado de cada vídeo na fila abaixo.</li>
         </ul>
       </div>
     </div>
@@ -1100,7 +1100,7 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
               Sobe um vídeo na esquerda
             </h3>
             <p className="mt-2 text-[13px] text-text-muted max-w-[360px]">
-              O rosto que vai ganhar a fala. Pode subir vários e escolher qual usar.
+              Adicione os vídeos de referência e escolha qual receberá o novo áudio.
             </p>
           </div>
           <style jsx>{`

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
 import { displayTierOf } from '@/lib/launch-flags';
@@ -50,13 +50,27 @@ type NavSection = {
  * Conta e Admin foram removidos da nav principal — só aparecem no
  * dropdown ao clicar no avatar do rodapé.
  */
-export function Sidebar() {
+export function Sidebar({ currentPath }: { currentPath?: string } = {}) {
   const router = useRouter();
-  const pathname = usePathname();
+  const actualPath = usePathname();
+  const pathname = currentPath ?? actualPath;
   const [profile, setProfile] = useState<Profile | null>(null);
   const [avatarBroken, setAvatarBroken] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!mobileOpen && !accountOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      setMobileOpen(false);
+      setAccountOpen(false);
+      if (mobileOpen) menuButtonRef.current?.focus();
+    }
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileOpen, accountOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -208,7 +222,7 @@ export function Sidebar() {
       items: [
         {
           href: '/tools/decupagem',
-          label: 'Tools',
+          label: 'Ferramentas',
           icon: <IconBase />,
           match: (p) =>
             TOOL_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
@@ -227,9 +241,12 @@ export function Sidebar() {
       {/* Botão mobile (fora da sidebar) */}
       <button
         type="button"
+        ref={menuButtonRef}
         onClick={() => setMobileOpen(true)}
         className="fixed left-4 top-4 z-40 flex h-10 w-10 items-center justify-center rounded-[12px] border border-line bg-bg-soft/90 backdrop-blur-md md:hidden"
         aria-label="Abrir menu"
+        aria-expanded={mobileOpen}
+        aria-controls="workspace-navigation"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           <path d="M3 6h18M3 12h18M3 18h18" />
@@ -238,15 +255,19 @@ export function Sidebar() {
 
       {/* Overlay mobile */}
       {mobileOpen ? (
-        <div
-          onClick={() => setMobileOpen(false)}
+        <button
+          type="button"
+          aria-label="Fechar menu"
+          onClick={() => { setMobileOpen(false); menuButtonRef.current?.focus(); }}
           className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
         />
       ) : null}
 
       <aside
+        id="workspace-navigation"
+        data-mobile-open={mobileOpen}
         className={
-          'fixed left-0 top-0 z-40 flex h-screen w-[84px] flex-col border-r border-line/80 bg-bg-soft/95 backdrop-blur-xl transition-transform duration-300 md:translate-x-0 ' +
+          'ae-sidebar fixed left-0 top-0 z-40 flex h-screen w-[84px] flex-col border-r border-line/80 bg-bg-soft/95 backdrop-blur-xl transition-transform duration-300 md:translate-x-0 ' +
           (mobileOpen ? 'translate-x-0' : '-translate-x-full')
         }
         style={{
@@ -256,6 +277,7 @@ export function Sidebar() {
         {/* Logo */}
         <Link
           href="/tools"
+          aria-label="Início do estúdio"
           onClick={() => setMobileOpen(false)}
           className="group flex h-[68px] items-center justify-center border-b border-line/60 transition hover:bg-bg/40"
         >

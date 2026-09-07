@@ -245,12 +245,12 @@ export default function CalculadoraPage() {
     <ToolShell
       title="Calculadora"
       eyebrow="OPERACIONAL"
-      description="Quanto cobrar pelo projeto? Coloca a duração de cada AD, o valor por minuto — geral ou próprio de cada AD — e a gente fecha a conta."
+      description="Monte seu orçamento pela duração dos vídeos. Defina o valor por minuto, ajuste cada item e gere um relatório para o cliente."
       hue={HUE}
       icon={<IconCalculadora size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} icon={<IconStepMoney size={18} />} title="Tabela de preço" hint="O valor padrão do minuto — vale pra todo AD que não tiver preço próprio" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMoney size={18} />} title="Valor de referência" hint="Este valor por minuto será aplicado aos itens sem preço individual." hue={HUE}>
           <label className="block">
             <span
               className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -286,7 +286,7 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepClock size={18} />} title="Serviço" hint="Nomeie cada item, digite os minutos (619 → 06:19) e, se quiser, um R$/min próprio — vazio usa a tabela" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepClock size={18} />} title="Itens do orçamento" hint="Informe a duração de cada vídeo (619 equivale a 06:19). O valor individual é opcional." hue={HUE}>
           <div className="flex flex-col gap-2">
             {ads.map((ad, i) => {
               const sec = parseDur(ad.time);
@@ -383,7 +383,7 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} icon={<IconStepTag size={18} />} title="Desconto" hint="Pra cliente recorrente ou pacote fechado" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepTag size={18} />} title="Desconto" hint="Aplique um percentual ao total, se fizer parte da proposta." hue={HUE}>
           <ToolSlider
             label="Desconto"
             min={0}
@@ -571,10 +571,10 @@ export default function CalculadoraPage() {
                   </svg>
                 )}
               </span>
-              <span>{gerando ? 'Gerando PDF…' : 'Baixar Relatório (PDF)'}</span>
+              <span>{gerando ? 'Gerando PDF…' : 'Baixar orçamento em PDF'}</span>
             </button>
             <p className="mt-2 text-center text-[11px] text-text-muted">
-              Baixa um PDF profissional do orçamento na hora — é só mandar pro cliente.
+              Exporte o orçamento com os itens, valores e condições da proposta.
             </p>
           </div>
         </ToolResultCard>

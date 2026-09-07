@@ -523,7 +523,7 @@ export default function DecupagemPage() {
       <ToolHero
         title="Decupagem"
         eyebrow="VÍDEO / ÁUDIO · FILA ATÉ 10"
-        subtitle="Corta os silêncios em lote. Joga até 10 arquivos, processa 1 por vez. Vídeo→vídeo, áudio→áudio."
+        subtitle="Remova silêncios de áudio e vídeo. Adicione até 10 arquivos e acompanhe cada entrega na fila."
         hue="rgba(163,230,53,0.4)"
         icon={<IconDecupagem size={56} />}
       />
@@ -533,7 +533,7 @@ export default function DecupagemPage() {
         <ToolStep
           n={1}
           icon={<IconStepUpload size={18} />}
-          title={`Solta os arquivos (até ${MAX_QUEUE})`}
+          title={`Adicione seus arquivos (até ${MAX_QUEUE})`}
           hint={`MP3, WAV, MP4, WEBM ou MOV — vários de uma vez · até ${MAX_FILE_LABEL} cada`}
           hue="rgba(163,230,53,0.4)"
         >
@@ -543,7 +543,7 @@ export default function DecupagemPage() {
             onFile={() => {}}
             multiple
             onFiles={addFiles}
-            hint={`Arraste vários ou clique. ${queue.length}/${MAX_QUEUE} na fila.`}
+            hint={`Selecione um ou mais arquivos. ${queue.length}/${MAX_QUEUE} na fila.`}
             hue="rgba(163,230,53,0.5)"
             disabled={processing || queue.length >= MAX_QUEUE}
           />
@@ -638,7 +638,7 @@ export default function DecupagemPage() {
             n={2}
             icon={<IconStepFormat size={18} />}
             title="Como receber os vídeos?"
-            hint={isFree ? 'A conta grátis exporta só áudio' : 'Aplica a todos os vídeos da fila'}
+            hint={isFree ? 'O plano Free permite exportar o áudio.' : 'A escolha será aplicada a todos os vídeos da fila.'}
             hue="rgba(167,139,250,0.4)"
           >
             <ToolChoice
@@ -674,7 +674,7 @@ export default function DecupagemPage() {
           n={queueHasVideo ? 4 : 3}
           icon={<IconStepSliders size={18} />}
           title="Quanto de silêncio manter?"
-          hint="Pouco = corte agressivo. Muito = fala respira"
+          hint="Valores menores deixam o corte mais curto. Valores maiores preservam mais pausa entre as falas."
           hue="rgba(244,114,182,0.4)"
         >
           <ToolSlider

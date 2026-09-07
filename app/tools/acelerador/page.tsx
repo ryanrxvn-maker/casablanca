@@ -245,11 +245,11 @@ export default function AceleradorPage() {
     <ToolShell
       title="Mixer de Velocidade"
       eyebrow="VÍDEO / ÁUDIO"
-      description="Acelera ou desacelera o vídeo/áudio sem ficar robótico."
+      description="Acelere ou desacelere vídeos e áudios com controle sobre a velocidade e o tom da voz."
       hue={HUE}
       icon={<IconAcelerador size={56} />}
     >
-      <div className="flex flex-col gap-5">
+      <div className="ae-four-step-flow flex flex-col gap-5">
         <ToolStep n={1} icon={<IconStepFiles size={18} />} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
@@ -261,7 +261,7 @@ export default function AceleradorPage() {
           />
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepSpeed size={18} />} title="Velocidade" hint="Pitch-corrigido — não fica robótico" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSpeed size={18} />} title="Velocidade" hint="Ajuste a velocidade preservando o tom da voz." hue={HUE}>
           <ToolSlider
             label={
               speedMode === 'slow'

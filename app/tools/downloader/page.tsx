@@ -787,12 +787,12 @@ export default function DownloaderPage() {
     <ToolShell
       title="Downloader"
       eyebrow="WEB · MULTI-SITE"
-      description="Baixa vídeos, áudios e imagens do YouTube, Instagram, TikTok e Pinterest. Cola um link ou vários, um por linha."
+      description="Baixe vídeos, áudios e imagens do YouTube, Instagram, TikTok e Pinterest. Adicione um link por linha para organizar os downloads."
       hue={HUE}
       icon={<IconDownloader size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Instala uma vez, baixa em qualquer site" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Configure a extensão e o motor para os serviços compatíveis." hue={HUE}>
           {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — a v1.7.0 repassa
               qualquer link/formato pro Motor local (YouTube/TikTok/Pinterest
               e áudios). Admin (você) atualiza manualmente, então não vê isso. */}
@@ -1257,7 +1257,7 @@ export default function DownloaderPage() {
           )}
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepLink size={18} />} title="Links" hint="Cola um por linha — vários downloads em paralelo" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepLink size={18} />} title="Links" hint="Adicione um link por linha. Os downloads entram na mesma fila." hue={HUE}>
           <div className="relative">
             <textarea
               id="urls"

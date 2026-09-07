@@ -71,54 +71,54 @@ export function TipoShowcase({
       if (it.preset!.highlightFont) fontKeys.add(it.preset!.highlightFont);
     }
 
-    const io =
-      typeof IntersectionObserver !== 'undefined'
-        ? new IntersectionObserver(
-            (es) => {
-              for (const en of es) visRef.current = en.isIntersecting;
-            },
-            { rootMargin: '80px' },
-          )
-        : null;
-    io?.observe(canvas);
-
     let raf = 0;
     let cancelled = false;
-    let t0 = 0;
-    const tick = () => {
-      if (cancelled) return;
-      raf = requestAnimationFrame(tick);
-      if (!visRef.current) return;
+    let loaded = false;
+    let t0 = performance.now() - 1200;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const paint = (time: number) => {
       const wrap = canvas.parentElement;
       if (!wrap) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const W = Math.round(wrap.clientWidth * dpr);
       const H = Math.round(wrap.clientHeight * dpr);
       if (W <= 0 || H <= 0) return;
-      if (canvas.width !== W || canvas.height !== H) {
-        canvas.width = W;
-        canvas.height = H;
-      }
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      const t = performance.now() - t0;
-      const idx = Math.floor(t / STEP_MS) % items.length;
-      const it = items[idx];
+      const item = items[Math.floor(time / STEP_MS) % items.length];
       ctx.clearRect(0, 0, W, H);
-      drawPresetDemo(ctx, it.preset!, t % STEP_MS, W, H, it.text);
+      drawPresetDemo(ctx, item.preset!, time % STEP_MS, W, H, item.text);
     };
-    // Espera as fontes ANTES do primeiro frame: o ctx.fillText rasteriza com o
-    // que estiver ativo no document.fonts na hora — desenhar antes do load
-    // fazia os primeiros ciclos saírem em sans-serif genérica (fonte "errada").
-    void ensureTypoFonts(Array.from(fontKeys)).then(() => {
-      if (cancelled) return;
-      t0 = performance.now();
+    const tick = () => {
+      if (cancelled || !loaded || !visRef.current || reduced.matches || document.visibilityState !== 'visible') return;
+      paint(performance.now() - t0);
       raf = requestAnimationFrame(tick);
-    });
-    return () => {
-      cancelled = true;
+    };
+    const update = () => {
       cancelAnimationFrame(raf);
-      io?.disconnect();
+      if (!loaded || cancelled) return;
+      // A static first frame keeps offscreen and reduced-motion demos readable.
+      paint(1200);
+      if (visRef.current && !reduced.matches && document.visibilityState === 'visible') {
+        t0 = performance.now() - 1200;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(entries => {
+      visRef.current = entries[0].isIntersecting;
+      update();
+    }, { rootMargin: '80px' }) : null;
+    io?.observe(canvas);
+    const resize = new ResizeObserver(update);
+    if (canvas.parentElement) resize.observe(canvas.parentElement);
+    reduced.addEventListener('change', update);
+    document.addEventListener('visibilitychange', update);
+    void ensureTypoFonts(Array.from(fontKeys)).catch(() => {}).then(() => { loaded = true; update(); });
+    return () => {
+      cancelled = true; cancelAnimationFrame(raf); io?.disconnect(); resize.disconnect();
+      reduced.removeEventListener('change', update);
+      document.removeEventListener('visibilitychange', update);
     };
   }, [variant]);
 

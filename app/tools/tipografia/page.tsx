@@ -1469,13 +1469,13 @@ function TipografiaInner() {
       <ToolHero
         title="Legendas Automáticas"
         eyebrow="Legendas animadas"
-        subtitle="Sobe o vídeo e a fala vira legenda animada profissional, no tempo exato do áudio — escolhe o modelo, edita direto no preview e baixa com a legenda queimada."
+        subtitle="Transforme a fala do vídeo em legendas animadas. Escolha o modelo, revise o texto na prévia e exporte o vídeo com as legendas prontas."
         hue={HUE}
         icon={<IconTipografia size={30} />}
       />
       {/* sem backdrop-blur aqui: backdrop-filter cria containing block e
           prenderia a timeline fixa (dock) dentro do cartão */}
-      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-6">
+      <div className="mt-6">
       <div className="flex flex-col gap-5">
         {/* Transcrição tem FALLBACK no servidor (Groq primeiro, AssemblyAI
             se ela falhar/faltar): quem tem só uma das duas está pronto —
@@ -1488,7 +1488,7 @@ function TipografiaInner() {
           n={1}
           icon={<IconStepMic size={18} />}
           title="Vídeo"
-          hint="MP4, MOV ou WEBM — até 800MB e 20min · dá pra subir até 10 e legendar um por vez"
+          hint="MP4, MOV ou WEBM · até 800 MB e 20 min. Adicione até 10 vídeos e legende um por vez."
           hue={HUE}
         >
           <ToolDropzone
@@ -1609,7 +1609,7 @@ function TipografiaInner() {
           n={2}
           icon={<IconStepText size={18} />}
           title="Legendas automáticas"
-          hint="Transcreve a fala palavra por palavra e monta os blocos no ritmo certo"
+          hint="Transcreva a fala e organize as legendas em blocos sincronizados com o áudio."
           hue={HUE}
         >
           <div className="mb-3">

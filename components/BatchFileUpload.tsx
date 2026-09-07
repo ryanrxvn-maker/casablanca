@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { IconStepFiles } from './ToolIcons';
 import { cn, formatBytes } from '@/lib/utils';
 
 /**
@@ -65,6 +66,17 @@ export function BatchFileUpload({
   return (
     <div className="flex flex-col gap-3">
       <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        aria-label={label}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (!disabled) inputRef.current?.click();
+          }
+        }}
         onDragOver={(e) => {
           if (disabled) return;
           e.preventDefault();
@@ -74,7 +86,7 @@ export function BatchFileUpload({
         onDrop={handleDrop}
         onClick={() => !disabled && inputRef.current?.click()}
         className={cn(
-          'group flex flex-col items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-dashed px-5 py-8 text-center transition-all duration-300',
+          'ae-batch-upload group flex flex-col items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-dashed px-5 py-8 text-center transition-all duration-300',
           disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
           dragging
             ? 'scale-[1.02] border-lime bg-lime/10 shadow-[0_0_40px_-8px_rgba(200,232,124,0.6)]'
@@ -86,6 +98,7 @@ export function BatchFileUpload({
           type="file"
           className="hidden"
           multiple
+          disabled={disabled}
           accept={accept}
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
@@ -93,9 +106,9 @@ export function BatchFileUpload({
             e.target.value = '';
           }}
         />
-        <div className="text-sm text-white">{label}</div>
+        <span className="ae-upload-emblem" aria-hidden="true"><IconStepFiles size={26} /></span><div className="ae-upload-title text-sm text-text">{label}</div>
         <div className="text-xs text-text-muted">
-          {hint ? hint + ' — ' : ''}ate {max} arquivos por lote
+          {hint ? hint + ' · ' : ''}Até {max} arquivos por lote
         </div>
       </div>
 
@@ -137,7 +150,7 @@ export function BatchFileUpload({
                       onChange(value.filter((_, idx) => idx !== i));
                     }}
                     className="shrink-0 text-text-dim transition hover:text-red-400"
-                    aria-label="Remover"
+                    aria-label={'Remover ' + f.name}
                   >
                     ×
                   </button>

@@ -647,7 +647,7 @@ export default function CamuflagemPage() {
     <ToolShell
       title="Camuflagem"
       eyebrow="ÁUDIO"
-      description="Esconde o áudio que a IA lê do TikTok/Kwai/YouTube/Meta (Facebook e Instagram). O selo só fica verde se realmente camuflar."
+      description="Combine duas trilhas de áudio e confira a leitura dos serviços de transcrição. Revise o resultado e os selos de verificação antes de exportar."
       hue={HUE}
       icon={<IconCamuflagem size={56} />}
     >

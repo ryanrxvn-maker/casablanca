@@ -1,69 +1,21 @@
 import type { Metadata } from 'next';
 
-import {
-  Space_Grotesk,
-  JetBrains_Mono,
-  Bricolage_Grotesque,
-  Instrument_Serif,
-  Inter,
-} from 'next/font/google';
-import { MouseGlow } from '@/components/MouseGlow';
-import { RippleRoot } from '@/components/RippleRoot';
-import { FloatingOrbs } from '@/components/FloatingOrbs';
+import localFont from 'next/font/local';
+import { PointerLight } from '@/components/redesign/PointerLight';
+import { BrandMotion } from '@/components/redesign/BrandMotion';
 import { WhatsAppFab } from '@/components/WhatsAppFab';
 import { ThemeManager } from '@/components/ThemeManager';
 import { ChunkGuard } from '@/components/ChunkGuard';
 import './globals.css';
+import './redesign.css';
+import './refinement.css';
 
-/**
- * Tipografia DARKO LAB — fontes ORIGINAIS (boas) preservadas. A ÚNICA mudança
- * premium é nos TEXTOS PEQUENOS (rótulos), via --font-label = Inter.
- *
- *  display · Space Grotesk        → corpo + UI geral (original)
- *  tech    · Bricolage Grotesque  → títulos, brand, tabs (original)
- *  serif   · Instrument Serif     → acentos editoriais (original)
- *  mono    · JetBrains Mono       → números, timestamps, código (original)
- *  label   · Inter                → APENAS rótulos pequenos (.label-tech) —
- *                                    limpa e premium em tamanho pequeno, sem
- *                                    cara de "vibe code". NÃO toca no resto.
- */
-const display = Space_Grotesk({
-  subsets: ['latin'],
-  variable: '--font-display',
-  weight: ['400', '500', '600', '700'],
-  display: 'swap',
-});
-
-const mono = JetBrains_Mono({
-  subsets: ['latin'],
-  variable: '--font-mono',
-  weight: ['400', '500', '700'],
-  display: 'swap',
-});
-
-const tech = Bricolage_Grotesque({
-  subsets: ['latin'],
-  variable: '--font-tech',
-  weight: ['500', '700', '800'],
-  display: 'swap',
-});
-
-const serif = Instrument_Serif({
-  subsets: ['latin'],
-  variable: '--font-serif',
-  weight: ['400'],
-  style: ['italic', 'normal'],
-  display: 'swap',
-});
-
-// Inter — SÓ pros textos pequenos (rótulos uppercase via .label-tech). Limpa,
-// neutra, premium em tamanho pequeno. É a única fonte nova; o resto é original.
-const label = Inter({
-  subsets: ['latin'],
-  variable: '--font-label',
-  weight: ['500', '600', '700'],
-  display: 'swap',
-});
+// Original typefaces, served locally for consistent previews and builds.
+const display = localFont({ src: '../public/fonts/site-space-grotesk.woff2', variable: '--font-display', weight: '300 700', display: 'swap' });
+const mono = localFont({ src: '../public/fonts/site-jetbrains-mono.woff2', variable: '--font-mono', weight: '100 800', display: 'swap', preload: false });
+const tech = localFont({ src: '../public/fonts/site-bricolage-grotesque.woff2', variable: '--font-tech', weight: '200 800', display: 'swap', preload: false });
+const serif = localFont({ src: [{path:'../public/fonts/site-instrument-serif.woff2',style:'normal',weight:'400'},{path:'../public/fonts/site-instrument-serif-italic.woff2',style:'italic',weight:'400'}], variable: '--font-serif', display: 'swap', preload: false });
+const label = localFont({ src: '../public/fonts/site-inter.woff2', variable: '--font-label', weight: '100 900', display: 'swap', preload: false });
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
@@ -218,7 +170,7 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable} ${label.variable}`}
     >
-      <body>
+      <body className="ae-redesign">
         {/* Anti-flash: aplica o tema salvo ANTES da pintura, mas SÓ dentro da
             conta (app). Landing e páginas públicas ficam sempre dark. /planos
             só fica claro se aberto via upgrade (?upgrade). Default = dark. */}
@@ -235,9 +187,7 @@ export default function RootLayout({
         />
         <ChunkGuard />
         <ThemeManager />
-        <FloatingOrbs />
-        <MouseGlow />
-        <RippleRoot />
+        <BrandMotion /><PointerLight />
         {children}
         <WhatsAppFab />
       </body>

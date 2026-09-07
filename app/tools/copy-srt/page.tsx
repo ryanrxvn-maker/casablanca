@@ -199,7 +199,7 @@ export default function CopySrtPage() {
         poster="/cards/gerador-srt.jpg"
         eyebrow="Legenda alinhada"
         title="Gerador de SRT"
-        subtitle="Áudio + copy. Palavra a palavra."
+        subtitle="Transforme seu texto em um arquivo SRT sincronizado com o áudio, palavra por palavra."
         glow="rgba(251,191,36,0.5)"
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
@@ -208,7 +208,7 @@ export default function CopySrtPage() {
             uma das duas basta. */}
         <MissingKeyBanner services={[['groq', 'assemblyai']]} />
 
-        <ToolStep n={1} icon={<IconStepMic size={18} />} title="Áudio ou vídeo" hint="MP3, WAV, MP4, MOV, WEBM — até 800MB e 60min" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMic size={18} />} title="Áudio ou vídeo" hint="MP3, WAV, MP4, MOV ou WEBM · até 800 MB e 60 minutos" hue={HUE}>
           <ToolDropzone
             accept="audio/*,video/mp4,video/webm,video/quicktime,video/x-matroska"
             file={file}
@@ -247,14 +247,14 @@ export default function CopySrtPage() {
           n={2}
           icon={<IconStepText size={18} />}
           title="Texto da copy"
-          hint="Será o conteúdo exato do SRT — só os tempos vêm do áudio"
+          hint="Este texto será usado nas legendas. O áudio define o tempo de cada palavra."
           hue={HUE}
         >
           <textarea
             id="copy"
             value={copyText}
             onChange={(e) => setCopyText(e.target.value)}
-            placeholder="Cole aqui o texto da copy. O SRT vai sair com este texto exato + os tempos extraidos do audio."
+            placeholder="Cole o texto que deve aparecer nas legendas. O áudio será usado para sincronizar as palavras."
             rows={9}
             className="input-field resize-y font-mono text-sm"
             disabled={processing}

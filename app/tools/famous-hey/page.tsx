@@ -204,7 +204,7 @@ function Etapa({
   children: React.ReactNode;
 }) {
   return (
-    <section className="glass-panel mb-4 rounded-[18px] p-4 md:p-5">
+    <section className="ae-tool-step ae-famous-step mb-5">
       <header className="mb-3.5 flex items-center gap-2.5">
         <span
           className="mono flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] text-[11px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_12px_-4px_rgba(167,139,250,0.7)]"
@@ -212,7 +212,7 @@ function Etapa({
         >
           {n}
         </span>
-        <h2 className="text-[13px] font-bold uppercase tracking-[0.14em] text-text">{titulo}</h2>
+        <h2 className="font-tech text-[17px] font-bold tracking-tight text-text">{titulo}</h2>
         {aparte ? (
           <span className="ml-auto hidden text-[11px] text-text-muted sm:block">{aparte}</span>
         ) : null}
@@ -377,8 +377,7 @@ function SeletorDeVoz({
             <p className="px-1 py-2 text-[12px] text-text-muted">carregando vozes…</p>
           ) : vozes.length === 0 ? (
             <p className="px-1 py-2 text-[12px] text-text-muted">
-              Nenhuma voz encontrada. Se a busca estiver vazia e mesmo assim não vier
-              nada, é sinal de que o HeyGen ainda não está conectado.
+              Nenhuma voz encontrada. Tente outro nome ou confira a conexão com o HeyGen.
             </p>
           ) : (
             vozes.map((v) => {
@@ -749,7 +748,7 @@ export default function FamousHeyPage() {
 
   /* ── disparar ─────────────────────────────────────────────────────────── */
   const podeDisparar = (): string | null => {
-    if (!imagem) return 'Suba a imagem que vai falar.';
+    if (!imagem) return 'Adicione uma imagem para começar.';
     if (emAndamento) return 'Já tem um vídeo sendo gerado. Um de cada vez.';
     if (modo === 'texto') {
       if (!script.trim()) return 'Escreva o texto da fala.';
@@ -955,7 +954,7 @@ export default function FamousHeyPage() {
     <ToolShell
       title="Famous Hey"
       eyebrow="HEYGEN · MODO IMAGEM"
-      description="Anima uma foto direto no HeyGen, sem cadastrar avatar na biblioteca. Um take, uma fala — sai o vídeo cru pra você levar pra edição."
+      description="Transforme uma imagem em um vídeo com sua fala. Escolha a voz ou envie um áudio, ajuste o formato e leve o resultado para a edição."
       hue="rgba(251, 191, 36, 0.42)"
       icon={<IconFamousHey size={30} />}
     >
@@ -1003,7 +1002,7 @@ export default function FamousHeyPage() {
       <Etapa n="02" titulo="A fala">
         {/* Segmentado com pílula deslizante — o trilho mostra que são DOIS
             caminhos exclusivos, coisa que dois botões soltos não diziam. */}
-        <div className="relative mb-3 inline-flex rounded-[12px] border border-line bg-bg/50 p-1">
+        <div className="relative mb-3 inline-flex w-full max-w-[390px] rounded-[12px] border border-line bg-bg/50 p-1">
           <span
             aria-hidden
             className="absolute inset-y-1 w-[calc(50%-4px)] rounded-[9px] transition-transform duration-300 ease-out"
@@ -1028,7 +1027,7 @@ export default function FamousHeyPage() {
               }}
               aria-pressed={modo === m.id}
               className={[
-                'relative z-10 flex w-[190px] items-center justify-center gap-1.5 rounded-[9px] px-3 py-1.5',
+                'relative z-10 flex min-h-[44px] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[9px] px-2 py-2',
                 'text-[12.5px] font-bold transition-colors duration-200',
                 modo === m.id ? 'text-white' : 'text-text-muted hover:text-text',
               ].join(' ')}
@@ -1177,7 +1176,7 @@ export default function FamousHeyPage() {
         </div>
         {jobs.length === 0 ? (
           <p className="text-[13px] text-text-muted">
-            Nada gerado ainda. O que sair daqui fica guardado pra baixar de novo quando quiser.
+            Seus vídeos aparecerão aqui após a geração. Os 30 registros mais recentes ficam neste navegador.
           </p>
         ) : (
           <div className="space-y-2.5">

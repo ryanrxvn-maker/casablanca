@@ -130,7 +130,7 @@ export default function AudioSplitPage() {
     <ToolShell
       title="Dividir áudios"
       eyebrow="ÁUDIO"
-      description="Quebra o áudio em pedaços pelas pausas. Sem cortar falas."
+      description="Divida áudios e vídeos em trechos usando as pausas da fala como pontos de corte."
       hue={HUE}
       icon={<IconAudioSplit size={56} />}
     >
@@ -147,7 +147,7 @@ export default function AudioSplitPage() {
           />
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepScissors size={18} />} title="Como divide" hint="Heurística inteligente de pausas" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepScissors size={18} />} title="Critério de divisão" hint="Defina como as pausas serão usadas para separar os trechos." hue={HUE}>
           <div className="rounded-[12px] border border-line bg-bg/40 px-4 py-3 text-xs text-text-muted leading-relaxed">
             Procura as pausas mais longas e quebra em partes equilibradas
             (~4 partes por minuto de fala). Pra remover silêncios use a{' '}

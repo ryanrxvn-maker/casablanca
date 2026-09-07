@@ -74,8 +74,9 @@ const TOOL_PATHS = TOOL_ITEMS.map((i) => i.href);
  *   │ ...                  │
  *   └──────────────────────┘
  */
-export function SubSidebar() {
-  const pathname = usePathname();
+export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
+  const actualPath = usePathname();
+  const pathname = currentPath ?? actualPath;
   const [isAdmin, setIsAdmin] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
@@ -114,7 +115,7 @@ export function SubSidebar() {
 
   return (
     <aside
-      className="fixed left-[84px] top-0 z-30 hidden h-screen w-[244px] flex-col border-r border-line/70 bg-bg-soft/70 backdrop-blur-xl md:flex"
+      className="ae-subsidebar fixed left-[84px] top-0 z-30 hidden h-screen w-[244px] flex-col border-r border-line/70 bg-bg-soft/70 backdrop-blur-xl md:flex"
       style={{
         boxShadow: '4px 0 24px -16px rgba(0,0,0,0.5)',
       }}
@@ -215,7 +216,7 @@ export function SubSidebar() {
                     {inner}
                   </div>
                 ) : (
-                  <Link href={it.href} className={rowCls}>
+                  <Link href={it.href} className={rowCls} aria-current={active ? 'page' : undefined}>
                     {inner}
                   </Link>
                 )}
@@ -250,8 +251,9 @@ export function SubSidebar() {
  * Hook auxiliar — diz se o pathname atual pede a sub-sidebar.
  * Usado pelo layout pra ajustar o padding esquerdo do conteúdo.
  */
-export function useSubSidebarActive() {
-  const pathname = usePathname();
+export function useSubSidebarActive(currentPath?: string) {
+  const actualPath = usePathname();
+  const pathname = currentPath ?? actualPath;
   return TOOL_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + '/'),
   );

@@ -38,6 +38,7 @@ const TITLES: Record<string, string> = {
   '/tools/points': 'Pontos',
   '/tools/background': 'Tarefas em segundo plano',
   '/tools/historico': 'Histórico geral',
+  '/tools/controles': 'Botões e estados',
   '/tools/lipsync-history': 'Histórico de avatares',
   '/tools/clickup-pilot': 'ClickUp Pilot',
   '/tools/famous-hey': 'Famous Hey',
@@ -49,7 +50,8 @@ const TITLES: Record<string, string> = {
 };
 
 export function TopBar() {
-  const pathname = usePathname();
+  const currentPath = usePathname();
+  const pathname = currentPath.startsWith('/dev/redesign/') ? (currentPath.endsWith('/hub') ? '/tools' : currentPath.replace('/dev/redesign/', '/tools/')) : currentPath;
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -73,7 +75,7 @@ export function TopBar() {
   return (
     <header
       className={
-        'sticky top-0 z-30 border-b transition-all duration-300 ' +
+        'ae-topbar sticky top-0 z-30 border-b transition-all duration-300 ' +
         (scrolled
           ? 'border-line/60 bg-bg/85 backdrop-blur-xl'
           : 'border-line/20 bg-bg/40 backdrop-blur-md')
@@ -82,7 +84,7 @@ export function TopBar() {
       <div
         className={
           'flex items-center justify-between gap-4 px-5 transition-all duration-300 md:px-8 ' +
-          (scrolled ? 'h-12' : 'h-14')
+          'h-[68px]'
         }
       >
         {/* Esquerda: título da rota */}

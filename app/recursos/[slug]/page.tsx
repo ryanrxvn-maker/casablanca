@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { Brand } from '@/components/Brand';
+import { SiteHeader } from '@/components/redesign/SiteHeader';
+import { SiteFooter } from '@/components/redesign/SiteFooter';
 import { PILLARS, PILLAR_SLUGS, getPillar } from '@/lib/pillars';
 
 const SITE_URL = 'https://www.darkoautoedit.com';
@@ -71,7 +72,7 @@ export default function PillarPage({ params }: { params: { slug: string } }) {
   };
 
   return (
-    <main className="relative min-h-screen">
+    <main className="ae-document relative min-h-screen">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }}
@@ -81,14 +82,7 @@ export default function PillarPage({ params }: { params: { slug: string } }) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }}
       />
 
-      <header className="border-b border-line/50 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-[820px] items-center justify-between px-5">
-          <Brand href="/" />
-          <Link href="/recursos" className="btn-ghost">
-            ← Recursos
-          </Link>
-        </div>
-      </header>
+      <SiteHeader />
 
       <article className="mx-auto max-w-[820px] px-5 py-12 md:py-16">
         {/* Breadcrumb visível */}
@@ -233,6 +227,7 @@ export default function PillarPage({ params }: { params: { slug: string } }) {
           </div>
         </section>
       </article>
+      <SiteFooter />
     </main>
   );
 }

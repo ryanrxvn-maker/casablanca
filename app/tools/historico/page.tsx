@@ -277,7 +277,7 @@ export default function HistoricoPage() {
       <ToolHero
         eyebrow="SEU TRABALHO · ÚLTIMOS 7 DIAS"
         title="Histórico geral"
-        subtitle="Tudo que você produziu, em todas as ferramentas — e baixável de novo. Arquivo pequeno fica guardado no navegador; avatar do HeyGen a gente resgata pelo ID mesmo que o cache tenha sido limpo. Some sozinho depois de 7 dias."
+        subtitle="Consulte suas entregas dos últimos 7 dias e baixe novamente os arquivos disponíveis. Arquivos pequenos ficam neste navegador; avatares do HeyGen também podem ser recuperados pelo ID. Os registros expiram após 7 dias."
         hue="rgba(167,139,250,0.45)"
         icon={
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -346,6 +346,7 @@ export default function HistoricoPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar por arquivo, ferramenta, detalhe…"
+            aria-label="Buscar no histórico"
             className="input-field flex-1"
           />
           {events.length > 0 ? (
@@ -414,7 +415,7 @@ export default function HistoricoPage() {
           </p>
           <p className="max-w-[440px] text-[13px] leading-relaxed text-text-muted">
             {events.length === 0
-              ? 'Assim que você processar, exportar ou disparar algo em qualquer ferramenta, o registro aparece aqui — baixável de novo por 7 dias.'
+              ? 'Suas próximas entregas aparecerão aqui. Os registros ficam disponíveis por 7 dias, com acesso aos arquivos que puderem ser recuperados.'
               : 'Tente outra ferramenta ou limpe a busca.'}
           </p>
         </div>

@@ -455,15 +455,15 @@ export default function CompressorPage() {
       <ToolHero
         title="Compressor"
         eyebrow="VÍDEO · ATÉ 5 EM PARALELO"
-        subtitle={`Reduz o peso dos vídeos sem perder qualidade visível. Até ${POOL_SIZE} comprimindo ao mesmo tempo, com preview de tamanho calibrado.`}
+        subtitle={`Ajuste a qualidade e a resolução para reduzir o tamanho dos vídeos. Processe até ${POOL_SIZE} arquivos em paralelo.`}
         hue={HUE}
         icon={<IconCompressor size={56} />}
       />
-      <div className="mt-6 flex flex-col gap-5">
+      <div className="ae-four-step-flow mt-6 flex flex-col gap-5">
         <ToolStep
           n={1}
           icon={<IconStepUpload size={18} />}
-          title="Solta os vídeos"
+          title="Adicione seus vídeos"
           hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV · até 2 GB cada`}
           hue={HUE}
         >
@@ -512,7 +512,7 @@ export default function CompressorPage() {
           n={2}
           icon={<IconStepSliders size={18} />}
           title="Qualidade"
-          hint="Quanto mais compressão, menor o arquivo (e maior a perda visual)"
+          hint="Encontre o equilíbrio entre tamanho do arquivo e qualidade de imagem."
           hue={HUE}
         >
           <ToolSlider

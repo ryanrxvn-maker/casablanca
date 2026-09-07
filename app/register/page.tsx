@@ -137,7 +137,7 @@ export default function RegisterPage() {
     // ver o motivo claro em vez do erro genérico do banco.
     if (isDisposableEmail(cleanEmail)) {
       setError(
-        'Não aceitamos email temporário/descartável. Use seu email de verdade (Gmail, Outlook, o da sua empresa) — é pra lá que vai o código de confirmação e o acesso.',
+        'Use um email permanente, como Gmail, Outlook ou o da sua empresa. Enviaremos o código de confirmação para esse endereço.',
       );
       return;
     }
@@ -158,7 +158,7 @@ export default function RegisterPage() {
       return;
     }
     if (!agreed) {
-      setError('Você precisa aceitar os Termos de Uso e a Política pra continuar.');
+      setError('Aceite os Termos de Uso e a Política para continuar.');
       return;
     }
     setLoading(true);
@@ -280,7 +280,7 @@ export default function RegisterPage() {
   return (
     <AuthShell
       title="Criar conta grátis"
-      subtitle="Sem cartão. Sobe o primeiro bruto em minutos."
+      subtitle="Seu estúdio de edição começa aqui. Sem cartão."
       footer={
         <span className="text-text-muted">
           Já tem conta?{' '}
@@ -333,7 +333,7 @@ export default function RegisterPage() {
             placeholder="(11) 98765-4321"
           />
           <p className="mt-1.5 text-[11px] text-text-muted">
-            Pra suporte por WhatsApp se precisar.
+            Para suporte pelo WhatsApp, quando necessário.
           </p>
         </div>
 
@@ -352,7 +352,7 @@ export default function RegisterPage() {
           label="Confirmar senha"
           value={confirm}
           onChange={setConfirm}
-          placeholder="Repete a senha"
+          placeholder="Confirme a senha"
           show={showConfirm}
           onToggle={() => setShowConfirm((v) => !v)}
         />

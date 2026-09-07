@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { LandingV3 } from '@/components/landing/v3/LandingV3';
+import { LandingV3 } from '@/components/redesign/Landing';
 import { FAQ } from '@/lib/faq';
 
 /**

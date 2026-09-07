@@ -152,7 +152,7 @@ function LoginInner() {
   return (
     <AuthShell
       title="Bem-vindo de volta"
-      subtitle="Entre pra continuar de onde parou."
+      subtitle="Entre para continuar suas edições."
       footer={
         <a
           href="/register"

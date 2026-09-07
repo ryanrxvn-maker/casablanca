@@ -2,7 +2,7 @@
 import { famousHeyGratis, famousHeyDiasRestantes } from '@/lib/famous-hey-trial';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
@@ -68,7 +68,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Lipsync Video to Video',
-    description: 'Suba o rosto, suba o áudio e o lipsync sai pronto — o avatar falando exatamente a copy que você quiser, em minutos.',
+    description: 'Sincronize a fala do avatar com seu áudio e revise o vídeo antes de baixar.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
@@ -78,7 +78,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/copy-srt',
     label: 'Gerador de SRT',
-    description: 'Cole a copy, suba o áudio e a legenda sai alinhada palavra por palavra — pronta pra importar no editor.',
+    description: 'Adicione o texto e o áudio para gerar legendas sincronizadas, prontas para importar no editor.',
     icon: <IconCopySRT size={28} />,
     hue: 'rgba(196, 181, 253, 0.45)',
     badge: 'IA',
@@ -100,7 +100,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/decupagem',
     label: 'Decupagem',
-    description: 'Vídeo ou áudio: o silêncio some, a fala fica. Corte limpo.',
+    description: 'Remova pausas de vídeos e áudios preservando o ritmo da fala.',
     icon: <IconDecupagem size={26} />,
     hue: 'rgba(163, 230, 53, 0.4)',
   },
@@ -114,35 +114,35 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/downloader',
     label: 'Downloader',
-    description: 'Baixa vídeo, áudio e imagem do YouTube, TikTok, Insta e Pinterest.',
+    description: 'Baixe vídeos, áudios e imagens do YouTube, TikTok, Instagram e Pinterest.',
     icon: <IconDownloader size={26} />,
     hue: 'rgba(96, 165, 250, 0.4)',
   },
   {
     href: '/tools/compressor',
     label: 'Compressor',
-    description: 'Reduz o peso do vídeo sem perder qualidade visível.',
+    description: 'Reduza o tamanho dos vídeos com controle de qualidade e resolução.',
     icon: <IconCompressor size={26} />,
     hue: 'rgba(129, 140, 248, 0.4)',
   },
   {
     href: '/tools/audio-split',
     label: 'Dividir áudios',
-    description: 'Divide o áudio em pedaços pelas pausas. Sem cortar falas.',
+    description: 'Divida o áudio pelas pausas ou pelo tempo definido para cada trecho.',
     icon: <IconAudioSplit size={26} />,
     hue: 'rgba(34, 211, 238, 0.4)',
   },
   {
     href: '/tools/acelerador',
     label: 'Mixer de Velocidade',
-    description: 'Acelera ou desacelera sem ficar robótico.',
+    description: 'Ajuste a velocidade e escolha como preservar o tom da voz.',
     icon: <IconAcelerador size={26} />,
     hue: 'rgba(251, 191, 36, 0.4)',
   },
   {
     href: '/tools/normalizador',
     label: 'Normalizador',
-    description: 'Iguala o volume da voz e limpa o chiado. Com relatório antes × depois.',
+    description: 'Equilibre o volume, reduza ruídos e compare o áudio antes e depois.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
   },
@@ -157,7 +157,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Lipsync Video to Video',
-    description: 'Vídeo entra. Áudio encaixa. Boca fala.',
+    description: 'Sincronize os movimentos da boca com um novo áudio.',
     icon: <IconLipsync size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
@@ -165,7 +165,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/auto-broll',
     label: 'Auto B-roll',
-    description: 'Uma lista. Um clique. Dezenas de vídeos.',
+    description: 'Organize a lista de vídeos e automatize a preparação dos cortes.',
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
     badge: 'ADMIN',
@@ -174,7 +174,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/remover-elementos',
     label: 'Remover Legenda/Marca d’Água',
-    description: 'Legenda queimada. IA remove. MP4 limpo.',
+    description: 'Remova legendas e marcas incorporadas ao vídeo com IA.',
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
@@ -184,7 +184,7 @@ const TOOLS: ToolEntry[] = [
     href: '/tools/decupagem-copy',
     adminOnly: true,
     label: 'Decupagem Inteligente',
-    description: 'IA lê a copy. Escolhe o take certo.',
+    description: 'Use o texto como referência para selecionar os trechos da gravação.',
     icon: <IconDecupageCopy size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
@@ -192,7 +192,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/copy-srt',
     label: 'Gerador de SRT',
-    description: 'Áudio + copy. Legenda alinhada palavra a palavra.',
+    description: 'Transforme texto e áudio em legendas sincronizadas no formato SRT.',
     icon: <IconCopySRT size={26} />,
     hue: 'rgba(196, 181, 253, 0.42)',
     badge: 'IA',
@@ -228,7 +228,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/famous-hey',
     label: 'Famous Hey',
-    description: 'Anima uma foto no HeyGen. Uma foto vira take falando.',
+    description: 'Anime uma foto com sua narração e crie um vídeo no HeyGen.',
     icon: <IconFamousHey size={26} />,
     hue: 'rgba(251, 191, 36, 0.42)',
     // Na janela grátis o selo anuncia a promoção e o card aparece pra TODOS;
@@ -245,6 +245,8 @@ export function ToolsHub() {
   const lockedFrom = params.get('from') || '';
   const lockedNeed = (params.get('need') as 'basic' | 'pro' | 'admin' | null) || null;
   const [isAdmin, setIsAdmin] = useState(false);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('Todas');
   const [firstName, setFirstName] = useState<string>('');
   const [maintBypass, setMaintBypass] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -295,121 +297,16 @@ export function ToolsHub() {
     return 'blocked';
   };
 
-  const greeting = greetingFor(new Date(), firstName);
-
-  return (
-    <div className="mx-auto w-full max-w-[1100px] px-5 md:px-8">
-      {/* Flash de "ferramenta bloqueada" — mostra pra qualquer tier
-          que tentou acessar algo que não pode. Inclui qual ferramenta
-          foi bloqueada + qual plano libera. */}
-      {lockedFlash ? (
-        <LockedFlash from={lockedFrom} need={lockedNeed} tier={tier} />
-      ) : null}
-
-      {/* Saudação + descrição */}
-      <section className="mb-8 animate-fade-in-up">
-        <div
-          className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-text-muted"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_10px_rgba(167,139,250,0.8)]" />
-          <span>AUTO EDIT</span>
-        </div>
-        <h1 className="hero-title">
-          {greeting}{firstName ? `, ${firstName}` : ''}.
-          <br />
-          <span className="display-subtle text-3xl md:text-5xl">
-            O que vamos automatizar hoje?
-          </span>
-        </h1>
-      </section>
-
-      {/* Banner-herói: FakePrint (manchete de telejornal) pra TODOS.
-          Pilot e Auto B-roll entram como slides extras SÓ pra admin. */}
-      <PromoBanner tier={tier} isAdmin={isAdmin} />
-
-      {/* Bloco DESTAQUES — grandes, com gradiente */}
-      <section className="mt-10">
-        <div
-          className="mb-5 flex items-end justify-between gap-4 fade-in-up"
-          style={{ animationDelay: '120ms' }}
-        >
-          <div>
-            <h2 className="section-title">Destaques</h2>
-            <p className="mt-1 text-sm text-text-muted">
-              As ferramentas mais usadas no estúdio.
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:-mx-6 2xl:-mx-10">
-          <TipografiaFeaturedCard delay={120} />
-          {featured.map((it, i) =>
-            it.video ? (
-              <FeaturedVideoCard
-                key={it.href}
-                entry={it}
-                delay={140 + i * 60}
-              />
-            ) : (
-              <FeaturedCard
-                key={it.href}
-                entry={it}
-                delay={140 + i * 60}
-                locked={
-                  !tierAllowsTool(tier, it.href) &&
-                  !emailUnlocksPath(userEmail, it.href)
-                }
-                maint={maintOf(it.href)}
-              />
-            ),
-          )}
-        </div>
-      </section>
-
-      {/* FERRAMENTAS — lista única, sem divisão Base × IA */}
-      <section className="mt-14">
-        <SectionTitle
-          eyebrow="ESTÚDIO"
-          title="Ferramentas"
-          sub="Cortes, ajustes, arquivos e IA — sem espera."
-          delay={300}
-        />
-        <div
-          className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 fade-in-up"
-          style={{ animationDelay: '340ms' }}
-        >
-          {tools.map((it, i) => (
-            <ToolCard
-              key={it.href}
-              entry={it}
-              delay={i * 35}
-              locked={
-                !tierAllowsTool(tier, it.href) &&
-                !emailUnlocksPath(userEmail, it.href)
-              }
-              maint={maintOf(it.href)}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* Rodapé editorial */}
-      <section className="mt-20 mb-6 text-center">
-        <p className="display-subtle text-lg md:text-xl">
-          Ligue a fila e vá dormir.
-        </p>
-        <p className="mt-1 text-[13px] text-text-muted">
-          Auto Edit · {new Date().getFullYear()}
-        </p>
-        <p
-          className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-text-dim"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          DarkoCorporation
-        </p>
-      </section>
-    </div>
-  );
+  const categories: Record<string, string> = { fakepass:'Criar', tipografia:'Criar', lipsync:'Criar', 'copy-srt':'Criar', 'famous-hey':'Criar', 'auto-broll':'Criar', 'heygen-auto':'Criar', 'auto-cortes':'Editar', decupagem:'Editar', 'decupagem-copy':'Editar', camuflagem:'Editar', normalizador:'Editar', acelerador:'Editar', 'remover-elementos':'Editar', compressor:'Preparar', downloader:'Preparar', 'audio-split':'Preparar', 'separador-audio':'Preparar' };
+  const visibleTools = tools.filter(tool => (category === 'Todas' || (categories[tool.href.split('/').pop() || ''] || 'Automatizar') === category) && (tool.label+' '+tool.description).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(query.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()));
+  return <div className="ae-hub">
+    {lockedFlash && <LockedFlash from={lockedFrom} need={lockedNeed} tier={tier} />}
+    <section className="ae-hub-heading"><div><p className="ae-eyebrow">SEU ESTÚDIO</p><h1>{firstName ? 'Vamos criar, '+firstName+'?' : 'O que você vai criar hoje?'}</h1><p>Encontre sua ferramenta, prepare os arquivos e avance na edição.</p></div><Link href="/tools/historico" className="ae-button ae-button-secondary">Ver histórico <span aria-hidden>↗</span></Link></section>
+    <section className="ae-hub-tools" aria-labelledby="ae-hub-tools-heading"><div className="ae-hub-tools-heading"><h2 id="ae-hub-tools-heading">Ferramentas</h2><label><span className="sr-only">Encontrar ferramenta</span><input type="search" className="input" placeholder="Encontrar ferramenta…" value={query} onChange={event=>setQuery(event.target.value)} /></label></div><div className="ae-hub-filters ae-filters" role="group" aria-label="Filtrar por etapa">{['Todas','Criar','Editar','Preparar',...(tools.some(t=>!categories[t.href.split('/').pop() || ''])?['Automatizar']:[])].map(item=><button type="button" key={item} aria-pressed={category===item} onClick={()=>setCategory(item)}>{item}</button>)}</div><div className="ae-hub-grid">{visibleTools.map((it,i)=><ToolCard key={it.href} entry={it} delay={0} loading={tier===null} locked={!tierAllowsTool(tier,it.href)&&!emailUnlocksPath(userEmail,it.href)} maint={maintOf(it.href)} />)}</div>{visibleTools.length===0 && <div className="ae-empty-search"><p>Nenhuma ferramenta encontrada.</p><button type="button" onClick={()=>{setQuery('');setCategory('Todas');}}>Limpar filtros</button></div>}<p className="ae-catalog-count" aria-live="polite">{visibleTools.length} {visibleTools.length === 1 ? 'ferramenta encontrada' : 'ferramentas encontradas'}</p></section>
+    <section className="ae-hub-spotlight"><div className="ae-hub-tools-heading"><h2>Explore as possibilidades</h2><p>Suas ferramentas em ação.</p></div><PromoBanner tier={tier} isAdmin={isAdmin}/></section>
+    <section className="ae-hub-featured"><h2>Para a próxima etapa</h2><div className="ae-hub-featured-grid"><TipografiaFeaturedCard delay={0}/>{featured.map(it=>it.video?<FeaturedVideoCard key={it.href} entry={it} delay={0}/>:<FeaturedCard key={it.href} entry={it} delay={0} locked={!tierAllowsTool(tier,it.href)&&!emailUnlocksPath(userEmail,it.href)} maint={maintOf(it.href)}/>)}</div></section>
+    <footer className="ae-hub-footer">Auto Edit · Seu estúdio de edição</footer>
+  </div>;
 }
 
 /* ─────────────────────────── Subcomponentes ─────────────────────── */
@@ -2205,15 +2102,17 @@ function ToolCard({
   entry,
   delay,
   locked = false,
+  loading = false,
   maint,
 }: {
   entry: ToolEntry;
   delay: number;
   locked?: boolean;
+  loading?: boolean;
   maint?: MaintMode;
 }) {
   const isBlocked = maint === 'blocked';
-  const nonClickable = locked || isBlocked;
+  const nonClickable = locked || isBlocked || loading;
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Cards de vídeo: o .mp4 fica PARADO no poster e só roda enquanto o mouse
@@ -2391,97 +2290,11 @@ function ToolCard({
     );
   }
 
-  const cls =
-    'tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 md:p-5 ' +
-    (nonClickable
-      ? 'cursor-not-allowed'
-      : 'hover:-translate-y-[2px] hover:border-violet/45');
-  const style: React.CSSProperties = {
-    animationDelay: `${delay}ms`,
-    background: 'linear-gradient(180deg, rgb(var(--bg-softer)) 0%, rgb(var(--bg-soft)) 100%)',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-  };
-  const body = (
-    <>
-      <div
-        aria-hidden
-        className="hub-glow pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-80"
-        style={{ background: entry.hue }}
-      />
-
-      {locked ? (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center"
-          style={{ background: 'rgba(7,7,8,0.55)' }}
-        >
-          <span
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
-            style={{ boxShadow: '0 0 18px -6px rgba(167,139,250,0.55)' }}
-          >
-            <LockIcon size={14} />
-          </span>
-        </div>
-      ) : null}
-
-      <div className={'relative flex items-start gap-3 ' + (nonClickable ? 'opacity-45' : '')}>
-        <span
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-white/6 bg-black/30 transition-transform duration-300 group-hover:scale-110"
-          style={{
-            boxShadow: `0 0 22px -6px ${entry.hue}`,
-          }}
-        >
-          {entry.icon}
-        </span>
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span
-              className="truncate text-[14px] font-bold tracking-tight text-white"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              {entry.label}
-            </span>
-            {entry.badge ? (
-              <span
-                className="shrink-0 rounded-full border border-violet/40 bg-violet/10 px-1.5 py-0 text-[8.5px] font-bold uppercase tracking-[0.18em] text-violet"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                {entry.badge}
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-1 text-[12.5px] leading-snug text-text-muted">
-            {entry.description}
-          </p>
-        </div>
-      </div>
-    </>
-  );
-
-  const card = nonClickable ? (
-    <div
-      className={cls}
-      style={style}
-      aria-disabled
-      title={isBlocked ? 'Em manutenção' : 'Disponível no plano Premium'}
-    >
-      {body}
-    </div>
-  ) : (
-    <Link href={entry.href} className={cls} style={style}>
-      {body}
-    </Link>
-  );
-
+  const status = isBlocked ? 'Em manutenção' : loading ? 'Verificando acesso'  : locked ? 'Premium' : 'Abrir ferramenta';
+  const body = <><span className="ae-hub-card-icon">{entry.icon}</span><div className="ae-hub-card-copy"><h3>{entry.label}</h3><p>{entry.description}</p></div><span className="ae-hub-card-status">{locked && !loading && <LockIcon size={12}/>}<span>{status}</span>{!nonClickable && <span aria-hidden>↗</span>}</span></>;
+  const card = nonClickable ? <div className="ae-hub-card" style={{'--card-hue':entry.hue} as CSSProperties} aria-disabled="true" title={status}>{body}</div> : <Link className="ae-hub-card" style={{'--card-hue':entry.hue} as CSSProperties} href={entry.href}>{body}</Link>;
   if (!maint) return card;
-  // Card tem overflow-hidden → o mini-card seria cortado. Por isso o selo
-  // fica FORA do card, num wrapper relative.
-  return (
-    <div className="relative">
-      {card}
-      <MaintenanceBadge mode={maint} className="right-3 top-3" />
-    </div>
-  );
+  return <div className="relative">{card}<MaintenanceBadge mode={maint} className="right-3 top-3"/></div>;
 }
 
 function LockIcon({ size = 18 }: { size?: number }) {
