@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.20.0';
+const DARKO_EXT_VERSION = '4.20.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1381,6 +1381,13 @@ async function testSession() {
 }
 
 function reportProgress(requestId, stage, percent) {
+  // O aviso vai em TODA mensagem, nao so na primeira: a aba pode virar oculta
+  // no MEIO do job (o usuario minimiza a janela de automacao) e, se o aviso so
+  // saisse no comeco, ele nunca ficaria sabendo por que o disparo empacou.
+  if (typeof stage === 'string' && typeof avisoDeAbaOculta === 'function') {
+    const av = avisoDeAbaOculta();
+    if (av && !stage.includes('OCULTA')) stage = stage + av;
+  }
   console.log('[DARKO LAB UI progress]', stage, percent != null ? `(${percent}%)` : '');
   chrome.runtime.sendMessage({
     type: 'HG_TAB_PROGRESS',
@@ -3919,7 +3926,7 @@ async function runEconomyJob(requestId, payload) {
 
     // Aquece o debugger: tira o custo do attach do primeiro clique.
     await aquecerCdp();
-    reportProgress(requestId, `Economia: abrindo o Studio de ${avatarName || avatarId}...${avisoDeAbaOculta()}`, 2);
+    reportProgress(requestId, `Economia: abrindo o Studio de ${avatarName || avatarId}...`, 2);
     await enterStudioForAvatar(avatarId, avatarName, groupName, (m) =>
       reportProgress(requestId, `Economia: ${m}...`, 3));
 
