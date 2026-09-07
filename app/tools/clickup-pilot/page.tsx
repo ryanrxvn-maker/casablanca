@@ -5526,7 +5526,17 @@ function ClickUpPilotInner() {
             erroParcial = (e as Error)?.message || String(e);
           }
         }
-        if (erroParcial) console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
+        if (erroParcial) {
+          console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
+          // O motivo TEM que chegar no card. Antes ele só existia no console
+          // do F12: o usuário via "a cena não voltou do Studio" — a mensagem
+          // genérica de cena sem resultado — e nunca o porquê de verdade
+          // ("Outra geracao em andamento", "não achei o botão Render Scene",
+          // "a aba está OCULTA"...). Diagnosticar virava adivinhação.
+          setBatchStates((prev) => (prev[taskId]
+            ? { ...prev, [taskId]: { ...prev[taskId], message: `Modo economia parou: ${erroParcial}` } }
+            : prev));
+        }
         // Cena pronta já nasce 'completed' com a URL: o poll pula e o download
         // do pipeline pega no lugar de sempre.
         statusEconomia = statusDasCenas(cenasFeitas);

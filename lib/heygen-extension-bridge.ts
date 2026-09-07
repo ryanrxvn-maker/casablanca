@@ -299,9 +299,16 @@ export function gerarPelaEconomia(
       clearTimeout(tJob);
       if (vigiaCancelamento) clearInterval(vigiaCancelamento);
     };
+    // Desistir SEM avisar a extensao deixava o `currentJob` dela preso: o
+    // proximo disparo batia em "Outra geracao em andamento" e so' fechando a
+    // aba do HeyGen na mao curava. Todo caminho de desistencia manda HG_CANCEL.
+    const avisarExtensao = () => {
+      try { window.postMessage({ source: 'darkolab', type: 'HG_CANCEL', requestId }, '*'); } catch { /* sem ponte */ }
+    };
     const tAck = setTimeout(() => {
       if (acked || !vivo) return;
       encerrar();
+      avisarExtensao();
       reject(
         new Error(
           'A extensão Auto Edit não respondeu ao modo economia. Baixe a versão atual em /api/extension/download, recarregue em chrome://extensions e atualize esta página.',
@@ -311,6 +318,7 @@ export function gerarPelaEconomia(
     const tJob = setTimeout(() => {
       if (!vivo) return;
       encerrar();
+      avisarExtensao();
       reject(new Error(`O modo economia passou de ${Math.round(tetoJobMs / 60000)} min sem terminar. Parei de esperar — confira a aba do HeyGen.`));
     }, tetoJobMs);
 

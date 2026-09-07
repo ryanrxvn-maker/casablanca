@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.20.1';
+const DARKO_EXT_VERSION = '4.20.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -89,6 +89,28 @@ const SELECTORS = {
 };
 
 let currentJob = null;
+/* Batimento do job corrente. Sem ele, um job que morre SEM rodar o finally
+ * (aba estrangulada pelo Chrome, renderer descartado, extensao recarregada no
+ * meio) deixava `currentJob` preso PRA SEMPRE, e todo disparo seguinte batia
+ * em "Outra geracao em andamento" ate alguem fechar a aba do HeyGen na mao.
+ * Medido 07.09.2026: foi exatamente isso que matou o disparo seguinte ao job
+ * que ficou travado. Agora todo sinal de vida carimba a hora, e um job novo
+ * PREEMPTA o anterior quando ele esta mudo ha mais que TETO_JOB_MUDO_MS. */
+let currentJobEm = 0;
+const TETO_JOB_MUDO_MS = 3 * 60 * 1000;
+function marcarBatimento() { currentJobEm = Date.now(); }
+/** true se da pra assumir o slot (livre, ou o dono anterior esta morto). */
+function podeAssumirJob(requestId) {
+  if (!currentJob || currentJob === requestId) return true;
+  const mudoHa = Date.now() - (currentJobEm || 0);
+  if (mudoHa > TETO_JOB_MUDO_MS) {
+    console.warn(`[DARKO LAB] job ${currentJob} mudo ha ${Math.round(mudoHa / 1000)}s — assumindo o slot pro ${requestId}`);
+    ecoCancelado = true;
+    currentJob = null;
+    return true;
+  }
+  return false;
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Ping pra background verificar que content script esta vivo
@@ -1381,6 +1403,7 @@ async function testSession() {
 }
 
 function reportProgress(requestId, stage, percent) {
+  marcarBatimento();
   // O aviso vai em TODA mensagem, nao so na primeira: a aba pode virar oculta
   // no MEIO do job (o usuario minimiza a janela de automacao) e, se o aviso so
   // saisse no comeco, ele nunca ficaria sabendo por que o disparo empacou.
@@ -1516,7 +1539,7 @@ async function fetchWithTimeout(url, opts, timeoutMs = 6000) {
  *  7. Aguarda HeyGen processar e captura URL do MP4 final
  */
 async function runJob(requestId, payload) {
-  if (currentJob) {
+  if (!podeAssumirJob(requestId)) {
     console.warn('[DARKO LAB UI] runJob ignorado - currentJob=', currentJob, 'novo reqId=', requestId);
     reportError(
       requestId,
@@ -1525,6 +1548,7 @@ async function runJob(requestId, payload) {
     return;
   }
   currentJob = requestId;
+  marcarBatimento();
   let generateClicked = false; // pra garantir click 1x
 
   try {
@@ -3504,11 +3528,12 @@ async function studioTrySelectVoice(voiceName, sceneLabel) {
  * payload = { avatarId, avatarName, groupName, voiceName, parts:[{audioBase64,filename,label}], jobLabel }
  */
 async function runStudioJob(requestId, payload) {
-  if (currentJob) {
+  if (!podeAssumirJob(requestId)) {
     reportError(requestId, 'Outra geracao em andamento — aguarde finalizar.');
     return;
   }
   currentJob = requestId;
+  marcarBatimento();
   try {
     const { avatarId, avatarName, groupName, voiceName, parts, jobLabel } = payload || {};
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
@@ -3902,11 +3927,12 @@ function ecoDumpDiag(tag) {
  * Resultado: "ECONOMIA:" + JSON { cenas: [{idx, videoUrl?, error?}] }
  */
 async function runEconomyJob(requestId, payload) {
-  if (currentJob) {
+  if (!podeAssumirJob(requestId)) {
     reportError(requestId, 'Outra geracao em andamento — aguarde finalizar.');
     return;
   }
   currentJob = requestId;
+  marcarBatimento();
   ecoCancelado = false;
   // O buffer de resource timing enche (250 entradas por padrão) e para de
   // registrar — num SPA pesado como o create-v4 isso acontece rápido, e daí em
