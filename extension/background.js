@@ -1023,6 +1023,14 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
 async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
   const jobMsg = tipoJob || 'HG_RUN_STUDIO_JOB';
   console.log('[DARKO LAB BG] handleStudioGenerate START reqId=', requestId, 'job=', jobMsg);
+  // VALIDA ANTES de abrir aba. Sem isto um payload inválido abria uma aba do
+  // HeyGen só pra falhar na linha seguinte.
+  if (!payload || !payload.avatarId) {
+    reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+      error: 'Studio: payload sem avatarId — nao da pra abrir o editor.',
+    });
+    return;
+  }
   const tab = await findOrCreateHeyGenTab();
   activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
 

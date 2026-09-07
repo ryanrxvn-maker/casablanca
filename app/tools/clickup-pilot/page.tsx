@@ -2609,6 +2609,8 @@ function ClickUpPilotInner() {
    * download e o passo a passo — não um texto mandando o user procurar.
    */
   const [extFaltando, setExtFaltando] = useState(false);
+  const extFaltandoRef = useRef(false);
+  extFaltandoRef.current = extFaltando;
   /* A extensão é o motor de TUDO que o Pilot dispara. Até 06.09 o aviso de
    * "falta a extensão" só nascia dentro da análise — quem estava no CREATOR
    * (que nem passa por lá) desinstalava a extensão e a tela não dizia nada.
@@ -2628,10 +2630,17 @@ function ClickUpPilotInner() {
     const aoVoltar = () => {
       if (document.visibilityState === 'visible') void conferir();
     };
+    // Procura sozinha enquanto o aviso estiver na tela: instalou a extensão, o
+    // aviso some por conta própria. É o que substitui o antigo "já instalei",
+    // que só recarregava a página na mão.
+    const relogio = setInterval(() => {
+      if (extFaltandoRef.current) void conferir();
+    }, 3000);
     window.addEventListener('focus', aoVoltar);
     document.addEventListener('visibilitychange', aoVoltar);
     return () => {
       vivo = false;
+      clearInterval(relogio);
       window.removeEventListener('focus', aoVoltar);
       document.removeEventListener('visibilitychange', aoVoltar);
     };
@@ -12827,55 +12836,50 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             * Hey Auto — é o mesmo problema, não faz sentido gritar aqui e
             * sussurrar lá. */}
           {extFaltando ? (
-            <div className="mb-4 rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <span className="aviso-amarelo text-[13px]" aria-hidden>⚠</span>
-                <span className="aviso-amarelo flex-1 text-xs leading-relaxed">
-                  <strong>Falta a extensão Auto Edit.</strong> É ela que dispara no HeyGen, lê o
-                  Google Docs e traz a sua biblioteca de avatares. Sem ela o Pilot analisa, mas não
-                  dispara. Se você já tem uma instalada e este aviso continua, ela é de uma versão
-                  antiga: baixe de novo.
-                </span>
-                <a href="/api/extension/download" download className="ext-baixar" >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
-                  </svg>
-                  baixar .zip
-                </a>
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  className="mono shrink-0 rounded-full border border-line-strong px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
-                >
-                  já instalei
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setExtFaltando(false)}
-                  className="mono shrink-0 rounded border border-line-strong px-2 py-0.5 text-[10px] text-text-muted hover:border-yellow-500/60"
-                  aria-label="Fechar"
-                >
-                  ✕
-                </button>
+            <section className="ext-falta" aria-live="polite">
+              <span className="ext-falta-tile" aria-hidden>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 3.5a1.5 1.5 0 0 1 3 0V5h2.5A1.5 1.5 0 0 1 17 6.5V9h1.5a1.5 1.5 0 0 1 0 3H17v2.5a1.5 1.5 0 0 1-1.5 1.5H13v1.5a1.5 1.5 0 0 1-3 0V16H7.5A1.5 1.5 0 0 1 6 14.5V12H4.5a1.5 1.5 0 0 1 0-3H6V6.5A1.5 1.5 0 0 1 7.5 5H10z" />
+                </svg>
+              </span>
+              <div className="ext-falta-corpo">
+                <h3 className="ext-falta-titulo">Falta a extensão Auto Edit</h3>
+                <p className="ext-falta-texto">
+                  É ela que dispara no HeyGen, lê o Google Docs e traz a sua biblioteca de avatares.
+                  Sem ela o Pilot analisa, mas não dispara.
+                </p>
+                <div className="ext-falta-acoes">
+                  <a href="/api/extension/download" download className="ext-falta-cta">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                    </svg>
+                    Baixar extensão
+                  </a>
+                  {/* Sem botão de "já instalei": a página procura a extensão
+                      sozinha, a cada 3s e quando a aba volta ao foco. Instalou,
+                      o aviso some. */}
+                  <span className="ext-falta-status">
+                    <span className="ext-falta-radar" aria-hidden />
+                    procurando a extensão
+                  </span>
+                </div>
+                <details className="ext-falta-passos">
+                  <summary>como instalar</summary>
+                  <ol>
+                    <li>Descompacte o .zip numa pasta que você não vá apagar.</li>
+                    <li>
+                      Abra <code>chrome://extensions</code> (cole na barra, porque link pra ele não
+                      abre) e ligue o <b>Modo do desenvolvedor</b>.
+                    </li>
+                    <li>
+                      <b>Carregar sem compactação</b> apontando pra essa pasta. Se houver uma versão
+                      antiga, remova antes.
+                    </li>
+                    <li>Pronto. O aviso some sozinho assim que eu encontrar a extensão.</li>
+                  </ol>
+                </details>
               </div>
-              <details className="mt-2">
-                <summary className="aviso-amarelo cursor-pointer text-[11px] font-semibold">
-                  como instalar
-                </summary>
-                <ol className="mt-1.5 list-decimal space-y-0.5 pl-5 text-[11px] leading-relaxed text-text-muted">
-                  <li>Descompacta o .zip numa pasta que você não vá apagar.</li>
-                  <li>
-                    Abre <code className="ext-cod">chrome://extensions</code> (cola na barra — link
-                    pra ele não abre) e liga o <b>Modo do desenvolvedor</b>.
-                  </li>
-                  <li>
-                    <b>Carregar sem compactação</b> apontando pra essa pasta. Se houver uma versão
-                    antiga, remove antes.
-                  </li>
-                  <li>Volta aqui e recarrega (F5).</li>
-                </ol>
-              </details>
-            </div>
+            </section>
           ) : null}
           {/* O erro da extensão já tem o painel acima — repetir a mesma coisa em
             * vermelho era só ruído. */}

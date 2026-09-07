@@ -2996,6 +2996,183 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
   gap: 6px;
 }
 
+/* ═══ Aviso "falta a extensão" ═══
+   Bisel duplo com luz âmbar no canto, tile do ícone e uma linha de status que
+   mostra a procura acontecendo. Não tem botão de fechar nem de "já instalei":
+   a página procura sozinha e o aviso some quando acha. */
+.ext-falta {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 16px;
+  border-radius: 18px;
+  padding: 16px 18px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(251, 191, 36, 0.14), transparent 58%),
+    linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)));
+  box-shadow:
+    inset 0 0 0 1px rgba(251, 191, 36, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 22px 48px -30px rgba(251, 191, 36, 0.5);
+}
+.ext-falta-tile {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  color: #1a1203;
+  background: linear-gradient(135deg, #fcd57a, #f0b429);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.22),
+    0 0 24px -8px rgba(251, 191, 36, 0.85);
+}
+.ext-falta-corpo {
+  min-width: 0;
+  flex: 1;
+}
+.ext-falta-titulo {
+  margin: 1px 0 0;
+  font-family: var(--font-tech), system-ui;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.ext-falta-texto {
+  margin: 5px 0 0;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.66);
+}
+.ext-falta-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+.ext-falta-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-family: var(--font-tech), system-ui;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #1a1203;
+  background: linear-gradient(135deg, #fde08a 0%, #f5b62b 60%, #e9a21f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.22),
+    0 0 26px -8px rgba(251, 191, 36, 0.8);
+  transition:
+    transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 220ms ease;
+}
+.ext-falta-cta:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.22),
+    0 0 36px -8px rgba(251, 191, 36, 0.95);
+}
+.ext-falta-cta:active {
+  transform: translateY(1px);
+}
+.ext-falta-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.ext-falta-radar {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #fbbf24;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.9);
+}
+.ext-falta-radar::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.5);
+  animation: ext-radar 1.8s ease-out infinite;
+}
+@keyframes ext-radar {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+.ext-falta-passos {
+  margin-top: 12px;
+}
+.ext-falta-passos > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fcd57a;
+  list-style: none;
+}
+.ext-falta-passos > summary::-webkit-details-marker {
+  display: none;
+}
+.ext-falta-passos > summary::before {
+  content: '▸ ';
+  display: inline-block;
+  transition: transform 200ms ease;
+}
+.ext-falta-passos[open] > summary::before {
+  content: '▾ ';
+}
+.ext-falta-passos ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.6);
+  list-style: decimal;
+}
+.ext-falta-passos code {
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-family: var(--font-mono), monospace;
+  font-size: 11.5px;
+  color: #fcd57a;
+  background: rgba(251, 191, 36, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.28);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ext-falta-radar::after {
+    animation: none;
+  }
+  .ext-falta-cta:hover,
+  .ext-falta-cta:active {
+    transform: none;
+  }
+}
+
 /* Trava do MODO ECONOMIA no slot: onde ficaria o gesto + motor. */
 .eco-trava {
   background: linear-gradient(180deg, rgba(52, 211, 153, 0.08), rgba(0, 0, 0, 0.12));
