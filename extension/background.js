@@ -415,9 +415,22 @@ async function cdpAttach(tabId) {
     try { await new Promise((r) => chrome.debugger.detach({ tabId: cdpTab }, () => r())); } catch {}
     cdpTab = null;
   }
-  if (cdpAttachInflight) await cdpAttachInflight;
+  // Espera um attach em voo, mas NUNCA pra sempre: uma promessa presa aqui
+  // envenenava toda chamada seguinte (o job inteiro travava calado).
+  if (cdpAttachInflight) {
+    try { await Promise.race([cdpAttachInflight, comTeto(6000, 'attach anterior')]); } catch (e) {}
+  }
   cdpAttachInflight = new Promise((resolve, reject) => {
+    let pronto = false;
+    const t = setTimeout(() => {
+      if (pronto) return;
+      pronto = true;
+      reject(new Error('chrome.debugger.attach nao respondeu em 6s'));
+    }, 6000);
     chrome.debugger.attach({ tabId }, '1.3', () => {
+      if (pronto) return;
+      pronto = true;
+      clearTimeout(t);
       if (chrome.runtime.lastError) {
         const m = chrome.runtime.lastError.message || '';
         // se ja anexado (mesma sessao), ok
@@ -434,9 +447,23 @@ async function cdpAttach(tabId) {
   console.log('[DARKO LAB BG CDP] attached to tab', tabId);
 }
 
+/** Promessa que so serve pra estourar: usada em Promise.race. */
+function comTeto(ms, oque) {
+  return new Promise((_, rej) => setTimeout(() => rej(new Error(`${oque} nao respondeu em ${ms}ms`)), ms));
+}
+
 function cdpSend(tabId, method, params) {
   return new Promise((resolve, reject) => {
+    let pronto = false;
+    const t = setTimeout(() => {
+      if (pronto) return;
+      pronto = true;
+      reject(new Error(`chrome.debugger.sendCommand ${method} nao respondeu em 6s`));
+    }, 6000);
     chrome.debugger.sendCommand({ tabId }, method, params || {}, (res) => {
+      if (pronto) return;
+      pronto = true;
+      clearTimeout(t);
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
       else resolve(res);
     });

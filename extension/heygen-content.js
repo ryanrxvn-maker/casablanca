@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.19.2';
+const DARKO_EXT_VERSION = '4.19.3';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2475,11 +2475,34 @@ function studioWarn(...a) { console.warn('[DARKO LAB STUDIO]', ...a); }
 /** Click CONFIAVEL (isTrusted=true) via CDP Input.dispatchMouseEvent.
  *  Usado pros botoes que so respondem a eventos confiaveis (Add audio,
  *  linha da biblioteca, pilula Use avatar voice no create-v4). */
+// TETO OBRIGATORIO. Sem ele o job fica pendurado PRA SEMPRE, sem progresso e
+// sem erro: `chrome.runtime.sendMessage` nao tem timeout, e do outro lado o
+// `chrome.debugger.attach` tambem nao — se o service worker (MV3) for suspenso
+// no meio da chamada, ou o attach ficar preso, o callback simplesmente nunca
+// vem. Medido 07.09.2026: card em ENVIANDO por 19 min sem uma unica mensagem
+// da extensao. Com o teto, a falha vira um `ok:false` que cai no clique
+// sintetico e o AD segue.
 async function cdpClick(x, y) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'HG_CDP_CLICK', x: Math.round(x), y: Math.round(y) }, (res) => {
-      resolve(res || { ok: false, error: 'no response' });
-    });
+    let respondido = false;
+    const t = setTimeout(() => {
+      if (respondido) return;
+      respondido = true;
+      resolve({ ok: false, error: 'CDP nao respondeu em 8s (service worker dormiu ou debugger travou)' });
+    }, 8000);
+    try {
+      chrome.runtime.sendMessage({ type: 'HG_CDP_CLICK', x: Math.round(x), y: Math.round(y) }, (res) => {
+        if (respondido) return;
+        respondido = true;
+        clearTimeout(t);
+        resolve(res || { ok: false, error: chrome.runtime.lastError?.message || 'no response' });
+      });
+    } catch (e) {
+      if (respondido) return;
+      respondido = true;
+      clearTimeout(t);
+      resolve({ ok: false, error: e?.message || String(e) });
+    }
   });
 }
 /** O clique do CDP vai por COORDENADA. Se algo estiver por cima do ponto, o
@@ -2861,8 +2884,14 @@ async function playStudioScene(scope, sceneLabel) {
  *  =<g>&defaultLookId=<look>&fromCreateButton=true) — o avatar ja vem
  *  bound na Scene 1, sem caça a menu/DOM. So esperamos a UI ficar pronta
  *  (painel Script + Add scene/Generate). Validado em teste real. */
-async function enterStudioForAvatar(avatarId, avatarName, groupName) {
+// `onEtapa` (opcional) faz o card dizer EM QUE PASSO da entrada estamos. Sem
+// isso a entrada e uma caixa-preta de ate ~110s: o card mostrava so "abrindo
+// o Studio" e, se algo la dentro pendurasse, nao havia como saber onde.
+async function enterStudioForAvatar(avatarId, avatarName, groupName, onEtapa) {
+  const etapa = (m) => { try { if (onEtapa) onEtapa(m); } catch (e) {} };
+  etapa('fechando modais de aviso');
   await dismissAnnouncementModals();
+  etapa('esperando o editor montar');
   const ok = await waitForOrNull(() => isInStudioEditor(), 45000, 800);
   if (!ok) {
     studioDumpDiag('enter-editor-timeout');
@@ -2880,6 +2909,7 @@ async function enterStudioForAvatar(avatarId, avatarName, groupName) {
   // Espera ate o botao Upload audio ficar REALMENTE clicavel (sem
   // overlays cobrindo). HeyGen tem loading overlay com z=999999 bg
   // solid que bloqueia tudo ate o canvas montar de verdade.
+  etapa('limpando overlays do editor');
   studioLog('aguardando overlays clearem (Upload audio btn no topo)...');
   let lastTopText = '';
   const clickableOk = await waitForOrNull(() => {
@@ -2903,6 +2933,7 @@ async function enterStudioForAvatar(avatarId, avatarName, groupName) {
     studioWarn('Upload audio btn nao ficou clicavel em 60s — seguindo mesmo assim');
   }
   await sleep(800);
+  etapa('editor pronto');
   studioLog('editor Studio 100% pronto');
 }
 
@@ -3434,7 +3465,8 @@ async function runStudioJob(requestId, payload) {
     if (!Array.isArray(parts) || parts.length === 0) throw new Error('payload invalido: parts vazio.');
 
     reportProgress(requestId, `VA Studio: abrindo editor de ${avatarName || avatarId}...`);
-    await enterStudioForAvatar(avatarId, avatarName, groupName);
+    await enterStudioForAvatar(avatarId, avatarName, groupName, (m) =>
+      reportProgress(requestId, `VA Studio: ${m}...`));
 
     const total = parts.length;
     for (let i = 0; i < total; i++) {
@@ -3842,7 +3874,8 @@ async function runEconomyJob(requestId, payload) {
     if (!Array.isArray(cenas) || cenas.length === 0) throw new Error('payload invalido: cenas vazio.');
 
     reportProgress(requestId, `Economia: abrindo o Studio de ${avatarName || avatarId}...`, 2);
-    await enterStudioForAvatar(avatarId, avatarName, groupName);
+    await enterStudioForAvatar(avatarId, avatarName, groupName, (m) =>
+      reportProgress(requestId, `Economia: ${m}...`, 3));
 
     const total = cenas.length;
     for (let i = 0; i < total; i++) {
