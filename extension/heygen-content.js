@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.21.0';
+const DARKO_EXT_VERSION = '4.21.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -3090,8 +3090,62 @@ const PADROES_DE_ANUNCIO = [
   /New .{0,20}plans are here/i,
 ];
 
+/** Um elemento esta DENTRO de um anuncio? Nao da pra confiar em
+ *  [role=dialog]: MEDIDO 07.09.2026, o "New HeyGen plans are here" nao tem
+ *  role nenhum, e por isso escapava do filtro e os pedacos dele viravam os
+ *  unicos candidatos a controle de motor (o texto dele lista Avatar III/IV/V).
+ *  Aqui a checagem e por TEXTO, subindo poucos niveis e so em containers
+ *  pequenos — container grande e a pagina, nao o anuncio. */
+function dentroDeAnuncio(el) {
+  if (el.closest('[role="dialog"], [role="alertdialog"]')) return true;
+  let p = el;
+  for (let i = 0; i < 8 && p && p !== document.body; i++) {
+    const t = p.textContent || '';
+    if (t.length <= 1200 && PADROES_DE_ANUNCIO.some((re) => re.test(t))) return true;
+    p = p.parentElement;
+  }
+  return false;
+}
+
+/** True se este no CONTEM o editor. Guarda-corpo do dismiss: esconder um
+ *  container que engloba o editor apagaria a tela inteira. */
+function contemOEditor(el) {
+  try {
+    if (el.querySelector('[contenteditable="true"], textarea')) return true;
+    const add = findAddSceneButton();
+    if (add && el.contains(add)) return true;
+  } catch (e) {}
+  return false;
+}
+
+/** Acha o container do anuncio pra esconder, sem role nenhum. */
+function acharAnuncioSemRole() {
+  for (const el of document.querySelectorAll('div, section, aside')) {
+    if (el.offsetParent === null || el.style.display === 'none') continue;
+    const t = el.textContent || '';
+    if (t.length > 1200) continue;
+    if (!PADROES_DE_ANUNCIO.some((re) => re.test(t))) continue;
+    // sobe ate o container do anuncio, mas NUNCA um que contenha o editor
+    let alvo = el;
+    for (let i = 0; i < 6; i++) {
+      const pai = alvo.parentElement;
+      if (!pai || pai === document.body || contemOEditor(pai)) break;
+      alvo = pai;
+    }
+    if (contemOEditor(alvo)) continue;
+    return alvo;
+  }
+  return null;
+}
+
 function studioDismissPaywallIfShown(where) {
   let dismissed = 0;
+  const semRole = acharAnuncioSemRole();
+  if (semRole) {
+    semRole.style.display = 'none';
+    dismissed++;
+    studioLog(`paywall (${where}): anuncio sem role "${(semRole.textContent || '').trim().slice(0, 40)}" escondido`);
+  }
   for (const d of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
     if (d.offsetParent === null || d.style.display === 'none') continue;
     const txt = (d.textContent || '');
@@ -3190,7 +3244,7 @@ function findStudioMotorControl() {
     // Texto DE DENTRO de um dialogo nunca e o controle. O anuncio "New HeyGen
     // plans are here" lista os planos Avatar III/IV/V, e sem este filtro os
     // pedacos dele viravam os unicos candidatos.
-    if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
+    if (dentroDeAnuncio(el)) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 40 || r.height < 16 || r.width > 420) continue;
     const style = window.getComputedStyle(el);
@@ -3203,11 +3257,17 @@ function findStudioMotorControl() {
       p = p.parentElement;
       if (p && /motion engine|motor/i.test(p.textContent || '') && (p.textContent || '').length < 400) { nearLabel = true; break; }
     }
-    cands.push({ el, clickable, nearLabel, right: r.right });
+    // O gatilho de verdade e um Radix DropdownMenu: MEDIDO no create-v4 real,
+    // ele e <button aria-haspopup="menu" data-state="closed">. Isso e o sinal
+    // mais forte que existe aqui — um clique no candidato errado abriu o menu
+    // do PROJETO ("Copy ID / Edit as New / ...") em vez do de motor.
+    const ehGatilhoDeMenu = el.getAttribute('aria-haspopup') === 'menu';
+    cands.push({ el, ehGatilhoDeMenu, clickable, nearLabel, right: r.right });
   }
   if (!cands.length) return null;
   cands.sort((a, b) =>
-    (a.nearLabel !== b.nearLabel ? (a.nearLabel ? -1 : 1)
+    (a.ehGatilhoDeMenu !== b.ehGatilhoDeMenu ? (a.ehGatilhoDeMenu ? -1 : 1)
+      : a.nearLabel !== b.nearLabel ? (a.nearLabel ? -1 : 1)
       : a.clickable !== b.clickable ? (a.clickable ? -1 : 1)
       : b.right - a.right));
   return cands[0].el;
@@ -3256,10 +3316,18 @@ async function setStudioMotorAvatarIII(sceneLabel) {
     // menu ABRIU e o que separa "cliquei" de "o clique chegou": este e o
     // primeiro clique por coordenada de cada cena, entao serve de canario pro
     // resto do job.
+    // O menu tem que ser O CERTO. MEDIDO: um clique que caiu no lugar errado
+    // abriu o menu do PROJETO ("Copy ID / Edit as New / Collaborate / Rename /
+    // Trash") e, se bastasse "algum menu aberto", isso contaria como sucesso —
+    // o laco seguiria procurando "Avatar III" num menu que nunca o teria.
+    const menuDoMotorAberto = () =>
+      [...document.querySelectorAll('[role="menu"]')].some(
+        (m) => m.offsetParent !== null && /Avatar\s*(III|IV|V)/.test(m.textContent || ''),
+      );
     const menuAbriu = () =>
-      ctrl.getAttribute('data-state') === 'open' ||
-      ctrl.getAttribute('aria-expanded') === 'true' ||
-      [...document.querySelectorAll('[role="menu"]')].some((m) => m.offsetParent !== null);
+      menuDoMotorAberto() ||
+      ((ctrl.getAttribute('data-state') === 'open' || ctrl.getAttribute('aria-expanded') === 'true') &&
+        document.querySelector('[role="menu"]') !== null);
     const abriu = await cdpClickEl(ctrl, 'motor-ctrl', menuAbriu);
     if (!abriu) {
       motorNota(`t${attempt}: menu nao abriu (motor em "${cur}", data-state=${ctrl.getAttribute('data-state')})`);
@@ -3330,7 +3398,7 @@ function studioHasPaidEngineVisible() {
       // ...e texto de um anuncio de PLANOS tambem nao e o estado do motor.
       // Sem isto o modal "New HeyGen plans are here" (que lista Avatar IV/V)
       // faria a trava abortar um disparo perfeitamente correto.
-      if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
+      if (dentroDeAnuncio(el)) continue;
       return t;
     }
   }
