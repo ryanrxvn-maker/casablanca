@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.19.1';
+const DARKO_EXT_VERSION = '4.19.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2797,6 +2797,8 @@ async function setSceneMirrorVoice(scope, sceneLabel) {
       return true;
     }
     // fecha eventual popover aberto antes de retentar
+    const fim = findStudioMotorControl();
+    motorNota(`t${attempt}: terminou em "${fim ? (fim.textContent || '').trim().slice(0, 20) : 'sem controle'}"`);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await sleep(500);
   }
@@ -3029,11 +3031,28 @@ function findStudioMotorControl() {
 /** Garante Avatar III na cena ativa (NUNCA IV/V — protege creditos
  *  pagos). Se nao confirmar III, retorna false → runStudioJob ABORTA
  *  antes do Generate. */
+// Por que existe: o diagnostico do motor so aparecia no console da ABA DO
+// HEYGEN, que roda em segundo plano e o usuario nunca abre. O erro que chegava
+// no Pilot era sempre o mesmo "nao consegui confirmar Avatar III", sem dizer em
+// QUAL passo parou. Agora o motivo viaja junto com o erro.
+let ultimoMotivoDoMotor = '';
+function motorNota(msg) {
+  ultimoMotivoDoMotor = (ultimoMotivoDoMotor ? ultimoMotivoDoMotor + ' | ' : '') + msg;
+  if (ultimoMotivoDoMotor.length > 700) ultimoMotivoDoMotor = ultimoMotivoDoMotor.slice(-700);
+}
+function motivoDoMotor() { return ultimoMotivoDoMotor || 'sem detalhe'; }
+
 async function setStudioMotorAvatarIII(sceneLabel) {
   const target = 'Avatar III';
+  ultimoMotivoDoMotor = '';
   for (let attempt = 1; attempt <= 3; attempt++) {
     const ctrl = findStudioMotorControl();
     if (!ctrl) {
+      const vistos = [...document.querySelectorAll('button, [role="button"], div, span')]
+        .filter((e) => e.offsetParent !== null && /Avatar\s*(III|IV|V)/.test((e.textContent || '').trim()))
+        .slice(0, 4)
+        .map((e) => `${e.tagName}"${(e.textContent || '').trim().slice(0, 24)}"`);
+      motorNota(`t${attempt}: controle nao achado (candidatos c/ "Avatar N": ${vistos.join(', ') || 'nenhum'})`);
       studioWarn(`${sceneLabel}: controle Motion Engine nao achado (tentativa ${attempt})`);
       await sleep(800);
       continue;
@@ -3053,7 +3072,10 @@ async function setStudioMotorAvatarIII(sceneLabel) {
       ctrl.getAttribute('aria-expanded') === 'true' ||
       [...document.querySelectorAll('[role="menu"]')].some((m) => m.offsetParent !== null);
     const abriu = await cdpClickEl(ctrl, 'motor-ctrl', menuAbriu);
-    if (!abriu) studioWarn(`${sceneLabel}: menu do Motion Engine nao abriu (tentativa ${attempt})`);
+    if (!abriu) {
+      motorNota(`t${attempt}: menu nao abriu (motor em "${cur}", data-state=${ctrl.getAttribute('data-state')})`);
+      studioWarn(`${sceneLabel}: menu do Motion Engine nao abriu (tentativa ${attempt})`);
+    }
     await sleep(900);
     // procura item "Avatar III" no menu (portalado no body).
     // VALIDADO EM TESTE REAL: o menu lista "Avatar V/IV/III" com
@@ -3083,9 +3105,15 @@ async function setStudioMotorAvatarIII(sceneLabel) {
         const a = findStudioMotorControl();
         return !!a && /^Avatar III\b/.test((a.textContent || '').trim());
       };
-      await cdpClickEl(c || item, 'Avatar III', virouIII);
+      const pegou = await cdpClickEl(c || item, 'Avatar III', virouIII);
+      if (!pegou) motorNota(`t${attempt}: cliquei o item mas o motor nao virou (alvo ${(c || item).tagName})`);
       await sleep(1100);
     } else {
+      const itens = [...document.querySelectorAll('[role="menuitem"]')]
+        .filter((o) => o.offsetParent !== null)
+        .slice(0, 5)
+        .map((o) => (o.textContent || '').trim().slice(0, 22));
+      motorNota(`t${attempt}: item "Avatar III" nao apareceu (menuitems visiveis: ${itens.join(' / ') || 'nenhum'})`);
       studioWarn(`${sceneLabel}: item "Avatar III" nao apareceu no menu`);
     }
     const after = findStudioMotorControl();
@@ -3439,9 +3467,9 @@ async function runStudioJob(requestId, payload) {
       if (!motorOk) {
         studioDumpDiag('motor-iii-fail');
         throw new Error(
-          `${sceneLabel}: NAO consegui confirmar Avatar III no Motion Engine. ` +
-          `Abortei ANTES do Generate pra nao consumir credito pago (IV/V). ` +
-          `Cola os logs [DARKO LAB STUDIO].`
+          `${sceneLabel}: NAO consegui confirmar Avatar III no Motion Engine ` +
+          `[${motivoDoMotor()}]. ` +
+          `Abortei ANTES do Generate pra nao consumir credito pago (IV/V).`
         );
       }
 
@@ -3858,7 +3886,7 @@ async function runEconomyJob(requestId, payload) {
       const motorOk = await setStudioMotorAvatarIII(rot);
       if (!motorOk) {
         ecoDumpDiag('motor-iii-fail');
-        throw new Error(`${rot}: não consegui confirmar Avatar III. Abortei ANTES de renderizar — nada foi gerado e nada foi cobrado.`);
+        throw new Error(`${rot}: não consegui confirmar Avatar III [${motivoDoMotor()}]. Abortei ANTES de renderizar — nada foi gerado e nada foi cobrado.`);
       }
       const pago = studioHasPaidEngineVisible();
       if (pago) {
