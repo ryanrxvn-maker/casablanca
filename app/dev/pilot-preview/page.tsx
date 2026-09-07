@@ -27,6 +27,7 @@ import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
 import { PilotModeHub } from '@/components/PilotModeHub';
+import { PilotEconomiaBtn } from '@/components/PilotEconomiaBtn';
 import { DocsBar, CreatorBar, type DocChip } from '@/components/PilotFontesBar';
 import type { ModoPilot } from '@/lib/pilot-fontes';
 
@@ -684,6 +685,7 @@ function Conteudo() {
   const [linkDemo, setLinkDemo] = useState('');
   const [importandoDemo, setImportandoDemo] = useState(false);
   const [criadasDemo, setCriadasDemo] = useState(3);
+  const [ecoOn, setEcoOn] = useState(false);
   // 06.09 — painel de copy do avatar no CREATOR (hooks + body), só a pele
   const [ccHooks, setCcHooks] = useState<string[]>([
     'Você usa azeite todo dia e nunca soube que ele pode virar remédio pra próstata.',
@@ -860,6 +862,32 @@ function Conteudo() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ══════════ 0.0c MODO ECONOMIA: botão moeda 3D ══════════ */}
+      <section
+        id="eco"
+        className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3"
+      >
+        <div className="label-tech mb-3 text-[9.5px] tracking-[0.18em] text-text-muted">
+          Modo economia 06.09 — moeda 3D que gira ao ligar (só ícone)
+        </div>
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex items-center gap-3">
+            <PilotEconomiaBtn on={ecoOn} onToggle={() => setEcoOn((v) => !v)} />
+            <span className="mono text-[11px] uppercase tracking-widest text-text-muted">
+              {ecoOn ? 'ligado' : 'desligado'} · clique
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <PilotEconomiaBtn on={false} onToggle={() => {}} disabled motivoBloqueio="Este AD tem take de áudio upado" />
+            <span className="mono text-[11px] uppercase tracking-widest text-text-muted">bloqueado</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <PilotEconomiaBtn on={ecoOn} onToggle={() => setEcoOn((v) => !v)} size={44} />
+            <span className="mono text-[11px] uppercase tracking-widest text-text-muted">44px</span>
           </div>
         </div>
       </section>

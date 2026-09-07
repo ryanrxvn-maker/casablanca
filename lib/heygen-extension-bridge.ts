@@ -38,6 +38,10 @@ type Pending = {
   resolve: (videoUrl: string) => void;
   reject: (e: Error) => void;
   onProgress?: (stage: string, percent?: number) => void;
+  /** MODO ECONOMIA: a extensão confirma que recebeu o job. Extensão velha não
+   *  conhece o tipo e nunca responde — sem este aviso a promessa ficaria
+   *  pendurada pra sempre e o card congelaria sem erro. */
+  onAck?: () => void;
 };
 
 const pending = new Map<string, Pending>();
@@ -57,7 +61,9 @@ function installListener() {
     const p = pending.get(requestId);
     if (!p) return;
 
-    if (data.type === 'HG_PROGRESS') {
+    if (data.type === 'HG_ECONOMY_ACK') {
+      p.onAck?.();
+    } else if (data.type === 'HG_PROGRESS') {
       p.onProgress?.(String(data.stage ?? ''), data.percent);
     } else if (data.type === 'HG_RESULT') {
       pending.delete(requestId);
@@ -204,6 +210,133 @@ export function generateAvatarStudio(
     };
     window.postMessage(
       { source: 'darkolab', type: 'HG_STUDIO_GENERATE', requestId, payload: wirePayload },
+      '*',
+    );
+  });
+}
+
+/* ===================== MODO ECONOMIA — STUDIO POR TEXTO ===================== *
+ * Renderiza cena por cena no Studio ("Render Scene"), que no Avatar III NÃO
+ * consome crédito. Uma cena por take; o vídeo de cada uma volta com a URL que
+ * a página do HeyGen carregou.
+ *
+ * Diferenças duras em relação à irmã `generateAvatarStudio`:
+ *   • ACK em 4s — extensão velha não conhece o tipo e ficaria muda pra sempre;
+ *   • TETO DE PAREDE por job — a irmã não tem nenhum, e job travado vira card
+ *     congelado sem erro nenhum.
+ */
+
+export type CenaEconomiaPayload = {
+  /** índice do take no plano do Pilot — é por ele que o resultado casa de volta */
+  idx: number;
+  label: string;
+  texto: string;
+};
+
+export type EconomiaPayload = {
+  avatarId: string;
+  groupId?: string | null;
+  avatarName?: string | null;
+  groupName?: string | null;
+  voiceName?: string | null;
+  jobLabel?: string;
+  cenas: CenaEconomiaPayload[];
+  /** teto por cena na extensão (default 8 min) */
+  tetoPorCenaMs?: number;
+};
+
+export type CenaRenderizada = {
+  idx: number;
+  videoUrl?: string | null;
+  videoId?: string | null;
+  error?: string | null;
+};
+
+export type EconomiaResultado = {
+  cenas: CenaRenderizada[];
+  /** o job parou no meio: as cenas que já vieram continuam válidas */
+  erro?: string;
+};
+
+export function gerarPelaEconomia(
+  payload: EconomiaPayload,
+  onProgress?: (stage: string, percent?: number) => void,
+  opts: { ackMs?: number; tetoJobMs?: number } = {},
+): Promise<EconomiaResultado> {
+  installListener();
+  const ackMs = opts.ackMs ?? 4000;
+  const tetoJobMs = opts.tetoJobMs ?? 90 * 60 * 1000;
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Sem window — a ponte só funciona no navegador.'));
+      return;
+    }
+    const requestId = `hgeco_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let acked = false;
+    let vivo = true;
+    const encerrar = () => {
+      vivo = false;
+      pending.delete(requestId);
+      clearTimeout(tAck);
+      clearTimeout(tJob);
+    };
+    const tAck = setTimeout(() => {
+      if (acked || !vivo) return;
+      encerrar();
+      reject(
+        new Error(
+          'A extensão Auto Edit não respondeu ao modo economia. Baixe a versão atual em /api/extension/download, recarregue em chrome://extensions e atualize esta página.',
+        ),
+      );
+    }, ackMs);
+    const tJob = setTimeout(() => {
+      if (!vivo) return;
+      encerrar();
+      reject(new Error(`O modo economia passou de ${Math.round(tetoJobMs / 60000)} min sem terminar. Parei de esperar — confira a aba do HeyGen.`));
+    }, tetoJobMs);
+
+    pending.set(requestId, {
+      onAck: () => {
+        acked = true;
+        clearTimeout(tAck);
+      },
+      onProgress,
+      resolve: (bruto: string) => {
+        encerrar();
+        const txt = String(bruto || '');
+        if (!txt.startsWith('ECONOMIA:')) {
+          reject(new Error(`Resposta inesperada do modo economia: ${txt.slice(0, 120)}`));
+          return;
+        }
+        try {
+          const j = JSON.parse(txt.slice('ECONOMIA:'.length)) as EconomiaResultado;
+          resolve({ cenas: Array.isArray(j.cenas) ? j.cenas : [], erro: j.erro });
+        } catch (e) {
+          reject(new Error('Não consegui ler o resultado do modo economia.'));
+        }
+      },
+      reject: (e: Error) => {
+        encerrar();
+        reject(e);
+      },
+    });
+
+    window.postMessage(
+      {
+        source: 'darkolab',
+        type: 'HG_ECONOMY_GENERATE',
+        requestId,
+        payload: {
+          avatarId: payload.avatarId,
+          groupId: payload.groupId ?? null,
+          avatarName: payload.avatarName ?? null,
+          groupName: payload.groupName ?? null,
+          voiceName: payload.voiceName ?? null,
+          jobLabel: payload.jobLabel ?? 'ECO',
+          tetoPorCenaMs: payload.tetoPorCenaMs ?? 8 * 60 * 1000,
+          cenas: payload.cenas,
+        },
+      },
       '*',
     );
   });

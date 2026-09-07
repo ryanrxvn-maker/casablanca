@@ -52,7 +52,7 @@ import {
   canalDoTaskId,
   taskIdBase,
 } from '@/lib/versao-canal';
-import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
+import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension, gerarPelaEconomia } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   pollVideosUntilReady,
@@ -159,7 +159,20 @@ import {
 } from '@/lib/clickup-pilot-config';
 import { WorkspaceSwitch3D } from '@/components/WorkspaceSwitch3D';
 import { PilotModeHub } from '@/components/PilotModeHub';
+import { PilotEconomiaBtn } from '@/components/PilotEconomiaBtn';
 import { DocsBar, CreatorBar } from '@/components/PilotFontesBar';
+import {
+  MOTOR_ECONOMIA,
+  motivoLegivel,
+  planejarEconomia,
+  podeEconomia,
+  recusaDaParte,
+  resultadosParaRunner,
+  resumoDoPlano,
+  statusDasCenas,
+  type ParteDoPlano,
+  type ResultadoCena,
+} from '@/lib/pilot-economia';
 import {
   isDrMillionFormat,
   parseDrMillionBriefing,
@@ -2759,6 +2772,55 @@ function ClickUpPilotInner() {
     });
   };
 
+  /* ═══════════ MODO ECONOMIA (06.09) ═══════════
+   *  Por task. Ligado, o disparo NÃO vai pela API (Quick Create, que cobra):
+   *  vai pelo Studio do HeyGen, uma cena por take, e cada cena é RENDERIZADA
+   *  ("Render Scene") em vez de gerada — no Avatar III isso não consome
+   *  crédito. Os vídeos das cenas voltam pela extensão e o resto do pipeline
+   *  (baixar, montar, decupagem, legenda, zoom) é o mesmo de sempre.
+   *
+   *  Trava dura: Avatar III e ZERO gesto. Não é preferência — Avatar IV e V
+   *  cobram, e o gesto sobe a cena pro IV sozinho lá no runner (motorEfetivo).
+   *  Por isso a trava existe em três camadas: aqui (estado), na tela (botões
+   *  desabilitados) e no plano enviado (lib/pilot-economia tira o gesto). */
+  const ECONOMIA_KEY = 'darkolab:clickup-pilot:economia';
+  const [economiaEnabled, setEconomiaEnabled] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(ECONOMIA_KEY) || '{}'); } catch { return {}; }
+  });
+  /** DESLIGADO por padrão: o disparo de sempre continua sendo o de sempre. */
+  const isEconomiaEnabled = (taskId: string) =>
+    !!(taskId in economiaEnabled ? economiaEnabled[taskId] : economiaEnabled[taskIdBaseDaVersao(taskId)]);
+  const setEconomiaFor = (taskId: string, enabled: boolean) => {
+    setEconomiaEnabled((prev) => {
+      const next = { ...prev, [taskId]: enabled };
+      try { localStorage.setItem(ECONOMIA_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  /** Ligar o modo economia numa task apaga o gesto de todos os avatares dela:
+   *  gesto ficaria guardado e voltaria a valer no disparo normal, mas aqui ele
+   *  subiria a cena pro Avatar IV. Melhor tirar na hora, à vista. */
+  const ligarEconomia = (taskId: string, ligado: boolean) => {
+    setEconomiaFor(taskId, ligado);
+    if (!ligado) return;
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.roleSlots?.length) return prev;
+      const precisa = a.roleSlots.some((s) => (s.motionPrompt || '').trim() || (s.engine && s.engine !== 'III'));
+      if (!precisa) return prev;
+      const next = {
+        ...prev,
+        [taskId]: {
+          ...a,
+          roleSlots: a.roleSlots.map((s) => ({ ...s, motionPrompt: null, engine: 'III' as const })),
+        },
+      };
+      taskAnalysesRef.current = next;
+      return next;
+    });
+  };
+
   // INTENSIDADE da decupagem (keepSilence em segundos) — por task, persistida.
   // É o MESMO parâmetro da ferramenta /decupagem: quanta pausa FICA no lugar de
   // cada silêncio cortado. Menor = corte mais seco. O valor escolhido é repassado
@@ -5346,7 +5408,94 @@ function ClickUpPilotInner() {
         setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
         return;
       }
-      const resultsEnviados = await runHeyGenJobs(jobs, {
+      // O MESMO registro pros dois caminhos de disparo (API e Studio). Deixar
+      // essa regra duplicada já custou caro neste projeto: um lado carimbava o
+      // take e o outro não, e o card mentia sobre o que gerou o vídeo.
+      const registrarResultado = (r: RunnerResult) => {
+        // r.index é 1-based na lista ENVIADA; traduz pro índice da part.
+        // Sem dedup, minhasIdx[i] === i (comportamento de sempre).
+        const orig = minhasIdx[r.index - 1];
+        if (orig === undefined) return;
+        setBatchStates((prev) => {
+          const s = prev[taskId];
+          if (!s) return prev;
+          // Carimba o que gerou este take (o plano DESTE disparo), pra o card
+          // poder acusar depois que o plano mudou e o take ficou pra tras.
+          const doPlano = replan?.parts?.find((x) => x.label === s.parts[orig]?.label);
+          const newParts = s.parts.map((p, i) => i === orig ? {
+            ...p,
+            videoId: r.videoId,
+            error: r.error,
+            usouAvatarId: doPlano?.avatarId ?? p.usouAvatarId ?? null,
+            usouVoiceId: doPlano?.voiceId ?? p.usouVoiceId ?? null,
+            usouEngine: doPlano?.engine ? String(doPlano.engine).toUpperCase() : (p.usouEngine ?? null),
+          } : p);
+          return { ...prev, [taskId]: { ...s, parts: newParts } };
+        });
+      };
+
+      /* ═══ MODO ECONOMIA: disparo pelo STUDIO, sem consumir crédito ═══
+       * Um projeto do Studio por AVATAR (o editor nasce amarrado a um look),
+       * uma cena por take, "Render Scene" em cada. Os projetos vão em SÉRIE:
+       * a extensão tem um slot único de job e duas tasks ao mesmo tempo se
+       * atropelariam. Devolve o MESMO contrato do runHeyGenJobs, então poll,
+       * download, auto-cura e montagem seguem sem saber de onde veio. */
+      let statusEconomia: Record<string, VideoStatus> = {};
+      const dispararPeloStudio = async (): Promise<RunnerResult[]> => {
+        const partesEco: ParteDoPlano[] = minhasIdx.map((i) => {
+          const p: any = plan!.parts[i];
+          const lib = p.avatarId ? findAvatarOptionById(p.avatarId) : null;
+          return {
+            label: p.label, text: p.text, avatarId: p.avatarId,
+            groupId: (lib as any)?.groupId ?? null,
+            avatarName: p.avatarName ?? null,
+            voiceId: p.voiceId ?? null, voiceName: p.voiceName ?? null,
+            motionPrompt: null, engine: MOTOR_ECONOMIA,
+            imageKey: p.imageKey ?? null, audioKey: p.audioKey ?? null,
+          };
+        });
+        const planoEco = planejarEconomia(partesEco);
+        for (const av of planoEco.avisos) console.warn(`[clickup-pilot] economia ${av.label}: ${av.detalhe}`);
+        if (planoEco.recusas.length > 0) {
+          const r = planoEco.recusas[0];
+          throw new Error(`Modo economia: o take ${r.label} não pode ir pelo Studio (${motivoLegivel(r.motivo)}). Nada foi gerado.`);
+        }
+        console.log(`[clickup-pilot] MODO ECONOMIA ${taskId}: ${resumoDoPlano(planoEco)}`);
+        const cenasFeitas: ResultadoCena[] = [];
+        let erroParcial: string | null = null;
+        for (let n = 0; n < planoEco.projetos.length && !erroParcial; n++) {
+          if (batchCancelRef.current[taskId]) break;
+          const proj = planoEco.projetos[n];
+          const rotulo = `${adNameClean} ${planoEco.projetos.length > 1 ? `(${n + 1}/${planoEco.projetos.length}) ` : ''}`;
+          setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}Studio: ${proj.cenas.length} cena(s), sem consumir crédito...` } } : prev));
+          try {
+            const res = await gerarPelaEconomia(
+              {
+                avatarId: proj.avatarId, groupId: proj.groupId,
+                avatarName: proj.avatarName, voiceName: proj.voiceName,
+                jobLabel: adNameClean,
+                cenas: proj.cenas.map((c) => ({ idx: c.idx, label: c.label, texto: c.texto })),
+              },
+              (stage) => {
+                setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}${stage}` } } : prev));
+              },
+            );
+            cenasFeitas.push(...(res.cenas || []));
+            if (res.erro) erroParcial = res.erro;
+          } catch (e) {
+            erroParcial = (e as Error)?.message || String(e);
+          }
+        }
+        if (erroParcial) console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
+        // Cena pronta já nasce 'completed' com a URL: o poll pula e o download
+        // do pipeline pega no lugar de sempre.
+        statusEconomia = statusDasCenas(cenasFeitas) as unknown as Record<string, VideoStatus>;
+        const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas);
+        for (const r of rs) registrarResultado(r);
+        return rs;
+      };
+
+      const resultsEnviados = isEconomiaEnabled(taskId) ? await dispararPeloStudio() : await runHeyGenJobs(jobs, {
         parallel: 3,
         mode: 'copy',
         avatarId: plan!.parts[0]?.avatarId || '',
@@ -5355,28 +5504,7 @@ function ClickUpPilotInner() {
         adNameSafe: adNameClean,
         isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: () => {},
-        onResult: (r) => {
-          // r.index é 1-based na lista ENVIADA; traduz pro índice da part.
-          // Sem dedup, minhasIdx[i] === i (comportamento de sempre).
-          const orig = minhasIdx[r.index - 1];
-          if (orig === undefined) return;
-          setBatchStates((prev) => {
-            const s = prev[taskId];
-            if (!s) return prev;
-            // Carimba o que gerou este take (o plano DESTE disparo), pra o card
-            // poder acusar depois que o plano mudou e o take ficou pra tras.
-            const doPlano = replan?.parts?.find((x) => x.label === s.parts[orig]?.label);
-            const newParts = s.parts.map((p, i) => i === orig ? {
-              ...p,
-              videoId: r.videoId,
-              error: r.error,
-              usouAvatarId: doPlano?.avatarId ?? p.usouAvatarId ?? null,
-              usouVoiceId: doPlano?.voiceId ?? p.usouVoiceId ?? null,
-              usouEngine: doPlano?.engine ? String(doPlano.engine).toUpperCase() : (p.usouEngine ?? null),
-            } : p);
-            return { ...prev, [taskId]: { ...s, parts: newParts } };
-          });
-        },
+        onResult: registrarResultado,
       });
 
       // Libera as reservas: quem esperava por estas falas recebe o videoId
@@ -5450,7 +5578,13 @@ function ClickUpPilotInner() {
       // 2. Poll status ate todos prontos (ou alguns falharem)
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'rendering', message: `Aguardando renderizacao no HeyGen (${validIds.length} videos)...` } }));
       let renderHealthNote = '';
-      const finalStatuses = await pollVideosUntilReady(validIds, {
+      // MODO ECONOMIA: cena renderizada no Studio já volta pronta, com a URL —
+      // não há o que esperar no HeyGen. Ela entra em `finalStatuses` como
+      // 'completed' e fica de fora do poll (o id sintético `eco:` não existe na
+      // API e o poll só ficaria girando à toa).
+      const idsPraPoll = validIds.filter((id) => !statusEconomia[id]);
+      const finalStatuses: Record<string, VideoStatus> = { ...statusEconomia };
+      Object.assign(finalStatuses, idsPraPoll.length === 0 ? {} : await pollVideosUntilReady(idsPraPoll, {
         intervalMs: 8000,
         timeoutMs: 30 * 60 * 1000,
         // Teto em plataforma SAUDÁVEL. Quando o monitor acusa lentidão, o poll
@@ -5471,7 +5605,7 @@ function ClickUpPilotInner() {
             return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos${renderHealthNote}` } };
           });
         },
-      });
+      }));
 
       // 3. Download em paralelo (3 simultaneos) + coleta blobs em memoria pra
       //    pipeline pos-producao (concat + decupagem + camuflagem).
@@ -5685,6 +5819,16 @@ function ClickUpPilotInner() {
             };
           });
 
+          // MODO ECONOMIA: a auto-cura re-dispara pela API, que COBRA. Curar
+          // por aqui gastaria exatamente o crédito que o modo existe pra não
+          // gastar — e calado. Para, explica e deixa o take pra nova rodada.
+          if (isEconomiaEnabled(taskId)) {
+            const quais = redispatchIdxs.map((i) => plan!.parts[i].label).join(', ');
+            const msg = `Modo economia ligado: ${redispatchIdxs.length} take(s) faltando (${quais}) NÃO foram re-disparados, porque o re-disparo automático sai pela API e cobra. Renderize de novo pelo Studio, ou desligue o modo economia pra completar pela API.`;
+            console.warn(`[clickup-pilot] ${msg}`);
+            setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: msg } } : prev));
+            break;
+          }
           let healResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
           try {
             healResults = await runHeyGenJobs(healJobs, {
@@ -6415,6 +6559,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           jobsToRedispatch.length = 0;
           jobsToRedispatch.push(...prontos);
 
+          // MODO ECONOMIA: mesma regra da auto-cura — retomar pela API cobra.
+          if (isEconomiaEnabled(taskId)) {
+            const msg = `Modo economia ligado: ${jobsToRedispatch.length} take(s) não foram re-disparados, porque o retomar automático sai pela API e cobra. Renderize de novo pelo Studio, ou desligue o modo economia pra completar pela API.`;
+            console.warn(`[clickup-pilot] ${msg}`);
+            setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: msg } } : prev));
+            break;
+          }
           let newResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
           try {
             newResults = await runHeyGenJobs(jobsToRedispatch, {
@@ -9574,6 +9725,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     return 0; // fallback do buildPlan: primeiro avatar fala o resto
   }
 
+  /** O take na forma que lib/pilot-economia entende: quem fala, se é modo
+   *  imagem, se tem áudio upado. É o que decide se o AD cabe no modo economia
+   *  (que fala por TEXTO, com avatar da biblioteca, em Avatar III). */
+  function parteParaEconomia(a: TaskAnalysis, pt: TaskAnalysis['partTemplates'][number]): ParteDoPlano {
+    const slot = (a.roleSlots || [])[ownerSlotIdx(a, pt)];
+    return {
+      label: pt.label,
+      text: pt.text,
+      avatarId: slot?.imageMode ? null : slot?.avatarId ?? null,
+      groupId: null,
+      avatarName: slot?.avatarName ?? null,
+      voiceId: slot?.voiceOverride?.id ?? slot?.avatarVoiceId ?? null,
+      voiceName: slot?.voiceOverride?.name ?? null,
+      motionPrompt: slot?.motionPrompt ?? null,
+      engine: slot?.engine ?? null,
+      imageKey: slot?.imageMode ? slot?.imageKey ?? 'modo-imagem' : null,
+      audioKey: slot?.audioKey ?? null,
+    };
+  }
+  /** Os takes do AD prontos pra decisão do modo economia. */
+  function partesParaEconomia(a: TaskAnalysis): ParteDoPlano[] {
+    return (a.partTemplates || []).map((pt) => parteParaEconomia(a, pt));
+  }
+
   /** Atribui uma part a um avatar (só faz sentido com 2+ slots). Grava o role
    *  em matchByRole — mesmo campo que o parser usa, então o disparo respeita
    *  sem nenhuma regra extra. */
@@ -10268,6 +10443,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    */
   function buildPlan(a: TaskAnalysis, canal: VersaoCanal = 'meta'): DispatchPlan | null {
     if (!a.roleSlots || !a.partTemplates) return null;
+    // MODO ECONOMIA: a trava de motor tem que valer AQUI, na origem do plano —
+    // depois do colapso de take único já seria tarde (os labels teriam virado
+    // "BODY 1+2" com o texto concatenado, e o split sairia diferente do normal).
+    const eco = isEconomiaEnabled(a.taskId);
     const slotsByRole: Record<string, RoleSlot> = {};
     for (const s of a.roleSlots) slotsByRole[s.role.toLowerCase()] = s;
     const firstSlot = a.roleSlots[0];
@@ -10315,12 +10494,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             ? (slot.voiceOverrideYoutube.name || null)
             : (slot?.voiceOverride?.name || null),
         // Movimento é do AVATAR da cena, então cada parte herda o do seu slot.
-        motionPrompt: (slot?.motionPrompt || '').trim() || null,
+        // MODO ECONOMIA: o gesto morre AQUI, no plano. Só esconder na tela não
+        // bastava — `motorEfetivo` sobe a cena de III pra IV sozinho quando há
+        // gesto, e IV cobra. Um plano velho, persistido antes deste modo
+        // existir, reidrataria o gesto e o take sairia pago sem ninguém pedir.
+        motionPrompt: eco ? null : (slot?.motionPrompt || '').trim() || null,
         // O frame e' o DO CANAL: no META o do papel, no YouTube o proprio
         // quando escolhido — senao o mesmo do META (e aí nao gera de novo).
         imageDataUrl: slot?.imageMode ? (esc?.imageDataUrl || null) : null,
         imageKey: slot?.imageMode ? (esc?.imageKey || null) : null,
-        engine: slot?.engine,
+        engine: eco ? MOTOR_ECONOMIA : slot?.engine,
         // ÁUDIO POR AVATAR: cada parte do slot herda a chave do áudio upado —
         // no runner elas se agrupam por chave e dividem o arquivo sem cortar
         // fala. Modo imagem NÃO leva áudio (a variante `image` só aceita
@@ -10342,11 +10525,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // único — só arquivo maior que isso é dividido pela ferramenta de
         // dividir áudios. Sem duração medida (attach antigo), divide como
         // antes (não colapsa no escuro).
-        _takeUnico: takeUnicoPorLook({
-          engine: (slot?.engine as 'III' | 'IV' | 'V') || 'III',
-          motionPrompt: (slot?.motionPrompt || '').trim() || null,
-          imageMode: !!slot?.imageMode,
-        }) || (!slot?.imageMode && !!slot?.audioKey && (audioDurSlot ?? 0) > 0 && (audioDurSlot as number) <= 30),
+        // No modo economia isto é sempre falso: motor III sem gesto não colapsa,
+        // então o split HOOK/BODY sai igual ao do disparo normal.
+        _takeUnico: eco
+          ? false
+          : takeUnicoPorLook({
+              engine: (slot?.engine as 'III' | 'IV' | 'V') || 'III',
+              motionPrompt: (slot?.motionPrompt || '').trim() || null,
+              imageMode: !!slot?.imageMode,
+            }) || (!slot?.imageMode && !!slot?.audioKey && (audioDurSlot ?? 0) > 0 && (audioDurSlot as number) <= 30),
       };
     });
     // TAKE ÚNICO por slot quando a cena NÃO é Avatar III.
@@ -14249,6 +14436,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         : 'Normalizador de volume OFF — o volume sai como veio do HeyGen'}
                                       onClick={() => setNivelamentoFor(a.taskId, !isNivelamentoEnabled(a.taskId))}
                                     />
+                                    {/* MODO ECONOMIA (06.09): dispara pelo Studio e renderiza
+                                        cena por cena, sem consumir crédito. Só entra quando o AD
+                                        inteiro pode ir por texto em Avatar III. */}
+                                    {(() => {
+                                      const partes = partesParaEconomia(a);
+                                      const impedimento = partes.length === 0
+                                        ? 'Analise a task primeiro: sem take não há o que renderizar.'
+                                        : podeEconomia(partes)
+                                          ? null
+                                          : (() => {
+                                              const r = partes.map(recusaDaParte).find(Boolean);
+                                              return `Modo economia indisponível: ${r ? motivoLegivel(r) : 'este AD tem take que não pode ir por texto'}.`;
+                                            })();
+                                      return (
+                                        <PilotEconomiaBtn
+                                          on={isEconomiaEnabled(a.taskId)}
+                                          disabled={!!impedimento}
+                                          motivoBloqueio={impedimento || undefined}
+                                          onToggle={() => ligarEconomia(a.taskId, !isEconomiaEnabled(a.taskId))}
+                                        />
+                                      );
+                                    })()}
                                     {acoesDePosProducao(a)}
                                     {/* Camuflagem toggle (per-task) */}
                                     <PilotBtn3D
@@ -16159,7 +16368,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 que é mais barato e não inventa gesto.
                                                 MODO ÁUDIO (29.08): com áudio no slot este bloco SOME —
                                                 os chips de motor moram dentro do card de áudio. */}
-                                            {(slot.avatarId || slot.imageMode) && !(slot.audioKey && !slot.imageMode) ? (() => {
+                                            {/* MODO ECONOMIA: gesto e motor pago ficam travados — o
+                                                gesto sobe a cena pro Avatar IV, e IV/V cobram. */}
+                                            {(slot.avatarId || slot.imageMode) && !(slot.audioKey && !slot.imageMode) && isEconomiaEnabled(a.taskId) ? (
+                                              <div className="eco-trava flex items-center gap-2.5 rounded-[12px] px-3 py-2.5">
+                                                <span className="eco-trava-ico flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px]" aria-hidden>
+                                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <rect x="4" y="10.5" width="16" height="10" rx="2.4" />
+                                                    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                                                  </svg>
+                                                </span>
+                                                <span className="min-w-0 flex-1 text-[12px] leading-snug text-text-muted">
+                                                  <b className="text-emerald-300">Modo economia:</b> esta cena sai em Avatar {MOTOR_ECONOMIA}, sem gesto. É o que
+                                                  faz o Render Scene não cobrar.
+                                                </span>
+                                              </div>
+                                            ) : (slot.avatarId || slot.imageMode) && !(slot.audioKey && !slot.imageMode) ? (() => {
                                               const motion = slot.motionPrompt || '';
                                               const on = !!motion.trim();
                                               return (

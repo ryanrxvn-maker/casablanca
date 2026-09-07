@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.17.0';
+const DARKO_EXT_VERSION = '4.19.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -106,6 +106,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // VA de avatar: fluxo HeyGen Studio cena-por-cena com Mirror voice.
     // NAO usar pra task normal — esse path e exclusivo de Variacao de Avatar.
     runStudioJob(msg.requestId, msg.payload).catch((err) => {
+      reportError(msg.requestId, err?.message ?? String(err));
+    });
+    return false;
+  }
+  if (msg && msg.type === 'HG_RUN_ECONOMY_JOB') {
+    // MODO ECONOMIA: Studio por TEXTO, uma cena por take, Render Scene em cada
+    // (sem crédito no Avatar III). NUNCA clica Generate.
+    runEconomyJob(msg.requestId, msg.payload).catch((err) => {
       reportError(msg.requestId, err?.message ?? String(err));
     });
     return false;
@@ -3395,5 +3403,288 @@ async function runStudioJob(requestId, payload) {
   }
 }
 
+
+/* ==================================================================== *
+ *  MODO ECONOMIA — Studio, TEXTO por cena, "Render Scene"              *
+ * -------------------------------------------------------------------- *
+ *  O Generate do Studio COBRA. O "Render Scene" (canto inferior direito)*
+ *  renderiza SÓ a cena ativa e, no Avatar III, NÃO consome crédito —    *
+ *  medido na conta do dono antes de existir este código.               *
+ *                                                                      *
+ *  Como o Render Scene age na CENA ATIVA, e a cena recém-criada JÁ é a  *
+ *  ativa, o laço não precisa saber selecionar cena nenhuma no DOM:      *
+ *    cria cena → escreve o texto → trava Avatar III → renderiza →       *
+ *    espera o vídeo aparecer → próxima.                                 *
+ *                                                                      *
+ *  A CAPTURA É O SINAL DE CONCLUSÃO. Em vez de adivinhar o ✅ no DOM,   *
+ *  a gente tira uma foto das mídias que a página já carregou e espera   *
+ *  UMA NOVA aparecer. É assim que extensão de download acha vídeo, e    *
+ *  não depende de classe/ícone que o HeyGen pode trocar amanhã.         *
+ *                                                                      *
+ *  ⚠ O botão Generate NUNCA é clicado aqui. Nem no caminho feliz, nem   *
+ *    no erro, nem em retry: findRenderSceneButton() tem veto explícito. *
+ * ==================================================================== */
+
+function ecoLog(...a) { console.log('[DARKO LAB ECONOMIA]', ...a); }
+function ecoWarn(...a) { console.warn('[DARKO LAB ECONOMIA]', ...a); }
+
+/** Extensões de mídia que interessam (o take renderizado). */
+const ECO_MIDIA_RE = /\.(mp4|webm|m3u8|mov)(\?|$)/i;
+
+/** Fotografia das mídias que a página JÁ carregou: recursos baixados +
+ *  qualquer <video src>. É a base de comparação pra saber o que é novo. */
+function ecoMidiasConhecidas() {
+  const set = new Set();
+  try {
+    for (const e of performance.getEntriesByType('resource')) {
+      const u = e.name || '';
+      if (ECO_MIDIA_RE.test(u) || (e.initiatorType === 'video' && u)) set.add(u);
+    }
+  } catch (e) { /* performance indisponível: sobra o DOM */ }
+  try {
+    for (const v of document.querySelectorAll('video')) {
+      if (v.src) set.add(v.src);
+      for (const s of v.querySelectorAll('source')) if (s.src) set.add(s.src);
+    }
+  } catch (e) {}
+  return set;
+}
+
+/** A primeira mídia que apareceu DEPOIS da foto `antes`. */
+function ecoMidiaNova(antes) {
+  const agora = ecoMidiasConhecidas();
+  for (const u of agora) {
+    if (antes.has(u)) continue;
+    // descarta o que claramente não é o take (sprite, poster, preview de UI)
+    if (/thumb|poster|sprite|avatar_preview|waveform/i.test(u)) continue;
+    if (ECO_MIDIA_RE.test(u) || u.startsWith('blob:')) return u;
+  }
+  return null;
+}
+
+/** Botão "Render Scene". VETO em Generate: clicar nele cobraria a conta, que
+ *  é exatamente o que este modo existe pra não fazer. Pontua o canto INFERIOR
+ *  direito (o Generate mora no topo — herdar a pontuação dele seria fatal). */
+function findRenderSceneButton() {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const cands = [];
+  for (const b of document.querySelectorAll('button, [role="button"]')) {
+    if (b.disabled || b.offsetParent === null) continue;
+    const r = b.getBoundingClientRect();
+    if (r.width < 40 || r.height < 20 || r.height > 90) continue;
+    const t = (b.textContent || '').trim().toLowerCase();
+    const al = (b.getAttribute('aria-label') || '').toLowerCase();
+    const dt = (b.getAttribute('data-testid') || '').toLowerCase();
+    const tudo = `${t} ${al} ${dt}`;
+    // VETO DURO: qualquer sinal de Generate/Submit desqualifica o candidato.
+    if (/\b(generate|gerar|submit|export|publish)\b/.test(tudo)) continue;
+    if (!/render/.test(tudo) && !/renderiza/.test(tudo)) continue;
+    let score = 100;
+    if (/render scene|renderizar cena/.test(tudo)) score += 60;
+    if (r.bottom > H * 0.6) score += 30;          // rodapé
+    score += Math.round((r.right / W) * 20);      // direita
+    cands.push({ b, score, t: t.slice(0, 40) });
+  }
+  if (!cands.length) return null;
+  cands.sort((x, y) => y.score - x.score);
+  ecoLog('candidatos a Render Scene:', cands.map((c) => `${c.t}(${c.score})`).join(' | '));
+  return cands[0].b;
+}
+
+/** Campos onde se escreve a fala, na ordem do documento. A cena ativa é a
+ *  ÚLTIMA — usar o primeiro (como o Quick Create faz) sobrescreveria a cena 1
+ *  a cada volta do laço. */
+function ecoCamposDeTexto() {
+  const out = [];
+  for (const el of document.querySelectorAll('textarea, [contenteditable="true"]')) {
+    if (el.offsetParent === null) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 80 || r.height < 18) continue;
+    out.push(el);
+  }
+  return out;
+}
+
+/** Escreve a fala na cena ATIVA (a última criada). */
+async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
+  const campos = await waitForOrNull(() => {
+    const c = ecoCamposDeTexto();
+    return c.length ? c : null;
+  }, 20000, 400);
+  if (!campos) {
+    ecoDumpDiag('sem-campo-de-texto');
+    throw new Error(`${sceneLabel}: não achei o campo de script da cena. Cola os logs [DARKO LAB ECONOMIA].`);
+  }
+  const alvo = campos[campos.length - 1];
+  // O React do create-v4 ignora clique sintético: foco por CDP antes de digitar.
+  await cdpClickEl(alvo, `${sceneLabel} campo de script`);
+  await sleep(250);
+  await pasteScriptIntoTextarea(alvo, texto);
+  await sleep(400);
+  const escrito = (alvo.value !== undefined ? alvo.value : alvo.textContent) || '';
+  if (escrito.trim().slice(0, 24) !== texto.trim().slice(0, 24)) {
+    ecoWarn(`${sceneLabel}: o campo ficou com "${escrito.slice(0, 40)}" e eu escrevi "${texto.slice(0, 40)}"`);
+  }
+  return alvo;
+}
+
+/** Diálogo aberto (paywall, limite): CAPTURA o texto antes de esconder. O
+ *  dismiss por heurística engoliria um aviso de limite de render em silêncio. */
+function ecoTextoDeDialogoAberto() {
+  for (const d of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
+    if (d.offsetParent === null) continue;
+    const t = (d.textContent || '').replace(/\s+/g, ' ').trim();
+    if (t) return t.slice(0, 300);
+  }
+  return null;
+}
+
+function ecoDumpDiag(tag) {
+  try {
+    const btns = Array.from(document.querySelectorAll('button, [role="button"]'))
+      .filter((b) => b.offsetParent !== null)
+      .slice(0, 60)
+      .map((b) => {
+        const r = b.getBoundingClientRect();
+        const t = ((b.textContent || '').trim() || b.getAttribute('aria-label') || '').slice(0, 30);
+        return `${t}@${Math.round(r.left)},${Math.round(r.top)}`;
+      })
+      .filter((s) => s && !s.startsWith('@'));
+    ecoWarn(`diag[${tag}] url=${location.href}`);
+    ecoWarn(`diag[${tag}] botoes:`, btns);
+    ecoWarn(`diag[${tag}] campos de texto:`, ecoCamposDeTexto().length);
+    const dlg = ecoTextoDeDialogoAberto();
+    if (dlg) ecoWarn(`diag[${tag}] DIALOGO ABERTO: ${dlg}`);
+  } catch (e) {}
+}
+
+/**
+ * Roda o AD inteiro no Studio, cena por cena, sem consumir crédito.
+ * payload = { avatarId, groupId, avatarName, voiceName, jobLabel,
+ *             cenas: [{ idx, label, texto }], tetoPorCenaMs }
+ * Resultado: "ECONOMIA:" + JSON { cenas: [{idx, videoUrl?, error?}] }
+ */
+async function runEconomyJob(requestId, payload) {
+  if (currentJob) {
+    reportError(requestId, 'Outra geracao em andamento — aguarde finalizar.');
+    return;
+  }
+  currentJob = requestId;
+  // O buffer de video_ids é COMPARTILHADO com o Quick Create. O que este job
+  // fizer entrar lá é removido no fim: um id de cena sobrando envenenaria a
+  // janela anti-duplicação de 90s do disparo normal na mesma aba.
+  const marcaBuffer = interceptedVideoIds.length;
+  const resultados = [];
+  try {
+    const { avatarId, avatarName, groupName, voiceName, cenas, jobLabel } = payload || {};
+    const tetoCena = Number(payload && payload.tetoPorCenaMs) || 8 * 60 * 1000;
+    if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
+    if (!Array.isArray(cenas) || cenas.length === 0) throw new Error('payload invalido: cenas vazio.');
+
+    reportProgress(requestId, `Economia: abrindo o Studio de ${avatarName || avatarId}...`, 2);
+    await enterStudioForAvatar(avatarId, avatarName, groupName);
+
+    const total = cenas.length;
+    for (let i = 0; i < total; i++) {
+      const cena = cenas[i];
+      const rot = `${jobLabel || 'ECO'} cena ${i + 1}/${total}`;
+      const base = Math.round((i / total) * 90);
+      reportProgress(requestId, `${rot}: montando...`, base);
+
+      const dlg = ecoTextoDeDialogoAberto();
+      if (dlg && /limit|limite|upgrade|plan|quota/i.test(dlg)) {
+        throw new Error(`${rot}: o HeyGen abriu um aviso e eu parei antes de renderizar — "${dlg}"`);
+      }
+      studioDismissPaywallIfShown(`${rot} start`);
+
+      if (i > 0) {
+        const addBtn = await waitForOrNull(() => findAddSceneButton(), 15000, 400);
+        if (!addBtn) {
+          ecoDumpDiag('no-add-scene');
+          throw new Error(`${rot}: botão "Add scene" não encontrado. Cola os logs [DARKO LAB ECONOMIA].`);
+        }
+        await cdpClickEl(addBtn, 'Add scene');
+        await sleep(2400);
+        studioDismissPaywallIfShown(`${rot} apos add-scene`);
+      }
+
+      await ecoEscreverTextoNaCenaAtiva(cena.texto, rot);
+
+      // AVATAR III por cena, relido do controle — o único motor que renderiza
+      // de graça. Sem confirmar, aborta ANTES de qualquer clique caro.
+      reportProgress(requestId, `${rot}: travando Avatar III...`, base + 2);
+      const motorOk = await setStudioMotorAvatarIII(rot);
+      if (!motorOk) {
+        ecoDumpDiag('motor-iii-fail');
+        throw new Error(`${rot}: não consegui confirmar Avatar III. Abortei ANTES de renderizar — nada foi gerado e nada foi cobrado.`);
+      }
+      const pago = studioHasPaidEngineVisible();
+      if (pago) {
+        ecoDumpDiag('paid-engine-visible');
+        throw new Error(`${rot}: vi "${pago}" na tela. Abortei pra não cobrar — nada foi gerado.`);
+      }
+      if (voiceName) await studioTrySelectVoice(voiceName, rot);
+
+      // FOTO das mídias ANTES de renderizar: o que aparecer de novo é o take.
+      const antes = ecoMidiasConhecidas();
+      const btn = await waitForOrNull(() => findRenderSceneButton(), 15000, 500);
+      if (!btn) {
+        ecoDumpDiag('no-render-scene');
+        throw new Error(`${rot}: botão "Render Scene" não encontrado. Nada foi gerado. Cola os logs [DARKO LAB ECONOMIA].`);
+      }
+      reportProgress(requestId, `${rot}: renderizando (sem crédito)...`, base + 4);
+      await cdpClickEl(btn, 'Render Scene');
+      await sleep(1500);
+      const dlg2 = ecoTextoDeDialogoAberto();
+      if (dlg2 && /limit|limite|upgrade|credit|cr[ée]dito/i.test(dlg2)) {
+        throw new Error(`${rot}: o HeyGen respondeu com um aviso — "${dlg2}". Parei aqui.`);
+      }
+
+      // Espera o vídeo da cena aparecer. A mídia nova É o sinal de pronto.
+      const t0 = Date.now();
+      let url = null;
+      let jaDeuPlay = false;
+      while (Date.now() - t0 < tetoCena) {
+        url = ecoMidiaNova(antes);
+        if (url) break;
+        await sleep(2500);
+        const seg = Math.round((Date.now() - t0) / 1000);
+        if (seg % 20 < 3) reportProgress(requestId, `${rot}: renderizando há ${seg}s...`, base + 5);
+        // Meio do caminho sem mídia: alguns players só baixam o arquivo quando
+        // tocam. Um play força o download sem custo nenhum.
+        if (!jaDeuPlay && Date.now() - t0 > tetoCena / 2) {
+          jaDeuPlay = true;
+          ecoLog(`${rot}: sem mídia até agora — dando play pra forçar o carregamento`);
+          try { await playStudioScene(document, rot); } catch (e) {}
+        }
+      }
+      if (!url) {
+        ecoDumpDiag('sem-midia');
+        throw new Error(`${rot}: a cena não ficou pronta em ${Math.round(tetoCena / 60000)} min. Parei aqui — nada foi cobrado.`);
+      }
+      ecoLog(`${rot}: vídeo capturado — ${url.slice(0, 120)}`);
+      resultados.push({ idx: cena.idx, videoUrl: url });
+      reportProgress(requestId, `${rot}: pronta`, Math.round(((i + 1) / total) * 90));
+    }
+
+    reportProgress(requestId, `Economia: ${resultados.length} cena(s) renderizada(s)`, 96);
+    reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados }));
+  } catch (e) {
+    console.error('[DARKO LAB ECONOMIA] runEconomyJob FAIL:', e);
+    // Devolve o que JÁ renderizou junto do erro: cena pronta não se joga fora.
+    const msg = e?.message ?? String(e);
+    if (resultados.length > 0) {
+      reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro: msg }));
+    } else {
+      reportError(requestId, msg);
+    }
+  } finally {
+    // Tira do buffer compartilhado o que este job pôs lá.
+    if (interceptedVideoIds.length > marcaBuffer) interceptedVideoIds.length = marcaBuffer;
+    currentJob = null;
+    try { await cdpDetachBg(); } catch (e) {}
+  }
+}
 
 } // fim do guard __darkolab_heygen_loaded__
