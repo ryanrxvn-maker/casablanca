@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.20.2';
+const DARKO_EXT_VERSION = '4.20.3';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -3016,14 +3016,34 @@ async function enterStudioForAvatar(avatarId, avatarName, groupName, onEtapa) {
  *  modal (botao "Switch" poderia cobrar plano). VALIDADO: o backdrop
  *  e um DIV fixed z>=100 com bg semi-transparente cobrindo viewport.
  *  Removendo o backdrop libera os cliques no editor por tras. */
+/* Anuncios/paywalls do HeyGen que cobrem o editor. SEMPRE escondidos por
+ * display:none — NUNCA clicando nada dentro: sao telas de PLANO, e um clique
+ * num botao ali pode assinar/trocar plano do usuario.
+ *
+ * MEDIDO 07.09.2026: o disparo morria em "nao consegui confirmar Avatar III" e
+ * o diagnostico entregou o culpado — "New HeyGen plans are here". A regra so
+ * conhecia "Plans that fit your scale", entao esse passava. Pior: o texto do
+ * modal cita os planos Avatar III/IV/V, e por isso findStudioMotorControl
+ * passava a achar SO os pedacos do modal como candidatos ("controle nao
+ * achado (candidatos: DIV'New HeyGen plans are her')").
+ * Ao adicionar um padrao novo aqui, prefira ancorar em texto de PLANO/UPGRADE;
+ * nunca em palavra generica que possa casar com dialogo legitimo do editor. */
+const PADROES_DE_ANUNCIO = [
+  /Plans that fit your scale/i,
+  /New HeyGen plans are here/i,
+  /New .{0,20}plans are here/i,
+];
+
 function studioDismissPaywallIfShown(where) {
-  const plans = [...document.querySelectorAll('[role="dialog"]')].find((d) =>
-    d.offsetParent !== null && /Plans that fit your scale/i.test(d.textContent || ''));
   let dismissed = 0;
-  if (plans) {
-    plans.style.display = 'none';
+  for (const d of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
+    if (d.offsetParent === null || d.style.display === 'none') continue;
+    const txt = (d.textContent || '');
+    const padrao = PADROES_DE_ANUNCIO.find((re) => re.test(txt));
+    if (!padrao) continue;
+    d.style.display = 'none';
     dismissed++;
-    studioLog(`paywall (${where}): "Plans that fit your scale" escondido`);
+    studioLog(`paywall (${where}): anuncio "${txt.trim().slice(0, 40)}" escondido`);
   }
   // Remove overlays bloqueando viewport. 2 tipos:
   //  A) backdrop semi-transparente (rgba(...,0.x), z>=100, fixed) — paywall
@@ -3111,6 +3131,10 @@ function findStudioMotorControl() {
     if (!/^Avatar (III|IV|V)\b/.test(t)) continue;
     if (t.length > 60) continue;
     if (el.querySelectorAll('*').length > 6) continue;
+    // Texto DE DENTRO de um dialogo nunca e o controle. O anuncio "New HeyGen
+    // plans are here" lista os planos Avatar III/IV/V, e sem este filtro os
+    // pedacos dele viravam os unicos candidatos.
+    if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 40 || r.height < 16 || r.width > 420) continue;
     const style = window.getComputedStyle(el);
@@ -3151,6 +3175,10 @@ async function setStudioMotorAvatarIII(sceneLabel) {
   const target = 'Avatar III';
   ultimoMotivoDoMotor = '';
   for (let attempt = 1; attempt <= 3; attempt++) {
+    // Um anuncio do HeyGen pode nascer DEPOIS da entrada, no meio do laco —
+    // foi assim que "New HeyGen plans are here" derrubou o disparo. Limpa em
+    // TODA tentativa, nao so na entrada.
+    studioDismissPaywallIfShown(`${sceneLabel} motor t${attempt}`);
     const ctrl = findStudioMotorControl();
     if (!ctrl) {
       const vistos = [...document.querySelectorAll('button, [role="button"], div, span')]
@@ -3243,6 +3271,10 @@ function studioHasPaidEngineVisible() {
       // ignora se for so um item de menu aberto (nao o estado atual)
       const role = el.getAttribute('role');
       if (role === 'menuitem' || role === 'option') continue;
+      // ...e texto de um anuncio de PLANOS tambem nao e o estado do motor.
+      // Sem isto o modal "New HeyGen plans are here" (que lista Avatar IV/V)
+      // faria a trava abortar um disparo perfeitamente correto.
+      if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
       return t;
     }
   }
