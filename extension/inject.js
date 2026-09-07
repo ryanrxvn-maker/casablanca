@@ -1,4 +1,18 @@
 /**
+ * ⚠⚠ ARQUIVO MORTO — NAO E CARREGADO E NAO E DISTRIBUIDO. ⚠⚠
+ *
+ * Ninguem faz chrome.runtime.getURL('inject.js') nem injeta este arquivo, e
+ * ele NAO entra no ZIP que o site entrega (a lista de arquivos vive em
+ * app/api/extension/download/route.ts). Editar aqui NAO tem efeito nenhum.
+ *
+ * O interceptador que REALMENTE roda e a funcao inline
+ * `injectInterceptorIntoMainWorld` em extension/background.js — e os dois ja
+ * divergiram (filtro e extracao de id diferentes). Mexeu em captura de
+ * request do HeyGen? E la, nao aqui.
+ *
+ * Mantido so como referencia historica do patch de fetch/XHR.
+ *
+ * ---------------------------------------------------------------------------
  * DARKO LAB - inject.js (roda no MAIN WORLD da pagina HeyGen)
  *
  * Patch window.fetch + XMLHttpRequest pra capturar TODAS as POST requests

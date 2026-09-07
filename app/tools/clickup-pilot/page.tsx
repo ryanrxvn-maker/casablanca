@@ -5489,7 +5489,7 @@ function ClickUpPilotInner() {
         if (erroParcial) console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
         // Cena pronta já nasce 'completed' com a URL: o poll pula e o download
         // do pipeline pega no lugar de sempre.
-        statusEconomia = statusDasCenas(cenasFeitas) as unknown as Record<string, VideoStatus>;
+        statusEconomia = statusDasCenas(cenasFeitas);
         const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas);
         for (const r of rs) registrarResultado(r);
         return rs;
