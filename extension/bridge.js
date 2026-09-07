@@ -48,7 +48,13 @@
     if (data.source !== 'darkolab') return;
 
     if (data.type === 'HG_PING') {
-      sendToPage({ type: 'HG_PONG', version: VERSION });
+      // `id` deixa o ext-sync saber de QUAL pasta unpacked esta extensao foi
+      // carregada (o Chrome deriva o id do caminho absoluto). Sem isso o script
+      // chutava pela data do manifest e ja publicou numa pasta que o Chrome nem
+      // carrega — tudo "passava" e nada mudava no navegador.
+      let extId = null;
+      try { extId = chrome.runtime.id; } catch {}
+      sendToPage({ type: 'HG_PONG', version: VERSION, id: extId });
       return;
     }
 

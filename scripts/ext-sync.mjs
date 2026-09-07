@@ -15,6 +15,7 @@
  */
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { acharPastaPorId } from './ext-id.mjs';
 
 const RAIZ_DOWNLOADS = 'D:/NOVOS DOWNLOADS';
 const PREFIXO = 'auto-edit-heygen-extension';
@@ -48,7 +49,31 @@ function acharPastaViva() {
 }
 
 const argAlvo = process.argv.indexOf('--alvo');
-const escolhida = argAlvo > -1 ? { pasta: process.argv[argAlvo + 1], versao: null } : acharPastaViva();
+const argId = process.argv.indexOf('--id');
+
+// ⚠ ORDEM IMPORTA. O id e a UNICA forma deterministica: o Chrome deriva o id
+// de uma extensao unpacked do caminho absoluto da pasta, entao id -> pasta e
+// exato. O palpite por "manifest mais recente" ja escolheu ERRADO e publicou
+// numa pasta que o Chrome nem carrega — tudo passou e nada mudou no navegador.
+// Pegue o id no HG_PONG da ponte (campo `id`) e passe aqui.
+let escolhida = null;
+if (argAlvo > -1) {
+  escolhida = { pasta: process.argv[argAlvo + 1], versao: null, como: '--alvo' };
+} else if (argId > -1) {
+  const p = acharPastaPorId(process.argv[argId + 1]);
+  if (!p) {
+    console.error(`[ext-sync] nenhuma pasta gera o id ${process.argv[argId + 1]}`);
+    process.exit(1);
+  }
+  escolhida = { pasta: p, versao: versaoDe(p), como: 'id' };
+} else {
+  escolhida = acharPastaViva();
+  if (escolhida) {
+    escolhida.como = 'palpite';
+    console.warn('[ext-sync] AVISO: escolhendo pela data do manifest (palpite).');
+    console.warn('[ext-sync] Prefira --id <id da extensao> — o HG_PONG da ponte devolve o id.');
+  }
+}
 
 if (!escolhida || !escolhida.pasta) {
   console.error(`[ext-sync] nao achei nenhuma pasta "${PREFIXO}*" em ${RAIZ_DOWNLOADS}`);
@@ -75,5 +100,5 @@ if (versaoDepois !== versaoRepo) {
   process.exit(1);
 }
 
-console.log(`[ext-sync] ${copiados} arquivo(s) -> ${escolhida.pasta}`);
+console.log(`[ext-sync] ${copiados} arquivo(s) -> ${escolhida.pasta} (por ${escolhida.como})`);
 console.log(`[ext-sync] versao ${versaoAntes} -> ${versaoDepois} (repo ${versaoRepo}) OK`);
