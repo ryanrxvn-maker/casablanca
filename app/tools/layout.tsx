@@ -45,7 +45,7 @@ function ContentWrap({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={
-        'ae-workspace flex min-h-screen flex-col transition-[padding] duration-300 ' +
+        'flex min-h-screen flex-col transition-[padding] duration-300 ' +
         (subActive ? 'md:pl-[328px]' : 'md:pl-[84px]')
       }
     >

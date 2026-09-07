@@ -1475,7 +1475,7 @@ function TipografiaInner() {
       />
       {/* sem backdrop-blur aqui: backdrop-filter cria containing block e
           prenderia a timeline fixa (dock) dentro do cartão */}
-      <div className="mt-6">
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-6">
       <div className="flex flex-col gap-5">
         {/* Transcrição tem FALLBACK no servidor (Groq primeiro, AssemblyAI
             se ela falhar/faltar): quem tem só uma das duas está pronto —

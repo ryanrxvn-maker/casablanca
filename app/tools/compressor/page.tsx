@@ -459,7 +459,7 @@ export default function CompressorPage() {
         hue={HUE}
         icon={<IconCompressor size={56} />}
       />
-      <div className="ae-four-step-flow mt-6 flex flex-col gap-5">
+      <div className="mt-6 flex flex-col gap-5">
         <ToolStep
           n={1}
           icon={<IconStepUpload size={18} />}

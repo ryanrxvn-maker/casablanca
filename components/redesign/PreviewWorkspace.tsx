@@ -13,5 +13,5 @@ function PreviewContent({ children }: { children: ReactNode }) {
   const path = usePathname();
   const currentPath = path.endsWith('/hub') ? '/tools' : path.replace('/dev/redesign/','/tools/');
   const subActive = useSubSidebarActive(currentPath);
-  return <><Sidebar currentPath={currentPath} /><SubSidebar currentPath={currentPath} /><div className={'ae-workspace flex min-h-screen flex-col '+(subActive?'md:pl-[328px]':'md:pl-[84px]')}><TopBar /><main className="flex-1 pb-16 pt-8">{children}</main></div></>;
+  return <><Sidebar currentPath={currentPath} /><SubSidebar currentPath={currentPath} /><div className={'flex min-h-screen flex-col '+(subActive?'md:pl-[328px]':'md:pl-[84px]')}><TopBar /><main className="flex-1 pb-16 pt-8">{children}</main></div></>;
 }

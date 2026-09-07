@@ -249,7 +249,7 @@ export default function AceleradorPage() {
       hue={HUE}
       icon={<IconAcelerador size={56} />}
     >
-      <div className="ae-four-step-flow flex flex-col gap-5">
+      <div className="flex flex-col gap-5">
         <ToolStep n={1} icon={<IconStepFiles size={18} />} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"

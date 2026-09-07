@@ -81,7 +81,7 @@ export function AuthShowcase() {
   return (
     <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
       {/* palco — todas as cenas na mesma célula; a ativa desliza pra dentro */}
-      <div className="grid">
+      <div className="grid grid-cols-1 overflow-hidden lg:overflow-visible">
         {SLIDES.map((s, i) => {
           // posição relativa no ciclo: 0 = ativa, len-1 = acabou de sair
           // (sai pela esquerda), resto espera à direita.
@@ -101,7 +101,7 @@ export function AuthShowcase() {
                     : 'pointer-events-none translate-x-9 opacity-0')
               }
             >
-              <div className="w-full">{s.scene}</div>
+              <div className="min-w-0 w-full">{s.scene}</div>
             </div>
           );
         })}

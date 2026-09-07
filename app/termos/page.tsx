@@ -1,6 +1,5 @@
 import Link from 'next/link';
-import { SiteHeader } from '@/components/redesign/SiteHeader';
-import { SiteFooter } from '@/components/redesign/SiteFooter';
+import { Brand } from '@/components/Brand';
 
 /**
  * /termos — Termos de Uso do Auto Edit. Público. Linkado no cadastro
@@ -17,8 +16,15 @@ const UPDATED = '29/05/2026';
 
 export default function TermosPage() {
   return (
-    <main className="ae-document relative min-h-screen">
-      <SiteHeader />
+    <main className="relative min-h-screen">
+      <header className="border-b border-line/50 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-[820px] items-center justify-between px-5">
+          <Brand href="/" />
+          <Link href="/" className="btn-ghost">
+            ← Início
+          </Link>
+        </div>
+      </header>
 
       <article className="mx-auto max-w-[820px] px-5 py-12 md:py-16">
         <p
@@ -124,7 +130,6 @@ export default function TermosPage() {
           </Link>
         </div>
       </article>
-      <SiteFooter />
     </main>
   );
 }

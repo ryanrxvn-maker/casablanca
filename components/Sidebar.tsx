@@ -222,7 +222,7 @@ export function Sidebar({ currentPath }: { currentPath?: string } = {}) {
       items: [
         {
           href: '/tools/decupagem',
-          label: 'Ferramentas',
+          label: 'Tools',
           icon: <IconBase />,
           match: (p) =>
             TOOL_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),

@@ -12,7 +12,6 @@
  * em lógica/estado. Cada componente é puramente visual.
  */
 
-import Link from 'next/link';
 import { ReactNode, useRef, type CSSProperties } from 'react';
 
 /* ─────────────────── ToolHero ─────────────────── */
@@ -20,25 +19,251 @@ import { ReactNode, useRef, type CSSProperties } from 'react';
  * Header da ferramenta — eyebrow + título + sub + ícone em tile 3D.
  * Cantos "tech" + hairline de gradiente na base + sheen que varre 1x.
  */
-export function ToolHero({ title, subtitle, eyebrow, hue, icon }: { title: string; subtitle?: string; eyebrow?: string; hue?: string; icon?: ReactNode }) {
-  return <header className="ae-tool-hero" style={{ '--tool-hue': hue ?? 'rgba(167,139,250,.45)' } as CSSProperties}>
-    <Link href="/tools" className="ae-tool-back">← Todas as ferramentas</Link>
-    {icon && <div className="ae-tool-hero-icon">{icon}</div>}
-    <div className="ae-tool-hero-copy">{eyebrow && <p className="ae-tool-eyebrow">{eyebrow}</p>}<h1>{title}</h1></div>
-    {subtitle && <p className="ae-tool-subtitle">{subtitle}</p>}
-  </header>;
+export function ToolHero({
+  title,
+  subtitle,
+  eyebrow,
+  hue = 'rgba(167,139,250,0.45)',
+  icon,
+}: {
+  title: string;
+  subtitle?: string;
+  eyebrow?: string;
+  hue?: string;
+  icon?: ReactNode;
+}) {
+  return (
+    <header className="tool-hero relative overflow-hidden rounded-[24px] border border-line/60 shadow-depth-2">
+      {/* Glow ambient duplo */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full opacity-55 blur-3xl"
+        style={{ background: hue }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-24 -left-16 h-56 w-56 rounded-full opacity-25 blur-3xl"
+        style={{ background: hue }}
+      />
+      {/* Grid sutil */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.05]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
+          maskImage: 'radial-gradient(80% 100% at 70% 0%, #000, transparent 85%)',
+          WebkitMaskImage:
+            'radial-gradient(80% 100% at 70% 0%, #000, transparent 85%)',
+        }}
+      />
+      {/* Sheen que varre uma vez ao montar */}
+      <div aria-hidden className="tool-hero-sheen pointer-events-none absolute inset-0" />
+
+      <div
+        className="relative flex flex-col gap-4 px-6 py-8 md:flex-row md:items-center md:justify-between md:px-9 md:py-10"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.2)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+        }}
+      >
+        <div className="flex-1">
+          {eyebrow ? (
+            <div
+              className="mb-2.5 inline-flex items-center gap-2 rounded-full border border-line/80 bg-bg/50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-text-muted backdrop-blur-sm"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full"
+                style={{ background: hue, boxShadow: `0 0 8px ${hue}` }}
+              />
+              {eyebrow}
+            </div>
+          ) : null}
+          <h1
+            className="text-[32px] font-extrabold leading-[1.02] tracking-tight text-text md:text-[42px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
+          >
+            {title}
+          </h1>
+          {subtitle ? (
+            <p className="mt-2.5 max-w-[580px] text-[14.5px] leading-relaxed text-text-muted">
+              {subtitle}
+            </p>
+          ) : null}
+        </div>
+        {icon ? (
+          <div className="tool-hero-icon relative hidden md:block">
+            <span
+              aria-hidden
+              className="absolute inset-0 -m-6 rounded-full opacity-70 blur-2xl"
+              style={{ background: `radial-gradient(circle, ${hue}, transparent 70%)` }}
+            />
+            <span
+              className="relative flex h-[88px] w-[88px] items-center justify-center rounded-[22px] border border-white/10"
+              style={{
+                background:
+                  'linear-gradient(160deg, rgba(255,255,255,0.06), transparent 45%), rgba(0,0,0,0.45)',
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -6px 12px rgba(0,0,0,0.5), 0 18px 36px -14px rgba(0,0,0,0.7), 0 0 34px -8px ${hue}`,
+              }}
+            >
+              {icon}
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Hairline de acento na base */}
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-px"
+        style={{
+          background: `linear-gradient(90deg, transparent, ${hue}, transparent)`,
+        }}
+      />
+
+      <style jsx>{`
+        .tool-hero-icon {
+          animation: tool-hero-float 4.5s ease-in-out infinite;
+        }
+        @keyframes tool-hero-float {
+          0%, 100% { transform: translateY(0) rotate(0); }
+          50% { transform: translateY(-6px) rotate(-2deg); }
+        }
+        .tool-hero-sheen {
+          background: linear-gradient(
+            105deg,
+            transparent 40%,
+            rgba(255, 255, 255, 0.06) 50%,
+            transparent 60%
+          );
+          transform: translateX(-120%);
+          animation: tool-hero-sweep 1.4s ease-out 0.35s 1 both;
+        }
+        @keyframes tool-hero-sweep {
+          to { transform: translateX(120%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .tool-hero-icon,
+          .tool-hero-sheen {
+            animation: none !important;
+          }
+        }
+      `}</style>
+    </header>
+  );
 }
 
-export function ToolStep({ n, title, hint, hue, icon, action, still, children }: { n?: number | string; title: string; hint?: string; hue?: string; icon?: ReactNode; action?: ReactNode; still?: boolean; children: ReactNode }) {
-  return <section className={'ae-tool-step' + (still ? ' ae-tool-step-still' : '')} style={{ '--tool-hue': hue ?? 'rgba(167,139,250,.45)' } as CSSProperties}>
-    <div className="ae-tool-step-heading">
-      {n != null && <span className="ae-tool-step-number" aria-label={'Etapa ' + n}>{String(n).padStart(2, '0')}</span>}
-      {icon && <span className="ae-tool-step-icon">{icon}</span>}
-      <div><h3>{title}</h3>{hint && <p>{hint}</p>}</div>
-      {action && <div className="ae-tool-step-action">{action}</div>}
-    </div>
-    {children}
-  </section>;
+export function ToolStep({
+  n: _n,
+  title,
+  hint,
+  hue = 'rgba(167,139,250,0.45)',
+  icon,
+  action,
+  still,
+  children,
+}: {
+  /** Mantido só pra compat — não é mais renderizado. */
+  n?: number | string;
+  title: string;
+  hint?: string;
+  hue?: string;
+  icon?: ReactNode;
+  /** Elemento opcional alinhado à direita do header (ex.: um toggle). */
+  action?: ReactNode;
+  /**
+   * Cartão PARADO: sem overflow-hidden e sem o levanta-no-hover. Existe pro
+   * passo que carrega uma coluna position:sticky por dentro (o editor de
+   * legendas) — overflow-hidden e transform em ancestral MATAM o sticky.
+   */
+  still?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      className={
+        // `still` também pula a animação de entrada: com fill both o
+        // transform final (translateY(0)) fica pra SEMPRE no computed style,
+        // e transform em ancestral prende position:fixed/sticky do filho
+        (still ? '' : 'tool-step overflow-hidden hover:-translate-y-[2px] ') +
+        'group relative rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:border-violet/35 hover:shadow-depth-2 md:p-7'
+      }
+      style={{
+        background:
+          'linear-gradient(180deg, rgba(255,255,255,0.028), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+      }}
+    >
+      {/* Glow do passo */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full opacity-30 blur-3xl transition-opacity duration-500 group-hover:opacity-60"
+        style={{ background: hue }}
+      />
+      {/* Barra de acento à esquerda — acende no hover */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full opacity-0 transition-opacity duration-400 group-hover:opacity-100"
+        style={{ background: `linear-gradient(180deg, transparent, ${hue}, transparent)` }}
+      />
+
+      <div className="relative">
+        <div className="mb-4 flex items-center gap-3.5">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border transition-transform duration-300 group-hover:scale-[1.06] group-hover:-rotate-3"
+            style={{
+              color: '#fff',
+              borderColor: hue,
+              background: `linear-gradient(150deg, ${hue}, transparent 65%), linear-gradient(180deg, rgba(255,255,255,0.05), transparent 40%), rgba(0,0,0,0.5)`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -3px 6px rgba(0,0,0,0.4), 0 0 20px -4px ${hue}`,
+            }}
+          >
+            {icon ? (
+              icon
+            ) : (
+              // Fallback: bullet genérico (NUNCA mostra número).
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                <circle cx="5" cy="5" r="3" fill="currentColor" opacity="0.85" />
+              </svg>
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3
+              className="text-[15px] font-bold tracking-tight text-text md:text-[16.5px]"
+              style={{
+                fontFamily: 'var(--font-tech)',
+                letterSpacing: '-0.015em',
+              }}
+            >
+              {title}
+            </h3>
+            {hint ? (
+              <p className="mt-0.5 text-[12px] leading-snug text-text-muted">{hint}</p>
+            ) : null}
+          </div>
+          {action ? <div className="shrink-0">{action}</div> : null}
+        </div>
+        <div className="divider-grad mb-4 -mt-1 opacity-70" aria-hidden />
+        <div>{children}</div>
+      </div>
+
+      <style jsx>{`
+        .tool-step {
+          animation: tool-step-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @keyframes tool-step-in {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .tool-step {
+            animation: none !important;
+          }
+        }
+      `}</style>
+    </section>
+  );
 }
 
 /* ─────────────────── ToolDropzone ─────────────────── */
@@ -406,7 +631,7 @@ export function ToolSlider({
     <div>
       <div className="mb-1.5 flex items-center justify-between">
         <label
-          className="ae-slider-label"
+          className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {label}

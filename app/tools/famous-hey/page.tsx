@@ -204,7 +204,7 @@ function Etapa({
   children: React.ReactNode;
 }) {
   return (
-    <section className="ae-tool-step ae-famous-step mb-5">
+    <section className="glass-panel mb-4 rounded-[18px] p-4 md:p-5">
       <header className="mb-3.5 flex items-center gap-2.5">
         <span
           className="mono flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] text-[11px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_4px_12px_-4px_rgba(167,139,250,0.7)]"
@@ -212,7 +212,7 @@ function Etapa({
         >
           {n}
         </span>
-        <h2 className="font-tech text-[17px] font-bold tracking-tight text-text">{titulo}</h2>
+        <h2 className="text-[13px] font-bold uppercase tracking-[0.14em] text-text">{titulo}</h2>
         {aparte ? (
           <span className="ml-auto hidden text-[11px] text-text-muted sm:block">{aparte}</span>
         ) : null}

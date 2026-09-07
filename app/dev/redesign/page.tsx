@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { SiteHeader } from '@/components/redesign/SiteHeader';
+import { Brand } from '@/components/Brand';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Revisão do redesign', robots: { index: false, follow: false } };
 export default function DesignReview() {
@@ -10,5 +10,5 @@ export default function DesignReview() {
     { title: 'Acesso', links: [['Entrar', '/login'], ['Criar conta', '/register'], ['Recuperar senha', '/forgot-password']] },
     { title: 'Área de edição', links: [['Início do estúdio', '/dev/redesign/hub'], ['Botões e estados', '/dev/redesign/controles'], ['Histórico', '/dev/redesign/historico'], ['Calculadora', '/dev/redesign/calculadora'], ['Famous Hey', '/dev/redesign/famous-hey'], ['FakePrint', '/dev/redesign/fakepass'], ['Legendas Automáticas', '/dev/redesign/tipografia'], ['Decupagem', '/dev/redesign/decupagem'], ['Camuflagem', '/dev/redesign/camuflagem'], ['Lipsync', '/dev/redesign/lipsync'], ['Gerador de SRT', '/dev/redesign/copy-srt'], ['Compressor', '/dev/redesign/compressor'], ['Downloader', '/dev/redesign/downloader'], ['Normalizador', '/dev/redesign/normalizador'], ['Mixer de Velocidade', '/dev/redesign/acelerador'], ['Dividir áudios', '/dev/redesign/audio-split']] },
   ];
-  return <main><SiteHeader compact/><div className="ae-container ae-section"><div className="ae-section-heading"><h2>O novo Auto Edit.<br/><span>Preview para revisão.</span></h2><p>Versão local. As telas internas usam os componentes reais, sem simular uma conta autenticada. Geração, pagamento e acesso continuam sujeitos às regras existentes.</p></div>{sections.map(section=><section className="ae-review-group" key={section.title}><h3>{section.title}</h3><div>{section.links.map(([name,href])=><Link href={href} key={href}>{name}<span aria-hidden>↗</span></Link>)}</div></section>)}</div></main>;
+  return <main className="mx-auto max-w-[1100px] px-5 py-8"><Brand href="/" /><h1 className="hero-title mt-10">Visual original. Botões refinados.</h1><p className="mt-4 text-text-muted">Prévia local com os componentes reais. As regras de acesso e processamento continuam iguais.</p>{sections.map(section => <section className="mt-10" key={section.title}><h2 className="section-title">{section.title}</h2><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{section.links.map(([name,href]) => <Link className="btn-secondary" href={href} key={href}>{name}</Link>)}</div></section>)}</main>;
 }

@@ -115,7 +115,7 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
 
   return (
     <aside
-      className="ae-subsidebar fixed left-[84px] top-0 z-30 hidden h-screen w-[244px] flex-col border-r border-line/70 bg-bg-soft/70 backdrop-blur-xl md:flex"
+      className="fixed left-[84px] top-0 z-30 hidden h-screen w-[244px] flex-col border-r border-line/70 bg-bg-soft/70 backdrop-blur-xl md:flex"
       style={{
         boxShadow: '4px 0 24px -16px rgba(0,0,0,0.5)',
       }}

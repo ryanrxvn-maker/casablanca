@@ -75,7 +75,7 @@ export function TopBar() {
   return (
     <header
       className={
-        'ae-topbar sticky top-0 z-30 border-b transition-all duration-300 ' +
+        'sticky top-0 z-30 border-b transition-all duration-300 ' +
         (scrolled
           ? 'border-line/60 bg-bg/85 backdrop-blur-xl'
           : 'border-line/20 bg-bg/40 backdrop-blur-md')
@@ -84,7 +84,7 @@ export function TopBar() {
       <div
         className={
           'flex items-center justify-between gap-4 px-5 transition-all duration-300 md:px-8 ' +
-          'h-[68px]'
+          (scrolled ? 'h-12' : 'h-14')
         }
       >
         {/* Esquerda: título da rota */}

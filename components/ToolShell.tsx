@@ -25,7 +25,7 @@ export function ToolShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="ae-tool-shell">
+    <div className="mx-auto w-full max-w-[1080px] px-5 md:px-8">
       <ToolHero
         title={title}
         eyebrow={eyebrow}
@@ -33,7 +33,7 @@ export function ToolShell({
         hue={hue}
         icon={icon}
       />
-      <div className="ae-tool-panel">
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-7 backdrop-blur-sm">
         {children}
       </div>
     </div>

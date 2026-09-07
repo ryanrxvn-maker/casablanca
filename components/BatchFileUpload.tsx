@@ -1,7 +1,6 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { IconStepFiles } from './ToolIcons';
 import { cn, formatBytes } from '@/lib/utils';
 
 /**
@@ -86,7 +85,7 @@ export function BatchFileUpload({
         onDrop={handleDrop}
         onClick={() => !disabled && inputRef.current?.click()}
         className={cn(
-          'ae-batch-upload group flex flex-col items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-dashed px-5 py-8 text-center transition-all duration-300',
+          'group flex flex-col items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-dashed px-5 py-8 text-center transition-all duration-300',
           disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
           dragging
             ? 'scale-[1.02] border-lime bg-lime/10 shadow-[0_0_40px_-8px_rgba(200,232,124,0.6)]'
@@ -106,7 +105,7 @@ export function BatchFileUpload({
             e.target.value = '';
           }}
         />
-        <span className="ae-upload-emblem" aria-hidden="true"><IconStepFiles size={26} /></span><div className="ae-upload-title text-sm text-text">{label}</div>
+        <div className="text-sm text-text">{label}</div>
         <div className="text-xs text-text-muted">
           {hint ? hint + ' · ' : ''}Até {max} arquivos por lote
         </div>

@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
 
 import localFont from 'next/font/local';
-import { PointerLight } from '@/components/redesign/PointerLight';
-import { BrandMotion } from '@/components/redesign/BrandMotion';
+import { MouseGlow } from '@/components/MouseGlow';
+import { RippleRoot } from '@/components/RippleRoot';
+import { FloatingOrbs } from '@/components/FloatingOrbs';
 import { WhatsAppFab } from '@/components/WhatsAppFab';
 import { ThemeManager } from '@/components/ThemeManager';
 import { ChunkGuard } from '@/components/ChunkGuard';
 import './globals.css';
-import './redesign.css';
-import './refinement.css';
+import './button-refinements.css';
 
 // Original typefaces, served locally for consistent previews and builds.
 const display = localFont({ src: '../public/fonts/site-space-grotesk.woff2', variable: '--font-display', weight: '300 700', display: 'swap' });
@@ -170,7 +170,7 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable} ${label.variable}`}
     >
-      <body className="ae-redesign">
+      <body className="ae-refined-controls">
         {/* Anti-flash: aplica o tema salvo ANTES da pintura, mas SÓ dentro da
             conta (app). Landing e páginas públicas ficam sempre dark. /planos
             só fica claro se aberto via upgrade (?upgrade). Default = dark. */}
@@ -187,7 +187,9 @@ export default function RootLayout({
         />
         <ChunkGuard />
         <ThemeManager />
-        <BrandMotion /><PointerLight />
+        <FloatingOrbs />
+        <MouseGlow />
+        <RippleRoot />
         {children}
         <WhatsAppFab />
       </body>
