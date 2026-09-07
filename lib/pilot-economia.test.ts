@@ -1,5 +1,9 @@
 import {
   MOTOR_ECONOMIA,
+  ehIdSintetico,
+  idDaCena,
+  idSinteticoDaCena,
+  statusDasCenas,
   motivoLegivel,
   planejarEconomia,
   podeEconomia,
@@ -154,9 +158,37 @@ console.log('pilot-economia:');
   eq(r[0].error, 'a cena renderizou mas o vídeo não foi capturado', 'render sem captura é erro nomeado');
 }
 {
-  // só videoUrl (sem id) ainda é sucesso: o Pilot baixa pela URL
+  // só videoUrl (sem id): entra com ID SINTÉTICO, senão o Pilot filtra por
+  // videoId e o take some sem erro nenhum.
   const r = resultadosParaRunner([0], [take({ label: 'HOOK 1' })], [{ idx: 0, videoUrl: 'https://x/cena.mp4' }]);
   eq(r[0].error, null, 'cena com URL e sem id conta como sucesso');
+  eq(r[0].videoId, 'eco:0', 'e ganha um id sintético — nunca videoId null com error null');
+  ok(ehIdSintetico(r[0].videoId), 'o id sintético é reconhecível');
+  ok(r.every((x) => (x.videoId === null) === (x.error !== null)), 'contrato: ou tem id, ou tem erro — nunca os dois nulos');
+}
+{
+  // o id do HeyGen, quando existe, vence o sintético
+  const r = resultadosParaRunner([0], [take({ label: 'HOOK 1' })], [{ idx: 0, videoId: 'v-real', videoUrl: 'https://x/c.mp4' }]);
+  eq(r[0].videoId, 'v-real', 'id real do HeyGen vence o sintético');
+  ok(!ehIdSintetico(r[0].videoId), 'e não é marcado como sintético');
+}
+{
+  // statusDasCenas: pré-preenche o mapa que o pipeline consulta pra baixar
+  const st = statusDasCenas([
+    { idx: 0, videoUrl: 'https://x/a.mp4' },
+    { idx: 1, videoId: 'v9', videoUrl: 'https://x/b.mp4' },
+    { idx: 2, error: 'falhou' },
+    { idx: 3, videoId: 'v10' },
+  ]);
+  eq(Object.keys(st).sort(), ['eco:0', 'v9'], 'só cenas com URL entram no mapa de status');
+  eq(st['eco:0'], { videoId: 'eco:0', status: 'completed', videoUrl: 'https://x/a.mp4' }, 'a cena nasce completed com a URL');
+  eq(st['v9'].videoId, 'v9', 'cena com id real usa o id real como chave');
+  ok(!('eco:2' in st) && !('v10' in st), 'cena com erro e cena sem URL ficam de fora');
+}
+{
+  eq(idSinteticoDaCena(7), 'eco:7', 'o id sintético carrega o índice do plano');
+  ok(!ehIdSintetico('abc123') && !ehIdSintetico(null), 'id do HeyGen e null não são sintéticos');
+  eq(idDaCena({ idx: 4 }), null, 'cena sem id e sem URL não tem id');
 }
 
 /* ─── 8. índices salteados (parte do AD foi pelo modo economia) ─── */

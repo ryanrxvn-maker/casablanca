@@ -92,6 +92,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_ECONOMY_GENERATE') {
+    // MODO ECONOMIA — Studio por TEXTO, "Render Scene" por cena (sem crédito).
+    const requestId = msg.requestId;
+    handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_JOB').catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_STUDIO_GENERATE') {
     // VA de avatar — fluxo HeyGen Studio cena-por-cena (Mirror voice).
     const requestId = msg.requestId;
@@ -1002,8 +1014,9 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
  * roteia pro HG_RUN_STUDIO_JOB. Registra em activeJobs pra os HG_TAB_*
  * (progress/result/error) serem relayados pra page.
  */
-async function handleStudioGenerate(requestId, payload, bridgeTabId) {
-  console.log('[DARKO LAB BG] handleStudioGenerate START reqId=', requestId);
+async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
+  const jobMsg = tipoJob || 'HG_RUN_STUDIO_JOB';
+  console.log('[DARKO LAB BG] handleStudioGenerate START reqId=', requestId, 'job=', jobMsg);
   const tab = await findOrCreateHeyGenTab();
   activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
 
@@ -1038,11 +1051,11 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId) {
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });
   try {
     await chrome.tabs.sendMessage(tab.id, {
-      type: 'HG_RUN_STUDIO_JOB',
+      type: jobMsg,
       requestId,
       payload,
     });
-    console.log('[DARKO LAB BG] HG_RUN_STUDIO_JOB despachado pra tab', tab.id);
+    console.log('[DARKO LAB BG]', jobMsg, 'despachado pra tab', tab.id);
   } catch (e) {
     activeJobs.delete(requestId);
     reportToPage(bridgeTabId, requestId, 'HG_ERROR', {

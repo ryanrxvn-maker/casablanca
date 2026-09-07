@@ -70,6 +70,19 @@
       return;
     }
 
+    if (data.type === 'HG_ECONOMY_GENERATE') {
+      // MODO ECONOMIA: Studio por texto, Render Scene por cena (sem crédito).
+      const requestId = data.requestId;
+      // ACK imediato: sem ele, extensão velha (que ignora este tipo) deixaria a
+      // página esperando pra sempre por um job que nunca começou.
+      sendToPage({ type: 'HG_ECONOMY_ACK', requestId });
+      relayToBg(
+        { type: 'HG_ECONOMY_GENERATE', requestId, payload: data.payload },
+        (error) => ({ type: 'HG_ERROR', requestId, error }),
+      );
+      return;
+    }
+
     if (data.type === 'HG_CANCEL') {
       try { chrome.runtime.sendMessage({ type: 'HG_CANCEL', requestId: data.requestId }); } catch {}
       return;

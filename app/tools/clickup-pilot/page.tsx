@@ -52,7 +52,7 @@ import {
   canalDoTaskId,
   taskIdBase,
 } from '@/lib/versao-canal';
-import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
+import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension, gerarPelaEconomia } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   pollVideosUntilReady,
@@ -164,9 +164,14 @@ import { DocsBar, CreatorBar } from '@/components/PilotFontesBar';
 import {
   MOTOR_ECONOMIA,
   motivoLegivel,
+  planejarEconomia,
   podeEconomia,
   recusaDaParte,
+  resultadosParaRunner,
+  resumoDoPlano,
+  statusDasCenas,
   type ParteDoPlano,
+  type ResultadoCena,
 } from '@/lib/pilot-economia';
 import {
   isDrMillionFormat,
@@ -5151,35 +5156,6 @@ function ClickUpPilotInner() {
     const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_')
       + (canalVersao === 'youtube' ? '_V2' : '');
 
-    // ═══ MODO ECONOMIA: portão ANTES de qualquer coisa cara ═══
-    // Ligado, o disparo TEM que sair pelo Studio (Render Scene, sem crédito).
-    // Enquanto o runner do Studio não estiver disponível nesta extensão, o
-    // Pilot PARA aqui: deixar cair no caminho normal cobraria a conta que o
-    // modo existe pra não cobrar, e ainda por cima calado.
-    if (isEconomiaEnabled(taskId)) {
-      const partesEco = plan
-        ? plan.parts.map((p: any) => ({
-            label: p.label, text: p.text, avatarId: p.avatarId,
-            imageKey: p.imageKey, audioKey: p.audioKey,
-            motionPrompt: p.motionPrompt, engine: p.engine,
-          }))
-        : [];
-      const impedida = partesEco.map(recusaDaParte).find(Boolean);
-      const motivo = impedida
-        ? `o AD tem take que não pode ir pelo Studio (${motivoLegivel(impedida)})`
-        : 'o runner do Studio ainda não está disponível nesta versão da extensão';
-      const msg = `Modo economia ligado, mas ${motivo}. O disparo foi BARRADO de propósito: sair pelo caminho normal consumiria crédito, que é justamente o que o modo evita. Desligue o modo economia pra disparar pela API.`;
-      console.warn(`[clickup-pilot] ${msg}`);
-      setBatchStates((prev) => ({
-        ...prev,
-        [taskId]: {
-          ...(prev[taskId] || { taskId, taskName: rTaskName, baseAdId: rBaseAdId, parts: [], startedAt: Date.now() }),
-          phase: 'failed', message: msg, finishedAt: Date.now(),
-        } as BatchTaskState,
-      }));
-      return;
-    }
-
     // Re-run da mesma task: revoga blob URLs antigos pra nao vazar memoria
     for (const url of [batchStates[taskId]?.zipBlobUrl, batchStates[taskId]?.montadoZipUrl, batchStates[taskId]?.camufladoZipUrl]) {
       if (url) { try { URL.revokeObjectURL(url); } catch {} }
@@ -5432,7 +5408,94 @@ function ClickUpPilotInner() {
         setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
         return;
       }
-      const resultsEnviados = await runHeyGenJobs(jobs, {
+      // O MESMO registro pros dois caminhos de disparo (API e Studio). Deixar
+      // essa regra duplicada já custou caro neste projeto: um lado carimbava o
+      // take e o outro não, e o card mentia sobre o que gerou o vídeo.
+      const registrarResultado = (r: RunnerResult) => {
+        // r.index é 1-based na lista ENVIADA; traduz pro índice da part.
+        // Sem dedup, minhasIdx[i] === i (comportamento de sempre).
+        const orig = minhasIdx[r.index - 1];
+        if (orig === undefined) return;
+        setBatchStates((prev) => {
+          const s = prev[taskId];
+          if (!s) return prev;
+          // Carimba o que gerou este take (o plano DESTE disparo), pra o card
+          // poder acusar depois que o plano mudou e o take ficou pra tras.
+          const doPlano = replan?.parts?.find((x) => x.label === s.parts[orig]?.label);
+          const newParts = s.parts.map((p, i) => i === orig ? {
+            ...p,
+            videoId: r.videoId,
+            error: r.error,
+            usouAvatarId: doPlano?.avatarId ?? p.usouAvatarId ?? null,
+            usouVoiceId: doPlano?.voiceId ?? p.usouVoiceId ?? null,
+            usouEngine: doPlano?.engine ? String(doPlano.engine).toUpperCase() : (p.usouEngine ?? null),
+          } : p);
+          return { ...prev, [taskId]: { ...s, parts: newParts } };
+        });
+      };
+
+      /* ═══ MODO ECONOMIA: disparo pelo STUDIO, sem consumir crédito ═══
+       * Um projeto do Studio por AVATAR (o editor nasce amarrado a um look),
+       * uma cena por take, "Render Scene" em cada. Os projetos vão em SÉRIE:
+       * a extensão tem um slot único de job e duas tasks ao mesmo tempo se
+       * atropelariam. Devolve o MESMO contrato do runHeyGenJobs, então poll,
+       * download, auto-cura e montagem seguem sem saber de onde veio. */
+      let statusEconomia: Record<string, VideoStatus> = {};
+      const dispararPeloStudio = async (): Promise<RunnerResult[]> => {
+        const partesEco: ParteDoPlano[] = minhasIdx.map((i) => {
+          const p: any = plan!.parts[i];
+          const lib = p.avatarId ? findAvatarOptionById(p.avatarId) : null;
+          return {
+            label: p.label, text: p.text, avatarId: p.avatarId,
+            groupId: (lib as any)?.groupId ?? null,
+            avatarName: p.avatarName ?? null,
+            voiceId: p.voiceId ?? null, voiceName: p.voiceName ?? null,
+            motionPrompt: null, engine: MOTOR_ECONOMIA,
+            imageKey: p.imageKey ?? null, audioKey: p.audioKey ?? null,
+          };
+        });
+        const planoEco = planejarEconomia(partesEco);
+        for (const av of planoEco.avisos) console.warn(`[clickup-pilot] economia ${av.label}: ${av.detalhe}`);
+        if (planoEco.recusas.length > 0) {
+          const r = planoEco.recusas[0];
+          throw new Error(`Modo economia: o take ${r.label} não pode ir pelo Studio (${motivoLegivel(r.motivo)}). Nada foi gerado.`);
+        }
+        console.log(`[clickup-pilot] MODO ECONOMIA ${taskId}: ${resumoDoPlano(planoEco)}`);
+        const cenasFeitas: ResultadoCena[] = [];
+        let erroParcial: string | null = null;
+        for (let n = 0; n < planoEco.projetos.length && !erroParcial; n++) {
+          if (batchCancelRef.current[taskId]) break;
+          const proj = planoEco.projetos[n];
+          const rotulo = `${adNameClean} ${planoEco.projetos.length > 1 ? `(${n + 1}/${planoEco.projetos.length}) ` : ''}`;
+          setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}Studio: ${proj.cenas.length} cena(s), sem consumir crédito...` } } : prev));
+          try {
+            const res = await gerarPelaEconomia(
+              {
+                avatarId: proj.avatarId, groupId: proj.groupId,
+                avatarName: proj.avatarName, voiceName: proj.voiceName,
+                jobLabel: adNameClean,
+                cenas: proj.cenas.map((c) => ({ idx: c.idx, label: c.label, texto: c.texto })),
+              },
+              (stage) => {
+                setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}${stage}` } } : prev));
+              },
+            );
+            cenasFeitas.push(...(res.cenas || []));
+            if (res.erro) erroParcial = res.erro;
+          } catch (e) {
+            erroParcial = (e as Error)?.message || String(e);
+          }
+        }
+        if (erroParcial) console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
+        // Cena pronta já nasce 'completed' com a URL: o poll pula e o download
+        // do pipeline pega no lugar de sempre.
+        statusEconomia = statusDasCenas(cenasFeitas) as unknown as Record<string, VideoStatus>;
+        const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas);
+        for (const r of rs) registrarResultado(r);
+        return rs;
+      };
+
+      const resultsEnviados = isEconomiaEnabled(taskId) ? await dispararPeloStudio() : await runHeyGenJobs(jobs, {
         parallel: 3,
         mode: 'copy',
         avatarId: plan!.parts[0]?.avatarId || '',
@@ -5441,28 +5504,7 @@ function ClickUpPilotInner() {
         adNameSafe: adNameClean,
         isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: () => {},
-        onResult: (r) => {
-          // r.index é 1-based na lista ENVIADA; traduz pro índice da part.
-          // Sem dedup, minhasIdx[i] === i (comportamento de sempre).
-          const orig = minhasIdx[r.index - 1];
-          if (orig === undefined) return;
-          setBatchStates((prev) => {
-            const s = prev[taskId];
-            if (!s) return prev;
-            // Carimba o que gerou este take (o plano DESTE disparo), pra o card
-            // poder acusar depois que o plano mudou e o take ficou pra tras.
-            const doPlano = replan?.parts?.find((x) => x.label === s.parts[orig]?.label);
-            const newParts = s.parts.map((p, i) => i === orig ? {
-              ...p,
-              videoId: r.videoId,
-              error: r.error,
-              usouAvatarId: doPlano?.avatarId ?? p.usouAvatarId ?? null,
-              usouVoiceId: doPlano?.voiceId ?? p.usouVoiceId ?? null,
-              usouEngine: doPlano?.engine ? String(doPlano.engine).toUpperCase() : (p.usouEngine ?? null),
-            } : p);
-            return { ...prev, [taskId]: { ...s, parts: newParts } };
-          });
-        },
+        onResult: registrarResultado,
       });
 
       // Libera as reservas: quem esperava por estas falas recebe o videoId
@@ -5536,7 +5578,13 @@ function ClickUpPilotInner() {
       // 2. Poll status ate todos prontos (ou alguns falharem)
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'rendering', message: `Aguardando renderizacao no HeyGen (${validIds.length} videos)...` } }));
       let renderHealthNote = '';
-      const finalStatuses = await pollVideosUntilReady(validIds, {
+      // MODO ECONOMIA: cena renderizada no Studio já volta pronta, com a URL —
+      // não há o que esperar no HeyGen. Ela entra em `finalStatuses` como
+      // 'completed' e fica de fora do poll (o id sintético `eco:` não existe na
+      // API e o poll só ficaria girando à toa).
+      const idsPraPoll = validIds.filter((id) => !statusEconomia[id]);
+      const finalStatuses: Record<string, VideoStatus> = { ...statusEconomia };
+      Object.assign(finalStatuses, idsPraPoll.length === 0 ? {} : await pollVideosUntilReady(idsPraPoll, {
         intervalMs: 8000,
         timeoutMs: 30 * 60 * 1000,
         // Teto em plataforma SAUDÁVEL. Quando o monitor acusa lentidão, o poll
@@ -5557,7 +5605,7 @@ function ClickUpPilotInner() {
             return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos${renderHealthNote}` } };
           });
         },
-      });
+      }));
 
       // 3. Download em paralelo (3 simultaneos) + coleta blobs em memoria pra
       //    pipeline pos-producao (concat + decupagem + camuflagem).

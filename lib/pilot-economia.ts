@@ -232,6 +232,49 @@ export type ResultadoRunner = {
   error: string | null;
 };
 
+/* ─────────── id sintético ───────────
+ * O pipeline do Pilot é todo ancorado em `videoId`: ele filtra
+ * `results.filter(r => r.videoId)`, faz poll com essa lista e baixa por
+ * `finalStatuses[videoId].videoUrl`. Uma cena que renderiza e devolve só a
+ * URL (o caso mais provável do Render Scene) NÃO tem id pollável — e passaria
+ * pelo filtro como se nunca tivesse disparado, calada.
+ *
+ * Então a cena com URL ganha um id SINTÉTICO e o chamador pré-preenche o mapa
+ * de status como 'completed'. O poll não tem o que esperar e o download acha a
+ * URL no lugar de sempre: o resto do pipeline não sabe a diferença. */
+export const ID_SINTETICO_PREFIXO = 'eco:';
+
+export function idSinteticoDaCena(idx: number): string {
+  return `${ID_SINTETICO_PREFIXO}${idx}`;
+}
+
+export function ehIdSintetico(id: string | null | undefined): boolean {
+  return typeof id === 'string' && id.startsWith(ID_SINTETICO_PREFIXO);
+}
+
+/** O id que representa a cena no pipeline: o do HeyGen quando existe, senão o
+ *  sintético (que só vale porque vem acompanhado da URL). */
+export function idDaCena(c: ResultadoCena): string | null {
+  if (c.videoId) return c.videoId;
+  if (c.videoUrl) return idSinteticoDaCena(c.idx);
+  return null;
+}
+
+export type StatusDaCena = { videoId: string; status: 'completed'; videoUrl: string };
+
+/** Mapa pronto pra entrar em `finalStatuses`: toda cena que voltou com URL já
+ *  nasce 'completed', então o poll pula e o download acontece direto. */
+export function statusDasCenas(cenas: ResultadoCena[]): Record<string, StatusDaCena> {
+  const out: Record<string, StatusDaCena> = {};
+  for (const c of cenas) {
+    if (c.error || !c.videoUrl) continue;
+    const id = idDaCena(c);
+    if (!id) continue;
+    out[id] = { videoId: id, status: 'completed', videoUrl: c.videoUrl };
+  }
+  return out;
+}
+
 /**
  * Adapta os resultados das cenas pro MESMO contrato que `runHeyGenJobs`
  * devolve, alinhado 1:1 com a lista de takes enviada. É o que faz o resto do
@@ -255,10 +298,13 @@ export function resultadosParaRunner(
       return { index: i + 1, label, videoId: null, error: 'a cena não voltou do Studio' };
     }
     if (c.error) return { index: i + 1, label, videoId: null, error: c.error };
-    if (!c.videoId && !c.videoUrl) {
+    const id = idDaCena(c);
+    if (!id) {
       return { index: i + 1, label, videoId: null, error: 'a cena renderizou mas o vídeo não foi capturado' };
     }
-    return { index: i + 1, label, videoId: c.videoId ?? null, error: null };
+    // Cena só com URL entra com id sintético — sem isso ela sumiria do
+    // `results.filter(r => r.videoId)` do Pilot sem erro nenhum.
+    return { index: i + 1, label, videoId: id, error: null };
   });
 }
 
