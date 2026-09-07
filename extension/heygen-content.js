@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.21.2';
+const DARKO_EXT_VERSION = '4.21.7';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -3123,13 +3123,24 @@ function dentroDeAnuncio(el) {
   return false;
 }
 
-/** True se este no CONTEM o editor. Guarda-corpo do dismiss: esconder um
- *  container que engloba o editor apagaria a tela inteira. */
+/** True se este no CONTEM qualquer parte viva do editor. Guarda-corpo do
+ *  dismiss.
+ *  ⚠ A 1a versao so olhava o painel ESQUERDO (campo de script, Add scene).
+ *  O controle de motor mora no painel DIREITO — entao um container que
+ *  englobasse o painel direito passava no guarda e era escondido, e o motor
+ *  "sumia" do DOM. Sintoma exato: t1 acha o controle, t2/t3 dizem "controle
+ *  nao achado". Agora o guarda cobre os DOIS lados. */
 function contemOEditor(el) {
   try {
+    // painel esquerdo (script)
     if (el.querySelector('[contenteditable="true"], textarea')) return true;
     const add = findAddSceneButton();
     if (add && el.contains(add)) return true;
+    // painel direito (motor / Motion Engine)
+    for (const b of el.querySelectorAll('button[aria-haspopup="menu"]')) {
+      if (/^Avatar (III|IV|V)/.test((b.textContent || '').trim())) return true;
+    }
+    if (/motion engine/i.test(el.textContent || '')) return true;
   } catch (e) {}
   return false;
 }
@@ -3154,13 +3165,66 @@ function acharAnuncioSemRole() {
   return null;
 }
 
+/** O editor esta vivo na tela? O painel direito (motor) e o sinal. */
+function editorVivo() {
+  if (/motion engine/i.test(document.body.textContent || '')) return true;
+  for (const b of document.querySelectorAll('button[aria-haspopup="menu"]')) {
+    if (/^Avatar (III|IV|V)/.test((b.textContent || '').trim())) return true;
+  }
+  return false;
+}
+
+/* O anuncio "New HeyGen plans are here" NAO e um overlay: ele TOMA A TELA e o
+ * editor some (medido — o rotulo "Motion Engine" deixa de existir na pagina
+ * inteira). Esconder container nao resolve, porque nao ha nada por baixo.
+ *
+ * A saida segura e fechar como um humano fecharia: SO controles de fechar.
+ * ⚠ NUNCA clicar em botao de acao dessa tela ("Upgrade", "Switch", "Choose
+ * plan", "Continue"): e tela de PLANO e um clique errado pode assinar. A lista
+ * abaixo e de rotulos que so podem DISPENSAR. */
+const ROTULOS_DE_FECHAR = ['close', 'dismiss', 'skip', 'maybe later', 'not now', 'no thanks', 'later', '×', '✕', 'x'];
+function fecharTomadaDeTela(where) {
+  if (editorVivo()) return false;
+  let cliques = 0;
+  const cands = [];
+  for (const b of document.querySelectorAll('button, [role="button"], [aria-label]')) {
+    if (!estaNaTela(b)) continue;
+    const txt = (b.textContent || '').trim().toLowerCase();
+    const al = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+    const r = b.getBoundingClientRect();
+    cands.push(`${(txt || al || '?').slice(0, 18)}@${Math.round(r.width)}x${Math.round(r.height)}`);
+    // ⚠ SO rotulo EXPLICITO de dispensar. A 1a versao tambem clicava "botao de
+    // icone pequeno sem rotulo" achando que era o X do canto — e clicou os
+    // botoes de ORIENTACAO do editor (portrait 9:16 / landscape 16:9). Clicar
+    // no escuro numa tela desconhecida nao e aceitavel.
+    const seguro =
+      ROTULOS_DE_FECHAR.includes(txt) ||
+      ROTULOS_DE_FECHAR.some((k) => al.includes(k));
+    if (!seguro) continue;
+    studioLog(`tomada de tela (${where}): fechando "${txt || al || 'icone'}"`);
+    cliqueSinteticoEm(b);
+    cliques++;
+    if (cliques >= 3) break;
+  }
+  try {
+    if (typeof motorNota === 'function') {
+      motorNota(`tomada de tela: ${cliques} clique(s) de fechar; url=${location.pathname}; botoes: ${cands.slice(0, 10).join(' / ')}`);
+    }
+  } catch (e) {}
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  return cliques > 0;
+}
+
 function studioDismissPaywallIfShown(where) {
   let dismissed = 0;
   const semRole = acharAnuncioSemRole();
   if (semRole) {
+    const r = semRole.getBoundingClientRect();
     semRole.style.display = 'none';
     dismissed++;
-    studioLog(`paywall (${where}): anuncio sem role "${(semRole.textContent || '').trim().slice(0, 40)}" escondido`);
+    const nota = `escondi ${semRole.tagName} ${Math.round(r.width)}x${Math.round(r.height)} "${(semRole.textContent || '').trim().slice(0, 30)}"`;
+    studioLog(`paywall (${where}): anuncio sem role — ${nota}`);
+    try { if (typeof motorNota === 'function') motorNota(nota); } catch (e) {}
   }
   for (const d of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
     if (d.offsetParent === null || d.style.display === 'none') continue;
@@ -3326,18 +3390,41 @@ function motivoDoMotor() { return ultimoMotivoDoMotor || 'sem detalhe'; }
 async function setStudioMotorAvatarIII(sceneLabel) {
   const target = 'Avatar III';
   ultimoMotivoDoMotor = '';
+  // ⚠ ESPERAR o painel direito montar, em vez de assumir que ja esta la.
+  // MEDIDO: o job chegava aqui com o editor montado pela metade — Script,
+  // Upload audio e Generate ja na tela, mas o painel do Motion Engine ainda
+  // nao. As 3 tentativas de 800ms davam ~3s no total e o job desistia com
+  // "controle nao achado" de um controle que ia aparecer logo depois.
+  const apareceu = await waitForOrNull(() => {
+    studioDismissPaywallIfShown(`${sceneLabel} espera do motor`);
+    return findStudioMotorControl();
+  }, 30000, 700);
+  if (!apareceu) {
+    motorNota(`espera de 30s: painel do motor nao montou`);
+  }
   for (let attempt = 1; attempt <= 3; attempt++) {
     // Um anuncio do HeyGen pode nascer DEPOIS da entrada, no meio do laco —
     // foi assim que "New HeyGen plans are here" derrubou o disparo. Limpa em
     // TODA tentativa, nao so na entrada.
     studioDismissPaywallIfShown(`${sceneLabel} motor t${attempt}`);
+    // Editor sumiu da tela? E a tela de planos tomando o lugar dele. Fecha e
+    // da tempo do editor voltar antes de procurar o controle.
+    if (!editorVivo() && fecharTomadaDeTela(`${sceneLabel} t${attempt}`)) {
+      await waitForOrNull(() => (editorVivo() ? true : null), 12000, 500);
+    }
     const ctrl = findStudioMotorControl();
     if (!ctrl) {
       const vistos = [...document.querySelectorAll('button, [role="button"], div, span')]
         .filter((e) => e.offsetParent !== null && /Avatar\s*(III|IV|V)/.test((e.textContent || '').trim()))
         .slice(0, 4)
         .map((e) => `${e.tagName}"${(e.textContent || '').trim().slice(0, 24)}"`);
-      motorNota(`t${attempt}: controle nao achado (candidatos c/ "Avatar N": ${vistos.join(', ') || 'nenhum'})`);
+      const temRotuloMotor = /motion engine/i.test(document.body.textContent || '');
+      const nGatilhos = document.querySelectorAll('button[aria-haspopup="menu"]').length;
+      motorNota(
+        `t${attempt}: controle nao achado (candidatos c/ "Avatar N": ${vistos.join(', ') || 'nenhum'}` +
+        `; rotulo "Motion Engine": ${temRotuloMotor}; gatilhos: ${nGatilhos}; url=${location.pathname}` +
+        `; TELA="${(document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 200)}")`,
+      );
       studioWarn(`${sceneLabel}: controle Motion Engine nao achado (tentativa ${attempt})`);
       await sleep(800);
       continue;
