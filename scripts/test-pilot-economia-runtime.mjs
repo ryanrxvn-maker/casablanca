@@ -21,7 +21,7 @@ function declarations(file, names) {
 }
 
 const source = declarations('extension/heygen-content.js', [
-  'runEconomyJobApi', 'ecoExigirJobAtivo', 'ecoEsperarTakeApi', 'ecoPublicarCena', 'ecoAguardarEtapa',
+  'runEconomyJobApi', 'ecoExigirJobAtivo', 'ecoEsperarTakeApi', 'ecoPublicarCena', 'ecoAguardarEtapa', 'ecoRenderCenaResiliente',
   'ecoDraftEscreverCena', 'ecoIdsDaCena', 'ecoFaixaDaCena', 'ecoPctDaEspera',
   'ecoProgresso', 'ecoZerarProgresso',
 ]);
@@ -426,4 +426,29 @@ test('TTS lento recebe pulsos sem invadir etapa seguinte nem atrasar conclusão'
   assert.ok(h.progress.every((p, i) => p.pct > 10 && p.pct < 20 && (!i || p.pct > h.progress[i - 1].pct)));
   finish('audio pronto'); assert.equal(await pending, 'audio pronto');
   tick(); await new Promise(setImmediate); assert.equal(h.progress.length, 3);
+});
+
+for (const http of [0, 502, 403]) {
+  test(`render HTTP ${http}: retentativa limitada e reutiliza exatamente a fala e o draft`, async () => {
+    let calls = 0, firstArgs;
+    const h = harness({ ecoRenderCenaApi: async args => {
+      calls++;
+      if (calls === 1) { firstArgs = args; return { ok: false, http }; }
+      assert.equal(args, firstArgs);
+      return { ok: true, data: { video_url: 'https://test/recovered.mp4' } };
+    } });
+    h.ctx.currentJob = 'job';
+    const r = await h.ctx.ecoRenderCenaResiliente('job', { wrapper: {}, videoId: 'bench' });
+    assert.equal(calls, http === 403 ? 1 : 2);
+    assert.equal(r.ok, http !== 403);
+  });
+}
+
+test('cancelamento no intervalo da retentativa impede outro POST', async () => {
+  let calls = 0;
+  const h = harness(ctx => ({ ecoRenderCenaApi: async () => { calls++; return { ok: false, http: 502 }; },
+    sleep: async () => { ctx.ecoCancelado = true; } }));
+  h.ctx.currentJob = 'job';
+  await assert.rejects(h.ctx.ecoRenderCenaResiliente('job', {}));
+  assert.equal(calls, 1);
 });

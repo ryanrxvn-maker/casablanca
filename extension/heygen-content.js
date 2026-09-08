@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.39.0';
+const DARKO_EXT_VERSION = '4.39.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -5077,6 +5077,22 @@ async function ecoRenderCenaApi({ videoId, sceneId, wrapper, title }) {
   return r;
 }
 
+// Somente o render de cena (Avatar III) e o MESMO draft/TTS. Uma falha de
+// transporte pode acontecer após a aceitação: não trocar texto nem refazer
+// TTS, para permitir o reaproveitamento do render/cache pelo servidor.
+async function ecoRenderCenaResiliente(requestId, args, aoRepetir) {
+  let r = await ecoRenderCenaApi(args);
+  ecoExigirJobAtivo(requestId);
+  if (!r.ok && (r.http === 0 || r.http >= 500)) {
+    if (aoRepetir) aoRepetir();
+    await sleep(2000);
+    ecoExigirJobAtivo(requestId);
+    r = await ecoRenderCenaApi(args);
+    ecoExigirJobAtivo(requestId);
+  }
+  return r;
+}
+
 async function ecoRenderCenaApiBruto({ videoId, sceneId, wrapper, title }) {
   return await ecoApiJson('v1/text_draft.scene_avatar_preview', {
     metodo: 'POST',
@@ -5604,7 +5620,8 @@ async function runEconomyJobApi(requestId, payload) {
 
         ecoProgresso(requestId, `${rot}: renderizando (Avatar III, 0 credito)...`, inicio + largura * 0.32);
         const r = await ecoAguardarEtapa(requestId,
-          () => ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title }),
+          () => ecoRenderCenaResiliente(requestId, { videoId, sceneId: ids.sceneId, wrapper, title },
+            () => ecoProgresso(requestId, `${rot}: falha temporaria no render; tentando mais uma vez com a fala pronta...`, inicio + largura * 0.32)),
           `${rot}: enviando o render`, inicio + largura * 0.32, inicio + largura * 0.355);
         ecoExigirJobAtivo(requestId);
         if (!r.ok) {
