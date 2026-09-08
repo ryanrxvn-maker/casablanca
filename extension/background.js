@@ -119,6 +119,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_ECONOMY_API_GENERATE') {
+    // MODO ECONOMIA POR API — sem DOM. O Studio so e aberto pra que o proprio
+    // app CRIE o projeto (a bancada); dali em diante e tudo JSON + endpoint.
+    const requestId = msg.requestId;
+    handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_API').catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
+  if (msg.type === 'HG_ECO_SONDA_API') {
+    // Diagnostico do caminho por API: nao renderiza nada, so confere o mapa.
+    (async () => {
+      const tab = await findOrCreateHeyGenTab();
+      if (msg.abrirBancada) {
+        const g = msg.groupId, l = msg.lookId;
+        if (g && l) {
+          await chrome.tabs.update(tab.id, {
+            url: 'https://app.heygen.com/create-v4/draft?avatarGroup=' + encodeURIComponent(g) +
+                 '&defaultLookId=' + encodeURIComponent(l) + '&fromCreateButton=true',
+          });
+          await waitForTabComplete(tab.id, 40000);
+          await new Promise((r) => setTimeout(r, 4000));
+          await waitForTabReady(tab.id);
+        }
+      }
+      const bancadaId = await esperarBancada(tab.id, 60000);
+      const r = await chrome.tabs.sendMessage(tab.id, { type: 'HG_ECO_SONDA_API', bancadaId });
+      sendResponse({ ...r, bancadaId });
+    })().catch((e) => sendResponse({ ok: false, erro: String(e?.message || e) }));
+    return true;
+  }
+
   if (msg.type === 'HG_STUDIO_GENERATE') {
     // VA de avatar — fluxo HeyGen Studio cena-por-cena (Mirror voice).
     const requestId = msg.requestId;
@@ -1153,19 +1189,60 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     });
     return;
   }
-  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
-  console.log('[DARKO LAB BG] navegando direto pro editor Studio create-v4');
-  await chrome.tabs.update(tab.id, { url: studioUrl });
-  await waitForTabComplete(tab.id, 40000);
-  await new Promise((r) => setTimeout(r, 5000));
-  await waitForTabReady(tab.id);
+  // ⚠ O CAMINHO POR API NAO PRECISA DO STUDIO ABERTO. O content script roda em
+  // TODA pagina app.heygen.com, e o render e feito por endpoint com o cookie da
+  // aba. Navegar ate o editor custava ~56s por disparo e nao servia pra nada —
+  // pior, o app nem cria projeto em aba oculta, entao a navegacao so atrasava.
+  // So navega quando falta bancada (pra ter onde o app criar) ou no caminho DOM.
+  const bancadaPrevia =
+    jobMsg === 'HG_RUN_ECONOMY_API'
+      ? (payload && payload.bancadaId) || (await bancadaGuardada())
+      : null;
+  const jaNoHeyGen = /^https:\/\/app\.heygen\.com\//.test(tab.url || '');
+  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && bancadaPrevia && jaNoHeyGen;
+
+  if (!pularNavegacao) {
+    reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
+    console.log('[DARKO LAB BG] navegando direto pro editor Studio create-v4');
+    await chrome.tabs.update(tab.id, { url: studioUrl });
+    await waitForTabComplete(tab.id, 40000);
+    await new Promise((r) => setTimeout(r, 5000));
+    await waitForTabReady(tab.id);
+  } else {
+    console.log('[DARKO LAB BG] bancada conhecida — pulando a navegacao pro Studio');
+  }
+
+  // O caminho por API precisa de um PROJETO de verdade (a bancada). Navegar
+  // pra /create-v4/draft?...&fromCreateButton=true faz o proprio app criar o
+  // projeto e redirecionar pra /create-v4/<id> — e navegar e a unica coisa que
+  // sempre funcionou em aba oculta. Sem o id nao ha o que renderizar.
+  let bancadaId = null;
+  if (jobMsg === 'HG_RUN_ECONOMY_API') {
+    // Bancada explicita no payload (teste, ou a que ficou guardada): usa e
+    // pula a espera — o app NAO cria projeto sozinho em aba oculta, entao
+    // esperar a URL mudar so gastaria 90s pra falhar.
+    bancadaId = bancadaPrevia;
+    if (!bancadaId) {
+      reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Preparando o projeto no Studio...' });
+      bancadaId = await esperarBancada(tab.id, 20000);
+    }
+    if (!bancadaId) {
+      activeJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+        error: 'Nao consegui preparar o projeto do Studio (bancada). Nada foi cobrado.',
+      });
+      return;
+    }
+    await guardarBancada(bancadaId);
+    console.log('[DARKO LAB BG] bancada =', bancadaId);
+  }
 
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });
   try {
     await chrome.tabs.sendMessage(tab.id, {
       type: jobMsg,
       requestId,
-      payload: { ...payload, medirMarcaDagua: ecoMedirMarcaDagua },
+      payload: { ...payload, bancadaId, medirMarcaDagua: ecoMedirMarcaDagua },
     });
     console.log('[DARKO LAB BG]', jobMsg, 'despachado pra tab', tab.id);
   } catch (e) {
@@ -1174,6 +1251,40 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
       error: 'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' + (e?.message ?? '') + ')',
     });
   }
+}
+
+/**
+ * O id do projeto que o create-v4 esta editando, esperando o app criar.
+ * Ao abrir `/create-v4/draft?...&fromCreateButton=true` o app chama o
+ * `pacific/draft/create` dele e TROCA a URL pra `/create-v4/<id>`. Esse id e a
+ * bancada: e nele que o render de cena por API acontece.
+ */
+/** A bancada fica GUARDADA: criar projeto novo a cada disparo sujaria a conta
+ *  do usuario com dezenas de rascunhos. Uma so, reusada pra sempre. */
+async function bancadaGuardada() {
+  try {
+    const o = await chrome.storage.local.get('ecoBancadaId');
+    return (o && o.ecoBancadaId) || null;
+  } catch { return null; }
+}
+async function guardarBancada(id) {
+  try { await chrome.storage.local.set({ ecoBancadaId: id }); } catch {}
+}
+
+async function esperarBancada(tabId, tetoMs = 90000) {
+  const RE = /create-v4\/([a-zA-Z0-9]{16,})/;
+  const ate = Date.now() + tetoMs;
+  while (Date.now() < ate) {
+    try {
+      const t = await chrome.tabs.get(tabId);
+      const m = RE.exec(t.url || '');
+      if (m) return m[1];
+    } catch {
+      return null; // aba fechada
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return null;
 }
 
 /**

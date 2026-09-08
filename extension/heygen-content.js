@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.30.2';
+const DARKO_EXT_VERSION = '4.33.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -150,6 +150,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       reportError(msg.requestId, err?.message ?? String(err));
     });
     return false;
+  }
+  if (msg && msg.type === 'HG_RUN_ECONOMY_API') {
+    // MODO ECONOMIA POR API: escreve a cena no JSON do draft e chama o render
+    // de cena. Sem DOM. O caminho por DOM morre em aba oculta porque o app
+    // nunca roda o TTS e a duracao fica 0 (`H===0` desabilita o render).
+    runEconomyJobApi(msg.requestId, msg.payload).catch((err) => {
+      reportError(msg.requestId, (err && err.message) || String(err));
+    });
+    return false;
+  }
+  if (msg && msg.type === 'HG_ECO_SONDA_API') {
+    ecoSondaApi(msg.bancadaId).then((r) => sendResponse(r), (e) =>
+      sendResponse({ ok: false, erro: (e && e.message) || String(e) }));
+    return true;
   }
   if (msg && msg.type === 'HG_TEST_SESSION') {
     testSession()
@@ -4800,6 +4814,573 @@ async function runEconomyJob(requestId, payload) {
     currentJob = null;
     try { await cdpDetachBg(); } catch (e) {}
   }
+}
+
+
+/* ======================================================================== *
+ *  MODO ECONOMIA — CAMINHO POR API  (sem DOM, sem clique, sem painel)      *
+ * ======================================================================== *
+ *
+ * POR QUE ISTO EXISTE. O caminho por DOM chegou ao fim da linha, e a causa
+ * ficou MEDIDA, nao suposta: numa aba oculta o app do HeyGen nunca registra a
+ * edicao que a gente faz no editor. Com tudo certo — avatar, voz, Avatar III,
+ * script escrito, painel montado — o botao ficava `Render Scene(OFF)` e a cena
+ * em `0.0s`. Instrumentando `fetch` e `XHR` na pagina e colando a copy de
+ * verdade, o app disparou UMA requisicao em 12s: `/api/v2/rum` (telemetria do
+ * Datadog). Nenhum TTS, nenhum save.
+ *
+ * A regra de desabilitar, lida do bundle deles (`use_pub_sub-*.js`):
+ *
+ *     we = H===0 || K==='rendering' || K==='regenerating_audio'
+ *          || !(s!=null && s.length) || (!y&&x) || I || E || Z
+ *
+ * `H` e a DURACAO. Sem TTS a duracao e 0, e `H===0` desabilita o render pra
+ * sempre. Ou seja: dirigir o DOM em aba invisivel e arquiteturalmente morto.
+ *
+ * O QUE MUDA AQUI. Tudo que o painel controla mora, na verdade, no JSON do
+ * draft — e o endpoint de render recebe o draft inteiro no corpo:
+ *
+ *     script.elements[ttsId].text                  a fala
+ *     script.elements[ttsId].attributes.voice_id   a voz
+ *     visual.elements[avatarId].content.engine     'avatar_iii'
+ *     visual.elements[avatarId].content.use_unlimited_mode = true
+ *     metadata[ttsId].item_needs_tts               o GATILHO do TTS
+ *
+ * Quem roda o TTS nesse caminho e o SERVIDOR, no proprio render. Por isso o
+ * `H===0` deixa de existir: a duracao nasce do lado de la.
+ *
+ * O mapa das cenas e deterministico (conferido no draft real):
+ *
+ *     cena i  ->  sceneId  = visual.layout[i]
+ *                 avatarId = visual.elements[sceneId].content.elements[0]
+ *                 ttsId    = script.timeline[i]
+ *
+ * ⚠ MARCA D'AGUA: nada aqui mexe em `enable_watermark`. Quem decide e o
+ *   servidor, pela franquia. A gente paga o pedagio dos previews gratis
+ *   (ecoQueimarFranquiaApi) e so entao renderiza — e a URL que volta ainda
+ *   passa pela trava do `-marked-`. Take marcado NAO entra no AD.
+ *
+ * ⚠ CUSTO: a trava de Avatar III continua valendo, e agora e ESCRITA por nos
+ *   no proprio draft. `use_avatar_iv_model` vai a false em toda cena. Avatar IV
+ *   cobra addon (`AvatarIVExtraAddon`); III e declarado ilimitado pelo app.
+ */
+
+const ECO_API_BASE = 'https://api2.heygen.com/';
+
+/** fetch na API interna com cookie da aba e TETO DE TEMPO.
+ *  ⚠ O teto nao e decorativo: um dia inteiro se perdeu por causa de chamada
+ *  sem timeout que ficou 19 min pendurada e engoliu o job. */
+async function ecoApiJson(rota, { metodo = 'GET', corpo = null, tetoMs = 25000 } = {}) {
+  const ctl = new AbortController();
+  const alarme = setTimeout(() => ctl.abort(), tetoMs);
+  try {
+    const r = await fetch(ECO_API_BASE + rota, {
+      method: metodo,
+      credentials: 'include',
+      signal: ctl.signal,
+      headers: corpo ? { 'content-type': 'application/json' } : undefined,
+      body: corpo ? JSON.stringify(corpo) : undefined,
+    });
+    let j = null;
+    try { j = await r.json(); } catch (e) {}
+    return {
+      http: r.status,
+      ok: r.ok && (!j || j.code === 100 || j.code === undefined),
+      code: j ? j.code : null,
+      data: j ? j.data : null,
+      msg: (j && (j.message || (j.error && j.error.message))) || (r.ok ? '' : 'HTTP ' + r.status),
+    };
+  } catch (e) {
+    const morreuNoTeto = e && e.name === 'AbortError';
+    return { http: 0, ok: false, code: null, data: null, msg: morreuNoTeto ? `sem resposta em ${Math.round(tetoMs / 1000)}s` : String((e && e.message) || e) };
+  } finally {
+    clearTimeout(alarme);
+  }
+}
+
+/** O draft inteiro do projeto: { text_draft, metadata, video_output }. */
+async function ecoDraftLer(videoId) {
+  const r = await ecoApiJson('v1/text_draft.get?video_id=' + encodeURIComponent(videoId));
+  if (!r.ok || !r.data || !r.data.text_draft) {
+    throw new Error(`nao consegui ler o draft ${String(videoId).slice(0, 10)} — ${r.msg || 'resposta vazia'}`);
+  }
+  return { wrapper: r.data.text_draft, title: r.data.title || 'Auto Edit' };
+}
+
+/** Os tres ids de uma cena, pelo mapa deterministico do draft. */
+function ecoIdsDaCena(wrapper, i) {
+  const td = wrapper && wrapper.text_draft;
+  const layout = (td && td.visual && td.visual.layout) || [];
+  const timeline = (td && td.script && td.script.timeline) || [];
+  const sceneId = layout[i];
+  if (!sceneId) throw new Error(`o draft nao tem cena ${i + 1} (layout com ${layout.length})`);
+  const cena = td.visual.elements[sceneId];
+  const filhos = (cena && cena.content && cena.content.elements) || [];
+  let avatarId = null;
+  for (const id of filhos) {
+    const el = td.visual.elements[id];
+    if (el && el.type === 'avatar') { avatarId = id; break; }
+  }
+  const ttsId = timeline[i];
+  if (!avatarId) throw new Error(`a cena ${i + 1} do draft nao tem elemento de avatar`);
+  if (!ttsId || !td.script.elements[ttsId]) throw new Error(`a cena ${i + 1} do draft nao tem elemento de fala`);
+  return { sceneId, avatarId, ttsId };
+}
+
+/** Escreve a cena no JSON: fala, voz, avatar e a trava do Avatar III.
+ *  Devolve os ids usados. NAO chama a rede. */
+function ecoDraftEscreverCena(wrapper, i, { texto, voiceId, avatarId, groupId }) {
+  const td = wrapper.text_draft;
+  const ids = ecoIdsDaCena(wrapper, i);
+
+  // --- a fala
+  const tts = td.script.elements[ids.ttsId];
+  tts.text = String(texto || '');
+  tts.type = 'tts';
+  if (voiceId) {
+    tts.attributes = tts.attributes || {};
+    tts.attributes.voice_id = voiceId;
+  }
+
+  // --- o avatar e o MOTOR (a trava de custo, escrita por nos)
+  const av = td.visual.elements[ids.avatarId];
+  av.content = av.content || {};
+  if (avatarId) av.content.avatar_id = avatarId;
+  if (groupId) av.content.avatar_group_id = groupId;
+  av.content.engine = 'avatar_iii';
+  av.content.use_avatar_iv_model = false;
+  av.content.use_unlimited_mode = true;
+  if (av.content.engine_settings && typeof av.content.engine_settings === 'object') {
+    av.content.engine_settings.engine_type = 'avatar_iii';
+  }
+  // O resultado da cena ANTERIOR mora aqui. Se ficar, o servidor pode devolver
+  // o cache velho e a gente montaria o AD com o take errado — o pior defeito
+  // possivel, porque tudo "da certo" e o video sai trocado.
+  av.content.inference_mp4 = null;
+  av.content.inference_webm = '';
+  av.content.inference_packed_mp4 = null;
+  av.content.inference_job_id = null;
+
+  // --- o GATILHO do TTS: e isto que o caminho por DOM nunca conseguia ligar
+  wrapper.metadata = wrapper.metadata || {};
+  const meta = (wrapper.metadata[ids.ttsId] = wrapper.metadata[ids.ttsId] || {});
+  meta.element_id = ids.ttsId;
+  meta.item_needs_tts = true;
+  // ⚠ INVALIDAR COM O TIPO CERTO. Zerar tudo com `null` fazia o servidor
+  // recusar: "metadata.<fala>.tts.words is invalid: Input should be a valid
+  // list". O schema deles e tipado — lista continua lista, string continua
+  // string. Zerar e preciso (senao o TTS velho fica e o take sai com a fala
+  // ANTIGA), mas tem que ser no tipo de cada campo.
+  meta.words = [];
+  meta.duration = 0;
+  if (typeof meta.url === 'string') meta.url = '';
+  else meta.url = null;
+  if (typeof meta.audio_duration === 'number') meta.audio_duration = 0;
+  if (voiceId) meta.voice_id = voiceId;
+  const metaAv = wrapper.metadata[ids.avatarId];
+  if (metaAv && typeof metaAv === 'object') { metaAv.url = null; metaAv.duration = 0; }
+
+  return ids;
+}
+
+/** Dispara o render da cena. Nada de `enable_watermark` no corpo: quem decide
+ *  isso e o servidor, pela franquia — e a gente confere na URL que volta. */
+async function ecoRenderCenaApi({ videoId, sceneId, wrapper, title }) {
+  const r = await ecoRenderCenaApiBruto({ videoId, sceneId, wrapper, title });
+  // ⚠ DIAGNOSTICO OBRIGATORIO. O `get_from_cache` e indexado pelo draft
+  // SALVO; o nosso vive so dentro do POST, entao ele fica vazio pra sempre e
+  // nao serve de sinal de conclusao. Quem diz como acompanhar e a resposta.
+  try { ecoLog('resposta do render:', JSON.stringify(r.data).slice(0, 400)); } catch (e) {}
+  return r;
+}
+
+async function ecoRenderCenaApiBruto({ videoId, sceneId, wrapper, title }) {
+  return await ecoApiJson('v1/text_draft.scene_avatar_preview', {
+    metodo: 'POST',
+    tetoMs: 60000,
+    corpo: {
+      video_id: videoId,
+      scene_id: sceneId,
+      title: title || 'Auto Edit',
+      draft_details: { text_draft_with_metadata: wrapper },
+    },
+  });
+}
+
+/* ---------------------------------------------------------------------- *
+ *  O PASSO QUE FALTAVA: rodar o TTS.
+ *
+ *  O servidor recusa o render com
+ *      "Video duration is 0 for element <cena> and type ElementType.SCENE"
+ *  A cena NAO guarda duracao propria — ela deriva da fala, e a fala so ganha
+ *  duracao depois do TTS. E a MESMA barreira que matou o caminho por DOM
+ *  (`H===0` desabilitava o botao), so que aqui da pra resolver: o app roda o
+ *  TTS por endpoint, e nos tambem podemos.
+ * ---------------------------------------------------------------------- */
+
+/** A voz que a cena ja tem (o draft nasce com uma). */
+function ecoVozDaCena(wrapper, ids) {
+  const tts = wrapper.text_draft.script.elements[ids.ttsId] || {};
+  return (tts.attributes && tts.attributes.voice_id) || null;
+}
+/** Os ajustes de voz da cena (velocidade, tom, idioma). */
+function ecoAjustesDeVoz(wrapper, ids) {
+  const tts = wrapper.text_draft.script.elements[ids.ttsId] || {};
+  return (tts.attributes && tts.attributes.voice_settings) || {};
+}
+
+/** Gera a fala e devolve { url, duracao, palavras }. */
+async function ecoGerarTts({ texto, voiceId, ajustes, videoId }) {
+  const vs = ajustes || {};
+  const corpo = {
+    text: String(texto || ''),
+    text_type: 'text',
+    voice_id: voiceId,
+    video_id: videoId || null,
+    speed: typeof vs.speed === 'number' ? vs.speed : 1,
+    pitch: typeof vs.pitch === 'number' ? vs.pitch : 0,
+  };
+  if (vs.locale) corpo.locale = vs.locale;
+  if (vs.emotion) corpo.emotion = vs.emotion;
+  const r = await ecoApiJson('v2/online/text_to_speech.generate', {
+    metodo: 'POST', corpo, tetoMs: 120000,
+  });
+  if (!r.ok) return { erro: r.msg || 'HTTP ' + r.http, resumo: ecoResumoDaResposta(r.data) };
+  const d = r.data || {};
+  const url = typeof d.audio_url === 'string' ? d.audio_url
+    : (typeof d.url === 'string' ? d.url : null);
+  const dur = Number(d.duration || d.audio_duration || d.duration_ms / 1000 || 0) || 0;
+  const brutas = Array.isArray(d.words) ? d.words
+    : (Array.isArray(d.word_timestamps) ? d.word_timestamps
+      : (Array.isArray(d.alignments) ? d.alignments : []));
+  const palavras = ecoNormalizarPalavras(brutas);
+  const forma = brutas.length ? Object.keys(brutas[0]).join(',').slice(0, 60) : '(sem palavras)';
+  return { url, duracao: dur, palavras, resumo: ecoResumoDaResposta(d) + ' palavra{' + forma + '}' };
+}
+
+/** As palavras no formato que o DRAFT exige: { word, start_time, end_time }.
+ *  O TTS devolve com outros nomes, e o servidor recusa o render inteiro por
+ *  causa disso: "metadata.<fala>.tts.words.0.start_time is invalid: Field
+ *  required". Conferido no draft real: a lista comeca com o marcador
+ *  `<start>` em 0,0. */
+function ecoNormalizarPalavras(brutas) {
+  const num = (...vs) => { for (const v of vs) if (typeof v === 'number' && isFinite(v)) return v; return 0; };
+  const saida = [];
+  for (const b of brutas || []) {
+    if (!b || typeof b !== 'object') continue;
+    const inicio = num(b.start_time, b.startTime, b.start, b.begin, b.from,
+      typeof b.start_ms === 'number' ? b.start_ms / 1000 : undefined);
+    const fim = num(b.end_time, b.endTime, b.end, b.to,
+      typeof b.end_ms === 'number' ? b.end_ms / 1000 : undefined);
+    const texto = b.word !== undefined ? b.word : (b.text !== undefined ? b.text : (b.w !== undefined ? b.w : ''));
+    saida.push({ word: String(texto), start_time: inicio, end_time: fim });
+  }
+  if (!saida.length || saida[0].word !== '<start>') {
+    saida.unshift({ word: '<start>', start_time: 0, end_time: 0 });
+  }
+  return saida;
+}
+
+/** Escreve o resultado do TTS na cena — e ISTO que da duracao a cena. */
+function ecoAplicarTtsNaCena(wrapper, ids, tts) {
+  const meta = wrapper.metadata[ids.ttsId];
+  meta.url = tts.url || meta.url;
+  meta.duration = tts.duracao;
+  meta.audio_duration = tts.duracao;
+  meta.words = Array.isArray(tts.palavras) ? tts.palavras : [];
+  // Ja rodou: se ficar `true`, o servidor tenta rodar de novo e volta a 0.
+  meta.item_needs_tts = false;
+}
+
+/** Um resumo LEGIVEL da resposta do render: nomes dos campos e os ids curtos.
+ *  Serve pra saber, quando a espera falha, se o job chegou a nascer. */
+function ecoResumoDaResposta(data) {
+  if (!data || typeof data !== 'object') return String(data);
+  const partes = [];
+  for (const [k, v] of Object.entries(data)) {
+    if (v === null || v === undefined) { partes.push(`${k}=null`); continue; }
+    if (typeof v === 'object') { partes.push(`${k}={${Object.keys(v).join(',').slice(0, 40)}}`); continue; }
+    const t = String(v);
+    partes.push(`${k}=${t.length > 14 ? t.slice(0, 8) + '~' : t}`);
+  }
+  return partes.join(' ').slice(0, 200) || '(vazio)';
+}
+
+/** As URLs em cache do projeto, como um conjunto (pra detectar a NOVA). */
+async function ecoUrlsEmCache(videoId) {
+  const r = await ecoApiJson(
+    'v1/text_draft.scene_avatar_preview.get_from_cache?video_id=' + encodeURIComponent(videoId),
+    { tetoMs: 20000 },
+  );
+  const txt = JSON.stringify(r.data || {});
+  const achadas = txt.match(/https:[/][/][^"'\s\\]+[.](?:mp4|webm)/g) || [];
+  return new Set(achadas);
+}
+
+/** A URL do take dentro de uma resposta de render/check. Prefere o mp4. */
+function ecoUrlDaResposta(data) {
+  if (!data || typeof data !== 'object') return null;
+  for (const campo of ['video_url', 'packed_premultiplied_rgb_alpha_video_url', 'webm_video_url']) {
+    const v = data[campo];
+    if (typeof v === 'string' && /^https:\/\//.test(v)) return v;
+  }
+  return null;
+}
+
+/** Espera o take ficar pronto.
+ *
+ *  ⚠ NAO DA PRA ESPERAR PELO `get_from_cache`. Ele e indexado pelo draft
+ *  SALVO, e o nosso draft vive so dentro do POST — o cache fica `items: []`
+ *  pra sempre e a espera morreria no teto com o render pronto do outro lado.
+ *  MEDIDO: 2min30 de espera com o cache vazio o tempo todo.
+ *
+ *  O sinal certo esta na propria resposta do render: ela devolve `job_id` e
+ *  `video_url` (nulo enquanto processa). Entao a espera e por `job_id` no
+ *  `.check`, com o `get_from_cache` so como rede de seguranca. */
+async function ecoEsperarTakeApi(videoId, jaExistiam, tetoMs, aoVivo, jobId) {
+  const ate = Date.now() + tetoMs;
+  let voltas = 0;
+  let ondeChecar = jobId ? ['job_id'] : [];
+  while (Date.now() < ate) {
+    if (ecoCancelado) throw new Error('cancelado durante a espera do render');
+    marcarBatimento();
+    await sleep(4000);
+    voltas++;
+
+    // 1) o caminho bom: perguntar pelo job
+    for (const chave of ondeChecar) {
+      const r = await ecoApiJson(
+        `v1/text_draft.scene_avatar_preview.check?${chave}=${encodeURIComponent(jobId)}` +
+          `&video_id=${encodeURIComponent(videoId)}`,
+        { tetoMs: 20000 },
+      );
+      const u = ecoUrlDaResposta(r.data);
+      if (u) return u;
+      // Alguns retornos vem com a lista de itens em vez do objeto direto.
+      const itens = (r.data && (r.data.items || r.data.list)) || null;
+      if (Array.isArray(itens)) {
+        for (const it of itens) { const v = ecoUrlDaResposta(it); if (v) return v; }
+      }
+    }
+
+    // 2) rede de seguranca: se o projeto for salvo por fora, aparece aqui
+    const agora = await ecoUrlsEmCache(videoId);
+    for (const u of agora) if (!jaExistiam.has(u)) return u;
+
+    if (aoVivo && voltas % 5 === 0) {
+      aoVivo(Math.round((tetoMs - (ate - Date.now())) / 1000));
+    }
+  }
+  return null;
+}
+
+/** Queima a franquia de previews gratis POR API — cada volta com texto
+ *  diferente, senao o servidor devolve o cache e a franquia nao cai (laco
+ *  eterno). O sinal de que queimou e a franquia DIMINUIR. */
+async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
+  let f = await ecoFranquiaDePreview();
+  if (f.restantes <= 0) return { queimadas: 0, restantes: f.restantes };
+  ecoWarn(`franquia com ${f.restantes} preview(s) marcado(s) — queimando antes de valer`);
+  let queimadas = 0;
+  for (let volta = 0; volta < 5 && f.restantes > 0; volta++) {
+    if (ecoCancelado) throw new Error('cancelado durante a queima da franquia');
+    reportProgress(requestId, `Economia: liberando o render limpo (${f.restantes} restante(s))...`, base);
+    const antes = f.restantes;
+    // ⚠ TEXTO DIFERENTE A CADA VOLTA — "viewing this scene again is free until
+    // you change it": repetir o mesmo texto devolve cache e nao consome nada.
+    const marca = Date.now().toString(36) + volta;
+    const ids = ecoDraftEscreverCena(wrapper, 0, { texto: `Teste de aquecimento numero ${volta + 1}, referencia ${marca}.` });
+    const jaTinha = await ecoUrlsEmCache(videoId);
+    const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
+    if (!r.ok) ecoWarn(`queima ${volta + 1}: o render respondeu ${r.http} — ${r.msg}`);
+    // Nao interessa o video: interessa a franquia cair. Espera curta.
+    const jobQueima = (r.data && (r.data.job_id || r.data.stream_id)) || null;
+    if (!ecoUrlDaResposta(r.data)) {
+      await ecoEsperarTakeApi(videoId, jaTinha, 3 * 60 * 1000, null, jobQueima).catch(() => null);
+    }
+    f = await ecoFranquiaDePreview();
+    if (f.restantes < antes) queimadas++;
+    else if (f.restantes === antes) {
+      ecoWarn(`queima ${volta + 1}: a franquia nao caiu (segue em ${antes}) — tentando de novo com outro texto`);
+    }
+  }
+  if (f.restantes > 0) {
+    throw new Error(
+      `nao consegui zerar a franquia de previews gratis (parou em ${f.restantes}). ` +
+      `Enquanto ela nao zera, todo take volta COM MARCA D'AGUA. Nada foi cobrado.`,
+    );
+  }
+  ecoLog(`franquia zerada (${queimadas} queima(s)) — render limpo liberado`);
+  return { queimadas, restantes: 0 };
+}
+
+/**
+ * O AD inteiro por API. Mesmo contrato do runEconomyJob (progresso +
+ * "ECONOMIA:" + JSON), mas sem tocar em DOM nenhum.
+ *
+ * payload = { bancadaId, avatarId, groupId, avatarName, voiceId, voiceName,
+ *             jobLabel, cenas: [{ idx, label, texto }], tetoPorCenaMs }
+ */
+async function runEconomyJobApi(requestId, payload) {
+  if (!podeAssumirJob(requestId)) {
+    reportError(requestId, 'Outra geracao em andamento — aguarde finalizar.');
+    return;
+  }
+  currentJob = requestId;
+  marcarBatimento();
+  ecoCancelado = false;
+
+  const resultados = [];
+  try {
+    const { avatarId, groupId, avatarName, voiceId, cenas, jobLabel } = payload || {};
+    const tetoCena = Number(payload && payload.tetoPorCenaMs) || 8 * 60 * 1000;
+    if (!Array.isArray(cenas) || cenas.length === 0) throw new Error('payload invalido: cenas vazio.');
+
+    // A bancada e um projeto de verdade do create-v4. Quem cria e o proprio
+    // app (basta NAVEGAR pra /create-v4/draft?...&fromCreateButton=true, que
+    // ele cria e redireciona pro id) — navegar e a unica coisa que sempre
+    // funcionou em aba oculta. O background faz isso ANTES de nos chamar.
+    const videoId = (payload && payload.bancadaId) || ecoVideoIdDaUrl();
+    if (!videoId) {
+      throw new Error('nao achei o projeto do Studio (bancada) pra renderizar. Nada foi cobrado.');
+    }
+
+    reportProgress(requestId, 'Economia: lendo o projeto...', 3);
+    let { wrapper, title } = await ecoDraftLer(videoId);
+    // Falha cedo e com nome: se o formato do draft mudar do lado do HeyGen,
+    // e melhor parar aqui do que renderizar a cena errada.
+    ecoIdsDaCena(wrapper, 0);
+
+    const franquia = await ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, 5);
+    if (franquia.queimadas > 0) {
+      // A queima sujou o draft com texto de aquecimento; relê limpo.
+      ({ wrapper, title } = await ecoDraftLer(videoId));
+    }
+
+    const total = cenas.length;
+    for (let i = 0; i < total; i++) {
+      const cena = cenas[i];
+      const rot = `${jobLabel || 'ECO'} cena ${i + 1}/${total}`;
+      const base = Math.round((i / total) * 90);
+      if (ecoCancelado) throw new Error(`Cancelado na cena ${i + 1}/${total}. As cenas ja prontas foram guardadas.`);
+      if (!cena || !String(cena.texto || '').trim()) {
+        throw new Error(`${rot}: a parte veio SEM TEXTO. Parei pra nao gerar take mudo. Nada foi cobrado.`);
+      }
+
+      reportProgress(requestId, `${rot}: montando a cena...`, base);
+      // Uma cena so, reescrita a cada take: o que a gente quer sao N takes, e
+      // cada texto novo e um render novo (texto igual devolveria o cache).
+      const ids = ecoDraftEscreverCena(wrapper, 0, {
+        texto: cena.texto,
+        voiceId: cena.voiceId || voiceId,
+        avatarId: cena.avatarId || avatarId,
+        groupId: cena.groupId || groupId,
+      });
+
+      // ⚠ SEM TTS NAO HA RENDER. A cena deriva a duracao da fala; com duracao
+      // 0 o servidor recusa ("Video duration is 0 for element ... SCENE").
+      reportProgress(requestId, `${rot}: gerando a fala...`, base + 1);
+      const fala = await ecoGerarTts({
+        texto: cena.texto,
+        voiceId: cena.voiceId || voiceId || ecoVozDaCena(wrapper, ids),
+        ajustes: ecoAjustesDeVoz(wrapper, ids),
+        videoId,
+      });
+      if (fala.erro || !(fala.duracao > 0)) {
+        throw new Error(
+          `${rot}: nao consegui gerar a fala (${fala.erro || 'duracao 0'}) — ` +
+          `sem audio o render nem comeca. Resposta: ${fala.resumo}. Nada foi cobrado.`,
+        );
+      }
+      ecoAplicarTtsNaCena(wrapper, ids, fala);
+      reportProgress(
+        requestId,
+        `${rot}: fala de ${fala.duracao.toFixed(1)}s pronta (${fala.palavras.length} palavras) — ${fala.resumo}`,
+        base + 2,
+      );
+
+      const jaTinha = await ecoUrlsEmCache(videoId);
+      reportProgress(requestId, `${rot}: renderizando (Avatar III, 0 credito)...`, base + 3);
+      const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
+      if (!r.ok) {
+        throw new Error(`${rot}: o HeyGen recusou o render — ${r.msg || 'HTTP ' + r.http}. Nada foi cobrado.`);
+      }
+      marcarBatimento();
+      // O que o servidor devolveu vira PROGRESSO, nao log de console: quando a
+      // espera falha, e essa linha que diz se o job nasceu e com que id.
+      const eco = ecoResumoDaResposta(r.data);
+      reportProgress(requestId, `${rot}: render aceito — ${eco}`, base + 4);
+      const jobId = (r.data && (r.data.job_id || r.data.stream_id)) || null;
+
+      // Cena inalterada volta PRONTA na hora (o servidor devolve o cache dele).
+      let url = ecoUrlDaResposta(r.data);
+      if (!url) {
+        url = await ecoEsperarTakeApi(videoId, jaTinha, tetoCena, (s) =>
+          reportProgress(requestId, `${rot}: renderizando ha ${s}s...`, base + 5), jobId);
+      }
+      if (!url) {
+        throw new Error(
+          `${rot}: a cena nao ficou pronta em ${Math.round(tetoCena / 60000)} min ` +
+          `(o servidor tinha respondido: ${eco}). Nada foi cobrado.`,
+        );
+      }
+
+      // ⚠ A MESMA TRAVA DE SEMPRE. URL com `-marked-` = marca QUEIMADA no
+      // arquivo. Take marcado nao entra no AD, ponto.
+      const marcado = /-marked-[a-z0-9_]+(?:-rgb|-packed)?\.(?:mp4|webm)/i.test(url);
+      if (marcado) {
+        throw new Error(
+          `${rot}: o take voltou COM MARCA D'AGUA mesmo com a franquia zerada. ` +
+          `Parei pra nao sujar o AD. Nada foi cobrado.`,
+        );
+      }
+      ecoLog(`${rot}: take limpo — ${url.slice(0, 110)}`);
+      resultados.push({ idx: cena.idx, videoUrl: url });
+      reportProgress(requestId, `${rot}: pronta`, Math.round(((i + 1) / total) * 90));
+    }
+
+    reportProgress(requestId, `Economia: ${resultados.length} cena(s) renderizada(s)`, 96);
+    reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados }));
+  } catch (e) {
+    console.error('[DARKO LAB ECONOMIA] runEconomyJobApi FAIL:', e);
+    const msg = (e && e.message) || String(e);
+    if (resultados.length > 0) {
+      reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro: msg }));
+    } else {
+      reportError(requestId, msg);
+    }
+  } finally {
+    currentJob = null;
+  }
+}
+
+/** SONDA — diagnostico do caminho por API sem renderizar nada.
+ *  Le a franquia, le o draft da bancada e confere o mapa das cenas. Serve pra
+ *  provar que o caminho esta de pe antes de gastar qualquer coisa. */
+async function ecoSondaApi(videoIdPedido) {
+  const out = { versao: DARKO_EXT_VERSION, url: location.href.slice(0, 120) };
+  try {
+    const f = await ecoFranquiaDePreview();
+    out.franquia = f.restantes;
+    const videoId = videoIdPedido || ecoVideoIdDaUrl();
+    out.bancada = videoId ? videoId.slice(0, 10) + '…' : null;
+    if (!videoId) { out.erro = 'sem projeto na URL (bancada nao criada)'; return out; }
+    const { wrapper, title } = await ecoDraftLer(videoId);
+    out.titulo = String(title).slice(0, 40);
+    const td = wrapper.text_draft;
+    out.nCenas = ((td.visual && td.visual.layout) || []).length;
+    const ids = ecoIdsDaCena(wrapper, 0);
+    out.mapaCena1 = { cena: ids.sceneId, avatar: ids.avatarId, fala: ids.ttsId };
+    const av = td.visual.elements[ids.avatarId].content || {};
+    out.motor = { engine: av.engine, iv: av.use_avatar_iv_model, ilimitado: av.use_unlimited_mode };
+    out.vozAtual = ((td.script.elements[ids.ttsId] || {}).attributes || {}).voice_id ? 'setada' : 'VAZIA';
+    out.cacheUrls = (await ecoUrlsEmCache(videoId)).size;
+    out.ok = true;
+  } catch (e) {
+    out.ok = false;
+    out.erro = (e && e.message) || String(e);
+  }
+  return out;
 }
 
 } // fim do guard __darkolab_heygen_loaded__

@@ -98,6 +98,30 @@
       return;
     }
 
+    if (data.type === 'HG_ECONOMY_API_GENERATE') {
+      // MODO ECONOMIA POR API: render de cena direto no endpoint, sem DOM.
+      const requestId = data.requestId;
+      sendToPage({ type: 'HG_ECONOMY_ACK', requestId });
+      relayToBg(
+        { type: 'HG_ECONOMY_API_GENERATE', requestId, payload: data.payload },
+        (error) => ({ type: 'HG_ERROR', requestId, error }),
+      );
+      return;
+    }
+
+    if (data.type === 'HG_ECO_SONDA_API') {
+      // Diagnostico: nao renderiza nada, so devolve o mapa do draft.
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'HG_ECO_SONDA_API', abrirBancada: !!data.abrirBancada, groupId: data.groupId, lookId: data.lookId },
+          (r) => sendToPage({ type: 'HG_ECO_SONDA_API_RESULT', resultado: r || { ok: false, erro: String((chrome.runtime.lastError && chrome.runtime.lastError.message) || 'sem resposta') } }),
+        );
+      } catch (e) {
+        sendToPage({ type: 'HG_ECO_SONDA_API_RESULT', resultado: { ok: false, erro: String(e && e.message) } });
+      }
+      return;
+    }
+
     if (data.type === 'HG_ECO_MEDIR') {
       try { chrome.runtime.sendMessage({ type: 'HG_ECO_MEDIR', ligado: !!data.ligado }); } catch {}
       return;
