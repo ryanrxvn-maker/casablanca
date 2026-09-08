@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.34.2';
+const DARKO_EXT_VERSION = '4.34.3';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -5221,7 +5221,26 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
     // ⚠ TEXTO DIFERENTE A CADA VOLTA — "viewing this scene again is free until
     // you change it": repetir o mesmo texto devolve cache e nao consome nada.
     const marca = Date.now().toString(36) + volta;
-    const ids = ecoDraftEscreverCena(wrapper, 0, { texto: `Teste de aquecimento numero ${volta + 1}, referencia ${marca}.` });
+    const texto = `Teste de aquecimento numero ${volta + 1}, referencia ${marca}.`;
+    const ids = ecoDraftEscreverCena(wrapper, 0, { texto });
+    // ⚠ A QUEIMA TAMBEM PRECISA DE TTS. Sem audio a cena fica com duracao 0 e o
+    // servidor recusa ("Video duration is 0 for element ... SCENE") — a franquia
+    // nunca cairia e o job morreria dizendo que nao conseguiu liberar o render
+    // limpo, com a franquia intacta. Defeito que so apareceria quando a cota
+    // voltasse, ou seja, dias depois e longe daqui.
+    const falaQueima = await ecoGerarTts({
+      texto,
+      voiceId: ecoVozDaCena(wrapper, ids),
+      ajustes: ecoAjustesDeVoz(wrapper, ids),
+      videoId,
+    });
+    if (falaQueima.erro || !(falaQueima.duracao > 0)) {
+      throw new Error(
+        `nao consegui gerar a fala pra queimar a franquia (${falaQueima.erro || 'duracao 0'}). ` +
+        `Enquanto a franquia nao zera, todo take volta COM MARCA D'AGUA. Nada foi cobrado.`,
+      );
+    }
+    ecoAplicarTtsNaCena(wrapper, ids, falaQueima);
     const jaTinha = await ecoUrlsEmCache(videoId);
     const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
     if (!r.ok) ecoWarn(`queima ${volta + 1}: o render respondeu ${r.http} — ${r.msg}`);
@@ -5282,7 +5301,18 @@ async function runEconomyJobApi(requestId, payload) {
       reportProgress(requestId, `Economia: bancada ${b.como}`, 3);
     }
 
-    if (!voiceId && voiceName) voiceId = await ecoResolverVozPorNome(voiceName);
+    if (!voiceId && voiceName) {
+      voiceId = await ecoResolverVozPorNome(voiceName);
+      // Falar isso em voz alta e de proposito: voz trocada em silencio so
+      // apareceria na revisao do AD inteiro.
+      reportProgress(
+        requestId,
+        voiceId
+          ? `Economia: voz "${voiceName}" encontrada`
+          : `Economia: voz "${voiceName}" NAO encontrada — vou usar a voz que ja esta na cena`,
+        2,
+      );
+    }
 
     reportProgress(requestId, 'Economia: lendo o projeto...', 3);
     let { wrapper, title } = await ecoDraftLer(videoId);
