@@ -6,12 +6,22 @@
 
 (function () {
   const VERSION = chrome.runtime.getManifest().version;
+  // Identifica inequivocamente qual extensao esta falando quando ha duas
+  // instalacoes unpacked no mesmo Chrome. A pagina usa isso para ignorar
+  // mensagens de uma instalacao antiga que ainda esteja carregada.
+  let EXTENSION_ID = null;
+  try { EXTENSION_ID = chrome.runtime.id; } catch {}
 
   function sendToPage(msg) {
     // IMPORTANTE: source: 'darkolab-ext' precisa vir DEPOIS do spread,
     // senao um campo source dentro do msg (vindo de payloads do background)
     // sobrescreve o source do envelope e a page nao reconhece a mensagem.
-    window.postMessage({ ...msg, source: 'darkolab-ext' }, '*');
+    window.postMessage({
+      ...msg,
+      source: 'darkolab-ext',
+      extensionId: EXTENSION_ID,
+      extensionVersion: VERSION,
+    }, '*');
   }
 
   /**
@@ -52,9 +62,7 @@
       // carregada (o Chrome deriva o id do caminho absoluto). Sem isso o script
       // chutava pela data do manifest e ja publicou numa pasta que o Chrome nem
       // carrega — tudo "passava" e nada mudava no navegador.
-      let extId = null;
-      try { extId = chrome.runtime.id; } catch {}
-      sendToPage({ type: 'HG_PONG', version: VERSION, id: extId });
+      sendToPage({ type: 'HG_PONG', version: VERSION, id: EXTENSION_ID });
       return;
     }
 

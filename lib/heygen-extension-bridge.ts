@@ -19,7 +19,7 @@
  */
 
 export type ExtensionStatus =
-  | { connected: true; version: string }
+  | { connected: true; version: string; id?: string }
   | { connected: false };
 
 export type HeygenJobPayload = {
@@ -48,14 +48,38 @@ type Pending = {
 const pending = new Map<string, Pending>();
 
 let listenerInstalled = false;
+let activeExtensionId: string | null = null;
+
+function compareVersion(a: string, b: string) {
+  const aa = a.split('.').map((n) => Number(n) || 0);
+  const bb = b.split('.').map((n) => Number(n) || 0);
+  for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
+    if ((aa[i] ?? 0) !== (bb[i] ?? 0)) return (aa[i] ?? 0) - (bb[i] ?? 0);
+  }
+  return 0;
+}
+
+function isActiveExtensionMessage(data: Record<string, unknown>) {
+  return !activeExtensionId || data.extensionId === activeExtensionId;
+}
 
 function installListener() {
   if (listenerInstalled || typeof window === 'undefined') return;
   listenerInstalled = true;
+  // Captura antes dos handlers particulares. Depois que escolhemos a versao
+  // atual, bloqueia qualquer resposta da extensao antiga para ela nunca mais
+  // vencer uma corrida de ACK/erro contra a extensao valida.
+  window.addEventListener('message', (ev: MessageEvent) => {
+    const data = ev.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.source !== 'darkolab-ext' || data.type === 'HG_PONG') return;
+    if (!isActiveExtensionMessage(data)) ev.stopImmediatePropagation();
+  }, true);
   window.addEventListener('message', (ev: MessageEvent) => {
     const data = ev.data;
     if (!data || typeof data !== 'object') return;
     if (data.source !== 'darkolab-ext') return;
+    if (!isActiveExtensionMessage(data)) return;
 
     const requestId = String(data.requestId ?? '');
     if (!requestId) return;
@@ -89,25 +113,39 @@ export function detectExtension(): Promise<ExtensionStatus> {
       resolve({ connected: false });
       return;
     }
-    let resolved = false;
+    const responses: Array<{ version: string; id?: string }> = [];
     const handler = (ev: MessageEvent) => {
       if (
         ev.data &&
         ev.data.source === 'darkolab-ext' &&
         ev.data.type === 'HG_PONG'
       ) {
-        resolved = true;
-        window.removeEventListener('message', handler);
-        resolve({ connected: true, version: String(ev.data.version ?? '?') });
+        responses.push({
+          version: String(ev.data.version ?? '?'),
+          id: typeof ev.data.id === 'string' ? ev.data.id : undefined,
+        });
       }
     };
     window.addEventListener('message', handler);
     window.postMessage({ source: 'darkolab', type: 'HG_PING' }, '*');
     setTimeout(() => {
-      if (!resolved) {
-        window.removeEventListener('message', handler);
-        resolve({ connected: false });
+      window.removeEventListener('message', handler);
+      if (!responses.length) { resolve({ connected: false }); return; }
+      const best = responses.reduce((winner, candidate) =>
+        compareVersion(candidate.version, winner.version) > 0 ? candidate : winner,
+      );
+      activeExtensionId = best.id ?? null;
+      const hasDuplicate = new Set(responses.map((r) => r.id || r.version)).size > 1;
+      // A extensao atual sabe reler seus arquivos por conta propria. Em caso
+      // de duplicata, fazemos uma unica recarga e atualizamos a pagina para
+      // o bridge voltar com identidade em todas as mensagens.
+      const reloadKey = 'darkolab-extension-bridge-reloaded';
+      if (hasDuplicate && best.id && !sessionStorage.getItem(reloadKey)) {
+        sessionStorage.setItem(reloadKey, '1');
+        window.postMessage({ source: 'darkolab', type: 'HG_RELOAD_EXT' }, '*');
+        setTimeout(() => window.location.reload(), 900);
       }
+      resolve({ connected: true, version: best.version, id: best.id });
     }, 700);
   });
 }
