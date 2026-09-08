@@ -247,6 +247,7 @@ import {
   writePilotRunnerPulse,
   type PilotRunnerPulse,
 } from '@/lib/pilot-runner-pulse';
+import { findPilotTextIntegrityIssue } from '@/lib/pilot-text-integrity';
 import {
   readJobCommands,
   clearJobCommand,
@@ -5239,6 +5240,39 @@ function ClickUpPilotInner() {
     }
     if (!plan) return;
     const partsLen = plan.parts.length;
+
+    // Gate estrutural antes de tocar no HeyGen. Um paste acidental do JSON do
+    // plano de cenas dentro de um textarea vira milhares de caracteres de
+    // configuracao falados pelo avatar. A combinacao de chaves abaixo e
+    // exclusiva do plano; copy comum com chaves continua aceita.
+    const textIntegrityIssue = findPilotTextIntegrityIssue(plan.parts);
+    if (textIntegrityIssue) {
+      const now = Date.now();
+      const errMsg = `Disparo bloqueado: ${textIntegrityIssue.label} contém configuração interna do plano de cenas. Restaure o trecho original no preview e tente novamente.`;
+      console.error(`[clickup-pilot] ${errMsg} task=${taskId}`);
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          taskId,
+          taskName: rTaskName,
+          baseAdId: rBaseAdId,
+          phase: 'failed',
+          parts: plan!.parts.map((p: any) => ({
+            label: p.label,
+            videoId: null,
+            renamedTo: labelToFilename(p.label),
+          })),
+          message: errMsg,
+          startedAt: now,
+          finishedAt: now,
+          replan,
+          docUrl: batchStates[taskId]?.docUrl || taskAnalyses[taskId]?.docUrl,
+          taskUrl: batchStates[taskId]?.taskUrl || taskAnalyses[taskId]?.taskUrl,
+          teamId: isTaskLocal(taskId) ? undefined : (batchStates[taskId]?.teamId ?? selectedTeam ?? undefined),
+        },
+      }));
+      return;
+    }
     // De que versão é esta task? A irmã do YouTube tem id próprio (`<id>-yt`),
     // então TODO nome derivado — zip de takes, montado, camuflado e até o
     // título do vídeo no HeyGen — já sai distinguível.
