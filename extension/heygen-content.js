@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.30.0';
+const DARKO_EXT_VERSION = '4.30.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -4289,14 +4289,37 @@ async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
     );
   }
   const alvo = campos[campos.length - 1];
-  // ⚠ NAO CLICAR NO CAMPO. O clique move a SELECAO do editor pro texto, e o
-  // painel da direita — que e o de propriedades do objeto selecionado — some
-  // junto com o botao de render que mora nele. Medido: com o clique o botao
-  // sumia e o job morria em "botao de render nao encontrado"; sem ele, o painel
-  // sobrevive. E o clique nem era necessario: pasteScriptIntoTextarea ja faz
-  // focus() e o ProseMirror aceita o paste sem precisar de clique.
+  // ⚠ O CLIQUE VOLTOU, e de proposito. Ele derruba o painel da direita (a
+  // selecao vai pro texto), e por isso eu o tinha tirado — mas a UNICA rodada
+  // que chegou a RENDERIZAR de fato tinha esse clique. Ele e o que faz o app
+  // tratar a cena como editada de verdade: e dai que sai o TTS, e sem audio o
+  // botao de render fica DESABILITADO pra sempre.
+  // O painel a gente traz de volta depois, clicando no palco.
+  await cdpClickEl(alvo, `${sceneLabel} campo de script`);
+  await sleep(250);
   await pasteScriptIntoTextarea(alvo, texto);
   await sleep(400);
+  // ⚠ SOLTAR O FOCO. O editor so COMMITA o texto quando perde o foco: e nesse
+  // momento que o app salva o draft e manda gerar o TTS. Sem isso o texto fica
+  // na tela mas o audio nunca nasce — e o botao de render (e o Generate) ficam
+  // DESABILITADOS pra sempre. MEDIDO: painel com Avatar GABY, voz Dagny, motor
+  // Avatar III, script escrito... e `Render Scene(OFF)` por 180s.
+  try {
+    alvo.blur();
+    alvo.dispatchEvent(new Event('change', { bubbles: true }));
+    alvo.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+    alvo.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  } catch (e) {}
+  // Clicar no palco tira a selecao do texto de vez (e ainda reseleciona o
+  // avatar, o que traz o painel do motor de volta).
+  const palcoCommit = [...document.querySelectorAll('canvas')]
+    .filter((c) => estaNaTela(c))
+    .sort((x, y) => {
+      const a1 = x.getBoundingClientRect(), b1 = y.getBoundingClientRect();
+      return b1.width * b1.height - a1.width * a1.height;
+    })[0];
+  if (palcoCommit) cliqueSinteticoEm(palcoCommit);
+  await sleep(1500);
   const escrito = (alvo.value !== undefined ? alvo.value : alvo.textContent) || '';
   // ABORTA, não avisa. Texto que não entrou vira take mudo ou take repetindo a
   // cena anterior — e isso só apareceria na revisão do montado, depois de todo
@@ -4617,17 +4640,17 @@ async function runEconomyJob(requestId, payload) {
       // botao de render mora nele. Escrever o script move a selecao pro texto
       // e o painel some — inclusive o botao. MEDIDO: clicar no canvas do palco
       // reseleciona o avatar e o painel volta (com o texto ja escrito).
-      if (!editorVivo()) {
+      {
         const palco = [...document.querySelectorAll('canvas')]
           .filter((c) => estaNaTela(c))
           .sort((x, y) => {
             const a1 = x.getBoundingClientRect(), b1 = y.getBoundingClientRect();
             return b1.width * b1.height - a1.width * a1.height;
           })[0];
-        if (palco) {
+        if (palco && !editorVivo()) {
           ecoLog(`${rot}: painel sumiu depois do texto — reselecionando o avatar no palco`);
           cliqueSinteticoEm(palco);
-          await waitForOrNull(() => (editorVivo() ? true : null), 10000, 400);
+          await waitForOrNull(() => (editorVivo() ? true : null), 12000, 400);
         }
       }
 
