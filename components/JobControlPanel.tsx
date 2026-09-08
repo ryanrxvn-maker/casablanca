@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { sendJobCommand, navigateToEngine } from '@/lib/job-commands';
+import { readDurableRecords } from '@/lib/durable-records';
 
 /**
  * Painel de controle de jobs (Retomar / Pausar / Debug) reutilizavel.
@@ -62,7 +63,7 @@ export function JobControlPanel({
 
   useEffect(() => {
     const refresh = () => {
-      setBatches(readJson<Record<string, BatchState>>(BATCH_KEY) || {});
+      setBatches(Object.fromEntries(Object.entries(readDurableRecords<BatchState>('background')).filter(([id]) => !id.startsWith('archive:'))));
       setMagnific(readJson<Record<string, MagnificJob>>(MAGNIFIC_KEY) || {});
     };
     refresh();

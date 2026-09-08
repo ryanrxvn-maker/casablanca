@@ -1,14 +1,13 @@
 'use client';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
 
 /**
- * Histórico geral — registro local de tudo que o usuário produziu, em todas
- * as ferramentas, com retenção de 7 dias (pedido: mínimo 5).
+ * Histórico geral na conta, separado do background, com retenção de 7 dias.
  *
  * Desenho:
- * - localStorage (chave versionada) — sobrevive a F5 e fechamento; nada sobe
- *   pra servidor (privacidade: nomes de arquivo ficam na máquina do usuário).
+ * - Registro por evento no servidor; localStorage guarda a fila de sincronização.
  * - logHistory() é fire-and-forget e NUNCA lança: instrumentação não pode
- *   quebrar ferramenta. Poda por idade e por teto a cada escrita.
+ *   quebrar ferramenta. Falhas de salvamento aparecem no indicador global.
  * - Um CustomEvent 'autoedit:history' avisa a página do histórico pra
  *   atualizar ao vivo se estiver aberta.
  */
@@ -56,9 +55,7 @@ export type HistoryEvent = {
   auto?: boolean;
 };
 
-const KEY = 'autoedit:history:v1';
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_EVENTS = 1200;
 
 /** Nomes exibidos por ferramenta (e ordem dos filtros). */
 export const HISTORY_TOOLS: { id: string; label: string }[] = [
@@ -102,45 +99,19 @@ export function historyToolLabel(id: string): string {
   return HISTORY_TOOLS.find((t) => t.id === c)?.label ?? c;
 }
 
-function safeRead(): HistoryEvent[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr.filter(
-      (e) =>
-        e &&
-        typeof e.t === 'number' &&
-        typeof e.tool === 'string' &&
-        typeof e.title === 'string',
-    );
-  } catch {
-    return [];
-  }
-}
+function safeRead(): HistoryEvent[] { return Object.values(readDurableRecords<HistoryEvent>('history')); }
 
 function safeWrite(events: HistoryEvent[]) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(events));
-  } catch {
-    // Quota cheia: derruba a metade mais velha e tenta uma única vez.
-    try {
-      localStorage.setItem(
-        KEY,
-        JSON.stringify(events.slice(0, Math.floor(events.length / 2))),
-      );
-    } catch {
-      /* desiste em silêncio — histórico nunca derruba ferramenta */
-    }
-  }
+  const writer = createRecordWriter('history');
+  writer.hydrate();
+  void writer.save(Object.fromEntries(events.map(e => [e.id, e]))).catch(() => {});
 }
 
 function prune(events: HistoryEvent[]): HistoryEvent[] {
   const cutoff = Date.now() - RETENTION_MS;
   const alive = events.filter((e) => e.t >= cutoff);
   alive.sort((a, b) => b.t - a.t);
-  return alive.slice(0, MAX_EVENTS);
+  return alive;
 }
 
 /**
@@ -281,11 +252,6 @@ export function readHistory(): HistoryEvent[] {
 }
 
 /** Apaga tudo. */
-export function clearHistory() {
-  try {
-    localStorage.removeItem(KEY);
-    window.dispatchEvent(new CustomEvent('autoedit:history'));
-  } catch {
-    /* noop */
-  }
+export async function clearHistory() {
+  await deleteDurableRecords('history', safeRead().map(e => e.id));
 }

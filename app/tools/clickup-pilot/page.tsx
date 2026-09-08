@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
@@ -634,40 +635,8 @@ const ACTIVE_BATCH_PHASES: ReadonlyArray<BatchTaskState['phase']> = [
 /** Persist batchStates entre reloads. zipBlobUrl nao sobrevive
  *  (Blob fica na memoria, e revogado no fechamento) — entao salva
  *  tudo menos isso. Permite retomar polling/download apos reload. */
-const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
-function persistBatchStates(states: Record<string, unknown>) {
-  if (typeof window === 'undefined') return;
-  try {
-    const sanitized: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(states)) {
-      const { zipBlobUrl, montadoZipUrl, camufladoZipUrl, ...rest } = v as {
-        zipBlobUrl?: string;
-        montadoZipUrl?: string;
-        camufladoZipUrl?: string;
-        [key: string]: unknown;
-      };
-      sanitized[k] = rest;
-    }
-    // PRESERVA as entradas do Hey Auto ('heygenauto:*'): elas vivem na MESMA
-    // chave mas são geridas/exibidas SÓ pelo Hey Auto. Sem isso, o persist do
-    // Pilot apagaria a fila do Hey Auto (cada tool tem a sua lista própria).
-    try {
-      const existing = JSON.parse(localStorage.getItem(BATCH_STATE_KEY) || '{}') as Record<string, unknown>;
-      for (const [k, v] of Object.entries(existing)) {
-        if (k.startsWith('heygenauto:') && !(k in sanitized)) sanitized[k] = v;
-      }
-    } catch {}
-    localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(sanitized));
-  } catch {}
-}
 function loadPersistedBatchStates(): Record<string, unknown> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(BATCH_STATE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return readDurableRecords('background');
 }
 
 /**
@@ -4408,6 +4377,9 @@ function ClickUpPilotInner() {
 
   /** Batch state — tasks rodando em background (dispatch + poll + download + zip) */
   const [batchStates, setBatchStates] = useState<Record<string, BatchTaskState>>({});
+  const batchWriterRef = useRef(createRecordWriter('background'));
+  // Restoring account records is read-only. It must not start a second worker.
+  const recoveredBatchIdsRef = useRef(new Set<string>());
   const batchCancelRef = useRef<Record<string, boolean>>({});
   /** Espelho de batchStates pra leitura SINCRONA fora do ciclo de render
    *  (watchdog/promoter por interval). Sem isso o watchdog leria closure
@@ -4525,6 +4497,7 @@ function ClickUpPilotInner() {
   useEffect(() => {
     const now = Date.now();
     for (const b of Object.values(batchStates)) {
+      if (recoveredBatchIdsRef.current.has(b.taskId)) continue;
       if (b.phase !== 'done' || b.kind === 'troca' || b.isVA) continue; // VA/troca têm completion própria
       const ps = b.pipeStats;
       // COTA: 'done' esperando reset diário do HeyGen NÃO é curável agora (a cota
@@ -4568,19 +4541,11 @@ function ClickUpPilotInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchStates, healTick]);
 
-  /** Restore persisted batch states no mount. Tudo que estava ATIVO
-   *  (dispatching/rendering/downloading/post) OU ja em 'queued' antes
-   *  do reload volta como 'queued' — o promoter useEffect re-dispara
-   *  ate MAX_HEYGEN_PARALLEL automaticamente. Sem clique manual.
-   *
-   *  Por que NAO 'failed': videos podem ja ter sido submitted no HeyGen
-   *  (videoIds salvos em parts[]) — re-poll vai pegar eles prontos em
-   *  segundos. Marcar failed forcaria user a clicar Retomar em cada um.
-   *
-   *  'done'/'failed' antigos sao preservados como estavam — user decide
-   *  se Retomar ou nao. */
+  /** Recover account records without claiming ownership of a worker in another
+   * tab/device. Interrupted cards offer Retomar; the display-only phase/message
+   * are not persisted over the live worker's checkpoint. */
   useEffect(() => {
-    const persisted = loadPersistedBatchStates() as Record<string, BatchTaskState>;
+    const persisted = batchWriterRef.current.hydrate<BatchTaskState>();
     if (Object.keys(persisted).length === 0) return;
     const restored: Record<string, BatchTaskState> = {};
     let interruptedCount = 0;
@@ -4588,7 +4553,8 @@ function ClickUpPilotInner() {
     for (const [taskId, state] of Object.entries(persisted)) {
       // Fila do Hey Auto vive na mesma chave — o Pilot NÃO exibe nem processa
       // os disparos do Hey Auto ('heygenauto:*'). Cada tool tem sua lista.
-      if (taskId.startsWith('heygenauto:')) continue;
+      if (taskId.startsWith('heygenauto:') || taskId.startsWith('archive:')) continue;
+      recoveredBatchIdsRef.current.add(taskId);
       const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
       if (wasInterrupted && state.kind === 'troca') {
         // TROCA: o WHITE foi salvo no IndexedDB + driveId no proprio state —
@@ -4603,8 +4569,8 @@ function ClickUpPilotInner() {
         interruptedCount++;
         restored[taskId] = {
           ...state,
-          phase: 'queued',
-          message: '⏳ Re-iniciando apos reload — checkpoint preservado, retomando do ponto certo...',
+          phase: 'failed',
+          message: 'Registro recuperado. Confira se outra aba ainda está processando antes de clicar em Retomar.',
           finishedAt: undefined,
         };
       } else {
@@ -4614,7 +4580,7 @@ function ClickUpPilotInner() {
     }
     setBatchStates(restored);
     if (interruptedCount > 0) {
-      console.info(`[batch restore] ${interruptedCount} batch(es) interrompidos — re-enfileirados pro promoter.`);
+      console.info(`[batch restore] ${interruptedCount} registro(s) recuperados sem iniciar outro processamento.`);
     }
 
     // REIDRATAÇÃO VA (sobrevive RELOAD/RESTART do PC): pra CADA task VA que tem
@@ -4837,9 +4803,8 @@ function ClickUpPilotInner() {
       void (async () => {
         try {
           const persisted = loadPersistedBatchStates() as Record<string, BatchTaskState>;
-          const protect = Object.entries(persisted)
-            .filter(([, s]) => s.phase !== 'done' && s.phase !== 'failed')
-            .map(([id]) => id);
+          // A saved background record is never eligible for automatic media eviction.
+          const protect = Object.keys(persisted);
           const { pruneZipStore } = await import('@/lib/zip-store');
           const r = await pruneZipStore({ protect });
           if (r && r.evicted > 0) {
@@ -4858,7 +4823,10 @@ function ClickUpPilotInner() {
 
   /** Persist batchStates a cada mudanca pra sobreviver reload. */
   useEffect(() => {
-    persistBatchStates(batchStates);
+    // The writer ignores absent/unchanged rows; only explicit removal deletes.
+    // It reports storage/network conflicts through the global persistence banner.
+    const owned = Object.fromEntries(Object.entries(batchStates).filter(([id]) => !recoveredBatchIdsRef.current.has(id)));
+    void batchWriterRef.current.save(owned).catch(() => {});
   }, [batchStates]);
 
   /** Backfill da EMPRESA (workspace) nos cards da fila.
@@ -7702,6 +7670,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  kind='resume' → resumeTaskBatch (so re-poll+download+post, requer videoIds)
    */
   async function runHeyGenGated(taskId: string, kind: 'run' | 'resume') {
+    recoveredBatchIdsRef.current.delete(taskId);
     if (heygenPendingRef.current[taskId]) {
       // Já há wrapper vivo. NÃO descarta o clique em silêncio (era o "Retomar não faz
       // nada" durante um Pausar→Retomar rápido, com o run anterior ainda encerrando):
@@ -7985,6 +7954,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *    zero (TTS+upload+submit+poll+zip). Garante botao util sempre.
    *  Gated por MAX_HEYGEN_PARALLEL — se 2 ja rodando, vira 'queued'. */
   function retomarTaskBatch(taskId: string) {
+    recoveredBatchIdsRef.current.delete(taskId);
     // TROCA DE ÁUDIO: re-roda o pipeline proprio (nao tem HeyGen pra retomar).
     if (batchStates[taskId]?.kind === 'troca' || taskAnalyses[taskId]?.trocaBriefing) {
       void runTrocaAudioPipelineForTask(taskId);
@@ -12298,6 +12268,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
   // Roda na MESMA fila (batchStates + BatchJobCard3D) das outras tasks, com o
   // mesmo botao de download no fim. Sem HeyGen.
   async function runTrocaAudioPipelineForTask(taskId: string) {
+    recoveredBatchIdsRef.current.delete(taskId);
     const a = taskAnalyses[taskId];
     const troca = a?.trocaBriefing;
     const taskName = a?.taskName || batchStates[taskId]?.taskName || taskId;
@@ -13976,7 +13947,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   />
                                 ) : undefined
                               }
-                              onRemove={() => {
+                              onRemove={async () => {
+                                try { await deleteDurableRecords('background', [b.taskId]); } catch { return; }
                                 if (queued) batchCancelRef.current[b.taskId] = true;
                                 for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
                                   if (url) { try { URL.revokeObjectURL(url); } catch {} }

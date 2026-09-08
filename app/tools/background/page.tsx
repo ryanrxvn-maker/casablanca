@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ToolShell } from '@/components/ToolShell';
 import { getPilotTeamNames, shortWorkspaceLabel } from '@/lib/clickup-pilot-config';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords } from '@/lib/durable-records';
 
 /**
  * Background Tasks — viewer dedicado dos batches do ClickUp Pilot.
@@ -90,13 +91,7 @@ type BatchTaskState = {
 };
 
 function readBatches(): Record<string, BatchTaskState> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(BATCH_STATE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return readDurableRecords<BatchTaskState>('background');
 }
 
 function readCancelMap(): Record<string, number> {
@@ -214,46 +209,41 @@ export default function BackgroundTasksPage() {
     return { running, queued, done, failed, total: sorted.length };
   }, [sorted]);
 
-  function cancelTask(taskId: string) {
+  async function cancelTask(taskId: string) {
     if (!confirm('Cancelar esse item? Vai parar os downloads e a finalização que estiverem em andamento.')) return;
     const map = readCancelMap();
     map[taskId] = Date.now();
     localStorage.setItem(CANCEL_KEY, JSON.stringify(map));
     setCancelMap(map);
     // Tambem marca o batch como failed pra dar feedback imediato
-    const current = readBatches();
+    const writer = createRecordWriter('background');
+    const current = writer.hydrate<BatchTaskState>();
     if (current[taskId]) {
       current[taskId] = { ...current[taskId], phase: 'failed', message: 'Cancelado por você', finishedAt: Date.now() };
-      localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(current));
+      try { await writer.save(current); } catch { return; }
       setBatches(current);
     }
   }
 
-  function removeTask(taskId: string) {
+  async function removeTask(taskId: string) {
     if (!confirm('Remover esse item do histórico? (Não apaga os ZIPs que você já baixou)')) return;
-    const current = readBatches();
-    delete current[taskId];
-    localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(current));
-    setBatches(current);
+    try { await deleteDurableRecords('background', [taskId]); } catch { return; }
+    setBatches(readBatches());
   }
 
-  function clearAllDone() {
+  async function clearAllDone() {
     if (!confirm('Limpar tudo que já concluiu ou falhou?')) return;
     const current = readBatches();
-    for (const k of Object.keys(current)) {
-      if (current[k].phase === 'done' || current[k].phase === 'failed') {
-        delete current[k];
-      }
-    }
-    localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(current));
-    setBatches(current);
+    const ids = Object.keys(current).filter(k => current[k].phase === 'done' || current[k].phase === 'failed');
+    try { await deleteDurableRecords('background', ids); } catch { return; }
+    setBatches(readBatches());
   }
 
   return (
     <ToolShell
       title="Tarefas em segundo plano"
       eyebrow="FILA"
-      description="Tudo o que está rodando agora. Você pode fechar a aba — o trabalho continua."
+      description="Seus disparos ficam salvos na conta até você excluir. O processamento depende da aba que executa a tarefa."
       hue="rgba(34,211,238,0.42)"
     >
       <div className="space-y-4">
@@ -538,10 +528,10 @@ export default function BackgroundTasksPage() {
             Como funciona
           </div>
           <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
-            Tasks iniciadas no Pilot aparecem aqui ao vivo. O andamento fica salvo
-            no seu navegador, então sobrevive se você recarregar a página. Os ZIPs gerados
-            ficam disponíveis na própria aba do Pilot (o link de download se perde
-            ao recarregar — gere de novo se precisar).
+            Os registros confirmados ficam salvos na sua conta até você excluí-los.
+            O histórico de 7 dias é separado e sua expiração não remove o background.
+            Os arquivos locais são conferidos ao baixar; recuperar um registro em outro
+            navegador não transfere os bytes do vídeo. Confira a montagem antes de refazer qualquer geração.
             <br/><br/>
             Cancelar avisa a aba do Pilot pra parar aquele item.
             Se aquela aba já foi fechada, não tem mais nada rodando — aí o &quot;cancelar&quot;

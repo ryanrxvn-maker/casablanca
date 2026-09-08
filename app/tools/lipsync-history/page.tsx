@@ -6,6 +6,7 @@ import { ToolShell } from '@/components/ToolShell';
 import { loadZip, listZipKeys, deleteZip as deleteZipFromStore } from '@/lib/zip-store';
 import { sendJobCommand, navigateToEngine } from '@/lib/job-commands';
 import { getPilotTeamNames, shortWorkspaceLabel } from '@/lib/clickup-pilot-config';
+import { readDurableRecords, deleteDurableRecords } from '@/lib/durable-records';
 
 /**
  * DARKO LAB Lipsync History — todos os lipsyncs feitos pela aplicacao,
@@ -80,13 +81,7 @@ type Entry = {
 };
 
 function readBatches(): Record<string, BatchTaskState> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(BATCH_STATE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return readDurableRecords<BatchTaskState>('background');
 }
 
 function readVAHistory(): VAHistoryEntry[] {
@@ -241,13 +236,11 @@ export default function LipsyncHistoryPage() {
     return [...ids];
   }, [entries]);
 
-  function removeEntry(e: Entry) {
+  async function removeEntry(e: Entry) {
     if (!confirm(`Remover "${e.taskName}" do histórico?`)) return;
     if (e.kind === 'batch') {
-      const cur = readBatches();
       const taskId = (e.raw as BatchTaskState).taskId;
-      delete cur[taskId];
-      localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(cur));
+      try { await deleteDurableRecords('background', [taskId]); } catch { return; }
     } else {
       const cur = readVAHistory();
       const filtered = cur.filter((v) => !(v.taskId === (e.raw as VAHistoryEntry).taskId && v.startedAt === (e.raw as VAHistoryEntry).startedAt));
@@ -256,13 +249,10 @@ export default function LipsyncHistoryPage() {
     setEntries(toEntries());
   }
 
-  function clearAllFailed() {
+  async function clearAllFailed() {
     if (!confirm('Limpar todas as entradas que falharam?')) return;
     const batches = readBatches();
-    for (const k of Object.keys(batches)) {
-      if (batches[k].phase === 'failed') delete batches[k];
-    }
-    localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(batches));
+    try { await deleteDurableRecords('background', Object.keys(batches).filter(k => batches[k].phase === 'failed')); } catch { return; }
     const va = readVAHistory().filter((v) => v.avatares.some((a) => a.status === 'done'));
     localStorage.setItem(VA_HISTORY_KEY, JSON.stringify(va));
     setEntries(toEntries());

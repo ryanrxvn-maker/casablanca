@@ -255,12 +255,22 @@ export async function pruneZipStore(opts: {
 } = {}): Promise<{ evicted: number; freedBytes: number; keptGroups: number } | null> {
   try {
     const { planZipEviction } = await import('./zip-store-prune');
+    const { durabilityStatus, readDurableRecords } = await import('./durable-records');
+    // Every caller shares this gate. Never prune against an empty/unrecovered
+    // registry, or evict an artifact belonging to a saved background record.
+    if (!durabilityStatus().ready || durabilityStatus().error) return null;
+    const records = readDurableRecords<{ originalTaskId?: string }>('background');
+    if (durabilityStatus().error) return null;
     // Áudios de itens de FILA do Hey Auto ainda não entregues são protegidos
     // AQUI (não só no protect do caller): a faxina também roda no boot do
     // Pilot/Auto B-roll, que não conhecem a fila — sem isto uma fila pendente
     // de madrugada (>12h) perdia os áudios pra faxina de outra ferramenta.
     const { listQueueAudioProtectIds } = await import('./heygen-queue-store');
     const protect = new Set<string>(opts.protect ? Array.from(opts.protect) : []);
+    for (const [id, row] of Object.entries(records)) {
+      protect.add(id);
+      if (row.originalTaskId) protect.add(row.originalTaskId);
+    }
     for (const id of listQueueAudioProtectIds()) protect.add(id);
     // listZipKeys lê via cursor SEM reter bytes (só key/size/createdAt) — pico de
     // memória é ~1 registro por vez, não o store inteiro.

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { readDurableRecords } from '@/lib/durable-records';
 
 const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
 
@@ -15,12 +16,7 @@ export function BackgroundTasksButton() {
   useEffect(() => {
     const compute = () => {
       try {
-        const raw = localStorage.getItem(BATCH_STATE_KEY);
-        if (!raw) {
-          setRunningCount(0);
-          return;
-        }
-        const map = JSON.parse(raw) as Record<string, { phase?: string }>;
+        const map = readDurableRecords<{ phase?: string }>('background');
         const running = Object.values(map).filter(
           (b) => b.phase && !['done', 'failed'].includes(b.phase),
         ).length;

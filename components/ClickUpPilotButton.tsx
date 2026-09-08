@@ -2,15 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { readDurableRecords } from '@/lib/durable-records';
 
 const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
 
 function readActiveBatchCount(): number {
   if (typeof window === 'undefined') return 0;
   try {
-    const raw = localStorage.getItem(BATCH_STATE_KEY);
-    if (!raw) return 0;
-    const states = JSON.parse(raw) as Record<string, { phase?: string }>;
+    const states = readDurableRecords<{ phase?: string }>('background');
     let n = 0;
     for (const s of Object.values(states)) {
       if (s.phase && s.phase !== 'done' && s.phase !== 'failed') n++;

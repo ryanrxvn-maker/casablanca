@@ -354,8 +354,8 @@ export default function HistoricoPage() {
               <span className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    clearHistory();
+                  onClick={async () => {
+                    try { await clearHistory(); } catch { return; }
                     void import('@/lib/history-vault')
                       .then((v) => v.clearVault())
                       .then(() => refreshAvailability())

@@ -16,7 +16,7 @@
  * desse taskId, regrava. Nunca apaga entradas de outros jobs.
  */
 
-const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
 
 export type SharedBatchPart = {
   label: string;
@@ -44,20 +44,7 @@ export type SharedBatchState = {
 };
 
 function readAll(): Record<string, SharedBatchState> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(BATCH_STATE_KEY);
-    return raw ? (JSON.parse(raw) as Record<string, SharedBatchState>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeAll(map: Record<string, SharedBatchState>) {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(map));
-  } catch {}
+  return readDurableRecords<SharedBatchState>('background');
 }
 
 /** Lista todos os batches persistidos (opcionalmente filtrados por prefixo
@@ -75,7 +62,8 @@ export function upsertSharedBatch(
   taskId: string,
   patch: Partial<SharedBatchState> & { taskId?: never },
 ) {
-  const map = readAll();
+  const writer = createRecordWriter('background');
+  const map = writer.hydrate<SharedBatchState>();
   const prev = map[taskId];
   map[taskId] = {
     taskId,
@@ -90,15 +78,11 @@ export function upsertSharedBatch(
     montadoZipName: patch.montadoZipName ?? prev?.montadoZipName,
     camufladoZipName: patch.camufladoZipName ?? prev?.camufladoZipName,
   };
-  writeAll(map);
+  void writer.save(map).catch(() => {}); // global banner preserves/reports failures
 }
 
 export function removeSharedBatch(taskId: string) {
-  const map = readAll();
-  if (map[taskId]) {
-    delete map[taskId];
-    writeAll(map);
-  }
+  void deleteDurableRecords('background', [taskId]).catch(() => {});
 }
 
 /* ============================================================================

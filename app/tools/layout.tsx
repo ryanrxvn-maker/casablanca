@@ -1,6 +1,7 @@
 'use client';
 
 import { Heartbeat } from '@/components/Heartbeat';
+import { DurableRecordsProvider } from '@/components/DurableRecordsProvider';
 import { PaymentBlockedBanner } from '@/components/PaymentBlockedBanner';
 import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
@@ -51,7 +52,7 @@ function ContentWrap({ children }: { children: React.ReactNode }) {
     >
       <TopBar />
       <PaymentBlockedBanner />
-      <main className="flex-1 pb-16 pt-6 md:pt-8">{children}</main>
+      <main className="flex-1 pb-16 pt-6 md:pt-8"><DurableRecordsProvider>{children}</DurableRecordsProvider></main>
     </div>
   );
 }
