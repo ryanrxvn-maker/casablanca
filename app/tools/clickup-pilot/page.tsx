@@ -240,6 +240,7 @@ import {
 } from '@/lib/magnific-queue-runner';
 import {
   clearPilotRunnerPulse,
+  overlayPilotBackgroundCheckpoint,
   overlayPilotRunnerPulse,
   PILOT_RUNNER_PULSE_INTERVAL_MS,
   PILOT_RUNNER_PULSE_KEY,
@@ -4426,6 +4427,13 @@ function ClickUpPilotInner() {
   const batchStatesRef = useRef<Record<string, BatchTaskState>>({});
   batchStatesRef.current = batchStates;
   const [foreignRunnerPulse, setForeignRunnerPulse] = useState<PilotRunnerPulse | null>(null);
+  /**
+   * Espelho APENAS DE TELA da fila durável. Quando esta aba não é a dona do
+   * executor, a hidratação conserva os cards como recuperados por segurança;
+   * este snapshot devolve o andamento real que a aba dona continua gravando.
+   * Não alimenta o runner e portanto não pode duplicar um disparo.
+   */
+  const [backgroundCheckpoint, setBackgroundCheckpoint] = useState<Record<string, BatchTaskState>>({});
 
   /**
    * Execução viva em OUTRA aba precisa aparecer como viva no Pilot. Antes, a
@@ -4476,6 +4484,26 @@ function ClickUpPilotInner() {
       window.clearInterval(timer);
       window.removeEventListener('storage', onStorage);
       clearPilotRunnerPulse(me);
+    };
+  }, []);
+
+  /**
+   * O evento `storage` não volta para a mesma aba que escreveu a fila e um
+   * executor legado não emite o pulse acima. Releitura leve deixa o Pilot
+   * aberto como painel ao vivo inclusive nesses lotes, sem recarregar ou
+   * assumir a execução em curso.
+   */
+  useEffect(() => {
+    const refresh = () => setBackgroundCheckpoint(loadPersistedBatchStates() as Record<string, BatchTaskState>);
+    refresh();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key?.includes(':background:')) refresh();
+    };
+    window.addEventListener('storage', onStorage);
+    const timer = window.setInterval(refresh, 1_500);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -5001,10 +5029,10 @@ function ClickUpPilotInner() {
     return out;
   }, [batchStates, selectedTeam, modo]);
 
-  const batchStatesDaEmpresaParaTela = useMemo(
-    () => overlayPilotRunnerPulse(batchStatesDaEmpresa, foreignRunnerPulse, thisTabId()),
-    [batchStatesDaEmpresa, foreignRunnerPulse],
-  );
+  const batchStatesDaEmpresaParaTela = useMemo(() => {
+    const checkpointed = overlayPilotBackgroundCheckpoint(batchStatesDaEmpresa, backgroundCheckpoint);
+    return overlayPilotRunnerPulse(checkpointed, foreignRunnerPulse, thisTabId());
+  }, [batchStatesDaEmpresa, backgroundCheckpoint, foreignRunnerPulse]);
 
   /** A fila COLAPSADA por AD (30.08): as versões do mesmo anúncio (`-yt`,
    *  `-v3`…) deixam de ocupar um card cada — sobra UM card por AD, o da
