@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.23.1';
+const DARKO_EXT_VERSION = '4.24.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -4105,6 +4105,23 @@ function findRenderSceneButton() {
     const tudo = `${t} ${al} ${dt}`;
     // VETO DURO: qualquer sinal de Generate/Submit desqualifica o candidato.
     if (/\b(generate|gerar|submit|export|publish)\b/.test(tudo)) continue;
+    // ⚠ O BOTAO MUDOU DE NOME. Ate 09.2026 era "Render Scene"; o HeyGen
+    // renomeou pra "Free Preview" no revamp de planos, e ele mora no painel
+    // direito (Avatar & Voice da cena), junto do Motion Engine.
+    // O que ele faz e o mesmo: renderiza SO a cena ativa. Em Avatar III o
+    // proprio app declara uso ILIMITADO (chaves render_scene_unlimited_usage /
+    // unlimited_lipsync no bundle), e o tooltip diz "a render costs 0 credits".
+    // O VETO de generate/submit/export/publish continua valendo acima — nenhum
+    // desses nomes pode ser clicado. "free preview" nao casa com o veto.
+    // ⚠⚠ "FREE PREVIEW" NAO SERVE E NAO PODE SER CLICADO.
+    // O HeyGen colocou esse botao no lugar do Render Scene no painel direito,
+    // mas ele e OUTRA COISA: da so 3 usos (endpoint .allowance devolve
+    // {"remaining":N}) e o video volta COM MARCA DAGUA. Clicar nele queima a
+    // franquia do usuario e entrega um arquivo inutil pro AD.
+    // O que serve e o RENDER SCENE de verdade, que continua existindo no
+    // bundle (chaves render_scene, menu_render_scene, render_scene_free,
+    // render_scene_unlimited_usage) e em Avatar III e declarado ILIMITADO.
+    if (/free preview/.test(tudo)) continue;
     if (!/render/.test(tudo) && !/renderiza/.test(tudo)) continue;
     let score = 100;
     if (/render scene|renderizar cena/.test(tudo)) score += 60;
@@ -4228,6 +4245,30 @@ async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
     );
   }
   return alvo;
+}
+
+/** Quantos previews GRATIS (com marca dagua) a conta ainda tem.
+ *  Endpoint interno descoberto no bundle do create-v4 e confirmado ao vivo:
+ *    GET api2.heygen.com/v1/text_draft.scene_avatar_preview.allowance
+ *    -> {"code":100,"data":{"is_eligible":true,"remaining":2}}
+ *  `restantes > 0` significa que o botao de render ainda esta no modo
+ *  "Free Preview" e devolve video MARCADO. So com 0 o render sai limpo e
+ *  custa 0 credito (Avatar III e declarado de uso ilimitado pelo proprio app).
+ *  Em caso de duvida (rede caiu, formato mudou) devolve -1: o chamador decide,
+ *  e o padrao e NAO bloquear por causa de uma leitura que falhou. */
+async function ecoFranquiaDePreview() {
+  try {
+    const r = await fetch('https://api2.heygen.com/v1/text_draft.scene_avatar_preview.allowance', {
+      credentials: 'include',
+    });
+    if (!r.ok) return { restantes: -1, motivo: `HTTP ${r.status}` };
+    const j = await r.json();
+    const n = j && j.data && typeof j.data.remaining === 'number' ? j.data.remaining : -1;
+    ecoLog(`franquia de preview gratis: ${n}`);
+    return { restantes: n, motivo: null };
+  } catch (e) {
+    return { restantes: -1, motivo: (e && e.message) || String(e) };
+  }
 }
 
 /** Diálogo aberto (paywall, limite): CAPTURA o texto antes de esconder. O
@@ -4357,6 +4398,26 @@ async function runEconomyJob(requestId, payload) {
       // motor ja esta travado e conferido.
       await ecoEscreverTextoNaCenaAtiva(cena.texto, rot);
 
+      // ⚠⚠ PORTAO DA MARCA DAGUA. O botao de render da cena e UM SO, e o
+      // rotulo dele muda conforme a franquia (visto no bundle):
+      //     p === 'loading' ? 'render_scene_allowance_loading'
+      //   : f              ? 'render_scene_free'      // "Free Preview"
+      //                    : 'menu_render_scene'      // "Render Scene"
+      // Enquanto `remaining > 0` o clique gasta um PREVIEW GRATIS e o video
+      // volta COM MARCA DAGUA — inutil pro AD. So depois que a franquia zera o
+      // mesmo botao passa a fazer o render de 0 credito.
+      // Entao: conferir ANTES de clicar, e recusar em vez de sujar o AD.
+      const franquia = await ecoFranquiaDePreview();
+      if (franquia.restantes > 0) {
+        throw new Error(
+          `${rot}: a conta ainda tem ${franquia.restantes} preview(s) GRATIS com MARCA DAGUA. ` +
+          `Enquanto sobrarem, o botao entrega video marcado — inutil pro AD. ` +
+          `Gaste os ${franquia.restantes} restantes na mao no HeyGen (botao "Free Preview") ` +
+          `e dispare de novo: dai o mesmo botao vira o Render Scene de 0 credito. ` +
+          `Nada foi gerado e nada foi cobrado.`,
+        );
+      }
+
       // FOTO das mídias ANTES de renderizar: o que aparecer de novo é o take.
       let antes = ecoMidiasConhecidas();
       const btn = await waitForOrNull(() => findRenderSceneButton(), 15000, 500);
@@ -4369,7 +4430,7 @@ async function runEconomyJob(requestId, payload) {
           .slice(0, 16)
           .join(' / ');
         throw new Error(
-          `${rot}: botão "Render Scene" não encontrado. Nada foi gerado. ` +
+          `${rot}: botão de render da cena ("Free Preview"/"Render Scene") não encontrado. Nada foi gerado. ` +
           `[url=${location.pathname}; viewport=${window.innerWidth}x${window.innerHeight}; botoes: ${vistos}]`,
         );
       }
