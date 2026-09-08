@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.29.3';
+const DARKO_EXT_VERSION = '4.30.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -4088,6 +4088,9 @@ let ecoCancelado = false;
  *  vez de abortar, e a URL capturada e classificada (marcada x limpa) no
  *  progresso. So pra investigacao — o padrao e desligado. */
 let ecoMedirMarcaDagua = false;
+/** Ligado SO durante a queima da franquia: nesse momento o botao rotulado
+ *  "Free Preview" e exatamente o alvo — e clicando nele que a franquia zera. */
+let ecoQueimandoFranquia = false;
 function ecoPedirCancelamento(requestId) {
   if (!requestId || requestId === currentJob) {
     ecoCancelado = true;
@@ -4178,8 +4181,9 @@ function findRenderSceneButton() {
     // Em MODO MEDICAO o "Free Preview" e aceito de proposito: e assim que se
     // gasta a franquia pra chegar no render de 0 credito e medir se ele vem
     // limpo. Fora da medicao ele continua vetado.
-    if (/free preview/.test(tudo) && !ecoMedirMarcaDagua) continue;
-    if (!/render/.test(tudo) && !/renderiza/.test(tudo) && !(ecoMedirMarcaDagua && /free preview/.test(tudo))) continue;
+    if (/free preview/.test(tudo) && !ecoMedirMarcaDagua && !ecoQueimandoFranquia) continue;
+    if (!/render/.test(tudo) && !/renderiza/.test(tudo) &&
+        !((ecoMedirMarcaDagua || ecoQueimandoFranquia) && /free preview/.test(tudo))) continue;
     let score = 100;
     if (/render scene|renderizar cena/.test(tudo)) score += 60;
     // Geometria so DESEMPATA, e so quando o viewport tem tamanho de verdade.
@@ -4358,6 +4362,76 @@ function ecoVideoIdDaUrl() {
   return m ? m[1] : null;
 }
 
+/* ============ QUEIMA DA FRANQUIA DE PREVIEW ============
+ * CONFIRMADO AO VIVO (Silas, 08.09.2026): depois de gastar os previews
+ * gratis, o botao vira o RENDER SCENE de sempre e o video sai **SEM MARCA
+ * DAGUA** — o painel passa a mostrar "Scene rendered".
+ *
+ * Ou seja, os previews gratis nao sao um beneficio: sao um PEDAGIO. Eles vem
+ * marcados e sao inuteis pro AD. A ferramenta identifica quantos faltam,
+ * queima cada um numa cena de aquecimento (texto descartavel) e so entao
+ * comeca a valer, com o render de 0 credito e limpo.
+ *
+ * ⚠ POR QUE TEXTO DIFERENTE A CADA VOLTA: o proprio tooltip avisa que "viewing
+ * this scene again is free until you change it". Renderizar a MESMA cena de
+ * novo devolve o cache e NAO consome franquia — ficaria em laco eterno. Cada
+ * queima usa um texto novo pra forcar render de verdade.
+ *
+ * ⚠ O SINAL DE QUE QUEIMOU e a franquia CAIR, nao o video aparecer: o video
+ * dessas voltas e descartado, entao nem esperamos por ele. */
+async function ecoQueimarFranquia(requestId, rotulo) {
+  ecoQueimandoFranquia = true;
+  try {
+    for (let volta = 1; volta <= 5; volta++) {
+      const antes = await ecoFranquiaDePreview();
+      if (antes.restantes <= 0) {
+        ecoLog('franquia zerada — o render agora sai limpo');
+        return true;
+      }
+      reportProgress(
+        requestId,
+        `${rotulo}: liberando o render limpo — queimando ${antes.restantes} preview(s) de teste (vem com marca d'agua e sao descartados)...`,
+        3,
+      );
+      const campos = ecoCamposDeTexto();
+      if (!campos.length) {
+        ecoWarn('queima: sem campo de script');
+        return false;
+      }
+      await pasteScriptIntoTextarea(
+        campos[campos.length - 1],
+        `Aquecimento ${volta}. Este take e descartado.`,
+      );
+      await sleep(2500);
+      const btn = await waitForOrNull(() => findRenderSceneButton(), 180000, 1500);
+      if (!btn) {
+        ecoWarn('queima: botao de render nao habilitou');
+        return false;
+      }
+      await cdpClickEl(btn, `queimar preview ${volta}`);
+      // espera a franquia CAIR (ate 8 min, mesmo teto de uma cena)
+      const t0 = Date.now();
+      let caiu = false;
+      while (Date.now() - t0 < 8 * 60 * 1000) {
+        if (ecoCancelado) throw new Error('Cancelado durante a liberacao do render limpo.');
+        await sleep(5000);
+        const agora = await ecoFranquiaDePreview();
+        if (agora.restantes >= 0 && agora.restantes < antes.restantes) { caiu = true; break; }
+        const seg = Math.round((Date.now() - t0) / 1000);
+        if (seg % 20 < 6) reportProgress(requestId, `${rotulo}: liberando o render limpo (${seg}s)...`, 3);
+      }
+      if (!caiu) {
+        ecoWarn('queima: a franquia nao caiu — parando pra nao girar em falso');
+        return false;
+      }
+    }
+  } finally {
+    ecoQueimandoFranquia = false;
+  }
+  const fim = await ecoFranquiaDePreview();
+  return fim.restantes <= 0;
+}
+
 /** Quantos previews GRATIS (com marca dagua) a conta ainda tem.
  *  Endpoint interno descoberto no bundle do create-v4 e confirmado ao vivo:
  *    GET api2.heygen.com/v1/text_draft.scene_avatar_preview.allowance
@@ -4519,21 +4593,23 @@ async function runEconomyJob(requestId, payload) {
       // volta COM MARCA DAGUA — inutil pro AD. So depois que a franquia zera o
       // mesmo botao passa a fazer o render de 0 credito.
       // Entao: conferir ANTES de clicar, e recusar em vez de sujar o AD.
+      // ⚠⚠ PEDAGIO DA FRANQUIA. CONFIRMADO ao vivo: enquanto sobrarem previews
+      // gratis o render sai COM MARCA DAGUA; depois que eles acabam o mesmo
+      // botao vira o Render Scene de sempre e o video sai LIMPO, a 0 credito.
+      // Entao a ferramenta paga o pedagio sozinha — queima os que faltam com
+      // texto descartavel — e so depois renderiza o take de verdade.
+      // Isso acontece UMA VEZ por conta, nao por AD.
       const franquia = await ecoFranquiaDePreview();
-      // MODO MEDICAO: com a flag ligada o portao AVISA e SEGUE, em vez de
-      // abortar. Serve pra gastar a franquia de propria vontade e medir se o
-      // render seguinte (o de 0 credito) vem sem marca dagua. Fora dela o
-      // portao continua protegendo o AD.
-      if (franquia.restantes > 0 && ecoMedirMarcaDagua) {
-        reportProgress(requestId, `${rot}: MEDICAO — gastando 1 dos ${franquia.restantes} previews gratis...`, base + 3);
-      } else if (franquia.restantes > 0) {
-        throw new Error(
-          `${rot}: a conta ainda tem ${franquia.restantes} preview(s) GRATIS com MARCA DAGUA. ` +
-          `Enquanto sobrarem, o botao entrega video marcado — inutil pro AD. ` +
-          `Gaste os ${franquia.restantes} restantes na mao no HeyGen (botao "Free Preview") ` +
-          `e dispare de novo: dai o mesmo botao vira o Render Scene de 0 credito. ` +
-          `Nada foi gerado e nada foi cobrado.`,
-        );
+      if (franquia.restantes > 0) {
+        const liberou = await ecoQueimarFranquia(requestId, rot);
+        if (!liberou) {
+          throw new Error(
+            `${rot}: nao consegui liberar o render limpo (ainda ha preview gratis com marca d'agua na conta). ` +
+            `Nada foi gerado pro AD e nada foi cobrado.`,
+          );
+        }
+        // A cena de aquecimento deixou texto lixo: reescreve a fala de verdade.
+        await ecoEscreverTextoNaCenaAtiva(cena.texto, rot);
       }
 
       // ⚠ TRAZER O PAINEL DE VOLTA antes de procurar o botao de render.
@@ -4667,9 +4743,19 @@ async function runEconomyJob(requestId, payload) {
       const marcado = /-marked-[a-z0-9_]+(?:-rgb|-packed)?\.(?:mp4|webm)/i.test(url);
       reportProgress(
         requestId,
-        `${rot}: take capturado — ${marcado ? 'COM MARCA DAGUA (queimada no arquivo)' : 'SEM marca dagua'}`,
+        `${rot}: take capturado — ${marcado ? 'COM MARCA DAGUA' : 'sem marca dágua ✓'}`,
         base + 8,
       );
+      // ⚠ TRAVA FINAL: take marcado NAO entra no AD, ponto. Se a franquia foi
+      // queimada e mesmo assim veio marcado, alguma coisa mudou do lado do
+      // HeyGen — melhor parar e falar do que entregar um AD com marca d'agua
+      // que so seria descoberta na revisao.
+      if (marcado) {
+        throw new Error(
+          `${rot}: o take voltou COM MARCA D'AGUA mesmo depois de liberar o render limpo. ` +
+          `Parei aqui pra nao sujar o AD. Nada foi cobrado.`,
+        );
+      }
       resultados.push({ idx: cena.idx, videoUrl: url });
       reportProgress(requestId, `${rot}: pronta`, Math.round(((i + 1) / total) * 90));
     }
