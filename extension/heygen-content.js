@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.33.2';
+const DARKO_EXT_VERSION = '4.34.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -5022,6 +5022,34 @@ async function ecoRenderCenaApiBruto({ videoId, sceneId, wrapper, title }) {
  *  TTS por endpoint, e nos tambem podemos.
  * ---------------------------------------------------------------------- */
 
+/** A voz pelo NOME que o Pilot manda (o card guarda nome, nao id).
+ *  ⚠ Se o nome nao bater, NAO cai numa voz qualquer: devolve null e o chamador
+ *  usa a voz que ja esta na cena. Escolher voz errada em silencio produziria um
+ *  AD inteiro com a voz trocada — defeito que so aparece na revisao. */
+let ecoCacheVozes = null;
+async function ecoResolverVozPorNome(nome) {
+  const alvo = String(nome || '').trim().toLowerCase();
+  if (!alvo) return null;
+  if (!ecoCacheVozes) {
+    try {
+      const r = await listMyVoices();
+      ecoCacheVozes = (r && r.voices) || [];
+    } catch (e) {
+      ecoCacheVozes = [];
+    }
+  }
+  const norm = (x) => String(x || '').trim().toLowerCase();
+  let achada = ecoCacheVozes.find((v) => norm(v.name) === alvo);
+  if (!achada) achada = ecoCacheVozes.find((v) => norm(v.name).startsWith(alvo));
+  if (!achada) achada = ecoCacheVozes.find((v) => norm(v.name).includes(alvo));
+  if (!achada) {
+    ecoWarn(`voz "${nome}" nao encontrada entre ${ecoCacheVozes.length} — vou usar a voz da cena`);
+    return null;
+  }
+  ecoLog(`voz "${nome}" -> ${achada.id}`);
+  return achada.id;
+}
+
 /** A voz que a cena ja tem (o draft nasce com uma). */
 function ecoVozDaCena(wrapper, ids) {
   const tts = wrapper.text_draft.script.elements[ids.ttsId] || {};
@@ -5236,7 +5264,8 @@ async function runEconomyJobApi(requestId, payload) {
 
   const resultados = [];
   try {
-    const { avatarId, groupId, avatarName, voiceId, cenas, jobLabel } = payload || {};
+    const { avatarId, groupId, avatarName, voiceName, cenas, jobLabel } = payload || {};
+    let voiceId = (payload && payload.voiceId) || null;
     const tetoCena = Number(payload && payload.tetoPorCenaMs) || 8 * 60 * 1000;
     if (!Array.isArray(cenas) || cenas.length === 0) throw new Error('payload invalido: cenas vazio.');
 
@@ -5244,10 +5273,16 @@ async function runEconomyJobApi(requestId, payload) {
     // app (basta NAVEGAR pra /create-v4/draft?...&fromCreateButton=true, que
     // ele cria e redireciona pro id) — navegar e a unica coisa que sempre
     // funcionou em aba oculta. O background faz isso ANTES de nos chamar.
-    const videoId = (payload && payload.bancadaId) || ecoVideoIdDaUrl();
+    let videoId = (payload && payload.bancadaId) || ecoVideoIdDaUrl();
     if (!videoId) {
-      throw new Error('nao achei o projeto do Studio (bancada) pra renderizar. Nada foi cobrado.');
+      reportProgress(requestId, 'Economia: preparando o projeto do Studio...', 2);
+      const b = await ecoGarantirBancada();
+      videoId = b.id;
+      try { chrome.runtime.sendMessage({ type: 'HG_ECO_BANCADA_NOVA', bancadaId: videoId }); } catch (e) {}
+      reportProgress(requestId, `Economia: bancada ${b.como}`, 3);
     }
+
+    if (!voiceId && voiceName) voiceId = await ecoResolverVozPorNome(voiceName);
 
     reportProgress(requestId, 'Economia: lendo o projeto...', 3);
     let { wrapper, title } = await ecoDraftLer(videoId);
@@ -5358,6 +5393,92 @@ async function runEconomyJobApi(requestId, payload) {
   }
 }
 
+/** O id de um projeto que sirva de BANCADA.
+ *
+ *  ⚠ O app do HeyGen NAO cria projeto sozinho numa aba oculta — a URL fica em
+ *  `/create-v4/draft` pra sempre. Entao a bancada tem que nascer por API, e
+ *  fica guardada: uma so, reusada, em vez de um rascunho por disparo.
+ *
+ *  Ordem: (1) criar a nossa; (2) se nao der, reaproveitar um projeto que ja
+ *  exista na conta — sem NUNCA salvar por cima dele (a gente so le o formato e
+ *  manda o draft no corpo do render). */
+async function ecoCriarBancada() {
+  const tentativas = [
+    { rota: 'v1/pacific/draft/create', corpo: { title: 'Auto Edit - bancada' } },
+    { rota: 'v1/pacific/draft/create', corpo: {} },
+  ];
+  const notas = [];
+  for (const t of tentativas) {
+    const r = await ecoApiJson(t.rota, { metodo: 'POST', corpo: t.corpo, tetoMs: 30000 });
+    const id = r.data && (r.data.video_id || r.data.id || r.data.draft_id || r.data.project_id);
+    if (r.ok && id) {
+      ecoLog('bancada criada:', String(id).slice(0, 10));
+      return { id, como: 'criada' };
+    }
+    notas.push(`${t.rota}: ${r.msg || 'sem id'}`);
+  }
+  return { id: null, como: 'falhou', notas };
+}
+
+/** Um projeto ja existente cujo draft tem cena+avatar+fala. So LEITURA. */
+async function ecoBancadaExistente() {
+  // ⚠ A rota certa e `v2/project/items` (data.items[].video_id). `video.list`
+  // e `pacific/video.list` NAO existem nessa API e devolviam vazio calado — a
+  // bancada caia direto no create, que nasce sem cena e nao serve.
+  for (const rota of ['v2/project/items?limit=30', 'v1/project/items?limit=30']) {
+    const r = await ecoApiJson(rota, { tetoMs: 20000 });
+    let lista = (r.data && (r.data.items || r.data.list)) || [];
+    if (!Array.isArray(lista)) continue;
+    // Projeto NOSSO primeiro: assim a bancada para de ser um AD do usuario
+    // assim que existir uma "Auto Edit - bancada" na conta.
+    lista = [...lista].sort((a, b) => {
+      const nosso = (x) => (/^auto edit/i.test(String((x && x.name) || '')) ? 0 : 1);
+      return nosso(a) - nosso(b);
+    });
+    for (const v of lista.slice(0, 12)) {
+      const id = v && (v.video_id || v.id);
+      if (!id || v.is_trash || v.is_deleted) continue;
+      try {
+        const { wrapper } = await ecoDraftLer(id);
+        ecoIdsDaCena(wrapper, 0); // lanca se o formato nao servir
+        ecoLog('bancada reaproveitada:', String(id).slice(0, 10));
+        return { id, como: 'reaproveitada' };
+      } catch (e) { /* proximo */ }
+    }
+  }
+  return { id: null, como: 'falhou' };
+}
+
+async function ecoGarantirBancada() {
+  // ⚠ ORDEM IMPORTA, e ja foi ao contrario. `pacific/draft/create` funciona,
+  // mas o draft nasce VAZIO — sem cena, sem avatar, sem elemento de fala — e
+  // por isso nao serve de molde: `ecoIdsDaCena` falha na hora. MEDIDO na sonda
+  // (`comoNasceu: "criada"` seguido de erro ao ler a cena 1).
+  // Entao: primeiro um projeto que ja exista e tenha formato bom (so LEITURA —
+  // a gente nunca salva por cima), e criar fica como ultimo recurso.
+  const velha = await ecoBancadaExistente();
+  if (velha.id) return velha;
+  const criada = await ecoCriarBancada();
+  if (criada.id) {
+    try {
+      const { wrapper } = await ecoDraftLer(criada.id);
+      ecoIdsDaCena(wrapper, 0);
+      return criada;
+    } catch (e) {
+      throw new Error(
+        'criei o projeto do Studio, mas ele nasceu vazio (sem cena) e nao da pra ' +
+          'renderizar nele. Abra o Studio uma vez nessa conta pra ter um projeto ' +
+          'com cena. Nada foi cobrado.',
+      );
+    }
+  }
+  throw new Error(
+    'nao consegui preparar o projeto do Studio (bancada): ' +
+      ((criada.notas || []).join(' | ') || 'sem detalhes') +
+      '. Nada foi cobrado.',
+  );
+}
+
 /** SONDA — diagnostico do caminho por API sem renderizar nada.
  *  Le a franquia, le o draft da bancada e confere o mapa das cenas. Serve pra
  *  provar que o caminho esta de pe antes de gastar qualquer coisa. */
@@ -5366,9 +5487,14 @@ async function ecoSondaApi(videoIdPedido) {
   try {
     const f = await ecoFranquiaDePreview();
     out.franquia = f.restantes;
-    const videoId = videoIdPedido || ecoVideoIdDaUrl();
+    let videoId = videoIdPedido || ecoVideoIdDaUrl();
     out.bancada = videoId ? videoId.slice(0, 10) + '…' : null;
-    if (!videoId) { out.erro = 'sem projeto na URL (bancada nao criada)'; return out; }
+    if (!videoId) {
+      const b = await ecoGarantirBancada();
+      videoId = b.id;
+      out.bancada = String(videoId).slice(0, 10) + '~';
+      out.comoNasceu = b.como;
+    }
     const { wrapper, title } = await ecoDraftLer(videoId);
     out.titulo = String(title).slice(0, 40);
     const td = wrapper.text_draft;

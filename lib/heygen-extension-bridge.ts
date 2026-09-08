@@ -351,7 +351,11 @@ export function gerarPelaEconomia(
     window.postMessage(
       {
         source: 'darkolab',
-        type: 'HG_ECONOMY_GENERATE',
+        // MODO ECONOMIA POR API. O caminho por DOM ficou pra tras: em aba
+        // oculta o app do HeyGen nunca registra a edicao, a duracao fica 0 e o
+        // render nem habilita (a regra deles e `H===0 || ...`). Por API o TTS
+        // roda no servidor e a duracao nasce de la.
+        type: 'HG_ECONOMY_API_GENERATE',
         requestId,
         payload: {
           avatarId: payload.avatarId,

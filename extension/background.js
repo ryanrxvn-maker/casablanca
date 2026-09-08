@@ -132,6 +132,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_ECO_BANCADA_NOVA') {
+    // A bancada nasceu dentro do content script; guardar aqui e o que evita
+    // criar um rascunho novo a cada disparo e sujar a conta do usuario.
+    guardarBancada(msg.bancadaId);
+    return false;
+  }
+
   if (msg.type === 'HG_ECO_SONDA_API') {
     // Diagnostico do caminho por API: nao renderiza nada, so confere o mapa.
     (async () => {
@@ -148,7 +155,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           await waitForTabReady(tab.id);
         }
       }
-      const bancadaId = await esperarBancada(tab.id, 60000);
+      // O app nao cria projeto em aba oculta; esperar muito aqui so atrasa.
+      const bancadaId = await esperarBancada(tab.id, 3000);
       const r = await chrome.tabs.sendMessage(tab.id, { type: 'HG_ECO_SONDA_API', bancadaId });
       sendResponse({ ...r, bancadaId });
     })().catch((e) => sendResponse({ ok: false, erro: String(e?.message || e) }));
