@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.24.1';
+const DARKO_EXT_VERSION = '4.25.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2130,10 +2130,43 @@ async function pasteScriptIntoTextarea(textarea, text) {
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     textarea.dispatchEvent(new Event('change', { bubbles: true }));
   } else if (textarea.isContentEditable) {
-    textarea.innerHTML = '';
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    await sleep(100);
-    document.execCommand('insertText', false, text);
+    // ⚠ O campo de script do create-v4 e um TipTap/ProseMirror
+    // (class="tiptap ProseMirror", role=textbox, com node views
+    // node-sceneHeader / node-segment). MEDIDO 07.09.2026.
+    //
+    // `innerHTML = ''` + execCommand ARRANCA os nos do editor por baixo do
+    // ProseMirror: o estado interno dele fica dessincronizado do DOM, e o que
+    // sobra e imprevisivel — as vezes o texto some, as vezes fica grudado no
+    // placeholder ("1Type your script...Ola, este e..."), as vezes o editor
+    // para de aceitar edicao.
+    //
+    // O jeito certo e falar a lingua dele: um evento de PASTE. O ProseMirror
+    // trata paste nativamente, converte o text/plain no documento dele e
+    // mantem o estado consistente. VALIDADO ao vivo: com paste o texto entrou
+    // limpo; o preventDefault (dispatchEvent devolvendo false) e justamente a
+    // prova de que o editor assumiu o evento.
+    textarea.focus();
+    const sel = window.getSelection();
+    const rng = document.createRange();
+    rng.selectNodeContents(textarea);
+    sel.removeAllRanges();
+    sel.addRange(rng);
+    let colou = false;
+    try {
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      textarea.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      await sleep(300);
+      colou = (textarea.textContent || '').includes(text.slice(0, 24));
+    } catch (e) {}
+    if (!colou) {
+      // Fallback pro caminho antigo: contenteditable simples (nao ProseMirror)
+      // continua funcionando com execCommand.
+      textarea.innerHTML = '';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(100);
+      document.execCommand('insertText', false, text);
+    }
   }
 }
 
