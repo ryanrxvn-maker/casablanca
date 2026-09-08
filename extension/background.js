@@ -9,6 +9,9 @@ const pendingListJobs = new Map();
 // Voice clone pendentes: { bridgeTabId, timeoutId }
 const pendingCloneJobs = new Map();
 const pendingPhotoAvatarJobs = new Map();
+/** Modo medicao da marca dagua (investigacao). Viaja no payload do job. */
+let ecoMedirMarcaDagua = false;
+
 const HEYGEN_CREATE_URL = 'https://app.heygen.com/avatar';
 
 async function fetchWithTimeout(url, opts, timeoutMs = 30000) {
@@ -330,6 +333,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'HG_ECO_MEDIR') {
+    // Guarda tambem no background: a aba do job so nasce no disparo, entao um
+    // broadcast pras abas existentes nao alcanca ela. O flag viaja no payload.
+    ecoMedirMarcaDagua = !!msg.ligado;
+    // Repassa pra TODA aba do HeyGen: o content script que roda o job pode
+    // estar em qualquer uma delas.
+    chrome.tabs.query({ url: ['https://app.heygen.com/*'] }, (abas) => {
+      for (const t of abas || []) {
+        try { chrome.tabs.sendMessage(t.id, { type: 'HG_ECO_MEDIR', ligado: !!msg.ligado }); } catch (e) {}
+      }
+    });
+    sendResponse({ ok: true });
+    return true;
+  }
   if (msg.type === 'HG_CANCEL') {
     const job = activeJobs.get(msg.requestId);
     // AVISA A ABA. Antes o cancelamento só desligava o relatório: o laço do
@@ -1148,7 +1165,7 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     await chrome.tabs.sendMessage(tab.id, {
       type: jobMsg,
       requestId,
-      payload,
+      payload: { ...payload, medirMarcaDagua: ecoMedirMarcaDagua },
     });
     console.log('[DARKO LAB BG]', jobMsg, 'despachado pra tab', tab.id);
   } catch (e) {

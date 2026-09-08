@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.25.0';
+const DARKO_EXT_VERSION = '4.27.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -130,6 +130,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     runStudioJob(msg.requestId, msg.payload).catch((err) => {
       reportError(msg.requestId, err?.message ?? String(err));
     });
+    return false;
+  }
+  if (msg && msg.type === 'HG_ECO_MEDIR') {
+    ecoMedirMarcaDagua = !!msg.ligado;
+    console.log('[DARKO LAB ECONOMIA] modo medicao da marca dagua:', ecoMedirMarcaDagua);
     return false;
   }
   if (msg && msg.type === 'HG_CANCEL') {
@@ -4067,6 +4072,10 @@ function ecoWarn(...a) { console.warn('[DARKO LAB ECONOMIA]', ...a); }
  *  a task na página não parava nada aqui: o laço seguia dirigindo o Studio por
  *  até uma hora e travava o próximo job com "Outra geracao em andamento". */
 let ecoCancelado = false;
+/** Liga o MODO MEDICAO da marca dagua: o portao da franquia passa a avisar em
+ *  vez de abortar, e a URL capturada e classificada (marcada x limpa) no
+ *  progresso. So pra investigacao — o padrao e desligado. */
+let ecoMedirMarcaDagua = false;
 function ecoPedirCancelamento(requestId) {
   if (!requestId || requestId === currentJob) {
     ecoCancelado = true;
@@ -4154,8 +4163,11 @@ function findRenderSceneButton() {
     // O que serve e o RENDER SCENE de verdade, que continua existindo no
     // bundle (chaves render_scene, menu_render_scene, render_scene_free,
     // render_scene_unlimited_usage) e em Avatar III e declarado ILIMITADO.
-    if (/free preview/.test(tudo)) continue;
-    if (!/render/.test(tudo) && !/renderiza/.test(tudo)) continue;
+    // Em MODO MEDICAO o "Free Preview" e aceito de proposito: e assim que se
+    // gasta a franquia pra chegar no render de 0 credito e medir se ele vem
+    // limpo. Fora da medicao ele continua vetado.
+    if (/free preview/.test(tudo) && !ecoMedirMarcaDagua) continue;
+    if (!/render/.test(tudo) && !/renderiza/.test(tudo) && !(ecoMedirMarcaDagua && /free preview/.test(tudo))) continue;
     let score = 100;
     if (/render scene|renderizar cena/.test(tudo)) score += 60;
     // Geometria so DESEMPATA, e so quando o viewport tem tamanho de verdade.
@@ -4360,6 +4372,7 @@ async function runEconomyJob(requestId, payload) {
   const resultados = [];
   try {
     const { avatarId, avatarName, groupName, voiceName, cenas, jobLabel } = payload || {};
+    if (payload && payload.medirMarcaDagua) ecoMedirMarcaDagua = true;
     const tetoCena = Number(payload && payload.tetoPorCenaMs) || 8 * 60 * 1000;
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
     if (!Array.isArray(cenas) || cenas.length === 0) throw new Error('payload invalido: cenas vazio.');
@@ -4441,7 +4454,13 @@ async function runEconomyJob(requestId, payload) {
       // mesmo botao passa a fazer o render de 0 credito.
       // Entao: conferir ANTES de clicar, e recusar em vez de sujar o AD.
       const franquia = await ecoFranquiaDePreview();
-      if (franquia.restantes > 0) {
+      // MODO MEDICAO: com a flag ligada o portao AVISA e SEGUE, em vez de
+      // abortar. Serve pra gastar a franquia de propria vontade e medir se o
+      // render seguinte (o de 0 credito) vem sem marca dagua. Fora dela o
+      // portao continua protegendo o AD.
+      if (franquia.restantes > 0 && ecoMedirMarcaDagua) {
+        reportProgress(requestId, `${rot}: MEDICAO — gastando 1 dos ${franquia.restantes} previews gratis...`, base + 3);
+      } else if (franquia.restantes > 0) {
         throw new Error(
           `${rot}: a conta ainda tem ${franquia.restantes} preview(s) GRATIS com MARCA DAGUA. ` +
           `Enquanto sobrarem, o botao entrega video marcado — inutil pro AD. ` +
@@ -4449,6 +4468,25 @@ async function runEconomyJob(requestId, payload) {
           `e dispare de novo: dai o mesmo botao vira o Render Scene de 0 credito. ` +
           `Nada foi gerado e nada foi cobrado.`,
         );
+      }
+
+      // ⚠ TRAZER O PAINEL DE VOLTA antes de procurar o botao de render.
+      // O painel da direita e o de PROPRIEDADES DO OBJETO SELECIONADO, e o
+      // botao de render mora nele. Escrever o script move a selecao pro texto
+      // e o painel some — inclusive o botao. MEDIDO: clicar no canvas do palco
+      // reseleciona o avatar e o painel volta (com o texto ja escrito).
+      if (!editorVivo()) {
+        const palco = [...document.querySelectorAll('canvas')]
+          .filter((c) => estaNaTela(c))
+          .sort((x, y) => {
+            const a1 = x.getBoundingClientRect(), b1 = y.getBoundingClientRect();
+            return b1.width * b1.height - a1.width * a1.height;
+          })[0];
+        if (palco) {
+          ecoLog(`${rot}: painel sumiu depois do texto — reselecionando o avatar no palco`);
+          cliqueSinteticoEm(palco);
+          await waitForOrNull(() => (editorVivo() ? true : null), 10000, 400);
+        }
       }
 
       // FOTO das mídias ANTES de renderizar: o que aparecer de novo é o take.
@@ -4512,6 +4550,18 @@ async function runEconomyJob(requestId, payload) {
         );
       }
       ecoLog(`${rot}: vídeo capturado — ${url.slice(0, 120)}`);
+      // ⚠ COMO SABER SE TEM MARCA DAGUA, sem baixar e olhar: o proprio app do
+      // HeyGen decide se desenha o overlay por este padrao de URL —
+      //   /scene_previews\/.+-marked-[a-z0-9_]+(-rgb|-packed)?\.(mp4|webm)/
+      // Se a URL casa, a marca ja esta QUEIMADA no arquivo (por isso o front
+      // nao precisa desenhar nada por cima). Se nao casa, a marca so existia
+      // como overlay no DOM e o arquivo baixado sai LIMPO.
+      const marcado = /-marked-[a-z0-9_]+(?:-rgb|-packed)?\.(?:mp4|webm)/i.test(url);
+      reportProgress(
+        requestId,
+        `${rot}: take capturado — ${marcado ? 'COM MARCA DAGUA (queimada no arquivo)' : 'SEM marca dagua'}`,
+        base + 8,
+      );
       resultados.push({ idx: cena.idx, videoUrl: url });
       reportProgress(requestId, `${rot}: pronta`, Math.round(((i + 1) / total) * 90));
     }

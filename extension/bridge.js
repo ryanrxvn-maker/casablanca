@@ -98,6 +98,10 @@
       return;
     }
 
+    if (data.type === 'HG_ECO_MEDIR') {
+      try { chrome.runtime.sendMessage({ type: 'HG_ECO_MEDIR', ligado: !!data.ligado }); } catch {}
+      return;
+    }
     if (data.type === 'HG_CANCEL') {
       try { chrome.runtime.sendMessage({ type: 'HG_CANCEL', requestId: data.requestId }); } catch {}
       return;
