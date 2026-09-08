@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.22.6';
+const DARKO_EXT_VERSION = '4.23.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -4092,9 +4092,13 @@ function findRenderSceneButton() {
   const H = window.innerHeight;
   const cands = [];
   for (const b of document.querySelectorAll('button, [role="button"]')) {
-    if (b.disabled || b.offsetParent === null) continue;
+    // ⚠ estaNaTela e NAO offsetParent (falso negativo em position:fixed), e
+    // SEM porta de largura/altura: MEDIDO que numa aba de fundo o viewport da
+    // aba vem 0x0 e o layout inteiro colapsa (campo de script 0x132). Toda
+    // regra de geometria vira ruido nesse estado.
+    if (b.disabled || !estaNaTela(b)) continue;
     const r = b.getBoundingClientRect();
-    if (r.width < 40 || r.height < 20 || r.height > 90) continue;
+    if (r.height > 90) continue;
     const t = (b.textContent || '').trim().toLowerCase();
     const al = (b.getAttribute('aria-label') || '').toLowerCase();
     const dt = (b.getAttribute('data-testid') || '').toLowerCase();
@@ -4104,8 +4108,9 @@ function findRenderSceneButton() {
     if (!/render/.test(tudo) && !/renderiza/.test(tudo)) continue;
     let score = 100;
     if (/render scene|renderizar cena/.test(tudo)) score += 60;
-    if (r.bottom > H * 0.6) score += 30;          // rodapé
-    score += Math.round((r.right / W) * 20);      // direita
+    // Geometria so DESEMPATA, e so quando o viewport tem tamanho de verdade.
+    if (H > 0 && r.bottom > H * 0.6) score += 30;              // rodapé
+    if (W > 0) score += Math.round((r.right / W) * 20);        // direita
     cands.push({ b, score, t: t.slice(0, 40) });
   }
   if (!cands.length) return null;
@@ -4325,10 +4330,16 @@ async function runEconomyJob(requestId, payload) {
         studioDismissPaywallIfShown(`${rot} apos add-scene`);
       }
 
-      await ecoEscreverTextoNaCenaAtiva(cena.texto, rot);
-
-      // AVATAR III por cena, relido do controle — o único motor que renderiza
-      // de graça. Sem confirmar, aborta ANTES de qualquer clique caro.
+      // ⚠ ORDEM: MOTOR ANTES DO TEXTO. Nao inverter.
+      // MEDIDO 07.09.2026 no create-v4 real: o painel da DIREITA e o de
+      // PROPRIEDADES DO OBJETO SELECIONADO. Ao carregar o draft o avatar vem
+      // selecionado e o "Motion Engine" esta la; assim que o campo de script
+      // recebe foco, a selecao passa pro texto e o painel do motor SOME do
+      // DOM. A ordem antiga (escrever -> travar motor) destruia o painel e
+      // logo depois procurava por ele: o job morria em "controle nao achado"
+      // com o editor perfeitamente montado.
+      //   antes de escrever: Motion Engine presente, motor "Avatar IV"
+      //   depois de escrever: painel sumiu, rotulo "Motion Engine" ausente
       reportProgress(requestId, `${rot}: travando Avatar III...`, base + 2);
       const motorOk = await setStudioMotorAvatarIII(rot);
       if (!motorOk) {
@@ -4342,12 +4353,25 @@ async function runEconomyJob(requestId, payload) {
       }
       if (voiceName) await studioTrySelectVoice(voiceName, rot);
 
+      // Só agora o texto: escrever tira a selecao do avatar, e a essa altura o
+      // motor ja esta travado e conferido.
+      await ecoEscreverTextoNaCenaAtiva(cena.texto, rot);
+
       // FOTO das mídias ANTES de renderizar: o que aparecer de novo é o take.
       let antes = ecoMidiasConhecidas();
       const btn = await waitForOrNull(() => findRenderSceneButton(), 15000, 500);
       if (!btn) {
         ecoDumpDiag('no-render-scene');
-        throw new Error(`${rot}: botão "Render Scene" não encontrado. Nada foi gerado. Cola os logs [DARKO LAB ECONOMIA].`);
+        const vistos = [...document.querySelectorAll('button, [role="button"]')]
+          .filter((x) => estaNaTela(x))
+          .map((x) => ((x.textContent || '').trim() || x.getAttribute('aria-label') || '?').slice(0, 16))
+          .filter((x) => x !== '?')
+          .slice(0, 16)
+          .join(' / ');
+        throw new Error(
+          `${rot}: botão "Render Scene" não encontrado. Nada foi gerado. ` +
+          `[url=${location.pathname}; viewport=${window.innerWidth}x${window.innerHeight}; botoes: ${vistos}]`,
+        );
       }
       reportProgress(requestId, `${rot}: renderizando (sem crédito)...`, base + 4);
       await cdpClickEl(btn, 'Render Scene');
