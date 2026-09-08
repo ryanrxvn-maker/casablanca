@@ -239,6 +239,9 @@ export type EconomiaPayload = {
   avatarName?: string | null;
   groupName?: string | null;
   voiceName?: string | null;
+  /** o id da voz — SEMPRE prefira isto ao nome: a lista da conta tem ~3 mil
+   *  vozes, nao aceita busca por nome, e casar por nome ja falhou em teste. */
+  voiceId?: string | null;
   jobLabel?: string;
   cenas: CenaEconomiaPayload[];
   /** teto por cena na extensão (default 8 min) */
@@ -363,6 +366,7 @@ export function gerarPelaEconomia(
           avatarName: payload.avatarName ?? null,
           groupName: payload.groupName ?? null,
           voiceName: payload.voiceName ?? null,
+          voiceId: payload.voiceId ?? null,
           jobLabel: payload.jobLabel ?? 'ECO',
           tetoPorCenaMs: payload.tetoPorCenaMs ?? 8 * 60 * 1000,
           cenas: payload.cenas,

@@ -5508,6 +5508,11 @@ function ClickUpPilotInner() {
               {
                 avatarId: proj.avatarId, groupId: proj.groupId,
                 avatarName: proj.avatarName, voiceName: proj.voiceName,
+                // O plano ja carrega o ID da voz. Mandar so o nome obrigava a
+                // extensao a caçar em ~3 mil vozes paginadas, sem busca por
+                // nome na API — e falhava calada, deixando o AD com a voz da
+                // bancada.
+                voiceId: proj.voiceId,
                 jobLabel: adNameClean,
                 cenas: proj.cenas.map((c) => ({ idx: c.idx, label: c.label, texto: c.texto })),
                 // Teto de parede pelo TAMANHO do job. Fixo em 90 min, um AD de

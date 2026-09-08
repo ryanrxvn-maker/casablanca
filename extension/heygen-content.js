@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.34.3';
+const DARKO_EXT_VERSION = '4.35.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -5031,12 +5031,25 @@ async function ecoResolverVozPorNome(nome) {
   const alvo = String(nome || '').trim().toLowerCase();
   if (!alvo) return null;
   if (!ecoCacheVozes) {
+    // ⚠ TEM QUE PAGINAR. `v1/voice.list` devolve no maximo 200 por pagina e a
+    // conta tem ~3097 vozes; `listMyVoices` lia so a primeira pagina e dizia
+    // "nao encontrada" pra qualquer voz depois da 200a. E a API NAO aceita
+    // busca por nome (search/keyword/name/query/q sao todos ignorados —
+    // testado: devolvem sempre a mesma primeira pagina).
+    ecoCacheVozes = [];
     try {
-      const r = await listMyVoices();
-      ecoCacheVozes = (r && r.voices) || [];
-    } catch (e) {
-      ecoCacheVozes = [];
-    }
+      for (let pag = 1; pag <= 20; pag++) {
+        const r = await ecoApiJson(`v1/voice.list?limit=200&page=${pag}`, { tetoMs: 20000 });
+        const lista = (r.data && (r.data.list || r.data.voices)) || [];
+        if (!Array.isArray(lista) || lista.length === 0) break;
+        for (const v of lista) {
+          const id = v.voice_id || v.id;
+          if (id) ecoCacheVozes.push({ id, name: v.name || v.display_name || '' });
+        }
+        if (lista.length < 200) break;
+      }
+    } catch (e) { /* fica com o que deu */ }
+    ecoLog(`catalogo de vozes: ${ecoCacheVozes.length}`);
   }
   const norm = (x) => String(x || '').trim().toLowerCase();
   let achada = ecoCacheVozes.find((v) => norm(v.name) === alvo);
