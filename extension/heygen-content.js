@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.28.0';
+const DARKO_EXT_VERSION = '4.29.3';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -4285,9 +4285,12 @@ async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
     );
   }
   const alvo = campos[campos.length - 1];
-  // O React do create-v4 ignora clique sintético: foco por CDP antes de digitar.
-  await cdpClickEl(alvo, `${sceneLabel} campo de script`);
-  await sleep(250);
+  // ⚠ NAO CLICAR NO CAMPO. O clique move a SELECAO do editor pro texto, e o
+  // painel da direita — que e o de propriedades do objeto selecionado — some
+  // junto com o botao de render que mora nele. Medido: com o clique o botao
+  // sumia e o job morria em "botao de render nao encontrado"; sem ele, o painel
+  // sobrevive. E o clique nem era necessario: pasteScriptIntoTextarea ja faz
+  // focus() e o ProseMirror aceita o paste sem precisar de clique.
   await pasteScriptIntoTextarea(alvo, texto);
   await sleep(400);
   const escrito = (alvo.value !== undefined ? alvo.value : alvo.textContent) || '';
@@ -4330,6 +4333,23 @@ async function ecoUrlsRenderizadas(videoId) {
   } catch (e) {
     return [];
   }
+}
+
+/** O texto do painel de propriedades (Avatar & Voice). Serve pra ver se a cena
+ *  tem VOZ: o componente do botao de render recebe `sceneHasMissingVoice` e
+ *  fica DESABILITADO quando falta voz — e sem voz nao ha TTS, logo nao ha
+ *  audio, logo o render nunca habilita. */
+function ecoTextoDoPainel() {
+  try {
+    for (const el of document.querySelectorAll('div, aside, section')) {
+      if (!estaNaTela(el)) continue;
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t.length > 400 || t.length < 20) continue;
+      if (!/motion engine/i.test(t)) continue;
+      return t.slice(0, 170);
+    }
+  } catch (e) {}
+  return '(painel nao achado)';
 }
 
 /** O id do projeto que o editor esta editando agora. */
@@ -4537,18 +4557,46 @@ async function runEconomyJob(requestId, payload) {
 
       // FOTO das mídias ANTES de renderizar: o que aparecer de novo é o take.
       let antes = ecoMidiasConhecidas();
-      const btn = await waitForOrNull(() => findRenderSceneButton(), 15000, 500);
+      // ⚠ ESPERAR O DRAFT SER SALVO. O botao de render fica DESABILITADO
+      // enquanto o projeto ainda e `/create-v4/draft` (sem id). O proprio app
+      // salva antes de renderizar — o call site do HeyGen faz
+      // `i_({videoId, skipRateLimit:true, ...})` antes de chamar o preview.
+      // MEDIDO: o painel estava montado e com Avatar III, mas o botao nao
+      // entrava na lista porque `b.disabled` era true e a URL seguia em /draft.
+      // ⚠ ESPERAR O BOTAO HABILITAR, nao so aparecer.
+      // MEDIDO: o painel estava montado, o motor em Avatar III, e o botao ESTAVA
+      // na tela — como `Free Preview(OFF)`, junto de `Generate(OFF)`. Os dois
+      // ficam desabilitados ate o AUDIO/TTS da cena existir; e o proprio call
+      // site do HeyGen espera o TTS e o audio entrarem no draft antes de
+      // chamar o preview. findRenderSceneButton ja descarta desabilitado, entao
+      // basta esperar com folga — e avisar enquanto espera, pra nao parecer
+      // travado.
+      const tEsp = Date.now();
+      const btn = await waitForOrNull(() => {
+        const seg = Math.round((Date.now() - tEsp) / 1000);
+        if (seg > 0 && seg % 15 < 2) {
+          reportProgress(requestId, `${rot}: esperando o audio da cena ficar pronto (${seg}s)...`, base + 4);
+        }
+        return findRenderSceneButton();
+      }, 180000, 1500);
       if (!btn) {
         ecoDumpDiag('no-render-scene');
         const vistos = [...document.querySelectorAll('button, [role="button"]')]
           .filter((x) => estaNaTela(x))
-          .map((x) => ((x.textContent || '').trim() || x.getAttribute('aria-label') || '?').slice(0, 16))
-          .filter((x) => x !== '?')
-          .slice(0, 16)
+          .map((x) => {
+            const t = ((x.textContent || '').trim() || x.getAttribute('aria-label') || '?').slice(0, 16);
+            return x.disabled ? t + '(OFF)' : t;
+          })
+          .filter((x) => !x.startsWith('?'))
+          .slice(0, 24)
           .join(' / ');
+        const campoAgora = ecoCamposDeTexto();
+        const scriptNaTela = campoAgora.length
+          ? (campoAgora[campoAgora.length - 1].textContent || '').replace(/\s+/g, ' ').trim().slice(0, 90)
+          : '(sem campo)';
         throw new Error(
-          `${rot}: botão de render da cena ("Free Preview"/"Render Scene") não encontrado. Nada foi gerado. ` +
-          `[url=${location.pathname}; viewport=${window.innerWidth}x${window.innerHeight}; botoes: ${vistos}]`,
+          `${rot}: botão de render da cena ("Free Preview"/"Render Scene") não encontrado ou desabilitado. Nada foi gerado. ` +
+          `[url=${location.pathname}; SCRIPT="${scriptNaTela}"; PAINEL="${ecoTextoDoPainel()}"; botoes: ${vistos}]`,
         );
       }
       reportProgress(requestId, `${rot}: renderizando (sem crédito)...`, base + 4);
