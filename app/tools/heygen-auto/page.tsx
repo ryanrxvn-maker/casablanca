@@ -2822,7 +2822,7 @@ function HeyGenAutoInner() {
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
                   </span>
                   <span className="text-lime">
-                    Extensão Hey Auto v1.0
+                    Extensão Hey Auto v{extStatus.version}
                   </span>
                   {sessionTest.state === 'ok' ? (
                     <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
