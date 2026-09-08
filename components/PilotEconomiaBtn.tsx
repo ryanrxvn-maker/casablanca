@@ -24,18 +24,23 @@ export function PilotEconomiaBtn({
   disabled = false,
   /** Por que não dá pra ligar (vai pro tooltip quando `disabled`). */
   motivoBloqueio,
+  avisoPreparacao,
   size = 36,
 }: {
   on: boolean;
   onToggle: () => void;
   disabled?: boolean;
   motivoBloqueio?: string;
+  /** Campos que podem ser preenchidos depois de escolher o modo. */
+  avisoPreparacao?: string;
   size?: number;
 }) {
   const title = on && motivoBloqueio
     ? `Modo economia LIGADO, mas este AD não cabe mais nele: ${motivoBloqueio} Clique pra desligar.`
     : disabled
     ? motivoBloqueio || 'Modo economia indisponível neste AD'
+    : avisoPreparacao
+    ? `${on ? 'Modo economia LIGADO.' : 'Pode ligar o modo economia agora.'} ${avisoPreparacao} Ligar o modo não inicia a geração.${on ? ' Clique pra desligar.' : ''}`
     : on
       ? 'Modo economia LIGADO: o disparo vai pelo Studio do HeyGen e renderiza cena por cena, sem consumir crédito. Trava o Avatar III e desliga o gesto. Clique pra voltar ao disparo normal.'
       : 'Modo economia: dispara pelo Studio do HeyGen e renderiza cena por cena, sem consumir crédito. Só Avatar III, sem gesto.';
@@ -79,22 +84,32 @@ export function PilotEconomiaBtn({
           height: 100%;
           align-items: center;
           justify-content: center;
-          border: 0;
+          border: 1px solid rgb(var(--line-strong));
           border-radius: 999px;
           cursor: pointer;
-          /* moeda: aro fino por fora, núcleo escuro por dentro */
-          background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.015));
+          /*
+           * Desligado e disponível precisa ter a mesma presença dos outros
+           * controles da barra. As variáveis do tema evitam o antigo branco
+           * translúcido, que praticamente desaparecia no modo claro e parecia
+           * um estado bloqueado.
+           */
+          background: linear-gradient(
+            180deg,
+            rgb(var(--bg-elev) / 0.88),
+            rgb(var(--bg-soft) / 0.62)
+          );
           box-shadow:
-            inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1),
-            inset 0 -2px 4px rgba(0, 0, 0, 0.35),
-            0 3px 10px -4px rgba(0, 0, 0, 0.5);
+            inset 0 1px 0 rgb(var(--text) / 0.1),
+            inset 0 -1px 2px rgb(var(--bg) / 0.32),
+            0 3px 10px -5px rgb(var(--text) / 0.24);
           transition:
             transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
             box-shadow 260ms ease,
-            background 260ms ease;
+            background 260ms ease,
+            border-color 260ms ease;
         }
         .eco-btn.is-on {
+          border-color: rgba(16, 185, 129, 0.72);
           background: linear-gradient(160deg, #6ee7b7 0%, #34d399 46%, #10b981 100%);
           box-shadow:
             inset 0 0 0 1px rgba(255, 255, 255, 0.4),
@@ -105,6 +120,19 @@ export function PilotEconomiaBtn({
         }
         .eco-btn:not(:disabled):hover {
           transform: translateY(-2px) scale(1.06);
+          border-color: rgb(var(--line-glow));
+          box-shadow:
+            inset 0 1px 0 rgb(var(--text) / 0.16),
+            0 10px 22px -8px rgb(var(--text) / 0.24);
+        }
+        .eco-btn.is-on:not(:disabled):hover {
+          border-color: rgba(16, 185, 129, 0.9);
+          box-shadow:
+            inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.6),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.24),
+            0 0 32px -6px rgba(52, 211, 153, 0.85),
+            0 10px 22px -8px rgba(16, 185, 129, 0.76);
         }
         .eco-btn:not(:disabled):active {
           transform: translateY(1px) scale(0.95);
@@ -116,8 +144,9 @@ export function PilotEconomiaBtn({
         }
         .eco-btn.is-off-limits {
           cursor: not-allowed;
-          opacity: 0.45;
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+          opacity: 0.42;
+          border-color: rgb(var(--line));
+          box-shadow: none;
         }
 
         /* a moeda vira: duas faces, uma de cada lado */
@@ -142,7 +171,7 @@ export function PilotEconomiaBtn({
           -webkit-backface-visibility: hidden;
         }
         .eco-front {
-          color: rgba(255, 255, 255, 0.55);
+          color: rgb(var(--text-muted));
         }
         .eco-back {
           transform: rotateY(180deg);

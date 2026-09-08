@@ -167,7 +167,6 @@ import {
   ehIdSintetico,
   motivoLegivel,
   planejarEconomia,
-  podeEconomia,
   recusaDaParte,
   resultadosParaRunner,
   resumoDoPlano,
@@ -14575,14 +14574,18 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       // Trecho ainda em branco não conta: o buildPlan já o descarta
                                       // antes do disparo, e ele travava o modo num AD que cabe.
                                       const partes = partesParaEconomia(a).filter((p) => (p.text || '').trim());
-                                      const impedimento = partes.length === 0
-                                        ? 'Analise a task primeiro: sem take não há o que renderizar.'
-                                        : podeEconomia(partes)
-                                          ? null
-                                          : (() => {
-                                              const r = partes.map(recusaDaParte).find(Boolean);
-                                              return `Modo economia indisponível: ${r ? motivoLegivel(r) : 'este AD tem take que não pode ir por texto'}.`;
-                                            })();
+                                      // Escolher o modo é uma preferência: copy e avatar podem
+                                      // vir depois. A validação completa permanece no disparo.
+                                      const incompatibilidade = partes.map(recusaDaParte)
+                                        .find((r) => r === 'modo-imagem' || r === 'audio-upado');
+                                      const impedimento = incompatibilidade
+                                        ? `Modo economia indisponível: ${motivoLegivel(incompatibilidade)}.`
+                                        : null;
+                                      const avisoPreparacao = partes.length === 0
+                                        ? 'Antes de iniciar, preencha a copy e selecione o avatar.'
+                                        : partes.some((p) => !p.avatarId)
+                                          ? 'Antes de iniciar, selecione o avatar de cada take.'
+                                          : undefined;
                                       return (
                                         <PilotEconomiaBtn
                                           on={isEconomiaEnabled(a.taskId)}
@@ -14592,6 +14595,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           // mensagem mandava desligar um botão que não respondia.
                                           disabled={!!impedimento && !isEconomiaEnabled(a.taskId)}
                                           motivoBloqueio={impedimento || undefined}
+                                          avisoPreparacao={avisoPreparacao}
                                           onToggle={() => ligarEconomia(a.taskId, !isEconomiaEnabled(a.taskId))}
                                         />
                                       );
