@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.27.0';
+const DARKO_EXT_VERSION = '4.28.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1491,14 +1491,26 @@ async function sleep(ms) {
   const pedaco = Math.min(alvo, 20000);
   const ok = await new Promise((resolve) => {
     let pronto = false;
+    // ⚠ TETO LOCAL OBRIGATORIO. Confiar que `chrome.runtime.lastError` sempre
+    // dispara e' aposta ruim: se o service worker morre no meio, ou se outro
+    // listener fecha o canal antes, o callback NUNCA vem e o job fica pendurado
+    // pra sempre — medido: 10m39s numa espera cujo teto era de 45s.
+    // O timer local e' impreciso em aba estrangulada, mas so' serve de rede de
+    // seguranca: se ele ganhar, seguimos e marcamos a ponte como quebrada.
+    const t = setTimeout(() => {
+      if (pronto) return;
+      pronto = true;
+      resolve(false);
+    }, pedaco + 8000);
     try {
       chrome.runtime.sendMessage({ type: 'HG_SLEEP', ms: pedaco }, () => {
         if (pronto) return;
         pronto = true;
+        clearTimeout(t);
         resolve(!chrome.runtime.lastError);
       });
     } catch (e) {
-      if (!pronto) { pronto = true; resolve(false); }
+      if (!pronto) { pronto = true; clearTimeout(t); resolve(false); }
     }
   });
   if (!ok) {
@@ -4292,6 +4304,40 @@ async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
   return alvo;
 }
 
+/** As URLs das cenas JA RENDERIZADAS deste projeto, direto da API interna.
+ *  Endpoint descoberto no bundle do create-v4 e confirmado ao vivo:
+ *    GET api2.heygen.com/v1/text_draft.scene_avatar_preview.get_from_cache?video_id=...
+ *
+ *  ⚠ POR QUE ISTO SUBSTITUI O FAREJADOR. A captura antiga fotografava
+ *  `performance.getEntriesByType('resource')` + os `<video src>` e esperava
+ *  aparecer midia nova. MEDIDO: o render ACONTECEU (a franquia caiu de 2 pra 1)
+ *  e mesmo assim o farejador nao viu nada em 8 minutos — porque numa aba de
+ *  fundo o player nem chega a baixar o arquivo. A API nao depende de o
+ *  navegador ter carregado midia nenhuma: ela lista o que o SERVIDOR
+ *  renderizou. */
+async function ecoUrlsRenderizadas(videoId) {
+  if (!videoId) return [];
+  try {
+    const r = await fetch(
+      'https://api2.heygen.com/v1/text_draft.scene_avatar_preview.get_from_cache?video_id=' +
+        encodeURIComponent(videoId),
+      { credentials: 'include' },
+    );
+    if (!r.ok) return [];
+    const txt = await r.text();
+    const achadas = txt.match(/https:[/][/][^"'\s]+[.](?:mp4|webm)/g) || [];
+    return [...new Set(achadas)];
+  } catch (e) {
+    return [];
+  }
+}
+
+/** O id do projeto que o editor esta editando agora. */
+function ecoVideoIdDaUrl() {
+  const m = location.pathname.match(/create-v4\/([a-zA-Z0-9]{16,})/);
+  return m ? m[1] : null;
+}
+
 /** Quantos previews GRATIS (com marca dagua) a conta ainda tem.
  *  Endpoint interno descoberto no bundle do create-v4 e confirmado ao vivo:
  *    GET api2.heygen.com/v1/text_draft.scene_avatar_preview.allowance
@@ -4513,13 +4559,27 @@ async function runEconomyJob(requestId, payload) {
         throw new Error(`${rot}: o HeyGen respondeu com um aviso — "${dlg2}". Parei aqui.`);
       }
 
-      // Espera o vídeo da cena aparecer. A mídia nova É o sinal de pronto.
+      // Espera o vídeo da cena aparecer.
+      //
+      // ⚠ FONTE PRIMARIA: a API. `get_from_cache` lista o que o SERVIDOR
+      // renderizou pra este projeto — nao depende de o navegador ter baixado
+      // midia nenhuma. MEDIDO: numa aba de fundo o render ACONTECEU (a franquia
+      // caiu de 2 pra 1) e o farejador de `performance`+`<video src>` nao viu
+      // NADA em 8 minutos, porque o player nem chega a buscar o arquivo.
+      // O farejador continua como segunda fonte, pra quando a API mudar.
+      const videoIdDaCena = ecoVideoIdDaUrl();
+      const urlsAntes = new Set(await ecoUrlsRenderizadas(videoIdDaCena));
       const t0 = Date.now();
       let url = null;
       let viuBlob = false;
       let jaDeuPlay = false;
       while (Date.now() - t0 < tetoCena) {
         if (ecoCancelado) throw new Error(`Cancelado enquanto a cena ${i + 1}/${total} renderizava. As cenas já prontas foram guardadas.`);
+        // 1) a API: determinística
+        const agora = await ecoUrlsRenderizadas(videoIdDaCena || ecoVideoIdDaUrl());
+        const nova = agora.find((u) => !urlsAntes.has(u));
+        if (nova) { url = nova; ecoLog(`${rot}: take veio pela API do cache`); break; }
+        // 2) o farejador antigo, como reserva
         const achado = ecoMidiaNova(antes);
         if (achado.url) { url = achado.url; break; }
         if (achado.blob) viuBlob = true;
