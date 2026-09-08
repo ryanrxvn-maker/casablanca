@@ -195,6 +195,8 @@ function pageHarness(gerar, shared = {}) {
     findAvatarOptionById: () => null,
     ecoFilaRef: shared.fila ?? { current: Promise.resolve() },
     ecoStatusRef: { current: {} }, batchCancelRef: shared.cancel ?? { current: {} },
+    sleepUnthrottled: shared.sleep ?? (async () => {}),
+    ...(shared.navigator ? { navigator: shared.navigator } : {}),
     setBatchStates: fn => { states = fn(states); },
     gerarPelaEconomia: gerar,
     registrarResultado: r => recorded.push(r),
@@ -249,6 +251,34 @@ test('duas tasks serializam o Studio e cancelada na fila não dispara', async ()
   cancel.current.task = true;
   release(); await Promise.all([pa, pb]);
   assert.equal(callsB, 0); await shared.fila.current;
+});
+
+test('bancada ocupada espera e repete o MESMO AD em vez de falhar e promover o proximo', async () => {
+  let calls = 0, waits = 0;
+  const h = pageHarness(async p => {
+    calls++;
+    if (calls === 1) return { cenas: [], erro: 'Outra geração em andamento — aguarde finalizar.', fatal: true };
+    return { cenas: p.cenas.map(c => ({ idx: c.idx, videoUrl: `https://test/${c.idx}.mp4` })) };
+  }, { sleep: async () => { waits++; } });
+  const r = await h.run();
+  // Três avatares = três projetos; o primeiro recebe BUSY e repete.
+  assert.equal(calls, 4);
+  assert.equal(waits, 1);
+  assert.equal(r.filter(x => x.videoId).length, 3);
+  assert.equal(r.every(x => x.error === null), true);
+});
+
+test('lock do navegador protege a bancada entre abas durante o projeto inteiro', async () => {
+  const locks = [];
+  const navigator = { locks: { request: async (name, options, fn) => {
+    locks.push([name, options.mode]);
+    return fn();
+  } } };
+  const h = pageHarness(async p => ({
+    cenas: p.cenas.map(c => ({ idx: c.idx, videoUrl: `https://test/${c.idx}.mp4` })),
+  }), { navigator });
+  await h.run();
+  assert.deepEqual(locks, [['autoedit:heygen-economia:studio', 'exclusive']]);
 });
 
 test('ponte transmite erro parcial sem perder o sinal fatal:false', async () => {

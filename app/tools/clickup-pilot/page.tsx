@@ -1004,6 +1004,10 @@ type BatchTaskState = {
    *  pelo `team_id` da própria task, e até lá ele continua visível — sumir
    *  disparo em andamento seria pior que mostrar demais. */
   teamId?: string;
+  /** Snapshot do motor de fila usado neste disparo. Precisa morar no registro:
+   *  o toggle da tela e local ao navegador e pode mudar/recarregar enquanto o
+   *  job continua. Economia ocupa a bancada inteira e portanto e sempre serial. */
+  economia?: boolean;
   /** ISOLAÇÃO POR GERAÇÃO (fix 2026-07-08): id único do disparo/re-disparo DO
    *  ZERO que produziu os videoIds atuais. Namespaceia os artefatos por-parte
    *  no IDB (`pilot:<taskId>:g:<genId>:...`) pra que um RETOMAR NUNCA hidrate um
@@ -5512,14 +5516,23 @@ function ClickUpPilotInner() {
         }
         if (jaEsperou) console.log(`[clickup-pilot] economia ${taskId}: peguei a vez na fila do Studio`);
 
-        try {
-        for (let n = 0; n < planoEco.projetos.length; n++) {
-          if (batchCancelRef.current[taskId]) break;
-          const proj = planoEco.projetos[n];
-          const rotulo = `${adNameClean} ${planoEco.projetos.length > 1 ? `(${n + 1}/${planoEco.projetos.length}) ` : ''}`;
-          setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}Studio: ${proj.cenas.length} cena(s), sem consumir crédito...` } } : prev));
-          try {
-            const res = await gerarPelaEconomia(
+        const executarProjetos = async () => {
+          for (let n = 0; n < planoEco.projetos.length; n++) {
+            if (batchCancelRef.current[taskId]) break;
+            const proj = planoEco.projetos[n];
+            const rotulo = `${adNameClean} ${planoEco.projetos.length > 1 ? `(${n + 1}/${planoEco.projetos.length}) ` : ''}`;
+            setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}Studio: ${proj.cenas.length} cena(s), sem consumir crédito...` } } : prev));
+
+            // A fila React acima serializa esta aba. `navigator.locks` estende
+            // a exclusao para OUTRAS abas do Pilot no mesmo Chrome. Ainda ha
+            // uma janela inevitavel: se uma aba for recarregada depois de
+            // entregar o job para a extensao, o lock da pagina cai enquanto o
+            // Studio continua. Nesse caso a extensao responde "Outra geracao
+            // em andamento". Isso e estado de ESPERA, nunca falha do AD.
+            const inicioOcupado = Date.now();
+            while (!batchCancelRef.current[taskId]) {
+              try {
+                const res = await gerarPelaEconomia(
               {
                 avatarId: proj.avatarId, groupId: proj.groupId,
                 avatarName: proj.avatarName, voiceName: proj.voiceName,
@@ -5557,17 +5570,45 @@ function ClickUpPilotInner() {
                   : prev));
               },
               { isCancelled: () => !!batchCancelRef.current[taskId] },
-            );
-            cenasFeitas.push(...(res.cenas || []));
-            if (res.erro) erroParcial = res.erro;
-            // Só falha LOCAL de cena libera os outros avatares. Cancelamento,
-            // marca d'água e respostas de extensão antiga continuam parando.
-            if (res.erro && res.fatal !== false) break;
-          } catch (e) {
-            erroParcial = (e as Error)?.message || String(e);
-            break; // ponte/ACK/timeout: o estado do Studio não está confirmado
+                );
+                const msg = (res.erro || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                const bancadaOcupada = (res.cenas || []).length === 0 && msg.includes('outra geracao em andamento');
+                if (bancadaOcupada && Date.now() - inicioOcupado < 6 * 60 * 60 * 1000) {
+                  setBatchStates((prev) => (prev[taskId]
+                    ? { ...prev, [taskId]: { ...prev[taskId], phase: 'dispatching', message: 'Aguardando a geracao anterior liberar o Studio (economia em serie)...' } }
+                    : prev));
+                  await sleepUnthrottled(15_000);
+                  continue;
+                }
+                cenasFeitas.push(...(res.cenas || []));
+                if (res.erro) erroParcial = res.erro;
+                // Só falha LOCAL de cena libera os outros avatares. Cancelamento,
+                // marca d'água e respostas de extensão antiga continuam parando.
+                if (res.erro && res.fatal !== false) return;
+                break;
+              } catch (e) {
+                const raw = (e as Error)?.message || String(e);
+                const msg = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                if (msg.includes('outra geracao em andamento') && Date.now() - inicioOcupado < 6 * 60 * 60 * 1000) {
+                  setBatchStates((prev) => (prev[taskId]
+                    ? { ...prev, [taskId]: { ...prev[taskId], phase: 'dispatching', message: 'Aguardando a geracao anterior liberar o Studio (economia em serie)...' } }
+                    : prev));
+                  await sleepUnthrottled(15_000);
+                  continue;
+                }
+                erroParcial = raw;
+                return; // ponte/ACK/timeout: o estado do Studio não está confirmado
+              }
+            }
           }
-        }
+        };
+
+        try {
+          if (typeof navigator !== 'undefined' && navigator.locks) {
+            await navigator.locks.request('autoedit:heygen-economia:studio', { mode: 'exclusive' }, executarProjetos);
+          } else {
+            await executarProjetos();
+          }
         } finally {
           // Solta a vez SEMPRE — inclusive se a task foi cancelada ou explodiu.
           // Sem isto, uma falha aqui travaria o modo economia da sessão inteira.
@@ -7249,12 +7290,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // crash/reload no meio.
       setBatchStates((prev) => {
         const next = { ...prev };
+        const startedAt = Date.now();
         for (const id of ready) {
           const a = taskAnalyses[id];
           if (!a) continue;
           const baseAdId = a.baseAdId || a.taskName;
           next[id] = {
-            ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
+            ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId }),
+            taskId: id,
+            taskName: a.taskName,
+            baseAdId,
+            parts: [],
+            startedAt,
+            economia: isEconomiaEnabled(id),
             phase: 'queued',
             message: 'Na fila — aguardando vaga...',
             finishedAt: undefined,
@@ -7339,6 +7387,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // 1. Normais via HeyGen Auto gated
     setBatchStates((prev) => {
       const next = { ...prev };
+      const startedAt = Date.now();
       for (const id of normalTasks) {
         // as irmãs recém-criadas ainda não estão no state deste tick
         const a = taskAnalyses[id] || irmas.find((ir) => ir.taskId === id);
@@ -7366,7 +7415,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ? replanDoPlano(a.taskName, baseAdId, qplan)
           : undefined;
         next[id] = {
-          ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
+          ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId }),
+          // Um clique em START e um NOVO disparo. O registro anterior pode
+          // continuar no Historico, mas nao pode emprestar idade, takes ou
+          // artefatos para o lote novo que o usuario esta vendo agora.
+          taskId: id,
+          taskName: a.taskName,
+          baseAdId,
+          parts: [],
+          startedAt,
+          genId: undefined,
+          economia: isEconomiaEnabled(id),
+          progressoMotor: undefined,
+          pipeStats: undefined,
+          deliveryOk: undefined,
+          waitingVideoIds: undefined,
+          waitingCheckedAt: undefined,
+          dirtyParts: undefined,
+          montagemSig: undefined,
+          zipBlobUrl: undefined,
+          zipFilename: undefined,
+          montadoZipUrl: undefined,
+          montadoZipName: undefined,
+          camufladoZipUrl: undefined,
+          camufladoZipName: undefined,
           // A EMPRESA nasce junto com o estado (03.09) — inclusive nas irmãs
           // de versão, que antes ficavam sem e vazavam em toda workspace.
           teamId: isTaskLocal(id) ? undefined : (next[id]?.teamId ?? selectedTeam ?? undefined),
@@ -7765,8 +7837,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     heygenPendingRef.current[taskId] = kind;
     try {
-      // ESPERA VAGA — checa a cada 1s. batchCancelRef true sai sem rodar.
-      while (heygenSlotsRef.current >= MAX_HEYGEN_PARALLEL) {
+      // ESPERA VAGA — checa a cada 1s. A bancada do Studio e unica: se a
+      // candidata OU qualquer job ativo e Economia, o teto global cai para 1.
+      // O modo normal continua usando as duas vagas historicas.
+      const usaEconomia = (b: BatchTaskState | undefined) =>
+        !!b && (b.economia === true || isEconomiaEnabled(b.taskId));
+      const tetoDaVez = () => {
+        const candidataEco = usaEconomia(batchStatesRef.current[taskId]);
+        const existeEcoAtiva = Object.values(batchStatesRef.current).some(
+          (b) => ACTIVE_BATCH_PHASES.includes(b.phase) && usaEconomia(b),
+        );
+        return candidataEco || existeEcoAtiva ? 1 : MAX_HEYGEN_PARALLEL;
+      };
+      while (heygenSlotsRef.current >= tetoDaVez()) {
         if (batchCancelRef.current[taskId]) {
           // User cancelou enquanto estava na fila — marca failed e sai.
           setBatchStates((prev) => {
@@ -7783,7 +7866,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const cur = prev[taskId];
           if (cur && cur.phase === 'queued') return prev; // ja marcado
           if (!cur) return prev; // sem entrada — promoter cria, nao aqui
-          return { ...prev, [taskId]: { ...cur, phase: 'queued', message: `Aguardando vaga (${heygenSlotsRef.current}/${MAX_HEYGEN_PARALLEL} ocupados)...`, finishedAt: undefined } };
+          const teto = tetoDaVez();
+          const rotulo = teto === 1 ? 'economia em serie' : `${heygenSlotsRef.current}/${teto} ocupados`;
+          return { ...prev, [taskId]: { ...cur, phase: 'queued', message: `Aguardando vaga (${rotulo})...`, finishedAt: undefined } };
         });
         await sleepUnthrottled(1000); // não-estrangulado: a fila escoa mesmo com a aba em segundo plano
       }
@@ -7875,13 +7960,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  enquanto houver vaga real. Idempotente (heygenPendingRef dedup +
    *  runHeyGenGated). Chamado pelo effect on-change E pelo watchdog. */
   function promoteQueuedTasks() {
-    if (heygenSlotsRef.current >= MAX_HEYGEN_PARALLEL) return;
     const queued = Object.values(batchStatesRef.current)
       // TROCA DE ÁUDIO roda fora do HeyGen — promoter NUNCA toca nelas.
       .filter((b) => b.phase === 'queued' && b.kind !== 'troca' && !heygenPendingRef.current[b.taskId])
       .sort((a, b) => a.startedAt - b.startedAt);
     if (queued.length === 0) return;
-    const freeSlots = MAX_HEYGEN_PARALLEL - heygenSlotsRef.current;
+    const usaEconomia = (b: BatchTaskState) => b.economia === true || isEconomiaEnabled(b.taskId);
+    const existeEcoAtiva = Object.values(batchStatesRef.current).some(
+      (b) => ACTIVE_BATCH_PHASES.includes(b.phase) && usaEconomia(b),
+    );
+    // Se o primeiro da fila e Economia, reserva a bancada inteira para ele.
+    // Isso evita o promoter criar dois wrappers que disputam o mesmo Studio.
+    const teto = existeEcoAtiva || usaEconomia(queued[0]) ? 1 : MAX_HEYGEN_PARALLEL;
+    if (heygenSlotsRef.current >= teto) return;
+    const freeSlots = teto - heygenSlotsRef.current;
     for (let i = 0; i < Math.min(freeSlots, queued.length); i++) {
       const b = queued[i];
       const kind: 'run' | 'resume' = b.parts.some((p) => p.videoId) ? 'resume' : 'run';
