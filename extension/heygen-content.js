@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.21.7';
+const DARKO_EXT_VERSION = '4.22.6';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1404,13 +1404,9 @@ async function testSession() {
 
 function reportProgress(requestId, stage, percent) {
   marcarBatimento();
-  // O aviso vai em TODA mensagem, nao so na primeira: a aba pode virar oculta
-  // no MEIO do job (o usuario minimiza a janela de automacao) e, se o aviso so
-  // saisse no comeco, ele nunca ficaria sabendo por que o disparo empacou.
-  if (typeof stage === 'string' && typeof avisoDeAbaOculta === 'function') {
-    const av = avisoDeAbaOculta();
-    if (av && !stage.includes('OCULTA')) stage = stage + av;
-  }
+  // ⚠ NAO avisar "aba oculta" aqui. Rodar oculto e o modo CORRETO e desejado:
+  // o usuario nao quer ver janela nenhuma. O throttling de timer que a aba
+  // oculta causava foi resolvido mandando a espera pro service worker.
   console.log('[DARKO LAB UI progress]', stage, percent != null ? `(${percent}%)` : '');
   chrome.runtime.sendMessage({
     type: 'HG_TAB_PROGRESS',
@@ -2594,10 +2590,10 @@ function studioWarn(...a) { console.warn('[DARKO LAB STUDIO]', ...a); }
  * usuario. Aqui embaixo so avisamos quando, ainda assim, a aba estiver oculta
  * — pra a falha ter nome em vez de virar silencio.
  */
-function avisoDeAbaOculta() {
-  return document.visibilityState === 'hidden'
-    ? ' (aviso: esta aba esta OCULTA e o Chrome desacelera os tempos dela — deixe a janela do HeyGen visivel)'
-    : '';
+/** Historico: rodar oculto e o modo desejado. O throttling que a aba oculta
+ *  causava esta resolvido pela espera no service worker (HG_SLEEP). */
+function abaEstaOculta() {
+  return document.visibilityState === 'hidden';
 }
 
 /** Anexa o debugger JA no comeco do job. Dois ganhos: aba sob debugger nao e
@@ -2740,7 +2736,16 @@ async function cdpClickEl(el, label, confirmar) {
   try { el.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch {}
   await sleep(150);
   let r = el.getBoundingClientRect();
-  if (r.width === 0 || r.height === 0) { studioWarn(`cdpClickEl ${label || ''}: rect zero`); return false; }
+  if (r.width === 0 || r.height === 0) {
+    // ⚠ NAO desistir. Numa aba de fundo o layout colapsa e elementos VIVOS
+    // aparecem com largura zero (medido: campo de script 0x132). Coordenada
+    // nao serve nesse estado, mas o evento sintetico vai direto no elemento e
+    // funciona igual. Antes isto devolvia false e o passo morria calado.
+    studioWarn(`cdpClickEl ${label || ''}: rect ${Math.round(r.width)}x${Math.round(r.height)} — indo de sintetico`);
+    const okZero = cliqueSinteticoEm(el);
+    if (!confirmar) return okZero;
+    return await esperarConfirmacao(confirmar, 2500);
+  }
   let x = r.left + r.width / 2, y = r.top + r.height / 2;
   // Coberto? Tenta limpar a cortina ANTES de gastar o clique — o dismiss ja
   // conhece a cortina opaca de aba oculta (caso C).
@@ -3326,7 +3331,11 @@ function findStudioMotorControl() {
     // pedacos dele viravam os unicos candidatos.
     if (dentroDeAnuncio(el)) continue;
     const r = el.getBoundingClientRect();
-    if (r.width < 40 || r.height < 16) continue;
+    // ⚠ SEM piso de LARGURA. Numa aba de fundo o painel nunca e pintado e o
+    // layout colapsa: MEDIDO 0x132 no campo de script, e o mesmo vale aqui.
+    // Exigir largura fazia o controle "nao existir" numa tela onde ele estava
+    // montado e funcional. Altura basta pra descartar no degenerado.
+    if (r.height < 16) continue;
     // O gatilho real e um Radix com aria-haspopup="menu". Quando essa evidencia
     // ESTRUTURAL existe, geometria nao decide nada.
     //
@@ -4108,18 +4117,45 @@ function findRenderSceneButton() {
 /** Campos onde se escreve a fala, na ordem do documento. A cena ativa é a
  *  ÚLTIMA — usar o primeiro (como o Quick Create faz) sobrescreveria a cena 1
  *  a cada volta do laço. */
+/** Ultimo censo dos filtros, pra o erro dizer ONDE o campo foi descartado. */
+let ecoCensoCampos = '';
 function ecoCamposDeTexto() {
   const out = [];
-  for (const el of document.querySelectorAll('textarea, [contenteditable="true"]')) {
-    if (el.offsetParent === null) continue;
+  let total = 0, foraDaTela = 0, pequenos = 0, emDialogo = 0, ultimoRejeitado = '-';
+  // `[contenteditable]` e nao `[contenteditable="true"]`: o atributo vazio
+  // (contenteditable="") tambem significa editavel, e o seletor estrito o
+  // perdia.
+  for (const el of document.querySelectorAll('textarea, [contenteditable]:not([contenteditable="false"])')) {
+    total++;
+    // ⚠ estaNaTela, NAO offsetParent. `offsetParent === null` da FALSO NEGATIVO
+    // em qualquer elemento dentro de um ancestral `position: fixed` — e o
+    // painel de script do create-v4 e fixed. MEDIDO 07.09.2026: o campo estava
+    // na tela (o placeholder "Type your script or use '/' for commands"
+    // aparecia no innerText) e mesmo assim o job morria em "nao achei o campo
+    // de script da cena" depois de esperar 20s por um elemento que ja existia.
+    // Mesma raiz do bug do menu do motor.
+    if (!estaNaTela(el)) { foraDaTela++; continue; }
     const r = el.getBoundingClientRect();
-    if (r.width < 80 || r.height < 18) continue;
+    // ⚠ PISO BAIXO. O antigo (80x18) reprovava o campo real: numa aba de
+    // fundo o editor do HeyGen layouta o painel de script menor, e o job
+    // morria em "nao achei o campo de script" com o campo ALI, visivel.
+    // MEDIDO pelo censo: total=1, foraDaTela=0, pequenos=1, aceitos=0.
+    // O piso existe so pra descartar campo degenerado (0x0); a escolha de QUAL
+    // campo usar e por ordem no documento (o ultimo = cena ativa), nao por
+    // tamanho.
+    // ⚠ SEM piso de LARGURA. MEDIDO na aba de fundo: o campo de script vem
+    // com rect 0x132 — largura ZERO, porque o painel nunca e pintado e o
+    // layout colapsa. E irrelevante: o texto entra por focus()+execCommand,
+    // nao por clique, entao largura nao muda nada. Exigir largura fazia o job
+    // morrer em "nao achei o campo de script" com o campo ali, funcional.
+    if (r.height < 8) { pequenos++; ultimoRejeitado = `${Math.round(r.width)}x${Math.round(r.height)}`; continue; }
     // Modal do HeyGen é renderizado por PORTAL no fim do body, ou seja DEPOIS
     // do editor: sem este descarte, o "último campo do documento" vira a caixa
     // de um diálogo aberto e a fala da cena seria escrita lá.
-    if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
+    if (el.closest('[role="dialog"], [role="alertdialog"]')) { emDialogo++; continue; }
     out.push(el);
   }
+  ecoCensoCampos = `total=${total} foraDaTela=${foraDaTela} pequenos=${pequenos}(${ultimoRejeitado}) emDialogo=${emDialogo} aceitos=${out.length}`;
   return out;
 }
 
@@ -4156,7 +4192,18 @@ async function ecoEscreverTextoNaCenaAtiva(texto, sceneLabel) {
   }, 20000, 400);
   if (!campos) {
     ecoDumpDiag('sem-campo-de-texto');
-    throw new Error(`${sceneLabel}: não achei o campo de script da cena. Cola os logs [DARKO LAB ECONOMIA].`);
+    // O motivo viaja no erro: sem isto so restava o console de uma aba que
+    // ninguem abre, e cada diagnostico custava uma rodada inteira.
+    const btns = [...document.querySelectorAll('button')]
+      .filter((b) => estaNaTela(b))
+      .map((b) => ((b.textContent || '').trim() || b.getAttribute('aria-label') || '?').slice(0, 14))
+      .slice(0, 10)
+      .join(' / ');
+    const tela = (document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    throw new Error(
+      `${sceneLabel}: não achei o campo de script da cena ` +
+      `[url=${location.pathname}; censo: ${ecoCensoCampos}; botoes: ${btns}; TELA="${tela}"]`,
+    );
   }
   const alvo = campos[campos.length - 1];
   // O React do create-v4 ignora clique sintético: foco por CDP antes de digitar.

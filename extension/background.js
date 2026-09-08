@@ -21,133 +21,30 @@ async function fetchWithTimeout(url, opts, timeoutMs = 30000) {
   }
 }
 
-/* ================= JANELA DE AUTOMACAO =================
- * POR QUE EXISTE (medido 07.09.2026, e era o que travava tudo): aba de fundo
- * tem document.visibilityState 'hidden' e o Chrome aplica throttling por
- * ORCAMENTO nos timers dela. Medido na aba real do Studio: setTimeout(200)
- * virava ~1000ms e, depois de ~6 disparos, a cadeia PARAVA. Como o laco do
- * Studio e todo `await sleep(...)`, o job morria no meio — sem progresso e sem
- * erro (card em ENVIANDO por 19 min sem uma unica mensagem).
- * Web Lock NAO isenta (testado: mesmos 6 ticks e para).
- * O que resolve: a aba ser a ATIVA de uma JANELA propria nao-minimizada, que e
- * 'visible' mesmo atras da janela do usuario. `focused:false` nao rouba foco.
+/* ============ A ABA DA AUTOMACAO E DE FUNDO, INVISIVEL ============
+ * O trabalho roda numa ABA DE FUNDO. O usuario nao ve janela nenhuma abrir.
  *
- * ⚠ A IDENTIDADE DA JANELA E REGISTRADA, NUNCA ADIVINHADA.
- * A 1a versao inferia "e a minha janela" de `aba ATIVA numa janela que nao
- * esta em foco`. A revisao mostrou o estrago: com dois monitores, a segunda
- * janela do Chrome do PROPRIO usuario — com o HeyGen aberto e ele editando na
- * mao — passava no teste, era adotada, e o disparo NAVEGAVA a aba dele,
- * matando o trabalho. E a adocao grudava: dali em diante ate a janela em foco
- * casava. Agora o id so vem de quem a extensao criou, guardado em
- * chrome.storage.session (sobrevive ao service worker, morre com o browser).
+ * ⚠ JA TENTEI JANELA PROPRIA E FOI PIOR — NAO REPETIR.
+ * A ideia era fugir do throttling de timer da aba oculta com
+ * `chrome.windows.create({focused:false})`, porque a aba ATIVA de uma janela e
+ * 'visible'. No Windows nao funciona: janela sem foco atras da janela
+ * MAXIMIZADA do usuario fica OCLUIDA, e o Chrome trata janela ocluida PIOR que
+ * aba de fundo. MEDIDO nas duas situacoes:
+ *   aba de fundo comum -> editor monta COMPLETO (Add scene, Auto-split, 1x,
+ *                         Avatar IV, Advanced Setting, Motion Engine)
+ *   janela sem foco    -> editor monta PELA METADE (so Script, Upload audio,
+ *                         Generate). O painel de CENA nunca monta, e por isso
+ *                         o controle de motor "nao existia".
+ * A janela ainda trazia risco proprio: a revisao adversarial mostrou que a
+ * heuristica pra reconhece-la sequestrava a aba do HeyGen do proprio usuario
+ * num segundo monitor.
+ *
+ * O throttling de timer, que era a UNICA razao da janela, foi resolvido melhor:
+ * `sleep()` do content script vai por HG_SLEEP ate o service worker, que nao e
+ * pagina e nao sofre throttling de visibilidade.
  */
-const CHAVE_JANELA = 'darkolab:janela-automacao';
-let janelaAutomacaoId = null;
 
-async function lerJanelaAutomacao() {
-  if (janelaAutomacaoId != null) return janelaAutomacaoId;
-  try {
-    const o = await chrome.storage.session.get(CHAVE_JANELA);
-    const id = o && o[CHAVE_JANELA];
-    if (typeof id === 'number') { janelaAutomacaoId = id; return id; }
-  } catch (e) {}
-  return null;
-}
-async function gravarJanelaAutomacao(id) {
-  janelaAutomacaoId = id;
-  try { await chrome.storage.session.set({ [CHAVE_JANELA]: id }); } catch (e) {}
-}
-async function esquecerJanelaAutomacao() {
-  janelaAutomacaoId = null;
-  try { await chrome.storage.session.remove(CHAVE_JANELA); } catch (e) {}
-}
-try {
-  chrome.windows.onRemoved.addListener((id) => {
-    if (id === janelaAutomacaoId) {
-      console.log('[DARKO LAB BG] janela de automacao foi fechada');
-      void esquecerJanelaAutomacao();
-    }
-  });
-} catch (e) {}
-
-/** Deixa a janela de automacao utilizavel: existe, nao minimizada, e a aba do
- *  HeyGen ativa nela. Devolve a aba, ou null se a janela nao serve mais.
- *  NUNCA mexe numa janela que nao seja a nossa (o id vem do registro). */
-async function prepararJanelaAutomacao(id) {
-  try {
-    const w = await chrome.windows.get(id, { populate: true });
-    // Cinto de seguranca: se por qualquer motivo o id registrado for a janela
-    // que o usuario esta usando agora, nao mexe em nada.
-    try {
-      const foco = await chrome.windows.getLastFocused();
-      if (foco && foco.id === id && foco.focused) {
-        console.warn('[DARKO LAB BG] janela registrada esta EM FOCO — nao vou mexer nela');
-        return null;
-      }
-    } catch (e) {}
-    const t = (w.tabs || []).find((x) => (x.url || '').includes('app.heygen.com'));
-    if (!t) return null;
-    if (w.state === 'minimized') {
-      // Minimizada volta a ser 'hidden' — desminimiza SEM focar.
-      try { await chrome.windows.update(id, { state: 'normal', focused: false }); } catch (e) {}
-    }
-    if (!t.active) { try { await chrome.tabs.update(t.id, { active: true }); } catch (e) {} }
-    await waitForTabReady(t.id);
-    return t;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function criarJanelaAutomacao() {
-  const win = await chrome.windows.create({
-    url: HEYGEN_CREATE_URL,
-    focused: false,
-    type: 'normal',
-    state: 'normal',
-    width: 1280,
-    height: 900,
-  });
-  await gravarJanelaAutomacao(win.id);
-  const t = (win.tabs || [])[0];
-  if (!t) throw new Error('janela criada sem aba');
-  await waitForTabReady(t.id);
-  return t;
-}
-
-/**
- * @param {{precisaVisivel?: boolean}} opts
- *   precisaVisivel: o trabalho depende de TIMERS (todo job do Studio depende).
- *   Nesse caso SO serve a janela de automacao — reusar uma aba de fundo aqui
- *   era o furo que anulava a correcao: existindo qualquer aba HeyGen de fundo,
- *   o laco devolvia ela e a janela nunca chegava a ser criada.
- *   Chamadas read-only (lista de avatar, saldo, apiFetch) nao dependem de
- *   timer e seguem podendo usar aba de fundo — assim abrir o seletor de avatar
- *   nao faz pipocar janela nenhuma.
- */
-async function findOrCreateHeyGenTab(opts = {}) {
-  const precisaVisivel = !!opts.precisaVisivel;
-  const idJanela = await lerJanelaAutomacao();
-
-  // 1) A NOSSA janela sempre tem prioridade, nos dois modos.
-  if (idJanela != null) {
-    const nossa = await prepararJanelaAutomacao(idJanela);
-    if (nossa) return nossa;
-    await esquecerJanelaAutomacao();
-  }
-
-  // 2) Trabalho que depende de timer: janela nova, sem reusar aba de fundo.
-  if (precisaVisivel) {
-    console.log('[DARKO LAB BG] job precisa de aba visivel — criando janela de automacao');
-    try {
-      return await criarJanelaAutomacao();
-    } catch (e) {
-      console.warn('[DARKO LAB BG] nao consegui criar janela:', e?.message || e);
-      // Sem janela, roda numa aba de fundo mesmo: lento e sujeito a travar,
-      // mas melhor do que nao rodar. O content script avisa que esta oculta.
-    }
-  }
-
+async function findOrCreateHeyGenTab() {
   const tabs = await chrome.tabs.query({ url: ['https://app.heygen.com/*'] });
   // Só abas de FUNDO. NUNCA uma aba que o usuario esteja olhando.
   //
@@ -183,7 +80,8 @@ async function findOrCreateHeyGenTab(opts = {}) {
       );
     }
   }
-  // Ultimo recurso: aba inativa (throttled, mas melhor que nao rodar).
+  // Nenhuma reaproveitavel: cria uma aba de fundo nova. Aba recem-criada
+  // sempre aceita o content script.
   const fresh = await chrome.tabs.create({
     url: HEYGEN_CREATE_URL,
     active: false,
@@ -1153,7 +1051,7 @@ async function handleCreatePhotoAvatar(requestId, payload, bridgeTabId) {
 
 async function handleGenerate(requestId, payload, bridgeTabId) {
   console.log('[DARKO LAB BG] handleGenerate START reqId=', requestId);
-  const tab = await findOrCreateHeyGenTab({ precisaVisivel: true });
+  const tab = await findOrCreateHeyGenTab();
   activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
 
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', {
@@ -1214,7 +1112,7 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     });
     return;
   }
-  const tab = await findOrCreateHeyGenTab({ precisaVisivel: true });
+  const tab = await findOrCreateHeyGenTab();
   activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
 
   // Entrada DETERMINISTICA no editor Studio cena-por-cena: URL direta
