@@ -267,6 +267,32 @@ console.log('pilot-economia:');
   ok(t.porque.includes('cobra'), 'a trava explica o porquê em uma frase');
 }
 
+/* ─── 11. MESMO avatar com vozes DIFERENTES nao pode virar um projeto so ─── */
+{
+  // ATENCAO - REGRESSAO REAL (auditoria 08.09.2026, 3/3 ceticos confirmaram):
+  // o agrupamento era so por avatarId, entao dois papeis com o MESMO look e
+  // vozes diferentes viravam um projeto com a voz do PRIMEIRO take - e o AD
+  // inteiro saia na voz errada, sem aviso e sem recusa.
+  const pv = planejarEconomia([
+    take({ label: 'PAPEL A', text: 'fala da Marta', avatarId: 'av1', voiceId: 'voz-marta' }),
+    take({ label: 'PAPEL B', text: 'fala do Rui', avatarId: 'av1', voiceId: 'voz-rui' }),
+  ]);
+  eq(pv.projetos.length, 2, 'mesmo avatar com vozes diferentes vira DOIS projetos');
+  eq(pv.projetos.map((x) => x.voiceId), ['voz-marta', 'voz-rui'], 'cada projeto leva a SUA voz');
+  eq(pv.projetos.map((x) => x.avatarId), ['av1', 'av1'], 'o avatarId do projeto continua o id puro do look');
+  eq(pv.projetos.map((x) => x.cenas.length), [1, 1], 'uma cena em cada');
+
+  const qv = planejarEconomia([
+    take({ label: 'A', avatarId: 'av1', voiceId: 'voz-unica' }),
+    take({ label: 'B', avatarId: 'av1', voiceId: 'voz-unica' }),
+  ]);
+  eq(qv.projetos.length, 1, 'mesma voz continua agrupando num projeto so');
+  eq(qv.projetos[0].cenas.length, 2, 'com as duas cenas juntas');
+
+  const rv = planejarEconomia([take({ label: 'A', avatarId: 'av1' }), take({ label: 'B', avatarId: 'av1' })]);
+  eq(rv.projetos.length, 1, 'sem voz declarada, segue agrupando por avatar');
+}
+
 /* ─── 10. texto da cena vem aparado ─── */
 {
   const p = planejarEconomia([take({ label: 'HOOK 1', text: '  fala com espaço  \n' })]);

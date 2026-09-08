@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.35.0';
+const DARKO_EXT_VERSION = '4.37.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -4483,18 +4483,14 @@ async function ecoQueimarFranquia(requestId, rotulo) {
  *  Em caso de duvida (rede caiu, formato mudou) devolve -1: o chamador decide,
  *  e o padrao e NAO bloquear por causa de uma leitura que falhou. */
 async function ecoFranquiaDePreview() {
-  try {
-    const r = await fetch('https://api2.heygen.com/v1/text_draft.scene_avatar_preview.allowance', {
-      credentials: 'include',
-    });
-    if (!r.ok) return { restantes: -1, motivo: `HTTP ${r.status}` };
-    const j = await r.json();
-    const n = j && j.data && typeof j.data.remaining === 'number' ? j.data.remaining : -1;
-    ecoLog(`franquia de preview gratis: ${n}`);
-    return { restantes: n, motivo: null };
-  } catch (e) {
-    return { restantes: -1, motivo: (e && e.message) || String(e) };
-  }
+  // ⚠ TETO DE TEMPO. Esta era a UNICA chamada de rede do caminho por API sem
+  // AbortController — e ela e a condicao de parada da queima da franquia. Um
+  // fetch pendurado aqui travava o job inteiro sem dizer nada.
+  const r = await ecoApiJson('v1/text_draft.scene_avatar_preview.allowance', { tetoMs: 15000 });
+  if (!r.ok) return { restantes: -1, motivo: r.msg || `HTTP ${r.http}` };
+  const n = r.data && typeof r.data.remaining === 'number' ? r.data.remaining : -1;
+  ecoLog(`franquia de preview gratis: ${n}`);
+  return { restantes: n, motivo: n === -1 ? 'resposta sem `remaining`' : null };
 }
 
 /** Diálogo aberto (paywall, limite): CAPTURA o texto antes de esconder. O
@@ -4951,11 +4947,20 @@ function ecoDraftEscreverCena(wrapper, i, { texto, voiceId, avatarId, groupId })
   av.content = av.content || {};
   if (avatarId) av.content.avatar_id = avatarId;
   if (groupId) av.content.avatar_group_id = groupId;
-  av.content.engine = 'avatar_iii';
-  av.content.use_avatar_iv_model = false;
-  av.content.use_unlimited_mode = true;
-  if (av.content.engine_settings && typeof av.content.engine_settings === 'object') {
-    av.content.engine_settings.engine_type = 'avatar_iii';
+
+  // ⚠ A TRAVA VALE PRA TODO AVATAR DO DRAFT, nao so' pro da cena. O draft
+  // postado vai INTEIRO no corpo, e a bancada e' um projeto reaproveitado que
+  // pode ter outras cenas com avatar em `avatar_iv` — o motor que cobra addon.
+  // Travar so' o primeiro deixava os outros do jeito que vieram.
+  for (const el of Object.values(td.visual.elements || {})) {
+    if (!el || el.type !== 'avatar' || !el.content) continue;
+    el.content.engine = 'avatar_iii';
+    el.content.use_avatar_iv_model = false;
+    el.content.use_unlimited_mode = true;
+    el.content.avatar_iv_more_expressive = null;
+    // `engine_settings` so' era corrigido quando JA existia; ausente, o
+    // servidor ficava livre pra assumir o padrao dele.
+    el.content.engine_settings = { ...(el.content.engine_settings || {}), engine_type: 'avatar_iii' };
   }
   // O resultado da cena ANTERIOR mora aqui. Se ficar, o servidor pode devolver
   // o cache velho e a gente montaria o AD com o take errado — o pior defeito
@@ -5068,10 +5073,17 @@ function ecoVozDaCena(wrapper, ids) {
   const tts = wrapper.text_draft.script.elements[ids.ttsId] || {};
   return (tts.attributes && tts.attributes.voice_id) || null;
 }
-/** Os ajustes de voz da cena (velocidade, tom, idioma). */
-function ecoAjustesDeVoz(wrapper, ids) {
-  const tts = wrapper.text_draft.script.elements[ids.ttsId] || {};
-  return (tts.attributes && tts.attributes.voice_settings) || {};
+/** Os ajustes de voz a usar.
+ *  ⚠ NAO HERDAR OS DA BANCADA. A bancada e' um projeto reaproveitado de OUTRO
+ *  AD: velocidade, tom e idioma de la' deformariam a fala do AD inteiro, e em
+ *  silencio. So' o que o Pilot pedir explicitamente vale; o resto e' neutro. */
+function ecoAjustesDeVoz(pedidos) {
+  const p = pedidos || {};
+  const num = (v, padrao) => (typeof v === 'number' && isFinite(v) ? v : padrao);
+  const ajustes = { speed: num(p.speed, 1), pitch: num(p.pitch, 0) };
+  if (p.locale) ajustes.locale = p.locale;
+  if (p.emotion) ajustes.emotion = p.emotion;
+  return ajustes;
 }
 
 /** Gera a fala e devolve { url, duracao, palavras }. */
@@ -5094,7 +5106,16 @@ async function ecoGerarTts({ texto, voiceId, ajustes, videoId }) {
   const d = r.data || {};
   const url = typeof d.audio_url === 'string' ? d.audio_url
     : (typeof d.url === 'string' ? d.url : null);
-  const dur = Number(d.duration || d.audio_duration || d.duration_ms / 1000 || 0) || 0;
+  // ⚠ FAIXA DE SANIDADE. `d.duration_ms / 1000` com `duration_ms` ausente da
+  // NaN, e um valor em MILISSEGUNDOS sob o nome `duration` viraria uma cena de
+  // horas. Take de fala nao passa de alguns minutos.
+  let dur = 0;
+  for (const cand of [d.duration, d.audio_duration, typeof d.duration_ms === 'number' ? d.duration_ms / 1000 : null]) {
+    const v = Number(cand);
+    if (isFinite(v) && v > 0) { dur = v; break; }
+  }
+  if (dur > 900) dur = dur / 1000; // veio em ms sob nome de segundos
+  if (!isFinite(dur) || dur <= 0 || dur > 900) dur = 0;
   const brutas = Array.isArray(d.words) ? d.words
     : (Array.isArray(d.word_timestamps) ? d.word_timestamps
       : (Array.isArray(d.alignments) ? d.alignments : []));
@@ -5151,7 +5172,11 @@ function ecoResumoDaResposta(data) {
   return partes.join(' ').slice(0, 200) || '(vazio)';
 }
 
-/** As URLs em cache do projeto, como um conjunto (pra detectar a NOVA). */
+/** As URLs em cache do projeto.
+ *  ⚠ NAO SERVE COMO SINAL DE CONCLUSAO e nao entra mais na espera: o cache e
+ *  indexado pelo draft SALVO (o nosso vive so dentro do POST), entao fica vazio
+ *  pra sempre — e, quando NAO fica, o que aparece ali pode ser o render de
+ *  OUTRA cena, entregue como se fosse desta. Vale so pra diagnostico. */
 async function ecoUrlsEmCache(videoId) {
   const r = await ecoApiJson(
     'v1/text_draft.scene_avatar_preview.get_from_cache?video_id=' + encodeURIComponent(videoId),
@@ -5182,39 +5207,62 @@ function ecoUrlDaResposta(data) {
  *  O sinal certo esta na propria resposta do render: ela devolve `job_id` e
  *  `video_url` (nulo enquanto processa). Entao a espera e por `job_id` no
  *  `.check`, com o `get_from_cache` so como rede de seguranca. */
-async function ecoEsperarTakeApi(videoId, jaExistiam, tetoMs, aoVivo, jobId) {
+async function ecoEsperarTakeApi(videoId, tetoMs, aoVivo, jobId) {
+  if (!jobId) {
+    // Sem job nao ha o que perguntar. Antes disso o laco girava ate o teto pra
+    // dar em nada — melhor falhar na hora, dizendo por que.
+    throw new Error('o render foi aceito mas nao devolveu job_id — nao da pra acompanhar');
+  }
   const ate = Date.now() + tetoMs;
+  const meuJob = currentJob;
   let voltas = 0;
-  let ondeChecar = jobId ? ['job_id'] : [];
+  let falhasSeguidas = 0;
   while (Date.now() < ate) {
     if (ecoCancelado) throw new Error('cancelado durante a espera do render');
+    // ⚠ PREEMPCAO. `podeAssumirJob` toma o slot de um job mudo e liga
+    // `ecoCancelado`; so' que o job NOVO logo em seguida religa a flag pra
+    // false, e o velho seguia vivo — dois jobs escrevendo na MESMA bancada, com
+    // o cancelamento zerado. O dono do slot e' a verdade, nao a flag.
+    if (currentJob !== meuJob) throw new Error('este job foi substituido por outro disparo');
     marcarBatimento();
     await sleep(4000);
     voltas++;
 
-    // 1) o caminho bom: perguntar pelo job
-    for (const chave of ondeChecar) {
-      const r = await ecoApiJson(
-        `v1/text_draft.scene_avatar_preview.check?${chave}=${encodeURIComponent(jobId)}` +
-          `&video_id=${encodeURIComponent(videoId)}`,
-        { tetoMs: 20000 },
-      );
-      const u = ecoUrlDaResposta(r.data);
-      if (u) return u;
-      // Alguns retornos vem com a lista de itens em vez do objeto direto.
-      const itens = (r.data && (r.data.items || r.data.list)) || null;
-      if (Array.isArray(itens)) {
-        for (const it of itens) { const v = ecoUrlDaResposta(it); if (v) return v; }
+    const r = await ecoApiJson(
+      `v1/text_draft.scene_avatar_preview.check?job_id=${encodeURIComponent(jobId)}` +
+        `&video_id=${encodeURIComponent(videoId)}`,
+      { tetoMs: 20000 },
+    );
+
+    // ⚠ ERRO DO SERVIDOR E' TERMINAL, NAO E' "AINDA NAO FICOU PRONTO". O 4xx
+    // aqui responde sobre um payload que nao muda mais (foi assim que o
+    // "Video duration is 0 for element ... SCENE" girou ate o teto sem que
+    // ninguem lesse a frase que explicava tudo). 5xx/rede podem ser passageiros.
+    if (r.http >= 400 && r.http < 500) {
+      throw new Error(`o HeyGen recusou o render — ${r.msg || 'HTTP ' + r.http}`);
+    }
+    if (!r.ok) {
+      if (++falhasSeguidas >= 5) {
+        throw new Error(`o HeyGen parou de responder o andamento (${r.msg || 'HTTP ' + r.http})`);
       }
+      continue;
+    }
+    falhasSeguidas = 0;
+
+    const d = r.data || {};
+    const estado = String(d.status || d.state || '').toLowerCase();
+    if (estado === 'failed' || estado === 'error' || d.error) {
+      throw new Error(`o render falhou no HeyGen — ${d.error || d.message || estado}`);
     }
 
-    // 2) rede de seguranca: se o projeto for salvo por fora, aparece aqui
-    const agora = await ecoUrlsEmCache(videoId);
-    for (const u of agora) if (!jaExistiam.has(u)) return u;
-
-    if (aoVivo && voltas % 5 === 0) {
-      aoVivo(Math.round((tetoMs - (ate - Date.now())) / 1000));
+    const u = ecoUrlDaResposta(d);
+    if (u) return u;
+    const itens = d.items || d.list || null;
+    if (Array.isArray(itens)) {
+      for (const it of itens) { const v = ecoUrlDaResposta(it); if (v) return v; }
     }
+
+    if (aoVivo && voltas % 5 === 0) aoVivo(Math.round((tetoMs - (ate - Date.now())) / 1000));
   }
   return null;
 }
@@ -5224,11 +5272,34 @@ async function ecoEsperarTakeApi(videoId, jaExistiam, tetoMs, aoVivo, jobId) {
  *  eterno). O sinal de que queimou e a franquia DIMINUIR. */
 async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
   let f = await ecoFranquiaDePreview();
-  if (f.restantes <= 0) return { queimadas: 0, restantes: f.restantes };
+  if (f.restantes === 0) return { queimadas: 0, restantes: 0, leu: true };
+  // ⚠ -1 NAO E' ZERO. A leitura da franquia devolve -1 quando FALHA (rede,
+  // formato novo), e tratar isso como "nao ha o que queimar" fazia o job seguir
+  // achando que o render sairia limpo. Segue em frente — a trava do `-marked-`
+  // ainda protege o AD — mas DIZENDO que nao deu pra conferir.
+  if (f.restantes < 0) {
+    reportProgress(
+      requestId,
+      `Economia: nao consegui ler a franquia gratis (${f.motivo || 'motivo desconhecido'}) — ` +
+      `sigo, e paro se algum take vier com marca d'agua`,
+      base,
+    );
+    return { queimadas: 0, restantes: -1, leu: false };
+  }
   ecoWarn(`franquia com ${f.restantes} preview(s) marcado(s) — queimando antes de valer`);
   let queimadas = 0;
+  let ultimaRecusa = null;
+  // Relogio de parede: sem isto a queima sozinha podia consumir o tempo do AD
+  // inteiro (cada volta espera ate 3 min) antes da primeira cena de verdade.
+  const ateQueima = Date.now() + 12 * 60 * 1000;
   for (let volta = 0; volta < 5 && f.restantes > 0; volta++) {
     if (ecoCancelado) throw new Error('cancelado durante a queima da franquia');
+    if (Date.now() > ateQueima) {
+      throw new Error(
+        `a liberacao do render limpo passou de 12 min e parou com ${f.restantes} preview(s) ` +
+        `gratis restando. Nada foi cobrado.`,
+      );
+    }
     reportProgress(requestId, `Economia: liberando o render limpo (${f.restantes} restante(s))...`, base);
     const antes = f.restantes;
     // ⚠ TEXTO DIFERENTE A CADA VOLTA — "viewing this scene again is free until
@@ -5244,7 +5315,7 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
     const falaQueima = await ecoGerarTts({
       texto,
       voiceId: ecoVozDaCena(wrapper, ids),
-      ajustes: ecoAjustesDeVoz(wrapper, ids),
+      ajustes: ecoAjustesDeVoz(null),
       videoId,
     });
     if (falaQueima.erro || !(falaQueima.duracao > 0)) {
@@ -5254,13 +5325,17 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
       );
     }
     ecoAplicarTtsNaCena(wrapper, ids, falaQueima);
-    const jaTinha = await ecoUrlsEmCache(videoId);
     const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
-    if (!r.ok) ecoWarn(`queima ${volta + 1}: o render respondeu ${r.http} — ${r.msg}`);
+    if (!r.ok) {
+      // Guardar o motivo REAL: antes isso era so' console.warn e a mensagem
+      // final culpava a franquia, escondendo o que o servidor tinha dito.
+      ultimaRecusa = r.msg || `HTTP ${r.http}`;
+      ecoWarn(`queima ${volta + 1}: o render respondeu ${r.http} — ${r.msg}`);
+    }
     // Nao interessa o video: interessa a franquia cair. Espera curta.
     const jobQueima = (r.data && (r.data.job_id || r.data.stream_id)) || null;
-    if (!ecoUrlDaResposta(r.data)) {
-      await ecoEsperarTakeApi(videoId, jaTinha, 3 * 60 * 1000, null, jobQueima).catch(() => null);
+    if (!ecoUrlDaResposta(r.data) && jobQueima) {
+      await ecoEsperarTakeApi(videoId, 3 * 60 * 1000, null, jobQueima).catch(() => null);
     }
     f = await ecoFranquiaDePreview();
     if (f.restantes < antes) queimadas++;
@@ -5270,12 +5345,13 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
   }
   if (f.restantes > 0) {
     throw new Error(
-      `nao consegui zerar a franquia de previews gratis (parou em ${f.restantes}). ` +
-      `Enquanto ela nao zera, todo take volta COM MARCA D'AGUA. Nada foi cobrado.`,
+      `nao consegui zerar a franquia de previews gratis (parou em ${f.restantes})` +
+      (ultimaRecusa ? ` — o HeyGen respondeu: ${ultimaRecusa}` : '') +
+      `. Enquanto ela nao zera, todo take volta COM MARCA D'AGUA. Nada foi cobrado.`,
     );
   }
   ecoLog(`franquia zerada (${queimadas} queima(s)) — render limpo liberado`);
-  return { queimadas, restantes: 0 };
+  return { queimadas, restantes: 0, leu: true };
 }
 
 /**
@@ -5305,26 +5381,40 @@ async function runEconomyJobApi(requestId, payload) {
     // app (basta NAVEGAR pra /create-v4/draft?...&fromCreateButton=true, que
     // ele cria e redireciona pro id) — navegar e a unica coisa que sempre
     // funcionou em aba oculta. O background faz isso ANTES de nos chamar.
-    let videoId = (payload && payload.bancadaId) || ecoVideoIdDaUrl();
+    // ⚠ A BANCADA GUARDADA PODE TER MORRIDO: projeto apagado, conta trocada,
+    // workspace trocado (o Pilot atende DUAS empresas). Sem revalidar, um id
+    // velho matava TODO disparo pra sempre, sempre com a mesma mensagem.
+    // Por isso a validacao vem antes do uso e a recuperacao e' automatica.
+    const conta = await ecoContaAtual();
+    let videoId = (payload && payload.bancadaId) || (await ecoBancadaGuardada(conta)) || ecoVideoIdDaUrl();
+    if (videoId && !(await ecoBancadaServe(videoId))) {
+      ecoWarn(`a bancada guardada (${String(videoId).slice(0, 10)}) nao serve mais — procurando outra`);
+      reportProgress(requestId, 'Economia: o projeto guardado nao serve mais, procurando outro...', 2);
+      await ecoGuardarBancada(conta, null);
+      videoId = null;
+    }
     if (!videoId) {
       reportProgress(requestId, 'Economia: preparando o projeto do Studio...', 2);
       const b = await ecoGarantirBancada();
       videoId = b.id;
-      try { chrome.runtime.sendMessage({ type: 'HG_ECO_BANCADA_NOVA', bancadaId: videoId }); } catch (e) {}
+      await ecoGuardarBancada(conta, videoId);
       reportProgress(requestId, `Economia: bancada ${b.como}`, 3);
     }
 
+    // ⚠ Voz PEDIDA e nao resolvida NAO segue. O fallback (a voz que ja esta na
+    // cena) e' a voz da BANCADA — um projeto de outro AD. Seguir assim produzia
+    // o AD inteiro com a voz errada, descoberto so' na revisao.
     if (!voiceId && voiceName) {
       voiceId = await ecoResolverVozPorNome(voiceName);
+      if (!voiceId) {
+        throw new Error(
+          `a voz "${voiceName}" nao existe no catalogo desta conta do HeyGen. ` +
+          `Parei pra nao gerar o AD inteiro com a voz de outro projeto. Nada foi cobrado.`,
+        );
+      }
       // Falar isso em voz alta e de proposito: voz trocada em silencio so
       // apareceria na revisao do AD inteiro.
-      reportProgress(
-        requestId,
-        voiceId
-          ? `Economia: voz "${voiceName}" encontrada`
-          : `Economia: voz "${voiceName}" NAO encontrada — vou usar a voz que ja esta na cena`,
-        2,
-      );
+      reportProgress(requestId, `Economia: voz "${voiceName}" encontrada`, 2);
     }
 
     reportProgress(requestId, 'Economia: lendo o projeto...', 3);
@@ -5333,7 +5423,20 @@ async function runEconomyJobApi(requestId, payload) {
     // e melhor parar aqui do que renderizar a cena errada.
     ecoIdsDaCena(wrapper, 0);
 
-    const franquia = await ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, 5);
+    // ⚠ VALIDAR AS CENAS ANTES DE QUEIMAR. A franquia gratis e' recurso escasso
+    // (volta sabe-se la quando); gasta-la e so' entao descobrir que a cena 7 veio
+    // sem texto seria jogar cota fora num job ja' condenado.
+    for (let i = 0; i < cenas.length; i++) {
+      const c = cenas[i];
+      if (!c || !String(c.texto || '').trim()) {
+        throw new Error(
+          `${jobLabel || 'ECO'} cena ${i + 1}/${cenas.length}: a parte veio SEM TEXTO. ` +
+          `Parei antes de gastar qualquer coisa. Nada foi cobrado.`,
+        );
+      }
+    }
+
+    let franquia = await ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, 5);
     if (franquia.queimadas > 0) {
       // A queima sujou o draft com texto de aquecimento; relê limpo.
       ({ wrapper, title } = await ecoDraftLer(videoId));
@@ -5345,8 +5448,23 @@ async function runEconomyJobApi(requestId, payload) {
       const rot = `${jobLabel || 'ECO'} cena ${i + 1}/${total}`;
       const base = Math.round((i / total) * 90);
       if (ecoCancelado) throw new Error(`Cancelado na cena ${i + 1}/${total}. As cenas ja prontas foram guardadas.`);
+      if (currentJob !== requestId) {
+        throw new Error(`Este disparo foi substituido por outro na cena ${i + 1}/${total}. As cenas ja prontas foram guardadas.`);
+      }
       if (!cena || !String(cena.texto || '').trim()) {
         throw new Error(`${rot}: a parte veio SEM TEXTO. Parei pra nao gerar take mudo. Nada foi cobrado.`);
+      }
+
+      // ⚠ A COTA PODE VOLTAR NO MEIO DO AD. Conferir uma vez so', no comeco,
+      // fazia um AD longo comecar limpo e terminar com takes MARCADOS — e o job
+      // morria na cena N em vez de simplesmente queimar de novo. Custa um GET.
+      if (franquia.leu) {
+        const agora = await ecoFranquiaDePreview();
+        if (agora.restantes > 0) {
+          reportProgress(requestId, `${rot}: a franquia gratis voltou (${agora.restantes}) — liberando de novo...`, base);
+          franquia = await ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base);
+          ({ wrapper, title } = await ecoDraftLer(videoId));
+        }
       }
 
       reportProgress(requestId, `${rot}: montando a cena...`, base);
@@ -5365,12 +5483,14 @@ async function runEconomyJobApi(requestId, payload) {
       const fala = await ecoGerarTts({
         texto: cena.texto,
         voiceId: cena.voiceId || voiceId || ecoVozDaCena(wrapper, ids),
-        ajustes: ecoAjustesDeVoz(wrapper, ids),
+        ajustes: ecoAjustesDeVoz(cena.voz || (payload && payload.voz)),
         videoId,
       });
-      if (fala.erro || !(fala.duracao > 0)) {
+      // ⚠ SEM URL A CENA SAI MUDA. Conferir so' a duracao deixava passar um TTS
+      // que respondeu 200, mediu o texto e nao entregou audio nenhum.
+      if (fala.erro || !(fala.duracao > 0) || !fala.url) {
         throw new Error(
-          `${rot}: nao consegui gerar a fala (${fala.erro || 'duracao 0'}) — ` +
+          `${rot}: nao consegui gerar a fala (${fala.erro || (!fala.url ? 'o TTS nao devolveu audio' : 'duracao 0')}) — ` +
           `sem audio o render nem comeca. Resposta: ${fala.resumo}. Nada foi cobrado.`,
         );
       }
@@ -5381,7 +5501,6 @@ async function runEconomyJobApi(requestId, payload) {
         base + 2,
       );
 
-      const jaTinha = await ecoUrlsEmCache(videoId);
       reportProgress(requestId, `${rot}: renderizando (Avatar III, 0 credito)...`, base + 3);
       const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
       if (!r.ok) {
@@ -5397,7 +5516,7 @@ async function runEconomyJobApi(requestId, payload) {
       // Cena inalterada volta PRONTA na hora (o servidor devolve o cache dele).
       let url = ecoUrlDaResposta(r.data);
       if (!url) {
-        url = await ecoEsperarTakeApi(videoId, jaTinha, tetoCena, (s) =>
+        url = await ecoEsperarTakeApi(videoId, tetoCena, (s) =>
           reportProgress(requestId, `${rot}: renderizando ha ${s}s...`, base + 5), jobId);
       }
       if (!url) {
@@ -5463,6 +5582,67 @@ async function ecoCriarBancada() {
   return { id: null, como: 'falhou', notas };
 }
 
+/** Quem e' a conta logada nesta aba.
+ *  ⚠ POR QUE ISTO EXISTE: a bancada era uma chave GLOBAL unica. O Pilot atende
+ *  DUAS empresas; ao trocar de conta, a bancada da outra virava um id que nao
+ *  existe aqui — e as duas ficavam se derrubando. Agora cada conta tem a sua. */
+let ecoContaCache = null;
+async function ecoContaAtual() {
+  if (ecoContaCache) return ecoContaCache;
+  const r = await ecoApiJson('v1/pacific/account.get?include_ff=true', { tetoMs: 15000 });
+  const d = (r.data && (r.data.user || r.data.account || r.data)) || {};
+  const id = d.id || d.user_id || d.account_id || d.space_id || d.username || d.email;
+  ecoContaCache = id ? String(id).slice(0, 64) : 'padrao';
+  return ecoContaCache;
+}
+
+/** A bancada guardada DESTA conta. Mora no content script de proposito: e' ele
+ *  quem sabe de qual conta se trata (o background nao tem o cookie). */
+async function ecoBancadaGuardada(conta) {
+  try {
+    const o = await chrome.storage.local.get('ecoBancadaPorConta');
+    const mapa = (o && o.ecoBancadaPorConta) || {};
+    return mapa[conta] || null;
+  } catch (e) {
+    return null;
+  }
+}
+async function ecoGuardarBancada(conta, id) {
+  try {
+    const o = await chrome.storage.local.get('ecoBancadaPorConta');
+    const mapa = (o && o.ecoBancadaPorConta) || {};
+    if (id) mapa[conta] = id; else delete mapa[conta];
+    await chrome.storage.local.set({ ecoBancadaPorConta: mapa });
+  } catch (e) {}
+}
+
+/** Quantos elementos de avatar a cena tem (1 = normal, 2+ = tela dividida). */
+function ecoQuantosAvatares(wrapper, i) {
+  try {
+    const td = wrapper.text_draft;
+    const sceneId = td.visual.layout[i];
+    const filhos = (td.visual.elements[sceneId].content.elements) || [];
+    return filhos.filter((id) => {
+      const el = td.visual.elements[id];
+      return el && el.type === 'avatar';
+    }).length;
+  } catch (e) {
+    return 0;
+  }
+}
+
+/** A bancada ainda serve? (existe, e' desta conta, e tem cena/avatar/fala) */
+async function ecoBancadaServe(videoId) {
+  try {
+    const { wrapper } = await ecoDraftLer(videoId);
+    ecoIdsDaCena(wrapper, 0);
+    if (ecoQuantosAvatares(wrapper, 0) !== 1) return false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /** Um projeto ja existente cujo draft tem cena+avatar+fala. So LEITURA. */
 async function ecoBancadaExistente() {
   // ⚠ A rota certa e `v2/project/items` (data.items[].video_id). `video.list`
@@ -5484,6 +5664,14 @@ async function ecoBancadaExistente() {
       try {
         const { wrapper } = await ecoDraftLer(id);
         ecoIdsDaCena(wrapper, 0); // lanca se o formato nao servir
+        // ⚠ TELA DIVIDIDA NAO SERVE DE BANCADA. Cena com DOIS avatares poria os
+        // dois no take (conteudo errado que a montagem nao percebe). A trava do
+        // Avatar III ja cobre todos os avatares, mas o take sairia com gente
+        // demais — melhor nem escolher esse projeto.
+        if (ecoQuantosAvatares(wrapper, 0) !== 1) {
+          ecoLog(`projeto ${String(id).slice(0, 8)} tem tela dividida — nao serve de bancada`);
+          continue;
+        }
         ecoLog('bancada reaproveitada:', String(id).slice(0, 10));
         return { id, como: 'reaproveitada' };
       } catch (e) { /* proximo */ }
@@ -5544,6 +5732,7 @@ async function ecoSondaApi(videoIdPedido) {
     out.nCenas = ((td.visual && td.visual.layout) || []).length;
     const ids = ecoIdsDaCena(wrapper, 0);
     out.mapaCena1 = { cena: ids.sceneId, avatar: ids.avatarId, fala: ids.ttsId };
+    out.avataresNaCena = ecoQuantosAvatares(wrapper, 0);
     const av = td.visual.elements[ids.avatarId].content || {};
     out.motor = { engine: av.engine, iv: av.use_avatar_iv_model, ilimitado: av.use_unlimited_mode };
     out.vozAtual = ((td.script.elements[ids.ttsId] || {}).attributes || {}).voice_id ? 'setada' : 'VAZIA';

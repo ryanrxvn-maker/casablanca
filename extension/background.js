@@ -132,13 +132,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'HG_ECO_BANCADA_NOVA') {
-    // A bancada nasceu dentro do content script; guardar aqui e o que evita
-    // criar um rascunho novo a cada disparo e sujar a conta do usuario.
-    guardarBancada(msg.bancadaId);
-    return false;
-  }
-
   if (msg.type === 'HG_ECO_SONDA_API') {
     // Diagnostico do caminho por API: nao renderiza nada, so confere o mapa.
     (async () => {
@@ -1202,12 +1195,22 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
   // aba. Navegar ate o editor custava ~56s por disparo e nao servia pra nada —
   // pior, o app nem cria projeto em aba oculta, entao a navegacao so atrasava.
   // So navega quando falta bancada (pra ter onde o app criar) ou no caminho DOM.
-  const bancadaPrevia =
-    jobMsg === 'HG_RUN_ECONOMY_API'
-      ? (payload && payload.bancadaId) || (await bancadaGuardada())
-      : null;
-  const jaNoHeyGen = /^https:\/\/app\.heygen\.com\//.test(tab.url || '');
-  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && bancadaPrevia && jaNoHeyGen;
+  // ⚠ A BANCADA NAO MORA MAIS AQUI. Ela e' guardada POR CONTA pelo content
+  // script, que e' o unico lado que sabe qual conta do HeyGen esta logada (o
+  // background nao tem o cookie). Guardar aqui, numa chave global unica, fazia
+  // as DUAS empresas que o Pilot atende se derrubarem: a bancada de uma virava
+  // um id inexistente na outra, e nao havia revalidacao. O `bancadaId` do
+  // payload sobrevive so' como atalho de TESTE.
+  const bancadaPrevia = jobMsg === 'HG_RUN_ECONOMY_API' ? (payload && payload.bancadaId) || null : null;
+  // ⚠ Reler a aba: o `tab` veio de findOrCreateHeyGenTab e a URL dele pode
+  // estar velha (a aba pode ter navegado no meio). Decidir pular a navegacao
+  // com URL velha e' como decidir no escuro.
+  let urlAgora = tab.url || '';
+  try { urlAgora = (await chrome.tabs.get(tab.id)).url || urlAgora; } catch {}
+  const jaNoHeyGen = /^https:\/\/app\.heygen\.com\//.test(urlAgora);
+  // O caminho por API so' precisa de UMA coisa da aba: estar em app.heygen.com,
+  // pra o content script existir com o cookie. A bancada ele resolve sozinho.
+  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen;
 
   if (!pularNavegacao) {
     reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
@@ -1229,20 +1232,14 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     // Bancada explicita no payload (teste, ou a que ficou guardada): usa e
     // pula a espera — o app NAO cria projeto sozinho em aba oculta, entao
     // esperar a URL mudar so gastaria 90s pra falhar.
+    // ⚠⚠ NAO DESISTIR AQUI. Este ponto ja' matou o caminho: sem bancada
+    // guardada, o background esperava o app criar um projeto (que ele NUNCA
+    // cria em aba oculta), nao criava, e ABORTAVA o job — de modo que o
+    // `ecoGarantirBancada()` do content script, que sabe achar e criar uma,
+    // nunca chegava a rodar. Primeira execucao numa conta limpa falhava sempre.
+    // Agora a falta de bancada NAO e' erro: o content script resolve.
     bancadaId = bancadaPrevia;
-    if (!bancadaId) {
-      reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Preparando o projeto no Studio...' });
-      bancadaId = await esperarBancada(tab.id, 20000);
-    }
-    if (!bancadaId) {
-      activeJobs.delete(requestId);
-      reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
-        error: 'Nao consegui preparar o projeto do Studio (bancada). Nada foi cobrado.',
-      });
-      return;
-    }
-    await guardarBancada(bancadaId);
-    console.log('[DARKO LAB BG] bancada =', bancadaId);
+    console.log('[DARKO LAB BG] bancada =', bancadaId || '(o content script resolve, por conta)');
   }
 
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });
@@ -1267,18 +1264,6 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
  * `pacific/draft/create` dele e TROCA a URL pra `/create-v4/<id>`. Esse id e a
  * bancada: e nele que o render de cena por API acontece.
  */
-/** A bancada fica GUARDADA: criar projeto novo a cada disparo sujaria a conta
- *  do usuario com dezenas de rascunhos. Uma so, reusada pra sempre. */
-async function bancadaGuardada() {
-  try {
-    const o = await chrome.storage.local.get('ecoBancadaId');
-    return (o && o.ecoBancadaId) || null;
-  } catch { return null; }
-}
-async function guardarBancada(id) {
-  try { await chrome.storage.local.set({ ecoBancadaId: id }); } catch {}
-}
-
 async function esperarBancada(tabId, tetoMs = 90000) {
   const RE = /create-v4\/([a-zA-Z0-9]{16,})/;
   const ate = Date.now() + tetoMs;

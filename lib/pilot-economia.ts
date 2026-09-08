@@ -172,11 +172,18 @@ export function planejarEconomia(partes: ParteDoPlano[], opts: OpcoesEconomia = 
         detalhe: `Avatar ${motor} cobra — esta cena vai em Avatar ${MOTOR_ECONOMIA}`,
       });
     }
-    const chave = p.avatarId as string;
+    // ⚠ A VOZ ENTRA NA CHAVE. Agrupar só por avatarId fundia dois papéis que
+    // usam o MESMO look com vozes diferentes num projeto só — e a voz do
+    // primeiro take vencia (`if (!proj.voiceId ...)` abaixo), calada. O AD
+    // inteiro saía na voz de um dos papéis e isso só apareceria na revisão,
+    // sem aviso nem recusa (ao contrário do gesto e do motor pago).
+    // O `avatarId` do projeto continua sendo o id puro do avatar; só a chave
+    // do agrupamento é composta.
+    const chave = `${p.avatarId}|${p.voiceId ?? ''}`;
     let proj = porAvatar.get(chave);
     if (!proj) {
       proj = {
-        avatarId: chave,
+        avatarId: p.avatarId as string,
         groupId: p.groupId ?? null,
         avatarName: p.avatarName ?? null,
         voiceId: p.voiceId ?? null,
