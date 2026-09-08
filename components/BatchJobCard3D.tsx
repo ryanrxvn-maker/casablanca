@@ -38,6 +38,11 @@ export type BatchJob3DProps = {
   partsDispatched: number;
   /** Pre-computed: parts com status completed */
   partsRendered: number;
+  /** Progresso (0-100) informado pelo motor do disparo, quando ele não produz
+   *  partes de forma incremental (modo economia). A barra usa o MAIOR entre
+   *  este e o calculado por contagem — assim ela nunca anda pra trás e nunca
+   *  fica parada num disparo que está claramente avançando. */
+  progressoMotor?: number;
   /** Mensagem livre (curta, fica embaixo da barra) */
   message?: string;
   /** Elapsed em ms desde o start (pra mostrar tempo decorrido) */
@@ -473,6 +478,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     partsTotal,
     partsDispatched,
     partsRendered,
+    progressoMotor,
     message,
     elapsedMs,
     allOk,
@@ -574,7 +580,16 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const dispatchPct = partsTotal > 0 ? partsDispatched / partsTotal : 0;
   const renderPct = partsDispatched > 0 ? partsRendered / partsDispatched : 0;
   const tail = phase === 'done' ? 1 : phase === 'downloading' || phase === 'post' ? 0.5 : 0;
-  const totalPct = phase === 'done' ? 100 : Math.round(dispatchPct * 30 + renderPct * 60 + tail * 10);
+  const contagemPct = phase === 'done' ? 100 : Math.round(dispatchPct * 30 + renderPct * 60 + tail * 10);
+  // ⚠ O MAIOR DOS DOIS. No modo economia a contagem de partes fica em ZERO até
+  // o job inteiro voltar (nenhuma parte ganha videoId no meio), então a barra
+  // ficava travada no mínimo o disparo todo. O motor informa por onde anda.
+  // Só vale enquanto o disparo está DE FATO andando: em 'queued' ou 'failed' um
+  // valor sobrando de outro disparo faria a barra mentir.
+  const motorVale = ['dispatching', 'rendering', 'downloading', 'post'].includes(phase);
+  const totalPct = phase === 'done'
+    ? 100
+    : Math.max(contagemPct, motorVale ? Math.round(Math.max(0, Math.min(99, progressoMotor ?? 0))) : 0);
   const barPct = Math.min(100, Math.max(3, totalPct));
 
   function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {

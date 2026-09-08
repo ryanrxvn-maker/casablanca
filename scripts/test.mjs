@@ -40,6 +40,7 @@ const ETAPAS = [
   { tsc: "lib/typography/player-control.ts lib/typography/player-control.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/player-control.test.js"] },
   { tsc: "lib/pilot-copy-creator.ts lib/pilot-copy-creator.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-copy-creator.test.js"] },
   { tsc: "lib/pilot-economia.ts lib/pilot-economia.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-economia.test.js"] },
+  { tsc: "lib/pilot-progresso.ts lib/pilot-progresso.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-progresso.test.js"] },
   // trava de scroll com CONTADOR (04.09): 10 modais dependem dela; duas janelas abertas nao podem travar a pagina pra sempre
   { tsc: "lib/trava-scroll.ts lib/trava-scroll.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/trava-scroll.test.js"] },
   { tsc: "lib/downloader-extension-guard.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/downloader-extension-guard.test.js"] },

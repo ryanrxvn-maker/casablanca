@@ -1014,6 +1014,15 @@ type BatchTaskState = {
   genId?: string;
   /** 'troca' = pipeline de TROCA DE ÁUDIO (sem HeyGen). Ausente = fluxo normal. */
   kind?: 'troca';
+  /** PROGRESSO INFORMADO PELO MOTOR (0-100), pro modo economia.
+   *
+   *  ⚠ POR QUE EXISTE: a barra do card é calculada por CONTAGEM DE PARTES
+   *  (`partsDispatched`/`partsRendered`). No modo economia nenhuma parte ganha
+   *  `videoId` até o job inteiro voltar — então a barra ficava CRAVADA no
+   *  mínimo (3%) do começo ao fim e só pulava pra 100%. O texto mudava, a
+   *  barra não. Aqui entra o percentual que a extensão emite a cada volta.
+   *  Não é persistido: progresso de disparo morto não faz sentido após F5. */
+  progressoMotor?: number;
   /** TROCA: dados serializaveis pra RETOMAR sobreviver reload. O novo WHITE
    *  fica no IndexedDB (chave `troca:white:<taskId>`); aqui guardamos o que
    *  e serializavel pra reconstruir tudo sem a analise em memoria. */
@@ -3076,6 +3085,23 @@ function ClickUpPilotInner() {
   const drDedupRef = useRef<
     Map<string, { promise: Promise<string | null>; resolve: (v: string | null) => void }>
   >(new Map());
+
+  /** FILA DO MODO ECONOMIA — uma task por vez, esperando em vez de morrer.
+   *
+   *  ⚠ A página roda até MAX_HEYGEN_PARALLEL tasks ao mesmo tempo, mas do
+   *  outro lado da ponte a extensão tem UM slot global, UMA aba do HeyGen e
+   *  UMA bancada por conta. Duas tasks em economia ao mesmo tempo faziam a
+   *  segunda voltar na hora com "Outra geracao em andamento" e fechar FALHADA
+   *  sem ter tentado uma única cena — precisando de RETOMAR na mão.
+   *  Agora ela espera a vez. A task que NÃO é economia segue em paralelo. */
+  const ecoFilaRef = useRef<Promise<void>>(Promise.resolve());
+
+  /** Status das cenas do modo economia, por id sintético, VISÍVEL A TODA A
+   *  PÁGINA. O mapa era local de quem disparou — então a task IRMÃ do dedup,
+   *  que herda o id `eco:<gen>:<n>`, não achava a URL na hora do download e
+   *  gravava `_NAO_RENDERIZOU.txt`, podendo ainda re-gerar o take pela API
+   *  PAGA. Aqui o take grátis que a dona já produziu fica ao alcance dela. */
+  const ecoStatusRef = useRef<Record<string, VideoStatus>>({});
 
   /* ========== Idioma da copy (docs bilíngues) (05.09) ==========
    *  Antes era um seletor GLOBAL (PL/HUN/PT) — não fazia sentido: o idioma é
@@ -5466,6 +5492,28 @@ function ClickUpPilotInner() {
         console.log(`[clickup-pilot] MODO ECONOMIA ${taskId}: ${resumoDoPlano(planoEco)}`);
         const cenasFeitas: ResultadoCena[] = [];
         let erroParcial: string | null = null;
+
+        // ⚠ ESPERAR A VEZ, não morrer. A extensão só atende um disparo de cada
+        // vez; sem esta fila a segunda task voltava na hora com "Outra geracao
+        // em andamento" e fechava sem nenhum take.
+        const anteriorNaFila = ecoFilaRef.current;
+        let liberarVez: () => void = () => {};
+        ecoFilaRef.current = new Promise<void>((r) => { liberarVez = r; });
+        let jaEsperou = false;
+        const aviso = setTimeout(() => {
+          jaEsperou = true;
+          setBatchStates((prev) => (prev[taskId]
+            ? { ...prev, [taskId]: { ...prev[taskId], message: 'Aguardando o Studio liberar (outra task no modo economia)...' } }
+            : prev));
+        }, 400);
+        try {
+          await anteriorNaFila;
+        } finally {
+          clearTimeout(aviso);
+        }
+        if (jaEsperou) console.log(`[clickup-pilot] economia ${taskId}: peguei a vez na fila do Studio`);
+
+        try {
         for (let n = 0; n < planoEco.projetos.length && !erroParcial; n++) {
           if (batchCancelRef.current[taskId]) break;
           const proj = planoEco.projetos[n];
@@ -5488,8 +5536,26 @@ function ClickUpPilotInner() {
                 // tinham renderizado de graça.
                 tetoJobMs: proj.cenas.length * 8 * 60 * 1000 + 12 * 60 * 1000,
               },
-              (stage) => {
-                setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: `${rotulo}${stage}` } } : prev));
+              (stage, percent) => {
+                // O percentual da extensão vale de 0 a 100 DENTRO do projeto
+                // atual; com mais de um projeto no plano, escala pro todo.
+                const totalProj = planoEco.projetos.length || 1;
+                const p = typeof percent === 'number' && isFinite(percent)
+                  ? Math.max(0, Math.min(99, ((n + percent / 100) / totalProj) * 100))
+                  : undefined;
+                setBatchStates((prev) => (prev[taskId]
+                  ? {
+                      ...prev,
+                      [taskId]: {
+                        ...prev[taskId],
+                        message: `${rotulo}${stage}`,
+                        // nunca deixa a barra voltar pra trás
+                        progressoMotor: p === undefined
+                          ? prev[taskId].progressoMotor
+                          : Math.max(prev[taskId].progressoMotor ?? 0, p),
+                      },
+                    }
+                  : prev));
               },
               { isCancelled: () => !!batchCancelRef.current[taskId] },
             );
@@ -5498,6 +5564,11 @@ function ClickUpPilotInner() {
           } catch (e) {
             erroParcial = (e as Error)?.message || String(e);
           }
+        }
+        } finally {
+          // Solta a vez SEMPRE — inclusive se a task foi cancelada ou explodiu.
+          // Sem isto, uma falha aqui travaria o modo economia da sessão inteira.
+          liberarVez();
         }
         if (erroParcial) {
           console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
@@ -5512,8 +5583,12 @@ function ClickUpPilotInner() {
         }
         // Cena pronta já nasce 'completed' com a URL: o poll pula e o download
         // do pipeline pega no lugar de sempre.
-        statusEconomia = statusDasCenas(cenasFeitas);
-        const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas, erroParcial);
+        statusEconomia = statusDasCenas(cenasFeitas, genId);
+        // A IRMÃ do dedup herda o id sintético mas não tem este mapa. Publicar
+        // aqui é o que a deixa baixar o take grátis em vez de gravar
+        // "_NAO_RENDERIZOU" — ou, pior, re-gerar pela API paga.
+        Object.assign(ecoStatusRef.current, statusEconomia);
+        const rs = resultadosParaRunner(minhasIdx, plan!.parts as unknown as ParteDoPlano[], cenasFeitas, erroParcial, genId);
         for (const r of rs) registrarResultado(r);
         return rs;
       };
@@ -5610,7 +5685,13 @@ function ClickUpPilotInner() {
       // este filtro ela consultaria na API um id que nunca existiu e ficaria
       // até 15 min por take esperando um render fantasma.
       const idsPraPoll = validIds.filter((id) => !statusEconomia[id] && !ehIdSintetico(id));
-      const finalStatuses: Record<string, VideoStatus> = { ...statusEconomia };
+      // ⚠ O REF ENTRA PRIMEIRO, o local vence. A task IRMÃ do dedup herda o id
+      // sintético da dona e NÃO tem o mapa local — sem este merge ela gravava
+      // "_NAO_RENDERIZOU.txt" com "Status: ?" e a auto-cura ainda podia
+      // re-gerar o take pela API PAGA, jogando fora o take grátis que a dona
+      // já tinha renderizado. Os ids são únicos por geração, então o merge não
+      // pode entregar take de outra task.
+      const finalStatuses: Record<string, VideoStatus> = { ...ecoStatusRef.current, ...statusEconomia };
       Object.assign(finalStatuses, idsPraPoll.length === 0 ? {} : await pollVideosUntilReady(idsPraPoll, {
         intervalMs: 8000,
         timeoutMs: 30 * 60 * 1000,
@@ -13802,6 +13883,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               partsTotal={b.parts.length}
                               partsDispatched={partsDispatched}
                               partsRendered={partsRendered}
+                              progressoMotor={b.progressoMotor}
                               message={b.message}
                               elapsedMs={elapsedMs}
                               allOk={allOk}

@@ -27,6 +27,7 @@ import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
 import { MAX_VERSOES, mapearVersoesDoDoc } from '@/lib/versoes-ad';
 import { PilotModeHub } from '@/components/PilotModeHub';
+import { PreviewProgressoEconomia } from '@/components/PreviewProgressoEconomia';
 import { PilotEconomiaBtn } from '@/components/PilotEconomiaBtn';
 import { DocsBar, CreatorBar, type DocChip } from '@/components/PilotFontesBar';
 import type { ModoPilot } from '@/lib/pilot-fontes';
@@ -744,6 +745,17 @@ function Conteudo() {
   return (
     <main className="mx-auto grid max-w-[760px] gap-8 px-4 py-10">
       <h1 className="text-lg font-bold text-text">DEV · preview Pilot 29.08</h1>
+
+      {/* ══════════ BARRA DE PROGRESSO do MODO ECONOMIA (08.09) ══════════ */}
+      <section
+        id="progresso-economia"
+        className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3"
+      >
+        <div className="label-tech mb-3 text-[9.5px] tracking-[0.18em] text-text-muted">
+          Modo economia — a barra do card, replayada com a MESMA matemática de produção
+        </div>
+        <PreviewProgressoEconomia />
+      </section>
 
       {/* ══════════ 0.0 PILOT 05.09: visor de entrada + barras DOCS/CREATOR ══════════ */}
       <section

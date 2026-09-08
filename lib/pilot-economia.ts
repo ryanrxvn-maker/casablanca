@@ -264,8 +264,17 @@ export type ResultadoRunner = {
  * URL no lugar de sempre: o resto do pipeline não sabe a diferença. */
 export const ID_SINTETICO_PREFIXO = 'eco:';
 
-export function idSinteticoDaCena(idx: number): string {
-  return `${ID_SINTETICO_PREFIXO}${idx}`;
+/**
+ * ⚠ O `gen` (id da geração) entra no id de propósito.
+ *
+ * Sem ele, `eco:3` da task A e `eco:3` da task B são a MESMA chave — e no
+ * dedup do DR MILLION, onde a task irmã herda o videoId da dona, uma podia
+ * receber o take da outra na hora do download. Colisão silenciosa, do tipo que
+ * entrega o vídeo trocado dizendo PRONTO. Com o `gen` a chave é única por
+ * disparo, e o mapa de status pode ser compartilhado entre as irmãs sem risco.
+ */
+export function idSinteticoDaCena(idx: number, gen?: string | null): string {
+  return `${ID_SINTETICO_PREFIXO}${gen ? `${gen}:` : ''}${idx}`;
 }
 
 export function ehIdSintetico(id: string | null | undefined): boolean {
@@ -274,9 +283,9 @@ export function ehIdSintetico(id: string | null | undefined): boolean {
 
 /** O id que representa a cena no pipeline: o do HeyGen quando existe, senão o
  *  sintético (que só vale porque vem acompanhado da URL). */
-export function idDaCena(c: ResultadoCena): string | null {
+export function idDaCena(c: ResultadoCena, gen?: string | null): string | null {
   if (c.videoId) return c.videoId;
-  if (c.videoUrl) return idSinteticoDaCena(c.idx);
+  if (c.videoUrl) return idSinteticoDaCena(c.idx, gen);
   return null;
 }
 
@@ -284,11 +293,11 @@ export type StatusDaCena = { videoId: string; status: 'completed'; videoUrl: str
 
 /** Mapa pronto pra entrar em `finalStatuses`: toda cena que voltou com URL já
  *  nasce 'completed', então o poll pula e o download acontece direto. */
-export function statusDasCenas(cenas: ResultadoCena[]): Record<string, StatusDaCena> {
+export function statusDasCenas(cenas: ResultadoCena[], gen?: string | null): Record<string, StatusDaCena> {
   const out: Record<string, StatusDaCena> = {};
   for (const c of cenas) {
     if (c.error || !c.videoUrl) continue;
-    const id = idDaCena(c);
+    const id = idDaCena(c, gen);
     if (!id) continue;
     out[id] = { videoId: id, status: 'completed', videoUrl: c.videoUrl };
   }
@@ -313,6 +322,8 @@ export function resultadosParaRunner(
    *  Studio", que é o sintoma, e o motivo de verdade ("New HeyGen plans are
    *  here", "Outra geracao em andamento") ficava só no console do F12. */
   motivoGeral?: string | null,
+  /** id da geração — entra no id sintético pra ele ser único por disparo. */
+  gen?: string | null,
 ): ResultadoRunner[] {
   const porIdx = new Map<number, ResultadoCena>();
   for (const c of cenas) porIdx.set(c.idx, c);
@@ -329,7 +340,7 @@ export function resultadosParaRunner(
       };
     }
     if (c.error) return { index: i + 1, label, videoId: null, error: c.error };
-    const id = idDaCena(c);
+    const id = idDaCena(c, gen);
     if (!id) {
       return { index: i + 1, label, videoId: null, error: 'a cena renderizou mas o vídeo não foi capturado' };
     }

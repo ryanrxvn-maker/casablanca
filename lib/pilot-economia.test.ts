@@ -293,6 +293,28 @@ console.log('pilot-economia:');
   eq(rv.projetos.length, 1, 'sem voz declarada, segue agrupando por avatar');
 }
 
+/* ─── 12. id sintetico e UNICO por geracao (colisao entre task irmas) ─── */
+{
+  // ATENCAO - REGRESSAO REAL (auditoria 08.09.2026, 3/3): sem o `gen`, `eco:3`
+  // da task A e `eco:3` da task B eram a MESMA chave. No dedup do DR MILLION a
+  // irma herda o videoId da dona, entao uma podia receber o take da OUTRA no
+  // download - video trocado, dizendo PRONTO.
+  eq(idSinteticoDaCena(3), 'eco:3', 'sem gen, o formato antigo continua valendo');
+  eq(idSinteticoDaCena(3, 'g1'), 'eco:g1:3', 'com gen, a chave carrega a geracao');
+  ok(idSinteticoDaCena(3, 'g1') !== idSinteticoDaCena(3, 'g2'), 'geracoes diferentes NAO colidem');
+  ok(ehIdSintetico(idSinteticoDaCena(3, 'g1')), 'o prefixo continua reconhecivel com gen');
+
+  const cenas = [{ idx: 0, videoUrl: 'https://a/x.mp4' }, { idx: 1, videoUrl: 'https://a/y.mp4' }];
+  const mapaA = statusDasCenas(cenas as any, 'genA');
+  const mapaB = statusDasCenas(cenas as any, 'genB');
+  eq(Object.keys(mapaA), ['eco:genA:0', 'eco:genA:1'], 'o mapa de status usa a chave com geracao');
+  const juntos = { ...mapaA, ...mapaB };
+  eq(Object.keys(juntos).length, 4, 'dois disparos podem compartilhar o mapa sem se sobrescrever');
+
+  const rs = resultadosParaRunner([0, 1], [{ label: 'A' }, { label: 'B' }] as any, cenas as any, null, 'genA');
+  eq(rs.map((r) => r.videoId), ['eco:genA:0', 'eco:genA:1'], 'o runner devolve o id com geracao');
+}
+
 /* ─── 10. texto da cena vem aparado ─── */
 {
   const p = planejarEconomia([take({ label: 'HOOK 1', text: '  fala com espaço  \n' })]);
