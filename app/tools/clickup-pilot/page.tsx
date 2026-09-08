@@ -239,6 +239,15 @@ import {
   type MagnificQueue,
 } from '@/lib/magnific-queue-runner';
 import {
+  clearPilotRunnerPulse,
+  overlayPilotRunnerPulse,
+  PILOT_RUNNER_PULSE_INTERVAL_MS,
+  PILOT_RUNNER_PULSE_KEY,
+  readPilotRunnerPulse,
+  writePilotRunnerPulse,
+  type PilotRunnerPulse,
+} from '@/lib/pilot-runner-pulse';
+import {
   readJobCommands,
   clearJobCommand,
   pruneStaleJobCommands,
@@ -4415,6 +4424,59 @@ function ClickUpPilotInner() {
    *  velho e nunca veria tasks novas na fila. */
   const batchStatesRef = useRef<Record<string, BatchTaskState>>({});
   batchStatesRef.current = batchStates;
+  const [foreignRunnerPulse, setForeignRunnerPulse] = useState<PilotRunnerPulse | null>(null);
+
+  /**
+   * Execução viva em OUTRA aba precisa aparecer como viva no Pilot. Antes, a
+   * hidratação era deliberadamente conservadora e transformava todo state ativo
+   * em “Registro recuperado”; isso evitava duplicação, mas fazia o lote real
+   * parecer perdido enquanto a aba dona continuava renderizando.
+   *
+   * Este pulso é efêmero e fica só no navegador. Ele não grava a cada 5s no
+   * Supabase e não dá ownership ao observador. O executor anuncia; as outras
+   * abas apenas sobrepõem fase/mensagem na TELA. Se a aba morrer, o pulso vence
+   * em 20s e o card volta para o estado recuperável seguro.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const me = thisTabId();
+    const refreshForeign = () => {
+      const pulse = readPilotRunnerPulse();
+      setForeignRunnerPulse(pulse?.ownerTabId !== me ? pulse : null);
+    };
+    const publish = () => {
+      const tasks: PilotRunnerPulse['tasks'] = {};
+      for (const [taskId, b] of Object.entries(batchStatesRef.current)) {
+        if (recoveredBatchIdsRef.current.has(taskId)) continue;
+        if (b.phase !== 'queued' && !ACTIVE_BATCH_PHASES.includes(b.phase)) continue;
+        tasks[taskId] = {
+          taskId,
+          phase: b.phase,
+          message: b.message,
+          startedAt: b.startedAt,
+          economia: b.economia,
+          progressoMotor: b.progressoMotor,
+        };
+      }
+      if (Object.keys(tasks).length) {
+        writePilotRunnerPulse({ ownerTabId: me, heartbeatAt: Date.now(), tasks });
+      } else {
+        clearPilotRunnerPulse(me);
+      }
+      refreshForeign();
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PILOT_RUNNER_PULSE_KEY) refreshForeign();
+    };
+    publish();
+    const timer = window.setInterval(publish, PILOT_RUNNER_PULSE_INTERVAL_MS);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('storage', onStorage);
+      clearPilotRunnerPulse(me);
+    };
+  }, []);
 
   /** Semafaro de slots HeyGen (in-memory). Cresce quando um wrapper
    *  gated PEGA o slot (acquireSlot ok) e decresce no finally. Sempre
@@ -4938,29 +5000,34 @@ function ClickUpPilotInner() {
     return out;
   }, [batchStates, selectedTeam, modo]);
 
+  const batchStatesDaEmpresaParaTela = useMemo(
+    () => overlayPilotRunnerPulse(batchStatesDaEmpresa, foreignRunnerPulse, thisTabId()),
+    [batchStatesDaEmpresa, foreignRunnerPulse],
+  );
+
   /** A fila COLAPSADA por AD (30.08): as versões do mesmo anúncio (`-yt`,
    *  `-v3`…) deixam de ocupar um card cada — sobra UM card por AD, o da
    *  versão escolhida no botão de versões. Sem versões, isto devolve
    *  exatamente a mesma lista de antes. */
   const batchStatesVisiveis = useMemo(() => {
     const porBase = new Map<string, string[]>();
-    for (const id of Object.keys(batchStatesDaEmpresa)) {
+    for (const id of Object.keys(batchStatesDaEmpresaParaTela)) {
       const base = taskIdBaseDaVersao(id);
       porBase.set(base, [...(porBase.get(base) || []), id]);
     }
     const out: Record<string, BatchTaskState> = {};
     for (const [base, ids] of porBase) {
-      if (ids.length === 1) { out[ids[0]] = batchStatesDaEmpresa[ids[0]]; continue; }
+      if (ids.length === 1) { out[ids[0]] = batchStatesDaEmpresaParaTela[ids[0]]; continue; }
       // escolhida > a mãe > a de menor versão que exista
       const escolhido = versaoVisivel[base];
       const id: string =
-        (escolhido && batchStatesDaEmpresa[escolhido] ? escolhido : null)
-        || (batchStatesDaEmpresa[base] ? base : null)
+        (escolhido && batchStatesDaEmpresaParaTela[escolhido] ? escolhido : null)
+        || (batchStatesDaEmpresaParaTela[base] ? base : null)
         || ids.slice().sort((x, y) => versaoDoTaskId(x) - versaoDoTaskId(y))[0];
-      out[id] = batchStatesDaEmpresa[id];
+      out[id] = batchStatesDaEmpresaParaTela[id];
     }
     return out;
-  }, [batchStatesDaEmpresa, versaoVisivel]);
+  }, [batchStatesDaEmpresaParaTela, versaoVisivel]);
 
   /** Disparos rodando NAS OUTRAS empresas — some da lista, mas você precisa
    *  saber que continuam de pé. Vira um aviso discreto no painel. */
