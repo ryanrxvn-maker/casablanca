@@ -9,7 +9,7 @@ const js = ts.transpileModule(source, {
 }).outputText;
 const ctx = vm.createContext({ exports: {}, Date, JSON });
 vm.runInContext(js, ctx);
-const { overlayPilotRunnerPulse, overlayPilotBackgroundCheckpoint, isPilotRunnerPulseAlive } = ctx.exports;
+const { overlayPilotRunnerPulse, isPilotRunnerPulseAlive } = ctx.exports;
 
 const now = 100_000;
 const saved = {
@@ -34,16 +34,4 @@ assert.equal(saved.ad1.phase, 'failed');
 assert.equal(overlayPilotRunnerPulse(saved, live, 'tab-a', now), saved);
 assert.equal(overlayPilotRunnerPulse(saved, { ...live, heartbeatAt: now - 25_000 }, 'tab-b', now), saved);
 
-const checkpointed = overlayPilotBackgroundCheckpoint(saved, {
-  ad1: { phase: 'dispatching', message: 'Studio: 3 cenas, sem crédito', startedAt: 91_000, economia: true, progressoMotor: 20 },
-  ad2: { phase: 'done', message: 'Pronto', startedAt: 2 },
-});
-assert.equal(checkpointed.ad1.phase, 'dispatching');
-assert.equal(checkpointed.ad1.message, 'Fila ativa · Studio: 3 cenas, sem crédito');
-assert.equal(checkpointed.ad1.startedAt, 91_000);
-assert.equal(checkpointed.ad1.finishedAt, undefined);
-assert.equal(checkpointed.ad1.progressoMotor, 20);
-assert.equal(checkpointed.ad2.phase, 'done');
-assert.equal(saved.ad1.phase, 'failed');
-
-console.log('pilot runner pulse: 19 checks passed');
+console.log('pilot runner pulse: 12 checks passed');

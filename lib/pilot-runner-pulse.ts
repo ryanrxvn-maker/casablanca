@@ -59,41 +59,6 @@ type DisplayableBatch = {
 };
 
 /**
- * A fila durável é o checkpoint que o executor grava durante o trabalho. Uma
- * aba do Pilot que foi recarregada preserva o cartão como “recuperado” para
- * jamais tomar posse do runner, mas ainda pode EXIBIR o checkpoint ativo da
- * outra aba. Isso é diferente do pulse: funciona também com um executor de
- * build anterior, que não emitia heartbeat.
- *
- * Só estados ativos entram na sobreposição. Um checkpoint terminal nunca
- * mascara um resultado já concluído/falho, e esta função não altera o estado
- * canônico nem dá permissão de executar para a aba observadora.
- */
-export function overlayPilotBackgroundCheckpoint<T extends DisplayableBatch>(
-  states: Record<string, T>,
-  checkpoints: Record<string, T>,
-): Record<string, T> {
-  let changed = false;
-  const out = { ...states };
-  for (const [taskId, live] of Object.entries(checkpoints)) {
-    const saved = states[taskId];
-    if (!saved) continue;
-    if (live.phase === 'done' || live.phase === 'failed') continue;
-    changed = true;
-    out[taskId] = {
-      ...saved,
-      phase: live.phase,
-      message: `Fila ativa · ${live.message || 'Processamento ativo'}`,
-      startedAt: live.startedAt || saved.startedAt,
-      finishedAt: undefined,
-      economia: live.economia ?? saved.economia,
-      progressoMotor: live.progressoMotor ?? saved.progressoMotor,
-    };
-  }
-  return changed ? out : states;
-}
-
-/**
  * Troca apenas a REPRESENTAÇÃO de cards recuperados pelo estado anunciado pela
  * aba dona. O state React, o promoter e o persist continuam intocados: uma aba
  * observadora nunca assume nem re-dispara trabalho de outra aba.
