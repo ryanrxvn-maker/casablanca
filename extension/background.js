@@ -392,6 +392,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (job && job.tabId) {
       chrome.tabs.sendMessage(job.tabId, { type: 'HG_CANCEL', requestId: msg.requestId }).catch(() => {});
     }
+    // Economia: esperar o content script guardar os parciais e liberar o
+    // slot. HG_ERROR imediato liberava a fila da página com o Studio ocupado.
+    if (job?.economiaApi && job.dispatched) {
+      if (!job.cancelTimeout) {
+        job.cancelTimeout = setTimeout(() => {
+          if (activeJobs.get(msg.requestId) !== job) return;
+          activeJobs.delete(msg.requestId);
+          reportToPage(job.bridgeTabId, msg.requestId, 'HG_ERROR', {
+            error: 'O Studio não confirmou o cancelamento em 90s. Os takes recebidos foram preservados.',
+          });
+        }, 90000);
+      }
+      return false;
+    }
     if (job) {
       activeJobs.delete(msg.requestId);
       reportToPage(job.bridgeTabId, msg.requestId, 'HG_ERROR', {
@@ -412,9 +426,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'HG_TAB_ECONOMY_SCENE') {
+    const job = activeJobs.get(msg.requestId);
+    if (job && sender.tab?.id === job.tabId) {
+      reportToPage(job.bridgeTabId, msg.requestId, 'HG_ECONOMY_SCENE', { cena: msg.cena });
+    }
+    return false;
+  }
+
   if (msg.type === 'HG_TAB_RESULT') {
     const job = activeJobs.get(msg.requestId);
     if (job) {
+      clearTimeout(job.cancelTimeout);
       activeJobs.delete(msg.requestId);
       reportToPage(job.bridgeTabId, msg.requestId, 'HG_RESULT', {
         videoUrl: msg.videoUrl,
@@ -445,6 +468,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'HG_TAB_ERROR') {
     const job = activeJobs.get(msg.requestId);
     if (job) {
+      clearTimeout(job.cancelTimeout);
       activeJobs.delete(msg.requestId);
       reportToPage(job.bridgeTabId, msg.requestId, 'HG_ERROR', {
         error: msg.error,
@@ -1166,8 +1190,15 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     });
     return;
   }
-  const tab = await findOrCreateHeyGenTab();
-  activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
+  // Registrar antes de aguardar a aba: cancelar durante o preparo precisa
+  // impedir o envio posterior, mesmo que o content script ainda não exista.
+  const job = { tabId: null, payload, bridgeTabId, economiaApi: jobMsg === 'HG_RUN_ECONOMY_API', dispatched: false };
+  activeJobs.set(requestId, job);
+  let tab;
+  try { tab = await findOrCreateHeyGenTab(); }
+  catch (e) { activeJobs.delete(requestId); throw e; }
+  if (activeJobs.get(requestId) !== job) return;
+  job.tabId = tab.id;
 
   // Entrada DETERMINISTICA no editor Studio cena-por-cena: URL direta
   // descoberta via teste real — equivale a My Avatars > look > "Use in
@@ -1244,6 +1275,8 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
 
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });
   try {
+    if (activeJobs.get(requestId) !== job) return;
+    job.dispatched = true;
     await chrome.tabs.sendMessage(tab.id, {
       type: jobMsg,
       requestId,
@@ -1251,6 +1284,7 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     });
     console.log('[DARKO LAB BG]', jobMsg, 'despachado pra tab', tab.id);
   } catch (e) {
+    clearTimeout(job.cancelTimeout);
     activeJobs.delete(requestId);
     reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
       error: 'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' + (e?.message ?? '') + ')',

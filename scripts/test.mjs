@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
  *  verdade — mp4box, por exemplo — que nao sobrevive ao --module commonjs.
  *  @type {{ tsc?: string, run?: string[], tsx?: string[] }[]} */
 const ETAPAS = [
+  { run: ["scripts/test-pilot-economia-runtime.mjs"] },
   { tsc: "lib/durable-records-core.ts lib/durable-records.ts lib/durable-records.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/durable-records.test.js"] },
   { tsc: "lib/speech-detect.ts lib/speech-detect.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/speech-detect.test.js"] },
   { tsc: "lib/decupagem-matcher.ts lib/decupagem-matcher.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck", run: [".test-tmp/decupagem-matcher.test.js"] },
@@ -106,9 +107,9 @@ for (const etapa of alvo) {
     }
     continue;
   }
-  const args = etapa.tsc.split(/\s+/).filter(Boolean);
-  const tsc = spawnSync(process.execPath, [TSC, ...args], { stdio: 'inherit' });
-  if (tsc.status !== 0) {
+  const args = etapa.tsc?.split(/\s+/).filter(Boolean);
+  const tsc = args ? spawnSync(process.execPath, [TSC, ...args], { stdio: 'inherit' }) : null;
+  if (tsc && tsc.status !== 0) {
     console.error('\n[test] tsc falhou em: ' + etapa.run.join(', '));
     falhou++;
     continue;

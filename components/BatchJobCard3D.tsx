@@ -589,7 +589,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const motorVale = ['dispatching', 'rendering', 'downloading', 'post'].includes(phase);
   const totalPct = phase === 'done'
     ? 100
-    : Math.max(contagemPct, motorVale ? Math.round(Math.max(0, Math.min(99, progressoMotor ?? 0))) : 0);
+    : Math.max(contagemPct, motorVale ? Math.max(0, Math.min(99, progressoMotor ?? 0)) : 0);
   const barPct = Math.min(100, Math.max(3, totalPct));
 
   function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
@@ -1096,7 +1096,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {expanded ? (
                 <div className="mt-1 flex items-center justify-between text-[9px] text-text-muted/80">
                   <span>{friendlyMsg || phaseInfo.label}</span>
-                  <span className="mono">{barPct}%</span>
+                  <span className="mono">{Math.round(barPct)}%</span>
                 </div>
               ) : null}
             </div>

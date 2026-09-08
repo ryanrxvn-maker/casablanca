@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.38.0';
+const DARKO_EXT_VERSION = '4.39.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1775,7 +1775,7 @@ async function runJob(requestId, payload) {
     console.error('[DARKO LAB UI] runJob FAIL:', e);
     reportError(requestId, e?.message ?? String(e));
   } finally {
-    currentJob = null;
+    if (currentJob === requestId) currentJob = null;
   }
 }
 
@@ -4067,9 +4067,11 @@ async function runStudioJob(requestId, payload) {
     console.error('[DARKO LAB STUDIO] runStudioJob FAIL:', e);
     reportError(requestId, e?.message ?? String(e));
   } finally {
-    currentJob = null;
-    // remove a barra amarela "DARKO LAB started debugging" do Chrome
-    try { await cdpDetachBg(); } catch {}
+    if (currentJob === requestId) {
+      // Não desligar o debugger de um disparo que já assumiu o slot.
+      try { await cdpDetachBg(); } catch {}
+      if (currentJob === requestId) currentJob = null;
+    }
   }
 }
 
@@ -4113,7 +4115,9 @@ let ecoPctAtual = 0;
 function ecoZerarProgresso() { ecoPctAtual = 0; }
 /** Emite progresso que nunca anda pra tras. */
 function ecoProgresso(requestId, msg, alvo) {
-  const n = Math.max(0, Math.min(99, Math.round(Number(alvo) || 0)));
+  // Com 15 cenas cada faixa tem ~6 pontos. Arredondar aqui congelava a
+  // barra por dezenas de segundos, embora a curva continuasse avançando.
+  const n = Math.max(0, Math.min(99, Number(alvo) || 0));
   if (n > ecoPctAtual) ecoPctAtual = n;
   reportProgress(requestId, msg, ecoPctAtual);
 }
@@ -4149,6 +4153,39 @@ function ecoPedirCancelamento(requestId) {
     ecoCancelado = true;
     ecoWarn('cancelamento pedido — vou parar na próxima cena');
   }
+}
+
+// Conferir depois de cada await também: cancelar/preemptar durante a rede
+// não pode deixar o disparo antigo iniciar outro render ou soltar o slot novo.
+function ecoExigirJobAtivo(requestId) {
+  if (currentJob !== requestId) throw new Error('Este disparo foi substituido por outro. As cenas prontas foram guardadas.');
+  if (ecoCancelado) throw new Error('Cancelado. As cenas prontas foram guardadas.');
+}
+
+// Publicar cada take pronto evita perder tudo se a ponte cair antes do fecho.
+function ecoPublicarCena(requestId, cena) {
+  try {
+    chrome.runtime.sendMessage({ type: 'HG_TAB_ECONOMY_SCENE', requestId, cena });
+  } catch (e) { ecoWarn('não consegui publicar o take parcial:', e); }
+}
+
+// TTS e o POST inicial também podem demorar. A barra avança somente dentro
+// da faixa desta etapa; acabar o request encerra o pulso sem esperar 4s extras.
+async function ecoAguardarEtapa(requestId, tarefa, rotulo, inicio, fim) {
+  const comecou = Date.now();
+  let terminou = false;
+  const pulsar = async () => {
+    while (!terminou) {
+      await sleep(4000);
+      if (terminou || ecoCancelado || currentJob !== requestId) return;
+      const ms = Date.now() - comecou;
+      ecoProgresso(requestId, `${rotulo} ha ${Math.round(ms / 1000)}s...`,
+        inicio + (fim - inicio) * (1 - Math.exp(-ms / 25000)));
+    }
+  };
+  pulsar().catch(e => ecoWarn('pulso de progresso indisponível:', e));
+  try { return await tarefa(); }
+  finally { terminou = true; }
 }
 
 /** O QUE CONTA COMO O TAKE RENDERIZADO — lista de permissão, não de exclusão.
@@ -4844,10 +4881,12 @@ async function runEconomyJob(requestId, payload) {
       reportError(requestId, msg);
     }
   } finally {
-    // Tira do buffer compartilhado o que este job pôs lá.
-    if (interceptedVideoIds.length > marcaBuffer) interceptedVideoIds.length = marcaBuffer;
-    currentJob = null;
-    try { await cdpDetachBg(); } catch (e) {}
+    // O buffer e o debugger também pertencem ao dono atual do slot.
+    if (currentJob === requestId) {
+      if (interceptedVideoIds.length > marcaBuffer) interceptedVideoIds.length = marcaBuffer;
+      try { await cdpDetachBg(); } catch (e) {}
+      if (currentJob === requestId) currentJob = null;
+    }
   }
 }
 
@@ -5262,6 +5301,7 @@ async function ecoEsperarTakeApi(videoId, tetoMs, aoVivo, jobId) {
     if (currentJob !== meuJob) throw new Error('este job foi substituido por outro disparo');
     marcarBatimento();
     await sleep(4000);
+    ecoExigirJobAtivo(meuJob);
     voltas++;
 
     const r = await ecoApiJson(
@@ -5269,6 +5309,10 @@ async function ecoEsperarTakeApi(videoId, tetoMs, aoVivo, jobId) {
         `&video_id=${encodeURIComponent(videoId)}`,
       { tetoMs: 20000 },
     );
+    ecoExigirJobAtivo(meuJob);
+
+    // Falhas transitórias também são espera: não congelar o card nos retries.
+    if (aoVivo) aoVivo(Math.round((Date.now() - comecou) / 1000), Date.now() - comecou);
 
     // ⚠ ERRO DO SERVIDOR E' TERMINAL, NAO E' "AINDA NAO FICOU PRONTO". O 4xx
     // aqui responde sobre um payload que nao muda mais (foi assim que o
@@ -5298,9 +5342,6 @@ async function ecoEsperarTakeApi(videoId, tetoMs, aoVivo, jobId) {
       for (const it of itens) { const v = ecoUrlDaResposta(it); if (v) return v; }
     }
 
-    // ⚠ TODA VOLTA, nao a cada 5: a barra tem que se mexer enquanto o usuario
-    // olha. `voltas % 5` deixava ~20s de imobilidade em cada ciclo.
-    if (aoVivo) aoVivo(Math.round((Date.now() - comecou) / 1000), Date.now() - comecou);
   }
   return null;
 }
@@ -5309,7 +5350,9 @@ async function ecoEsperarTakeApi(videoId, tetoMs, aoVivo, jobId) {
  *  diferente, senao o servidor devolve o cache e a franquia nao cai (laco
  *  eterno). O sinal de que queimou e a franquia DIMINUIR. */
 async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
+  ecoExigirJobAtivo(requestId);
   let f = await ecoFranquiaDePreview();
+  ecoExigirJobAtivo(requestId);
   if (f.restantes === 0) return { queimadas: 0, restantes: 0, leu: true };
   // ⚠ -1 NAO E' ZERO. A leitura da franquia devolve -1 quando FALHA (rede,
   // formato novo), e tratar isso como "nao ha o que queimar" fazia o job seguir
@@ -5331,6 +5374,7 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
   // inteiro (cada volta espera ate 3 min) antes da primeira cena de verdade.
   const ateQueima = Date.now() + 12 * 60 * 1000;
   for (let volta = 0; volta < 5 && f.restantes > 0; volta++) {
+    ecoExigirJobAtivo(requestId);
     if (ecoCancelado) throw new Error('cancelado durante a queima da franquia');
     if (Date.now() > ateQueima) {
       throw new Error(
@@ -5356,6 +5400,7 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
       ajustes: ecoAjustesDeVoz(null),
       videoId,
     });
+    ecoExigirJobAtivo(requestId);
     if (falaQueima.erro || !(falaQueima.duracao > 0)) {
       throw new Error(
         `nao consegui gerar a fala pra queimar a franquia (${falaQueima.erro || 'duracao 0'}). ` +
@@ -5364,6 +5409,7 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
     }
     ecoAplicarTtsNaCena(wrapper, ids, falaQueima);
     const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
+    ecoExigirJobAtivo(requestId);
     if (!r.ok) {
       // Guardar o motivo REAL: antes isso era so' console.warn e a mensagem
       // final culpava a franquia, escondendo o que o servidor tinha dito.
@@ -5375,7 +5421,9 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
     if (!ecoUrlDaResposta(r.data) && jobQueima) {
       await ecoEsperarTakeApi(videoId, 3 * 60 * 1000, null, jobQueima).catch(() => null);
     }
+    ecoExigirJobAtivo(requestId);
     f = await ecoFranquiaDePreview();
+    ecoExigirJobAtivo(requestId);
     if (f.restantes < antes) queimadas++;
     else if (f.restantes === antes) {
       ecoWarn(`queima ${volta + 1}: a franquia nao caiu (segue em ${antes}) — tentando de novo com outro texto`);
@@ -5425,16 +5473,20 @@ async function runEconomyJobApi(requestId, payload) {
     // velho matava TODO disparo pra sempre, sempre com a mesma mensagem.
     // Por isso a validacao vem antes do uso e a recuperacao e' automatica.
     const conta = await ecoContaAtual();
+    ecoExigirJobAtivo(requestId);
     let videoId = (payload && payload.bancadaId) || (await ecoBancadaGuardada(conta)) || ecoVideoIdDaUrl();
+    ecoExigirJobAtivo(requestId);
     if (videoId && !(await ecoBancadaServe(videoId))) {
       ecoWarn(`a bancada guardada (${String(videoId).slice(0, 10)}) nao serve mais — procurando outra`);
       ecoProgresso(requestId, 'Economia: o projeto guardado nao serve mais, procurando outro...', 1);
       await ecoGuardarBancada(conta, null);
       videoId = null;
     }
+    ecoExigirJobAtivo(requestId);
     if (!videoId) {
       ecoProgresso(requestId, 'Economia: preparando o projeto do Studio...', 2);
       const b = await ecoGarantirBancada();
+      ecoExigirJobAtivo(requestId);
       videoId = b.id;
       await ecoGuardarBancada(conta, videoId);
       ecoProgresso(requestId, `Economia: bancada ${b.como}`, 4);
@@ -5445,6 +5497,7 @@ async function runEconomyJobApi(requestId, payload) {
     // o AD inteiro com a voz errada, descoberto so' na revisao.
     if (!voiceId && voiceName) {
       voiceId = await ecoResolverVozPorNome(voiceName);
+      ecoExigirJobAtivo(requestId);
       if (!voiceId) {
         throw new Error(
           `a voz "${voiceName}" nao existe no catalogo desta conta do HeyGen. ` +
@@ -5458,6 +5511,7 @@ async function runEconomyJobApi(requestId, payload) {
 
     ecoProgresso(requestId, 'Economia: lendo o projeto...', 5);
     let { wrapper, title } = await ecoDraftLer(videoId);
+    ecoExigirJobAtivo(requestId);
     // Falha cedo e com nome: se o formato do draft mudar do lado do HeyGen,
     // e melhor parar aqui do que renderizar a cena errada.
     ecoIdsDaCena(wrapper, 0);
@@ -5476,6 +5530,7 @@ async function runEconomyJobApi(requestId, payload) {
     }
 
     let franquia = await ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, 5);
+    ecoExigirJobAtivo(requestId);
     if (franquia.queimadas > 0) {
       // A queima sujou o draft com texto de aquecimento; relê limpo.
       ({ wrapper, title } = await ecoDraftLer(videoId));
@@ -5500,6 +5555,7 @@ async function runEconomyJobApi(requestId, payload) {
       // morria na cena N em vez de simplesmente queimar de novo. Custa um GET.
       if (franquia.leu) {
         const agora = await ecoFranquiaDePreview();
+        ecoExigirJobAtivo(requestId);
         if (agora.restantes > 0) {
           ecoProgresso(requestId, `${rot}: a franquia gratis voltou (${agora.restantes}) — liberando de novo...`, base);
           franquia = await ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base);
@@ -5507,97 +5563,121 @@ async function runEconomyJobApi(requestId, payload) {
         }
       }
 
-      ecoProgresso(requestId, `${rot}: montando a cena...`, inicio + largura * 0.05);
-      // Uma cena so, reescrita a cada take: o que a gente quer sao N takes, e
-      // cada texto novo e um render novo (texto igual devolveria o cache).
-      const ids = ecoDraftEscreverCena(wrapper, 0, {
-        texto: cena.texto,
-        voiceId: cena.voiceId || voiceId,
-        avatarId: cena.avatarId || avatarId,
-        groupId: cena.groupId || groupId,
-      });
+      ecoExigirJobAtivo(requestId);
+      let falhaFatal = false;
+      try {
+        ecoProgresso(requestId, `${rot}: montando a cena...`, inicio + largura * 0.05);
+        // Uma cena so, reescrita a cada take: o que a gente quer sao N takes, e
+        // cada texto novo e um render novo (texto igual devolveria o cache).
+        const ids = ecoDraftEscreverCena(wrapper, 0, {
+          texto: cena.texto,
+          voiceId: cena.voiceId || voiceId,
+          avatarId: cena.avatarId || avatarId,
+          groupId: cena.groupId || groupId,
+        });
 
-      // ⚠ SEM TTS NAO HA RENDER. A cena deriva a duracao da fala; com duracao
-      // 0 o servidor recusa ("Video duration is 0 for element ... SCENE").
-      ecoProgresso(requestId, `${rot}: gerando a fala...`, inicio + largura * 0.10);
-      const fala = await ecoGerarTts({
-        texto: cena.texto,
-        voiceId: cena.voiceId || voiceId || ecoVozDaCena(wrapper, ids),
-        ajustes: ecoAjustesDeVoz(cena.voz || (payload && payload.voz)),
-        videoId,
-      });
-      // ⚠ SEM URL A CENA SAI MUDA. Conferir so' a duracao deixava passar um TTS
-      // que respondeu 200, mediu o texto e nao entregou audio nenhum.
-      if (fala.erro || !(fala.duracao > 0) || !fala.url) {
-        throw new Error(
-          `${rot}: nao consegui gerar a fala (${fala.erro || (!fala.url ? 'o TTS nao devolveu audio' : 'duracao 0')}) — ` +
-          `sem audio o render nem comeca. Resposta: ${fala.resumo}. Nada foi cobrado.`,
+        // ⚠ SEM TTS NAO HA RENDER. A cena deriva a duracao da fala; com duracao
+        // 0 o servidor recusa ("Video duration is 0 for element ... SCENE").
+        ecoProgresso(requestId, `${rot}: gerando a fala...`, inicio + largura * 0.10);
+        const fala = await ecoAguardarEtapa(requestId, () => ecoGerarTts({
+          texto: cena.texto,
+          voiceId: cena.voiceId || voiceId || ecoVozDaCena(wrapper, ids),
+          ajustes: ecoAjustesDeVoz(cena.voz || (payload && payload.voz)),
+          videoId,
+        }), `${rot}: gerando a fala`, inicio + largura * 0.10, inicio + largura * 0.27);
+        ecoExigirJobAtivo(requestId);
+        // ⚠ SEM URL A CENA SAI MUDA. Conferir so' a duracao deixava passar um TTS
+        // que respondeu 200, mediu o texto e nao entregou audio nenhum.
+        if (fala.erro || !(fala.duracao > 0) || !fala.url) {
+          throw new Error(
+            `${rot}: nao consegui gerar a fala (${fala.erro || (!fala.url ? 'o TTS nao devolveu audio' : 'duracao 0')}) — ` +
+            `sem audio o render nem comeca. Resposta: ${fala.resumo}. Nada foi cobrado.`,
+          );
+        }
+        ecoAplicarTtsNaCena(wrapper, ids, fala);
+        ecoProgresso(
+          requestId,
+          `${rot}: fala de ${fala.duracao.toFixed(1)}s pronta (${fala.palavras.length} palavras)`,
+          inicio + largura * 0.28,
         );
-      }
-      ecoAplicarTtsNaCena(wrapper, ids, fala);
-      ecoProgresso(
-        requestId,
-        `${rot}: fala de ${fala.duracao.toFixed(1)}s pronta (${fala.palavras.length} palavras)`,
-        inicio + largura * 0.28,
-      );
-      ecoLog(`${rot}: TTS — ${fala.resumo}`);
+        ecoLog(`${rot}: TTS — ${fala.resumo}`);
 
-      ecoProgresso(requestId, `${rot}: renderizando (Avatar III, 0 credito)...`, inicio + largura * 0.32);
-      const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
-      if (!r.ok) {
-        throw new Error(`${rot}: o HeyGen recusou o render — ${r.msg || 'HTTP ' + r.http}. Nada foi cobrado.`);
-      }
-      marcarBatimento();
-      // O que o servidor devolveu vira PROGRESSO, nao log de console: quando a
-      // espera falha, e essa linha que diz se o job nasceu e com que id.
-      const eco = ecoResumoDaResposta(r.data);
-      ecoProgresso(requestId, `${rot}: render aceito`, inicio + largura * 0.36);
-      ecoLog(`${rot}: resposta do render — ${eco}`);
-      const jobId = (r.data && (r.data.job_id || r.data.stream_id)) || null;
+        ecoProgresso(requestId, `${rot}: renderizando (Avatar III, 0 credito)...`, inicio + largura * 0.32);
+        const r = await ecoAguardarEtapa(requestId,
+          () => ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title }),
+          `${rot}: enviando o render`, inicio + largura * 0.32, inicio + largura * 0.355);
+        ecoExigirJobAtivo(requestId);
+        if (!r.ok) {
+          throw new Error(`${rot}: o HeyGen recusou o render — ${r.msg || 'HTTP ' + r.http}. Nada foi cobrado.`);
+        }
+        marcarBatimento();
+        // O que o servidor devolveu vira PROGRESSO, nao log de console: quando a
+        // espera falha, e essa linha que diz se o job nasceu e com que id.
+        const eco = ecoResumoDaResposta(r.data);
+        ecoProgresso(requestId, `${rot}: render aceito`, inicio + largura * 0.36);
+        ecoLog(`${rot}: resposta do render — ${eco}`);
+        const jobId = (r.data && (r.data.job_id || r.data.stream_id)) || null;
 
-      // Cena inalterada volta PRONTA na hora (o servidor devolve o cache dele).
-      let url = ecoUrlDaResposta(r.data);
-      if (!url) {
-        url = await ecoEsperarTakeApi(videoId, tetoCena, (s, decorridoMs) =>
-          ecoProgresso(
-            requestId,
-            `${rot}: renderizando ha ${s}s...`,
-            ecoPctDaEspera(inicio, largura, decorridoMs),
-          ), jobId);
-      }
-      if (!url) {
-        throw new Error(
-          `${rot}: a cena nao ficou pronta em ${Math.round(tetoCena / 60000)} min ` +
-          `(o servidor tinha respondido: ${eco}). Nada foi cobrado.`,
-        );
-      }
+        // Cena inalterada volta PRONTA na hora (o servidor devolve o cache dele).
+        let url = ecoUrlDaResposta(r.data);
+        if (!url) {
+          url = await ecoEsperarTakeApi(videoId, tetoCena, (s, decorridoMs) =>
+            ecoProgresso(
+              requestId,
+              `${rot}: renderizando ha ${s}s...`,
+              ecoPctDaEspera(inicio, largura, decorridoMs),
+            ), jobId);
+        }
+        ecoExigirJobAtivo(requestId);
+        if (!url) {
+          throw new Error(
+            `${rot}: a cena nao ficou pronta em ${Math.round(tetoCena / 60000)} min ` +
+            `(o servidor tinha respondido: ${eco}). Nada foi cobrado.`,
+          );
+        }
 
-      // ⚠ A MESMA TRAVA DE SEMPRE. URL com `-marked-` = marca QUEIMADA no
-      // arquivo. Take marcado nao entra no AD, ponto.
-      const marcado = /-marked-[a-z0-9_]+(?:-rgb|-packed)?\.(?:mp4|webm)/i.test(url);
-      if (marcado) {
-        throw new Error(
-          `${rot}: o take voltou COM MARCA D'AGUA mesmo com a franquia zerada. ` +
-          `Parei pra nao sujar o AD. Nada foi cobrado.`,
-        );
+        // ⚠ A MESMA TRAVA DE SEMPRE. URL com `-marked-` = marca QUEIMADA no
+        // arquivo. Take marcado nao entra no AD, ponto.
+        const marcado = /-marked-[a-z0-9_]+(?:-rgb|-packed)?\.(?:mp4|webm)/i.test(url);
+        if (marcado) {
+          falhaFatal = true;
+          throw new Error(
+            `${rot}: o take voltou COM MARCA D'AGUA mesmo com a franquia zerada. ` +
+            `Parei pra nao sujar o AD. Nada foi cobrado.`,
+          );
+        }
+        ecoLog(`${rot}: take limpo — ${url.slice(0, 110)}`);
+        const pronta = { idx: cena.idx, videoUrl: url };
+        resultados.push(pronta);
+        ecoPublicarCena(requestId, pronta);
+        ecoProgresso(requestId, `${rot}: pronta`, inicio + largura * 0.99);
+      } catch (e) {
+        ecoExigirJobAtivo(requestId);
+        if (falhaFatal) throw e;
+        const error = (e && e.message) || String(e);
+        const falha = { idx: cena.idx, error };
+        resultados.push(falha);
+        ecoPublicarCena(requestId, falha);
+        ecoWarn(`${rot}: ${error}`);
+        ecoProgresso(requestId, `${rot}: falhou; seguindo para as demais cenas`, inicio + largura * 0.99);
       }
-      ecoLog(`${rot}: take limpo — ${url.slice(0, 110)}`);
-      resultados.push({ idx: cena.idx, videoUrl: url });
-      ecoProgresso(requestId, `${rot}: pronta`, inicio + largura * 0.99);
     }
 
-    ecoProgresso(requestId, `Economia: ${resultados.length} cena(s) renderizada(s)`, 97);
-    reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados }));
+    const falhas = resultados.filter(c => c.error).length;
+    const prontas = resultados.length - falhas;
+    const erro = falhas ? `${falhas} cena(s) falharam; ${prontas} prontas foram preservadas.` : undefined;
+    ecoProgresso(requestId, `Economia: ${prontas} cena(s) renderizada(s)${falhas ? `; ${falhas} com falha` : ''}`, 97);
+    reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro, fatal: false }));
   } catch (e) {
     console.error('[DARKO LAB ECONOMIA] runEconomyJobApi FAIL:', e);
     const msg = (e && e.message) || String(e);
     if (resultados.length > 0) {
-      reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro: msg }));
+      reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro: msg, fatal: true }));
     } else {
       reportError(requestId, msg);
     }
   } finally {
-    currentJob = null;
+    if (currentJob === requestId) currentJob = null;
   }
 }
 

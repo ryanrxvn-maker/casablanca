@@ -5514,7 +5514,7 @@ function ClickUpPilotInner() {
         if (jaEsperou) console.log(`[clickup-pilot] economia ${taskId}: peguei a vez na fila do Studio`);
 
         try {
-        for (let n = 0; n < planoEco.projetos.length && !erroParcial; n++) {
+        for (let n = 0; n < planoEco.projetos.length; n++) {
           if (batchCancelRef.current[taskId]) break;
           const proj = planoEco.projetos[n];
           const rotulo = `${adNameClean} ${planoEco.projetos.length > 1 ? `(${n + 1}/${planoEco.projetos.length}) ` : ''}`;
@@ -5561,8 +5561,12 @@ function ClickUpPilotInner() {
             );
             cenasFeitas.push(...(res.cenas || []));
             if (res.erro) erroParcial = res.erro;
+            // Só falha LOCAL de cena libera os outros avatares. Cancelamento,
+            // marca d'água e respostas de extensão antiga continuam parando.
+            if (res.erro && res.fatal !== false) break;
           } catch (e) {
             erroParcial = (e as Error)?.message || String(e);
+            break; // ponte/ACK/timeout: o estado do Studio não está confirmado
           }
         }
         } finally {
@@ -5571,14 +5575,14 @@ function ClickUpPilotInner() {
           liberarVez();
         }
         if (erroParcial) {
-          console.warn(`[clickup-pilot] economia ${taskId} parou: ${erroParcial}`);
+          console.warn(`[clickup-pilot] economia ${taskId} teve falhas: ${erroParcial}`);
           // O motivo TEM que chegar no card. Antes ele só existia no console
           // do F12: o usuário via "a cena não voltou do Studio" — a mensagem
           // genérica de cena sem resultado — e nunca o porquê de verdade
           // ("Outra geracao em andamento", "não achei o botão Render Scene",
           // "a aba está OCULTA"...). Diagnosticar virava adivinhação.
           setBatchStates((prev) => (prev[taskId]
-            ? { ...prev, [taskId]: { ...prev[taskId], message: `Modo economia parou: ${erroParcial}` } }
+            ? { ...prev, [taskId]: { ...prev[taskId], message: `Modo economia: ${erroParcial}` } }
             : prev));
         }
         // Cena pronta já nasce 'completed' com a URL: o poll pula e o download

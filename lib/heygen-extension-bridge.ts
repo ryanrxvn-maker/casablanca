@@ -42,6 +42,7 @@ type Pending = {
    *  conhece o tipo e nunca responde — sem este aviso a promessa ficaria
    *  pendurada pra sempre e o card congelaria sem erro. */
   onAck?: () => void;
+  onScene?: (cena: CenaRenderizada) => void;
 };
 
 const pending = new Map<string, Pending>();
@@ -63,6 +64,8 @@ function installListener() {
 
     if (data.type === 'HG_ECONOMY_ACK') {
       p.onAck?.();
+    } else if (data.type === 'HG_ECONOMY_SCENE') {
+      p.onScene?.(data.cena);
     } else if (data.type === 'HG_PROGRESS') {
       p.onProgress?.(String(data.stage ?? ''), data.percent);
     } else if (data.type === 'HG_RESULT') {
@@ -259,8 +262,10 @@ export type CenaRenderizada = {
 
 export type EconomiaResultado = {
   cenas: CenaRenderizada[];
-  /** o job parou no meio: as cenas que já vieram continuam válidas */
+  /** Falhas parciais ou parada: as cenas que já vieram continuam válidas. */
   erro?: string;
+  /** false permite os próximos projetos; ausente mantém a parada das versões antigas. */
+  fatal?: boolean;
 };
 
 export function gerarPelaEconomia(
@@ -283,6 +288,15 @@ export function gerarPelaEconomia(
     const requestId = `hgeco_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     let acked = false;
     let vivo = true;
+    const parciais = new Map<number, CenaRenderizada>();
+    const indices = new Set(payload.cenas.map(c => c.idx));
+    const guardarCena = (c: CenaRenderizada) => {
+      if (c && Number.isInteger(c.idx) && indices.has(c.idx) && (c.videoUrl || c.videoId || c.error)) parciais.set(c.idx, c);
+    };
+    const falharPreservando = (e: Error) => {
+      if (parciais.size) resolve({ cenas: [...parciais.values()], erro: e.message, fatal: true });
+      else reject(e);
+    };
     // Cancelou a task? Avisa a EXTENSÃO — só parar de escutar deixaria o laço
     // do Studio rodando na aba e travando o próximo job.
     const vigiaCancelamento = opts.isCancelled
@@ -322,7 +336,7 @@ export function gerarPelaEconomia(
       if (!vivo) return;
       encerrar();
       avisarExtensao();
-      reject(new Error(`O modo economia passou de ${Math.round(tetoJobMs / 60000)} min sem terminar. Parei de esperar — confira a aba do HeyGen.`));
+      falharPreservando(new Error(`O modo economia passou de ${Math.round(tetoJobMs / 60000)} min sem terminar. As cenas recebidas foram preservadas.`));
     }, tetoJobMs);
 
     pending.set(requestId, {
@@ -331,23 +345,25 @@ export function gerarPelaEconomia(
         clearTimeout(tAck);
       },
       onProgress,
+      onScene: guardarCena,
       resolve: (bruto: string) => {
         encerrar();
         const txt = String(bruto || '');
         if (!txt.startsWith('ECONOMIA:')) {
-          reject(new Error(`Resposta inesperada do modo economia: ${txt.slice(0, 120)}`));
+          falharPreservando(new Error(`Resposta inesperada do modo economia: ${txt.slice(0, 120)}`));
           return;
         }
         try {
           const j = JSON.parse(txt.slice('ECONOMIA:'.length)) as EconomiaResultado;
-          resolve({ cenas: Array.isArray(j.cenas) ? j.cenas : [], erro: j.erro });
+          for (const c of Array.isArray(j.cenas) ? j.cenas : []) guardarCena(c);
+          resolve({ cenas: [...parciais.values()], erro: j.erro, fatal: j.fatal });
         } catch (e) {
-          reject(new Error('Não consegui ler o resultado do modo economia.'));
+          falharPreservando(new Error('Não consegui ler o resultado do modo economia.'));
         }
       },
       reject: (e: Error) => {
         encerrar();
-        reject(e);
+        falharPreservando(e);
       },
     });
 
