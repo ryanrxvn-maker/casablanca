@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.33.1';
+const DARKO_EXT_VERSION = '4.33.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2585,7 +2585,11 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
     } catch (e) {
       data = { _jsonParseError: String(e?.message || e), _contentType: ct, _extVersion: DARKO_EXT_VERSION };
     }
-  } else if (/^(audio|video|image|application\/octet-stream)/i.test(ct)) {
+  } else if (/^(audio|video|image)|octet-stream/i.test(ct)) {
+    // ⚠ `octet-stream` SEM ancora no comeco de proposito. O S3 entrega os takes
+    // do HeyGen como `binary/octet-stream`, que nao casava com
+    // `^application/octet-stream` e caia no ramo de TEXTO: o mp4 virava string
+    // truncada em 2000 chars e o take chegava corrompido no download.
     try {
       const buf = await r.arrayBuffer();
       const bytes = new Uint8Array(buf);
