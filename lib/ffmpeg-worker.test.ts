@@ -8,7 +8,10 @@
  * honesto, nunca um arquivo bugado.
  */
 import { assertValidMp4, planDecupChunks, chunkContainerFor, DECUP_CHUNK_TARGET_BYTES,
-  computeStaticGainDb, buildFinalGain, parseLoudnormStats, type LoudnormStats } from './ffmpeg-worker';
+  computeStaticGainDb, buildFinalGain, parseLoudnormStats, FFMPEG_CLASS_WORKER_URL,
+  type LoudnormStats } from './ffmpeg-worker';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 let pass = 0;
 let fail = 0;
@@ -36,6 +39,17 @@ function throws(fn: () => void, match: RegExp, msg: string) {
       console.error('  FAIL', msg, `(msg errada: ${m})`);
     }
   }
+}
+
+console.log('\nGARANTIA — worker FFmpeg local, sem bootstrap remoto que trava:');
+{
+  const publicDir = join(process.cwd(), 'public', 'ffmpeg');
+  const workerPath = join(publicDir, 'worker.js');
+  ok(FFMPEG_CLASS_WORKER_URL === '/ffmpeg/worker.js', 'FFmpeg aponta para worker same-origin');
+  ok(existsSync(workerPath), 'worker local existe no build');
+  ok(existsSync(join(publicDir, 'const.js')) && existsSync(join(publicDir, 'errors.js')), 'imports do worker local existem');
+  const source = readFileSync(workerPath, 'utf8');
+  ok(!/unpkg\.com\/@ffmpeg\/ffmpeg|cdn\.jsdelivr\.net\/npm\/@ffmpeg\/ffmpeg/.test(source), 'worker não depende de bootstrap remoto');
 }
 
 const FTYP = [0x66, 0x74, 0x79, 0x70]; // 'ftyp'

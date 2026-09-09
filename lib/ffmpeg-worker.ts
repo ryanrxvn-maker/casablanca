@@ -10,7 +10,9 @@
  *   algumas configuracoes trava indefinidamente (o que estava causando o bug
  *   de "Carregando FFmpeg..." infinito). O core ST e' confiavel em toda
  *   plataforma e nao trava.
- * - Tentamos primeiro unpkg, e caimos pra jsdelivr se falhar.
+ * - O worker controlador e' servido pelo proprio app. Worker ESM remoto pode
+ *   ficar preso sem emitir erro em algumas versoes do Chrome/COEP.
+ * - O core pesado ainda tenta primeiro unpkg e cai pra jsdelivr se falhar.
  * - Toda operacao tem timeout explicito para nao pendurar a UI.
  */
 
@@ -22,31 +24,22 @@ export type FFLoadStage = (stage: string) => void;
 
 let instance: FFmpeg | null = null;
 let loadingPromise: Promise<FFmpeg> | null = null;
+let loadingInstance: FFmpeg | null = null;
 
 // O bundle UMD do @ffmpeg/ffmpeg é transformado pelo Next em um worker que
 // não consegue fazer o fallback `import(blob:)` do core: ele vira um require
-// estático inexistente e falha com "Cannot find module blob:...". Mantemos o
-// core no CDN/cache, mas iniciamos explicitamente o worker ESM oficial. Ele
-// usa `import()` nativo e aceita os Blob URLs do cache com segurança.
+// estático inexistente e falha com "Cannot find module blob:...". Por isso
+// hospedamos o worker ESM oficial no MESMO domínio do app. O bootstrap antigo
+// era um blob que importava worker.js de unpkg/jsdelivr; no Chrome ele passou
+// a ficar pendurado em ff.load() (sem erro), deixando a Decupagem eternamente
+// em "Inicializando...". Mesmo domínio também elimina CORS/COEP/CDN da etapa
+// mais sensível da inicialização.
 const CORE_VERSION = '0.12.9';
 const CDNS = [
   `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`,
   `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/esm`,
 ];
-const FFMPEG_WORKER_ESM = [
-  'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
-  'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
-];
-let classWorkerURL: string | null = null;
-
-function getClassWorkerURL(): string {
-  if (classWorkerURL) return classWorkerURL;
-  // O bootstrap mantém imports absolutos: se o próprio worker fosse convertido
-  // em blob, seus `./const.js` e `./errors.js` deixariam de resolver.
-  const source = `try { await import(${JSON.stringify(FFMPEG_WORKER_ESM[0])}); } catch { await import(${JSON.stringify(FFMPEG_WORKER_ESM[1])}); }`;
-  classWorkerURL = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-  return classWorkerURL;
-}
+export const FFMPEG_CLASS_WORKER_URL = '/ffmpeg/worker.js';
 
 const LOAD_TIMEOUT_MS = 90_000; // 90s total pra carregar core + wasm
 // WATCHDOG GLOBAL de exec: teto MUITO generoso (só pega HANG infinito do
@@ -85,8 +78,13 @@ export async function getFFmpeg(
 
   try {
     instance = await loadingPromise;
+    loadingInstance = null;
     return instance;
   } catch (e) {
+    // withTimeout rejeita a Promise externa, mas a carga nativa pode continuar
+    // viva por baixo. Termine-a para não deixar um worker zumbi consumindo RAM
+    // nem fazer a próxima tentativa disputar com a anterior.
+    cancelFFmpeg();
     loadingPromise = null;
     throw e;
   }
@@ -99,14 +97,23 @@ export async function getFFmpeg(
  * "terminated" — pegue isso no try/catch da tool.
  */
 export function cancelFFmpeg(): void {
-  if (instance) {
+  const active = instance;
+  if (active) {
     try {
-      instance.terminate();
+      active.terminate();
     } catch {
       /* ignora */
     }
     instance = null;
   }
+  if (loadingInstance && loadingInstance !== active) {
+    try {
+      loadingInstance.terminate();
+    } catch {
+      /* ignora */
+    }
+  }
+  loadingInstance = null;
   loadingPromise = null;
 }
 
@@ -188,23 +195,6 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
   onStage?.('Preparando...');
   const { FFmpeg } = await import('@ffmpeg/ffmpeg');
 
-  const ff = new FFmpeg();
-  if (onLog) ff.on('log', ({ message }) => onLog(message));
-
-  attachExecWatchdog(ff, () => {
-    if (instance === ff) {
-      instance = null; // força reinit limpo no próximo getFFmpeg
-      // CRÍTICO (fix 2026-07-03): zerar TAMBÉM o loadingPromise. Sem isto,
-      // getFFmpeg cai em `if (loadingPromise) return loadingPromise` e devolve
-      // a promise RESOLVIDA que aponta pra ESTA instância JÁ TERMINADA (zumbi)
-      // — todo exec seguinte "resolve" mas não produz nada → montado 1KB /
-      // takes 0KB persistidos como sucesso, em TODAS as tasks seguintes do
-      // mesmo tab (foi a raiz do lote 02.07 com 4 montados 1KB em série).
-      // cancelFFmpeg já zera os dois; o kill do watchdog não zerava.
-      loadingPromise = null;
-    }
-  });
-
   let lastErr: unknown = null;
   for (let i = 0; i < CDNS.length; i++) {
     const baseURL = CDNS[i];
@@ -214,12 +204,26 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
         cachedBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
       ]);
+      // Uma falha em ff.load pode deixar o Worker inutilizável. Cada CDN ganha
+      // uma instância nova; nunca reutilizamos o worker envenenado no fallback.
+      const ff = new FFmpeg();
+      loadingInstance = ff;
+      if (onLog) ff.on('log', ({ message }) => onLog(message));
+      attachExecWatchdog(ff, () => {
+        if (instance === ff) instance = null;
+        if (loadingInstance === ff) loadingInstance = null;
+        loadingPromise = null;
+      });
       onStage?.('Inicializando...');
-      await ff.load({ coreURL, wasmURL, classWorkerURL: getClassWorkerURL() });
+      await ff.load({ coreURL, wasmURL, classWorkerURL: FFMPEG_CLASS_WORKER_URL });
       onStage?.('Pronto.');
       return ff;
     } catch (err) {
       lastErr = err;
+      if (loadingInstance) {
+        try { loadingInstance.terminate(); } catch { /* ignora */ }
+        loadingInstance = null;
+      }
       console.warn(`[ffmpeg] CDN ${i + 1} falhou:`, err);
       // tenta proximo CDN
     }
