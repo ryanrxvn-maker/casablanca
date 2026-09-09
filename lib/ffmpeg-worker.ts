@@ -215,7 +215,10 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
         loadingPromise = null;
       });
       onStage?.('Inicializando...');
-      await ff.load({ coreURL, wasmURL, classWorkerURL: FFMPEG_CLASS_WORKER_URL });
+      // @ffmpeg resolve caminhos relativos contra import.meta.url. No bundle do
+      // Next esse base pode virar file:///, então entregue HTTPS absoluto.
+      const classWorkerURL = new URL(FFMPEG_CLASS_WORKER_URL, window.location.origin).href;
+      await ff.load({ coreURL, wasmURL, classWorkerURL });
       onStage?.('Pronto.');
       return ff;
     } catch (err) {
