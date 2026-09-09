@@ -4598,6 +4598,12 @@ function ClickUpPilotInner() {
   useEffect(() => {
     const hasHealPending = Object.values(batchStates).some((b) =>
       b.phase === 'done' && b.kind !== 'troca' && !b.isVA && b.deliveryOk !== true
+      // No Economia, take recusado/ausente e' falha de geracao, nao falha do
+      // ffmpeg local. O runner ja faz retry de transporte do render. Tentar o
+      // AD inteiro de novo aqui escondia a causa, ocupava a bancada e fazia a
+      // fila parecer travada. O usuario pode Retomar depois de ver/corrigir a
+      // causa; a fila segue imediatamente para a proxima task.
+      && !(b.economia && b.parts.some((p) => p.videoStatus === 'failed' || !!p.error || !p.videoUrl))
       && !/limite di[aá]rio|daily limit|quota|usage.*exceeded/i.test(b.message || ''));
     if (!hasHealPending) return;
     const id = setInterval(() => setHealTick((t) => t + 1), 20_000);
@@ -4613,6 +4619,9 @@ function ClickUpPilotInner() {
       // segue morta) — só o RETOMAR manual/restore pós-reset re-dispara. Pula.
       const isQuotaWait = /limite di[aá]rio|daily limit|daily quota|quota|usage.*exceeded/i.test(b.message || '');
       if (isQuotaWait) continue;
+      const economySceneFailure = !!b.economia
+        && b.parts.some((p) => p.videoStatus === 'failed' || !!p.error || !p.videoUrl);
+      if (economySceneFailure) continue;
       // ELEGÍVEL pra cura = 'done' que NÃO entregou de verdade. Dois casos:
       //  (a) tem pipeStats mas pipeOk=false (montagem/decup/camo incompleta);
       //  (b) NÃO tem pipeStats — gate incompleto (não-cota) ou 'pipeline FATAL'

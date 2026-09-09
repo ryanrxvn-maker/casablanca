@@ -386,6 +386,8 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
   assert.doesNotMatch(page, /Modo economia ligado: \$\{jobsToRedispatch\.length\} take\(s\) não foram re-disparados/);
   assert.match(page, /state\.parts\[cena\.idx\] = \{/);
   assert.match(page, /Causa: \$\{String\(erros\[0\]\)/);
+  assert.match(page, /const economySceneFailure = !!b\.economia/);
+  assert.match(page, /if \(economySceneFailure\) continue/);
 
   const extension = readFileSync('extension/heygen-content.js', 'utf8');
   assert.match(extension, /falha sistemica do HeyGen/);
