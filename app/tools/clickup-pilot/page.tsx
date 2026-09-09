@@ -166,6 +166,7 @@ import {
   MOTOR_ECONOMIA,
   ehIdSintetico,
   idDaCena,
+  idSinteticoDaCena,
   motivoLegivel,
   planejarEconomia,
   recusaDaParte,
@@ -6966,8 +6967,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               const pos = cenasFeitas.findIndex((x) => x.idx === cena.idx);
               if (pos >= 0) cenasFeitas[pos] = cena;
               else cenasFeitas.push(cena);
-              const videoId = idDaCena(cena, genId);
-              if (!videoId) return;
+              // Cena com erro nao traz URL/videoId. Mesmo assim ela PRECISA
+              // substituir o falso `completed` legado; mantenha o id sintetico
+              // que ja representava a parte (ou crie um) para que o erro tenha
+              // identidade estavel no card e na persistencia.
+              const videoId = idDaCena(cena, genId)
+                || state.parts[cena.idx]?.videoId
+                || idSinteticoDaCena(cena.idx, genId);
               // A retomada mantém duas representações do mesmo batch: a cópia
               // local `state`, usada logo abaixo pelos gates/downloads, e o
               // estado React que desenha o card. Atualizar só o React deixava a

@@ -385,6 +385,7 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
   assert.match(page, /planejarEconomia\(partesEco, \{ indicesDoPlano: redispatchIdxs \}\)/);
   assert.doesNotMatch(page, /Modo economia ligado: \$\{jobsToRedispatch\.length\} take\(s\) não foram re-disparados/);
   assert.match(page, /state\.parts\[cena\.idx\] = \{/);
+  assert.match(page, /idDaCena\(cena, genId\)[\s\S]*state\.parts\[cena\.idx\]\?\.videoId[\s\S]*idSinteticoDaCena\(cena\.idx, genId\)/);
   assert.match(page, /Causa: \$\{String\(erros\[0\]\)/);
   assert.match(page, /const economySceneFailure = !!b\.economia/);
   assert.match(page, /if \(economySceneFailure\) continue/);
