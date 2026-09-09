@@ -17,6 +17,8 @@ import { buildZip } from '@/lib/zip-builder';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const FILES = [
   'manifest.json',
