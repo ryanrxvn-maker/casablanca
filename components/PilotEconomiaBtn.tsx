@@ -9,9 +9,8 @@
  * ao ligar, com a face acesa em esmeralda. Quem olha a barra sabe, sem ler
  * nada, que aquele botão foi virado.
  *
- * Só ícone, por pedido do dono: bateria em modo economia — o desenho que em
- * pt-BR já quer dizer exatamente isso. O tooltip carrega o significado inteiro,
- * porque ícone sozinho nunca explica consequência.
+ * Só ícone, por pedido do dono: bateria em modo economia. O tooltip fica
+ * deliberadamente curto para não competir com a barra de ações.
  *
  * Sem travessão no texto visível. Movimento respeita prefers-reduced-motion.
  */
@@ -24,26 +23,17 @@ export function PilotEconomiaBtn({
   disabled = false,
   /** Por que não dá pra ligar (vai pro tooltip quando `disabled`). */
   motivoBloqueio,
-  avisoPreparacao,
   size = 36,
 }: {
   on: boolean;
   onToggle: () => void;
   disabled?: boolean;
   motivoBloqueio?: string;
-  /** Campos que podem ser preenchidos depois de escolher o modo. */
-  avisoPreparacao?: string;
   size?: number;
 }) {
-  const title = on && motivoBloqueio
-    ? `Modo economia LIGADO, mas este AD não cabe mais nele: ${motivoBloqueio} Clique pra desligar.`
-    : disabled
+  const title = disabled
     ? motivoBloqueio || 'Modo economia indisponível neste AD'
-    : avisoPreparacao
-    ? `${on ? 'Modo economia LIGADO.' : 'Pode ligar o modo economia agora.'} ${avisoPreparacao} Ligar o modo não inicia a geração.${on ? ' Clique pra desligar.' : ''}`
-    : on
-      ? 'Modo economia LIGADO: o disparo vai pelo Studio do HeyGen e renderiza cena por cena, sem consumir crédito. Trava o Avatar III e desliga o gesto. Clique pra voltar ao disparo normal.'
-      : 'Modo economia: dispara pelo Studio do HeyGen e renderiza cena por cena, sem consumir crédito. Só Avatar III, sem gesto.';
+    : 'Modo Economia: não gasta créditos';
 
   const estilo: CSSProperties = { height: size, width: size };
 

@@ -2426,7 +2426,8 @@ function ClickUpPilotInner() {
    */
   function selosDoCard(
     taskId: string,
-  ): Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> {
+    economia = false,
+  ): Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> {
     const cfgId = taskIdBaseDaVersao(taskId);
     // Legenda, zoom, inserts e headline saem TODOS do mesmo render. Se ele não
     // entrou no vídeo entregue, nenhum deles foi aplicado — o selo tem que
@@ -2434,7 +2435,12 @@ function ClickUpPilotInner() {
     const posFalhou = posResultado[taskId] ? !posResultado[taskId].aplicou : false;
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> = [];
+    const out: Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> = [];
+    // O selo lê o snapshot do próprio batch, não o toggle atual. Assim um AD
+    // pronto continua identificado como Economia mesmo depois de a tela mudar.
+    if (economia) {
+      out.push({ tipo: 'economia', title: 'Modo Economia — gerado sem gastar créditos' });
+    }
     // Primeiro na ordem do pipeline: o nivelamento roda POR PARTE, antes de
     // juntar. Mesma chamada que o disparo usa (isNivelamentoEnabled(taskId)),
     // então o selo conta exatamente o que foi aplicado.
@@ -14385,7 +14391,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               taskId={b.taskId}
                               taskName={b.taskName}
                               channels={channels}
-                              selos={selosDoCard(b.taskId)}
+                              selos={selosDoCard(b.taskId, b.economia === true)}
                               avisosPos={posResultado[b.taskId]?.aplicou === false ? posResultado[b.taskId].avisos : undefined}
                               phase={b.phase as any}
                               partsTotal={b.parts.length}
@@ -15086,11 +15092,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       const impedimento = incompatibilidade
                                         ? `Modo economia indisponível: ${motivoLegivel(incompatibilidade)}.`
                                         : null;
-                                      const avisoPreparacao = partes.length === 0
-                                        ? 'Antes de iniciar, preencha a copy e selecione o avatar.'
-                                        : partes.some((p) => !p.avatarId)
-                                          ? 'Antes de iniciar, selecione o avatar de cada take.'
-                                          : undefined;
                                       return (
                                         <PilotEconomiaBtn
                                           on={isEconomiaEnabled(a.taskId)}
@@ -15100,7 +15101,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           // mensagem mandava desligar um botão que não respondia.
                                           disabled={!!impedimento && !isEconomiaEnabled(a.taskId)}
                                           motivoBloqueio={impedimento || undefined}
-                                          avisoPreparacao={avisoPreparacao}
                                           onToggle={() => ligarEconomia(a.taskId, !isEconomiaEnabled(a.taskId))}
                                         />
                                       );
@@ -17015,19 +17015,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 que é mais barato e não inventa gesto.
                                                 MODO ÁUDIO (29.08): com áudio no slot este bloco SOME —
                                                 os chips de motor moram dentro do card de áudio. */}
-                                            {/* MODO ECONOMIA: gesto e motor pago ficam travados — o
-                                                gesto sobe a cena pro Avatar IV, e IV/V cobram. */}
+                                            {/* MODO ECONOMIA: o slot mostra somente o benefício que
+                                                interessa ao usuário, sem expor a trava técnica. */}
                                             {(slot.avatarId || slot.imageMode) && !(slot.audioKey && !slot.imageMode) && isEconomiaEnabled(a.taskId) ? (
                                               <div className="eco-trava flex items-center gap-2.5 rounded-[12px] px-3 py-2.5">
                                                 <span className="eco-trava-ico flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px]" aria-hidden>
                                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                                    <rect x="4" y="10.5" width="16" height="10" rx="2.4" />
-                                                    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                                                    <rect x="2" y="7" width="16" height="10" rx="2.6" />
+                                                    <path d="M21 10.5v3M10.9 9.4 8.4 12.6h3.2l-2.5 3.2" />
                                                   </svg>
                                                 </span>
-                                                <span className="min-w-0 flex-1 text-[12px] leading-snug text-text-muted">
-                                                  <b className="text-emerald-300">Modo economia:</b> esta cena sai em Avatar {MOTOR_ECONOMIA}, sem gesto. É o que
-                                                  faz o Render Scene não cobrar.
+                                                <span className="min-w-0 flex-1">
+                                                  <span className="block text-[11px] font-semibold text-emerald-100">Modo Economia</span>
+                                                  <span className="block text-[10px] text-emerald-200/65">Não gasta créditos</span>
                                                 </span>
                                               </div>
                                             ) : (slot.avatarId || slot.imageMode) && !(slot.audioKey && !slot.imageMode) ? (() => {

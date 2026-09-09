@@ -100,10 +100,10 @@ export type BatchJob3DProps = {
    *  novo). Diferente de `children`, aparece mesmo com o card minimizado: o
    *  user clicou pra editar ESTA task, então não pode depender de lembrar de
    *  expandir. Enquanto ele existe, o card abre sozinho. */
-  /** SELOS do que foi aplicado neste vídeo (31.08): decupagem, legenda, zoom.
+  /** SELOS do que foi aplicado neste vídeo (31.08): economia, decupagem, legenda, zoom.
    *  Ícone puro, sem texto — o `title` conta a história no hover. */
   selos?: Array<{
-    tipo: 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline';
+    tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline';
     title: string;
     /** LIGADO na config mas NÃO aplicado no vídeo entregue (02.09). O selo
      *  vira âmbar e riscado. Sem isto o card exibia o ícone de zoom sobre um
@@ -684,7 +684,12 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       className={`selo-aplicado is-${sl.tipo}${sl.falhou ? ' is-falhou' : ''}`}
                       title={sl.falhou ? `NÃO aplicado neste vídeo — ${sl.title}` : sl.title}
                     >
-                      {sl.tipo === 'normalizador' ? (
+                      {sl.tipo === 'economia' ? (
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <rect x="2" y="7" width="16" height="10" rx="2.6" />
+                          <path d="M21 10.5v3M10.9 9.4 8.4 12.6h3.2l-2.5 3.2" />
+                        </svg>
+                      ) : sl.tipo === 'normalizador' ? (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
                           <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
