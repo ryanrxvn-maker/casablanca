@@ -165,6 +165,7 @@ import { DocsBar, CreatorBar } from '@/components/PilotFontesBar';
 import {
   MOTOR_ECONOMIA,
   ehIdSintetico,
+  idDaCena,
   motivoLegivel,
   planejarEconomia,
   recusaDaParte,
@@ -1036,6 +1037,14 @@ type BatchTaskState = {
    *  barra não. Aqui entra o percentual que a extensão emite a cada volta.
    *  Não é persistido: progresso de disparo morto não faz sentido após F5. */
   progressoMotor?: number;
+  /** Telemetria do modo economia medida dentro da extensao. Fica no card para
+   *  separar tempo do render do HeyGen da espera local entre etapas. */
+  economiaMetricas?: {
+    totalMs: number;
+    ttsMs: number;
+    esperaTtsMs: number;
+    renderMs: number;
+  };
   /** TROCA: dados serializaveis pra RETOMAR sobreviver reload. O novo WHITE
    *  fica no IndexedDB (chave `troca:white:<taskId>`); aqui guardamos o que
    *  e serializavel pra reconstruir tudo sem a analise em memoria. */
@@ -4457,6 +4466,14 @@ function ClickUpPilotInner() {
           startedAt: b.startedAt,
           economia: b.economia,
           progressoMotor: b.progressoMotor,
+          economiaMetricas: b.economiaMetricas,
+          parts: b.parts.map((part) => ({
+            label: part.label,
+            videoId: part.videoId,
+            videoStatus: part.videoStatus,
+            videoUrl: part.videoUrl,
+            error: part.error,
+          })),
         };
       }
       if (Object.keys(tasks).length) {
@@ -5599,7 +5616,13 @@ function ClickUpPilotInner() {
         }
         console.log(`[clickup-pilot] MODO ECONOMIA ${taskId}: ${resumoDoPlano(planoEco)}`);
         const cenasFeitas: ResultadoCena[] = [];
+        const guardarCena = (cena: ResultadoCena) => {
+          const pos = cenasFeitas.findIndex((x) => x.idx === cena.idx);
+          if (pos >= 0) cenasFeitas[pos] = cena;
+          else cenasFeitas.push(cena);
+        };
         let erroParcial: string | null = null;
+        const metricasDoAd = { totalMs: 0, ttsMs: 0, esperaTtsMs: 0, renderMs: 0 };
 
         // ⚠ ESPERAR A VEZ, não morrer. A extensão só atende um disparo de cada
         // vez; sem esta fila a segunda task voltava na hora com "Outra geracao
@@ -5674,7 +5697,33 @@ function ClickUpPilotInner() {
                     }
                   : prev));
               },
-              { isCancelled: () => !!batchCancelRef.current[taskId] },
+              {
+                isCancelled: () => !!batchCancelRef.current[taskId],
+                onScene: (cena) => {
+                  guardarCena(cena);
+
+                  const videoId = idDaCena(cena, genId);
+                  setBatchStates((prev) => {
+                    const state = prev[taskId];
+                    if (!state || !state.parts[cena.idx]) return prev;
+                    return {
+                      ...prev,
+                      [taskId]: {
+                        ...state,
+                        parts: state.parts.map((part, idx) => idx === cena.idx
+                          ? {
+                              ...part,
+                              videoId,
+                              videoStatus: cena.error ? 'failed' as const : 'completed' as const,
+                              videoUrl: cena.videoUrl ?? null,
+                              error: cena.error ?? null,
+                            }
+                          : part),
+                      },
+                    };
+                  });
+                },
+              },
                 );
                 const msg = (res.erro || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
                 const bancadaOcupada = (res.cenas || []).length === 0 && msg.includes('outra geracao em andamento');
@@ -5685,7 +5734,16 @@ function ClickUpPilotInner() {
                   await sleepUnthrottled(15_000);
                   continue;
                 }
-                cenasFeitas.push(...(res.cenas || []));
+                if (res.metricas) {
+                  metricasDoAd.totalMs += res.metricas.totalMs || 0;
+                  metricasDoAd.ttsMs += res.metricas.ttsMs || 0;
+                  metricasDoAd.esperaTtsMs += res.metricas.esperaTtsMs || 0;
+                  metricasDoAd.renderMs += res.metricas.renderMs || 0;
+                  setBatchStates((prev) => (prev[taskId]
+                    ? { ...prev, [taskId]: { ...prev[taskId], economiaMetricas: { ...metricasDoAd } } }
+                    : prev));
+                }
+                for (const cena of res.cenas || []) guardarCena(cena);
                 if (res.erro) erroParcial = res.erro;
                 // Só falha LOCAL de cena libera os outros avatares. Cancelamento,
                 // marca d'água e respostas de extensão antiga continuam parando.
@@ -14009,6 +14067,21 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             const canEdit = !!b.replan?.parts?.length; // so habilita se temos plan
                             return (
                               <>
+                                {b.economia && b.economiaMetricas ? (() => {
+                                  const tempo = (ms: number) => {
+                                    const seg = Math.max(0, Math.round(ms / 1000));
+                                    const min = Math.floor(seg / 60);
+                                    const resto = seg % 60;
+                                    return min > 0 ? `${min}m ${String(resto).padStart(2, '0')}s` : `${resto}s`;
+                                  };
+                                  return (
+                                    <div className="mono mb-2 flex flex-wrap gap-x-3 gap-y-1 rounded-[8px] border border-cyan-400/25 bg-cyan-400/[0.05] px-2.5 py-1.5 text-[9px] uppercase tracking-wider text-cyan-100/80">
+                                      <span>Economia · total {tempo(b.economiaMetricas.totalMs)}</span>
+                                      <span>HeyGen/render {tempo(b.economiaMetricas.renderMs)}</span>
+                                      <span>espera TTS {tempo(b.economiaMetricas.esperaTtsMs)}</span>
+                                    </div>
+                                  );
+                                })() : null}
                                 <div className="mono mb-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
                                   <span>Takes ({donePv}/{previews.length} prontos)</span>
                                 </div>

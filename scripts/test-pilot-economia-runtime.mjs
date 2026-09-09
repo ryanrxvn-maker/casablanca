@@ -164,6 +164,36 @@ test('15 cenas: progresso emitido preserva frações durante render de 2 minutos
   assert.ok(h.progress.every((p, i) => !i || p.pct > h.progress[i - 1].pct));
 });
 
+test('modo economia prepara o TTS seguinte durante o poll sem paralelizar renders', async () => {
+  const tts = [], renders = [];
+  let primeiraEspera = true;
+  const h = harness({
+    ecoGerarTts: async ({ texto }) => {
+      tts.push(texto);
+      return { duracao: 2, url: `https://test/${texto}.mp3`, palavras: [], resumo: 'ok' };
+    },
+    ecoRenderCenaApi: async ({ wrapper: draft }) => {
+      const texto = draft.text_draft.script.elements.speech.text;
+      renders.push(texto);
+      return primeiraEspera
+        ? { ok: true, data: { job_id: 'primeiro-render' } }
+        : { ok: true, data: { video_url: `https://test/${texto}.mp4` } };
+    },
+    ecoEsperarTakeApi: async () => {
+      // O segundo TTS ja nasceu, mas o segundo render ainda nao: esta e a
+      // sobreposicao segura que encurta o caminho critico.
+      assert.deepEqual(tts, ['take0', 'take1']);
+      assert.deepEqual(renders, ['take0']);
+      primeiraEspera = false;
+      return 'https://test/take0.mp4';
+    },
+  });
+  h.payload.cenas = h.payload.cenas.slice(0, 2).map((c, i) => ({ ...c, idx: i }));
+  const r = await h.run();
+  assert.equal(r.cenas.length, 2);
+  assert.deepEqual(renders, ['take0', 'take1']);
+});
+
 function loadTs(file) {
   const ctx = vm.createContext({ exports: {}, console });
   vm.runInContext(ts.transpileModule(readFileSync(file, 'utf8'), {
@@ -444,6 +474,28 @@ test('ponte mantém resultado antigo que só tem videoId', async () => {
   listeners.forEach(fn => fn({ data: { source: 'darkolab-ext', requestId: sent[0].requestId, type: 'HG_RESULT',
     videoUrl: 'ECONOMIA:{"cenas":[{"idx":0,"videoId":"legacy-id"}]}' } }));
   assert.equal((await pending).cenas[0].videoId, 'legacy-id');
+});
+
+test('ponte publica a cena pronta imediatamente e nao duplica a previa no resultado final', async () => {
+  const listeners = [], sent = [], prontas = [];
+  const ctx = vm.createContext({ exports: {}, console, setTimeout, clearTimeout, setInterval, clearInterval,
+    window: { addEventListener: (_event, fn) => listeners.push(fn), postMessage: msg => sent.push(msg) } });
+  vm.runInContext(ts.transpileModule(readFileSync('lib/heygen-extension-bridge.ts', 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, ctx);
+  const pending = ctx.exports.gerarPelaEconomia(
+    { cenas: [{ idx: 0, texto: 'test' }], avatarId: 'look' },
+    undefined,
+    { onScene: cena => prontas.push(clean(cena)) },
+  );
+  const requestId = sent[0].requestId;
+  const emit = data => listeners.forEach(fn => fn({ data: { source: 'darkolab-ext', requestId, ...data } }));
+  const cena = { idx: 0, videoUrl: 'https://test/live.mp4' };
+  emit({ type: 'HG_ECONOMY_SCENE', cena });
+  assert.deepEqual(prontas, [cena]);
+  emit({ type: 'HG_RESULT', videoUrl: `ECONOMIA:${JSON.stringify({ cenas: [cena] })}` });
+  assert.deepEqual(clean((await pending).cenas), [cena]);
+  assert.deepEqual(prontas, [cena]);
 });
 
 test('TTS lento recebe pulsos sem invadir etapa seguinte nem atrasar conclusão', async () => {

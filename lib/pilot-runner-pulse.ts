@@ -11,6 +11,21 @@ export type PilotRunnerPulseTask = {
   startedAt: number;
   economia?: boolean;
   progressoMotor?: number;
+  economiaMetricas?: {
+    totalMs: number;
+    ttsMs: number;
+    esperaTtsMs: number;
+    renderMs: number;
+  };
+  /** Snapshot minimo dos takes. Permite que outra aba do Pilot mostre o MP4
+   *  que acabou de ficar pronto sem assumir a execucao nem esperar o cloud. */
+  parts?: Array<{
+    label: string;
+    videoId: string | null;
+    videoStatus?: string;
+    videoUrl?: string | null;
+    error?: string | null;
+  }>;
 };
 
 export type PilotRunnerPulse = {
@@ -56,6 +71,19 @@ type DisplayableBatch = {
   finishedAt?: number;
   economia?: boolean;
   progressoMotor?: number;
+  economiaMetricas?: {
+    totalMs: number;
+    ttsMs: number;
+    esperaTtsMs: number;
+    renderMs: number;
+  };
+  parts?: Array<{
+    label: string;
+    videoId: string | null;
+    videoStatus?: string;
+    videoUrl?: string | null;
+    error?: string | null;
+  }>;
 };
 
 /**
@@ -84,6 +112,13 @@ export function overlayPilotRunnerPulse<T extends DisplayableBatch>(
       finishedAt: undefined,
       economia: live.economia ?? saved.economia,
       progressoMotor: live.progressoMotor ?? saved.progressoMotor,
+      economiaMetricas: live.economiaMetricas ?? saved.economiaMetricas,
+      parts: live.parts?.length
+        ? saved.parts?.map((part) => {
+            const fresh = live.parts?.find((candidate) => candidate.label === part.label);
+            return fresh ? { ...part, ...fresh } : part;
+          })
+        : saved.parts,
     };
   }
   return changed ? out : states;

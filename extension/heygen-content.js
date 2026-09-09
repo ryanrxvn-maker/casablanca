@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.39.1';
+const DARKO_EXT_VERSION = '4.40.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -5474,6 +5474,13 @@ async function runEconomyJobApi(requestId, payload) {
   ecoZerarProgresso();
 
   const resultados = [];
+  const metricas = {
+    totalMs: 0,
+    ttsMs: 0,
+    esperaTtsMs: 0,
+    renderMs: 0,
+  };
+  const inicioDoJob = Date.now();
   try {
     const { avatarId, groupId, avatarName, voiceName, cenas, jobLabel } = payload || {};
     let voiceId = (payload && payload.voiceId) || null;
@@ -5553,6 +5560,36 @@ async function runEconomyJobApi(requestId, payload) {
     }
 
     const total = cenas.length;
+
+    // PIPELINE SEGURO DO MODO ECONOMIA: enquanto o HeyGen renderiza a cena N,
+    // prepara somente o TTS da cena N+1. Os renders continuam estritamente em
+    // serie e continuam usando a mesma bancada; portanto nao existe corrida no
+    // draft nem mudanca na ordem dos takes. O ganho vem de retirar o TTS do
+    // caminho critico entre dois renders.
+    const ttsAdiantados = new Map();
+    const iniciarTts = (idx) => {
+      if (idx < 0 || idx >= total || ttsAdiantados.has(idx)) return ttsAdiantados.get(idx) || null;
+      const proxima = cenas[idx];
+      const idDaVoz = proxima && (proxima.voiceId || voiceId);
+      // Sem ID explicito, o fallback depende do wrapper ja reescrito daquela
+      // cena. Nesse caso preserva o caminho antigo em vez de adivinhar a voz.
+      if (!proxima || !String(proxima.texto || '').trim() || !idDaVoz) return null;
+      const comecou = Date.now();
+      const tarefa = ecoGerarTts({
+        texto: proxima.texto,
+        voiceId: idDaVoz,
+        ajustes: ecoAjustesDeVoz(proxima.voz || (payload && payload.voz)),
+        videoId,
+      }).then(
+        (fala) => ({ ok: true, fala, ms: Date.now() - comecou }),
+        (erro) => ({ ok: false, erro, ms: Date.now() - comecou }),
+      );
+      ttsAdiantados.set(idx, tarefa);
+      return tarefa;
+    };
+
+    // A primeira fala pode comecar assim que os gates e a franquia terminam.
+    iniciarTts(0);
     for (let i = 0; i < total; i++) {
       const cena = cenas[i];
       const rot = `${jobLabel || 'ECO'} cena ${i + 1}/${total}`;
@@ -5595,12 +5632,31 @@ async function runEconomyJobApi(requestId, payload) {
         // ⚠ SEM TTS NAO HA RENDER. A cena deriva a duracao da fala; com duracao
         // 0 o servidor recusa ("Video duration is 0 for element ... SCENE").
         ecoProgresso(requestId, `${rot}: gerando a fala...`, inicio + largura * 0.10);
-        const fala = await ecoAguardarEtapa(requestId, () => ecoGerarTts({
-          texto: cena.texto,
-          voiceId: cena.voiceId || voiceId || ecoVozDaCena(wrapper, ids),
-          ajustes: ecoAjustesDeVoz(cena.voz || (payload && payload.voz)),
-          videoId,
-        }), `${rot}: gerando a fala`, inicio + largura * 0.10, inicio + largura * 0.27);
+        const esperaTtsComecou = Date.now();
+        const adiantado = ttsAdiantados.get(i) || null;
+        let fala;
+        if (adiantado) {
+          const pronta = await ecoAguardarEtapa(
+            requestId,
+            () => adiantado,
+            `${rot}: preparando a fala`,
+            inicio + largura * 0.10,
+            inicio + largura * 0.27,
+          );
+          metricas.ttsMs += pronta.ms || 0;
+          if (!pronta.ok) throw pronta.erro;
+          fala = pronta.fala;
+        } else {
+          const comecouTts = Date.now();
+          fala = await ecoAguardarEtapa(requestId, () => ecoGerarTts({
+            texto: cena.texto,
+            voiceId: cena.voiceId || voiceId || ecoVozDaCena(wrapper, ids),
+            ajustes: ecoAjustesDeVoz(cena.voz || (payload && payload.voz)),
+            videoId,
+          }), `${rot}: gerando a fala`, inicio + largura * 0.10, inicio + largura * 0.27);
+          metricas.ttsMs += Date.now() - comecouTts;
+        }
+        metricas.esperaTtsMs += Date.now() - esperaTtsComecou;
         ecoExigirJobAtivo(requestId);
         // ⚠ SEM URL A CENA SAI MUDA. Conferir so' a duracao deixava passar um TTS
         // que respondeu 200, mediu o texto e nao entregou audio nenhum.
@@ -5636,6 +5692,10 @@ async function runEconomyJobApi(requestId, payload) {
         const jobId = (r.data && (r.data.job_id || r.data.stream_id)) || null;
 
         // Cena inalterada volta PRONTA na hora (o servidor devolve o cache dele).
+        // O render atual ja foi aceito. Agora o TTS seguinte pode correr em
+        // paralelo com o poll sem tocar no wrapper nem submeter outro render.
+        iniciarTts(i + 1);
+        const renderComecou = Date.now();
         let url = ecoUrlDaResposta(r.data);
         if (!url) {
           url = await ecoEsperarTakeApi(videoId, tetoCena, (s, decorridoMs) =>
@@ -5645,6 +5705,7 @@ async function runEconomyJobApi(requestId, payload) {
               ecoPctDaEspera(inicio, largura, decorridoMs),
             ), jobId);
         }
+        metricas.renderMs += Date.now() - renderComecou;
         ecoExigirJobAtivo(requestId);
         if (!url) {
           throw new Error(
@@ -5684,12 +5745,14 @@ async function runEconomyJobApi(requestId, payload) {
     const prontas = resultados.length - falhas;
     const erro = falhas ? `${falhas} cena(s) falharam; ${prontas} prontas foram preservadas.` : undefined;
     ecoProgresso(requestId, `Economia: ${prontas} cena(s) renderizada(s)${falhas ? `; ${falhas} com falha` : ''}`, 97);
-    reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro, fatal: false }));
+    metricas.totalMs = Date.now() - inicioDoJob;
+    reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro, fatal: false, metricas }));
   } catch (e) {
     console.error('[DARKO LAB ECONOMIA] runEconomyJobApi FAIL:', e);
     const msg = (e && e.message) || String(e);
     if (resultados.length > 0) {
-      reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro: msg, fatal: true }));
+      metricas.totalMs = Date.now() - inicioDoJob;
+      reportResult(requestId, 'ECONOMIA:' + JSON.stringify({ cenas: resultados, erro: msg, fatal: true, metricas }));
     } else {
       reportError(requestId, msg);
     }

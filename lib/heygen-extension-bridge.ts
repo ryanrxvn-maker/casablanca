@@ -304,12 +304,26 @@ export type EconomiaResultado = {
   erro?: string;
   /** false permite os próximos projetos; ausente mantém a parada das versões antigas. */
   fatal?: boolean;
+  /** Tempos medidos pela extensao para separar espera do HeyGen de overhead. */
+  metricas?: {
+    totalMs: number;
+    ttsMs: number;
+    esperaTtsMs: number;
+    renderMs: number;
+  };
 };
 
 export function gerarPelaEconomia(
   payload: EconomiaPayload,
   onProgress?: (stage: string, percent?: number) => void,
-  opts: { ackMs?: number; tetoJobMs?: number; isCancelled?: () => boolean } = {},
+  opts: {
+    ackMs?: number;
+    tetoJobMs?: number;
+    isCancelled?: () => boolean;
+    /** Entrega cada cena assim que o HeyGen devolve o MP4. O Pilot usa isto
+     *  para mostrar a previa e persistir o take sem esperar o AD inteiro. */
+    onScene?: (cena: CenaRenderizada) => void;
+  } = {},
 ): Promise<EconomiaResultado> {
   installListener();
   const ackMs = opts.ackMs ?? 4000;
@@ -329,7 +343,10 @@ export function gerarPelaEconomia(
     const parciais = new Map<number, CenaRenderizada>();
     const indices = new Set(payload.cenas.map(c => c.idx));
     const guardarCena = (c: CenaRenderizada) => {
-      if (c && Number.isInteger(c.idx) && indices.has(c.idx) && (c.videoUrl || c.videoId || c.error)) parciais.set(c.idx, c);
+      if (!c || !Number.isInteger(c.idx) || !indices.has(c.idx) || !(c.videoUrl || c.videoId || c.error)) return;
+      const anterior = parciais.get(c.idx);
+      parciais.set(c.idx, c);
+      if (JSON.stringify(anterior) !== JSON.stringify(c)) opts.onScene?.(c);
     };
     const falharPreservando = (e: Error) => {
       if (parciais.size) resolve({ cenas: [...parciais.values()], erro: e.message, fatal: true });
@@ -394,7 +411,7 @@ export function gerarPelaEconomia(
         try {
           const j = JSON.parse(txt.slice('ECONOMIA:'.length)) as EconomiaResultado;
           for (const c of Array.isArray(j.cenas) ? j.cenas : []) guardarCena(c);
-          resolve({ cenas: [...parciais.values()], erro: j.erro, fatal: j.fatal });
+          resolve({ cenas: [...parciais.values()], erro: j.erro, fatal: j.fatal, metricas: j.metricas });
         } catch (e) {
           falharPreservando(new Error('Não consegui ler o resultado do modo economia.'));
         }
