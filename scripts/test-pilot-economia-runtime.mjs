@@ -389,6 +389,7 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
   assert.match(page, /Causa: \$\{String\(erros\[0\]\)/);
   assert.match(page, /const economySceneFailure = !!b\.economia/);
   assert.match(page, /if \(economySceneFailure\) continue/);
+  assert.match(page, /renderConfirmadoPelaFase && !!p\.videoId && !p\.videoStatus/);
 
   const extension = readFileSync('extension/heygen-content.js', 'utf8');
   assert.match(extension, /falha sistemica do HeyGen/);

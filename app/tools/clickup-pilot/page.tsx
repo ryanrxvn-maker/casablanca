@@ -14133,7 +14133,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           // videoStatus e mostravam 0 prontos durante a montagem,
                           // embora os nove MP4s estivessem baixados.
                           const renderConfirmadoPelaFase = ['downloading', 'post', 'done'].includes(b.phase);
-                          const partsRendered = b.parts.filter(p => p.videoStatus === 'completed' || (renderConfirmadoPelaFase && !!p.videoId)).length;
+                          const partsRendered = b.parts.filter(p =>
+                            p.videoStatus === 'completed'
+                            // Fallback apenas para batch antigo SEM status. Um
+                            // `failed` explicito nunca pode virar pronto so porque
+                            // a fase terminal e o id sintetico existem.
+                            || (renderConfirmadoPelaFase && !!p.videoId && !p.videoStatus)
+                          ).length;
                           // "Tudo OK" = todas partes COM CONTEÚDO dispararam + renderizaram E
                           //  pipeline produziu o esperado.
                           //
