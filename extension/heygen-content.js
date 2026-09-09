@@ -5737,6 +5737,12 @@ async function runEconomyJobApi(requestId, payload) {
         resultados.push(falha);
         ecoPublicarCena(requestId, falha);
         ecoWarn(`${rot}: ${error}`);
+        // Conta, sessão e cota afetam o job inteiro. Continuar submetendo as
+        // cenas seguintes só repete a mesma recusa e faz um lote grande parecer
+        // lento. Preserva o que já voltou e encerra a rodada imediatamente.
+        if (/\b429\b|quota|daily|usage has exceeded|limit reached|insufficient|credit|unauthori[sz]ed|forbidden|sess(?:ao|ion).*(?:expir|invalid)/i.test(error)) {
+          throw new Error(`${rot}: falha sistemica do HeyGen — ${error}`);
+        }
         ecoProgresso(requestId, `${rot}: falhou; seguindo para as demais cenas`, inicio + largura * 0.99);
       }
     }

@@ -6959,6 +6959,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               else cenasFeitas.push(cena);
               const videoId = idDaCena(cena, genId);
               if (!videoId) return;
+              // A retomada mantém duas representações do mesmo batch: a cópia
+              // local `state`, usada logo abaixo pelos gates/downloads, e o
+              // estado React que desenha o card. Atualizar só o React deixava a
+              // cópia local com `completed` de uma execução anterior. No fim da
+              // rodada ela escondia o erro real e mostrava "recuperando do
+              // cache" para uma cena que o Studio tinha recusado.
+              state.parts[cena.idx] = {
+                ...state.parts[cena.idx],
+                videoId,
+                videoStatus: cena.error ? 'failed' : 'completed',
+                videoUrl: cena.videoUrl ?? null,
+                error: cena.error ?? undefined,
+              };
               setBatchStates((prev) => {
                 const cur = prev[taskId];
                 if (!cur || !cur.parts[cena.idx]) return prev;
@@ -7263,7 +7276,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             }
             const msg = is429
               ? `⏳ Limite diário do HeyGen — faltam ${miss.length} parte(s). NÃO montei (evita vídeo incompleto). Retome após o reset (~24h): ${labels.join(', ')}`
-              : `Incompleto — faltam ${miss.length} parte(s) que o HeyGen não gerou (${labels.join(', ')}). NÃO montei. Clica RETOMAR pra tentar essas.`;
+              : (() => {
+                  const erros = miss
+                    .map((i) => cur?.parts?.[i]?.error || state.parts[i]?.error || '')
+                    .filter(Boolean);
+                  const primeiroErro = erros[0]
+                    ? ` Causa: ${String(erros[0]).replace(/\s+/g, ' ').slice(0, 220)}`
+                    : '';
+                  return `Incompleto — faltam ${miss.length} parte(s) que o HeyGen não gerou (${labels.join(', ')}). NÃO montei.${primeiroErro} Clica RETOMAR pra tentar essas.`;
+                })();
             return { ...prev, [taskId]: { ...cur, phase: 'done', message: msg, finishedAt: Date.now(), zipBlobUrl: takesUrl, zipFilename: takesFilename, montadoZipUrl: undefined, montadoZipName: undefined, pipeStats: undefined } };
           });
           return;
