@@ -50,6 +50,8 @@ const pending = new Map<string, Pending>();
 let listenerInstalled = false;
 let activeExtensionId: string | null = null;
 
+export const ECONOMY_EXTENSION_VERSION = '4.41.0';
+
 function compareVersion(a: string, b: string) {
   const aa = a.split('.').map((n) => Number(n) || 0);
   const bb = b.split('.').map((n) => Number(n) || 0);
@@ -57,6 +59,10 @@ function compareVersion(a: string, b: string) {
     if ((aa[i] ?? 0) !== (bb[i] ?? 0)) return (aa[i] ?? 0) - (bb[i] ?? 0);
   }
   return 0;
+}
+
+export function extensionVersionAtLeast(version: string | undefined, minimum = ECONOMY_EXTENSION_VERSION): boolean {
+  return !!version && version !== '?' && compareVersion(version, minimum) >= 0;
 }
 
 function isActiveExtensionMessage(data: Record<string, unknown>) {

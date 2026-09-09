@@ -27,7 +27,7 @@ function ok(cond: boolean, msg: string) {
 async function main() {
   ok(typeof (globalThis as { document?: unknown }).document === 'undefined', 'este teste roda SEM <video> (como a aba oculta)');
 
-  const blob = new Blob([readFileSync('tiny-test.mp4')], { type: 'video/mp4' });
+  const blob = new Blob([readFileSync('lib/fixtures/tiny-test.mp4')], { type: 'video/mp4' });
 
   const meta = await metaPeloCabecalho(blob);
   ok(!!meta, 'o cabeçalho do MP4 responde');

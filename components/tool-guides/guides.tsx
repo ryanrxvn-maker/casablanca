@@ -1619,14 +1619,14 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Creator: monte o AD do zero',
-        text: 'Clique no botão "+" e uma task nova aparece já com o card de análise aberto (AD01, AD02 e assim por diante; o lápis ao lado do nome renomeia). Primeiro adicione o avatar em "Adicionar outro avatar" e escolha avatar e voz. Depois clique no lápis do avatar: no primeiro avatar você escreve os hooks (um por caixa, até dez; cada hook vira um vídeo, todos com o mesmo body) e o body; os outros avatares entram só no body. Sem hook, sai um vídeo só com o body. "Smart Division" corta o body em takes de cerca de vinte segundos no Avatar III; no Avatar IV ou V o bloco vai inteiro, sem picotar. Depois disso o lápis vira o olho de sempre, onde você ajusta take por take.',
+        text: 'Clique no botão "+" e uma task nova aparece já com o card de análise aberto (AD01, AD02 e assim por diante; o lápis ao lado do nome renomeia). Primeiro adicione o avatar em "Adicionar outro avatar" e escolha avatar e voz. Depois clique no lápis do avatar: no primeiro avatar você escreve os hooks (um por caixa, até dez; cada hook vira um vídeo, todos com o mesmo body) e o body; os outros avatares entram só no body. Sem hook, sai um vídeo só com o body. Escolha "Smart Division" para cortar o body em takes de cerca de vinte segundos ou "Sem divisão" para manter o body inteiro; no Avatar IV ou V o bloco sempre vai inteiro. Clique em "Montar takes" e use o olho para ajustar take por take.',
         visual: (
           <Shot label="Creator · copy do avatar">
             <MStack>
               <MField label="Hook 1" value="Você usa azeite todo dia e nunca soube que ele pode virar remédio." grow />
               <MField label="Hook 2" value="Meu tio de 71 anos me contou esse truque em segredo." grow />
               <MField label="Body" value="A maioria usa azeite do jeito errado e joga fora a parte que importa..." grow />
-              <MBtn tone="primary">Smart Division</MBtn>
+              <MRow><MBtn tone="primary">Smart Division</MBtn><MBtn>Sem divisão</MBtn><MBtn tone="primary">Montar takes</MBtn></MRow>
             </MStack>
           </Shot>
         ),

@@ -90,8 +90,19 @@ type BatchTaskState = {
   camufladoZipName?: string;
 };
 
+type PilotDraft = {
+  taskId: string;
+  sourceTaskId: string;
+  scope: string;
+  analysis: { taskName?: string; baseAdId?: string; roleSlots?: unknown[]; partTemplates?: unknown[] };
+};
+
 function readBatches(): Record<string, BatchTaskState> {
-  return readDurableRecords<BatchTaskState>('background');
+  return Object.fromEntries(Object.entries(readDurableRecords<BatchTaskState>('background')).filter(([id]) => !id.startsWith('pilot-draft:')));
+}
+
+function readDrafts(): Record<string, PilotDraft> {
+  return Object.fromEntries(Object.entries(readDurableRecords<PilotDraft>('background')).filter(([id]) => id.startsWith('pilot-draft:')));
 }
 
 function readCancelMap(): Record<string, number> {
@@ -150,6 +161,7 @@ function percentForPhase(b: BatchTaskState): number {
 
 export default function BackgroundTasksPage() {
   const [batches, setBatches] = useState<Record<string, BatchTaskState>>({});
+  const [drafts, setDrafts] = useState<Record<string, PilotDraft>>({});
   // id→nome das empresas, gravado pelo Pilot — só pro selo do card.
   const [teamNames, setTeamNames] = useState<Record<string, string>>({});
   useEffect(() => setTeamNames(getPilotTeamNames()), []);
@@ -161,6 +173,7 @@ export default function BackgroundTasksPage() {
 
   useEffect(() => {
     setBatches(readBatches());
+    setDrafts(readDrafts());
     setCancelMap(readCancelMap());
     setMagnific(readMagnificQueue());
     const onStorage = (e: StorageEvent) => {
@@ -172,6 +185,7 @@ export default function BackgroundTasksPage() {
     // Tambem refazer leitura periodica pra abas mesma origem nao disparam storage
     const id = setInterval(() => {
       setBatches(readBatches());
+      setDrafts(readDrafts());
       setMagnific(readMagnificQueue());
       setTick((t) => t + 1);
     }, 1500);
@@ -239,6 +253,12 @@ export default function BackgroundTasksPage() {
     setBatches(readBatches());
   }
 
+  async function removeDraft(id: string) {
+    if (!confirm('Remover esta preparação salva do Pilot?')) return;
+    try { await deleteDurableRecords('background', [id]); } catch { return; }
+    setDrafts(readDrafts());
+  }
+
   return (
     <ToolShell
       title="Tarefas em segundo plano"
@@ -254,6 +274,9 @@ export default function BackgroundTasksPage() {
           </span>
           <span className="mono rounded-full border border-line-strong bg-bg/40 px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted">
             Na fila: {counts.queued}
+          </span>
+          <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-[10px] uppercase tracking-widest text-amber-200">
+            Preparadas: {Object.keys(drafts).length}
           </span>
           <span className="mono rounded-full border border-lime/40 bg-lime/10 px-3 py-1 text-[10px] uppercase tracking-widest text-lime">
             Concluídos: {counts.done}
@@ -303,7 +326,28 @@ export default function BackgroundTasksPage() {
           ))}
         </div>
 
-        {typeFilter === 'broll' ? null : sorted.length === 0 ? (
+        {typeFilter !== 'broll' && Object.keys(drafts).length > 0 ? (
+          <div className="grid gap-3">
+            <div className="label-tech text-[10px] uppercase tracking-widest text-amber-200">Prontas para revisar no Pilot</div>
+            {Object.values(drafts).sort((a, b) => (a.analysis.taskName || '').localeCompare(b.analysis.taskName || '')).map((draft) => (
+              <div key={draft.taskId} className="flex items-center gap-3 rounded-[14px] border border-amber-400/30 bg-amber-400/[0.06] p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="label-tech rounded-md border border-amber-400/40 px-2 py-0.5 text-[10px] uppercase tracking-widest text-amber-200">Preparado</span>
+                    <span className="text-[13px] text-white">{draft.analysis.taskName || draft.taskId}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-text-muted">
+                    {(draft.analysis.roleSlots || []).length} avatar(es) · {(draft.analysis.partTemplates || []).length} take(s) · salvo na conta
+                  </div>
+                </div>
+                <Link href="/tools/clickup-pilot" className="label-tech rounded-md border border-lime/50 px-3 py-1.5 text-[10px] uppercase tracking-widest text-lime">Revisar</Link>
+                <button type="button" onClick={() => void removeDraft(draft.taskId)} className="label-tech rounded-md border border-red-500/40 px-3 py-1.5 text-[10px] uppercase tracking-widest text-red-300">Remover</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {typeFilter === 'broll' ? null : sorted.length === 0 && Object.keys(drafts).length === 0 ? (
           <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/20 p-12 text-center">
             <div className="label-tech text-[11px] uppercase tracking-widest text-text-muted">
               Nenhum trabalho em andamento

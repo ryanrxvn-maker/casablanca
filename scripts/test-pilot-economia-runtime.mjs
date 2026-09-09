@@ -355,7 +355,8 @@ for (const ending of ['error', 'timeout', 'result', 'malformed']) {
 test('card mantém frações na largura e ignora progresso antigo quando em fila', () => {
   const text = readFileSync('components/BatchJobCard3D.tsx', 'utf8');
   const start = text.indexOf('  const dispatchPct =');
-  const end = text.indexOf('\n\n', text.indexOf('  const barPct =', start));
+  const bar = text.indexOf('  const barPct =', start);
+  const end = text.indexOf('\n', bar);
   assert.ok(start > 0 && end > start);
   const code = text.slice(start, end) + '\nbarPct;';
   assert.equal(vm.runInNewContext(code, { partsTotal: 15, partsDispatched: 0, partsRendered: 0, phase: 'rendering', progressoMotor: 8.123 }), 8.123);
@@ -374,7 +375,8 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
   assert.match(card, /'REGULANDO VOZ'/);
 
   const page = readFileSync('app/tools/clickup-pilot/page.tsx', 'utf8');
-  assert.match(page, /minEconomia = '4\.40\.0'/);
+  assert.match(page, /ECONOMY_EXTENSION_VERSION/);
+  assert.match(page, /garantirExtensaoEconomia/);
   assert.match(page, /p\.detail \? ` · \$\{p\.detail\}`/);
   // Retomar economia nunca pode apagar o unico cache dos ids sinteticos nem
   // mandar `eco:*` ao porteiro da API. Se o cache sumiu, recupera apenas as

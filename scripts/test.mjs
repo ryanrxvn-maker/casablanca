@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
  *  verdade — mp4box, por exemplo — que nao sobrevive ao --module commonjs.
  *  @type {{ tsc?: string, run?: string[], tsx?: string[] }[]} */
 const ETAPAS = [
+  { tsc: "lib/heygen-extension-bridge.ts lib/heygen-extension-version.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/heygen-extension-version.test.js"] },
   { run: ["scripts/test-pilot-economia-runtime.mjs"] },
   { tsc: "lib/durable-records-core.ts lib/durable-records.ts lib/durable-records.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/durable-records.test.js"] },
   { tsc: "lib/speech-detect.ts lib/speech-detect.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/speech-detect.test.js"] },

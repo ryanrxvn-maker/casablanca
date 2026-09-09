@@ -96,6 +96,12 @@ async function main() {
   assert(!restored.readDurableRecords('background').B);
   assert(Object.keys(restored.readDurableRecords('history')).length > 0, 'dispatch history survives browser loss');
 
+  const draftWriter = restored.createRecordWriter('background'); draftWriter.hydrate();
+  const draft = { taskId: 'pilot-draft:team:A', sourceTaskId: 'A', taskName: 'AD01', baseAdId: 'AD01', phase: 'draft', parts: [], startedAt: 1, scope: 'clickup:team', analysis: { taskId: 'A', taskName: 'AD01', roleSlots: [], partTemplates: [] }, updatedAt: 1 };
+  await draftWriter.save({ [draft.taskId]: draft }); await settled(restored);
+  assert.equal(validateRecord('background', draft.taskId, draft), null);
+  assert(restored.readDurableRecords('background')[draft.taskId], 'prepared Pilot task is stored independently');
+
   const wr = restored.createRecordWriter('background'); const restoredData = wr.hydrate();
   online = false;
   await wr.save({ ...restoredData, C: job('C') }); await settled(restored);
@@ -120,6 +126,7 @@ async function main() {
   local.bag.clear();
   const afterRetention = await client();
   assert(afterRetention.readDurableRecords('background').A);
+  assert(afterRetention.readDurableRecords('background')[draft.taskId], 'prepared Pilot task survives a fresh browser');
   assert(!afterRetention.readDurableRecords('history').expired);
 
   const quotaWriter = afterRetention.createRecordWriter('background'); const beforeQuota = quotaWriter.hydrate();

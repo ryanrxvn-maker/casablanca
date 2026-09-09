@@ -44,6 +44,8 @@ export async function GET() {
       }),
     );
     const entries = [...fileEntries, ...iconEntries];
+    const manifest = JSON.parse(new TextDecoder().decode(fileEntries.find((entry) => entry.name === 'manifest.json')!.data));
+    const version = String(manifest.version || 'latest').replace(/[^0-9.]/g, '');
 
     const zip = await buildZip(entries);
     const arrayBuffer = await zip.arrayBuffer();
@@ -52,9 +54,11 @@ export async function GET() {
       status: 200,
       headers: {
         'content-type': 'application/zip',
-        'content-disposition':
-          'attachment; filename="auto-edit-heygen-extension.zip"',
-        'cache-control': 'public, max-age=3600',
+        'content-disposition': `attachment; filename="auto-edit-heygen-extension-v${version}.zip"`,
+        'cache-control': 'private, no-store, no-cache, must-revalidate, max-age=0',
+        pragma: 'no-cache',
+        expires: '0',
+        'x-autoedit-extension-version': version,
       },
     });
   } catch (e) {

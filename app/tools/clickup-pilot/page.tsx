@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
-import { createRecordWriter, readDurableRecords, deleteDurableRecords } from '@/lib/durable-records';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
@@ -53,7 +53,7 @@ import {
   canalDoTaskId,
   taskIdBase,
 } from '@/lib/versao-canal';
-import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension, gerarPelaEconomia } from '@/lib/heygen-extension-bridge';
+import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension, gerarPelaEconomia, ECONOMY_EXTENSION_VERSION, extensionVersionAtLeast } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   pollVideosUntilReady,
@@ -213,6 +213,7 @@ import {
   docDeTexto,
   textoDeArquivo,
   baseAdIdDoNome,
+  hashCurto,
   type ModoPilot,
   type TaskLocal,
   type DocLocal,
@@ -1242,6 +1243,8 @@ type RoleSlot = {
    *  não fura a regra do movimento — cena com gesto marcada como III sobe pro
    *  IV no runner de qualquer jeito, senão o take voltaria parado. */
   engine?: 'III' | 'IV' | 'V';
+  /** CREATOR: Smart corta o body; single mantém o body em um take. */
+  copyDivision?: 'smart' | 'single';
   imageMode?: boolean;
   /** ÁUDIO POR AVATAR (29.08) — em vez do TTS por texto, este avatar fala um
    *  ÁUDIO upado. Os bytes vivem no IDB (`pilot:<task>:roleaudio:<slug>:<ts>`,
@@ -1355,6 +1358,23 @@ type TaskAnalysis = {
   /** ClickUp URL direto da task (atalho — vem do feed da listagem). */
   taskUrl?: string;
 };
+
+type PilotDraftRecord = {
+  taskId: string;
+  sourceTaskId: string;
+  taskName: string;
+  baseAdId: string;
+  phase: 'draft';
+  parts: [];
+  startedAt: number;
+  scope: string;
+  analysis: TaskAnalysis;
+  updatedAt: number;
+};
+
+function pilotDraftId(scope: string, taskId: string): string {
+  return `pilot-draft:${hashCurto(scope)}:${taskId}`.slice(0, 240);
+}
 
 /**
  * Extrai SO o body falado — delega pro sanitizador AUTORITATIVO do parser
@@ -1952,6 +1972,7 @@ function ClickUpPilotInner() {
     });
   }
   function removerTaskLocal(id: string) {
+    excluirDrafts([id], modoDaTaskLocal(id) === 'creator' ? 'creator' : escopoRef.current);
     persistirLocais(tasksLocaisRef.current.filter((t) => t.id !== id));
     // Insumos no IDB (imagens do modo imagem, áudios por take) ficariam órfãos
     // pra sempre — o id local nunca se repete. Melhor esforço.
@@ -2041,6 +2062,16 @@ function ClickUpPilotInner() {
     for (const [id, a] of Object.entries(taskAnalysesRef.current)) {
       if (a && pertenceAoEscopo(id, esc) && a.status !== 'pending' && a.status !== 'analyzing') next[id] = a;
     }
+    // A conta é a fonte durável. Cada task é um registro separado para um
+    // lote grande nunca depender da cota de um único JSON do localStorage.
+    for (const draft of Object.values(durableDraftsRef.current)) {
+      if (draft.scope !== esc || !pertenceAoEscopo(draft.sourceTaskId, esc)) continue;
+      const a = draft.analysis;
+      if (!a || (a.status !== 'ready' && a.status !== 'partial' && a.status !== 'error')) continue;
+      next[draft.sourceTaskId] = a.status === 'ready' || a.status === 'partial'
+        ? { ...a, status: a.roleSlots.length > 0 && a.roleSlots.every(slotPronto) ? 'ready' : 'partial' }
+        : a;
+    }
     taskAnalysesRef.current = next;
     setTaskAnalyses(next);
     setSelectedTaskIds(new Set(Object.keys(next)));
@@ -2100,8 +2131,30 @@ function ClickUpPilotInner() {
     if (esc.startsWith('docs:')) return m === 'docs' && base.startsWith(`pilot_docs_${esc.slice(5)}_`);
     return m === null;
   }
+  function excluirDrafts(ids: Iterable<string>, esc = escopoRef.current) {
+    const recordIds = Array.from(ids, (taskId) => pilotDraftId(esc, taskId));
+    for (const id of recordIds) delete durableDraftsRef.current[id];
+    if (draftsHydratedRef.current && recordIds.length) {
+      void deleteDurableRecords('background', recordIds).catch((e) => setError((e as Error).message));
+    }
+  }
   const restauradosRef = useRef<Set<string>>(new Set());
   const creatorRestauradoRef = useRef(false);
+  const draftWriterRef = useRef(createRecordWriter('background'));
+  const durableDraftsRef = useRef<Record<string, PilotDraftRecord>>({});
+  const draftsHydratedRef = useRef(false);
+
+  // DurableRecordsProvider só monta esta página depois de identificar a conta.
+  useEffect(() => {
+    const hydrate = () => {
+      if (!durabilityStatus().ready) return;
+      durableDraftsRef.current = draftWriterRef.current.hydrate<PilotDraftRecord>();
+      draftsHydratedRef.current = true;
+      restaurarAnalises(escopoRef.current);
+    };
+    hydrate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // AUTO-SAVE: grava o mapa do escopo a cada mudança — só depois do restauro
   // dele (senão o mapa vazio do primeiro render apagaria o salvo) e só o que
   // pertence ao escopo (análise em voo de outro modo não vaza pra cá).
@@ -2120,7 +2173,30 @@ function ClickUpPilotInner() {
       for (const t of tasksLocaisRef.current) if (t.modo === 'creator' && !mapa[t.id] && salvas[t.id]) mapa[t.id] = salvas[t.id];
       for (const id of Object.keys(mapa)) if (!tasksLocaisRef.current.some((t) => t.id === id)) delete mapa[id];
     }
-    salvarAnalisesDoEscopo(esc, mapa);
+    if (!draftsHydratedRef.current) {
+      salvarAnalisesDoEscopo(esc, mapa);
+    } else {
+      const records: Record<string, PilotDraftRecord> = {};
+      for (const [taskId, analysis] of Object.entries(mapa)) {
+        const id = pilotDraftId(esc, taskId);
+        const a = analysis as TaskAnalysis;
+        records[id] = {
+          taskId: id, sourceTaskId: taskId, taskName: a.taskName,
+          baseAdId: a.baseAdId || a.taskName, phase: 'draft', parts: [],
+          startedAt: 1, scope: esc, analysis: a, updatedAt: 1,
+        };
+        durableDraftsRef.current[id] = records[id];
+      }
+      void draftWriterRef.current.save(records)
+        .then(() => {
+          // A chave monolítica antiga era a causa do estouro de quota. Só sai
+          // depois que os registros individuais foram aceitos pelo outbox.
+          if (Object.keys(records).length > 0) {
+            try { localStorage.removeItem('darkolab:clickup-pilot:analises'); } catch {}
+          }
+        })
+        .catch((e) => setError((e as Error).message));
+    }
   }, [taskAnalyses]);
   // TROCA DE ESCOPO: modo, empresa ou doc mudou = restaura o mapa daquele escopo.
   const escopoAplicadoRef = useRef<string | null>(null);
@@ -2616,6 +2692,7 @@ function ClickUpPilotInner() {
    * download e o passo a passo — não um texto mandando o user procurar.
    */
   const [extFaltando, setExtFaltando] = useState(false);
+  const [extVersao, setExtVersao] = useState<string | null>(null);
   const extFaltandoRef = useRef(false);
   extFaltandoRef.current = extFaltando;
   /* A extensão é o motor de TUDO que o Pilot dispara. Até 06.09 o aviso de
@@ -2628,7 +2705,10 @@ function ClickUpPilotInner() {
     const conferir = async () => {
       try {
         const ext = await detectExtension();
-        if (vivo) setExtFaltando(!ext.connected);
+        if (vivo) {
+          setExtVersao(ext.connected ? ext.version : null);
+          setExtFaltando(!ext.connected || !extensionVersionAtLeast(ext.version));
+        }
       } catch {
         if (vivo) setExtFaltando(true);
       }
@@ -2652,6 +2732,20 @@ function ClickUpPilotInner() {
       document.removeEventListener('visibilitychange', aoVoltar);
     };
   }, []);
+
+  async function garantirExtensaoEconomia(): Promise<boolean> {
+    const ext = await detectExtension();
+    const ok = ext.connected && extensionVersionAtLeast(ext.version);
+    setExtVersao(ext.connected ? ext.version : null);
+    setExtFaltando(!ok);
+    if (!ok) {
+      setError(
+        `Modo Economia exige a extensão v${ECONOMY_EXTENSION_VERSION} ou mais nova. ` +
+        `Detectada: ${ext.connected ? `v${ext.version}` : 'não conectada'}. Baixe a versão atual e recarregue o Pilot.`,
+      );
+    }
+    return ok;
+  }
 
   /* ═══════════════ INSERTS (31.08) ═══════════════
    *  B-roll que entra NA MONTAGEM, ancorado numa palavra da copy. Os bytes
@@ -2936,27 +3030,21 @@ function ClickUpPilotInner() {
     }
     // Remove tambem TODAS siblings (G1/G2 etc) que compartilharam analise
     // com essa task primary OU eram primary dela
+    const toDelete = new Set<string>([taskId]);
+    const target = taskAnalyses[taskId];
+    if (target?.sharedWithPrimaryId) toDelete.add(target.sharedWithPrimaryId);
+    for (const a of Object.values(taskAnalyses)) {
+      if (a.sharedWithPrimaryId && toDelete.has(a.sharedWithPrimaryId)) toDelete.add(a.taskId);
+    }
+    excluirDrafts(toDelete);
     setTaskAnalyses((prev) => {
       const next = { ...prev };
-      // Acha siblings ligados: a propria + as que compartilham com ela
-      const toDelete = new Set<string>([taskId]);
-      const target = prev[taskId];
-      if (target?.sharedWithPrimaryId) {
-        // Essa e sibling — remove o primary tambem
-        toDelete.add(target.sharedWithPrimaryId);
-      }
-      for (const a of Object.values(prev)) {
-        if (a.sharedWithPrimaryId && toDelete.has(a.sharedWithPrimaryId)) {
-          toDelete.add(a.taskId);
-        }
-      }
       for (const id of toDelete) delete next[id];
       return next;
     });
     setSelectedTaskIds((prev) => {
       const n = new Set(prev);
       // Mesma logica de siblings — desmarca todos do grupo
-      const target = taskAnalyses[taskId];
       const toRemove = new Set<string>([taskId]);
       if (target?.sharedWithPrimaryId) toRemove.add(target.sharedWithPrimaryId);
       for (const a of Object.values(taskAnalyses)) {
@@ -4678,7 +4766,7 @@ function ClickUpPilotInner() {
     for (const [taskId, state] of Object.entries(persisted)) {
       // Fila do Hey Auto vive na mesma chave — o Pilot NÃO exibe nem processa
       // os disparos do Hey Auto ('heygenauto:*'). Cada tool tem sua lista.
-      if (taskId.startsWith('heygenauto:') || taskId.startsWith('archive:')) continue;
+      if (taskId.startsWith('heygenauto:') || taskId.startsWith('archive:') || taskId.startsWith('pilot-draft:')) continue;
       recoveredBatchIdsRef.current.add(taskId);
       const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
       if (wasInterrupted && state.kind === 'troca') {
@@ -7629,6 +7717,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return;
     }
 
+    // Vale para o fluxo clássico e para MORE. A checagem precisa acontecer
+    // antes de qualquer fila/checkpoint, senão uma extensão antiga deixa cards
+    // aparentando falha enquanto o HeyGen segue em outra aba.
+    const temEconomia = Array.from(selectedTaskIds).some(
+      (id) => taskAnalyses[id]?.status === 'ready' && isEconomiaEnabled(id),
+    );
+    if (temEconomia && !(await garantirExtensaoEconomia())) return;
+
     if (moreMagnificMode) {
       // MORE: HeyGen Auto roda pra TODAS as tasks ready (igual ao fluxo
       // classico). Magnific gated SO pras tasks ready com JSON — o gate
@@ -7699,32 +7795,6 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         !taskAnalyses[id]?.trocaBriefing,
     );
 
-    // O modo Economia depende do protocolo incremental da extensão 4.40.0.
-    // Versões anteriores até conseguem iniciar, mas não publicam todos os
-    // checkpoints/previews nem a telemetria nova; o lote parece parado ou
-    // recuperado enquanto ainda roda. Bloqueia ANTES de enfileirar para nunca
-    // criar outro disparo invisível com uma extensão antiga.
-    if (normalTasks.some((id) => isEconomiaEnabled(id))) {
-      const ext = await detectExtension();
-      const minEconomia = '4.40.0';
-      const cmp = (a: string, b: string) => {
-        const aa = a.split('.').map((n) => parseInt(n, 10) || 0);
-        const bb = b.split('.').map((n) => parseInt(n, 10) || 0);
-        for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
-          const d = (aa[i] || 0) - (bb[i] || 0);
-          if (d !== 0) return d;
-        }
-        return 0;
-      };
-      if (!ext.connected || ext.version === '?' || cmp(ext.version, minEconomia) < 0) {
-        setExtFaltando(true);
-        setError(
-          `Modo economia exige a extensão v${minEconomia}+ para mostrar cada take e recuperar a fila corretamente. ` +
-          `Detectada: ${ext.connected ? `v${ext.version}` : 'não conectada'}. Atualize a extensão e recarregue o Pilot.`,
-        );
-        return;
-      }
-    }
     // CREATOR: escolher o avatar já deixa 'ready' antes de existir copy. Sem
     // trecho, a task entraria na fila só pra falhar em 'Nenhum trecho com texto'.
     const creatorSemCopy = normalTasks.filter(
@@ -10273,10 +10343,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return;
     }
     const outros = (a.partTemplates || []).filter((p) => ownerSlotIdx(a, p) !== sIdx);
-    // Smart Division é do Avatar III: body em takes de ~20s sem quebrar frase.
-    // Avatar IV/V fala o bloco INTEIRO num take só (não picota).
+    // No CREATOR o usuário escolhe: divisão inteligente ou body inteiro.
+    // Avatar IV/V continua inteiro porque esses motores não usam este corte.
     const motor = slot.engine || 'III';
-    const cortar = motor === 'III' ? (t: string) => splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 }) : (t: string) => [t];
+    const cortar = motor === 'III' && slot.copyDivision !== 'single'
+      ? (t: string) => splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 })
+      : (t: string) => [t];
     const novas = partesDaCopy(copy, slot.role, outros, cortar);
     if (!novas.length) {
       setError('Não achei texto falado nessa copy.');
@@ -11242,7 +11314,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   }
 
   /** Dispara UMA task (botão Play do card) — pela fila em background do Pilot. */
-  function dispatchTaskToHeyGen(taskId: string) {
+  async function dispatchTaskToHeyGen(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a) return;
     // ROUTER VA — se task eh VA briefing, roteia pro pipeline correto
@@ -11282,6 +11354,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       );
       return;
     }
+    if (isEconomiaEnabled(taskId) && !(await garantirExtensaoEconomia())) return;
     // DISPARO SÓ PELO PILOT (06.09): o Play entra na MESMA fila em background
     // do Start (runHeyGenGated → runTaskInBackground), que já sabe áudio por
     // avatar, gesto (motor IV), versões, decupagem e pós-produção. Antes, task
@@ -13398,24 +13471,27 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 </svg>
               </span>
               <div className="ext-falta-corpo">
-                <h3 className="ext-falta-titulo">Falta a extensão Auto Edit</h3>
+                <h3 className="ext-falta-titulo">
+                  {extVersao ? `Atualize a extensão Auto Edit (v${extVersao})` : 'Falta a extensão Auto Edit'}
+                </h3>
                 <p className="ext-falta-texto">
-                  É ela que dispara no HeyGen, lê o Google Docs e traz a sua biblioteca de avatares.
-                  Sem ela o Pilot analisa, mas não dispara.
+                  {extVersao
+                    ? `O Modo Economia requer a v${ECONOMY_EXTENSION_VERSION} ou mais nova. O Pilot bloqueia o início até receber o protocolo completo da fila.`
+                    : 'É ela que dispara no HeyGen, lê o Google Docs e traz a sua biblioteca de avatares. Sem ela o Pilot analisa, mas não dispara.'}
                 </p>
                 <div className="ext-falta-acoes">
                   <a href="/api/extension/download" download className="ext-falta-cta">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
                     </svg>
-                    Baixar extensão
+                    {extVersao ? 'Baixar atualização' : 'Baixar extensão'}
                   </a>
                   {/* Sem botão de "já instalei": a página procura a extensão
                       sozinha, a cada 3s e quando a aba volta ao foco. Instalou,
                       o aviso some. */}
                   <span className="ext-falta-status">
                     <span className="ext-falta-radar" aria-hidden />
-                    procurando a extensão
+                    {extVersao ? `aguardando v${ECONOMY_EXTENSION_VERSION}+` : 'procurando a extensão'}
                   </span>
                 </div>
                 <details className="ext-falta-passos">
@@ -15133,7 +15209,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       color="lime"
                                       title={a.status === 'partial' ? 'Tem avatar pendente abaixo' : 'Disparar — gerar videos HeyGen'}
                                       disabled={a.status === 'partial'}
-                                      onClick={() => dispatchTaskToHeyGen(a.taskId)}
+                                      onClick={() => void dispatchTaskToHeyGen(a.taskId)}
                                       pulse={a.status === 'ready'}
                                     />
                                   </div>
@@ -16514,7 +16590,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                               {!r.body.trim()
                                                                 ? 'sem body: cada hook vira um vídeo sozinho'
                                                                 : motor === 'III'
-                                                                  ? 'o mesmo pra todos os hooks · corte automático em takes de ~20s'
+                                                                  ? slot.copyDivision === 'single'
+                                                                    ? 'o mesmo pra todos os hooks · body inteiro em um take'
+                                                                    : 'o mesmo pra todos os hooks · corte automático em takes de ~20s'
                                                                   : `o mesmo pra todos os hooks · Avatar ${motor}: bloco inteiro, sem picotar`}
                                                             </span>
                                                           </span>
@@ -16545,12 +16623,30 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </div>
 
                                                       <div className="cc-foot">
+                                                        <div className="cc-division" role="group" aria-label="Divisão do body">
+                                                          <button
+                                                            type="button"
+                                                            className={`cc-division-btn ${slot.copyDivision !== 'single' ? 'is-active' : ''}`}
+                                                            onClick={() => updateRoleSlot(a.taskId, sIdx, { copyDivision: 'smart' })}
+                                                            aria-pressed={slot.copyDivision !== 'single'}
+                                                          >
+                                                            Smart Division
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            className={`cc-division-btn ${slot.copyDivision === 'single' ? 'is-active' : ''}`}
+                                                            onClick={() => updateRoleSlot(a.taskId, sIdx, { copyDivision: 'single' })}
+                                                            aria-pressed={slot.copyDivision === 'single'}
+                                                          >
+                                                            Sem divisão
+                                                          </button>
+                                                        </div>
                                                         <button
                                                           type="button"
                                                           className="cc-cta"
                                                           disabled={!!problema}
                                                           onClick={() => aplicarCopyNoSlot(a.taskId, sIdx)}
-                                                          title={`Divide o body em takes e monta um vídeo por hook pra ${slot.role}. Substitui os takes que já eram dele.`}
+                                                          title={`Monta um vídeo por hook para ${slot.role} usando a divisão selecionada.`}
                                                         >
                                                           <span className="cc-cta-ico" aria-hidden>
                                                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -16559,7 +16655,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                               <path d="M12 3v18" strokeDasharray="2.5 3" />
                                                             </svg>
                                                           </span>
-                                                          Smart Division
+                                                          Montar takes
                                                           <span className="cc-brilho" aria-hidden />
                                                         </button>
                                                         {problema === 'hooks-demais' ? <span className="cc-erro">Até {MAX_HOOKS} hooks.</span> : null}

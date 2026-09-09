@@ -90,7 +90,7 @@ export function refreshDurableRecords(): Promise<void> {
         more = body.more;
       }
       await locked(() => {
-        // TTL applies only to history. Never prune background on age or count.
+        // TTL applies only to history. Never prune background.
         initError = '';
         for (const row of readLocal()) {
           const event = row.data ?? row.base;
@@ -155,7 +155,7 @@ export function createRecordWriter(kind: RecordKind) {
               row.pending = crypto.randomUUID();
               saveLocal(row);
               seen[id] = clone(data);
-              if (kind === 'background' && typeof data.startedAt === 'number') {
+              if (kind === 'background' && data.phase !== 'draft' && typeof data.startedAt === 'number') {
                 const eventId = `dispatch:${id}:${data.startedAt}`;
                 const hkey = keyFor('history', eventId);
                 const hraw = localStorage.getItem(hkey);
