@@ -23,11 +23,30 @@ export type FFLoadStage = (stage: string) => void;
 let instance: FFmpeg | null = null;
 let loadingPromise: Promise<FFmpeg> | null = null;
 
-const CORE_VERSION = '0.12.6';
+// O bundle UMD do @ffmpeg/ffmpeg é transformado pelo Next em um worker que
+// não consegue fazer o fallback `import(blob:)` do core: ele vira um require
+// estático inexistente e falha com "Cannot find module blob:...". Mantemos o
+// core no CDN/cache, mas iniciamos explicitamente o worker ESM oficial. Ele
+// usa `import()` nativo e aceita os Blob URLs do cache com segurança.
+const CORE_VERSION = '0.12.9';
 const CDNS = [
-  `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`,
-  `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/umd`,
+  `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/esm`,
+  `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/esm`,
 ];
+const FFMPEG_WORKER_ESM = [
+  'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
+  'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/worker.js',
+];
+let classWorkerURL: string | null = null;
+
+function getClassWorkerURL(): string {
+  if (classWorkerURL) return classWorkerURL;
+  // O bootstrap mantém imports absolutos: se o próprio worker fosse convertido
+  // em blob, seus `./const.js` e `./errors.js` deixariam de resolver.
+  const source = `try { await import(${JSON.stringify(FFMPEG_WORKER_ESM[0])}); } catch { await import(${JSON.stringify(FFMPEG_WORKER_ESM[1])}); }`;
+  classWorkerURL = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+  return classWorkerURL;
+}
 
 const LOAD_TIMEOUT_MS = 90_000; // 90s total pra carregar core + wasm
 // WATCHDOG GLOBAL de exec: teto MUITO generoso (só pega HANG infinito do
@@ -196,7 +215,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
         cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
       ]);
       onStage?.('Inicializando...');
-      await ff.load({ coreURL, wasmURL });
+      await ff.load({ coreURL, wasmURL, classWorkerURL: getClassWorkerURL() });
       onStage?.('Pronto.');
       return ff;
     } catch (err) {
