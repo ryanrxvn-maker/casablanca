@@ -25,6 +25,9 @@ export type BatchJob3DPhase =
   /** Takes ainda RENDERIZANDO no HeyGen (plataforma lenta). Não é falha e não
    *  re-dispara nada — o watcher fecha sozinho. Ver [[heygen-health]]. */
   | 'waiting-heygen'
+  /** O registro sobreviveu, mas esta aba não é mais o executor. Não é falha:
+   *  o usuário pode retomar com segurança se não houver um runner vivo. */
+  | 'recoverable'
   | 'done'
   | 'failed';
 
@@ -379,6 +382,7 @@ const PHASE_MAP: Record<BatchJob3DPhase, { label: string; icon: React.ReactNode;
   downloading: { label: 'Baixando', icon: <IconDownload size={12} />, tone: 'progress', barFrom: 'from-cyan-300', barTo: 'to-lime' },
   post: { label: 'Montando', icon: <IconStack size={12} />, tone: 'progress', barFrom: 'from-lime/80', barTo: 'to-lime' },
   'waiting-heygen': { label: 'Aguardando HeyGen', icon: <IconClock size={12} />, tone: 'warn', barFrom: 'from-amber-400', barTo: 'to-amber-200' },
+  recoverable: { label: 'Pronta para retomar', icon: <IconClock size={12} />, tone: 'warn', barFrom: 'from-amber-400', barTo: 'to-amber-200' },
   done: { label: 'Pronto', icon: <IconCheck size={12} />, tone: 'success', barFrom: 'from-lime/80', barTo: 'to-lime' },
   failed: { label: 'Falhou', icon: <IconAlert size={12} />, tone: 'error', barFrom: 'from-rose-400', barTo: 'to-rose-300' },
 };
@@ -452,6 +456,13 @@ function classifyBanner(raw: string | undefined, phase: BatchJob3DPhase): MsgBan
       kind: 'wait',
       title: 'O HeyGen ainda está renderizando esses takes',
       hint: 'Não é falha e não re-gerei nada (economiza cota). Eu re-checo sozinho e fecho a montagem assim que ficarem prontos.',
+    };
+  }
+  if (phase === 'recoverable') {
+    return {
+      kind: 'wait',
+      title: 'Execução pausada com segurança',
+      hint: 'O Pilot preservou o que já existia. Clique em Retomar para continuar a partir daqui.',
     };
   }
   if (phase !== 'failed') return null;
@@ -565,14 +576,14 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     : phase === 'done' ? 'border-lime/35'
     : phase === 'failed' ? 'border-rose-400/35'
     // Esperar o HeyGen é aviso âmbar, nunca o vermelho de falha.
-    : phase === 'waiting-heygen' ? 'border-amber-400/35'
+    : phase === 'waiting-heygen' || phase === 'recoverable' ? 'border-amber-400/35'
     : isRunning ? 'border-fuchsia-400/30'
     : 'border-white/8';
   const bgGradient =
     showAsWarn ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
     : phase === 'done' ? 'from-lime/[0.07] via-lime/[0.02] to-transparent'
     : phase === 'failed' ? 'from-rose-500/[0.07] via-rose-500/[0.02] to-transparent'
-    : phase === 'waiting-heygen' ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
+    : phase === 'waiting-heygen' || phase === 'recoverable' ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
     : isRunning ? 'from-fuchsia-500/[0.07] via-fuchsia-500/[0.02] to-transparent'
     : 'from-white/[0.04] to-transparent';
 

@@ -1053,7 +1053,7 @@ type BatchTaskState = {
   /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed
    *  waiting-heygen = takes ainda RENDERIZANDO no HeyGen (plataforma lenta). NÃO
    *  é falha e NÃO re-dispara — o watcher retoma sozinho quando ficarem prontos. */
-  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed' | 'waiting-heygen';
+  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed' | 'waiting-heygen' | 'recoverable';
   /** Per-part status durante dispatch (parteN: error|null) */
   /** ⚠ `usouAvatarId`/`usouVoiceId`/`usouEngine` = o que REALMENTE gerou este
    *  take, nao o que o plano pede hoje. Sao coisas diferentes: em 23.08 o AD06
@@ -4661,8 +4661,12 @@ function ClickUpPilotInner() {
         interruptedCount++;
         restored[taskId] = {
           ...state,
-          phase: 'failed',
-          message: 'Registro recuperado. Confira se outra aba ainda está processando antes de clicar em Retomar.',
+          // "Recuperado" não é erro. A execução pode estar viva em outra aba
+          // (o pulso ao vivo a sobrepõe logo abaixo); se não estiver, este card
+          // fica explícita e honestamente pronto para retomar, sem o vermelho
+          // enganoso de uma falha que o Pilot não confirmou.
+          phase: 'recoverable',
+          message: 'Execução recuperada — pronta para Retomar.',
           finishedAt: undefined,
         };
       } else {
