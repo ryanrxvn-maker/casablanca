@@ -6298,7 +6298,7 @@ function ClickUpPilotInner() {
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
-              [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
+              [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}${p.detail ? ` · ${p.detail}` : ''}` },
             }));
           },
         }, taskId);
@@ -7145,7 +7145,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
-              [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
+              [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}${p.detail ? ` · ${p.detail}` : ''}` },
             }));
           },
         }, taskId);
@@ -7495,6 +7495,33 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         !taskAnalyses[id]?.vaBriefing &&
         !taskAnalyses[id]?.trocaBriefing,
     );
+
+    // O modo Economia depende do protocolo incremental da extensão 4.40.0.
+    // Versões anteriores até conseguem iniciar, mas não publicam todos os
+    // checkpoints/previews nem a telemetria nova; o lote parece parado ou
+    // recuperado enquanto ainda roda. Bloqueia ANTES de enfileirar para nunca
+    // criar outro disparo invisível com uma extensão antiga.
+    if (normalTasks.some((id) => isEconomiaEnabled(id))) {
+      const ext = await detectExtension();
+      const minEconomia = '4.40.0';
+      const cmp = (a: string, b: string) => {
+        const aa = a.split('.').map((n) => parseInt(n, 10) || 0);
+        const bb = b.split('.').map((n) => parseInt(n, 10) || 0);
+        for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
+          const d = (aa[i] || 0) - (bb[i] || 0);
+          if (d !== 0) return d;
+        }
+        return 0;
+      };
+      if (!ext.connected || ext.version === '?' || cmp(ext.version, minEconomia) < 0) {
+        setExtFaltando(true);
+        setError(
+          `Modo economia exige a extensão v${minEconomia}+ para mostrar cada take e recuperar a fila corretamente. ` +
+          `Detectada: ${ext.connected ? `v${ext.version}` : 'não conectada'}. Atualize a extensão e recarregue o Pilot.`,
+        );
+        return;
+      }
+    }
     // CREATOR: escolher o avatar já deixa 'ready' antes de existir copy. Sem
     // trecho, a task entraria na fila só pra falhar em 'Nenhum trecho com texto'.
     const creatorSemCopy = normalTasks.filter(
@@ -8870,7 +8897,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         onProgress: (p) => {
           setBatchStates((prev) => ({
             ...prev,
-            [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
+            [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}${p.detail ? ` · ${p.detail}` : ''}` },
           }));
         },
       }, taskId);
@@ -13904,7 +13931,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       <ul className="grid gap-3">
                         {Object.values(batchStatesVisiveis).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
-                          const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
+                          // Quando já entrou em download/pós, todo videoId já foi
+                          // confirmado pelo motor. Batches antigos não persistiam
+                          // videoStatus e mostravam 0 prontos durante a montagem,
+                          // embora os nove MP4s estivessem baixados.
+                          const renderConfirmadoPelaFase = ['downloading', 'post', 'done'].includes(b.phase);
+                          const partsRendered = b.parts.filter(p => p.videoStatus === 'completed' || (renderConfirmadoPelaFase && !!p.videoId)).length;
                           // "Tudo OK" = todas partes COM CONTEÚDO dispararam + renderizaram E
                           //  pipeline produziu o esperado.
                           //
@@ -14057,7 +14089,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 validIdxsFiltered.push(originalIdx);
                                 return {
                                   label: p.label,
-                                  status: p.videoStatus || 'processing',
+                                  status: p.videoStatus || (renderConfirmadoPelaFase ? 'completed' : 'processing'),
                                   videoUrl: p.videoUrl ?? null,
                                   error: p.error ?? null,
                                 };

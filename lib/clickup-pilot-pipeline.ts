@@ -43,6 +43,9 @@ export type AssembledPart = {
 export type PipelineProgress = {
   stage: 'assembling' | 'regulando' | 'decupando' | 'posproduzindo' | 'camuflando' | 'done';
   currentFilename?: string;
+  /** Subetapa humana dentro do take atual. Mantém a tela viva durante os dois
+   *  passes do normalizador em vez de deixar um genérico "0/1" por minutos. */
+  detail?: string;
   doneCount: number;
   totalCount: number;
 };
@@ -272,10 +275,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // Helper compartilhado: roda uma promise com timeout. ffmpeg-wasm pode TRAVAR
   // (loop infinito) num decode de áudio corrompido — sem timeout o pipeline
   // ficava pendurado pra sempre (user reportou RETOMAR travando, 2026-05-28).
-  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
-    Promise.race([
-      p,
-      new Promise<T>((_, rej) => setTimeout(() => {
+  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<T>((_, rej) => {
+      timer = setTimeout(() => {
         // ffmpeg-wasm TRAVOU no worker. CRÍTICO: mata o worker (cancelFFmpeg) pra
         // a PRÓXIMA op — e o RETOMAR — começarem com instância LIMPA. Sem isso a
         // instância poisoned fazia TODA op seguinte (resto do nivelamento, concat,
@@ -285,8 +288,16 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         // então matar a instância aqui não afeta nenhuma outra op em andamento.
         try { cancelFFmpeg(); } catch { /* ignora */ }
         rej(new Error(`${label} timeout ${ms / 1000}s`));
-      }, ms)),
-    ]);
+      }, ms);
+    });
+    // CRÍTICO: o timeout antigo nunca era cancelado quando o exec terminava.
+    // Minutos depois ele acordava e matava o FFmpeg que já estava trabalhando
+    // em OUTRO take. Isso explicava o lote parar em 97%/"regulando" apesar de
+    // os takes anteriores terem concluído normalmente.
+    return Promise.race([p, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  };
 
   // Timeout GENEROSO p/ concat (proporcional ao tamanho total) — nunca mata um
   // re-encode legítimo (mesmo de montagem grande), só pega um HANG infinito do
@@ -418,14 +429,25 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // média dela. Se falhar 2x, devolve o clipe original E REGISTRA — parte crua no
   // meio de partes niveladas era a origem do "uma parte alta, outra baixa".
   const nivelFalhou: string[] = [];   // partes que entraram SEM nivelar (vira aviso na task)
-  const regularVoz = async (blob: Blob, label: string): Promise<Blob> => {
+  const regularVoz = async (
+    blob: Blob,
+    label: string,
+    progress: { filename: string; index: number; total: number },
+  ): Promise<Blob> => {
     // Timeout PROPORCIONAL ao tamanho (era 150s fixo): parte LONGA (BODY de
     // 60-90s) num PC carregado estourava o teto no meio de um nivelamento
     // LEGÍTIMO → a parte caía no clipe original (sem nivelar) e empurrava a
     // montagem pros caminhos frágeis (concat misto/re-encode). Um HANG de
     // verdade não depende deste teto: o watchdog por batimento do worker mata
     // em ~3min de silêncio de qualquer jeito.
-    const levelMs = Math.min(600_000, Math.max(150_000, Math.round((blob.size / (1024 * 1024)) * 6_000)));
+    const durSec = await blobDurSec(blob).catch(() => 0);
+    // O trabalho é áudio em dois passes e o vídeo normalmente é stream-copy.
+    // Um teto calculado pela duração é muito mais fiel que bytes (bitrate alto
+    // fazia um take curto ganhar 10min por tentativa). Mantém folga ampla para
+    // PCs carregados, mas um take ruim deixa de segurar a fila por até 20min.
+    const byDuration = durSec > 0 ? durSec * 4_000 + 60_000 : 0;
+    const bySize = Math.round((blob.size / (1024 * 1024)) * 4_000);
+    const levelMs = Math.min(360_000, Math.max(120_000, byDuration || bySize));
     // TENTA 2x: uma parte que entra CRUA no meio de partes niveladas é a origem do
     // "uma parte muito alta e outra muito baixa" que o cliente ouve. Falha aqui é
     // quase sempre transitória (heap do wasm), e instância limpa costuma resolver.
@@ -438,7 +460,16 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           // parte. O 'natural' de antes só acertava a média e deixava o contraste.
           prepareVoiceForDecupagem(
             blob,
-            { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) },
+            { onStage: (s) => {
+              console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`);
+              onProgress?.({
+                stage: 'regulando',
+                currentFilename: progress.filename,
+                detail: `take ${progress.index + 1}/${progress.total} · ${s.replace(/\.{3}$/, '')}`,
+                doneCount: progress.index,
+                totalCount: progress.total,
+              });
+            } },
             'mp4',
             'full',
             (motivo) => {
@@ -505,18 +536,31 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     const out2: Blob[] = [];
     for (let i = 0; i < blobs.length; i++) {
       const lbl = partLabels[i];
+      onProgress?.({
+        stage: 'regulando',
+        currentFilename: groupLabel,
+        detail: `take ${i + 1}/${blobs.length} · ${lbl || 'parte'}`,
+        doneCount: i,
+        totalCount: blobs.length,
+      });
       if (readClipCache && loadCachedClip && lbl) {
         try {
           const cached = await loadCachedClip('leveled', lbl);
           if (cached && cached.size > 1024) {
             console.log(`[clickup-pilot-pipeline] nivel ${lbl}: CACHE HIT (pulou nivelamento)`);
             out2.push(cached);
+            onProgress?.({ stage: 'regulando', currentFilename: groupLabel, detail: `take ${i + 1}/${blobs.length} · cache pronto`, doneCount: i + 1, totalCount: blobs.length });
             continue;
           }
         } catch {}
       }
-      const leveled = await regularVoz(blobs[i], `${groupLabel} parte ${i + 1}/${blobs.length}`);
+      const leveled = await regularVoz(
+        blobs[i],
+        `${groupLabel} parte ${i + 1}/${blobs.length}`,
+        { filename: groupLabel, index: i, total: blobs.length },
+      );
       out2.push(leveled);
+      onProgress?.({ stage: 'regulando', currentFilename: groupLabel, detail: `take ${i + 1}/${blobs.length} · pronto`, doneCount: i + 1, totalCount: blobs.length });
       // SÓ guarda no cache o que foi MESMO nivelado. Guardar o clipe cru sob a
       // chave 'leveled' carimbava o defeito: o RETOMAR dava CACHE HIT, pulava o
       // nivelamento pra sempre e nem re-rodar consertava.
@@ -1058,4 +1102,3 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   console.log('[clickup-pilot-pipeline] DONE', summary);
   return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary, okMontagens: okMont.length, failMontagens: failMont } };
 }
-

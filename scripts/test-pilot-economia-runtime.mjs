@@ -362,6 +362,22 @@ test('card mantém frações na largura e ignora progresso antigo quando em fila
   assert.equal(vm.runInNewContext(code, { partsTotal: 15, partsDispatched: 0, partsRendered: 0, phase: 'queued', progressoMotor: 88 }), 3);
 });
 
+test('pós-processo cancela timers vencidos e expõe progresso real por take', () => {
+  const pipeline = readFileSync('lib/clickup-pilot-pipeline.ts', 'utf8');
+  assert.match(pipeline, /Promise\.race\(\[p, timeout\]\)\.finally/);
+  assert.match(pipeline, /clearTimeout\(timer\)/);
+  assert.match(pipeline, /detail: `take \$\{i \+ 1\}\/\$\{blobs\.length\}/);
+  assert.match(pipeline, /durSec \* 4_000 \+ 60_000/);
+
+  const card = readFileSync('components/BatchJobCard3D.tsx', 'utf8');
+  assert.match(card, /\/regulando\/i\.test\(message \|\| ''\)/);
+  assert.match(card, /'REGULANDO VOZ'/);
+
+  const page = readFileSync('app/tools/clickup-pilot/page.tsx', 'utf8');
+  assert.match(page, /minEconomia = '4\.40\.0'/);
+  assert.match(page, /p\.detail \? ` · \$\{p\.detail\}`/);
+});
+
 function backgroundHarness() {
   const source = readFileSync('extension/background.js', 'utf8');
   const ast = ts.createSourceFile('background.js', source, ts.ScriptTarget.Latest, true);

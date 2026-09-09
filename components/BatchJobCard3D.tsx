@@ -560,6 +560,19 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   //    normal acusa, e o video sai com o avatar antigo parecendo certo.
   const foraDoPlano = takesForaDoPlano > 0 && phase === 'done';
   const showAsWarn = isPartialDone || montagemVelha || renderizando || foraDoPlano;
+  const postLabel = phase === 'post'
+    ? /regulando/i.test(message || '')
+      ? 'REGULANDO VOZ'
+      : /decupando/i.test(message || '')
+        ? 'DECUPANDO'
+        : /posproduzindo|pós.produ/i.test(message || '')
+          ? 'APLICANDO EDIÇÃO'
+          : /camuflando/i.test(message || '')
+            ? 'CAMUFLANDO'
+            : /assembling|montando/i.test(message || '')
+              ? 'MONTANDO'
+              : 'PÓS-PRODUÇÃO'
+    : null;
   const effectiveLabel = downloadBlocked
     ? 'Incompleto — clica Retomar'
     : renderizando
@@ -570,7 +583,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
         ? `Montagem desatualizada — ${dirtyPartsCount} take${dirtyPartsCount === 1 ? '' : 's'} mudou`
         : isPartialDone
           ? 'Pronto · pós-processo parcial'
-          : phaseInfo.label;
+          : postLabel || phaseInfo.label;
   const ringColor =
     showAsWarn ? 'border-amber-400/35'
     : phase === 'done' ? 'border-lime/35'
