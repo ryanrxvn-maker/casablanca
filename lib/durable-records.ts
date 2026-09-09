@@ -46,6 +46,16 @@ function saveLocal(row: LocalRow) {
   // Failure is propagated: callers must never announce cloud protection on quota errors.
   localStorage.setItem(keyFor(row.kind, row.id), JSON.stringify(row));
 }
+/** Fold legacy strict-conflict snapshots into a normal pending checkpoint. */
+function reconcileLocalConflicts() {
+  for (const row of readLocal()) {
+    if (!row.conflict) continue;
+    const data = mergeRecord(row.base, row.recovery ?? row.data, row.data);
+    saveLocal({ ...row, data, base: row.data,
+      pending: encode(data) === encode(row.data) ? undefined : crypto.randomUUID(),
+      recovery: undefined, conflict: false });
+  }
+}
 async function locked<T>(work: () => Promise<T> | T): Promise<T> {
   if (!owner) throw new Error('A conta ainda não foi identificada. Os registros existentes não foram alterados.');
   if (!navigator.locks) throw new Error('Este navegador não oferece a proteção necessária para salvar entre abas. Use o Chrome atualizado.');
@@ -55,7 +65,10 @@ function refreshStatus() {
   const rows = readLocal();
   status.pending = rows.filter(r => !!r.pending).length;
   status.conflicts = rows.filter(r => r.conflict).length;
-  if (status.conflicts) notify('Há alterações conflitantes preservadas. Exporte a cópia de recuperação antes de revisar.', true);
+  // Existing records from the short-lived strict-conflict implementation are
+  // reconciled in-place below. Never turn a recoverable checkpoint race into a
+  // global UI error that hides the actual Pilot queue.
+  if (status.conflicts) notify('Registros locais preservados; reconciliando atualizações da fila.', false);
   // Pendências são a fila normal do salvamento assíncrono, não uma falha.
   // Se elas bloqueiam o provider, o Pilot desmonta quando um novo disparo
   // precisa gravar o checkpoint e a tela deixa de mostrar a fila real.
@@ -83,6 +96,7 @@ export function refreshDurableRecords(): Promise<void> {
           const event = row.data ?? row.base;
           if (row.kind === 'history' && event && !inRetention('history', event)) localStorage.removeItem(keyFor(row.kind, row.id));
         }
+        reconcileLocalConflicts();
         refreshStatus();
       });
     } catch (e) { initError = (e as Error).message; notify(initError, true); }
@@ -129,7 +143,14 @@ export function createRecordWriter(kind: RecordKind) {
             const raw = localStorage.getItem(keyFor(kind, id));
             const row: LocalRow = raw ? JSON.parse(raw) : { kind, id, data: null, base: null, revision: 0 };
             try {
-              if (row.conflict || (raw && row.data === null)) throw new Error('Este disparo foi excluído ou tem conflito. A alteração antiga não foi aplicada.');
+            // An explicit removal always wins over a late checkpoint from an
+            // older tab. It must never resurrect the task.
+            if (raw && row.data === null) continue;
+            if (row.conflict) {
+              const reconciled = mergeRecord(row.base, row.recovery ?? row.data, row.data);
+              row.data = reconciled; row.base = reconciled;
+              row.recovery = undefined; row.conflict = false;
+            }
               row.data = mergeRecord(seen[id] ?? null, data, row.data);
               row.pending = crypto.randomUUID();
               saveLocal(row);
@@ -144,10 +165,7 @@ export function createRecordWriter(kind: RecordKind) {
                   if (inRetention('history', event)) saveLocal({ kind: 'history', id: eventId, data: event, base: null, revision: 0, pending: crypto.randomUUID() });
                 }
               }
-            } catch (e) {
-              saveLocal({ ...row, recovery: data, conflict: true });
-              throw e;
-            }
+            } catch (e) { throw e; }
           }
           refreshStatus();
         });
@@ -198,8 +216,10 @@ async function absorb(remote: CloudRow) {
     saveLocal({ ...local, data, base: remoteData, revision: remote.revision,
       pending: encode(data) === encode(remoteData) ? undefined : crypto.randomUUID() });
   } catch {
-    saveLocal({ ...local, data: remoteData, base: remoteData, revision: remote.revision,
-      pending: undefined, recovery: local.data, conflict: true });
+    // Defensive fallback for malformed legacy data: retain both snapshots and
+    // retry the account save. The app must remain usable while it recovers.
+    saveLocal({ ...local, data: local.data ?? remoteData, base: remoteData, revision: remote.revision,
+      pending: crypto.randomUUID(), recovery: undefined, conflict: false });
   }
 }
 
@@ -272,7 +292,7 @@ export function initializeDurableRecords(): Promise<void> {
       status.legacy = !imported ? Object.keys(legacy.background).length + Object.keys(legacy.history).length : 0;
       status.ready = true;
       initError = '';
-      refreshStatus();
+      await locked(() => { reconcileLocalConflicts(); refreshStatus(); });
       await syncDurableRecords();
     } catch (e) {
       initError = (e as Error).message;

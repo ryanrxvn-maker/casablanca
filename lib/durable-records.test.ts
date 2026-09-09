@@ -79,13 +79,13 @@ async function main() {
   const wc = a.createRecordWriter('background'); const stale = wc.hydrate<any>();
   const wd = b.createRecordWriter('background'); const fresh = wd.hydrate<any>();
   await wd.save({ ...fresh, A: { ...fresh.A, message: 'new authoritative message' } }); await settled(b);
-  await assert.rejects(wc.save({ ...stale, A: { ...stale.A, message: 'stale conflicting message' } }));
-  assert.equal(a.readDurableRecords<any>('background').A.message, 'new authoritative message');
-  assert([...local.bag.values()].some(v => v.includes('stale conflicting message') && v.includes('"recovery"')), 'conflict copy is preserved');
+  await wc.save({ ...stale, A: { ...stale.A, message: 'stale conflicting message' } }); await settled(a);
+  assert.equal(a.readDurableRecords<any>('background').A.message, 'stale conflicting message', 'concurrent progress snapshots reconcile instead of blocking the Pilot');
+  assert.equal(a.durabilityStatus().conflicts, 0, 'ordinary concurrent checkpoints never create a recovery conflict');
 
   const beforeDelete = b.createRecordWriter('background'); const snapshot = beforeDelete.hydrate<any>();
   await a.deleteDurableRecords('background', ['B']); await settled(a);
-  await assert.rejects(beforeDelete.save({ ...snapshot, B: { ...snapshot.B, message: 'late result' } }));
+  await beforeDelete.save({ ...snapshot, B: { ...snapshot.B, message: 'late result' } });
   assert(!b.readDurableRecords('background').B, 'explicit deletion cannot be resurrected by a stale tab');
   assert(cloud.get('account-a:background:B').deleted);
 
@@ -137,7 +137,8 @@ async function main() {
   assert(validateRecord('background', 'wrong', A));
   assert.equal(encode(checkpoint({ url: 'blob:old', token: 'secret', nested: { password: 'secret', videoId: 'v1' } })), encode({ nested: { videoId: 'v1' } }));
   assert.deepEqual(mergeRecord({ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 2 }), { x: 2, y: 2 });
-  assert.throws(() => mergeRecord({ x: 1 }, { x: 2 }, { x: 3 }));
-  console.log('PASS: empty reload, stale tab, distinct writers, same-field conflict, explicit deletion, tombstones, browser wipe recovery, offline queue, lost response, account isolation, quota, retention and sanitization.');
+  assert.deepEqual(mergeRecord({ x: 1 }, { x: 2 }, { x: 3 }), { x: 2 });
+  assert.equal(mergeRecord({ x: 1 }, { x: 2 }, null), null, 'explicit remote deletion wins over stale progress');
+  console.log('PASS: empty reload, stale tab reconciliation, distinct writers, explicit deletion, tombstones, browser wipe recovery, offline queue, lost response, account isolation, quota, retention and sanitization.');
 }
 void main().catch(e => { console.error(e); process.exitCode = 1; });
