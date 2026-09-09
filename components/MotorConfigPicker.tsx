@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MOTORS, CREDIT_COST_PER_MIN, DEFAULT_TAKE_SECONDS, estimateCost, sanitizePercent, type Motor, type MotorConfig } from '@/lib/motor-config';
 import { useHeyGenCredits } from '@/lib/use-heygen-credits';
 import { motorEfetivo } from '@/lib/heygen-motion-motor';
@@ -23,6 +23,7 @@ export function MotorConfigPicker({
   takeSeconds,
   avatarSlots,
   setAvatarMotor,
+  lockedMotor,
 }: {
   config: MotorConfig;
   setConfig: (c: MotorConfig) => void;
@@ -50,8 +51,17 @@ export function MotorConfigPicker({
     imageMode?: boolean;
   }>;
   setAvatarMotor?: (id: string, m: Motor) => void;
+  /** Motor imposto temporariamente por um modo de disparo, como Economia. */
+  lockedMotor?: Motor;
 }) {
   const [collapsed, setCollapsed] = useState(true); // minimizado por padrao
+  const locked = !!lockedMotor;
+
+  // Se Economia for ligada com o seletor aberto, ele fecha imediatamente. A
+  // configuração manual continua salva e volta a aparecer ao desligar o modo.
+  useEffect(() => {
+    if (locked) setCollapsed(true);
+  }, [locked]);
   // Duracao: usa array per-take quando disponivel (calculado da copy/audio),
   // senao DEFAULT_TAKE_SECONDS uniforme
   // Previa de creditos / saldo HeyGen REMOVIDOS a pedido — picker so
@@ -59,10 +69,13 @@ export function MotorConfigPicker({
 
   // Label compacto pro botao 3D
   const motorLabel =
+    lockedMotor ? `Avatar ${lockedMotor}` :
     config.kind === 'global' ? `Avatar ${config.motor}` :
     config.kind === 'percent' ? `Mix %` : 'Por avatar';
   const motorColor =
-    config.kind === 'global'
+    lockedMotor
+      ? (lockedMotor === 'III' ? 'lime' : lockedMotor === 'IV' ? 'amber' : 'fuchsia')
+      : config.kind === 'global'
       ? (config.motor === 'III' ? 'lime' : config.motor === 'IV' ? 'amber' : 'fuchsia')
       : 'cyan';
   const colorClasses: Record<string, string> = {
@@ -79,8 +92,9 @@ export function MotorConfigPicker({
         <button
           type="button"
           onClick={() => setCollapsed(false)}
-          className={`group/motor relative inline-flex h-9 items-center gap-2 rounded-full border px-3 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.03] active:translate-y-0 active:scale-[0.98] ${colorClasses[motorColor]}`}
-          title="Escolher motor de avatar (III / IV / V)"
+          disabled={locked}
+          className={`group/motor relative inline-flex h-9 items-center gap-2 rounded-full border px-3 transition-all duration-200 ${locked ? 'cursor-not-allowed opacity-70 grayscale-[0.12]' : 'hover:-translate-y-0.5 hover:scale-[1.03] active:translate-y-0 active:scale-[0.98]'} ${colorClasses[motorColor]}`}
+          title={locked ? `Avatar ${lockedMotor} fixado no Modo Economia` : 'Escolher motor de avatar (III / IV / V)'}
         >
           <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/20 to-transparent" aria-hidden />
           {/* Chip icon */}
@@ -107,7 +121,7 @@ export function MotorConfigPicker({
         </div>
       )}
 
-      {!collapsed ? (
+      {!collapsed && !locked ? (
         <div className="mt-3 space-y-3.5">
           {/* MODE SELECTOR — segmented control pro estilo */}
           <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">

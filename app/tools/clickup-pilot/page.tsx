@@ -14898,6 +14898,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <MotorConfigPicker
                                     config={getMotorConfig(a.taskId)}
                                     setConfig={(cfg) => setMotorConfigForTask(a.taskId, cfg)}
+                                    lockedMotor={isEconomiaEnabled(a.taskId) ? MOTOR_ECONOMIA : undefined}
                                     takeCount={(a.partTemplates?.length || 0) || (a.totalParts || 0) || (a.roleSlots?.length || 0)}
                                     slotIds={(a.partTemplates || []).map((p: any, i: number) => p.label || `t${i}`)}
                                     // Calcula duracoes reais lendo a copy de cada parte (palavras / 150 wpm)
