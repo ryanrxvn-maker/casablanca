@@ -6511,6 +6511,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   async function resumeTaskBatch(taskId: string) {
     const state = batchStates[taskId];
     if (!state) return;
+    const economiaNoResume = state.economia === true || isEconomiaEnabled(taskId);
     // VA: resume = re-rodar o pipeline VA (nao tem resume parcial de
     // videoIds como a task normal). Roteia pro runner VA.
     if (state.isVA || taskAnalyses[taskId]?.vaBriefing) {
@@ -6524,7 +6525,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // — jamais puxa o take de uma geração anterior (avatar antigo).
     let genId = state.genId;
     const validParts = state.parts.filter((p) => p.videoId);
-    if (validParts.length === 0) {
+    const temParteReplanejadaParaDisparar = !!state.replan?.parts?.some((p: any) =>
+      !!(p?.text || '').trim() && (!!p.avatarId || !!p.imageKey));
+    if (validParts.length === 0 && !temParteReplanejadaParaDisparar) {
       setError('Não achei os vídeos desse disparo pra retomar — essa task precisa ser disparada do zero.');
       return;
     }
@@ -6540,7 +6543,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // cunha um genId agora, PURGA o cache velho e força re-download do HeyGen sob
     // o namespace novo. A partir daqui o batch fica isolado (RETOMARs futuros já
     // são limpos). Ver [[project_disparo_genid_isolacao]].
-    if (!genId) {
+    const legadoEconomiaComIdSintetico = !genId && validParts.some((p) => ehIdSintetico(p.videoId));
+    if (legadoEconomiaComIdSintetico) {
+      // No modo economia o id `eco:*` NAO existe no HeyGen: o blob legado e'
+      // a unica copia recuperavel do take. Migrar este batch como se fosse um
+      // disparo normal apagava exatamente esses blobs e, logo depois, tentava
+      // consultar ids sinteticos na API — 9/9 prontos viravam 0/9 faltando.
+      // Mantemos o namespace legado nesta retomada; o proximo disparo do zero
+      // ja nasce isolado por genId normalmente.
+      console.warn('[pilot resume] batch legado do modo economia — preservando o cache legado; ids sinteticos nao podem ser re-baixados do HeyGen');
+    } else if (!genId) {
       genId = newPilotGenId();
       try {
         const { deletePrefix, INSUMO_DO_DISPARO } = await import('@/lib/zip-store');
@@ -6592,6 +6604,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // Só polla HeyGen se NÃO temos tudo em cache. Se já temos, finalStatuses
       // fica vazio (download loop vai pular tudo e usar só o cache).
       let finalStatuses: Awaited<ReturnType<typeof pollVideosUntilReady>> = {};
+      // Uma URL HTTP(S) do Studio sobrevive ao checkpoint e ainda pode estar
+      // valida mesmo se o blob local sumiu. Trate-a como fonte pronta antes de
+      // decidir re-renderizar. `blob:` nao sobrevive ao reload e por isso nao
+      // entra aqui.
+      for (const p of state.parts) {
+        if (p.videoId && ehIdSintetico(p.videoId) && /^https?:\/\//i.test(p.videoUrl || '')) {
+          finalStatuses[p.videoId] = {
+            videoId: p.videoId,
+            status: 'completed',
+            videoUrl: p.videoUrl!,
+          };
+        }
+      }
       // Set de indices que JA TÊM BLOB no IDB — usado pra excluir do re-dispatch
       // de zombie (se ja tem cache, parte ja terminou antes; status 'failed'
       // novo eh ruido, nao precisa re-disparar).
@@ -6706,56 +6731,76 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           }
           if (candidateIdxs.length === 0) break;
 
-          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Conferindo no HeyGen o que realmente falhou (${candidateIdxs.length} take(s))...` } }));
-          const gate = await planRedispatch(
-            candidateIdxs,
-            (i) => {
-              const p = state.parts[i];
-              const st = p.videoId ? finalStatuses[p.videoId] : null;
-              return { videoId: p.videoId, title: `${adNameClean}_${p.label}`, error: st?.error || p.error };
-            },
-            'pilot resume',
-          );
-
-          // RESGATE: ficou pronto no HeyGen. Só alimenta finalStatuses — o loop
-          // de download logo abaixo baixa normalmente, sem gastar cota.
-          for (const r of gate.rescue) {
-            finalStatuses[r.videoId] = { videoId: r.videoId, status: 'completed', videoUrl: r.videoUrl };
-            state.parts[r.idx] = { ...state.parts[r.idx], videoId: r.videoId };
-            setBatchStates((prev) => {
-              const s = prev[taskId];
-              if (!s) return prev;
-              const newParts = s.parts.map((p, i) => i === r.idx ? { ...p, videoId: r.videoId, videoStatus: 'completed' as const, videoUrl: r.videoUrl, error: undefined } : p);
-              return { ...prev, [taskId]: { ...s, parts: newParts } };
-            });
-          }
-          if (gate.rescue.length > 0) {
-            console.log(`[pilot resume] ${gate.rescue.length} take(s) resgatado(s) prontos do HeyGen — nenhuma cota gasta`);
-          }
-
-          // AINDA RENDERIZANDO: proibido re-disparar. Registra pro fecho honesto.
-          resumeStillRenderingIds = gate.waiting.map((w) => w.videoId);
-          if (gate.waiting.length > 0) {
-            console.warn(
-              `[pilot resume] ${gate.waiting.length} take(s) AINDA renderizando no HeyGen — re-disparo BLOQUEADO:`,
-              gate.waiting.map((w) => state.parts[w.idx].label),
+          let zombieIdxs: number[];
+          let rejeitadosPraExcluir: Array<{ videoId?: string | null; error?: string | null }> = [];
+          if (economiaNoResume) {
+            // `eco:*` e' ponteiro local, nao video da API. O porteiro da API
+            // sempre o classificaria como falha. Sem cache/URL, recuperamos
+            // somente as cenas faltantes pelo Studio, ainda sem credito.
+            zombieIdxs = candidateIdxs;
+            setBatchStates((prev) => ({
+              ...prev,
+              [taskId]: {
+                ...prev[taskId],
+                phase: 'dispatching',
+                message: `Recuperando ${candidateIdxs.length} take(s) faltante(s) pelo Studio (modo economia, sem credito)...`,
+              },
+            }));
+          } else {
+            setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Conferindo no HeyGen o que realmente falhou (${candidateIdxs.length} take(s))...` } }));
+            const gate = await planRedispatch(
+              candidateIdxs,
+              (i) => {
+                const p = state.parts[i];
+                const st = p.videoId ? finalStatuses[p.videoId] : null;
+                return { videoId: p.videoId, title: `${adNameClean}_${p.label}`, error: st?.error || p.error };
+              },
+              'pilot resume',
             );
-            setBatchStates((prev) => {
-              const s = prev[taskId];
-              if (!s) return prev;
-              const newParts = s.parts.map((p, i) =>
-                gate.waiting.some((w) => w.idx === i)
-                  ? { ...p, videoStatus: 'stalled' as const, error: 'O HeyGen ainda está renderizando esse take — não re-disparei pra não gastar cota à toa.' }
-                  : p,
-              );
-              return { ...prev, [taskId]: { ...s, parts: newParts } };
-            });
-          }
 
-          const zombieIdxs = gate.redispatch;
+            // RESGATE: ficou pronto no HeyGen. Só alimenta finalStatuses — o loop
+            // de download logo abaixo baixa normalmente, sem gastar cota.
+            for (const r of gate.rescue) {
+              finalStatuses[r.videoId] = { videoId: r.videoId, status: 'completed', videoUrl: r.videoUrl };
+              state.parts[r.idx] = { ...state.parts[r.idx], videoId: r.videoId };
+              setBatchStates((prev) => {
+                const s = prev[taskId];
+                if (!s) return prev;
+                const newParts = s.parts.map((p, i) => i === r.idx ? { ...p, videoId: r.videoId, videoStatus: 'completed' as const, videoUrl: r.videoUrl, error: undefined } : p);
+                return { ...prev, [taskId]: { ...s, parts: newParts } };
+              });
+            }
+            if (gate.rescue.length > 0) {
+              console.log(`[pilot resume] ${gate.rescue.length} take(s) resgatado(s) prontos do HeyGen — nenhuma cota gasta`);
+            }
+
+            // AINDA RENDERIZANDO: proibido re-disparar. Registra pro fecho honesto.
+            resumeStillRenderingIds = gate.waiting.map((w) => w.videoId);
+            if (gate.waiting.length > 0) {
+              console.warn(
+                `[pilot resume] ${gate.waiting.length} take(s) AINDA renderizando no HeyGen — re-disparo BLOQUEADO:`,
+                gate.waiting.map((w) => state.parts[w.idx].label),
+              );
+              setBatchStates((prev) => {
+                const s = prev[taskId];
+                if (!s) return prev;
+                const newParts = s.parts.map((p, i) =>
+                  gate.waiting.some((w) => w.idx === i)
+                    ? { ...p, videoStatus: 'stalled' as const, error: 'O HeyGen ainda está renderizando esse take — não re-disparei pra não gastar cota à toa.' }
+                    : p,
+                );
+                return { ...prev, [taskId]: { ...s, parts: newParts } };
+              });
+            }
+            zombieIdxs = gate.redispatch;
+            rejeitadosPraExcluir = gate.rejected;
+          }
           if (zombieIdxs.length === 0) break;
 
-          console.warn(`[pilot resume] round ${round}: re-disparando ${zombieIdxs.length} parte(s) com falha REAL:`, zombieIdxs.map((i) => state.parts[i].label));
+          console.warn(
+            `[pilot resume] round ${round}: recuperando ${zombieIdxs.length} parte(s) ${economiaNoResume ? 'pelo Studio sem credito' : 'com falha REAL'}:`,
+            zombieIdxs.map((i) => state.parts[i].label),
+          );
           setBatchStates((prev) => ({
             ...prev,
             [taskId]: {
@@ -6768,7 +6813,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           // EXCLUI os vídeos NEGADOS antes do re-disparo (anti-memória de
           // moderação): re-submeter o MESMO texto com o registro negado vivo
           // era negado de novo — RETOMAR ficava em loop de FALHA eterno.
-          await purgeRejectedVideosBeforeRedispatch(gate.rejected, 'pilot resume');
+          await purgeRejectedVideosBeforeRedispatch(rejeitadosPraExcluir, 'pilot resume');
 
           // Pós-F5 só a CHAVE sobrevive (base64 estouraria o localStorage) —
           // os bytes voltam do IndexedDB aqui.
@@ -6834,9 +6879,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               }
             }
           }
-          const jobsToRedispatch = zombieIdxs.map((i) => {
+          const entradasRedispatch = zombieIdxs.map((i) => {
             const rp: any = state.replan!.parts[i];
-            return {
+            return { idx: i, job: {
               label: rp.label,
               copy: rp.text,
               avatarId: rp.avatarId || '',
@@ -6851,18 +6896,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               audio: audioResume.get(i),
               voiceMirroring: audioResume.has(i) ? (!!rp.audioMirror || undefined) : undefined,
               _precisaAudio: !!rp.audioKey,
-            };
+            } };
           });
           // Sem avatar E sem imagem não dá pra disparar — e take de ÁUDIO sem o
           // áudio também não (TTS entregaria voz errada). Mas descartar calado
           // faz o RETOMAR "rodar" e não fazer nada — foi assim que a faxina do
           // IndexedDB comendo o frame passou despercebida por horas. Fala qual
           // cena e por quê.
-          const semInsumo = jobsToRedispatch.filter((j) => (!j.avatarId && !j.imageDataUrl) || (j._precisaAudio && !j.audio));
-          const prontos = jobsToRedispatch.filter((j) => (j.avatarId || j.imageDataUrl) && !(j._precisaAudio && !j.audio));
+          const semInsumo = entradasRedispatch.filter(({ job: j }) => (!j.avatarId && !j.imageDataUrl) || (j._precisaAudio && !j.audio));
+          const prontos = entradasRedispatch.filter(({ job: j }) => (j.avatarId || j.imageDataUrl) && !(j._precisaAudio && !j.audio));
           if (semInsumo.length) {
-            const quais = semInsumo.map((j) => j.label).join(', ');
-            const temAudioFaltando = semInsumo.some((j) => j._precisaAudio && !j.audio);
+            const quais = semInsumo.map(({ job }) => job.label).join(', ');
+            const temAudioFaltando = semInsumo.some(({ job }) => job._precisaAudio && !job.audio);
             console.error(`[pilot resume] sem insumo no IDB pra re-disparar: ${quais}`);
             setBatchStates((prev) => ({
               ...prev,
@@ -6875,15 +6920,131 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             }));
           }
           if (prontos.length === 0) break;
-          jobsToRedispatch.length = 0;
-          jobsToRedispatch.push(...prontos);
+          const redispatchIdxs = prontos.map(({ idx }) => idx);
+          const jobsToRedispatch = prontos.map(({ job }) => job);
 
-          // MODO ECONOMIA: mesma regra da auto-cura — retomar pela API cobra.
-          if (isEconomiaEnabled(taskId)) {
-            const msg = `Modo economia ligado: ${jobsToRedispatch.length} take(s) não foram re-disparados, porque o retomar automático sai pela API e cobra. Renderize de novo pelo Studio, ou desligue o modo economia pra completar pela API.`;
-            console.warn(`[clickup-pilot] ${msg}`);
-            setBatchStates((prev) => (prev[taskId] ? { ...prev, [taskId]: { ...prev[taskId], message: msg } } : prev));
-            break;
+          if (economiaNoResume) {
+            const partesEco: ParteDoPlano[] = redispatchIdxs.map((i) => {
+              const p: any = state.replan!.parts[i];
+              const lib = p.avatarId ? findAvatarOptionById(p.avatarId) : null;
+              return {
+                label: p.label,
+                text: p.text,
+                avatarId: p.avatarId,
+                groupId: (lib as any)?.groupId ?? null,
+                avatarName: p.avatarName ?? null,
+                voiceId: p.voiceId ?? null,
+                voiceName: p.voiceName ?? null,
+                motionPrompt: null,
+                engine: MOTOR_ECONOMIA,
+                imageKey: p.imageKey ?? null,
+                imageDataUrl: p.imageDataUrl ? 'x' : null,
+                audioKey: p.audioKey ?? null,
+              };
+            });
+            const planoEco = planejarEconomia(partesEco, { indicesDoPlano: redispatchIdxs });
+            if (planoEco.recusas.length) {
+              const r = planoEco.recusas[0];
+              setBatchStates((prev) => (prev[taskId] ? {
+                ...prev,
+                [taskId]: { ...prev[taskId], message: `Modo economia não recuperou ${r.label}: ${motivoLegivel(r.motivo)}.` },
+              } : prev));
+              break;
+            }
+
+            const cenasFeitas: ResultadoCena[] = [];
+            const guardarCena = (cena: ResultadoCena) => {
+              const pos = cenasFeitas.findIndex((x) => x.idx === cena.idx);
+              if (pos >= 0) cenasFeitas[pos] = cena;
+              else cenasFeitas.push(cena);
+              const videoId = idDaCena(cena, genId);
+              if (!videoId) return;
+              setBatchStates((prev) => {
+                const cur = prev[taskId];
+                if (!cur || !cur.parts[cena.idx]) return prev;
+                return {
+                  ...prev,
+                  [taskId]: {
+                    ...cur,
+                    parts: cur.parts.map((part, idx) => idx === cena.idx ? {
+                      ...part,
+                      videoId,
+                      videoStatus: cena.error ? 'failed' as const : 'completed' as const,
+                      videoUrl: cena.videoUrl ?? null,
+                      error: cena.error ?? null,
+                    } : part),
+                  },
+                };
+              });
+            };
+
+            const executarRecuperacaoEco = async () => {
+              for (let n = 0; n < planoEco.projetos.length; n++) {
+                if (batchCancelRef.current[taskId]) break;
+                const proj = planoEco.projetos[n];
+                const inicioOcupado = Date.now();
+                while (!batchCancelRef.current[taskId]) {
+                  const res = await gerarPelaEconomia({
+                    avatarId: proj.avatarId,
+                    groupId: proj.groupId,
+                    avatarName: proj.avatarName,
+                    voiceName: proj.voiceName,
+                    voiceId: proj.voiceId,
+                    jobLabel: adNameClean,
+                    cenas: proj.cenas.map((c) => ({ idx: c.idx, label: c.label, texto: c.texto })),
+                    tetoJobMs: proj.cenas.length * 8 * 60 * 1000 + 12 * 60 * 1000,
+                  }, (stage, percent) => {
+                    setBatchStates((prev) => (prev[taskId] ? {
+                      ...prev,
+                      [taskId]: {
+                        ...prev[taskId],
+                        phase: 'dispatching',
+                        message: `Recuperação economia ${n + 1}/${planoEco.projetos.length} · ${stage}`,
+                        progressoMotor: typeof percent === 'number'
+                          ? Math.max(prev[taskId].progressoMotor ?? 0, percent)
+                          : prev[taskId].progressoMotor,
+                      },
+                    } : prev));
+                  }, {
+                    isCancelled: () => !!batchCancelRef.current[taskId],
+                    onScene: guardarCena,
+                  });
+                  for (const cena of res.cenas || []) guardarCena(cena);
+                  const msg = (res.erro || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                  const ocupada = (res.cenas || []).length === 0 && msg.includes('outra geracao em andamento');
+                  if (ocupada && Date.now() - inicioOcupado < 6 * 60 * 60 * 1000) {
+                    setBatchStates((prev) => (prev[taskId] ? {
+                      ...prev,
+                      [taskId]: { ...prev[taskId], message: 'Aguardando a geração anterior liberar o Studio (economia em série)...' },
+                    } : prev));
+                    await sleepUnthrottled(15_000);
+                    continue;
+                  }
+                  break;
+                }
+              }
+            };
+            if (typeof navigator !== 'undefined' && navigator.locks) {
+              await navigator.locks.request('autoedit:heygen-economia:studio', { mode: 'exclusive' }, executarRecuperacaoEco);
+            } else {
+              await executarRecuperacaoEco();
+            }
+
+            for (const cena of cenasFeitas) {
+              if (cena.error || !cena.videoUrl) continue;
+              const videoId = idDaCena(cena, genId);
+              if (!videoId) continue;
+              finalStatuses[videoId] = { videoId, status: 'completed', videoUrl: cena.videoUrl };
+              state.parts[cena.idx] = {
+                ...state.parts[cena.idx],
+                videoId,
+                videoStatus: 'completed',
+                videoUrl: cena.videoUrl,
+                error: undefined,
+              };
+            }
+            if (!cenasFeitas.some((c) => !c.error && !!c.videoUrl)) break;
+            continue;
           }
           let newResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
           try {
@@ -6898,7 +7059,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               onProgress: () => {},
               onResult: (r) => {
                 // r.index eh 1-based dentro do array de jobs; mapeia pro state idx
-                const stateIdx = zombieIdxs[r.index - 1];
+                const stateIdx = redispatchIdxs[r.index - 1];
                 setBatchStates((prev) => {
                   const s = prev[taskId];
                   if (!s) return prev;
@@ -6915,7 +7076,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           // Atualiza state.parts referencia local (pra proxima iteracao do loop)
           for (let k = 0; k < newResults.length; k++) {
             const r = newResults[k];
-            const stateIdx = zombieIdxs[k];
+            const stateIdx = redispatchIdxs[k];
             if (r.videoId) state.parts[stateIdx] = { ...state.parts[stateIdx], videoId: r.videoId };
           }
 

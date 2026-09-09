@@ -376,6 +376,14 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
   const page = readFileSync('app/tools/clickup-pilot/page.tsx', 'utf8');
   assert.match(page, /minEconomia = '4\.40\.0'/);
   assert.match(page, /p\.detail \? ` · \$\{p\.detail\}`/);
+  // Retomar economia nunca pode apagar o unico cache dos ids sinteticos nem
+  // mandar `eco:*` ao porteiro da API. Se o cache sumiu, recupera apenas as
+  // cenas faltantes pelo mesmo Studio sem credito.
+  assert.match(page, /legadoEconomiaComIdSintetico/);
+  assert.match(page, /preservando o cache legado/);
+  assert.match(page, /economiaNoResume[\s\S]*Recuperando \$\{candidateIdxs\.length\} take\(s\) faltante\(s\) pelo Studio/);
+  assert.match(page, /planejarEconomia\(partesEco, \{ indicesDoPlano: redispatchIdxs \}\)/);
+  assert.doesNotMatch(page, /Modo economia ligado: \$\{jobsToRedispatch\.length\} take\(s\) não foram re-disparados/);
 });
 
 function backgroundHarness() {
