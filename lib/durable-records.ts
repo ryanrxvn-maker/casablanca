@@ -12,6 +12,10 @@ let owner: string | null = null;
 let status: DurabilityStatus = { ready: false, message: 'Recuperando os registros da conta…', pending: 0, conflicts: 0, legacy: 0, error: false };
 let initialization: Promise<void> | null = null;
 let syncing: Promise<void> | null = null;
+// Uma gravação pode chegar enquanto o POST anterior está em voo. Nesse caso o
+// novo snapshot não pertence à lista `pending` já capturada; marque uma segunda
+// passagem para ele não ficar parado até o timer global de 15 segundos.
+let syncAgain = false;
 let pulling: Promise<void> | null = null;
 let initError = '';
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -200,7 +204,11 @@ async function absorb(remote: CloudRow) {
 }
 
 export async function syncDurableRecords(): Promise<void> {
-  if (!owner || syncing) return syncing ?? Promise.resolve();
+  if (!owner) return;
+  if (syncing) {
+    syncAgain = true;
+    return syncing;
+  }
   const expectedOwner = owner;
   syncing = (async () => {
     try {
@@ -230,7 +238,13 @@ export async function syncDurableRecords(): Promise<void> {
       initError = (e as Error).message || 'Sem conexão. A cópia local está preservada e será reenviada.';
       notify(initError, true);
     }
-  })().finally(() => { syncing = null; });
+  })().finally(() => {
+    syncing = null;
+    if (syncAgain && owner === expectedOwner) {
+      syncAgain = false;
+      void syncDurableRecords();
+    }
+  });
   return syncing;
 }
 

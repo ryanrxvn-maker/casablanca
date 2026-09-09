@@ -35,7 +35,9 @@ const ETAPAS = [
   { tsc: "lib/idioma.ts lib/idioma.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck", run: [".test-tmp/idioma.test.js"] },
   { tsc: "lib/pilot-inserts.ts lib/pilot-inserts.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-inserts.test.js"] },
   { tsc: "lib/ffmpeg-serial.ts lib/ffmpeg-serial.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom", run: [".test-tmp/ffmpeg-serial.test.js"] },
-  { tsc: "lib/ffmpeg-worker.ts lib/ffmpeg-worker.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/ffmpeg-worker.test.js"] },
+  // ffmpeg-worker importa os módulos ESM estaticamente para o clique da
+  // Decupagem nunca depender de um chunk tardio. Rode esse teste como ESM.
+  { tsx: ["lib/ffmpeg-worker.test.ts"] },
   // fontes de task do Pilot (05.09): DOCS / CREATOR — doc real vira N tasks, ids seguros, .docx, persistencia
   { tsc: "lib/pilot-fontes.ts lib/pilot-fontes.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom,dom.iterable", run: [".test-tmp/pilot-fontes.test.js"] },
   { tsc: "lib/typography/player-control.ts lib/typography/player-control.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/player-control.test.js"] },

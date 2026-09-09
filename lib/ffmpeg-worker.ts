@@ -16,7 +16,8 @@
  * - Toda operacao tem timeout explicito para nao pendurar a UI.
  */
 
-import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
 
 export type FFProgress = { ratio: number; time: number };
 export type FFLog = (line: string) => void;
@@ -193,8 +194,6 @@ export function attachExecWatchdog(ff: FFmpeg, onKilled?: () => void): void {
 
 async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
   onStage?.('Preparando...');
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-
   let lastErr: unknown = null;
   for (let i = 0; i < CDNS.length; i++) {
     const baseURL = CDNS[i];
@@ -279,8 +278,6 @@ export async function speedUpVideo(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.mp4';
 
@@ -353,8 +350,6 @@ export async function compressVideoOn(
   params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
   opts: RunOptions = {},
 ): Promise<Blob> {
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const inputName = `in_${uniq}.${guessExt(file, 'mp4')}`;
   const outputName = `out_${uniq}.mp4`;
@@ -675,8 +670,6 @@ export async function speedUpAudio(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp3');
   const outputName = 'out.' + format;
 
@@ -715,8 +708,6 @@ export async function extractAudioAs(
   robust = false,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.' + format;
 
@@ -907,8 +898,6 @@ export async function muxAudioIntoVideo(
   robust = false,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const videoExt = guessExt(video, 'mp4');
   const audioExt = guessExt(audio, 'wav');
   const videoName = 'vin.' + videoExt;
@@ -970,8 +959,6 @@ export async function cutVideoSegments(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const ext = guessExt(file, 'mp4');
   const inputName = 'in.' + ext;
   const progressHandler = wireProgress(ff, opts.onProgress);
@@ -1178,7 +1165,6 @@ async function makeInputsAvailable(
       'Esse arquivo é pesado demais pra preparar no navegador nesse aparelho. Comprime o vídeo no Compressor e tenta de novo.',
     );
   }
-  const { fetchFile } = await import('@ffmpeg/util');
   const wdir = `/decupmem_${uniq}`;
   await ff.createDir(wdir);
   for (const e2 of entries) {
@@ -1606,7 +1592,7 @@ async function muxAudioOnly(
   opts: RunOptions,
 ): Promise<Blob> {
   if (!hasAudio) return videoOnly;
-  await ff.writeFile('vonly.mp4', await (await import('@ffmpeg/util')).fetchFile(videoOnly));
+  await ff.writeFile('vonly.mp4', await fetchFile(videoOnly));
   const V = (await probeVideoMetadata(videoOnly))?.durationSec || 0;
   const factor = V > 0 && audioDur > 0 ? audioDur / V : 1;
   const useTempo = Number.isFinite(factor) && Math.abs(factor - 1) > 0.0005 && factor >= 0.5 && factor <= 2;
@@ -1668,8 +1654,6 @@ export async function extractAudioForTranscription(
   durationSec?: number,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.opus';
   const progressHandler = wireProgress(ff, opts.onProgress);
@@ -1719,8 +1703,6 @@ export async function extractAudioForDiarization(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out_diar.opus';
   const progressHandler = wireProgress(ff, opts.onProgress);
@@ -1763,8 +1745,6 @@ export async function extractStereoAudioForTranscription(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.opus';
   const progressHandler = wireProgress(ff, opts.onProgress);
@@ -1863,8 +1843,6 @@ export async function splitVideoByScenes(
   opts: RunOptions = {},
 ): Promise<Take[]> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const threshold = Math.max(0.05, Math.min(0.95, options.threshold ?? 0.3));
   const minDur = Math.max(0.5, options.minDurationSec ?? 3);
@@ -2069,8 +2047,6 @@ export async function removeRegions(
 ): Promise<Blob> {
   if (regions.length === 0) throw new Error('Nenhuma regiao a remover.');
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.mp4';
   const progressHandler = wireProgress(ff, opts.onProgress);
@@ -2128,8 +2104,6 @@ export async function extractFrameAt(
   opts: { maxWidth?: number; quality?: number } = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg();
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'frame_in.' + guessExt(file, 'mp4');
   const outputName = 'frame_out.jpg';
   const maxW = opts.maxWidth ?? 1024;
@@ -2458,8 +2432,6 @@ export async function normalizeVolume(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.' + params.output;
 
@@ -2773,8 +2745,6 @@ export async function extractReportPcm(
   opts: RunOptions = {},
 ): Promise<ReportPcm> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'rep_in.' + guessExt(file, 'mp4');
   const outputName = 'rep_out.pcm';
 
@@ -2990,7 +2960,6 @@ export async function concatAvatarParts(
   if (parts.length === 1) return parts[0];
 
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   const inputNames: string[] = [];
@@ -3069,7 +3038,6 @@ export async function concatAvatarParts(
  */
 export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
   const inputName = 'norm_in.' + guessExt(file, 'mp4');
   const outputName = 'norm_out.mp4';
   const progressHandler = wireProgress(ff, opts.onProgress);
@@ -3114,7 +3082,6 @@ export async function concatVideosFast(
   if (parts.length === 1) return parts[0];
 
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   const inputNames: string[] = [];
@@ -3305,8 +3272,6 @@ export async function overlaySegmentsOnVideo(
     return original;
   }
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const baseExt = guessExt(original, 'mp4');
   const baseName = 'base.' + baseExt;
   const overlayNames: string[] = [];
@@ -3418,8 +3383,6 @@ export async function removeAvatarSilences(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const inputName = 'avatar_in.' + guessExt(file, 'mp4');
 
   // ATENCAO (bug historico): NAO usar `silenceremove` (filtro so de audio) +
@@ -3549,7 +3512,6 @@ export async function mindAdsMontage(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const { fetchFile } = await import('@ffmpeg/util');
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   const avatarName = 'avatar.mp4';
@@ -3923,7 +3885,6 @@ export async function probeFirstPts(ff: FFmpeg, blob: Blob): Promise<number> {
       found = true;
     }
   };
-  const { fetchFile } = await import('@ffmpeg/util');
   await ff.writeFile(name, await fetchFile(blob));
   ff.on('log', onLog);
   try {
@@ -3958,7 +3919,6 @@ export async function extractAudioRangeAac(
   opts: RunOptions & { ff?: FFmpeg } = {},
 ): Promise<Blob> {
   const ff = opts.ff ?? (await getFFmpeg(opts.onStage, opts.onLog));
-  const { fetchFile } = await import('@ffmpeg/util');
   const tag = acTag();
   const inputName = `aud_in_${tag}.${guessExt(clip, 'mp4')}`;
   const outputName = `aud_out_${tag}.m4a`;

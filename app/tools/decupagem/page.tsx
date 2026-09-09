@@ -703,11 +703,11 @@ export default function DecupagemPage() {
             </ToolAction>
           )}
           {zippableCount >= 2 ? (
-            <button onClick={downloadAll} className="btn-lime !py-2.5 text-xs" disabled={processing}>
+            <button type="button" onClick={downloadAll} className="btn-lime !py-2.5 text-xs" disabled={processing}>
               ↓ Baixar todos (ZIP)
             </button>
           ) : null}
-          <button onClick={clearQueue} className="btn-ghost" disabled={processing || queue.length === 0}>
+          <button type="button" onClick={clearQueue} className="btn-ghost" disabled={processing || queue.length === 0}>
             Limpar fila
           </button>
         </div>
