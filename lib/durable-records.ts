@@ -52,7 +52,10 @@ function refreshStatus() {
   status.pending = rows.filter(r => !!r.pending).length;
   status.conflicts = rows.filter(r => r.conflict).length;
   if (status.conflicts) notify('Há alterações conflitantes preservadas. Exporte a cópia de recuperação antes de revisar.', true);
-  else if (status.pending) notify(`${status.pending} registro(s) aguardando confirmação na conta. Mantenha esta aba aberta.`, true);
+  // Pendências são a fila normal do salvamento assíncrono, não uma falha.
+  // Se elas bloqueiam o provider, o Pilot desmonta quando um novo disparo
+  // precisa gravar o checkpoint e a tela deixa de mostrar a fila real.
+  else if (status.pending) notify(`${status.pending} registro(s) sincronizando na conta. Mantenha esta aba aberta.`, false);
   else if (initError) notify(initError, true);
   else notify('Registros sincronizados na conta. Background sem prazo de expiração; histórico por 7 dias.');
 }
