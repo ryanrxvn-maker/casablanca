@@ -1263,7 +1263,11 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
   // TODA pagina app.heygen.com, e o render e feito por endpoint com o cookie da
   // aba. Navegar ate o editor custava ~56s por disparo e nao servia pra nada —
   // pior, o app nem cria projeto em aba oculta, entao a navegacao so atrasava.
-  // So navega quando falta bancada (pra ter onde o app criar) ou no caminho DOM.
+  // O caminho por API nao deve navegar para o Studio quando falta bancada.
+  // Em contas novas o create-v4/draft fica nessa URL e nao cria um projeto em
+  // aba oculta; esperar um redirect aqui fazia a conta nova falhar antes de o
+  // content script conseguir procurar uma bancada valida por conta. O content
+  // script tem o cookie da sessao e resolve isso via project/items.
   // ⚠ A BANCADA NAO MORA MAIS AQUI. Ela e' guardada POR CONTA pelo content
   // script, que e' o unico lado que sabe qual conta do HeyGen esta logada (o
   // background nao tem o cookie). Guardar aqui, numa chave global unica, fazia
@@ -1279,9 +1283,11 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
   let urlAgora = tab.url || '';
   try { urlAgora = (await chrome.tabs.get(tab.id)).url || urlAgora; } catch {}
   const jaNoHeyGen = /^https:\/\/app\.heygen\.com\//.test(urlAgora);
-  // Sem id confirmado, nao pulamos a navegacao: em conta nova ela e o passo
-  // que cria o draft com a estrutura que o endpoint de render exige.
-  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen && !!bancadaPrevia;
+  // O modo economia por API sempre pode seguir com a aba atual: se a bancada
+  // estiver guardada, usa o caminho rapido; se nao estiver, o content script
+  // chama ecoGarantirBancada() e publica o estado/progresso corretamente.
+  // O caminho DOM continua navegando como antes.
+  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen;
 
   if (!pularNavegacao) {
     reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
@@ -1290,19 +1296,10 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     await waitForTabComplete(tab.id, 40000);
     await new Promise((r) => setTimeout(r, 5000));
     await waitForTabReady(tab.id);
-    if (jobMsg === 'HG_RUN_ECONOMY_API' && !bancadaPrevia) {
-      // O redirect para /create-v4/<id> e o sinal de que a bancada nasceu.
-      // Nao criamos outro draft vazio pela API se o HeyGen ainda nao terminou.
-      bancadaPrevia = await esperarBancada(tab.id, 20000);
-      if (!bancadaPrevia) {
-        activeJobs.delete(requestId);
-        throw new Error(
-          'O HeyGen nao criou a bancada do Studio nesta conta. Abra o Studio uma vez, ' +
-          'deixe a pagina terminar de carregar e tente o Modo Economia novamente. Nada foi gerado nem cobrado.',
-        );
-      }
-      console.log('[DARKO LAB BG] bancada criada pelo Studio:', String(bancadaPrevia).slice(0, 12));
-    }
+    // A economia por API nao espera redirect nem tenta criar projeto pela UI.
+    // Se chegou aqui por uma URL que nao era do HeyGen, a navegacao acima foi
+    // apenas para instalar o content script; a resolucao da bancada continua
+    // no ecoGarantirBancada(), com a conta confirmada nessa aba.
   } else {
     console.log('[DARKO LAB BG] bancada conhecida — pulando a navegacao pro Studio');
   }

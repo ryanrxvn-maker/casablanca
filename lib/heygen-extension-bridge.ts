@@ -50,7 +50,7 @@ const pending = new Map<string, Pending>();
 let listenerInstalled = false;
 let activeExtensionId: string | null = null;
 
-export const ECONOMY_EXTENSION_VERSION = '4.42.0';
+export const ECONOMY_EXTENSION_VERSION = '4.43.0';
 
 function compareVersion(a: string, b: string) {
   const aa = a.split('.').map((n) => Number(n) || 0);

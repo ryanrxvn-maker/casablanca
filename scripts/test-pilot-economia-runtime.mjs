@@ -400,8 +400,10 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
   assert.match(extension, /ecoContaAtual\(true\)/);
   const background = readFileSync('extension/background.js', 'utf8');
   assert.match(background, /HG_ECO_BENCH_STATUS/);
-  assert.match(background, /esperarBancada\(tab\.id, 20000\)/);
-  assert.match(background, /pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen && !!bancadaPrevia/);
+  // Conta nova nao pode ficar esperando um redirect que o create-v4 nao faz
+  // em aba de fundo: o content script resolve a bancada pela API da conta.
+  assert.doesNotMatch(background, /esperarBancada\(tab\.id, 20000\)/);
+  assert.match(background, /pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen/);
 });
 
 function backgroundHarness() {

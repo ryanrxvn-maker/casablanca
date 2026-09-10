@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.42.0';
+const DARKO_EXT_VERSION = '4.43.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -5889,12 +5889,25 @@ async function ecoBancadaServe(videoId) {
 
 /** Um projeto ja existente cujo draft tem cena+avatar+fala. So LEITURA. */
 async function ecoBancadaExistente() {
-  // ⚠ A rota certa e `v2/project/items` (data.items[].video_id). `video.list`
-  // e `pacific/video.list` NAO existem nessa API e devolviam vazio calado — a
-  // bancada caia direto no create, que nasce sem cena e nao serve.
-  for (const rota of ['v2/project/items?limit=30', 'v1/project/items?limit=30']) {
+  // ⚠ A listagem de projetos do Studio nao usa o default da rota: sem
+  // `item_types=heygen_video_draft`, algumas contas (especialmente contas
+  // recem-trocadas no mesmo Chrome) devolvem `items: []` mesmo com drafts
+  // visiveis na barra Recentes. O Pilot entao caia no `draft/create` vazio e
+  // acusava "bancada sem cena". O Studio filtra explicitamente por esse tipo;
+  // repetimos o contrato dele e mantemos um fallback de compatibilidade para
+  // contas ainda no endpoint v1.
+  const rotas = [
+    'v2/project/items?item_types=heygen_video_draft&limit=50',
+    'v1/project/items?item_types=heygen_video_draft&limit=50',
+    'v1/project/items?item_type=heygen_video_draft&limit=50',
+  ];
+  for (const rota of rotas) {
     const r = await ecoApiJson(rota, { tetoMs: 20000 });
-    let lista = (r.data && (r.data.items || r.data.list)) || [];
+    // Algumas respostas antigas aninham a pagina em `data.data`; aceitar as
+    // duas formas evita transformar um draft valido em lista vazia.
+    const pagina = r.data && r.data.data && typeof r.data.data === 'object'
+      ? r.data.data : r.data;
+    let lista = (pagina && (pagina.items || pagina.list || pagina.projects)) || [];
     if (!Array.isArray(lista)) continue;
     // Projeto NOSSO primeiro: assim a bancada para de ser um AD do usuario
     // assim que existir uma "Auto Edit - bancada" na conta.
@@ -5903,7 +5916,11 @@ async function ecoBancadaExistente() {
       return nosso(a) - nosso(b);
     });
     for (const v of lista.slice(0, 12)) {
-      const id = v && (v.video_id || v.id);
+      const tipo = String(v && (v.item_type || v.type || '')).toLowerCase();
+      // Quando o filtro e aceito, todo item ja e draft. Se a conta ignorar o
+      // filtro, nao arrisque abrir asset/video final como bancada.
+      if (tipo && !/heygen_video_draft|video_draft|heygen_video/.test(tipo)) continue;
+      const id = v && (v.video_id || v.item_id || v.id);
       if (!id || v.is_trash || v.is_deleted) continue;
       try {
         const { wrapper } = await ecoDraftLer(id);
