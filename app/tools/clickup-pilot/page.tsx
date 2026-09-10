@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
-import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus } from '@/lib/durable-records';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
@@ -2143,16 +2143,21 @@ function ClickUpPilotInner() {
   const draftWriterRef = useRef(createRecordWriter('background'));
   const durableDraftsRef = useRef<Record<string, PilotDraftRecord>>({});
   const draftsHydratedRef = useRef(false);
+  const batchHydratedRef = useRef(false);
 
-  // DurableRecordsProvider só monta esta página depois de identificar a conta.
+  // A análise salva do Creator/Docs também pode chegar depois do primeiro
+  // render quando a recuperação da conta demora. O evento garante que ela seja
+  // reidratada assim que a conta ficar pronta.
   useEffect(() => {
     const hydrate = () => {
-      if (!durabilityStatus().ready) return;
+      if (draftsHydratedRef.current || !durabilityStatus().ready) return;
       durableDraftsRef.current = draftWriterRef.current.hydrate<PilotDraftRecord>();
       draftsHydratedRef.current = true;
       restaurarAnalises(escopoRef.current);
     };
     hydrate();
+    window.addEventListener(RECORDS_EVENT, hydrate);
+    return () => window.removeEventListener(RECORDS_EVENT, hydrate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // AUTO-SAVE: grava o mapa do escopo a cada mudança — só depois do restauro
@@ -4790,9 +4795,15 @@ function ClickUpPilotInner() {
 
   /** Recover account records without claiming ownership of a worker in another
    * tab/device. Interrupted cards offer Retomar; the display-only phase/message
-   * are not persisted over the live worker's checkpoint. */
+   * are not persisted over the live worker's checkpoint. If the provider had
+   * to render in degraded mode while the account request retried, the records
+   * are hydrated from the durable store on its readiness event — never from an
+   * empty initial state. */
   useEffect(() => {
-    const persisted = batchWriterRef.current.hydrate<BatchTaskState>();
+    const hydrateBatch = () => {
+      if (batchHydratedRef.current || !durabilityStatus().ready) return;
+      batchHydratedRef.current = true;
+      const persisted = batchWriterRef.current.hydrate<BatchTaskState>();
     if (Object.keys(persisted).length === 0) return;
     const restored: Record<string, BatchTaskState> = {};
     let interruptedCount = 0;
@@ -5040,6 +5051,10 @@ function ClickUpPilotInner() {
         }
       })();
     }
+    };
+    hydrateBatch();
+    window.addEventListener(RECORDS_EVENT, hydrateBatch);
+    return () => window.removeEventListener(RECORDS_EVENT, hydrateBatch);
   }, []);
 
   /** FAXINA do IndexedDB (LRU por disparo) — sem isto o `darkolab-zip-store`

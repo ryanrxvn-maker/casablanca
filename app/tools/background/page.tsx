@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ToolShell } from '@/components/ToolShell';
 import { getPilotTeamNames, shortWorkspaceLabel } from '@/lib/clickup-pilot-config';
-import { createRecordWriter, readDurableRecords, deleteDurableRecords } from '@/lib/durable-records';
+import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 
 /**
  * Background Tasks — viewer dedicado dos batches do ClickUp Pilot.
@@ -172,25 +172,33 @@ export default function BackgroundTasksPage() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'lip' | 'broll'>('all');
 
   useEffect(() => {
-    setBatches(readBatches());
-    setDrafts(readDrafts());
+    // O provider pode montar a página em modo degradado enquanto recupera a
+    // conta. Ler antes de `ready` devolve {} e, sem este listener, a tela ficava
+    // vazia para sempre mesmo com o background salvo no armazenamento durável.
+    const refreshRecords = () => {
+      if (!durabilityStatus().ready) return;
+      setBatches(readBatches());
+      setDrafts(readDrafts());
+    };
+    refreshRecords();
     setCancelMap(readCancelMap());
     setMagnific(readMagnificQueue());
     const onStorage = (e: StorageEvent) => {
-      if (e.key === BATCH_STATE_KEY) setBatches(readBatches());
+      if (e.key === BATCH_STATE_KEY) refreshRecords();
       if (e.key === CANCEL_KEY) setCancelMap(readCancelMap());
       if (e.key === MAGNIFIC_QUEUE_KEY) setMagnific(readMagnificQueue());
     };
     window.addEventListener('storage', onStorage);
+    window.addEventListener(RECORDS_EVENT, refreshRecords);
     // Tambem refazer leitura periodica pra abas mesma origem nao disparam storage
     const id = setInterval(() => {
-      setBatches(readBatches());
-      setDrafts(readDrafts());
+      refreshRecords();
       setMagnific(readMagnificQueue());
       setTick((t) => t + 1);
     }, 1500);
     return () => {
       window.removeEventListener('storage', onStorage);
+      window.removeEventListener(RECORDS_EVENT, refreshRecords);
       clearInterval(id);
     };
   }, []);
