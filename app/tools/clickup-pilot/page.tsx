@@ -2693,6 +2693,7 @@ function ClickUpPilotInner() {
    */
   const [extFaltando, setExtFaltando] = useState(false);
   const [extVersao, setExtVersao] = useState<string | null>(null);
+  const [baixandoExtensao, setBaixandoExtensao] = useState(false);
   const extFaltandoRef = useRef(false);
   extFaltandoRef.current = extFaltando;
   /* A extensão é o motor de TUDO que o Pilot dispara. Até 06.09 o aviso de
@@ -2732,6 +2733,39 @@ function ClickUpPilotInner() {
       document.removeEventListener('visibilitychange', aoVoltar);
     };
   }, []);
+
+  async function baixarExtensao() {
+    if (baixandoExtensao) return;
+    setBaixandoExtensao(true);
+    try {
+      // O fallback via Blob evita que o Chrome trate o ZIP como um download
+      // automático bloqueável. O endpoint continua sendo o mesmo e valida o
+      // pacote antes de entregar os bytes.
+      const response = await fetch('/api/extension/download', { cache: 'no-store' });
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const body = await response.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch { /* mantém o status HTTP */ }
+        throw new Error(detail);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `auto-edit-heygen-extension-v${ECONOMY_EXTENSION_VERSION}.zip`;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (e) {
+      setError(`Não foi possível baixar a extensão: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBaixandoExtensao(false);
+    }
+  }
 
   async function garantirExtensaoEconomia(): Promise<boolean> {
     const ext = await detectExtension();
@@ -13480,12 +13514,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     : 'É ela que dispara no HeyGen, lê o Google Docs e traz a sua biblioteca de avatares. Sem ela o Pilot analisa, mas não dispara.'}
                 </p>
                 <div className="ext-falta-acoes">
-                  <a href="/api/extension/download" download className="ext-falta-cta">
+                  <button type="button" onClick={() => void baixarExtensao()} className="ext-falta-cta" disabled={baixandoExtensao}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
                     </svg>
-                    {extVersao ? 'Baixar atualização' : 'Baixar extensão'}
-                  </a>
+                    {baixandoExtensao ? 'Preparando download…' : extVersao ? 'Baixar atualização' : 'Baixar extensão'}
+                  </button>
                   {/* Sem botão de "já instalei": a página procura a extensão
                       sozinha, a cada 3s e quando a aba volta ao foco. Instalou,
                       o aviso some. */}
