@@ -5415,6 +5415,9 @@ function ClickUpPilotInner() {
           taskId,
           taskName: rTaskName,
           baseAdId: rBaseAdId,
+          // Economia é um snapshot do disparo. O toggle pode mudar depois;
+          // nunca deixe a reconstrução da fase apagar a marca da fila.
+          economia: prev[taskId]?.economia ?? isEconomiaEnabled(taskId),
           phase: 'failed',
           parts: plan!.parts.map((p: any) => ({
             label: p.label,
@@ -5466,6 +5469,9 @@ function ClickUpPilotInner() {
       ...prev,
       [taskId]: {
         taskId, taskName: rTaskName, baseAdId: rBaseAdId,
+        // A entrada queued já carrega a escolha do motor. Esta reconstrução
+        // acontece exatamente ao pegar a vaga e precisa carregá-la até done.
+        economia: prev[taskId]?.economia ?? isEconomiaEnabled(taskId),
         genId,
         phase: 'dispatching',
         parts: plan!.parts.map((p: any) => ({ label: p.label, videoId: null, renamedTo: labelToFilename(p.label) })),
@@ -7979,6 +7985,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const driveId = a.vaBriefing.linkAdFileId || extractDriveFileId(vaAdUrl[id] || '');
           next[id] = {
             ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId: a.vaBriefing.baseAdId, parts: [], startedAt: Date.now() }),
+            // Congela a escolha feita no START para o card VA inteiro.
+            economia: next[id]?.economia ?? isEconomiaEnabled(id),
             phase: 'queued',
             isVA: true,
             adOriginalUrl: driveId ? `https://drive.google.com/uc?export=download&id=${driveId}` : undefined,
@@ -12240,7 +12248,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
-          ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now() }),
+          ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), economia: isEconomiaEnabled(taskId) }),
           phase: 'failed', isVA: true, message: msg, finishedAt: Date.now(),
         } as BatchTaskState,
       }));
@@ -12252,7 +12260,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
     // Helpers de escrita no batchStates
     const patchVA = (patch: Partial<BatchTaskState>) => setBatchStates((prev) => {
-      const base: BatchTaskState = prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: vaStartedAt, phase: 'dispatching' };
+      const base: BatchTaskState = prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: vaStartedAt, phase: 'dispatching', economia: isEconomiaEnabled(taskId) };
       return { ...prev, [taskId]: { ...base, ...patch } };
     });
     // Cria/atualiza um "take" (parte) por label — alimenta os previews.
@@ -12553,7 +12561,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     const vaStartedAt = batchStates[taskId]?.startedAt || Date.now();
 
     const patchVA = (patch: Partial<BatchTaskState>) => setBatchStates((prev) => {
-      const base: BatchTaskState = prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: vaStartedAt, phase: 'dispatching' };
+      const base: BatchTaskState = prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: vaStartedAt, phase: 'dispatching', economia: isEconomiaEnabled(taskId) };
       return { ...prev, [taskId]: { ...base, ...patch } };
     });
     const upsertPart = (label: string, patch: Partial<BatchTaskState['parts'][number]>) => setBatchStates((prev) => {
@@ -14399,6 +14407,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
                           // Preview slot — so renderiza se ja tem video disparado
                           const previewsNode = b.kind === 'troca' ? trocaProofNode : b.parts.some((p) => p.videoId) ? (() => {
+                            // economiaMetricas só é escrito pelo runner de Economia;
+                            // ele também identifica cards legados cujo snapshot
+                            // antigo perdeu o campo `economia` na transição de fase.
+                            const economiaDoBatch = b.economia === true || Boolean(b.economiaMetricas);
                             // Mapeia idx do filtered → idx no array original (pra EDIT funcionar)
                             const validIdxsFiltered: number[] = [];
                             const previews: LipsyncTake[] = b.parts
@@ -14418,7 +14430,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             const canEdit = !!b.replan?.parts?.length; // so habilita se temos plan
                             return (
                               <>
-                                {b.economia && b.economiaMetricas ? (() => {
+                                {economiaDoBatch && b.economiaMetricas ? (() => {
                                   const tempo = (ms: number) => {
                                     const seg = Math.max(0, Math.round(ms / 1000));
                                     const min = Math.floor(seg / 60);
@@ -14501,7 +14513,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               taskId={b.taskId}
                               taskName={b.taskName}
                               channels={channels}
-                              selos={selosDoCard(b.taskId, b.economia === true)}
+                              // O selo usa o snapshot persistido; métricas são um
+                              // fallback seguro para batches antigos de Economia.
+                              selos={selosDoCard(b.taskId, b.economia === true || Boolean(b.economiaMetricas))}
                               avisosPos={posResultado[b.taskId]?.aplicou === false ? posResultado[b.taskId].avisos : undefined}
                               phase={b.phase as any}
                               partsTotal={b.parts.length}
