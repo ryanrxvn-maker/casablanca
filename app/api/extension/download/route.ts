@@ -25,7 +25,6 @@ const FILES = [
   'background.js',
   'bridge.js',
   'heygen-content.js',
-  'README.md',
 ];
 
 const ICONS = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];
