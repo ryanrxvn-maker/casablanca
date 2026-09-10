@@ -3,7 +3,6 @@ import { ECONOMY_EXTENSION_VERSION, extensionVersionAtLeast } from './heygen-ext
 
 assert.equal(ECONOMY_EXTENSION_VERSION, '4.42.0');
 assert(extensionVersionAtLeast('4.42.0'));
-assert(extensionVersionAtLeast('4.42.0'));
 assert(!extensionVersionAtLeast('4.40.9'));
 assert(!extensionVersionAtLeast('?'));
 assert(!extensionVersionAtLeast(undefined));

@@ -1269,7 +1269,8 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
   // background nao tem o cookie). Guardar aqui, numa chave global unica, fazia
   // as DUAS empresas que o Pilot atende se derrubarem: a bancada de uma virava
   // um id inexistente na outra, e nao havia revalidacao. O `bancadaId` do
-  // payload sobrevive so' como atalho de TESTE.
+  // payload so' e' um fallback interno; nunca decide a conta nem pula o
+  // preflight.
   // `bancadaPrevia` veio somente do preflight confirmado acima ou da URL nova
   // criada pelo Studio.
   // ⚠ Reler a aba: o `tab` veio de findOrCreateHeyGenTab e a URL dele pode
