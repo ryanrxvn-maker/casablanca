@@ -121,8 +121,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'HG_ECONOMY_API_GENERATE') {
-    // MODO ECONOMIA POR API — sem DOM. O Studio so e aberto pra que o proprio
-    // app CRIE o projeto (a bancada); dali em diante e tudo JSON + endpoint.
+    // MODO ECONOMIA POR API — sem DOM. A aba HeyGen só fornece a sessão/cookie;
+    // o content script encontra ou prepara a bancada da conta e faz tudo por
+    // JSON + endpoint.
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_API').catch((err) => {
       activeJobs.delete(requestId);
@@ -1304,10 +1305,10 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     console.log('[DARKO LAB BG] bancada conhecida — pulando a navegacao pro Studio');
   }
 
-  // O caminho por API precisa de um PROJETO de verdade (a bancada). Navegar
-  // pra /create-v4/draft?...&fromCreateButton=true faz o proprio app criar o
-  // projeto e redirecionar pra /create-v4/<id> — e navegar e a unica coisa que
-  // sempre funcionou em aba oculta. Sem o id nao ha o que renderizar.
+  // O caminho por API precisa de um PROJETO de verdade (a bancada). O id
+  // confirmado é repassado quando existe; sem ele, o content script procura um
+  // draft válido nessa conta antes de qualquer render. Não dependemos de um
+  // redirect da UI para criar projeto em aba oculta.
   let bancadaId = null;
   if (jobMsg === 'HG_RUN_ECONOMY_API') {
     // Bancada explicita no payload (teste, ou a que ficou guardada): usa e
