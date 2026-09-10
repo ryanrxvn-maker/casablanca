@@ -395,6 +395,13 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
 
   const extension = readFileSync('extension/heygen-content.js', 'utf8');
   assert.match(extension, /falha sistemica do HeyGen/);
+  assert.match(extension, /HG_ECO_BENCH_STATUS/);
+  assert.match(extension, /ecoBancadaStatus/);
+  assert.match(extension, /ecoContaAtual\(true\)/);
+  const background = readFileSync('extension/background.js', 'utf8');
+  assert.match(background, /HG_ECO_BENCH_STATUS/);
+  assert.match(background, /esperarBancada\(tab\.id, 20000\)/);
+  assert.match(background, /pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen && !!bancadaPrevia/);
 });
 
 function backgroundHarness() {

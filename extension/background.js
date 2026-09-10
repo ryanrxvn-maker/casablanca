@@ -111,6 +111,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // MODO ECONOMIA — Studio por TEXTO, "Render Scene" por cena (sem crédito).
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_JOB').catch((err) => {
+      activeJobs.delete(requestId);
       reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
         error: err?.message ?? String(err),
       });
@@ -124,6 +125,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // app CRIE o projeto (a bancada); dali em diante e tudo JSON + endpoint.
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_API').catch((err) => {
+      activeJobs.delete(requestId);
       reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
         error: err?.message ?? String(err),
       });
@@ -160,6 +162,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // VA de avatar — fluxo HeyGen Studio cena-por-cena (Mirror voice).
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id).catch((err) => {
+      activeJobs.delete(requestId);
       reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
         error: err?.message ?? String(err),
       });
@@ -1221,6 +1224,41 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     });
     return;
   }
+  // O render por API precisa de um draft com cena/avatar/fala. A rota de
+  // criacao da API devolve um draft vazio em contas novas; nesse caso a
+  // abertura do Studio e que faz o HeyGen criar a bancada completa. Primeiro
+  // sondamos a aba sem renderizar. Contas ja preparadas seguem pelo caminho
+  // rapido e continuam reaproveitando a bancada guardada.
+  // O payload pode conter um id antigo salvo pelo Pilot. Nunca o usamos para
+  // decidir a conta: o preflight confirma a bancada no HeyGen logado agora.
+  let bancadaPrevia = null;
+  if (jobMsg === 'HG_RUN_ECONOMY_API') {
+    try {
+      const probe = await Promise.race([
+        chrome.tabs.sendMessage(tab.id, { type: 'HG_ECO_BENCH_STATUS' }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('preflight da bancada expirou')), 12000)),
+      ]);
+      if (activeJobs.get(requestId) !== job) return;
+      if (probe && probe.ok === false && probe.error) {
+        // Falha de sessao/API e' diferente de bancada ausente. Nao abrimos o
+        // Studio nem criamos rascunho quando a conta nao foi confirmada.
+        const erroSessao = new Error(`nao consegui validar a sessao do HeyGen: ${probe.error}`);
+        erroSessao.code = 'HEYGEN_SESSION';
+        throw erroSessao;
+      }
+      if (probe && probe.ok && probe.bancadaId) bancadaPrevia = probe.bancadaId;
+      console.log('[DARKO LAB BG] preflight bancada:', probe?.source || 'sem resposta', bancadaPrevia || '(nova)');
+    } catch (e) {
+      if (e?.code === 'HEYGEN_SESSION') {
+        activeJobs.delete(requestId);
+        throw e;
+      }
+      // Se nao conseguimos provar que existe uma bancada, abrimos o Studio e
+      // deixamos o HeyGen preparar uma. Isso e seguro e evita falha silenciosa
+      // em contas com service worker recem-reiniciado.
+      console.warn('[DARKO LAB BG] preflight bancada falhou — abrindo Studio:', e?.message ?? e);
+    }
+  }
   // ⚠ O CAMINHO POR API NAO PRECISA DO STUDIO ABERTO. O content script roda em
   // TODA pagina app.heygen.com, e o render e feito por endpoint com o cookie da
   // aba. Navegar ate o editor custava ~56s por disparo e nao servia pra nada —
@@ -1232,16 +1270,17 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
   // as DUAS empresas que o Pilot atende se derrubarem: a bancada de uma virava
   // um id inexistente na outra, e nao havia revalidacao. O `bancadaId` do
   // payload sobrevive so' como atalho de TESTE.
-  const bancadaPrevia = jobMsg === 'HG_RUN_ECONOMY_API' ? (payload && payload.bancadaId) || null : null;
+  // `bancadaPrevia` veio somente do preflight confirmado acima ou da URL nova
+  // criada pelo Studio.
   // ⚠ Reler a aba: o `tab` veio de findOrCreateHeyGenTab e a URL dele pode
   // estar velha (a aba pode ter navegado no meio). Decidir pular a navegacao
   // com URL velha e' como decidir no escuro.
   let urlAgora = tab.url || '';
   try { urlAgora = (await chrome.tabs.get(tab.id)).url || urlAgora; } catch {}
   const jaNoHeyGen = /^https:\/\/app\.heygen\.com\//.test(urlAgora);
-  // O caminho por API so' precisa de UMA coisa da aba: estar em app.heygen.com,
-  // pra o content script existir com o cookie. A bancada ele resolve sozinho.
-  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen;
+  // Sem id confirmado, nao pulamos a navegacao: em conta nova ela e o passo
+  // que cria o draft com a estrutura que o endpoint de render exige.
+  const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen && !!bancadaPrevia;
 
   if (!pularNavegacao) {
     reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
@@ -1250,6 +1289,19 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     await waitForTabComplete(tab.id, 40000);
     await new Promise((r) => setTimeout(r, 5000));
     await waitForTabReady(tab.id);
+    if (jobMsg === 'HG_RUN_ECONOMY_API' && !bancadaPrevia) {
+      // O redirect para /create-v4/<id> e o sinal de que a bancada nasceu.
+      // Nao criamos outro draft vazio pela API se o HeyGen ainda nao terminou.
+      bancadaPrevia = await esperarBancada(tab.id, 20000);
+      if (!bancadaPrevia) {
+        activeJobs.delete(requestId);
+        throw new Error(
+          'O HeyGen nao criou a bancada do Studio nesta conta. Abra o Studio uma vez, ' +
+          'deixe a pagina terminar de carregar e tente o Modo Economia novamente. Nada foi gerado nem cobrado.',
+        );
+      }
+      console.log('[DARKO LAB BG] bancada criada pelo Studio:', String(bancadaPrevia).slice(0, 12));
+    }
   } else {
     console.log('[DARKO LAB BG] bancada conhecida — pulando a navegacao pro Studio');
   }

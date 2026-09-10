@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.41.0';
+const DARKO_EXT_VERSION = '4.42.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -163,6 +163,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'HG_ECO_SONDA_API') {
     ecoSondaApi(msg.bancadaId).then((r) => sendResponse(r), (e) =>
       sendResponse({ ok: false, erro: (e && e.message) || String(e) }));
+    return true;
+  }
+  if (msg && msg.type === 'HG_ECO_BENCH_STATUS') {
+    // Preflight sem render: informa ao background se esta conta ja tem uma
+    // bancada de Studio valida. Em conta nova, isso permite abrir o Studio
+    // uma unica vez para o proprio HeyGen criar o draft completo, em vez de
+    // cair no draft vazio que a rota pacific/draft/create devolve.
+    ecoBancadaStatus().then((r) => sendResponse(r), (e) =>
+      sendResponse({ ok: false, bancadaId: null, error: (e && e.message) || String(e) }));
     return true;
   }
   if (msg && msg.type === 'HG_TEST_SESSION') {
@@ -5495,7 +5504,9 @@ async function runEconomyJobApi(requestId, payload) {
     // workspace trocado (o Pilot atende DUAS empresas). Sem revalidar, um id
     // velho matava TODO disparo pra sempre, sempre com a mesma mensagem.
     // Por isso a validacao vem antes do uso e a recuperacao e' automatica.
-    const conta = await ecoContaAtual();
+    // Reconfirma a sessao a cada job. Se o usuario trocou de conta na mesma
+    // aba, nunca reutilizamos a bancada nem a chave da conta anterior.
+    const conta = await ecoContaAtual(true);
     ecoExigirJobAtivo(requestId);
     let videoId = (payload && payload.bancadaId) || (await ecoBancadaGuardada(conta)) || ecoVideoIdDaUrl();
     ecoExigirJobAtivo(requestId);
@@ -5799,13 +5810,34 @@ async function ecoCriarBancada() {
  *  DUAS empresas; ao trocar de conta, a bancada da outra virava um id que nao
  *  existe aqui — e as duas ficavam se derrubando. Agora cada conta tem a sua. */
 let ecoContaCache = null;
-async function ecoContaAtual() {
+async function ecoContaAtual(force = false) {
+  if (force) ecoContaCache = null;
   if (ecoContaCache) return ecoContaCache;
   const r = await ecoApiJson('v1/pacific/account.get?include_ff=true', { tetoMs: 15000 });
+  if (!r.ok) throw new Error(`nao consegui confirmar a conta do HeyGen — ${r.msg || 'sessao ausente'}`);
   const d = (r.data && (r.data.user || r.data.account || r.data)) || {};
   const id = d.id || d.user_id || d.account_id || d.space_id || d.username || d.email;
-  ecoContaCache = id ? String(id).slice(0, 64) : 'padrao';
+  if (!id) throw new Error('a sessao do HeyGen nao devolveu um identificador de conta');
+  ecoContaCache = String(id).slice(0, 64);
   return ecoContaCache;
+}
+
+/** Preflight barato do modo Economia. Nao renderiza e nao consome franquia. */
+async function ecoBancadaStatus() {
+  const conta = await ecoContaAtual(true);
+  const guardada = await ecoBancadaGuardada(conta);
+  if (guardada && await ecoBancadaServe(guardada)) {
+    return { ok: true, accountId: conta, bancadaId: guardada, source: 'stored' };
+  }
+  // Se a conta trocou de sessao ou o projeto foi apagado, limpa o ponteiro
+  // velho antes de procurar o projeto que esta aberto na propria aba.
+  if (guardada) await ecoGuardarBancada(conta, null);
+  const daUrl = ecoVideoIdDaUrl();
+  if (daUrl && await ecoBancadaServe(daUrl)) {
+    await ecoGuardarBancada(conta, daUrl);
+    return { ok: true, accountId: conta, bancadaId: daUrl, source: 'url' };
+  }
+  return { ok: true, accountId: conta, bancadaId: null, source: 'missing' };
 }
 
 /** A bancada guardada DESTA conta. Mora no content script de proposito: e' ele
