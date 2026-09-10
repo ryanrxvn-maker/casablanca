@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
+import { ClickUpPilotTokenSection } from '@/components/ClickUpPilotTokenSection';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 /**
@@ -468,6 +469,7 @@ export default function ConfiguracoesPage() {
             {/* ClickUp Pilot — ferramenta de uso interno; só admin vê */}
             {isAdmin ? (
               <section id="clickup" className="fade-in-up" style={{ animationDelay: '200ms' }}>
+                <ClickUpPilotTokenSection flash={flash} />
                 <ClickUpPilotStatusSection flash={flash} />
               </section>
             ) : null}
