@@ -33,6 +33,7 @@ const ETAPAS = [
   { tsc: "lib/versoes-ad.ts lib/versoes-ad.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/versoes-ad.test.js"] },
   { tsc: "lib/pilot-pos-producao.ts lib/pilot-pos-producao.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-pos-producao.test.js"] },
   { tsx: ["lib/video-duracao.test.ts"] },
+  { tsx: ["lib/pilot-plano-copy.test.ts"] },
   { tsc: "lib/idioma.ts lib/idioma.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck", run: [".test-tmp/idioma.test.js"] },
   { tsc: "lib/pilot-inserts.ts lib/pilot-inserts.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-inserts.test.js"] },
   { tsc: "lib/ffmpeg-serial.ts lib/ffmpeg-serial.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom", run: [".test-tmp/ffmpeg-serial.test.js"] },

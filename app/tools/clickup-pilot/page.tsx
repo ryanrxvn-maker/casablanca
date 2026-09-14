@@ -220,6 +220,7 @@ import {
   type DocLocal,
 } from '@/lib/pilot-fontes';
 import { takeUnicoPorLook, motorEfetivo } from '@/lib/heygen-motion-motor';
+import { planoTemCopy, partesDoPlanoComCopy, diferencaDeCobertura } from '@/lib/pilot-plano-copy';
 import { revisarCopy, contarGraves } from '@/lib/revisar-copy';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
@@ -10588,6 +10589,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   type CenaDoPlano = {
     cena: string;
     n: number;
+    /** A COPY desta cena, já no idioma do disparo (14.09). Com texto, o plano
+     *  é a fonte dos takes: não precisa de doc nem de digitar no lápis. */
+    texto?: string | null;
+    /** Nome da task (CREATOR): o plano cria a task quando ela não existe. */
+    task?: string | null;
     titulo?: string;
     avatarNome?: string | null;
     avatarId?: string | null;
@@ -10685,6 +10691,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return;
     }
     const relato: string[] = [];
+    // CREATOR (14.09): não há doc nem ClickUp — o plano CRIA as tasks que
+    // faltam, com o nome que ele declara. Síncrono (refs), então o updater
+    // abaixo já enxerga os cards novos.
+    if (modoRef.current === 'creator') {
+      const casa = (ad: string, s?: string | null) => new RegExp(`\\b${ad}\\b`).test(s || '');
+      const criadas: TaskLocal[] = [];
+      for (const [ad, cenas] of Object.entries(plano)) {
+        if (!Array.isArray(cenas) || cenas.length === 0) continue;
+        const existe =
+          Object.values(taskAnalysesRef.current).some((a) => casa(ad, a?.baseAdId) || casa(ad, a?.taskName)) ||
+          tasksLocaisRef.current.some((t) => t.modo === 'creator' && (casa(ad, t.baseAdId) || casa(ad, t.nome)));
+        if (existe) continue;
+        const declarado = (cenas.find((c) => c.task)?.task || '').replace(/\s+/g, ' ').trim();
+        const nome = declarado && casa(ad, declarado) && baseAdIdDoNome(declarado) ? declarado : ad;
+        const base = baseAdIdDoNome(nome) || ad;
+        criadas.push({ id: idTaskCreator(), modo: 'creator', nome, baseAdId: base, docKey: null, teamId: null, criadoEm: Date.now() + criadas.length });
+      }
+      if (criadas.length) {
+        const locais = [...tasksLocaisRef.current, ...criadas];
+        persistirLocais(locais);
+        setTasks(tasksSinteticasDoModo('creator', locais, docsLocaisRef.current, docAtivoKey));
+        setSelectedTaskIds((prev) => new Set([...Array.from(prev), ...criadas.map((t) => t.id)]));
+        const semeado = { ...taskAnalysesRef.current };
+        for (const t of criadas) semeado[t.id] = analiseCreatorVazia(t);
+        taskAnalysesRef.current = semeado;
+        setTaskAnalyses((prev) => {
+          const n = { ...prev };
+          for (const t of criadas) if (!n[t.id]) n[t.id] = analiseCreatorVazia(t);
+          return n;
+        });
+        creatorRestauradoRef.current = true;
+        relato.push(`CREATOR: ${criadas.length} task(s) criada(s) pelo plano — ${criadas.map((t) => t.nome).join(' · ')}`);
+      }
+    }
     setTaskAnalyses((prev) => {
       const next = { ...prev };
       for (const [ad, cenas] of Object.entries(plano)) {
@@ -10735,11 +10775,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
         // reparte as parts entre as cenas (matchByRole é o que o disparo lê)
         const partes = alvo.partTemplates || [];
+        // PLANO COM COPY (14.09): as cenas trazem o texto — os takes nascem
+        // dele (no idioma escrito) e ninguém reparte o que a análise achou.
+        const comCopy = planoTemCopy(ordenadas);
         // Ordem de preferência: quem fala (diálogo) → âncora (corte editorial)
         // → por igual. Sempre que o declarado não fecha, avisa e cai no de
         // baixo: nunca monta errado calado.
-        const querFalante = ordenadas.every((c) => c.falante);
-        const querAncora = !querFalante && ordenadas.slice(1).every((c) => c.ancora);
+        const querFalante = !comCopy && ordenadas.every((c) => c.falante);
+        const querAncora = !comCopy && !querFalante && ordenadas.slice(1).every((c) => c.ancora);
         const porFalante = querFalante ? repartirPorFalante(partes, ordenadas) : null;
         const porAncora = querAncora ? repartirPorAncora(partes, ordenadas) : null;
         if (querFalante && !porFalante) {
@@ -10748,22 +10791,39 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         if (querAncora && !porAncora) {
           relato.push(`⚠ ${ad}: âncora do plano não bateu com nenhum take — corte por igual, CONFIRA no 👁`);
         }
-        const donos = porFalante || porAncora || repartirPartes(partes.length, slots.length);
-        const novasPartes = partes
-          .map((p, i) => ({ p, dono: donos[i] }))
-          .filter((x) => x.dono >= 0)
-          .map((x) => ({ ...x.p, matchByRole: slots[x.dono].role.toLowerCase() }));
-        const descartados = partes.length - novasPartes.length;
+        let novasPartes: typeof partes;
+        let cobertura = 0;
+        if (comCopy) {
+          const cortar = (t: string) => splitCopyIntoParts(t, { targetSec: 20, minSec: 10, maxSec: 35 });
+          const geradas = partesDoPlanoComCopy(
+            ordenadas,
+            slots.map((s) => s.role),
+            (i) => takeUnicoPorLook({ engine: slots[i].engine, motionPrompt: slots[i].motionPrompt, imageMode: slots[i].imageMode }),
+            cortar,
+          );
+          cobertura = diferencaDeCobertura(ordenadas, geradas);
+          novasPartes = geradas as unknown as typeof partes;
+        } else {
+          const donos = porFalante || porAncora || repartirPartes(partes.length, slots.length);
+          novasPartes = partes
+            .map((p, i) => ({ p, dono: donos[i] }))
+            .filter((x) => x.dono >= 0)
+            .map((x) => ({ ...x.p, matchByRole: slots[x.dono].role.toLowerCase() }));
+        }
+        const descartados = comCopy ? 0 : partes.length - novasPartes.length;
 
         const faltamImagens = slots.filter((s) => s.imageMode && !s.imageDataUrl).map((s) => s.username);
+        const hooksNovos = novasPartes.filter((p) => /^(hook|gancho)/i.test(p.label)).length;
         next[alvo.taskId] = {
           ...alvo,
           roleSlots: slots,
           partTemplates: novasPartes,
           totalParts: novasPartes.length,
+          hookCount: hooksNovos,
+          bodyPartsCount: novasPartes.length - hooksNovos,
           status: slots.every(slotPronto) ? 'ready' : 'partial',
         };
-        const criterio = porFalante ? ' POR FALANTE' : porAncora ? ' POR ÂNCORA' : '';
+        const criterio = comCopy ? ' COM A COPY DO PLANO' : porFalante ? ' POR FALANTE' : porAncora ? ' POR ÂNCORA' : '';
         const semTake = slots.filter((s) => !novasPartes.some((p) => p.matchByRole === s.role.toLowerCase()));
         // CUSTO ANTES DE CLICAR. Cena fora do III vira UM take (take único por
         // look) e cobra ~6; o III cobra ~1 por pedaço. Sem esta conta, a
@@ -10785,7 +10845,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             (descartados ? ` · ${descartados} take(s) DESCARTADO(s) (falante sem cena)` : '') +
             (slots.some((s) => s.motionPrompt) ? ` · ${slots.filter((s) => s.motionPrompt).length} c/ movimento` : '') +
             (semTake.length ? ` · ⚠ sem fala: ${semTake.map((s) => s.username).join(', ')}` : '') +
-            (faltamImagens.length ? ` · ⚠ falta a imagem de ${faltamImagens.join(', ')}` : ''),
+            (faltamImagens.length ? ` · ⚠ falta a imagem de ${faltamImagens.join(', ')}` : '') +
+            (comCopy
+              ? cobertura === 0
+                ? ` · copy 100% nos takes`
+                : ` · ⚠ COPY ${cobertura < 0 ? 'COMIDA' : 'SOBRANDO'}: ${Math.abs(cobertura)} caractere(s) de diferença`
+              : ''),
         );
       }
       return next;
