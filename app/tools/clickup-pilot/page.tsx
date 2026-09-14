@@ -164,6 +164,7 @@ import { PilotEconomiaBtn } from '@/components/PilotEconomiaBtn';
 import { DocsBar, CreatorBar } from '@/components/PilotFontesBar';
 import {
   MOTOR_ECONOMIA,
+  MODO_ECONOMIA_DISPONIVEL,
   ehIdSintetico,
   idDaCena,
   idSinteticoDaCena,
@@ -2965,9 +2966,11 @@ function ClickUpPilotInner() {
     if (typeof window === 'undefined') return {};
     try { return JSON.parse(localStorage.getItem(ECONOMIA_KEY) || '{}'); } catch { return {}; }
   });
-  /** DESLIGADO por padrão: o disparo de sempre continua sendo o de sempre. */
+  /** DESLIGADO por padrão: o disparo de sempre continua sendo o de sempre.
+   *  ⚠ E com a chave geral desligada (MODO_ECONOMIA_DISPONIVEL) nenhuma task
+   *  entra em economia, nem uma que ficou ligada no localStorage antes. */
   const isEconomiaEnabled = (taskId: string) =>
-    !!(taskId in economiaEnabled ? economiaEnabled[taskId] : economiaEnabled[taskIdBaseDaVersao(taskId)]);
+    MODO_ECONOMIA_DISPONIVEL && !!(taskId in economiaEnabled ? economiaEnabled[taskId] : economiaEnabled[taskIdBaseDaVersao(taskId)]);
   const setEconomiaFor = (taskId: string, enabled: boolean) => {
     setEconomiaEnabled((prev) => {
       const next = { ...prev, [taskId]: enabled };
@@ -15243,7 +15246,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     {/* MODO ECONOMIA (06.09): dispara pelo Studio e renderiza
                                         cena por cena, sem consumir crédito. Só entra quando o AD
                                         inteiro pode ir por texto em Avatar III. */}
-                                    {(() => {
+                                    {/* Modo economia RETIRADO da tela (14.09.2026): ver MODO_ECONOMIA_DISPONIVEL. */}
+                                    {MODO_ECONOMIA_DISPONIVEL && (() => {
                                       // Trecho ainda em branco não conta: o buildPlan já o descarta
                                       // antes do disparo, e ele travava o modo num AD que cabe.
                                       const partes = partesParaEconomia(a).filter((p) => (p.text || '').trim());

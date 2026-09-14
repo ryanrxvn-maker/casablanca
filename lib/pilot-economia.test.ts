@@ -1,4 +1,4 @@
-import {
+import { MODO_ECONOMIA_DISPONIVEL,
   MOTOR_ECONOMIA,
   ehIdSintetico,
   idDaCena,
@@ -319,6 +319,21 @@ console.log('pilot-economia:');
 {
   const p = planejarEconomia([take({ label: 'HOOK 1', text: '  fala com espaço  \n' })]);
   eq(p.projetos[0].cenas[0].texto, 'fala com espaço', 'o texto da cena vai aparado');
+}
+
+/* ─── 11. modo economia RETIRADO da tela (14.09.2026) ───
+ * O HeyGen passou a limitar o render de cena a previews mensais com marca
+ * d'agua; o modo nao entrega take limpo. Ninguem (nem admin) pode ver o botao
+ * nem disparar por ele ate alguem virar a chave de proposito. */
+{
+  eq(MODO_ECONOMIA_DISPONIVEL, false, 'chave geral do modo economia continua desligada');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fonte: string = require('fs').readFileSync('app/tools/clickup-pilot/page.tsx', 'utf8');
+  eq(/const isEconomiaEnabled = \(taskId: string\) =>\s*MODO_ECONOMIA_DISPONIVEL && /.test(fonte), true, 'isEconomiaEnabled so liga com a chave');
+  const usos = fonte.split('<PilotEconomiaBtn').length - 1;
+  eq(usos, 1, 'o botao aparece num lugar so na pagina');
+  const antesDoBotao = fonte.slice(0, fonte.indexOf('<PilotEconomiaBtn'));
+  eq(antesDoBotao.lastIndexOf('{MODO_ECONOMIA_DISPONIVEL && (() => {') > antesDoBotao.lastIndexOf('{acoesDePosProducao'), true, 'o botao so renderiza atras da chave');
 }
 
 console.log(`\npilot-economia: ${oks} ok, ${fails} fail`);

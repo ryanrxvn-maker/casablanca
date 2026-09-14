@@ -20,6 +20,16 @@
  * Por isso o gesto é REMOVIDO aqui, na origem, e não só escondido na tela.
  */
 
+/** CHAVE GERAL DO MODO ECONOMIA — DESLIGADO (14.09.2026).
+ *
+ *  O HeyGen mudou o render de cena: agora sao 100 previews por MES, todos com
+ *  marca d'agua, e depois deles o render e' RECUSADO ("monthly scene preview
+ *  limit"). Medido ponta a ponta — nao existe mais take limpo a 0 credito, entao
+ *  o modo foi RETIRADO da tela pra todo mundo (inclusive admin) pra ninguem
+ *  achar que funciona. O codigo fica guardado: pra testar de novo no futuro,
+ *  basta virar esta chave pra true (o botao volta e o disparo volta a rotear). */
+export const MODO_ECONOMIA_DISPONIVEL = false;
+
 /** O motor é sempre este no modo economia. IV e V cobram. */
 export const MOTOR_ECONOMIA = 'III' as const;
 
