@@ -393,19 +393,40 @@ export function gerarPelaEconomia(
         ),
       );
     }, ackMs);
-    const tJob = setTimeout(() => {
+    // ⚠ O PRAZO ANDA COM O PROGRESSO. A liberacao do render limpo (1x por mes
+    // por conta, dezenas de previews gratis com marca d'agua desde 14.09.2026)
+    // pode levar muitos minutos ANTES da 1a cena; um teto fixo pelo numero de
+    // cenas matava o AD no meio dela. Enquanto a extensao manda progresso, o
+    // prazo nunca fica a menos de 15 min; 15 min sem progresso e o job morre
+    // como antes (card nunca congela).
+    const FOLGA_COM_PROGRESSO_MS = 15 * 60 * 1000;
+    const comecou = Date.now();
+    let prazo = comecou + tetoJobMs;
+    const estourou = () => {
       if (!vivo) return;
       encerrar();
       avisarExtensao();
-      falharPreservando(new Error(`O modo economia passou de ${Math.round(tetoJobMs / 60000)} min sem terminar. As cenas recebidas foram preservadas.`));
-    }, tetoJobMs);
+      falharPreservando(new Error(`O modo economia passou de ${Math.round((Date.now() - comecou) / 60000)} min sem terminar. As cenas recebidas foram preservadas.`));
+    };
+    let tJob = setTimeout(estourou, tetoJobMs);
+    const estenderPrazo = () => {
+      if (!vivo) return;
+      const minimo = Date.now() + FOLGA_COM_PROGRESSO_MS;
+      if (prazo >= minimo) return;
+      prazo = minimo;
+      clearTimeout(tJob);
+      tJob = setTimeout(estourou, FOLGA_COM_PROGRESSO_MS);
+    };
 
     pending.set(requestId, {
       onAck: () => {
         acked = true;
         clearTimeout(tAck);
       },
-      onProgress,
+      onProgress: (stage: string, percent?: number) => {
+        estenderPrazo();
+        onProgress?.(stage, percent);
+      },
       onScene: guardarCena,
       resolve: (bruto: string) => {
         encerrar();

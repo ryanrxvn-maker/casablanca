@@ -22,7 +22,7 @@ function declarations(file, names) {
 
 const source = declarations('extension/heygen-content.js', [
   'runEconomyJobApi', 'ecoExigirJobAtivo', 'ecoEsperarTakeApi', 'ecoPublicarCena', 'ecoAguardarEtapa', 'ecoRenderCenaResiliente',
-  'ecoDraftEscreverCena', 'ecoIdsDaCena', 'ecoFaixaDaCena', 'ecoPctDaEspera',
+  'ecoDraftEscreverCena', 'ecoIdsDaCena', 'ecoRenomearElemento', 'ecoIdNovo', 'ecoFaixaDaCena', 'ecoPctDaEspera',
   'ecoProgresso', 'ecoZerarProgresso',
 ]);
 const clean = value => JSON.parse(JSON.stringify(value));
@@ -59,7 +59,8 @@ function harness(overrides = {}) {
     ecoRenderCenaApi: async ({ wrapper: draft }) => {
       const text = draft.text_draft.script.elements.speech.text;
       calls.push(['render', text]);
-      assert.equal(draft.text_draft.visual.elements.avatar.content.engine, 'avatar_iii');
+      const avatar = Object.values(draft.text_draft.visual.elements).find(e => e.type === 'avatar');
+      assert.equal(avatar.content.engine, 'avatar_iii');
       return { ok: true, data: { video_url: `https://test/${text}.mp4` } };
     },
     ecoResumoDaResposta: () => 'ok', ecoUrlDaResposta: d => d?.video_url ?? null,
@@ -472,6 +473,155 @@ test('preempção durante preparo impede a queima e preserva o slot novo', async
   }));
   const r = await h.run();
   assert.equal(burns, 0); assert.equal(h.ctx.currentJob, 'new-job'); assert.ok(r.erro);
+});
+
+// POLÍTICA NOVA DO HEYGEN (14.09.2026): 100 previews grátis/mês no Avatar III,
+// todos MARCADOS. O preview só fica gasto quando o render TERMINA (recusado ou
+// substituído volta pra franquia) e 2 renders simultâneos consomem os dois.
+function burnHarness({ inicial = 88, modo = 'fim', cancelarNoPost = null, ttsFalhaEm = [], recusaNoCheck = null, mensal = null } = {}) {
+  const src = declarations('extension/heygen-content.js', [
+    'ecoQueimarFranquiaApi', 'ecoQueimarUmPreview', 'ecoDraftEscreverCena', 'ecoIdsDaCena',
+    'ecoRenomearElemento', 'ecoIdNovo', 'ecoExigirJobAtivo', 'ecoProgresso', 'ecoAplicarTtsNaCena', 'ecoAguardarEtapa',
+  ]);
+  const st = { restante: inicial, posts: [], avatarIds: [], esperas: 0, textos: [], noAr: 0, maxNoAr: 0 };
+  const ctx = vm.createContext({
+    console: { log() {}, warn() {}, error() {} }, Date, Math, JSON, Promise,
+    currentJob: 'job', ecoCancelado: false, ecoPctAtual: 0, ECO_QUEIMA_PARALELO: 2,
+    ECO_MSG_LIMITE_MENSAL: 'O HeyGen agora limita o render de cena a previews mensais com marca d\'agua. Modo economia indisponivel: dispare esta task pelo modo normal. Nada foi cobrado.',
+    marcarBatimento() {}, ecoLog() {}, ecoWarn() {}, reportProgress() {},
+    // Cede a vez a macrotasks: o pulso de ecoAguardarEtapa gira em `sleep` e,
+    // com sleep instantaneo, nunca deixaria o render simulado terminar.
+    sleep: () => new Promise(r => setImmediate(r)),
+    ecoFranquiaDePreview: async () => ({ restantes: st.restante, mensal }),
+    ecoVozDaCena: () => 'voice', ecoAjustesDeVoz: () => ({}),
+    ecoGerarTts: async ({ texto }) => {
+      st.textos.push(texto);
+      return ttsFalhaEm.includes(st.textos.length) ? { erro: 'HTTP 429' } : { duracao: 2, url: 'https://t/a.mp3', palavras: [] };
+    },
+    ecoRenderCenaApi: async ({ wrapper: w }) => {
+      const els = w.text_draft.visual.elements;
+      const [avatarId, avatar] = Object.entries(els).find(([, e]) => e.type === 'avatar');
+      assert.deepEqual([...els.scene.content.elements], [avatarId], 'a cena aponta pro id novo do avatar');
+      st.posts.push(avatar.content.engine);
+      st.avatarIds.push(avatarId);
+      if (cancelarNoPost && st.posts.length === cancelarNoPost) ctx.ecoCancelado = true;
+      return { ok: true, data: { job_id: `j${st.posts.length}`, free_preview_granted: true, free_previews_remaining: Math.max(0, st.restante - 1) } };
+    },
+    ecoUrlDaResposta: d => d?.video_url ?? null,
+    ecoEsperarTakeApi: async () => {
+      st.esperas++;
+      st.noAr++; st.maxNoAr = Math.max(st.maxNoAr, st.noAr);
+      await new Promise(r => setImmediate(r));
+      st.noAr--;
+      if (recusaNoCheck) throw new Error(`o HeyGen recusou o render — ${recusaNoCheck}`);
+      if (modo === 'fim') st.restante = Math.max(0, st.restante - 1);
+      return 'https://t/marked-take.mp4';
+    },
+  });
+  vm.runInContext(src, ctx);
+  const wrapper = { text_draft: {
+    visual: { layout: ['scene'], elements: {
+      scene: { content: { elements: ['avatar'] } },
+      avatar: { type: 'avatar', content: { engine: 'avatar_iv' } },
+    } },
+    script: { timeline: ['speech'], elements: { speech: { attributes: {} } } },
+  }, metadata: {} };
+  return { st, ctx, wrapper, run: () => ctx.ecoQueimarFranquiaApi('job', 'bench', wrapper, 'T', 5) };
+}
+
+test('franquia de 88 (política nova) zera esperando cada render, em lotes de 2, sempre Avatar III e id novo', async () => {
+  const b = burnHarness({ inicial: 88 });
+  const r = clean(await b.run());
+  assert.deepEqual(r, { queimadas: 88, restantes: 0, leu: true });
+  assert.equal(b.st.posts.length, 88);
+  assert.equal(b.st.esperas, 88);
+  assert.equal(b.st.maxNoAr, 2);
+  assert.equal(new Set(b.st.textos).size, 88);
+  assert.ok(b.st.posts.every(e => e === 'avatar_iii'));
+  assert.equal(new Set(b.st.avatarIds).size, 88);
+  assert.ok(b.st.avatarIds.every(id => id !== 'avatar'));
+  assert.ok(b.wrapper.text_draft.visual.elements.avatar, 'o draft base nao e mexido pelos clones');
+});
+
+test('servidor que nunca desconta para em 3 lotes e diz onde parou', async () => {
+  const b = burnHarness({ inicial: 88, modo: 'nunca' });
+  await assert.rejects(b.run(), /parou em 88/);
+  assert.equal(b.st.posts.length, 6);
+});
+
+test('render recusado no .check não conta e o motivo real chega na mensagem', async () => {
+  const b = burnHarness({ inicial: 5, recusaNoCheck: 'Video duration is 0 for element x and type ElementType.AVATAR' });
+  await assert.rejects(b.run(), /parou em 5.*Video duration is 0/);
+});
+
+test('soluço de TTS no meio da queima não derruba o disparo', async () => {
+  const b = burnHarness({ inicial: 10, ttsFalhaEm: [2, 7] });
+  const r = clean(await b.run());
+  assert.deepEqual(r, { queimadas: 10, restantes: 0, leu: true });
+  assert.equal(b.st.posts.length, 10);
+});
+
+test('cancelar durante a queima para de postar', async () => {
+  const b = burnHarness({ inicial: 88, cancelarNoPost: 5 });
+  await assert.rejects(b.run(), /Cancelad/i);
+  assert.ok(b.st.posts.length <= 6, `postou ${b.st.posts.length}`);
+});
+
+test('regra mensal do HeyGen (14.09.2026): para ANTES de qualquer render, com mensagem curta e clara', async () => {
+  const b = burnHarness({ inicial: 100, mensal: 100 });
+  await assert.rejects(b.run(), /Modo economia indisponivel: dispare esta task pelo modo normal/);
+  assert.equal(b.st.posts.length, 0);
+  assert.equal(b.st.textos.length, 0);
+  assert.ok(b.ctx.ECO_MSG_LIMITE_MENSAL.length <= 170, 'cabe no card sem cortar');
+  const zerada = burnHarness({ inicial: 0, mensal: 100 });
+  await assert.rejects(zerada.run(), /Modo economia indisponivel/);
+  assert.equal(zerada.st.posts.length, 0);
+});
+
+test('limite mensal atingido no meio do AD encerra o job na hora, sem tentar as outras cenas', async () => {
+  const h = harness((ctx, calls) => ({
+    ECO_MSG_LIMITE_MENSAL: 'O HeyGen agora limita o render de cena a previews mensais com marca d\'agua. Modo economia indisponivel: dispare esta task pelo modo normal. Nada foi cobrado.',
+    ecoRenderCenaApi: async () => { calls.push(['render', 'x']); return { ok: false, http: 400, msg: "The space's monthly scene preview limit has been reached. Please try again next month." }; },
+  }));
+  const r = await h.run();
+  assert.equal(h.calls.filter(c => c[0] === 'render').length, 1);
+  assert.match(r.erro, /Modo economia indisponivel/);
+});
+
+test('franquia já zerada não posta nada', async () => {
+  const b = burnHarness({ inicial: 0 });
+  const r = clean(await b.run());
+  assert.deepEqual(r, { queimadas: 0, restantes: 0, leu: true });
+  assert.equal(b.st.posts.length, 0);
+});
+
+test('escrever a cena troca o id do avatar em TODO lugar e nunca cria duração no metadata do avatar', () => {
+  const src = declarations('extension/heygen-content.js', ['ecoDraftEscreverCena', 'ecoIdsDaCena', 'ecoRenomearElemento', 'ecoIdNovo']);
+  const ctx = vm.createContext({ Math, JSON, Object });
+  vm.runInContext(src, ctx);
+  const w = { text_draft: {
+    visual: { layout: ['scene'], elements: {
+      scene: { type: 'scene', content: { elements: ['okLMsjXQ'] } },
+      okLMsjXQ: { id: 'okLMsjXQ', type: 'avatar', content: { engine: 'avatar_iv', inference_mp4: 'https://velho.mp4' } },
+    } },
+    alignments: { okLMsjXQ: { element_id: 'okLMsjXQ' } },
+    script: { timeline: ['speech'], elements: { speech: { attributes: {} } } },
+  }, metadata: { okLMsjXQ: { element_id: 'okLMsjXQ', fps: 25, width: 1440 } } };
+  const ids = ctx.ecoDraftEscreverCena(w, 0, { texto: 'oi' });
+  const novo = ids.avatarId;
+  assert.match(novo, /^[A-Za-z0-9]{8}$/);
+  assert.notEqual(novo, 'okLMsjXQ');
+  assert.ok(!JSON.stringify(w).includes('okLMsjXQ'), 'nenhuma referência ao id antigo sobrou');
+  assert.equal(w.text_draft.visual.elements[novo].id, novo);
+  assert.deepEqual([...w.text_draft.visual.elements.scene.content.elements], [novo]);
+  assert.equal(w.text_draft.alignments[novo].element_id, novo);
+  assert.equal(w.metadata[novo].element_id, novo);
+  assert.equal(w.metadata[novo].fps, 25);
+  assert.ok(!('duration' in w.metadata[novo]) && !('url' in w.metadata[novo]), 'metadata do avatar sem duration/url');
+  assert.equal(w.text_draft.visual.elements[novo].content.inference_mp4, null);
+  assert.equal(w.text_draft.visual.elements[novo].content.engine, 'avatar_iii');
+  const ids2 = ctx.ecoDraftEscreverCena(w, 0, { texto: 'de novo' });
+  assert.notEqual(ids2.avatarId, novo, 'cada take ganha um id novo');
 });
 
 test('falhas transitórias de poll também emitem progresso e erro permanente não gira', async () => {

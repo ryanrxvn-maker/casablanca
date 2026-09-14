@@ -4570,8 +4570,15 @@ async function ecoFranquiaDePreview() {
   const r = await ecoApiJson('v1/text_draft.scene_avatar_preview.allowance', { tetoMs: 15000 });
   if (!r.ok) return { restantes: -1, motivo: r.msg || `HTTP ${r.http}` };
   const n = r.data && typeof r.data.remaining === 'number' ? r.data.remaining : -1;
-  ecoLog(`franquia de preview gratis: ${n}`);
-  return { restantes: n, motivo: n === -1 ? 'resposta sem `remaining`' : null };
+  // ⚠⚠ REGRA NOVA DO HEYGEN (14.09.2026): `avatar_iii.config.free_previews_per_month`.
+  // Medido ponta a ponta: sao N renders de cena por MES, todos com marca
+  // d'agua, e depois deles o render e' RECUSADO ("The space's monthly scene
+  // preview limit has been reached"). Nao existe mais render limpo a 0 credito
+  // pra liberar — queimar a franquia so' gasta o mes e falha no fim.
+  const cfg = r.data && r.data.avatar_iii && r.data.avatar_iii.config;
+  const mensal = cfg && typeof cfg.free_previews_per_month === 'number' ? cfg.free_previews_per_month : null;
+  ecoLog(`franquia de preview gratis: ${n}${mensal !== null ? ` (limite mensal ${mensal})` : ''}`);
+  return { restantes: n, mensal, motivo: n === -1 ? 'resposta sem `remaining`' : null };
 }
 
 /** Diálogo aberto (paywall, limite): CAPTURA o texto antes de esconder. O
@@ -5012,9 +5019,50 @@ function ecoIdsDaCena(wrapper, i) {
 
 /** Escreve a cena no JSON: fala, voz, avatar e a trava do Avatar III.
  *  Devolve os ids usados. NAO chama a rede. */
+/** Um id de elemento no formato do HeyGen (8 alfanumericos). */
+function ecoIdNovo() {
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let k = 0; k < 8; k++) s += abc[Math.floor(Math.random() * abc.length)];
+  return s;
+}
+
+/** Troca o id de um elemento em TODO lugar do draft que o referencia:
+ *  a chave e o `id` em `visual.elements`, a lista de filhos das cenas, e a
+ *  chave + `element_id` em `alignments` e em `metadata` (mapeado no draft
+ *  real em 14.09.2026). Devolve o id novo. */
+function ecoRenomearElemento(wrapper, velho, novo) {
+  const td = wrapper.text_draft;
+  const el = td.visual.elements[velho];
+  if (!el || !novo || velho === novo) return velho;
+  delete td.visual.elements[velho];
+  el.id = novo;
+  td.visual.elements[novo] = el;
+  for (const x of Object.values(td.visual.elements)) {
+    const filhos = x && x.content && x.content.elements;
+    if (Array.isArray(filhos)) x.content.elements = filhos.map((id) => (id === velho ? novo : id));
+  }
+  for (const mapa of [td.alignments, wrapper.metadata]) {
+    if (!mapa || typeof mapa !== 'object' || !mapa[velho] || typeof mapa[velho] !== 'object') continue;
+    const m = mapa[velho];
+    delete mapa[velho];
+    if (Object.prototype.hasOwnProperty.call(m, 'element_id')) m.element_id = novo;
+    mapa[novo] = m;
+  }
+  return novo;
+}
+
 function ecoDraftEscreverCena(wrapper, i, { texto, voiceId, avatarId, groupId }) {
   const td = wrapper.text_draft;
   const ids = ecoIdsDaCena(wrapper, i);
+  // ⚠⚠ ID NOVO DO AVATAR A CADA TAKE (medido ao vivo em 14.09.2026). O HeyGen
+  // guarda estado por (projeto, elemento): depois que um render saiu com a
+  // duracao do avatar zerada, TODO render seguinte com o MESMO id de elemento
+  // era recusado — "Video duration is 0 for element <avatar> and type
+  // ElementType.AVATAR" — com o corpo certo, fala certa e tudo. Trocar so' o id
+  // do elemento no corpo fez o mesmo draft renderizar em 66s. O corpo do POST
+  // e' descartavel (nunca salvamos a bancada), entao o id novo nao suja nada.
+  ids.avatarId = ecoRenomearElemento(wrapper, ids.avatarId, ecoIdNovo());
 
   // --- a fala
   const tts = td.script.elements[ids.ttsId];
@@ -5069,8 +5117,11 @@ function ecoDraftEscreverCena(wrapper, i, { texto, voiceId, avatarId, groupId })
   else meta.url = null;
   if (typeof meta.audio_duration === 'number') meta.audio_duration = 0;
   if (voiceId) meta.voice_id = voiceId;
-  const metaAv = wrapper.metadata[ids.avatarId];
-  if (metaAv && typeof metaAv === 'object') { metaAv.url = null; metaAv.duration = 0; }
+  // ⚠⚠ NAO escrever `duration`/`url` no metadata do AVATAR. Esse bloco e' o
+  // descritor do avatar (54 campos: dimensoes, fps, previews) e NAO tem
+  // duracao; o `metaAv.duration = 0` que morava aqui CRIAVA uma duracao zero e
+  // envenenou a bancada no servidor (ver o id novo acima). O resultado da
+  // cena anterior ja' e' limpo nos `inference_*` do conteudo do avatar.
 
   return ids;
 }
@@ -5374,10 +5425,59 @@ async function ecoEsperarTakeApi(videoId, tetoMs, aoVivo, jobId) {
 /** Queima a franquia de previews gratis POR API — cada volta com texto
  *  diferente, senao o servidor devolve o cache e a franquia nao cai (laco
  *  eterno). O sinal de que queimou e a franquia DIMINUIR. */
+/** Quantos previews de descarte renderizam ao mesmo tempo. MEDIDO 14.09.2026:
+ *  2 simultaneos terminam e consomem os dois. Nao subir sem medir de novo. */
+const ECO_QUEIMA_PARALELO = 2;
+
+/** UM preview de descarte, do inicio ao FIM do render — so' assim ele conta.
+ *  Recebe um CLONE do draft. Devolve {} ou { recusa } com o motivo real;
+ *  cancelamento/preempcao sobem como erro. */
+async function ecoQueimarUmPreview(requestId, videoId, wrapper, title, marcaVolta) {
+  // ⚠ TEXTO DIFERENTE A CADA ENVIO — "viewing this scene again is free until
+  // you change it": repetir o texto devolve cache e nao consome nada.
+  const texto = `Teste de aquecimento ${marcaVolta}, referencia ${Date.now().toString(36)}.`;
+  const ids = ecoDraftEscreverCena(wrapper, 0, { texto });
+  // ⚠ A QUEIMA TAMBEM PRECISA DE TTS: sem audio a cena fica com duracao 0 e o
+  // servidor recusa o render, sem consumir a franquia.
+  const fala = await ecoGerarTts({
+    texto,
+    voiceId: ecoVozDaCena(wrapper, ids),
+    ajustes: ecoAjustesDeVoz(null),
+    videoId,
+  });
+  ecoExigirJobAtivo(requestId);
+  if (fala.erro || !(fala.duracao > 0) || !fala.url) {
+    return { recusa: `fala: ${fala.erro || (!fala.url ? 'o TTS nao devolveu audio' : 'duracao 0')}` };
+  }
+  ecoAplicarTtsNaCena(wrapper, ids, fala);
+  const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
+  ecoExigirJobAtivo(requestId);
+  if (!r.ok) return { recusa: r.msg || `HTTP ${r.http}` };
+  const job = (r.data && (r.data.job_id || r.data.stream_id)) || null;
+  if (ecoUrlDaResposta(r.data) || !job) return {};
+  try {
+    await ecoEsperarTakeApi(videoId, 4 * 60 * 1000, null, job);
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    if (/cancelad|substituid/i.test(msg)) throw e;
+    return { recusa: msg };
+  }
+  return {};
+}
+
+/** Mensagem curta (o card mostra ate ~170 chars) pra conta na regra nova. */
+const ECO_MSG_LIMITE_MENSAL =
+  "O HeyGen agora limita o render de cena a previews mensais com marca d'agua. " +
+  'Modo economia indisponivel: dispare esta task pelo modo normal. Nada foi cobrado.';
+
 async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
   ecoExigirJobAtivo(requestId);
   let f = await ecoFranquiaDePreview();
   ecoExigirJobAtivo(requestId);
+  // ⚠⚠ ANTES DE QUALQUER RENDER. Na regra nova nao ha render limpo depois da
+  // franquia (medido 14.09: 75/75 queimados e as cenas reais recusadas por
+  // limite mensal). Parar aqui nao gasta nenhum preview da conta.
+  if (f.mensal !== null && f.mensal !== undefined) throw new Error(ECO_MSG_LIMITE_MENSAL);
   if (f.restantes === 0) return { queimadas: 0, restantes: 0, leu: true };
   // ⚠ -1 NAO E' ZERO. A leitura da franquia devolve -1 quando FALHA (rede,
   // formato novo), e tratar isso como "nao ha o que queimar" fazia o job seguir
@@ -5392,73 +5492,86 @@ async function ecoQueimarFranquiaApi(requestId, videoId, wrapper, title, base) {
     );
     return { queimadas: 0, restantes: -1, leu: false };
   }
-  ecoWarn(`franquia com ${f.restantes} preview(s) marcado(s) — queimando antes de valer`);
+  // ⚠⚠ POLITICA NOVA DO HEYGEN (medida ao vivo em 14.09.2026). A franquia
+  // deixou de ser 2-3 previews e virou `free_previews_per_month: 100` no Avatar
+  // III — e continuam MARCADOS (take `-marked-tiled_standard`). A queima antiga
+  // (5 voltas) parava em ~84 e derrubava TODO disparo.
+  // O MODELO DE CONSUMO, medido:
+  //   • o POST responde `free_previews_remaining` ja' descontado, MAS o
+  //     preview so' fica gasto quando o render TERMINA — recusado/cancelado
+  //     volta pra franquia (79 → 78 no aceite → 79 de novo com o render recusado);
+  //   • um POST novo na mesma cena enquanto a anterior renderiza a substitui
+  //     (e devolve o preview dela) — por isso cada envio tem que ESPERAR o fim;
+  //   • 2 renders simultaneos (ids de avatar diferentes) terminam os dois e
+  //     consomem os dois (78 → 76 em 54s). Entao a queima vai em LOTES de 2.
+  //   • nenhum contador de video pago muda (915/434 antes e depois).
+  const inicial = f.restantes;
+  ecoWarn(`franquia com ${inicial} preview(s) marcado(s) — queimando antes de valer`);
+  let restantes = inicial;
   let queimadas = 0;
+  let semAvanco = 0;
   let ultimaRecusa = null;
-  // Relogio de parede: sem isto a queima sozinha podia consumir o tempo do AD
-  // inteiro (cada volta espera ate 3 min) antes da primeira cena de verdade.
-  const ateQueima = Date.now() + 12 * 60 * 1000;
-  for (let volta = 0; volta < 5 && f.restantes > 0; volta++) {
+  // Relogio de parede proporcional ao que falta (a queima e' 1x por mes por
+  // conta): ate 3 min por lote de render, nunca menos de 15 min.
+  const lotesPrevistos = Math.ceil(inicial / ECO_QUEIMA_PARALELO);
+  const tetoQueimaMs = Math.max(15 * 60 * 1000, lotesPrevistos * 3 * 60 * 1000);
+  const ateQueima = Date.now() + tetoQueimaMs;
+  const maxLotes = lotesPrevistos + 10;
+  for (let lote = 0; restantes > 0 && lote < maxLotes; lote++) {
     ecoExigirJobAtivo(requestId);
     if (ecoCancelado) throw new Error('cancelado durante a queima da franquia');
     if (Date.now() > ateQueima) {
       throw new Error(
-        `a liberacao do render limpo passou de 12 min e parou com ${f.restantes} preview(s) ` +
-        `gratis restando. Nada foi cobrado.`,
+        `a liberacao do render limpo passou de ${Math.round(tetoQueimaMs / 60000)} min ` +
+        `e parou com ${restantes} preview(s) gratis restando. Rode de novo que continua de onde parou. Nada foi cobrado.`,
       );
     }
-    ecoProgresso(requestId, `Economia: liberando o render limpo (${f.restantes} restante(s))...`, base);
-    const antes = f.restantes;
-    // ⚠ TEXTO DIFERENTE A CADA VOLTA — "viewing this scene again is free until
-    // you change it": repetir o mesmo texto devolve cache e nao consome nada.
-    const marca = Date.now().toString(36) + volta;
-    const texto = `Teste de aquecimento numero ${volta + 1}, referencia ${marca}.`;
-    const ids = ecoDraftEscreverCena(wrapper, 0, { texto });
-    // ⚠ A QUEIMA TAMBEM PRECISA DE TTS. Sem audio a cena fica com duracao 0 e o
-    // servidor recusa ("Video duration is 0 for element ... SCENE") — a franquia
-    // nunca cairia e o job morreria dizendo que nao conseguiu liberar o render
-    // limpo, com a franquia intacta. Defeito que so apareceria quando a cota
-    // voltasse, ou seja, dias depois e longe daqui.
-    const falaQueima = await ecoGerarTts({
-      texto,
-      voiceId: ecoVozDaCena(wrapper, ids),
-      ajustes: ecoAjustesDeVoz(null),
-      videoId,
-    });
-    ecoExigirJobAtivo(requestId);
-    if (falaQueima.erro || !(falaQueima.duracao > 0)) {
-      throw new Error(
-        `nao consegui gerar a fala pra queimar a franquia (${falaQueima.erro || 'duracao 0'}). ` +
-        `Enquanto a franquia nao zera, todo take volta COM MARCA D'AGUA. Nada foi cobrado.`,
-      );
+    marcarBatimento();
+    const rotuloQueima = `Economia: liberando o render limpo — ${queimadas}/${inicial} previews gratis ` +
+      `com marca d'agua descartados (so' na 1a vez do mes)`;
+    ecoProgresso(requestId, `${rotuloQueima}...`, base);
+    const antes = restantes;
+    const envios = [];
+    for (let k = 0; k < Math.min(ECO_QUEIMA_PARALELO, restantes); k++) {
+      // Cada envio num CLONE do draft: renders simultaneos nao podem dividir o
+      // mesmo corpo, e cada um ganha o seu id de avatar.
+      const copia = JSON.parse(JSON.stringify(wrapper));
+      envios.push(ecoQueimarUmPreview(requestId, videoId, copia, title, `${lote + 1}.${k + 1}`));
     }
-    ecoAplicarTtsNaCena(wrapper, ids, falaQueima);
-    const r = await ecoRenderCenaApi({ videoId, sceneId: ids.sceneId, wrapper, title });
+    // ⚠ COM PULSO, igual as cenas. Aba do HeyGen oculta estrangula a pagina e
+    // o service worker dorme sem trafego: sem o pulso (que espera PELO worker e
+    // emite progresso a cada 4s) a queima rodava muda — medido 14.09: a pagina
+    // parou de receber mensagens na 1a volta enquanto a franquia caia.
+    const respostas = await ecoAguardarEtapa(requestId, () => Promise.all(envios), rotuloQueima, base, base);
     ecoExigirJobAtivo(requestId);
-    if (!r.ok) {
-      // Guardar o motivo REAL: antes isso era so' console.warn e a mensagem
-      // final culpava a franquia, escondendo o que o servidor tinha dito.
-      ultimaRecusa = r.msg || `HTTP ${r.http}`;
-      ecoWarn(`queima ${volta + 1}: o render respondeu ${r.http} — ${r.msg}`);
+    for (const resp of respostas) {
+      if (resp && resp.recusa) {
+        // Guardar o motivo REAL pra mensagem final nao culpar a franquia.
+        ultimaRecusa = resp.recusa;
+        ecoWarn(`queima lote ${lote + 1}: ${resp.recusa}`);
+      }
     }
-    // Nao interessa o video: interessa a franquia cair. Espera curta.
-    const jobQueima = (r.data && (r.data.job_id || r.data.stream_id)) || null;
-    if (!ecoUrlDaResposta(r.data) && jobQueima) {
-      await ecoEsperarTakeApi(videoId, 3 * 60 * 1000, null, jobQueima).catch(() => null);
-    }
-    ecoExigirJobAtivo(requestId);
     f = await ecoFranquiaDePreview();
     ecoExigirJobAtivo(requestId);
-    if (f.restantes < antes) queimadas++;
-    else if (f.restantes === antes) {
-      ecoWarn(`queima ${volta + 1}: a franquia nao caiu (segue em ${antes}) — tentando de novo com outro texto`);
+    if (f.restantes >= 0) restantes = f.restantes;
+    if (restantes < antes) {
+      queimadas += antes - restantes;
+      semAvanco = 0;
+    } else {
+      ecoWarn(`queima lote ${lote + 1}: a franquia nao caiu (segue em ${antes})`);
+      if (++semAvanco >= 3) break;
+      await sleep(3000);
     }
   }
-  if (f.restantes > 0) {
+  // Confirma na fonte antes de declarar o render limpo liberado.
+  f = await ecoFranquiaDePreview();
+  ecoExigirJobAtivo(requestId);
+  if (f.restantes >= 0) restantes = f.restantes;
+  if (restantes > 0) {
     throw new Error(
-      `nao consegui zerar a franquia de previews gratis (parou em ${f.restantes})` +
+      `nao consegui zerar a franquia de previews gratis (parou em ${restantes})` +
       (ultimaRecusa ? ` — o HeyGen respondeu: ${ultimaRecusa}` : '') +
-      `. Enquanto ela nao zera, todo take volta COM MARCA D'AGUA. Nada foi cobrado.`,
+      `. Enquanto ela nao zera, todo take volta COM MARCA D'AGUA. Rode de novo que continua de onde parou. Nada foi cobrado.`,
     );
   }
   ecoLog(`franquia zerada (${queimadas} queima(s)) — render limpo liberado`);
@@ -5751,6 +5864,9 @@ async function runEconomyJobApi(requestId, payload) {
         // Conta, sessão e cota afetam o job inteiro. Continuar submetendo as
         // cenas seguintes só repete a mesma recusa e faz um lote grande parecer
         // lento. Preserva o que já voltou e encerra a rodada imediatamente.
+        if (/monthly scene preview limit|preview limit has been reached/i.test(error)) {
+          throw new Error(ECO_MSG_LIMITE_MENSAL);
+        }
         if (/\b429\b|quota|daily|usage has exceeded|limit reached|insufficient|credit|unauthori[sz]ed|forbidden|sess(?:ao|ion).*(?:expir|invalid)/i.test(error)) {
           throw new Error(`${rot}: falha sistemica do HeyGen — ${error}`);
         }
