@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.43.0';
+const DARKO_EXT_VERSION = chrome.runtime.getManifest().version;
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -152,6 +152,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   if (msg && msg.type === 'HG_RUN_ECONOMY_API') {
+    sendResponse({ ok: true, version: DARKO_EXT_VERSION });
     // MODO ECONOMIA POR API: escreve a cena no JSON do draft e chama o render
     // de cena. Sem DOM. O caminho por DOM morre em aba oculta porque o app
     // nunca roda o TTS e a duracao fica 0 (`H===0` desabilita o render).
@@ -160,18 +161,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return false;
   }
+  if (msg && msg.type === 'HG_ECO_PREPARE') {
+    ecoPrepararStudio().then(sendResponse, (e) => sendResponse({ ok: false, error: String(e?.message || e) }));
+    return true;
+  }
   if (msg && msg.type === 'HG_ECO_SONDA_API') {
     ecoSondaApi(msg.bancadaId).then((r) => sendResponse(r), (e) =>
       sendResponse({ ok: false, erro: (e && e.message) || String(e) }));
-    return true;
-  }
-  if (msg && msg.type === 'HG_ECO_BENCH_STATUS') {
-    // Preflight sem render: informa ao background se esta conta ja tem uma
-    // bancada de Studio valida. Em conta nova, isso permite abrir o Studio
-    // uma unica vez para o proprio HeyGen criar o draft completo, em vez de
-    // cair no draft vazio que a rota pacific/draft/create devolve.
-    ecoBancadaStatus().then((r) => sendResponse(r), (e) =>
-      sendResponse({ ok: false, bancadaId: null, error: (e && e.message) || String(e) }));
     return true;
   }
   if (msg && msg.type === 'HG_TEST_SESSION') {
@@ -1583,12 +1579,49 @@ async function waitForOrNull(predicate, timeoutMs = 5000, interval = 200) {
  *
  * Tudo dentro do contexto autenticado da aba — nao consome a API publica.
  */
+function heygenCookieValue(name) {
+  try {
+    const entry = document.cookie.split(';').map(s => s.trim()).find(s => s.startsWith(name + '='));
+    return entry ? decodeURIComponent(entry.slice(name.length + 1)) : '';
+  } catch { return ''; }
+}
+
+function heygenStoredValue(key) {
+  // Mesma precedência do app HeyGen: cookie, sessionStorage, localStorage.
+  for (const storage of [typeof sessionStorage === 'undefined' ? null : sessionStorage,
+    typeof localStorage === 'undefined' ? null : localStorage]) {
+    try {
+      const raw = storage?.getItem(key);
+      if (!raw) continue;
+      try { const value = JSON.parse(raw); if (typeof value === 'string') return value; }
+      catch { return raw; }
+    } catch { /* armazenamento bloqueado: ainda podemos usar cookies */ }
+  }
+  return '';
+}
+
+function heygenWorkspaceHeaders() {
+  // un()/Ra() do app HeyGen lêem heygen_space / pacific/SPACE_ID e enviam
+  // x-space-id. Cookie sozinho pode apontar para o workspace pessoal de
+  // quem recebeu acesso a outra empresa. Nunca guarda a conta em cache.
+  if (heygenStoredValue('pacific/X_GUEST_SESSION_TOKEN')) return {};
+  const space = heygenCookieValue('heygen_space') || heygenStoredValue('pacific/SPACE_ID');
+  return space && /^[A-Za-z0-9_-]{1,128}$/.test(space) ? { 'x-space-id': space } : {};
+}
+
 function getInternalAuthHeaders() {
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
+    ...heygenWorkspaceHeaders(),
   };
+  // Token de sessão próprio do HeyGen. Fica somente nesta aba e só é usado
+  // no host exato da API após recusa explícita; nunca vai para o Pilot.
+  const sessionToken = heygenCookieValue('heygen_token');
+  if (sessionToken && !/[\r\n]/.test(sessionToken) && sessionToken.length <= 8192) {
+    headers['x-session-token'] = sessionToken;
+  }
   // HeyGen pode guardar token em varios lugares. Tentamos todos.
   try {
     const candidates = [
@@ -1604,7 +1637,7 @@ function getInternalAuthHeaders() {
 
     // Token raw (provavelmente JWT comecando com "eyJ") — usa o primeiro
     const token = candidates.find((t) => /^[A-Za-z0-9._-]+$/.test(t));
-    if (token) headers['Authorization'] = 'Bearer ' + token;
+    if (token && !headers['x-session-token']) headers['Authorization'] = 'Bearer ' + token;
 
     // Tambem tenta extrair x-csrf-token de cookies (se HeyGen usar)
     const csrfMatch = document.cookie.match(/(?:^|;\s*)csrf[-_]?token=([^;]+)/i);
@@ -1613,6 +1646,30 @@ function getInternalAuthHeaders() {
     /* ignora */
   }
   return headers;
+}
+
+async function fetchHeyGenWithSession(url, options = {}) {
+  let internal = false;
+  try { internal = new URL(url).origin === 'https://api2.heygen.com'; } catch {}
+  // URLs de upload/CDN nunca recebem a sessão nem o workspace do HeyGen.
+  if (!internal) return fetch(url, options);
+  const request = { ...options, credentials: 'include', headers: { ...heygenWorkspaceHeaders(), ...options.headers } };
+  let response = await fetch(url, request);
+  let code = null;
+  if (response.status === 401 || response.status === 403 || /^application\/(?:[\w.+-]+\+)?json\b/i.test(response.headers.get('content-type') || '')) {
+    try { code = Number((await response.clone().json())?.code); } catch {}
+  }
+  // Verificação de telefone, SSO e permissão não são login expirado. Não
+  // repete um render aceito, timeout, 429 ou 5xx: evita cobrança duplicada.
+  const accountGate = [400192, 400193, 400585, 400573, 400562, 400561].includes(code);
+  const authRefused = !accountGate && (response.status === 401 || response.status === 403 || code === 400112 || code === 400564);
+  if (authRefused) {
+    const auth = getInternalAuthHeaders();
+    if (auth['x-session-token'] || auth.Authorization || auth['X-CSRF-Token']) {
+      response = await fetch(url, { ...request, headers: { ...request.headers, ...auth } });
+    }
+  }
+  return response;
 }
 
 /**
@@ -2512,7 +2569,7 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
     uploadedBytes = bytes.byteLength;
     opts.body = new Blob([bytes], { type: bodyType || 'application/octet-stream' });
   }
-  const r = await fetch(url, opts);
+  const r = await fetchHeyGenWithSession(url, opts);
   let data;
   const ct = r.headers.get('content-type') || '';
   // NDJSON (newline-delimited JSON) — usado por endpoints de streaming
@@ -4964,13 +5021,14 @@ async function ecoApiJson(rota, { metodo = 'GET', corpo = null, tetoMs = 25000 }
   const ctl = new AbortController();
   const alarme = setTimeout(() => ctl.abort(), tetoMs);
   try {
-    const r = await fetch(ECO_API_BASE + rota, {
+    const request = {
       method: metodo,
       credentials: 'include',
       signal: ctl.signal,
       headers: corpo ? { 'content-type': 'application/json' } : undefined,
       body: corpo ? JSON.stringify(corpo) : undefined,
-    });
+    };
+    const r = await fetchHeyGenWithSession(ECO_API_BASE + rota, request);
     let j = null;
     try { j = await r.json(); } catch (e) {}
     return {
@@ -5617,9 +5675,7 @@ async function runEconomyJobApi(requestId, payload) {
     // workspace trocado (o Pilot atende DUAS empresas). Sem revalidar, um id
     // velho matava TODO disparo pra sempre, sempre com a mesma mensagem.
     // Por isso a validacao vem antes do uso e a recuperacao e' automatica.
-    // Reconfirma a sessao a cada job. Se o usuario trocou de conta na mesma
-    // aba, nunca reutilizamos a bancada nem a chave da conta anterior.
-    const conta = await ecoContaAtual(true);
+    const conta = await ecoContaAtual();
     ecoExigirJobAtivo(requestId);
     let videoId = (payload && payload.bancadaId) || (await ecoBancadaGuardada(conta)) || ecoVideoIdDaUrl();
     ecoExigirJobAtivo(requestId);
@@ -5925,35 +5981,45 @@ async function ecoCriarBancada() {
  *  ⚠ POR QUE ISTO EXISTE: a bancada era uma chave GLOBAL unica. O Pilot atende
  *  DUAS empresas; ao trocar de conta, a bancada da outra virava um id que nao
  *  existe aqui — e as duas ficavam se derrubando. Agora cada conta tem a sua. */
-let ecoContaCache = null;
-async function ecoContaAtual(force = false) {
-  if (force) ecoContaCache = null;
-  if (ecoContaCache) return ecoContaCache;
+async function ecoContaAtual() {
   const r = await ecoApiJson('v1/pacific/account.get?include_ff=true', { tetoMs: 15000 });
-  if (!r.ok) throw new Error(`nao consegui confirmar a conta do HeyGen — ${r.msg || 'sessao ausente'}`);
-  const d = (r.data && (r.data.user || r.data.account || r.data)) || {};
+  if (!r.ok || !r.data) {
+    const diagnostic = ` [HG_AUTH http=${r.http} code=${r.code ?? '?'} ext=${DARKO_EXT_VERSION}]`;
+    const code = Number(r.code);
+    if (code === 400192 || code === 400193) throw new Error('O HeyGen exige concluir a verificação de telefone desta conta. Abra app.heygen.com e conclua o aviso mostrado pelo HeyGen.' + diagnostic);
+    if (code === 400585) throw new Error('O workspace do HeyGen exige login SSO. Abra app.heygen.com e entre no workspace autorizado.' + diagnostic);
+    if ([400561, 400562, 400564, 400573].includes(code) || r.http === 403) throw new Error('O HeyGen não autorizou o workspace selecionado. Abra app.heygen.com e confirme seu acesso a esse workspace.' + diagnostic);
+    if (r.http === 401 || /unauthoriz/i.test(r.msg || '')) {
+      throw new Error('Sessão do HeyGen expirada ou sem autorização. Entre em app.heygen.com, selecione seu workspace e clique em Retomar.' + diagnostic);
+    }
+    throw new Error('Não foi possível verificar a conta do HeyGen. Confira a conexão e tente novamente.' + diagnostic);
+  }
+  const plan = r.data.space_info?.user_plan_v2;
+  if (plan && (String(plan.tier || '').toLowerCase() === 'free' || /^free(?:\s+plan)?$/i.test(plan.plan_name || '')) && !plan.is_paid) {
+    throw new Error('O plano gratuito do HeyGen não permite o modo economia (Render Scene). Selecione um workspace com plano compatível no HeyGen. O acesso ao Pilot já está liberado.');
+  }
+  const d = r.data.user || r.data.account || r.data.user_info || r.data;
   const id = d.id || d.user_id || d.account_id || d.space_id || d.username || d.email;
-  if (!id) throw new Error('a sessao do HeyGen nao devolveu um identificador de conta');
-  ecoContaCache = String(id).slice(0, 64);
-  return ecoContaCache;
+  const space = r.data.space_info?.space_id || r.data.space_info?.id || r.data.space_id || '';
+  return `${id ? String(id).slice(0, 64) : 'sessao'}:${space}`;
 }
 
-/** Preflight barato do modo Economia. Nao renderiza e nao consome franquia. */
-async function ecoBancadaStatus() {
-  const conta = await ecoContaAtual(true);
-  const guardada = await ecoBancadaGuardada(conta);
-  if (guardada && await ecoBancadaServe(guardada)) {
-    return { ok: true, accountId: conta, bancadaId: guardada, source: 'stored' };
+/** Preflight sem render: conta, workspace e uma cena válida antes do job. */
+async function ecoPrepararStudio() {
+  if (currentJob) return { ok: false, error: 'Outra geracao em andamento — aguarde finalizar.' };
+  const conta = await ecoContaAtual();
+  for (const id of [await ecoBancadaGuardada(conta), ecoVideoIdDaUrl()]) {
+    if (id && await ecoBancadaServe(id)) {
+      await ecoGuardarBancada(conta, id);
+      return { ok: true, bancadaId: id };
+    }
   }
-  // Se a conta trocou de sessao ou o projeto foi apagado, limpa o ponteiro
-  // velho antes de procurar o projeto que esta aberto na propria aba.
-  if (guardada) await ecoGuardarBancada(conta, null);
-  const daUrl = ecoVideoIdDaUrl();
-  if (daUrl && await ecoBancadaServe(daUrl)) {
-    await ecoGuardarBancada(conta, daUrl);
-    return { ok: true, accountId: conta, bancadaId: daUrl, source: 'url' };
+  const existente = await ecoBancadaExistente();
+  if (existente.id) {
+    await ecoGuardarBancada(conta, existente.id);
+    return { ok: true, bancadaId: existente.id };
   }
-  return { ok: true, accountId: conta, bancadaId: null, source: 'missing' };
+  return { ok: false, needsStudio: true };
 }
 
 /** A bancada guardada DESTA conta. Mora no content script de proposito: e' ele
@@ -6005,25 +6071,12 @@ async function ecoBancadaServe(videoId) {
 
 /** Um projeto ja existente cujo draft tem cena+avatar+fala. So LEITURA. */
 async function ecoBancadaExistente() {
-  // ⚠ A listagem de projetos do Studio nao usa o default da rota: sem
-  // `item_types=heygen_video_draft`, algumas contas (especialmente contas
-  // recem-trocadas no mesmo Chrome) devolvem `items: []` mesmo com drafts
-  // visiveis na barra Recentes. O Pilot entao caia no `draft/create` vazio e
-  // acusava "bancada sem cena". O Studio filtra explicitamente por esse tipo;
-  // repetimos o contrato dele e mantemos um fallback de compatibilidade para
-  // contas ainda no endpoint v1.
-  const rotas = [
-    'v2/project/items?item_types=heygen_video_draft&limit=50',
-    'v1/project/items?item_types=heygen_video_draft&limit=50',
-    'v1/project/items?item_type=heygen_video_draft&limit=50',
-  ];
-  for (const rota of rotas) {
+  // ⚠ A rota certa e `v2/project/items` (data.items[].video_id). `video.list`
+  // e `pacific/video.list` NAO existem nessa API e devolviam vazio calado — a
+  // bancada caia direto no create, que nasce sem cena e nao serve.
+  for (const rota of ['v2/project/items?limit=30', 'v1/project/items?limit=30']) {
     const r = await ecoApiJson(rota, { tetoMs: 20000 });
-    // Algumas respostas antigas aninham a pagina em `data.data`; aceitar as
-    // duas formas evita transformar um draft valido em lista vazia.
-    const pagina = r.data && r.data.data && typeof r.data.data === 'object'
-      ? r.data.data : r.data;
-    let lista = (pagina && (pagina.items || pagina.list || pagina.projects)) || [];
+    let lista = (r.data && (r.data.items || r.data.list)) || [];
     if (!Array.isArray(lista)) continue;
     // Projeto NOSSO primeiro: assim a bancada para de ser um AD do usuario
     // assim que existir uma "Auto Edit - bancada" na conta.
@@ -6032,11 +6085,7 @@ async function ecoBancadaExistente() {
       return nosso(a) - nosso(b);
     });
     for (const v of lista.slice(0, 12)) {
-      const tipo = String(v && (v.item_type || v.type || '')).toLowerCase();
-      // Quando o filtro e aceito, todo item ja e draft. Se a conta ignorar o
-      // filtro, nao arrisque abrir asset/video final como bancada.
-      if (tipo && !/heygen_video_draft|video_draft|heygen_video/.test(tipo)) continue;
-      const id = v && (v.video_id || v.item_id || v.id);
+      const id = v && (v.video_id || v.id);
       if (!id || v.is_trash || v.is_deleted) continue;
       try {
         const { wrapper } = await ecoDraftLer(id);

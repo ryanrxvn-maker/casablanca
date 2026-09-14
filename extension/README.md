@@ -17,6 +17,60 @@ Sem consumir API publica (usa sua mensalidade HeyGen).
 
 ## Como usar
 
+### Atualização 4.44.3 — inserts do Google Flow
+
+O módulo Flow usa arquivos, fila e aba de automação próprios. O funcionamento
+do HeyGen permanece nos seus scripts existentes. O Pilot identifica uma única
+instalação ativa antes de encaminhar cada pedido de geração.
+
+Abra um projeto do Google Flow na conta desejada. No Pilot, abra **Inserts do
+Flow**, confira nome, e-mail e saldo da conta, configure o insert e atualize a
+previsão de créditos. A extensão lê os controles e o custo apresentados pelo
+próprio Flow antes de enviar o pedido. Se a conta, o custo ou a configuração
+não puderem ser confirmados, a geração é interrompida antes do envio.
+
+O download solicita **1080p aprimorada** para vídeos e **2K aprimorada** para
+imagens. O Pilot abre o arquivo recebido e confere suas dimensões antes de
+inseri-lo na montagem. Quando o Flow não oferece a opção necessária, o módulo
+preserva o resultado na galeria e informa o problema.
+
+Uma geração já enviada ao Google pode continuar após cancelar o acompanhamento
+no Pilot. Um pedido com resposta incerta nunca é enviado outra vez
+automaticamente. Confira o projeto no Flow antes de iniciar uma nova geração.
+
+Depois de atualizar a extensão, recarregue o Pilot. O novo módulo precisa de
+permissão para acessar o Google Flow e seus arquivos de mídia. A extensão usa
+a sessão Google já conectada no navegador e não solicita sua senha.
+
+### Correção de sessão do Pilot — 4.41.2
+
+As consultas e gerações usam o workspace ativo escolhido no HeyGen. Uma
+recusa de autenticação permite uma única tentativa com a sessão da própria
+aba. Nenhuma credencial sai do HeyGen para o Pilot ou para URLs de mídia.
+Exigências de telefone, SSO e permissão recebem mensagens específicas;
+o diagnóstico guarda somente os códigos da resposta e a versão da extensão.
+
+### Atualização 4.41.1 — instalação e modo economia no Pilot
+
+O Pilot mostra **Baixar extensão** quando ela está ausente e **Baixar atualização**
+quando a versão é antiga. Com a versão atual conectada, o aviso fica oculto.
+A verificação consulta o serviço ativo da extensão para não confundir um script
+antigo da aba com uma instalação ativa depois de remover ou recarregar.
+
+Baixe o ZIP atual e substitua os arquivos da pasta da extensão. Em
+`chrome://extensions`, clique em **Recarregar** no card **Hey Auto** e depois
+recarregue as abas do Pilot e do HeyGen. Espere as gerações atuais terminarem
+antes de atualizar. Mantenha apenas uma instalação ativa da extensão.
+
+O modo economia verifica a sessão e o workspace de cada conta antes de
+renderizar. No primeiro uso, pode abrir o Studio para preparar a primeira
+cena. Conclua eventuais avisos de entrada do próprio HeyGen.
+
+O workspace precisa permitir **Render Scene**. O plano gratuito do HeyGen
+recusa essa operação; liberar o Pilot não altera os recursos do plano HeyGen.
+
+### Geração de avatares
+
 1. Na ferramenta HeyGen Auto Avatar:
    - Escolhe o motor (Avatar III/IV/V)
    - Busca o avatar pelo nome (preview com thumbnail)
@@ -28,15 +82,16 @@ Sem consumir API publica (usa sua mensalidade HeyGen).
 ## Requisitos
 
 - Google Chrome (ou navegador baseado em Chromium — Edge, Brave, etc)
-- Conta HeyGen ativa (qualquer plano)
+- Conta HeyGen ativa com acesso à operação escolhida (Render Scene para o modo economia)
 - Estar logado no HeyGen no momento de gerar
 
 ## Privacidade
 
 A extensao:
-- So acessa app.heygen.com e o site DARKO LAB
+- Acessa HeyGen, Google Flow, os arquivos de mídia e documentos Google usados
+  pelo Pilot, além do site DARKO LAB
 - NAO envia suas credenciais pra nenhum servidor (tudo roda local + sua sessao HeyGen)
-- NAO acessa nenhuma outra aba/site
+- A automação do Flow usa uma aba própria e identifica a conta antes de gerar
 - Codigo aberto — voce pode auditar todos os arquivos
 
 ## Troubleshooting

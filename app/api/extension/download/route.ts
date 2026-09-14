@@ -20,11 +20,18 @@ export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+// ⚠ TODO arquivo que o manifest referencia TEM que estar aqui. A 4.44.x
+// carrega os scripts do Flow e o inject.js; zip sem eles nao carrega no Chrome
+// ("Could not load javascript"). O teste heygen-extension-version confere.
 const FILES = [
   'manifest.json',
   'background.js',
   'bridge.js',
   'heygen-content.js',
+  'inject.js',
+  'flow-background.js',
+  'flow-bridge.js',
+  'flow-content.js',
 ];
 
 const ICONS = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];

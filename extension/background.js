@@ -2,6 +2,10 @@
  * DARKO LAB Extension - Background Service Worker
  */
 
+// Flow is a separate module. A broken/missing Flow file must never prevent
+// the established HeyGen worker from loading.
+try { importScripts('flow-background.js'); } catch (error) { console.error('[AutoEdit Flow] Module unavailable:', error); }
+
 const activeJobs = new Map();
 // Map<requestId, { bridgeTabId, timeoutId }> pra correlacionar push do
 // content script (HG_TAB_AVATARS_RESULT) de volta com o requester original.
@@ -96,6 +100,11 @@ async function findOrCreateHeyGenTab() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return;
 
+  if (msg.type === 'HG_BRIDGE_HEALTH') {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+
   if (msg.type === 'HG_GENERATE') {
     const requestId = msg.requestId;
     handleGenerate(requestId, msg.payload, sender.tab?.id).catch((err) => {
@@ -111,7 +120,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // MODO ECONOMIA — Studio por TEXTO, "Render Scene" por cena (sem crédito).
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_JOB').catch((err) => {
-      activeJobs.delete(requestId);
       reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
         error: err?.message ?? String(err),
       });
@@ -121,12 +129,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'HG_ECONOMY_API_GENERATE') {
-    // MODO ECONOMIA POR API — sem DOM. A aba HeyGen só fornece a sessão/cookie;
-    // o content script encontra ou prepara a bancada da conta e faz tudo por
-    // JSON + endpoint.
+    // MODO ECONOMIA POR API — sem DOM. O Studio so e aberto pra que o proprio
+    // app CRIE o projeto (a bancada); dali em diante e tudo JSON + endpoint.
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id, 'HG_RUN_ECONOMY_API').catch((err) => {
-      activeJobs.delete(requestId);
       reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
         error: err?.message ?? String(err),
       });
@@ -163,7 +169,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // VA de avatar — fluxo HeyGen Studio cena-por-cena (Mirror voice).
     const requestId = msg.requestId;
     handleStudioGenerate(requestId, msg.payload, sender.tab?.id).catch((err) => {
-      activeJobs.delete(requestId);
       reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
         error: err?.message ?? String(err),
       });
@@ -1225,69 +1230,26 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     });
     return;
   }
-  // O render por API precisa de um draft com cena/avatar/fala. A rota de
-  // criacao da API devolve um draft vazio em contas novas; nesse caso a
-  // abertura do Studio e que faz o HeyGen criar a bancada completa. Primeiro
-  // sondamos a aba sem renderizar. Contas ja preparadas seguem pelo caminho
-  // rapido e continuam reaproveitando a bancada guardada.
-  // O payload pode conter um id antigo salvo pelo Pilot. Nunca o usamos para
-  // decidir a conta: o preflight confirma a bancada no HeyGen logado agora.
-  let bancadaPrevia = null;
-  if (jobMsg === 'HG_RUN_ECONOMY_API') {
-    try {
-      const probe = await Promise.race([
-        chrome.tabs.sendMessage(tab.id, { type: 'HG_ECO_BENCH_STATUS' }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('preflight da bancada expirou')), 12000)),
-      ]);
-      if (activeJobs.get(requestId) !== job) return;
-      if (probe && probe.ok === false && probe.error) {
-        // Falha de sessao/API e' diferente de bancada ausente. Nao abrimos o
-        // Studio nem criamos rascunho quando a conta nao foi confirmada.
-        const erroSessao = new Error(`nao consegui validar a sessao do HeyGen: ${probe.error}`);
-        erroSessao.code = 'HEYGEN_SESSION';
-        throw erroSessao;
-      }
-      if (probe && probe.ok && probe.bancadaId) bancadaPrevia = probe.bancadaId;
-      console.log('[DARKO LAB BG] preflight bancada:', probe?.source || 'sem resposta', bancadaPrevia || '(nova)');
-    } catch (e) {
-      if (e?.code === 'HEYGEN_SESSION') {
-        activeJobs.delete(requestId);
-        throw e;
-      }
-      // Se nao conseguimos provar que existe uma bancada, abrimos o Studio e
-      // deixamos o HeyGen preparar uma. Isso e seguro e evita falha silenciosa
-      // em contas com service worker recem-reiniciado.
-      console.warn('[DARKO LAB BG] preflight bancada falhou — abrindo Studio:', e?.message ?? e);
-    }
-  }
   // ⚠ O CAMINHO POR API NAO PRECISA DO STUDIO ABERTO. O content script roda em
   // TODA pagina app.heygen.com, e o render e feito por endpoint com o cookie da
   // aba. Navegar ate o editor custava ~56s por disparo e nao servia pra nada —
   // pior, o app nem cria projeto em aba oculta, entao a navegacao so atrasava.
-  // O caminho por API nao deve navegar para o Studio quando falta bancada.
-  // Em contas novas o create-v4/draft fica nessa URL e nao cria um projeto em
-  // aba oculta; esperar um redirect aqui fazia a conta nova falhar antes de o
-  // content script conseguir procurar uma bancada valida por conta. O content
-  // script tem o cookie da sessao e resolve isso via project/items.
+  // So navega quando falta bancada (pra ter onde o app criar) ou no caminho DOM.
   // ⚠ A BANCADA NAO MORA MAIS AQUI. Ela e' guardada POR CONTA pelo content
   // script, que e' o unico lado que sabe qual conta do HeyGen esta logada (o
   // background nao tem o cookie). Guardar aqui, numa chave global unica, fazia
   // as DUAS empresas que o Pilot atende se derrubarem: a bancada de uma virava
   // um id inexistente na outra, e nao havia revalidacao. O `bancadaId` do
-  // payload so' e' um fallback interno; nunca decide a conta nem pula o
-  // preflight.
-  // `bancadaPrevia` veio somente do preflight confirmado acima ou da URL nova
-  // criada pelo Studio.
+  // payload sobrevive so' como atalho de TESTE.
+  const bancadaPrevia = jobMsg === 'HG_RUN_ECONOMY_API' ? (payload && payload.bancadaId) || null : null;
   // ⚠ Reler a aba: o `tab` veio de findOrCreateHeyGenTab e a URL dele pode
   // estar velha (a aba pode ter navegado no meio). Decidir pular a navegacao
   // com URL velha e' como decidir no escuro.
   let urlAgora = tab.url || '';
   try { urlAgora = (await chrome.tabs.get(tab.id)).url || urlAgora; } catch {}
   const jaNoHeyGen = /^https:\/\/app\.heygen\.com\//.test(urlAgora);
-  // O modo economia por API sempre pode seguir com a aba atual: se a bancada
-  // estiver guardada, usa o caminho rapido; se nao estiver, o content script
-  // chama ecoGarantirBancada() e publica o estado/progresso corretamente.
-  // O caminho DOM continua navegando como antes.
+  // O caminho por API so' precisa de UMA coisa da aba: estar em app.heygen.com,
+  // pra o content script existir com o cookie. A bancada ele resolve sozinho.
   const pularNavegacao = jobMsg === 'HG_RUN_ECONOMY_API' && jaNoHeyGen;
 
   if (!pularNavegacao) {
@@ -1297,18 +1259,14 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     await waitForTabComplete(tab.id, 40000);
     await new Promise((r) => setTimeout(r, 5000));
     await waitForTabReady(tab.id);
-    // A economia por API nao espera redirect nem tenta criar projeto pela UI.
-    // Se chegou aqui por uma URL que nao era do HeyGen, a navegacao acima foi
-    // apenas para instalar o content script; a resolucao da bancada continua
-    // no ecoGarantirBancada(), com a conta confirmada nessa aba.
   } else {
     console.log('[DARKO LAB BG] bancada conhecida — pulando a navegacao pro Studio');
   }
 
-  // O caminho por API precisa de um PROJETO de verdade (a bancada). O id
-  // confirmado é repassado quando existe; sem ele, o content script procura um
-  // draft válido nessa conta antes de qualquer render. Não dependemos de um
-  // redirect da UI para criar projeto em aba oculta.
+  // O caminho por API precisa de um PROJETO de verdade (a bancada). Navegar
+  // pra /create-v4/draft?...&fromCreateButton=true faz o proprio app criar o
+  // projeto e redirecionar pra /create-v4/<id> — e navegar e a unica coisa que
+  // sempre funcionou em aba oculta. Sem o id nao ha o que renderizar.
   let bancadaId = null;
   if (jobMsg === 'HG_RUN_ECONOMY_API') {
     // Bancada explicita no payload (teste, ou a que ficou guardada): usa e
@@ -1320,7 +1278,31 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     // `ecoGarantirBancada()` do content script, que sabe achar e criar uma,
     // nunca chegava a rodar. Primeira execucao numa conta limpa falhava sempre.
     // Agora a falta de bancada NAO e' erro: o content script resolve.
-    bancadaId = bancadaPrevia;
+    let preparo;
+    try { preparo = await chrome.tabs.sendMessage(tab.id, { type: 'HG_ECO_PREPARE' }); }
+    catch (e) {
+      if (activeJobs.get(requestId) !== job) return;
+      activeJobs.delete(requestId);
+      throw e;
+    }
+    if (activeJobs.get(requestId) !== job) return;
+    if (!preparo?.ok && !preparo?.needsStudio) {
+      activeJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+        error: preparo?.error || 'Atualize a extensão Hey Auto e recarregue as abas do Pilot e do HeyGen para conectar o modo economia.',
+      });
+      return;
+    }
+    if (preparo.needsStudio) {
+      try {
+        bancadaId = await prepararPrimeiroStudio(tab, studioUrl, requestId, job);
+      } catch (e) {
+        if (activeJobs.get(requestId) !== job) return;
+        activeJobs.delete(requestId);
+        reportToPage(bridgeTabId, requestId, 'HG_ERROR', { error: String(e?.message || e) });
+        return;
+      }
+    } else bancadaId = preparo.bancadaId || bancadaPrevia;
     console.log('[DARKO LAB BG] bancada =', bancadaId || '(o content script resolve, por conta)');
   }
 
@@ -1340,6 +1322,44 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId, tipoJob) {
     reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
       error: 'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' + (e?.message ?? '') + ')',
     });
+  }
+}
+
+/** Só a primeira utilização de uma conta sem cena precisa montar o editor.
+ * O próprio HeyGen cria a estrutura, com o avatar do pedido. Não inventa um
+ * draft vazio nem sobrescreve um projeto do usuário. Restaura a aba anterior. */
+async function prepararPrimeiroStudio(tab, studioUrl, requestId, job) {
+  const previous = (await chrome.tabs.query({ active: true, windowId: tab.windowId }))[0];
+  const stillActive = () => activeJobs.get(requestId) === job;
+  if (!stillActive()) throw new Error('Cancelado.');
+  reportToPage(job.bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Primeiro uso nesta conta: preparando uma cena no Studio do HeyGen…' });
+  try {
+    // Aba oculta não inicializa o draft em algumas contas. Foco temporário
+    // apenas no primeiro uso; as renderizações continuam em segundo plano.
+    await chrome.tabs.update(tab.id, { url: studioUrl, active: true });
+    await waitForTabReady(tab.id);
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline && stillActive()) {
+      try {
+        const current = await chrome.tabs.get(tab.id);
+        if (/\/create-v4\/(?!draft(?:[/?#]|$))[^/?#]+/.test(current.url || '')) {
+          const ready = await chrome.tabs.sendMessage(tab.id, { type: 'HG_ECO_PREPARE' });
+          if (ready?.ok && ready.bancadaId) return ready.bancadaId;
+          if (ready?.error) throw new Error(ready.error);
+        }
+      } catch (e) {
+        if (!/receiving end|connection|channel closed/i.test(String(e?.message || e))) throw e;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    if (!stillActive()) throw new Error('Cancelado.');
+    throw new Error('O HeyGen ainda não terminou de preparar a primeira cena. Conclua os avisos de entrada no Studio e clique em Retomar. Nenhum render foi disparado.');
+  } finally {
+    try {
+      // Se a pessoa mudou de aba durante o preparo, respeita a escolha dela.
+      const current = await chrome.tabs.get(tab.id);
+      if (current.active && previous?.id && previous.id !== tab.id) await chrome.tabs.update(previous.id, { active: true });
+    } catch { /* a aba anterior pode ter sido fechada */ }
   }
 }
 

@@ -396,11 +396,13 @@ test('pós-processo cancela timers vencidos e expõe progresso real por take', (
 
   const extension = readFileSync('extension/heygen-content.js', 'utf8');
   assert.match(extension, /falha sistemica do HeyGen/);
-  assert.match(extension, /HG_ECO_BENCH_STATUS/);
-  assert.match(extension, /ecoBancadaStatus/);
-  assert.match(extension, /ecoContaAtual\(true\)/);
+  // 4.44.x: a bancada da conta e preparada por HG_ECO_PREPARE (content
+  // script -> ecoPrepararStudio), o fluxo que rodou ao vivo em 14.09.2026.
+  assert.match(extension, /msg\.type === 'HG_ECO_PREPARE'/);
+  assert.match(extension, /ecoPrepararStudio/);
+  assert.match(extension, /ecoContaAtual\(/);
   const background = readFileSync('extension/background.js', 'utf8');
-  assert.match(background, /HG_ECO_BENCH_STATUS/);
+  assert.match(background, /HG_ECO_PREPARE/);
   // Conta nova nao pode ficar esperando um redirect que o create-v4 nao faz
   // em aba de fundo: o content script resolve a bancada pela API da conta.
   assert.doesNotMatch(background, /esperarBancada\(tab\.id, 20000\)/);

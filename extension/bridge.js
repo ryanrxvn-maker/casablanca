@@ -62,7 +62,15 @@
       // carregada (o Chrome deriva o id do caminho absoluto). Sem isso o script
       // chutava pela data do manifest e ja publicou numa pasta que o Chrome nem
       // carrega — tudo "passava" e nada mudava no navegador.
-      sendToPage({ type: 'HG_PONG', version: VERSION, id: EXTENSION_ID });
+      // Um content script pode continuar vivo na aba depois de desinstalar.
+      // Só confirma presença se o runtime e o worker ainda responderem.
+      try {
+        if (!chrome.runtime.id) return;
+        chrome.runtime.sendMessage({ type: 'HG_BRIDGE_HEALTH' }, (response) => {
+          if (chrome.runtime.lastError || !response?.ok) return;
+          sendToPage({ type: 'HG_PONG', version: VERSION, id: EXTENSION_ID, requestId: data.requestId });
+        });
+      } catch { /* Contexto removido: a página deve mostrar desconectada. */ }
       return;
     }
 
