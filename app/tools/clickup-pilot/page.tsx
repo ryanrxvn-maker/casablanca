@@ -2760,7 +2760,14 @@ function ClickUpPilotInner() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `auto-edit-heygen-extension-v${ECONOMY_EXTENSION_VERSION}.zip`;
+      // O NOME vem da versao que o servidor REALMENTE entregou (header da rota),
+      // nunca da constante minima do Pilot: com a constante, o zip da 4.44.7
+      // chegava chamado v4.43.0 e parecia a extensao antiga.
+      const versaoServida = (response.headers.get("x-autoedit-extension-version") || "").replace(/[^0-9.]/g, "");
+      const nomeDoServidor = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") || "")?.[1];
+      link.download = versaoServida
+        ? `auto-edit-heygen-extension-v${versaoServida}.zip`
+        : nomeDoServidor || `auto-edit-heygen-extension-v${ECONOMY_EXTENSION_VERSION}.zip`;
       link.rel = 'noopener';
       document.body.appendChild(link);
       link.click();
