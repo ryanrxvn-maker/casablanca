@@ -1526,6 +1526,82 @@ console.log('\nhook com dois falantes:');
   assert(!d2?.hooks?.[0]?.segments, 'hook de 1 falante continua sem segments (nada mudou pro caso simples)');
 }
 
+/* ===== ARQUIVO DO AVATAR = o chip EXATO da linha, nunca um parecido ===== *
+ * Bug real (2026-09-14, AD117GL - PRPB07): "UGC: 1-10 (1).mp4" (smart-chip de
+ * Drive). O parser tira o "(1)" do username → "1-10", e o resolvedor fuzzy
+ * normalizava pra "110" e casava o PRIMEIRO link do doc INTEIRO que contivesse
+ * "110" (ou o "1-10.mp4" de outro AD) → card mostrava a miniatura de OUTRA
+ * pessoa (um doutor) no lugar do UGC. O arquivo tem que vir do chip exato. */
+console.log('\narquivo do avatar pelo chip exato (AD117GL 1-10 (1).mp4):');
+{
+  const LINKS_117: DocLink[] = [
+    { text: '1-10.mp4', fileId: 'DOUTOR_OUTRO_AD', url: null },
+    { text: '7558110842210531102.mp4', fileId: 'TALKING_PHOTO_110', url: null },
+    { text: '1-10 (1).mp4', fileId: 'UGC_CERTO', url: null },
+  ];
+  const DOC_117 = [
+    'AD116GL - PRPB07', 'Avatar e Vozes:', 'Doutor: 1-10.mp4', '',
+    'AD116G1GL - PRPB07', 'Doutor', 'Gancho do 116.', 'Body', 'Corpo do 116.', '',
+    'AD117GL - PRPB07',
+    'BRIEFING: AD minerado da oferta do quiabo adaptado para Compliance.',
+    'Avatar e Vozes:', 'Youtube Ads / Kwai Ads', 'UGC: 1-10 (1).mp4', '',
+    'AD117G1GL - PRPB07', 'Pro homem que ja passou dos 50, presta atencao.', 'Body', 'Corpo do 117.',
+  ].join('\n');
+  const b117 = parseDarkoBriefing(DOC_117, 'AD117GL', null, LINKS_117);
+  const av117 = b117?.avatars?.[0];
+  assert(av117?.videoFileId === 'UGC_CERTO', `AD117 UGC usa o arquivo do chip "1-10 (1).mp4" (got ${av117?.videoFileId})`);
+  const b116 = parseDarkoBriefing(DOC_117, 'AD116GL', null, LINKS_117);
+  assert(b116?.avatars?.[0]?.videoFileId === 'DOUTOR_OUTRO_AD', `AD116 continua com "1-10.mp4" (got ${b116?.avatars?.[0]?.videoFileId})`);
+  const d117 = buildDisparoForNomenclature(DOC_117, 'AD117GL - PRPB07', [], LINKS_117);
+  const fids = (d117?.avatars || []).map((a) => a.briefingFileId);
+  assert(fids.length === 1 && fids[0] === 'UGC_CERTO', `disparo AD117 aponta pro UGC certo (got ${JSON.stringify(fids)})`);
+
+  // Sem o link exato no doc: username curto/numerico NUNCA casa por substring
+  // solta ("1-10" → "110" dentro de um ID de talking-photo).
+  const LINKS_SEM: DocLink[] = [{ text: '7558110842210531102.mp4', fileId: 'TALKING_PHOTO_110', url: null }];
+  const dSem = buildDisparoForNomenclature(DOC_117, 'AD117GL - PRPB07', [], LINKS_SEM);
+  const fSem = (dSem?.avatars || []).map((a) => a.briefingFileId);
+  assert(fSem.every((f) => f !== 'TALKING_PHOTO_110'), `"1-10" NAO casa talking-photo que contem "110" (got ${JSON.stringify(fSem)})`);
+
+  // Mesmo texto de chip apontando pra 2 arquivos diferentes = ambiguo → sem
+  // arquivo (melhor sem miniatura do que a pessoa errada).
+  const LINKS_AMB: DocLink[] = [
+    { text: '1-10 (1).mp4', fileId: 'ARQ_A', url: null },
+    { text: '1-10 (1).mp4', fileId: 'ARQ_B', url: null },
+  ];
+  const dAmb = buildDisparoForNomenclature(DOC_117, 'AD117GL - PRPB07', [], LINKS_AMB);
+  const fAmb = (dAmb?.avatars || []).map((a) => a.briefingFileId);
+  assert(fAmb.length === 1 && fAmb[0] === null, `chip ambiguo (2 arquivos, mesmo nome) nao chuta (got ${JSON.stringify(fAmb)})`);
+  // Handle REAL repetido (mesmo video subido 2x) mantem o 1o, como sempre foi.
+  const LINKS_REP: DocLink[] = [
+    { text: 'renatomartins1.mp4', fileId: 'REN_A', url: null },
+    { text: 'renatomartins1.mp4', fileId: 'REN_B', url: null },
+  ];
+  const DOC_REP = ['AD52GL - PRPB07', 'Avatar e Vozes:', 'Doutor: @renatomartins1.mp4', '',
+    'AD52G1GL - PRPB07', 'Gancho.', 'Body', 'Corpo.'].join('\n');
+  const dRep = buildDisparoForNomenclature(DOC_REP, 'AD52GL - PRPB07', [], LINKS_REP);
+  assert((dRep?.avatars || [])[0]?.briefingFileId === 'REN_A', `handle real repetido continua no 1o arquivo (got ${(dRep?.avatars || [])[0]?.briefingFileId})`);
+  // Chip exato vence um link de outro nome que CONTEM o username.
+  const LINKS_CONT: DocLink[] = [
+    { text: 'renatomartins12.mp4', fileId: 'OUTRO', url: null },
+    { text: 'renatomartins1.mp4', fileId: 'CERTO', url: null },
+  ];
+  const dCont = buildDisparoForNomenclature(DOC_REP, 'AD52GL - PRPB07', [], LINKS_CONT);
+  assert((dCont?.avatars || [])[0]?.briefingFileId === 'CERTO', `nome exato vence "renatomartins12" que vem antes (got ${(dCont?.avatars || [])[0]?.briefingFileId})`);
+
+  // NAO DESFAZER O QUE FUNCIONA: nomes longos continuam casando por contencao.
+  const LINKS_VIVA: DocLink[] = [{ text: 'Viva Saudável_1330239768979913 (32 ativos).mp4', fileId: 'VIVA', url: null }];
+  const DOC_VIVA = ['AD50GL - PRPB07', 'Avatar e Vozes:', 'Doutor: 📎 Viva Saudável_1330239768979913 (32 ativos).mp4', '',
+    'AD50G1GL - PRPB07', 'Gancho.', 'Body', 'Corpo.'].join('\n');
+  const dViva = buildDisparoForNomenclature(DOC_VIVA, 'AD50GL - PRPB07', [], LINKS_VIVA);
+  assert((dViva?.avatars || [])[0]?.briefingFileId === 'VIVA', `chip com parenteses longo continua achando o arquivo (got ${(dViva?.avatars || [])[0]?.briefingFileId})`);
+  const LINKS_TP: DocLink[] = [{ text: '7508150707225251077.mp4', fileId: 'TP', url: null }];
+  const DOC_TP = ['AD51GL - PRPB07', 'Avatar e Vozes:', 'Doutor: 7508150707225251077.mp4', '',
+    'AD51G1GL - PRPB07', 'Gancho.', 'Body', 'Corpo.'].join('\n');
+  const dTp = buildDisparoForNomenclature(DOC_TP, 'AD51GL - PRPB07', [], LINKS_TP);
+  assert((dTp?.avatars || [])[0]?.briefingFileId === 'TP', `talking-photo numerico continua achando o arquivo (got ${(dTp?.avatars || [])[0]?.briefingFileId})`);
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ ${failures} assert(s) falharam`);

@@ -3513,6 +3513,25 @@ function ClickUpPilotInner() {
     if (u.length < 3) return null;
     const uNoTrailDigits = u.replace(/\d+$/, ''); // 'manualdohomemsolo2' → 'manualdohomemsolo'
 
+    // 0. Nome IGUAL (com fronteiras) ganha de qualquer parecido. 2+ arquivos com
+    //    o mesmo nome = ambiguo → null (nunca chuta a pessoa errada).
+    const tok = (s: string) => ` ${(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/\.(mp4|mov)\b/gi, ' ').replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    const uTok = tok(username.replace(/^@/, ''));
+    // Username FRACO (menos de 4 letras: "1-10", "7508...") so casa por palavra
+    // inteira. Bug AD117GL: "1-10" virava "110" e casava o 1o link do doc que
+    // tivesse "110" no meio (talking-photo de outro AD) → thumb de outra pessoa.
+    const strong = (u.match(/[a-z]/g) || []).length >= 4;
+    const exact = [...new Set(links.filter((l) => tok(l.text) === uTok).map((l) => l.fileId as string))];
+    if (exact.length === 1 || (exact.length > 1 && strong)) return exact[0];
+    if (exact.length > 1) return null;
+    if (!strong) {
+      for (const link of links) {
+        if (tok(link.text).includes(uTok)) return link.fileId;
+      }
+      return null;
+    }
+
     // 1. Match direto: text normalizado contem username
     for (const link of links) {
       const t = normalizeForMatch(link.text);
@@ -4169,6 +4188,9 @@ function ClickUpPilotInner() {
             // ID e casaria links numericos por acaso (thumb errada). Pula.
             // Avatar por IMAGEM embutida tambem nao tem arquivo nem username.
             if (av.youtubeUrl || av.imageUrl) continue;
+            // Chip AMBIGUO (mesmo nome, 2+ arquivos no doc): fica sem arquivo.
+            // Resolver por nome aqui chutaria a pessoa errada (bug AD117GL).
+            if (!av.videoFileId && av.videoFileAmbiguous) continue;
             const fid = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
             if (fid) { av.videoFileId = fid; continue; }
             // SEM arquivo de Drive: o chip ".mp4" pode na verdade apontar pra um

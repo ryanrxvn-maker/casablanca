@@ -199,6 +199,24 @@ function resolveVideoFileId(username: string, links: DocLink[]): string | null {
   const u = normForMatch(username.replace(/^@/, ''));
   if (u.length < 3) return null;
   const uNoTrailDigits = u.replace(/\d+$/, ''); // 'manualdohomemsolo2' → 'manualdohomemsolo'
+  // 0) Nome IGUAL (com fronteiras) ganha de qualquer parecido. 2+ arquivos com
+  //    o mesmo nome = ambiguo → null (nunca chuta a pessoa errada).
+  const tok = (s: string) => ` ${(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/\.(mp4|mov)\b/gi, ' ').replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const uTok = tok(username.replace(/^@/, ''));
+  // Username FRACO (menos de 4 letras: "1-10", "7508...") so casa por palavra
+  // inteira. Bug AD117GL: "1-10" virava "110" e casava o 1o link do doc que
+  // tivesse "110" no meio (talking-photo de outro AD) → thumb de outra pessoa.
+  const strong = (u.match(/[a-z]/g) || []).length >= 4;
+  const exact = [...new Set(driveLinks.filter((l) => tok(l.text) === uTok).map((l) => l.fileId as string))];
+  if (exact.length === 1 || (exact.length > 1 && strong)) return exact[0];
+  if (exact.length > 1) return null;
+  if (!strong) {
+    for (const link of driveLinks) {
+      if (tok(link.text).includes(uTok)) return link.fileId;
+    }
+    return null;
+  }
   // 1) Match direto: texto normalizado do link contem o username
   for (const link of driveLinks) {
     if (normForMatch(link.text).includes(u)) return link.fileId;
@@ -235,7 +253,7 @@ function resolveVideoFileId(username: string, links: DocLink[]): string | null {
  *  + status de match — exatamente o que o roleSlot do clickup-pilot precisa pra
  *  renderizar o card de avatar. */
 function avatarInfosFrom(
-  avatars: Array<{ role: string; username: string; videoFileId?: string | null; youtubeUrl?: string | null; thumbUrl?: string | null }>,
+  avatars: Array<{ role: string; username: string; videoFileId?: string | null; videoFileAmbiguous?: boolean; youtubeUrl?: string | null; thumbUrl?: string | null }>,
   matchedByRole: Record<string, { id: string; name: string; voiceId: string | null }>,
   links: DocLink[],
 ): DisparoAvatar[] {
@@ -247,7 +265,9 @@ function avatarInfosFrom(
     const youtubeUrl = av.youtubeUrl || null;
     // YouTube nao tem arquivo no Drive — username e o video ID; resolver fileId
     // casaria um .mp4 numerico errado. Fica so com a thumb do video.
-    const briefingFileId = youtubeUrl ? null : (av.videoFileId || resolveVideoFileId(av.username, links));
+    // Chip ambiguo (mesmo nome, 2+ arquivos) → sem arquivo, sem chute por nome.
+    const briefingFileId = youtubeUrl ? null
+      : (av.videoFileId || (av.videoFileAmbiguous ? null : resolveVideoFileId(av.username, links)));
     return {
       role: av.role || '',
       roleKey,

@@ -37,6 +37,10 @@ export type ParsedAvatar = {
    *  a biblioteca (nao ha username) — fica PENDENTE pro user escolher vendo o
    *  print. */
   imageUrl?: string | null;
+  /** true = a linha do avatar cita um chip cujo NOME aponta pra 2+ arquivos
+   *  diferentes no doc. Sem como saber qual e, fica SEM arquivo — e quem
+   *  consome NAO pode cair no resolvedor por nome (chutaria a pessoa errada). */
+  videoFileAmbiguous?: boolean;
 };
 
 /** Link capturado do doc (Google Docs export / mobilebasic). `fileId` aponta
@@ -428,6 +432,49 @@ function normForLinkMatch(s: string): string {
     .trim();
 }
 
+/** Arquivo de Drive do avatar tirado do CHIP EXATO da linha dele.
+ *
+ *  Bug real (2026-09-14, AD117GL - PRPB07): "UGC: 1-10 (1).mp4". O username
+ *  perde o "(1)" ("1-10") e o resolvedor por nome casava o "1-10.mp4" de OUTRO
+ *  AD (ou qualquer link com "110") → miniatura/Baixar de OUTRA pessoa. Aqui o
+ *  link so vale se o NOME INTEIRO dele aparece na propria linha, em fronteira
+ *  de palavra, e comeca pelo username. Entre varios que casam, vence o nome
+ *  mais longo ("1-10 (1)" ganha de "1-10"). Se o nome vencedor aponta pra 2+
+ *  arquivos diferentes → ambiguo (nao chuta). Sem link na linha → null e o
+ *  fluxo antigo segue igual. */
+export function resolveChipFileIdFromLine(
+  raw: string,
+  username: string,
+  links: DocLink[],
+): { fileId: string | null; ambiguous: boolean } {
+  const none = { fileId: null, ambiguous: false };
+  if (!raw || !username || !links || links.length === 0) return none;
+  const stripExt = (s: string) => (s || '').replace(/\.(?:mp4|mov)\b/gi, ' ');
+  const lineN = ` ${normForLinkMatch(stripExt(raw))} `;
+  const userN = normForLinkMatch(stripExt(username.replace(/^@/, '')));
+  if (!userN) return none;
+  let bestLen = 0;
+  let best: string[] = [];
+  for (const l of links) {
+    if (!l.fileId || l.isFolder || l.isImage) continue;
+    const lt = normForLinkMatch(stripExt(l.text));
+    if (!lt) continue;
+    if (!(lt === userN || lt.startsWith(`${userN} `))) continue;
+    if (!lineN.includes(` ${lt} `)) continue;
+    if (lt.length > bestLen) { bestLen = lt.length; best = [l.fileId]; }
+    else if (lt.length === bestLen && !best.includes(l.fileId)) best.push(l.fileId);
+  }
+  if (best.length === 1) return { fileId: best[0], ambiguous: false };
+  if (best.length > 1) {
+    // Nome FRACO (menos de 4 letras: "1-10 (1)", "7508...") repetido pode ser
+    // gente diferente → nao chuta. Handle de verdade ("renatomartins1") repetido
+    // e o mesmo video subido 2x → mantem o 1o, como sempre foi.
+    const weak = (userN.match(/[a-z]/g) || []).length < 4;
+    return weak ? { fileId: null, ambiguous: true } : { fileId: best[0], ambiguous: false };
+  }
+  return none;
+}
+
 /** Acha o link capturado cujo TEXTO corresponde ao `value` de uma linha de
  *  avatar (ex valor = "O IMPACTO DO ESTRESSE..." casa o smart-chip de mesmo
  *  titulo). Match: igualdade normalizada OU containment com overlap forte de
@@ -815,6 +862,15 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
       pendingRole = null;
       pendingRoleLine = -1;
     }
+  }
+
+  // Arquivo do avatar = chip EXATO da linha dele (ver resolveChipFileIdFromLine).
+  // So preenche quem ainda nao tem arquivo/YouTube/imagem.
+  for (const a of out) {
+    if (a.videoFileId || a.youtubeUrl || a.imageUrl || !a.username) continue;
+    const r = resolveChipFileIdFromLine(a.raw, a.username, links);
+    if (r.fileId) a.videoFileId = r.fileId;
+    else if (r.ambiguous) a.videoFileAmbiguous = true;
   }
 
   // Dedup por (role + username): se mesma combinacao aparecer 2x, mantem 1
@@ -2691,7 +2747,11 @@ export function parseVABriefing(
     if (usernames.length === 0) continue;
     seenAvaCodes.add(avaCode);
     const resolveFileId = (u: string): string | null => {
-      const dl = driveLinks.find((d) => d.text.includes(u));
+      // Nome IGUAL primeiro ("1-10.mp4" nao pode perder pra "11-10.mp4" que
+      // vem antes no doc); so depois o "contem" antigo.
+      const uN = normForLinkMatch(u.replace(/\.(?:mp4|mov)$/i, ''));
+      const eq = driveLinks.find((d) => normForLinkMatch(d.text.replace(/\.(?:mp4|mov)\b/gi, ' ')) === uN);
+      const dl = eq || driveLinks.find((d) => d.text.includes(u));
       return dl ? dl.fileId : null;
     };
     const primary = usernames[0];
