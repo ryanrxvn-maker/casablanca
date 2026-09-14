@@ -15040,8 +15040,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     </div>
                   ) : null}
 
-                  {/* Preview previsibilidade — antes de iniciar */}
-                  {Object.keys(taskAnalyses).length > 0 ? (
+                  {/* Preview previsibilidade — antes de iniciar.
+                    * No CREATOR aparece mesmo sem card: é aqui que mora o
+                    * "Carregar plano de cenas", que cria as tasks (14.09). */}
+                  {Object.keys(taskAnalyses).length > 0 || modo === 'creator' ? (
                     <div className="mt-4">
                       <div className="section-eyebrow mb-3 text-[11px]">
                         Análise <span className="ml-1 font-semibold tracking-[0.14em] text-text-dim">— o que vai ser disparado</span>
@@ -17693,8 +17695,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         * concêntrico por dentro. Mesma gramática do painel de
                         * reiniciar disparo: rótulo em sentença, um acento só,
                         * hairline no lugar de borda cinza. */}
-                      {/* Plano de cenas vem do briefing (DR MILLION/DOCS); no CREATOR nao ha doc. */}
-                      {modo !== 'creator' ? (
+                      {/* Plano de cenas: ClickUp/DOCS repartem a copy da análise; no
+                        * CREATOR o plano traz a copy (`texto`) e cria as tasks (14.09). */}
+                      {modo === 'clickup' || modo === 'docs' || modo === 'creator' ? (
                       <div className="plano-shell mt-3 rounded-[18px] p-[5px]">
                         <div className="plano-core group/plano rounded-[13px] p-3">
                         <button
