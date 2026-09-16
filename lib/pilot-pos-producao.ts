@@ -685,3 +685,80 @@ export function montarRoteiro(
   void bodyText; // o texto do body corrige via correctBlocksByCopy; a fronteira é só do hook
   return out;
 }
+
+/* ══════════════ AVISOS DA PÓS-PRODUÇÃO: dizer o que FOI PEDIDO (16.09) ══════════════
+ *
+ * Bug real (AD44VN - VRWA05): só o SMART ZOOM estava ligado, a montagem falhou
+ * e o card disse "não consegui aplicar legenda/zoom". O editor nem tinha pedido
+ * legenda — e a mensagem ainda escondia a causa (o erro cru ia só pro console).
+ * Toda mensagem de falha agora nomeia APENAS o que estava ligado e carrega o
+ * motivo técnico curto, pra que um RETOMAR que falhe de novo seja diagnosticável.
+ */
+
+export type PedidoDaPosProducao = {
+  legenda?: boolean;
+  zoom?: boolean;
+  headline?: boolean;
+  inserts?: boolean;
+};
+
+/** "o zoom" · "a legenda e o zoom" · "a legenda, o zoom e a headline". */
+export function oQueFoiPedido(p: PedidoDaPosProducao): string {
+  const itens: string[] = [];
+  if (p.legenda) itens.push('a legenda');
+  if (p.zoom) itens.push('o zoom');
+  if (p.headline) itens.push('a headline');
+  if (p.inserts) itens.push('os inserts');
+  if (itens.length === 0) return 'a pós-produção';
+  if (itens.length === 1) return itens[0];
+  return `${itens.slice(0, -1).join(', ')} e ${itens[itens.length - 1]}`;
+}
+
+/** "sem o zoom" · "sem a legenda e o zoom". */
+export function semOQueFoiPedido(p: PedidoDaPosProducao): string {
+  return `sem ${oQueFoiPedido(p)}`;
+}
+
+/** Concordância: "o zoom não entrou" / "a legenda e o zoom não entraram". */
+function verboEntrar(p: PedidoDaPosProducao): string {
+  const n = [p.legenda, p.zoom, p.headline, p.inserts].filter(Boolean).length;
+  return n > 1 || (n === 1 && p.inserts) ? 'não entraram' : 'não entrou';
+}
+
+/** O motivo técnico, curto e sem URL, pra fechar o aviso entre parênteses. */
+export function motivoCurto(e: unknown): string {
+  const bruto = e instanceof Error ? `${e.name && e.name !== 'Error' ? e.name + ': ' : ''}${e.message || ''}` : String(e ?? '');
+  return bruto
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140);
+}
+
+export type TipoDeFalhaDaPos = 'teto' | 'parado' | 'terminado' | 'versao-nova' | 'generica';
+
+/** Aviso de falha do render da pós-produção — o que o card mostra. */
+export function avisoDeFalhaDaPosProducao(
+  tipo: TipoDeFalhaDaPos,
+  pedido: PedidoDaPosProducao,
+  motivo?: string,
+): string {
+  const oQue = oQueFoiPedido(pedido);
+  const sem = semOQueFoiPedido(pedido);
+  switch (tipo) {
+    case 'teto':
+      return `a montagem passou de 35 minutos e foi interrompida — o AD saiu ${sem}. Ela estava progredindo, só devagar: deixa a aba do Pilot VISÍVEL (em segundo plano o navegador segura o vídeo) e clica RETOMAR.`;
+    case 'parado':
+      return `o render ficou parado e foi interrompido — o AD saiu ${sem}. Deixa a aba do Pilot VISÍVEL e clica RETOMAR.`;
+    case 'terminado':
+      return `outra ferramenta interrompeu o motor de vídeo no meio da montagem — o AD saiu ${sem}. Clica RETOMAR (não custa geração nova).`;
+    case 'versao-nova':
+      return `saiu uma versão nova do site no meio da montagem — o AD saiu ${sem}. Aperta F5 e clica RETOMAR (os takes estão salvos, não gera de novo).`;
+    default: {
+      const m = (motivo || '').trim();
+      const frase = oQue.charAt(0).toUpperCase() + oQue.slice(1);
+      return `${frase} ${verboEntrar(pedido)} nesta montagem — o AD saiu com o vídeo normal. Clica RETOMAR pra tentar de novo.` +
+        (m ? ` (motivo: ${m})` : '');
+    }
+  }
+}

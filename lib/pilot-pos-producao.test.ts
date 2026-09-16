@@ -20,6 +20,9 @@ import {
   escalaNoInstante,
   encaixarFronteiraNoCorte,
   type ZoomCfg,
+  oQueFoiPedido,
+  avisoDeFalhaDaPosProducao,
+  motivoCurto,
 } from './pilot-pos-producao';
 import { TEMPLATE_1 } from './typography/caption-script';
 
@@ -652,6 +655,38 @@ function adRealista(): { dur: number; partes: number[]; internos: number[][] } {
     if (e < piorEscala) piorEscala = e;
   }
   ok(piorEscala >= 0.999, `nunca abaixo de 100% com força inválida (mínimo ${piorEscala.toFixed(3)})`);
+}
+
+/* (27) AVISO DE FALHA diz o que FOI PEDIDO (bug AD44VN - VRWA05, 16.09).
+ * Só o zoom ligado e o card dizia "não consegui aplicar legenda/zoom". */
+{
+  const soZoom = { zoom: true };
+  const aviso = avisoDeFalhaDaPosProducao('generica', soZoom, 'EncodingError: Encoder failure');
+  ok(!/legenda/i.test(aviso), 'só zoom: o aviso NÃO fala de legenda');
+  ok(/^O zoom não entrou/.test(aviso), 'só zoom: começa com "O zoom não entrou"');
+  ok(/motivo: EncodingError: Encoder failure/.test(aviso), 'o motivo real aparece no aviso');
+  ok(oQueFoiPedido({ legenda: true }) === 'a legenda', 'só legenda');
+  ok(oQueFoiPedido({ legenda: true, zoom: true }) === 'a legenda e o zoom', 'legenda + zoom');
+  ok(oQueFoiPedido({ legenda: true, zoom: true, headline: true }) === 'a legenda, o zoom e a headline', 'três itens');
+  ok(/^A legenda e o zoom não entraram/.test(avisoDeFalhaDaPosProducao('generica', { legenda: true, zoom: true })), 'plural concorda');
+  ok(!/motivo/.test(avisoDeFalhaDaPosProducao('generica', soZoom)), 'sem motivo não mostra parênteses vazios');
+  for (const tipo of ['teto', 'parado', 'terminado', 'versao-nova'] as const) {
+    const a = avisoDeFalhaDaPosProducao(tipo, soZoom);
+    ok(/sem o zoom/.test(a) && !/legenda/i.test(a), `${tipo}: nomeia só o zoom`);
+  }
+  ok(/F5/.test(avisoDeFalhaDaPosProducao('versao-nova', soZoom)), 'versão nova manda dar F5');
+  const m = motivoCurto(new Error('falhou em https://x.y/z?token=abc de verdade'));
+  ok(!/https?:/.test(m) && /de verdade/.test(m), 'motivo curto tira URL');
+
+  // Nenhuma mensagem FIXA de "legenda/zoom" sobrou no orquestrador, e o render
+  // troca pro encoder de SOFTWARE nos três caminhos quando o de hardware morre.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const fsx = require('fs');
+  const run: string = fsx.readFileSync('lib/pilot-pos-producao-run.ts', 'utf8');
+  ok(!/sem legenda\/zoom|aplicar legenda\/zoom|sem legenda e sem zoom/.test(run), 'orquestrador sem texto fixo de legenda/zoom');
+  const exp: string = fsx.readFileSync('lib/typography/export.ts', 'utf8');
+  ok((exp.match(/trocarProSoftware\(e\)/g) || []).length >= 3, 'decode, reprodução e seek trocam pro encoder de software');
+  ok(/prefer-software/.test(exp), 'o encoder de software é pedido explicitamente');
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-pos-producao: ${passed} ok, ${failed} fail\n`);

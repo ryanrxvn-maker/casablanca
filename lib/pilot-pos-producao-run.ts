@@ -12,6 +12,9 @@ import {
   separarHookBody,
   montarRoteiro,
   palavrasDoHookNoAsr,
+  avisoDeFalhaDaPosProducao,
+  semOQueFoiPedido,
+  motivoCurto,
   type LegendaCfg,
   type ZoomCfg,
 } from './pilot-pos-producao';
@@ -113,6 +116,10 @@ export async function montarPosProducao(
   const temInserts = (cfg.inserts?.length || 0) > 0 && !!cfg.lerMidia;
   const querHeadline = !!cfg.headline?.on;
   if (!querLegenda && !querZoom && !temInserts && !querHeadline) return { blob: null, avisos, insertsOrfaos: orfaos };
+  // O que o editor LIGOU — toda mensagem de falha fala só disso (bug AD44VN:
+  // só zoom ligado e o card acusava "legenda/zoom").
+  const pedido = { legenda: querLegenda, zoom: querZoom, headline: querHeadline, inserts: temInserts };
+  const sem = semOQueFoiPedido(pedido);
 
   try {
     const [{ renderTypographyVideo }, engine, grupo, roteiro, copyFix] = await Promise.all([
@@ -134,7 +141,7 @@ export async function montarPosProducao(
     const somaPartes = (info.partesSec || []).reduce((a, b) => a + (b > 0 ? b : 0), 0);
     const durSec = await duracaoDeVideo(blob, somaPartes > 0.5 ? somaPartes : null);
     if (!durSec) {
-      avisos.push('não consegui medir a duração do vídeo montado — ele saiu sem legenda e sem zoom. Clica RETOMAR com a aba do Pilot visível.');
+      avisos.push(`não consegui medir a duração do vídeo montado — ele saiu ${sem}. Clica RETOMAR com a aba do Pilot visível.`);
       return { blob: null, avisos, insertsOrfaos: orfaos };
     }
 
@@ -804,7 +811,7 @@ export async function montarPosProducao(
         `${r.width}x${r.height}@${r.fps} · ${(r.blob.size / 1e6).toFixed(1)}MB · audioOk=${r.audioOk}`,
     );
     if (!r.blob || r.blob.size < 50_000) {
-      avisos.push('o render saiu vazio — o AD foi entregue sem legenda/zoom. Clica RETOMAR; se repetir, fecha as outras abas pesadas.');
+      avisos.push(`o render saiu vazio — o AD foi entregue ${sem}. Clica RETOMAR; se repetir, fecha as outras abas pesadas.`);
       return { blob: null, avisos, insertsOrfaos: orfaos };
     }
     if (!r.audioOk) avisos.push('o vídeo saiu SEM ÁUDIO — confere antes de entregar e, se estiver mudo, clica RETOMAR.');
@@ -827,14 +834,25 @@ export async function montarPosProducao(
       avisos.push(msg);
       return { blob: null, avisos, insertsOrfaos: orfaos };
     }
+    // Versão nova do site publicada com a aba aberta: o import dinâmico do
+    // render busca um chunk que não existe mais. RETOMAR sem F5 falharia igual.
+    const versaoNova = /ChunkLoadError|Loading chunk\s+[\w-]+\s+failed|Loading CSS chunk|dynamically imported module|importing a module script failed/i.test(
+      `${(e as Error)?.name || ''} ${msg}`,
+    );
     avisos.push(
-      motivoAborto === 'teto'
-        ? 'a montagem passou de 35 minutos e foi interrompida — o AD saiu sem legenda/zoom. Ela estava progredindo, só devagar: deixa a aba do Pilot VISÍVEL (em segundo plano o navegador segura o vídeo) e clica RETOMAR.'
-        : /abort|cancel/i.test(msg)
-        ? 'o render ficou parado e foi interrompido — o AD saiu sem legenda/zoom. Deixa a aba do Pilot VISÍVEL e clica RETOMAR.'
-        : /terminat/i.test(msg)
-          ? 'outra ferramenta interrompeu o motor de vídeo no meio da montagem — o AD saiu sem legenda/zoom. Clica RETOMAR (não custa geração nova).'
-          : 'não consegui aplicar legenda/zoom nesta montagem — o AD saiu com o vídeo normal. Clica RETOMAR pra tentar de novo.',
+      avisoDeFalhaDaPosProducao(
+        motivoAborto === 'teto'
+          ? 'teto'
+          : /abort|cancel/i.test(msg)
+            ? 'parado'
+            : /terminat/i.test(msg)
+              ? 'terminado'
+              : versaoNova
+                ? 'versao-nova'
+                : 'generica',
+        pedido,
+        motivoCurto(e),
+      ),
     );
     return { blob: null, avisos, insertsOrfaos: orfaos };
   }

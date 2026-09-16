@@ -2611,6 +2611,7 @@ function ClickUpPilotInner() {
         text: String(x.text || ''),
       }));
       const { montarPosProducao } = await import('@/lib/pilot-pos-producao-run');
+      const { semOQueFoiPedido } = await import('@/lib/pilot-pos-producao');
       // Idioma do ASR: o drLang só existe no fluxo DR MILLION (e o default
       // dele é 'pl'!) — task B2C transcreveria em polonês. Fora do DR
       // MILLION, é pt.
@@ -2684,7 +2685,7 @@ function ClickUpPilotInner() {
       if (!aplicou && r.avisos.length === 0) {
         setPosResultado((prev) => ({
           ...prev,
-          [taskId]: { aplicou: false, avisos: ['a pós-produção não gerou vídeo novo — o AD saiu sem legenda/zoom'] },
+          [taskId]: { aplicou: false, avisos: [`a pós-produção não gerou vídeo novo — o AD saiu ${semOQueFoiPedido({ legenda: legenda.on, zoom: zoom.on, headline: !!hl.on, inserts: insDaTask.length > 0 })}`] },
         }));
       }
       return r.blob;

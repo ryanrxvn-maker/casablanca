@@ -181,6 +181,8 @@ async function pickCodec(
   width: number,
   height: number,
   bitrate: number,
+  /** so encoder de SOFTWARE — reserva quando o de hardware morre no render */
+  somenteSoftware = false,
 ): Promise<CodecEscolhido> {
   const candidates = [
     'avc1.640033', // High 5.1
@@ -192,7 +194,8 @@ async function pickCodec(
   ];
   // 1ª passada HARDWARE, 2ª passada o que der. A ordem importa: um perfil
   // mais simples NO HARDWARE ganha de um perfil alto no software.
-  for (const modo of ['prefer-hardware', 'no-preference'] as const) {
+  const modos = somenteSoftware ? (['prefer-software'] as const) : (['prefer-hardware', 'no-preference'] as const);
+  for (const modo of modos) {
     for (const codec of candidates) {
       try {
         const support = await VideoEncoder.isConfigSupported({
@@ -238,7 +241,8 @@ function makeSink(
   W: number,
   H: number,
   bitrate: number,
-  hw = false,
+  /** true = hardware · 'software' = forca software · false = o navegador decide */
+  hw: boolean | 'software' = false,
   qualidadeMax = false,
   /** AAC já pronto (WebCodecs). Quando vem, a faixa de áudio é declarada aqui
    *  e o mux acontece na MESMA passada do vídeo — sem ffmpeg nenhum. */
@@ -280,7 +284,11 @@ function makeSink(
     // *"temos que sacrificar um pouco de qualidade (imperceptível) pra ganhar
     // uma boa velocidade"*. Quem quiser o máximo liga MAX QUALITY.
     latencyMode: qualidadeMax ? 'quality' : 'realtime',
-    ...(hw ? { hardwareAcceleration: 'prefer-hardware' as const } : null),
+    ...(hw === true
+      ? { hardwareAcceleration: 'prefer-hardware' as const }
+      : hw === 'software'
+        ? { hardwareAcceleration: 'prefer-software' as const }
+        : null),
   });
   return { encoder, muxer, target, err: () => encoderError };
 }
@@ -344,7 +352,7 @@ async function renderFramesByDecode(opts: {
   durationSec: number;
   codec: string;
   bitrate: number;
-  hw?: boolean;
+  hw?: boolean | 'software';
   qualidadeMax?: boolean;
   /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
   trilhaAac?: TrilhaAac | null;
@@ -764,7 +772,7 @@ async function renderFramesBySeek(opts: {
   durationSec: number;
   codec: string;
   bitrate: number;
-  hw?: boolean;
+  hw?: boolean | 'software';
   qualidadeMax?: boolean;
   /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
   trilhaAac?: TrilhaAac | null;
@@ -883,7 +891,7 @@ async function renderFramesByPlayback(opts: {
   durationSec: number;
   codec: string;
   bitrate: number;
-  hw?: boolean;
+  hw?: boolean | 'software';
   qualidadeMax?: boolean;
   /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
   trilhaAac?: TrilhaAac | null;
@@ -1498,35 +1506,66 @@ export async function renderTypographyVideo(opts: {
           : '[tipografia] inserts com leitor EXATO — caminho RÁPIDO de decode',
       );
     }
+    /* ⚠ ENCODER DE HARDWARE QUE MORRE NO MEIO (16.09). Num AD longo a GPU
+     * derruba o VideoEncoder ("EncodingError"/"Encoder failure") e TODOS os
+     * caminhos abaixo usavam o MESMO encoder de hardware: reprodução e seek
+     * morriam igual, e o AD saía sem o zoom com uma mensagem genérica. Ao ver
+     * uma falha de ENCODER, o render troca pro encoder de SOFTWARE (mesmo
+     * resultado, só mais lento) e refaz o caminho que caiu. */
+    let codecAtual = codec;
+    let hwAtual: boolean | 'software' = hw;
+    const ehFalhaDeEncoder = (e: unknown) =>
+      /encod/i.test(`${(e as Error)?.name || ''} ${(e as Error)?.message || String(e)}`);
+    const trocarProSoftware = async (e: unknown): Promise<boolean> => {
+      if (hwAtual !== true || !ehFalhaDeEncoder(e)) return false;
+      const sw = await pickCodec(W, H, bitrate, true).catch(() => null);
+      if (!sw) return false;
+      console.warn(`[tipografia] encoder de HARDWARE falhou — refazendo com SOFTWARE (${sw.codec}):`, e);
+      codecAtual = sw.codec;
+      hwAtual = 'software';
+      return true;
+    };
+    const tentarDecode = () =>
+      renderFramesByDecode({
+        file,
+        blocks,
+        preset,
+        style,
+        headlines,
+        zoom,
+        inserts,
+        canvas,
+        ctx,
+        W,
+        H,
+        srcW,
+        srcH,
+        durationSec,
+        codec: codecAtual,
+        bitrate,
+        hw: hwAtual,
+        qualidadeMax,
+        trilhaAac,
+        onProgress,
+        throwIfAborted,
+      });
     if (!opts.forceSeekPath && !insertsPrecisamEsperar) {
       try {
-        videoOnly = await renderFramesByDecode({
-          file,
-          blocks,
-          preset,
-          style,
-          headlines,
-          zoom,
-          inserts,
-          canvas,
-          ctx,
-          W,
-          H,
-          srcW,
-          srcH,
-          durationSec,
-          codec,
-          bitrate,
-          hw,
-          qualidadeMax,
-          trilhaAac,
-          onProgress,
-          throwIfAborted,
-        });
+        videoOnly = await tentarDecode();
       } catch (e) {
         if (isCancellationError(e) || signal?.aborted) throw e;
-        console.warn('[tipografia] decode rápido falhou — caindo pro seek:', e);
         videoOnly = null;
+        if (await trocarProSoftware(e)) {
+          try {
+            videoOnly = await tentarDecode();
+          } catch (e2) {
+            if (isCancellationError(e2) || signal?.aborted) throw e2;
+            console.warn('[tipografia] decode rápido (software) falhou — caindo pro seek:', e2);
+            videoOnly = null;
+          }
+        } else {
+          console.warn('[tipografia] decode rápido falhou — caindo pro seek:', e);
+        }
       }
     }
     if (!videoOnly) {
@@ -1548,12 +1587,21 @@ export async function renderTypographyVideo(opts: {
        * e é ordens de grandeza mais rápida; ela já trata insert ausente com
        * optional-chaining em todo hook. O seek continua como última reserva. */
       if (!opts.forceSeekPath) {
-        try {
-          videoOnly = await renderFramesByPlayback({
+        const tentarPlayback = () =>
+          renderFramesByPlayback({
             video, blocks, preset, style, headlines, zoom, inserts,
-            canvas, ctx, W, H, durationSec, codec, bitrate, hw, qualidadeMax, trilhaAac,
+            canvas, ctx, W, H, durationSec, codec: codecAtual, bitrate, hw: hwAtual, qualidadeMax, trilhaAac,
             onProgress, throwIfAborted,
           });
+        try {
+          try {
+            videoOnly = await tentarPlayback();
+          } catch (e) {
+            if (isCancellationError(e) || signal?.aborted) throw e;
+            if (!(await trocarProSoftware(e))) throw e;
+            try { video.pause(); } catch { /* segue */ }
+            videoOnly = await tentarPlayback();
+          }
           mode = 'playback';
           console.log('[tipografia] REPRODUÇÃO assumiu — render em ~tempo real');
         } catch (e) {
@@ -1568,27 +1616,35 @@ export async function renderTypographyVideo(opts: {
     if (!videoOnly) {
       mode = 'seek';
       onProgress?.({ phase: 'frames', ratio: 0, frame: 0, totalFrames: Math.ceil(durationSec * FPS) });
-      videoOnly = await renderFramesBySeek({
-        video,
-        blocks,
-        preset,
-        style,
-        headlines,
-        zoom,
-        inserts,
-        canvas,
-        ctx,
-        W,
-        H,
-        durationSec,
-        codec,
-        bitrate,
-        hw,
-        qualidadeMax,
-        trilhaAac,
-        onProgress,
-        throwIfAborted,
-      });
+      const tentarSeek = () =>
+        renderFramesBySeek({
+          video,
+          blocks,
+          preset,
+          style,
+          headlines,
+          zoom,
+          inserts,
+          canvas,
+          ctx,
+          W,
+          H,
+          durationSec,
+          codec: codecAtual,
+          bitrate,
+          hw: hwAtual,
+          qualidadeMax,
+          trilhaAac,
+          onProgress,
+          throwIfAborted,
+        });
+      try {
+        videoOnly = await tentarSeek();
+      } catch (e) {
+        if (isCancellationError(e) || signal?.aborted) throw e;
+        if (!(await trocarProSoftware(e))) throw e;
+        videoOnly = await tentarSeek();
+      }
     }
 
     if (videoOnly.size < 2048) {
@@ -1668,7 +1724,7 @@ export async function renderTypographyVideo(opts: {
     }
 
     onProgress?.({ phase: 'finalizando', ratio: 1 });
-    return { blob: final, audioOk, somInsertOk, width: W, height: H, fps: FPS, mode, hw };
+    return { blob: final, audioOk, somInsertOk, width: W, height: H, fps: FPS, mode, hw: hwAtual === true };
   } finally {
     try {
       video.removeAttribute('src');
