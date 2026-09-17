@@ -873,10 +873,12 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 />
               ) : null}
               {(montadoUrl || camufladoUrl || onDownload || loadDeliverables) ? (() => {
-                // DOWNLOAD = so o(s) MP4 final(is). Entrega o montado/decupado e,
-                // se houver, o camuflado — SEMPRE como .mp4 solto. Nunca o
-                // takes.zip, nunca .zip. Fontes que ja sao .mp4 (TROCA) baixam
-                // direto; fontes .zip (lipsync/VA) tem os .mp4 extraidos de dentro.
+                // DOWNLOAD = o(s) VIDEO(S) final(is), nunca o takes.zip.
+                // UM video (avatar unico, TROCA) -> .mp4 solto.
+                // VARIACOES DE HOOK -> o montado ja vem como .zip com um video
+                // montado por hook dentro (AD01G1.mp4, AD01G2.mp4...): esse zip
+                // E a entrega, baixa como esta. Versao tem botao proprio pra
+                // alternar e nao passa por aqui.
                 const sources = [
                   montadoUrl ? { url: montadoUrl, name: montadoFilename } : null,
                   camufladoUrl ? { url: camufladoUrl, name: camufladoFilename } : null,
@@ -892,6 +894,20 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   document.body.removeChild(a);
                 };
 
+                // Uma Blob URL NAO sobrevive ao reload da aba: o navegador revoga
+                // e o <a download> passa a apontar pro nada — o Chrome diz
+                // "Verifique a conexao com a Internet" e o arquivo nunca chega.
+                // Confere a fonte SEM materializar os bytes (cancela o corpo), pra
+                // dar tempo de cair no IndexedDB antes de disparar o download.
+                const urlViva = async (url: string) => {
+                  try {
+                    const r = await fetch(url);
+                    if (!r.ok) return false;
+                    try { await r.body?.cancel(); } catch {}
+                    return true;
+                  } catch { return false; }
+                };
+
                 const handleDownloadAll = async () => {
                   // ⛔ CONFERE ANTES DE ENTREGAR. Se o arquivo no disco nao e' o
                   // dos takes de agora, nao baixa — avisa e manda atualizar.
@@ -905,24 +921,39 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   // reload descartou e a re-hidratacao do IDB falhou), busca as
                   // fontes DIRETO do IndexedDB por taskId agora. Sem isto, uma task
                   // PRONTA com o blob salvo no disco ficava com botao mudo/ausente.
-                  let effSources = sources;
-                  if (effSources.length === 0 && loadDeliverables) {
+                  const doIDB = async () => {
+                    if (!loadDeliverables) return [] as Array<{ url: string; name?: string; revoke?: boolean }>;
                     try {
                       const lazy = await loadDeliverables();
-                      effSources = (lazy || []).filter((s) => s && s.url);
+                      return (lazy || []).filter((s) => s && s.url);
                     } catch (e) {
                       console.warn('[card] loadDeliverables falhou:', e);
+                      return [];
                     }
-                    if (effSources.length === 0) {
-                      // Disco realmente vazio (raro/destrutivo) — nunca silencioso:
-                      // avisa e manda regerar. Melhor mensagem clara que botao morto.
-                      alert('O vídeo pronto não está mais no cache do navegador (pode ter sido limpo). Clique em Retomar pra regerar a entrega.');
-                      return;
+                  };
+                  let effSources = sources;
+                  if (effSources.length === 0) {
+                    effSources = await doIDB();
+                  } else if (loadDeliverables) {
+                    // FONTE MORTA: antes so recorriamos ao IndexedDB quando NAO
+                    // havia URL nenhuma. Uma URL presente porem ja revogada passava
+                    // batido e o download falhava na cara do user. Agora qualquer
+                    // fonte morta manda reler a entrega inteira do disco.
+                    const vivas = await Promise.all(effSources.map((s) => urlViva(s.url)));
+                    if (vivas.some((v) => !v)) {
+                      const novo = await doIDB();
+                      if (novo.length) effSources = novo;
                     }
                   }
-                  // 1) Junta TODOS os MP4 finais: .mp4 solto (TROCA) entra direto;
-                  //    .zip (lipsync/VA) tem os .mp4 extraidos de dentro. Pode dar
-                  //    1 (single avatar) ou N (VA com 2+ avatares, montado+camuflado).
+                  if (effSources.length === 0) {
+                    // Disco realmente vazio (raro/destrutivo) — nunca silencioso:
+                    // avisa e manda regerar. Melhor mensagem clara que botao morto.
+                    alert('O vídeo pronto não está mais no cache do navegador (pode ter sido limpo). Clique em Retomar pra regerar a entrega.');
+                    return;
+                  }
+                  // 1) Resolve cada fonte no arquivo que o user deve receber:
+                  //    .mp4 entra direto; .zip com UM video vira o .mp4 limpo;
+                  //    .zip com VARIOS (variacoes de hook) vai inteiro.
                   const out: Array<{ blob?: Blob; url: string; name: string; revoke?: boolean }> = [];
                   for (const src of effSources) {
                     const fname = src.name || 'video.mp4';
@@ -931,34 +962,38 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       out.push({ url: src.url, name: fname });
                       continue;
                     }
-                    // .zip (lipsync/VA): extrai os .mp4 de dentro.
                     try {
                       const blob = await fetch(src.url).then((r) => r.blob());
                       const JSZip = (await import('jszip')).default;
+                      // loadAsync le so o INDICE do zip — nao descomprime nada.
                       const zip = await JSZip.loadAsync(blob);
                       const entries = Object.values(zip.files).filter(
                         (f: any) => !f.dir && /\.mp4$/i.test(f.name),
                       );
-                      if (entries.length === 0) {
-                        // Sem MP4 dentro (pipeline falhou / so diagnostico) —
-                        // cai pro zip mesmo pra nao deixar o botao mudo.
-                        out.push({ url: src.url, name: fname });
-                        continue;
-                      }
-                      for (const e of entries as any[]) {
-                        const b = await e.async('blob');
-                        const mp4 = new Blob([b], { type: 'video/mp4' });
+                      if (entries.length === 1) {
+                        // UM video dentro do zip (avatar unico) — entrega o .mp4 limpo.
+                        const e = entries[0] as any;
+                        const mp4 = new Blob([await e.async('blob')], { type: 'video/mp4' });
                         const base = (e.name.split('/').pop() || e.name) as string;
                         out.push({ blob: mp4, url: URL.createObjectURL(mp4), name: base, revoke: true });
+                      } else {
+                        // 0 mp4 (so diagnostico) ou 2+ (VARIACOES DE HOOK: AD01G1.mp4,
+                        // AD01G2.mp4...) — o zip JA E a entrega certa, vai como esta.
+                        // Antes o codigo descomprimia os N videos e re-zipava um
+                        // pacote identico: num montado de ~200 MB isso estourava a
+                        // memoria, caia no catch e mandava baixar a URL crua — que
+                        // era justamente o download que falhava.
+                        out.push({ url: src.url, name: fname });
                       }
-                    } catch {
+                    } catch (e) {
                       // Nao era zip valido (ou fetch falhou) — baixa o que tem.
+                      console.warn('[card] leitura do zip falhou:', e);
                       out.push({ url: src.url, name: fname });
                     }
                   }
                   if (out.length === 0) return;
 
-                  // 2) UM arquivo → baixa solto (.mp4), rapido e sem zip.
+                  // 2) UM arquivo → baixa solto (.mp4, ou o zip dos hooks).
                   if (out.length === 1) {
                     const m = out[0];
                     triggerDownload(m.url, m.name);
@@ -985,7 +1020,12 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                     // STORE (sem compressao): MP4 ja e comprimido — so empacota, rapido.
                     const zipBlob = await bundle.generateAsync({ type: 'blob', compression: 'STORE' });
                     const base = (montadoFilename || 'videos').replace(/\.(zip|mp4)$/i, '');
-                    const zipName = `${base}_${out.length}_videos.zip`;
+                    // So conta "_N_videos" quando os N itens SAO videos. Se algum
+                    // item e um zip (montado com variacoes de hook + camuflado), o
+                    // numero mentiria — o pacote leva menos arquivos que videos.
+                    const zipName = out.some((m) => /\.zip$/i.test(m.name))
+                      ? `${base}_entregas.zip`
+                      : `${base}_${out.length}_videos.zip`;
                     const zurl = URL.createObjectURL(zipBlob);
                     triggerDownload(zurl, zipName);
                     setTimeout(() => { try { URL.revokeObjectURL(zurl); } catch {} }, 60_000);
