@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hey Auto",
-  "version": "4.45.0",
+  "version": "4.45.1",
   "description": "Avatares HeyGen e inserts do Google Flow no Pilot, usando suas contas conectadas no navegador.",
   "icons": {
     "16": "icons/icon-16.png",

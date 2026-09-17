@@ -903,6 +903,10 @@ async function listMyAvatars() {
   // Agora percorre TODAS as paginas ate a resposta vir menor que o limit
   // (ou o total reportado ser atingido). Dedup por id como rede extra.
   let groups = [];
+  // Quanto o HeyGen DIZ que a conta tem. É a única referência externa que
+  // temos pra provar lista cortada sem abrir o console (caso 17.09: conta com
+  // vários avatares mostrando 1, e a tela não tinha como saber).
+  let totalInformado = null;
   try {
     console.log('[DARKO LAB] fetching grupos (paginado)...');
     const PAGE_LIMIT = 200;
@@ -933,7 +937,16 @@ async function listMyAvatars() {
         break;
       }
       const json = await r.json();
-      const batch = json?.data?.avatar_groups ?? [];
+      // SHAPE TOLERANTE: lia SÓ `data.avatar_groups`. O próprio arquivo já
+      // documenta que essa rota também responde `avatar_group_list`/`list` —
+      // se o HeyGen trocar o nome do campo, a biblioteca zera sem erro nenhum.
+      const batch =
+        json?.data?.avatar_groups ??
+        json?.data?.avatar_group_list ??
+        json?.data?.list ??
+        (Array.isArray(json?.data) ? json.data : null) ??
+        json?.data?.groups ??
+        [];
       let added = 0;
       for (const g of batch) {
         const gid = g?.id;
@@ -943,6 +956,7 @@ async function listMyAvatars() {
         added++;
       }
       const total = Number(json?.data?.total ?? 0) || null;
+      if (total) totalInformado = total;
       console.log(`[DARKO LAB] page=${page}: +${added} grupos (acum ${groups.length}${total ? ` de ${total}` : ''})`);
       // Fim da lista: pagina veio curta, nada novo entrou, ou total atingido.
       if (batch.length < PAGE_LIMIT || added === 0 || (total && groups.length >= total)) break;
@@ -1244,9 +1258,20 @@ async function listMyAvatars() {
     // LISTA PARCIAL NÃO PODE PASSAR CALADA: grupo que falhou depois dos retries
     // entra na tela com 1 look de capa, e antes a única pista disso ficava no
     // console. A contagem curta parecia a biblioteca real do cliente.
-    error: stillFailed
-      ? `[LISTA_PARCIAL] ${stillFailed} avatar(es) não puderam ser lidos agora — os looks deles podem estar faltando.`
-      : null,
+    error: (() => {
+      const recados = [];
+      if (totalInformado && groupsOut.length < totalInformado) {
+        recados.push(
+          `O HeyGen informou ${totalInformado} avatares nesta conta e só consegui ler ${groupsOut.length}.`,
+        );
+      }
+      if (stillFailed) {
+        recados.push(
+          `${stillFailed} avatar(es) não puderam ser lidos agora — os looks deles podem estar faltando.`,
+        );
+      }
+      return recados.length ? `[LISTA_PARCIAL] ${recados.join(' ')}` : null;
+    })(),
     source: 'api2.heygen.com/v2/avatar_group.private.list + avatar_look.private.list',
   };
 }
