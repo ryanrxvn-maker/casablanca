@@ -15,7 +15,7 @@ import {
   listMyHeyGenAvatars,
   type LibraryAvatarGroup,
 } from './heygen-extension-bridge';
-import { getActiveSpaceId } from './heygen-api-direct';
+import { getActiveAccountInfo, getActiveSpaceId } from './heygen-api-direct';
 
 type CacheState = {
   groups: LibraryAvatarGroup[];
@@ -26,6 +26,14 @@ type CacheState = {
   /** Workspace/space do HeyGen em que ESSA lista foi buscada. null = desconhecido
    *  (extensão antiga / campo ausente) → o check de workspace fica inerte. */
   spaceId: string | null;
+  /** Conta e workspace da sessão HeyGen deste navegador, pra tela poder dizer
+   *  DE ONDE a lista veio: a lista de grupos é privada do workspace ativo, e
+   *  a mesma conta em dois navegadores pode render listas diferentes. */
+  conta: { email: string | null; spaceName: string | null } | null;
+  /** Ressalva sobre a lista EXIBIDA (parcial, ou velha porque a atualização
+   *  falhou). Diferente de `error`: aqui há lista na tela, só não é confiável
+   *  como completa — e isso precisa estar ESCRITO, não só no console. */
+  aviso: string | null;
 };
 
 const TTL_MS = 5 * 60 * 1000;
@@ -39,6 +47,8 @@ const state: CacheState = {
   error: null,
   lastFetched: 0,
   spaceId: null,
+  conta: null,
+  aviso: null,
 };
 
 const subscribers = new Set<() => void>();
@@ -56,11 +66,12 @@ function hydrate() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return;
-    const j = JSON.parse(raw) as { groups?: LibraryAvatarGroup[]; lastFetched?: number; spaceId?: string | null };
+    const j = JSON.parse(raw) as { groups?: LibraryAvatarGroup[]; lastFetched?: number; spaceId?: string | null; conta?: CacheState['conta'] };
     if (Array.isArray(j.groups) && j.groups.length > 0 && state.groups.length === 0) {
       state.groups = j.groups;
       state.lastFetched = j.lastFetched || 0;
       state.spaceId = j.spaceId ?? null;
+      state.conta = j.conta ?? null;
     }
   } catch {}
 }
@@ -68,7 +79,7 @@ function hydrate() {
 function persist() {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify({ groups: state.groups, lastFetched: state.lastFetched, spaceId: state.spaceId }));
+    localStorage.setItem(LS_KEY, JSON.stringify({ groups: state.groups, lastFetched: state.lastFetched, spaceId: state.spaceId, conta: state.conta }));
   } catch {}
 }
 
@@ -147,6 +158,7 @@ export async function reloadLibrary(force = false): Promise<void> {
   const hasCached = state.groups.length > 0;
   state.loading = !hasCached || force;
   state.error = null;
+  state.aviso = null;
   notify();
   inflightPromise = (async () => {
     try {
@@ -160,21 +172,35 @@ export async function reloadLibrary(force = false): Promise<void> {
         if (!hasCached) {
           state.error =
             '[EXT_AUSENTE] A extensão Hey Auto não está ativa neste navegador.';
+        } else {
+          // Com lista guardada, sumir com o erro faria a lista velha passar
+          // por atual — inclusive uma lista de OUTRO workspace.
+          state.aviso =
+            'A extensão Hey Auto não respondeu: esta é a última lista que carregou, e pode não ser a atual.';
         }
         return;
       }
       // Busca a lista E o space ativo EM PARALELO (sem latência extra) — assim a
       // lista cacheada fica "carimbada" com o workspace em que foi buscada.
-      const [r, sid] = await Promise.all([listMyHeyGenAvatars(), getActiveSpaceId()]);
+      const [r, ident] = await Promise.all([listMyHeyGenAvatars(), getActiveAccountInfo()]);
+      const sid = ident.spaceId;
+      if (ident.email || ident.spaceName) state.conta = { email: ident.email, spaceName: ident.spaceName };
       if (r.ok) {
         state.groups = r.groups ?? [];
         state.lastFetched = Date.now();
         state.error = null;
+        // A extensão manda `error` junto de ok=true quando a lista saiu
+        // PARCIAL. Antes isso era descartado: a tela mostrava uma biblioteca
+        // curta como se fosse a conta inteira.
+        state.aviso = r.error ?? null;
         if (sid) state.spaceId = sid;
         persist();
       } else {
         // Mantém a lista cacheada (se houver) e só marca erro quando vazio.
+        // Com cache, a falha vira RESSALVA — engolir fazia a lista velha
+        // passar por atual.
         if (!hasCached) state.error = r.error ?? 'Falha ao listar avatares.';
+        else state.aviso = 'Não consegui atualizar a lista agora — esta é a última que carregou.';
       }
     } catch (e) {
       if (!hasCached) state.error = (e as Error).message ?? 'Falha desconhecida.';

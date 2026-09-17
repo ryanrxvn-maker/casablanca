@@ -112,20 +112,43 @@ export function heygenApiFetch(req: ApiReq): Promise<ApiRes> {
  * Tenta vários nomes de campo porque o shape exato do space_info não é
  * documentado (descoberto por engenharia-reversa). */
 export async function getActiveSpaceId(): Promise<string | null> {
+  return (await getActiveAccountInfo()).spaceId;
+}
+
+/** Identidade da SESSÃO HeyGen deste navegador: conta logada e workspace ativo.
+ *  Existe pra tela poder dizer DE ONDE a biblioteca de avatares veio. A lista
+ *  de grupos é privada do workspace ativo, então a mesma conta em dois
+ *  navegadores pode render listas diferentes — e sem esse carimbo ninguém
+ *  descobre isso olhando a tela (caso 17.09: cliente via 1 avatar de 20 e as
+ *  vozes vinham completas, porque voz stock não depende de workspace).
+ *  FAIL-SAFE: qualquer falha devolve tudo null e a tela só omite o carimbo. */
+export async function getActiveAccountInfo(): Promise<{
+  email: string | null;
+  spaceId: string | null;
+  spaceName: string | null;
+}> {
+  const vazio = { email: null, spaceId: null, spaceName: null };
   try {
     const r = await heygenApiFetch({
       url: 'https://api2.heygen.com/v1/pacific/account.get?include_ff=true',
       method: 'GET',
     });
-    if (!r.ok) return null;
+    if (!r.ok) return vazio;
     const d: any = r.body?.data ?? {};
     const si: any = d.space_info ?? {};
-    const id =
+    const u: any = d.user ?? d.account ?? d.user_info ?? d;
+    const spaceId =
       si.space_id ?? si.id ?? si.current_space_id ?? si.active_space_id ??
       d.space_id ?? d.current_space_id ?? d.active_space_id ?? null;
-    return id ? String(id) : null;
+    const email = u?.email ?? u?.username ?? null;
+    const spaceName = si.name ?? si.space_name ?? si.display_name ?? null;
+    return {
+      email: email ? String(email) : null,
+      spaceId: spaceId ? String(spaceId) : null,
+      spaceName: spaceName ? String(spaceName) : null,
+    };
   } catch {
-    return null;
+    return vazio;
   }
 }
 

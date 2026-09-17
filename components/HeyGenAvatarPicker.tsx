@@ -234,6 +234,8 @@ export function HeyGenAvatarPicker({
   const groups = snap.groups;
   const loading = snap.loading;
   const error = snap.error;
+  const aviso = snap.aviso;
+  const conta = snap.conta;
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const failedThumbsRef = useRef(0);
   const lastReloadRef = useRef(0);
@@ -499,8 +501,30 @@ export function HeyGenAvatarPicker({
             <span className="mono tabular-nums text-[13px] font-semibold leading-none text-text">{totalLooks}</span>
             <span className="text-[9px] font-medium uppercase tracking-[0.18em] text-text-muted">looks</span>
           </div>
+          {/* DE ONDE veio a lista. A lista de avatares e' privada do WORKSPACE
+           *  ativo do HeyGen: a mesma conta, em dois navegadores, pode render
+           *  listas diferentes. Sem este carimbo, "so' aparece 1 avatar" nao
+           *  tem como ser diagnosticado olhando a tela. */}
+          {conta?.email || conta?.spaceName ? (
+            <>
+              <span className="h-2.5 w-px bg-line-strong/80" aria-hidden />
+              <span className="truncate text-[10px] leading-none text-text-dim" title="Conta e workspace do HeyGen de onde esta lista veio">
+                {conta.email ?? 'conta HeyGen'}
+                {conta.spaceName ? ` · ${conta.spaceName}` : ''}
+              </span>
+            </>
+          ) : null}
         </div>
       )}
+
+      {/* Lista na tela, mas com ressalva: parcial, ou velha porque a
+       *  atualizacao falhou. Nunca deixar uma biblioteca curta passar por
+       *  completa. */}
+      {!error && aviso ? (
+        <div className="mt-2 rounded-[10px] border border-amber-400/30 bg-amber-400/[0.07] px-3 py-2 text-[11px] text-amber-200/90">
+          {aviso.replace('[LISTA_PARCIAL] ', '')} Clique em <strong>Recarregar</strong> pra tentar de novo.
+        </div>
+      ) : null}
 
       {/* Inline mode: quando um avatar foi aberto, mostra LOOKS no lugar
        *  do grid de avatares (com botao "voltar"). Sem segundo modal. */}

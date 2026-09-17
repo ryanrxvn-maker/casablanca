@@ -861,6 +861,36 @@ function parseVoicesResponse(json) {
  * Retorna a lista crua + metadados (thumb, name, version) pra exibicao
  * fiel no DARKO LAB.
  */
+/**
+ * Fetch das LISTAGENS da biblioteca (grupos e looks) no caminho AUTENTICADO.
+ *
+ * Por que existe: a listagem era a unica chamada que usava `fetch` puro, sem o
+ * header `x-space-id`. Quem recebeu acesso ao workspace de outra empresa tem o
+ * cookie apontando pro workspace PESSOAL — a UI do HeyGen mostrava 20 avatares
+ * e o Pilot listava 1, sem erro nenhum na tela (caso 17.09, num Mac; o mesmo
+ * login em outro navegador trazia tudo). fetchHeyGenWithSession manda o
+ * workspace ATIVO (mesma regra do app do HeyGen) e ainda refaz a chamada pela
+ * sessao da aba quando o HeyGen recusa a autenticacao.
+ *
+ * FALLBACK conservador: se esse caminho lancar, cai no fetch puro de antes —
+ * quem ja funcionava nao regride.
+ */
+async function fetchListaHeyGen(url, timeoutMs) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    try {
+      return await fetchHeyGenWithSession(url, { method: 'GET', signal: controller.signal });
+    } catch (e) {
+      if (e?.name === 'AbortError') throw e;
+      console.warn('[DARKO LAB] listagem com sessao falhou, tentando fetch simples:', e?.message ?? e);
+      return await fetch(url, { method: 'GET', credentials: 'include', signal: controller.signal });
+    }
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 async function listMyAvatars() {
   console.log('[DARKO LAB] === STEP 1: listMyAvatars iniciando ===');
 
@@ -879,11 +909,15 @@ async function listMyAvatars() {
     const MAX_PAGES = 25; // teto sanity: 5000 grupos
     const seenGroupIds = new Set();
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const r = await fetchWithTimeout(
-        `https://api2.heygen.com/v2/avatar_group.private.list?limit=${PAGE_LIMIT}&page=${page}`,
-        { method: 'GET', credentials: 'include' },
-        8000,
-      );
+      const urlGrupos = `https://api2.heygen.com/v2/avatar_group.private.list?limit=${PAGE_LIMIT}&page=${page}`;
+      // 12s (era 8): internet lenta derrubava a pagina 1 e a biblioteca inteira
+      // sumia. A pagina 1 ainda ganha UMA segunda chance antes de desistir.
+      let r = await fetchListaHeyGen(urlGrupos, 12000);
+      if (!r.ok && page === 1) {
+        console.warn(`[DARKO LAB] grupos page=1 HTTP ${r.status} — segunda tentativa`);
+        await new Promise((res) => setTimeout(res, 600));
+        r = await fetchListaHeyGen(urlGrupos, 12000);
+      }
       console.log(`[DARKO LAB] grupos page=${page} status:`, r.status);
       if (!r.ok) {
         // Pagina 1 falhou = erro real. Pagina N>1 falhou = fica com o que
@@ -956,29 +990,48 @@ async function listMyAvatars() {
   // Busca os looks de UM grupo. failed=true => a fetch quebrou (candidato a
   // retry); failed=false => respondeu (looks pode estar vazio legitimamente).
   const fetchGroupLooks = async (g) => {
-    const url = `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${g.id}&limit=50`;
-    try {
-      const r = await fetchWithTimeout(
-        url,
-        { method: 'GET', credentials: 'include' },
-        6000,
-      );
-      if (!r.ok) {
-        console.warn(`[DARKO LAB] grupo ${g.name}: HTTP ${r.status}`);
-        return { group: g, looks: [], failed: true };
+    // PAGINADO: `limit=50` sem paginacao era um teto silencioso — avatar com
+    // mais de 50 looks perdia o resto e ninguem ficava sabendo. Mesma regra
+    // dos grupos: anda enquanto a pagina vier cheia.
+    const LOOK_LIMIT = 100;
+    const MAX_LOOK_PAGES = 10; // teto sanity: 1000 looks por avatar
+    const juntos = [];
+    const vistos = new Set();
+    for (let page = 1; page <= MAX_LOOK_PAGES; page++) {
+      const url = `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${g.id}&limit=${LOOK_LIMIT}&page=${page}`;
+      try {
+        const r = await fetchListaHeyGen(url, 9000);
+        if (!r.ok) {
+          console.warn(`[DARKO LAB] grupo ${g.name} looks page=${page}: HTTP ${r.status}`);
+          // Pagina 1 ruim = grupo candidato a retry. Pagina N>1 ruim = fica
+          // com o que ja veio (parcial vale mais que nada).
+          if (page === 1) return { group: g, looks: [], failed: true };
+          break;
+        }
+        const j = await r.json();
+        const lote =
+          j?.data?.avatar_looks ??
+          j?.data?.avatar_look_list ??
+          j?.data?.list ??
+          (Array.isArray(j?.data) ? j.data : null) ??
+          [];
+        if (!Array.isArray(lote)) break;
+        let novos = 0;
+        for (const item of lote) {
+          const chave = item?.id ?? item?.look?.id ?? JSON.stringify(item);
+          if (vistos.has(chave)) continue;
+          vistos.add(chave);
+          juntos.push(item);
+          novos++;
+        }
+        if (lote.length < LOOK_LIMIT || novos === 0) break;
+      } catch (e) {
+        console.warn(`[DARKO LAB] grupo ${g.name} looks page=${page} ERR:`, e.message);
+        if (page === 1) return { group: g, looks: [], failed: true };
+        break;
       }
-      const j = await r.json();
-      const looks =
-        j?.data?.avatar_looks ??
-        j?.data?.avatar_look_list ??
-        j?.data?.list ??
-        (Array.isArray(j?.data) ? j.data : null) ??
-        [];
-      return { group: g, looks: Array.isArray(looks) ? looks : [], failed: false };
-    } catch (e) {
-      console.warn(`[DARKO LAB] grupo ${g.name} ERR:`, e.message);
-      return { group: g, looks: [], failed: true };
     }
+    return { group: g, looks: juntos, failed: false };
   };
 
   // Roda `worker` sobre `collection` com no maximo `limit` tarefas em voo.
@@ -1188,6 +1241,12 @@ async function listMyAvatars() {
     ok: true,
     groups: groupsOut,
     avatars: dedup,
+    // LISTA PARCIAL NÃO PODE PASSAR CALADA: grupo que falhou depois dos retries
+    // entra na tela com 1 look de capa, e antes a única pista disso ficava no
+    // console. A contagem curta parecia a biblioteca real do cliente.
+    error: stillFailed
+      ? `[LISTA_PARCIAL] ${stillFailed} avatar(es) não puderam ser lidos agora — os looks deles podem estar faltando.`
+      : null,
     source: 'api2.heygen.com/v2/avatar_group.private.list + avatar_look.private.list',
   };
 }
