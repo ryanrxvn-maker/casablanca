@@ -31,7 +31,6 @@ import {
   LandingFooter,
   PricingSection,
   SuiteSection,
-  FamousHeySection,
 } from './sections';
 
 const RED = '#e0483f';
@@ -53,9 +52,6 @@ export function LandingV3() {
       <EditionBar />
       <Masthead />
       <Hero />
-
-      {/* Famous Hey abre o corpo da landing (pedido em 18.08). */}
-      <FamousHeySection />
 
       {/* Cada manchete assinada pela sua editoria — nada de claim solto. */}
       <Ticker
