@@ -22,10 +22,21 @@ import { useHistoryEvents } from '@/components/history/HistoryTimeline';
  *
  * O painel é lazy: nenhum byte dele entra no bundle da ferramenta até o clique.
  */
-const ToolHistoryPanel = dynamic(
-  () => import('@/components/history/ToolHistoryPanel').then((m) => m.ToolHistoryPanel),
-  { ssr: false },
-);
+const carregarPainel = () =>
+  import('@/components/history/ToolHistoryPanel').then((m) => m.ToolHistoryPanel);
+
+const ToolHistoryPanel = dynamic(carregarPainel, {
+  ssr: false,
+  // Enquanto o pedaco do painel chega, a gaveta ja' aparece vazia. Sem isto o
+  // clique ficava ~1s sem resposta nenhuma e parecia botao morto.
+  loading: () => (
+    <div className="hist-overlay" aria-hidden>
+      <aside className="hist-drawer items-center justify-center">
+        <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-text-dim border-t-transparent" />
+      </aside>
+    </div>
+  ),
+});
 
 export function ToolHistoryFab() {
   const pathname = usePathname();
@@ -74,6 +85,10 @@ function Fab({ tool, pathname }: { tool: string; pathname: string | null }) {
           className="hist-fab__btn"
           aria-label={`Histórico desta ferramenta${total > 0 ? ` (${total} registros)` : ''}`}
           aria-haspopup="dialog"
+          // Passar o mouse (ou dar foco pelo teclado) ja' busca o pedaco do
+          // painel: quando o clique vem, ele costuma estar em maos.
+          onMouseEnter={() => void carregarPainel().catch(() => {})}
+          onFocus={() => void carregarPainel().catch(() => {})}
           onClick={() => setOpen(true)}
         >
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>

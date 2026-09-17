@@ -40,6 +40,9 @@ export function ToolHistoryPanel({
   const [query, setQuery] = useState('');
   const [soComArquivo, setSoComArquivo] = useState(false);
   const fecharRef = useRef<HTMLButtonElement>(null);
+  // Instante em que a gaveta abriu: um clique rapido demais no fundo, vindo do
+  // mesmo gesto que abriu, nao pode fechar o que o usuario acabou de pedir.
+  const abertoEm = useRef(Date.now());
   const reais = useHistoryEvents();
   const todos = eventosDeTeste ?? reais;
   const disponibilidade = useDisponibilidade(true);
@@ -76,7 +79,7 @@ export function ToolHistoryPanel({
     <div
       className="hist-overlay"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && Date.now() - abertoEm.current > 250) onClose();
       }}
     >
       <aside
