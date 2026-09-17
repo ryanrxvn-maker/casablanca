@@ -53,6 +53,8 @@ const ETAPAS = [
   { tsc: "lib/downloader-extension-guard.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/downloader-extension-guard.test.js"] },
   { tsc: "lib/heygen-batch-store.ts lib/heygen-batch-store.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/heygen-batch-store.test.js"] },
   { tsc: "lib/pilot-gen-isolation.ts lib/pilot-gen-isolation.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/pilot-gen-isolation.test.js"] },
+  // historico POR FERRAMENTA (17.09): rota->ferramenta, apelidos, estado honesto do botao Baixar
+  { tsc: "lib/history-tools.ts lib/history-tools.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/history-tools.test.js"] },
   { tsc: "lib/zip-store-prune.ts lib/zip-store-prune.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/zip-store-prune.test.js"] },
   { tsc: "lib/heygen-queue-store.ts lib/heygen-queue-store.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/heygen-queue-store.test.js"] },
   { tsc: "lib/drmillion-parser.ts lib/drmillion-parser.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/drmillion-parser.test.js"] },

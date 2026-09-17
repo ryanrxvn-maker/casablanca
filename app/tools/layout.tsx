@@ -7,6 +7,7 @@ import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
 import { SubSidebar, useSubSidebarActive } from '@/components/SubSidebar';
 import { ToolGuideFab } from '@/components/ToolGuideFab';
+import { ToolHistoryFab } from '@/components/ToolHistoryFab';
 import { TopBar } from '@/components/TopBar';
 import { ToolsStateProvider } from '@/components/ToolsStateProvider';
 
@@ -32,6 +33,7 @@ export default function ToolsLayout({
       <SubSidebar />
       <ContentWrap>{children}</ContentWrap>
       <ToolGuideFab />
+      <ToolHistoryFab />
       <RouteLoader />
     </ToolsStateProvider>
   );

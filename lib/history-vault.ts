@@ -27,6 +27,7 @@
  *   do Pilot já tenha sido limpo. O HeyGen retém ~60 dias.
  */
 
+import { durabilityStatus } from './durable-records';
 import { attachRefToRecent, readHistory, type FileRef } from './history';
 
 // ---------- Limites (anti-lixo) -------------------------------------------
@@ -308,24 +309,53 @@ export function scheduleVaultPrune(): void {
 }
 
 /**
+ * Janela em que um arquivo recém-guardado NUNCA é tratado como órfão.
+ *
+ * A referência do evento é gravada de forma assíncrona (durable-records grava
+ * sob lock e sincroniza com a conta). Entre guardar os bytes e a referência
+ * aparecer no histórico existe um intervalo — e uma poda que caísse bem nele
+ * apagaria o arquivo que o usuário acabou de gerar.
+ */
+const CARENCIA_ORFAO_MS = 10 * 60 * 1000;
+
+/**
  * Poda o cofre: (1) TTL 7 dias; (2) órfãos — bytes cujo evento já saiu do
  * histórico; (3) LRU por teto total/quantidade. Nunca lança.
+ *
+ * TRAVA DE SEGURANÇA: a varredura de órfãos só roda com o histórico REALMENTE
+ * carregado. Os registros vivem na conta (durable-records) e, antes de chegar
+ * — ou quando a rede falha — a leitura devolve lista VAZIA. Sem esta trava,
+ * um dia de rede ruim faria a poda concluir que todo arquivo é órfão e limpar
+ * o cofre inteiro do cliente. TTL e LRU seguem valendo nesse caso.
  */
 export async function pruneVault(): Promise<void> {
   try {
     const list = await vaultList();
     if (list.length === 0) return;
     const agora = Date.now();
+    const eventos = readHistory();
     const emUso = new Set<string>();
-    for (const ev of readHistory()) {
+    for (const ev of eventos) {
       for (const r of ev.ref ?? []) {
         if (r.via === 'vault') emUso.add(r.key);
       }
     }
+    let historicoConfiavel = eventos.length > 0;
+    try {
+      historicoConfiavel = historicoConfiavel && durabilityStatus().ready;
+    } catch {
+      historicoConfiavel = false;
+    }
     const remover = new Set<string>();
     for (const rec of list) {
       if (agora - rec.createdAt > VAULT_TTL_MS) remover.add(rec.key);
-      else if (!emUso.has(rec.key)) remover.add(rec.key);
+      else if (
+        historicoConfiavel &&
+        !emUso.has(rec.key) &&
+        agora - rec.createdAt > CARENCIA_ORFAO_MS
+      ) {
+        remover.add(rec.key);
+      }
     }
     // LRU: entre os sobreviventes, derruba os mais antigos até caber.
     const vivos = list
@@ -388,6 +418,29 @@ async function cabeNoNavegador(bytes: number): Promise<boolean> {
  *   anexam a própria receita via:'heygen'/'zip' no logHistory delas).
  */
 export function captureDownload(blob: Blob, filename: string, toolHint?: string): void {
+  guardarNoCofre(blob, filename, toolHint, `${filename} baixado`);
+}
+
+/**
+ * Guarda no cofre um artefato que a ferramenta ACABOU de produzir, mesmo que o
+ * usuario ainda nao tenha clicado em baixar, e anexa a referencia ao registro
+ * que a pagina acabou de gravar (logHistory vem ANTES desta chamada).
+ *
+ * Existe porque nem toda ferramenta entrega por downloadBlob: algumas mostram
+ * o resultado num <video> e deixam o download por conta de um link. Sem isto,
+ * o historico mostrava "video gerado" sem botao nenhum — registro que nao
+ * entrega arquivo nao serve pra nada.
+ */
+export function captureArtifact(blob: Blob, filename: string, toolHint?: string): void {
+  guardarNoCofre(blob, filename, toolHint, `${filename} gerado`);
+}
+
+function guardarNoCofre(
+  blob: Blob,
+  filename: string,
+  toolHint: string | undefined,
+  fallbackTitle: string,
+): void {
   if (typeof window === 'undefined') return;
   try {
     if (!blob || blob.size < 100) return;
@@ -430,7 +483,7 @@ export function captureDownload(blob: Blob, filename: string, toolHint?: string)
         const r = attachRefToRecent({
           tool,
           ref: { via: 'vault', key, name: filename, size: blob.size, mime },
-          fallbackTitle: `${filename} baixado`,
+          fallbackTitle,
         });
         if (r === 'skipped') {
           // Double-click do mesmo download — descarta os bytes duplicados.

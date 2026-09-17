@@ -1,5 +1,6 @@
 'use client';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
+import { RETENTION_MS, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
 
 /**
  * Histórico geral na conta, separado do background, com retenção de 7 dias.
@@ -12,92 +13,24 @@ import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './
  *   atualizar ao vivo se estiver aberta.
  */
 
-export type HistoryKind = 'done' | 'export' | 'dispatch' | 'download';
-
-/**
- * Referência RECUPERÁVEL de arquivo — o que torna um registro do histórico
- * baixável de novo, e não só visível. Cada evento pode carregar N referências
- * (ex.: um disparo do Pilot tem Montado + Takes + resgate via HeyGen).
- *
- * - 'vault'  → bytes guardados no cofre do histórico (IndexedDB próprio,
- *              lib/history-vault.ts) — artefatos pequenos (prints, srt, áudio…).
- * - 'zip'    → aponta pra um artefato que JÁ vive no zip-store dos disparos
- *              (batch:<id>:montado etc.) — zero custo extra de espaço.
- * - 'heygen' → receita de resgate: os videoIds do disparo. O HeyGen retém os
- *              vídeos (~60 dias), então dá pra re-baixar os takes pelo id
- *              mesmo depois do navegador ter descartado os blobs locais.
- */
-export type FileRef =
-  | { via: 'vault'; key: string; name: string; size?: number; mime?: string; label?: string }
-  | { via: 'zip'; key: string; name: string; label?: string; taskId?: string }
-  | {
-      via: 'heygen';
-      parts: { label: string; videoId: string }[];
-      name: string;
-      label?: string;
-      taskId?: string;
-    };
-
-export type HistoryEvent = {
-  id: string;
-  /** epoch ms */
-  t: number;
-  /** slug da ferramenta (mesmo id das rotas: 'decupagem', 'heygen-auto'...) */
-  tool: string;
-  /** frase curta do que aconteceu — ex.: "ad-hook-03.mp4 decupado" */
-  title: string;
-  kind: HistoryKind;
-  /** detalhe opcional — ex.: "31% menor · 0:42" */
-  meta?: string;
-  /** referências de download — presença = o registro é recuperável */
-  ref?: FileRef[];
-  /** evento criado automaticamente pela captura de download (candidato a fusão) */
-  auto?: boolean;
-};
-
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** Nomes exibidos por ferramenta (e ordem dos filtros). */
-export const HISTORY_TOOLS: { id: string; label: string }[] = [
-  { id: 'clickup-pilot', label: 'ClickUp Pilot' },
-  { id: 'heygen-auto', label: 'Hey Auto' },
-  { id: 'auto-broll', label: 'Auto B-roll' },
-  { id: 'lipsync', label: 'Lipsync' },
-  { id: 'decupagem', label: 'Decupagem' },
-  { id: 'decupagem-copy', label: 'Decupagem Inteligente' },
-  { id: 'copy-srt', label: 'Gerador de SRT' },
-  { id: 'tipografia', label: 'Legendas Automáticas' },
-  { id: 'auto-cortes', label: 'Auto Cortes' },
-  { id: 'camuflagem', label: 'Camuflagem' },
-  { id: 'compressor', label: 'Compressor' },
-  { id: 'acelerador', label: 'Mixer de Velocidade' },
-  { id: 'audio-split', label: 'Dividir áudios' },
-  { id: 'downloader', label: 'Downloader' },
-  { id: 'fakepass', label: 'FakePrint' },
-  { id: 'ltx-video', label: 'Vídeo do zero' },
-  { id: 'normalizador', label: 'Normalizador' },
-  { id: 'separador-audio', label: 'Separador de Áudio' },
-  { id: 'voice-test', label: 'Isolar voz' },
-];
-
-/**
- * Ferramentas que o usuário enxerga como UMA só. A caixinha de pergunta tem
- * rota própria, mas é o mesmo produto do FakePrint (que também traz a caixinha
- * entre os modelos de story) — dois chips pro mesmo trabalho só confundia.
- */
-const TOOL_ALIAS: Record<string, string> = {
-  'caixinha-pergunta': 'fakepass',
-};
-
-/** Id de exibição: dobra os apelidos na ferramenta dona (ver TOOL_ALIAS). */
-export function canonicalTool(id: string): string {
-  return TOOL_ALIAS[id] ?? id;
-}
-
-export function historyToolLabel(id: string): string {
-  const c = canonicalTool(id);
-  return HISTORY_TOOLS.find((t) => t.id === c)?.label ?? c;
-}
+export type {
+  FileRef,
+  HistoryEvent,
+  HistoryKind,
+} from './history-tools';
+export {
+  HISTORY_TOOLS,
+  buildChains,
+  canonicalTool,
+  chainState,
+  countByTool,
+  eventMatchesQuery,
+  filterHistory,
+  historyToolForPath,
+  historyToolLabel,
+  type Chain,
+  type ChainState,
+} from './history-tools';
 
 function safeRead(): HistoryEvent[] { return Object.values(readDurableRecords<HistoryEvent>('history')); }
 

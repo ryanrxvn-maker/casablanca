@@ -659,7 +659,7 @@ export default function FamousHeyPage() {
               erro: st.error || 'O HeyGen recusou a geração.',
             }),
           );
-          logHistory({ tool: 'Famous Hey', title: 'Geração falhou', kind: 'dispatch' });
+          logHistory({ tool: 'famous-hey', title: 'Geração falhou', kind: 'dispatch' });
           return;
         }
 
@@ -669,6 +669,7 @@ export default function FamousHeyPage() {
           // histórico promete "baixar de novo" pra sempre.
           let temVideo = false;
           let bytes: number | null = null;
+          let videoBlob: Blob | null = null;
           try {
             const r = await fetch(
               `/api/heygen/image-video/arquivo?videoId=${encodeURIComponent(videoId)}`,
@@ -678,6 +679,7 @@ export default function FamousHeyPage() {
               if (blob.size > 0) {
                 temVideo = await guardarVideo(jobId, blob);
                 bytes = blob.size;
+                videoBlob = blob;
               }
             }
           } catch {
@@ -685,12 +687,21 @@ export default function FamousHeyPage() {
             // depender da URL do HeyGen. O card avisa quando é esse o caso.
           }
           setJobs(atualizarJob(jobId, { status: 'pronto', erro: null, temVideo, bytes }));
+          const titulo = lerJobs().find((j) => j.id === jobId)?.titulo ?? '';
           logHistory({
-            tool: 'Famous Hey',
-            title: 'Vídeo pronto',
+            tool: 'famous-hey',
+            title: titulo ? `${titulo} — vídeo pronto` : 'Vídeo pronto',
             kind: 'done',
             meta: st.duration ? `${st.duration.toFixed(1)}s` : undefined,
           });
+          // Copia pro cofre do histórico: o vídeo só vivia no store próprio da
+          // ferramenta, então o histórico listava a entrega sem botão nenhum.
+          const paraOCofre = videoBlob;
+          if (paraOCofre) {
+            void import('@/lib/history-vault')
+              .then((v) => v.captureArtifact(paraOCofre, nomeDeArquivo(titulo), 'famous-hey'))
+              .catch(() => {});
+          }
           return;
         }
 
@@ -859,7 +870,7 @@ export default function FamousHeyPage() {
         bytes: null,
       };
       setJobs(salvarJob(job));
-      logHistory({ tool: 'Famous Hey', title: `Disparou "${nome}"`, kind: 'dispatch' });
+      logHistory({ tool: 'famous-hey', title: `Disparou "${nome}"`, kind: 'dispatch' });
       void acompanhar(id, j.videoId);
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro inesperado no disparo.');
@@ -875,7 +886,7 @@ export default function FamousHeyPage() {
     setErro(null);
     const local = await pegarVideo(job.id);
     if (local && local.size > 0) {
-      await downloadBlob(local, nomeDeArquivo(job.titulo));
+      await downloadBlob(local, nomeDeArquivo(job.titulo), { capture: false });
       return;
     }
     // Sem cópia local (falhou na hora, ou o navegador limpou): tenta o proxy,

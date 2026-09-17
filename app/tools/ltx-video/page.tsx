@@ -25,6 +25,8 @@ type GalleryItem = {
   url: string;
   prompt: string;
   meta: string;
+  /** Bytes do video gerado — servem ao download e ao cofre do historico. */
+  blob?: Blob;
 };
 
 type GenResp = {
@@ -296,10 +298,16 @@ export default function LtxVideoPage() {
         url,
         prompt: txt,
         meta: `${res.label} · ${dur.label}`,
+        blob: finalBlob,
       };
       setResult(item);
       setGallery((g) => [item, ...g].slice(0, 8));
       logHistory({ tool: 'ltx-video', title: `Vídeo gerado — ${item.meta}` });
+      // O video fica num <video> da pagina, nao passa por downloadBlob: sem
+      // guardar aqui, o historico teria o registro e nenhum botao de baixar.
+      void import('@/lib/history-vault').then((v) =>
+        v.captureArtifact(finalBlob, `ltx-${item.id}.mp4`, 'ltx-video'),
+      ).catch(() => {});
       setPhase('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -457,13 +465,31 @@ export default function LtxVideoPage() {
             />
             <div className="mt-2 flex items-center justify-between gap-3">
               <span className="text-xs text-text-muted">{result.meta}</span>
-              <a
-                href={result.url}
-                download={`ltx-${result.id}.mp4`}
+              <button
+                type="button"
+                onClick={() => {
+                  // capture:false — os bytes ja' foram pro cofre quando o
+                  // video ficou pronto; capturar de novo duplicaria registro.
+                  // Sem blob em maos (estado remontado), busca pela propria
+                  // Object URL: o botao nunca fica sem fazer nada.
+                  const item = result;
+                  void (async () => {
+                    try {
+                      const guardado = item.blob;
+                      const b: Blob = guardado
+                        ? guardado
+                        : await fetch(item.url).then((r) => r.blob());
+                      const { downloadBlob } = await import('@/lib/audio-engine');
+                      await downloadBlob(b, `ltx-${item.id}.mp4`, { capture: false });
+                    } catch {
+                      window.open(item.url, '_blank', 'noopener');
+                    }
+                  })();
+                }}
                 className="btn-secondary"
               >
                 Baixar MP4
-              </a>
+              </button>
             </div>
           </div>
         ) : null}

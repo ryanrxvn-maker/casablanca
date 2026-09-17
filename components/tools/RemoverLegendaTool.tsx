@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { splitVideoByTime } from '@/lib/ffmpeg-worker';
 import { joinCleanedSmart } from '@/lib/webcodecs-join';
 import { withFFLock } from '@/lib/lipsync-pipeline';
+import { logHistory } from '@/lib/history';
 
 /**
  * RemoverLegendaTool — remoção de legenda/marca d'água queimada.
@@ -331,6 +332,18 @@ export default function RemoverLegendaTool() {
 
       const resultUrl = URL.createObjectURL(finalBlob);
       patchJob(jobId, { stage: 'done', pct: 100, resultUrl });
+      // Historico da ferramenta: registra a entrega e guarda os bytes no cofre
+      // quando cabem (video grande passa do teto — ai o registro fica sem
+      // botao, que e' a verdade, em vez de prometer um download que nao existe).
+      const nomeLimpo = `${(file.name || 'video').replace(/\.[^.]+$/, '')}_limpo.mp4`;
+      logHistory({
+        tool: 'remover-elementos',
+        title: `${file.name || 'vídeo'} — legenda/marca removida`,
+        meta: `${(finalBlob.size / 1048576).toFixed(1)} MB`,
+      });
+      void import('@/lib/history-vault')
+        .then((v) => v.captureArtifact(finalBlob, nomeLimpo, 'remover-elementos'))
+        .catch(() => {});
     } catch (e) {
       if (cancelledRef.current.has(jobId)) return;
       patchJob(jobId, { stage: 'error', error: errMsg(e) || 'Algo deu errado.' });
