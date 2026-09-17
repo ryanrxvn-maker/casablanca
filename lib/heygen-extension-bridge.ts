@@ -565,8 +565,13 @@ export function listMyHeyGenAvatars(): Promise<{
         ok: false,
         avatars: [],
         groups: [],
+        // NÃO cite login aqui: quem não responde é a EXTENSÃO (service worker
+        // dormindo, extensão recém-atualizada com a página aberta, contexto
+        // invalidado). A palavra 'logado' fazia o picker classificar isso como
+        // sessão expirada e mandar o cliente entrar no HeyGen — ele entrava,
+        // nada mudava, e a causa real ficava escondida.
         error:
-          'A extensão Hey Auto não respondeu. Confirme que está logado no HeyGen (app.heygen.com), atualize a página e tente de novo.',
+          '[EXT_MUDA] A extensão Hey Auto não respondeu. Abra chrome://extensions, clique no ↻ do card Hey Auto e atualize esta página (F5).',
       });
     }, 90000);
   });

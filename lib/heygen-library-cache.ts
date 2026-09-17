@@ -11,6 +11,7 @@
  * - TTL de 5 min: depois disso, getOrLoad re-busca automaticamente
  */
 import {
+  detectExtension,
   listMyHeyGenAvatars,
   type LibraryAvatarGroup,
 } from './heygen-extension-bridge';
@@ -149,6 +150,19 @@ export async function reloadLibrary(force = false): Promise<void> {
   notify();
   inflightPromise = (async () => {
     try {
+      // PRÉ-CHECK DA EXTENSÃO (1,5s) antes de pedir a lista. Sem extensão,
+      // ninguém responde ao HG_LIST_AVATARS: a página esperava 90s e caía num
+      // erro que mencionava login — a tela então acusava "você não está logado
+      // no HeyGen" pra quem só não tinha a extensão instalada (caso do cliente
+      // novo em 17.09). Agora a causa certa aparece na hora.
+      const ext = await detectExtension();
+      if (!ext.connected) {
+        if (!hasCached) {
+          state.error =
+            '[EXT_AUSENTE] A extensão Hey Auto não está ativa neste navegador.';
+        }
+        return;
+      }
       // Busca a lista E o space ativo EM PARALELO (sem latência extra) — assim a
       // lista cacheada fica "carimbada" com o workspace em que foi buscada.
       const [r, sid] = await Promise.all([listMyHeyGenAvatars(), getActiveSpaceId()]);

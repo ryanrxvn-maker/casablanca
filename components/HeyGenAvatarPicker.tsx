@@ -396,12 +396,54 @@ export function HeyGenAvatarPicker({
         <div className="mt-2 rounded-[10px] border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-200">
           {(() => {
             const raw = String(error || '');
-            const looksAuth = /401|403|login|sign[\s-]?in|unauthor|session|logad|entrar/i.test(raw);
+            // MARCADORES (app novo) vêm carimbados na origem e mandam mais que
+            // qualquer heurística — o texto da extensão do cliente pode ser de
+            // uma versão antiga, então as regex abaixo continuam como rede.
+            const semExt = raw.includes('[EXT_AUSENTE]');
+            const extMuda = raw.includes('[EXT_MUDA]');
+            // Biblioteca vazia NÃO é aba travada nem sessão caída: a conta do
+            // HeyGen simplesmente não tem avatar cadastrado. Cai antes do
+            // looksTab porque a frase cita app.heygen.com.
+            const vazia = /biblioteca (?:esta|está) vazia/i.test(raw);
+            const looksAuth =
+              !semExt && !extMuda && !vazia &&
+              /401|403|login|sign[\s-]?in|unauthor|session|logad|entrar/i.test(raw);
             // Aba do HeyGen dormindo/travada (Memory Saver, pagina de erro, ou
             // aba velha de outra conta). Aqui o user PRECISA da instrucao certa
             // — o texto generico fazia ele reinstalar a extensao a toa.
-            const looksTab = /dormindo|travada|aba .*heygen|app\.heygen\.com/i.test(raw);
-            return looksTab && !looksAuth ? (
+            const looksTab =
+              !semExt && !extMuda && !vazia &&
+              /dormindo|travada|aba .*heygen|app\.heygen\.com/i.test(raw);
+            return semExt ? (
+              <div>
+                A extensão <strong>Hey Auto</strong> não está ativa neste navegador — é
+                ela que lê os avatares da sua conta do HeyGen. Baixe em{' '}
+                <a href="/api/extension/download" className="underline hover:text-amber-100">
+                  extensão Hey Auto
+                </a>
+                , carregue a pasta em <strong>chrome://extensions</strong> (modo
+                desenvolvedor) e atualize esta página (F5).
+              </div>
+            ) : extMuda ? (
+              <div>
+                A extensão Hey Auto está instalada, mas não respondeu. Abra{' '}
+                <strong>chrome://extensions</strong>, clique no <strong>↻</strong> do card
+                da Hey Auto e atualize esta página (F5).
+              </div>
+            ) : vazia ? (
+              <div>
+                Sua conta do HeyGen não tem nenhum avatar cadastrado. Crie um avatar em{' '}
+                <a
+                  href="https://app.heygen.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-amber-100"
+                >
+                  app.heygen.com
+                </a>{' '}
+                e clique em <strong>Recarregar</strong>.
+              </div>
+            ) : looksTab && !looksAuth ? (
               <div>
                 A aba do HeyGen está dormindo ou travada. Feche as abas do{' '}
                 <a
@@ -430,8 +472,9 @@ export function HeyGenAvatarPicker({
               </div>
             ) : (
               <div>
-                Não consegui carregar sua biblioteca de avatares agora. Confirme que
-                está logado no HeyGen e clique em <strong>Recarregar biblioteca</strong>.
+                Não consegui carregar sua biblioteca de avatares agora. Clique em{' '}
+                <strong>Recarregar</strong>; se insistir, mande este motivo pro suporte:{' '}
+                <span className="opacity-80">{raw.slice(0, 180) || 'sem detalhe'}</span>
               </div>
             );
           })()}
