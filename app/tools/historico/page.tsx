@@ -94,7 +94,7 @@ export default function HistoricoPage() {
       <ToolHero
         eyebrow="SEU TRABALHO · ÚLTIMOS 7 DIAS"
         title="Histórico geral"
-        subtitle="Tudo que você produziu nos últimos 7 dias, de todas as ferramentas — pronto pra baixar de novo."
+        subtitle="Tudo que você produziu nos últimos 7 dias, de todas as ferramentas, pronto pra baixar de novo."
         hue="rgba(167,139,250,0.45)"
         icon={
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

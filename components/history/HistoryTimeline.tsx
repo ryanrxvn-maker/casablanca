@@ -620,7 +620,7 @@ export function HistoryTimeline({
                         !alvo
                           ? vivo?.ativo
                             ? 'O arquivo aparece aqui quando a montagem terminar'
-                            : 'Esse registro nao guardou arquivo pra baixar'
+                            : 'Esse registro não guardou arquivo pra baixar'
                           : estado === 'gone'
                             ? `${alvo.name} expirou do navegador (7 dias)`
                             : estado === 'remote'
@@ -629,7 +629,7 @@ export function HistoryTimeline({
                       }
                       onClick={alvo ? () => void baixar(e, alvo) : undefined}
                     />
-                    {podeAgir && taskId && naFila.existe ? (
+                    {podeAgir && taskId && naFila.existe && !vivo?.ativo ? (
                       <>
                         <PilotBtn3D
                           size={30}
@@ -638,7 +638,7 @@ export function HistoryTimeline({
                           disabled={!naFila.existe || naFila.rodando || !!st?.busy}
                           title={
                             !naFila.existe
-                              ? 'Esse disparo nao esta mais na fila do Pilot'
+                              ? 'Esse disparo não está mais na fila do Pilot'
                               : naFila.rodando
                                 ? 'Espere terminar pra remontar'
                                 : 'Remontar no Pilot'
@@ -652,7 +652,7 @@ export function HistoryTimeline({
                           disabled={!naFila.existe || naFila.rodando || !!st?.busy}
                           title={
                             !naFila.existe
-                              ? 'Esse disparo nao esta mais na fila do Pilot'
+                              ? 'Esse disparo não está mais na fila do Pilot'
                               : naFila.rodando
                                 ? 'Espere terminar pra reiniciar'
                                 : 'Reiniciar o disparo (pergunta se quer editar antes)'
@@ -661,21 +661,23 @@ export function HistoryTimeline({
                         />
                       </>
                     ) : null}
-                    <PilotBtn3D
-                      size={30}
-                      color={st?.confirmar ? 'rose' : 'neutral'}
-                      icon={removendo ? <Girando size={13} /> : st?.confirmar ? <IcoCheck /> : <IcoX />}
-                      disabled={!!st?.busy || !!vivo?.ativo}
-                      pulse={st?.confirmar}
-                      title={
-                        vivo?.ativo
-                          ? 'Nao da pra remover um disparo em andamento'
-                          : st?.confirmar
+                    {/* Enquanto gera, remover nao aparece: o disparo em curso nao
+                        pode ser apagado, e botao travado so' ocupa espaco. */}
+                    {vivo?.ativo ? null : (
+                      <PilotBtn3D
+                        size={30}
+                        color={st?.confirmar ? 'rose' : 'neutral'}
+                        icon={removendo ? <Girando size={13} /> : st?.confirmar ? <IcoCheck /> : <IcoX />}
+                        disabled={!!st?.busy}
+                        pulse={st?.confirmar}
+                        title={
+                          st?.confirmar
                             ? 'Confirmar: apaga o registro e os arquivos guardados'
-                            : 'Remover do historico'
-                      }
-                      onClick={() => void remover(e)}
-                    />
+                            : 'Remover do histórico'
+                        }
+                        onClick={() => void remover(e)}
+                      />
+                    )}
                   </div>
 
                   {st?.msg || st?.err ? (
