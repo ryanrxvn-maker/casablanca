@@ -185,7 +185,7 @@ export function ToolHistoryPanel({
 
         {/* Rodapé */}
         <footer className="hist-rodape">
-          <Link href="/tools/historico" onClick={onClose} className="hist-rodape__link">
+          <Link href={`/tools/historico?tool=${encodeURIComponent(tool)}`} onClick={onClose} className="hist-rodape__link">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M4 6h16M4 12h16M4 18h10" />
             </svg>

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { GUIDE_PATHS } from '@/components/tool-guides/routes';
+import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
 import { countByTool, historyToolForPath } from '@/lib/history';
 import { useHistoryEvents } from '@/components/history/HistoryTimeline';
 
@@ -50,6 +51,7 @@ export function ToolHistoryFab() {
 
 function Fab({ tool, pathname }: { tool: string; pathname: string | null }) {
   const [open, setOpen] = useState(false);
+  const [abrindo, setAbrindo] = useState(false);
   const [montado, setMontado] = useState(false);
   // Atraso BEM maior que o do painel: aqui só o contador do selo depende
   // disso, e ler o histórico varre o armazenamento da conta inteiro. Num
@@ -71,6 +73,29 @@ function Fab({ tool, pathname }: { tool: string; pathname: string | null }) {
 
   const temGuia = !!pathname && GUIDE_PATHS.has(pathname);
 
+  /**
+   * Abre a gaveta garantindo que o pedaço dela chegou.
+   *
+   * Quando um deploy novo troca os arquivos com a página aberta, o pedido do
+   * pedaço morre com ChunkLoadError — e um `.catch` silencioso deixaria o botão
+   * mudo pra sempre. Aqui a falha de pedaço vira o recarregamento único que o
+   * app já usa pra essa situação (lib/chunk-guard).
+   */
+  const preparar = () =>
+    carregarPainel().catch((e) => {
+      if (isChunkLoadError(e)) reloadOnceForChunk();
+      throw e;
+    });
+
+  const abrir = () => {
+    if (abrindo) return;
+    setAbrindo(true);
+    void preparar()
+      .then(() => setOpen(true))
+      .catch(() => {})
+      .finally(() => setAbrindo(false));
+  };
+
   return (
     <>
       <div
@@ -82,14 +107,14 @@ function Fab({ tool, pathname }: { tool: string; pathname: string | null }) {
       >
         <button
           type="button"
-          className="hist-fab__btn"
+          className={'hist-fab__btn' + (abrindo ? ' hist-fab__btn--carregando' : '')}
           aria-label={`Histórico desta ferramenta${total > 0 ? ` (${total} registros)` : ''}`}
           aria-haspopup="dialog"
           // Passar o mouse (ou dar foco pelo teclado) ja' busca o pedaco do
           // painel: quando o clique vem, ele costuma estar em maos.
-          onMouseEnter={() => void carregarPainel().catch(() => {})}
-          onFocus={() => void carregarPainel().catch(() => {})}
-          onClick={() => setOpen(true)}
+          onMouseEnter={() => void preparar().catch(() => {})}
+          onFocus={() => void preparar().catch(() => {})}
+          onClick={abrir}
         >
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path

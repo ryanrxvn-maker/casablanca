@@ -2673,6 +2673,16 @@ html[data-theme='light'] .hist-chip {
   background: rgba(16, 16, 24, 0.03);
 }
 
+/* Enquanto o pedaco da gaveta esta' a caminho: pulso curto pra o clique ter
+   resposta na hora, mesmo no primeiro (quando nada foi pre-carregado). */
+.hist-fab__btn--carregando {
+  animation: hist-fab-pulso 0.9s ease-in-out infinite;
+}
+@keyframes hist-fab-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* ─────────────── SOMBRA DOS SLIDES DO HERÓI ───────────────
    Era inline com rgba(0,0,0,.95): no tema CLARO isso vira uma mancha cinza
    em volta do card, que lia como "borda sobrando". Aqui a sombra é escura no

@@ -62,6 +62,15 @@ export default function HistoricoPage() {
     };
   }, []);
 
+  // Link direto por ferramenta (/tools/historico?tool=decupagem). Lido do
+  // window em vez de useSearchParams pra não exigir Suspense nesta página.
+  useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tool');
+      if (t && HISTORY_TOOLS.some((x) => x.id === t)) setTool(t);
+    } catch {}
+  }, []);
+
   // Poda o cofre em ocioso no primeiro load (nunca no caminho quente).
   useEffect(() => {
     void import('@/lib/history-vault').then((v) => v.scheduleVaultPrune()).catch(() => {});
