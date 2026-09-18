@@ -574,8 +574,15 @@ export function HistoryTimeline({
                     </div>
                     <p className="hist-row__meta">
                       {mostrarFerramenta ? <span>{historyToolLabel(e.tool)}</span> : null}
-                      {takes ? <span>{takes}</span> : null}
-                      {!takes && e.meta ? <span>{e.meta}</span> : null}
+                      {/* Rodando, o que importa e o ANDAMENTO (4/10 takes);
+                          parado, o resumo da entrega (takes + tamanho). */}
+                      {vivo?.ativo && takes ? (
+                        <span>{takes}</span>
+                      ) : e.meta ? (
+                        <span>{e.meta}</span>
+                      ) : takes ? (
+                        <span>{takes}</span>
+                      ) : null}
                       {corrido ? <span>{corrido}</span> : <span>{timeLabel(e.t)}</span>}
                     </p>
                     {vivo?.ativo ? (
