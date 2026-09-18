@@ -13,6 +13,8 @@ import { notFound, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
 import { ToolHistoryPanel } from '@/components/history/ToolHistoryPanel';
+import type { FilaAoVivo } from '@/components/history/HistoryTimeline';
+import { statusDoDisparo } from '@/lib/history-fila';
 import type { HistoryEvent } from '@/lib/history';
 
 const AGORA = Date.now();
@@ -20,6 +22,9 @@ const H = 3600_000;
 
 /** Disparos do Pilot: entrega com montado + takes + resgate, e disparos crus. */
 const PILOT: HistoryEvent[] = [
+  { id: 'dispatch:viva-1:1', t: AGORA - 32_000, tool: 'clickup-pilot', title: 'AD122VN - PRPB07', kind: 'dispatch' },
+  { id: 'dispatch:viva-2:2', t: AGORA - 43_000, tool: 'clickup-pilot', title: 'AD123VN - PRPB07', kind: 'dispatch' },
+  { id: 'dispatch:viva-3:3', t: AGORA - 48_000, tool: 'clickup-pilot', title: 'AD121VN - PRPB07', kind: 'dispatch' },
   {
     id: 'p1',
     t: AGORA - 40 * 60_000,
@@ -142,6 +147,26 @@ function semearCofre(): Promise<void> {
   });
 }
 
+/** Fila sintética: o preview precisa mostrar o disparo ANDANDO. */
+const parte = (id: string | null, pronto: boolean) => ({ videoId: id, videoStatus: pronto ? 'completed' : null });
+const FILA: FilaAoVivo = {
+  agora: AGORA,
+  url: { '86aj6nfue': 'https://app.clickup.com/t/exemplo' },
+  inicio: { 'viva-1': AGORA - 32_000, 'viva-2': AGORA - 43_000, 'viva-3': AGORA - 48_000 },
+  status: {
+    'viva-1': statusDoDisparo({
+      phase: 'rendering',
+      parts: [...Array(10)].map((_, i) => parte(`v${i}`, i < 4)),
+    }),
+    'viva-2': statusDoDisparo({
+      phase: 'post',
+      parts: [...Array(10)].map((_, i) => parte(`v${i}`, true)),
+    }),
+    'viva-3': statusDoDisparo({ phase: 'queued', parts: [...Array(10)].map(() => parte(null, false)) }),
+    '86aj6nfue': statusDoDisparo({ phase: 'done', parts: [...Array(10)].map((_, i) => parte(`v${i}`, true)) }),
+  },
+};
+
 export default function DevHistoricoFerramenta() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
@@ -194,6 +219,7 @@ function Preview() {
         <ToolHistoryPanel
           tool={tool}
           eventosDeTeste={tool === 'compressor' ? COMPRESSOR : PILOT}
+          filaDeTeste={tool === 'compressor' ? undefined : FILA}
           onClose={() => setAberto(false)}
         />
       ) : null}

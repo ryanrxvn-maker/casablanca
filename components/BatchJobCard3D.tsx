@@ -645,6 +645,30 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const banner = classifyBanner(message, phase);
   const showProgress = phase !== 'done' && phase !== 'failed';
 
+  /**
+   * ABRIR PELO HISTÓRICO: a linha do histórico pede pra ver ESTA task. O card
+   * se expande (previews dos takes à mostra) e vem pra a vista. Sem isso, o
+   * botão levava pro Pilot e o usuário ainda tinha que caçar o card e clicar
+   * na setinha pra entender qual task era.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onAbrir = (ev: Event) => {
+      const alvo = (ev as CustomEvent<{ taskId?: string }>).detail?.taskId;
+      if (!alvo || alvo !== props.taskId) return;
+      setExpanded(true);
+      setTimeout(() => {
+        try {
+          document
+            .getElementById(`batch-card-${props.taskId}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {}
+      }, 80);
+    };
+    window.addEventListener('autoedit:abrir-card', onAbrir);
+    return () => window.removeEventListener('autoedit:abrir-card', onAbrir);
+  }, [props.taskId]);
+
   return (
     <li className="list-none" id={`batch-card-${props.taskId}`}>
       <div

@@ -9,6 +9,7 @@ import {
   toolIcon,
   useDisponibilidade,
   useHistoryEvents,
+  type FilaAoVivo,
 } from './HistoryTimeline';
 import { filterHistory, historyToolLabel, type HistoryEvent } from '@/lib/history';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
@@ -32,11 +33,13 @@ export function ToolHistoryPanel({
   tool,
   onClose,
   eventosDeTeste,
+  filaDeTeste,
 }: {
   tool: string;
   onClose: () => void;
   /** Só a página de preview dev-only passa isto (app/dev/historico-ferramenta). */
   eventosDeTeste?: HistoryEvent[];
+  filaDeTeste?: FilaAoVivo;
 }) {
   const [query, setQuery] = useState('');
   const [soComArquivo, setSoComArquivo] = useState(false);
@@ -179,6 +182,7 @@ export function ToolHistoryPanel({
               compacto
               mostrarFerramenta={false}
               aoAgir={onClose}
+              filaDeTeste={filaDeTeste}
             />
           )}
         </div>

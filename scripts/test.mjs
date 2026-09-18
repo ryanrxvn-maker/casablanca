@@ -58,6 +58,8 @@ const ETAPAS = [
   { tsc: "lib/history-tools.ts lib/history-tools.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/history-tools.test.js"] },
   // acoes do historico (17.09): download do MONTADO, taskId do disparo, intencao entre paginas
   { tsc: "lib/history-tools.ts lib/history-acoes.ts lib/history-acoes.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/history-acoes.test.js"] },
+  // status AO VIVO no historico (18.09): mesma conta da barra do card do Pilot
+  { tsc: "lib/history-fila.ts lib/history-fila.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/history-fila.test.js"] },
   { tsc: "lib/zip-store-prune.ts lib/zip-store-prune.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/zip-store-prune.test.js"] },
   { tsc: "lib/heygen-queue-store.ts lib/heygen-queue-store.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/heygen-queue-store.test.js"] },
   { tsc: "lib/drmillion-parser.ts lib/drmillion-parser.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/drmillion-parser.test.js"] },

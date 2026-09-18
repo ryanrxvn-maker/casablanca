@@ -2289,11 +2289,11 @@ html[data-theme='light'] .hist-fab__label {
 }
 .hist-dia {
   font-family: var(--font-tech);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: rgb(var(--text-dim));
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: rgb(var(--text-muted));
+  white-space: nowrap;
 }
 .hist-hairline {
   height: 1px;
@@ -2304,26 +2304,26 @@ html[data-theme='light'] .hist-fab__label {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px 9px 16px;
+  gap: 11px;
+  padding: 10px 12px 10px 16px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0)),
     rgb(var(--bg-softer));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  /* Hairline no lugar de borda cinza: a linha fica desenhada, nao cercada. */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.055),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   transition:
-    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.22s ease,
-    box-shadow 0.22s ease;
+    transform 0.34s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.34s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .hist-row:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--hist-accent) 40%, transparent);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 10px 24px -14px rgba(0, 0, 0, 0.9),
-    0 0 0 1px color-mix(in srgb, var(--hist-accent) 12%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--hist-accent) 26%, rgba(255, 255, 255, 0.07)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 16px 34px -20px color-mix(in srgb, var(--hist-accent) 45%, rgba(0, 0, 0, 0.9));
 }
 .hist-row--compacta {
   padding: 8px 10px 8px 14px;
@@ -2352,10 +2352,14 @@ html[data-theme='light'] .hist-fab__label {
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: color-mix(in srgb, var(--hist-accent) 9%, rgb(var(--bg)));
-  color: rgb(var(--text-muted));
+  border-radius: 11px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 60%),
+    color-mix(in srgb, var(--hist-accent) 10%, rgb(var(--bg)));
+  color: color-mix(in srgb, var(--hist-accent) 62%, rgb(var(--text-muted)));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--hist-accent) 22%, rgba(255, 255, 255, 0.05)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 .hist-row__titulo {
   overflow: hidden;
@@ -2381,6 +2385,12 @@ html[data-theme='light'] .hist-fab__label {
 .hist-row__meta > span {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Ponto separador desenhado pelo CSS: o texto so' carrega informacao. */
+.hist-row__meta > span + span::before {
+  content: '·';
+  margin-right: 5px;
+  opacity: 0.55;
 }
 .hist-row__ferramenta {
   font-family: var(--font-tech);
@@ -2464,13 +2474,9 @@ html[data-theme='light'] .hist-row__icone {
 .hist-cabecalho__linha {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 2px;
-  font-family: var(--font-tech);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  gap: 6px;
+  margin-top: 1px;
+  font-size: 11.5px;
   color: rgb(var(--text-dim));
 }
 .hist-fechar {
@@ -2563,19 +2569,22 @@ html[data-theme='light'] .hist-row__icone {
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 6px 12px;
+  padding: 6px 13px;
   font-family: var(--font-tech);
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: rgb(var(--text-dim));
-  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  transition:
+    transform 0.34s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.28s ease,
+    color 0.28s ease;
 }
 .hist-rodape__link:hover {
   transform: translateY(-1px);
-  border-color: rgba(167, 139, 250, 0.45);
+  box-shadow:
+    inset 0 0 0 1px rgba(167, 139, 250, 0.45),
+    0 10px 22px -16px rgba(139, 92, 246, 0.9);
   color: rgb(var(--text));
 }
 html[data-theme='light'] .hist-cabecalho,
@@ -2620,11 +2629,7 @@ html[data-theme='light'] .hist-busca {
   color: rgb(var(--text));
 }
 .hist-stat__rotulo {
-  font-family: var(--font-tech);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: 11.5px;
   color: rgb(var(--text-dim));
 }
 .hist-filtros-geral {
@@ -2681,6 +2686,188 @@ html[data-theme='light'] .hist-chip {
 @keyframes hist-fab-pulso {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
+}
+
+/* ───────────── HISTORICO: corpo da linha, selo de estado e barra viva ─────────────
+   O que estava faltando: o histórico agora ACOMPANHA. Enquanto o disparo
+   trabalha, a linha mostra a fase, a contagem de takes e a barra andando com a
+   mesma conta do card do Pilot; terminado, vira registro com as ações. */
+:root {
+  --hist-fuchsia: #e879f9;
+  --hist-rose: #fb7185;
+  --hist-mola: cubic-bezier(0.32, 0.72, 0, 1);
+}
+.hist-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hist-dia-linha {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding-left: 2px;
+}
+.hist-dia-linha .hist-hairline {
+  flex: 1;
+}
+.hist-row__corpo {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.hist-row__topo {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.hist-row__topo .hist-row__titulo {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+/* Selo de ESTADO: é o único lugar onde caixa alta faz sentido aqui. */
+.hist-selo {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: var(--font-label), var(--font-tech);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.hist-selo[data-tom='progress'] {
+  color: #f9d4ff;
+  background: rgba(232, 121, 249, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(232, 121, 249, 0.42);
+}
+.hist-selo[data-tom='success'] {
+  color: #d9f99d;
+  background: rgba(163, 230, 53, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(163, 230, 53, 0.35);
+}
+.hist-selo[data-tom='error'] {
+  color: #fecdd3;
+  background: rgba(251, 113, 133, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.42);
+}
+.hist-selo[data-tom='idle'] {
+  background: rgba(255, 255, 255, 0.05);
+}
+.hist-selo__ponto {
+  height: 5px;
+  width: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  animation: hist-pulso 1.4s ease-in-out infinite;
+}
+@keyframes hist-pulso {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+/* Barra: trilho fino embutido + preenchimento com brilho que varre. */
+.hist-barra {
+  position: relative;
+  display: block;
+  margin-top: 5px;
+  height: 3px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+.hist-barra > i {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(232, 121, 249, 0.55), var(--hist-fuchsia));
+  box-shadow: 0 0 12px -2px var(--hist-fuchsia);
+  transition: width 0.7s var(--hist-mola);
+}
+.hist-barra > i::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  background-size: 200% 100%;
+  animation: hist-varredura 1.8s linear infinite;
+}
+@keyframes hist-varredura {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+/* Linha VIVA: a marca lateral respira e o fundo ganha um véu do tom da fase. */
+.hist-row--viva {
+  background:
+    linear-gradient(180deg, rgba(232, 121, 249, 0.07), rgba(255, 255, 255, 0)),
+    rgb(var(--bg-softer));
+}
+.hist-row--viva .hist-row__marca {
+  height: 72%;
+  animation: hist-pulso 1.8s ease-in-out infinite;
+}
+/* Entrada escalonada só nas primeiras linhas: dá vida sem atrasar lista longa. */
+.hist-lista > li {
+  animation: hist-entrada 0.44s var(--hist-mola) both;
+}
+.hist-lista > li:nth-child(n + 9) {
+  animation: none;
+}
+.hist-lista > li:nth-child(2) { animation-delay: 0.03s; }
+.hist-lista > li:nth-child(3) { animation-delay: 0.06s; }
+.hist-lista > li:nth-child(4) { animation-delay: 0.09s; }
+.hist-lista > li:nth-child(5) { animation-delay: 0.12s; }
+.hist-lista > li:nth-child(6) { animation-delay: 0.15s; }
+.hist-lista > li:nth-child(7) { animation-delay: 0.18s; }
+.hist-lista > li:nth-child(8) { animation-delay: 0.21s; }
+@keyframes hist-entrada {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* Barra de rolagem da gaveta: fina, discreta, do tom do texto. */
+.hist-drawer__body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.hist-drawer__body::-webkit-scrollbar {
+  width: 8px;
+}
+.hist-drawer__body::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.16);
+}
+.hist-drawer__body::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+html[data-theme='light'] .hist-selo {
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
+}
+html[data-theme='light'] .hist-barra {
+  background: rgba(16, 16, 24, 0.09);
+  box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hist-lista > li,
+  .hist-selo__ponto,
+  .hist-row--viva .hist-row__marca,
+  .hist-barra > i::after {
+    animation: none !important;
+  }
 }
 
 /* ─────────────── SOMBRA DOS SLIDES DO HERÓI ───────────────

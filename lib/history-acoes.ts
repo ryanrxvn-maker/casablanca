@@ -14,10 +14,12 @@ import { canonicalTool, type Chain, type HistoryEvent } from './history-tools';
 
 /** Evento disparado na própria página quando ela JÁ é a dona da fila. */
 export const EVENTO_ACAO_FILA = 'autoedit:fila-acao';
+/** Evento que manda o card daquela task abrir os previews. */
+export const EVENTO_ABRIR_CARD = 'autoedit:abrir-card';
 /** Onde a intenção espera quando a ação veio de OUTRA página. */
 export const CHAVE_INTENCAO = 'autoedit:fila-intencao:v1';
 
-export type AcaoFila = 'retomar' | 'debug';
+export type AcaoFila = 'retomar' | 'debug' | 'abrir';
 
 export type IntencaoFila = { acao: AcaoFila; taskId: string; t: number };
 

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
-import { EVENTO_ACAO_FILA, lerIntencao, limparIntencao } from '@/lib/history-acoes';
+import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao } from '@/lib/history-acoes';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
@@ -4620,9 +4620,13 @@ function ClickUpPilotInner() {
    */
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const executar = (acao: 'retomar' | 'debug', taskId: string): boolean => {
+    const executar = (acao: 'retomar' | 'debug' | 'abrir', taskId: string): boolean => {
       if (!batchStatesRef.current[taskId]) return false;
-      if (acao === 'debug') pedirReinicioDaTask(taskId);
+      // ABRIR: só põe o card na tela com os previews abertos — nada é
+      // reiniciado. É o caminho de "que task é essa mesmo?".
+      if (acao === 'abrir') {
+        window.dispatchEvent(new CustomEvent(EVENTO_ABRIR_CARD, { detail: { taskId } }));
+      } else if (acao === 'debug') pedirReinicioDaTask(taskId);
       else setPedindoMontagem({ taskId, acao: 'retomar' });
       // O painel abre DENTRO do card: sem trazer o card pra vista, a ação
       // acontece fora da tela e parece que nada aconteceu.
@@ -4636,10 +4640,10 @@ function ClickUpPilotInner() {
       return true;
     };
     const semTask = () =>
-      setError('Esse disparo não está mais na fila do Pilot — dá pra baixar o que ficou guardado, mas não tem o que remontar.');
+      setError('Esse disparo não está mais na fila do Pilot. Dá pra baixar o que ficou guardado, mas não tem card pra abrir nem o que remontar.');
 
     const onEvento = (e: Event) => {
-      const d = (e as CustomEvent<{ acao?: 'retomar' | 'debug'; taskId?: string }>).detail;
+      const d = (e as CustomEvent<{ acao?: 'retomar' | 'debug' | 'abrir'; taskId?: string }>).detail;
       if (!d?.taskId || !d.acao) return;
       if (!executar(d.acao, d.taskId)) semTask();
     };
