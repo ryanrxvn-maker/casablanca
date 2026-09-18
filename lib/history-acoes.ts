@@ -16,6 +16,8 @@ import { canonicalTool, type Chain, type HistoryEvent } from './history-tools';
 export const EVENTO_ACAO_FILA = 'autoedit:fila-acao';
 /** Evento que manda o card daquela task abrir os previews. */
 export const EVENTO_ABRIR_CARD = 'autoedit:abrir-card';
+/** Resposta da ferramenta: deu pra fazer, ou por que nao deu. */
+export const EVENTO_RESULTADO = 'autoedit:fila-acao-resultado';
 /** Onde a intenção espera quando a ação veio de OUTRA página. */
 export const CHAVE_INTENCAO = 'autoedit:fila-intencao:v1';
 
@@ -188,4 +190,52 @@ export function pedirAcaoDeFila(
   }
   salvarIntencao(acao, taskId);
   return { modo: 'navegar', rota };
+}
+
+/** Quanto o histórico espera a ferramenta responder antes de desistir. */
+export const ESPERA_RESPOSTA_MS = 2500;
+
+/**
+ * Pede a ação e ESPERA a ferramenta dizer se deu certo.
+ *
+ * Existe porque "mandei o pedido" não é "aconteceu": o disparo pode ter
+ * registro e mesmo assim não ter card na tela (a fila mostra só a empresa e a
+ * origem selecionadas). Sem resposta, o histórico fechava a gaveta e o clique
+ * morria em silêncio. Aqui a gaveta só fecha quando a ação aconteceu de fato.
+ */
+export function pedirAcaoEEsperar(
+  acao: AcaoFila,
+  taskId: string,
+): Promise<{ ok: true } | { ok: false; motivo: string } | { navegar: string }> {
+  const rota = rotaDaTask(taskId);
+  const aqui = typeof window !== 'undefined' && window.location.pathname.startsWith(rota);
+  if (!aqui) {
+    salvarIntencao(acao, taskId);
+    return Promise.resolve({ navegar: rota });
+  }
+  return new Promise((resolve) => {
+    let respondeu = false;
+    const ouvir = (e: Event) => {
+      const d = (e as CustomEvent<{ taskId?: string; ok?: boolean; motivo?: string }>).detail;
+      if (!d || d.taskId !== taskId || respondeu) return;
+      respondeu = true;
+      window.removeEventListener(EVENTO_RESULTADO, ouvir);
+      clearTimeout(timer);
+      resolve(d.ok ? { ok: true } : { ok: false, motivo: d.motivo || 'Não deu pra fazer isso agora.' });
+    };
+    const timer = setTimeout(() => {
+      if (respondeu) return;
+      respondeu = true;
+      window.removeEventListener(EVENTO_RESULTADO, ouvir);
+      resolve({ ok: false, motivo: 'A ferramenta não respondeu. Recarregue a página e tente de novo.' });
+    }, ESPERA_RESPOSTA_MS);
+    window.addEventListener(EVENTO_RESULTADO, ouvir);
+    window.dispatchEvent(new CustomEvent(EVENTO_ACAO_FILA, { detail: { acao, taskId } }));
+  });
+}
+
+/** A ferramenta responde ao pedido do histórico (sempre, deu certo ou não). */
+export function responderAcaoDeFila(taskId: string, ok: boolean, motivo?: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(EVENTO_RESULTADO, { detail: { taskId, ok, motivo } }));
 }

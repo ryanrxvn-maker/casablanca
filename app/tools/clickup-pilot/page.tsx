@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
-import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao } from '@/lib/history-acoes';
+import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, responderAcaoDeFila } from '@/lib/history-acoes';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
@@ -4638,15 +4638,18 @@ function ClickUpPilotInner() {
         } catch {}
       }, 80);
       // CONFERÊNCIA: existir registro não garante card na tela — a fila mostra
-      // só a empresa e o modo selecionados. Sem card, a ação seria um clique
-      // mudo, então o usuário ouve o motivo.
+      // só a empresa e a origem selecionadas. Sem card, a ação seria um clique
+      // mudo, então quem pediu recebe o motivo de volta e mostra na hora.
       setTimeout(() => {
         try {
-          if (!document.getElementById(`batch-card-${taskId}`)) {
-            setError(
-              'Esse disparo existe, mas o card dele não está nesta lista. Ele é de outra empresa ou de outra origem (Creator/Docs) — troque ali em cima pra ver a task.',
-            );
+          if (document.getElementById(`batch-card-${taskId}`)) {
+            responderAcaoDeFila(taskId, true);
+            return;
           }
+          const motivo =
+            'Esse disparo existe, mas o card dele não está nesta lista: ele é de outra empresa ou de outra origem (Creator/Docs). Troque ali em cima pra ver a task.';
+          responderAcaoDeFila(taskId, false, motivo);
+          setError(motivo);
         } catch {}
       }, 700);
       return true;
@@ -4657,7 +4660,14 @@ function ClickUpPilotInner() {
     const onEvento = (e: Event) => {
       const d = (e as CustomEvent<{ acao?: 'retomar' | 'debug' | 'abrir'; taskId?: string }>).detail;
       if (!d?.taskId || !d.acao) return;
-      if (!executar(d.acao, d.taskId)) semTask();
+      if (!executar(d.acao, d.taskId)) {
+        responderAcaoDeFila(
+          d.taskId,
+          false,
+          'Esse disparo não está mais na fila do Pilot. Dá pra baixar o que ficou guardado, mas não tem card pra abrir nem o que remontar.',
+        );
+        semTask();
+      }
     };
     window.addEventListener(EVENTO_ACAO_FILA, onEvento);
 

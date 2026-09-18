@@ -18,7 +18,7 @@ import {
 import {
   aceitaAcaoDeFila,
   chainDeDownload,
-  pedirAcaoDeFila,
+  pedirAcaoEEsperar,
   podeVirarCard,
   prefixosDoDisparo,
   taskIdDoEvento,
@@ -463,11 +463,33 @@ export function HistoryTimeline({
     }
   }
 
-  /** ABRIR / REMONTAR / DEBUG — quem executa é a página da fila (Pilot). */
-  function acaoDeFila(acao: 'retomar' | 'debug' | 'abrir', taskId: string) {
-    const r = pedirAcaoDeFila(acao, taskId);
-    aoAgir?.();
-    if (r.modo === 'navegar') router.push(r.rota);
+  /**
+   * ABRIR / REMONTAR / DEBUG — quem executa é a página da fila (Pilot).
+   *
+   * A gaveta só fecha quando a ferramenta CONFIRMA que fez. Se não deu (o card
+   * não está nesta lista, o disparo saiu da fila), o motivo aparece na própria
+   * linha em vez de o clique morrer calado.
+   */
+  async function acaoDeFila(
+    ev: HistoryEvent,
+    acao: 'retomar' | 'debug' | 'abrir',
+    taskId: string,
+  ): Promise<boolean> {
+    patch(ev.id, { err: undefined, msg: 'Abrindo…' });
+    const r = await pedirAcaoEEsperar(acao, taskId);
+    if ('navegar' in r) {
+      patch(ev.id, { msg: undefined });
+      aoAgir?.();
+      router.push(r.navegar);
+      return true;
+    }
+    if (r.ok) {
+      patch(ev.id, { msg: undefined });
+      aoAgir?.();
+      return true;
+    }
+    patch(ev.id, { msg: undefined, err: r.motivo });
+    return false;
   }
 
   /**
@@ -615,7 +637,14 @@ export function HistoryTimeline({
                         }
                         onClick={() => {
                           if (podeAgir && taskId && naFila.existe) {
-                            acaoDeFila('abrir', taskId);
+                            void acaoDeFila(e, 'abrir', taskId).then((deu) => {
+                              // Sem card na tela, o link da task no ClickUp
+                              // ainda responde a pergunta "que task e essa?".
+                              if (!deu && linkTask) {
+                                patch(e.id, { err: undefined });
+                                window.open(linkTask, '_blank', 'noopener');
+                              }
+                            });
                             return;
                           }
                           if (linkTask) window.open(linkTask, '_blank', 'noopener');
@@ -654,7 +683,7 @@ export function HistoryTimeline({
                                 ? 'Espere terminar pra remontar'
                                 : 'Remontar no Pilot'
                           }
-                          onClick={() => acaoDeFila('retomar', taskId)}
+                          onClick={() => void acaoDeFila(e, 'retomar', taskId)}
                         />
                         <PilotBtn3D
                           size={30}
@@ -668,7 +697,7 @@ export function HistoryTimeline({
                                 ? 'Espere terminar pra reiniciar'
                                 : 'Reiniciar o disparo (pergunta se quer editar antes)'
                           }
-                          onClick={() => acaoDeFila('debug', taskId)}
+                          onClick={() => void acaoDeFila(e, 'debug', taskId)}
                         />
                       </>
                     ) : null}
