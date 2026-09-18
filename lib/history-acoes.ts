@@ -116,18 +116,34 @@ export function salvarIntencao(acao: AcaoFila, taskId: string): void {
   }
 }
 
-/** Lê E APAGA a intenção: ela vale por uma execução só. */
-export function consumirIntencao(): IntencaoFila | null {
+/**
+ * Lê a intenção guardada. NÃO apaga: quem executa chama limparIntencao() ao
+ * conseguir. Apagar na leitura perdia o pedido quando o React monta o efeito
+ * duas vezes (StrictMode) — o primeiro mount consumia, o segundo não achava
+ * nada e a ação sumia sem aviso. A janela de 1 minuto é que limita o estrago.
+ */
+export function lerIntencao(): IntencaoFila | null {
   if (typeof window === 'undefined') return null;
   try {
     const cru = sessionStorage.getItem(CHAVE_INTENCAO);
     if (!cru) return null;
-    sessionStorage.removeItem(CHAVE_INTENCAO);
     const i = JSON.parse(cru) as IntencaoFila;
-    return intencaoValida(i) ? i : null;
+    if (!intencaoValida(i)) {
+      sessionStorage.removeItem(CHAVE_INTENCAO);
+      return null;
+    }
+    return i;
   } catch {
     return null;
   }
+}
+
+/** Some com a intenção — chamado quando a ação foi executada de verdade. */
+export function limparIntencao(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(CHAVE_INTENCAO);
+  } catch {}
 }
 
 /**

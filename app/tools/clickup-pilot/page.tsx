@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
-import { EVENTO_ACAO_FILA, consumirIntencao } from '@/lib/history-acoes';
+import { EVENTO_ACAO_FILA, lerIntencao, limparIntencao } from '@/lib/history-acoes';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
@@ -4648,13 +4648,17 @@ function ClickUpPilotInner() {
     // Pedido vindo de outra página: a fila hidrata da conta de forma assíncrona,
     // então insiste por alguns segundos antes de desistir.
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const intencao = consumirIntencao();
+    const intencao = lerIntencao();
     if (intencao) {
       let tentativas = 0;
       const tentar = () => {
-        if (executar(intencao.acao, intencao.taskId)) return;
+        if (executar(intencao.acao, intencao.taskId)) {
+          limparIntencao();
+          return;
+        }
         tentativas += 1;
         if (tentativas > 20) {
+          limparIntencao();
           semTask();
           return;
         }
