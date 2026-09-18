@@ -6775,8 +6775,25 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  ja persistidos pra re-poll status no HeyGen + re-baixar + zipar. Pula
    *  TTS+upload+submit que ja foram feitos. */
   async function resumeTaskBatch(taskId: string) {
-    const state = batchStates[taskId];
-    if (!state) return;
+    // O REF e' a verdade do momento; o `batchStates` desta closure pode ser de
+    // um render velho. Duas situacoes reais: (a) o retomar esperou vaga por
+    // minutos dentro do runHeyGenGated, (b) quem chamou veio de um effect de
+    // deps [] e a closure era a do PRIMEIRO render (estado vazio). Nos dois
+    // casos `state` saia undefined e a funcao voltava CALADA com a fase ja em
+    // 'dispatching' — o watchdog de orfa carimbava "Disparo travou (nenhum
+    // processo ativo)" num disparo que estava inteiro.
+    const state = batchStatesRef.current[taskId] || batchStates[taskId];
+    if (!state) {
+      // GARANTIA: nao existe saida muda. Se nem o ref tem o registro, o card
+      // diz o que houve e continua acionavel.
+      console.error(`[pilot resume] ${taskId}: sem registro pra retomar (nem no ref nem na closure).`);
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur || cur.phase === 'done') return prev;
+        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'Não achei o registro desse disparo pra retomar. Clique Retomar de novo; se insistir, dispare do zero.', finishedAt: Date.now() } };
+      });
+      return;
+    }
     const economiaNoResume = state.economia === true || isEconomiaEnabled(taskId);
     // VA: resume = re-rodar o pipeline VA (nao tem resume parcial de
     // videoIds como a task normal). Roteia pro runner VA.
@@ -6794,7 +6811,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const temParteReplanejadaParaDisparar = !!state.replan?.parts?.some((p: any) =>
       !!(p?.text || '').trim() && (!!p.avatarId || !!p.imageKey));
     if (validParts.length === 0 && !temParteReplanejadaParaDisparar) {
-      setError('Não achei os vídeos desse disparo pra retomar — essa task precisa ser disparada do zero.');
+      const semVideos = 'Não achei os vídeos desse disparo pra retomar — essa task precisa ser disparada do zero.';
+      setError(semVideos);
+      // A fase tambem tem que sair de 'dispatching': sem isto o card ficava
+      // "ativo" sem ninguem trabalhando ate o watchdog carimbar "travou".
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur || cur.phase === 'done') return prev;
+        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: semVideos, finishedAt: Date.now() } };
+      });
       return;
     }
     batchCancelRef.current[taskId] = false;
@@ -8614,6 +8639,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   const promoterRef = useRef(promoteQueuedTasks);
   promoterRef.current = promoteQueuedTasks;
 
+  /** MESMA razao do promoterRef, pro disparo. O watcher de espera do HeyGen
+   *  roda num effect de deps [] — sem este ref ele chamaria o runHeyGenGated
+   *  do PRIMEIRO render, cuja cadeia de closures (resumeTaskBatch →
+   *  batchStates) enxerga o estado do MOUNT, ou seja VAZIO. O auto-retomar
+   *  saia calado e o card caia em "Disparo travou (nenhum processo ativo)"
+   *  com o disparo inteiro na mao (2026-09-18, AD120 - PRPB07: 7 takes, o
+   *  BODY 4 terminou de renderizar, o watcher mandou retomar e o resume
+   *  voltou do primeiro `if` sem tocar na fase). */
+  const runHeyGenGatedRef = useRef(runHeyGenGated);
+  runHeyGenGatedRef.current = runHeyGenGated;
+
   // Promoter on-change: roda quando batchStates muda (run terminou → libera
   // slot → promove proxima).
   useEffect(() => {
@@ -8674,7 +8710,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             });
             if (settled) {
               console.log(`[waiting-heygen] ${b.taskId}: HeyGen concluiu (${done} pronto(s), ${failed} recusado(s)) — retomando automaticamente`);
-              void runHeyGenGated(b.taskId, 'resume');
+              void runHeyGenGatedRef.current(b.taskId, 'resume');
             }
           }
         } finally {
@@ -8736,7 +8772,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             // re-checa: se avançou de 'dispatching' nesse meio-tempo, está
             // progredindo — não marca falha.
             if (!cur || cur.phase !== 'dispatching') return prev;
-            return { ...prev, [b.taskId]: { ...cur, phase: 'failed', message: 'Disparo travou (nenhum processo ativo) — clique Retomar pra re-disparar.', finishedAt: Date.now() } };
+            // ESPERA DO HEYGEN NAO E' FALHA. Se os takes que faltam ainda tem
+            // render em aberto la, a orfa volta pra 'waiting-heygen' — o
+            // watcher de 2min segue cutucando e fecha sozinho. Marcar 'failed'
+            // aqui matava a espera e escondia a causa atras de um "travou".
+            if ((cur.waitingVideoIds?.length || 0) > 0) {
+              console.warn(`[promoter] órfã com take ainda renderizando no HeyGen: ${b.taskId} → volta pra espera (sem falhar)`);
+              return { ...prev, [b.taskId]: { ...cur, phase: 'waiting-heygen', message: '⏳ Ainda esperando o HeyGen terminar o(s) take(s) que faltam — fecho sozinho quando terminarem.', waitingCheckedAt: 0, finishedAt: undefined } };
+            }
+            const parado = cur.parts.filter((p) => !p.videoId || p.videoStatus === 'failed').map((p) => p.label);
+            const porque = parado.length
+              ? ` Parou com ${parado.length} take(s) sem vídeo: ${parado.slice(0, 4).join(', ')}${parado.length > 4 ? '…' : ''}.`
+              : '';
+            return { ...prev, [b.taskId]: { ...cur, phase: 'failed', message: `Disparo travou (nenhum processo ativo) — clique Retomar pra re-disparar.${porque}`, finishedAt: Date.now() } };
           });
         }
       }

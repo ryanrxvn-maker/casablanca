@@ -17,7 +17,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
-import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, sanitizeSpokenCopy, type DocLink } from './copy-parser';
+import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, parseGlobalAvatarLinks, sanitizeSpokenCopy, type DocLink } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -1600,6 +1600,85 @@ console.log('\narquivo do avatar pelo chip exato (AD117GL 1-10 (1).mp4):');
     'AD51G1GL - PRPB07', 'Gancho.', 'Body', 'Corpo.'].join('\n');
   const dTp = buildDisparoForNomenclature(DOC_TP, 'AD51GL - PRPB07', [], LINKS_TP);
   assert((dTp?.avatars || [])[0]?.briefingFileId === 'TP', `talking-photo numerico continua achando o arquivo (got ${(dTp?.avatars || [])[0]?.briefingFileId})`);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// REFERENCIA DE AD NA LINHA DO AVATAR (bug real 2026-09-18, AD119/AD120 -
+// PRPB07). O copy colou a indicacao de cena na MESMA entrada do avatar:
+//
+//   Link do avatar: @kiko.urso3.mp4 colocar o avatar no cenario desse ad,
+//   segurando uma caixa de finasterida, sem nome e sem marca:
+//   AD105G1VN[C]-PRPB07.mp4
+//
+// O "[" nao entra no token de filename, entao o coletor casava so' o rabo
+// ("PRPB07") e INVENTAVA um "Avatar 2 @PRPB07" que nao existe no doc. No
+// AD119 o avatar de verdade era um chip SEM .mp4 e o fantasma virou o UNICO
+// avatar — o AD inteiro saiu com a pessoa errada.
+console.log('');
+console.log('REFERENCIA DE AD na linha do avatar (AD119/AD120 - PRPB07):');
+{
+  const CENARIO = 'colocar o avatar no cenário desse ad, segurando uma caixa de finasterida, sem nome e sem marca:';
+  const DOC_120 = [
+    'AD120G1VN-PRPB07',
+    '',
+    `Link do avatar: @kiko.urso3.mp4 ${CENARIO}`,
+    'AD105G1VN[C]-PRPB07.mp4',
+    'Instruções para edição: Somente para Youtube, sem edição e sem camuflagem',
+    '',
+    'GANCHO',
+    'Caísse no golpe quando te receitaram esse prescrito na consulta.',
+    '',
+    'BODY',
+    'Tomar isso te leva pro buraco rapidinho.',
+  ].join('\n');
+  const LINKS_120: DocLink[] = [
+    { text: '@kiko.urso3.mp4', fileId: 'FID_KIKO', url: null },
+    { text: 'AD105G1VN[C]-PRPB07.mp4', fileId: 'FID_AD105', url: null },
+  ];
+  const g120 = parseGlobalAvatarLinks(DOC_120, LINKS_120);
+  assert(g120.length === 1, `AD120: 1 avatar (got ${g120.length}: ${g120.map((a) => a.username).join(', ')})`);
+  assert(g120[0]?.username === 'kiko.urso3', `AD120: o avatar e' kiko.urso3 (got ${g120[0]?.username})`);
+  assert(!g120.some((a) => /prpb/i.test(a.username)), 'AD120: NENHUM avatar fantasma vindo do codigo do AD');
+  const d120 = buildDisparoForNomenclature(DOC_120, 'AD120G1VN-PRPB07', [], LINKS_120);
+  assert((d120?.avatars || []).length === 1, `AD120 (ponta a ponta): 1 avatar (got ${(d120?.avatars || []).length})`);
+
+  // AD119: o avatar de verdade e' um CHIP sem .mp4, colado na prosa. Antes,
+  // a referencia de AD roubava o lugar dele; agora o chip e' recuperado.
+  const DOC_119 = [
+    'AD119G1VN-PRPB07',
+    '',
+    `Link do avatar: manotargino ${CENARIO}`,
+    'AD99G1VN[C] - PRPB07.mp4',
+    'Instruções para edição: Somente para Youtube, sem edição e sem camuflagem',
+    '',
+    'GANCHO',
+    'Caísse no golpe quando te receitaram esse prescrito na consulta.',
+    '',
+    'BODY',
+    'Tomar isso te leva pro buraco rapidinho.',
+  ].join('\n');
+  const LINKS_119: DocLink[] = [
+    { text: 'manotargino', fileId: 'FID_MANO', url: null },
+    { text: 'AD99G1VN[C] - PRPB07.mp4', fileId: 'FID_AD99', url: null },
+  ];
+  const g119 = parseGlobalAvatarLinks(DOC_119, LINKS_119);
+  assert(g119.length === 1, `AD119: 1 avatar (got ${g119.length})`);
+  assert(g119[0]?.username === 'manotargino', `AD119: o avatar e' manotargino (got ${g119[0]?.username})`);
+  assert(g119[0]?.videoFileId === 'FID_MANO', `AD119: arquivo do chip certo (got ${g119[0]?.videoFileId})`);
+  assert(!g119.some((a) => /prpb|^ad\d/i.test(a.username)), 'AD119: referencia de AD NAO virou avatar');
+
+  // Sem chip capturado: melhor NENHUM avatar do que o avatar errado.
+  const g119Sem = parseGlobalAvatarLinks(DOC_119, [LINKS_119[1]]);
+  assert(g119Sem.length === 0, `AD119 sem o chip: 0 avatares em vez de chutar o AD (got ${g119Sem.map((a) => a.username).join(', ')})`);
+
+  // Token: o codigo do AD sai INTEIRO, o avatar de verdade fica.
+  const tk = extractAvatarFileTokens('@kiko.urso3.mp4 no cenario de AD105G1VN[C]-PRPB07.mp4');
+  assert(tk.length === 1 && tk[0] === 'kiko.urso3', `extractAvatarFileTokens ignora a referencia de AD (got ${tk.join(', ')})`);
+
+  // NAO DESFAZER O QUE FUNCIONA: dois avatares de verdade na mesma linha.
+  const g2 = parseGlobalAvatarLinks('Link do avatar: monetzamoraa.mp4 + feliperocha3.mp4');
+  assert(g2.length === 2 && g2[0].username === 'monetzamoraa' && g2[1].username === 'feliperocha3',
+    `multi-avatar na mesma linha continua igual (got ${g2.map((a) => a.username).join(', ')})`);
 }
 
 console.log('');

@@ -961,6 +961,28 @@ export function parseAdSection(fullDocText: string, adIdOrPrefix: string): Parse
   };
 }
 
+/** Arquivo que e' REFERENCIA DE AD (a cena a copiar), NUNCA um avatar:
+ *  "AD105G1VN[C]-PRPB07.mp4", "AD99G1VN[C] - PRPB07.mp4", "AD02G1VN - PRPB07.mp4".
+ *
+ *  Bug real (2026-09-18, AD119/AD120 - PRPB07): o copy colou a indicacao na
+ *  MESMA entrada de avatar — "Link do avatar: @kiko.urso3.mp4 colocar o avatar
+ *  no cenario desse ad ...: AD105G1VN[C]-PRPB07.mp4". O coletor de ".mp4" nao
+ *  aceita "[" no token, entao casava so' o RABO do nome ("PRPB07") e inventava
+ *  um "AVATAR 2 @PRPB07" que nao existe no doc. No AD119, onde o avatar de
+ *  verdade era um chip SEM .mp4, esse fantasma virou o UNICO avatar e levou as
+ *  7 partes. Aqui a referencia inteira e' reconhecida ANTES de tokenizar.
+ *
+ *  A classe do meio NAO inclui quebra de linha de proposito — senao o codigo
+ *  do AD no heading engoliria o arquivo do avatar da linha de baixo. */
+const AD_REF_FILE_RE = /\bAD\d{1,5}[A-Za-z0-9\[\]._\- \t]*?\.(?:mp4|mov)\b/gi;
+
+/** Tira do texto as referencias de AD (ver AD_REF_FILE_RE) pra que so' sobrem
+ *  arquivos que podem ser avatar de verdade. */
+export function stripAdRefFiles(text: string): string {
+  AD_REF_FILE_RE.lastIndex = 0;
+  return (text || '').replace(AD_REF_FILE_RE, ' ');
+}
+
 /** Detecta linha 'Link do avatar: <file>.mp4' (formato alternativo usado em
  *  alguns ADs onde o avatar GLOBAL da copy inteira eh declarado no topo,
  *  sem 'Avatar:' por hook). Retorna {role: 'Avatar', username} ou null.
@@ -1006,6 +1028,8 @@ export function parseGlobalAvatarLinks(section: string, links: DocLink[] = []): 
 
   const collect = (text: string, out: Array<{ role: string; username: string }>): void => {
     // Extrai TODOS os "<name>.mp4" da string (suporta "+", ",", " e ", etc.)
+    // Referencia de AD ("AD105G1VN[C]-PRPB07.mp4") sai ANTES: nao e' avatar.
+    text = stripAdRefFiles(text);
     filenameTokenRe.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = filenameTokenRe.exec(text)) !== null) {
@@ -1058,10 +1082,41 @@ export function parseGlobalAvatarLinks(section: string, links: DocLink[] = []): 
         if (pm) { nome = pm[1].trim(); break; }
       }
       for (const s of scan) {
-        const r = resolveLinkAvatar(s, links);
+        const r = resolveLinkAvatar(stripAdRefFiles(s), links);
         if (r && (r.youtubeUrl || r.fileId)) {
           const uname = (nome || r.username || 'avatar').trim();
           return [{ role: 'Avatar', username: uname, youtubeUrl: r.youtubeUrl, thumbUrl: r.thumbUrl, videoFileId: r.fileId }];
+        }
+      }
+      // ULTIMO RECURSO — CHIP no meio da PROSA (2026-09-18, AD119 - PRPB07).
+      // O copy colou a instrucao na MESMA linha do chip: "Link do avatar:
+      // manotargino colocar o avatar no cenario desse ad, segurando uma caixa
+      // de finasterida, sem nome e sem marca:". O casamento por TITULO acima
+      // exige cobertura alta (senao uma narrativa longa casaria um chip curto)
+      // e nao pega essa linha — o AD ficava SEM o avatar de verdade. Aqui o
+      // chip vale se o texto dele aparece INTEIRO, em fronteira de palavra,
+      // dentro da linha; vence o que aparece MAIS CEDO (o avatar vem antes da
+      // instrucao) e, no empate, o nome mais longo. Referencia de AD ja saiu.
+      for (const s of scan) {
+        const hay = ' ' + normForLinkMatch(stripAdRefFiles(s)) + ' ';
+        if (hay.trim().length < 3) continue;
+        let best: { pos: number; len: number; text: string } | null = null;
+        for (const l of links) {
+          if (l.isFolder || l.isImage) continue;
+          if (!l.fileId && !l.url) continue;
+          const lt = normForLinkMatch(stripAdRefFiles(l.text).replace(/\.(?:mp4|mov)\b/gi, ' '));
+          if (lt.length < 3) continue;
+          const pos = hay.indexOf(' ' + lt + ' ');
+          if (pos < 0) continue;
+          if (!best || pos < best.pos || (pos === best.pos && lt.length > best.len)) {
+            best = { pos, len: lt.length, text: l.text };
+          }
+        }
+        if (!best) continue;
+        const r2 = resolveLinkAvatar(best.text, links);
+        if (r2 && (r2.youtubeUrl || r2.fileId)) {
+          const uname = (nome || r2.username || 'avatar').trim();
+          return [{ role: 'Avatar', username: uname, youtubeUrl: r2.youtubeUrl, thumbUrl: r2.thumbUrl, videoFileId: r2.fileId }];
         }
       }
     }
@@ -1084,6 +1139,9 @@ export function parseGlobalAvatarLinks(section: string, links: DocLink[] = []): 
  * ou esquema de URL. Dedup case-insensitive, preserva ordem.
  */
 export function extractAvatarFileTokens(text: string): string[] {
+  // "AD105G1VN[C]-PRPB07.mp4" sai INTEIRO antes: o "[" quebrava o token e o
+  // filtro de codigo de AD abaixo nunca via o "AD" (sobrava so' "PRPB07").
+  text = stripAdRefFiles(text);
   const re = /@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._\s-]*?)\.(?:mp4|mov)\b/gi;
   const out: string[] = [];
   let m: RegExpExecArray | null;
