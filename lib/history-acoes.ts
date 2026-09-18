@@ -88,6 +88,17 @@ export function chainDeDownload(ev: HistoryEvent, chains: Chain[]): Chain | null
   );
 }
 
+/**
+ * Fases em que o disparo está TRABALHANDO — remontar/debug/remover ficam
+ * travados só nelas. 'draft' (analisado, nunca disparado) e 'done'/'failed'
+ * não são trabalho em curso: travar ali deixava o botão morto sem motivo.
+ */
+const FASES_ATIVAS = new Set(['queued', 'dispatching', 'rendering', 'downloading', 'post']);
+
+export function faseAtiva(phase: string | undefined | null): boolean {
+  return !!phase && FASES_ATIVAS.has(String(phase));
+}
+
 /** Chaves do zip-store que pertencem a este disparo (usado ao remover). */
 export function prefixosDoDisparo(taskId: string): string[] {
   return [`batch:${taskId}:`, `pilot:${taskId}:`, `va:${taskId}:`, `troca:white:${taskId}`];

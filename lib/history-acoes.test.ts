@@ -11,6 +11,7 @@
  */
 import {
   aceitaAcaoDeFila,
+  faseAtiva,
   chainDeDownload,
   intencaoValida,
   prefixosDoDisparo,
@@ -125,6 +126,17 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
     p.every((x) => x.includes('86aj6')),
     'todo prefixo é ANCORADO na task — remoção nunca varre disparo de outro',
   );
+}
+
+// (D2) o que conta como disparo TRABALHANDO
+{
+  for (const f of ['queued', 'dispatching', 'rendering', 'downloading', 'post']) {
+    ok(faseAtiva(f), `fase "${f}" é trabalho em curso (trava remontar)`);
+  }
+  for (const f of ['done', 'failed', 'draft']) {
+    ok(!faseAtiva(f), `fase "${f}" NÃO trava os botões`);
+  }
+  ok(!faseAtiva(undefined), 'registro sem fase não trava nada');
 }
 
 // (E) intenção entre páginas vence

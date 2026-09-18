@@ -1,6 +1,7 @@
 'use client';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
 import { RETENTION_MS, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
+import { faseAtiva } from './history-acoes';
 
 /**
  * Histórico geral na conta, separado do background, com retenção de 7 dias.
@@ -204,8 +205,7 @@ export function disparoNaFila(taskId: string): { existe: boolean; rodando: boole
   try {
     const rec = readDurableRecords<{ phase?: string }>('background')[taskId];
     if (!rec) return { existe: false, rodando: false };
-    const fase = String(rec.phase ?? '');
-    return { existe: true, rodando: fase !== 'done' && fase !== 'failed' };
+    return { existe: true, rodando: faseAtiva(rec.phase) };
   } catch {
     return { existe: false, rodando: false };
   }
