@@ -14632,6 +14632,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               avisosPos={posResultado[b.taskId]?.aplicou === false ? posResultado[b.taskId].avisos : undefined}
                               phase={b.phase as any}
                               partsTotal={b.parts.length}
+                              // Quantos hooks a montagem entrega: o montado vira um
+                              // pacote com um video por hook, e o botao de download
+                              // usa isso pra dizer o que vai sair.
+                              hooksTotal={b.parts.filter((p) => /^(hook|gancho)/i.test(p.label || '')).length}
                               partsDispatched={partsDispatched}
                               partsRendered={partsRendered}
                               progressoMotor={b.progressoMotor}
@@ -14665,11 +14669,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       const keys = b.isVA
                                         ? [`va:${b.taskId}:zip`]
                                         : [`batch:${b.taskId}:montado`, `batch:${b.taskId}:camo`];
-                                      const out: Array<{ url: string; name?: string; revoke?: boolean }> = [];
+                                      const out: Array<{ url: string; name?: string; revoke?: boolean; blob?: Blob }> = [];
                                       for (const k of keys) {
                                         try {
                                           const z = await loadZip(k);
-                                          if (z?.blobUrl) out.push({ url: z.blobUrl, name: z.filename, revoke: true });
+                                          // O `blob` vai junto: com ele o card lê o índice do
+                                          // zip por `slice` em vez de `fetch`, que falha num
+                                          // montado de centenas de MB.
+                                          if (z?.blobUrl) out.push({ url: z.blobUrl, name: z.filename, revoke: true, blob: z.blob });
                                         } catch (e) { console.warn('[pilot] loadDeliverables', k, e); }
                                       }
                                       return out;

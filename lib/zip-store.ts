@@ -156,15 +156,20 @@ export async function saveZip(key: string, blob: Blob, filename: string): Promis
   await writeWithRetry(rec);
 }
 
-export async function loadZip(key: string): Promise<{ blobUrl: string; filename: string; size: number } | null> {
+/** O `blob` vem junto de proposito: `fetch(blobUrl)` de um arquivo de centenas
+ *  de MB falha em navegador com pouca memoria, e quem tem o Blob na mao pode
+ *  ler so um pedaco (`blob.slice`) sem materializar o resto. */
+export async function loadZip(
+  key: string,
+): Promise<{ blobUrl: string; filename: string; size: number; blob: Blob } | null> {
   const db = await openDB();
-  return runTx<{ blobUrl: string; filename: string; size: number } | null>(db, 'readonly', (store, resolve, reject) => {
+  return runTx<{ blobUrl: string; filename: string; size: number; blob: Blob } | null>(db, 'readonly', (store, resolve, reject) => {
     const req = store.get(key);
     req.onsuccess = () => {
       const rec = req.result as ZipRecord | undefined;
       if (!rec) return resolve(null);
       const blob = new Blob([rec.bytes as BlobPart], { type: 'application/zip' });
-      resolve({ blobUrl: URL.createObjectURL(blob), filename: rec.filename, size: rec.size });
+      resolve({ blobUrl: URL.createObjectURL(blob), filename: rec.filename, size: rec.size, blob });
     };
     req.onerror = () => reject(req.error);
   });

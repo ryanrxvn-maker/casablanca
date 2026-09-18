@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { toFriendlyMessage } from '@/lib/friendly-error';
+import { lerEntradasDoZip, videosDoZip, abrirEntrada, temEscritaEmPasta, type ZipEntry } from '@/lib/zip-entries';
 
 /**
  * BatchJobCard3D — card 3D ultra-pro pro painel de batch do ClickUp Pilot.
@@ -37,6 +38,9 @@ export type BatchJob3DProps = {
   phase: BatchJob3DPhase;
   /** Pre-computed: parts total */
   partsTotal: number;
+  /** Quantas variacoes de HOOK a entrega tem. Com mais de uma, o montado e'
+   *  um pacote com um video por hook — e o botao precisa dizer isso. */
+  hooksTotal?: number;
   /** Pre-computed: parts com videoId */
   partsDispatched: number;
   /** Pre-computed: parts com status completed */
@@ -84,7 +88,7 @@ export type BatchJob3DProps = {
    *  depende de a URL viva ter sobrevivido. Retorna as fontes (montado + camo)
    *  já com URLs frescas; [] só se o disco estiver realmente vazio. O parent
    *  passa isto sempre que a task tem entrega (nome persistido ou URL viva). */
-  loadDeliverables?: () => Promise<Array<{ url: string; name?: string; revoke?: boolean }>>;
+  loadDeliverables?: () => Promise<Array<{ url: string; name?: string; revoke?: boolean; blob?: Blob }>>;
   /** Status flags pra disabled */
   isRunning: boolean;
   isQueued: boolean;
@@ -487,6 +491,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     taskName,
     phase,
     partsTotal,
+    hooksTotal,
     partsDispatched,
     partsRendered,
     progressoMotor,
@@ -532,6 +537,9 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
   const [expanded, setExpanded] = useState(!defaultMinimized);
   const [resolvingDoc, setResolvingDoc] = useState(false);
+  // Gravar N videos numa pasta leva segundos e o botao nao pode ficar mudo:
+  // guarda qual arquivo esta saindo agora pra virar tooltip.
+  const [salvandoEmPasta, setSalvandoEmPasta] = useState<string | null>(null);
 
   // Painel aberto (ex: reiniciar disparo) => card ABRE sozinho. Sem isto, quem
   // clicasse em "editar antes de reiniciar" num card minimizado veria só o
@@ -882,7 +890,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 const sources = [
                   montadoUrl ? { url: montadoUrl, name: montadoFilename } : null,
                   camufladoUrl ? { url: camufladoUrl, name: camufladoFilename } : null,
-                ].filter(Boolean) as Array<{ url: string; name?: string; revoke?: boolean }>;
+                ].filter(Boolean) as Array<{ url: string; name?: string; revoke?: boolean; blob?: Blob }>;
 
                 const triggerDownload = (url: string, name: string) => {
                   const a = document.createElement('a');
@@ -922,7 +930,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   // fontes DIRETO do IndexedDB por taskId agora. Sem isto, uma task
                   // PRONTA com o blob salvo no disco ficava com botao mudo/ausente.
                   const doIDB = async () => {
-                    if (!loadDeliverables) return [] as Array<{ url: string; name?: string; revoke?: boolean }>;
+                    if (!loadDeliverables) return [] as Array<{ url: string; name?: string; revoke?: boolean; blob?: Blob }>;
                     try {
                       const lazy = await loadDeliverables();
                       return (lazy || []).filter((s) => s && s.url);
@@ -954,7 +962,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   // 1) Resolve cada fonte no arquivo que o user deve receber:
                   //    .mp4 entra direto; .zip com UM video vira o .mp4 limpo;
                   //    .zip com VARIOS (variacoes de hook) vai inteiro.
-                  const out: Array<{ blob?: Blob; url: string; name: string; revoke?: boolean }> = [];
+                  const out: Array<{ blob?: Blob; url: string; name: string; revoke?: boolean; videos?: ZipEntry[] }> = [];
                   for (const src of effSources) {
                     const fname = src.name || 'video.mp4';
                     if (/\.mp4$/i.test(fname)) {
@@ -963,35 +971,79 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       continue;
                     }
                     try {
-                      const blob = await fetch(src.url).then((r) => r.blob());
-                      const JSZip = (await import('jszip')).default;
-                      // loadAsync le so o INDICE do zip — nao descomprime nada.
-                      const zip = await JSZip.loadAsync(blob);
-                      const entries = Object.values(zip.files).filter(
-                        (f: any) => !f.dir && /\.mp4$/i.test(f.name),
-                      );
-                      if (entries.length === 1) {
+                      // `blob` vem do IndexedDB; `fetch` e' so o ultimo recurso —
+                      // ele falha num arquivo de centenas de MB quando o navegador
+                      // esta com pouca memoria, e era assim que a entrega morria.
+                      const blob: Blob = src.blob ?? (await (await fetch(src.url)).blob());
+                      // Le SO o indice do zip (uns KB no fim), nunca o arquivo todo.
+                      const entradas = await lerEntradasDoZip(blob);
+                      const videos = entradas ? videosDoZip(entradas) : [];
+                      if (!entradas || videos.length === 0) {
+                        // Nao era zip legivel, ou nao tem video dentro (so
+                        // diagnostico) — entrega o arquivo como esta.
+                        out.push({ url: src.url, name: fname, blob });
+                      } else if (videos.length === 1) {
                         // UM video dentro do zip (avatar unico) — entrega o .mp4 limpo.
-                        const e = entries[0] as any;
-                        const mp4 = new Blob([await e.async('blob')], { type: 'video/mp4' });
-                        const base = (e.name.split('/').pop() || e.name) as string;
+                        const v = videos[0];
+                        const mp4 = new Blob([await new Response(await abrirEntrada(blob, v)).arrayBuffer()], { type: 'video/mp4' });
+                        const base = v.nome.split('/').pop() || v.nome;
                         out.push({ blob: mp4, url: URL.createObjectURL(mp4), name: base, revoke: true });
                       } else {
-                        // 0 mp4 (so diagnostico) ou 2+ (VARIACOES DE HOOK: AD01G1.mp4,
-                        // AD01G2.mp4...) — o zip JA E a entrega certa, vai como esta.
-                        // Antes o codigo descomprimia os N videos e re-zipava um
-                        // pacote identico: num montado de ~200 MB isso estourava a
-                        // memoria, caia no catch e mandava baixar a URL crua — que
-                        // era justamente o download que falhava.
-                        out.push({ url: src.url, name: fname });
+                        // VARIACOES DE HOOK (AD01G1.mp4, AD01G2.mp4...): sao N videos
+                        // prontos. Se o navegador souber escrever em pasta, cada um vai
+                        // direto pro disco em streaming — sem empacotar, sem carregar os
+                        // 200 MB na memoria. Senao, o proprio zip e' a entrega.
+                        out.push({ url: src.url, name: fname, blob, videos });
                       }
                     } catch (e) {
-                      // Nao era zip valido (ou fetch falhou) — baixa o que tem.
+                      // Nao era zip valido (ou a leitura falhou) — baixa o que tem.
                       console.warn('[card] leitura do zip falhou:', e);
                       out.push({ url: src.url, name: fname });
                     }
                   }
                   if (out.length === 0) return;
+
+                  // 1b) PASTA: quando a entrega e' um pacote de videos e o navegador
+                  //     sabe gravar em disco, pergunta a pasta e escreve os MP4 la
+                  //     dentro, um a um, em streaming. E' o caminho que NAO depende
+                  //     do gerenciador de downloads aguentar um arquivo gigante.
+                  const pacotes = out.filter((m) => m.videos && m.videos.length > 1);
+                  if (pacotes.length > 0 && temEscritaEmPasta()) {
+                    try {
+                      const raiz = await (window as any).showDirectoryPicker({ id: 'pilot-entrega', mode: 'readwrite' });
+                      let gravados = 0;
+                      for (const pac of pacotes) {
+                        const nomePasta = (pac.name || 'entrega').replace(/\.zip$/i, '');
+                        const pasta = await raiz.getDirectoryHandle(nomePasta, { create: true });
+                        for (const v of pac.videos!) {
+                          const base = v.nome.split('/').pop() || v.nome;
+                          setSalvandoEmPasta(`${base} (${gravados + 1}/${pacotes.reduce((n, p) => n + p.videos!.length, 0)})`);
+                          const arq = await pasta.getFileHandle(base, { create: true });
+                          const destino = await arq.createWritable();
+                          // pipeTo fecha o destino no fim e propaga erro — o arquivo
+                          // nunca fica pela metade sem ninguem saber.
+                          await (await abrirEntrada(pac.blob!, v)).pipeTo(destino);
+                          gravados++;
+                        }
+                      }
+                      setSalvandoEmPasta(null);
+                      // Os pacotes ja foram entregues; o que sobrar (ex: camuflado
+                      // solto) segue pelo caminho normal abaixo.
+                      const resto = out.filter((m) => !m.videos || m.videos.length <= 1);
+                      for (const m of resto) triggerDownload(m.url, m.name);
+                      for (const m of out) if (m.revoke) setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
+                      return;
+                    } catch (e: any) {
+                      setSalvandoEmPasta(null);
+                      // O user fechou o seletor de pasta: nao baixa nada pelas costas.
+                      if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) {
+                        for (const m of out) if (m.revoke) setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
+                        return;
+                      }
+                      // Qualquer outra falha (disco cheio, permissao) cai no zip.
+                      console.warn('[card] gravar em pasta falhou, entregando o zip:', e);
+                    }
+                  }
 
                   // 2) UM arquivo → baixa solto (.mp4, ou o zip dos hooks).
                   if (out.length === 1) {
@@ -1042,8 +1094,10 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 // MONTAGEM VELHA trava igual: o arquivo existe, mas e' o de
                 // ANTES da correcao dos takes. Baixar ali entrega o video sem
                 // as correcoes — o pior tipo de erro, porque parece certo.
-                const travado = downloadBlocked || montagemVelha || renderizando || foraDoPlano;
-                const tooltip = downloadBlocked
+                const travado = downloadBlocked || montagemVelha || renderizando || foraDoPlano || !!salvandoEmPasta;
+                const tooltip = salvandoEmPasta
+                  ? `Salvando ${salvandoEmPasta}…`
+                  : downloadBlocked
                   ? '⚠ Incompleto — clique Retomar pra completar (não baixa versão zoada)'
                   : renderizando
                     ? `⚠ ${takesPendentes} take${takesPendentes === 1 ? '' : 's'} ainda renderizando — espere terminar e atualize a montagem`
@@ -1051,7 +1105,13 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                     ? `⚠ ${takesForaDoPlano} take${takesForaDoPlano === 1 ? '' : 's'} com avatar/voz/motor diferente do plano — re-gere antes de baixar`
                     : montagemVelha
                       ? '⚠ Montagem desatualizada — clique "Atualizar montagem" antes, senão baixa a versão de ANTES das correções'
-                      : 'Baixar MP4';
+                      // Com variações de hook a entrega é UM vídeo montado por
+                      // hook, não um MP4 — dizer "Baixar MP4" ali era mentira.
+                      : (hooksTotal && hooksTotal > 1)
+                        ? (temEscritaEmPasta()
+                            ? `Baixar os ${hooksTotal} hooks montados — você escolhe a pasta`
+                            : `Baixar os ${hooksTotal} hooks montados (.zip)`)
+                        : 'Baixar MP4';
                 return (
                   <Btn3D
                     icon={<IconDownload size={16} />}
