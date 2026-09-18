@@ -6,7 +6,6 @@ import { createPortal } from 'react-dom';
 
 import {
   HistoryTimeline,
-  fmtBytes,
   toolIcon,
   useDisponibilidade,
   useHistoryEvents,
@@ -17,11 +16,13 @@ import { travarScrollDaPagina } from '@/lib/trava-scroll';
 /**
  * PAINEL DE HISTÓRICO DA FERRAMENTA.
  *
- * Gaveta que abre POR CIMA da própria ferramenta com tudo que aquela
- * ferramenta entregou nos últimos 7 dias — e o botão pra baixar de novo. É o
- * mesmo motor da página /tools/historico (HistoryTimeline), só que já filtrado
- * na ferramenta em que o usuário está: ninguém precisa sair do fluxo, procurar
- * numa lista geral e voltar.
+ * Gaveta que abre POR CIMA da própria ferramenta com tudo que ela entregou nos
+ * últimos 7 dias — e as ações em cima de cada entrega (baixar · remontar ·
+ * debug · remover). É o mesmo motor da página /tools/historico
+ * (HistoryTimeline), já filtrado na ferramenta em que o usuário está.
+ *
+ * O texto aqui é o mínimo: título, dois filtros e a busca. Tudo que dava pra
+ * dizer com cor, ícone ou posição não vira frase.
  *
  * Fechar: ESC, clique no fundo ou no ✕. O scroll da página fica travado pelo
  * contador compartilhado (lib/trava-scroll) — nunca pelo jeito ingênuo, que
@@ -89,28 +90,16 @@ export function ToolHistoryPanel({
         className="hist-drawer"
       >
         {/* Cabeçalho */}
-        <header className="flex items-start gap-3 border-b border-line/60 px-5 py-4">
-          <span
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border border-line-strong bg-bg/50"
-            aria-hidden
-          >
+        <header className="hist-cabecalho">
+          <span className="hist-cabecalho__icone" aria-hidden>
             {toolIcon(tool)}
           </span>
           <div className="min-w-0 flex-1">
-            <p
-              className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet"
-              style={{ fontFamily: 'var(--font-label)' }}
-            >
-              Histórico da ferramenta
-            </p>
-            <h2
-              className="truncate text-[19px] font-bold leading-tight text-text"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              {label}
-            </h2>
-            <p className="mt-0.5 text-[11.5px] leading-relaxed text-text-muted">
-              Tudo que você fez aqui nos últimos 7 dias — e o que dá pra baixar de novo.
+            <h2 className="hist-cabecalho__titulo">{label}</h2>
+            <p className="hist-cabecalho__linha">
+              <span>Histórico</span>
+              <span aria-hidden>·</span>
+              <span>7 dias</span>
             </p>
           </div>
           <button
@@ -118,93 +107,69 @@ export function ToolHistoryPanel({
             type="button"
             onClick={onClose}
             aria-label="Fechar histórico"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line-strong text-text-muted transition hover:border-violet/50 hover:text-text"
+            title="Fechar"
+            className="hist-fechar"
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              aria-hidden
-            >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
             </svg>
           </button>
         </header>
 
-        {/* Resumo + filtros */}
-        <div className="flex flex-col gap-2.5 border-b border-line/60 px-5 py-3.5">
-          <div className="flex flex-wrap items-center gap-2">
+        {/* Filtros — dois estados num segmento só, e a busca quando faz falta */}
+        <div className="hist-filtros">
+          <div className="hist-seg" role="group" aria-label="Filtrar registros">
             <button
               type="button"
               onClick={() => setSoComArquivo(false)}
-              className={chipCls(!soComArquivo)}
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className={'hist-seg__item' + (!soComArquivo ? ' hist-seg__item--on' : '')}
+              aria-pressed={!soComArquivo}
             >
-              {`Tudo · ${daFerramenta.length}`}
+              Tudo <b>{daFerramenta.length}</b>
             </button>
             <button
               type="button"
               onClick={() => setSoComArquivo(true)}
-              className={chipCls(soComArquivo)}
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className={'hist-seg__item' + (soComArquivo ? ' hist-seg__item--on' : '')}
+              aria-pressed={soComArquivo}
+              title="Só os registros que ainda têm arquivo pra baixar"
             >
-              {`Com arquivo · ${comArquivo}`}
+              Com arquivo <b>{comArquivo}</b>
             </button>
-            {disponibilidade.vaultInfo ? (
-              <span className="mono ml-auto text-[10px] text-text-dim">
-                {`cofre ${fmtBytes(disponibilidade.vaultInfo.bytes)}`}
-              </span>
-            ) : null}
           </div>
-          {daFerramenta.length > 4 ? (
+          {daFerramenta.length > 6 ? (
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar por arquivo ou detalhe…"
+              placeholder="Buscar…"
               aria-label="Buscar no histórico desta ferramenta"
-              className="input-field !py-2 !text-[12.5px]"
+              className="hist-busca"
             />
           ) : null}
         </div>
 
         {/* Lista */}
-        <div className="hist-drawer__body flex-1 overflow-y-auto px-5 py-4">
+        <div className="hist-drawer__body flex-1 overflow-y-auto px-4 py-3.5">
           {visiveis.length === 0 ? (
-            <div className="flex flex-col items-center gap-2.5 px-4 py-14 text-center">
+            <div className="flex flex-col items-center gap-2.5 px-4 py-16 text-center">
               <span
                 className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-line-strong bg-bg/50"
                 aria-hidden
               >
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="rgb(var(--text-dim))"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-dim))" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="9" />
                   <path d="M12 7v5l3 2" />
                 </svg>
               </span>
-              <p
-                className="text-[14px] font-bold text-text"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
+              <p className="text-[13.5px] font-bold text-text" style={{ fontFamily: 'var(--font-tech)' }}>
                 {daFerramenta.length === 0 ? 'Nada por aqui ainda' : 'Nenhum resultado'}
               </p>
-              <p className="max-w-[300px] text-[12.5px] leading-relaxed text-text-muted">
+              <p className="max-w-[280px] text-[12px] leading-relaxed text-text-muted">
                 {daFerramenta.length === 0
-                  ? 'Assim que você entregar algo nesta ferramenta, aparece aqui — com o botão pra baixar de novo por 7 dias.'
-                  : 'Tente outra busca ou volte pra "Tudo".'}
+                  ? 'O que você entregar nesta ferramenta aparece aqui por 7 dias.'
+                  : 'Tente outra busca.'}
               </p>
             </div>
           ) : (
@@ -213,35 +178,22 @@ export function ToolHistoryPanel({
               disponibilidade={disponibilidade}
               compacto
               mostrarFerramenta={false}
+              aoAgir={onClose}
             />
           )}
         </div>
 
         {/* Rodapé */}
-        <footer className="flex items-center justify-between gap-3 border-t border-line/60 px-5 py-3">
-          <p className="text-[10.5px] leading-snug text-text-dim">
-            Os registros somem depois de 7 dias.
-          </p>
-          <Link
-            href="/tools/historico"
-            onClick={onClose}
-            className="shrink-0 rounded-full border border-line-strong px-3 py-1.5 text-[11px] font-bold text-text-muted transition hover:border-violet/45 hover:text-text"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
+        <footer className="hist-rodape">
+          <Link href="/tools/historico" onClick={onClose} className="hist-rodape__link">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 6h16M4 12h16M4 18h10" />
+            </svg>
             Histórico geral
           </Link>
         </footer>
       </aside>
     </div>,
     document.body,
-  );
-}
-
-function chipCls(active: boolean): string {
-  return (
-    'rounded-full border px-3 py-1 text-[11px] font-bold transition-all duration-200 active:scale-[0.96] ' +
-    (active
-      ? 'border-violet/60 bg-violet/15 text-text'
-      : 'border-line-strong text-text-muted hover:border-violet/40 hover:text-text')
   );
 }

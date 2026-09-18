@@ -85,7 +85,7 @@ export default function HistoricoPage() {
       <ToolHero
         eyebrow="SEU TRABALHO · ÚLTIMOS 7 DIAS"
         title="Histórico geral"
-        subtitle="Consulte suas entregas dos últimos 7 dias e baixe novamente os arquivos disponíveis. Arquivos pequenos ficam neste navegador; avatares do HeyGen também podem ser recuperados pelo ID. Os registros expiram após 7 dias."
+        subtitle="Tudo que você produziu nos últimos 7 dias, de todas as ferramentas — pronto pra baixar de novo."
         hue="rgba(167,139,250,0.45)"
         icon={
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -96,15 +96,17 @@ export default function HistoricoPage() {
         }
       />
 
-      {/* Resumo: registros, recuperáveis e cofre local */}
-      <div className="grid grid-cols-3 gap-2 sm:max-w-[560px]">
-        <StatCard label="REGISTROS" value={String(events.length)} tone="text-text" />
-        <StatCard label="DISPONÍVEIS" value={String(recuperaveis)} tone="text-lime" />
-        <StatCard
-          label="COFRE LOCAL"
-          value={vaultInfo ? fmtBytes(vaultInfo.bytes) : '—'}
-          tone="text-cyan"
-          hint={vaultInfo ? `${vaultInfo.files} arquivo${vaultInfo.files === 1 ? '' : 's'} · limpa sozinho` : undefined}
+      {/* Resumo — números grandes, rótulo miúdo: a faixa inteira cabe num olhar */}
+      <div className="hist-faixa">
+        <Stat valor={String(events.length)} rotulo="registros" />
+        <span className="hist-faixa__div" aria-hidden />
+        <Stat valor={String(recuperaveis)} rotulo="com arquivo" tom="var(--hist-lime)" />
+        <span className="hist-faixa__div" aria-hidden />
+        <Stat
+          valor={vaultInfo ? fmtBytes(vaultInfo.bytes) : '—'}
+          rotulo="neste navegador"
+          tom="var(--hist-cyan)"
+          dica={vaultInfo ? `${vaultInfo.files} arquivo${vaultInfo.files === 1 ? '' : 's'} guardados — limpa sozinho` : undefined}
         />
       </div>
 
@@ -126,25 +128,19 @@ export default function HistoricoPage() {
       ) : null}
 
       {/* Filtros */}
-      <div
-        className="flex flex-col gap-3 rounded-[18px] border border-line/60 p-4 shadow-depth-1 md:p-5"
-        style={{
-          background:
-            'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.14)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-        }}
-      >
+      <div className="hist-filtros-geral">
         <div className="flex flex-wrap items-center gap-2">
           <FilterChip
             active={tool === 'all'}
             onClick={() => setTool('all')}
-            label={`Tudo · ${events.length}`}
+            label={`Tudo ${events.length}`}
           />
           {toolChips.map((t) => (
             <FilterChip
               key={t.id}
               active={tool === t.id}
               onClick={() => setTool(tool === t.id ? 'all' : t.id)}
-              label={`${t.label} · ${counts.get(t.id)}`}
+              label={`${t.label} ${counts.get(t.id)}`}
             />
           ))}
         </div>
@@ -153,9 +149,9 @@ export default function HistoricoPage() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por arquivo, ferramenta, detalhe…"
+            placeholder="Buscar…"
             aria-label="Buscar no histórico"
-            className="input-field flex-1"
+            className="hist-busca flex-1"
           />
           {events.length > 0 ? (
             confirmClear ? (
@@ -223,7 +219,7 @@ export default function HistoricoPage() {
           </p>
           <p className="max-w-[440px] text-[13px] leading-relaxed text-text-muted">
             {events.length === 0
-              ? 'Suas próximas entregas aparecerão aqui. Os registros ficam disponíveis por 7 dias, com acesso aos arquivos que puderem ser recuperados.'
+              ? 'Suas entregas aparecem aqui por 7 dias.'
               : 'Tente outra ferramenta ou limpe a busca.'}
           </p>
         </div>
@@ -234,36 +230,24 @@ export default function HistoricoPage() {
   );
 }
 
-function StatCard({
-  label,
-  value,
-  tone,
-  hint,
+function Stat({
+  valor,
+  rotulo,
+  tom,
+  dica,
 }: {
-  label: string;
-  value: string;
-  tone: string;
-  hint?: string;
+  valor: string;
+  rotulo: string;
+  tom?: string;
+  dica?: string;
 }) {
   return (
-    <div
-      className="rounded-[14px] border border-line/60 px-3.5 py-2.5 shadow-depth-1"
-      style={{
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.12)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-      }}
-    >
-      <p
-        className="text-[9.5px] font-bold uppercase tracking-[0.16em] text-text-dim"
-        style={{ fontFamily: 'var(--font-label)' }}
-      >
-        {label}
-      </p>
-      <p className={`mt-0.5 text-[17px] font-bold leading-tight ${tone}`} style={{ fontFamily: 'var(--font-tech)' }}>
-        {value}
-      </p>
-      {hint ? <p className="mono mt-0.5 text-[9.5px] text-text-dim">{hint}</p> : null}
-    </div>
+    <span className="hist-stat" title={dica}>
+      <b className="hist-stat__valor" style={tom ? { color: tom } : undefined}>
+        {valor}
+      </b>
+      <span className="hist-stat__rotulo">{rotulo}</span>
+    </span>
   );
 }
 
@@ -280,23 +264,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={
-        'rounded-full border px-3.5 py-1.5 text-[11.5px] font-bold transition-all duration-200 active:scale-[0.96] ' +
-        (active
-          ? 'border-violet/60 text-text'
-          : 'border-line-strong text-text-muted hover:border-violet/40 hover:text-text')
-      }
-      style={{
-        fontFamily: 'var(--font-tech)',
-        ...(active
-          ? {
-              background:
-                'linear-gradient(160deg, rgba(167,139,250,0.18), rgba(124,58,237,0.06)), rgb(var(--bg-elev))',
-              boxShadow:
-                'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 18px -6px rgba(139,92,246,0.6)',
-            }
-          : {}),
-      }}
+      className={'hist-chip' + (active ? ' hist-chip--on' : '')}
     >
       {label}
     </button>

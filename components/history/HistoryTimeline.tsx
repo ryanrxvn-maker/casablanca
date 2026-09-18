@@ -1,17 +1,28 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { PilotBtn3D } from '@/components/PilotCardActions';
 import {
   buildChains,
   canonicalTool,
   chainState,
+  disparoNaFila,
   historyToolLabel,
   readHistory,
+  removeHistoryEvent,
   type Chain,
-  type ChainState,
   type HistoryEvent,
 } from '@/lib/history';
+import {
+  aceitaAcaoDeFila,
+  chainDeDownload,
+  pedirAcaoDeFila,
+  prefixosDoDisparo,
+  taskIdDoEvento,
+  temFilaDeDisparo,
+} from '@/lib/history-acoes';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -38,48 +49,131 @@ import {
 /**
  * TIMELINE DO HISTÓRICO — o miolo compartilhado.
  *
- * Existe UMA implementação de "listar registros e baixar de novo", usada por:
- *   - /tools/historico          (histórico geral, todas as ferramentas)
- *   - ToolHistoryPanel          (botão Histórico dentro de cada ferramenta)
+ * Existe UMA implementação de "listar o que foi feito e agir em cima", usada
+ * por /tools/historico e pelo botão Histórico de cada ferramenta. Duplicar era
+ * garantir divergência: um lado ganharia um conserto que o outro não teria.
  *
- * Duplicar isso era garantir divergência: um lado ganharia um conserto que o
- * outro não teria. Aqui moram a leitura ao vivo, a disponibilidade dos
- * arquivos (cofre + zip-store) e a cadeia de resgate do botão Baixar.
+ * DESENHO (17.09, pedido do Silas: "menos textos, botão só ícone e animado"):
+ * cada registro é uma linha limpa — marca colorida do estado, ícone da
+ * ferramenta, o que foi feito, e os MESMOS botões do card pronto do Pilot
+ * (baixar · remontar · debug · remover) em ícone, sem rótulo. Nada de texto
+ * repetindo o que a cor e o ícone já dizem.
  */
 
 const TOOL_ICON: Record<string, React.ReactNode> = {
-  'clickup-pilot': <IconClickUpPilot size={20} />,
-  'heygen-auto': <IconHeyGenAuto size={20} />,
-  'auto-broll': <IconAutoBroll size={20} />,
-  'auto-cortes': <IconAutoCortes size={20} />,
-  lipsync: <IconLipsync size={20} />,
-  decupagem: <IconDecupagem size={20} />,
-  'decupagem-copy': <IconDecupageCopy size={20} />,
-  'copy-srt': <IconCopySRT size={20} />,
-  tipografia: <IconTipografia size={20} />,
-  camuflagem: <IconCamuflagem size={20} />,
-  compressor: <IconCompressor size={20} />,
-  acelerador: <IconAcelerador size={20} />,
-  'audio-split': <IconAudioSplit size={20} />,
-  downloader: <IconDownloader size={20} />,
-  fakepass: <IconFakePass size={20} />,
-  'famous-hey': <IconFamousHey size={20} />,
-  'ltx-video': <IconLtxVideo size={20} />,
-  normalizador: <IconNormalizador size={20} />,
-  'remover-elementos': <IconRemoverElementos size={20} />,
-  'separador-audio': <IconSeparadorAudio size={20} />,
+  'clickup-pilot': <IconClickUpPilot size={18} />,
+  'heygen-auto': <IconHeyGenAuto size={18} />,
+  'auto-broll': <IconAutoBroll size={18} />,
+  'auto-cortes': <IconAutoCortes size={18} />,
+  lipsync: <IconLipsync size={18} />,
+  decupagem: <IconDecupagem size={18} />,
+  'decupagem-copy': <IconDecupageCopy size={18} />,
+  'copy-srt': <IconCopySRT size={18} />,
+  tipografia: <IconTipografia size={18} />,
+  camuflagem: <IconCamuflagem size={18} />,
+  compressor: <IconCompressor size={18} />,
+  acelerador: <IconAcelerador size={18} />,
+  'audio-split': <IconAudioSplit size={18} />,
+  downloader: <IconDownloader size={18} />,
+  fakepass: <IconFakePass size={18} />,
+  'famous-hey': <IconFamousHey size={18} />,
+  'ltx-video': <IconLtxVideo size={18} />,
+  normalizador: <IconNormalizador size={18} />,
+  'remover-elementos': <IconRemoverElementos size={18} />,
+  'separador-audio': <IconSeparadorAudio size={18} />,
 };
 
 export function toolIcon(tool: string): React.ReactNode {
-  return TOOL_ICON[canonicalTool(tool)] ?? <IconClickUpPilot size={20} />;
+  return TOOL_ICON[canonicalTool(tool)] ?? <IconClickUpPilot size={18} />;
 }
 
-const KIND_LABEL: Record<string, { label: string; cls: string }> = {
-  done: { label: 'PRONTO', cls: 'border-lime/35 bg-lime/10 text-lime' },
-  export: { label: 'EXPORT', cls: 'border-violet/35 bg-violet/10 text-violet' },
-  dispatch: { label: 'DISPARO', cls: 'border-cyan/35 bg-cyan/10 text-cyan' },
-  download: { label: 'DOWNLOAD', cls: 'border-line-strong bg-bg/60 text-text-muted' },
+/** Estado do registro: vira COR (marca na lateral), nunca palavra. */
+const KIND_ACCENT: Record<string, string> = {
+  done: 'var(--hist-lime)',
+  export: 'var(--hist-violet)',
+  dispatch: 'var(--hist-cyan)',
+  download: 'var(--hist-neutro)',
 };
+
+const KIND_TITULO: Record<string, string> = {
+  done: 'Entrega pronta',
+  export: 'Exportado',
+  dispatch: 'Disparo',
+  download: 'Download',
+};
+
+/**
+ * Dentro da gaveta TODAS as linhas são da mesma ferramenta — repetir o ícone
+ * dela 20 vezes é ruído. Ali o selo mostra o ESTADO do registro; na lista
+ * geral, onde as ferramentas se misturam, ele mostra a ferramenta.
+ */
+const KIND_ICON: Record<string, React.ReactNode> = {
+  done: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  ),
+  export: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 19V5" />
+      <path d="m5 12 7-7 7 7" />
+    </svg>
+  ),
+  dispatch: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  ),
+  download: (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14" />
+      <path d="m5 12 7 7 7-7" />
+    </svg>
+  ),
+};
+
+// ---------- Ícones das ações (mesma família do card do Pilot) --------------
+
+const IcoDownload = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v12" />
+    <path d="m7 10 5 5 5-5" />
+    <path d="M5 21h14" />
+  </svg>
+);
+const IcoRefresh = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+    <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M3 21v-5h5" />
+  </svg>
+);
+const IcoBug = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="8" y="6" width="8" height="14" rx="4" />
+    <path d="M9 12H3M21 12h-6M9 8.5l-3-3M18 5.5l-3 3M9 15.5l-3 3M18 18.5l-3-3" />
+  </svg>
+);
+const IcoX = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m6 6 12 12M18 6 6 18" />
+  </svg>
+);
+const IcoCheck = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m5 13 4 4L19 7" />
+  </svg>
+);
+const Girando = ({ size = 15 }: { size?: number }) => (
+  <span
+    aria-hidden
+    className="inline-block animate-spin rounded-full border-2 border-current border-t-transparent"
+    style={{ height: size, width: size }}
+  />
+);
+
+// ---------- Rótulos de tempo e tamanho ------------------------------------
 
 export function dayLabel(t: number): string {
   const d = new Date(t);
@@ -168,7 +262,7 @@ export type Disponibilidade = {
 
 /**
  * Quais chaves ainda EXISTEM no navegador — é o que faz o botão dizer a
- * verdade ("baixar" × "expirou") antes do clique. Lê só METADADOS (o cofre tem
+ * verdade (baixa × expirou) antes do clique. Lê só METADADOS (o cofre tem
  * store separado pra isso: cursor sobre bytes já custou um boot de 70s aqui).
  */
 export function useDisponibilidade(ativo: boolean): Disponibilidade {
@@ -207,26 +301,37 @@ export function useDisponibilidade(ativo: boolean): Disponibilidade {
 
 // ---------- Timeline -------------------------------------------------------
 
-type RowState = { busy?: string; msg?: string; err?: string; ofereceResgate?: boolean };
+type RowState = { busy?: 'baixar' | 'remover'; msg?: string; err?: string; confirmar?: boolean };
 
 /**
- * Lista de registros agrupada por dia, com o botão Baixar por arquivo.
- *
- * `compacto` é o modo do painel dentro da ferramenta: linhas mais estreitas e
- * sem a coluna de ferramenta (lá todos os registros são da mesma).
+ * Lista de registros agrupada por dia, com as ações de cada um.
+ * `compacto` é o modo da gaveta dentro da ferramenta: linhas mais estreitas e
+ * sem repetir o nome da ferramenta (lá todos os registros são da mesma).
  */
 export function HistoryTimeline({
   events,
   disponibilidade,
   compacto = false,
   mostrarFerramenta = true,
+  aoAgir,
 }: {
   events: HistoryEvent[];
   disponibilidade: Disponibilidade;
   compacto?: boolean;
   mostrarFerramenta?: boolean;
+  /** Chamado quando a ação leva o usuário pra outro lugar (a gaveta fecha). */
+  aoAgir?: () => void;
 }) {
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
+  const router = useRouter();
+  const confirmTimer = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  useEffect(() => {
+    const timers = confirmTimer.current;
+    return () => {
+      for (const t of Object.values(timers)) clearTimeout(t);
+    };
+  }, []);
 
   const groups = useMemo(() => {
     const out: { day: string; items: HistoryEvent[] }[] = [];
@@ -239,207 +344,197 @@ export function HistoryTimeline({
     return out;
   }, [events]);
 
-  async function baixarChain(ev: HistoryEvent, chain: Chain) {
-    const st = rowState[ev.id];
-    if (st?.busy) return;
-    const patch = (p: Partial<RowState>) =>
-      setRowState((prev) => ({ ...prev, [ev.id]: { ...prev[ev.id], ...p } }));
-    patch({ busy: chain.name, msg: 'Localizando…', err: undefined, ofereceResgate: false });
+  const patch = useCallback((id: string, p: Partial<RowState>) => {
+    setRowState((prev) => ({ ...prev, [id]: { ...prev[id], ...p } }));
+  }, []);
+
+  /** BAIXAR — percorre a cadeia (cofre → zip → resgate) até achar os bytes. */
+  async function baixar(ev: HistoryEvent, chain: Chain) {
+    if (rowState[ev.id]?.busy) return;
+    patch(ev.id, { busy: 'baixar', msg: undefined, err: undefined });
     try {
       const { recoverRef } = await import('@/lib/history-vault');
-      let lastReason = 'Arquivo não encontrado.';
-      let sugerirHeygen = false;
+      let motivo = 'Arquivo não encontrado.';
       for (const r of chain.refs) {
-        const res = await recoverRef(r, (m) => patch({ msg: m }));
+        const res = await recoverRef(r, (m) => patch(ev.id, { msg: m }));
         if (res.ok) {
-          patch({ busy: undefined, msg: undefined, err: undefined });
+          patch(ev.id, { busy: undefined, msg: undefined, err: undefined });
           return;
         }
-        lastReason = res.reason;
-        sugerirHeygen = sugerirHeygen || !!res.sugerirHeygen;
+        motivo = res.reason;
       }
-      const temResgate =
-        (ev.ref ?? []).some((r) => r.via === 'heygen') &&
-        !chain.refs.some((r) => r.via === 'heygen');
-      patch({
-        busy: undefined,
-        msg: undefined,
-        err: lastReason,
-        ofereceResgate: sugerirHeygen && temResgate,
-      });
+      patch(ev.id, { busy: undefined, msg: undefined, err: motivo });
     } catch (e) {
-      patch({ busy: undefined, msg: undefined, err: (e as Error)?.message || 'Falha inesperada.' });
+      patch(ev.id, { busy: undefined, msg: undefined, err: (e as Error)?.message || 'Falha inesperada.' });
     } finally {
       disponibilidade.refresh();
     }
   }
 
-  const recuo = compacto ? 'pl-[44px]' : 'pl-[54px]';
+  /** REMONTAR / DEBUG — quem executa é a página da fila (Pilot). */
+  function acaoDeFila(acao: 'retomar' | 'debug', taskId: string) {
+    const r = pedirAcaoDeFila(acao, taskId);
+    aoAgir?.();
+    if (r.modo === 'navegar') router.push(r.rota);
+  }
+
+  /**
+   * REMOVER — dois toques. O primeiro arma (botão fica vermelho e vira ✓), o
+   * segundo apaga o registro e os arquivos daquele disparo. Sem janela de
+   * confirmação: menos texto na tela, e nada some com um toque só.
+   */
+  async function remover(ev: HistoryEvent) {
+    const st = rowState[ev.id];
+    if (st?.busy) return;
+    if (!st?.confirmar) {
+      patch(ev.id, { confirmar: true, err: undefined });
+      clearTimeout(confirmTimer.current[ev.id]);
+      confirmTimer.current[ev.id] = setTimeout(() => patch(ev.id, { confirmar: false }), 4000);
+      return;
+    }
+    clearTimeout(confirmTimer.current[ev.id]);
+    patch(ev.id, { busy: 'remover', confirmar: false });
+    try {
+      // 1. os bytes do cofre que só este registro apontava
+      const chavesCofre = (ev.ref ?? []).filter((r) => r.via === 'vault').map((r) => r.key);
+      if (chavesCofre.length > 0) {
+        await import('@/lib/history-vault').then((v) => v.vaultDelete(chavesCofre)).catch(() => {});
+      }
+      // 2. o pacote do disparo no zip-store (montado/takes/partes)
+      const taskId = taskIdDoEvento(ev);
+      if (taskId && !disparoNaFila(taskId).rodando) {
+        const zs = await import('@/lib/zip-store').catch(() => null);
+        if (zs) for (const p of prefixosDoDisparo(taskId)) await zs.deletePrefix(p).catch(() => {});
+      }
+      // 3. o registro
+      await removeHistoryEvent(ev.id);
+    } catch (e) {
+      patch(ev.id, { busy: undefined, err: (e as Error)?.message || 'Não consegui remover.' });
+      return;
+    }
+    patch(ev.id, { busy: undefined });
+    disponibilidade.refresh();
+  }
 
   return (
-    <div className={'flex flex-col ' + (compacto ? 'gap-5' : 'gap-7 pb-4')}>
+    <div className={'flex flex-col ' + (compacto ? 'gap-4' : 'gap-6 pb-4')}>
       {groups.map((g) => (
         <section key={g.day + g.items[0].id}>
-          <div className="mb-3 flex items-center gap-3">
-            <h3
-              className="text-[12px] font-bold uppercase tracking-[0.18em] text-text-muted"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              {g.day}
-            </h3>
-            <span className="divider-grad flex-1" aria-hidden />
-            <span className="mono text-[10.5px] text-text-dim">
-              {g.items.length} {g.items.length === 1 ? 'registro' : 'registros'}
-            </span>
+          <div className="mb-2 flex items-center gap-3">
+            <h3 className="hist-dia">{g.day}</h3>
+            <span className="hist-hairline flex-1" aria-hidden />
           </div>
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-1.5">
             {g.items.map((e) => {
-              const kind = KIND_LABEL[e.kind] ?? KIND_LABEL.done;
-              const chains = buildChains(e.ref);
               const st = rowState[e.id];
-              const resgate = chains.find((c) => c.refs.some((r) => r.via === 'heygen'));
+              const chains = buildChains(e.ref);
+              const alvo = chainDeDownload(e, chains);
+              const estado = alvo ? chainState(alvo, disponibilidade) : 'gone';
+              const taskId = taskIdDoEvento(e);
+              const naFila = temFilaDeDisparo(e.tool) && !!taskId && aceitaAcaoDeFila(taskId);
+              const fila = naFila && taskId ? disparoNaFila(taskId) : { existe: false, rodando: false };
+              const baixando = st?.busy === 'baixar';
+              const removendo = st?.busy === 'remover';
               return (
                 <li
                   key={e.id}
-                  className={
-                    'group rounded-[14px] border border-line/60 shadow-depth-1 transition-all duration-300 hover:-translate-y-px hover:border-violet/30 ' +
-                    (compacto ? 'px-3.5 py-2.5' : 'px-4 py-3 md:px-5')
-                  }
-                  style={{
-                    background:
-                      'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.12)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-                  }}
+                  className={'hist-row' + (compacto ? ' hist-row--compacta' : '')}
+                  style={{ ['--hist-accent' as string]: KIND_ACCENT[e.kind] ?? KIND_ACCENT.download }}
                 >
-                  <div className={'flex items-center ' + (compacto ? 'gap-3' : 'gap-3.5')}>
-                    <span
-                      className={
-                        'flex shrink-0 items-center justify-center rounded-[11px] border border-line-strong bg-bg/50 ' +
-                        (compacto ? 'h-8 w-8' : 'h-10 w-10')
-                      }
-                      aria-hidden
-                    >
-                      {toolIcon(e.tool)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p
-                        className={
-                          'truncate font-semibold text-text ' +
-                          (compacto ? 'text-[12.5px]' : 'text-[13.5px]')
-                        }
-                        title={e.title}
-                      >
-                        {e.title}
-                      </p>
-                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-text-muted">
-                        {mostrarFerramenta ? (
-                          <span className="font-bold" style={{ fontFamily: 'var(--font-tech)' }}>
-                            {historyToolLabel(e.tool)}
-                          </span>
-                        ) : null}
-                        {e.meta ? (
-                          <>
-                            {mostrarFerramenta ? (
-                              <span aria-hidden className="text-text-dim">
-                                ·
-                              </span>
-                            ) : null}
-                            <span className="mono">{e.meta}</span>
-                          </>
-                        ) : null}
-                      </p>
-                    </div>
-                    <span
-                      className={
-                        'hidden shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] sm:inline-block ' +
-                        kind.cls
-                      }
-                      style={{ fontFamily: 'var(--font-label)' }}
-                    >
-                      {kind.label}
-                    </span>
-                    <span className="mono shrink-0 text-[11px] text-text-dim">{timeLabel(e.t)}</span>
+                  <span className="hist-row__marca" aria-hidden />
+                  <span className="hist-row__icone" title={KIND_TITULO[e.kind] ?? ''} aria-hidden>
+                    {mostrarFerramenta ? toolIcon(e.tool) : KIND_ICON[e.kind] ?? KIND_ICON.done}
+                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="hist-row__titulo" title={e.title}>
+                      {e.title}
+                    </p>
+                    <p className="hist-row__meta">
+                      {mostrarFerramenta ? (
+                        <>
+                          <span className="hist-row__ferramenta">{historyToolLabel(e.tool)}</span>
+                          <span aria-hidden>·</span>
+                        </>
+                      ) : null}
+                      {e.meta ? (
+                        <>
+                          <span>{e.meta}</span>
+                          <span aria-hidden>·</span>
+                        </>
+                      ) : null}
+                      <span>{timeLabel(e.t)}</span>
+                    </p>
                   </div>
 
-                  {/* Downloads: um botão por arquivo, com estado honesto */}
-                  {chains.length > 0 ? (
-                    <div className={'mt-2.5 flex flex-wrap items-center gap-2 ' + recuo}>
-                      {chains.map((c) => {
-                        const state: ChainState = chainState(c, disponibilidade);
-                        const busy = st?.busy === c.name;
-                        const isHg = c.refs.every((r) => r.via === 'heygen');
-                        return (
-                          <button
-                            key={c.name}
-                            type="button"
-                            disabled={!!st?.busy || state === 'gone'}
-                            onClick={() => baixarChain(e, c)}
-                            title={
-                              state === 'gone'
-                                ? 'Esse arquivo já expirou do navegador e não tem resgate remoto'
-                                : state === 'remote'
-                                  ? 'Re-baixa do HeyGen pelos IDs salvos (precisa da extensão + aba logada)'
-                                  : `Baixar ${c.name}`
-                            }
-                            className={
-                              'inline-flex max-w-full items-center gap-1.5 truncate rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all active:scale-[0.96] disabled:cursor-not-allowed ' +
-                              (state === 'gone'
-                                ? 'border-line/50 text-text-dim opacity-60'
-                                : busy
-                                  ? 'border-violet/50 text-violet'
-                                  : isHg || state === 'remote'
-                                    ? 'border-cyan/45 bg-cyan/10 text-cyan hover:bg-cyan/20'
-                                    : 'border-lime/40 bg-lime/10 text-lime hover:bg-lime/20')
-                            }
-                            style={{ fontFamily: 'var(--font-tech)' }}
-                          >
-                            {busy ? (
-                              <span
-                                aria-hidden
-                                className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-[2px] border-current border-t-transparent"
-                              />
-                            ) : (
-                              <svg
-                                width="11"
-                                height="11"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2.4"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                className="shrink-0"
-                                aria-hidden
-                              >
-                                <path d="M12 3v12" />
-                                <path d="m7 10 5 5 5-5" />
-                                <path d="M5 21h14" />
-                              </svg>
-                            )}
-                            <span className="truncate">
-                              {state === 'gone' ? `${c.label} · expirou` : c.label}
-                            </span>
-                          </button>
-                        );
-                      })}
-                      {st?.msg ? (
-                        <span className="mono text-[10.5px] text-text-muted">{st.msg}</span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {st?.err ? (
-                    <div className={'mt-2 flex flex-wrap items-center gap-2 ' + recuo}>
-                      <p className="text-[11.5px] leading-relaxed text-amber-300/90">{st.err}</p>
-                      {st.ofereceResgate && resgate ? (
-                        <button
-                          type="button"
-                          onClick={() => baixarChain(e, resgate)}
-                          className="rounded-full border border-cyan/45 bg-cyan/10 px-3 py-1 text-[11px] font-bold text-cyan transition hover:bg-cyan/20"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          Resgatar do HeyGen
-                        </button>
-                      ) : null}
-                    </div>
+                  <div className="hist-row__acoes">
+                    <PilotBtn3D
+                      size={30}
+                      color={estado === 'gone' ? 'neutral' : baixando ? 'cyan' : 'lime'}
+                      icon={baixando ? <Girando /> : <IcoDownload />}
+                      disabled={!alvo || estado === 'gone' || !!st?.busy}
+                      title={
+                        !alvo
+                          ? 'Esse registro não guardou arquivo pra baixar'
+                          : estado === 'gone'
+                            ? `${alvo.name} — expirou do navegador (7 dias)`
+                            : estado === 'remote'
+                              ? `Resgatar do HeyGen: ${alvo.name}`
+                              : `Baixar ${alvo.name}`
+                      }
+                      onClick={alvo ? () => void baixar(e, alvo) : undefined}
+                    />
+                    {naFila && taskId && fila.existe ? (
+                      <>
+                        <PilotBtn3D
+                          size={30}
+                          color="cyan"
+                          icon={<IcoRefresh />}
+                          disabled={!fila.existe || fila.rodando || !!st?.busy}
+                          title={
+                            !fila.existe
+                              ? 'Esse disparo não está mais na fila do Pilot'
+                              : fila.rodando
+                                ? 'Esse disparo ainda está rodando'
+                                : 'Remontar — abre a montagem desta task no Pilot'
+                          }
+                          onClick={() => acaoDeFila('retomar', taskId)}
+                        />
+                        <PilotBtn3D
+                          size={30}
+                          color="violet"
+                          icon={<IcoBug />}
+                          disabled={!fila.existe || fila.rodando || !!st?.busy}
+                          title={
+                            !fila.existe
+                              ? 'Esse disparo não está mais na fila do Pilot'
+                              : fila.rodando
+                                ? 'Esse disparo ainda está rodando'
+                                : 'Debug — reinicia o disparo (pergunta se quer editar antes)'
+                          }
+                          onClick={() => acaoDeFila('debug', taskId)}
+                        />
+                      </>
+                    ) : null}
+                    <PilotBtn3D
+                      size={30}
+                      color={st?.confirmar ? 'rose' : 'neutral'}
+                      icon={removendo ? <Girando size={13} /> : st?.confirmar ? <IcoCheck /> : <IcoX />}
+                      disabled={!!st?.busy}
+                      pulse={st?.confirmar}
+                      title={
+                        st?.confirmar
+                          ? 'Confirmar: apaga o registro e os arquivos guardados'
+                          : 'Remover do histórico'
+                      }
+                      onClick={() => void remover(e)}
+                    />
+                  </div>
+
+                  {st?.msg || st?.err ? (
+                    <p className={'hist-row__recado ' + (st.err ? 'hist-row__recado--erro' : '')}>
+                      {st.err ?? st.msg}
+                    </p>
                   ) : null}
                 </li>
               );

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
+import { EVENTO_ACAO_FILA, consumirIntencao } from '@/lib/history-acoes';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
@@ -4603,6 +4604,70 @@ function ClickUpPilotInner() {
   const batchStatesRef = useRef<Record<string, BatchTaskState>>({});
   batchStatesRef.current = batchStates;
   const [foreignRunnerPulse, setForeignRunnerPulse] = useState<PilotRunnerPulse | null>(null);
+
+  /**
+   * PONTE HISTÓRICO → FILA (17.09).
+   *
+   * Os botões REMONTAR e DEBUG do histórico são os MESMOS do card pronto daqui
+   * — e quem sabe executá-los é esta página. O histórico só PEDE: pelo evento
+   * `autoedit:fila-acao` quando o usuário já está no Pilot, ou por uma intenção
+   * guardada quando o pedido veio de outra ferramenta (aí o clique navega pra
+   * cá e a ação roda na chegada).
+   *
+   * Duas travas: a task tem que EXISTIR na fila (senão o pedido vira aviso, e
+   * nunca um clique mudo), e a intenção guardada vale por 1 minuto — pedido
+   * velho jamais reinicia um disparo sozinho.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const executar = (acao: 'retomar' | 'debug', taskId: string): boolean => {
+      if (!batchStatesRef.current[taskId]) return false;
+      if (acao === 'debug') pedirReinicioDaTask(taskId);
+      else setPedindoMontagem({ taskId, acao: 'retomar' });
+      // O painel abre DENTRO do card: sem trazer o card pra vista, a ação
+      // acontece fora da tela e parece que nada aconteceu.
+      setTimeout(() => {
+        try {
+          document
+            .getElementById(`batch-card-${taskId}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {}
+      }, 80);
+      return true;
+    };
+    const semTask = () =>
+      setError('Esse disparo não está mais na fila do Pilot — dá pra baixar o que ficou guardado, mas não tem o que remontar.');
+
+    const onEvento = (e: Event) => {
+      const d = (e as CustomEvent<{ acao?: 'retomar' | 'debug'; taskId?: string }>).detail;
+      if (!d?.taskId || !d.acao) return;
+      if (!executar(d.acao, d.taskId)) semTask();
+    };
+    window.addEventListener(EVENTO_ACAO_FILA, onEvento);
+
+    // Pedido vindo de outra página: a fila hidrata da conta de forma assíncrona,
+    // então insiste por alguns segundos antes de desistir.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const intencao = consumirIntencao();
+    if (intencao) {
+      let tentativas = 0;
+      const tentar = () => {
+        if (executar(intencao.acao, intencao.taskId)) return;
+        tentativas += 1;
+        if (tentativas > 20) {
+          semTask();
+          return;
+        }
+        timer = setTimeout(tentar, 500);
+      };
+      timer = setTimeout(tentar, 400);
+    }
+    return () => {
+      window.removeEventListener(EVENTO_ACAO_FILA, onEvento);
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Execução viva em OUTRA aba precisa aparecer como viva no Pilot. Antes, a

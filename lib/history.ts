@@ -184,6 +184,33 @@ export function readHistory(): HistoryEvent[] {
   return prune(safeRead());
 }
 
+/**
+ * Apaga UM registro (botão Remover do histórico). Os bytes que ele apontava
+ * são limpos por quem chama — o histórico não decide sozinho apagar arquivo.
+ */
+export async function removeHistoryEvent(id: string): Promise<void> {
+  await deleteDurableRecords('history', [id]);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('autoedit:history'));
+  }
+}
+
+/**
+ * Esse disparo ainda está na fila da ferramenta? É o que decide se REMONTAR e
+ * DEBUG podem agir: sem o registro de background, não há o que retomar, e o
+ * botão precisa dizer isso em vez de fingir que funciona.
+ */
+export function disparoNaFila(taskId: string): { existe: boolean; rodando: boolean } {
+  try {
+    const rec = readDurableRecords<{ phase?: string }>('background')[taskId];
+    if (!rec) return { existe: false, rodando: false };
+    const fase = String(rec.phase ?? '');
+    return { existe: true, rodando: fase !== 'done' && fase !== 'failed' };
+  } catch {
+    return { existe: false, rodando: false };
+  }
+}
+
 /** Apaga tudo. */
 export async function clearHistory() {
   await deleteDurableRecords('history', safeRead().map(e => e.id));

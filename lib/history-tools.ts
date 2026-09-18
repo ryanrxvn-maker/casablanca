@@ -29,7 +29,7 @@ export type HistoryKind = 'done' | 'export' | 'dispatch' | 'download';
  *              mesmo depois do navegador ter descartado os blobs locais.
  */
 export type FileRef =
-  | { via: 'vault'; key: string; name: string; size?: number; mime?: string; label?: string }
+  | { via: 'vault'; key: string; name: string; size?: number; mime?: string; label?: string; taskId?: string }
   | { via: 'zip'; key: string; name: string; label?: string; taskId?: string }
   | {
       via: 'heygen';

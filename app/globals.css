@@ -2277,6 +2277,402 @@ html[data-theme='light'] .hist-fab__label {
   }
 }
 
+/* ───────────── LINHAS DO HISTORICO (desenho 17.09) ─────────────
+   Menos texto: o estado do registro e' uma MARCA colorida na lateral, nao uma
+   palavra; as acoes sao os mesmos botoes do card pronto do Pilot, so' icone.
+   As linhas sao estreitas e alinhadas pra a lista ler como uma TABELA calma. */
+:root {
+  --hist-lime: #a3e635;
+  --hist-cyan: #22d3ee;
+  --hist-violet: #a78bfa;
+  --hist-neutro: rgba(160, 160, 180, 0.55);
+}
+.hist-dia {
+  font-family: var(--font-tech);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgb(var(--text-dim));
+}
+.hist-hairline {
+  height: 1px;
+  background: linear-gradient(90deg, rgb(var(--line-strong)), transparent);
+}
+.hist-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    rgb(var(--bg-softer));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+.hist-row:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--hist-accent) 40%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 10px 24px -14px rgba(0, 0, 0, 0.9),
+    0 0 0 1px color-mix(in srgb, var(--hist-accent) 12%, transparent);
+}
+.hist-row--compacta {
+  padding: 8px 10px 8px 14px;
+  gap: 9px;
+}
+.hist-row__marca {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 46%;
+  width: 3px;
+  transform: translateY(-50%);
+  border-radius: 0 3px 3px 0;
+  background: var(--hist-accent);
+  opacity: 0.85;
+  transition: height 0.24s ease, opacity 0.24s ease;
+}
+.hist-row:hover .hist-row__marca {
+  height: 72%;
+  opacity: 1;
+}
+.hist-row__icone {
+  display: flex;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: color-mix(in srgb, var(--hist-accent) 9%, rgb(var(--bg)));
+  color: rgb(var(--text-muted));
+}
+.hist-row__titulo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.8px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: rgb(var(--text));
+}
+.hist-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-family: var(--font-mono, ui-monospace), monospace;
+  font-size: 10.5px;
+  line-height: 1.2;
+  color: rgb(var(--text-dim));
+}
+.hist-row__meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hist-row__ferramenta {
+  font-family: var(--font-tech);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(var(--text-muted));
+}
+.hist-row__acoes {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.22s ease;
+}
+/* Onde existe mouse, as acoes ficam discretas ate' a linha ser mirada — no
+   toque elas nunca escondem (senao o botao some no celular). */
+@media (hover: hover) and (pointer: fine) {
+  .hist-row__acoes {
+    opacity: 0.62;
+  }
+  .hist-row:hover .hist-row__acoes,
+  .hist-row:focus-within .hist-row__acoes {
+    opacity: 1;
+  }
+}
+.hist-row__recado {
+  flex-basis: 100%;
+  margin: 2px 0 0 42px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgb(var(--text-muted));
+}
+.hist-row__recado--erro {
+  color: #fcd34d;
+}
+html[data-theme='light'] .hist-row {
+  border-color: rgba(16, 16, 24, 0.08);
+  background: linear-gradient(180deg, #fff, rgba(255, 255, 255, 0.6));
+  box-shadow: 0 1px 2px rgba(16, 16, 24, 0.04);
+}
+html[data-theme='light'] .hist-row__icone {
+  border-color: rgba(16, 16, 24, 0.08);
+}
+
+/* ───────────── CROMO DA GAVETA (cabecalho, filtros, rodape) ─────────────
+   Densidade alta e texto curto: o titulo e' o nome da ferramenta, o resto e'
+   uma linha so' de contexto. Segmento no lugar de dois chips soltos. */
+.hist-cabecalho {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+}
+.hist-cabecalho__icone {
+  display: flex;
+  height: 38px;
+  width: 38px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: radial-gradient(120% 120% at 50% 0%, rgba(167, 139, 250, 0.16), transparent 65%), rgb(var(--bg));
+  color: rgb(var(--text-muted));
+}
+.hist-cabecalho__titulo {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-tech);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: rgb(var(--text));
+}
+.hist-cabecalho__linha {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-family: var(--font-tech);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--text-dim));
+}
+.hist-fechar {
+  display: flex;
+  height: 30px;
+  width: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgb(var(--text-muted));
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.hist-fechar:hover {
+  transform: rotate(90deg);
+  border-color: rgba(244, 63, 94, 0.5);
+  color: #fda4af;
+}
+.hist-filtros {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.hist-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.22);
+}
+.hist-seg__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-family: var(--font-tech);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgb(var(--text-dim));
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.hist-seg__item b {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+.hist-seg__item:hover {
+  color: rgb(var(--text-muted));
+}
+.hist-seg__item--on {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.26), rgba(124, 58, 237, 0.12));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 4px 14px -8px rgba(139, 92, 246, 0.9);
+}
+.hist-seg__item--on b {
+  opacity: 0.9;
+}
+.hist-busca {
+  flex: 1;
+  min-width: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.22);
+  padding: 7px 13px;
+  font-size: 12px;
+  color: rgb(var(--text));
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.hist-busca::placeholder {
+  color: rgb(var(--text-dim));
+}
+.hist-busca:focus {
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.14);
+}
+.hist-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 9px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.hist-rodape__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 12px;
+  font-family: var(--font-tech);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--text-dim));
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.hist-rodape__link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(167, 139, 250, 0.45);
+  color: rgb(var(--text));
+}
+html[data-theme='light'] .hist-cabecalho,
+html[data-theme='light'] .hist-filtros,
+html[data-theme='light'] .hist-rodape {
+  border-color: rgba(16, 16, 24, 0.08);
+}
+html[data-theme='light'] .hist-seg,
+html[data-theme='light'] .hist-busca {
+  border-color: rgba(16, 16, 24, 0.1);
+  background: rgba(16, 16, 24, 0.03);
+}
+
+/* ───────────── HISTORICO GERAL: faixa de numeros + filtros ───────────── */
+.hist-faixa {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  align-self: flex-start;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), rgb(var(--bg-softer));
+  padding: 10px 20px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.hist-faixa__div {
+  height: 20px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.09);
+}
+.hist-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.hist-stat__valor {
+  font-family: var(--font-tech);
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--text));
+}
+.hist-stat__rotulo {
+  font-family: var(--font-tech);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--text-dim));
+}
+.hist-filtros-geral {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent), rgb(var(--bg-softer));
+  padding: 14px 16px;
+}
+html[data-theme='light'] .hist-faixa,
+html[data-theme='light'] .hist-filtros-geral {
+  border-color: rgba(16, 16, 24, 0.08);
+  background: #fff;
+}
+html[data-theme='light'] .hist-faixa__div {
+  background: rgba(16, 16, 24, 0.1);
+}
+
+.hist-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 5px 12px;
+  font-family: var(--font-tech);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgb(var(--text-dim));
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+.hist-chip:hover {
+  transform: translateY(-1px);
+  color: rgb(var(--text-muted));
+  border-color: rgba(167, 139, 250, 0.35);
+}
+.hist-chip--on {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.26), rgba(124, 58, 237, 0.12));
+  border-color: rgba(167, 139, 250, 0.5);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 4px 14px -8px rgba(139, 92, 246, 0.9);
+}
+html[data-theme='light'] .hist-chip {
+  border-color: rgba(16, 16, 24, 0.1);
+  background: rgba(16, 16, 24, 0.03);
+}
+
 /* ─────────────── SOMBRA DOS SLIDES DO HERÓI ───────────────
    Era inline com rgba(0,0,0,.95): no tema CLARO isso vira uma mancha cinza
    em volta do card, que lia como "borda sobrando". Aqui a sombra é escura no
