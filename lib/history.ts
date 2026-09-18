@@ -1,7 +1,7 @@
 'use client';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
 import { RETENTION_MS, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
-import { faseAtiva } from './history-acoes';
+import { faseAtiva, podeVirarCard } from './history-acoes';
 
 /**
  * Histórico geral na conta, separado do background, com retenção de 7 dias.
@@ -203,6 +203,7 @@ export async function removeHistoryEvent(id: string): Promise<void> {
  */
 export function disparoNaFila(taskId: string): { existe: boolean; rodando: boolean } {
   try {
+    if (!podeVirarCard(taskId)) return { existe: false, rodando: false };
     const rec = readDurableRecords<{ phase?: string }>('background')[taskId];
     if (!rec) return { existe: false, rodando: false };
     return { existe: true, rodando: faseAtiva(rec.phase) };

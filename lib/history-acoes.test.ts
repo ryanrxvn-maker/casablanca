@@ -12,6 +12,7 @@
 import {
   aceitaAcaoDeFila,
   faseAtiva,
+  podeVirarCard,
   chainDeDownload,
   intencaoValida,
   prefixosDoDisparo,
@@ -137,6 +138,16 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
     ok(!faseAtiva(f), `fase "${f}" NÃO trava os botões`);
   }
   ok(!faseAtiva(undefined), 'registro sem fase não trava nada');
+}
+
+// (D3) registro que o Pilot nunca mostra como card
+{
+  ok(podeVirarCard('86aj6nfue'), 'task normal vira card');
+  ok(podeVirarCard('pilot_creator_abc_1'), 'task do Creator vira card');
+  ok(!podeVirarCard('archive:9eeb9de2c160a3e0741900ca4975c24e'), 'arquivo morto NÃO vira card');
+  ok(!podeVirarCard('pilot-draft:team:A'), 'rascunho NÃO vira card');
+  ok(!podeVirarCard('heygenauto:heygen:1:2'), 'fila do Hey Auto NÃO vira card do Pilot');
+  ok(!podeVirarCard(null), 'sem task, sem card');
 }
 
 // (E) intenção entre páginas vence

@@ -4637,6 +4637,18 @@ function ClickUpPilotInner() {
             ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } catch {}
       }, 80);
+      // CONFERÊNCIA: existir registro não garante card na tela — a fila mostra
+      // só a empresa e o modo selecionados. Sem card, a ação seria um clique
+      // mudo, então o usuário ouve o motivo.
+      setTimeout(() => {
+        try {
+          if (!document.getElementById(`batch-card-${taskId}`)) {
+            setError(
+              'Esse disparo existe, mas o card dele não está nesta lista. Ele é de outra empresa ou de outra origem (Creator/Docs) — troque ali em cima pra ver a task.',
+            );
+          }
+        } catch {}
+      }, 700);
       return true;
     };
     const semTask = () =>

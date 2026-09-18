@@ -101,6 +101,18 @@ export function faseAtiva(phase: string | undefined | null): boolean {
   return !!phase && FASES_ATIVAS.has(String(phase));
 }
 
+/**
+ * Registro que o Pilot NUNCA transforma em card: arquivo morto, rascunho e a
+ * fila do Hey Auto (que tem tela própria). O Pilot pula esses prefixos na
+ * hidratação, então oferecer ação de card pra eles seria botão mudo.
+ */
+const PREFIXOS_SEM_CARD = ['archive:', 'pilot-draft:', 'heygenauto:'];
+
+export function podeVirarCard(taskId: string | null | undefined): boolean {
+  if (!taskId) return false;
+  return !PREFIXOS_SEM_CARD.some((pre) => taskId.startsWith(pre));
+}
+
 /** Chaves do zip-store que pertencem a este disparo (usado ao remover). */
 export function prefixosDoDisparo(taskId: string): string[] {
   return [`batch:${taskId}:`, `pilot:${taskId}:`, `va:${taskId}:`, `troca:white:${taskId}`];

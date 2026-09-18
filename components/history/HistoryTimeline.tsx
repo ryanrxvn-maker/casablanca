@@ -19,6 +19,7 @@ import {
   aceitaAcaoDeFila,
   chainDeDownload,
   pedirAcaoDeFila,
+  podeVirarCard,
   prefixosDoDisparo,
   taskIdDoEvento,
   temFilaDeDisparo,
@@ -348,6 +349,9 @@ export function useFilaAoVivo(ativo: boolean): FilaAoVivo {
         const inicio: Record<string, number> = {};
         const url: Record<string, string> = {};
         for (const [id, r] of Object.entries(recs)) {
+          // Arquivo morto/rascunho/Hey Auto nunca viram card: manter no mapa
+          // acenderia acao que a tela do Pilot nao tem como executar.
+          if (!podeVirarCard(id)) continue;
           status[id] = statusDoDisparo(r);
           if (typeof r?.startedAt === 'number') inicio[id] = r.startedAt;
           if (typeof r?.taskUrl === 'string' && r.taskUrl) url[id] = r.taskUrl;
