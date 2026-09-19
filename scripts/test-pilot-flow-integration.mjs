@@ -66,7 +66,8 @@ assert.ok(modal.includes('promptSuggestion.explanation') && modal.includes("copy
 assert.ok(modal.includes("document.execCommand('copy')"), 'prompt copy retains a user-gesture fallback when the modern clipboard API is denied');
 assert.ok(modal.includes("mode === 'frames' ? 'START AND END' : 'Imagens'"), 'image inputs use the requested START AND END and Imagens labels');
 assert.ok(!modal.includes('aria-label="Recalcular custo no Flow"'), 'credit calculation has no manual recalculate control');
-assert.ok(modal.includes('<video src={source} muted playsInline preload="metadata"'), 'video results use a playable thumbnail instead of an image tag with an MP4 source');
+assert.ok(modal.includes('poster !== media') && modal.includes("!pathname.includes('/video/')") && modal.includes("candidate.kind === 'image'"), 'video results reject MP4 poster URLs and inherit the nearest generated image as their thumbnail');
+assert.ok(modal.includes('<video src={source} muted playsInline preload="auto"'), 'direct videos without a generated frame keep a playable thumbnail fallback');
 assert.ok(modal.includes('flowAssetId: asset.id'), 'an inserted take keeps its exact Flow identity for visible take-to-copy binding');
 const modalAst = ts.createSourceFile('PilotFlowInserts.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const quoteNodes = [];
