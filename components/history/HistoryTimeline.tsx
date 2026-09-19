@@ -15,9 +15,12 @@ import {
   historyToolLabel,
   readHistory,
   removeHistoryEvent,
+  syncDownloaderHistoryJobs,
   type Chain,
+  type DownloaderSource,
   type HistoryEvent,
 } from '@/lib/history';
+import { enqueueDownloaderSource, requestDownloaderJobs } from '@/lib/downloader-bridge';
 import {
   aceitaAcaoDeFila,
   agruparPorVersao,
@@ -218,6 +221,52 @@ const Girando = ({ size = 15 }: { size?: number }) => (
   />
 );
 
+function DownloaderSourcePreview({ source, onClose }: { source: DownloaderSource; onClose: () => void }) {
+  const [thumbnail, setThumbnail] = useState(source.thumbnailUrl || '');
+  const [loading, setLoading] = useState(!source.thumbnailUrl);
+  const openedAt = useRef(Date.now());
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    if (!thumbnail) {
+      void fetch(`/api/downloader-preview?url=${encodeURIComponent(source.url)}`, {
+        cache: 'no-store', signal: AbortSignal.timeout(8000),
+      }).then((response) => response.ok ? response.json() : null)
+        .then((value) => { if (typeof value?.thumbnailUrl === 'string') setThumbnail(value.thumbnailUrl); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } else setLoading(false);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, source.url, thumbnail]);
+  return createPortal(
+    <div className="hist-overlay hist-overlay--previews" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && Date.now() - openedAt.current > 250) onClose();
+    }}>
+      <section className="hist-previews hist-download-preview" role="dialog" aria-modal="true" aria-label={`Preview de ${source.filename}`}>
+        <header className="hist-previews__topo">
+          <div className="min-w-0 flex-1">
+            <h2 className="hist-previews__titulo">{source.filename}</h2>
+            <p className="hist-previews__linha">{source.platform || 'Download'} · preview da origem</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Fechar preview" title="Fechar" className="hist-fechar">
+            <IcoX size={14} />
+          </button>
+        </header>
+        <div className="hist-download-preview__body">
+          {loading ? <div className="hist-download-preview__empty"><Girando size={22} /><span>Buscando a thumbnail…</span></div>
+            : thumbnail ? <img src={thumbnail} alt={`Thumbnail de ${source.sourceTitle || source.filename}`} referrerPolicy="no-referrer" />
+              : <div className="hist-download-preview__empty"><IconDownloader size={34} /><span>A origem não publicou uma thumbnail, mas o link está preservado.</span></div>}
+        </div>
+        <footer className="hist-previews__rodape">
+          <span className="hist-download-preview__source">{source.sourceTitle || source.platform || 'Origem preservada'}</span>
+          <a href={source.url} target="_blank" rel="noopener noreferrer" className="hist-previews__link">Abrir origem</a>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 // ---------- Rótulos de tempo e tamanho ------------------------------------
 
 export function dayLabel(t: number): string {
@@ -286,13 +335,31 @@ export function useHistoryEvents(debounceMs = 250): HistoryEvent[] {
       timer = setTimeout(load, debounceMs);
     };
     load();
+    const syncDownloader = () => {
+      void requestDownloaderJobs()
+        .then((jobs) => syncDownloaderHistoryJobs(jobs))
+        .then(() => load())
+        .catch(() => {});
+    };
+    // A extensão mantém uma fila única para a página, o popup e o botão que
+    // aparece sobre YouTube/TikTok/etc. Importamos essa fila ao montar e toda
+    // vez que o usuário volta para o Auto Edit.
+    const syncWhenVisible = () => {
+      if (document.visibilityState === 'visible') syncDownloader();
+    };
+    const firstSync = setTimeout(syncDownloader, 300);
     window.addEventListener('autoedit:history', agendar);
     window.addEventListener('storage', agendar);
+    window.addEventListener('focus', syncDownloader);
+    document.addEventListener('visibilitychange', syncWhenVisible);
     return () => {
       vivo = false;
       if (timer) clearTimeout(timer);
+      clearTimeout(firstSync);
       window.removeEventListener('autoedit:history', agendar);
       window.removeEventListener('storage', agendar);
+      window.removeEventListener('focus', syncDownloader);
+      document.removeEventListener('visibilitychange', syncWhenVisible);
     };
   }, [debounceMs]);
   return events;
@@ -470,6 +537,7 @@ export function HistoryTimeline({
 }) {
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
   const [previews, setPreviews] = useState<{ taskId: string; titulo: string } | null>(null);
+  const [downloadPreview, setDownloadPreview] = useState<DownloaderSource | null>(null);
   /** Versão escolhida em cada grupo de versões (chave do grupo -> id do evento). */
   const [versaoEscolhida, setVersaoEscolhida] = useState<Record<string, string>>({});
   /**
@@ -636,6 +704,28 @@ export function HistoryTimeline({
     }
   }
 
+  async function baixarDaOrigem(ev: HistoryEvent, source: DownloaderSource) {
+    if (rowState[ev.id]?.busy) return;
+    patch(ev.id, { busy: 'baixar', msg: 'Preparando novamente…', err: undefined });
+    try {
+      const completed = await enqueueDownloaderSource({
+        url: source.url,
+        mode: source.mode,
+        quality: source.quality,
+        sourceTitle: source.sourceTitle,
+        thumbnailUrl: source.thumbnailUrl,
+      }, (job) => {
+        const pct = typeof job.pct === 'number' && job.pct >= 0 ? ` · ${Math.min(100, job.pct)}%` : '';
+        patch(ev.id, { msg: `${job.phase === 'saving' ? 'Salvando' : 'Preparando'}${pct}` });
+      });
+      await syncDownloaderHistoryJobs([completed]);
+      patch(ev.id, { busy: undefined, msg: 'Download concluído.', err: undefined });
+      setTimeout(() => patch(ev.id, { msg: undefined }), 3500);
+    } catch (error) {
+      patch(ev.id, { busy: undefined, msg: undefined, err: (error as Error)?.message || 'Não consegui baixar novamente.' });
+    }
+  }
+
   /**
    * ABRIR / REMONTAR / DEBUG — quem executa é a página da fila (Pilot).
    *
@@ -721,6 +811,7 @@ export function HistoryTimeline({
               const chains = buildChains(e.ref);
               const alvo = chainDeDownload(e, chains);
               const estado = alvo ? chainState(alvo, disponibilidade) : 'gone';
+              const fonteDownloader = e.source?.kind === 'downloader' ? e.source : null;
               const taskId = taskIdDoEvento(e);
               const ehDisparo = temFilaDeDisparo(e.tool) && !!taskId;
               const podeAgir = ehDisparo && !!taskId && aceitaAcaoDeFila(taskId);
@@ -872,13 +963,24 @@ export function HistoryTimeline({
                         onClick={() => setPreviews({ taskId, titulo: tituloVisivel })}
                       />
                     ) : null}
+                    {fonteDownloader ? (
+                      <PilotBtn3D
+                        size={30}
+                        color="fuchsia"
+                        icon={<IcoOlho />}
+                        title={`Ver a thumbnail de ${fonteDownloader.filename}`}
+                        onClick={() => setDownloadPreview(fonteDownloader)}
+                      />
+                    ) : null}
                     <PilotBtn3D
                       size={30}
-                      color={estado === 'gone' ? 'neutral' : baixando ? 'cyan' : 'lime'}
+                      color={!fonteDownloader && estado === 'gone' ? 'neutral' : baixando ? 'cyan' : 'lime'}
                       icon={baixando ? <Girando /> : <IcoDownload />}
-                      disabled={!alvo || estado === 'gone' || !!st?.busy}
+                      disabled={(!fonteDownloader && (!alvo || estado === 'gone')) || !!st?.busy}
                       title={
-                        !alvo
+                        fonteDownloader
+                          ? `Baixar novamente: ${fonteDownloader.filename}`
+                          : !alvo
                           ? vivo?.ativo
                             ? 'O arquivo aparece aqui quando a montagem terminar'
                             : 'Esse registro não guardou arquivo pra baixar'
@@ -888,7 +990,7 @@ export function HistoryTimeline({
                               ? `Resgatar do HeyGen: ${alvo.name}`
                               : `Baixar ${alvo.name}`
                       }
-                      onClick={alvo ? () => void baixar(e, alvo) : undefined}
+                      onClick={fonteDownloader ? () => void baixarDaOrigem(e, fonteDownloader) : alvo ? () => void baixar(e, alvo) : undefined}
                     />
                     {podeAgir && taskId && naFila.existe && !vivo?.ativo ? (
                       <>
@@ -1008,6 +1110,7 @@ export function HistoryTimeline({
           onClose={() => setPreviews(null)}
         />
       ) : null}
+      {downloadPreview ? <DownloaderSourcePreview source={downloadPreview} onClose={() => setDownloadPreview(null)} /> : null}
     </div>
   );
 }

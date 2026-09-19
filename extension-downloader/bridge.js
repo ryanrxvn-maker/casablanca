@@ -37,9 +37,9 @@
     if (!job) return;
     for (const [reqId, request] of pending) {
       if (request.jobId !== job.id && request.jobId !== job.jobId) continue;
-      toPage({ type: 'DL_ENGINE_PROGRESS', reqId, phase: job.phase, pct: job.pct, state: job.state });
+      toPage({ type: 'DL_ENGINE_PROGRESS', reqId, phase: job.phase, pct: job.pct, state: job.state, job });
       if (['complete', 'error', 'canceled'].includes(job.state)) {
-        toPage({ type: request.resultType, reqId, ok: job.state === 'complete', error: job.error, code: job.code });
+        toPage({ type: request.resultType, reqId, ok: job.state === 'complete', error: job.error, code: job.code, job });
         pending.delete(reqId);
       }
     }
@@ -49,6 +49,15 @@
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin || data?.source !== 'darko-dl') return;
     if (data.type === 'DL_PING' || data.type === 'DL_TEST') { announce(data.force === true); return; }
+    if (data.type === 'DL_HISTORY_PULL' && data.reqId) {
+      try {
+        const response = await message({ type: 'darko-jobs' });
+        toPage({ type: 'DL_HISTORY_JOBS', reqId: data.reqId, jobs: response?.jobs || [] });
+      } catch {
+        toPage({ type: 'DL_HISTORY_JOBS', reqId: data.reqId, jobs: [] });
+      }
+      return;
+    }
     if (!['DL_ENGINE_DOWNLOAD', 'DL_IG_DOWNLOAD'].includes(data.type) || !data.url || !data.reqId) return;
     if (pending.has(data.reqId)) return;
     const resultType = data.type === 'DL_IG_DOWNLOAD' ? 'DL_IG_RESULT' : 'DL_ENGINE_RESULT';
@@ -56,7 +65,8 @@
     pending.set(data.reqId, request);
     try {
       const response = await message({ type: 'darko-enqueue', reqId: data.reqId, url: data.url,
-        mode: data.mode || 'video', quality: data.quality || '1080', adult: false });
+        mode: data.mode || 'video', quality: data.quality || '1080', adult: false,
+        sourceTitle: data.sourceTitle, thumbnailUrl: data.thumbnailUrl });
       if (!response?.ok) throw new Error(response?.error || 'Não foi possível adicionar o download.');
       request.jobId = response.jobId;
       progress(response.job);

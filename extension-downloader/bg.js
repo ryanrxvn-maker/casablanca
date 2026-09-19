@@ -62,6 +62,7 @@ async function loadJobs() {
   if (jobs) return jobs;
   if (!loadingJobs) loadingJobs = chrome.storage.local.get(QUEUE_KEY).then(value => {
     jobs = Array.isArray(value[QUEUE_KEY]) ? value[QUEUE_KEY] : [];
+    for (const job of jobs) if (!job.previewResolved) void hydratePreview(job);
     return jobs;
   });
   return loadingJobs;
@@ -71,9 +72,55 @@ function persist() {
   saving = saving.catch(() => {}).then(() => chrome.storage.local.set({ [QUEUE_KEY]: snapshot }));
   return saving;
 }
+function cleanText(value, max = 240) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) || null : null;
+}
+function cleanHttpUrl(value) {
+  if (typeof value !== 'string' || value.length > 4096) return null;
+  try { const url = new URL(value); return /^https?:$/.test(url.protocol) ? url.href : null; } catch { return null; }
+}
+function platformForUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (host === 'youtu.be' || host.endsWith('.youtube.com')) return 'YouTube';
+    if (host.endsWith('.instagram.com')) return 'Instagram';
+    if (host.endsWith('.tiktok.com')) return 'TikTok';
+    if (host === 'pin.it' || host.includes('pinterest.')) return 'Pinterest';
+  } catch {}
+  return 'Web';
+}
+function youtubeThumbnail(value) {
+  try {
+    const url = new URL(value);
+    const id = url.hostname === 'youtu.be'
+      ? url.pathname.split('/').filter(Boolean)[0]
+      : url.searchParams.get('v') || (/\/(?:shorts|live)\/([\w-]+)/.exec(url.pathname) || [])[1];
+    return /^[\w-]{6,20}$/.test(id || '') ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+  } catch { return null; }
+}
+async function hydratePreview(job) {
+  if (!job || job.previewResolved) return;
+  const direct = cleanHttpUrl(job.thumbnailUrl) || youtubeThumbnail(job.url);
+  if (direct) { await update(job, { thumbnailUrl: direct, previewResolved: true }); return; }
+  try {
+    const endpoint = `https://www.darkoautoedit.com/api/downloader-preview?url=${encodeURIComponent(job.url)}`;
+    const response = await tfetch(endpoint, 8000);
+    const value = response.ok ? await response.json() : null;
+    await update(job, {
+      thumbnailUrl: cleanHttpUrl(value?.thumbnailUrl) || null,
+      sourceTitle: cleanText(job.sourceTitle) || cleanText(value?.title),
+      previewResolved: true,
+    });
+  } catch {
+    // Preview é auxiliar: nunca atrasa nem derruba o download principal.
+    await update(job, { previewResolved: true }).catch(() => {});
+  }
+}
 function publicJob(job) {
-  const { id, url, mode, quality, adult, state, phase, pct, error, code, filename, createdAt, updatedAt, downloadId } = job;
-  return { id, url, mode, quality, adult, state, phase, pct, error, code, filename, createdAt, updatedAt, downloadId };
+  const { id, url, mode, quality, adult, state, phase, pct, error, code, filename, createdAt, updatedAt, downloadId,
+    thumbnailUrl, sourceTitle, platform } = job;
+  return { id, url, mode, quality, adult, state, phase, pct, error, code, filename, createdAt, updatedAt, downloadId,
+    thumbnailUrl, sourceTitle, platform };
 }
 function emit(job) {
   const message = { type: 'darko-dl-progress', ...publicJob(job), jobId: job.id, reqId: job.reqId };
@@ -105,11 +152,14 @@ async function enqueue(input, sender = {}) {
   jobs = jobs.filter(j => !terminal(j.state) || recentCompleted.has(j.id));
   const job = { id: crypto.randomUUID(), reqId: input.reqId || null, tabId: sender.tab?.id,
     url, mode, quality, adult: input.adult === true, state: 'queued', phase: 'queued', pct: -1,
+    thumbnailUrl: cleanHttpUrl(input.thumbnailUrl) || youtubeThumbnail(url),
+    sourceTitle: cleanText(input.sourceTitle), platform: platformForUrl(url),
     createdAt: Date.now(), updatedAt: Date.now(), retries: 0, transportErrors: 0 };
   jobs.push(job);
   await persist();
   ensureKeepalive();
   wake();
+  void hydratePreview(job);
   return job;
 }
 async function engineJson(eng, path, options = {}) {
@@ -137,7 +187,10 @@ async function inspectDownload(job) {
     if (Math.max(Number(item.fileSize) || 0, Number(item.bytesReceived) || 0) <= 0 || /json|html|text\/plain/i.test(item.mime || '') || /\.(json|html?)$/i.test(item.filename || '')) {
       await fail(job, 'INVALID_MEDIA'); return;
     }
-    await update(job, { state: 'complete', phase: 'complete', pct: 100, error: null, filename: job.filename || item.filename?.split(/[\\/]/).pop() });
+    // O navegador pode aplicar " (1)" por conflictAction=uniquify. O nome
+    // exibido no histórico precisa ser exatamente o arquivo que chegou ao disco.
+    await update(job, { state: 'complete', phase: 'complete', pct: 100, error: null,
+      filename: item.filename?.split(/[\\/]/).pop() || job.filename });
   } else if (item.state === 'interrupted') {
     const reason = item.error || 'SERVER_FAILED';
     if (/^(NETWORK_|SERVER_FAILED|SERVER_UNREACHABLE|SERVER_UNAUTHORIZED|SERVER_FORBIDDEN)/.test(reason) && job.retries < 2) {

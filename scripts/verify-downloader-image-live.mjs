@@ -37,7 +37,7 @@ try{
  await page.locator('#urls').fill('https://www.pinterest.com/pin/1234567890/');await page.locator('#go').click();
  await page.waitForFunction(()=>document.querySelector('.job.complete')||document.querySelector('.job.error'),null,{timeout:20000});
  const record=await worker.evaluate(async()=>({version:chrome.runtime.getManifest().version,jobs:(await chrome.storage.local.get('downloadJobsV2')).downloadJobsV2,files:await new Promise(resolve=>chrome.downloads.search({},resolve))}));
- assert.equal(record.version,'1.9.3');assert.equal(record.jobs[0].state,'complete',JSON.stringify(record.jobs[0]));assert.equal(record.files[0].state,'complete');assert.equal(record.files[0].mime,'image/png');assert.equal(gets,1);
+ assert.equal(record.version,'1.9.4');assert.equal(record.jobs[0].state,'complete',JSON.stringify(record.jobs[0]));assert.equal(record.files[0].state,'complete');assert.equal(record.files[0].mime,'image/png');assert.equal(gets,1);
  const saved=await fs.readFile(record.files[0].filename);assert.deepEqual(saved,png);assert.equal(record.files.length,1);
  await page.screenshot({path:path.join(folder,'image-complete.png')});
  const report={version:record.version,mode:'controlled engine fixture, real Chromium extension and file transfer',state:record.jobs[0].state,filename:record.jobs[0].filename,mime:record.files[0].mime,bytes:saved.length,byteIdentical:true,downloads:record.files.length,evidence:folder};

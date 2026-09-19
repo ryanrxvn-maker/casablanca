@@ -120,6 +120,28 @@ const COMPRESSOR: HistoryEvent[] = [
   { id: 'c4', t: AGORA - 30 * H, tool: 'compressor', title: 'depoimento-paciente.mp4 comprimido', kind: 'done', meta: '0:48 · 12 MB' },
 ];
 
+const DOWNLOADER: HistoryEvent[] = [
+  {
+    id: 'dl-preview',
+    t: AGORA - 12 * 60_000,
+    tool: 'downloader',
+    title: 'Nome fiel do arquivo baixado.mp4',
+    kind: 'download',
+    meta: 'YouTube',
+    externalId: 'downloader:preview',
+    source: {
+      kind: 'downloader',
+      url: 'https://www.youtube.com/watch?v=NI6gXN7YMM4',
+      filename: 'Nome fiel do arquivo baixado.mp4',
+      mode: 'video',
+      quality: '1080',
+      thumbnailUrl: 'https://i.ytimg.com/vi/NI6gXN7YMM4/hqdefault.jpg',
+      sourceTitle: 'Vídeo de referência',
+      platform: 'YouTube',
+    },
+  },
+];
+
 /**
  * Semeia bytes de mentira NO COFRE (mesmo schema de lib/history-vault) pras
  * chaves hv:1 e hv:2. A hv:expirada e a zs:sumiu ficam de fora de proposito: o
@@ -250,6 +272,7 @@ function Preview() {
   const tool = params?.get('tool') || 'clickup-pilot';
   const [aberto, setAberto] = useState(false);
   const [pronto, setPronto] = useState(false);
+  const eventos = tool === 'compressor' ? COMPRESSOR : tool === 'downloader' ? DOWNLOADER : PILOT;
 
   useEffect(() => {
     void Promise.all([semearCofre(), semearTakes('viva-1', 4), semearTakes('86aj6nfue', 6)]).then(
@@ -278,7 +301,7 @@ function Preview() {
             <path d="M12 8v4l3 2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <span className="hist-fab__dot" aria-hidden>
-            {tool === 'compressor' ? COMPRESSOR.length : PILOT.length}
+            {eventos.length}
           </span>
         </button>
         <span className="hist-fab__label" aria-hidden>
@@ -289,8 +312,8 @@ function Preview() {
       {aberto && pronto ? (
         <ToolHistoryPanel
           tool={tool}
-          eventosDeTeste={tool === 'compressor' ? COMPRESSOR : PILOT}
-          filaDeTeste={tool === 'compressor' ? undefined : FILA}
+          eventosDeTeste={eventos}
+          filaDeTeste={tool === 'clickup-pilot' ? FILA : undefined}
           onClose={() => setAberto(false)}
         />
       ) : null}

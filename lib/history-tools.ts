@@ -39,6 +39,25 @@ export type FileRef =
       taskId?: string;
     };
 
+/**
+ * Receita leve de um download feito pelo ecossistema Downloader.
+ *
+ * O arquivo em si NÃO é duplicado no cofre: guardamos a origem e os parâmetros
+ * necessários para o Motor preparar o mesmo conteúdo de novo. Isso mantém os
+ * 7 dias de histórico úteis sem consumir o armazenamento do navegador com
+ * vídeos grandes.
+ */
+export type DownloaderSource = {
+  kind: 'downloader';
+  url: string;
+  filename: string;
+  mode?: 'video' | 'audio-mp3' | 'audio-wav';
+  quality?: '1080' | '720' | '480' | 'best';
+  thumbnailUrl?: string;
+  sourceTitle?: string;
+  platform?: string;
+};
+
 export type HistoryEvent = {
   id: string;
   /** epoch ms */
@@ -62,6 +81,10 @@ export type HistoryEvent = {
    * continua sabendo de que canal aquele AD era — pra sempre.
    */
   channels?: Array<{ label: string; color: string }>;
+  /** Identificador estável de uma origem externa (ex.: job da extensão). */
+  externalId?: string;
+  /** Receita para visualizar e baixar novamente sem guardar os bytes. */
+  source?: DownloaderSource;
   /** evento criado automaticamente pela captura de download (candidato a fusão) */
   auto?: boolean;
 };

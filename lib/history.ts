@@ -1,6 +1,6 @@
 'use client';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
-import { RETENTION_MS, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
+import { RETENTION_MS, type DownloaderSource, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
 import { faseAtiva, podeVirarCard, preencherCanaisAusentes } from './history-acoes';
 
 /**
@@ -16,6 +16,7 @@ import { faseAtiva, podeVirarCard, preencherCanaisAusentes } from './history-aco
 
 export type {
   FileRef,
+  DownloaderSource,
   HistoryEvent,
   HistoryKind,
 } from './history-tools';
@@ -54,12 +55,15 @@ function prune(events: HistoryEvent[]): HistoryEvent[] {
  * contra double-fire de efeitos em StrictMode/re-render).
  */
 export function logHistory(ev: {
+  id?: string;
+  externalId?: string;
   tool: string;
   title: string;
   kind?: HistoryKind;
   meta?: string;
   ref?: FileRef[];
   channels?: Array<{ label: string; color: string }>;
+  source?: DownloaderSource;
 }) {
   if (typeof window === 'undefined') return;
   try {
@@ -67,24 +71,26 @@ export function logHistory(ev: {
     const now = Date.now();
     const dup = events.find(
       (e) =>
-        e.tool === ev.tool &&
-        e.title === ev.title &&
-        e.kind === (ev.kind ?? 'done') &&
-        now - e.t < 1500,
+        (ev.externalId && e.externalId === ev.externalId) ||
+        (e.tool === ev.tool &&
+          e.title === ev.title &&
+          e.kind === (ev.kind ?? 'done') &&
+          now - e.t < 1500),
     );
     if (dup) {
       // Evento idêntico recém-gravado: anexa refs/canal que chegaram no
       // segundo fire (StrictMode não perde download nem metadado).
-      if ((ev.ref?.length && !dup.ref?.length) || (ev.channels?.length && !dup.channels?.length)) {
+      if ((ev.ref?.length && !dup.ref?.length) || (ev.channels?.length && !dup.channels?.length) || (ev.source && !dup.source)) {
         if (ev.ref?.length && !dup.ref?.length) dup.ref = ev.ref;
         if (ev.channels?.length && !dup.channels?.length) dup.channels = ev.channels;
+        if (ev.source && !dup.source) dup.source = ev.source;
         safeWrite(prune(events));
         window.dispatchEvent(new CustomEvent('autoedit:history'));
       }
       return;
     }
     const novo: HistoryEvent = {
-      id: `${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+      id: ev.id?.slice(0, 160) || `${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`,
       t: now,
       tool: ev.tool,
       title: ev.title.slice(0, 160),
@@ -92,6 +98,8 @@ export function logHistory(ev: {
       meta: ev.meta ? ev.meta.slice(0, 120) : undefined,
       ref: ev.ref?.length ? ev.ref : undefined,
       channels: ev.channels?.length ? ev.channels : undefined,
+      externalId: ev.externalId?.slice(0, 180),
+      source: ev.source,
     };
     // FUSÃO (captura → evento da página): se a captura automática de download
     // criou eventos provisórios pra essa ferramenta há poucos segundos e a
@@ -119,6 +127,106 @@ export function logHistory(ev: {
   } catch {
     /* nunca propaga */
   }
+}
+
+export type DownloaderHistoryJob = {
+  id: string;
+  url: string;
+  state: string;
+  filename?: string | null;
+  mode?: string;
+  quality?: string;
+  thumbnailUrl?: string | null;
+  sourceTitle?: string | null;
+  platform?: string | null;
+  updatedAt?: number;
+  createdAt?: number;
+};
+
+function safeHttpUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length > 4096) return undefined;
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Importa os jobs concluídos da extensão para o histórico da conta.
+ *
+ * A extensão é a fonte de verdade para página, popup e botão flutuante. O id
+ * estável impede duplicatas, e registros genéricos criados por versões antigas
+ * são reparados no lugar quando o horário corresponde ao mesmo download.
+ */
+export async function syncDownloaderHistoryJobs(jobs: DownloaderHistoryJob[]): Promise<number> {
+  if (typeof window === 'undefined' || !Array.isArray(jobs)) return 0;
+  const writer = createRecordWriter('history');
+  const events = Object.values(writer.hydrate<HistoryEvent>());
+  let changed = 0;
+  for (const job of jobs) {
+    const url = safeHttpUrl(job?.url);
+    const filename = typeof job?.filename === 'string' ? job.filename.trim().slice(0, 240) : '';
+    if (!job?.id || job.state !== 'complete' || !url || !filename) continue;
+    const externalId = `downloader:${job.id}`;
+    const when = Number(job.updatedAt || job.createdAt) || Date.now();
+    const source: DownloaderSource = {
+      kind: 'downloader',
+      url,
+      filename,
+      mode: ['video', 'audio-mp3', 'audio-wav'].includes(String(job.mode))
+        ? job.mode as DownloaderSource['mode']
+        : 'video',
+      quality: ['1080', '720', '480', 'best'].includes(String(job.quality))
+        ? job.quality as DownloaderSource['quality']
+        : '1080',
+      thumbnailUrl: safeHttpUrl(job.thumbnailUrl),
+      sourceTitle: typeof job.sourceTitle === 'string' ? job.sourceTitle.trim().slice(0, 240) || undefined : undefined,
+      platform: typeof job.platform === 'string' ? job.platform.trim().slice(0, 40) || undefined : undefined,
+    };
+    let event = events.find((candidate) => candidate.externalId === externalId);
+    if (!event) {
+      // Migra a linha genérica que a página antiga gravava ao mesmo tempo que
+      // o job, evitando deixar "YouTube baixado pelo Motor" + nome real.
+      event = events.find((candidate) =>
+        candidate.tool === 'downloader' &&
+        !candidate.externalId &&
+        !candidate.source &&
+        Math.abs(candidate.t - when) < 3 * 60_000 &&
+        /(?:baixado pelo motor|instagram baixado|youtube baixado|pinterest baixado|tiktok baixado)/i.test(candidate.title));
+    }
+    if (event) {
+      const same = event.title === filename && event.externalId === externalId &&
+        event.source?.url === source.url && event.source?.filename === source.filename &&
+        event.source?.thumbnailUrl === source.thumbnailUrl;
+      if (!same) {
+        event.title = filename;
+        event.kind = 'download';
+        event.externalId = externalId;
+        event.source = source;
+        event.meta = source.platform || event.meta;
+        changed += 1;
+      }
+      continue;
+    }
+    events.push({
+      id: `dl-${String(job.id).replace(/[^a-z0-9_-]/gi, '').slice(0, 120)}`,
+      t: when,
+      tool: 'downloader',
+      title: filename,
+      kind: 'download',
+      meta: source.platform,
+      externalId,
+      source,
+    });
+    changed += 1;
+  }
+  if (!changed) return 0;
+  const alive = prune(events);
+  await writer.save(Object.fromEntries(alive.map((event) => [event.id, event])));
+  window.dispatchEvent(new CustomEvent('autoedit:history'));
+  return changed;
 }
 
 /**

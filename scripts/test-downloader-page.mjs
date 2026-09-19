@@ -14,7 +14,7 @@ const version = JSON.parse(readFileSync('extension-downloader/manifest.json', 'u
 mkdirSync(output, { recursive: true });
 const mocks = {
   '@/components/ToolsStateProvider': "import { useState } from 'react'; export function useToolState(key, initial) { return useState(initial); }",
-  '@/lib/history': 'export function logHistory() {}',
+  '@/lib/history': 'export function logHistory() {}; export async function syncDownloaderHistoryJobs() { return 1; }',
   '@/lib/audio-engine': 'export function downloadBlob() { window.__blobSaved = true; }',
   '@/lib/supabase/client': "export function createClient() { return { auth:{ getUser:async()=>({data:{user:{id:'test'}}}) }, from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{is_admin:window.__admin === true}})})})}) }; }",
   '@/lib/use-tier': 'export function useUserEmail() { return "downloader-test@example.test"; }',
@@ -106,8 +106,9 @@ try {
   await page.getByRole('button', { name: /Baixando · 42%/ }).waitFor();
   assert.equal(await page.getByText('salvo', { exact: true }).count(), 0, 'progress never claims saved');
   await page.screenshot({ path: `${output}/progress.png`, fullPage: true });
-  await page.evaluate(reqId => window.postMessage({ source: 'darko-dl-ext', type: 'DL_ENGINE_RESULT', reqId, ok: true }, location.origin), command.reqId);
+  await page.evaluate(({ reqId, url }) => window.postMessage({ source: 'darko-dl-ext', type: 'DL_ENGINE_RESULT', reqId, ok: true, job: { id: 'page-job-1', url, state: 'complete', filename: 'Nome fiel do arquivo.mp4', mode: 'video', quality: '1080', updatedAt: Date.now() } }, location.origin), { reqId: command.reqId, url: command.url });
   await page.getByText('salvo', { exact: true }).waitFor();
+  await page.getByText('Nome fiel do arquivo.mp4', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Baixar arquivo', exact: true }).isEnabled(), true);
 
   await page.getByRole('button', { name: 'Baixar arquivo', exact: true }).click();
@@ -119,8 +120,19 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: `${output}/mobile-error.png`, fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile has no horizontal overflow');
+
+  // Extensão recém-instalada: não existe content script nesta aba ainda. O
+  // botão deve fazer o equivalente ao F5 sozinho quando nenhum PONG chega.
+  const recheckPage = await browser.newPage({ viewport: { width: 1000, height: 800 } });
+  await recheckPage.goto(origin);
+  await recheckPage.locator('[data-downloader-status="missing"]').waitFor({ timeout: 10000 });
+  const reloaded = recheckPage.waitForEvent('load', { timeout: 8000 });
+  await recheckPage.getByRole('button', { name: /Verificar conexão/ }).click();
+  await reloaded;
+  assert.ok((await recheckPage.evaluate(() => performance.getEntriesByType('navigation').length)) >= 1);
+  await recheckPage.close();
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, states: results, downloadProgress: 42, completionVerified: true, retryAfterError: true, mobileNoOverflow: true, artifacts: output }, null, 2));
+  console.log(JSON.stringify({ ok: true, states: results, downloadProgress: 42, completionVerified: true, retryAfterError: true, recheckReloadVerified: true, mobileNoOverflow: true, artifacts: output }, null, 2));
 } finally {
   await browser.close();
   server.close();

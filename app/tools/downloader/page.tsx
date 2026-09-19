@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
-import { logHistory } from '@/lib/history';
+import { logHistory, syncDownloaderHistoryJobs, type DownloaderHistoryJob } from '@/lib/history';
 import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { createClient } from '@/lib/supabase/client';
 import { useUserEmail } from '@/lib/use-tier';
@@ -79,7 +79,7 @@ function downloadViaEngine(
   quality: Quality,
   onProgress: (phase: string, percent: number | null) => void,
   instagram = false,
-): Promise<void> {
+): Promise<DownloaderHistoryJob> {
   return new Promise((resolve, reject) => {
     const reqId = `eng-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let done = false;
@@ -115,7 +115,8 @@ function downloadViaEngine(
       window.removeEventListener('message', onMsg);
       clearTimeout(idleTimer);
       clearTimeout(overallTimer);
-      if (d.ok) resolve();
+      if (d.ok && d.job) resolve(d.job as DownloaderHistoryJob);
+      else if (d.ok) reject(new FriendlyError('O navegador concluiu o download sem informar o nome do arquivo. Atualize a extensão e tente novamente.'));
       else reject(new FriendlyError(friendlyEngineFail(String(d.error || ''))));
     };
     window.addEventListener('message', onMsg);
@@ -137,8 +138,22 @@ async function triggerDownload(blob: Blob, filename: string) {
   // downloadBlob = revoke de 60s (10s cortava vídeo grande de YouTube no meio)
   // + captura pro cofre do Histórico geral (recuperável por 7 dias).
   await import('@/lib/audio-engine').then(({ downloadBlob }) =>
-    downloadBlob(blob, filename, { tool: 'downloader' }),
+    downloadBlob(blob, filename, { tool: 'downloader', capture: false }),
   );
+}
+
+async function previewFor(url: string): Promise<{ thumbnailUrl?: string; title?: string }> {
+  try {
+    const response = await fetch(`/api/downloader-preview?url=${encodeURIComponent(url)}`, {
+      cache: 'no-store', signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) return {};
+    const value = await response.json();
+    return {
+      thumbnailUrl: typeof value.thumbnailUrl === 'string' ? value.thumbnailUrl : undefined,
+      title: typeof value.title === 'string' ? value.title : undefined,
+    };
+  } catch { return {}; }
 }
 
 /** Quebra de linha da caixa de URLs (constantes: evitam escapes no meio
@@ -263,6 +278,7 @@ export default function DownloaderPage() {
   const [reChecking, setReChecking] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPongAt = useRef(0);
   const connectionStatus = getDownloaderStatus(ext, latestVersion);
   const extensionCurrent = ext.connected && versionAtLeast(ext.version, latestVersion);
   const extensionDownloadUrl = `/api/downloader-extension/download?v=${latestVersion}`;
@@ -275,6 +291,7 @@ export default function DownloaderPage() {
     function onMsg(event: MessageEvent) {
       const data = event.data;
       if (event.source !== window || event.origin !== window.location.origin || !data || data.source !== 'darko-dl-ext' || data.type !== 'DL_PONG') return;
+      lastPongAt.current = Date.now();
       setExt((previous) => connectionFromPong(data, Date.now(), previous));
       if (data.checking !== true) setReChecking(false);
     }
@@ -317,13 +334,22 @@ export default function DownloaderPage() {
   }, []);
 
   function handleRecheck() {
+    const startedAt = Date.now();
     setReChecking(true);
     window.postMessage({ source: 'darko-dl', type: 'DL_PING', force: true }, window.location.origin);
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     reconnectTimer.current = setTimeout(() => {
+      // Instalar/atualizar a extensão invalida o content script que já estava
+      // nesta aba. Sem PONG novo, o único jeito correto de injetar a ponte nova
+      // é o mesmo que F5 — o botão faz isso sozinho e o useToolState preserva
+      // os links e as opções preenchidas.
+      if (lastPongAt.current < startedAt) {
+        window.location.reload();
+        return;
+      }
       setReChecking(false);
       setExt((previous) => expireDownloaderConnection(previous, Date.now()));
-    }, 7000);
+    }, 1800);
   }
 
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -412,18 +438,18 @@ export default function DownloaderPage() {
               : j,
           ),
         );
-        await downloadViaEngine(url, mode, quality, (phase, pct) => {
+        const completed = await downloadViaEngine(url, mode, quality, (phase, pct) => {
           setJobs((previous) => previous.map((job, i) => i === idx ? {
             ...job, state: phase === 'queued' ? 'queued' : phase === 'resolving' ? 'resolving' : 'downloading', phase, percent: pct,
           } : job));
         }, true);
-        const filename = 'instagram.mp4';
+        const filename = completed.filename || 'instagram.mp4';
         setJobs((prev) =>
           prev.map((j, i) =>
             i === idx ? { ...j, state: 'done', filename, progress: null } : j,
           ),
         );
-        logHistory({ tool: 'downloader', kind: 'download', title: 'Instagram baixado' });
+        await syncDownloaderHistoryJobs([completed]);
         return;
       } catch (e) {
         setJobs((prev) =>
@@ -456,7 +482,7 @@ export default function DownloaderPage() {
             i === idx ? { ...j, state: 'downloading', progress: null } : j,
           ),
         );
-        await downloadViaEngine(url, mode, quality, (phase, pct) => {
+        const completed = await downloadViaEngine(url, mode, quality, (phase, pct) => {
           setJobs((previous) => previous.map((job, i) => i === idx ? {
             ...job,
             state: phase === 'queued' ? 'queued' : phase === 'resolving' ? 'resolving' : 'downloading',
@@ -470,17 +496,13 @@ export default function DownloaderPage() {
               ? {
                   ...j,
                   state: 'done',
-                  filename: 'Pronto — na barra de downloads do navegador',
+                  filename: completed.filename || 'Pronto — na barra de downloads do navegador',
                   progress: null,
                 }
               : j,
           ),
         );
-        logHistory({
-          tool: 'downloader',
-          kind: 'download',
-          title: `${source} baixado pelo Motor`,
-        });
+        await syncDownloaderHistoryJobs([completed]);
       } catch (e) {
         console.error('[downloader] motor', e);
         setJobs((prev) =>
@@ -611,7 +633,18 @@ export default function DownloaderPage() {
             : j,
         ),
       );
-      logHistory({ tool: 'downloader', kind: 'download', title: `${filename} baixado` });
+      const preview = await previewFor(url);
+      logHistory({
+        externalId: `downloader:server:${crypto.randomUUID()}`,
+        tool: 'downloader',
+        kind: 'download',
+        title: filename,
+        source: {
+          kind: 'downloader', url, filename, mode, quality,
+          thumbnailUrl: preview.thumbnailUrl, sourceTitle: preview.title,
+          platform: detectSource(url) === '—' ? 'Web' : detectSource(url),
+        },
+      });
     } catch (e) {
       console.error('[downloader]', e);
       setJobs((prev) =>
@@ -681,7 +714,7 @@ export default function DownloaderPage() {
                     {connectionStatus === 'checking' ? 'Verificando seu navegador…' : connectionStatus === 'missing' ? 'Conecte sua extensão' : connectionStatus === 'outdated' ? 'Uma atualização está disponível' : connectionStatus === 'engine-outdated' ? 'Atualize o Motor para continuar' : connectionStatus === 'engine-offline' ? 'Extensão conectada. Abra o Motor.' : connectionStatus === 'engine-checking' ? 'Localizando o Motor…' : 'Tudo pronto para baixar'}
                   </h3>
                   <p className="mt-1 max-w-[58ch] text-xs leading-relaxed text-text-muted">
-                    {connectionStatus === 'checking' ? 'Aguardando a resposta da extensão instalada.' : connectionStatus === 'missing' ? 'Instale a extensão ou reative a que você já usa e recarregue esta página.' : connectionStatus === 'outdated' ? `Sua extensão ${ext.version ? `v${ext.version}` : 'é de uma versão antiga'}. A versão v${latestVersion} está disponível.` : connectionStatus === 'engine-outdated' ? `Motor ${ext.engineVersion ? `v${ext.engineVersion}` : 'antigo'} detectado. Instale a versão v${DOWNLOADER_ENGINE_VERSION} para receber as correções.` : connectionStatus === 'engine-offline' ? 'A extensão respondeu, mas o Motor local está indisponível. Verifique a conexão depois de abri-lo.' : connectionStatus === 'engine-checking' ? 'A extensão respondeu. Estamos verificando o Motor local.' : 'Conexão confirmada agora com o seu computador.'}
+                    {connectionStatus === 'checking' ? 'Aguardando a resposta da extensão instalada.' : connectionStatus === 'missing' ? 'Instale ou reative a extensão e clique em Verificar conexão. A página se atualiza sozinha se necessário.' : connectionStatus === 'outdated' ? `Sua extensão ${ext.version ? `v${ext.version}` : 'é de uma versão antiga'}. A versão v${latestVersion} está disponível.` : connectionStatus === 'engine-outdated' ? `Motor ${ext.engineVersion ? `v${ext.engineVersion}` : 'antigo'} detectado. Instale a versão v${DOWNLOADER_ENGINE_VERSION} para receber as correções.` : connectionStatus === 'engine-offline' ? 'A extensão respondeu, mas o Motor local está indisponível. Verifique a conexão depois de abri-lo.' : connectionStatus === 'engine-checking' ? 'A extensão respondeu. Estamos verificando o Motor local.' : 'Conexão confirmada agora com o seu computador.'}
                   </p>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 /** The bundled release is a safe fallback while the no-cache release endpoint loads. */
-export const DOWNLOADER_EXTENSION_VERSION = '1.9.3';
+export const DOWNLOADER_EXTENSION_VERSION = '1.9.4';
 export const DOWNLOADER_ENGINE_VERSION = '1.2.1';
 
 export type DownloaderConnection = {

@@ -133,6 +133,13 @@
       }); } catch { clearTimeout(timer); reject(new Error('Recarregue esta página para conectar a extensão atualizada.')); }
     });
   }
+  function pageMetadata() {
+    const meta = selector => document.querySelector(selector)?.getAttribute('content')?.trim() || '';
+    const thumbnailUrl = meta('meta[property="og:image"]') || meta('meta[name="twitter:image"]') ||
+      meta('meta[property="twitter:image"]');
+    const sourceTitle = meta('meta[property="og:title"]') || meta('meta[name="twitter:title"]') || document.title;
+    return { thumbnailUrl, sourceTitle };
+  }
   const phaseLabels = { queued: 'Na fila', preparing: 'Baixando da fonte', resolving: 'Localizando', reconnecting: 'Reconectando', retrying: 'Tentando novamente', saving: 'Salvando' };
   function progress(job) {
     if (!job || (job.id !== currentJobId && job.jobId !== currentJobId)) return;
@@ -162,8 +169,9 @@
     const target = videoTarget(); if (!target || currentJobId) return;
     setButton('loading', 'Adicionando');
     try {
+      const metadata = pageMetadata();
       const response = await message({ type: 'darko-enqueue', reqId: crypto.randomUUID(), url: target.url,
-        mode: 'video', quality: '1080', adult: target.adult === true });
+        mode: 'video', quality: '1080', adult: target.adult === true, ...metadata });
       if (!response?.ok) throw new Error(response?.error || 'Não foi possível adicionar este download.');
       follow(response.job);
       if (currentJobId) toast('Adicionado à fila. Você pode continuar navegando.');

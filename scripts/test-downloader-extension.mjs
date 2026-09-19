@@ -35,7 +35,7 @@ function harness(options = {}) {
       cancel: (id, cb) => { const r = records.find(r => r.id === id); if (r) { r.state = 'interrupted'; r.error = 'USER_CANCELED'; } cb?.(); },
       download: (input, cb) => {
         calls++;
-        const record = { id: nextId++, url: input.url, filename: input.filename, mime: options.browserMime || 'video/mp4', state: options.instant ? 'complete' : 'in_progress', bytesReceived: options.instant ? 2000 : 0, totalBytes: 2000, fileSize: options.instant ? 2000 : 0 };
+        const record = { id: nextId++, url: input.url, filename: options.browserFilename || input.filename, mime: options.browserMime || 'video/mp4', state: options.instant ? 'complete' : 'in_progress', bytesReceived: options.instant ? 2000 : 0, totalBytes: 2000, fileSize: options.instant ? 2000 : 0 };
         records.push(record);
         if (options.instant) for (const f of listeners.changes) f({ id: record.id, state: { current: 'complete' } });
         cb(record.id);
@@ -81,6 +81,16 @@ await check('browser initiation is not reported as completion', async () => {
 await check('instant Chrome completion before id persistence is recovered', async () => {
   const h = harness({ instant: true }); const job = await h.api.enqueue({ url: 'https://youtu.be/a' }); await h.api.tick();
   assert.equal(job.state, 'complete'); assert.equal(job.pct, 100); assert.equal(h.calls, 1);
+});
+await check('history metadata keeps source/thumbnail and the exact filename Chrome wrote', async () => {
+  const h = harness({ instant: true, filename: 'video.mp4', browserFilename: 'video (1).mp4' });
+  const job = await h.api.enqueue({ url: 'https://www.youtube.com/watch?v=abc123XYZ00', sourceTitle: 'Título original', thumbnailUrl: 'https://img.test/thumb.jpg' });
+  await h.api.tick();
+  const visible = h.api.publicJob(job);
+  assert.equal(visible.filename, 'video (1).mp4');
+  assert.equal(visible.sourceTitle, 'Título original');
+  assert.equal(visible.thumbnailUrl, 'https://img.test/thumb.jpg');
+  assert.equal(visible.platform, 'YouTube');
 });
 await check('popup closure / service worker restart resumes same browser download', async () => {
   const first = harness(); const job = await first.api.enqueue({ url: 'https://youtu.be/a' }); await first.api.tick();

@@ -3135,6 +3135,45 @@ html[data-theme='light'] .hist-barra {
   color: rgb(var(--text));
   box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.45), 0 10px 22px -16px rgba(139, 92, 246, 0.9);
 }
+.hist-download-preview {
+  width: min(760px, 94vw);
+}
+.hist-download-preview__body {
+  display: grid;
+  min-height: 300px;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(139, 92, 246, 0.13), transparent 55%),
+    rgba(0, 0, 0, 0.22);
+}
+.hist-download-preview__body img {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+}
+.hist-download-preview__empty {
+  display: flex;
+  max-width: 360px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgb(var(--text-muted));
+}
+.hist-download-preview__source {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: rgb(var(--text-dim));
+}
 html[data-theme='light'] .hist-previews {
   background: #fff;
   box-shadow:
@@ -4191,6 +4230,17 @@ html[data-theme='light'] .roteiro-accent { color: #96540a; }
 .ext-falta-corpo {
   min-width: 0;
   flex: 1;
+}
+.pilot-extension-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; }
+.pilot-extension-heading > div { flex: 1 1 260px; }
+.pilot-extension-heading .ext-falta-cta { flex-shrink: 0; font-size: 11px; letter-spacing: .07em; }
+.pilot-extension-check { margin-top: 10px; font-size: 12px; color: rgb(var(--text-muted)); text-decoration: underline; text-underline-offset: 3px; }
+.pilot-extension-check:hover { color: rgb(var(--text)); }
+.pilot-extension-check:disabled { opacity: .6; cursor: wait; }
+.pilot-extension-setup :is(a, button, summary):focus-visible { outline: 2px solid #fcd57a; outline-offset: 4px; }
+@media (max-width: 480px) {
+  .pilot-extension-setup { padding: 14px; }
+  .pilot-extension-heading .ext-falta-cta { width: 100%; justify-content: center; padding-inline: 10px; }
 }
 .ext-falta-titulo {
   margin: 1px 0 0;
@@ -6920,6 +6970,48 @@ html[data-theme='light'] .mtg-rodape { border-top-color: rgba(16, 16, 24, 0.1); 
 /* Base OPACA + tint por status: o card era translúcido e a grade de 52px do
  * body vazava por ele — o "gradeado" que o Silas pediu pra tirar. */
 .analise-ok { background: linear-gradient(rgba(163, 230, 53, 0.055), rgba(163, 230, 53, 0.055)), rgb(var(--bg)); }
+
+/* Pilot: acabamento local, mantendo a ordem e as cores dos controles. */
+.pilot-analysis-card {
+  padding: 18px;
+  border-radius: 18px;
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.55;
+  box-shadow: inset 0 1px 0 rgb(var(--text) / .055), 0 12px 32px -24px rgb(0 0 0 / .55);
+}
+.pilot-analysis-card.analise-ok {
+  border-color: rgb(var(--lime) / .3);
+  background: linear-gradient(150deg, rgb(var(--lime) / .055), transparent 58%), rgb(var(--bg-soft));
+}
+.pilot-analysis-heading { padding-bottom: 12px; border-bottom: 1px solid rgb(var(--text) / .065); margin-bottom: 12px; }
+.pilot-analysis-title { font-family: var(--font-tech), system-ui, sans-serif; font-size: 15px; font-weight: 650; letter-spacing: -.025em; line-height: 1.35; }
+.pilot-analysis-card .mono { font-family: var(--font-display), system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+.pilot-analysis-card .label-tech { font-family: var(--font-tech), system-ui, sans-serif; letter-spacing: .11em; font-weight: 650; }
+.pilot-analysis-card .text-text-muted { color: rgb(var(--text) / .64); }
+.pilot-analysis-card .info-linha { gap: 7px; padding: 8px 0; }
+.pilot-analysis-card .info-chip { font-size: 10px; letter-spacing: .075em; padding: 3px 8px; }
+.pilot-analysis-card .pilot-avatar-slot { padding: 14px; margin-top: 8px; border-color: rgb(var(--text) / .1); box-shadow: inset 0 1px 0 rgb(var(--text) / .045); }
+.pilot-analysis-card .gesto-input { font-family: var(--font-display), system-ui, sans-serif; font-size: 12px; line-height: 1.6; }
+.pilot-analysis-card button:disabled { cursor: not-allowed; }
+.pilot-analysis-card button[aria-pressed]:disabled { opacity: .4; }
+.pilot-analysis-card :is(button, a, textarea, input):focus-visible { outline: 2px solid rgb(var(--lime) / .8); outline-offset: 3px; }
+.pilot-credential-control:focus-visible { outline: 2px solid rgb(var(--amber)); outline-offset: 4px; border-radius: 50%; }
+.pilot-credential-tooltip {
+  display: none; position: absolute; z-index: 40; top: calc(100% + 10px); right: -8px;
+  width: min(285px, 75vw); padding: 14px 16px; border-radius: 12px;
+  border: 1px solid rgb(var(--amber) / .3); background: rgb(var(--bg-elev));
+  box-shadow: 0 10px 32px rgb(0 0 0 / .3); color: rgb(var(--text) / .9);
+  font: 500 12px/1.6 var(--font-display), system-ui, sans-serif; text-transform: none; letter-spacing: normal;
+}
+.pilot-credential-tooltip::before { content: ''; position: absolute; top: -12px; left: 0; right: 0; height: 12px; }
+.pilot-credential-control:is(:hover, :focus-within) .pilot-credential-tooltip { display: grid; gap: 8px; }
+.pilot-credential-tooltip a, .pilot-credential-tooltip button { color: rgb(var(--amber)); text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 640px) {
+  .pilot-analysis-card { padding: 12px; border-radius: 14px; }
+  .pilot-analysis-card .pilot-avatar-slot { padding: 10px; }
+  .pilot-analysis-title { font-size: 14px; }
+}
 .analise-parcial { background: linear-gradient(rgba(234, 179, 8, 0.055), rgba(234, 179, 8, 0.055)), rgb(var(--bg)); }
 .analise-erro { background: linear-gradient(rgba(239, 68, 68, 0.055), rgba(239, 68, 68, 0.055)), rgb(var(--bg)); }
 .analise-neutra { background: linear-gradient(rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.03)), rgb(var(--bg)); }
