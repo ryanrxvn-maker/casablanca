@@ -66,7 +66,7 @@ import {
   getVideosStatus,
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
-import { getHeyGenHealth } from '@/lib/heygen-health';
+import { getHeyGenHealth, decideEsperaDoBatch, TETO_MODERACAO_MS } from '@/lib/heygen-health';
 import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
 import {
   getLibrarySnapshot,
@@ -402,11 +402,23 @@ async function purgeRejectedVideosBeforeRedispatch(
  *  "ainda renderizando" — mentira que fazia o usuário esperar um render que
  *  nunca vinha (AD120 - PRPB07, 18.09). Nomeia a causa e o que fazer. */
 const MODERACAO_ERRO_PARTE =
-  'O HeyGen mandou esse take pra REVISÃO DE MODERAÇÃO. Não é falha de render e re-enviar o MESMO texto cai na mesma fila — ajuste o texto e clique "Editar e re-gerar", ou use "Não esperar · usar áudio".';
+  'O HeyGen mandou esse take pra REVISÃO DE MODERAÇÃO. Não estou re-gerando (o mesmo texto cai na mesma fila) — fico de olho e resgato sozinho se a revisão liberar. Se não liberar, ajuste o texto em "Editar e re-gerar" ou use "Não esperar · usar áudio".';
 
-/** Fecho honesto de um batch cujo que falta está TODO em moderação. */
-function mensagemModeracao(labels: string[]): string {
-  return `⛔ O HeyGen mandou ${labels.length} take(s) pra REVISÃO DE MODERAÇÃO (${labels.join(', ')}). `
+/** ESPERANDO a revisão (dentro do teto). Diz a verdade: não é render, é fila
+ *  humana; ninguém está gastando cota; e se liberar, fecha sozinho. */
+function mensagemModeracaoEsperando(labels0: string[], desdeMs: number): string {
+  const labels = labels0.length ? labels0 : ['take em revisão'];
+  const min = Math.max(1, Math.round((Date.now() - (desdeMs || Date.now())) / 60000));
+  const restam = Math.max(0, Math.round((TETO_MODERACAO_MS - (Date.now() - (desdeMs || Date.now()))) / 60000));
+  return `⏸ ${labels.length} take(s) em REVISÃO DE MODERAÇÃO no HeyGen (${labels.join(', ')}) há ${min}min. `
+    + 'Não é falha de render e não estou re-gerando nada (re-enviar o mesmo texto cai na mesma fila). '
+    + `Continuo checando de graça: se a revisão liberar, eu resgato e monto sozinho. Se não liberar em ~${restam}min, fecho e te aviso.`;
+}
+
+/** DESISTIU da revisão (passou do teto). Fecho terminal e acionável. */
+function mensagemModeracao(labels0: string[]): string {
+  const labels = labels0.length ? labels0 : ['take em revisão'];
+  return `⛔ O HeyGen segurou ${labels.length} take(s) em REVISÃO DE MODERAÇÃO (${labels.join(', ')}) e a revisão não saiu. `
     + 'Não é falha de render e NÃO adianta Retomar: re-enviar o mesmo texto cai na mesma fila. '
     + 'NÃO montei. Abra o take, ajuste o texto e clique "Editar e re-gerar" — ou use "Não esperar · usar áudio".';
 }
@@ -1136,12 +1148,17 @@ type BatchTaskState = {
   waitingVideoIds?: string[];
   /** Instante da última re-checagem do watcher (evita martelar a API). */
   waitingCheckedAt?: number;
-  /** O HeyGen pôs take(s) deste batch na REVISÃO DE MODERAÇÃO. Isso NÃO se
-   *  resolve sozinho e NÃO se resolve re-disparando o mesmo texto: quem tem
-   *  que agir é o usuário (editar o texto e re-gerar, ou usar o áudio). A
-   *  marca existe pra auto-cura e watcher ficarem FORA desse batch em vez de
-   *  re-tentar pra sempre. */
+  /** DESISTIMOS da revisão de moderação (passou de TETO_MODERACAO_MS). O card
+   *  está fechado pedindo ação humana — a auto-cura fica FORA dele, senão
+   *  re-tentaria até o teto de tentativas sem nunca resolver (é fila humana e
+   *  o mesmo texto cai nela de novo). Some sozinha quando o porteiro roda e
+   *  não vê mais moderação. */
   moderacaoPendente?: boolean;
+  /** Quando ESTE batch viu moderação pela 1a vez. É o relógio do teto: até lá
+   *  o watcher só cutuca o status (GET, cota zero) e resgata sozinho se a
+   *  revisão liberar — foi o que aconteceu no BODY 4 do AD120, aprovado ~2h
+   *  depois. Ver [[project_pilot_moderacao_loop_eterno]]. */
+  moderacaoDesde?: number;
   /** VA: quantos avatares saíram montados vs esperados. BLINDAGEM: o card só
    *  mostra "PRONTO" verde quando okAvas === expectedAvas. Se faltou avatar
    *  (ex: 1/2 — mount morreu, cota, etc.), o card vira AVISO (não verde) com a
@@ -6430,14 +6447,14 @@ function ClickUpPilotInner() {
                   ? { ...p, videoStatus: 'failed' as const, error: MODERACAO_ERRO_PARTE }
                   : p,
               );
-              return { ...prev, [taskId]: { ...st, parts: newParts, moderacaoPendente: true } };
+              return { ...prev, [taskId]: { ...st, parts: newParts, moderacaoDesde: st.moderacaoDesde || Date.now() } };
             });
           } else {
-            // O porteiro rodou e NÃO viu moderação: a marca antiga morre aqui.
-            // Sem isto, um batch que já esteve barrado ficaria fora da auto-cura
-            // pra sempre, mesmo depois da revisão liberar o take.
-            setBatchStates((prev) => (prev[taskId]?.moderacaoPendente
-              ? { ...prev, [taskId]: { ...prev[taskId], moderacaoPendente: undefined } }
+            // O porteiro rodou e NÃO viu moderação: as marcas antigas morrem
+            // aqui. Sem isto, um batch que já esteve barrado ficaria fora da
+            // auto-cura pra sempre, mesmo depois da revisão liberar o take.
+            setBatchStates((prev) => ((prev[taskId]?.moderacaoPendente || prev[taskId]?.moderacaoDesde)
+              ? { ...prev, [taskId]: { ...prev[taskId], moderacaoPendente: undefined, moderacaoDesde: undefined } }
               : prev));
           }
           // AINDA RENDERIZANDO: guarda pra fechar depois. NUNCA re-dispara.
@@ -6581,17 +6598,33 @@ function ClickUpPilotInner() {
             // HeyGen AINDA está renderizando, o batch não fecha como incompleto —
             // fica em 'waiting-heygen' e o watcher retoma sozinho quando ficar
             // pronto. Nada de cota gasta, nada de card vermelho mentindo "falha".
-            if (stillRenderingIds.length > 0 && !is429) {
-              const h = getHeyGenHealth();
+            // MODERAÇÃO: os takes em revisão também continuam SENDO ESPERADOS
+            // (checagem é GET, cota zero) — a revisão costuma liberar e aí o
+            // watcher resgata sozinho. O que NÃO pode é o watcher chamar o
+            // Retomar por causa deles: era essa ida-e-volta que virava loop.
+            // A regra do teto e do "não retomar" é pura e testada:
+            // decideEsperaDoBatch em lib/heygen-health.
+            const modIdxs = miss.filter((i) => moderacaoIdxs.includes(i));
+            const modLabels = modIdxs
+              .map((i) => cur?.parts?.[i]?.label || plan!.parts[i]?.label)
+              .filter(Boolean) as string[];
+            const modVideoIds = modIdxs
+              .map((i) => cur?.parts?.[i]?.videoId)
+              .filter(Boolean) as string[];
+            const moderacaoDesde = modVideoIds.length > 0 ? (cur?.moderacaoDesde || Date.now()) : undefined;
+            const esperaModeracaoEstourou = !!moderacaoDesde
+              && Date.now() - moderacaoDesde >= TETO_MODERACAO_MS;
+            if (esperaModeracaoEstourou && stillRenderingIds.length === 0) {
               return {
                 ...prev,
                 [taskId]: {
                   ...cur,
-                  phase: 'waiting-heygen',
-                  message: `⏳ ${stillRenderingIds.length} take(s) ainda renderizando no HeyGen (${labels.join(', ')}). ${h.state === 'ok' ? 'Não é falha' : h.reason} — não re-disparei nada. Eu re-checo sozinho e fecho quando ficarem prontos.`,
-                  waitingVideoIds: stillRenderingIds,
-                  waitingCheckedAt: Date.now(),
-                  finishedAt: undefined,
+                  phase: 'done',
+                  moderacaoPendente: true,
+                  moderacaoDesde,
+                  message: mensagemModeracao(modLabels),
+                  finishedAt: Date.now(),
+                  waitingVideoIds: undefined,
                   zipBlobUrl: takesUrl,
                   zipFilename: takesFilename,
                   montadoZipUrl: undefined,
@@ -6600,23 +6633,22 @@ function ClickUpPilotInner() {
                 },
               };
             }
-            // TUDO que falta está em MODERAÇÃO: fecho terminal e acionável. Não
-            // volta pra espera (não termina sozinho) e não pede Retomar (cai na
-            // mesma fila). Ver a nota em RedispatchPlan.moderacao.
-            const modLabels = miss
-              .filter((i) => moderacaoIdxs.includes(i))
-              .map((i) => cur?.parts?.[i]?.label || plan!.parts[i]?.label)
-              .filter(Boolean) as string[];
-            if (modLabels.length > 0 && modLabels.length === miss.length) {
+            const esperandoIds = [...stillRenderingIds, ...modVideoIds];
+            if (esperandoIds.length > 0 && !is429) {
+              const h = getHeyGenHealth();
+              const soModeracao = stillRenderingIds.length === 0;
               return {
                 ...prev,
                 [taskId]: {
                   ...cur,
-                  phase: 'done',
-                  moderacaoPendente: true,
-                  message: mensagemModeracao(modLabels),
-                  finishedAt: Date.now(),
-                  waitingVideoIds: undefined,
+                  phase: 'waiting-heygen',
+                  moderacaoDesde,
+                  message: soModeracao
+                    ? mensagemModeracaoEsperando(modLabels, moderacaoDesde!)
+                    : `⏳ ${stillRenderingIds.length} take(s) ainda renderizando no HeyGen (${labels.join(', ')}). ${h.state === 'ok' ? 'Não é falha' : h.reason} — não re-disparei nada. Eu re-checo sozinho e fecho quando ficarem prontos.`,
+                  waitingVideoIds: esperandoIds,
+                  waitingCheckedAt: Date.now(),
+                  finishedAt: undefined,
                   zipBlobUrl: takesUrl,
                   zipFilename: takesFilename,
                   montadoZipUrl: undefined,
@@ -7188,13 +7220,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                     ? { ...p, videoStatus: 'failed' as const, error: MODERACAO_ERRO_PARTE }
                     : p,
                 );
-                return { ...prev, [taskId]: { ...st, parts: newParts, moderacaoPendente: true } };
+                return { ...prev, [taskId]: { ...st, parts: newParts, moderacaoDesde: st.moderacaoDesde || Date.now() } };
               });
             } else {
-              // Porteiro rodou e não viu moderação: apaga a marca antiga (senão
-              // o batch ficaria fora da auto-cura mesmo depois da revisão liberar).
-              setBatchStates((prev) => (prev[taskId]?.moderacaoPendente
-                ? { ...prev, [taskId]: { ...prev[taskId], moderacaoPendente: undefined } }
+              // Porteiro rodou e não viu moderação: apaga as marcas antigas
+              // (senão o batch ficaria fora da auto-cura mesmo depois de liberar).
+              setBatchStates((prev) => ((prev[taskId]?.moderacaoPendente || prev[taskId]?.moderacaoDesde)
+                ? { ...prev, [taskId]: { ...prev[taskId], moderacaoPendente: undefined, moderacaoDesde: undefined } }
                 : prev));
             }
             // AINDA RENDERIZANDO: proibido re-disparar. Registra pro fecho honesto.
@@ -7683,17 +7715,31 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             const is429 = miss.some((i) => /429|daily limit|exceeded the maximum|quota/i.test(cur?.parts?.[i]?.error || state.parts[i]?.error || ''));
             // ESPERANDO ≠ FALHOU: o que o HeyGen ainda está renderizando não
             // fecha o batch como incompleto — o watcher re-checa e retoma.
-            if (resumeStillRenderingIds.length > 0 && !is429) {
-              const h = getHeyGenHealth();
+            // MODERAÇÃO: continua sendo esperada (GET, cota zero) até o teto —
+            // a revisão costuma liberar e aí o watcher resgata sozinho. O que
+            // quebra o loop é o watcher NÃO chamar o Retomar por causa dela
+            // (decideEsperaDoBatch, em lib/heygen-health).
+            const modIdxs = miss.filter((i) => resumeModeracaoIdxs.includes(i));
+            const modLabels = modIdxs
+              .map((i) => cur?.parts?.[i]?.label || state.parts[i]?.label)
+              .filter(Boolean) as string[];
+            const modVideoIds = modIdxs
+              .map((i) => cur?.parts?.[i]?.videoId || state.parts[i]?.videoId)
+              .filter(Boolean) as string[];
+            const moderacaoDesde = modVideoIds.length > 0 ? (cur?.moderacaoDesde || Date.now()) : undefined;
+            const esperaModeracaoEstourou = !!moderacaoDesde
+              && Date.now() - moderacaoDesde >= TETO_MODERACAO_MS;
+            if (esperaModeracaoEstourou && resumeStillRenderingIds.length === 0) {
               return {
                 ...prev,
                 [taskId]: {
                   ...cur,
-                  phase: 'waiting-heygen',
-                  message: `⏳ ${resumeStillRenderingIds.length} take(s) ainda renderizando no HeyGen (${labels.join(', ')}). ${h.state === 'ok' ? 'Não é falha' : h.reason} — não re-disparei nada. Eu re-checo sozinho e fecho quando ficarem prontos.`,
-                  waitingVideoIds: resumeStillRenderingIds,
-                  waitingCheckedAt: Date.now(),
-                  finishedAt: undefined,
+                  phase: 'done',
+                  moderacaoPendente: true,
+                  moderacaoDesde,
+                  message: mensagemModeracao(modLabels),
+                  finishedAt: Date.now(),
+                  waitingVideoIds: undefined,
                   zipBlobUrl: takesUrl,
                   zipFilename: takesFilename,
                   montadoZipUrl: undefined,
@@ -7702,22 +7748,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                 },
               };
             }
-            // TUDO que falta está em MODERAÇÃO: fecho terminal e acionável, em
-            // vez de devolver o card pra 'waiting-heygen' (era o loop eterno).
-            const modLabels = miss
-              .filter((i) => resumeModeracaoIdxs.includes(i))
-              .map((i) => cur?.parts?.[i]?.label || state.parts[i]?.label)
-              .filter(Boolean) as string[];
-            if (modLabels.length > 0 && modLabels.length === miss.length) {
+            const esperandoIds = [...resumeStillRenderingIds, ...modVideoIds];
+            if (esperandoIds.length > 0 && !is429) {
+              const h = getHeyGenHealth();
+              const soModeracao = resumeStillRenderingIds.length === 0;
               return {
                 ...prev,
                 [taskId]: {
                   ...cur,
-                  phase: 'done',
-                  moderacaoPendente: true,
-                  message: mensagemModeracao(modLabels),
-                  finishedAt: Date.now(),
-                  waitingVideoIds: undefined,
+                  phase: 'waiting-heygen',
+                  moderacaoDesde,
+                  message: soModeracao
+                    ? mensagemModeracaoEsperando(modLabels, moderacaoDesde!)
+                    : `⏳ ${resumeStillRenderingIds.length} take(s) ainda renderizando no HeyGen (${labels.join(', ')}). ${h.state === 'ok' ? 'Não é falha' : h.reason} — não re-disparei nada. Eu re-checo sozinho e fecho quando ficarem prontos.`,
+                  waitingVideoIds: esperandoIds,
+                  waitingCheckedAt: Date.now(),
+                  finishedAt: undefined,
                   zipBlobUrl: takesUrl,
                   zipFilename: takesFilename,
                   montadoZipUrl: undefined,
@@ -8849,21 +8895,55 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             }
             const done = ids.filter((i) => statuses[i]?.status === 'completed').length;
             const failed = ids.filter((i) => statuses[i]?.status === 'failed').length;
-            // MODERAÇÃO NÃO É ESPERA. Um take em revisão volta como 'failed' com
-            // moderation_status 'pending': o contador dava por resolvido, o
-            // watcher chamava o Retomar, o porteiro respondia "espera" e o
-            // resume devolvia o card pra 'waiting-heygen' — loop eterno, com a
-            // mensagem mentindo "ainda renderizando" (AD120 - PRPB07, 18.09).
-            // Aqui esses saem da fila de espera; o resume seguinte fecha o card
-            // com a causa certa e ninguém volta pra cá.
+            // MODERAÇÃO ≠ RENDER. Um take em revisão volta como 'failed' com
+            // moderation_status 'pending'. O contador antigo o dava por
+            // resolvido e chamava o Retomar; o porteiro respondia "espera"
+            // (certo: o mesmo texto cai na mesma fila humana) e o resume
+            // devolvia o card pra cá. Loop eterno, com a mensagem ainda
+            // mentindo "ainda renderizando" (AD120 - PRPB07, 18.09).
+            //
+            // A saída NÃO é abandonar o batch: checar status é GET, cota zero,
+            // e a revisão costuma liberar (o BODY 4 do AD120 foi aprovado ~2h
+            // depois). Então seguimos esperando de graça — só que sem NUNCA
+            // chamar o Retomar por causa da moderação, que era o elo do loop.
+            // Se liberar, o take vira 'completed' e cai no 'agir' normal.
+            // A regra é pura e testada: decideEsperaDoBatch, lib/heygen-health.
             const emModeracao = ids.filter((i) => statuses[i]?.moderationPending);
             const aindaRenderizando = ids.filter((i) => {
               const st = statuses[i];
               return !st?.moderationPending && st?.status !== 'completed' && st?.status !== 'failed';
             });
-            const settled = aindaRenderizando.length === 0;
-            if (emModeracao.length > 0) {
-              console.warn(`[waiting-heygen] ${b.taskId}: ${emModeracao.length} take(s) em REVISÃO DE MODERAÇÃO — saindo da espera (isso não termina sozinho).`);
+            const agora = Date.now();
+            const moderacaoDesde = emModeracao.length > 0 ? (b.moderacaoDesde || agora) : undefined;
+            const acao = decideEsperaDoBatch({
+              renderizando: aindaRenderizando.length,
+              emModeracao: emModeracao.length,
+              moderacaoDesdeMs: moderacaoDesde || 0,
+              agoraMs: agora,
+            });
+            const rotulosModeracao = emModeracao
+              .map((id) => b.parts?.find((p) => p.videoId === id)?.label)
+              .filter(Boolean) as string[];
+            if (acao === 'desistir') {
+              console.warn(`[waiting-heygen] ${b.taskId}: revisão de moderação passou de ${Math.round(TETO_MODERACAO_MS / 3600000)}h — fechando o card pedindo ação.`);
+              setBatchStates((prev) => {
+                const cur = prev[b.taskId];
+                if (!cur || cur.phase !== 'waiting-heygen') return prev;
+                return {
+                  ...prev,
+                  [b.taskId]: {
+                    ...cur,
+                    phase: 'done',
+                    moderacaoPendente: true,
+                    moderacaoDesde,
+                    waitingVideoIds: undefined,
+                    waitingCheckedAt: agora,
+                    finishedAt: agora,
+                    message: mensagemModeracao(rotulosModeracao.length ? rotulosModeracao : ['take em revisão']),
+                  },
+                };
+              });
+              continue;
             }
             setBatchStates((prev) => {
               const cur = prev[b.taskId];
@@ -8872,18 +8952,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                 ...prev,
                 [b.taskId]: {
                   ...cur,
-                  waitingCheckedAt: Date.now(),
-                  waitingVideoIds: aindaRenderizando,
-                  moderacaoPendente: cur.moderacaoPendente || emModeracao.length > 0,
-                  message: settled
-                    ? (emModeracao.length > 0
-                        ? `O HeyGen mandou ${emModeracao.length} take(s) pra revisão de moderação — fechando o card com a causa certa (não fico esperando).`
-                        : `✓ O HeyGen terminou — retomando pra baixar e montar (nenhum take re-gerado).`)
-                    : `⏳ ${done}/${ids.length} take(s) prontos no HeyGen. Continuo esperando sem re-disparar — fecho sozinho quando terminarem.`,
+                  waitingCheckedAt: agora,
+                  // A moderação CONTINUA na fila de espera: é ela que faz o
+                  // próximo tique reparar que a revisão liberou.
+                  waitingVideoIds: [...aindaRenderizando, ...emModeracao],
+                  moderacaoDesde,
+                  message: acao === 'agir'
+                    ? `✓ O HeyGen terminou — retomando pra baixar e montar (nenhum take re-gerado).`
+                    : (aindaRenderizando.length === 0 && emModeracao.length > 0
+                        ? mensagemModeracaoEsperando(
+                            rotulosModeracao.length ? rotulosModeracao : ['take em revisão'],
+                            moderacaoDesde!,
+                          )
+                        : `⏳ ${done}/${ids.length} take(s) prontos no HeyGen. Continuo esperando sem re-disparar — fecho sozinho quando terminarem.`),
                 },
               };
             });
-            if (settled) {
+            if (acao === 'agir') {
               console.log(`[waiting-heygen] ${b.taskId}: HeyGen concluiu (${done} pronto(s), ${failed} recusado(s)) — retomando automaticamente`);
               void runHeyGenGatedRef.current(b.taskId, 'resume');
             }

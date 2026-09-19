@@ -13,8 +13,14 @@
  *      constante. Batch inteiro parado = plataforma lenta (espera mais);
  *      retardatário isolado com irmãos prontos = zumbi (desiste rápido).
  *   2. decideRedispatch — só gasta cota com PROVA de que não há render vivo.
+ *   3. decideEsperaDoBatch — espera de graça sem nunca entrar em loop.
  */
-import { computePatienceBudget, decideRedispatch } from './heygen-health';
+import {
+  computePatienceBudget,
+  decideRedispatch,
+  decideEsperaDoBatch,
+  TETO_MODERACAO_MS,
+} from './heygen-health';
 
 let passed = 0;
 let failed = 0;
@@ -180,6 +186,65 @@ ok(
   ok(
     decideRedispatch({ hasVideoId: true, status: 'completed', hasVideoUrl: true, moderationPending: true }) === 'rescue',
     'take que ficou pronto é resgatado mesmo com flag de moderação',
+  );
+}
+
+// ═══ (3) A ESPERA — a regra que quebra o LOOP ETERNO ═══════════════════════
+//     Caso real (AD120 - PRPB07, 18.09): o take em moderação era contado como
+//     "resolvido", o watcher chamava o Retomar, o porteiro dizia "espera" e o
+//     resume devolvia o card pra espera. Pra sempre.
+{
+  const H = 60 * 60 * 1000;
+  const agora = 1_000_000_000;
+
+  // (3.1) render vivo manda em tudo: espera, sem retomar.
+  ok(
+    decideEsperaDoBatch({ renderizando: 1, emModeracao: 0, moderacaoDesdeMs: 0, agoraMs: agora }) === 'esperar',
+    'render ainda vivo: espera (não retoma, não desiste)',
+  );
+
+  // (3.2) O CORAÇÃO DO FIX: moderação pendente NÃO manda retomar. Era o
+  //       'agir' aqui que fechava o ciclo do loop.
+  ok(
+    decideEsperaDoBatch({ renderizando: 0, emModeracao: 1, moderacaoDesdeMs: agora - H, agoraMs: agora }) === 'esperar',
+    'moderação dentro do teto: espera de graça — NUNCA manda retomar (quebra o loop)',
+  );
+
+  // (3.3) mas não espera pra sempre.
+  ok(
+    decideEsperaDoBatch({ renderizando: 0, emModeracao: 1, moderacaoDesdeMs: agora - 5 * H, agoraMs: agora }) === 'desistir',
+    'moderação passou do teto: desiste e fecha o card pedindo ação',
+  );
+
+  // (3.4) a revisão liberou (o take virou 'completed', some de emModeracao):
+  //       agora sim retoma e resgata sem gastar cota. É o caso REAL do BODY 4.
+  ok(
+    decideEsperaDoBatch({ renderizando: 0, emModeracao: 0, moderacaoDesdeMs: agora - 2 * H, agoraMs: agora }) === 'agir',
+    'moderação liberou: retoma e resgata (auto-recuperação preservada)',
+  );
+
+  // (3.5) primeiro tique vendo moderação (desde = 0) nunca desiste na hora.
+  ok(
+    decideEsperaDoBatch({ renderizando: 0, emModeracao: 2, moderacaoDesdeMs: 0, agoraMs: agora }) === 'esperar',
+    'primeiro tique da moderação não desiste imediatamente',
+  );
+
+  // (3.6) INVARIANTE: com moderação pendente, a resposta NUNCA é 'agir' — é
+  //       'agir' que chama o Retomar, e o Retomar em moderação é o loop.
+  {
+    const tempos = [0, 1, H, 3 * H, 4 * H, 10 * H];
+    ok(
+      tempos.every((t) => decideEsperaDoBatch({
+        renderizando: 0, emModeracao: 1, moderacaoDesdeMs: agora - t, agoraMs: agora,
+      }) !== 'agir'),
+      'INVARIANTE: moderação pendente nunca dispara o Retomar automático',
+    );
+  }
+
+  // (3.7) teto configurável (o watcher e o resume têm que usar o MESMO).
+  ok(
+    TETO_MODERACAO_MS === 4 * H,
+    'teto da moderação exposto pra os dois lados usarem o mesmo número',
   );
 }
 

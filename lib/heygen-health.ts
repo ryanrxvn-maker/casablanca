@@ -266,6 +266,58 @@ export function decideRedispatch(args: {
   return 'redispatch';
 }
 
+/* ═══ POLÍTICA DE ESPERA (o que o watcher faz a cada tique) ═══════════════ */
+
+/** Teto da espera por REVISÃO DE MODERAÇÃO. Enquanto não estoura, o watcher
+ *  fica só cutucando o status (GET, cota zero) e resgata sozinho se a revisão
+ *  liberar — foi o que aconteceu no BODY 4 do AD120, aprovado ~2h depois.
+ *  Estourado o teto, o card fecha pedindo ação humana em vez de ficar eterno. */
+export const TETO_MODERACAO_MS = 4 * 60 * 60 * 1000;
+
+export type AcaoDaEspera =
+  /** Nada a fazer neste tique: continua cutucando o status, de graça. */
+  | 'esperar'
+  /** Tudo que faltava já é acionável (pronto ou recusado de verdade): retoma. */
+  | 'agir'
+  /** A revisão passou do teto: fecha o card com a causa e o que fazer. */
+  | 'desistir';
+
+/**
+ * O QUE FAZER COM UM BATCH QUE ESTÁ ESPERANDO O HEYGEN.
+ *
+ * Vive aqui, pura e testada, porque errar isto custou um LOOP ETERNO em
+ * produção (AD120 - PRPB07, 18.09): o watcher contava o take em moderação como
+ * "resolvido", chamava o Retomar, o porteiro respondia "espera" (certo: o mesmo
+ * texto cai na mesma fila humana) e o resume devolvia o card pra espera. Ida e
+ * volta pra sempre, com a mensagem ainda mentindo "ainda renderizando".
+ *
+ * As três regras que quebram o loop e mesmo assim não abandonam o batch:
+ *   1. render vivo        → espera (ele termina sozinho);
+ *   2. moderação pendente → espera ATÉ O TETO, sem chamar o Retomar — é o
+ *      Retomar que fechava o ciclo. Se a revisão liberar, o take vira
+ *      'completed', cai na regra 3 e é resgatado sem gastar nada;
+ *   3. nada pendente      → age (resgata o que ficou pronto, fecha o resto).
+ */
+export function decideEsperaDoBatch(args: {
+  /** Ids ainda em pending/unknown — render possivelmente vivo. */
+  renderizando: number;
+  /** Ids em revisão de moderação (failed + moderation_status pendente). */
+  emModeracao: number;
+  /** Quando ESTE batch viu moderação pela 1a vez (0 = está vendo agora). */
+  moderacaoDesdeMs: number;
+  agoraMs: number;
+  /** Default TETO_MODERACAO_MS. */
+  tetoMs?: number;
+}): AcaoDaEspera {
+  const teto = args.tetoMs ?? TETO_MODERACAO_MS;
+  if (args.renderizando > 0) return 'esperar';
+  if (args.emModeracao > 0) {
+    const desde = args.moderacaoDesdeMs || args.agoraMs;
+    return args.agoraMs - desde >= teto ? 'desistir' : 'esperar';
+  }
+  return 'agir';
+}
+
 /** Só pra teste/diagnóstico — zera o histórico. */
 export function resetHeyGenHealth() {
   mem = { samples: [], lastCompletionAt: 0 };
