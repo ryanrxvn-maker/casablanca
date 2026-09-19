@@ -8,10 +8,19 @@
   const visible = (element) => Boolean(element && element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
   const all = (selector, root = document) => [...root.querySelectorAll(selector)].filter(visible);
   const text = (element) => (element?.innerText || element?.textContent || '').replace(/\s+/g, ' ').trim();
-  const label = (element) => element.getAttribute('aria-label') || text(element);
+  function label(element) {
+    const explicit = element.getAttribute('aria-label');
+    if (explicit?.trim()) return explicit;
+    const copy = element.cloneNode(true);
+    for (const decoration of copy.querySelectorAll('[aria-hidden="true"],mat-icon:not([aria-label]):not([aria-labelledby])')) decoration.remove();
+    // Material icon ligatures (e.g. "upload") are not the button's name.
+    // Keep real text authoritative; tooltip is only an empty-text fallback.
+    return text(copy) || element.getAttribute('mattooltip') || '';
+  }
   const blobDownloads = new Map();
   const submissionAttempts = new Set();
   const gestureAttempts = new Set();
+  const galleryMediaIdentities = new Map();
   function base64(bytes) {
     let binary = '';
     for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
@@ -174,35 +183,77 @@
     try { return new URL(source, location.href).pathname.match(/\/image\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})(?:\/|$)/i)?.[1]?.toLowerCase() || null; }
     catch { return null; }
   }
+  function asbIdentity(source) {
+    try {
+      const url = new URL(source, location.href);
+      if (url.protocol !== 'https:' || !(url.hostname === 'flow.google.com' || /^lh\d+\.googleusercontent\.com$/.test(url.hostname))) return null;
+      // Flow uses the same ASB asset through its own host and Google's image
+      // CDN. Rendering transformations follow '=' and are not asset identity.
+      const token = url.pathname.match(/^\/asb\/([a-zA-Z0-9_-]+)(?:=[^/]*)?$/)?.[1];
+      return token ? `asb:${token}` : null;
+    } catch { return null; }
+  }
+  function rememberGalleryMediaIdentities() {
+    for (const image of document.querySelectorAll('img[data-media-id]')) {
+      const id = image.getAttribute('data-media-id')?.toLowerCase();
+      const identity = asbIdentity(image.currentSrc || image.src);
+      if (id && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id) && identity) galleryMediaIdentities.set(id, identity);
+    }
+  }
+  function matchesFrameIdentity(imageId, source) {
+    const directId = referenceImageId(source);
+    if (directId) return directId === imageId;
+    const identity = asbIdentity(source);
+    return Boolean(identity && galleryMediaIdentities.get(imageId) === identity);
+  }
+  function referenceIdentity(source) {
+    const directId = referenceImageId(source);
+    if (directId) return directId;
+    const identity = asbIdentity(source);
+    if (!identity) return null;
+    const ids = [...galleryMediaIdentities].filter(([, candidate]) => candidate === identity).map(([id]) => id);
+    return ids.length === 1 ? ids[0] : null;
+  }
   function uploadedResource(name) {
+    rememberGalleryMediaIdentities();
     const option = one(all('[role="option"]').filter((element) => text(element.querySelector('.asset-title')) === name), `Referência ${name}`);
     const thumbnail = option.querySelector('img.asset-thumbnail-image');
-    const imageId = referenceImageId(thumbnail?.currentSrc || thumbnail?.src);
+    const imageId = referenceIdentity(thumbnail?.currentSrc || thumbnail?.src);
     if (!imageId) throw new Error('O Flow ainda não confirmou a imagem enviada.');
     return { option, imageId };
   }
   function resourceSelection(name) {
     const resource = uploadedResource(name);
     const preview = all('img').find((element) => element.getAttribute('alt') === `Prévia de ${name}`);
-    const previewId = referenceImageId(preview?.currentSrc || preview?.src);
-    return { imageId: resource.imageId, previewMatches: Boolean(preview && (!previewId || previewId === resource.imageId)) };
+    const previewId = referenceIdentity(preview?.currentSrc || preview?.src);
+    return { imageId: resource.imageId, previewMatches: Boolean(preview && previewId === resource.imageId) };
   }
   function frameResource(imageId) {
+    rememberGalleryMediaIdentities();
     const option = one(all('[role="option"]').filter((element) => {
       const thumbnail = element.querySelector('img.asset-thumbnail-image');
-      return referenceImageId(thumbnail?.currentSrc || thumbnail?.src) === imageId;
+      return matchesFrameIdentity(imageId, thumbnail?.currentSrc || thumbnail?.src);
     }), 'Imagem do frame selecionado');
     return { option, name: text(option.querySelector('.asset-title')), imageId };
   }
   function frameReferenceSelection(imageId) {
     const resource = frameResource(imageId);
     const preview = all('img').find((element) => element.getAttribute('alt') === `Prévia de ${resource.name}`);
-    return { imageId, previewMatches: Boolean(preview && referenceImageId(preview.currentSrc || preview.src) === imageId) };
+    return { imageId, previewMatches: Boolean(preview && matchesFrameIdentity(imageId, preview.currentSrc || preview.src)) };
+  }
+  function referencePlacementState(imageId, name) {
+    const references = commandReferences();
+    // Immediate insertion closes the picker, so its option/preview no longer
+    // exists. The worker can still verify the exact UUID in the composer.
+    let selection = null;
+    try { selection = name ? resourceSelection(name) : frameReferenceSelection(imageId); } catch {}
+    return { imageId, references, previewMatches: Boolean(selection?.imageId === imageId && selection.previewMatches) };
   }
   function openFrameSlot(index) {
     if (![0, 1].includes(index)) throw new Error('Escolha o frame inicial ou final.');
     const slots = all('.base-prompt-box flow-ingredient-bar .frame-trigger');
     if (slots.length !== 2) throw new Error('Os slots Início e Fim não foram encontrados no Flow.');
+    rememberGalleryMediaIdentities();
     return activate(one([...slots[index].querySelectorAll('button.empty-chip')], index === 0 ? 'Frame inicial vazio' : 'Frame final vazio'));
   }
   function commandReferences() {
@@ -253,15 +304,29 @@
     target.setAttribute('data-pilot-flow-activation', token);
     return { prepared: true };
   }
+  function detailPreview({ kind, assetId } = {}) {
+    if (assetId) {
+      const currentId = location.pathname.match(/\/edit\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})\/?$/i)?.[1]?.toLowerCase();
+      if (currentId !== assetId.toLowerCase()) throw new Error('A prévia não pertence ao resultado selecionado.');
+    }
+    const videos = all('video').filter((element) => element.currentSrc || element.src);
+    const video = videos.length === 1 ? videos[0] : null;
+    if (kind === 'video') {
+      const posters = all('img').filter((element) => element.getAttribute('alt') === 'Prévia do vídeo da cena');
+      const poster = posters.length === 1 ? posters[0] : null;
+      // Current Flow renders video on canvas. Its poster is never a video URL;
+      // the exact result remains downloadable even without a DOM media source.
+      return { kind: 'video', ...(video ? { url: video.currentSrc || video.src, width: video.videoWidth, height: video.videoHeight } : {}),
+        ...(poster ? { posterUrl: poster.currentSrc || poster.src } : {}), previewPending: !video };
+    }
+    const image = all('img').sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight)[0];
+    return video ? { url: video.currentSrc || video.src, kind: 'video', width: video.videoWidth, height: video.videoHeight } : image ? { url: image.currentSrc || image.src, kind: 'image', width: image.naturalWidth, height: image.naturalHeight } : null;
+  }
   const handlers = {
     ping: () => ({ ok: true, version: adapterVersion }),
     uiState: () => uiState(),
     downloadReady: () => ({ ready: all('button[aria-label="Baixar mídia"]').length === 1 }),
-    detailPreview: () => {
-      const video = all('video').find((element) => element.currentSrc || element.src);
-      const image = all('img').sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight)[0];
-      return video ? { url: video.currentSrc || video.src, kind: 'video', width: video.videoWidth, height: video.videoHeight } : image ? { url: image.currentSrc || image.src, kind: 'image', width: image.naturalWidth, height: image.naturalHeight } : null;
-    },
+    detailPreview: (payload) => detailPreview(payload),
     galleryTop: () => {
       const tile = document.querySelector('flow-tile-container');
       let parent = tile?.parentElement;
@@ -293,6 +358,7 @@
     frameResource: ({ imageId }) => ({ name: frameResource(imageId).name, imageId }),
     selectFrameResource: ({ imageId }) => activate(frameResource(imageId).option),
     frameReferenceSelection: ({ imageId }) => frameReferenceSelection(imageId),
+    referencePlacementState: ({ imageId, name }) => referencePlacementState(imageId, name),
     commandReferences: () => commandReferences(),
     blobDownloadStart: async ({ url, requestId, kind }) => {
       if (!url.startsWith(`blob:${location.origin}/`)) throw new Error('O download temporário não pertence a esta aba do Flow.');

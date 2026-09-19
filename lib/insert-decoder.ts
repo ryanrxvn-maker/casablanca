@@ -38,7 +38,7 @@ export type LeitorDeQuadros = {
   fechar(): void;
 };
 
-type Amostra = { data: Uint8Array; ctsUs: number; durUs: number; chave: boolean };
+type Amostra = { data: Uint8Array; dtsUs: number; ctsUs: number; durUs: number; chave: boolean };
 
 /**
  * Abre o leitor. Devolve `null` quando o arquivo não serve (sem moov, codec
@@ -98,11 +98,14 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
     .filter((s) => !!s.data)
     .map((s) => ({
       data: s.data as Uint8Array,
+      dtsUs: Math.round((s.dts / s.timescale) * 1_000_000),
       ctsUs: Math.round((s.cts / s.timescale) * 1_000_000),
       durUs: Math.max(0, Math.round((s.duration / s.timescale) * 1_000_000)),
       chave: !!s.is_sync,
     }))
-    .sort((a, b) => a.ctsUs - b.ctsUs);
+    // Compressed B-frames depend on later presentation frames. Decode in DTS
+    // order; CTS remains the presentation timestamp on EncodedVideoChunk.
+    .sort((a, b) => a.dtsUs - b.dtsUs);
   void escala;
   if (amostras.length === 0) return null;
 
@@ -190,9 +193,14 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
       console.warn(`[insert-decoder] RECOMECO #${_recomecos} em ${(alvoUs / 1e6).toFixed(2)}s (chamada ${_chamadas})`);
     }
     let k = 0;
+    let melhorCts = -Infinity;
     for (let i = 0; i < amostras.length; i++) {
-      if (amostras[i].ctsUs > alvoUs) break;
-      if (amostras[i].chave) k = i;
+      // CTS is not monotonic in decode order. Inspect sync samples without
+      // stopping at a future presentation timestamp from a reordered frame.
+      if (amostras[i].chave && amostras[i].ctsUs <= alvoUs && amostras[i].ctsUs >= melhorCts) {
+        k = i;
+        melhorCts = amostras[i].ctsUs;
+      }
     }
     novoDecoder();
     proxAmostra = k;

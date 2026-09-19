@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
 import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, responderAcaoDeFila } from '@/lib/history-acoes';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
@@ -96,8 +96,9 @@ import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
 import { PilotInsertsModal } from '@/components/PilotInserts';
+import { PilotFlowButton, PilotFlowInsertsModal } from '@/components/PilotFlowInserts';
 import { PilotHeadlineModal } from '@/components/PilotHeadline';
-import { HEADLINE_CFG_DEFAULT, type Insert, type HeadlineCfg } from '@/lib/pilot-inserts';
+import { HEADLINE_CFG_DEFAULT, insertsAtivosNaMontagem, mesclarInsertsDaOrigem, type Insert, type HeadlineCfg } from '@/lib/pilot-inserts';
 import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
 import {
   LEGENDA_CFG_DEFAULT,
@@ -299,19 +300,19 @@ function chaveSigDoMontado(taskId: string) {
 }
 
 /** Grava a assinatura do que entrou no montado, ao lado do arquivo. */
-async function gravarSigDoMontado(taskId: string, sig: string) {
+async function gravarSigDoMontado(taskId: string, sig: string, key = chaveSigDoMontado(taskId)) {
   if (!sig) return;
   try {
     const { saveBlob } = await import('@/lib/zip-store');
-    await saveBlob(chaveSigDoMontado(taskId), new Blob([sig], { type: 'text/plain' }), 'text/plain');
+    await saveBlob(key, new Blob([sig], { type: 'text/plain' }), 'text/plain');
   } catch (e) { console.warn('[pilot] gravar sig do montado:', e); }
 }
 
 /** A assinatura gravada com o montado, ou null se o arquivo e' anterior a isto. */
-async function lerSigDoMontado(taskId: string): Promise<string | null> {
+async function lerSigDoMontado(taskId: string, key = chaveSigDoMontado(taskId)): Promise<string | null> {
   try {
     const { loadBlob } = await import('@/lib/zip-store');
-    const b = await loadBlob(chaveSigDoMontado(taskId), 'text/plain');
+    const b = await loadBlob(key, 'text/plain');
     return b ? (await b.text()) : null;
   } catch { return null; }
 }
@@ -1121,6 +1122,9 @@ type BatchTaskState = {
   /** ZIP 3 — versoes montadas + camuflagem (gerado se modo camuflagem ON) */
   camufladoZipUrl?: string;
   camufladoZipName?: string;
+  /** Publica uma remontagem Flow somente depois de salvar TODOS os arquivos.
+   * As chaves únicas preservam a entrega anterior se a tarefa mudar no await. */
+  flowMontagem?: { genId: string; montadoKey: string; camufladoKey?: string; assinaturaKey: string };
   /** Stats numericas do pipeline pos-prod — usado pra detectar "parcial".
    *  Quando phase='done' mas algum count !== expected, UI esconde TODOS os
    *  botoes de download (takes/montados/camuflados) e exibe "⚠ parcial",
@@ -2345,6 +2349,7 @@ function ClickUpPilotInner() {
 
   /** Qual popover está aberto ('legenda' | 'zoom') por task. */
   const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | 'headline' | null>>({});
+  const [flowDialog, setFlowDialog] = useState<{ analysis: TaskAnalysis; editor: boolean } | null>(null);
   const legendaBtnRefs = useRef<Record<string, HTMLElement | null>>({});
   const zoomBtnRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -2474,7 +2479,7 @@ function ClickUpPilotInner() {
           palavra da copy — tela cheia ou dividindo a tela com o
           avatar. Nada disto toca o que foi pro HeyGen. */}
       {(() => {
-        const lista = getInserts(a.taskId);
+        const lista = getInserts(a.taskId).filter((ins) => ins.source !== 'flow');
         const aberto = posPopover[a.taskId] === 'inserts';
         const partesDaCopy = (
           batchStates[a.taskId]?.replan?.parts?.length
@@ -2497,7 +2502,7 @@ function ClickUpPilotInner() {
                 partes={partesDaCopy}
                 inserts={lista}
                 onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
-                onMudar={(prox) => setInserts(a.taskId, prox)}
+                onMudar={(prox) => setInsertsDaOrigem(a.taskId, prox, 'manual')}
                 onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
                 thumbDaMidia={(k) => insertThumbs[k] || null}
                 duracaoDaMidia={(k) => insertDurs[k] ?? null}
@@ -2516,6 +2521,14 @@ function ClickUpPilotInner() {
           </span>
         );
       })()}
+      <PilotFlowButton
+        enabled={isFlowEnabled(a.taskId)}
+        count={getInserts(a.taskId).filter((ins) => ins.source === 'flow').length}
+        onClick={() => {
+          setPosPopover((prev) => ({ ...prev, [a.taskId]: null }));
+          setFlowDialog({ analysis: a, editor: false });
+        }}
+      />
       {/* HEADLINE (01.09) — manchete parada por cima do vídeo,
           saindo num corte pra o sumiço ser mascarado. */}
       {(() => {
@@ -2598,7 +2611,7 @@ function ClickUpPilotInner() {
     if (hl.on) {
       out.push({ tipo: 'headline', title: `Com headline — sai no fim de ${hl.ancoraAte || 'hook'}, mascarada pelo corte`, falhou: posFalhou });
     }
-    const ins = insertsRef.current[taskId] || insertsRef.current[cfgId] || [];
+    const ins = insertsDaMontagem(taskId);
     if (ins.length > 0) {
       out.push({
         tipo: 'insert',
@@ -2643,7 +2656,7 @@ function ClickUpPilotInner() {
      *  fila do ffmpeg, então a pós-produção não pode pedir o lock de novo
      *  (esperaria a si mesma). O VA pega o lock por operação — lá ela PRECISA
      *  pedir. Errar isto é deadlock de um lado, corrida do outro. */
-    opts?: { ffmpegJaExclusivo?: boolean },
+    opts?: { ffmpegJaExclusivo?: boolean; exigirCompleta?: boolean },
   ): ((blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>) | undefined {
     // Versão irmã (-yt / -v3...) herda a config da task MÃE — é nela que o
     // user clicou os botões; a irmã nem aparece na lista.
@@ -2651,7 +2664,7 @@ function ClickUpPilotInner() {
     const legenda = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zoom = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
     const hl = headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT;
-    const insDaTask = insertsRef.current[taskId] || insertsRef.current[cfgId] || [];
+    const insDaTask = insertsDaMontagem(taskId);
     if (!legenda.on && !zoom.on && !hl.on && insDaTask.length === 0) return undefined;
     return async (blob, info) => {
       const rp = batchStatesRef.current?.[taskId]?.replan?.parts;
@@ -2695,7 +2708,7 @@ function ClickUpPilotInner() {
         ffmpegJaExclusivo: opts?.ffmpegJaExclusivo !== false,
         // INSERTS: a config é da task MÃE (a irmã de versão herda), e os bytes
         // vêm do IDB na hora do render — nunca ficam presos na memória.
-        inserts: insertsRef.current[taskId] || insertsRef.current[cfgId] || [],
+        inserts: insertsDaMontagem(taskId),
         headline: headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT,
         lerMidia: async (key: string) => {
           try {
@@ -2711,6 +2724,12 @@ function ClickUpPilotInner() {
         },
       });
       for (const av of r.avisos) console.warn(`[clickup-pilot] posprod ${taskId}: ${av}`);
+      // Um pedido omitido não substitui a entrega anterior. Avisos de ajuste
+      // de duração ou alinhamento estimado continuam informativos, como antes.
+      const avisosDeFalha = r.avisos.filter((av) => /não (?:entrou|entraram|abriu|coube|está mais salvo|consegui ler os arquivos dos inserts|consegui misturar o som dos inserts)|saiu sem áudio/i.test(av));
+      if (opts?.exigirCompleta && (avisosDeFalha.length || r.insertsOrfaos?.length)) {
+        throw new Error(`A pós-produção não foi concluída: ${avisosDeFalha.join(' · ') || 'uma mídia de insert ficou indisponível'}`);
+      }
       // INSERT ÓRFÃO (03.09): a mídia foi varrida da faxina do cache do
       // navegador (o AD ficou parado tempo demais). O card já avisa em
       // português; aqui a config se limpa sozinha, senão o MESMO erro voltaria
@@ -2868,6 +2887,56 @@ function ClickUpPilotInner() {
     });
   };
 
+  // As janelas editam somente sua origem. O merge funcional também preserva
+  // alterações feitas enquanto um download do Flow termina em background.
+  const setInsertsDaOrigem = (
+    taskId: string,
+    valor: Insert[] | ((atuais: Insert[]) => Insert[]),
+    origem: 'flow' | 'manual',
+  ) => {
+    setInsertsPorTask((prev) => {
+      const atuais = prev[taskId] || prev[taskIdBaseDaVersao(taskId)] || [];
+      const daOrigem = atuais.filter((ins) => origem === 'flow' ? ins.source === 'flow' : ins.source !== 'flow');
+      const novos = typeof valor === 'function' ? valor(daOrigem) : valor;
+      const next = { ...prev, [taskId]: mesclarInsertsDaOrigem(atuais, novos, origem) };
+      try { localStorage.setItem(INSERTS_KEY, JSON.stringify(next)); } catch {}
+      insertsRef.current = next;
+      return next;
+    });
+  };
+
+  const FLOW_ENABLED_KEY = 'darkolab:clickup-pilot:flow-enabled';
+  const [flowEnabled, setFlowEnabled] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const salvo = JSON.parse(localStorage.getItem(FLOW_ENABLED_KEY) || '{}');
+      return salvo && typeof salvo === 'object' && !Array.isArray(salvo) ? salvo : {};
+    } catch { return {}; }
+  });
+  const flowEnabledRef = useRef(flowEnabled);
+  flowEnabledRef.current = flowEnabled;
+  const isFlowEnabled = (taskId: string): boolean => {
+    const cfgId = taskIdBaseDaVersao(taskId);
+    const cfg = flowEnabledRef.current;
+    if (typeof cfg[taskId] === 'boolean') return cfg[taskId];
+    if (typeof cfg[cfgId] === 'boolean') return cfg[cfgId];
+    // Inserts de Flow já salvos continuam ativos até a pessoa desligá-los.
+    return (insertsRef.current[taskId] || insertsRef.current[cfgId] || []).some((ins) => ins.source === 'flow');
+  };
+  const setFlowEnabledFor = (taskId: string, enabled: boolean) => {
+    setFlowEnabled((prev) => {
+      const next = { ...prev, [taskId]: enabled };
+      try { localStorage.setItem(FLOW_ENABLED_KEY, JSON.stringify(next)); } catch {}
+      flowEnabledRef.current = next;
+      return next;
+    });
+  };
+  function insertsDaMontagem(taskId: string): Insert[] {
+    // O runner continua lendo refs atuais, mesmo depois de gerações longas.
+    const lista = insertsRef.current[taskId] || insertsRef.current[taskIdBaseDaVersao(taskId)] || [];
+    return insertsAtivosNaMontagem(lista, isFlowEnabled(taskId));
+  }
+
   /* ═══════════════ HEADLINE (01.09) ═══════════════
    *  Manchete parada por cima do vídeo. Mesma mecânica de legenda/zoom: config
    *  por task, com fallback pra task mãe e pro padrão da conta. */
@@ -2981,6 +3050,107 @@ function ClickUpPilotInner() {
     } finally {
       URL.revokeObjectURL(url);
     }
+  }
+
+  /** Flow só entra na montagem depois de medir o arquivo e reler seus bytes. */
+  async function subirMidiaDeFlow(taskId: string, f: File, ancora: string) {
+    const meta = await subirMidiaDeInsert(taskId, f, ancora);
+    if (!meta) throw new Error(`Não foi possível importar ${f.name}. Confira o arquivo e tente novamente.`);
+    try {
+      if (!(meta.w > 0 && meta.h > 0)) throw new Error('O arquivo do Flow não tem dimensões válidas.');
+      if (meta.tipo === 'video' && Math.min(meta.w, meta.h) < 1080) {
+        throw new Error('O vídeo do Flow precisa ser baixado em 1080p antes de entrar na montagem.');
+      }
+      const { loadBlob } = await import('@/lib/zip-store');
+      const salvo = await loadBlob(meta.key, f.type);
+      if (!salvo || salvo.size !== f.size) {
+        throw new Error('Não foi possível guardar a mídia do Flow neste navegador. Libere espaço e tente novamente.');
+      }
+      return meta;
+    } catch (e) {
+      try {
+        const { deleteZip } = await import('@/lib/zip-store');
+        await deleteZip(meta.key);
+      } catch {}
+      setInsertThumbs((prev) => { const next = { ...prev }; delete next[meta.key]; return next; });
+      setInsertDurs((prev) => { const next = { ...prev }; delete next[meta.key]; return next; });
+      throw e;
+    }
+  }
+
+  /** Uma janela na raiz, ainda que a toolbar apareça em várias vistas da task. */
+  function janelaDeFlow() {
+    if (!flowDialog) return null;
+    const taskId = flowDialog.analysis.taskId;
+    const a = taskAnalyses[taskId] || flowDialog.analysis;
+    const partes = (
+      batchStates[taskId]?.replan?.parts?.length
+        ? batchStates[taskId]!.replan!.parts!
+        : a.partTemplates || []
+    ).map((x: any) => ({ label: String(x.label || ''), text: String(x.text || '') }));
+    const lista = getInserts(taskId).filter((ins) => ins.source === 'flow');
+    if (flowDialog.editor) {
+      return (
+        <PilotInsertsModal
+          key={`flow-editor:${taskId}`}
+          partes={partes}
+          inserts={lista}
+          onFechar={() => setFlowDialog((prev) => prev?.analysis.taskId === taskId ? { ...prev, editor: false } : prev)}
+          onMudar={(prox) => {
+            const ids = new Set(prox.map((ins) => ins.id));
+            const removidos = new Set(lista.filter((ins) => !ids.has(ins.id)).map((ins) => ins.id));
+            const alterados = prox.filter((ins) => !lista.includes(ins));
+            setInsertsDaOrigem(taskId, (atuais) => {
+              // Uploads terminam mesmo após fechar o editor. Reaplica somente
+              // esta edição para não apagar novos inserts ou ressuscitar removidos.
+              const next = atuais.filter((ins) => !removidos.has(ins.id));
+              for (const ins of alterados) {
+                const index = next.findIndex((atual) => atual.id === ins.id);
+                if (index < 0) next.push(ins); else next[index] = ins;
+              }
+              return next;
+            }, 'flow');
+          }}
+          onSubirMidia={async (f, ancora) => {
+            try { return await subirMidiaDeFlow(taskId, f, ancora); }
+            catch (e) { setError((e as Error)?.message || 'Não foi possível importar a mídia do Flow.'); return null; }
+          }}
+          thumbDaMidia={(k) => insertThumbs[k] || null}
+          duracaoDaMidia={(k) => insertDurs[k] ?? null}
+          lerMidia={async (k) => {
+            try {
+              const { loadBlob } = await import('@/lib/zip-store');
+              return await loadBlob(k);
+            } catch (e) {
+              console.warn(`[clickup-pilot] Flow: mídia ${k} não voltou do IDB:`, e);
+              return null;
+            }
+          }}
+          thumbAvatar={(a.roleSlots || []).find((sl) => sl.avatarThumb)?.avatarThumb || null}
+        />
+      );
+    }
+    return (
+      <PilotFlowInsertsModal
+        key={`flow:${taskId}`}
+        taskId={taskId}
+        partes={partes}
+        inserts={lista}
+        enabled={isFlowEnabled(taskId)}
+        onEnabledChange={(enabled) => setFlowEnabledFor(taskId, enabled)}
+        onFechar={() => setFlowDialog(null)}
+        onMudar={(prox) => setInsertsDaOrigem(taskId, prox, 'flow')}
+        onSubirMidia={(f, ancora) => subirMidiaDeFlow(taskId, f, ancora)}
+        onEditarInserts={() => setFlowDialog((prev) => prev?.analysis.taskId === taskId ? { ...prev, editor: true } : prev)}
+        onAtualizarMontagem={
+          batchStates[taskId]?.kind !== 'troca' && !batchStates[taskId]?.isVA
+          && (batchStates[taskId]?.phase === 'done' || flowRebuildLocksRef.current.has(taskId))
+            ? () => rebuildMontage(taskId, { somenteCache: true })
+            : undefined
+        }
+        atualizandoMontagem={flowRebuildLocksRef.current.has(taskId)}
+      />
+    );
   }
 
   // FRAME × AVATAR por VERSÃO (30.08) — override de UI. A VERDADE é a
@@ -5196,7 +5366,8 @@ function ClickUpPilotInner() {
             const updates: Partial<BatchTaskState> = {};
             const t = await loadZipRetry(`batch:${taskId}:takes`);
             if (t) { updates.zipBlobUrl = t.blobUrl; updates.zipFilename = t.filename; }
-            const m = await loadZipRetry(`batch:${taskId}:montado`);
+            const flowEntrega = restored[taskId]?.flowMontagem?.genId === restored[taskId]?.genId ? restored[taskId]?.flowMontagem : undefined;
+            const m = await loadZipRetry(flowEntrega?.montadoKey || `batch:${taskId}:montado`);
             if (m) { updates.montadoZipUrl = m.blobUrl; updates.montadoZipName = m.filename; }
             // VA (texto E lipsync) salva o resultado em `va:<taskId>:zip` (chave
             // diferente do batch normal). Sem re-hidratar isso, uma VA PRONTA
@@ -5207,12 +5378,16 @@ function ClickUpPilotInner() {
               const v = await loadZipRetry(`va:${taskId}:zip`);
               if (v) { updates.montadoZipUrl = v.blobUrl; updates.montadoZipName = v.filename; }
             }
-            const c = await loadZipRetry(`batch:${taskId}:camo`);
+            const camoKey = flowEntrega ? flowEntrega.camufladoKey : `batch:${taskId}:camo`;
+            const c = camoKey ? await loadZipRetry(camoKey) : null;
             if (c) { updates.camufladoZipUrl = c.blobUrl; updates.camufladoZipName = c.filename; }
             if (Object.keys(updates).length === 0) continue;
             setBatchStates((prev) => {
               const cur = prev[taskId];
               if (!cur) return prev;
+              if ((cur.flowMontagem || restored[taskId]?.flowMontagem)
+                  && (cur.genId !== restored[taskId]?.genId
+                    || JSON.stringify(cur.flowMontagem) !== JSON.stringify(restored[taskId]?.flowMontagem))) return prev;
               return { ...prev, [taskId]: { ...cur, ...updates } as BatchTaskState };
             });
           }
@@ -5733,7 +5908,7 @@ function ClickUpPilotInner() {
     try {
       const { deletePrefix, INSUMO_DO_DISPARO } = await import('@/lib/zip-store');
       // preserva o FRAME do modo imagem: é insumo da cena, não take velho
-      const purged = await deletePrefix(`pilot:${taskId}:`, { preservar: INSUMO_DO_DISPARO });
+      const purged = await deletePrefix(`pilot:${taskId}:`, { preservar: new RegExp(`${INSUMO_DO_DISPARO.source}|:part:flow-montagem:`) });
       if (purged > 0) console.log(`[clickup-pilot] geração nova ${genId} (task=${taskId}): limpei ${purged} artefato(s) por-parte de gerações anteriores (isolação de avatar)`);
     } catch (e) { console.warn('[clickup-pilot] purge de geração anterior falhou (segue mesmo assim — a geração nova escreve em namespace próprio):', e); }
 
@@ -6956,6 +7131,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           zipFilename: takesFilename,
           montadoZipUrl: montadoUrl,
           montadoZipName: montadoName,
+          flowMontagem: undefined,
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
@@ -7067,7 +7243,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       try {
         const { deletePrefix, INSUMO_DO_DISPARO } = await import('@/lib/zip-store');
         // preserva o FRAME do modo imagem: é insumo da cena, não take velho
-        const purged = await deletePrefix(`pilot:${taskId}:`, { preservar: INSUMO_DO_DISPARO });
+        const purged = await deletePrefix(`pilot:${taskId}:`, { preservar: new RegExp(`${INSUMO_DO_DISPARO.source}|:part:flow-montagem:`) });
         console.warn(`[pilot resume] batch LEGADO sem genId — purguei ${purged} artefato(s) por-parte possivelmente contaminado(s) e vou RE-BAIXAR do HeyGen pelos videoIds atuais (avatar certo) sob genId ${genId}`);
       } catch (e) { console.warn('[pilot resume] purge do cache legado falhou (segue re-baixando do HeyGen mesmo assim):', e); }
       // Grava o genId no state pra sobreviver F5 e blindar os próximos RETOMAR.
@@ -8060,6 +8236,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           zipFilename: takesFilename,
           montadoZipUrl: montadoUrl,
           montadoZipName: montadoName,
+          flowMontagem: undefined,
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
           pipeStats,
@@ -9250,6 +9427,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   const [regenError, setRegenError] = useState<string | null>(null);
   const [rebuildingTaskId, setRebuildingTaskId] = useState<string | null>(null);
+  const flowRebuildLocksRef = useRef(new Set<string>());
+  // O handler atravessa awaits; estes leitores precisam ser do render atual.
+  const flowRebuildConfigRef = useRef((taskId: string) => ({
+    decupagem: isDecupagemEnabled(taskId), respiro: getDecupIntensity(taskId),
+    nivelamento: isNivelamentoEnabled(taskId), ...getTaskCamuflagem(taskId),
+  }));
+  flowRebuildConfigRef.current = (taskId: string) => ({
+    decupagem: isDecupagemEnabled(taskId), respiro: getDecupIntensity(taskId),
+    nivelamento: isNivelamentoEnabled(taskId), ...getTaskCamuflagem(taskId),
+  });
 
   /** Procura AvatarOption completo na library cache pelo avatarId.
    *  Retorna null se nao achar (library nao carregada ou avatar deletado). */
@@ -9668,17 +9855,62 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   // runPostPipeline com TODOS os blobs do IDB (fresh) e gera novos
   // montadoZipUrl/camufladoZipUrl. dirtyParts limpa pra zerar o flag.
 
-  async function rebuildMontage(taskId: string) {
-    const b = batchStates[taskId];
-    if (!b) return;
+  async function rebuildMontage(taskId: string, opts?: { somenteCache?: boolean }): Promise<boolean> {
+    const somenteCache = opts?.somenteCache === true;
+    // O Flow nunca passa pelo Retomar: usa exclusivamente os takes existentes.
+    // O ref fecha a janela de dois cliques antes do próximo render do React.
+    if (flowRebuildLocksRef.current.has(taskId)) return false;
+    const b = somenteCache ? batchStatesRef.current[taskId] : batchStates[taskId];
+    if (!b) return false;
+    if (somenteCache) flowRebuildLocksRef.current.add(taskId);
     const genId = b.genId; // isolação por geração: hidrata só os takes DESTA geração
     // ⛔ A assinatura e' do estado que ENTROU na montagem, capturado AGORA — nao
     // do estado no fim dela. Montar leva minutos; um take re-gerado nesse meio
     // tempo nao esta' no arquivo, e carimbar no fim diria que esta'. Seria a
     // mesma mentira que a assinatura existe pra impedir.
     const sigDoQueEntrou = assinaturaMontagem(b.parts);
+    const flowStage = somenteCache ? `pilot:${taskId}:g:${genId}:part:flow-montagem:${crypto.randomUUID()}` : null;
+    const montadoKey = flowStage ? `${flowStage}:montado` : `batch:${taskId}:montado`;
+    const camufladoKey = flowStage ? `${flowStage}:camo` : `batch:${taskId}:camo`;
+    const assinaturaKey = flowStage ? `${flowStage}:sig` : chaveSigDoMontado(taskId);
+    const configDoQueEntrou = somenteCache ? flowRebuildConfigRef.current(taskId) : null;
+    const snapshotFlow = () => {
+      const atual = batchStatesRef.current[taskId];
+      const cfgId = taskIdBaseDaVersao(taskId);
+      return JSON.stringify({
+        genId: atual?.genId,
+        assinatura: assinaturaMontagem(atual?.parts),
+        copy: atual?.replan?.parts,
+        inserts: insertsRef.current[taskId] || insertsRef.current[cfgId] || [],
+        flowEnabled: isFlowEnabled(taskId),
+        legenda: legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO],
+        zoom: zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO],
+        headline: headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO],
+        pipeline: flowRebuildConfigRef.current(taskId),
+        templates: captionTemplatesRef.current,
+        idioma: { drMillion: taskAnalysesRef.current[taskId]?.drMillion, drLang: taskAnalysesRef.current[taskId]?.drLang },
+      });
+    };
+    const snapshotDoQueEntrou = somenteCache ? snapshotFlow() : '';
+    const conferirSnapshot = () => {
+      if (!somenteCache) return;
+      const atual = batchStatesRef.current[taskId];
+      if (!atual || !['done', 'post'].includes(atual.phase) || heygenPendingRef.current[taskId]
+          || takesPendentesDe(atual) || snapshotFlow() !== snapshotDoQueEntrou
+          || flowRebuildConfigRef.current(taskId).whiteAudio !== configDoQueEntrou?.whiteAudio) {
+        throw new Error('Os takes, a copy ou os inserts mudaram durante a montagem. Confira a configuração e atualize novamente.');
+      }
+    };
+    let iniciouMontagem = false;
+    const novasUrls: string[] = [];
     setRebuildingTaskId(taskId);
     try {
+      if (somenteCache && (b.phase !== 'done' || b.kind === 'troca' || b.isVA
+          || !genId || !b.parts.length || !b.replan?.parts?.length
+          || b.replan.parts.length !== b.parts.length || heygenPendingRef.current[taskId]
+          || takesPendentesDe(b))) {
+        throw new Error('Para atualizar sem gerar avatares, esta task precisa estar pronta, com a copy e todos os takes salvos neste navegador.');
+      }
       const { loadBlob } = await import('@/lib/zip-store');
       // Hidrata blobs do IDB (todos, fresh — incluindo os editados)
       // expected:true = parte COM conteúdo (texto no plano) → DEVE ter blob.
@@ -9700,31 +9932,76 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }),
       );
 
-      setBatchStates((prev) => ({
-        ...prev,
-        [taskId]: { ...prev[taskId], phase: 'post', message: 'Re-montando com parts editadas...', finishedAt: undefined },
-      }));
+      if (somenteCache) {
+        const faltando = partBlobs.filter((p, i) => p.expected && (!p.blob || !b.parts[i].videoId
+          || (b.parts[i].videoStatus && b.parts[i].videoStatus !== 'completed')
+          || b.replan?.parts[i]?.label !== p.label));
+        if (!partBlobs.some((p) => p.expected) || faltando.length) {
+          throw new Error(`Os takes ${faltando.map((p) => p.label).join(', ') || 'desta task'} não estão completos no cache. Nenhum avatar foi gerado; a montagem anterior foi preservada.`);
+        }
+        for (const ins of insertsDaMontagem(taskId)) {
+          const midia = await loadBlob(ins.midiaKey);
+          if (!midia || midia.size === 0) {
+            throw new Error(`A mídia do insert “${ins.midiaNome || ins.ancora}” não está neste navegador. Importe-a novamente antes de atualizar a montagem.`);
+          }
+        }
+        conferirSnapshot();
+      }
 
-      const _tc = getTaskCamuflagem(taskId);
+      const marcarMontagem = () => setBatchStates((prev) => {
+        if (somenteCache) {
+          try { conferirSnapshot(); } catch { return prev; }
+          if (prev[taskId]?.genId !== genId || prev[taskId]?.phase !== 'done'
+              || assinaturaMontagem(prev[taskId]?.parts) !== sigDoQueEntrou) return prev;
+        }
+        iniciouMontagem = true;
+        return { ...prev, [taskId]: { ...prev[taskId], phase: 'post', message: 'Re-montando com parts editadas...', finishedAt: undefined } };
+      });
+      if (somenteCache) flushSync(marcarMontagem); else marcarMontagem();
+      if (somenteCache && !iniciouMontagem) throw new Error('A task mudou antes de iniciar a montagem. A entrega anterior foi preservada.');
+
+      const _tc = configDoQueEntrou || getTaskCamuflagem(taskId);
+      const decupagemDaMontagem = configDoQueEntrou?.decupagem ?? isDecupagemEnabled(taskId);
+      const respiroDaMontagem = configDoQueEntrou?.respiro ?? getDecupIntensity(taskId);
+      const nivelamentoDaMontagem = configDoQueEntrou?.nivelamento ?? isNivelamentoEnabled(taskId);
+      const camuflagemDaMontagem = somenteCache ? _tc.camuflagem : camuflagemMode;
+      limparPosResultado(taskId);
+      const posOriginal = fazerPosProcessar(taskId, somenteCache ? { exigirCompleta: true } : undefined);
+      let posConcluidos = 0;
+      const posProcessar = somenteCache && posOriginal
+        ? async (blob: Blob, info: { filename: string; partesSec: number[] | null }) => {
+            conferirSnapshot();
+            const novo = await posOriginal(blob, info);
+            conferirSnapshot();
+            if (!novo || novo.size <= 50_000) throw new Error('A pós-produção não concluiu o vídeo com os inserts. A entrega anterior foi preservada.');
+            posConcluidos++;
+            return novo;
+          }
+        : posOriginal;
       const pipeRes = await runPostPipelineSerial({
         baseAdId: b.baseAdId,
         parts: partBlobs,
-        decupagem: isDecupagemEnabled(taskId),
-        keepSilenceSec: getDecupIntensity(taskId),
-        nivelarVoz: isNivelamentoEnabled(taskId),
-        posProcessar: (limparPosResultado(taskId), fazerPosProcessar(taskId)),
+        decupagem: decupagemDaMontagem,
+        keepSilenceSec: respiroDaMontagem,
+        nivelarVoz: nivelamentoDaMontagem,
+        posProcessar,
         camuflagem: _tc.camuflagem,
         whiteAudio: _tc.whiteAudio,
         camuflagemVolume: _tc.camuflagemVolume,
         // Atualizar montagem: reusa cache das partes NÃO editadas; as editadas
         // tiveram o cache invalidado na hora da edição (regen) → recomputam só elas.
         readClipCache: true,
-        ...makeClipCacheHooks(taskId, getDecupIntensity(taskId), genId),
+        ...makeClipCacheHooks(taskId, respiroDaMontagem, genId),
         onProgress: (p) => {
-          setBatchStates((prev) => ({
-            ...prev,
-            [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}${p.detail ? ` · ${p.detail}` : ''}` },
-          }));
+          setBatchStates((prev) => {
+            if (somenteCache) {
+              try { conferirSnapshot(); } catch { return prev; }
+              if (prev[taskId]?.genId !== genId || prev[taskId]?.phase !== 'post'
+                  || assinaturaMontagem(prev[taskId]?.parts) !== sigDoQueEntrou) return prev;
+            }
+            return { ...prev, [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}${p.detail ? ` · ${p.detail}` : ''}` } };
+          });
+
         },
       }, taskId);
 
@@ -9747,6 +10024,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               : nomeComCanal(it.filename, canalVersao),
           }));
 
+      if (somenteCache) {
+        conferirSnapshot();
+        const falhou = assembled.find((it) => it.missingParts?.length || it.errors?.assemble
+          || it.errors?.posproducao || !it.rawAssembled || it.rawAssembled.size <= 50_000
+          || (nivelamentoDaMontagem && it.errors?.nivelamento)
+          || (decupagemDaMontagem && (!it.decupado || it.decupado.size <= 50_000 || it.errors?.decupagem))
+          || (camuflagemDaMontagem && (!it.camuflado || it.camuflado.size <= 50_000 || it.errors?.camuflagem)));
+        if (!assembled.length || falhou || (posOriginal && posConcluidos < assembled.length)) {
+          throw new Error(`A nova montagem ficou incompleta${falhou ? ` (${falhou.filename})` : ''}. A entrega anterior foi preservada.`);
+        }
+      }
+
       // ZIP montado
       const zipMont = new JSZip();
       for (const item of assembled) {
@@ -9762,31 +10051,47 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       zipMont.file('_DIAGNOSTICO.txt', `Re-montagem apos edicao de parts\n${pipeRes.diagnostics.summary}\n`);
       const montBlob = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
+      const montadoName = `${adNameClean}_${decupagemDaMontagem ? 'montado_decupado' : 'montado'}.zip`;
+      conferirSnapshot();
       const montadoUrl = URL.createObjectURL(montBlob);
-      await persistDeliverableOrRescue(`batch:${taskId}:montado`, montBlob, montadoName);
-      await gravarSigDoMontado(taskId, sigDoQueEntrou);
+      novasUrls.push(montadoUrl);
+      const montadoSalvo = await persistDeliverableOrRescue(montadoKey, montBlob, montadoName);
+      conferirSnapshot();
+      if (somenteCache && !montadoSalvo.persisted) throw new Error('Não foi possível salvar a nova montagem neste navegador. Libere espaço e atualize novamente.');
+      if (!somenteCache) await gravarSigDoMontado(taskId, sigDoQueEntrou);
 
       // ZIP camo (se modo ON)
       let camuUrl: string | undefined;
       let camuName: string | undefined;
-      if (camuflagemMode) {
+      if (camuflagemDaMontagem) {
         const zipCamu = new JSZip();
         for (const item of assembled) {
           if (item.camuflado) zipCamu.file(item.filename.replace('.mp4', '_camuflado.mp4'), item.camuflado);
           else zipCamu.file(`${item.filename.replace('.mp4', '')}_CAMUFLAGEM_ERRO.txt`, item.errors?.camuflagem || 'falha');
         }
         const camuBlob = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        conferirSnapshot();
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(camuBlob);
+        novasUrls.push(camuUrl);
         // GUARD: zip só de erro NÃO sobrescreve camuflado BOM no IDB (o F5
         // re-hidrata o download de lá) — mesma política do montado.
         if (assembled.some((it) => !!it.camuflado)) {
-          await persistDeliverableOrRescue(`batch:${taskId}:camo`, camuBlob, camuName);
+          const camufladoSalvo = await persistDeliverableOrRescue(camufladoKey, camuBlob, camuName);
+          conferirSnapshot();
+          if (somenteCache && !camufladoSalvo.persisted) throw new Error('Não foi possível salvar o camuflado neste navegador. A entrega anterior foi preservada; libere espaço e atualize novamente.');
         }
       }
 
-      const decupagemOn = isDecupagemEnabled(taskId);
+      if (somenteCache) {
+        await gravarSigDoMontado(taskId, sigDoQueEntrou, assinaturaKey);
+        conferirSnapshot();
+        const assinaturaSalva = await lerSigDoMontado(taskId, assinaturaKey);
+        conferirSnapshot();
+        if (assinaturaSalva !== sigDoQueEntrou) throw new Error('Não foi possível conferir a assinatura da nova montagem. A entrega anterior foi preservada.');
+      }
+
+      const decupagemOn = decupagemDaMontagem;
       const pipeStats = {
         expectedMontagens: assembled.length,
         // Montagem INCOMPLETA (faltou parte esperada) NÃO conta como ok →
@@ -9797,15 +10102,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         okDecupados: assembled.filter((it) => !!it.decupado).length,
         okCamuflados: assembled.filter((it) => !!it.camuflado).length,
         expectedDecupagem: decupagemOn,
-        expectedCamuflagem: camuflagemMode,
+        expectedCamuflagem: camuflagemDaMontagem,
       };
 
-      // Revoga URLs antigas antes de substituir (memoria)
-      for (const url of [b.montadoZipUrl, b.camufladoZipUrl]) {
-        if (url) { try { URL.revokeObjectURL(url); } catch {} }
-      }
-
-      setBatchStates((prev) => ({
+      // Nenhum await daqui até publicar o apontador: os ZIPs anteriores nunca
+      // foram sobrescritos. Uma edição durante a gravação deixa só staging órfão.
+      conferirSnapshot();
+      let publicou = false;
+      const publicarEntrega = () => setBatchStates((prev) => {
+        if (somenteCache) {
+          try { conferirSnapshot(); } catch { return prev; }
+          if (prev[taskId]?.genId !== genId || assinaturaMontagem(prev[taskId]?.parts) !== sigDoQueEntrou
+              || !['done', 'post'].includes(prev[taskId]?.phase)) return prev;
+          recoveredBatchIdsRef.current.delete(taskId);
+        }
+        publicou = true;
+        return {
         ...prev,
         [taskId]: {
           ...prev[taskId],
@@ -9816,6 +10128,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           montadoZipName: montadoName,
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
+          flowMontagem: somenteCache ? { genId: genId!, montadoKey, camufladoKey: camuName ? camufladoKey : undefined, assinaturaKey } : undefined,
           pipeStats,
           // Limpa SO' o que entrou nesta montagem. Take re-gerado DURANTE ela
           // nao esta' no arquivo: continua sujo, e o card segue pedindo
@@ -9826,15 +10139,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           }),
           montagemSig: sigDoQueEntrou,
         },
-      }));
+        };
+      });
+      // O commit do apontador é síncrono: um update React já enfileirado não
+      // pode aplicar o resultado antigo depois de uma geração mais nova.
+      if (somenteCache) flushSync(publicarEntrega); else publicarEntrega();
+      if (somenteCache && !publicou) throw new Error('A task mudou antes de publicar a montagem. A entrega anterior foi preservada.');
+      for (const url of [b.montadoZipUrl, b.camufladoZipUrl]) {
+        if (url) { try { URL.revokeObjectURL(url); } catch {} }
+      }
+      if (somenteCache) {
+        try { logHistory({
+          tool: 'clickup-pilot', title: `${adNameClean} · montagem atualizada`,
+          meta: 'Takes locais · inserts Flow',
+          ref: [
+            { via: 'zip', key: montadoKey, name: montadoName, label: 'Montado', taskId },
+            ...(camuName ? [{ via: 'zip' as const, key: camufladoKey, name: camuName, label: 'Camuflado', taskId }] : []),
+          ],
+        }); } catch (e) { console.warn('[pilot] histórico da montagem Flow:', e); }
+      }
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setBatchStates((prev) => ({
-        ...prev,
-        [taskId]: { ...prev[taskId], phase: 'done', message: `Re-montagem falhou: ${msg}`, finishedAt: Date.now() },
-      }));
+      for (const url of novasUrls) { try { URL.revokeObjectURL(url); } catch {} }
+      if (!somenteCache || iniciouMontagem) {
+        setBatchStates((prev) => {
+          if (somenteCache && (prev[taskId]?.genId !== genId || prev[taskId]?.phase !== 'post' || heygenPendingRef.current[taskId])) return prev;
+          return { ...prev, [taskId]: { ...prev[taskId], phase: 'done', message: `Re-montagem falhou: ${msg}`, finishedAt: Date.now() } };
+        });
+      }
+      if (somenteCache) throw e;
+      return false;
     } finally {
-      setRebuildingTaskId(null);
+      if (somenteCache) flowRebuildLocksRef.current.delete(taskId);
+      setRebuildingTaskId((atual) => atual === taskId ? null : atual);
     }
   }
 
@@ -15139,9 +15477,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 && (montagemContentOk || b.kind === 'troca' || !!b.camufladoZipName || !!b.camufladoZipUrl)
                                   ? async () => {
                                       const { loadZip } = await import('@/lib/zip-store');
+                                      const flowEntrega = b.flowMontagem?.genId === b.genId ? b.flowMontagem : undefined;
                                       const keys = b.isVA
                                         ? [`va:${b.taskId}:zip`]
-                                        : [`batch:${b.taskId}:montado`, `batch:${b.taskId}:camo`];
+                                        : flowEntrega
+                                          ? [flowEntrega.montadoKey, ...(flowEntrega.camufladoKey ? [flowEntrega.camufladoKey] : [])]
+                                          : [`batch:${b.taskId}:montado`, `batch:${b.taskId}:camo`];
                                       const out: Array<{ url: string; name?: string; revoke?: boolean; blob?: Blob }> = [];
                                       for (const k of keys) {
                                         try {
@@ -15291,7 +15632,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               takesPendentes={takesPendentesDe(b)}
                               takesForaDoPlano={partesForaDoPlano(b.parts, b.replan?.parts).length}
                               conferirEntrega={async () => {
-                                const gravada = await lerSigDoMontado(b.taskId);
+                                const gravada = await lerSigDoMontado(b.taskId, b.flowMontagem?.genId === b.genId ? b.flowMontagem?.assinaturaKey : undefined);
                                 // Arquivo anterior a esta checagem nao tem assinatura:
                                 // nao da' pra afirmar nada, e travar todo montado antigo
                                 // seria pior que o silencio. Segue.
@@ -18575,6 +18916,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             </div>
           ) : null}
       </ToolShell>
+      {janelaDeFlow()}
       {/* Modal pra editar 1 take e re-gerar so essa parte */}
       {editingPart ? (
         <EditPartModal

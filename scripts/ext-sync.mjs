@@ -20,8 +20,8 @@ import { acharPastaPorId } from './ext-id.mjs';
 const RAIZ_DOWNLOADS = 'D:/NOVOS DOWNLOADS';
 const PREFIXO = 'auto-edit-heygen-extension';
 // Mesma lista que o ZIP distribuido usa (app/api/extension/download/route.ts).
-const ARQUIVOS = ['manifest.json', 'background.js', 'bridge.js', 'heygen-content.js', 'README.md'];
-const ICONES = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];
+const ARQUIVOS = ['manifest.json', 'background.js', 'bridge.js', 'flow-background.js', 'flow-bridge.js', 'flow-content.js', 'heygen-content.js', 'inject.js', 'README.md'];
+const ICONES = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'].map((name) => join('icons', name));
 
 function versaoDe(pasta) {
   try {

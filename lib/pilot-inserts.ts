@@ -40,6 +40,8 @@ export type MidiaTipo = 'video' | 'imagem';
 
 export type Insert = {
   id: string;
+  /** Origem da mídia; ausente preserva os inserts enviados manualmente. */
+  source?: 'flow';
   /** label da parte da copy onde ancora — 'HOOK 1', 'BODY 2'... */
   ancora: string;
   /**
@@ -91,6 +93,30 @@ export type Insert = {
   /** 0..1 — quanto do som do insert entra por cima da fala. */
   volume?: number;
 };
+
+/** As duas janelas editam coleções independentes dentro da mesma montagem. */
+export function mesclarInsertsDaOrigem(atuais: Insert[], novos: Insert[], origem: 'flow' | 'manual'): Insert[] {
+  const recebidos = origem === 'flow' ? novos.map((ins) => ({ ...ins, source: 'flow' as const })) : novos;
+  const pendentes = new Map(recebidos.map((ins) => [ins.id, ins]));
+  const resultado: Insert[] = [];
+  for (const atual of atuais) {
+    const pertence = origem === 'flow' ? atual.source === 'flow' : atual.source !== 'flow';
+    if (!pertence) {
+      resultado.push(atual);
+    } else {
+      const substituto = pendentes.get(atual.id);
+      if (substituto) resultado.push(substituto);
+      pendentes.delete(atual.id);
+    }
+  }
+  // Preserva a ordem dos inserts já presentes: ela desempata âncoras sobrepostas.
+  return [...resultado, ...pendentes.values()];
+}
+
+/** Desligar Flow preserva seus arquivos e deixa todos os inserts manuais ativos. */
+export function insertsAtivosNaMontagem(inserts: Insert[], flowAtivo: boolean): Insert[] {
+  return flowAtivo ? inserts : inserts.filter((ins) => ins.source !== 'flow');
+}
 
 export const INSERT_FOCO_PADRAO = 0.34;
 /** Recorte não pode ser mais curto que isto — abaixo disso não se vê nada. */

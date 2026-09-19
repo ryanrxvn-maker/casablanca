@@ -175,12 +175,21 @@
     await waitDom(tabId, 'button', { name }, () => true, `o botão ${name}`);
     return dom(tabId, 'activateButton', { name });
   }
-  async function activateWithUserGesture(tabId, kind, name, requestId) {
+  async function assertDownloadRoute(tabId, detailUrl) {
+    const expected = new URL(detailUrl);
+    const current = new URL((await chrome.tabs.get(tabId)).url);
+    if (current.origin !== expected.origin || current.pathname.replace(/\/$/, '') !== expected.pathname.replace(/\/$/, '')) throw new Error('O Flow saiu do resultado selecionado antes do download. Nenhum outro arquivo será baixado.');
+  }
+  async function activateWithUserGesture(tabId, kind, name, requestId, detailUrl = null) {
     await waitDom(tabId, kind === 'upload' ? 'button' : 'menu', { name }, () => true, `o controle ${name}`);
+    if (detailUrl) await assertDownloadRoute(tabId, detailUrl);
+    const expectedLocation = detailUrl ? { origin: new URL(detailUrl).origin, pathname: new URL(detailUrl).pathname.replace(/\/$/, '') } : null;
     const token = crypto.randomUUID();
     await dom(tabId, 'prepareGestureActivation', { kind, name, requestId, token });
     const result = await cdp(tabId, 'Runtime.evaluate', {
       expression: `(() => {
+        const expectedLocation = ${JSON.stringify(expectedLocation)};
+        if (expectedLocation && (location.origin !== expectedLocation.origin || location.pathname.replace(/\\/$/, '') !== expectedLocation.pathname)) throw new Error('O Flow saiu do resultado selecionado antes do clique de download.');
         const target = document.querySelector('[data-pilot-flow-activation="' + ${JSON.stringify(token)} + '"]');
         if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true') throw new Error('O controle do Flow mudou antes da ativação.');
         target.removeAttribute('data-pilot-flow-activation');
@@ -432,19 +441,31 @@
   }
   async function placeFrameReference(tabId, index, source) {
     const before = await dom(tabId, 'commandReferences');
-    if (!Array.isArray(before.frameIds) || before.frameIds[index]) throw new Error('O slot de frame não está vazio. Nenhuma geração foi disparada.');
+    if (![0, 1].includes(index) || before.busy || !Array.isArray(before.frameIds) || before.frameIds.length !== 2 || before.frameIds[index] || before.count !== before.frameIds.filter(Boolean).length || !sameReferenceIds(before.ids, before.frameIds.filter(Boolean))) throw new Error('O slot de frame não está vazio ou as referências anteriores não foram confirmadas. Nenhuma geração foi disparada.');
     await dom(tabId, 'openFrameSlot', { index });
     const imageId = source.imageId || (await waitDom(tabId, 'uploadedResource', { name: source.name }, (value) => Boolean(value.imageId), 'a referência enviada na biblioteca do Flow', 60000)).imageId;
     await waitDom(tabId, 'frameResource', { imageId }, (value) => value.imageId === imageId, 'a imagem exata do frame', 60000);
     await dom(tabId, 'selectFrameResource', { imageId });
-    await waitDom(tabId, 'frameReferenceSelection', { imageId }, (value) => value.previewMatches && value.imageId === imageId, 'a prévia do frame selecionado', 15000);
-    await clickButton(tabId, 'Incluir no comando');
-    const expected = [...before.frameIds]; expected[index] = imageId;
-    await waitDom(tabId, 'commandReferences', {}, (value) => !value.busy && value.count === before.count + 1 && sameFrameIds(value.frameIds, expected) && sameReferenceIds(value.ids, expected.filter(Boolean)), 'o frame na posição correta do comando', 60000);
+    await confirmReferencePlacement(tabId, before, imageId, { frameIndex: index });
     return imageId;
+  }
+  async function confirmReferencePlacement(tabId, before, imageId, { frameIndex = null, name } = {}) {
+    const expectedIds = [...before.ids, imageId];
+    const expectedFrames = frameIndex === null ? null : [...before.frameIds];
+    if (expectedFrames) expectedFrames[frameIndex] = imageId;
+    const matches = (value, ids, frames) => Boolean(value && !value.busy && value.count === ids.length && sameReferenceIds(value.ids, ids) && (frames === null || sameFrameIds(value.frameIds, frames)));
+    const inserted = (value) => matches(value, expectedIds, expectedFrames);
+    const unchanged = (value) => matches(value, before.ids, frameIndex === null ? null : before.frameIds);
+    // New Flow pickers insert immediately. Older pickers leave a preview and
+    // require Include. Neither path may change an existing reference or slot.
+    const selected = await waitDom(tabId, 'referencePlacementState', { imageId, name }, (value) =>
+      inserted(value.references) || (value.imageId === imageId && value.previewMatches && unchanged(value.references)), 'a referência exata inserida ou sua prévia no Flow', 60000);
+    if (!inserted(selected.references)) await clickButton(tabId, 'Incluir no comando');
+    await waitDom(tabId, 'commandReferences', {}, inserted, frameIndex === null ? 'a identidade da referência no comando' : 'o frame na posição correta do comando', 60000);
   }
   async function uploadReference(tabId, reference, requestId, index) {
     const before = await dom(tabId, 'commandReferences');
+    if (before.busy || !Array.isArray(before.ids) || before.count !== before.ids.length) throw new Error('As referências anteriores ainda não foram confirmadas. Nenhuma geração foi disparada.');
     const upload = { ...reference, name: uniqueReferenceName(requestId, index, reference.mimeType) };
     await clickButton(tabId, 'Adicionar elementos à caixa de comando');
     let resolveChooser;
@@ -458,17 +479,47 @@
       await injectReferenceFile(tabId, event, upload);
       const resource = await waitDom(tabId, 'uploadedResource', { name: upload.name }, (value) => Boolean(value.imageId), 'o arquivo enviado na lista do Flow', 60000);
       await dom(tabId, 'selectUploadedResource', { name: upload.name });
-      // Flow leaves aria-selected=false even after a valid selection. The
-      // exact preview name plus image identity is the observed reliable signal.
-      await waitDom(tabId, 'resourceSelection', { name: upload.name }, (value) => value.previewMatches && value.imageId === resource.imageId, 'a prévia da referência enviada', 15000);
-      await clickButton(tabId, 'Incluir no comando');
-      const expectedIds = [...before.ids, resource.imageId];
-      await waitDom(tabId, 'commandReferences', {}, (value) => value.count === before.count + 1 && !value.busy && sameReferenceIds(value.ids, expectedIds), 'a identidade da referência no comando', 60000);
+      await confirmReferencePlacement(tabId, before, resource.imageId, { name: upload.name });
       return resource.imageId;
     } finally {
       choosers.delete(tabId);
       await cdp(tabId, 'Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => {});
     }
+  }
+  function videoDetailId(projectUrl, detailUrl) {
+    const project = new URL(projectUrl), detail = new URL(detailUrl);
+    const prefix = project.pathname.replace(/\/+$/, '') + '/edit/';
+    const id = detail.pathname.startsWith(prefix) ? detail.pathname.slice(prefix.length).replace(/\/$/, '') : '';
+    if (detail.origin !== project.origin || !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id)) throw new Error('O Flow não confirmou o vídeo dentro do projeto deste pedido. O resultado não será associado a outra mídia.');
+    return id.toLowerCase();
+  }
+  async function resolveVideoAsset(tabId, asset, projectUrl) {
+    await click(tabId, await dom(tabId, 'mediaOpen', { asset }));
+    await waitReady(tabId, 'downloadReady');
+    const id = videoDetailId(projectUrl, (await chrome.tabs.get(tabId)).url);
+    if (/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(asset.id) && asset.id.toLowerCase() !== id) throw new Error('O Flow abriu outro vídeo. O resultado deste pedido foi preservado na galeria.');
+    const preview = await dom(tabId, 'detailPreview', { kind: 'video', assetId: id }).catch(() => null);
+    if (videoDetailId(projectUrl, (await chrome.tabs.get(tabId)).url) !== id) throw new Error('O Flow mudou de vídeo durante a leitura da prévia.');
+    // The gallery URL is a thumbnail. A canvas-only editor has no playable
+    // source; keep the verified UUID and let the Pilot preview its 1080p file.
+    const result = { ...asset, id, projectUrl, kind: 'video', previewPending: true };
+    delete result.url;
+    const posterUrl = preview?.posterUrl || asset.posterUrl || asset.url;
+    if (posterUrl) result.posterUrl = posterUrl;
+    if (preview?.kind === 'video' && preview.url) {
+      result.url = preview.url;
+      result.previewPending = false;
+      if (preview.width) result.width = preview.width;
+      if (preview.height) result.height = preview.height;
+    }
+    return result;
+  }
+  async function refreshResultAccount(tabId, previous) {
+    try {
+      const current = await readAccount(tabId);
+      if (!current?.email || (previous?.email && current.email.toLowerCase() !== previous.email.toLowerCase())) throw new Error('A conta mudou após a geração.');
+      return { ...current, credits: Number.isFinite(current.credits) ? current.credits : null };
+    } catch { return previous ? { ...previous, credits: null } : null; }
   }
   async function generate(requestId, payload, bridgeTabId) {
     validate(payload, true);
@@ -576,19 +627,7 @@
           const assets = [];
           for (const result of collected.values()) {
             if (result.kind === 'video') {
-              await click(tabId, await dom(tabId, 'mediaOpen', { asset: result }));
-              await waitReady(tabId, 'downloadReady');
-              const detailUrl = (await chrome.tabs.get(tabId)).url;
-              const id = detailUrl.match(/\/edit\/([\da-f-]{36})(?:[/?#]|$)/i)?.[1];
-              if (!id) throw new Error('O Flow gerou o vídeo, mas não confirmou seu identificador. Confira a galeria antes de gerar novamente.');
-              let preview = null;
-              for (let attempt = 0; attempt < 40; attempt++) {
-                preview = await dom(tabId, 'detailPreview');
-                if (preview?.kind === 'video' && preview.url) break;
-                await sleep(250);
-              }
-              if (preview?.kind !== 'video') throw new Error('O Flow gerou o vídeo, mas a prévia ainda não está disponível. O resultado foi preservado na galeria.');
-              assets.push({ ...result, ...preview, id });
+              assets.push(await resolveVideoAsset(tabId, result, job.projectUrl));
               await chrome.tabs.update(tabId, { url: job.projectUrl, active: false });
               await waitReady(tabId);
               await dom(tabId, 'galleryTop');
@@ -597,8 +636,11 @@
           // Each exact card restored this request's prompt and references.
           // Network bodies may be unavailable in current Flow; gallery novelty
           // alone still never authorizes associating a result.
-          await update(job, 'completed', 'Resultados prontos para prévia e download.', { assets, evidenceIds: assets.map((asset) => asset.id.toLowerCase()), commandVerified: true });
-          return { assets, projectUrl: job.projectUrl, account, credits: controls.credits };
+          await update(job, 'completed', 'Resultados prontos para prévia e download.', { assets, evidenceIds: assets.map((asset) => asset.id.toLowerCase()), commandVerified: true, error: '' });
+          // Save the paid result before optional account UI/network work.
+          job.account = await refreshResultAccount(tabId, account);
+          await save(job).catch(() => {});
+          return { assets, projectUrl: job.projectUrl, account: job.account, credits: controls.credits };
         }
         await sleep(2500);
       }
@@ -635,25 +677,23 @@
       const assets = [];
       for (const asset of candidates) {
         const commandMatches = recoveryHash ? await verifyAssetCommand(tabId, asset, recoveryHash, job.referenceIds || [], job.referenceMode || 'ingredients') : false;
+        if (recoveryHash && !commandMatches) continue;
         if (asset.kind === 'image') {
           if (commandMatches || (!recoveryHash && confirmed.has(asset.id.toLowerCase()))) assets.push(asset);
           continue;
         }
-        await click(tabId, await dom(tabId, 'mediaOpen', { asset }));
-        await waitReady(tabId, 'downloadReady');
-        const id = (await chrome.tabs.get(tabId)).url.match(/\/edit\/([\da-f-]{36})(?:[/?#]|$)/i)?.[1];
-        if (id && (commandMatches || (!recoveryHash && confirmed.has(id.toLowerCase())))) {
-          const preview = await dom(tabId, 'detailPreview');
-          if (preview?.kind === 'video') assets.push({ ...asset, ...preview, id });
-        }
+        const result = await resolveVideoAsset(tabId, asset, job.projectUrl);
+        if (commandMatches || (!recoveryHash && confirmed.has(result.id))) assets.push(result);
         await chrome.tabs.update(tabId, { url: job.projectUrl, active: false });
         await waitReady(tabId);
         await dom(tabId, 'galleryTop');
         if (assets.length === job.expectedCount) break;
       }
       if (assets.length === job.expectedCount) {
-        Object.assign(job, { bridgeTabId, state: 'completed', stage: 'Resultados recuperados do Flow.', assets, promptHash: recoveryHash, evidenceIds: assets.map((asset) => asset.id.toLowerCase()), updatedAt: Date.now() });
+        Object.assign(job, { bridgeTabId, state: 'completed', stage: 'Resultados recuperados do Flow.', error: '', assets, promptHash: recoveryHash, evidenceIds: assets.map((asset) => asset.id.toLowerCase()), updatedAt: Date.now() });
         await save(job);
+        job.account = await refreshResultAccount(tabId, job.account);
+        await save(job).catch(() => {});
       } else Object.assign(job, { state: 'needs_attention', stage: visible.busy ? 'O Flow ainda está gerando. Atualize o status em instantes.' : 'Os resultados confirmados ainda não estão visíveis. Abra o projeto no Flow e atualize o status.' });
       return job;
     } catch (error) { return { ...job, state: 'needs_attention', stage: errorText(error) }; }
@@ -680,9 +720,12 @@
       if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(payload.asset.id)) throw new Error('O resultado não possui um identificador de mídia válido do Flow.');
       const project = new URL((await chrome.tabs.get(tabId)).url);
       project.pathname = project.pathname.replace(/(\/project\/[^/]+).*$/, '$1') + '/edit/' + payload.asset.id;
-      await chrome.tabs.update(tabId, { url: project.href, active: false });
+      const detailUrl = project.href;
+      await chrome.tabs.update(tabId, { url: detailUrl, active: false });
       await waitReady(tabId, 'downloadReady');
-      await key(tabId, 'Escape', 'Escape');
+      // Escape closes Flow's video editor and navigates to the project. A
+      // download must remain on this exact result through menu activation.
+      await assertDownloadRoute(tabId, detailUrl);
       await cdp(tabId, 'Page.enable');
       await clickButton(tabId, 'Baixar mídia');
       let resolveDownload;
@@ -690,7 +733,7 @@
       let downloadStarted = false;
       downloads.set(tabId, { resolve: (event) => { downloadStarted = true; resolveDownload(event); } });
       const resolution = payload.asset.kind === 'video' ? '1080p' : '2K';
-      await activateWithUserGesture(tabId, 'download', resolution, requestId);
+      await activateWithUserGesture(tabId, 'download', resolution, requestId, detailUrl);
       await waitDom(tabId, 'downloadSelectionState', {}, (value) => downloadStarted || !value.menuOpen, `a seleção do download ${resolution}`, 15000);
       await emit(bridgeTabId, requestId, 'FLOW_PROGRESS', { stage: `Preparando o download ${resolution} no Flow…` });
       const event = await deadline(started, 8 * 60 * 1000, 'O Flow não iniciou o download. O resultado foi preservado na galeria; tente baixar novamente.');
