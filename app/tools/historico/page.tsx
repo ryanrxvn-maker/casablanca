@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ToolHero } from '@/components/tool-kit';
 import {
   HistoryTimeline,
+  chavesZipDosEventos,
   fmtBytes,
   useDisponibilidade,
   useHistoryEvents,
@@ -37,7 +38,6 @@ export default function HistoricoPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const events = useHistoryEvents();
-  const disponibilidade = useDisponibilidade(true);
 
   // Atalhos internos (Pilot/Hey Auto) — só admin vê.
   useEffect(() => {
@@ -85,6 +85,8 @@ export default function HistoricoPage() {
   );
 
   const filtered = useMemo(() => filterHistory(events, { tool, query }), [events, tool, query]);
+  const chavesZip = useMemo(() => chavesZipDosEventos(filtered), [filtered]);
+  const disponibilidade = useDisponibilidade(true, chavesZip);
 
   const toolChips = HISTORY_TOOLS.filter((t) => (counts.get(t.id) ?? 0) > 0);
   const vaultInfo = disponibilidade.vaultInfo;

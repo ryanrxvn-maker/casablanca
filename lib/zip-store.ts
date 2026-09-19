@@ -194,6 +194,54 @@ export async function listZipKeys(): Promise<Array<{ key: string; filename: stri
   });
 }
 
+/**
+ * Quais destas chaves EXISTEM, sem ler um byte de arquivo.
+ *
+ * ⚠ POR QUE NÃO USAR listZipKeys(): ela abre cursor sobre o store de BYTES e
+ * MATERIALIZA cada registro. Com centenas de entregas guardadas isso são vários
+ * GB lidos só pra saber se um arquivo existe — a chamada estourava o timeout de
+ * 15s, voltava vazia, e TODO botão de baixar do histórico aparecia como
+ * "expirou" mesmo com o arquivo ali. É o mesmo erro que já tinha custado o boot
+ * de 70s do zip-store e a listagem do cofre. `getKey` lê só o índice.
+ */
+export async function zipKeysExistentes(keys: string[]): Promise<Set<string>> {
+  const achadas = new Set<string>();
+  const alvo = [...new Set(keys.filter(Boolean))];
+  if (alvo.length === 0) return achadas;
+  const db = await openDB();
+  return runTx<Set<string>>(db, 'readonly', (store, resolve, reject) => {
+    let pendentes = alvo.length;
+    let erro: unknown = null;
+    for (const k of alvo) {
+      const req = store.getKey(k);
+      req.onsuccess = () => {
+        if (req.result !== undefined) achadas.add(k);
+        if (--pendentes === 0) (erro ? reject(erro) : resolve(achadas));
+      };
+      req.onerror = () => {
+        erro = req.error;
+        if (--pendentes === 0) reject(erro);
+      };
+    }
+  });
+}
+
+/**
+ * Chaves guardadas sob um prefixo (ex.: todas as partes de um disparo), lendo
+ * SÓ o índice. É o que permite montar a janela de previews sem carregar vídeo
+ * nenhum: o blob de cada take só é lido quando o usuário manda tocar.
+ */
+export async function listarChavesPorPrefixo(prefixo: string): Promise<string[]> {
+  if (!prefixo) return [];
+  const db = await openDB();
+  return runTx<string[]>(db, 'readonly', (store, resolve, reject) => {
+    const faixa = IDBKeyRange.bound(prefixo, prefixo + '\uffff', false, false);
+    const req = store.getAllKeys(faixa);
+    req.onsuccess = () => resolve((req.result as IDBValidKey[]).map((k) => String(k)));
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export async function deleteZip(key: string): Promise<void> {
   const db = await openDB();
   return runTx<void>(db, 'readwrite', (store, resolve, reject) => {

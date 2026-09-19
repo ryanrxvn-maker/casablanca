@@ -167,6 +167,55 @@ const FILA: FilaAoVivo = {
   },
 };
 
+/**
+ * Semeia TAKES de mentira no zip-store (`pilot:<taskId>:g:dev:part:<label>`)
+ * usando o dev-tiny.mp4, pra a janela de previews abrir com card de verdade.
+ */
+async function semearTakes(taskId: string, quantos: number): Promise<void> {
+  try {
+    const buf = (await fetch('/dev-tiny.mp4').then((r) => r.arrayBuffer())) as ArrayBuffer;
+    const bytes = new Uint8Array(buf);
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.open('darkolab-zip-store');
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('zips')) db.createObjectStore('zips', { keyPath: 'key' });
+      };
+      req.onerror = () => resolve();
+      req.onsuccess = () => {
+        const db = req.result;
+        try {
+          const tx = db.transaction('zips', 'readwrite');
+          const store = tx.objectStore('zips');
+          for (let i = 1; i <= quantos; i++) {
+            const label = i === 1 ? 'hook' : `parte ${i}`;
+            store.put({
+              key: `pilot:${taskId}:g:dev:part:${label}`,
+              filename: `${label}.mp4`,
+              bytes,
+              size: bytes.length,
+              createdAt: Date.now(),
+            });
+          }
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            resolve();
+          };
+        } catch {
+          db.close();
+          resolve();
+        }
+      };
+    });
+  } catch {
+    /* preview sem takes ainda abre, so' mostra o estado vazio */
+  }
+}
+
 export default function DevHistoricoFerramenta() {
   if (process.env.NODE_ENV === 'production') notFound();
   return (
@@ -183,10 +232,12 @@ function Preview() {
   const [pronto, setPronto] = useState(false);
 
   useEffect(() => {
-    void semearCofre().then(() => {
-      setPronto(true);
-      setAberto(true);
-    });
+    void Promise.all([semearCofre(), semearTakes('viva-1', 4), semearTakes('86aj6nfue', 6)]).then(
+      () => {
+        setPronto(true);
+        setAberto(true);
+      },
+    );
   }, []);
 
   return (

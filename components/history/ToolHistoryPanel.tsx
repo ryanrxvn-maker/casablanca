@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 
 import {
   HistoryTimeline,
+  chavesZipDosEventos,
   toolIcon,
   useDisponibilidade,
   useHistoryEvents,
@@ -49,7 +50,6 @@ export function ToolHistoryPanel({
   const abertoEm = useRef(Date.now());
   const reais = useHistoryEvents();
   const todos = eventosDeTeste ?? reais;
-  const disponibilidade = useDisponibilidade(true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,6 +76,10 @@ export function ToolHistoryPanel({
     () => daFerramenta.filter((e) => (e.ref?.length ?? 0) > 0).length,
     [daFerramenta],
   );
+  // Pergunta a existência só das chaves que estão na tela (ver o porquê em
+  // zipKeysExistentes: enumerar o store lia GBs e derrubava todo o botão).
+  const chavesZip = useMemo(() => chavesZipDosEventos(visiveis), [visiveis]);
+  const disponibilidade = useDisponibilidade(true, chavesZip);
 
   const label = historyToolLabel(tool);
 

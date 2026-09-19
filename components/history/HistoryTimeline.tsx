@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -93,6 +94,12 @@ const TOOL_ICON: Record<string, React.ReactNode> = {
   'remover-elementos': <IconRemoverElementos size={18} />,
   'separador-audio': <IconSeparadorAudio size={18} />,
 };
+
+/** A janela de previews só entra no bundle quando alguém clica no olho. */
+const PreviewsDoDisparo = dynamic(
+  () => import('./PreviewsDoDisparo').then((m) => m.PreviewsDoDisparo),
+  { ssr: false },
+);
 
 export function toolIcon(tool: string): React.ReactNode {
   return TOOL_ICON[canonicalTool(tool)] ?? <IconClickUpPilot size={18} />;
@@ -270,6 +277,15 @@ export function useHistoryEvents(debounceMs = 250): HistoryEvent[] {
   return events;
 }
 
+/** As chaves de zip-store que estes registros apontam (o que perguntar). */
+export function chavesZipDosEventos(events: HistoryEvent[]): string[] {
+  const out: string[] = [];
+  for (const e of events) {
+    for (const r of e.ref ?? []) if (r.via === 'zip') out.push(r.key);
+  }
+  return out;
+}
+
 export type Disponibilidade = {
   vaultKeys: Set<string>;
   zipKeys: Set<string>;
@@ -282,11 +298,15 @@ export type Disponibilidade = {
  * verdade (baixa × expirou) antes do clique. Lê só METADADOS (o cofre tem
  * store separado pra isso: cursor sobre bytes já custou um boot de 70s aqui).
  */
-export function useDisponibilidade(ativo: boolean): Disponibilidade {
+export function useDisponibilidade(ativo: boolean, chavesZip: string[] = []): Disponibilidade {
   const [vaultKeys, setVaultKeys] = useState<Set<string>>(new Set());
   const [zipKeys, setZipKeys] = useState<Set<string>>(new Set());
   const [vaultInfo, setVaultInfo] = useState<{ files: number; bytes: number } | null>(null);
   const emVoo = useRef(false);
+  // As chaves mudam a cada render da lista; o ref evita refazer a consulta por
+  // identidade de array (e evita recriar o refresh, que reinicia o efeito).
+  const chavesRef = useRef<string[]>(chavesZip);
+  chavesRef.current = chavesZip;
 
   const refresh = useCallback(() => {
     if (emVoo.current) return;
@@ -299,19 +319,24 @@ export function useDisponibilidade(ativo: boolean): Disponibilidade {
         setVaultInfo(await vaultStats().catch(() => null));
       } catch {}
       try {
-        const { listZipKeys } = await import('@/lib/zip-store');
-        const zips = await listZipKeys();
-        setZipKeys(new Set(zips.map((z) => z.key)));
+        // PERGUNTA SÓ PELO QUE ESTÁ NA TELA. Enumerar o store inteiro lia os
+        // bytes de cada entrega guardada (GBs), estourava o timeout e fazia
+        // TODO botão de baixar dizer "expirou" com o arquivo ali do lado.
+        const { zipKeysExistentes } = await import('@/lib/zip-store');
+        const achadas = await zipKeysExistentes(chavesRef.current);
+        setZipKeys(achadas);
       } catch {}
       emVoo.current = false;
     })();
   }, []);
 
+  // Assinatura das chaves: só refaz a consulta quando o conjunto muda de fato.
+  const assinatura = chavesZip.join('|');
   useEffect(() => {
     if (!ativo) return;
     const t = setTimeout(refresh, 250);
     return () => clearTimeout(t);
-  }, [ativo, refresh]);
+  }, [ativo, refresh, assinatura]);
 
   return { vaultKeys, zipKeys, vaultInfo, refresh };
 }
@@ -413,6 +438,7 @@ export function HistoryTimeline({
   filaDeTeste?: FilaAoVivo;
 }) {
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
+  const [previews, setPreviews] = useState<{ taskId: string; titulo: string } | null>(null);
   const filaReal = useFilaAoVivo(!filaDeTeste);
   const fila = filaDeTeste ?? filaReal;
   const router = useRouter();
@@ -565,8 +591,6 @@ export function HistoryTimeline({
               // vivo; sem ela, o estado do próprio registro. Linha sem selo do
               // lado de linha com selo lê como defeito, e é.
               const selo = vivo ? { rotulo: vivo.rotulo, tom: vivo.tom } : seloDoRegistro(e.kind);
-              const linkTask = taskId ? fila.url[taskId] : undefined;
-              const podeVer = (podeAgir && !!taskId && naFila.existe) || !!linkTask;
               return (
                 <li
                   key={e.id}
@@ -625,30 +649,15 @@ export function HistoryTimeline({
                   </div>
 
                   <div className="hist-row__acoes">
-                    {podeVer ? (
+                    {/* OLHO: abre a janela com os takes AQUI MESMO. Nada de
+                        mandar o usuário pra outra tela pra ver o que ele fez. */}
+                    {ehDisparo && taskId ? (
                       <PilotBtn3D
                         size={30}
                         color="fuchsia"
                         icon={<IcoOlho />}
-                        title={
-                          podeAgir && taskId && naFila.existe
-                            ? 'Ver a task: abre o card com os previews dos takes'
-                            : 'Abrir a task no ClickUp'
-                        }
-                        onClick={() => {
-                          if (podeAgir && taskId && naFila.existe) {
-                            void acaoDeFila(e, 'abrir', taskId).then((deu) => {
-                              // Sem card na tela, o link da task no ClickUp
-                              // ainda responde a pergunta "que task e essa?".
-                              if (!deu && linkTask) {
-                                patch(e.id, { err: undefined });
-                                window.open(linkTask, '_blank', 'noopener');
-                              }
-                            });
-                            return;
-                          }
-                          if (linkTask) window.open(linkTask, '_blank', 'noopener');
-                        }}
+                        title="Ver os takes deste disparo"
+                        onClick={() => setPreviews({ taskId, titulo: e.title })}
                       />
                     ) : null}
                     <PilotBtn3D
@@ -731,6 +740,14 @@ export function HistoryTimeline({
           </ul>
         </section>
       ))}
+
+      {previews ? (
+        <PreviewsDoDisparo
+          taskId={previews.taskId}
+          titulo={previews.titulo}
+          onClose={() => setPreviews(null)}
+        />
+      ) : null}
     </div>
   );
 }
