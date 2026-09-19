@@ -29,6 +29,7 @@ type RecoveredJob = { state?: string; stage?: string; submitted?: boolean; asset
 type Busy = 'inspect' | 'quote' | 'generate' | 'download' | 'prompt' | null;
 type PromptMode = 'image-video' | 'video-only';
 type PromptSuggestion = { imagePrompt?: string; videoPrompt: string; explanation?: string; strategy?: string; source?: string };
+type CopyTakePreview = { insert: Insert; asset: StudioAsset; assetIndex: number; takeNumber: number; left: number; top: number };
 type Session = {
   busy: Busy; progress: string; error: string; inspection: FlowInspection | null;
   quote: FlowQuote | null; quoteKey: string; assets: StudioAsset[]; projectUrl: string;
@@ -275,6 +276,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const [promptSuggestion, setPromptSuggestion] = useState<PromptSuggestion | null>(null);
   const [promptExplanationOpen, setPromptExplanationOpen] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState<'image' | 'video' | null>(null);
+  const [copyTakePreview, setCopyTakePreview] = useState<CopyTakePreview | null>(null);
   const promptStudioRef = useRef(false);
   promptStudioRef.current = promptStudioOpen;
   const [localPreview, setLocalPreview] = useState<{ key: string; url: string | null; state: 'loading' | 'missing' | 'ready' | 'error' } | null>(null);
@@ -752,6 +754,23 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     if (rangeStart == null) { setRangeStart(index); setRange(null); }
     else { setRange({ ancora: part.label, de: Math.min(rangeStart, index), ate: Math.max(rangeStart, index) }); setRangeStart(null); }
   }
+  function showCopyTakePreview(insert: Insert, asset: StudioAsset, assetIndex: number, target: HTMLElement) {
+    const rect = target.getBoundingClientRect();
+    const cardWidth = Math.min(320, window.innerWidth - 24);
+    const cardHeight = 184;
+    const margin = 12;
+    const left = Math.max(margin, Math.min(window.innerWidth - cardWidth - margin, rect.left + rect.width / 2 - cardWidth / 2));
+    const above = rect.top - cardHeight - margin;
+    const top = above >= margin ? above : Math.min(window.innerHeight - cardHeight - margin, rect.bottom + margin);
+    setCopyTakePreview({ insert, asset, assetIndex, takeNumber: assetIndex + 1, left, top: Math.max(margin, top) });
+  }
+  function renderCopyWord(word: string, index: number) {
+    const linkedInsert = inserts.find((insert) => insert.ancora === part.label && index >= insert.palavraDe && index <= insert.palavraAte);
+    const assetIndex = linkedInsert ? session.assets.findIndex((asset) => insertMatchesAsset(linkedInsert, asset)) : -1;
+    const linkedAsset = assetIndex >= 0 ? session.assets[assetIndex] : undefined;
+    const linkedTake = linkedInsert && linkedAsset ? assetIndex + 1 : 0;
+    return <button type="button" key={index} data-flow-linked-take={linkedTake || undefined} onClick={() => chooseWord(index)} onMouseEnter={linkedTake ? (event) => showCopyTakePreview(linkedInsert!, linkedAsset!, assetIndex, event.currentTarget) : undefined} onMouseLeave={linkedTake ? () => setCopyTakePreview(null) : undefined} onFocus={linkedTake ? (event) => showCopyTakePreview(linkedInsert!, linkedAsset!, assetIndex, event.currentTarget) : undefined} onBlur={linkedTake ? () => setCopyTakePreview(null) : undefined} aria-pressed={!!selectedRange && index >= selectedRange.de && index <= selectedRange.ate} aria-label={`${word}, palavra ${index + 1}${linkedTake ? `, TAKE ${String(linkedTake).padStart(2, '0')} vinculado` : rangeStart == null ? ', marcar início' : ', marcar fim'}`} className={`${selectedRange && index >= selectedRange.de && index <= selectedRange.ate ? s.wordSelected : ''} ${rangeStart === index ? s.wordStart : ''} ${linkedTake ? s.wordHasTake : ''}`}>{word}</button>;
+  }
   async function atualizarMontagem() {
     const current = sessionFor(taskId);
     if (!onAtualizarMontagem || current.busy || current.montage?.busy || atualizandoMontagem) return;
@@ -828,7 +847,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
         <section className={s.placement} aria-label="Escolher trecho da copy">
           <div className={s.sectionHeading}><span className={s.step}>03</span><h3>O lugar certo na copy</h3><span className={s.smallLabel}>INÍCIO → FIM</span></div>
           {chosenAsset && <div className={`${s.takeBinding} ${assignedInsert ? s.takeBindingSaved : ''}`}><span className={s.takeNumber}>TAKE {String(chosenTake).padStart(2, '0')}</span><div><strong>{assignedInsert ? 'Take vinculado à copy' : selectedRange ? 'Vínculo pronto para confirmar' : 'Escolha o trecho deste take'}</strong><p>{assignedInsert ? rangeText(assignedInsert, copyParts) : selectedRange ? rangeText({ ancora: selectedRange.ancora, palavraDe: selectedRange.de, palavraAte: selectedRange.ate }, copyParts) : 'Marque a primeira e a última palavra que receberão este insert.'}</p></div>{assignedInsert && <Icon name="check"/>}</div>}
-          {copyParts.length ? <><div className={s.parts} role="group" aria-label="Parte da copy">{copyParts.map((item) => <button type="button" key={item.label} aria-pressed={part.label === item.label} className={part.label === item.label ? s.partSelected : ''} onClick={() => { setAnchor(item.label); setRangeStart(null); }}>{item.label}</button>)}</div><div className={s.copy} aria-label={`Palavras de ${part.label}`}>{words.map((word, index) => <button type="button" key={index} onClick={() => chooseWord(index)} aria-pressed={!!selectedRange && index >= selectedRange.de && index <= selectedRange.ate} aria-label={`${word}, palavra ${index + 1}${rangeStart == null ? ', marcar início' : ', marcar fim'}`} className={`${selectedRange && index >= selectedRange.de && index <= selectedRange.ate ? s.wordSelected : ''} ${rangeStart === index ? s.wordStart : ''}`}>{word}</button>)}</div><div className={s.rangeFooter}><p aria-live="polite">{rangeStart != null ? <>Início em <b>“{words[rangeStart]}”</b>. Clique na última palavra.</> : selectedRange ? <>De <b>“{words[selectedRange.de]}”</b> até <b>“{words[selectedRange.ate]}”</b> · {selectedRange.ate - selectedRange.de + 1} palavras</> : 'Clique na primeira palavra e depois na última.'}</p><div className={s.rangeActions}><button type="button" className={s.textButton} onClick={() => { setRange({ ancora: part.label, de: 0, ate: words.length - 1 }); setRangeStart(null); }}>Parte inteira</button><div className={s.promptMagicWrap}><button type="button" className={s.promptMagicButton} disabled={!selectedRange || rangeStart != null || busy} onClick={() => { setPromptStudioOpen(true); setPromptExplanationOpen(false); }} aria-label="Abrir diretor de prompt para o trecho" aria-haspopup="dialog" aria-expanded={promptStudioOpen}><span/><Icon name="spark"/></button></div></div></div></> : <div className={s.emptyCopy}>A copy desta task ainda não está disponível. Analise a task para escolher onde o insert entra.</div>}
+          {copyParts.length ? <><div className={s.parts} role="group" aria-label="Parte da copy">{copyParts.map((item) => <button type="button" key={item.label} aria-pressed={part.label === item.label} className={part.label === item.label ? s.partSelected : ''} onClick={() => { setCopyTakePreview(null); setAnchor(item.label); setRangeStart(null); }}>{item.label}</button>)}</div><div className={s.copy} aria-label={`Palavras de ${part.label}`}>{words.map(renderCopyWord)}</div><div className={s.rangeFooter}><p aria-live="polite">{rangeStart != null ? <>Início em <b>“{words[rangeStart]}”</b>. Clique na última palavra.</> : selectedRange ? <>De <b>“{words[selectedRange.de]}”</b> até <b>“{words[selectedRange.ate]}”</b> · {selectedRange.ate - selectedRange.de + 1} palavras</> : 'Clique na primeira palavra e depois na última.'}</p><div className={s.rangeActions}><button type="button" className={s.textButton} onClick={() => { setRange({ ancora: part.label, de: 0, ate: words.length - 1 }); setRangeStart(null); }}>Parte inteira</button><div className={s.promptMagicWrap}><button type="button" className={s.promptMagicButton} disabled={!selectedRange || rangeStart != null || busy} onClick={() => { setPromptStudioOpen(true); setPromptExplanationOpen(false); }} aria-label="Abrir diretor de prompt para o trecho" aria-haspopup="dialog" aria-expanded={promptStudioOpen}><span/><Icon name="spark"/></button></div></div></div></> : <div className={s.emptyCopy}>A copy desta task ainda não está disponível. Analise a task para escolher onde o insert entra.</div>}
           <div className={s.attachRow}><p><Icon name="video"/>{chosenAsset ? assignedInsert ? `Take ${String(chosenTake).padStart(2, '0')} já está em ${assignedInsert.ancora}. Selecione outro trecho para mover.` : chosenAsset.kind === 'video' ? 'O vídeo será baixado em 1080p e salvo na montagem.' : 'A imagem será baixada em 2K e salva na montagem.' : 'Sua criação aparecerá aqui quando estiver pronta.'}</p><button type="button" className={s.attachButton} disabled={!chosenAsset || !selectedRange || rangeStart != null || busy || referenceBusy || montageBusy} onClick={() => void attach()}><span>{session.busy === 'download' ? 'Preparando insert…' : assignedInsert ? 'Atualizar vínculo' : 'Usar neste trecho'}</span><Icon name="arrow"/></button></div>
         </section>
       </div>
@@ -864,5 +883,22 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       {(session.montage?.error || session.montage?.notice) && <div className={`${s.feedback} ${session.montage.error ? s.feedbackError : s.feedbackSuccess}`} role={session.montage.error ? 'alert' : 'status'}><Icon name={session.montage.error ? 'external' : 'check'}/><span>{session.montage.error || session.montage.notice}</span></div>}
       <footer className={s.footer}><div className={s.savedSummary}><span className={s.savedCount}>{inserts.length}</span><div><strong>{inserts.length === 1 ? 'insert na montagem' : 'inserts na montagem'}</strong><span>{enabled ? 'Flow ligado nesta versão' : 'Ative o Flow para incluir estes inserts'}</span></div></div><div className={s.footerActions}>{inserts.length > 0 && <button type="button" className={s.secondaryButton} onClick={onEditarInserts} disabled={busy || montageBusy}>Editar inserts e enquadramento</button>}{onAtualizarMontagem && <button type="button" className={s.rebuildButton} disabled={busy || referenceBusy || montageBusy} aria-busy={montageBusy} onClick={() => void atualizarMontagem()} title="Refaz a montagem com os takes já gerados e os inserts atuais.">{montageBusy ? <span className={s.spinner} aria-hidden="true"/> : <Icon name="refresh"/>}{montageBusy ? 'Atualizando montagem…' : 'Atualizar montagem'}</button>}<button type="button" className={s.doneButton} onClick={onFechar}>Concluir<Icon name="check"/></button></div></footer>
     </div>
+    {copyTakePreview && (() => {
+      const poster = copyTakePreview.asset.kind === 'video' ? imagePosterUrl(copyTakePreview.asset, session.assets, copyTakePreview.assetIndex) : '';
+      const source = assetUrl(copyTakePreview.asset);
+      return <aside className={s.copyTakePreview} data-flow-copy-preview="true" role="tooltip" aria-label={`Prévia do TAKE ${String(copyTakePreview.takeNumber).padStart(2, '0')}`} style={{ left: copyTakePreview.left, top: copyTakePreview.top }}>
+        <div className={s.copyTakePreviewMedia}>
+          {copyTakePreview.asset.kind === 'video' && poster ? <img src={poster} alt=""/> : copyTakePreview.asset.kind === 'image' && source ? <img src={source} alt=""/> : copyTakePreview.asset.kind === 'video' && source ? <video src={source} muted playsInline preload="metadata" onLoadedData={(event) => { try { event.currentTarget.currentTime = .05; } catch { /* frame extraction is best effort */ } }}/> : <span><Icon name={copyTakePreview.asset.kind === 'video' ? 'video' : 'image'}/></span>}
+          <i><Icon name={copyTakePreview.asset.kind === 'video' ? 'video' : 'image'}/></i>
+        </div>
+        <div className={s.copyTakePreviewInfo}>
+          <span>PREVIEW DO TRECHO</span>
+          <strong>TAKE {String(copyTakePreview.takeNumber).padStart(2, '0')}</strong>
+          <b>{copyTakePreview.asset.kind === 'video' ? 'VÍDEO NO FLOW' : 'IMAGEM NO FLOW'}</b>
+          <p>{rangeText(copyTakePreview.insert, copyParts)}</p>
+          <small><i/>Vinculado à copy</small>
+        </div>
+      </aside>;
+    })()}
   </div>, document.body);
 }
