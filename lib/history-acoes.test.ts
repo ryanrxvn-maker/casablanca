@@ -13,6 +13,8 @@ import {
   aceitaAcaoDeFila,
   agruparPorVersao,
   faseAtiva,
+  filtrarPorOrigemEData,
+  origemDoEvento,
   podeVirarCard,
   rotuloVersaoDoTaskId,
   chainDeDownload,
@@ -183,6 +185,46 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
   ok(rotuloVersaoDoTaskId('86ad-yt') === 'v2', 'a versão YouTube é a 2');
   ok(rotuloVersaoDoTaskId('86ad') === 'v1', 'a mãe é a v1');
   ok(rotuloVersaoDoTaskId(null) === '', 'sem task, sem rótulo');
+}
+
+// (D5) origem do disparo e filtro por data
+{
+  const comTask = (id: string, taskId: string, t?: number): HistoryEvent =>
+    ev({ id, t: t ?? 1_700_000_000_000, ref: [{ via: 'zip', key: 'k', name: 'n', taskId }] });
+
+  ok(origemDoEvento(comTask('o1', '86abc')) === 'clickup', 'task do ClickUp');
+  ok(origemDoEvento(comTask('o2', 'pilot_creator_abc_1')) === 'creator', 'task do Creator');
+  ok(origemDoEvento(comTask('o3', 'pilot_docs_abc_1')) === 'docs', 'task de um Doc');
+  ok(origemDoEvento(ev({ id: 'o4', tool: 'compressor' })) === null, 'ferramenta comum não tem origem');
+  ok(
+    origemDoEvento(comTask('o5', 'archive:xyz')) === null,
+    'registro arquivado não entra em filtro de origem',
+  );
+
+  const lista = [
+    comTask('a', '86abc'),
+    comTask('b', 'pilot_creator_x_1'),
+    comTask('c', 'pilot_docs_y_1'),
+    ev({ id: 'd', tool: 'compressor' }),
+  ];
+  ok(filtrarPorOrigemEData(lista, { origem: 'creator' }).length === 1, 'filtra pela origem pedida');
+  ok(filtrarPorOrigemEData(lista, { origem: null }).length === 4, 'sem origem escolhida, passa tudo');
+
+  const DIA = 86_400_000;
+  const agora = new Date(2026, 8, 19, 15, 0, 0).getTime();
+  const porData = [
+    comTask('hoje', '86a', agora - 3600_000),
+    comTask('ontem', '86b', agora - DIA),
+    comTask('semana', '86c', agora - 5 * DIA),
+    comTask('velho', '86d', agora - 30 * DIA),
+  ];
+  ok(filtrarPorOrigemEData(porData, { dias: 0, agora }).map((e) => e.id).join() === 'hoje', 'só hoje');
+  ok(filtrarPorOrigemEData(porData, { dias: 1, agora }).map((e) => e.id).join() === 'ontem', 'só ontem');
+  ok(
+    filtrarPorOrigemEData(porData, { dias: 7, agora }).map((e) => e.id).join() === 'hoje,ontem,semana',
+    'últimos 7 dias pega hoje, ontem e a semana',
+  );
+  ok(filtrarPorOrigemEData(porData, {}).length === 4, 'sem filtro, nada some');
 }
 
 // (E) intenção entre páginas vence

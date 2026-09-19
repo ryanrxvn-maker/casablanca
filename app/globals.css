@@ -2538,6 +2538,70 @@ html[data-theme='light'] .hist-row__icone {
 .hist-seg__item--on b {
   opacity: 0.9;
 }
+/* Segunda linha de filtros: DATA e ORIGEM do disparo (Pilot/Creator/Docs).
+   Só aparece quando tem o que filtrar — filtro morto vira ruído. */
+.hist-filtros2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.hist-filtros2--solto {
+  padding: 0;
+  border-bottom: none;
+}
+.hist-fchips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hist-fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-family: var(--font-tech);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgb(var(--text-dim));
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition:
+    transform 0.3s var(--hist-mola),
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.hist-fchip b {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.hist-fchip:hover {
+  color: rgb(var(--text-muted));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.hist-fchip--on {
+  color: #fff;
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.26), rgba(124, 58, 237, 0.12));
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 181, 253, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 6px 16px -10px rgba(139, 92, 246, 0.9);
+}
+.hist-fchip--on b {
+  opacity: 0.9;
+}
+html[data-theme='light'] .hist-fchip {
+  background: rgba(16, 16, 24, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
+}
+html[data-theme='light'] .hist-filtros2 {
+  border-bottom-color: rgba(16, 16, 24, 0.08);
+}
 .hist-busca {
   flex: 1;
   min-width: 0;
@@ -3041,69 +3105,101 @@ html[data-theme='light'] .hist-previews {
 
 /* ───────────── SELETOR DE VERSOES NA LINHA DO HISTORICO ─────────────
    O AD pode sair em ate' 10 versoes (avatar diferente por versao). A linha
-   mostra UMA e o seletor troca, igual ao card do Pilot. */
-.hist-versoes {
-  position: relative;
-  display: inline-flex;
-  flex-shrink: 0;
-}
+   mostra UMA e o seletor troca, igual ao card do Pilot.
+   O MENU vai em portal, com posicao fixa: dentro da lista que rola ele era
+   cortado pela borda do painel e aparecia pela metade. */
 .hist-versoes__botao {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 5px;
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 3px 7px 3px 6px;
   font-family: var(--font-tech);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
   color: rgb(var(--text-muted));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-  transition: transform 0.3s var(--hist-mola), box-shadow 0.25s ease, color 0.25s ease;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 6px 14px -12px rgba(0, 0, 0, 0.9);
+  transition:
+    transform 0.3s var(--hist-mola),
+    box-shadow 0.25s ease,
+    color 0.25s ease,
+    background 0.25s ease;
+}
+.hist-versoes__botao svg {
+  opacity: 0.7;
+  transition: opacity 0.25s ease;
 }
 .hist-versoes__botao b {
   display: inline-flex;
-  min-width: 14px;
-  height: 14px;
+  min-width: 15px;
+  height: 15px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .hist-versoes__botao:hover {
   transform: translateY(-1px);
   color: rgb(var(--text));
-  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5), 0 8px 18px -14px rgba(139, 92, 246, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(167, 139, 250, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 10px 20px -14px rgba(139, 92, 246, 0.85);
+}
+.hist-versoes__botao:hover svg {
+  opacity: 1;
+}
+.hist-versoes__botao--on {
+  color: #fff;
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.32), rgba(139, 92, 246, 0.16));
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 181, 253, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 10px 22px -14px rgba(139, 92, 246, 0.9);
+}
+.hist-versoes__botao--on svg {
+  opacity: 1;
+}
+.hist-versoes__botao--on b {
+  background: rgba(255, 255, 255, 0.22);
 }
 .hist-versoes__menu {
-  position: absolute;
-  top: calc(100% + 7px);
-  left: 0;
-  z-index: 6;
+  position: fixed;
+  z-index: 90;
   display: flex;
-  min-width: 210px;
+  max-height: min(340px, 70vh);
+  min-width: 226px;
   flex-direction: column;
   gap: 2px;
+  overflow-y: auto;
   border-radius: 14px;
   padding: 6px;
   background: linear-gradient(180deg, rgb(var(--bg-elev)), rgb(var(--bg-soft)));
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.1),
-    0 26px 50px -26px rgba(0, 0, 0, 0.95);
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 30px 60px -28px rgba(0, 0, 0, 0.95);
+  transform-origin: top left;
   animation: hist-pop 0.22s var(--hist-mola) both;
 }
 .hist-versoes__menu--cima {
-  top: auto;
-  bottom: calc(100% + 7px);
+  transform-origin: bottom left;
 }
 .hist-versoes__item {
   display: flex;
   align-items: center;
   gap: 8px;
   border-radius: 10px;
-  padding: 6px 9px;
+  padding: 7px 9px;
   text-align: left;
   font-size: 11.5px;
   color: rgb(var(--text-muted));
@@ -3116,12 +3212,13 @@ html[data-theme='light'] .hist-previews {
 .hist-versoes__item--on {
   background: rgba(167, 139, 250, 0.16);
   color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(196, 181, 253, 0.28);
 }
 .hist-versoes__item b {
   font-family: var(--font-tech);
   font-size: 11px;
   font-weight: 800;
-  min-width: 20px;
+  min-width: 22px;
 }
 .hist-versoes__estado {
   flex: 1;
@@ -3143,7 +3240,14 @@ html[data-theme='light'] .hist-previews {
   color: rgb(var(--text-dim));
 }
 html[data-theme='light'] .hist-versoes__botao {
-  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.14);
+  background: linear-gradient(180deg, #fff, rgba(16, 16, 24, 0.03));
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 16, 24, 0.14),
+    0 6px 14px -12px rgba(16, 16, 24, 0.5);
+}
+html[data-theme='light'] .hist-versoes__botao b {
+  background: rgba(16, 16, 24, 0.08);
+  box-shadow: none;
 }
 html[data-theme='light'] .hist-versoes__menu {
   background: #fff;

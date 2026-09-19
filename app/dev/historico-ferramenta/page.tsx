@@ -73,8 +73,10 @@ const PILOT: HistoryEvent[] = [
     id: 'v3', t: AGORA - 5 * H + 120_000, tool: 'clickup-pilot', title: 'AD05 entregue', kind: 'done', meta: '8 takes · 121.7MB',
     ref: [{ via: 'zip', key: 'zs:sumiu', name: 'AD05G1GL-v3.mp4', label: 'Montado', taskId: '86ad5-v3' }],
   },
-  { id: 'dispatch:86aj6nfue:1', t: AGORA - 4 * H, tool: 'clickup-pilot', title: 'AD01 - CREATOR', kind: 'dispatch' },
-  { id: 'dispatch:86aj6nfuh:2', t: AGORA - 26 * H, tool: 'clickup-pilot', title: 'AD03 - CREATOR', kind: 'dispatch' },
+  // Ids com prefixo de ORIGEM: e' o que acende os chips Pilot/Creator/Docs.
+  { id: 'dispatch:pilot_creator_m9x2_a1:1', t: AGORA - 4 * H, tool: 'clickup-pilot', title: 'AD01 - CREATOR', kind: 'dispatch' },
+  { id: 'dispatch:pilot_docs_k41f_ad09:3', t: AGORA - 4 * H - 30 * 60_000, tool: 'clickup-pilot', title: 'AD09 - DOC', kind: 'dispatch' },
+  { id: 'dispatch:pilot_creator_m9x2_a2:2', t: AGORA - 26 * H, tool: 'clickup-pilot', title: 'AD03 - CREATOR', kind: 'dispatch' },
   {
     id: 'p4',
     t: AGORA - 27 * H,

@@ -12,6 +12,7 @@ import {
   useHistoryEvents,
   type FilaAoVivo,
 } from './HistoryTimeline';
+import { FiltrosDeOrigemEData, useFiltroDeOrigemEData } from './FiltrosHistorico';
 import { filterHistory, historyToolLabel, type HistoryEvent } from '@/lib/history';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
@@ -68,13 +69,16 @@ export function ToolHistoryPanel({
   }, [onClose]);
 
   const daFerramenta = useMemo(() => filterHistory(todos, { tool }), [todos, tool]);
+  // Filtro por DATA e por ORIGEM (Pilot/Creator/Docs) antes de tudo: os
+  // contadores dos outros filtros precisam falar da mesma lista que a tela.
+  const filtro = useFiltroDeOrigemEData(daFerramenta);
   const visiveis = useMemo(
-    () => filterHistory(daFerramenta, { query, soRecuperaveis: soComArquivo }),
-    [daFerramenta, query, soComArquivo],
+    () => filterHistory(filtro.eventos, { query, soRecuperaveis: soComArquivo }),
+    [filtro.eventos, query, soComArquivo],
   );
   const comArquivo = useMemo(
-    () => daFerramenta.filter((e) => (e.ref?.length ?? 0) > 0).length,
-    [daFerramenta],
+    () => filtro.eventos.filter((e) => (e.ref?.length ?? 0) > 0).length,
+    [filtro.eventos],
   );
   // Pergunta a existência só das chaves que estão na tela (ver o porquê em
   // zipKeysExistentes: enumerar o store lia GBs e derrubava todo o botão).
@@ -133,7 +137,7 @@ export function ToolHistoryPanel({
               className={'hist-seg__item' + (!soComArquivo ? ' hist-seg__item--on' : '')}
               aria-pressed={!soComArquivo}
             >
-              Tudo <b>{daFerramenta.length}</b>
+              Tudo <b>{filtro.eventos.length}</b>
             </button>
             <button
               type="button"
@@ -157,6 +161,8 @@ export function ToolHistoryPanel({
           ) : null}
         </div>
 
+        <FiltrosDeOrigemEData {...filtro} />
+
         {/* Lista */}
         <div className="hist-drawer__body flex-1 overflow-y-auto px-4 py-3.5">
           {visiveis.length === 0 ? (
@@ -176,8 +182,15 @@ export function ToolHistoryPanel({
               <p className="max-w-[280px] text-[12px] leading-relaxed text-text-muted">
                 {daFerramenta.length === 0
                   ? 'O que você entregar nesta ferramenta aparece aqui por 7 dias.'
-                  : 'Tente outra busca.'}
+                  : filtro.ativo
+                    ? 'Nada dentro deste filtro.'
+                    : 'Tente outra busca.'}
               </p>
+              {daFerramenta.length > 0 && filtro.ativo ? (
+                <button type="button" className="hist-fchip" onClick={filtro.limpar}>
+                  Limpar filtro
+                </button>
+              ) : null}
             </div>
           ) : (
             <HistoryTimeline

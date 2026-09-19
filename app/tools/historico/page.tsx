@@ -12,6 +12,10 @@ import {
   useHistoryEvents,
 } from '@/components/history/HistoryTimeline';
 import {
+  FiltrosDeOrigemEData,
+  useFiltroDeOrigemEData,
+} from '@/components/history/FiltrosHistorico';
+import {
   clearHistory,
   countByTool,
   filterHistory,
@@ -84,7 +88,14 @@ export default function HistoricoPage() {
     [events],
   );
 
-  const filtered = useMemo(() => filterHistory(events, { tool, query }), [events, tool, query]);
+  const porFerramenta = useMemo(() => filterHistory(events, { tool }), [events, tool]);
+  // Data e origem entram entre a ferramenta e a busca: os contadores dos chips
+  // de origem falam da ferramenta escolhida, que e' o que esta' na tela.
+  const filtro = useFiltroDeOrigemEData(porFerramenta);
+  const filtered = useMemo(
+    () => filterHistory(filtro.eventos, { query }),
+    [filtro.eventos, query],
+  );
   const chavesZip = useMemo(() => chavesZipDosEventos(filtered), [filtered]);
   const disponibilidade = useDisponibilidade(true, chavesZip);
 
@@ -155,6 +166,8 @@ export default function HistoricoPage() {
             />
           ))}
         </div>
+        <FiltrosDeOrigemEData {...filtro} solto />
+
         <div className="flex items-center gap-3">
           <input
             type="search"

@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -465,8 +466,20 @@ export function HistoryTimeline({
   const [previews, setPreviews] = useState<{ taskId: string; titulo: string } | null>(null);
   /** Versão escolhida em cada grupo de versões (chave do grupo -> id do evento). */
   const [versaoEscolhida, setVersaoEscolhida] = useState<Record<string, string>>({});
-  /** Grupo com o seletor de versões aberto, e pra que lado ele abre. */
-  const [menuVersoes, setMenuVersoes] = useState<{ chave: string; praCima: boolean } | null>(null);
+  /**
+   * Menu de versões ABERTO: posição na tela e as irmãs.
+   *
+   * Vai em portal com posição fixa porque a lista rola dentro de um container
+   * com overflow — ancorado na linha, o menu era cortado pela borda e aparecia
+   * pela metade, em cima das outras linhas.
+   */
+  const [menuVersoes, setMenuVersoes] = useState<{
+    chave: string;
+    x: number;
+    y: number;
+    praCima: boolean;
+    eventos: HistoryEvent[];
+  } | null>(null);
   const filaReal = useFilaAoVivo(!filaDeTeste);
   const fila = filaDeTeste ?? filaReal;
   const router = useRouter();
@@ -488,14 +501,21 @@ export function HistoryTimeline({
     };
     const noClique = (e: MouseEvent) => {
       const alvo = e.target as HTMLElement | null;
-      if (alvo?.closest('.hist-versoes')) return;
+      // O menu vive em portal: o clique nele (ou no proprio botao) nao fecha.
+      if (alvo?.closest('.hist-versoes__menu, .hist-versoes__botao')) return;
       fechar();
     };
     document.addEventListener('keydown', noEsc);
     document.addEventListener('mousedown', noClique);
+    // Posição fixa não acompanha rolagem: rolou, o menu fecha em vez de flutuar
+    // solto longe do botão que o abriu.
+    window.addEventListener('scroll', fechar, true);
+    window.addEventListener('resize', fechar);
     return () => {
       document.removeEventListener('keydown', noEsc);
       document.removeEventListener('mousedown', noClique);
+      window.removeEventListener('scroll', fechar, true);
+      window.removeEventListener('resize', fechar);
     };
   }, [menuVersoes]);
 
@@ -701,70 +721,39 @@ export function HistoryTimeline({
                         {selo.rotulo}
                       </span>
                       {temVersoes ? (
-                        <span className="hist-versoes">
-                          <button
-                            type="button"
-                            className="hist-versoes__botao"
-                            aria-haspopup="listbox"
-                            aria-expanded={menuVersoes?.chave === grupo.chave}
-                            title={`${grupo.eventos.length} versões deste AD`}
-                            onClick={(ev) => {
-                              if (menuVersoes?.chave === grupo.chave) {
-                                setMenuVersoes(null);
-                                return;
-                              }
-                              // Perto do rodapé o menu abre pra CIMA, senão
-                              // ficaria escondido atrás da borda da lista.
-                              const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-                              setMenuVersoes({
-                                chave: grupo.chave,
-                                praCima: r.bottom > window.innerHeight - 220,
-                              });
-                            }}
-                          >
-                            {rotuloVersaoDoTaskId(taskId) || 'v1'}
-                            <b>{grupo.eventos.length}</b>
-                          </button>
-                          {menuVersoes?.chave === grupo.chave ? (
-                            <span
-                              role="listbox"
-                              className={
-                                'hist-versoes__menu' +
-                                (menuVersoes.praCima ? ' hist-versoes__menu--cima' : '')
-                              }
-                            >
-                              {grupo.eventos.map((irma) => {
-                                const idIrma = taskIdDoEvento(irma);
-                                const st2 = idIrma ? fila.status[idIrma] ?? null : null;
-                                const marca = st2
-                                  ? { rotulo: st2.rotulo, tom: st2.tom }
-                                  : seloDoRegistro(irma.kind);
-                                return (
-                                  <button
-                                    key={irma.id}
-                                    type="button"
-                                    role="option"
-                                    aria-selected={irma.id === e.id}
-                                    className={
-                                      'hist-versoes__item' +
-                                      (irma.id === e.id ? ' hist-versoes__item--on' : '')
-                                    }
-                                    onClick={() => {
-                                      setVersaoEscolhida((p) => ({ ...p, [grupo.chave]: irma.id }));
-                                      setMenuVersoes(null);
-                                    }}
-                                  >
-                                    <b>{rotuloVersaoDoTaskId(idIrma) || 'v1'}</b>
-                                    <span className="hist-versoes__estado" data-tom={marca.tom}>
-                                      {marca.rotulo}
-                                    </span>
-                                    <span className="hist-versoes__hora">{timeLabel(irma.t)}</span>
-                                  </button>
-                                );
-                              })}
-                            </span>
-                          ) : null}
-                        </span>
+                        <button
+                          type="button"
+                          className={
+                            'hist-versoes__botao' +
+                            (menuVersoes?.chave === grupo.chave ? ' hist-versoes__botao--on' : '')
+                          }
+                          aria-haspopup="listbox"
+                          aria-expanded={menuVersoes?.chave === grupo.chave}
+                          title={`${grupo.eventos.length} versões deste AD`}
+                          onClick={(ev) => {
+                            if (menuVersoes?.chave === grupo.chave) {
+                              setMenuVersoes(null);
+                              return;
+                            }
+                            const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                            const altura = Math.min(grupo.eventos.length, 6) * 34 + 16;
+                            const praCima = r.bottom + altura > window.innerHeight - 16;
+                            setMenuVersoes({
+                              chave: grupo.chave,
+                              x: r.left,
+                              y: praCima ? r.top - 8 : r.bottom + 8,
+                              praCima,
+                              eventos: grupo.eventos,
+                            });
+                          }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <rect x="3" y="7" width="12" height="14" rx="2.5" />
+                            <path d="M7 4h11a2 2 0 0 1 2 2v11" />
+                          </svg>
+                          {rotuloVersaoDoTaskId(taskId) || 'v1'}
+                          <b>{grupo.eventos.length}</b>
+                        </button>
                       ) : null}
                     </div>
                     <p className="hist-row__meta">
@@ -885,6 +874,54 @@ export function HistoryTimeline({
           </ul>
         </section>
       ))}
+
+      {menuVersoes && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              role="listbox"
+              aria-label="Versões deste AD"
+              className={
+                'hist-versoes__menu' + (menuVersoes.praCima ? ' hist-versoes__menu--cima' : '')
+              }
+              style={{
+                left: menuVersoes.x,
+                ...(menuVersoes.praCima
+                  ? { bottom: Math.max(8, window.innerHeight - menuVersoes.y) }
+                  : { top: menuVersoes.y }),
+              }}
+            >
+              {menuVersoes.eventos.map((irma) => {
+                const idIrma = taskIdDoEvento(irma);
+                const st2 = idIrma ? fila.status[idIrma] ?? null : null;
+                const marca = st2
+                  ? { rotulo: st2.rotulo, tom: st2.tom }
+                  : seloDoRegistro(irma.kind);
+                const atual =
+                  (versaoEscolhida[menuVersoes.chave] ?? menuVersoes.eventos[0].id) === irma.id;
+                return (
+                  <button
+                    key={irma.id}
+                    type="button"
+                    role="option"
+                    aria-selected={atual}
+                    className={'hist-versoes__item' + (atual ? ' hist-versoes__item--on' : '')}
+                    onClick={() => {
+                      setVersaoEscolhida((p) => ({ ...p, [menuVersoes.chave]: irma.id }));
+                      setMenuVersoes(null);
+                    }}
+                  >
+                    <b>{rotuloVersaoDoTaskId(idIrma) || 'v1'}</b>
+                    <span className="hist-versoes__estado" data-tom={marca.tom}>
+                      {marca.rotulo}
+                    </span>
+                    <span className="hist-versoes__hora">{timeLabel(irma.t)}</span>
+                  </button>
+                );
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {previews ? (
         <PreviewsDoDisparo

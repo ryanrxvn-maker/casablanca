@@ -71,7 +71,8 @@ export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Nomes exibidos por ferramenta (e ordem dos filtros). */
 export const HISTORY_TOOLS: { id: string; label: string }[] = [
-  { id: 'clickup-pilot', label: 'ClickUp Pilot' },
+  // O dono chama de PILOT. 'ClickUp Pilot' é o nome da rota, não o que ele diz.
+  { id: 'clickup-pilot', label: 'Pilot' },
   { id: 'heygen-auto', label: 'Hey Auto' },
   { id: 'auto-broll', label: 'Auto B-roll' },
   { id: 'lipsync', label: 'Lipsync' },

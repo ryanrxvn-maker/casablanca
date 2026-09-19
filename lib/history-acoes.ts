@@ -12,6 +12,7 @@
 
 import { canonicalTool, type Chain, type HistoryEvent } from './history-tools';
 import { taskIdBaseDaVersao, versaoDoTaskId } from './versoes-ad';
+import { modoDaTaskLocal } from './pilot-fontes';
 
 /** Evento disparado na própria página quando ela JÁ é a dona da fila. */
 export const EVENTO_ACAO_FILA = 'autoedit:fila-acao';
@@ -164,6 +165,57 @@ export function agruparPorVersao(events: HistoryEvent[]): GrupoDeVersoes[] {
 export function rotuloVersaoDoTaskId(taskId: string | null | undefined): string {
   if (!taskId) return '';
   return `v${versaoDoTaskId(taskId)}`;
+}
+
+/**
+ * DE ONDE VEIO O DISPARO: ClickUp, Creator ou Docs.
+ *
+ * É o mesmo critério do Pilot (o id da task carrega o prefixo da origem), e é
+ * o que permite filtrar o histórico como o dono pensa: "me mostra só o que
+ * saiu do ClickUp", "só o que eu escrevi no Creator".
+ */
+export type OrigemDoDisparo = 'clickup' | 'creator' | 'docs';
+
+export function origemDoEvento(ev: HistoryEvent): OrigemDoDisparo | null {
+  const taskId = taskIdDoEvento(ev);
+  if (!taskId) return null;
+  if (!podeVirarCard(taskId)) return null;
+  const base = taskIdBaseDaVersao(taskId);
+  const local = modoDaTaskLocal(base);
+  return local === 'creator' || local === 'docs' ? local : 'clickup';
+}
+
+/** Janela de tempo do filtro de data, em dias (0 = hoje). */
+export type JanelaDeDias = 0 | 1 | 7;
+
+/**
+ * Filtra por origem e por data. Registro sem origem (ferramenta comum) só
+ * aparece quando nenhuma origem está escolhida — filtrar por "Creator" não
+ * pode fazer o histórico do compressor sumir sem explicação.
+ */
+export function filtrarPorOrigemEData(
+  events: HistoryEvent[],
+  opts: { origem?: OrigemDoDisparo | null; dias?: JanelaDeDias | null; agora?: number },
+): HistoryEvent[] {
+  const origem = opts.origem ?? null;
+  const dias = opts.dias ?? null;
+  const agora = opts.agora ?? Date.now();
+  const inicioDoDia = (t: number) => {
+    const d = new Date(t);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  };
+  const hoje = inicioDoDia(agora);
+  return events.filter((e) => {
+    if (origem && origemDoEvento(e) !== origem) return false;
+    if (dias !== null) {
+      const dia = inicioDoDia(e.t);
+      const distancia = Math.round((hoje - dia) / 86400000);
+      if (dias === 0 && distancia !== 0) return false;
+      if (dias === 1 && distancia !== 1) return false;
+      if (dias === 7 && (distancia < 0 || distancia > 7)) return false;
+    }
+    return true;
+  });
 }
 
 // ---------- Intenção entre páginas ----------------------------------------
