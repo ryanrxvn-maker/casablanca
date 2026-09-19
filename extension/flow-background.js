@@ -222,9 +222,10 @@
     await cdp(tabId, 'Input.dispatchKeyEvent', { type: 'keyDown', key: keyName, code, modifiers, windowsVirtualKeyCode: keyName === 'Backspace' ? 8 : keyName === 'Escape' ? 27 : keyName === 'a' ? 65 : undefined });
     await cdp(tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code, modifiers });
   }
-  async function waitReady(tabId, op = 'editor') {
+  async function waitReady(tabId, op = 'editor', timeout = 40000) {
     let refreshedAdapter = false;
-    for (let i = 0; i < 80; i++) {
+    const until = Date.now() + timeout;
+    while (Date.now() < until) {
       const tab = await chrome.tabs.get(tabId);
       if (!isFlow(tab.url || tab.pendingUrl)) throw new Error('Entre na sua conta Google no Flow e abra um projeto antes de continuar.');
       if (tab.status === 'complete') {
@@ -242,7 +243,11 @@
       }
       await sleep(500);
     }
-    throw new Error('O projeto do Flow não abriu em 40 segundos. Abra o Flow e confira se sua conta está conectada.');
+    const error = new Error(op === 'downloadReady'
+      ? 'O resultado apareceu no Flow, mas o arquivo ainda está sendo preparado. O Pilot continuará acompanhando automaticamente.'
+      : `O projeto do Flow não abriu em ${Math.round(timeout / 1000)} segundos. Abra o Flow e confira se sua conta está conectada.`);
+    error.code = op === 'downloadReady' ? 'FLOW_MEDIA_NOT_READY' : 'FLOW_PROJECT_NOT_READY';
+    throw error;
   }
   async function tabFor(projectUrl) {
     if (projectUrl && !isFlow(projectUrl)) throw new Error('Use um endereço de projeto do Google Flow.');
@@ -326,13 +331,23 @@
     }
     throw new Error(`O Flow não confirmou a opção ${name}. Nenhum crédito foi gasto.`);
   }
+  function verifyConfigured(controls, payload) {
+    if (controls.model !== payload.model) throw new Error(`O Flow selecionou ${controls.model || 'um motor desconhecido'}, diferente de ${payload.model}. Nenhuma geração foi disparada.`);
+    const required = [payload.mode === 'image' ? 'Imagem' : 'Vídeo', payload.aspectRatio, `x${payload.count}`];
+    if (payload.mode === 'video') required.push(payload.videoMode === 'ingredients' ? 'Elementos' : 'Frames', payload.resolution, `${payload.durationSeconds}s`);
+    if (!required.every((value) => controls.selected.includes(value))) throw new Error('O Flow alterou uma opção ao trocar o motor. Confira as opções disponíveis antes de gerar.');
+    return controls;
+  }
   async function configure(tabId, payload) {
     await openSettings(tabId);
     await choose(tabId, payload.mode === 'image' ? 'Imagem' : 'Vídeo');
-    await openModelMenu(tabId);
-    await waitDom(tabId, 'model', { name: payload.model }, () => true, `o motor ${payload.model}`);
-    await dom(tabId, 'activateModel', { name: payload.model });
-    await waitDom(tabId, 'uiState', {}, (value) => !value.modelMenuOpen && value.settingsOpen, 'a seleção do motor');
+    let controls = await dom(tabId, 'settings');
+    if (controls.model !== payload.model) {
+      await openModelMenu(tabId);
+      await waitDom(tabId, 'model', { name: payload.model }, () => true, `o motor ${payload.model}`);
+      await dom(tabId, 'activateModel', { name: payload.model });
+      await waitDom(tabId, 'uiState', {}, (value) => !value.modelMenuOpen && value.settingsOpen, 'a seleção do motor');
+    }
     if (payload.mode === 'video') await choose(tabId, payload.videoMode === 'ingredients' ? 'Elementos' : 'Frames');
     await choose(tabId, payload.aspectRatio);
     if (payload.mode === 'video') {
@@ -340,13 +355,14 @@
       await choose(tabId, `${payload.durationSeconds}s`);
     }
     await choose(tabId, `x${payload.count}`);
-    const controls = await dom(tabId, 'settings');
-    if (controls.model !== payload.model) throw new Error(`O Flow selecionou ${controls.model || 'um motor desconhecido'}, diferente de ${payload.model}. Nenhuma geração foi disparada.`);
-    const required = [payload.mode === 'image' ? 'Imagem' : 'Vídeo', payload.aspectRatio, `x${payload.count}`];
-    if (payload.mode === 'video') required.push(payload.videoMode === 'ingredients' ? 'Elementos' : 'Frames', payload.resolution, `${payload.durationSeconds}s`);
-    if (!required.every((value) => controls.selected.includes(value))) throw new Error('O Flow alterou uma opção ao trocar o motor. Confira as opções disponíveis antes de gerar.');
+    controls = verifyConfigured(await dom(tabId, 'settings'), payload);
     await closeSettings(tabId);
     return controls;
+  }
+  async function confirmConfiguration(tabId, payload) {
+    await openSettings(tabId);
+    try { return verifyConfigured(await dom(tabId, 'settings'), payload); }
+    finally { await closeSettings(tabId); }
   }
   async function inspect(payload) {
     if (payload.mode !== undefined && !['image', 'video'].includes(payload.mode)) throw new Error('Escolha Imagem ou Vídeo para consultar o Flow.');
@@ -505,7 +521,7 @@
   }
   async function resolveVideoAsset(tabId, asset, projectUrl) {
     await click(tabId, await dom(tabId, 'mediaOpen', { asset }));
-    await waitReady(tabId, 'downloadReady');
+    await waitReady(tabId, 'downloadReady', 180000);
     const id = videoDetailId(projectUrl, (await chrome.tabs.get(tabId)).url);
     if (/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(asset.id) && asset.id.toLowerCase() !== id) throw new Error('O Flow abriu outro vídeo. O resultado deste pedido foi preservado na galeria.');
     const preview = await dom(tabId, 'detailPreview', { kind: 'video', assetId: id }).catch(() => null);
@@ -580,7 +596,7 @@
           } else uploadedReferenceIds.push(await uploadReference(tabId, payload.references[index], requestId, index));
         }
       }
-      const controls = await configure(tabId, payload);
+      const controls = await confirmConfiguration(tabId, payload);
       const accountBeforeSubmit = await readAccount(tabId);
       if (accountBeforeSubmit.email.toLowerCase() !== payload.expectedAccountEmail.toLowerCase()) throw new Error('A conta do Flow mudou durante o preparo. Atualize a conta e a previsão antes de gerar.');
       const finalReferences = await dom(tabId, 'commandReferences');
@@ -627,22 +643,31 @@
         if (newErrors.length) throw new Error(`O Flow informou: ${newErrors.join(' ').slice(0, 600)}`);
         for (const asset of status.assets) {
           if (known.has(asset.id) || checked.has(asset.id) || asset.canReuseCommand === false || asset.kind !== payload.mode || !asset.width || !asset.height) continue;
-          await update(job, 'generating', 'Conferindo o comando e as referências de cada resultado…');
-          const matches = await verifyAssetCommand(tabId, asset, job.promptHash, job.referenceIds, job.referenceMode);
+          const networkConfirmed = evidence.ids.has(asset.id.toLowerCase());
+          await update(job, 'generating', networkConfirmed ? 'Resultado confirmado; preparando a prévia…' : 'Conferindo o comando e as referências de cada resultado…');
+          const matches = networkConfirmed || await verifyAssetCommand(tabId, asset, job.promptHash, job.referenceIds, job.referenceMode);
           checked.add(asset.id);
           if (matches) collected.set(asset.id, { ...asset, projectUrl: job.projectUrl });
         }
         if (collected.size > payload.count) throw new Error('O Flow recebeu outra geração neste projeto. Confira os resultados na galeria para evitar associar o insert errado.');
         if (collected.size === payload.count) {
           const assets = [];
+          let mediaStillPreparing = false;
           for (const result of collected.values()) {
             if (result.kind === 'video') {
-              assets.push(await resolveVideoAsset(tabId, result, job.projectUrl));
+              try { assets.push(await resolveVideoAsset(tabId, result, job.projectUrl)); }
+              catch (error) {
+                if (error?.code !== 'FLOW_MEDIA_NOT_READY') throw error;
+                mediaStillPreparing = true;
+                await update(job, 'generating', 'O vídeo já apareceu. O Flow ainda está preparando a prévia; acompanhamento automático ativo.');
+              }
               await chrome.tabs.update(tabId, { url: job.projectUrl, active: false });
               await waitReady(tabId);
               await dom(tabId, 'galleryTop');
+              if (mediaStillPreparing) break;
             } else assets.push(result);
           }
+          if (mediaStillPreparing) { await sleep(1200); continue; }
           // Each exact card restored this request's prompt and references.
           // Network bodies may be unavailable in current Flow; gallery novelty
           // alone still never authorizes associating a result.
@@ -652,7 +677,7 @@
           await save(job).catch(() => {});
           return { assets, projectUrl: job.projectUrl, account: job.account, credits: controls.credits };
         }
-        await sleep(2500);
+        await sleep(1200);
       }
       throw new Error('O Flow não concluiu em 20 minutos. O pedido foi preservado; consulte o projeto antes de tentar gerar novamente.');
     } catch (error) {
@@ -686,13 +711,21 @@
       const candidates = visible.assets.filter((asset) => asset.canReuseCommand !== false && asset.kind === job.mode && !job.baselineIds?.includes(asset.id)).slice(0, 12);
       const assets = [];
       for (const asset of candidates) {
-        const commandMatches = recoveryHash ? await verifyAssetCommand(tabId, asset, recoveryHash, job.referenceIds || [], job.referenceMode || 'ingredients') : false;
+        const exactEvidence = confirmed.has(asset.id.toLowerCase());
+        const commandMatches = exactEvidence || (recoveryHash ? await verifyAssetCommand(tabId, asset, recoveryHash, job.referenceIds || [], job.referenceMode || 'ingredients') : false);
         if (recoveryHash && !commandMatches) continue;
         if (asset.kind === 'image') {
           if (commandMatches || (!recoveryHash && confirmed.has(asset.id.toLowerCase()))) assets.push(asset);
           continue;
         }
-        const result = await resolveVideoAsset(tabId, asset, job.projectUrl);
+        let result;
+        try { result = await resolveVideoAsset(tabId, asset, job.projectUrl); }
+        catch (error) {
+          if (error?.code !== 'FLOW_MEDIA_NOT_READY') throw error;
+          Object.assign(job, { state: 'generating', stage: 'O vídeo já apareceu. O Flow ainda está preparando a prévia; o Pilot verificará novamente automaticamente.', updatedAt: Date.now() });
+          await save(job);
+          return job;
+        }
         if (commandMatches || (!recoveryHash && confirmed.has(result.id))) assets.push(result);
         await chrome.tabs.update(tabId, { url: job.projectUrl, active: false });
         await waitReady(tabId);
@@ -732,7 +765,7 @@
       project.pathname = project.pathname.replace(/(\/project\/[^/]+).*$/, '$1') + '/edit/' + payload.asset.id;
       const detailUrl = project.href;
       await chrome.tabs.update(tabId, { url: detailUrl, active: false });
-      await waitReady(tabId, 'downloadReady');
+      await waitReady(tabId, 'downloadReady', 180000);
       // Escape closes Flow's video editor and navigates to the project. A
       // download must remain on this exact result through menu activation.
       await assertDownloadRoute(tabId, detailUrl);

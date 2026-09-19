@@ -57,6 +57,10 @@ assert.match(modal, /type Draft = \{[^\n]*account\?: FlowAccount \| null/, 'the 
 assert.ok(modal.includes("if (!sessionFor(taskId).account?.email && draft.account?.email) updateSession(taskId, { account: draft.account });"), 'F5 restores the confirmed Flow account before another quote');
 assert.ok(modal.includes('assets, account: resultAccount, projectUrl: result.projectUrl || projectUrl, activeJob: null'), 'completed generation persists its refreshed account with the assets');
 assert.ok(modal.includes('assets, account: refreshedAccount, projectUrl: actualProject, activeJob: null'), 'recovered generation persists its refreshed account before releasing the request lock');
+assert.ok(modal.includes('void quote(true)'), 'valid prompt/settings trigger the automatic credit consultation');
+assert.ok(modal.includes('1800'), 'an active paid request is polled automatically without a manual status click');
+assert.ok(modal.includes("generatePrompt('image-video')") && modal.includes("generatePrompt('video-only')"), 'the copy-range director exposes paired and direct-video prompts');
+assert.ok(modal.includes('flowAssetId: asset.id'), 'an inserted take keeps its exact Flow identity for visible take-to-copy binding');
 const modalAst = ts.createSourceFile('PilotFlowInserts.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const quoteNodes = [];
 function findQuoteNodes(node) {

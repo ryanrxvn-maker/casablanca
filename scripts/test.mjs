@@ -25,6 +25,7 @@ const ETAPAS = [
   { run: ["scripts/test-pilot-economia-runtime.mjs"] },
   { run: ["scripts/test-pilot-biblioteca-avatares.mjs"] },
   { run: ["scripts/test-flow-bridge.mjs", "scripts/test-pilot-flow-integration.mjs", "scripts/test-flow-extension.mjs"] },
+  { tsc: "lib/flow-prompt.ts lib/flow-prompt.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --esModuleInterop --lib esnext,dom", run: [".test-tmp/flow-prompt.test.js"] },
   { tsc: "lib/durable-records-core.ts lib/durable-records.ts lib/durable-records.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/durable-records.test.js"] },
   { tsc: "lib/speech-detect.ts lib/speech-detect.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/speech-detect.test.js"] },
   { tsc: "lib/decupagem-matcher.ts lib/decupagem-matcher.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck", run: [".test-tmp/decupagem-matcher.test.js"] },

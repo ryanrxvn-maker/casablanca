@@ -156,17 +156,17 @@ function declaration(name, source = workerSource) {
   assert.ok(found, `function ${name}`);
   return found;
 }
-function configureHarness(dropFinalControl = '') {
-  let selected = new Set(), model = 'old';
+function configureHarness(dropFinalControl = '', initialModel = 'old') {
+  let selected = new Set(), model = initialModel;
   const actions = [];
-  const ctx = { openSettings: async () => {}, openModelMenu: async () => {}, closeSettings: async () => {},
+  const ctx = { openSettings: async () => {}, openModelMenu: async () => { actions.push('model menu'); }, closeSettings: async () => {},
     waitDom: async () => ({}),
     choose: async (_, name) => { selected.add(name); actions.push(name); },
     dom: async (_, op, payload) => {
       if (op === 'activateModel') { model = payload.name; selected = new Set([...selected].filter(item => ['Imagem', 'Vídeo'].includes(item))); actions.push('model selected'); return {}; }
       return { model, credits: 15, selected: [...selected].filter(item => item !== dropFinalControl) };
     } };
-  vm.runInNewContext(declaration('configure') + ';this.configure = configure;', ctx);
+  vm.runInNewContext(declaration('verifyConfigured') + declaration('configure') + ';this.configure = configure;', ctx);
   return { actions, configure: payload => ctx.configure(1, payload) };
 }
 test('model changes may reset options; configure restores and verifies all requested controls', async () => {
@@ -214,6 +214,29 @@ test('account panel failure is not swallowed before trying the settings menu', a
   vm.runInNewContext(declaration('readAccount') + ';this.readAccount=readAccount;', ctx);
   await assert.rejects(ctx.readAccount(1), /abertura da conta Google/);
   assert.equal(settingsCalls, 1);
+});
+test('configure keeps the current model menu closed when the requested motor is already active', async () => {
+  const h = configureHarness('', valid.model);
+  await h.configure({ ...valid, videoMode: 'ingredients' });
+  assert.equal(h.actions.includes('model menu'), false);
+  assert.equal(h.actions.includes('model selected'), false);
+});
+test('download readiness is transient and receives the extended preparation window', async () => {
+  let now = 0;
+  const ctx = {
+    Date: { now: () => now }, sleep: async ms => { now += ms; },
+    chrome: {
+      tabs: { get: async () => ({ url: 'https://flow.google.com/project/project-a/edit/6a2a3747-0ba8-4ec3-b911-1d0d7a30ef0e', status: 'complete' }), reload: async () => {} },
+      scripting: { executeScript: async () => {} }, runtime: { getManifest: () => ({ version: '4.45.5' }) },
+    },
+    isFlow: () => true,
+    dom: async (_, op) => op === 'ping' ? { version: '4.45.5' } : { ready: false },
+  };
+  vm.runInNewContext(declaration('waitReady') + ';this.waitReady=waitReady;', ctx);
+  const error = await ctx.waitReady(7, 'downloadReady', 180000).then(() => null, value => value);
+  assert.equal(error.code, 'FLOW_MEDIA_NOT_READY');
+  assert.match(error.message, /continuará acompanhando automaticamente/);
+  assert.ok(now >= 180000);
 });
 test('account connection uses the nested Google role button before the inert visual shell', () => {
   const google = { ariaLabel: 'Conta do Google: Silas Ryan (ryanrxvn@gmail.com), Assinatura do Google' };
@@ -638,6 +661,44 @@ for (const accountFails of [false, true]) test(`paid canvas job recovers without
   assert.ok(saved.every(snapshot => snapshot.error === ''), 'both persisted completed states clear the old error before account lookup');
   assert.equal(recovered.account.credits, accountFails ? null : 243); assert.equal(saved.length, 2);
   assert.deepEqual(verified, ['unrelated', 'target']); assert.deepEqual(opened, ['target']); assert.equal(ctx.busyOperation, null);
+});
+
+test('persisted network UUID recovers a paid result without the slower command-reuse inspection', async () => {
+  const id = '6a2a3747-0ba8-4ec3-b911-1d0d7a30ef0e', projectUrl = 'https://flow.google.com/project/project-a';
+  const job = { requestId: 'flow-network-proof', submitted: true, state: 'generating', expectedCount: 1, mode: 'image', promptHash: 'hash', referenceIds: [], referenceMode: 'ingredients', baselineIds: [], evidenceIds: [id], account: { email: 'test@example.com' }, projectUrl };
+  let verifies = 0;
+  const ctx = { busyOperation: null, Date, sleep: async () => {}, tabFor: async () => 7,
+    readAccount: async () => ({ email: 'test@example.com', credits: 80 }),
+    dom: async (_, op) => op === 'media' ? { assets: [{ id, kind: 'image', width: 768, height: 1376 }], busy: false } : {},
+    verifyAssetCommand: async () => { verifies++; return false; }, resolveVideoAsset: async () => { throw Error('must not open image'); },
+    chrome: { tabs: { update: async () => {} } }, waitReady: async () => {},
+    save: async () => {}, detach: async () => {}, errorText: error => error.message,
+    refreshResultAccount: async (_, account) => account,
+  };
+  vm.runInNewContext(declaration('recoverJob') + ';this.recoverJob=recoverJob;', ctx);
+  const result = await ctx.recoverJob(job, 1);
+  assert.equal(result.state, 'completed');
+  assert.equal(result.assets[0].id, id);
+  assert.equal(verifies, 0);
+});
+
+test('video detail still preparing stays in automatic recovery instead of becoming an error', async () => {
+  const id = '6a2a3747-0ba8-4ec3-b911-1d0d7a30ef0e', projectUrl = 'https://flow.google.com/project/project-a';
+  const job = { requestId: 'flow-preparing-video', submitted: true, state: 'needs_attention', expectedCount: 1, mode: 'video', promptHash: 'hash', referenceIds: [], referenceMode: 'ingredients', baselineIds: [], evidenceIds: [id], account: { email: 'test@example.com' }, projectUrl };
+  const saved = [];
+  const pending = new Error('still preparing'); pending.code = 'FLOW_MEDIA_NOT_READY';
+  const ctx = { busyOperation: null, Date, sleep: async () => {}, tabFor: async () => 7,
+    readAccount: async () => ({ email: 'test@example.com', credits: 80 }),
+    dom: async (_, op) => op === 'media' ? { assets: [{ id, kind: 'video', width: 720, height: 1280 }], busy: false } : {},
+    verifyAssetCommand: async () => { throw Error('network proof must be enough'); }, resolveVideoAsset: async () => { throw pending; },
+    chrome: { tabs: { update: async () => {} } }, waitReady: async () => {},
+    save: async state => saved.push({ ...state }), detach: async () => {}, errorText: error => error.message,
+  };
+  vm.runInNewContext(declaration('recoverJob') + ';this.recoverJob=recoverJob;', ctx);
+  const result = await ctx.recoverJob(job, 1);
+  assert.equal(result.state, 'generating');
+  assert.match(result.stage, /verificará novamente automaticamente/);
+  assert.equal(saved.at(-1).state, 'generating');
 });
 
 test('post-generation account refresh never reuses a stale balance or another account identity', async () => {

@@ -26,12 +26,15 @@ type StudioAsset = FlowAsset & { projectUrl?: string; accountEmail?: string };
 type ActiveJob = { requestId: string; projectUrl: string; startedAt: number; accountEmail?: string; prompt?: string };
 type Draft = { settings: FlowSettings; projectUrl: string; range: Range | null; assets: StudioAsset[]; account?: FlowAccount | null; activeJob?: ActiveJob | null; selectedModels?: Record<FlowSettings['mode'], string> };
 type RecoveredJob = { state?: string; stage?: string; submitted?: boolean; assets?: StudioAsset[]; projectUrl?: string; account?: FlowAccount; error?: string };
-type Busy = 'inspect' | 'quote' | 'generate' | 'download' | null;
+type Busy = 'inspect' | 'quote' | 'generate' | 'download' | 'prompt' | null;
+type PromptMode = 'image-video' | 'video-only';
+type PromptSuggestion = { imagePrompt?: string; videoPrompt: string; strategy?: string; source?: string };
 type Session = {
   busy: Busy; progress: string; error: string; inspection: FlowInspection | null;
   quote: FlowQuote | null; quoteKey: string; assets: StudioAsset[]; projectUrl: string;
   activeJob?: ActiveJob | null; recoveryMessage?: string; recoveryState?: string; preparedSettings?: FlowSettings | null;
-  account?: FlowAccount | null; mediaRevision?: number;
+  account?: FlowAccount | null; mediaRevision?: number; suggestedMotion?: string;
+  checkingStatus?: boolean;
   montage?: { busy: boolean; error: string; notice: string };
 };
 
@@ -149,6 +152,16 @@ function fileDataUrl(file: File): Promise<string> {
   });
 }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : 'Não foi possível concluir. Tente novamente.'; }
+function insertMatchesAsset(insert: Insert, asset: StudioAsset): boolean {
+  return insert.source === 'flow' && (insert.flowAssetId === asset.id || (!insert.flowAssetId && insert.midiaNome.includes(asset.id)));
+}
+function rangeText(insert: Pick<Insert, 'ancora' | 'palavraDe' | 'palavraAte'>, partes: Parte[]): string {
+  const words = (partes.find((part) => part.label === insert.ancora)?.text || '').split(/\s+/).filter(Boolean);
+  if (!words.length) return insert.ancora;
+  const from = words[Math.max(0, Math.min(words.length - 1, insert.palavraDe))];
+  const to = words[Math.max(0, Math.min(words.length - 1, insert.palavraAte))];
+  return `${insert.ancora} · “${from}” → “${to}”`;
+}
 const controlLabel = (value: string) => value.replace(/\s+/g, '').replace(/×/g, 'x').toLowerCase();
 function availableControls(inspection: FlowInspection | null, settings: FlowSettings) {
   const matches = inspection?.mode === settings.mode && inspection.controls?.model === settings.model && Array.isArray(inspection.controls.available);
@@ -237,6 +250,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const [storageError, setStorageError] = useState('');
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [promptMenu, setPromptMenu] = useState(false);
   const [localPreview, setLocalPreview] = useState<{ key: string; url: string | null; state: 'loading' | 'missing' | 'ready' | 'error' } | null>(null);
   const previewAttempts = useRef(new Set<string>());
   const [notice, setNotice] = useState('');
@@ -244,6 +258,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const previousMontageInputs = useRef(montageInputs);
   const preferredModels = useRef<Record<FlowSettings['mode'], string>>({ image: FLOW_IMAGE_MODELS[0], video: FLOW_VIDEO_MODELS[0] });
   const inspectionAttempt = useRef('');
+  const automaticQuote = useRef({ key: '', attempts: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
   const draftRef = useRef<Draft>({ settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null });
   draftRef.current = { settings: session.preparedSettings || settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null, activeJob: session.activeJob, selectedModels: preferredModels.current };
@@ -266,6 +281,8 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const montageBusy = atualizandoMontagem || !!session.montage?.busy;
   const unresolved = !!session.activeJob;
   const chosenAsset = session.assets.find((asset) => asset.id === selected) || session.assets[session.assets.length - 1];
+  const chosenTake = chosenAsset ? Math.max(1, session.assets.findIndex((asset) => asset.id === chosenAsset.id) + 1) : 0;
+  const assignedInsert = chosenAsset ? inserts.find((insert) => insertMatchesAsset(insert, chosenAsset)) : undefined;
   const chosenMediaKey = useMemo(() => { try { return chosenAsset ? flowMediaKey(chosenAsset) : ''; } catch { return ''; } }, [chosenAsset?.id, chosenAsset?.kind, chosenAsset?.projectUrl, chosenAsset?.accountEmail]);
   const previewUrl = localPreview?.key === chosenMediaKey && localPreview.url ? localPreview.url : chosenAsset ? assetUrl(chosenAsset) : undefined;
   const selectedRange = range && range.ancora === part?.label && range.ate < words.length && range.de >= 0 ? range : null;
@@ -385,9 +402,12 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     setNotice('');
     updateSession(taskId, { quote: null, quoteKey: '', error: '' });
   }, [taskId]);
-  async function recoverActiveJob(active = sessionFor(taskId).activeJob, restoredDraft?: Draft) {
-    if (!active || sessionFor(taskId).busy === 'generate' || sessionFor(taskId).busy === 'download') return;
-    updateSession(taskId, { busy: 'inspect', progress: 'Recuperando o pedido já enviado ao Flow…', error: '' });
+  async function recoverActiveJob(active = sessionFor(taskId).activeJob, restoredDraft?: Draft, quiet = false) {
+    const current = sessionFor(taskId);
+    if (!active || current.checkingStatus || current.busy === 'generate' || current.busy === 'download') return;
+    updateSession(taskId, quiet
+      ? { checkingStatus: true, recoveryMessage: current.recoveryMessage || 'Acompanhamento automático ativo…', error: '' }
+      : { busy: 'inspect', progress: 'Recuperando o pedido já enviado ao Flow…', error: '' });
     try {
       const response = await flowStatus(active.requestId, { expectedPrompt: active.prompt }) as { job?: RecoveredJob | null };
       if (!response || !Object.prototype.hasOwnProperty.call(response, 'job')) throw new Error('A extensão não confirmou o estado do pedido anterior. Confira o projeto no Flow.');
@@ -409,14 +429,25 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
         await saveDraft(taskId, { ...(restoredDraft || draftRef.current), assets, account: refreshedAccount, projectUrl: actualProject, activeJob: null });
         updateSession(taskId, { activeJob: null, assets, account: refreshedAccount, projectUrl: actualProject, quote: null, quoteKey: '', recoveryMessage: '', recoveryState: undefined, error: job?.error || '' });
         setProjectUrl(actualProject);
+        if (returned[0]?.id) setSelected(returned[0].id);
         setNotice(completed ? 'Pedido recuperado. Suas criações estão prontas para conferir.' : 'Nenhuma geração pendente. Consulte os créditos para continuar.');
       } else {
         updateSession(taskId, { recoveryState: job.state, recoveryMessage: job.stage || job.error || 'A geração ainda não foi concluída. Confira o projeto e atualize o status.', error: '' });
       }
     } catch (error) {
-      updateSession(taskId, { error: errorText(error), recoveryMessage: 'O pedido anterior ainda precisa ser conferido. A geração de um novo pedido está pausada.' });
-    } finally { updateSession(taskId, { busy: null, progress: '' }); }
+      updateSession(taskId, quiet
+        ? { error: '', recoveryMessage: 'A conexão oscilou, mas o acompanhamento automático continua ativo.' }
+        : { error: errorText(error), recoveryMessage: 'O pedido anterior ainda precisa ser conferido. A geração de um novo pedido está pausada.' });
+    } finally { updateSession(taskId, quiet ? { checkingStatus: false } : { busy: null, progress: '' }); }
   }
+
+  useEffect(() => {
+    const active = session.activeJob;
+    if (!loaded || !active || session.busy || session.checkingStatus || session.recoveryState === 'unknown') return;
+    if (Date.now() - active.startedAt > 30 * 60 * 1000) return;
+    const timer = setTimeout(() => void recoverActiveJob(active, undefined, true), session.recoveryState === 'needs_attention' ? 3200 : 1800);
+    return () => clearTimeout(timer);
+  }, [loaded, session.activeJob?.requestId, session.activeJob?.startedAt, session.busy, session.checkingStatus, session.recoveryState]);
   async function acknowledgePreviousJob() {
     const current = sessionFor(taskId);
     if (!current.activeJob || current.busy || !['needs_attention', 'unknown'].includes(current.recoveryState || '')) return;
@@ -458,14 +489,17 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     } catch (error) { updateSession(taskId, { error: errorText(error) }); }
     finally { updateSession(taskId, { busy: null, progress: '' }); }
   }
-  async function quote() {
+  async function quote(automatic = false) {
     if (sessionFor(taskId).busy || sessionFor(taskId).activeJob || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || !settings.prompt.trim()) return;
     const requested = settings;
     updateSession(taskId, { busy: 'quote', error: '', progress: 'Conferindo a conta e as opções deste motor…', quote: null, quoteKey: '' });
     try {
-      // A first quote also connects the account. Inspect while the same request
-      // remains busy so the capabilities effect cannot erase the new quote.
-      const inspection = await flowInspect(projectUrl || undefined, { mode: requested.mode, model: requested.model });
+      // Reuse the live capability snapshot. Reopening the account panel and the
+      // model menu for every keystroke made automatic pricing feel sluggish.
+      const cached = sessionFor(taskId).inspection;
+      const inspection = cached?.account?.email && cached.mode === requested.mode && cached.controls?.model === requested.model
+        ? cached
+        : await flowInspect(projectUrl || undefined, { mode: requested.mode, model: requested.model });
       const adjusted = settingsForInspection(requested, inspection);
       const controls = availableControls(inspection, adjusted);
       if (!controls.matches || !controls.aspects.includes(adjusted.aspectRatio) || !controls.counts.includes(adjusted.count) ||
@@ -490,9 +524,24 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       updateSession(taskId, { inspection: { ...inspection, account: quoted.account, projectUrl: actualProject }, account: quoted.account, quote: quoted, quoteKey: JSON.stringify({ settings: adjusted, projectUrl: actualProject }), projectUrl: actualProject });
       if (JSON.stringify(adjusted) !== JSON.stringify(requested)) setNotice('As opções foram ajustadas às combinações disponíveis neste motor. O custo exibido já considera esses ajustes.');
       if (quoted.credits == null) updateSession(taskId, { error: 'O Flow não informou o custo. Atualize a cotação antes de gerar.' });
-    } catch (error) { updateSession(taskId, { error: errorText(error) }); }
+    } catch (error) {
+      if (!automatic || automaticQuote.current.attempts >= 3) updateSession(taskId, { error: errorText(error) });
+    }
     finally { updateSession(taskId, { busy: null, progress: '' }); }
   }
+
+  useEffect(() => {
+    const key = `${account?.email || ''}:${fingerprint}`;
+    if (automaticQuote.current.key !== key) automaticQuote.current = { key, attempts: 0 };
+    if (!loaded || busy || unresolved || quoteValid || referenceBusy || !account?.email || !settings.prompt.trim() ||
+        capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || automaticQuote.current.attempts >= 3) return;
+    const delay = automaticQuote.current.attempts ? 1300 * automaticQuote.current.attempts : 650;
+    const timer = setTimeout(() => {
+      automaticQuote.current.attempts += 1;
+      void quote(true);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [loaded, busy, unresolved, quoteValid, referenceBusy, account?.email, fingerprint, settings.prompt, capabilitiesPending, capabilitiesUnsupported, referencesOverLimit]);
   async function generate() {
     if (sessionFor(taskId).busy || sessionFor(taskId).activeJob || referencesOverLimit || !quoteValid || insufficient || !session.quote || session.quote.credits == null) return;
     const capturedSettings = settings;
@@ -518,7 +567,9 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       await saveDraft(taskId, { ...draftRef.current, assets, account: resultAccount, projectUrl: result.projectUrl || projectUrl, activeJob: null });
       updateSession(taskId, { activeJob: null, recoveryMessage: '' });
       if (!result.assets.length) updateSession(taskId, { error: 'O Flow terminou sem devolver uma mídia. Abra o projeto para conferir.' });
-    } catch (error) { updateSession(taskId, { error: errorText(error), quote: null, quoteKey: '', recoveryMessage: 'Confira o pedido anterior antes de gerar novamente. Atualizar o status não gasta créditos.' }); }
+    } catch (error) {
+      updateSession(taskId, { error: '', quote: null, quoteKey: '', recoveryState: 'generating', recoveryMessage: `O Flow demorou para confirmar uma etapa. O Pilot continuará acompanhando automaticamente. ${errorText(error)}` });
+    }
     finally { updateSession(taskId, { busy: null, progress: '' }); }
   }
   async function addReferences(files: FileList | null) {
@@ -547,8 +598,9 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       const file = await assetFile(asset);
       const media = await onSubirMidia(file, placement.ancora);
       if (!media) throw new Error('A mídia não foi salva. O insert ainda não foi adicionado.');
-      const insert = { ...insertPadrao(`flow-${crypto.randomUUID()}`, placement.ancora, media), source: 'flow' as const, palavraDe: placement.de, palavraAte: placement.ate };
-      onMudar((current) => [...current.filter((item) => item.id !== insert.id), insert]);
+      const existing = inserts.find((item) => insertMatchesAsset(item, asset));
+      const insert = { ...(existing || insertPadrao(`flow-${crypto.randomUUID()}`, placement.ancora, media)), source: 'flow' as const, flowAssetId: asset.id, ancora: placement.ancora, palavraDe: placement.de, palavraAte: placement.ate, midiaKey: media.key, midiaNome: media.nome, midiaTipo: media.tipo, midiaW: media.w, midiaH: media.h };
+      onMudar((current) => existing ? current.map((item) => item.id === existing.id ? insert : item) : [...current, insert]);
       onEnabledChange(true);
       setNotice(`Insert adicionado em ${placement.ancora}. A montagem usará o trecho marcado.`);
     } catch (error) { updateSession(taskId, { error: errorText(error) }); }
@@ -586,9 +638,33 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       const file = await assetFile(asset);
       if (file.size > 10 * 1024 * 1024) throw new Error('A imagem baixada ultrapassa o limite de 10 MB para referências. Use uma versão menor para animar.');
       const reference = { name: file.name, mimeType: file.type, dataUrl: await fileDataUrl(file) };
-      const prepared: FlowSettings = { ...draftRef.current.settings, mode: 'video', model: preferredModels.current.video, videoMode: 'frames', animateMediaId: asset.id, references: [reference] };
+      const prepared: FlowSettings = { ...draftRef.current.settings, prompt: sessionFor(taskId).suggestedMotion || draftRef.current.settings.prompt, mode: 'video', model: preferredModels.current.video, videoMode: 'frames', animateMediaId: asset.id, references: [reference] };
       await saveDraft(taskId, { ...draftRef.current, settings: prepared });
-      updateSession(taskId, { preparedSettings: prepared, quote: null, quoteKey: '' });
+      updateSession(taskId, { preparedSettings: prepared, suggestedMotion: '', quote: null, quoteKey: '' });
+    } catch (error) { updateSession(taskId, { error: errorText(error) }); }
+    finally { updateSession(taskId, { busy: null, progress: '' }); }
+  }
+  async function generatePrompt(mode: PromptMode) {
+    if (!selectedRange || rangeStart != null || sessionFor(taskId).busy) return;
+    const selectedWords = words.slice(selectedRange.de, selectedRange.ate + 1).join(' ');
+    if (!selectedWords.trim()) return;
+    updateSession(taskId, { busy: 'prompt', error: '', progress: 'Criando uma direção cinematográfica para este trecho…' });
+    try {
+      const response = await fetch('/api/flow-prompt', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ excerpt: selectedWords, context: part?.text || selectedWords, mode, aspectRatio: settings.aspectRatio, durationSeconds: settings.durationSeconds }),
+      });
+      const result = await response.json().catch(() => null) as (PromptSuggestion & { error?: string }) | null;
+      if (!response.ok || !result?.videoPrompt) throw new Error(result?.error || 'Não foi possível criar o prompt agora.');
+      if (mode === 'image-video' && result.imagePrompt) {
+        change({ prompt: result.imagePrompt, mode: 'image', model: preferredModels.current.image, animateMediaId: undefined, references: [] });
+        updateSession(taskId, { suggestedMotion: result.videoPrompt });
+        setNotice('Frame cinematográfico pronto. Gere a imagem e clique em Animar com Flow; o movimento já ficará preenchido.');
+      } else {
+        change({ prompt: result.videoPrompt, mode: 'video', model: preferredModels.current.video, animateMediaId: undefined });
+        updateSession(taskId, { suggestedMotion: '' });
+        setNotice('Prompt de vídeo criado para o trecho selecionado. O custo será calculado automaticamente.');
+      }
     } catch (error) { updateSession(taskId, { error: errorText(error) }); }
     finally { updateSession(taskId, { busy: null, progress: '' }); }
   }
@@ -650,23 +726,24 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
           <div className={`${s.accountCard} ${account?.email ? s.accountCardConnected : s.accountCardDisconnected}`}><div className={s.accountIdentity}>{account?.avatarUrl ? <img src={account.avatarUrl} alt="" referrerPolicy="no-referrer"/> : <div className={s.accountAvatar}>G</div>}<div><span className={s.smallLabel}>CONTA DO FLOW</span><strong>{account?.name || 'Conecte sua conta'}</strong><span title={account?.email}>{account?.email || 'Confirme a conta que fará esta criação'}</span></div><span className={`${s.statusDot} ${account?.email ? s.statusConnected : ''}`} title={account?.email ? 'Conta conferida' : 'Conta ainda não conferida'}/></div><div className={s.accountFooter}><span><b>{account?.credits == null ? '—' : account.credits.toLocaleString('pt-BR')}</b> créditos disponíveis</span><button type="button" className={account?.email ? s.accountLink : s.connectButton} disabled={busy} onClick={() => void (account ? openFlow() : inspect())}><span>{account ? 'Mudar conta' : 'Conectar ao Google Flow'}</span><Icon name="external"/></button></div></div>
           <div className={s.sectionHeading}><span className={s.step}>02</span><h3>Sua criação</h3><button type="button" className={s.textButton} disabled={busy} onClick={() => void inspect()}><Icon name="refresh"/>Atualizar conta</button></div>
           <div className={s.previewShell}><div className={`${s.preview} ${settings.aspectRatio === '16:9' ? s.previewWide : ''}`}>
-            {chosenAsset && (previewError === chosenAsset.id || !previewUrl) ? <div className={s.pendingPreview}>
+            {chosenAsset && (previewError === chosenAsset.id || !previewUrl) ? <div className={`${s.pendingPreview} ${mediaUrl(chosenAsset.posterUrl) ? s.pendingPreviewWithPoster : ''}`}>
               {mediaUrl(chosenAsset.posterUrl) && <img className={s.previewPoster} src={mediaUrl(chosenAsset.posterUrl)} alt=""/>}
-              <div className={s.emptyPreview}><Icon name={chosenAsset.kind === 'video' ? 'video' : 'image'}/><h4>{previewError === chosenAsset.id ? 'Vamos recuperar a prévia.' : chosenAsset.kind === 'video' ? 'Seu vídeo está pronto.' : 'Sua imagem está pronta.'}</h4><p>{chosenAsset.kind === 'video' ? 'Prepare o arquivo em 1080p para assistir aqui.' : 'Recupere a imagem em 2K para conferir aqui.'}<br/>Ele também ficará salvo para a montagem.</p><button type="button" className={s.previewPrepare} disabled={busy || !loaded} onClick={() => void preparePreview(chosenAsset)}><Icon name="video"/>{chosenAsset.kind === 'video' ? 'Preparar prévia 1080p' : 'Recuperar imagem 2K'}</button><button type="button" className={s.textButton} disabled={busy} onClick={() => void openFlow(chosenAsset)}>Conferir no Flow <Icon name="external"/></button></div>
+              <div className={s.emptyPreview}><Icon name={chosenAsset.kind === 'video' ? 'video' : 'image'}/><h4>{previewError === chosenAsset.id ? 'Vamos recuperar a prévia.' : chosenAsset.kind === 'video' ? 'Seu vídeo está pronto.' : 'Sua imagem está pronta.'}</h4><p>{chosenAsset.kind === 'video' ? mediaUrl(chosenAsset.posterUrl) ? 'O take já apareceu. A versão 1080p está sendo preparada automaticamente.' : 'A versão 1080p será preparada automaticamente para tocar aqui.' : 'A imagem em 2K será recuperada automaticamente.'}<br/>Ela também ficará salva para a montagem.</p><button type="button" className={s.previewPrepare} disabled={busy || !loaded} onClick={() => void preparePreview(chosenAsset)}><Icon name="video"/>{chosenAsset.kind === 'video' ? 'Preparar agora em 1080p' : 'Recuperar agora em 2K'}</button><button type="button" className={s.textButton} disabled={busy} onClick={() => void openFlow(chosenAsset)}>Conferir no Flow <Icon name="external"/></button></div>
             </div> : chosenAsset && previewUrl ? chosenAsset.kind === 'video' ? <video key={chosenAsset.id} src={previewUrl} poster={mediaUrl(chosenAsset.posterUrl)} controls playsInline muted preload="metadata" aria-label="Prévia do vídeo criado no Flow" onLoadedMetadata={(event) => { const { videoWidth: width, videoHeight: height } = event.currentTarget; if (width && height && (chosenAsset.width !== width || chosenAsset.height !== height)) updateSession(taskId, { assets: sessionFor(taskId).assets.map((asset) => asset.id === chosenAsset.id ? { ...asset, width, height } : asset) }); }} onError={() => setPreviewError(chosenAsset.id)}/> : <img src={previewUrl} alt="Imagem criada no Flow" onError={() => setPreviewError(chosenAsset.id)}/> : <div className={s.emptyPreview}><div className={s.emptyMark}><FlowMark size={54}/></div><span className={s.eyebrow}>UM NOVO TAKE COMEÇA AQUI</span><h4>Dê forma à sua ideia.</h4><p>Escreva o prompt, confira os créditos<br/>e gere sua primeira criação.</p><div className={s.previewCorners} aria-hidden="true"><i/><i/><i/><i/></div></div>}
-            {busy && <div className={s.progressOverlay} role="status"><span className={s.spinner}/><strong>{session.progress || 'Processando…'}</strong><span>{session.busy === 'generate' ? 'Você pode fechar esta janela e voltar nesta sessão.' : 'Aguarde a confirmação do Flow.'}</span></div>}
+            {busy && <div className={`${s.progressOverlay} ${session.busy === 'download' && mediaUrl(chosenAsset?.posterUrl) ? s.progressCompact : ''}`} role="status"><span className={s.spinner}/><strong>{session.progress || 'Processando…'}</strong><span>{session.busy === 'generate' ? 'O acompanhamento continua mesmo com a janela fechada.' : session.busy === 'quote' ? 'O custo aparece sozinho assim que o Flow confirmar.' : 'Aguarde a confirmação do Flow.'}</span></div>}
           </div><div className={s.previewMeta}><span>{chosenAsset ? chosenAsset.kind === 'video' ? 'VÍDEO GERADO' : 'IMAGEM GERADA' : 'PREVIEW'}</span><span>{chosenAsset?.width && chosenAsset?.height ? `${chosenAsset.width} × ${chosenAsset.height}` : settings.aspectRatio} <i/> {chosenAsset?.kind === 'image' || (!chosenAsset && settings.mode === 'image') ? 'Imagem' : `${settings.durationSeconds}s`}</span></div></div>
-          {session.assets.length > 0 && <div className={s.results} role="group" aria-label="Criações do Flow">{session.assets.map((asset, index) => <button type="button" key={asset.id} disabled={busy} onClick={() => setSelected(asset.id)} className={chosenAsset?.id === asset.id ? s.resultSelected : ''} aria-label={`Selecionar ${asset.kind === 'video' ? 'vídeo' : 'imagem'} ${index + 1}`} aria-pressed={chosenAsset?.id === asset.id}>{asset.kind === 'image' && assetUrl(asset) ? <img src={assetUrl(asset)} alt=""/> : <Icon name="video"/>}<span>{String(index + 1).padStart(2, '0')}</span>{chosenAsset?.id === asset.id && <i><Icon name="check"/></i>}</button>)}</div>}
-          {chosenAsset?.kind === 'image' && <button type="button" className={s.animateButton} disabled={busy} onClick={animate}><Icon name="video"/><span>Animar esta imagem<small>Use a criação como primeiro frame</small></span><Icon name="arrow"/></button>}
-          {unresolved && !busy && <div className={s.recoveryCard} role="status"><strong>Um pedido precisa ser conferido</strong><p>{session.recoveryMessage || 'Recupere o resultado do pedido anterior antes de gerar novamente.'}</p><div><button type="button" className={s.textButton} onClick={() => void recoverActiveJob()}><Icon name="refresh"/>Atualizar status</button><button type="button" className={s.textButton} onClick={() => void openFlow()}>Conferir no Flow<Icon name="external"/></button></div><small>Atualizar o status não dispara outra geração.</small>{['needs_attention', 'unknown'].includes(session.recoveryState || '') && <><p>Confira o projeto antes de liberar: o pedido anterior pode ter sido gerado.</p><button type="button" className={s.textButton} onClick={() => void acknowledgePreviousJob()}>Conferi no Flow · liberar novo pedido</button></>}</div>}
-          <div className={s.creditCard}><div><span className={s.smallLabel}>CUSTO DESTA CRIAÇÃO</span><strong>{quoteValid ? session.quote?.credits?.toLocaleString('pt-BR') : '—'} <small>créditos</small></strong><p>{quoteValid ? `${settings.count} ${settings.count === 1 ? 'variação' : 'variações'} · valor conferido no Flow` : 'Consulte o valor real antes de gerar.'}</p></div><button type="button" className={s.quoteButton} disabled={busy || unresolved || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || referenceBusy || !loaded || !settings.prompt.trim()} onClick={() => void quote()}><Icon name="refresh"/>{session.busy === 'quote' ? 'Consultando…' : quoteValid ? 'Atualizar' : 'Consultar'}</button></div>
+          {session.assets.length > 0 && <div className={s.results} role="group" aria-label="Criações do Flow">{session.assets.map((asset, index) => { const binding = inserts.find((insert) => insertMatchesAsset(insert, asset)); return <button type="button" key={asset.id} disabled={busy} onClick={() => setSelected(asset.id)} className={`${chosenAsset?.id === asset.id ? s.resultSelected : ''} ${binding ? s.resultBound : ''}`} aria-label={`Selecionar ${asset.kind === 'video' ? 'vídeo' : 'imagem'} ${index + 1}${binding ? `, usado em ${binding.ancora}` : ''}`} aria-pressed={chosenAsset?.id === asset.id}>{assetUrl(asset) || mediaUrl(asset.posterUrl) ? <img src={assetUrl(asset) || mediaUrl(asset.posterUrl)} alt=""/> : <Icon name="video"/>}<span>{String(index + 1).padStart(2, '0')}</span>{binding && <b>{binding.ancora}</b>}{chosenAsset?.id === asset.id && <i><Icon name="check"/></i>}</button>; })}</div>}
+          {chosenAsset?.kind === 'image' && <button type="button" className={s.animateButton} disabled={busy} onClick={animate}><span className={s.animateIcon}><Icon name="video"/></span><span><b>Animar com Flow</b><small>Transforme este frame em um take cinematográfico</small></span><em>IMAGE → VIDEO</em><i><Icon name="arrow"/></i></button>}
+          {unresolved && !busy && <div className={`${s.recoveryCard} ${s.recoveryLive}`} role="status"><span className={s.livePulse}/><strong>{session.recoveryState === 'unknown' ? 'Pedido precisa de conferência' : 'Acompanhamento automático ativo'}</strong><p>{session.recoveryMessage || 'O Pilot continuará verificando o Flow até o take ficar pronto.'}</p><div><button type="button" className={s.textButton} onClick={() => void recoverActiveJob()}><Icon name="refresh"/>Verificar agora</button><button type="button" className={s.textButton} onClick={() => void openFlow()}>Conferir no Flow<Icon name="external"/></button></div><small>{session.recoveryState === 'unknown' ? 'Esta instalação não reconheceu o pedido antigo.' : 'Nova verificação automática em instantes · nenhum crédito adicional.'}</small>{['needs_attention', 'unknown'].includes(session.recoveryState || '') && <><p>Se o projeto pertencer a outra instalação, confira o resultado antes de liberar.</p><button type="button" className={s.textButton} onClick={() => void acknowledgePreviousJob()}>Conferi no Flow · liberar novo pedido</button></>}</div>}
+          <div className={s.creditCard}><div><span className={s.smallLabel}>CUSTO DESTA CRIAÇÃO</span><strong>{quoteValid ? session.quote?.credits?.toLocaleString('pt-BR') : '—'} <small>créditos</small></strong><p>{quoteValid ? `${settings.count} ${settings.count === 1 ? 'variação' : 'variações'} · calculado automaticamente no Flow` : settings.prompt.trim() ? session.busy === 'quote' ? 'Calculando automaticamente…' : 'Aguardando a confirmação automática do Flow.' : 'Escreva o prompt para calcular automaticamente.'}</p></div><button type="button" className={s.quoteButton} disabled={busy || unresolved || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || referenceBusy || !loaded || !settings.prompt.trim()} onClick={() => void quote()} aria-label="Recalcular custo no Flow"><Icon name="refresh"/>{session.busy === 'quote' ? 'Calculando…' : quoteValid ? 'Recalcular' : 'Calcular agora'}</button></div>
           {insufficient && <p className={s.inlineError} role="alert">Esta conta não tem créditos suficientes para a configuração escolhida.</p>}
           <button type="button" className={s.generateButton} disabled={busy || unresolved || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || referenceBusy || !quoteValid || insufficient || !loaded} onClick={() => void generate()}><Icon name="spark"/><span>{session.busy === 'generate' ? 'Gerando no Flow…' : `Gerar ${settings.count > 1 ? `${settings.count} ${settings.mode === 'video' ? 'vídeos' : 'imagens'}` : settings.mode === 'video' ? 'vídeo' : 'imagem'} no Flow`}</span><i><Icon name="arrow"/></i></button>
         </section>
         <section className={s.placement} aria-label="Escolher trecho da copy">
           <div className={s.sectionHeading}><span className={s.step}>03</span><h3>O lugar certo na copy</h3><span className={s.smallLabel}>INÍCIO → FIM</span></div>
-          {copyParts.length ? <><div className={s.parts} role="group" aria-label="Parte da copy">{copyParts.map((item) => <button type="button" key={item.label} aria-pressed={part.label === item.label} className={part.label === item.label ? s.partSelected : ''} onClick={() => { setAnchor(item.label); setRangeStart(null); }}>{item.label}</button>)}</div><div className={s.copy} aria-label={`Palavras de ${part.label}`}>{words.map((word, index) => <button type="button" key={index} onClick={() => chooseWord(index)} aria-pressed={!!selectedRange && index >= selectedRange.de && index <= selectedRange.ate} aria-label={`${word}, palavra ${index + 1}${rangeStart == null ? ', marcar início' : ', marcar fim'}`} className={`${selectedRange && index >= selectedRange.de && index <= selectedRange.ate ? s.wordSelected : ''} ${rangeStart === index ? s.wordStart : ''}`}>{word}</button>)}</div><div className={s.rangeFooter}><p aria-live="polite">{rangeStart != null ? <>Início em <b>“{words[rangeStart]}”</b>. Clique na última palavra.</> : selectedRange ? <>De <b>“{words[selectedRange.de]}”</b> até <b>“{words[selectedRange.ate]}”</b> · {selectedRange.ate - selectedRange.de + 1} palavras</> : 'Clique na primeira palavra e depois na última.'}</p><button type="button" className={s.textButton} onClick={() => { setRange({ ancora: part.label, de: 0, ate: words.length - 1 }); setRangeStart(null); }}>Parte inteira</button></div></> : <div className={s.emptyCopy}>A copy desta task ainda não está disponível. Analise a task para escolher onde o insert entra.</div>}
-          <div className={s.attachRow}><p><Icon name="video"/>{chosenAsset ? chosenAsset.kind === 'video' ? 'O vídeo será baixado em 1080p e salvo na montagem.' : 'A imagem será baixada em 2K e salva na montagem.' : 'Sua criação aparecerá aqui quando estiver pronta.'}</p><button type="button" className={s.attachButton} disabled={!chosenAsset || !selectedRange || rangeStart != null || busy || referenceBusy || montageBusy} onClick={() => void attach()}><span>{session.busy === 'download' ? 'Preparando insert…' : 'Usar neste trecho'}</span><Icon name="arrow"/></button></div>
+          {chosenAsset && <div className={`${s.takeBinding} ${assignedInsert ? s.takeBindingSaved : ''}`}><span className={s.takeNumber}>TAKE {String(chosenTake).padStart(2, '0')}</span><div><strong>{assignedInsert ? 'Take vinculado à copy' : selectedRange ? 'Vínculo pronto para confirmar' : 'Escolha o trecho deste take'}</strong><p>{assignedInsert ? rangeText(assignedInsert, copyParts) : selectedRange ? rangeText({ ancora: selectedRange.ancora, palavraDe: selectedRange.de, palavraAte: selectedRange.ate }, copyParts) : 'Marque a primeira e a última palavra que receberão este insert.'}</p></div>{assignedInsert && <Icon name="check"/>}</div>}
+          {copyParts.length ? <><div className={s.parts} role="group" aria-label="Parte da copy">{copyParts.map((item) => <button type="button" key={item.label} aria-pressed={part.label === item.label} className={part.label === item.label ? s.partSelected : ''} onClick={() => { setAnchor(item.label); setRangeStart(null); }}>{item.label}</button>)}</div><div className={s.copy} aria-label={`Palavras de ${part.label}`}>{words.map((word, index) => <button type="button" key={index} onClick={() => chooseWord(index)} aria-pressed={!!selectedRange && index >= selectedRange.de && index <= selectedRange.ate} aria-label={`${word}, palavra ${index + 1}${rangeStart == null ? ', marcar início' : ', marcar fim'}`} className={`${selectedRange && index >= selectedRange.de && index <= selectedRange.ate ? s.wordSelected : ''} ${rangeStart === index ? s.wordStart : ''}`}>{word}</button>)}</div><div className={s.rangeFooter}><p aria-live="polite">{rangeStart != null ? <>Início em <b>“{words[rangeStart]}”</b>. Clique na última palavra.</> : selectedRange ? <>De <b>“{words[selectedRange.de]}”</b> até <b>“{words[selectedRange.ate]}”</b> · {selectedRange.ate - selectedRange.de + 1} palavras</> : 'Clique na primeira palavra e depois na última.'}</p><div className={s.rangeActions}><button type="button" className={s.textButton} onClick={() => { setRange({ ancora: part.label, de: 0, ate: words.length - 1 }); setRangeStart(null); }}>Parte inteira</button><div className={s.promptMagicWrap}><button type="button" className={s.promptMagicButton} disabled={!selectedRange || rangeStart != null || busy} onClick={() => setPromptMenu((open) => !open)} aria-label="Criar prompt cinematográfico para o trecho" aria-haspopup="menu" aria-expanded={promptMenu}><span/><Icon name="spark"/></button>{promptMenu && <div className={s.promptMenu} role="menu"><span>CRIAR DIREÇÃO · 0 CRÉDITOS FLOW</span><button type="button" role="menuitem" onClick={() => { setPromptMenu(false); void generatePrompt('image-video'); }}><Icon name="image"/><span><b>Imagem + vídeo</b><small>Frame inicial e movimento</small></span><Icon name="arrow"/></button><button type="button" role="menuitem" onClick={() => { setPromptMenu(false); void generatePrompt('video-only'); }}><Icon name="video"/><span><b>Vídeo direto</b><small>Take completo em um prompt</small></span><Icon name="arrow"/></button></div>}</div></div></div></> : <div className={s.emptyCopy}>A copy desta task ainda não está disponível. Analise a task para escolher onde o insert entra.</div>}
+          <div className={s.attachRow}><p><Icon name="video"/>{chosenAsset ? assignedInsert ? `Take ${String(chosenTake).padStart(2, '0')} já está em ${assignedInsert.ancora}. Selecione outro trecho para mover.` : chosenAsset.kind === 'video' ? 'O vídeo será baixado em 1080p e salvo na montagem.' : 'A imagem será baixada em 2K e salva na montagem.' : 'Sua criação aparecerá aqui quando estiver pronta.'}</p><button type="button" className={s.attachButton} disabled={!chosenAsset || !selectedRange || rangeStart != null || busy || referenceBusy || montageBusy} onClick={() => void attach()}><span>{session.busy === 'download' ? 'Preparando insert…' : assignedInsert ? 'Atualizar vínculo' : 'Usar neste trecho'}</span><Icon name="arrow"/></button></div>
         </section>
       </div>
       {(session.error || storageError || notice) && <div className={`${s.feedback} ${session.error || storageError ? s.feedbackError : s.feedbackSuccess}`} role={session.error || storageError ? 'alert' : 'status'}><Icon name={session.error || storageError ? 'external' : 'check'}/><span>{session.error || storageError || notice}</span>{session.error && <a className={s.textButton} href="https://flow.google.com/" target="_blank" rel="noopener noreferrer">Abrir Flow <Icon name="external"/></a>}</div>}

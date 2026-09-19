@@ -322,3 +322,110 @@
 @media (max-width: 760px) { .layer { padding: 8px; } .dialog { max-height: calc(100dvh - 16px); border-radius: 21px; } .header { padding: 19px 18px; } .heading h2 { font-size: 24px; } .heading p { font-size: 12px; } .eyebrow { font-size: 10px; } .workspace { grid-template-columns: minmax(0,1fr); } .creator, .previewColumn { padding: 23px 19px; border-right: 0; } .previewColumn { border-top: 1px solid var(--flow-line); } .preview { height: 300px; } .preview > video, .preview > img { max-height: 300px; } .placement { grid-column: 1; padding: 22px 19px; } .placement .sectionHeading .smallLabel { font-size: 10px; } .footer { padding: 14px 17px; } .savedSummary > div > span { font-size: 10px; } .secondaryButton { max-width: 155px; } }
 @media (max-width: 500px) { .accountFooter { align-items: stretch; flex-direction: column; } .accountFooter .connectButton { justify-content: center; width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .accountCardDisconnected::before, .connectButton::before { animation: none; } .accountFooter .connectButton:hover { transform: none; } }
+
+/* Cinematic depth pass. Surfaces keep the existing information architecture,
+   while light, elevation and motion make the studio feel like one instrument. */
+.dialog { background:
+  radial-gradient(90% 62% at 13% -12%, #a7db6920 0, transparent 56%),
+  radial-gradient(70% 58% at 100% 0%, #72c7b20c 0, transparent 62%),
+  linear-gradient(145deg, #151c15 0%, #0d130f 58%, #0a100c 100%);
+  box-shadow: 0 46px 140px #000e, 0 0 0 1px #dcffc00c, 0 0 90px #9edc6512, inset 0 1px 0 #f4ffe827, inset 0 -1px 0 #0008;
+}
+.header { position: relative; overflow: hidden; box-shadow: 0 16px 44px #0004, inset 0 -1px 0 #dfffc40a; }
+.header::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(112deg, transparent 20%, #e9ffd709 42%, transparent 62%); transform: translateX(-55%); animation: studioLight 9s ease-in-out infinite; }
+.brandTile { transform: translateZ(0); background: linear-gradient(145deg, #33452a, #111811 68%); box-shadow: inset 1px 1px 0 #f3ffd944, inset -7px -9px 18px #030703b8, 0 15px 28px #0007, 0 0 25px #b4e67318; }
+.creator { background: linear-gradient(135deg, #ffffff03, transparent 34%), radial-gradient(circle at 7% 15%, #b5df7908, transparent 30%); }
+.previewColumn { background: radial-gradient(ellipse at 52% -5%, #b7e47b12, transparent 52%), linear-gradient(160deg, #111811, #090f0b 70%); box-shadow: inset 18px 0 45px #0003; }
+.promptBox, .modeSwitch, .field select, .segments, .copy, .previewShell, .accountCard { transform: translateZ(0); box-shadow: inset 0 1px 0 #efffe90d, inset 0 -10px 28px #0002, 0 12px 28px #0002; }
+.promptBox:focus-within { box-shadow: inset 0 1px 0 #f4ffe81c, 0 0 0 4px #bce9890a, 0 18px 38px #0004; }
+.segments button.segmentSelected, .modeSwitch button.modeSelected { transform: translateY(-1px); background: linear-gradient(145deg, #33442a, #202b1c); box-shadow: inset 0 1px 0 #efffdb32, 0 5px 12px #0005; }
+.previewShell { background: linear-gradient(145deg, #d9efbd12, #2e4c2609); border-color: #d7f1b638; box-shadow: inset 0 1px 0 #f4ffe81c, 0 24px 55px #0005, 0 0 35px #a8dc7208; }
+.pendingPreviewWithPoster .previewPoster { opacity: .76; filter: saturate(.92) contrast(1.02); }
+.pendingPreviewWithPoster .emptyPreview { justify-content: flex-end; align-items: flex-start; text-align: left; padding: 24px; background: linear-gradient(180deg, transparent 15%, #03070430 46%, #030704ed 100%); }
+.pendingPreviewWithPoster .emptyPreview > svg { display: none; }
+.pendingPreviewWithPoster .emptyPreview h4 { margin-bottom: 3px; color: #efffdf; text-shadow: 0 2px 13px #000; }
+.pendingPreviewWithPoster .emptyPreview p { color: #bfd0b2; max-width: 370px; text-shadow: 0 1px 9px #000; }
+.pendingPreviewWithPoster .previewPrepare { margin: 10px 0 5px; backdrop-filter: blur(12px); background: #d5efba22; }
+.progressCompact { inset: auto 12px 12px; min-height: 78px; align-items: flex-start; padding: 13px 15px 13px 52px; gap: 3px; border: 1px solid #dcf7c32b; border-radius: 13px; background: #071007d6; backdrop-filter: blur(16px); box-shadow: 0 14px 35px #0008; }
+.progressCompact .spinner { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); }
+.progressCompact strong { text-align: left; }
+.progressCompact > span:last-child { text-align: left; }
+.results button { overflow: visible; background: linear-gradient(145deg, #26351e, #0f170d); box-shadow: inset 0 1px 0 #edffdc18, 0 8px 18px #0004; }
+.results button.resultSelected { transform: translateY(-2px); box-shadow: inset 0 1px 0 #f4ffe862, 0 10px 24px #0007, 0 0 18px #bceb8822; }
+.results button > b { position: absolute; z-index: 2; left: 50%; bottom: -9px; transform: translateX(-50%); max-width: 68px; padding: 2px 5px; overflow: hidden; color: #17240e; background: #d9f2bd; border: 1px solid #f0ffdc; border-radius: 8px; box-shadow: 0 4px 10px #0007; font: 700 7px var(--font-label), system-ui; white-space: nowrap; text-overflow: ellipsis; }
+.results .resultBound { border-color: #d4efa878; }
+
+.animateButton { position: relative; isolation: isolate; min-height: 72px; margin-top: 17px; padding: 10px 12px; gap: 12px; overflow: hidden; border: 1px solid #d9f8b66b; border-radius: 17px; color: #e8ffd9; background: radial-gradient(circle at 18% 0%, #d5ff9d28, transparent 34%), linear-gradient(135deg, #36512d 0%, #172c22 52%, #0f201b 100%); box-shadow: inset 0 1px 0 #f5ffe77d, inset 0 -14px 34px #02090345, 0 17px 35px #0006, 0 0 29px #9fe36a13; }
+.animateButton::before { content: ''; position: absolute; z-index: -1; top: -80%; left: -35%; width: 32%; height: 250%; transform: rotate(18deg); background: linear-gradient(90deg, transparent, #f0ffd83f, transparent); animation: animateSweep 4.4s ease-in-out infinite; }
+.animateButton::after { content: ''; position: absolute; z-index: -2; inset: 1px; border-radius: 15px; background: linear-gradient(110deg, transparent 0 65%, #61d4bd0c); }
+.animateButton:not(:disabled):hover { transform: translateY(-2px); border-color: #efffd7b3; box-shadow: inset 0 1px 0 #fff, inset 0 -14px 34px #02090355, 0 21px 42px #0008, 0 0 34px #a7ed702b; }
+.animateButton > .animateIcon { display: grid; flex: 0 0 45px; place-items: center; width: 45px; height: 45px; border: 1px solid #edffd76e; border-radius: 14px; background: radial-gradient(circle at 35% 20%, #eaffbd45, #7aaa5530 38%, #08130d 100%); box-shadow: inset 0 1px 0 #fff8, inset 0 -8px 16px #07100788, 0 9px 18px #0007, 0 0 20px #b9f18327; }
+.animateIcon svg { width: 21px; height: 21px; filter: drop-shadow(0 0 8px #d7ffad70); }
+.animateButton > span:not(.animateIcon) { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; font-size: 13px; }
+.animateButton b { font-weight: 700; letter-spacing: -.01em; }
+.animateButton small { color: #9fbea6; font-size: 10px; }
+.animateButton em { padding: 4px 7px; border: 1px solid #d9f6c029; border-radius: 8px; color: #9fc3aa; font: 650 8px var(--font-mono), monospace; letter-spacing: .08em; font-style: normal; white-space: nowrap; }
+.animateButton > i { display: grid; place-items: center; width: 31px; height: 31px; flex-shrink: 0; border-radius: 50%; color: #1f391b; background: #d9f5bd; box-shadow: inset 0 1px 0 #fff, 0 7px 16px #0005; }
+
+.recoveryLive { position: relative; padding-left: 34px; border-color: #a8cf7d3d; color: #b8cbaa; background: linear-gradient(135deg, #23351b72, #111b13); box-shadow: inset 0 1px 0 #f0ffe812, 0 12px 30px #0003; }
+.recoveryLive strong { color: #d8efc1; }
+.livePulse { position: absolute; left: 15px; top: 17px; width: 8px; height: 8px; border-radius: 50%; background: #c7ef9d; box-shadow: 0 0 0 0 #bfee9270; animation: livePulse 1.8s ease-out infinite; }
+.creditCard { margin-top: 5px; padding: 21px 4px 18px; border-top: 1px solid #d8edc30c; }
+.generateButton:not(:disabled) { position: relative; overflow: hidden; transform: translateZ(0); background: linear-gradient(155deg, #ebffd1 0%, #c8e99e 48%, #a9d37e 100%); box-shadow: inset 0 2px 0 #fff, inset 0 -8px 18px #65874126, 0 12px 27px #0005, 0 0 28px #a6e36720; }
+.generateButton:not(:disabled)::before { content: ''; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, #fff8 47%, transparent 62%); transform: translateX(-120%); animation: generateSweep 3.8s ease-in-out infinite; }
+.generateButton > * { position: relative; z-index: 1; }
+
+.placement { position: relative; background: radial-gradient(circle at 3% 0%, #b6dd7b0a, transparent 38%), linear-gradient(180deg, #141d12, #10170f); box-shadow: inset 0 1px 0 #efffde0e, 0 -18px 45px #0002; }
+.takeBinding { display: flex; align-items: center; gap: 13px; margin: 0 0 14px; padding: 12px 14px; border: 1px solid #c8e3aa1f; border-radius: 13px; color: #91a883; background: linear-gradient(135deg, #1a2517, #11180f); box-shadow: inset 0 1px 0 #edffdf0b, 0 9px 22px #0002; }
+.takeBindingSaved { border-color: #d4f0ae4a; background: radial-gradient(circle at 0 0, #b4e2781a, transparent 38%), linear-gradient(135deg, #21321a, #121b11); }
+.takeNumber { flex-shrink: 0; padding: 6px 9px; border: 1px solid #d4eeb334; border-radius: 8px; color: #d2ecb7; background: #779f4f20; font: 700 9px var(--font-mono), monospace; letter-spacing: .08em; }
+.takeBinding > div { min-width: 0; flex: 1; }
+.takeBinding strong { display: block; color: #d0e6bd; font-size: 12px; }
+.takeBinding p { margin: 2px 0 0; overflow: hidden; color: #8ca07f; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.takeBinding > svg { width: 19px; height: 19px; color: #d6f5b8; filter: drop-shadow(0 0 7px #bbed8960); }
+.copy { border-color: #d2eab72c; background: linear-gradient(145deg, #0c130a, #081008); box-shadow: inset 0 1px 0 #f3ffe70b, inset 0 -12px 32px #0002, 0 13px 28px #0002; }
+.copy button.wordSelected { color: #efffda; background: linear-gradient(180deg, #a8ce6d45, #749d4033); border-color: #ccea9a30; box-shadow: inset 0 1px 0 #efffdc20, 0 2px 7px #0004; }
+.rangeActions { display: flex; align-items: center; gap: 13px; }
+.promptMagicWrap { position: relative; z-index: 15; }
+.promptMagicButton { position: relative; isolation: isolate; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; overflow: hidden; border: 1px solid #efffcbb0; border-radius: 16px; color: #efffd8; background: radial-gradient(circle at 32% 20%, #f1ffc871, #99cc5b48 31%, #1c3527 66%, #0b1712 100%); box-shadow: inset 1px 1px 0 #fff, inset -8px -10px 20px #020a05a8, 0 11px 23px #0008, 0 0 0 4px #b9eb7d0c, 0 0 28px #b9ef7954; }
+.promptMagicButton::before { content: ''; position: absolute; z-index: -1; inset: -3px; border-radius: inherit; background: conic-gradient(from 0deg, transparent 0 50%, #d9ff9baa 66%, #7ce4ca8c 75%, transparent 86%); mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px)); animation: orbit 3.7s linear infinite; }
+.promptMagicButton::after { content: ''; position: absolute; z-index: -1; width: 23px; height: 110%; left: -35px; transform: rotate(17deg); background: linear-gradient(90deg, transparent, #fff9, transparent); animation: magicSweep 3.2s ease-in-out infinite; }
+.promptMagicButton svg { width: 21px; height: 21px; filter: drop-shadow(0 0 8px #dfffad); }
+.promptMagicButton:not(:disabled):hover { transform: translateY(-3px) rotate(-2deg) scale(1.04); box-shadow: inset 1px 1px 0 #fff, inset -8px -10px 20px #020a05a8, 0 17px 30px #0009, 0 0 36px #bdff706f; }
+.promptMagicButton:disabled { filter: grayscale(.5); }
+.promptMenu { position: absolute; right: 0; bottom: calc(100% + 10px); width: 286px; padding: 9px; border: 1px solid #daf6ba55; border-radius: 16px; background: linear-gradient(150deg, #1d2b19f5, #0b120df8); backdrop-filter: blur(24px); box-shadow: inset 0 1px 0 #f3ffe52b, 0 22px 55px #000c, 0 0 32px #b6ee7914; animation: promptMenuIn .2s var(--flow-bezier) both; }
+.promptMenu > span { display: block; padding: 5px 8px 9px; color: #90a984; font: 700 10px var(--font-label), system-ui; letter-spacing: .12em; }
+.promptMenu button { display: flex; align-items: center; width: 100%; gap: 11px; padding: 11px; border: 1px solid transparent; border-radius: 11px; color: #cde4ba; background: transparent; }
+.promptMenu button:hover { border-color: #d6efbd24; background: #d8f6bb0b; transform: translateX(2px); }
+.promptMenu button > span { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 2px; }
+.promptMenu button b { font-size: 12px; }
+.promptMenu button small { color: #8ca381; font-size: 10px; }
+.promptMenu button > svg:last-child { width: 13px; height: 13px; }
+.attachButton { background: linear-gradient(145deg, #789f5138, #3249272b); box-shadow: inset 0 1px 0 #eaffd829, 0 7px 17px #0003; }
+
+@keyframes studioLight { 0%,62%,100% { transform: translateX(-65%); opacity: .25; } 78% { transform: translateX(65%); opacity: 1; } }
+@keyframes animateSweep { 0%,52%,100% { left: -35%; opacity: 0; } 66% { opacity: 1; } 88% { left: 125%; opacity: 0; } }
+@keyframes generateSweep { 0%,58%,100% { transform: translateX(-120%); opacity: 0; } 72% { opacity: 1; } 91% { transform: translateX(120%); opacity: 0; } }
+@keyframes livePulse { 0% { box-shadow: 0 0 0 0 #bfee9270; } 75%,100% { box-shadow: 0 0 0 9px #bfee9200; } }
+@keyframes magicSweep { 0%,45%,100% { left: -35px; opacity: 0; } 58% { opacity: 1; } 78% { left: 70px; opacity: 0; } }
+@keyframes promptMenuIn { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+@media (max-width: 760px) {
+  .animateButton em { display: none; }
+  .rangeFooter { align-items: flex-start; }
+  .rangeActions { flex-shrink: 0; }
+  .promptMenu { right: -4px; width: min(286px, calc(100vw - 38px)); }
+  .takeBinding { align-items: flex-start; }
+}
+@media (max-width: 500px) {
+  .animateButton { min-height: 67px; padding: 9px; }
+  .animateButton > .animateIcon { flex-basis: 41px; width: 41px; height: 41px; }
+  .animateButton small { white-space: normal; }
+  .rangeFooter { flex-direction: column; }
+  .rangeActions { width: 100%; justify-content: space-between; }
+  .promptMagicButton { width: 46px; height: 46px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .header::after, .animateButton::before, .livePulse, .generateButton:not(:disabled)::before, .promptMagicButton::before, .promptMagicButton::after { animation: none; }
+  .animateButton:not(:disabled):hover, .promptMagicButton:not(:disabled):hover, .segments button.segmentSelected, .modeSwitch button.modeSelected { transform: none; }
+}

@@ -42,6 +42,9 @@ export type Insert = {
   id: string;
   /** Origem da mídia; ausente preserva os inserts enviados manualmente. */
   source?: 'flow';
+  /** Resultado exato do Flow que originou o insert. Opcional nos registros
+   * antigos; permite ao estúdio mostrar take → trecho sem depender do nome. */
+  flowAssetId?: string;
   /** label da parte da copy onde ancora — 'HOOK 1', 'BODY 2'... */
   ancora: string;
   /**
