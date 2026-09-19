@@ -238,8 +238,15 @@ export function pedirAcaoDeFila(
   return { modo: 'navegar', rota };
 }
 
-/** Quanto o histórico espera a ferramenta responder antes de desistir. */
-export const ESPERA_RESPOSTA_MS = 2500;
+/**
+ * Quanto o histórico espera a ferramenta responder antes de desistir.
+ *
+ * Tem que ser MAIOR que o tempo que a ferramenta leva pra confirmar: o Pilot
+ * troca de empresa/origem, espera a lista recarregar e só então diz se o card
+ * apareceu (até ~2,5s). Com a espera curta demais, a linha dizia "a ferramenta
+ * não respondeu" enquanto a janela de edição abria na frente do usuário.
+ */
+export const ESPERA_RESPOSTA_MS = 6000;
 
 /**
  * Pede a ação e ESPERA a ferramenta dizer se deu certo.

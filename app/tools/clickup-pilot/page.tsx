@@ -14268,8 +14268,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               ) : null}
 
               {/* Lista de tasks */}
-              {tasks.length > 0 ? (
+              {/* A FILA aparece mesmo sem o board carregado: disparo em
+                  andamento (ou o card que o histórico quer abrir) não pode
+                  depender de alguém ter clicado pra carregar as tasks. */}
+              {tasks.length > 0 || Object.keys(batchStatesVisiveis).length > 0 ? (
                 <section>
+                  {tasks.length > 0 ? (
+                  <>
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <h2
@@ -14802,6 +14807,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         </button>
                       </div>
                     </div>
+                  ) : null}
+
+                  </>
                   ) : null}
 
                   {/* Painel batch — tasks rodando ou completas */}
