@@ -55,6 +55,8 @@ assert.ok(page.includes('Math.min(meta.w, meta.h) < 1080'), 'Flow video import r
 const modal = readFileSync(new URL('../components/PilotFlowInserts.tsx', import.meta.url), 'utf8');
 assert.match(modal, /type Draft = \{[^\n]*account\?: FlowAccount \| null/, 'the persisted Flow draft retains the confirmed account card');
 assert.ok(modal.includes("if (!sessionFor(taskId).account?.email && draft.account?.email) updateSession(taskId, { account: draft.account });"), 'F5 restores the confirmed Flow account before another quote');
+assert.ok(modal.includes("if (!sessionFor(taskId).suggestedMotion && draft.suggestedMotion) updateSession(taskId, { suggestedMotion: draft.suggestedMotion });"), 'F5 restores the paired animation prompt before the image is animated');
+assert.ok(modal.includes('suggestedMotion: session.suggestedMotion ||'), 'the paired animation prompt is part of every persisted draft snapshot');
 assert.ok(modal.includes('assets, account: resultAccount, projectUrl: result.projectUrl || projectUrl, activeJob: null'), 'completed generation persists its refreshed account with the assets');
 assert.ok(modal.includes('assets, account: refreshedAccount, projectUrl: actualProject, activeJob: null'), 'recovered generation persists its refreshed account before releasing the request lock');
 assert.ok(modal.includes('void quote(true)'), 'valid prompt/settings trigger the automatic credit consultation');
@@ -199,6 +201,38 @@ assert.equal(downloadCalls.length, 4, 'image animation and attachment also reuse
 await assert.rejects(mediaHarness({ corruptWrites: true }).file({ ...pendingVideo, id: 'corrupt-roundtrip' }, project, () => {}), /não foi salva por completo/, 'an incomplete cache roundtrip cannot be exposed as a saved preview');
 assert.ok(modal.includes('URL.revokeObjectURL(objectUrl)'), 'the preview releases object URLs when closing or changing assets');
 assert.equal((modal.match(/const file = await assetFile\(asset\);/g) || []).length, 2, 'both attachment and animation use the verified shared file path');
+
+let animateNode;
+function findAnimate(node) { if (ts.isFunctionDeclaration(node) && node.name?.text === 'animate') animateNode = node.getText(modalAst); ts.forEachChild(node, findAnimate); }
+findAnimate(modalAst);
+const animateCode = ts.transpileModule(`${animateNode}\nexports.run = animate;`, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+}).outputText;
+const imageSettings = { ...quoteSettings, mode: 'image', prompt: 'first-frame prompt', model: 'Nano Banana Pro', resolution: '2K', videoMode: 'ingredients' };
+const imageAsset = { id: 'paired-image', kind: 'image', projectUrl: project, accountEmail: 'test@example.com' };
+let animationState = { busy: null, suggestedMotion: 'camera pushes in while the recipe transforms naturally' };
+let savedAnimationDraft;
+let animationNotice = '';
+const animationContext = {
+  exports: {}, taskId: 'paired-animation', chosenAsset: imageAsset,
+  draftRef: { current: { settings: imageSettings, projectUrl: project, range: null, assets: [imageAsset] } },
+  preferredModels: { current: { image: 'Nano Banana Pro', video: 'Omni 1.1 Flash' } },
+  sessionFor: () => animationState,
+  updateSession: (_, update) => { animationState = { ...animationState, ...update }; },
+  assetFile: async () => new File(['verified-image'], 'paired-image.jpg', { type: 'image/jpeg' }),
+  fileDataUrl: async () => 'data:image/jpeg;base64,dmVyaWZpZWQ=',
+  saveDraft: async (_, draft) => { savedAnimationDraft = draft; },
+  setNotice: (value) => { animationNotice = value; },
+  errorText: (error) => error.message,
+};
+vm.runInNewContext(animateCode, animationContext, { filename: 'PilotFlowInserts.animate.js' });
+await animationContext.exports.run();
+assert.equal(animationState.preparedSettings.prompt, 'camera pushes in while the recipe transforms naturally', 'Animate uses the paired motion prompt instead of reusing the still-frame prompt');
+assert.equal(animationState.preparedSettings.videoMode, 'frames', 'Animate binds the generated image as a Flow frame');
+assert.equal(savedAnimationDraft.settings.prompt, animationState.preparedSettings.prompt, 'the animation prompt is persisted before UI handoff');
+assert.equal(savedAnimationDraft.suggestedMotion, '', 'the paired prompt is consumed exactly once');
+assert.equal(animationState.suggestedMotion, '', 'session cannot accidentally reuse the prompt on another image');
+assert.match(animationNotice, /prompt automático de movimento já está preenchido/, 'the UI confirms that animation guidance was filled automatically');
 
 let generateNode;
 function findGenerate(node) { if (ts.isFunctionDeclaration(node) && node.name?.text === 'generate') generateNode = node.getText(modalAst); ts.forEachChild(node, findGenerate); }

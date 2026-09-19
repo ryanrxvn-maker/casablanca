@@ -24,7 +24,7 @@ type InsertMedia = { key: string; nome: string; tipo: 'video' | 'imagem'; w: num
 type Range = { ancora: string; de: number; ate: number };
 type StudioAsset = FlowAsset & { projectUrl?: string; accountEmail?: string };
 type ActiveJob = { requestId: string; projectUrl: string; startedAt: number; accountEmail?: string; prompt?: string };
-type Draft = { settings: FlowSettings; projectUrl: string; range: Range | null; assets: StudioAsset[]; account?: FlowAccount | null; activeJob?: ActiveJob | null; selectedModels?: Record<FlowSettings['mode'], string> };
+type Draft = { settings: FlowSettings; projectUrl: string; range: Range | null; assets: StudioAsset[]; account?: FlowAccount | null; activeJob?: ActiveJob | null; selectedModels?: Record<FlowSettings['mode'], string>; suggestedMotion?: string };
 type RecoveredJob = { state?: string; stage?: string; submitted?: boolean; assets?: StudioAsset[]; projectUrl?: string; account?: FlowAccount; error?: string };
 type Busy = 'inspect' | 'quote' | 'generate' | 'download' | 'prompt' | null;
 type PromptMode = 'image-video' | 'video-only';
@@ -260,8 +260,8 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const inspectionAttempt = useRef('');
   const automaticQuote = useRef({ key: '', attempts: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
-  const draftRef = useRef<Draft>({ settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null });
-  draftRef.current = { settings: session.preparedSettings || settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null, activeJob: session.activeJob, selectedModels: preferredModels.current };
+  const draftRef = useRef<Draft>({ settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null, suggestedMotion: session.suggestedMotion || '' });
+  draftRef.current = { settings: session.preparedSettings || settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null, activeJob: session.activeJob, selectedModels: preferredModels.current, suggestedMotion: session.suggestedMotion || '' };
   const copyParts = useMemo(() => partes.filter((part) => part.text.trim()), [partes]);
   const part = copyParts.find((item) => item.label === anchor) || copyParts[0];
   const words = useMemo(() => (part?.text || '').split(/\s+/).filter(Boolean), [part?.text]);
@@ -317,6 +317,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       if (draft.range) { setRange(draft.range); setAnchor(draft.range.ancora); }
       if (!sessionFor(taskId).assets.length && Array.isArray(draft.assets)) updateSession(taskId, { assets: draft.assets });
       if (!sessionFor(taskId).account?.email && draft.account?.email) updateSession(taskId, { account: draft.account });
+      if (!sessionFor(taskId).suggestedMotion && draft.suggestedMotion) updateSession(taskId, { suggestedMotion: draft.suggestedMotion });
       if (draft.activeJob?.requestId && !sessionFor(taskId).busy) {
         // Recover the saved request; refreshing never submits a new generation.
         // Legacy drafts predate prompt snapshots; capture their saved text once
@@ -335,14 +336,13 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       saveDraft(taskId, draftRef.current).then(() => { if (alive) setStorageError(''); }).catch(() => { if (alive) setStorageError('Sem espaço para salvar o rascunho. As referências podem se perder ao recarregar.'); });
     }, 300);
     return () => { alive = false; clearTimeout(timer); };
-  }, [loaded, taskId, settings, projectUrl, range, session.assets, session.account, session.quote?.account, session.inspection?.account, session.activeJob]);
+  }, [loaded, taskId, settings, projectUrl, range, session.assets, session.account, session.quote?.account, session.inspection?.account, session.activeJob, session.suggestedMotion]);
   useEffect(() => () => { if (loaded) void saveDraft(taskId, draftRef.current).catch(() => {}); }, [loaded, taskId]);
   useEffect(() => {
     if (!session.preparedSettings) return;
     setSettings(session.preparedSettings);
     preferredModels.current[session.preparedSettings.mode] = session.preparedSettings.model;
     updateSession(taskId, { preparedSettings: null });
-    setNotice('Imagem pronta como primeiro frame. Descreva o movimento e consulte os créditos.');
   }, [session.preparedSettings, taskId]);
   useEffect(() => {
     if (!loaded || busy || unresolved || !account?.email) return;
@@ -638,9 +638,13 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       const file = await assetFile(asset);
       if (file.size > 10 * 1024 * 1024) throw new Error('A imagem baixada ultrapassa o limite de 10 MB para referências. Use uma versão menor para animar.');
       const reference = { name: file.name, mimeType: file.type, dataUrl: await fileDataUrl(file) };
-      const prepared: FlowSettings = { ...draftRef.current.settings, prompt: sessionFor(taskId).suggestedMotion || draftRef.current.settings.prompt, mode: 'video', model: preferredModels.current.video, videoMode: 'frames', animateMediaId: asset.id, references: [reference] };
-      await saveDraft(taskId, { ...draftRef.current, settings: prepared });
+      const suggestedMotion = sessionFor(taskId).suggestedMotion?.trim() || '';
+      const prepared: FlowSettings = { ...draftRef.current.settings, prompt: suggestedMotion || draftRef.current.settings.prompt, mode: 'video', model: preferredModels.current.video, videoMode: 'frames', animateMediaId: asset.id, references: [reference] };
+      await saveDraft(taskId, { ...draftRef.current, settings: prepared, suggestedMotion: '' });
       updateSession(taskId, { preparedSettings: prepared, suggestedMotion: '', quote: null, quoteKey: '' });
+      setNotice(suggestedMotion
+        ? 'Imagem pronta como primeiro frame. O prompt automático de movimento já está preenchido e o custo será calculado sozinho.'
+        : 'Imagem pronta como primeiro frame. Descreva o movimento; o custo será calculado automaticamente.');
     } catch (error) { updateSession(taskId, { error: errorText(error) }); }
     finally { updateSession(taskId, { busy: null, progress: '' }); }
   }
@@ -657,12 +661,16 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       const result = await response.json().catch(() => null) as (PromptSuggestion & { error?: string }) | null;
       if (!response.ok || !result?.videoPrompt) throw new Error(result?.error || 'Não foi possível criar o prompt agora.');
       if (mode === 'image-video' && result.imagePrompt) {
-        change({ prompt: result.imagePrompt, mode: 'image', model: preferredModels.current.image, animateMediaId: undefined, references: [] });
+        const pairedSettings: FlowSettings = { ...settings, prompt: result.imagePrompt, mode: 'image', model: preferredModels.current.image, animateMediaId: undefined, references: [] };
+        change(pairedSettings);
         updateSession(taskId, { suggestedMotion: result.videoPrompt });
+        await saveDraft(taskId, { ...draftRef.current, settings: pairedSettings, suggestedMotion: result.videoPrompt });
         setNotice('Frame cinematográfico pronto. Gere a imagem e clique em Animar com Flow; o movimento já ficará preenchido.');
       } else {
-        change({ prompt: result.videoPrompt, mode: 'video', model: preferredModels.current.video, animateMediaId: undefined });
+        const directSettings: FlowSettings = { ...settings, prompt: result.videoPrompt, mode: 'video', model: preferredModels.current.video, animateMediaId: undefined };
+        change(directSettings);
         updateSession(taskId, { suggestedMotion: '' });
+        await saveDraft(taskId, { ...draftRef.current, settings: directSettings, suggestedMotion: '' });
         setNotice('Prompt de vídeo criado para o trecho selecionado. O custo será calculado automaticamente.');
       }
     } catch (error) { updateSession(taskId, { error: errorText(error) }); }
