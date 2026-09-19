@@ -708,7 +708,23 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     const value = kind === 'image' ? promptSuggestion?.imagePrompt : promptSuggestion?.videoPrompt;
     if (!value) return;
     try {
-      await navigator.clipboard.writeText(value);
+      let copied = false;
+      try {
+        if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(value); copied = true; }
+      } catch { /* browsers may deny the async clipboard API despite a user gesture */ }
+      if (!copied) {
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.pointerEvents = 'none';
+        document.body.appendChild(textarea);
+        textarea.select();
+        copied = document.execCommand('copy');
+        textarea.remove();
+      }
+      if (!copied) throw new Error('copy-unavailable');
       setCopiedPrompt(kind);
       window.setTimeout(() => setCopiedPrompt((current) => current === kind ? null : current), 1800);
     } catch { updateSession(taskId, { error: 'Não foi possível copiar automaticamente. Selecione o texto e copie pelo navegador.' }); }

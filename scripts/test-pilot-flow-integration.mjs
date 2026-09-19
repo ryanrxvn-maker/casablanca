@@ -63,6 +63,7 @@ assert.ok(modal.includes('void quote(true)'), 'valid prompt/settings trigger the
 assert.ok(modal.includes('1800'), 'an active paid request is polled automatically without a manual status click');
 assert.ok(modal.includes('setPromptStudioOpen(true)') && modal.includes('generatePrompt(promptMode)') && modal.includes('applyPromptSuggestion'), 'the copy-range director opens a review studio before applying paired or direct-video prompts');
 assert.ok(modal.includes('promptSuggestion.explanation') && modal.includes("copyGeneratedPrompt('video')"), 'the prompt studio explains and copies its generated direction');
+assert.ok(modal.includes("document.execCommand('copy')"), 'prompt copy retains a user-gesture fallback when the modern clipboard API is denied');
 assert.ok(modal.includes("mode === 'frames' ? 'START AND END' : 'Imagens'"), 'image inputs use the requested START AND END and Imagens labels');
 assert.ok(!modal.includes('aria-label="Recalcular custo no Flow"'), 'credit calculation has no manual recalculate control');
 assert.ok(modal.includes('<video src={source} muted playsInline preload="metadata"'), 'video results use a playable thumbnail instead of an image tag with an MP4 source');
