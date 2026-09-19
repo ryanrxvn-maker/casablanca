@@ -22,9 +22,9 @@ const H = 3600_000;
 
 /** Disparos do Pilot: entrega com montado + takes + resgate, e disparos crus. */
 const PILOT: HistoryEvent[] = [
-  { id: 'dispatch:viva-1:1', t: AGORA - 32_000, tool: 'clickup-pilot', title: 'AD122VN - PRPB07', kind: 'dispatch' },
-  { id: 'dispatch:viva-2:2', t: AGORA - 43_000, tool: 'clickup-pilot', title: 'AD123VN - PRPB07', kind: 'dispatch' },
-  { id: 'dispatch:viva-3:3', t: AGORA - 48_000, tool: 'clickup-pilot', title: 'AD121VN - PRPB07', kind: 'dispatch' },
+  { id: 'dispatch:viva-1:1', t: AGORA - 32_000, tool: 'clickup-pilot', title: 'AD122VN - PRPB07', kind: 'dispatch', channels: [{ label: 'YOUTUBE', color: '#e50914' }] },
+  { id: 'dispatch:viva-2:2', t: AGORA - 43_000, tool: 'clickup-pilot', title: 'AD123VN - PRPB07', kind: 'dispatch', channels: [{ label: 'META', color: '#1877f2' }] },
+  { id: 'dispatch:viva-3:3', t: AGORA - 48_000, tool: 'clickup-pilot', title: 'AD121VN - PRPB07', kind: 'dispatch', channels: [{ label: 'KWAI', color: '#ffbe0b' }, { label: 'TIKTOK', color: '#111111' }] },
   {
     id: 'p1',
     t: AGORA - 40 * 60_000,

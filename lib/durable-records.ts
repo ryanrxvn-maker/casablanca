@@ -159,10 +159,28 @@ export function createRecordWriter(kind: RecordKind) {
                 const eventId = `dispatch:${id}:${data.startedAt}`;
                 const hkey = keyFor('history', eventId);
                 const hraw = localStorage.getItem(hkey);
+                // The distribution channel lives on a ClickUp field that only
+                // exists while the task is in the loaded board. The history is
+                // exactly what looks back at tasks that already left it, so the
+                // chip is copied into the event instead of resolved on read.
+                const canais = Array.isArray(data.channels) && data.channels.length
+                  ? data.channels : null;
                 // One event per dispatch, immutable event time. Refreshing never extends TTL.
                 if (!hraw && eventId.length <= 240) {
-                  const event = { id: eventId, t: data.startedAt, tool: id.startsWith('heygenauto:') ? 'heygen-auto' : 'clickup-pilot', title: String(data.taskName ?? id), kind: 'dispatch' };
+                  const event: RecordData = { id: eventId, t: data.startedAt, tool: id.startsWith('heygenauto:') ? 'heygen-auto' : 'clickup-pilot', title: String(data.taskName ?? id), kind: 'dispatch' };
+                  if (canais) event.channels = canais;
                   if (inRetention('history', event)) saveLocal({ kind: 'history', id: eventId, data: event, base: null, revision: 0, pending: crypto.randomUUID() });
+                } else if (hraw && canais) {
+                  // The board often answers only after the first checkpoint, so
+                  // the chip arrives late. Fill it in once; never overwrite a
+                  // chip already recorded, and never touch the event time.
+                  try {
+                    const hrow: LocalRow = JSON.parse(hraw);
+                    const ev = hrow.data;
+                    if (isObject(ev) && !(Array.isArray(ev.channels) && ev.channels.length)) {
+                      saveLocal({ ...hrow, data: { ...ev, channels: canais }, pending: crypto.randomUUID() });
+                    }
+                  } catch { /* evento ilegível: o histórico segue sem o chip */ }
                 }
               }
             } catch (e) { throw e; }

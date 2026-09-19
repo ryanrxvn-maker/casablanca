@@ -67,6 +67,8 @@ const ETAPAS = [
   { tsc: "lib/heygen-health.ts lib/heygen-health.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/heygen-health.test.js"] },
   { tsc: "lib/heygen-motion-motor.ts lib/heygen-motion-motor.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/heygen-motion-motor.test.js"] },
   { tsc: "lib/montagem-sig.ts lib/montagem-sig.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/montagem-sig.test.js"] },
+  // chip de CANAL (19.09): o board nao pode apagar o que ja se sabia do card
+  { tsc: "lib/pilot-canais.ts lib/pilot-canais.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-canais.test.js"] },
   { tsc: "lib/versao-canal.ts lib/versao-canal.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/versao-canal.test.js"] },
   { tsc: "lib/auto-cortes/transcript.ts lib/auto-cortes/transcript.test.ts lib/auto-cortes/types.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2020,dom,dom.iterable", run: [".test-tmp/auto-cortes/transcript.test.js"] },
   { tsc: "lib/auto-cortes/types.ts lib/auto-cortes/prompts.ts lib/auto-cortes/analyze.ts lib/auto-cortes/analyze.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2020,dom,dom.iterable", run: [".test-tmp/auto-cortes/analyze.test.js"] },

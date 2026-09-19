@@ -125,6 +125,18 @@ const KIND_TITULO: Record<string, string> = {
  * dela 20 vezes é ruído. Ali o selo mostra o ESTADO do registro; na lista
  * geral, onde as ferramentas se misturam, ele mostra a ferramenta.
  */
+/** Contraste do texto no chip de canal — mesma regra do card do Pilot, pra o
+ *  chip amarelo do KWAI não sair com texto branco ilegível. */
+function corDoTextoNoChip(hex: string): string {
+  const h = (hex || '').replace('#', '');
+  if (h.length < 6) return '#fff';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1a1a1a' : '#fff';
+}
+
 const KIND_ICON: Record<string, React.ReactNode> = {
   done: (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -617,6 +629,26 @@ export function HistoryTimeline({
                       <p className="hist-row__titulo" title={e.title}>
                         {e.title}
                       </p>
+                      {/* CANAL do AD (YOUTUBE/META/KWAI). Fica gravado no
+                          evento: a task já saiu do board quando alguém vem
+                          olhar o histórico. */}
+                      {e.channels?.length ? (
+                        <span className="hist-canais">
+                          {e.channels.map((ch, i) => (
+                            <span
+                              key={`${ch.label}-${i}`}
+                              className="hist-canal"
+                              style={{
+                                backgroundColor: ch.color,
+                                color: corDoTextoNoChip(ch.color),
+                              }}
+                              title={`Canal: ${ch.label}`}
+                            >
+                              {ch.label}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
                       <span className="hist-selo" data-tom={selo.tom}>
                         {vivo?.ativo ? <i className="hist-selo__ponto" aria-hidden /> : null}
                         {selo.rotulo}

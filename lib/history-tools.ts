@@ -52,6 +52,16 @@ export type HistoryEvent = {
   meta?: string;
   /** referências de download — presença = o registro é recuperável */
   ref?: FileRef[];
+  /**
+   * CANAL(is) de distribuição do AD (YOUTUBE / META / KWAI…), como chip.
+   *
+   * Mora no evento, e não é buscado na hora, porque o canal vem de um custom
+   * field do ClickUp que só existe enquanto a task está na listagem: quando
+   * ela vai pra "revisão"/"entregue" some do filtro, e o histórico é
+   * justamente o lugar que olha pra trás. Guardado no disparo, o registro
+   * continua sabendo de que canal aquele AD era — pra sempre.
+   */
+  channels?: Array<{ label: string; color: string }>;
   /** evento criado automaticamente pela captura de download (candidato a fusão) */
   auto?: boolean;
 };

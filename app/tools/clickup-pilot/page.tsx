@@ -67,6 +67,7 @@ import {
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
 import { getHeyGenHealth, decideEsperaDoBatch, TETO_MODERACAO_MS } from '@/lib/heygen-health';
+import { canaisDoCard, precisaGravarCanais, idDoBoardParaCanal } from '@/lib/pilot-canais';
 import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
 import {
   getLibrarySnapshot,
@@ -5272,12 +5273,18 @@ function ClickUpPilotInner() {
     void batchWriterRef.current.save(owned).catch(() => {});
   }, [batchStates]);
 
-  /** Backfill da EMPRESA (workspace) nos cards da fila.
+  /** Backfill da EMPRESA (workspace) e do CANAL nos cards da fila.
    *
    *  Cada card mostra um disparo, e disparo de uma empresa não pode aparecer
    *  enquanto você trabalha na outra. Batches antigos não guardavam de quem
    *  eram, então perguntamos ao ClickUp — GET /task/{id} devolve `team_id` —
    *  uma vez por task, e carimbamos.
+   *
+   *  O mesmo GET traz os custom fields, então ele também repara o CHIP DE
+   *  CANAL (YOUTUBE/META/KWAI) de quem ficou sem. É o que conserta o card de
+   *  uma task que JÁ saiu do filtro de status (foi pra "revisão"/"entregue"):
+   *  a listagem não a traz mais, mas perguntar por id continua funcionando —
+   *  sem isso o chip só voltava ligando o olho de incluir revisão.
    *
    *  Enquanto não resolve, o card CONTINUA visível: sumir com um disparo em
    *  andamento é bem pior do que mostrá-lo na empresa errada por um instante.
@@ -5294,9 +5301,11 @@ function ClickUpPilotInner() {
     const pendente = (b: BatchTaskState | undefined) =>
       !!b &&
       !!b.taskId &&
-      !b.teamId &&
+      (!b.teamId || !(b.channels && b.channels.length)) &&
       !b.taskId.startsWith('heygenauto:') &&
-      !isTaskLocal(b.taskId) && // CREATOR/DOCS não existem no ClickUp
+      // CREATOR/DOCS não existem no ClickUp. A irmã de 2ª versão (`-yt`) existe
+      // pela MÃE — é o id dela que se pergunta.
+      !isTaskLocal(idDoBoardParaCanal(b.taskId)) &&
       !teamBackfillTriedRef.current.has(b.taskId);
     if (!Object.values(batchStatesRef.current).some(pendente)) return;
     teamBackfillRunningRef.current = true;
@@ -5309,14 +5318,27 @@ function ClickUpPilotInner() {
           if (!alvo) break;
           teamBackfillTriedRef.current.add(alvo.taskId);
           try {
-            const det = await getTask(alvo.taskId);
+            // Pergunta pela MÃE: a irmã de 2ª versão (`<id>-yt`) não existe no
+            // ClickUp, e herda empresa e canal dela.
+            const det = await getTask(idDoBoardParaCanal(alvo.taskId));
             const tid = det?.team_id ? String(det.team_id) : null;
-            if (!tid) continue;
-            setBatchStates((prev) =>
-              prev[alvo.taskId] && !prev[alvo.taskId].teamId
-                ? { ...prev, [alvo.taskId]: { ...prev[alvo.taskId], teamId: tid } }
-                : prev,
-            );
+            const ch = det ? resolveChannels(det) : [];
+            if (!tid && !ch.length) continue;
+            setBatchStates((prev) => {
+              const cur = prev[alvo.taskId];
+              if (!cur) return prev;
+              const poeTeam = !!tid && !cur.teamId;
+              const poeCanal = precisaGravarCanais(cur.channels, ch);
+              if (!poeTeam && !poeCanal) return prev;
+              return {
+                ...prev,
+                [alvo.taskId]: {
+                  ...cur,
+                  ...(poeTeam ? { teamId: tid! } : null),
+                  ...(poeCanal ? { channels: ch } : null),
+                },
+              };
+            });
           } catch {
             /* sem carimbo: o card segue visível em qualquer empresa */
           }
@@ -5391,26 +5413,43 @@ function ClickUpPilotInner() {
     );
   }, [batchStates, selectedTeam, modo]);
 
-  /** Backfill do snapshot de CANAL nos cards da fila quando o board carrega.
-   *  Cards criados antes do board (ou de versoes antigas) ficam sem
-   *  `channels`; aqui preenchemos uma vez por task, persistindo no batch.
-   *  Guard de igualdade evita loop de render. */
+  /** GRAVA o snapshot de CANAL no registro do disparo enquanto o board sabe.
+   *
+   *  O chip (YOUTUBE/META/KWAI) vem de um custom field do ClickUp, que só
+   *  existe na listagem carregada. Assim que a task ia pra "revisão vídeo" ela
+   *  saía do filtro, o board deixava de conhecê-la e o chip SUMIA de um card
+   *  que continuava ali, pronto (19.09). Gravado uma vez, nunca mais depende
+   *  do board — e board que não conhece a task não apaga nada, porque lista
+   *  vazia é "não sei", não "não tem" (regra em lib/pilot-canais).
+   *
+   *  Depende de `batchStates` também: sem isso o backfill só rodava quando o
+   *  BOARD mudava, e um card criado DEPOIS da listagem (o caso normal: carrega
+   *  tasks → dispara) nunca era carimbado. Ele aparecia certo mesmo assim,
+   *  pelo plano B ao vivo — e só revelava o buraco quando a task saía da lista.
+   *  O guard de igualdade corta o loop: sem mudança, devolve `prev`. */
   useEffect(() => {
     if (!tasks.length) return;
+    // Saída barata: o effect roda a cada mudança de batchStates (que muda a
+    // cada mensagem de progresso), então nem monta o índice quando já está
+    // tudo carimbado — que é o caso em 99% dos ticks.
+    if (!Object.values(batchStatesRef.current).some((b) => !(b.channels && b.channels.length))) return;
+    const porId = new Map(tasks.map((t) => [t.id, t]));
     setBatchStates((prev) => {
       let changed = false;
       const next: Record<string, BatchTaskState> = {};
       for (const [id, b] of Object.entries(prev)) {
-        if (b.channels && b.channels.length) { next[id] = b; continue; }
-        const task = tasks.find((t) => t.id === id);
+        next[id] = b;
+        if (b.channels && b.channels.length) continue;
+        // A 2ª versão é task IRMÃ (`<id>-yt`), que não existe no ClickUp: o
+        // canal dela é o da MÃE.
+        const task = porId.get(idDoBoardParaCanal(id));
         const ch = task ? resolveChannels(task) : [];
-        if (ch.length > 0) { next[id] = { ...b, channels: ch }; changed = true; }
-        else { next[id] = b; }
+        if (precisaGravarCanais(b.channels, ch)) { next[id] = { ...b, channels: ch }; changed = true; }
       }
       return changed ? next : prev;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks]);
+  }, [tasks, batchStates]);
 
   /** Escuta flags de cancelamento vindos da pagina /tools/background.
    *  Quando user clica "Cancelar" la, gravamos taskId em
@@ -14994,12 +15033,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           })() : null;
 
                           // Canais (KWAI/META/YT/TIKTOK...) pro chip no card da
-                          // fila: usa o snapshot do disparo; se ausente (ex card
-                          // antigo), resolve ao vivo do board.
-                          const taskForChannels = tasks.find((t) => t.id === b.taskId);
-                          const channels = b.channels && b.channels.length
-                            ? b.channels
-                            : (taskForChannels ? resolveChannels(taskForChannels) : []);
+                          // fila: o SNAPSHOT do disparo manda; o board é só o
+                          // plano B pra card antigo que ainda não foi carimbado.
+                          // Board sem a task (ela foi pra revisão) devolve vazio
+                          // — e vazio nunca apaga o snapshot.
+                          const taskForChannels = tasks.find((t) => t.id === idDoBoardParaCanal(b.taskId));
+                          const channels = canaisDoCard(
+                            b.channels,
+                            taskForChannels ? resolveChannels(taskForChannels) : [],
+                          );
 
                           return (
                             <BatchJobCard3D
