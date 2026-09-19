@@ -73,6 +73,48 @@ export function PreviewsDoDisparo({
   const abertoEm = useRef(Date.now());
   /** Object URLs criadas aqui: morrem junto com a janela. */
   const criadasRef = useRef<string[]>([]);
+  /** Takes que entraram na vista: só esses saem do disco. */
+  const [naVista, setNaVista] = useState<Set<string>>(new Set());
+  const observadorRef = useRef<IntersectionObserver | null>(null);
+
+  /**
+   * Um disparo tem 7, 10, 16 takes. Montar todos os <video> com a fonte pronta
+   * faz o navegador decodificar TUDO de uma vez e a janela engasga na abertura
+   * (medido em produção: a aba parou de responder). Cada card só pede o vídeo
+   * quando chega perto da vista.
+   */
+  const observar = useCallback((el: HTMLDivElement | null, chave?: string) => {
+    if (!el || !chave) return;
+    if (!observadorRef.current) {
+      observadorRef.current = new IntersectionObserver(
+        (entradas) => {
+          const novas: string[] = [];
+          for (const en of entradas) {
+            const k = (en.target as HTMLElement).dataset.chave;
+            if (en.isIntersecting && k) novas.push(k);
+          }
+          if (novas.length > 0) {
+            setNaVista((prev) => {
+              const proximo = new Set(prev);
+              for (const k of novas) proximo.add(k);
+              return proximo;
+            });
+          }
+        },
+        { root: null, rootMargin: '300px 0px', threshold: 0.01 },
+      );
+    }
+    el.dataset.chave = chave;
+    observadorRef.current.observe(el);
+  }, []);
+
+  useEffect(
+    () => () => {
+      observadorRef.current?.disconnect();
+      observadorRef.current = null;
+    },
+    [],
+  );
 
   useEffect(
     () => () => {
@@ -158,7 +200,7 @@ export function PreviewsDoDisparo({
   }, [registro, chaves, urlsFrescas, urlsLocais]);
 
   const prontos = takes.filter((t) => t.status === 'completed').length;
-  const abrindoTakes = chaves.length > Object.keys(urlsLocais).length;
+  const abrindoTakes = [...naVista].some((k) => !urlsLocais[k]);
 
   /**
    * Traz os MP4 guardados UM DE CADA VEZ.
@@ -168,7 +210,7 @@ export function PreviewsDoDisparo({
    * fila, cada card sai do estado "recuperando" assim que chega a vez dele.
    */
   useEffect(() => {
-    const pendentes = chaves.filter((k) => !urlsLocais[k]);
+    const pendentes = chaves.filter((k) => naVista.has(k) && !urlsLocais[k]);
     if (pendentes.length === 0) return;
     let vivo = true;
     void (async () => {
@@ -192,7 +234,7 @@ export function PreviewsDoDisparo({
       vivo = false;
     };
     // urlsLocais entra de propósito: cada chegada reavalia o que falta.
-  }, [chaves, urlsLocais]);
+  }, [chaves, urlsLocais, naVista]);
 
   /** O card pede uma URL nova quando a dele morre (object URL revogada). */
   const recuperar = useCallback(async (chave?: string) => {
@@ -263,7 +305,7 @@ export function PreviewsDoDisparo({
                 {carregando
                   ? 'Abrindo'
                   : abrindoTakes
-                    ? `${Object.keys(urlsLocais).length} de ${chaves.length} takes carregados`
+                    ? `abrindo ${Object.keys(urlsLocais).length + 1} de ${takes.length} takes`
                     : `${prontos} de ${takes.length} takes`}
               </span>
               {registro?.phase ? (
@@ -312,19 +354,23 @@ export function PreviewsDoDisparo({
           ) : (
             <div className="hist-previews__grade">
               {takes.map((t, i) => (
-                <LipsyncPreviewCard
+                <div
                   key={`${t.label}-${i}`}
-                  take={{
-                    status: t.status,
-                    label: t.label,
-                    videoUrl: t.videoUrl,
-                    error: t.error,
-                  }}
-                  position={i + 1}
-                  total={takes.length}
-                  fileBase={titulo.replace(/[^\p{L}\p{N} _-]/gu, '').trim() || 'take'}
-                  recuperarVideo={t.chave ? () => recuperar(t.chave) : undefined}
-                />
+                  ref={t.chave ? (el) => observar(el, t.chave) : undefined}
+                >
+                  <LipsyncPreviewCard
+                    take={{
+                      status: t.status,
+                      label: t.label,
+                      videoUrl: t.videoUrl,
+                      error: t.error,
+                    }}
+                    position={i + 1}
+                    total={takes.length}
+                    fileBase={titulo.replace(/[^\p{L}\p{N} _-]/gu, '').trim() || 'take'}
+                    recuperarVideo={t.chave ? () => recuperar(t.chave) : undefined}
+                  />
+                </div>
               ))}
             </div>
           )}
