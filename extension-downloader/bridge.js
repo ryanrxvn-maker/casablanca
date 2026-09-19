@@ -1,122 +1,80 @@
-/**
- * DarkoLab Downloader — Bridge content script.
- * Roda no site do DARKO (darkoautoedit.com/localhost). Ponte pagina <-> extensao:
- * a pagina manda DL_PING, respondemos DL_PONG { version, engine }
- * (engine = se o motor local esta vivo). Mesmo padrao do Magnific.
- */
+/* Page bridge. Acknowledgement means queued; success is sent only after
+   Chrome confirms the file is complete. Polling also recovers missed events. */
 (function () {
   'use strict';
-  let VERSION = '?';
-  try {
-    VERSION = chrome.runtime.getManifest().version;
-  } catch {
-    return; // contexto invalido
+  let version;
+  try { version = chrome.runtime.getManifest().version; } catch { return; }
+  const pending = new Map();
+  const toPage = message => window.postMessage({ ...message, source: 'darko-dl-ext' }, location.origin);
+  function message(data) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('A extensão demorou para responder. Recarregue esta página.')), 12000);
+      try { chrome.runtime.sendMessage(data, result => {
+        clearTimeout(timeout);
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message)); else resolve(result);
+      }); } catch (error) { clearTimeout(timeout); reject(error); }
+    });
   }
-
-  function toPage(m) {
+  async function announce(force = false) {
+    // An old content script can outlive extension removal/update. Prove that
+    // its runtime is alive before advertising installation to the website.
     try {
-      window.postMessage({ ...m, source: 'darko-dl-ext' }, '*');
-    } catch {
-      /* ignore */
-    }
-  }
-
-  function announce() {
+      if (!chrome.runtime.id) return;
+      const health = await message({ type: 'darko-bridge-health' });
+      if (!health?.ok || !chrome.runtime.id) return;
+      version = health.version || version;
+    } catch { return; }
+    toPage({ type: 'DL_PONG', version, installed: true, checking: true, capabilities: ['durable-downloads-v1'] });
     try {
-      chrome.runtime.sendMessage({ type: 'darko-ping-engine' }, (resp) => {
-        const err = chrome.runtime.lastError; // evita unchecked warning
-        toPage({
-          type: 'DL_PONG',
-          version: VERSION,
-          engine: !err && !!(resp && resp.connected),
-          port: resp && resp.port,
-        });
-      });
-    } catch {
-      toPage({ type: 'DL_PONG', version: VERSION, engine: false });
-    }
+      const result = await message({ type: force ? 'darko-force-rediscover' : 'darko-ping-engine' });
+      toPage({ type: 'DL_PONG', version, installed: true, engine: !!result?.connected,
+        port: result?.port, engineVersion: result?.engineVersion || null,
+        engineCompatible: !!result?.engineCompatible, capabilities: ['durable-downloads-v1'] });
+    } catch { if (chrome.runtime.id) toPage({ type: 'DL_PONG', version, installed: true, engine: false, engineCompatible: false }); }
   }
-
-  window.addEventListener('message', (ev) => {
-    const d = ev.data;
-    if (!d || typeof d !== 'object' || d.source !== 'darko-dl') return;
-    if (d.type === 'DL_PING' || d.type === 'DL_TEST') announce();
-    // Site pede pra baixar um link de Instagram pela sessão logada do
-    // usuário (o motor não consegue — IG exige login). Relaia pro service
-    // worker, que resolve com os cookies do próprio usuário e baixa via
-    // chrome.downloads. Devolve DL_IG_RESULT { reqId, ok, error } pro site.
-    // Site pede pra baixar QUALQUER link pelo Motor local (YouTube, TikTok,
-    // Pinterest... — o servidor do site nao baixa esses; o Motor baixa).
-    // Relaia pro service worker com modo/qualidade escolhidos na pagina e
-    // devolve DL_ENGINE_RESULT { reqId, ok, error } pro site. (v1.7.0+)
-    if (d.type === 'DL_ENGINE_DOWNLOAD' && d.url && d.reqId) {
-      try {
-        chrome.runtime.sendMessage(
-          {
-            type: 'darko-download',
-            url: d.url,
-            mode: d.mode || 'video',
-            quality: d.quality || '1080',
-            adult: false,
-          },
-          (resp) => {
-            const err = chrome.runtime.lastError;
-            toPage({
-              type: 'DL_ENGINE_RESULT',
-              reqId: d.reqId,
-              ok: !err && !!(resp && resp.ok),
-              error: err ? err.message : resp && resp.error,
-            });
-          },
-        );
-      } catch (e) {
-        toPage({
-          type: 'DL_ENGINE_RESULT',
-          reqId: d.reqId,
-          ok: false,
-          error: String(e && e.message),
-        });
+  function progress(job) {
+    if (!job) return;
+    for (const [reqId, request] of pending) {
+      if (request.jobId !== job.id && request.jobId !== job.jobId) continue;
+      toPage({ type: 'DL_ENGINE_PROGRESS', reqId, phase: job.phase, pct: job.pct, state: job.state });
+      if (['complete', 'error', 'canceled'].includes(job.state)) {
+        toPage({ type: request.resultType, reqId, ok: job.state === 'complete', error: job.error, code: job.code });
+        pending.delete(reqId);
       }
     }
-    if (d.type === 'DL_IG_DOWNLOAD' && d.url && d.reqId) {
-      try {
-        chrome.runtime.sendMessage(
-          {
-            type: 'darko-download',
-            url: d.url,
-            mode: 'video',
-            quality: '1080',
-            adult: false,
-          },
-          (resp) => {
-            const err = chrome.runtime.lastError;
-            toPage({
-              type: 'DL_IG_RESULT',
-              reqId: d.reqId,
-              ok: !err && !!(resp && resp.ok),
-              error: err ? err.message : resp && resp.error,
-            });
-          },
-        );
-      } catch (e) {
-        toPage({
-          type: 'DL_IG_RESULT',
-          reqId: d.reqId,
-          ok: false,
-          error: String(e && e.message),
-        });
-      }
+  }
+  chrome.runtime.onMessage.addListener(msg => { if (msg?.type === 'darko-dl-progress') progress(msg); });
+  window.addEventListener('message', async event => {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || data?.source !== 'darko-dl') return;
+    if (data.type === 'DL_PING' || data.type === 'DL_TEST') { announce(data.force === true); return; }
+    if (!['DL_ENGINE_DOWNLOAD', 'DL_IG_DOWNLOAD'].includes(data.type) || !data.url || !data.reqId) return;
+    if (pending.has(data.reqId)) return;
+    const resultType = data.type === 'DL_IG_DOWNLOAD' ? 'DL_IG_RESULT' : 'DL_ENGINE_RESULT';
+    const request = { resultType, jobId: null };
+    pending.set(data.reqId, request);
+    try {
+      const response = await message({ type: 'darko-enqueue', reqId: data.reqId, url: data.url,
+        mode: data.mode || 'video', quality: data.quality || '1080', adult: false });
+      if (!response?.ok) throw new Error(response?.error || 'Não foi possível adicionar o download.');
+      request.jobId = response.jobId;
+      progress(response.job);
+    } catch (error) {
+      pending.delete(data.reqId);
+      toPage({ type: resultType, reqId: data.reqId, ok: false, error: error.message });
     }
   });
-
-  // HEARTBEAT: anuncia proativamente em multiplos timings pra cobrir
-  // race condition de quem chegou primeiro (page listener pode estar
-  // sendo registrado enquanto a extension já anunciou).
-  // Burst inicial + heartbeat contínuo cada 3s.
-  [0, 100, 300, 600, 1500, 3000].forEach((delay) => setTimeout(announce, delay));
-  setInterval(announce, 3000);
+  setInterval(async () => {
+    if (!pending.size) return;
+    try {
+      const response = await message({ type: 'darko-jobs' });
+      for (const job of response?.jobs || []) progress(job);
+    } catch { /* A suspended worker is retried; the queue remains durable. */ }
+  }, 2500);
+  [0, 300, 1500].forEach(delay => setTimeout(announce, delay));
+  setInterval(announce, 10000);
 })();
-
 /**
  * AUTO CORTES (v1.8.0) — relay de BYTES página <-> service worker.
  *

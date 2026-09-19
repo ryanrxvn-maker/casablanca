@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
         'content-type': wantZip ? 'application/zip' : 'application/octet-stream',
         'content-disposition': `attachment; filename="${fileName}"`,
         'content-length': String(st.size),
-        'cache-control': 'public, max-age=3600',
+        'cache-control': 'no-store, max-age=0',
         'x-accel-buffering': 'no',
       },
     });

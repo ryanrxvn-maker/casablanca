@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Edit · Downloader",
-  "version": "1.8.0",
+  "version": "1.9.3",
   "description": "Baixa vídeos e áudios do YouTube, Instagram, TikTok e Pinterest direto pra você.",
   "action": {
     "default_title": "Auto Edit · Downloader",
@@ -19,8 +19,15 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "background": { "service_worker": "bg.js" },
-  "permissions": ["downloads", "storage", "notifications", "alarms"],
+  "background": {
+    "service_worker": "bg.js"
+  },
+  "permissions": [
+    "downloads",
+    "storage",
+    "notifications",
+    "alarms"
+  ],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*",
@@ -41,7 +48,9 @@
         "http://localhost/*",
         "http://localhost:*/*"
       ],
-      "js": ["bridge.js"],
+      "js": [
+        "bridge.js"
+      ],
       "run_at": "document_start"
     },
     {
@@ -64,15 +73,13 @@
         "*://*.xvideosputaria.com/*",
         "*://*.buceteiro.com/*"
       ],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["icons/btn-orb.png"],
-      "matches": ["<all_urls>"]
     }
   ]
 }

@@ -22,70 +22,103 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
 
 class Runner
 {
     static void Main()
     {
+        string baseDir = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+        string logPath = Path.Combine(baseDir, "engine.log");
         try
         {
-            // Pasta do próprio exe (= %LOCALAPPDATA%\AutoEditDownloader\)
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
-            string nodeExe   = Path.Combine(baseDir, "node", "node.exe");
-            string serverCjs = Path.Combine(baseDir, "server.cjs");
-            string binDir    = Path.Combine(baseDir, "bin");
-            string ytDlp     = Path.Combine(binDir, "yt-dlp.exe");
-            string ffmpeg    = Path.Combine(binDir, "ffmpeg.exe");
-            string browsers  = Path.Combine(baseDir, "ms-playwright");
-            string logPath   = Path.Combine(baseDir, "engine.log");
-
-            // Se o node ou server não existem, não há o que rodar.
-            if (!File.Exists(nodeExe) || !File.Exists(serverCjs))
-                return;
-
-            var psi = new ProcessStartInfo
+            string identity;
+            using (var hash = SHA256.Create())
+                identity = BitConverter.ToString(hash.ComputeHash(
+                    Encoding.UTF8.GetBytes(baseDir.ToLowerInvariant()))).Replace("-", "");
+            using (var gate = new Mutex(false, "Local\\AutoEditDownloader." + identity))
             {
-                FileName               = nodeExe,
-                Arguments              = "\"" + serverCjs + "\"",
-                WorkingDirectory       = baseDir,
-                UseShellExecute        = false,   // necessário p/ CreateNoWindow + env vars
-                CreateNoWindow         = true,    // ← SEM janela de console
-                WindowStyle            = ProcessWindowStyle.Hidden,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-            };
-
-            // Variáveis de ambiente que o AutoEditDownloader.cmd setava
-            psi.EnvironmentVariables["YTDLP_PATH"] = ytDlp;
-            psi.EnvironmentVariables["FFMPEG_PATH"] = ffmpeg;
-            psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = browsers;
-            if (psi.EnvironmentVariables["DARKO_ALLOW_ADULT"] == null)
-                psi.EnvironmentVariables["DARKO_ALLOW_ADULT"] = "1";
-
-            var proc = new Process { StartInfo = psi };
-
-            // Redireciona saída pro engine.log (append) sem nunca abrir janela.
-            var logWriter = new StreamWriter(logPath, append: true) { AutoFlush = true };
-            logWriter.WriteLine("[" + DateTime.Now + "] runner start (hidden)");
-            proc.OutputDataReceived += (s, e) => { if (e.Data != null) { try { logWriter.WriteLine(e.Data); } catch {} } };
-            proc.ErrorDataReceived  += (s, e) => { if (e.Data != null) { try { logWriter.WriteLine(e.Data); } catch {} } };
-
-            proc.Start();
-            proc.BeginOutputReadLine();
-            proc.BeginErrorReadLine();
-
-            // O Runner espera o node terminar (mantém o redirect de log vivo).
-            // Como é winexe sem janela, isso NÃO mostra nada na tela —
-            // só segura o processo pai em background.
-            proc.WaitForExit();
-
-            logWriter.WriteLine("[" + DateTime.Now + "] node exit code " + proc.ExitCode);
-            logWriter.Dispose();
+                bool ownsGate;
+                try { ownsGate = gate.WaitOne(0); }
+                catch (AbandonedMutexException) { ownsGate = true; }
+                if (!ownsGate) return;
+                try { Supervise(baseDir, logPath); }
+                finally { gate.ReleaseMutex(); }
+            }
         }
-        catch
+        catch (Exception error)
         {
-            // Silencioso por definição — nunca mostra erro ao cliente.
+            try { File.AppendAllText(logPath, "[" + DateTime.Now + "] runner error: " + error.Message + Environment.NewLine); }
+            catch { }
+        }
+    }
+
+    static void Supervise(string baseDir, string logPath)
+    {
+        string nodeExe = Path.Combine(baseDir, "node", "node.exe");
+        string serverCjs = Path.Combine(baseDir, "server.cjs");
+        if (!File.Exists(nodeExe) || !File.Exists(serverCjs))
+            throw new FileNotFoundException("Motor incompleto. Execute o instalador do Downloader para reparar.");
+
+        try
+        {
+            if (File.Exists(logPath) && new FileInfo(logPath).Length > 5 * 1024 * 1024)
+            {
+                File.Delete(logPath + ".previous");
+                File.Move(logPath, logPath + ".previous");
+            }
+        }
+        catch { }
+
+        using (TextWriter log = TextWriter.Synchronized(new StreamWriter(logPath, true) { AutoFlush = true }))
+        {
+            int delaySeconds = 2;
+            for (;;)
+            {
+                var startedAt = DateTime.UtcNow;
+                int exitCode = -1;
+                try
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = nodeExe,
+                        Arguments = "\"" + serverCjs + "\"",
+                        WorkingDirectory = baseDir,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                    };
+                    psi.EnvironmentVariables["YTDLP_PATH"] = Path.Combine(baseDir, "bin", "yt-dlp.exe");
+                    psi.EnvironmentVariables["FFMPEG_PATH"] = Path.Combine(baseDir, "bin", "ffmpeg.exe");
+                    psi.EnvironmentVariables["PLAYWRIGHT_BROWSERS_PATH"] = Path.Combine(baseDir, "ms-playwright");
+                    if (psi.EnvironmentVariables["DARKO_ALLOW_ADULT"] == null)
+                        psi.EnvironmentVariables["DARKO_ALLOW_ADULT"] = "1";
+                    using (var proc = new Process { StartInfo = psi })
+                    {
+                        proc.OutputDataReceived += (s, e) => { if (e.Data != null) { try { log.WriteLine(e.Data); } catch { } } };
+                        proc.ErrorDataReceived += (s, e) => { if (e.Data != null) { try { log.WriteLine(e.Data); } catch { } } };
+                        log.WriteLine("[" + DateTime.Now + "] runner start (hidden)");
+                        proc.Start();
+                        proc.BeginOutputReadLine();
+                        proc.BeginErrorReadLine();
+                        proc.WaitForExit();
+                        exitCode = proc.ExitCode;
+                    }
+                }
+                catch (Exception error) { log.WriteLine("[" + DateTime.Now + "] node start failed: " + error.Message); }
+
+                log.WriteLine("[" + DateTime.Now + "] node exit code " + exitCode);
+                // Exit 0 is deliberate, including an already-running engine.
+                if (exitCode == 0) return;
+                if ((DateTime.UtcNow - startedAt).TotalMinutes >= 5) delaySeconds = 2;
+                log.WriteLine("[" + DateTime.Now + "] restarting engine in " + delaySeconds + "s");
+                Thread.Sleep(delaySeconds * 1000);
+                delaySeconds = Math.Min(60, delaySeconds * 2);
+            }
         }
     }
 }

@@ -12,6 +12,7 @@
 import {
   aceitaAcaoDeFila,
   agruparPorVersao,
+  consolidarCiclosDeDisparo,
   faseAtiva,
   filtrarPorOrigemEData,
   origemDoEvento,
@@ -227,6 +228,45 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
     tituloVisivelDoHistorico('Arquivo entregue ao cliente') === 'Arquivo entregue ao cliente',
     'não apaga palavra que faz parte de uma frase real',
   );
+  ok(
+    tituloVisivelDoHistorico('AD124VN - PRPB07 entregue') === 'AD124VN - PRPB07',
+    'preserva a nomenclatura completa e exata da task',
+  );
+}
+
+// (D4c) disparo + entrega pronta são uma execução, não duas tasks
+{
+  const taskId = '86ad124';
+  const pronto = ev({
+    id: 'ready-124',
+    t: 1_700_000_500_000,
+    title: 'AD124VN entregue',
+    kind: 'done',
+    meta: '10 takes · 75.5MB',
+    ref: [{ via: 'zip', key: `batch:${taskId}:montado`, name: 'AD124VN.zip', taskId }],
+  });
+  const disparo = ev({
+    id: `dispatch:${taskId}:1700000000000`,
+    t: 1_700_000_000_000,
+    title: 'AD124VN - PRPB07',
+    kind: 'dispatch',
+    channels: [{ label: 'META', color: '#22d3ee' }],
+  });
+  const umaLinha = consolidarCiclosDeDisparo([pronto, disparo]);
+  ok(umaLinha.length === 1, 'uma execução pronta não aparece duas vezes');
+  ok(umaLinha[0].id === 'ready-124', 'preserva o registro que contém o arquivo pronto');
+  ok(umaLinha[0].title === 'AD124VN - PRPB07', 'recupera do disparo o nome completo da task');
+  ok(umaLinha[0].channels?.[0]?.label === 'META', 'preserva o canal gravado no disparo');
+
+  const redisparoNovo = ev({
+    id: `dispatch:${taskId}:1700000600000`,
+    t: 1_700_000_600_000,
+    title: 'AD124VN - PRPB07',
+    kind: 'dispatch',
+  });
+  const duasExecucoes = consolidarCiclosDeDisparo([redisparoNovo, pronto, disparo]);
+  ok(duasExecucoes.length === 2, 'um redisparo realmente novo continua separado');
+  ok(duasExecucoes[0].id === redisparoNovo.id, 'o redisparo atual fica na frente');
 }
 
 // (D5) origem do disparo e filtro por data

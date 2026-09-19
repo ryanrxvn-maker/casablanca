@@ -145,6 +145,50 @@ export type GrupoDeVersoes = {
   eventos: HistoryEvent[];
 };
 
+/**
+ * Junta as duas metades de UMA execução do Pilot.
+ *
+ * O durable-records grava o começo (`dispatch`) e a página grava a entrega
+ * pronta, com as refs do arquivo. Isso é útil internamente, mas na interface
+ * são a mesma task — mostrar duas linhas fazia parecer que o AD tinha sido
+ * produzido duas vezes. A entrega absorve somente o dispatch imediatamente
+ * anterior da MESMA task; um novo dispatch posterior continua visível como
+ * uma reexecução real até que a respectiva entrega termine.
+ *
+ * O registro da entrega é a fonte dos arquivos/estado. O dispatch costuma ter
+ * a nomenclatura completa do ClickUp, então ela vence quando for mais rica.
+ */
+export function consolidarCiclosDeDisparo(events: HistoryEvent[]): HistoryEvent[] {
+  const ordenados = [...events].sort((a, b) => b.t - a.t);
+  const absorvidos = new Set<number>();
+  const taskIds = ordenados.map(taskIdDoEvento);
+
+  return ordenados.flatMap((evento, indice) => {
+    if (absorvidos.has(indice)) return [];
+    const taskId = taskIds[indice];
+    if (evento.kind === 'dispatch' || !taskId || !evento.ref?.length) return [evento];
+
+    const indiceDoDisparo = ordenados.findIndex((candidato, i) =>
+      i > indice &&
+      !absorvidos.has(i) &&
+      candidato.kind === 'dispatch' &&
+      taskIds[i] === taskId,
+    );
+    if (indiceDoDisparo < 0) return [evento];
+
+    absorvidos.add(indiceDoDisparo);
+    const disparo = ordenados[indiceDoDisparo];
+    const atualVisivel = tituloVisivelDoHistorico(evento.title);
+    const disparoVisivel = tituloVisivelDoHistorico(disparo.title);
+    const titulo = disparoVisivel.length > atualVisivel.length ? disparo.title : evento.title;
+    return [{
+      ...evento,
+      title: titulo,
+      channels: evento.channels?.length ? evento.channels : disparo.channels,
+    }];
+  });
+}
+
 export function agruparPorVersao(events: HistoryEvent[]): GrupoDeVersoes[] {
   const grupos: GrupoDeVersoes[] = [];
   const porChave = new Map<string, { grupo: GrupoDeVersoes; versoes: Set<number> }>();

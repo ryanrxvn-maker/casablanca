@@ -175,11 +175,11 @@ var init_headless_grab = __esm({
 
 // engine/server.ts
 var import_http = __toESM(require("http"));
-var import_fs = require("fs");
-var import_promises2 = require("fs/promises");
-var import_crypto = __toESM(require("crypto"));
+var import_fs2 = require("fs");
+var import_promises4 = require("fs/promises");
+var import_crypto2 = __toESM(require("crypto"));
 var import_os2 = __toESM(require("os"));
-var import_path2 = __toESM(require("path"));
+var import_path3 = __toESM(require("path"));
 
 // lib/downloader-core.ts
 var import_child_process = require("child_process");
@@ -230,9 +230,11 @@ function safeName(title, ext) {
 }
 var ytDlpResolved = null;
 var ytDlpInflight = null;
-var ytDlpSelfHealTried = false;
+var ytDlpSelfHealAt = 0;
 var ffmpegResolved = null;
 var aria2Resolved = void 0;
+var maintenanceInflight = null;
+var maintenanceAt = 0;
 async function fileExists(p) {
   try {
     return (await (0, import_promises.stat)(p)).isFile();
@@ -257,9 +259,47 @@ function whichAbs(name) {
 function probe(cmd, args) {
   return new Promise((resolve) => {
     const p = (0, import_child_process.spawn)(cmd, args, { windowsHide: true });
-    p.on("error", () => resolve(false));
-    p.on("close", (code) => resolve(code === 0));
+    const timer = setTimeout(() => {
+      p.kill();
+      resolve(false);
+    }, 15e3);
+    p.stdout.resume();
+    p.stderr.resume();
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
   });
+}
+async function maintainExtractor(tool) {
+  if (!process.env.YTDLP_PATH || tool.cmd !== process.env.YTDLP_PATH || tool.pre.length) return;
+  if (maintenanceInflight) return maintenanceInflight;
+  if (Date.now() - maintenanceAt < 24 * 60 * 6e4) return;
+  maintenanceInflight = (async () => {
+    const stamp = tool.cmd + ".autoedit-update.json";
+    try {
+      const last = JSON.parse(await (0, import_promises.readFile)(stamp, "utf8"));
+      if (Date.now() - Number(last.checkedAt) < 24 * 60 * 6e4) {
+        maintenanceAt = Number(last.checkedAt);
+        return;
+      }
+    } catch {
+    }
+    const result = await run(tool.cmd, ["--ignore-config", "--update"], import_path.default.dirname(tool.cmd), 9e4);
+    maintenanceAt = Date.now() - (result.code === 0 ? 0 : 23 * 60 * 6e4);
+    if (result.code === 0) await (0, import_promises.writeFile)(stamp, JSON.stringify({ checkedAt: maintenanceAt })).catch(() => {
+    });
+    else console.error("[downloader-core] extractor update deferred:", result.stderr.slice(-500));
+  })();
+  try {
+    await maintenanceInflight;
+  } finally {
+    maintenanceInflight = null;
+  }
 }
 async function winPythonDirs() {
   if (process.platform !== "win32") return [];
@@ -280,7 +320,15 @@ async function winPythonDirs() {
   return dirs;
 }
 async function resolveYtDlp() {
-  if (ytDlpResolved) return ytDlpResolved;
+  if (ytDlpResolved) {
+    const cached = ytDlpResolved;
+    if (await probe(cached.cmd, [...cached.pre, "--version"])) return cached;
+    if (ytDlpResolved === cached) {
+      ytDlpResolved = null;
+      ytDlpSelfHealAt = 0;
+      maintenanceAt = 0;
+    }
+  }
   if (ytDlpInflight) return ytDlpInflight;
   ytDlpInflight = (async () => {
     const tryTool = async (t) => t.cmd && await probe(t.cmd, [...t.pre, "--version"]) ? t : null;
@@ -332,8 +380,20 @@ async function resolveYtDlp() {
           ],
           { windowsHide: true }
         );
-        p.on("error", () => res());
-        p.on("close", () => res());
+        const timer = setTimeout(() => {
+          p.kill();
+          res();
+        }, 12e4);
+        p.stdout.resume();
+        p.stderr.resume();
+        p.on("error", () => {
+          clearTimeout(timer);
+          res();
+        });
+        p.on("close", () => {
+          clearTimeout(timer);
+          res();
+        });
       });
       const healed = await tryTool({ cmd: anyPy, pre: ["-m", "yt_dlp"] });
       if (healed) {
@@ -343,8 +403,8 @@ async function resolveYtDlp() {
     }
     const healPath = process.env.YTDLP_PATH;
     const healAsset = process.platform === "win32" ? "yt-dlp.exe" : process.platform === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux";
-    if (healPath && !ytDlpSelfHealTried) {
-      ytDlpSelfHealTried = true;
+    if (healPath && Date.now() - ytDlpSelfHealAt > 60 * 6e4) {
+      ytDlpSelfHealAt = Date.now();
       try {
         const r = await fetch(
           `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${healAsset}`,
@@ -382,7 +442,7 @@ async function resolveYtDlp() {
   }
 }
 async function resolveFfmpeg() {
-  if (ffmpegResolved) return ffmpegResolved;
+  if (ffmpegResolved && await fileExists(ffmpegResolved)) return ffmpegResolved;
   const env = process.env.FFMPEG_PATH;
   const found = (env && await fileExists(env) ? env : null) || await whichAbs("ffmpeg") || await whichAbs("ffmpeg.exe");
   ffmpegResolved = found || "ffmpeg";
@@ -393,24 +453,36 @@ async function aria2Path() {
   aria2Resolved = await whichAbs("aria2c") || await whichAbs("aria2c.exe");
   return aria2Resolved;
 }
-function run(cmd, args, cwd, timeoutMs) {
+function run(cmd, args, cwd, timeoutMs = 15e5, signal) {
   return new Promise((resolve) => {
     const p = (0, import_child_process.spawn)(cmd, args, { cwd, windowsHide: true });
+    p.stdout.resume();
     let stderr = "";
     let done = false;
+    let timer = null;
+    const abort = () => {
+      try {
+        p.kill("SIGKILL");
+      } catch {
+      }
+      finish(-1, "\n[cancelado: outra rota resolveu a m\xEDdia]");
+    };
     const finish = (code, extra = "") => {
       if (done) return;
       done = true;
       if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       resolve({ code, stderr: stderr + extra });
     };
-    const timer = timeoutMs ? setTimeout(() => {
+    timer = timeoutMs ? setTimeout(() => {
       try {
         p.kill("SIGKILL");
       } catch {
       }
       finish(-1, "\n[timeout: processo morto]");
     }, timeoutMs) : null;
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
     p.stderr.on("data", (d) => {
       stderr += d.toString();
       if (stderr.length > 64e3) stderr = stderr.slice(-64e3);
@@ -481,6 +553,7 @@ async function fetchTikTok(url, mode, workDir) {
 }
 async function ytDlpArgs(mode, quality, provider) {
   const base = [
+    "--ignore-config",
     "--no-playlist",
     "--no-warnings",
     "--restrict-filenames",
@@ -495,6 +568,7 @@ async function ytDlpArgs(mode, quality, provider) {
     "-o",
     "%(title).80B-%(id)s.%(ext)s"
   ];
+  base.push("--js-runtimes", `node:${process.execPath}`, "--ffmpeg-location", await resolveFfmpeg());
   if (provider === "adult") {
     base.push(
       "--impersonate",
@@ -528,6 +602,10 @@ async function ytDlpArgs(mode, quality, provider) {
 }
 function friendlyYtDlpFail(stderr) {
   const m = stderr.toLowerCase();
+  if (/(requested format.*not available|javascript runtime|signature|nsig|challenge solving|no supported js)/.test(m))
+    return "o site mudou a forma de entregar este v\xEDdeo. O Motor verifica atualiza\xE7\xF5es automaticamente; tente novamente. Se persistir, atualize o Motor na p\xE1gina do Downloader.";
+  if (/(not a bot|confirm.*bot|http error 403|forbidden)/.test(m))
+    return "o site recusou o acesso autom\xE1tico a este v\xEDdeo. Abra o link no navegador e tente novamente mais tarde.";
   if (/(private|login|sign in|logged.?in|members.?only|subscriber|only available for registered)/.test(m))
     return "esse video e privado ou exige login \u2014 so da pra baixar conteudo publico. Confere o link no navegador.";
   if (/(age.?restrict|confirm your age|18\+)/.test(m))
@@ -544,7 +622,10 @@ function friendlyYtDlpFail(stderr) {
     return "a conexao falhou no meio do download. Confere a internet e tenta de novo.";
   return "nao consegui baixar esse link agora. Confere se o video esta publico e tenta de novo em instantes.";
 }
-async function fetchYtDlp(url, mode, quality, provider, workDir, referer) {
+function extractorNeedsUpdate(stderr) {
+  return /(requested format.*not available|javascript runtime|signature|nsig|challenge solving|no supported js|unable to extract)/i.test(stderr);
+}
+async function fetchYtDlp(url, mode, quality, provider, workDir, referer, signal) {
   const tool = await resolveYtDlp();
   if (!tool)
     return {
@@ -558,23 +639,117 @@ async function fetchYtDlp(url, mode, quality, provider, workDir, referer) {
     ...refArgs,
     url
   ];
-  const { code, stderr } = await run(tool.cmd, args, workDir, 15e5);
+  let result = await run(tool.cmd, args, workDir, 15e5, signal);
+  if (signal?.aborted) return { error: "rota substituida por uma midia direta do Pinterest." };
+  if (result.code !== 0 && extractorNeedsUpdate(result.stderr)) {
+    await maintainExtractor(tool);
+    result = await run(tool.cmd, args, workDir, 15e5, signal);
+  }
+  const { code, stderr } = result;
   if (code !== 0) {
     console.error("[downloader-core] yt-dlp falhou:", stderr.slice(-4e3));
     return { error: friendlyYtDlpFail(stderr) };
   }
   const names = await (0, import_promises.readdir)(workDir);
   const files = (await Promise.all(
-    names.filter((n) => !/\.(part|ytdl|temp)$/i.test(n)).map(async (n) => {
+    names.filter((n) => CONTENT_TYPES[import_path.default.extname(n).toLowerCase()] && !/\.f\d+\./i.test(n)).map(async (n) => {
       const full = import_path.default.join(workDir, n);
       const s = await (0, import_promises.stat)(full);
-      return s.isFile() ? { n, full, size: s.size } : null;
+      return s.isFile() && s.size > 32 ? { n, full, size: s.size } : null;
     })
   )).filter(Boolean);
   if (files.length === 0)
     return { error: "o download terminou sem gerar arquivo. Tenta de novo em instantes." };
   files.sort((a, b) => b.size - a.size);
   return { file: files[0].full, name: files[0].n };
+}
+function decodePinterestHtmlValue(value) {
+  return value.replace(/\\u002F/gi, "/").replace(/\\\//g, "/").replace(/&amp;/gi, "&").replace(/&#x2F;/gi, "/").replace(/&#47;/g, "/").replace(/&quot;/gi, '"');
+}
+function pinterestImageCandidates(html) {
+  const raw = [];
+  const meta = /<meta\b[^>]*(?:property|name)=["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["'][^>]*content=["']([^"']+)["'][^>]*>|<meta\b[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["'][^>]*>/gi;
+  for (const match of html.matchAll(meta)) raw.push(match[1] || match[2]);
+  for (const match of html.matchAll(/https?:(?:\\u002F|\\\/|\/){2}i\.pinimg\.com(?:\\u002F|\\\/|\/)[^"'<>\s]+?\.(?:jpe?g|png|webp|gif)(?:\?[^"'<>\s]*)?/gi)) {
+    raw.push(match[0]);
+  }
+  const candidates = [];
+  for (const value of raw) {
+    if (!value) continue;
+    const decoded = decodePinterestHtmlValue(value);
+    let parsed;
+    try {
+      parsed = new URL(decoded);
+    } catch {
+      continue;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (host !== "i.pinimg.com" && !host.endsWith(".pinimg.com")) continue;
+    if (!/\.(?:jpe?g|png|webp|gif)$/i.test(parsed.pathname)) continue;
+    const original = new URL(parsed.href);
+    original.pathname = original.pathname.replace(/^\/(?:75x75_RS|136x136|170x|236x|474x|564x|736x)\//i, "/originals/");
+    if (original.href !== parsed.href) candidates.push(original.href);
+    candidates.push(parsed.href);
+  }
+  return [...new Set(candidates)];
+}
+function pinterestPageHasVideo(html) {
+  return /(?:property|name)=["'](?:og:video(?::url|:secure_url)?|twitter:player)["']|"(?:contentUrl|video_list|story_pin_data)"\s*:/i.test(html);
+}
+async function fetchPinterestPage(url) {
+  try {
+    const page = await fetch(url, {
+      headers: {
+        "user-agent": UA2,
+        accept: "text/html,application/xhtml+xml",
+        "accept-language": "pt-BR,pt;q=0.9,en;q=0.7"
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(25e3)
+    });
+    return page.ok ? await page.text() : null;
+  } catch (error) {
+    console.error("[downloader-core] pagina do Pinterest falhou:", error);
+    return null;
+  }
+}
+async function fetchPinterestImage(url, workDir, pageHtml) {
+  const html = pageHtml ?? await fetchPinterestPage(url);
+  if (!html) return { error: "nao consegui abrir esse pin agora. Confere a internet e tenta de novo." };
+  const candidates = pinterestImageCandidates(html);
+  if (!candidates.length) return { error: "esse pin nao entregou uma imagem ou video publico." };
+  const pinId = new URL(url).pathname.match(/\/pin\/(?:[^/]*--)?(\d+)/i)?.[1] || "imagem";
+  for (const candidate of candidates) {
+    try {
+      const media = await fetch(candidate, {
+        headers: { "user-agent": UA2, referer: url, accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.5" },
+        redirect: "follow",
+        signal: AbortSignal.timeout(6e4)
+      });
+      if (!media.ok) continue;
+      const finalHost = new URL(media.url || candidate).hostname.toLowerCase();
+      if (finalHost !== "i.pinimg.com" && !finalHost.endsWith(".pinimg.com")) continue;
+      const mime = (media.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      const extByMime = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif"
+      };
+      const ext = extByMime[mime];
+      if (!ext) continue;
+      const bytes = Buffer.from(await media.arrayBuffer());
+      if (bytes.length < 32 || /^(?:\s*<!doctype|\s*<html|\s*<\?xml)/i.test(bytes.subarray(0, 256).toString("utf8"))) continue;
+      const name = safeName(`pinterest-${pinId}`, ext);
+      const file = import_path.default.join(workDir, name);
+      await (0, import_promises.writeFile)(file, bytes);
+      return { file, name };
+    } catch (error) {
+      console.error("[downloader-core] candidato de imagem do Pinterest falhou:", error);
+    }
+  }
+  return { error: "o Pinterest nao entregou uma imagem valida para esse pin." };
 }
 var TUBE_RE = /(pornhub|xvideos|xhamster|redtube|youporn|spankbang|eporner|tube8)\.[a-z.]+/i;
 var JUNK_MEDIA_RE = /(plyr\.io|jwplayer|jsdelivr|cdnjs|googletagmanager|gstatic|doubleclick|\/blank\.mp4|blank\.mp4|sample\.mp4|placeholder|\/ads?\/)/i;
@@ -718,7 +893,7 @@ async function fetchAdult(url, mode, quality, workDir) {
   return { error: `esse site nao liberou o video (pode exigir login ou assinatura). ${native.error}`, code: native.code };
 }
 async function processDownload(input) {
-  const url = (input.url ?? "").trim();
+  let url = typeof input.url === "string" ? input.url.trim() : "";
   const mode = input.mode ?? "video";
   const quality = input.quality ?? "1080";
   const adult = input.adult === true;
@@ -727,6 +902,11 @@ async function processDownload(input) {
   let host;
   try {
     host = new URL(url).hostname;
+    if (/(^|\.)youtube\.com$/.test(host) && new URL(url).searchParams.has("v")) {
+      const clean = new URL(url);
+      clean.search = new URLSearchParams({ v: clean.searchParams.get("v") }).toString();
+      url = clean.toString();
+    }
   } catch {
     return { ok: false, status: 400, error: "URL invalida." };
   }
@@ -745,6 +925,8 @@ async function processDownload(input) {
     };
   if (!["video", "audio-mp3", "audio-wav"].includes(mode))
     return { ok: false, status: 400, error: "Modo invalido." };
+  if (!["1080", "720", "480", "best"].includes(quality))
+    return { ok: false, status: 400, error: "Qualidade inv\xE1lida." };
   const workDir = await (0, import_promises.mkdtemp)(import_path.default.join(import_os.default.tmpdir(), "darkolab-dl-"));
   const dispose = async () => {
     await (0, import_promises.rm)(workDir, { recursive: true, force: true }).catch(() => {
@@ -765,6 +947,26 @@ async function processDownload(input) {
       }
     } else if (provider === "adult") {
       built = await fetchAdult(url, mode, quality, workDir);
+    } else if (provider === "pinterest") {
+      if (mode === "video") {
+        const abortVideo = new AbortController();
+        const video = fetchYtDlp(url, mode, quality, provider, workDir, void 0, abortVideo.signal);
+        const html = await fetchPinterestPage(url);
+        if (html && !pinterestPageHasVideo(html) && pinterestImageCandidates(html).length) {
+          abortVideo.abort();
+          await video;
+          built = await fetchPinterestImage(url, workDir, html);
+        } else {
+          built = await video;
+          if ("error" in built) {
+            const image = await fetchPinterestImage(url, workDir, html);
+            if (!("error" in image)) built = image;
+            else console.error("[downloader-core] fallback de imagem do Pinterest falhou:", image.error);
+          }
+        }
+      } else {
+        built = await fetchYtDlp(url, mode, quality, provider, workDir);
+      }
     } else {
       built = await fetchYtDlp(url, mode, quality, provider, workDir);
     }
@@ -808,19 +1010,188 @@ async function processDownload(input) {
   }
 }
 
+// engine/jobs.ts
+var import_crypto = __toESM(require("crypto"));
+var import_path2 = __toESM(require("path"));
+var import_fs = require("fs");
+var import_promises2 = require("fs/promises");
+var import_stream = require("stream");
+var import_promises3 = require("stream/promises");
+var TTL = 6 * 60 * 60 * 1e3;
+async function validateMedia(file, mime) {
+  if (!/^(video|audio|image)\//.test(mime)) throw new Error("A fonte n\xE3o entregou um arquivo de m\xEDdia v\xE1lido.");
+  const size = (await (0, import_promises2.stat)(file)).size;
+  if (size < 32) throw new Error("A fonte entregou um arquivo vazio ou incompleto.");
+  const handle = await (0, import_promises2.open)(file, "r");
+  try {
+    const bytes = Buffer.alloc(512);
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+    const head = bytes.subarray(0, bytesRead).toString("utf8").trimStart();
+    if (/^(?:<!doctype|<html|<\?xml|\{\s*"|\[\s*\{)/i.test(head)) {
+      throw new Error("A fonte retornou uma mensagem de erro no lugar do v\xEDdeo. Tente novamente.");
+    }
+  } finally {
+    await handle.close();
+  }
+  return size;
+}
+var DownloadJobs = class {
+  constructor(dir, process2 = processDownload) {
+    this.dir = dir;
+    this.process = process2;
+  }
+  dir;
+  process;
+  jobs = /* @__PURE__ */ new Map();
+  active = 0;
+  pumping = false;
+  initializing = /* @__PURE__ */ new Set();
+  saves = /* @__PURE__ */ new Map();
+  async init() {
+    await (0, import_promises2.mkdir)(this.dir, { recursive: true });
+    for (const name of await (0, import_promises2.readdir)(this.dir)) {
+      if (!/^[a-f0-9-]{36}\.json$/.test(name)) continue;
+      try {
+        const job = JSON.parse(await (0, import_promises2.readFile)(import_path2.default.join(this.dir, name), "utf8"));
+        if (name !== `${job.id}.json`) continue;
+        this.jobs.set(job.id, job);
+        if (job.state === "processing") job.state = "queued";
+        if (job.state === "ready") {
+          try {
+            await validateMedia(this.filePath(job.id), job.mime || "");
+          } catch {
+            job.state = "error";
+            job.error = "O arquivo n\xE3o est\xE1 mais dispon\xEDvel. Inicie o download novamente.";
+          }
+        }
+      } catch {
+      }
+    }
+    await this.prune();
+    void this.pump();
+  }
+  async save(job) {
+    const destination = import_path2.default.join(this.dir, `${job.id}.json`);
+    const snapshot = JSON.stringify(job);
+    const pending = (this.saves.get(job.id) || Promise.resolve()).catch(() => {
+    }).then(async () => {
+      await (0, import_promises2.writeFile)(destination + ".tmp", snapshot);
+      await (0, import_promises2.rename)(destination + ".tmp", destination);
+    });
+    this.saves.set(job.id, pending);
+    try {
+      await pending;
+    } finally {
+      if (this.saves.get(job.id) === pending) this.saves.delete(job.id);
+    }
+  }
+  filePath(id) {
+    return import_path2.default.join(this.dir, `${id}.media`);
+  }
+  get(id) {
+    return this.jobs.get(id);
+  }
+  public(job) {
+    const { input: _input, requestId: _requestId, ...publicJob } = job;
+    return publicJob;
+  }
+  async create(input, requestId) {
+    const existing = [...this.jobs.values()].find((j) => j.requestId === requestId);
+    if (existing) {
+      if (JSON.stringify(existing.input) !== JSON.stringify(input)) throw new Error("Esse pedido j\xE1 foi usado para outro download.");
+      await this.saves.get(existing.id);
+      return existing;
+    }
+    if ([...this.jobs.values()].filter((j) => j.state === "queued" || j.state === "processing").length >= 100) throw new Error("A fila est\xE1 cheia. Aguarde os downloads atuais terminarem.");
+    const job = { id: import_crypto.default.randomUUID(), requestId, input, state: "queued", createdAt: Date.now(), updatedAt: Date.now() };
+    this.jobs.set(job.id, job);
+    this.initializing.add(job.id);
+    try {
+      await this.save(job);
+    } catch (e) {
+      this.jobs.delete(job.id);
+      throw e;
+    } finally {
+      this.initializing.delete(job.id);
+    }
+    void this.pump();
+    return job;
+  }
+  async prune() {
+    for (const [id, job] of this.jobs) {
+      if (job.state === "queued" || job.state === "processing" || Date.now() - job.updatedAt < TTL) continue;
+      this.jobs.delete(id);
+      await (0, import_promises2.rm)(this.filePath(id), { force: true });
+      await (0, import_promises2.rm)(import_path2.default.join(this.dir, `${id}.json`), { force: true });
+    }
+  }
+  async pump() {
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      while (this.active < 2) {
+        const job = [...this.jobs.values()].find((j) => j.state === "queued" && !this.initializing.has(j.id));
+        if (!job) break;
+        job.state = "processing";
+        this.active++;
+        void this.run(job).finally(() => {
+          this.active--;
+          void this.pump();
+        });
+      }
+    } finally {
+      this.pumping = false;
+    }
+  }
+  async run(job) {
+    let result;
+    const file = this.filePath(job.id);
+    try {
+      await this.save(job);
+      result = await this.process(job.input);
+      if (!result.ok) throw new Error(result.error);
+      if (result.kind === "file") {
+        await (0, import_promises2.copyFile)(result.filePath, file);
+      } else {
+        const response = await fetch(result.url, { headers: result.headers, signal: AbortSignal.timeout(25 * 6e4) });
+        if (!response.ok || !response.body) throw new Error("A fonte do v\xEDdeo n\xE3o respondeu. Tente novamente em instantes.");
+        if (/json|html|xml/.test(response.headers.get("content-type") || "")) throw new Error("A fonte retornou um erro no lugar do v\xEDdeo.");
+        await (0, import_promises3.pipeline)(import_stream.Readable.fromWeb(response.body), (0, import_fs.createWriteStream)(file));
+        const length = Number(response.headers.get("content-length"));
+        if (length && (await (0, import_promises2.stat)(file)).size !== length) throw new Error("A conex\xE3o caiu antes de terminar o arquivo. Tente novamente.");
+      }
+      job.size = await validateMedia(file, result.contentType);
+      job.filename = result.name.replace(/[\r\n"\\/]/g, "_");
+      job.mime = result.contentType;
+      job.state = "ready";
+    } catch (e) {
+      job.state = "error";
+      job.error = e instanceof Error ? e.message : "N\xE3o foi poss\xEDvel preparar o download. Tente novamente.";
+      await (0, import_promises2.rm)(file, { force: true }).catch(() => {
+      });
+    } finally {
+      if (result?.ok) await result.dispose().catch(() => {
+      });
+      job.updatedAt = Date.now();
+      await this.save(job).catch((e) => console.error("[jobs] persist failed:", e.message));
+    }
+  }
+};
+
 // engine/server.ts
-var VERSION = "1.1.0";
+var VERSION = "1.2.1";
 var DEFAULT_PORT = 47923;
 function configDir() {
-  const base = process.platform === "win32" ? process.env.LOCALAPPDATA || import_os2.default.homedir() : import_path2.default.join(import_os2.default.homedir(), ".config");
-  return import_path2.default.join(base, "DarkoDownloader");
+  if (process.env.AUTOEDIT_ENGINE_CONFIG_DIR) return import_path3.default.resolve(process.env.AUTOEDIT_ENGINE_CONFIG_DIR);
+  const base = process.platform === "win32" ? process.env.LOCALAPPDATA || import_os2.default.homedir() : import_path3.default.join(import_os2.default.homedir(), ".config");
+  return import_path3.default.join(base, "DarkoDownloader");
 }
 async function loadConfig() {
   const dir = configDir();
-  const file = import_path2.default.join(dir, "config.json");
-  await (0, import_promises2.mkdir)(dir, { recursive: true });
+  const file = import_path3.default.join(dir, "config.json");
+  await (0, import_promises4.mkdir)(dir, { recursive: true });
   try {
-    const c = JSON.parse(await (0, import_promises2.readFile)(file, "utf8"));
+    const c = JSON.parse(await (0, import_promises4.readFile)(file, "utf8"));
     if (c.token && c.port) {
       const envA = process.env.DARKO_ALLOW_ADULT;
       const allowAdult = envA === "1" ? true : envA === "0" ? false : c.allowAdult === true;
@@ -829,17 +1200,17 @@ async function loadConfig() {
   } catch {
   }
   const cfg = {
-    token: import_crypto.default.randomBytes(24).toString("hex"),
+    token: import_crypto2.default.randomBytes(24).toString("hex"),
     port: Number(process.env.DARKO_PORT) || DEFAULT_PORT,
     allowAdult: process.env.DARKO_ALLOW_ADULT === "1"
   };
-  await (0, import_promises2.writeFile)(file, JSON.stringify(cfg, null, 2));
+  await (0, import_promises4.writeFile)(file, JSON.stringify(cfg, null, 2));
   return cfg;
 }
 async function persistConfig(cfg) {
-  const file = import_path2.default.join(configDir(), "config.json");
-  await (0, import_promises2.mkdir)(configDir(), { recursive: true });
-  await (0, import_promises2.writeFile)(file, JSON.stringify(cfg, null, 2));
+  const file = import_path3.default.join(configDir(), "config.json");
+  await (0, import_promises4.mkdir)(configDir(), { recursive: true });
+  await (0, import_promises4.writeFile)(file, JSON.stringify(cfg, null, 2));
 }
 function isExtensionOrigin(origin) {
   return !!origin && (origin.startsWith("chrome-extension://") || origin.startsWith("moz-extension://") || origin.startsWith("extension://"));
@@ -848,7 +1219,7 @@ function cors(res, origin) {
   if (isExtensionOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Headers", "authorization,content-type");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
     res.setHeader("Access-Control-Max-Age", "86400");
   }
 }
@@ -865,9 +1236,24 @@ function readBody(req) {
 }
 async function main() {
   const cfg = await loadConfig();
-  const server = import_http.default.createServer(async (req, res) => {
+  const jobs = new DownloadJobs(import_path3.default.join(configDir(), "jobs"));
+  await jobs.init();
+  setInterval(() => {
+    void jobs.prune().catch(console.error);
+  }, 6e4).unref();
+  const server = import_http.default.createServer((req, res) => {
+    void handle(req, res).catch((error) => {
+      console.error("[engine] request failed:", error instanceof Error ? error.message : error);
+      if (res.headersSent) return res.destroy();
+      res.writeHead(500, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ error: "N\xE3o foi poss\xEDvel concluir o pedido. Tente novamente." }));
+    });
+  });
+  async function handle(req, res) {
     const origin = req.headers.origin;
     cors(res, origin);
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("x-content-type-options", "nosniff");
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       return res.end();
@@ -880,6 +1266,7 @@ async function main() {
           ok: true,
           app: "darkolab-downloader-engine",
           version: VERSION,
+          capabilities: ["download-jobs-v1"],
           allowAdult: cfg.allowAdult
         })
       );
@@ -896,16 +1283,94 @@ async function main() {
           token: cfg.token,
           port: cfg.port,
           allowAdult: cfg.allowAdult,
-          version: VERSION
+          version: VERSION,
+          capabilities: ["download-jobs-v1"]
         })
       );
     }
     function tokenOk(tok) {
       try {
-        return tok.length === cfg.token.length && import_crypto.default.timingSafeEqual(Buffer.from(tok), Buffer.from(cfg.token));
+        return tok.length === cfg.token.length && import_crypto2.default.timingSafeEqual(Buffer.from(tok), Buffer.from(cfg.token));
       } catch {
         return false;
       }
+    }
+    if (url.pathname === "/jobs" || url.pathname.startsWith("/jobs/")) {
+      const fileRequest = /^\/jobs\/([a-f0-9-]{36})\/file$/.exec(url.pathname);
+      const tok = (req.headers.authorization || "").replace(/^Bearer\s+/i, "") || (fileRequest ? url.searchParams.get("t") || "" : "");
+      if (!tokenOk(tok) || origin && !isExtensionOrigin(origin)) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Conex\xE3o expirada. Reconecte a extens\xE3o." }));
+      }
+      if (req.method === "POST" && url.pathname === "/jobs") {
+        let b;
+        try {
+          b = JSON.parse(await readBody(req));
+        } catch {
+          res.writeHead(400);
+          return res.end(JSON.stringify({ error: "Pedido inv\xE1lido." }));
+        }
+        if (!b || typeof b.url !== "string" || typeof b.requestId !== "string" || !b.requestId || b.requestId.length > 160) {
+          res.writeHead(400, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "Link ou identificador de download inv\xE1lido." }));
+        }
+        if (b.adult && !cfg.allowAdult) {
+          res.writeHead(403, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "O modo +18 est\xE1 desativado neste Motor." }));
+        }
+        try {
+          const job2 = await jobs.create({ url: b.url, mode: b.mode || "video", quality: b.quality || "1080", adult: b.adult === true }, b.requestId);
+          res.writeHead(202, { "content-type": "application/json" });
+          return res.end(JSON.stringify(jobs.public(job2)));
+        } catch (e) {
+          res.writeHead(409, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: e instanceof Error ? e.message : "N\xE3o foi poss\xEDvel adicionar \xE0 fila." }));
+        }
+      }
+      const match = /^\/jobs\/([a-f0-9-]{36})(?:\/file)?$/.exec(url.pathname);
+      const job = match ? jobs.get(match[1]) : void 0;
+      if (!job) {
+        res.writeHead(404, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Este download expirou. Inicie novamente." }));
+      }
+      if (!fileRequest && req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify(jobs.public(job)));
+      }
+      if (fileRequest && (req.method === "GET" || req.method === "HEAD")) {
+        if (job.state !== "ready" || !job.size || !job.mime) {
+          res.writeHead(409, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: job.error || "O arquivo ainda est\xE1 sendo preparado." }));
+        }
+        let start = 0;
+        let end = job.size - 1;
+        if (req.headers.range) {
+          const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+          if (range && (range[1] || range[2])) {
+            start = range[1] ? Number(range[1]) : Math.max(0, job.size - Number(range[2]));
+            end = range[1] && range[2] ? Math.min(Number(range[2]), end) : end;
+          } else start = job.size;
+          if (start > end || start >= job.size) {
+            res.writeHead(416, { "content-range": `bytes */${job.size}` });
+            return res.end();
+          }
+          res.setHeader("content-range", `bytes ${start}-${end}/${job.size}`);
+        }
+        res.writeHead(req.headers.range ? 206 : 200, {
+          "content-type": job.mime,
+          "content-length": String(end - start + 1),
+          "content-disposition": `attachment; filename="${(job.filename || "download").replace(/[^\x20-\x7E]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(job.filename || "download")}`,
+          "accept-ranges": "bytes"
+        });
+        if (req.method === "HEAD") return res.end();
+        const stream = (0, import_fs2.createReadStream)(jobs.filePath(job.id), { start, end });
+        res.on("close", () => stream.destroy());
+        stream.on("error", () => res.destroy());
+        stream.pipe(res);
+        return;
+      }
+      res.writeHead(405);
+      return res.end();
     }
     async function serve(params) {
       if (params.adult && !cfg.allowAdult) {
@@ -967,7 +1432,7 @@ async function main() {
       };
       if (totalBytes > 0) fhdrs["content-length"] = String(totalBytes);
       res.writeHead(200, fhdrs);
-      const stream = (0, import_fs.createReadStream)(result.filePath);
+      const stream = (0, import_fs2.createReadStream)(result.filePath);
       stream.on("error", () => {
         try {
           res.destroy();
@@ -1019,7 +1484,7 @@ async function main() {
     }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
-  });
+  }
   function announce() {
     persistConfig(cfg).catch(() => {
     });
@@ -1027,7 +1492,6 @@ async function main() {
       JSON.stringify({
         event: "listening",
         port: cfg.port,
-        token: cfg.token,
         allowAdult: cfg.allowAdult,
         configDir: configDir()
       })
@@ -1035,11 +1499,6 @@ async function main() {
     console.log(
       `
 [DarkoLab Downloader] motor rodando em http://127.0.0.1:${cfg.port}`
-    );
-    console.log(
-      `[DarkoLab Downloader] CODIGO DE PAREAMENTO (cole na extensao):
-  ${cfg.token}
-`
     );
   }
   async function tryListen(port, attempt) {

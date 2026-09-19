@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory } from '@/lib/history';
@@ -8,7 +8,8 @@ import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { createClient } from '@/lib/supabase/client';
 import { useUserEmail } from '@/lib/use-tier';
 import { macMotorLiberado } from '@/lib/mac-motor-beta';
-import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
+import { DOWNLOADER_EXTENSION_VERSION, DOWNLOADER_ENGINE_VERSION, INITIAL_DOWNLOADER_CONNECTION, connectionFromPong, expireDownloaderConnection, getDownloaderStatus, versionAtLeast, type DownloaderConnection } from '@/lib/downloader-connection';
+import { ToolStep, ToolChoice } from '@/components/tool-kit';
 import { IconDownloader, IconStepPlug, IconStepLink, IconStepFormat, IconStepDownload } from '@/components/ToolIcons';
 
 type Mode = 'video' | 'audio-mp3' | 'audio-wav';
@@ -23,6 +24,8 @@ type Job = {
   error: string | null;
   /** Bytes recebidos / total (null = ainda não chegou content-length) */
   progress: { received: number; total: number | null } | null;
+  phase?: string;
+  percent?: number | null;
 };
 
 const HUE = 'rgba(96,165,250,0.4)';
@@ -48,75 +51,14 @@ function isInstagramUrl(u: string): boolean {
   }
 }
 
-// A extensão só sabe baixar IG por link colado (via bridge → sessão logada)
-// a partir da v1.6.0. Versões anteriores têm só o botão na página do IG.
-function versionAtLeast(v: string | undefined, min: number[]): boolean {
-  if (!v) return false;
-  const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < min.length; i++) {
-    const cur = parts[i] || 0;
-    if (cur < min[i]) return false;
-    if (cur > min[i]) return true;
-  }
-  return true;
-}
-
-// Baixa um link de Instagram pela EXTENSÃO (sessão logada do usuário). O
-// motor/servidor não consegue IG (o IG exige login), então quando a
-// extensão está presente pedimos pra ela resolver com os cookies do
-// próprio usuário e baixar via chrome.downloads. Resolve quando a extensão
-// confirma (DL_IG_RESULT); rejeita em erro ou timeout.
-function downloadIgViaExtension(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const reqId = `ig-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    let done = false;
-    const onMsg = (e: MessageEvent) => {
-      const d = e.data;
-      if (
-        !d ||
-        d.source !== 'darko-dl-ext' ||
-        d.type !== 'DL_IG_RESULT' ||
-        d.reqId !== reqId
-      )
-        return;
-      if (done) return;
-      done = true;
-      window.removeEventListener('message', onMsg);
-      clearTimeout(timer);
-      if (d.ok) resolve();
-      else
-        reject(
-          new FriendlyError(
-            d.error
-              ? 'Instagram: ' + String(d.error)
-              : 'Não consegui baixar do Instagram. Confira se você está logado no Instagram neste navegador.',
-          ),
-        );
-    };
-    window.addEventListener('message', onMsg);
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      window.removeEventListener('message', onMsg);
-      reject(
-        new FriendlyError(
-          'A extensão não respondeu a tempo. Verifique se ela está conectada e tente de novo.',
-        ),
-      );
-    }, 600000);
-    window.postMessage(
-      { source: 'darko-dl', type: 'DL_IG_DOWNLOAD', url, reqId },
-      '*',
-    );
-  });
-}
-
 // Erros do caminho extensão→Motor chegam como códigos do Chrome
 // ("SERVER_FAILED") ou frases curtas do service worker. Traduz pro cliente
 // SEMPRE em linguagem normal, com o que fazer em seguida.
 function friendlyEngineFail(raw: string): string {
   const m = raw.toLowerCase();
   if (!m.trim()) return 'O download falhou agora. Tenta de novo em instantes.';
+  if (/(user_canceled|cancelado pelo usu)/.test(m))
+    return 'Download cancelado no navegador. Clique em Baixar para tentar novamente.';
   if (/(unauthorized|forbidden|token)/.test(m))
     return 'O Motor está reiniciando. Espera uns segundos e tenta de novo.';
   if (/(nao esta rodando|não está rodando|abra o)/.test(m))
@@ -131,47 +73,54 @@ function friendlyEngineFail(raw: string): string {
 // funciona pra YouTube/Pinterest/TikTok: o servidor não baixa esses sites —
 // quem baixa é o Motor no computador do usuário. O arquivo cai direto na
 // barra de downloads do navegador.
-// legacy=true → extensão 1.6.x: usa o canal DL_IG_DOWNLOAD (o service
-// worker já manda qualquer link pro Motor, mas fixa vídeo/1080).
 function downloadViaEngine(
   url: string,
   mode: Mode,
   quality: Quality,
-  legacy: boolean,
+  onProgress: (phase: string, percent: number | null) => void,
+  instagram = false,
 ): Promise<void> {
-  const type = legacy ? 'DL_IG_DOWNLOAD' : 'DL_ENGINE_DOWNLOAD';
-  const resultType = legacy ? 'DL_IG_RESULT' : 'DL_ENGINE_RESULT';
   return new Promise((resolve, reject) => {
     const reqId = `eng-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let done = false;
+    let idleTimer: ReturnType<typeof setTimeout>;
+    const stopWaiting = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMsg);
+      clearTimeout(idleTimer);
+      clearTimeout(overallTimer);
+      reject(new FriendlyError('A página perdeu o acompanhamento deste pedido. Abra a extensão Auto Edit Downloader para conferir a fila antes de tentar novamente; o download pode continuar por lá.'));
+    };
+    const keepWaiting = () => { clearTimeout(idleTimer); idleTimer = setTimeout(stopWaiting, 120000); };
+    const overallTimer = setTimeout(stopWaiting, 60 * 60 * 1000);
     const onMsg = (e: MessageEvent) => {
       const d = e.data;
       if (
+        e.source !== window || e.origin !== window.location.origin ||
         !d ||
         d.source !== 'darko-dl-ext' ||
-        d.type !== resultType ||
         d.reqId !== reqId
       )
         return;
       if (done) return;
+      if (d.type === 'DL_ENGINE_PROGRESS') {
+        const pct = typeof d.pct === 'number' && Number.isFinite(d.pct) && d.pct >= 0 ? Math.min(100, d.pct) : null;
+        keepWaiting();
+        onProgress(typeof d.phase === 'string' ? d.phase : 'downloading', pct);
+        return;
+      }
+      if (d.type !== (instagram ? 'DL_IG_RESULT' : 'DL_ENGINE_RESULT')) return;
       done = true;
       window.removeEventListener('message', onMsg);
-      clearTimeout(timer);
+      clearTimeout(idleTimer);
+      clearTimeout(overallTimer);
       if (d.ok) resolve();
       else reject(new FriendlyError(friendlyEngineFail(String(d.error || ''))));
     };
     window.addEventListener('message', onMsg);
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      window.removeEventListener('message', onMsg);
-      reject(
-        new FriendlyError(
-          'O Motor demorou demais pra responder. Confere se ele está aberto (bolinha verde no passo 1) e tenta de novo.',
-        ),
-      );
-    }, 600000);
-    window.postMessage({ source: 'darko-dl', type, url, mode, quality, reqId }, '*');
+    keepWaiting();
+    window.postMessage({ source: 'darko-dl', type: instagram ? 'DL_IG_DOWNLOAD' : 'DL_ENGINE_DOWNLOAD', url, mode, quality, reqId }, window.location.origin);
   });
 }
 
@@ -184,10 +133,10 @@ function detectSource(url: string): string {
   return '—';
 }
 
-function triggerDownload(blob: Blob, filename: string) {
+async function triggerDownload(blob: Blob, filename: string) {
   // downloadBlob = revoke de 60s (10s cortava vídeo grande de YouTube no meio)
   // + captura pro cofre do Histórico geral (recuperável por 7 dias).
-  void import('@/lib/audio-engine').then(({ downloadBlob }) =>
+  await import('@/lib/audio-engine').then(({ downloadBlob }) =>
     downloadBlob(blob, filename, { tool: 'downloader' }),
   );
 }
@@ -309,139 +258,72 @@ export default function DownloaderPage() {
     'downloader:quality',
     '1080',
   );
-  // Cache localStorage: se foi conectado nos últimos 10min, começa
-  // otimisticamente como connected — evita "desconectado" flash no reload.
-  // User pediu: "conectou uma vez, fica conectado a menos que exclua a extensão".
-  const EXT_CACHE_KEY = 'darkolab:downloader:ext-cache';
-  const CACHE_TTL_MS = 10 * 60 * 1000; // 10min
-  function loadCachedExt(): { connected: boolean; version?: string; engine?: boolean } {
-    try {
-      const raw = localStorage.getItem(EXT_CACHE_KEY);
-      if (!raw) return { connected: false };
-      const c = JSON.parse(raw) as { connected: boolean; version?: string; engine?: boolean; ts: number };
-      if (Date.now() - c.ts > CACHE_TTL_MS) return { connected: false };
-      return { connected: c.connected, version: c.version, engine: c.engine };
-    } catch { return { connected: false }; }
-  }
-  function saveCachedExt(v: { connected: boolean; version?: string; engine?: boolean }) {
-    try {
-      localStorage.setItem(EXT_CACHE_KEY, JSON.stringify({ ...v, ts: Date.now() }));
-    } catch {}
-  }
-
-  // Versão MÍNIMA recomendada da extensão+motor. A v1.7.0 baixa QUALQUER
-  // link colado (YouTube/TikTok/Pinterest em qualquer formato) pelo Motor
-  // local; a v1.6.0 só repassava vídeo/1080 e Instagram.
-  const MIN_EXT_VERSION = [1, 7, 0];
-  function isOutdatedVersion(v?: string): boolean {
-    if (!v) return false; // sem info de versão → não alarma
-    const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
-    for (let i = 0; i < MIN_EXT_VERSION.length; i++) {
-      const cur = parts[i] || 0;
-      if (cur < MIN_EXT_VERSION[i]) return true;
-      if (cur > MIN_EXT_VERSION[i]) return false;
-    }
-    return false; // igual = atualizado
-  }
-
-  const [ext, setExt] = useState<{
-    connected: boolean;
-    version?: string;
-    engine?: boolean;
-  }>(() => loadCachedExt()); // 🔥 começa otimisticamente do cache
-
+  const [ext, setExt] = useState<DownloaderConnection>(INITIAL_DOWNLOADER_CONNECTION);
+  const [latestVersion, setLatestVersion] = useState(DOWNLOADER_EXTENSION_VERSION);
   const [reChecking, setReChecking] = useState(false);
-  const doPing = () =>
-    window.postMessage({ source: 'darko-dl', type: 'DL_PING' }, '*');
+  const [showSetup, setShowSetup] = useState(false);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectionStatus = getDownloaderStatus(ext, latestVersion);
+  const extensionCurrent = ext.connected && versionAtLeast(ext.version, latestVersion);
+  const extensionDownloadUrl = `/api/downloader-extension/download?v=${latestVersion}`;
 
   useEffect(() => {
     let alive = true;
-    // Contador de pings SEM RESPOSTA consecutivos.
-    // Só marcamos desconectado após N fails SEGUIDOS — anti-flicker.
-    // (User: "uma vez conectado, fica conectado.")
-    let missedPings = 0;
-    const MAX_MISSED = 5; // 5 pings × 2s = 10s sem resposta → desconectado
-    let lastPongAt = 0;
-    let pendingPing = false;
-
-    function onMsg(e: MessageEvent) {
-      const d = e.data;
-      if (!d || d.source !== 'darko-dl-ext' || d.type !== 'DL_PONG') return;
-      if (!alive) return;
-      lastPongAt = Date.now();
-      missedPings = 0;
-      pendingPing = false;
-      const next = { connected: true, version: d.version, engine: d.engine === true };
-      setExt(next);
-      saveCachedExt(next);
-      setReChecking(false);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const ping = () => window.postMessage({ source: 'darko-dl', type: 'DL_PING' }, window.location.origin);
+    const later = (fn: () => void, delay: number) => timers.push(setTimeout(() => alive && fn(), delay));
+    function onMsg(event: MessageEvent) {
+      const data = event.data;
+      if (event.source !== window || event.origin !== window.location.origin || !data || data.source !== 'darko-dl-ext' || data.type !== 'DL_PONG') return;
+      setExt((previous) => connectionFromPong(data, Date.now(), previous));
+      if (data.checking !== true) setReChecking(false);
+    }
+    async function refreshRelease() {
+      try {
+        const response = await fetch('/api/downloader-extension/version', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+        if (!response.ok) return;
+        const release = await response.json();
+        if (alive && typeof release.version === 'string' && versionAtLeast(release.version, DOWNLOADER_EXTENSION_VERSION)) setLatestVersion(release.version);
+      } catch { /* The bundled release remains the minimum when offline. */ }
     }
     window.addEventListener('message', onMsg);
-
-    // Burst inicial — pings agressivos pra pegar a extension em qualquer
-    // estado de inicialização (cobre race condition de quem chegou primeiro).
-    const initialPings = [0, 50, 200, 500, 1000, 2000, 4000];
-    const timers: ReturnType<typeof setTimeout>[] = initialPings.map((delay) =>
-      setTimeout(() => alive && doPing(), delay),
-    );
-
-    // Polling 2s — mais responsivo que 5s antigo
+    [0, 250, 1000, 2500, 5000].forEach((delay) => later(ping, delay));
+    later(() => setExt((previous) => previous.connected ? previous : { ...previous, checked: true }), 7000);
+    void refreshRelease();
     const interval = setInterval(() => {
-      if (!alive) return;
       if (document.visibilityState !== 'visible') return;
-      pendingPing = true;
-      doPing();
-      // Após 1.5s sem pong, conta como missed
-      setTimeout(() => {
-        if (!alive || !pendingPing) return;
-        pendingPing = false;
-        missedPings++;
-        if (missedPings >= MAX_MISSED) {
-          // Só zera connected se passou MAX_MISSED inteiros sem pong.
-          // Anti-flicker: extensão pode dar pequenos glitches sem desconectar.
-          setExt((prev) => {
-            if (!prev.connected) return prev;
-            const next = { ...prev, connected: false };
-            saveCachedExt(next);
-            return next;
-          });
-        }
-      }, 1500);
-    }, 2000);
-
-    // Re-ping AGRESSIVO ao voltar pra tab (visibility change)
-    function onVis() {
-      if (document.visibilityState === 'visible') {
-        doPing();
-        setTimeout(doPing, 200);
-        setTimeout(doPing, 600);
-      }
+      ping();
+      setExt((previous) => expireDownloaderConnection(previous, Date.now()));
+    }, 5000);
+    const releaseInterval = setInterval(refreshRelease, 5 * 60 * 1000);
+    function resume() {
+      if (document.visibilityState !== 'visible') return;
+      ping();
+      later(ping, 500);
+      void refreshRelease();
     }
-    document.addEventListener('visibilitychange', onVis);
-
-    // Re-ping ao reconectar à rede
-    function onOnline() {
-      missedPings = 0;
-      doPing();
-      setTimeout(doPing, 500);
-    }
-    window.addEventListener('online', onOnline);
-
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('online', resume);
     return () => {
       alive = false;
       window.removeEventListener('message', onMsg);
-      document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('online', resume);
       timers.forEach(clearTimeout);
       clearInterval(interval);
+      clearInterval(releaseInterval);
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     };
   }, []);
 
-  // Re-check manual — burst agressivo
   function handleRecheck() {
     setReChecking(true);
-    [0, 200, 500, 1000, 2000].forEach((d) => setTimeout(doPing, d));
-    setTimeout(() => setReChecking(false), 3000);
+    window.postMessage({ source: 'darko-dl', type: 'DL_PING', force: true }, window.location.origin);
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    reconnectTimer.current = setTimeout(() => {
+      setReChecking(false);
+      setExt((previous) => expireDownloaderConnection(previous, Date.now()));
+    }, 7000);
   }
 
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -504,7 +386,7 @@ export default function DownloaderPage() {
     // andamento. Sem extensão, segue pro /api/downloader (que orienta o
     // usuário a instalar a extensão).
     if (mode === 'video' && !(isAdmin && adult) && isInstagramUrl(url)) {
-      const canIgPaste = ext.connected && versionAtLeast(ext.version, [1, 6, 0]);
+      const canIgPaste = extensionCurrent;
       if (!canIgPaste) {
         setJobs((prev) =>
           prev.map((j, i) =>
@@ -530,7 +412,11 @@ export default function DownloaderPage() {
               : j,
           ),
         );
-        await downloadIgViaExtension(url);
+        await downloadViaEngine(url, mode, quality, (phase, pct) => {
+          setJobs((previous) => previous.map((job, i) => i === idx ? {
+            ...job, state: phase === 'queued' ? 'queued' : phase === 'resolving' ? 'resolving' : 'downloading', phase, percent: pct,
+          } : job));
+        }, true);
         const filename = 'instagram.mp4';
         setJobs((prev) =>
           prev.map((j, i) =>
@@ -558,38 +444,26 @@ export default function DownloaderPage() {
 
     const source = detectSource(url);
     const knownSource = source !== '—';
-    const engineOk = ext.connected && ext.engine === true;
+    const engineOk = connectionStatus === 'ready';
 
     // MOTOR CONECTADO: baixa pelo Motor no computador do usuário (via
     // extensão). É o caminho que sempre funciona pra YouTube, TikTok e
     // Pinterest — o servidor não baixa esses sites; o Motor baixa.
     if (engineOk && knownSource && !(isAdmin && adult)) {
-      const modern = versionAtLeast(ext.version, [1, 7, 0]);
-      const legacyDefault = mode === 'video' && quality === '1080';
-      if (!modern && !legacyDefault) {
-        // Extensão antiga só repassa vídeo/1080 pro Motor.
-        setJobs((prev) =>
-          prev.map((j, i) =>
-            i === idx
-              ? {
-                  ...j,
-                  state: 'error',
-                  error:
-                    'Pra baixar áudio ou outra qualidade, atualiza a extensão (aviso amarelo no passo 1 — leva 1 minuto) e clica em Baixar de novo.',
-                  progress: null,
-                }
-              : j,
-          ),
-        );
-        return;
-      }
       try {
         setJobs((prev) =>
           prev.map((j, i) =>
             i === idx ? { ...j, state: 'downloading', progress: null } : j,
           ),
         );
-        await downloadViaEngine(url, mode, quality, !modern);
+        await downloadViaEngine(url, mode, quality, (phase, pct) => {
+          setJobs((previous) => previous.map((job, i) => i === idx ? {
+            ...job,
+            state: phase === 'queued' ? 'queued' : phase === 'resolving' ? 'resolving' : 'downloading',
+            phase,
+            percent: pct,
+          } : job));
+        });
         setJobs((prev) =>
           prev.map((j, i) =>
             i === idx
@@ -640,9 +514,7 @@ export default function DownloaderPage() {
               ? {
                   ...j,
                   state: 'error',
-                  error: `Pra baixar ${
-                    mode === 'video' ? 'do ' + source : 'áudio'
-                  }, instala e conecta o Motor + Extensão (passo 1 acima — leva 1 minuto) e clica em Baixar de novo.`,
+                  error: connectionStatus === 'outdated' ? 'Atualize a extensão no passo 1 para continuar.' : connectionStatus === 'engine-outdated' ? 'Atualize o Motor no passo 1 para continuar.' : connectionStatus === 'engine-offline' ? 'Abra o Auto Edit Downloader no seu computador e clique em Verificar conexão no passo 1.' : 'Instale e conecte a extensão e o Motor no passo 1 para baixar este link.',
                   progress: null,
                 }
               : j,
@@ -657,6 +529,7 @@ export default function DownloaderPage() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ url, mode, quality, adult: isAdmin && adult }),
+        signal: AbortSignal.timeout(180000),
       });
 
       if (!res.ok) {
@@ -671,6 +544,9 @@ export default function DownloaderPage() {
       }
 
       const cd = res.headers.get('content-disposition') || '';
+      if (/application\/json|text\/html/i.test(res.headers.get('content-type') || '')) {
+        throw new FriendlyError('O serviço retornou uma resposta inválida em vez do arquivo. Tente novamente.');
+      }
       const m = cd.match(/filename="?([^"]+)"?/i);
       const filename = m ? m[1] : `download-${Date.now()}`;
       const total = Number(res.headers.get('content-length')) || null;
@@ -693,7 +569,7 @@ export default function DownloaderPage() {
       if (!res.body) {
         // Fallback (browsers muito antigos): cai pra blob direto
         const blob = await res.blob();
-        triggerDownload(blob, filename);
+        await triggerDownload(blob, filename);
       } else {
         const reader = res.body.getReader();
         const chunks: Uint8Array[] = [];
@@ -725,7 +601,7 @@ export default function DownloaderPage() {
         }
         const ct = res.headers.get('content-type') || 'application/octet-stream';
         const blob = new Blob(chunks as BlobPart[], { type: ct });
-        triggerDownload(blob, filename);
+        await triggerDownload(blob, filename);
       }
 
       setJobs((prev) =>
@@ -768,7 +644,7 @@ export default function DownloaderPage() {
     setStartedAt(Date.now());
     // Concorrência maior = inicia mais downloads em paralelo,
     // reduz percepção de "esperar a vez"
-    const CONCURRENCY = 6;
+    const CONCURRENCY = 3;
     let next = 0;
     async function worker() {
       while (next < urls.length) {
@@ -777,10 +653,11 @@ export default function DownloaderPage() {
         await processOne(urls[i], i);
       }
     }
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker),
-    );
-    setRunning(false);
+    try {
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
+    } finally {
+      setRunning(false);
+    }
   }
 
   return (
@@ -792,475 +669,73 @@ export default function DownloaderPage() {
       icon={<IconDownloader size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Configure a extensão e o motor para os serviços compatíveis." hue={HUE}>
-          {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — a v1.7.0 repassa
-              qualquer link/formato pro Motor local (YouTube/TikTok/Pinterest
-              e áudios). Admin (você) atualiza manualmente, então não vê isso. */}
-          {!isAdmin && ext.connected && isOutdatedVersion(ext.version) && (
-            <div
-              className="mb-3 rounded-[14px] border border-amber-400/50 bg-amber-400/[0.08] p-4"
-              style={{ boxShadow: '0 0 20px -8px rgba(251,191,36,0.5)' }}
-            >
-              <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-400/50 bg-amber-400/15 text-lg">
-                  ⚠
+        <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Sua conexão" hint="Extensão no navegador. Motor no computador. Tudo no mesmo lugar." hue={HUE}>
+          <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#151419]" data-downloader-status={connectionStatus}>
+            <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
+              <div className="flex min-w-0 items-center gap-3.5" role="status" aria-live="polite">
+                <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${connectionStatus === 'ready' ? 'border-lime/25 bg-lime/[0.08] text-lime' : connectionStatus === 'outdated' || connectionStatus === 'engine-outdated' ? 'border-amber-300/25 bg-amber-300/[0.06] text-amber-200' : 'border-white/10 bg-white/[0.035] text-violet'}`}>
+                  <IconStepPlug size={22} />
                 </span>
-                <div className="min-w-0 flex-1">
-                  <div
-                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-amber-300"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Atualização importante disponível
-                  </div>
-                  <div
-                    className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Baixe tudo colando o link — atualize a extensão
-                  </div>
-                  <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
-                    A nova versão (<b className="text-white">v1.7.0</b>) baixa{' '}
-                    <b className="text-white">YouTube, TikTok, Pinterest e áudios</b>{' '}
-                    colando o link aqui — tudo direto pelo Motor no seu computador
-                    (e mantém o Instagram pela sua conta logada). Sua versão atual
-                    (<b className="text-white">v{ext.version}</b>) não faz isso ainda.
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-semibold tracking-tight text-white">
+                    {connectionStatus === 'checking' ? 'Verificando seu navegador…' : connectionStatus === 'missing' ? 'Conecte sua extensão' : connectionStatus === 'outdated' ? 'Uma atualização está disponível' : connectionStatus === 'engine-outdated' ? 'Atualize o Motor para continuar' : connectionStatus === 'engine-offline' ? 'Extensão conectada. Abra o Motor.' : connectionStatus === 'engine-checking' ? 'Localizando o Motor…' : 'Tudo pronto para baixar'}
+                  </h3>
+                  <p className="mt-1 max-w-[58ch] text-xs leading-relaxed text-text-muted">
+                    {connectionStatus === 'checking' ? 'Aguardando a resposta da extensão instalada.' : connectionStatus === 'missing' ? 'Instale a extensão ou reative a que você já usa e recarregue esta página.' : connectionStatus === 'outdated' ? `Sua extensão ${ext.version ? `v${ext.version}` : 'é de uma versão antiga'}. A versão v${latestVersion} está disponível.` : connectionStatus === 'engine-outdated' ? `Motor ${ext.engineVersion ? `v${ext.engineVersion}` : 'antigo'} detectado. Instale a versão v${DOWNLOADER_ENGINE_VERSION} para receber as correções.` : connectionStatus === 'engine-offline' ? 'A extensão respondeu, mas o Motor local está indisponível. Verifique a conexão depois de abri-lo.' : connectionStatus === 'engine-checking' ? 'A extensão respondeu. Estamos verificando o Motor local.' : 'Conexão confirmada agora com o seu computador.'}
                   </p>
-                  <ol className="mono mt-2.5 list-decimal space-y-1 pl-5 text-[11.5px] leading-relaxed text-text-muted">
-                    <li>Baixe a nova extensão no botão abaixo e descompacte.</li>
-                    <li>Em <code className="text-white">chrome://extensions</code>, remova a extensão antiga e carregue a nova pasta.</li>
-                    <li>Pronto — cole qualquer link e baixe.</li>
-                  </ol>
-                  <div className="mt-3">
-                    <a
-                      href="/api/downloader-extension/download"
-                      download
-                      className="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-400/15 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-amber-200 transition hover:bg-amber-400/25"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      ↓ Baixar extensão v1.7.0
-                    </a>
-                  </div>
                 </div>
               </div>
-            </div>
-          )}
-          {ext.connected && ext.engine ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
-                </span>
-                <span className="text-lime">
-                  Auto Edit · Downloader v{ext.version}
-                </span>
-                <span className="label-tech ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  ✓ motor online
-                </span>
-              </div>
-            </div>
-          ) : ext.connected && !ext.engine ? (
-            // EXTENSÃO OK, MOTOR OFFLINE — caso típico de "Motor desconectado".
-            // Mostra painel orientativo, botão pra rechecar e link
-            // pra reinstalar o .exe caso esteja faltando.
-            <div className="rounded-[14px] border border-red-500/40 bg-red-500/[0.06] p-4">
-              <div className="flex items-start gap-3">
-                <span
-                  className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-500/50 bg-red-500/15"
-                  style={{ boxShadow: '0 0 18px -6px rgba(244,63,94,0.6)' }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 8v4M12 16h.01" />
-                  </svg>
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div
-                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-red-300"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Motor desconectado
-                  </div>
-                  <div
-                    className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Extensão instalada · motor local offline
-                  </div>
-                  <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
-                    A extensão do navegador encontrou a página, mas o motor
-                    no seu computador não está rodando.{' '}
-                    {isMac && !macMotorOk ? (
-                      <>
-                        No Mac o Motor ainda está em{' '}
-                        <b className="text-white">teste fechado</b>, então é
-                        esperado ele aparecer desconectado aqui — e não te
-                        atrapalha: <b className="text-white">Instagram</b> e{' '}
-                        <b className="text-white">TikTok</b> baixam sem ele.
-                      </>
-                    ) : isMac ? (
-                      <>
-                        Roda de novo o comando de instalação (passo 01) no
-                        Terminal — ele reinstala por cima sem bagunçar nada — e
-                        depois clica em{' '}
-                        <b className="text-white">Verificar de novo</b>.
-                      </>
-                    ) : (
-                      <>
-                        Abre o atalho{' '}
-                        <b className="text-white">Auto Edit Downloader</b> no
-                        menu Iniciar (ou rebaixa o instalador) e depois clica
-                        em <b className="text-white">Verificar de novo</b>.
-                      </>
-                    )}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2.5">
-                    <button
-                      type="button"
-                      onClick={handleRecheck}
-                      disabled={reChecking}
-                      className="inline-flex items-center gap-2 rounded-full border border-lime/55 bg-lime/10 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-lime transition hover:bg-lime/20 disabled:opacity-60"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      {reChecking ? (
-                        <>
-                          <span className="inline-block h-3 w-3 animate-spin rounded-full border border-lime/40 border-t-lime" />
-                          Verificando…
-                        </>
-                      ) : (
-                        <>↻ Verificar de novo</>
-                      )}
-                    </button>
-                    {!isMac && (
-                      <a
-                        href="/api/downloader-engine/download"
-                        download
-                        className="inline-flex items-center gap-2 rounded-full border border-blue-400/45 bg-blue-400/[0.08] px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-blue-300 transition hover:bg-blue-400/20"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        ↓ Rebaixar Motor (.exe)
-                      </a>
-                    )}
-                    <span
-                      className="mono ml-1 text-[10px] text-text-muted"
-                      title="Verifica a cada 2 segundos enquanto a aba estiver aberta"
-                    >
-                      Auto-check: 2s
-                    </span>
-                  </div>
-                  {/* No Mac o card de instalação não está na tela neste estado,
-                      então o comando precisa estar AQUI — senão o cliente lê
-                      "roda o comando de novo" e não tem o comando em lugar
-                      nenhum. */}
-                  {isMac && macMotorOk && <MacInstallCommand />}
-                  <details className="mt-3 group">
-                    <summary
-                      className="cursor-pointer text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted hover:text-text"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      O motor não abre?
-                    </summary>
-                    <ol className="mono mt-2 list-decimal space-y-1.5 pl-5 text-[11px] leading-relaxed text-text-muted">
-                      {isMac && !macMotorOk ? (
-                        <>
-                          <li>
-                            No Mac o Motor ainda está em teste fechado — não tem o que abrir aqui ainda.
-                          </li>
-                          <li>
-                            <b className="text-white">Instagram</b> e <b className="text-white">TikTok</b> continuam baixando normalmente, é só colar o link abaixo.
-                          </li>
-                          <li>
-                            Quer entrar no teste do Motor no Mac? Chama no WhatsApp.
-                          </li>
-                        </>
-                      ) : isMac ? (
-                        <>
-                          <li>
-                            Cola o comando acima no <b className="text-white">Terminal</b>. Ele reinstala por cima e no fim diz se ficou de pé.
-                          </li>
-                          <li>
-                            Pra forçar o motor a subir agora:{' '}
-                            <code className="text-white">launchctl kickstart -k gui/$(id -u)/com.autoedit.downloader</code>
-                          </li>
-                          <li>
-                            O log fica em{' '}
-                            <code className="text-white">~/Library/Application Support/AutoEditDownloader/engine.log</code>.
-                          </li>
-                          <li>
-                            Sem solução? Manda print do log no WhatsApp.
-                          </li>
-                        </>
-                      ) : (
-                        <>
-                          <li>
-                            Vai em <code className="text-white">Iniciar → Auto Edit Downloader</code> e abre.
-                          </li>
-                          <li>
-                            Se não tiver o atalho, rebaixa o <code className="text-white">.exe</code> acima e roda como administrador.
-                          </li>
-                          <li>
-                            Antivírus pode ter colocado em quarentena —
-                            cheque <code className="text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>.
-                          </li>
-                          <li>
-                            Sem solução? Manda print do log no WhatsApp.
-                          </li>
-                        </>
-                      )}
-                    </ol>
-                  </details>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <div className={isMac ? 'grid gap-2.5' : 'grid gap-2.5 sm:grid-cols-2'}>
-                {isMac && macMotorOk ? (
-                  /* MAC — o Motor não é .exe aqui. Instala por UMA linha no
-                     Terminal, e isso é técnico, não preguiça de fazer .pkg: o
-                     que o curl baixa de dentro do script não recebe
-                     `com.apple.quarantine`, então não existe tela de
-                     "desenvolvedor não verificado" pra travar o cliente. */
-                  <div
-                    className="rounded-[14px] border border-blue-400/40 bg-blue-400/[0.06] px-4 py-3.5"
-                    style={{ boxShadow: '0 0 20px -8px rgba(96,165,250,0.4)' }}
-                  >
-                    <div
-                      className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-blue-300"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Passo 01 · Mac
-                    </div>
-                    <div
-                      className="text-[14px] font-bold tracking-tight text-white"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Instalar o Motor
-                    </div>
-                    <p className="mono mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
-                      Abre o <b className="text-white">Terminal</b> (aperta{' '}
-                      <b className="text-white">Command + Espaço</b>, escreve{' '}
-                      <i>Terminal</i>, Enter), cola a linha abaixo e aperta Enter.
-                      Leva ~2 minutos e no fim ele mesmo testa se ficou funcionando.
-                    </p>
-                    <MacInstallCommand />
-                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
-                      Serve pros dois chips —{' '}
-                      <b className="text-white">Apple Silicon</b> (M1/M2/M3/M4) e{' '}
-                      <b className="text-white">Intel</b>. O Mac pode pedir sua
-                      senha; é do próprio macOS, não vai pra lugar nenhum. Depois
-                      disso o Motor sobe sozinho toda vez que você liga o Mac.
-                    </p>
-                  </div>
-                ) : isMac ? (
-                  /* MAC FORA DO TESTE — o pior desfecho aqui seria mandar
-                     este cliente baixar o .exe: ele leva um arquivo que o Mac
-                     não executa e conclui que a ferramenta é quebrada. Então
-                     dizemos a verdade e mostramos o que JÁ funciona pra ele. */
-                  <div className="rounded-[14px] border border-line-strong bg-bg-soft/60 px-4 py-3.5">
-                    <div
-                      className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Você está no Mac
-                    </div>
-                    <div
-                      className="text-[14px] font-bold tracking-tight text-white"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Instagram e TikTok já funcionam
-                    </div>
-                    <p className="mono mt-1.5 text-[10.5px] leading-relaxed text-text-muted">
-                      Instala só a <b className="text-white">Extensão</b> (passo 02
-                      aqui do lado) e o Downloader já baixa do{' '}
-                      <b className="text-white">Instagram</b> e do{' '}
-                      <b className="text-white">TikTok</b> normalmente.
-                    </p>
-                    <p className="mono mt-2 text-[10.5px] leading-relaxed text-text-muted">
-                      <b className="text-white">YouTube e Pinterest</b> precisam do
-                      Motor, um programinha que roda no seu computador. A versão pro
-                      Mac está pronta e <b className="text-white">em teste fechado</b>{' '}
-                      agora — te avisamos assim que abrir. No Windows ele já funciona.
-                    </p>
-                  </div>
-                ) : (
-                  <a
-                    href="/api/downloader-engine/download"
-                    className="group relative flex items-center justify-between gap-3 overflow-hidden rounded-[14px] border border-blue-400/40 bg-blue-400/[0.06] px-4 py-3.5 transition-all hover:-translate-y-[1px] hover:border-blue-400/65"
-                    download
-                    style={{ boxShadow: '0 0 20px -8px rgba(96,165,250,0.4)' }}
-                  >
-                    <div>
-                      <div
-                        className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-blue-300"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        Passo 01
-                      </div>
-                      <div
-                        className="text-[14px] font-bold tracking-tight text-white"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        Instalar o Motor
-                      </div>
-                      <div className="mono text-[10.5px] text-text-muted">
-                        .exe — 1 clique, instala sozinho
-                      </div>
-                    </div>
-                    <span className="text-2xl text-blue-300 transition-transform group-hover:translate-x-1">
-                      →
-                    </span>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {(connectionStatus === 'missing' || connectionStatus === 'outdated') && (
+                  <a href={extensionDownloadUrl} download onClick={() => setShowSetup(true)} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#b39af3] px-4 text-sm font-semibold text-[#20172e] transition duration-200 hover:bg-[#c5b0fb] active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet">
+                    <IconStepDownload size={17} /> {connectionStatus === 'outdated' ? 'Atualizar extensão' : 'Baixar extensão'}
                   </a>
                 )}
-                <a
-                  href="/api/downloader-extension/download"
-                  className="group relative flex items-center justify-between gap-3 overflow-hidden rounded-[14px] border border-line-strong bg-bg-soft/60 px-4 py-3.5 transition-all hover:-translate-y-[1px] hover:border-blue-400/45"
-                  download
-                >
-                  <div>
-                    <div
-                      className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Passo 02
-                    </div>
-                    <div
-                      className="text-[14px] font-bold tracking-tight text-white"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Baixar Extensão
-                    </div>
-                    <div className="mono text-[10.5px] text-text-muted">
-                      Chrome / chrome://extensions
-                    </div>
-                  </div>
-                  <span className="text-2xl text-text-muted transition-transform group-hover:translate-x-1">
-                    →
-                  </span>
-                </a>
-              </div>
-              <details className="mt-3 group">
-                <summary
-                  className="cursor-pointer text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300/80 hover:text-blue-300"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  Instruções detalhadas
-                </summary>
-                <ol className="mono mt-3 list-decimal space-y-2 pl-5 text-[11px] leading-relaxed text-text-muted">
-                  {isMac ? (
-                    /* Fora do teste fechado não existe passo de Motor no Mac —
-                       a lista começa direto na extensão, que é o que ele
-                       realmente vai instalar. */
-                    macMotorOk && (
-                      <>
-                        <li>
-                          Cola o comando do passo 01 no <b className="text-white">Terminal</b> e aperta Enter. Ele baixa o motor, o yt-dlp e o ffmpeg — uns <b className="text-white">100 MB</b>, ~2 minutos numa internet comum.
-                        </li>
-                        <li>
-                          No fim ele roda um <b className="text-white">auto-teste</b> e imprime <b className="text-lime">&quot;Motor instalado e funcionando&quot;</b>. Se algo falhar, ele diz <i>qual peça</i> falhou — não some calado.
-                        </li>
-                      </>
-                    )
-                  ) : (
-                    <>
-                      <li>
-                        Duplo-clique no <code className="mono text-white">AutoEditDownloaderSetup.exe</code>. Abre a janela Auto Edit (preta com accent lime, igual ao site) mostrando o progresso. <span className="text-lime">Sem CMD piscando.</span>
-                      </li>
-                      <li>
-                        Se o SmartScreen avisar: <i>&quot;Mais informações&quot;</i> → <i>&quot;Executar assim mesmo&quot;</i>.
-                      </li>
-                      <li>
-                        Quando o título virar <b className="text-lime">&quot;Instalado e vinculado&quot;</b>, clica <i>Fechar</i>.
-                      </li>
-                    </>
-                  )}
-                  <li>
-                    Extrai o ZIP da extensão, abre <code className="mono text-white">chrome://extensions</code>, ativa <i>Modo desenvolvedor</i>, clica <i>Carregar sem compactação</i>.
-                  </li>
-                  <li>
-                    Abre um vídeo em qualquer site e clica no botão <b className="text-white">⬇ Baixar</b> que aparece na página.
-                  </li>
-                </ol>
-                {isMac ? (
-                  macMotorOk && (
-                  <>
-                    <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
-                      <span className="text-lime">Por que um comando e não um instalador de clicar:</span>{' '}
-                      no Mac, a trava do <b className="text-white">Gatekeeper</b> (&quot;desenvolvedor não verificado&quot;) é acionada por uma marca que o <b className="text-white">navegador</b> põe no arquivo baixado. O que o comando baixa não recebe essa marca — então não tem tela de bloqueio nenhuma pra você furar. É o mesmo caminho que Homebrew e outros instaladores de Mac usam.
-                    </p>
-                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
-                      Quer conferir antes de rodar? O script é texto aberto —{' '}
-                      <a
-                        href="/api/downloader-engine/mac"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-300 underline decoration-dotted underline-offset-2 hover:text-blue-200"
-                      >
-                        abre ele aqui
-                      </a>{' '}
-                      e lê antes.
-                    </p>
-                    <div className="mt-3 rounded-[10px] border border-yellow-500/30 bg-yellow-500/5 px-3 py-2.5">
-                      <div
-                        className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.18em] text-yellow-300"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        Precisa desinstalar?
-                      </div>
-                      <p className="mono text-[10.5px] leading-relaxed text-yellow-200/90">
-                        Mesmo comando com <code>--uninstall</code> no fim. Tira o motor e os arquivos; a extensão do Chrome continua.
-                      </p>
-                    </div>
-                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
-                      Falhou? O log fica em{' '}
-                      <code className="mono text-white">
-                        ~/Library/Application Support/AutoEditDownloader/engine.log
-                      </code>
-                      . Manda no WhatsApp.
-                    </p>
-                  </>
-                  )
-                ) : (
-                  <>
-                    <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
-                      <span className="text-lime">Anti-antivírus:</span> EXE <b className="text-white">assinado digitalmente</b> (Publisher: Auto Edit, timestamp DigiCert), metadata completa (versão 3.0, descrição, copyright), manifest XML <code>asInvoker</code> (sem UAC), PowerShell visível, sem VBS, sem mods em Startup. Auto-start usa Task Scheduler nativo.
-                    </p>
-
-                    {/* Fallback: ZIP sem .exe — pra casos extremos onde mesmo o
-                        .exe assinado é bloqueado por AV corporativo paranóico. */}
-                    <div className="mt-3 rounded-[10px] border border-yellow-500/30 bg-yellow-500/5 px-3 py-2.5">
-                      <div
-                        className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.18em] text-yellow-300"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        Antivírus ainda bloqueia?
-                      </div>
-                      <p className="mono text-[10.5px] leading-relaxed text-yellow-200/90">
-                        Baixa a versão <b>sem .exe</b> (só scripts <code>.cmd</code> + <code>.ps1</code> abertos — você consegue abrir no Notepad). Avast/Defender quase nunca bloqueiam:
-                      </p>
-                      <a
-                        href="/api/downloader-engine/download?format=zip"
-                        download
-                        className="mono mt-2 inline-flex items-center gap-2 rounded-full border border-yellow-500/60 bg-yellow-500/15 px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-yellow-100 transition hover:bg-yellow-500/25"
-                      >
-                        ↓ Baixar versão ZIP (alternativa)
-                      </a>
-                    </div>
-
-                    <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
-                      Falhou? Log em <code className="mono text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>. Manda no WhatsApp.
-                    </p>
-                  </>
+                {(connectionStatus === 'engine-outdated' || connectionStatus === 'engine-offline') && !isMac && (
+                  <a href={`/api/downloader-engine/download?v=${DOWNLOADER_ENGINE_VERSION}`} download className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#b39af3] px-4 text-sm font-semibold text-[#20172e] transition duration-200 hover:bg-[#c5b0fb] active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet">
+                    <IconStepDownload size={17} /> {connectionStatus === 'engine-outdated' ? 'Atualizar Motor' : 'Instalar Motor'}
+                  </a>
                 )}
-              </details>
+                <button type="button" disabled={reChecking} onClick={handleRecheck} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.025] px-3.5 text-xs font-medium text-text-muted transition duration-200 hover:border-white/20 hover:text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet">
+                  <svg className={reChecking ? 'animate-spin' : ''} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6 7a7 7 0 0 1 12-1l2 6M4 12l2 6a7 7 0 0 0 12-1" /></svg>
+                  {reChecking ? 'Verificando…' : 'Verificar conexão'}
+                </button>
+              </div>
             </div>
-          )}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-white/[0.06] bg-white/[0.015] px-5 py-3 text-[11px] text-text-muted">
+              <span className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${extensionCurrent ? 'bg-lime' : 'bg-white/25'}`} />Extensão {ext.connected ? ext.version ? `v${ext.version}` : 'antiga' : 'não detectada'}</span>
+              <span className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${connectionStatus === 'ready' ? 'bg-lime' : 'bg-white/25'}`} />Motor {ext.engine ? ext.engineVersion ? `v${ext.engineVersion}` : 'detectado' : 'aguardando conexão'}</span>
+              <span className="ml-auto tabular-nums">Versão disponível · {latestVersion}</span>
+            </div>
+          </section>
+          <details className="group mt-4" open={showSetup || connectionStatus === 'missing' || connectionStatus === 'outdated'} onToggle={(event) => setShowSetup(event.currentTarget.open)}>
+            <summary className="cursor-pointer text-xs font-medium text-text-muted transition hover:text-white">{connectionStatus === 'outdated' ? 'Como atualizar sua extensão' : 'Instalação e ajuda'}</summary>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
+                <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-violet">No navegador</p>
+                <h4 className="mt-1 text-sm font-semibold text-white">{connectionStatus === 'outdated' ? 'Atualize sem perder sua configuração' : 'Instale a extensão'}</h4>
+                <ol className="mt-3 list-decimal space-y-2 pl-4 text-xs leading-relaxed text-text-muted">
+                  <li>Baixe e extraia o ZIP da extensão v{latestVersion}.</li>
+                  {connectionStatus === 'outdated' ? <><li>Substitua os arquivos na pasta em que você instalou a extensão.</li><li>Abra <code className="text-white">chrome://extensions</code> (Chrome) ou <code className="text-white">edge://extensions</code> (Edge) e clique no botão de recarregar do Auto Edit Downloader.</li></> : <li>Abra <code className="text-white">chrome://extensions</code> (Chrome) ou <code className="text-white">edge://extensions</code> (Edge). Ative o modo desenvolvedor, clique em <b className="font-medium text-white">Carregar sem compactação</b> e selecione a pasta extraída.</li>}
+                  <li>Recarregue esta página e as abas dos vídeos para ativar a nova extensão.</li>
+                </ol>
+                <a href={extensionDownloadUrl} download className="mt-4 inline-flex min-h-10 items-center gap-2 text-xs font-medium text-violet underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet"><IconStepDownload size={15} /> Baixar ZIP · v{latestVersion}</a>
+              </div>
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
+                <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-violet">No computador</p>
+                <h4 className="mt-1 text-sm font-semibold text-white">{isMac ? 'Motor para Mac' : 'Motor para Windows'}</h4>
+                {isMac && macMotorOk ? <><p className="mt-3 text-xs leading-relaxed text-text-muted">Abra o Terminal, cole o comando e aguarde a confirmação. Ele também atualiza uma instalação existente.</p><MacInstallCommand /></> : isMac ? <p className="mt-3 text-xs leading-relaxed text-text-muted">O Motor para Mac está em teste fechado. Instagram pela extensão e TikTok em vídeo podem usar os caminhos disponíveis sem o Motor. YouTube e Pinterest precisam dele.</p> : <><p className="mt-3 text-xs leading-relaxed text-text-muted">Execute o instalador e aguarde a confirmação. Para atualizar, instale por cima da versão existente. Se já estiver instalado, abra <b className="font-medium text-white">Auto Edit Downloader</b> no menu Iniciar.</p><a href={`/api/downloader-engine/download?v=${DOWNLOADER_ENGINE_VERSION}`} download className="mt-4 inline-flex min-h-10 items-center gap-2 text-xs font-medium text-violet underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet"><IconStepDownload size={15} /> Baixar Motor · v{DOWNLOADER_ENGINE_VERSION}</a><p className="mt-2 text-[11px] leading-relaxed text-text-muted">Se o instalador não abrir, use a <a href="/api/downloader-engine/download?format=zip" download className="text-violet underline underline-offset-2">versão ZIP</a>.</p></>}
+              </div>
+            </div>
+          </details>
+          {isMac && macMotorOk && (connectionStatus === 'engine-outdated' || connectionStatus === 'engine-offline') && !showSetup && <MacInstallCommand />}
         </ToolStep>
 
         <ToolStep n={2} icon={<IconStepLink size={18} />} title="Links" hint="Adicione um link por linha. Os downloads entram na mesma fila." hue={HUE}>
           <div className="relative">
             <textarea
               id="urls"
+              aria-label="Links para baixar, um por linha"
               rows={5}
               placeholder={
                 'https://youtube.com/watch?v=...\nhttps://tiktok.com/@user/video/...\nhttps://pinterest.com/pin/...\nhttps://instagram.com/reel/...'
@@ -1352,17 +827,20 @@ export default function DownloaderPage() {
           })()}
           hue={HUE}
         >
-          <ToolAction
+          <button
+            type="button"
             onClick={handleStart}
-            loading={false}
+            aria-busy={running}
             disabled={urls.length === 0 || running}
+            className="group inline-flex min-h-14 w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-[#b39af3] px-6 text-[15px] font-semibold tracking-tight text-[#20172e] shadow-[0_8px_24px_-12px_rgba(179,154,243,0.4)] transition duration-200 hover:bg-[#c5b0fb] active:translate-y-px disabled:cursor-not-allowed disabled:border-white/[0.07] disabled:bg-white/[0.07] disabled:text-text-muted disabled:shadow-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-violet"
           >
+            <span className={running ? 'animate-pulse' : 'transition-transform duration-200 group-hover:translate-y-0.5'}><IconStepDownload size={20} /></span>
             {(() => {
               // Estado padrão: botão de start
               if (!running) {
                 return urls.length > 1
                   ? `Baixar ${urls.length} arquivos`
-                  : 'Baixar';
+                  : 'Baixar arquivo';
               }
               // Em execução: calcula agregado de bytes ou estado
               const active = jobs.filter(
@@ -1400,6 +878,11 @@ export default function DownloaderPage() {
                 return `${pct}% baixado  ·  ${doneCount}/${total}`;
               }
 
+              if (active.some((job) => job.state === 'downloading')) {
+                const progress = active.find((job) => job.percent != null)?.percent;
+                return progress != null ? `Baixando · ${Math.round(progress)}% · ${doneCount}/${total}` : `Baixando · ${doneCount}/${total}`;
+              }
+
               // Sem bytes ainda — mostra "Localizando…" com cronômetro
               if (active.length > 0 && startedAt) {
                 const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
@@ -1407,7 +890,7 @@ export default function DownloaderPage() {
               }
               return `Iniciando…  ${doneCount}/${total}`;
             })()}
-          </ToolAction>
+          </button>
 
           {jobs.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
@@ -1415,19 +898,19 @@ export default function DownloaderPage() {
                 const pct =
                   j.progress && j.progress.total
                     ? Math.min(100, Math.round((j.progress.received / j.progress.total) * 100))
-                    : null;
+                    : j.percent ?? null;
                 const isActive = j.state === 'resolving' || j.state === 'downloading';
                 return (
                   <div
                     key={j.id}
-                    className="card-3d card-pad flex flex-col gap-2 !py-3"
+                    className="flex flex-col gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] p-4"
                   >
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="mono truncate text-xs text-white">
                           {j.filename || j.url}
                         </div>
-                        <div className="mono mt-0.5 text-[10px] uppercase tracking-widest text-text-muted">
+                        <div className="mt-1 text-[11px] text-text-muted">
                           {detectSource(j.url)}
                           {j.progress && j.state === 'downloading' ? (
                             <>
@@ -1440,8 +923,8 @@ export default function DownloaderPage() {
                               </span>
                             </>
                           ) : null}
-                          {j.error ? ` · ${j.error}` : ''}
                         </div>
+                        {j.error && <p role="alert" className="mt-2 whitespace-normal break-words text-xs leading-relaxed text-red-300">{j.error}</p>}
                       </div>
                       <span
                         className={`mono shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${
@@ -1459,8 +942,8 @@ export default function DownloaderPage() {
                         {j.state === 'queued' && 'fila'}
                         {j.state === 'resolving' && 'localizando'}
                         {j.state === 'downloading' &&
-                          (pct !== null ? `${pct}%` : 'baixando…')}
-                        {j.state === 'done' && 'ok'}
+                          (j.phase === 'saving' ? 'salvando…' : pct !== null ? `${Math.round(pct)}%` : 'baixando…')}
+                        {j.state === 'done' && 'salvo'}
                         {j.state === 'error' && 'erro'}
                       </span>
                     </div>
@@ -1499,7 +982,7 @@ export default function DownloaderPage() {
           <span className="text-lime">sem marca d&apos;água em HD</span> ·{' '}
           <span className="text-white">Pinterest</span> mídia direta ·{' '}
           <span className="text-white">YouTube/Instagram</span>.
-          Downloads paralelos (até 6 por vez) e acelerados (multi-conexão). Links
+          Downloads em fila, com até 3 pedidos simultâneos. Links
           privados exigem login. Use apenas para conteúdo que você tem
           direito de baixar.
         </p>

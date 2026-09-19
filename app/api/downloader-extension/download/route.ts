@@ -13,9 +13,11 @@ import { buildZip } from '@/lib/zip-builder';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
 
 const FILES = [
   'manifest.json',
+  'download-utils.js',
   'bg.js',
   'bridge.js',
   'content.js',
@@ -48,14 +50,16 @@ export async function GET() {
       })),
     );
     const zip = await buildZip([...fileEntries, ...iconEntries]);
+    const manifest = JSON.parse(new TextDecoder().decode(fileEntries.find((entry) => entry.name === 'manifest.json')!.data));
     const arrayBuffer = await zip.arrayBuffer();
     return new NextResponse(arrayBuffer, {
       status: 200,
       headers: {
         'content-type': 'application/zip',
         'content-disposition':
-          'attachment; filename="auto-edit-downloader-extension.zip"',
-        'cache-control': 'public, max-age=3600',
+          `attachment; filename="auto-edit-downloader-extension-${manifest.version}.zip"`,
+        'cache-control': 'no-store, max-age=0',
+        'x-autoedit-extension-version': manifest.version,
       },
     });
   } catch (e) {

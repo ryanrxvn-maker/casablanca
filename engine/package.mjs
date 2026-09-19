@@ -25,9 +25,16 @@ import path from 'path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkg = path.join(here, 'pkg');
+if (path.dirname(path.resolve(pkg)) !== path.resolve(here)) {
+  throw new Error('A pasta do pacote precisa ficar dentro de engine/.');
+}
 const log = (s) => console.log('[package] ' + s);
 
 const NODE_VER = 'v22.11.0'; // LTS pinada (baixada no install)
+const engineVersion = readFileSync(path.join(here, 'server.ts'), 'utf8').match(/const VERSION = '([^']+)'/)?.[1];
+if (!engineVersion || !/^\d+\.\d+\.\d+$/.test(engineVersion)) {
+  throw new Error('Versao do motor ausente ou invalida. Pacote nao liberado.');
+}
 
 async function main() {
   log('bundle do motor...');
@@ -46,6 +53,7 @@ async function main() {
   rmSync(pkg, { recursive: true, force: true });
   mkdirSync(pkg, { recursive: true });
   cpSync(path.join(here, 'dist', 'server.cjs'), path.join(pkg, 'server.cjs'));
+  writeFileSync(path.join(pkg, 'engine-version.txt'), engineVersion + '\r\n');
 
   // ── Runner.exe: launcher SILENCIOSO (winexe, sem console) ──
   // Substitui o `cmd.exe /c AutoEditDownloader.cmd` que mostrava a
@@ -85,7 +93,7 @@ async function main() {
 
   writeFileSync(
     path.join(pkg, 'Instalar.ps1'),
-    INSTALAR_PS1.replace(/__NODE_VER__/g, NODE_VER).trim() + '\r\n',
+    INSTALAR_PS1.replace(/__NODE_VER__/g, NODE_VER).replace(/__ENGINE_VERSION__/g, engineVersion).trim() + '\r\n',
   );
   // Entrada interna (quando user roda manualmente o ZIP — fallback).
   // Janela VISÍVEL pra reduzir trigger AV.
@@ -225,7 +233,7 @@ async function main() {
       { stdio: 'inherit' },
     );
   } catch (e) {
-    log('AVISO: assinatura falhou (continua sem assinar): ' + e.message);
+    throw new Error('A assinatura do instalador falhou; pacote nao liberado: ' + e.message);
   }
 
   log('pronto:');
@@ -261,7 +269,26 @@ function Log {
 }
 function WriteStatus { param([string]$head, [string]$msg)
   if ($StatusFile) {
-    try { Set-Content -LiteralPath $StatusFile -Value ("$head|$msg") -Encoding UTF8 } catch {}
+    # A interface pode ler a qualquer instante. Nunca deixe o arquivo vazio
+    # entre truncar e escrever, especialmente antes do processo encerrar.
+    $statusTemp = $StatusFile + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+      [IO.File]::WriteAllText($statusTemp, ("$head|$msg"), (New-Object Text.UTF8Encoding($false)))
+      for ($statusAttempt = 0; $statusAttempt -lt 10; $statusAttempt++) {
+        try {
+          if ([IO.File]::Exists($StatusFile)) {
+            [IO.File]::Replace($statusTemp, $StatusFile, [NullString]::Value)
+          } else {
+            [IO.File]::Move($statusTemp, $StatusFile)
+          }
+          return
+        } catch {
+          if ($statusAttempt -eq 9) { throw }
+          Start-Sleep -Milliseconds 25
+        }
+      }
+    } catch { Log ('Falha comunicando status ao instalador: ' + $_.Exception.Message) }
+    finally { if ([IO.File]::Exists($statusTemp)) { [IO.File]::Delete($statusTemp) } }
   }
 }
 function Step { param([int]$pct, [string]$msg)
@@ -272,6 +299,15 @@ function Fail { param([string]$msg, [int]$code = 1)
   Log ("ERRO: {0}" -f $msg)
   WriteStatus 'ERR' $msg
   exit $code
+}
+function Test-YtDlp {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return $false }
+  try {
+    $probe = Start-Process -FilePath $Path -ArgumentList '--version' -WindowStyle Hidden -PassThru -ErrorAction Stop
+    if (-not $probe.WaitForExit(20000)) { $probe.Kill(); return $false }
+    return $probe.ExitCode -eq 0
+  } catch { return $false }
 }
 trap { Fail $_.Exception.Message 99 }
 
@@ -284,8 +320,15 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 
 Step 2 'Parando instancia anterior do motor (se houver)...'
 try {
+  # Pare o supervisor antes do node, para ele nao reiniciar durante a troca.
+  $runnerPath = Join-Path $dst 'AutoEditRunner.exe'
+  $legacyDst = Join-Path $env:LOCALAPPDATA 'DarkoDownloaderApp'
+  $serverPattern = [regex]::Escape((Join-Path $dst 'server.cjs')) + '|' + [regex]::Escape((Join-Path $legacyDst 'server.cjs'))
+  Get-CimInstance Win32_Process -Filter "Name='AutoEditRunner.exe'" \`
+    | Where-Object { $_.ExecutablePath -eq $runnerPath -or $_.ExecutablePath -eq (Join-Path $legacyDst 'AutoEditRunner.exe') } \`
+    | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" \`
-    | Where-Object { $_.CommandLine -match 'server\\.cjs' } \`
+    | Where-Object { $_.CommandLine -match $serverPattern } \`
     | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 } catch { Log ('aviso: ' + $_.Exception.Message) }
 
@@ -295,7 +338,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
 # AutoEditRunner.exe = launcher SILENCIOSO (sem janela preta no startup)
 foreach ($f in @('server.cjs', 'AutoEditRunner.exe', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'DESINSTALAR.cmd', 'LEIA-ME.txt')) {
   $sp = Join-Path $src $f
-  if (Test-Path $sp) { Copy-Item $sp $dst -Force }
+  if (-not (Test-Path -LiteralPath $sp)) { Fail ('Arquivo obrigatorio ausente no pacote: ' + $f) 15 }
+  Copy-Item -LiteralPath $sp -Destination $dst -Force -ErrorAction Stop
 }
 # Starter = Runner.exe (hidden). Fallback pro .cmd se o runner faltar.
 $runnerExe = Join-Path $dst 'AutoEditRunner.exe'
@@ -350,11 +394,26 @@ if (-not (Test-Path (Join-Path $dst 'ms-playwright\\chromium-1223'))) {
 } else { Step 48 'Navegador ja presente, pulando.' }
 
 $yt = Join-Path $dst 'bin\\yt-dlp.exe'
-if (-not (Test-Path $yt) -or (Get-Item $yt).Length -lt 5MB) {
-  Step 78 'Baixando motor de download (yt-dlp)...'
-  try { Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile $yt }
-  catch { Fail ('Falha baixando yt-dlp: ' + $_.Exception.Message) 50 }
-} else { Step 78 'yt-dlp ja presente, pulando.' }
+$ytNew = Join-Path $dst 'bin\\yt-dlp.install.exe'
+$ytBackup = Join-Path $dst 'bin\\yt-dlp.previous.exe'
+Step 78 'Atualizando o componente de download...'
+try {
+  Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile $ytNew -TimeoutSec 180 -ErrorAction Stop
+  if ((Get-Item -LiteralPath $ytNew).Length -lt 5MB -or -not (Test-YtDlp $ytNew)) {
+    throw 'O componente baixado nao passou na verificacao.'
+  }
+  if (Test-Path -LiteralPath $yt) {
+    [IO.File]::Replace($ytNew, $yt, $ytBackup, $true)
+  } else {
+    [IO.File]::Move($ytNew, $yt)
+  }
+  Log 'Componente de download atualizado e validado.'
+} catch {
+  $updateError = $_.Exception.Message
+  Remove-Item -LiteralPath $ytNew -Force -ErrorAction SilentlyContinue
+  if (-not (Test-YtDlp $yt)) { Fail ('Falha preparando yt-dlp: ' + $updateError) 50 }
+  Log ('A atualizacao nao respondeu; a versao funcional foi preservada. O motor tentara novamente. ' + $updateError)
+}
 
 $ff = Join-Path $dst 'bin\\ffmpeg.exe'
 if (-not (Test-Path $ff) -or (Get-Item $ff).Length -lt 10MB) {
@@ -379,12 +438,33 @@ try {
   # Se temos o Runner.exe (winexe SEM console), a task roda ELE DIRETO —
   # sem cmd.exe /c (que abria a janela preta). Runner.exe não mostra nada.
   # Fallback (.cmd legado): roda via cmd minimizado.
-  if ($usingRunner) {
-    $action = ('"{0}"' -f $starter)
-  } else {
-    $action = ('cmd.exe /c "{0}"' -f $starter)
-  }
-  $null = schtasks /Create /TN $taskName /TR $action /SC ONLOGON /RL LIMITED /F 2>&1
+  $taskCommand = if ($usingRunner) { $starter } else { Join-Path $env:SystemRoot 'System32\\cmd.exe' }
+  $taskArguments = if ($usingRunner) { '' } else { '/c "' + $starter + '"' }
+  $taskCommandXml = [Security.SecurityElement]::Escape($taskCommand)
+  $taskArgumentsXml = [Security.SecurityElement]::Escape($taskArguments)
+  $taskWorkingDirXml = [Security.SecurityElement]::Escape($dst)
+  $taskSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $taskXmlFile = Join-Path $dst 'startup-task.xml'
+  # Defaults do schtasks encerram tarefas apos 72h ou ao entrar na bateria.
+  # O motor e um servico de usuario continuo, sem limite de execucao.
+  $taskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$taskSid</UserId></LogonTrigger></Triggers>
+  <Principals><Principal id="User"><UserId>$taskSid</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>
+  </Settings>
+  <Actions Context="User"><Exec><Command>$taskCommandXml</Command><Arguments>$taskArgumentsXml</Arguments><WorkingDirectory>$taskWorkingDirXml</WorkingDirectory></Exec></Actions>
+</Task>
+"@
+  Set-Content -LiteralPath $taskXmlFile -Value $taskXml -Encoding Unicode
+  $null = schtasks /Create /TN $taskName /XML $taskXmlFile /F 2>&1
   if ($LASTEXITCODE -ne 0) {
     Log 'aviso: schtasks falhou, fallback para Startup folder (sem .vbs)'
     $startup = [Environment]::GetFolderPath('Startup')
@@ -395,25 +475,49 @@ try {
     $lnk.WindowStyle = 7
     $lnk.Save()
   }
+  # Remove atalhos do motor legado, que poderiam iniciar uma versao antiga
+  # antes do supervisor. Apenas atalhos dentro das duas pastas do produto.
+  $startup = [Environment]::GetFolderPath('Startup')
+  $wsh = New-Object -ComObject WScript.Shell
+  $oldLinkPath = Join-Path $startup 'DarkoLab Downloader.lnk'
+  if (Test-Path -LiteralPath $oldLinkPath) {
+    $oldLink = $wsh.CreateShortcut($oldLinkPath)
+    $ownedTarget = $oldLink.TargetPath + ' ' + $oldLink.Arguments
+    if ($ownedTarget -match ([regex]::Escape($dst) + '|' + [regex]::Escape((Join-Path $env:LOCALAPPDATA 'DarkoDownloaderApp')))) {
+      Remove-Item -LiteralPath $oldLinkPath -Force -ErrorAction SilentlyContinue
+    }
+  }
 } catch { Log ('aviso configurando autostart: ' + $_.Exception.Message) }
 
+# O caminho orientado pela interface precisa existir no menu Iniciar.
+try {
+  $programs = [Environment]::GetFolderPath('Programs')
+  $wsh = New-Object -ComObject WScript.Shell
+  $lnk = $wsh.CreateShortcut((Join-Path $programs 'Auto Edit Downloader.lnk'))
+  $lnk.TargetPath = $starter
+  $lnk.WorkingDirectory = $dst
+  $lnk.WindowStyle = 7
+  $lnk.Save()
+} catch { Log ('aviso criando atalho: ' + $_.Exception.Message) }
+
 Step 97 'Iniciando o motor...'
-Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
+# O supervisor preserva o diagnostico e so gira logs acima de 5 MB.
 # Runner.exe (winexe) inicia hidden; .cmd legado vai minimizado.
 if ($usingRunner) {
-  Start-Process -FilePath $starter -WorkingDirectory $dst
+  Start-Process -FilePath $starter -WorkingDirectory $dst -WindowStyle Hidden
 } else {
-  Start-Process -FilePath $starter -WindowStyle Minimized
+  Start-Process -FilePath $starter -WindowStyle Hidden
 }
 
 $alive = $false
-$ports = @(47923, 47924, 47925, 47926, 47927, 47928)
+$ports = @(47923, 47924, 47925, 47926, 47927, 47928, 47929, 47930, 47931)
 for ($i = 0; $i -lt 60; $i++) {
   Start-Sleep -Milliseconds 700
   foreach ($p in $ports) {
     try {
       $r = Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:$p/health") -TimeoutSec 1 -ErrorAction Stop
-      if ($r.Content -match 'darkolab-downloader-engine|auto-edit-downloader') { $alive = $true; break }
+      $health = $r.Content | ConvertFrom-Json
+      if ($health.app -eq 'darkolab-downloader-engine' -and $health.version -eq '__ENGINE_VERSION__' -and $health.capabilities -contains 'download-jobs-v1') { $alive = $true; break }
     } catch {}
   }
   if ($alive) { break }
@@ -434,21 +538,32 @@ const DESINSTALAR_PS1 = `
 $ErrorActionPreference = 'SilentlyContinue'
 Write-Host 'Auto Edit Downloader - Desinstalar'
 Write-Host '----------------------------------'
+$dst = Join-Path $env:LOCALAPPDATA 'AutoEditDownloader'
+$legacyDst = Join-Path $env:LOCALAPPDATA 'DarkoDownloaderApp'
+$localRoot = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\\') + '\\'
+foreach ($d in @($dst, $legacyDst)) {
+  if (-not ([IO.Path]::GetFullPath($d).StartsWith($localRoot, [StringComparison]::OrdinalIgnoreCase))) {
+    throw 'Destino de desinstalacao invalido.'
+  }
+}
 Write-Host 'Parando o motor...'
+Get-CimInstance Win32_Process -Filter "Name='AutoEditRunner.exe'" |
+  Where-Object { $_.ExecutablePath -eq (Join-Path $dst 'AutoEditRunner.exe') -or $_.ExecutablePath -eq (Join-Path $legacyDst 'AutoEditRunner.exe') } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+$serverPattern = [regex]::Escape((Join-Path $dst 'server.cjs')) + '|' + [regex]::Escape((Join-Path $legacyDst 'server.cjs'))
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-  Where-Object { $_.CommandLine -match 'server\\.cjs' } |
+  Where-Object { $_.CommandLine -match $serverPattern } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Write-Host 'Removendo auto-start...'
 schtasks /Delete /TN 'AutoEditDownloader' /F 2>$null | Out-Null
 $startup = [Environment]::GetFolderPath('Startup')
 Remove-Item (Join-Path $startup 'Auto Edit Downloader.lnk') -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $startup 'DarkoLab Downloader.lnk')  -Force -ErrorAction SilentlyContinue
-$dst = Join-Path $env:LOCALAPPDATA 'AutoEditDownloader'
-$legacyDst = Join-Path $env:LOCALAPPDATA 'DarkoDownloaderApp'
+Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Auto Edit Downloader.lnk') -Force -ErrorAction SilentlyContinue
 foreach ($d in @($dst, $legacyDst)) {
   if (Test-Path $d) {
     Write-Host ('Removendo ' + $d)
-    Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
 Write-Host ''

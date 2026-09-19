@@ -1,380 +1,149 @@
 'use strict';
-
-const $ = (id) => document.getElementById(id);
-const state = { token: '', port: 47923, mode: 'video', quality: '1080', adult: false };
-
-function engineBase() {
-  return `http://127.0.0.1:${state.port}`;
-}
-
-async function storageGet() {
-  return new Promise((r) =>
-    chrome.storage.local.get(['token', 'port'], (v) => r(v || {})),
-  );
-}
-async function storageSet(v) {
-  return new Promise((r) => chrome.storage.local.set(v, r));
-}
-
-// TODAS as portas em que o motor pode subir. server.cjs sobe em 47923 e,
-// se ocupada, cai pra proxima ate 8 tentativas (47923..47930). Varremos
-// 47923..47931 pra cobrir TODO o range com folga — se a lista ficar
-// curta, a extensao "nao acha" um motor vivo numa porta alta.
-const ENGINE_PORTS = [47923, 47924, 47925, 47926, 47927, 47928, 47929, 47930, 47931];
-
-// fetch com timeout DURO — NUNCA pendura. Uma porta zumbi (socket
-// meio-aberto, antivirus/firewall segurando, motor travado) nao pode mais
-// congelar a conexao: o AbortSignal aborta em `ms` e a promise rejeita.
-// Fallback pra AbortController onde AbortSignal.timeout nao existir —
-// blindagem: fetch de localhost NUNCA sem timeout, em qualquer engine.
-function tfetch(url, ms) {
-  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return fetch(url, { signal: AbortSignal.timeout(ms) });
-  }
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), ms);
-  return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
-}
-
-// Testa UMA porta: /health tem que responder com o app certo, dai /pair
-// devolve o token. Resolve com o engine ou LANCA (pra Promise.any pular
-// pra proxima). Timeout curto (1.4s) por chamada.
-async function probePort(p) {
-  const h = await tfetch(`http://127.0.0.1:${p}/health`, 1400);
-  if (!h.ok) throw 0;
-  const j = await h.json();
-  if (!j || j.app !== 'darkolab-downloader-engine') throw 0;
-  const pr = await tfetch(`http://127.0.0.1:${p}/pair`, 1400);
-  if (!pr.ok) throw 0;
-  const pj = await pr.json();
-  if (!pj || !pj.token) throw 0;
-  return { port: p, token: pj.token, allowAdult: pj.allowAdult === true };
-}
-
-// AUTO-PAIR DEFINITIVO: varre TODAS as portas EM PARALELO com timeout. A
-// primeira que tiver o motor vivo ganha; porta lenta/zumbi nao atrasa as
-// outras NEM trava a funcao. (O loop serial-sem-timeout antigo pendurava
-// pra sempre numa porta meio-morta -> popup eterno em "Conectando".)
-// Nunca usa token cacheado stale — sempre pega o /pair atual do motor.
-async function refreshPair() {
-  const tries = [state.port, ...ENGINE_PORTS].filter(
-    (v, i, a) => v && a.indexOf(v) === i,
-  );
-  try {
-    const eng = await Promise.any(tries.map(probePort));
-    state.token = eng.token;
-    state.port = eng.port;
-    await storageSet({ token: eng.token, port: eng.port });
-    return { allowAdult: eng.allowAdult };
-  } catch {
-    return null; // nenhuma porta respondeu a tempo
-  }
-}
-
-function show(boxId) {
-  for (const id of ['appBox', 'noEngine'])
-    $(id).classList.toggle('hidden', id !== boxId);
-}
-
-// Guarda anti-reentrancia: se ja estamos varrendo, nao dispara outra —
-// evita duas varreduras concorrentes pisando no state.
+const $ = id => document.getElementById(id);
+const { terminal, normalizeUrl, humanError, newerVersion } = DownloaderUtils;
+const state = { mode: 'video', quality: '1080', adult: false };
+const VERSION = chrome.runtime.getManifest().version;
 let refreshing = false;
-
-async function refresh() {
+let pendingAdd = false;
+let latestJobs = [];
+let minimumEngineVersion = null;
+$('version').textContent = `Extensão ${VERSION}`;
+function message(data, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('A extensão demorou para responder. Feche e reabra esta janela.')), timeoutMs);
+    try { chrome.runtime.sendMessage(data, response => {
+      clearTimeout(timeout);
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message)); else resolve(response);
+    }); } catch (error) { clearTimeout(timeout); reject(error); }
+  });
+}
+function inputError(value) { $('inputError').textContent = value || ''; $('inputError').classList.toggle('hidden', !value); }
+async function refresh(force = false) {
   if (refreshing) return;
   refreshing = true;
-  const lbl = $('engineLabel');
-  if (lbl) lbl.textContent = 'Conectando';
-  $('engineDot').className = 'dot off';
-  // WATCHDOG (cinto-e-suspensorio): cada fetch ja tem timeout de 1.4s e o
-  // Promise.any resolve em ~1.5s, entao refresh NUNCA deveria passar disso.
-  // Mesmo assim, se por qualquer bug futuro travar, em 8s forcamos estado
-  // terminal — a UI JAMAIS fica presa em "Conectando".
-  const watchdog = setTimeout(() => {
-    if (!refreshing) return;
-    const box = $('appBox');
-    const connected = box && !box.classList.contains('hidden');
-    if (!connected) {
-      $('engineDot').className = 'dot off';
-      if (lbl) lbl.textContent = 'Offline';
-      show('noEngine');
-    }
-    refreshing = false;
-  }, 8000);
+  $('hardRefresh').classList.add('spin');
   try {
-    const cfg = await storageGet();
-    state.token = cfg.token || '';
-    state.port = cfg.port || 47923;
-
-    const eng = await refreshPair();
-    $('engineDot').className = 'dot ' + (eng ? 'on' : 'off');
-    if (lbl) lbl.textContent = eng ? 'Online' : 'Offline';
-
-    if (!eng) {
-      show('noEngine');
-      return;
-    }
-    show('appBox');
-    // +18 liberado pra todos
-    $('adultBtn').classList.remove('hidden');
+    const response = await message({ type: force ? 'darko-force-rediscover' : 'darko-ping-engine' });
+    const compatible = !!response?.connected && !!response?.engineCompatible &&
+      !!response?.engineVersion && (!minimumEngineVersion || !newerVersion(minimumEngineVersion, response.engineVersion));
+    $('engineDot').className = 'dot' + (compatible ? ' on' : '');
+    $('engineLabel').textContent = compatible ? 'Conectado' : response?.connected ? 'Atualizar Motor' : 'Sem Motor';
+    $('noEngine').classList.toggle('hidden', compatible);
+    $('engineTitle').textContent = response?.connected ? 'Seu Motor precisa de uma atualização' : 'Abra o Motor para conectar';
+    $('engineHelp').textContent = response?.connected
+      ? 'A nova versão prepara e verifica os arquivos antes de salvar. Atualize uma vez para continuar.'
+      : 'Abra Auto Edit Downloader no menu Iniciar. A conexão será refeita automaticamente.';
+    $('engineSetup').textContent = response?.connected ? 'Atualizar Motor ↗' : 'Instalar ou abrir Motor ↗';
   } catch {
-    // Qualquer erro inesperado -> estado terminal claro, NUNCA limbo.
-    $('engineDot').className = 'dot off';
-    if (lbl) lbl.textContent = 'Offline';
-    show('noEngine');
-  } finally {
-    clearTimeout(watchdog);
-    refreshing = false;
+    $('engineLabel').textContent = 'Reconectar';
+    $('engineDot').className = 'dot';
+    $('noEngine').classList.remove('hidden');
+  } finally { refreshing = false; $('hardRefresh').classList.remove('spin'); }
+}
+$('hardRefresh').addEventListener('click', () => refresh(true));
+function updateOptions() {
+  for (const [id, key] of [['modes', 'mode'], ['quals', 'quality']]) {
+    for (const button of $(id).querySelectorAll('button')) {
+      const selected = button.dataset.v === state[key];
+      button.classList.toggle('on', selected); button.setAttribute('aria-pressed', String(selected));
+      if (id === 'quals') button.disabled = state.mode !== 'video';
+    }
   }
-}
-
-// HARD REFRESH: reconexao limpa e forcada. Apaga token/porta/cache stale,
-// pede pro service worker redescobrir do zero e revarre as portas. Para o
-// usuario nunca ter que "ficar esperando" quando algo trava — 1 clique
-// resolve. (Botao ↻ no header.)
-async function hardRefresh() {
-  const btn = $('hardRefresh');
-  if (btn) btn.classList.add('spin');
-  const lbl = $('engineLabel');
-  if (lbl) lbl.textContent = 'Reconectando';
-  try {
-    await new Promise((r) =>
-      chrome.storage.local.remove(
-        ['token', 'port', 'engineUp', 'enginePortCache', 'engineCheckedAt'],
-        () => r(),
-      ),
-    );
-    state.token = '';
-    state.port = 47923;
-    // limpa tambem o cache do background (fire-and-forget)
-    try {
-      chrome.runtime.sendMessage({ type: 'darko-force-rediscover' }, () => {
-        void chrome.runtime.lastError;
-      });
-    } catch {
-      /* SW pode estar acordando */
-    }
-  } catch {
-    /* segue pro refresh de qualquer jeito */
-  }
-  await refresh();
-  if (btn) btn.classList.remove('spin');
-}
-
-const retryLink = $('retry');
-if (retryLink)
-  retryLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    refresh();
-  });
-
-const hardBtn = $('hardRefresh');
-if (hardBtn) hardBtn.addEventListener('click', hardRefresh);
-
-// Ultimo recurso: recarrega a extensao inteira — mata service worker
-// zumbi/travado e reinicia tudo do zero. (Fecha o popup.)
-const reloadLink = $('reloadExt');
-if (reloadLink)
-  reloadLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    try {
-      chrome.runtime.reload();
-    } catch {
-      /* ignore */
-    }
-  });
-
-// ---- chips ----
-function wireChips(containerId, key) {
-  const c = $(containerId);
-  c.addEventListener('click', (e) => {
-    const b = e.target.closest('.chip');
-    if (!b) return;
-    [...c.children].forEach((x) => x.classList.toggle('on', x === b));
-    state[key] = b.dataset.v;
-    if (key === 'mode') {
-      const isVid = state.mode === 'video';
-      [...$('quals').children].forEach((x) => (x.disabled = !isVid));
-    }
-  });
-}
-wireChips('modes', 'mode');
-wireChips('quals', 'quality');
-
-// ---- +18 ----
-// Sem lista de sites na UI (pedido 17.07.26): o modo continua
-// funcionando igual, só não expõe os domínios suportados.
-$('adultBtn').addEventListener('click', () => {
-  state.adult = !state.adult;
+  $('audioHint').classList.toggle('hidden', state.mode === 'video');
   $('adultBtn').classList.toggle('on', state.adult);
-  const list = $('adultList');
-  list.classList.toggle('hidden', !state.adult);
-  if (state.adult) list.textContent = 'Modo +18 ativo';
-});
-
-// ---- download ----
-function parseFilename(cd, fallback) {
-  const m = /filename="?([^"]+)"?/i.exec(cd || '');
-  return (m && m[1]) || fallback;
+  $('adultBtn').setAttribute('aria-pressed', String(state.adult));
 }
-
-function addJob(url) {
-  const el = document.createElement('div');
-  el.className = 'job';
-  el.innerHTML = `<span class="u">${url}</span><span class="tag run">baixando</span>`;
-  $('jobs').appendChild(el);
-  return el;
-}
-
-async function postDownload(url) {
-  return fetch(`${engineBase()}/download`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${state.token}`,
-    },
-    body: JSON.stringify({
-      url,
-      mode: state.mode,
-      quality: state.quality,
-      adult: state.adult,
-    }),
+for (const [id, key] of [['modes', 'mode'], ['quals', 'quality']]) {
+  $(id).addEventListener('click', event => {
+    const button = event.target.closest('button'); if (!button || button.disabled) return;
+    state[key] = button.dataset.v; updateOptions(); chrome.storage.local.set({ downloaderPreferences: state });
   });
 }
-
-function isInstagramUrl(u) {
-  try {
-    return /(^|\.)instagram\.com$/.test(new URL(u).hostname);
-  } catch {
-    return false;
-  }
+$('adultBtn').addEventListener('click', () => { state.adult = !state.adult; updateOptions(); chrome.storage.local.set({ downloaderPreferences: state }); });
+function countLinks() {
+  const count = $('urls').value.trim().split(/\s+/).filter(Boolean).length;
+  $('linkCount').textContent = count ? `${count} ${count === 1 ? 'link' : 'links'}` : '01 — Links';
+  $('goLabel').textContent = count > 1 ? `Baixar ${count} arquivos` : 'Baixar arquivo';
 }
-function igShort(u) {
-  try {
-    const m = new URL(u).pathname.match(/\/(?:reel|reels|p|tv)\/([\w-]+)/);
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-// Resolve o mp4 do IG pela sessão logada do usuário (via service worker) e
-// baixa direto do CDN. O motor não consegue IG (exige login), então este é
-// o caminho pra link de Instagram colado no popup.
-async function downloadInstagram(url, el) {
-  const cdn = await new Promise((resolve) => {
-    try {
-      chrome.runtime.sendMessage({ type: 'darko-ig-resolve', url }, (r) => {
-        if (chrome.runtime.lastError) return resolve(null);
-        resolve(r && r.ok ? r.url : null);
+let draftTimer;
+$('urls').addEventListener('input', () => {
+  inputError(''); countLinks(); clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => chrome.storage.local.set({ downloaderDraft: $('urls').value }), 200);
+});
+const phases = { queued: 'Na fila', resolving: 'Localizando vídeo', preparing: 'Baixando da fonte', reconnecting: 'Reconectando', retrying: 'Tentando novamente', saving: 'Salvando arquivo', complete: 'Salvo', error: 'Não concluído' };
+function element(tag, className, text) { const node = document.createElement(tag); node.className = className; if (text) node.textContent = text; return node; }
+function renderJobs(list) {
+  latestJobs = list;
+  $('jobs').replaceChildren();
+  $('jobCount').textContent = String(list.length);
+  $('emptyState').classList.toggle('hidden', list.length > 0);
+  $('clearJobs').classList.toggle('hidden', !list.some(job => terminal(job.state)));
+  for (const job of list.slice().reverse()) {
+    const row = element('article', `job ${job.state}`);
+    const head = element('div', 'job-head');
+    let host = ''; try { host = new URL(job.url).hostname.replace(/^www\./, ''); } catch {}
+    head.append(element('span', 'job-title', job.filename || host || 'Vídeo'));
+    const label = job.state === 'canceled' ? 'Cancelado' : job.pct >= 0 && job.state === 'downloading' ? `${job.pct}% · salvando` : phases[job.phase] || 'Na fila';
+    head.append(element('span', 'job-state', label));
+    row.append(head, element('div', 'job-url', job.url));
+    if (!terminal(job.state)) {
+      const bar = element('div', `progress${job.pct >= 0 ? ' known' : ''}`);
+      bar.style.setProperty('--progress', `${job.pct}%`); bar.append(element('i', '')); row.append(bar);
+    }
+    if (job.error) row.append(element('p', 'job-detail', humanError(job.error)));
+    if (['error', 'canceled'].includes(job.state)) {
+      const actions = element('div', 'job-actions');
+      const retry = element('button', '', 'Tentar novamente'); retry.type = 'button';
+      retry.addEventListener('click', async () => {
+        retry.disabled = true;
+        try { const result = await message({ type: 'darko-enqueue', ...job, reqId: crypto.randomUUID() }); if (!result?.ok) throw new Error(result?.error); await refreshJobs(); }
+        catch (error) { inputError(humanError(error)); } finally { retry.disabled = false; }
       });
-    } catch {
-      resolve(null);
+      actions.append(retry); row.append(actions);
     }
-  });
-  if (!cdn) return false;
-  const name = `instagram-${igShort(url) || Date.now()}.mp4`;
-  await new Promise((resolve, reject) => {
-    chrome.downloads.download({ url: cdn, filename: name, saveAs: false }, (id) => {
-      if (chrome.runtime.lastError || id === undefined)
-        reject(new Error(chrome.runtime.lastError?.message || 'download'));
-      else resolve(id);
-    });
-  });
-  el.querySelector('.tag').className = 'tag ok';
-  el.querySelector('.tag').textContent = 'ok';
-  return true;
-}
-
-async function downloadOne(url, el) {
-  try {
-    // Instagram (vídeo): resolve pela sessão logada; só cai no motor se
-    // falhar. MP3/WAV do IG continua indo pro motor (comportamento antigo).
-    if (state.mode === 'video' && isInstagramUrl(url)) {
-      try {
-        if (await downloadInstagram(url, el)) return;
-      } catch {
-        /* segue pro motor */
-      }
+    if (job.state === 'complete' && Number.isInteger(job.downloadId)) {
+      const actions = element('div', 'job-actions');
+      const show = element('button', '', 'Mostrar na pasta'); show.type = 'button';
+      show.addEventListener('click', () => chrome.downloads.show(job.downloadId)); actions.append(show); row.append(actions);
     }
-    // pega token vivo antes (sempre fresh — invalida storage stale)
-    if (!state.token) await refreshPair();
-    let res = await postDownload(url);
-    if (res.status === 401) {
-      // motor regerou token? re-pair forcado e tenta de novo
-      if (await refreshPair()) {
-        res = await postDownload(url);
-      }
-    }
-    if (!res.ok) {
-      let msg = 'HTTP ' + res.status;
-      try {
-        msg = (await res.json()).error || msg;
-      } catch {}
-      throw new Error(msg);
-    }
-    const cd = res.headers.get('content-disposition') || '';
-    const blob = await res.blob();
-    const name = parseFilename(cd, `download-${Date.now()}`);
-    const objUrl = URL.createObjectURL(blob);
-    await new Promise((resolve, reject) => {
-      chrome.downloads.download(
-        { url: objUrl, filename: name, saveAs: false },
-        (id) => {
-          if (chrome.runtime.lastError || id === undefined)
-            reject(new Error(chrome.runtime.lastError?.message || 'download'));
-          else resolve(id);
-        },
-      );
-    });
-    setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
-    el.querySelector('.tag').className = 'tag ok';
-    el.querySelector('.tag').textContent = 'ok';
-  } catch (e) {
-    el.querySelector('.tag').className = 'tag err';
-    el.querySelector('.tag').textContent = (e.message || 'erro').slice(0, 40);
+    $('jobs').append(row);
   }
 }
-
-function setDownloadLabel(text) {
-  // O botão tem estrutura HTML; só troca o texto do <span> interno.
-  const btn = $('go');
-  const labelSpan = btn.querySelector('.download-btn-content span:last-child');
-  if (labelSpan) labelSpan.textContent = text;
-}
-
+async function refreshJobs() { try { const response = await message({ type: 'darko-jobs' }); if (response?.jobs) renderJobs(response.jobs); } catch {} }
+$('clearJobs').addEventListener('click', async () => { await message({ type: 'darko-clear-jobs' }); await refreshJobs(); });
 $('go').addEventListener('click', async () => {
-  const urls = $('urls')
-    .value.split(/[\n\s]+/)
-    .map((s) => s.trim())
-    .filter((s) => /^https?:\/\//i.test(s));
-  if (!urls.length) return;
-  await refreshPair();
-  $('jobs').innerHTML = '';
-  $('go').disabled = true;
-  setDownloadLabel('Baixando…');
-  const els = urls.map(addJob);
-  let next = 0;
-  const worker = async () => {
-    while (next < urls.length) {
-      const i = next++;
-      await downloadOne(urls[i], els[i]);
+  if (pendingAdd) return;
+  inputError('');
+  const lines = $('urls').value.trim().split(/\s+/).filter(Boolean);
+  if (!lines.length) { inputError('Cole pelo menos um link para baixar.'); $('urls').focus(); return; }
+  let urls;
+  try { urls = [...new Set(lines.map(normalizeUrl))]; } catch { inputError('Um dos links não é válido. Use o endereço completo, começando com https://.'); return; }
+  if (urls.length > 30) { inputError('Adicione até 30 links de cada vez.'); return; }
+  pendingAdd = true; $('go').disabled = true; $('goLabel').textContent = 'Adicionando à fila…';
+  try {
+    for (const url of urls) {
+      const response = await message({ type: 'darko-enqueue', url, ...state, reqId: crypto.randomUUID() });
+      if (!response?.ok) throw new Error(response?.error || 'Não foi possível adicionar o link.');
     }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(3, urls.length) }, worker),
-  );
-  $('go').disabled = false;
-  setDownloadLabel('Baixar');
+    $('urls').value = ''; await chrome.storage.local.set({ downloaderDraft: '' }); await refreshJobs();
+  } catch (error) { inputError(humanError(error)); }
+  finally { pendingAdd = false; $('go').disabled = false; countLinks(); }
 });
-
-refresh();
-// Pos-restart do PC: motor pode demorar uns segs pra subir. Reconecta
-// sozinho enquanto o popup esta aberto — SEMPRE que nao estiver conectado
-// (appBox escondido), nao so no card de erro. Cobre inclusive o estado
-// inicial em que os dois boxes ainda estao ocultos.
-setInterval(() => {
-  if (refreshing) return;
-  const appBox = document.getElementById('appBox');
-  const connected = appBox && !appBox.classList.contains('hidden');
-  if (!connected) refresh();
-}, 2500);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.downloadJobsV2) renderJobs(changes.downloadJobsV2.newValue || []);
+});
+(async () => {
+  const saved = await chrome.storage.local.get(['downloaderPreferences', 'downloaderDraft']);
+  if (saved.downloaderPreferences) Object.assign(state, saved.downloaderPreferences);
+  $('urls').value = saved.downloaderDraft || ''; updateOptions(); countLinks();
+  await Promise.all([refresh(), refreshJobs()]);
+})();
+setInterval(refresh, 10000);
+fetch('https://www.darkoautoedit.com/api/downloader-extension/version', { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+  .then(response => response.ok ? response.json() : null).then(release => {
+    if (!release) return;
+    minimumEngineVersion = release.minimumEngineVersion || release.engineVersion || null;
+    if (newerVersion(release.version || release.latestVersion, VERSION)) $('updateBox').classList.remove('hidden');
+    void refresh();
+  }).catch(() => {});

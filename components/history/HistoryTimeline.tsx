@@ -20,6 +20,7 @@ import {
 import {
   aceitaAcaoDeFila,
   agruparPorVersao,
+  consolidarCiclosDeDisparo,
   chainDeDownload,
   pedirAcaoEEsperar,
   podeVirarCard,
@@ -522,7 +523,9 @@ export function HistoryTimeline({
 
   const groups = useMemo(() => {
     const porDia: { day: string; items: HistoryEvent[] }[] = [];
-    for (const e of events) {
+    // Começo + entrega pronta são um único ciclo da task. A consolidação roda
+    // antes da divisão por dia para também cobrir renders que atravessam meia-noite.
+    for (const e of consolidarCiclosDeDisparo(events)) {
       const day = dayLabel(e.t);
       const last = porDia[porDia.length - 1];
       if (last && last.day === day) last.items.push(e);

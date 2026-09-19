@@ -1,21 +1,14 @@
-/**
- * GARANTIA — o Downloader NUNCA mais trava em "CONECTANDO".
- *
- * O bug: popup.js/bg.js varriam as portas do motor (47923..) com fetch SEM
- * timeout, em SÉRIE. Uma porta que aceita SYN mas não responde (antivírus
- * segurando o loopback, motor zumbi) pendurava o await pra sempre → a UI
- * ficava eterna em "Conectando", sem app nem erro.
- *
- * Este teste TRAVA a blindagem contra regressão em duas frentes:
- *  (A) invariantes ESTÁTICAS no source — timeout em todo fetch, varredura
- *      paralela (Promise.any), range de portas completo, watchdog, botão de
- *      reconectar; e a assinatura do bug antigo NÃO pode reaparecer.
- *  (B) prova de COMPORTAMENTO do algoritmo — porta zumbi não atrasa nem
- *      trava, a 1ª porta viva ganha, e "todas mortas" resolve por timeout
- *      (Offline), nunca infinito.
- */
+/** Regression coverage for live installation/version state and bounded engine discovery. */
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import {
+  DOWNLOADER_EXTENSION_VERSION,
+  INITIAL_DOWNLOADER_CONNECTION,
+  connectionFromPong,
+  expireDownloaderConnection,
+  getDownloaderStatus,
+  versionAtLeast,
+} from './downloader-connection';
 
 let pass = 0;
 let fail = 0;
@@ -36,35 +29,45 @@ const content = readFileSync(join(extDir, 'content.js'), 'utf8');
 
 console.log('\nGARANTIA — blindagem do Downloader (não regredir):');
 
-// ── A. Invariantes estáticas nos dois lados (popup + service worker) ──
-const sides: [string, string][] = [
-  ['popup.js', popup],
-  ['bg.js', bg],
-];
-for (const [name, src] of sides) {
-  ok(/AbortSignal\.timeout/.test(src), `${name}: fetch de localhost com timeout (AbortSignal.timeout)`);
-  ok(/new AbortController\(\)/.test(src), `${name}: fallback de timeout p/ engine sem AbortSignal.timeout`);
-  ok(/Promise\.any/.test(src), `${name}: descoberta de porta é PARALELA (Promise.any)`);
-  ok(src.includes('tfetch(`http://127.0.0.1:${p}/health`'), `${name}: /health via tfetch (com timeout)`);
-  ok(src.includes('tfetch(`http://127.0.0.1:${p}/pair`'), `${name}: /pair via tfetch (com timeout)`);
-  // A assinatura do BUG ANTIGO (loop serial, fetch cru sem timeout) não volta:
-  ok(!src.includes('await fetch(`http://127.0.0.1:${p}/health`'), `${name}: sem fetch serial-sem-timeout (bug antigo)`);
-  // Range de portas cobre até onde o motor pode subir (server.cjs: 47923..47930):
-  for (const p of [47923, 47929, 47930, 47931]) {
-    ok(src.includes(String(p)), `${name}: cobre a porta ${p}`);
-  }
+const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
+ok(manifest.version === DOWNLOADER_EXTENSION_VERSION, 'site e ZIP usam a mesma versão da extensão');
+ok(getDownloaderStatus(INITIAL_DOWNLOADER_CONNECTION) === 'checking', 'primeiro render aguarda resposta real, sem cache otimista');
+const missing = expireDownloaderConnection(INITIAL_DOWNLOADER_CONNECTION, 20000);
+ok(getDownloaderStatus(missing) === 'missing', 'nenhuma resposta apresenta instalação da extensão');
+for (const version of [undefined, '?', '1.6.0', '1.7.0', '1.8.0', '1.9.0']) {
+  const legacy = connectionFromPong({ version, engine: true }, 10000);
+  ok(getDownloaderStatus(legacy) === 'outdated', `extensão ${version || 'sem versão'} recebe atualização mesmo com Motor conectado`);
 }
+const current = connectionFromPong({ version: DOWNLOADER_EXTENSION_VERSION, engine: true, engineVersion: '1.2.1', engineCompatible: true }, 10000);
+ok(getDownloaderStatus(current) === 'ready', 'extensão e Motor atuais apresentam conexão pronta');
+ok(getDownloaderStatus(connectionFromPong({ version: DOWNLOADER_EXTENSION_VERSION, checking: true }, 12000, current)) === 'ready', 'anúncio de presença preserva Motor recentemente verificado durante rechecagem');
+ok(getDownloaderStatus(connectionFromPong({ version: DOWNLOADER_EXTENSION_VERSION, checking: true }, 26000, current)) === 'engine-checking', 'anúncio sem resultado não mantém Motor online indefinidamente');
+ok(getDownloaderStatus({ ...current, engine: false }) === 'engine-offline', 'extensão presente com Motor ausente mostra instalação do Motor');
+ok(getDownloaderStatus({ ...current, engine: undefined }) === 'engine-checking', 'resposta inicial não confunde Motor ainda não verificado com offline');
+ok(getDownloaderStatus({ ...current, engineVersion: '1.0.0', engineCompatible: false }) === 'engine-outdated', 'Motor instalado antigo mostra atualização');
+ok(getDownloaderStatus({ ...current, engineVersion: '1.2.0', engineCompatible: true }) === 'engine-outdated', 'Motor 1.2.0 não finge possuir a correção de imagens do Pinterest');
+ok(getDownloaderStatus({ ...current, engineVersion: undefined, engineCompatible: undefined }) === 'engine-outdated', 'Motor sem versão/protocolo não é considerado compatível');
+ok(getDownloaderStatus(expireDownloaderConnection(current, 24000)) === 'ready', 'resposta recente resiste a um heartbeat perdido');
+ok(getDownloaderStatus(expireDownloaderConnection(current, 25000)) === 'missing', 'extensão removida expira em 15 segundos sem manter online falso');
+ok(getDownloaderStatus(connectionFromPong({ version: DOWNLOADER_EXTENSION_VERSION, engine: true, engineVersion: '1.2.1', engineCompatible: true }, 26000)) === 'ready', 'retorno da extensão recupera o estado pronto');
+ok(getDownloaderStatus(current, '1.10.0') === 'outdated', 'nova versão publicada atualiza o aviso sem recarregar a página');
+ok(versionAtLeast('1.10.0', '1.9.0') && !versionAtLeast('1.9.0', '1.10.0'), 'comparação numérica de versões não usa ordem de texto');
+ok(versionAtLeast('1.9.0.1', '1.9.0'), 'versão Chrome com quarto componente é reconhecida');
 
-// popup: refresh blindado + reconectar + watchdog anti-limbo
-ok(/hardRefresh/.test(popup), 'popup.js: botão ↻ de hard-refresh (reconectar)');
-ok(/watchdog/.test(popup), 'popup.js: watchdog anti-limbo no refresh');
-ok(/chrome\.runtime\.reload/.test(popup), 'popup.js: opção de recarregar a extensão (SW zumbi)');
-ok(
-  /darko-force-rediscover/.test(popup) && /darko-force-rediscover/.test(bg),
-  'force-rediscover existe nos dois lados (hard-refresh limpa o cache do SW)',
-);
-// content: não afirma "iniciou" sem progresso REAL do background
-ok(/gotProgress/.test(content), 'content.js: só afirma download após progresso REAL (fim do toast mentiroso)');
+// Only the durable worker probes the engine; the popup must not duplicate downloads.
+ok(/AbortSignal\.timeout/.test(bg), 'worker: localhost fetch has a hard timeout');
+ok(/Promise\.allSettled\(ports\.map\(probePort\)\)/.test(bg), 'worker: probes every port in parallel and prefers a compatible Motor');
+ok(/tfetch\(`http:\/\/127\.0\.0\.1:\$\{port\}\/health`/.test(bg), 'worker: health is checked through bounded fetch');
+ok(/tfetch\(`http:\/\/127\.0\.0\.1:\$\{port\}\/pair`/.test(bg), 'worker: pairing is checked through bounded fetch');
+for (const port of [47923, 47929, 47930, 47931]) ok(bg.includes(String(port)), `worker covers port ${port}`);
+ok(!popup.includes('chrome.downloads.download('), 'popup delegates transfers to durable worker');
+ok(popup.includes('darko-enqueue') && popup.includes('downloadJobsV2'), 'popup starts and restores the durable queue');
+ok(popup.includes('setTimeout(() => reject') && popup.includes('finally { refreshing = false;'), 'popup times out unresponsive workers and releases reconnect button');
+ok(popup.includes('darko-force-rediscover') && bg.includes('darko-force-rediscover'), 'manual reconnect forces fresh discovery');
+ok(content.includes("job.state === 'complete'") && content.includes('darko-enqueue'), 'page button tracks durable jobs and uses completed state');
+const archiveRoute = readFileSync(join(__dirname, '..', 'app', 'api', 'downloader-extension', 'download', 'route.ts'), 'utf8');
+ok(archiveRoute.includes("'download-utils.js'"), 'extension ZIP contains the worker and popup shared runtime');
+ok(archiveRoute.includes("'no-store, max-age=0'"), 'extension ZIP cannot serve a stale browser/CDN cache');
 
 // ── B. Prova de comportamento do algoritmo (Promise.any + timeout) ──
 // tfetch simulado: respeita o timeout `ms`; porta "morta" pendura até o

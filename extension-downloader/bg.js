@@ -1,545 +1,285 @@
-// Service worker: recebe pedido do botao na pagina e dispara o
-// download pelo motor local via chrome.downloads (endpoint GET /get,
-// token na query — sem precisar de blob no service worker).
-//
-// Auto-pareamento DEFINITIVO: a extensao NUNCA pede codigo. A cada
-// operacao, varre as portas conhecidas, acha o motor vivo e pega o
-// token atual via /pair. Storage local serve so de cache rapido.
-
-// ═══════════════════════════════════════════════════════════════
-// KEEPALIVE MV3 (fix 2026-05-28) — service worker NUNCA hiberna.
-//
-// Problema: Chrome MV3 mata o service worker após ~30s ocioso. Quando
-// morto, a página vê "desconectado" mesmo com o motor local rodando.
-// User reportou: "downloader desconecta e para de funcionar pra todos".
-//
-// Solução em 3 camadas:
-//  1. chrome.alarms a cada 0.4min (24s < 30s) → acorda o SW antes de
-//     hibernar. NUNCA morre.
-//  2. Cache de status no storage (engineUp/enginePort/checkedAt) →
-//     o ping responde INSTANTÂNEO do cache, sem esperar o fetch localhost.
-//  3. Re-check do engine no alarm → cache sempre fresco (<24s de idade).
-// ═══════════════════════════════════════════════════════════════
-
-const KEEPALIVE_ALARM = 'darko-keepalive';
-const ENGINE_CACHE_TTL_MS = 30_000; // cache vale 30s
-
-/** Re-descobre o engine + atualiza cache no storage. Idempotente. */
-async function recheckEngine() {
-  try {
-    const { port } = await getCfg();
-    const eng = await discoverEngine(port || 47923);
-    await chrome.storage.local.set({
-      engineUp: !!eng,
-      enginePortCache: eng ? eng.port : (port || 47923),
-      engineCheckedAt: Date.now(),
-    });
-    return eng;
-  } catch {
-    // não derruba o cache num erro pontual de rede; só marca timestamp
-    return null;
-  }
-}
-
-/** Lê o status cacheado (rápido, sem fetch). */
-function getEngineCache() {
-  return new Promise((r) =>
-    chrome.storage.local.get(['engineUp', 'enginePortCache', 'engineCheckedAt'], (v) => r(v || {})),
-  );
-}
-
-function ensureKeepalive() {
-  // periodInMinutes 0.4 = 24s. Mínimo de produção do Chrome é 0.5 (30s),
-  // mas valores menores funcionam em unpacked; o Chrome clampa pra 0.5 se
-  // necessário — 30s ainda mantém vivo o suficiente combinado com o cache.
-  chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
-}
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === KEEPALIVE_ALARM) {
-    // O simples fato do handler rodar já reseta o timer de hibernação.
-    // Aproveita pra manter o cache do engine fresco.
-    recheckEngine();
-  }
-});
-
-function prewarmToken() {
-  ensureKeepalive();
-  let tries = 0;
-  const tick = () => {
-    tries++;
-    recheckEngine()
-      .then((eng) => {
-        if (!eng && tries < 30) setTimeout(tick, 2000); // ~1min de tentativas
-      })
-      .catch(() => {
-        if (tries < 30) setTimeout(tick, 2000);
-      });
-  };
-  tick();
-}
-chrome.runtime.onInstalled.addListener(() => prewarmToken());
-chrome.runtime.onStartup.addListener(() => prewarmToken());
-// Também garante keepalive quando o SW acorda por qualquer evento
-ensureKeepalive();
-
-function getCfg() {
-  return new Promise((r) =>
-    chrome.storage.local.get(['token', 'port'], (v) => r(v || {})),
-  );
-}
-
-// TODAS as portas em que o motor pode subir (47923..47930 no server.cjs);
-// varremos ate 47931 com folga pra nunca "nao achar" um motor vivo.
+'use strict';
+importScripts('download-utils.js');
+const { terminal, normalizeUrl, humanError, isMedia, newerVersion } = DownloaderUtils;
+const KEEPALIVE_ALARM = 'darko-download-recovery';
 const ENGINE_PORTS = [47923, 47924, 47925, 47926, 47927, 47928, 47929, 47930, 47931];
+const QUEUE_KEY = 'downloadJobsV2';
+const MAX_JOB_MS = 60 * 60 * 1000;
+let jobs = null;
+let loadingJobs = null;
+let saving = Promise.resolve();
+let ticking = false;
+let tickTimer;
+let discovery;
 
-// fetch com timeout DURO — NUNCA pendura. Uma porta zumbi (socket
-// meio-aberto, antivirus/firewall segurando, motor travado) nao pode mais
-// congelar a descoberta. Sem isso, o service worker ficava preso numa
-// promise pendente e a pagina via "desconectado" com o motor vivo.
-// Fallback pra AbortController onde AbortSignal.timeout nao existir.
-function tfetch(url, ms) {
-  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return fetch(url, { signal: AbortSignal.timeout(ms) });
-  }
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), ms);
-  return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
+// Alarms recover work after MV3 suspension; they do not prevent suspension.
+// Jobs and Chrome download ids are durable, and listeners register at top level.
+function ensureKeepalive() { chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 }); }
+function getCfg() { return chrome.storage.local.get(['token', 'port']); }
+function tfetch(url, ms = 12000, options = {}) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(ms), cache: 'no-store' });
 }
-
-// Testa UMA porta: /health precisa responder com o app certo, dai /pair
-// devolve o token. Resolve com o engine ou LANCA (pra Promise.any pular).
-async function probePort(p) {
-  const h = await tfetch(`http://127.0.0.1:${p}/health`, 1400);
-  if (!h.ok) throw 0;
-  const j = await h.json();
-  if (!j || j.app !== 'darkolab-downloader-engine') throw 0;
-  const pr = await tfetch(`http://127.0.0.1:${p}/pair`, 1400);
-  if (!pr.ok) throw 0;
-  const pj = await pr.json();
-  if (!pj || !pj.token) throw 0;
-  chrome.storage.local.set({ token: pj.token, port: p });
-  return { port: p, token: pj.token, allowAdult: pj.allowAdult === true };
+async function probePort(port) {
+  const r = await tfetch(`http://127.0.0.1:${port}/health`, 1800);
+  const health = r.ok ? await r.json() : null;
+  if (health?.app !== 'darkolab-downloader-engine') throw new Error('not-engine');
+  const pairResponse = await tfetch(`http://127.0.0.1:${port}/pair`, 1800);
+  const pair = pairResponse.ok ? await pairResponse.json() : null;
+  if (!pair?.token) throw new Error('not-paired');
+  return { port, token: pair.token, allowAdult: pair.allowAdult === true, version: health.version || null,
+    compatible: health.capabilities?.includes('download-jobs-v1') === true };
 }
-
-// Descobre a porta E pareia automaticamente (pega o token do motor vivo).
-// Varre TODAS as portas EM PARALELO com timeout: porta lenta/zumbi nao
-// atrasa nem trava. (O loop serial-sem-timeout antigo pendurava o SW pra
-// sempre numa porta meio-morta.) Acaba o pareamento manual e o 401 stale.
 async function discoverEngine(preferred) {
-  const tries = [preferred, ...ENGINE_PORTS].filter(
-    (v, i, a) => v && a.indexOf(v) === i,
-  );
-  try {
-    return await Promise.any(tries.map(probePort));
-  } catch {
-    return null; // nenhuma porta respondeu a tempo
-  }
+  if (discovery) return discovery;
+  discovery = (async () => {
+    // Prefer a compatible engine when an old installation also runs locally.
+    const ports = [...new Set([preferred, ...ENGINE_PORTS].filter(Boolean))];
+    const results = await Promise.allSettled(ports.map(probePort));
+    const found = results.filter(x => x.status === 'fulfilled').map(x => x.value);
+    const compatible = found.filter(x => x.compatible);
+    const eng = compatible.reduce((best, current) =>
+      !best || newerVersion(current.version, best.version) ? current : best, null) || found[0] || null;
+    if (eng) await chrome.storage.local.set({ token: eng.token, port: eng.port });
+    return eng;
+  })().finally(() => { discovery = null; });
+  return discovery;
 }
-
-function sendProgress(tabId, payload) {
-  if (!tabId) return;
-  try {
-    chrome.tabs.sendMessage(tabId, { type: 'darko-dl-progress', ...payload });
-  } catch {
-    /* aba pode ter fechado */
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INSTAGRAM — resolve pela SESSÃO LOGADA do próprio usuário.
-//
-// O IG bloqueou 100% o acesso anônimo (motor/yt-dlp e qualquer IP de
-// datacenter recebem "login_required"). Sites tipo sssinstagram só
-// funcionam porque o SERVIDOR deles mantém contas-robô + proxies. Nós
-// não precisamos disso: o usuário JÁ está logado no Instagram no próprio
-// navegador. Com host_permission de instagram.com, o fetch credenciado
-// DESTE service worker manda os cookies da sessão dele — então
-// resolvemos o mp4 real (com áudio) aqui, sem servidor e sem contas.
-//
-// Fluxo: permalink → media_id → API interna /api/v1/media/<id>/info/ →
-// video_versions (mp4 progressivo). A URL do CDN é ASSINADA e baixa sem
-// referer/cookie (testado), então entregamos direto pro chrome.downloads.
-// ═══════════════════════════════════════════════════════════════
-const IG_APP_ID = '936619743392459'; // app id oficial do web client
-
-function isInstagramUrl(u) {
-  try {
-    return /(^|\.)instagram\.com$/.test(new URL(u).hostname);
-  } catch {
-    return false;
-  }
-}
-
-function igShortcode(u) {
-  try {
-    const m = new URL(u).pathname.match(/\/(?:reel|reels|p|tv)\/([\w-]+)/);
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-// Resolve a melhor mp4 do post/reel na sessão logada. Retorna a URL do
-// CDN ou null (sem sessão, post privado sem acesso, ou não-vídeo).
-async function resolveInstagram(pageUrl) {
-  const sig = () =>
-    typeof AbortSignal !== 'undefined' && AbortSignal.timeout
-      ? AbortSignal.timeout(20000)
-      : undefined;
-  // HTML do permalink (server-render logado) → media_id.
-  const html = await fetch(pageUrl, {
-    credentials: 'include',
-    signal: sig(),
-  }).then((r) => r.text());
-  const mid =
-    (html.match(/instagram:\/\/media\?id=(\d+)/) || [])[1] ||
-    (html.match(/"media_id":"(\d+)"/) || [])[1];
-  if (!mid) return null;
-  const r = await fetch(
-    `https://www.instagram.com/api/v1/media/${mid}/info/`,
-    {
-      credentials: 'include',
-      headers: { 'x-ig-app-id': IG_APP_ID },
-      signal: sig(),
-    },
-  );
-  if (!r.ok) return null;
-  const item = (((await r.json()) || {}).items || [])[0];
-  const best = (it) =>
-    it && it.video_versions && it.video_versions.length
-      ? it.video_versions
-          .slice()
-          .sort((a, b) => (b.width || 0) - (a.width || 0))[0].url
-      : null;
-  let url = best(item);
-  if (!url && item && item.carousel_media) {
-    for (const cm of item.carousel_media) {
-      url = best(cm);
-      if (url) break;
-    }
-  }
-  return url || null;
-}
-
-// Baixa uma URL DIRETA (já resolvida) via chrome.downloads, reportando
-// progresso REAL pro content script/popup. Mesmo motor de progresso do
-// tryDownloadOnce, mas sem passar pelo motor local.
-function downloadDirect({ url, filename, tabId }) {
-  return new Promise((resolve) => {
-    chrome.downloads.download({ url, filename, saveAs: false }, (id) => {
-      if (chrome.runtime.lastError || id === undefined) {
-        resolve({
-          ok: false,
-          error: chrome.runtime.lastError?.message || 'falha ao iniciar',
-        });
-        return;
-      }
-      let settled = false;
-      const finish = (r) => {
-        if (settled) return;
-        settled = true;
-        chrome.downloads.onChanged.removeListener(onChanged);
-        clearInterval(poller);
-        clearTimeout(cap);
-        resolve(r);
-      };
-      const poller = setInterval(() => {
-        try {
-          chrome.downloads.search({ id }, (items) => {
-            const it = items && items[0];
-            if (!it) return;
-            const total = Number(it.totalBytes) || 0;
-            const recv = Number(it.bytesReceived) || 0;
-            const pct =
-              total > 0 ? Math.min(99, Math.floor((recv / total) * 100)) : -1;
-            sendProgress(tabId, { id, state: it.state, pct, recv, total });
-            if (it.state === 'complete') {
-              sendProgress(tabId, { id, state: 'complete', pct: 100 });
-              finish({ ok: true });
-            } else if (it.state === 'interrupted') {
-              sendProgress(tabId, {
-                id,
-                state: 'interrupted',
-                pct,
-                error: it.error || 'FAILED',
-              });
-              finish({ ok: false, error: it.error || 'FAILED' });
-            }
-          });
-        } catch {
-          /* SW suspendendo — próxima tick ok */
-        }
-      }, 600);
-      const onChanged = (delta) => {
-        if (delta.id !== id) return;
-        if (delta.state && delta.state.current === 'complete') {
-          sendProgress(tabId, { id, state: 'complete', pct: 100 });
-          finish({ ok: true });
-        } else if (delta.error && delta.error.current) {
-          sendProgress(tabId, {
-            id,
-            state: 'interrupted',
-            error: String(delta.error.current),
-          });
-          finish({ ok: false, error: String(delta.error.current) });
-        }
-      };
-      chrome.downloads.onChanged.addListener(onChanged);
-      const cap = setTimeout(
-        () => finish({ ok: false, error: 'tempo esgotado' }),
-        600000,
-      );
-    });
-  });
-}
-
-// Tenta baixar um link de Instagram pela sessão logada. Retorna
-// { handled: true, ok } se conseguiu resolver (mesmo que o download
-// falhe depois), ou { handled: false } pra deixar o fluxo do motor seguir.
-async function tryInstagramSession({ url, tabId }) {
-  try {
-    const cdn = await resolveInstagram(url);
-    if (!cdn) return { handled: false };
-    const filename = `instagram-${igShortcode(url) || Date.now()}.mp4`;
-    const r = await downloadDirect({ url: cdn, filename, tabId });
-    return { handled: true, ok: r.ok, error: r.error };
-  } catch {
-    return { handled: false };
-  }
-}
-
-async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
-  // SEMPRE refaz pair antes do download. Custo: 1 GET extra (<5ms localhost),
-  // mas elimina de vez o 401 por token stale.
+async function recheckEngine() {
   const eng = await discoverEngine((await getCfg()).port || 47923);
-  if (!eng) {
-    return {
-      ok: false,
-      authFail: false,
-      error: 'O Motor não está aberto neste computador. Abra o Auto Edit Downloader pelo menu Iniciar e tente de novo.',
-    };
-  }
-  const params = {
-    t: eng.token,
-    url,
-    mode: mode || 'video',
-    quality: quality || '1080',
-  };
-  if (adult === true) params.adult = '1';
-  const qs = new URLSearchParams(params).toString();
-  const dlUrl = `http://127.0.0.1:${eng.port}/get?${qs}`;
-
-  return new Promise((resolve) => {
-    chrome.downloads.download({ url: dlUrl, saveAs: false }, (id) => {
-      if (chrome.runtime.lastError || id === undefined) {
-        resolve({
-          ok: false,
-          authFail: false,
-          error: chrome.runtime.lastError?.message || 'falha ao iniciar',
-        });
-        return;
-      }
-      let settled = false;
-      const finish = (r) => {
-        if (settled) return;
-        settled = true;
-        chrome.downloads.onChanged.removeListener(onChanged);
-        clearInterval(poller);
-        clearTimeout(cap);
-        resolve(r);
-      };
-      // PROGRESSO REAL: polling de chrome.downloads.search → manda %
-      // pro content script (botao mostra carregando ate subir na barra).
-      const poller = setInterval(() => {
-        try {
-          chrome.downloads.search({ id }, (items) => {
-            const it = items && items[0];
-            if (!it) return;
-            const total = Number(it.totalBytes) || 0;
-            const recv = Number(it.bytesReceived) || 0;
-            const pct = total > 0 ? Math.min(99, Math.floor((recv / total) * 100)) : -1;
-            sendProgress(tabId, { id, state: it.state, pct, recv, total });
-            if (it.state === 'complete') {
-              sendProgress(tabId, { id, state: 'complete', pct: 100 });
-              finish({ ok: true });
-            } else if (it.state === 'interrupted') {
-              const err = it.error || 'FAILED';
-              sendProgress(tabId, { id, state: 'interrupted', pct, error: err });
-              finish({
-                ok: false,
-                authFail: /FORBIDDEN|SERVER_UNAUTHORIZED|SERVER_BAD_CONTENT/i.test(
-                  err,
-                ),
-                error: err,
-              });
-            }
-          });
-        } catch {
-          /* SW pode estar suspendendo — proxima tick ok */
-        }
-      }, 600);
-      // event-driven backup
-      const onChanged = (delta) => {
-        if (delta.id !== id) return;
-        if (delta.state && delta.state.current === 'complete') {
-          sendProgress(tabId, { id, state: 'complete', pct: 100 });
-          finish({ ok: true });
-        } else if (delta.error && delta.error.current) {
-          const e = String(delta.error.current);
-          sendProgress(tabId, { id, state: 'interrupted', error: e });
-          finish({
-            ok: false,
-            authFail: /FORBIDDEN|SERVER_UNAUTHORIZED|SERVER_BAD_CONTENT/i.test(
-              e,
-            ),
-            error: e,
-          });
-        }
-      };
-      chrome.downloads.onChanged.addListener(onChanged);
-      const cap = setTimeout(
-        () =>
-          finish({
-            ok: false,
-            authFail: false,
-            error: 'tempo esgotado — tente de novo.',
-          }),
-        600000,
-      );
-    });
+  await chrome.storage.local.set({ engineUp: !!eng, enginePortCache: eng?.port || 47923,
+    engineVersion: eng?.version || null, engineCompatible: !!eng?.compatible, engineCheckedAt: Date.now() });
+  return eng;
+}
+async function pingEngine(force = false) {
+  const cache = await chrome.storage.local.get(['engineUp', 'enginePortCache', 'engineVersion', 'engineCompatible', 'engineCheckedAt']);
+  if (!force && Date.now() - (cache.engineCheckedAt || 0) < 10000) return {
+    connected: !!cache.engineUp, port: cache.enginePortCache, engineVersion: cache.engineVersion,
+    engineCompatible: !!cache.engineCompatible };
+  const eng = await recheckEngine();
+  return { connected: !!eng, port: eng?.port || 47923, engineVersion: eng?.version || null, engineCompatible: !!eng?.compatible };
+}
+async function loadJobs() {
+  if (jobs) return jobs;
+  if (!loadingJobs) loadingJobs = chrome.storage.local.get(QUEUE_KEY).then(value => {
+    jobs = Array.isArray(value[QUEUE_KEY]) ? value[QUEUE_KEY] : [];
+    return jobs;
   });
+  return loadingJobs;
 }
-
-async function startDownload({ url, mode, quality, adult, tabId }) {
-  // INSTAGRAM (vídeo, não +18): resolve pela sessão logada do usuário
-  // ANTES de tentar o motor. O motor não consegue (IG exige login), então
-  // este é o caminho principal pra IG. Só cai no motor se a resolução
-  // falhar (post sem vídeo, sem sessão, etc.) — comportamento preservado.
-  if (adult !== true && mode === 'video' && isInstagramUrl(url)) {
-    const ig = await tryInstagramSession({ url, tabId });
-    if (ig.handled) {
-      if (ig.ok) return { ok: true };
-      return { ok: false, error: 'Falha: ' + (ig.error || 'instagram') };
+function persist() {
+  const snapshot = JSON.parse(JSON.stringify(jobs));
+  saving = saving.catch(() => {}).then(() => chrome.storage.local.set({ [QUEUE_KEY]: snapshot }));
+  return saving;
+}
+function publicJob(job) {
+  const { id, url, mode, quality, adult, state, phase, pct, error, code, filename, createdAt, updatedAt, downloadId } = job;
+  return { id, url, mode, quality, adult, state, phase, pct, error, code, filename, createdAt, updatedAt, downloadId };
+}
+function emit(job) {
+  const message = { type: 'darko-dl-progress', ...publicJob(job), jobId: job.id, reqId: job.reqId };
+  if (Number.isInteger(job.tabId)) chrome.tabs.sendMessage(job.tabId, message, () => { void chrome.runtime.lastError; });
+  chrome.runtime.sendMessage(message, () => { void chrome.runtime.lastError; });
+}
+async function update(job, patch) {
+  Object.assign(job, patch, { updatedAt: Date.now() });
+  await persist();
+  emit(job);
+}
+function wake(delay = 0) { clearTimeout(tickTimer); tickTimer = setTimeout(() => { tick().catch(() => {}); }, delay); }
+function errorCode(error) { return String(error?.code || error?.message || error || 'FAILED'); }
+async function fail(job, error) {
+  const code = errorCode(error);
+  await update(job, { state: /USER_CANCELED/.test(code) ? 'canceled' : 'error', phase: 'error', error: humanError(error), code });
+}
+async function enqueue(input, sender = {}) {
+  await loadJobs();
+  const url = normalizeUrl(input.url);
+  const mode = ['video', 'audio-mp3', 'audio-wav'].includes(input.mode) ? input.mode : 'video';
+  const quality = ['1080', '720', '480', 'best'].includes(input.quality) ? input.quality : '1080';
+  // A repeated click or lost acknowledgement must not start a second file.
+  const previous = jobs.find(j => (input.reqId && j.reqId === input.reqId) ||
+    (!terminal(j.state) && j.url === url && j.mode === mode && j.quality === quality && j.adult === !!input.adult));
+  if (previous) return previous;
+  if (jobs.filter(j => !terminal(j.state)).length >= 30) throw new Error('A fila tem 30 links. Aguarde alguns downloads antes de adicionar outros.');
+  const recentCompleted = new Set(jobs.filter(j => terminal(j.state) && Date.now() - j.updatedAt < 7 * 86400000).slice(-70).map(j => j.id));
+  jobs = jobs.filter(j => !terminal(j.state) || recentCompleted.has(j.id));
+  const job = { id: crypto.randomUUID(), reqId: input.reqId || null, tabId: sender.tab?.id,
+    url, mode, quality, adult: input.adult === true, state: 'queued', phase: 'queued', pct: -1,
+    createdAt: Date.now(), updatedAt: Date.now(), retries: 0, transportErrors: 0 };
+  jobs.push(job);
+  await persist();
+  ensureKeepalive();
+  wake();
+  return job;
+}
+async function engineJson(eng, path, options = {}) {
+  let response = await tfetch(`http://127.0.0.1:${eng.port}${path}`, 15000,
+    { ...options, headers: { authorization: `Bearer ${eng.token}`, 'content-type': 'application/json', ...options.headers } });
+  if (response.status === 401) {
+    const repaired = await probePort(eng.port);
+    Object.assign(eng, repaired);
+    response = await tfetch(`http://127.0.0.1:${eng.port}${path}`, 15000,
+      { ...options, headers: { authorization: `Bearer ${eng.token}`, 'content-type': 'application/json', ...options.headers } });
+  }
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) { const error = new Error(value.error || `HTTP ${response.status}`); error.status = response.status; throw error; }
+  return value;
+}
+function chromeSearch(query) {
+  return new Promise((resolve, reject) => chrome.downloads.search(query, items => {
+    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message)); else resolve(items || []);
+  }));
+}
+async function inspectDownload(job) {
+  const [item] = await chromeSearch({ id: job.downloadId });
+  if (!item) { await fail(job, 'O download não está mais no navegador. Tente novamente.'); return; }
+  if (item.state === 'complete') {
+    if (Math.max(Number(item.fileSize) || 0, Number(item.bytesReceived) || 0) <= 0 || /json|html|text\/plain/i.test(item.mime || '') || /\.(json|html?)$/i.test(item.filename || '')) {
+      await fail(job, 'INVALID_MEDIA'); return;
     }
-    // não resolvido → segue pro motor (fallback)
+    await update(job, { state: 'complete', phase: 'complete', pct: 100, error: null, filename: job.filename || item.filename?.split(/[\\/]/).pop() });
+  } else if (item.state === 'interrupted') {
+    const reason = item.error || 'SERVER_FAILED';
+    if (/^(NETWORK_|SERVER_FAILED|SERVER_UNREACHABLE|SERVER_UNAUTHORIZED|SERVER_FORBIDDEN)/.test(reason) && job.retries < 2) {
+      await update(job, { state: 'preparing', phase: 'retrying', retries: job.retries + 1,
+        downloadId: null, delivery: null, nextAttemptAt: Date.now() + 1500 * (job.retries + 1) });
+    } else await fail(job, reason);
+  } else {
+    const pct = item.totalBytes > 0 ? Math.min(99, Math.floor(item.bytesReceived / item.totalBytes * 100)) : -1;
+    if (job.pct !== pct || job.phase !== 'saving') await update(job, { state: 'downloading', phase: 'saving', pct });
   }
-
-  // Tentativa 1
-  let r = await tryDownloadOnce({ url, mode, quality, adult, tabId });
-  // Se 401/auth (token defasado), re-pair forcado e tenta de novo —
-  // usuario nao precisa fazer nada manualmente. NUNCA mostra dialogo
-  // de codigo.
-  if (!r.ok && r.authFail) {
-    try {
-      await chrome.storage.local.set({ token: '' });
-    } catch {}
-    r = await tryDownloadOnce({ url, mode, quality, adult, tabId });
-  }
-  if (r.ok) return { ok: true };
-  return {
-    ok: false,
-    error:
-      r.error === 'SERVER_UNAUTHORIZED'
-        ? 'Motor reiniciando — tente novamente em alguns segundos.'
-        : 'Falha: ' + r.error,
-  };
 }
-
+async function startBrowserDownload(job, url, filename) {
+  // Persist delivery intent before invoking Chrome. If SW dies between the
+  // browser call and id persistence, recovery looks up that exact intent.
+  if (!job.delivery) await update(job, { delivery: { url, startedAt: Date.now() }, state: 'delivering', phase: 'saving' });
+  const matches = await chromeSearch({ startedAfter: new Date(job.delivery.startedAt - 1000).toISOString(), limit: 50 });
+  const existing = matches.find(x => x.url === job.delivery.url && x.state !== 'interrupted');
+  const id = existing?.id ?? await new Promise((resolve, reject) => chrome.downloads.download(
+    { url: job.delivery.url, filename, saveAs: false, conflictAction: 'uniquify' }, result => {
+      const error = chrome.runtime.lastError;
+      if (error || result === undefined) reject(new Error(error?.message || 'Falha ao iniciar o download.'));
+      else resolve(result);
+    }));
+  await update(job, { downloadId: id, state: 'downloading', phase: 'saving', filename });
+  await inspectDownload(job);
+}
+const IG_APP_ID = '936619743392459';
+function isInstagramUrl(url) { try { return /(^|\.)instagram\.com$/.test(new URL(url).hostname); } catch { return false; } }
+async function resolveInstagram(pageUrl) {
+  const html = await tfetch(pageUrl, 20000, { credentials: 'include' }).then(r => r.text());
+  const mid = (html.match(/instagram:\/\/media\?id=(\d+)/) || [])[1] || (html.match(/"media_id":"(\d+)"/) || [])[1];
+  if (!mid) return null;
+  const response = await tfetch(`https://www.instagram.com/api/v1/media/${mid}/info/`, 20000,
+    { credentials: 'include', headers: { 'x-ig-app-id': IG_APP_ID } });
+  if (!response.ok) return null;
+  const item = (await response.json())?.items?.[0];
+  for (const media of [item, ...(item?.carousel_media || [])]) {
+    const best = media?.video_versions?.slice().sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+    if (best?.url) return best.url;
+  }
+  return null;
+}
+async function advance(job) {
+  if (job.nextAttemptAt && Date.now() < job.nextAttemptAt) return;
+  if (Date.now() - job.createdAt > MAX_JOB_MS) {
+    // Do not leave a browser transfer alive after presenting a timeout.
+    if (job.downloadId != null) await new Promise(resolve => chrome.downloads.cancel(job.downloadId, () => { void chrome.runtime.lastError; resolve(); }));
+    await fail(job, 'O download excedeu uma hora. Tente um vídeo menor ou outra qualidade.'); return;
+  }
+  if (job.downloadId != null) { await inspectDownload(job); return; }
+  if (job.delivery) { await startBrowserDownload(job, job.delivery.url, job.filename); return; }
+  if (!job.igChecked && job.mode === 'video' && !job.adult && isInstagramUrl(job.url)) {
+    await update(job, { state: 'preparing', phase: 'resolving' });
+    const cdn = await resolveInstagram(job.url).catch(() => null);
+    await update(job, { igChecked: true });
+    if (cdn) {
+      const name = `instagram-${new URL(job.url).pathname.split('/').filter(Boolean)[1] || job.id}.mp4`;
+      await startBrowserDownload(job, cdn, name); return;
+    }
+  }
+  const eng = await discoverEngine(job.enginePort || (await getCfg()).port || 47923);
+  if (!eng) throw new Error('ENGINE_OFFLINE');
+  if (!eng.compatible) { await fail(job, 'ENGINE_UPDATE_REQUIRED'); return; }
+  if (!job.engineJobId || job.enginePort !== eng.port) {
+    const created = await engineJson(eng, '/jobs', { method: 'POST', body: JSON.stringify({
+      requestId: job.id, url: job.url, mode: job.mode, quality: job.quality, adult: job.adult }) });
+    if (!created.id) throw new Error('O Motor respondeu sem identificar o download. Atualize o Motor.');
+    await update(job, { engineJobId: created.id, enginePort: eng.port, state: 'preparing', phase: created.state === 'queued' ? 'queued' : 'preparing' });
+  }
+  let remote;
+  try { remote = await engineJson(eng, `/jobs/${encodeURIComponent(job.engineJobId)}`); }
+  catch (error) {
+    if (error.status === 404 && (job.engineRestarts || 0) < 2) {
+      await update(job, { engineJobId: null, engineRestarts: (job.engineRestarts || 0) + 1, phase: 'reconnecting' }); return;
+    }
+    throw error;
+  }
+  job.transportErrors = 0;
+  if (remote.state === 'error') { await fail(job, remote.error || 'Não foi possível preparar este vídeo.'); return; }
+  if (remote.state !== 'ready') {
+    const phase = remote.state === 'queued' ? 'queued' : 'preparing';
+    if (job.phase !== phase) await update(job, { state: 'preparing', phase });
+    return;
+  }
+  if (!isMedia(remote.mime, remote.filename, remote.size)) { await fail(job, 'INVALID_MEDIA'); return; }
+  const fileUrl = `http://127.0.0.1:${eng.port}/jobs/${encodeURIComponent(job.engineJobId)}/file?t=${encodeURIComponent(eng.token)}`;
+  const check = await tfetch(fileUrl, 12000, { method: 'HEAD' });
+  if (!check.ok || !isMedia(check.headers.get('content-type'), remote.filename, check.headers.get('content-length'))) {
+    if (check.status === 401) throw new Error('SERVER_UNAUTHORIZED');
+    await fail(job, 'INVALID_MEDIA'); return;
+  }
+  await update(job, { filename: remote.filename });
+  await startBrowserDownload(job, fileUrl, remote.filename);
+}
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  try {
+    await loadJobs();
+    const running = jobs.filter(job => !terminal(job.state));
+    // Two engine requests concurrently; saving files does not occupy a slot.
+    const downloading = running.filter(j => j.downloadId != null);
+    const preparing = running.filter(j => j.downloadId == null).slice(0, 2);
+    await Promise.all([...downloading, ...preparing].map(async job => {
+      try { await advance(job); }
+      catch (error) {
+        job.transportErrors = (job.transportErrors || 0) + 1;
+        const permanentResponse = error.status >= 400 && error.status < 500 && ![401, 408, 429].includes(error.status);
+        // Allow a restarting Windows service time to return, with a finite
+        // recovery window. Invalid input/removed jobs fail without retries.
+        if (job.transportErrors <= 6 && !permanentResponse && !/INVALID_MEDIA/.test(errorCode(error))) {
+          await update(job, { phase: 'reconnecting', nextAttemptAt: Date.now() + Math.min(10000, 2500 * job.transportErrors) });
+        } else await fail(job, error);
+      }
+    }));
+  } finally {
+    ticking = false;
+    if (jobs?.some(j => !terminal(j.state))) wake(1500);
+  }
+}
+chrome.downloads.onChanged.addListener(() => wake());
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === KEEPALIVE_ALARM) wake(); });
+chrome.runtime.onInstalled.addListener(() => { ensureKeepalive(); wake(); });
+chrome.runtime.onStartup.addListener(() => { ensureKeepalive(); wake(); });
+ensureKeepalive();
+wake();
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg && msg.type === 'darko-download') {
-    const tabId = sender && sender.tab && sender.tab.id;
-    startDownload({ ...msg, tabId }).then(sendResponse);
-    return true; // resposta assíncrona
-  }
-  if (msg && msg.type === 'darko-ig-resolve') {
-    // Resolve um link de Instagram pela sessão logada e devolve a URL do
-    // CDN (mp4 com áudio) ou null. Usado pelo popup e pela página do site
-    // (via bridge) pra baixar por link colado, sem passar pelo motor.
-    (async () => {
-      try {
-        const cdn = await resolveInstagram(msg.url);
-        sendResponse({ ok: !!cdn, url: cdn || null });
-      } catch (e) {
-        sendResponse({ ok: false, error: String(e && e.message).slice(0, 160) });
-      }
-    })();
-    return true;
-  }
-  if (msg && msg.type === 'darko-force-rediscover') {
-    // Hard-refresh do popup: apaga cache/token stale e redescobre do zero.
-    (async () => {
-      try {
-        await new Promise((r) =>
-          chrome.storage.local.remove(
-            ['token', 'engineUp', 'enginePortCache', 'engineCheckedAt'],
-            () => r(),
-          ),
-        );
-      } catch {
-        /* segue */
-      }
-      const eng = await recheckEngine();
-      sendResponse({ connected: !!eng, port: eng ? eng.port : 47923 });
-    })();
-    return true;
-  }
-  if (msg && msg.type === 'darko-ping-engine') {
-    (async () => {
-      ensureKeepalive(); // garante alarm vivo a cada ping também
-      const cache = await getEngineCache();
-      const cacheAge = Date.now() - (cache.engineCheckedAt || 0);
-
-      // Cache FRESCO (<30s): responde NA HORA com o status conhecido.
-      // Evita a página marcar "desconectado" enquanto o fetch localhost
-      // demora ou o SW está acordando. Re-verifica em background.
-      if (cache.engineCheckedAt && cacheAge < ENGINE_CACHE_TTL_MS) {
-        sendResponse({ connected: !!cache.engineUp, port: cache.enginePortCache || 47923 });
-        recheckEngine(); // atualiza pra próxima (fire-and-forget)
-        return;
-      }
-
-      // Cache velho/ausente: verifica agora (primeira vez ou >30s parado).
-      const eng = await recheckEngine();
-      sendResponse({
-        connected: !!eng,
-        port: eng ? eng.port : (cache.enginePortCache || 47923),
-      });
-    })();
+  if (!msg || typeof msg !== 'object') return;
+  let operation;
+  if (msg.type === 'darko-bridge-health') operation = Promise.resolve({ ok: true, version: chrome.runtime.getManifest().version });
+  if (msg.type === 'darko-enqueue' || msg.type === 'darko-download') operation = enqueue(msg, sender).then(job => ({ ok: true, accepted: true, jobId: job.id, job: publicJob(job) }));
+  if (msg.type === 'darko-jobs') operation = loadJobs().then(list => ({ ok: true, jobs: list.map(publicJob) }));
+  if (msg.type === 'darko-job') operation = loadJobs().then(list => ({ ok: true, job: list.find(j => j.id === msg.jobId) ? publicJob(list.find(j => j.id === msg.jobId)) : null }));
+  if (msg.type === 'darko-clear-jobs') operation = loadJobs().then(async () => { jobs = jobs.filter(j => !terminal(j.state)); await persist(); return { ok: true }; });
+  if (msg.type === 'darko-ping-engine' || msg.type === 'darko-force-rediscover') operation = pingEngine(msg.type === 'darko-force-rediscover');
+  if (msg.type === 'darko-ig-resolve') operation = resolveInstagram(msg.url).then(url => ({ ok: !!url, url }));
+  if (operation) {
+    operation.then(sendResponse).catch(error => sendResponse({ ok: false, error: humanError(error) }));
     return true;
   }
 });
-
-// ═══════════════════════════════════════════════════════════════
-// AUTO CORTES (v1.8.0) — `darko-fetch`: entrega os BYTES pra PÁGINA.
-//
-// Por que isto existe: em tudo que veio antes o arquivo cai na BARRA DE
-// DOWNLOADS (chrome.downloads) — a página nunca vê um byte. O Auto Cortes
-// precisa do vídeo DENTRO do navegador (OPFS) pra cortar sem subir nada
-// pro servidor, e a página não consegue buscar sozinha:
-//   - Motor local: só libera CORS pra origens chrome-extension:// (o site
-//     não tem token, nem ACAO, nem Allow-Private-Network).
-//   - Google Drive: precisa dos COOKIES do usuário (arquivo privado) e da
-//     cadeia de confirmação de arquivo grande.
-// O service worker consegue os dois (host_permissions) — então ele faz o
-// fetch em STREAM e repassa o corpo em pedaços pro content script, que
-// converte em ArrayBuffer e entrega pra página.
-//
-// Protocolo (SW → content script, via chrome.tabs.sendMessage):
-//   darko-fetch-meta     { reqId, filename, size|null, mime }
-//   darko-fetch-chunk    { reqId, idx, b64 }        (8 MB CRUS por chunk)
-//   darko-fetch-progress { reqId, received, total|null, phase }
-//   darko-fetch-done     { reqId, total, chunks }
-//   darko-fetch-error    { reqId, error }
-// Cada mensagem é ACKada pelo bridge (sendResponse) — o SW só manda o
-// próximo chunk depois do ack. Isso é BACKPRESSURE: sem ele, o SW despeja
-// 8 MB a cada poucos ms, a fila do Chrome estoura e volta o velho "chunk N
-// faltou (chrome.tabs.sendMessage perdeu mensagem)".
-//
-// 8 MB crus → ~10,7 MB de base64 (limite de mensagem é 64 MiB — folga de 6×).
-// Inatividade: 90 s sem bytes aborta. Teto absoluto: 45 min por pedido.
-// ═══════════════════════════════════════════════════════════════
-
+// Existing Auto Cortes streaming protocol is preserved below.
 const FETCH_RAW_CHUNK = 8 * 1024 * 1024; // 8 MB crus -> ~10,7 MB base64
 const FETCH_IDLE_MS = 90000; // 90 s sem bytes = conexão morta
 const FETCH_ABSOLUTE_MS = 45 * 60 * 1000; // teto duro por pedido

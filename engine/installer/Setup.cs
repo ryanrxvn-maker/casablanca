@@ -34,8 +34,12 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.IO.Compression;
+using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace AutoEdit
@@ -56,6 +60,154 @@ namespace AutoEdit
 #endif
         public const string Heading    = "Auto Edit";
         public const string DoneHint   = "Pronto. O motor está vinculado. Use a ferramenta no site normalmente.";
+    }
+
+    // Completion is a protocol, not a process-exit event. PowerShell may
+    // write DONE and exit entirely between two 150ms UI ticks.
+    enum InstallerCompletionState
+    {
+        Installing, WaitingForExit, WaitingForStatus, WaitingForOutput,
+        Verifying, Success, Failure
+    }
+
+    sealed class EngineHealthResult
+    {
+        public readonly bool Healthy;
+        public readonly string Detail;
+        public EngineHealthResult(bool healthy, string detail)
+        { Healthy = healthy; Detail = detail ?? ""; }
+    }
+
+    sealed class InstallerDecision
+    {
+        public readonly InstallerCompletionState State;
+        public readonly string Message;
+        public readonly int ExitCode;
+        public InstallerDecision(InstallerCompletionState state, string message, int exitCode)
+        { State = state; Message = message ?? ""; ExitCode = exitCode; }
+    }
+
+    sealed class InstallerCompletion
+    {
+        private string _terminal;
+        private string _terminalMessage;
+        private DateTime? _doneAt;
+        private DateTime? _exitedAt;
+        private DateTime? _verificationAt;
+        private InstallerDecision _final;
+
+        public InstallerDecision Observe(string status, bool exited, int code,
+            bool outputDrained, EngineHealthResult health, DateTime now)
+        {
+            if (_final != null) return _final;
+            string line = (status ?? "").Trim().TrimStart('\uFEFF');
+            int divider = line.IndexOf('|');
+            if (divider >= 0)
+            {
+                string head = line.Substring(0, divider);
+                string text = line.Substring(divider + 1).Trim();
+                // ERR is authoritative; a stale progress/DONE write must not
+                // turn a previously reported installation failure into success.
+                if (head == "ERR") { _terminal = head; _terminalMessage = text; }
+                else if (head == "DONE" && _terminal != "ERR")
+                {
+                    _terminal = head;
+                    if (!_doneAt.HasValue) _doneAt = now;
+                }
+            }
+            if (exited && !_exitedAt.HasValue) _exitedAt = now;
+            if (_terminal == "ERR")
+                return Finish(false, string.IsNullOrEmpty(_terminalMessage)
+                    ? "O instalador informou uma falha. Abra o registro para ver os detalhes."
+                    : _terminalMessage, code == 0 ? 1 : code);
+            if (exited && code != 0)
+            {
+                // Let final ERR and stderr arrive before choosing the error
+                // wording. Never report success for a nonzero exit code.
+                if (!outputDrained && now - _exitedAt.Value < TimeSpan.FromSeconds(2))
+                    return Pending(InstallerCompletionState.WaitingForOutput, "Lendo o resultado da instalação");
+                return Finish(false, "O instalador encerrou com código " + code + ".", code);
+            }
+            if (!exited)
+            {
+                if (_doneAt.HasValue && now - _doneAt.Value > TimeSpan.FromSeconds(30))
+                    return Finish(false, "A instalação informou conclusão, mas o processo não encerrou. Abra o registro para conferir o resultado.", 1);
+                return Pending(_terminal == "DONE" ? InstallerCompletionState.WaitingForExit : InstallerCompletionState.Installing,
+                    "Finalizando a instalação");
+            }
+            if (_terminal != "DONE")
+            {
+                if (now - _exitedAt.Value < TimeSpan.FromSeconds(3))
+                    return Pending(InstallerCompletionState.WaitingForStatus, "Conferindo o resultado da instalação");
+                return Finish(false, "O instalador encerrou sem confirmar a conclusão (código 0). Abra o registro para conferir o que aconteceu.", 1);
+            }
+            if (!outputDrained && now - _exitedAt.Value < TimeSpan.FromSeconds(2))
+                return Pending(InstallerCompletionState.WaitingForOutput, "Finalizando o registro da instalação");
+            if (!_verificationAt.HasValue) _verificationAt = now;
+            if (health != null && health.Healthy)
+                return Finish(true, health.Detail, 0);
+            if (now - _verificationAt.Value >= TimeSpan.FromSeconds(30))
+                return Finish(false, health != null && !string.IsNullOrEmpty(health.Detail)
+                    ? health.Detail : "A instalação terminou, mas não foi possível confirmar o Motor online. Abra o registro para ver os detalhes.", 1);
+            return Pending(InstallerCompletionState.Verifying, "Confirmando o Motor instalado");
+        }
+
+        private InstallerDecision Pending(InstallerCompletionState state, string message)
+        { return new InstallerDecision(state, message, 0); }
+        private InstallerDecision Finish(bool success, string message, int code)
+        {
+            _final = new InstallerDecision(success ? InstallerCompletionState.Success : InstallerCompletionState.Failure, message, code);
+            return _final;
+        }
+    }
+
+    static class InstallerEngineHealth
+    {
+        public static EngineHealthResult Check(string packagePath)
+        {
+#if REMOVER
+            // Smart Remover's separate PowerShell protocol validates its ready
+            // event. Do not apply Downloader's release metadata to that product.
+            return new EngineHealthResult(true, "Smart Remover confirmou que o motor iniciou.");
+#else
+            string expected;
+            try { expected = File.ReadAllText(Path.Combine(packagePath, "engine-version.txt")).Trim(); }
+            catch (Exception ex) { return new EngineHealthResult(false, "O pacote não informa a versão do Motor: " + ex.Message); }
+            if (!Regex.IsMatch(expected, @"^\d+\.\d+\.\d+(?:\.\d+)?$"))
+                return new EngineHealthResult(false, "A versão do Motor no pacote é inválida. Baixe o instalador novamente.");
+            string observed = "";
+            for (int port = 47923; port <= 47931; port++)
+            {
+                try
+                {
+                    var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/health");
+                    request.Proxy = null;
+                    request.Timeout = 700;
+                    request.ReadWriteTimeout = 700;
+                    request.AllowAutoRedirect = false;
+                    request.KeepAlive = false;
+                    using (var response = (HttpWebResponse)request.GetResponse())
+                    using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                    {
+                        if (response.StatusCode != HttpStatusCode.OK) continue;
+                        string body = reader.ReadToEnd();
+                        if (!Regex.IsMatch(body, "\"app\"\\s*:\\s*\"darkolab-downloader-engine\"")) continue;
+                        var version = Regex.Match(body, "\"version\"\\s*:\\s*\"([^\"]+)\"");
+                        string found = version.Success ? version.Groups[1].Value : "desconhecida";
+                        observed = "Foi encontrado o Motor " + found + ", mas esta instalação precisa da versão " + expected + ".";
+                        if (found == expected && Regex.IsMatch(body, "\"capabilities\"\\s*:\\s*\\[[^\\]]*\"download-jobs-v1\""))
+                            return new EngineHealthResult(true, "Motor " + expected + " online na porta " + port + ".");
+                        if (found == expected) observed = "O Motor " + expected + " respondeu sem o suporte a downloads desta versão.";
+                    }
+                }
+                catch (WebException) { }
+                catch (IOException) { }
+            }
+            return new EngineHealthResult(false, string.IsNullOrEmpty(observed)
+                ? "A instalação terminou, mas o Motor " + expected + " ainda não respondeu. Abra o registro para conferir a inicialização."
+                : observed);
+#endif
+        }
     }
 
     // ====================== Design Tokens ====================================
@@ -222,15 +374,48 @@ namespace AutoEdit
         private int _animTick;
         private bool _finished;
         private string _lastBaseStatus = "Iniciando";
+        private readonly InstallerCompletion _completion = new InstallerCompletion();
+        private readonly Func<EngineHealthResult> _healthProbe;
+        private readonly object _diagnosticLock = new object();
+        private string _sessionLogPath;
+        private string _lastStderr = "";
+        private string _lastStatusLine;
+        private volatile bool _stdoutClosed;
+        private volatile bool _stderrClosed;
+        private volatile bool _healthRunning;
+        private EngineHealthResult _healthResult;
+        private DateTime _nextHealthProbe = DateTime.MinValue;
+        private ToolTip _detailsTip;
+        public int ResultCode { get; private set; }
 
         public InstallerForm(string tmp, string statusPath)
+            : this(tmp, statusPath, null)
+        { }
+
+        public InstallerForm(string tmp, string statusPath, Func<EngineHealthResult> healthProbe)
         {
             _tmp = tmp;
             _statusPath = statusPath;
+            _healthProbe = healthProbe ?? delegate { return InstallerEngineHealth.Check(_tmp); };
+            ResultCode = 1;
             _installDst = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 Brand.InstallDir);
             _logPath = Path.Combine(_installDst, "install.log");
+            try
+            {
+                Directory.CreateDirectory(_installDst);
+                _sessionLogPath = Path.Combine(_installDst, "install-ui-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Process.GetCurrentProcess().Id + ".log");
+                File.WriteAllText(_sessionLogPath, "Auto Edit installer diagnostics\r\n", Encoding.UTF8);
+            }
+            catch
+            {
+                string fallbackLogs = Path.Combine(Path.GetTempPath(), "AutoEditInstallerLogs");
+                Directory.CreateDirectory(fallbackLogs);
+                _sessionLogPath = Path.Combine(fallbackLogs, "install-ui-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Process.GetCurrentProcess().Id + ".log");
+                File.WriteAllText(_sessionLogPath, "Auto Edit installer diagnostics\r\n", Encoding.UTF8);
+            }
+            LogDiagnostic("setup", "Package: " + _tmp + "; status: " + _statusPath + "; PowerShell log: " + _logPath);
             BuildUi();
         }
 
@@ -441,7 +626,7 @@ namespace AutoEdit
 
             var version = new Label
             {
-                Text = "v3.0  ·  100% local",
+                Text = "v" + Assembly.GetExecutingAssembly().GetName().Version.ToString(3) + "  ·  local",
                 ForeColor = Theme.TextDim,
                 Font = new Font("Consolas", 9f, FontStyle.Regular),
                 AutoSize = true,
@@ -450,6 +635,16 @@ namespace AutoEdit
                 Location = new Point(PAD_X, footerY + 4),
             };
             Controls.Add(version);
+
+            var logsButton = MakeButton("Ver registro", 126, footerY);
+            logsButton.Left = PAD_X + 150;
+            logsButton.Click += delegate
+            {
+                try { Process.Start(new ProcessStartInfo("notepad.exe", "\"" + _sessionLogPath + "\"") { UseShellExecute = true }); }
+                catch (Exception ex) { MessageBox.Show("Registro: " + _sessionLogPath + "\r\n" + ex.Message, "Auto Edit"); }
+            };
+            Controls.Add(logsButton);
+            _detailsTip = new ToolTip { AutoPopDelay = 30000, InitialDelay = 300 };
 
             // Botão único "Finalizar" — primary violet, alinhado à direita.
             // Aparece SÓ quando termina (DONE ou ERR no status).
@@ -507,7 +702,7 @@ namespace AutoEdit
             Shown += delegate(object s, EventArgs e)
             {
                 LaunchPowerShell();
-                _tmr.Start();
+                if (!_finished) _tmr.Start();
             };
             FormClosing += delegate(object s, FormClosingEventArgs e)
             {
@@ -532,10 +727,8 @@ namespace AutoEdit
             string ps1 = Path.Combine(_tmp, "Instalar.ps1");
             if (!File.Exists(ps1))
             {
-                _statusLbl.Text = "Erro de extração";
-                _statusLbl.ForeColor = Theme.Danger;
-                _hintLbl.Text = "Arquivo de instalação não encontrado. Baixe novamente.";
-                _btnFinalize.Visible = true;
+                FinishInstallation(new InstallerDecision(InstallerCompletionState.Failure,
+                    "Arquivo de instalação não encontrado no pacote. Baixe o instalador novamente.", 2));
                 return;
             }
             var psi = new ProcessStartInfo
@@ -552,112 +745,160 @@ namespace AutoEdit
             };
             try
             {
-                _psProc = Process.Start(psi);
-                _psProc.OutputDataReceived += delegate { };
-                _psProc.ErrorDataReceived += delegate { };
+                _psProc = new Process { StartInfo = psi };
+                _psProc.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
+                {
+                    if (e.Data == null) _stdoutClosed = true;
+                    else LogDiagnostic("stdout", e.Data);
+                };
+                _psProc.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e)
+                {
+                    if (e.Data == null) _stderrClosed = true;
+                    else
+                    {
+                        if (!string.IsNullOrWhiteSpace(e.Data)) lock (_diagnosticLock) _lastStderr = e.Data;
+                        LogDiagnostic("stderr", e.Data);
+                    }
+                };
+                if (!_psProc.Start()) throw new InvalidOperationException("Não foi possível iniciar o processo de instalação.");
+                LogDiagnostic("setup", "PowerShell PID " + _psProc.Id);
                 _psProc.BeginOutputReadLine();
                 _psProc.BeginErrorReadLine();
             }
             catch (Exception ex)
             {
-                _statusLbl.Text = "Falhou ao iniciar";
-                _statusLbl.ForeColor = Theme.Danger;
-                _hintLbl.Text = ex.Message;
-                _btnFinalize.Visible = true;
+                LogDiagnostic("launch-error", ex.ToString());
+                FinishInstallation(new InstallerDecision(InstallerCompletionState.Failure,
+                    "Não foi possível iniciar o instalador: " + ex.Message, 1));
             }
         }
 
-        // ===== Status watcher =====
+        void LogDiagnostic(string source, string message)
+        {
+            lock (_diagnosticLock)
+            {
+                try { File.AppendAllText(_sessionLogPath, DateTime.UtcNow.ToString("o") + " [" + source + "] " + message + "\r\n", Encoding.UTF8); }
+                catch { /* Diagnostics must not replace the installation result. */ }
+            }
+        }
+
+        void FinishInstallation(InstallerDecision decision)
+        {
+            if (_finished) return;
+            _finished = true;
+            ResultCode = decision.State == InstallerCompletionState.Success ? 0 : (decision.ExitCode == 0 ? 1 : decision.ExitCode);
+            if (_tmr != null) _tmr.Stop();
+            var pct = (Label)Controls["progressPct"];
+            bool success = ResultCode == 0;
+            string message = decision.Message;
+            if (!success)
+            {
+                string stderr;
+                lock (_diagnosticLock) stderr = _lastStderr;
+                if (!string.IsNullOrWhiteSpace(stderr) && !message.Contains(stderr)) message += " " + stderr;
+                LogDiagnostic("result", "FAILED; exit=" + ResultCode + "; " + message);
+            }
+            else LogDiagnostic("result", "SUCCESS; " + message);
+            if (pct != null)
+            {
+                pct.Text = success ? "100%" : "Erro";
+                pct.ForeColor = success ? Theme.Violet : Theme.Danger;
+                pct.Left = PAD_X + CONTENT_W - pct.PreferredSize.Width;
+            }
+            if (success) _progress.Value = 1f;
+            _statusLbl.Text = success ? "Instalação concluída" : "Não foi possível concluir";
+            _statusLbl.ForeColor = success ? Theme.Text : Theme.Danger;
+            string compact = Regex.Replace(message, @"\s+", " ").Trim();
+            _hintLbl.Text = success ? "Motor pronto. Abra o Downloader no Auto Edit para continuar."
+                : (compact.Length > 185 ? compact.Substring(0, 185) + "…" : compact) + "\r\nVer registro mostra os detalhes desta instalação.";
+#if REMOVER
+            if (success) _hintLbl.Text = "Motor pronto. Abra o Smart Remover no Auto Edit para continuar.";
+#endif
+            if (_detailsTip != null) _detailsTip.SetToolTip(_hintLbl, message + "\r\nRegistro: " + _sessionLogPath);
+            _btnFinalize.Visible = true;
+        }
+
+        // The timer reads the terminal status BEFORE reconciling process exit.
+        // This handles DONE + exit 0 within one tick, atomic-file replacement,
+        // delayed stdout/stderr delivery, and an actually failed PowerShell.
         void OnTick(object sender, EventArgs e)
         {
+            if (_finished) return;
             _animTick++;
-            if (!_finished)
-            {
-                int dots = (_animTick / 4) % 4;
-                string suffix = new string('.', dots);
-                if (!string.IsNullOrEmpty(_lastBaseStatus))
-                    _statusLbl.Text = _lastBaseStatus + suffix;
-            }
-
-            // WATCHDOG: detecta PowerShell que crashou sem completar.
-            // User reportou "modal trava em Preparando 2% pra sempre".
-            // Causa raiz: PS pode falhar silencioso (EDR/AV bloqueia, ps1
-            // throw cedo, exec policy). Sem watchdog, status file fica em
-            // "2|Preparando" eterno e modal nunca mostra erro.
-            if (!_finished && _psProc != null && _psProc.HasExited)
-            {
-                int code = -1;
-                try { code = _psProc.ExitCode; } catch { }
-                _finished = true;
-                _tmr.Stop();
-                Label pct2 = (Label)Controls["progressPct"];
-                if (pct2 != null) { pct2.Text = "Erro"; pct2.ForeColor = Theme.Danger; }
-                _statusLbl.Text = "Instalação interrompida";
-                _statusLbl.ForeColor = Theme.Danger;
-                _hintLbl.Text = "PowerShell encerrou inesperadamente (exit code " + code +
-                    "). Possíveis causas: antivirus bloqueando, ExecutionPolicy restrita, " +
-                    "ou Instalar.ps1 com erro. Tente rodar como administrador.";
-                _btnFinalize.Visible = true;
-                return;
-            }
-
             string line = null;
             try
             {
-                if (File.Exists(_statusPath))
-                    line = File.ReadAllText(_statusPath).Trim();
+                using (var stream = new FileStream(_statusPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = new StreamReader(stream, Encoding.UTF8, true)) line = reader.ReadToEnd().Trim();
             }
-            catch { }
-            if (string.IsNullOrEmpty(line)) return;
-
-            var idx = line.IndexOf('|');
-            if (idx < 0) return;
-            var head = line.Substring(0, idx);
-            var msg = idx + 1 < line.Length ? line.Substring(idx + 1) : "";
-
-            Label pct = (Label)Controls["progressPct"];
-
-            // Helper local pra re-alinhar o pct à direita após mudar texto
-            Action realignPct = delegate
+            catch (IOException) { /* A replacing writer can briefly hide/lock the file. */ }
+            catch (UnauthorizedAccessException ex) { LogDiagnostic("status-read", ex.Message); }
+            if (!string.IsNullOrEmpty(line) && line != _lastStatusLine)
             {
-                if (pct != null)
-                    pct.Left = PAD_X + CONTENT_W - pct.PreferredSize.Width;
-            };
-
-            if (head == "DONE")
-            {
-                _finished = true;
-                _tmr.Stop();
-                _progress.Value = 1f;
-                if (pct != null) { pct.Text = "100%"; pct.ForeColor = Theme.Violet; realignPct(); }
-                _statusLbl.Text = "Instalado e vinculado";
-                _statusLbl.ForeColor = Theme.Text;
-                _hintLbl.Text = Brand.DoneHint;
-                _btnFinalize.Visible = true;
+                _lastStatusLine = line;
+                LogDiagnostic("status", line);
             }
-            else if (head == "ERR")
+            bool exited = false;
+            int code = 0;
+            try
             {
-                _finished = true;
-                _tmr.Stop();
-                if (pct != null) { pct.Text = "Erro"; pct.ForeColor = Theme.Danger; realignPct(); }
-                _statusLbl.Text = "Algo deu errado";
-                _statusLbl.ForeColor = Theme.Danger;
-                _hintLbl.Text = msg.Length > 220 ? msg.Substring(0, 220) + "…" : msg;
-                _btnFinalize.Visible = true;
+                exited = _psProc != null && _psProc.HasExited;
+                if (exited) code = _psProc.ExitCode;
             }
-            else
+            catch (InvalidOperationException ex)
             {
-                int p;
-                if (int.TryParse(head, out p))
+                FinishInstallation(new InstallerDecision(InstallerCompletionState.Failure,
+                    "Não foi possível acompanhar o processo de instalação: " + ex.Message, 1));
+                return;
+            }
+            EngineHealthResult health;
+            lock (_diagnosticLock) health = _healthResult;
+            InstallerDecision decision = _completion.Observe(line, exited, code,
+                _stdoutClosed && _stderrClosed, health, DateTime.UtcNow);
+            if (decision.State == InstallerCompletionState.Success || decision.State == InstallerCompletionState.Failure)
+            {
+                FinishInstallation(decision);
+                return;
+            }
+            if (decision.State == InstallerCompletionState.Verifying)
+            {
+                if (!_healthRunning && DateTime.UtcNow >= _nextHealthProbe)
                 {
-                    _progress.Value = Math.Max(0.02f, Math.Min(1f, p / 100f));
-                    if (pct != null) { pct.Text = p + "%"; realignPct(); }
-                    _lastBaseStatus = msg.TrimEnd('.', ' ');
+                    _healthRunning = true;
+                    _nextHealthProbe = DateTime.UtcNow.AddSeconds(1);
+                    ThreadPool.QueueUserWorkItem(delegate
+                    {
+                        EngineHealthResult result;
+                        try { result = _healthProbe(); }
+                        catch (Exception ex) { result = new EngineHealthResult(false, "Não foi possível verificar o Motor: " + ex.Message); }
+                        lock (_diagnosticLock) _healthResult = result;
+                        LogDiagnostic("health", result.Detail);
+                        _healthRunning = false;
+                    });
                 }
             }
+            if (decision.State != InstallerCompletionState.Installing)
+            {
+                _lastBaseStatus = decision.Message;
+                _progress.Value = Math.Min(_progress.Value, 0.99f);
+                _hintLbl.Text = "Confirmando o resultado antes de finalizar. O registro permanece disponível abaixo.";
+            }
+            else if (!string.IsNullOrEmpty(line))
+            {
+                int divider = line.IndexOf('|');
+                int percent;
+                if (divider >= 0 && int.TryParse(line.Substring(0, divider), out percent))
+                {
+                    percent = Math.Max(0, Math.Min(99, percent));
+                    _progress.Value = Math.Max(0.02f, percent / 100f);
+                    var pct = (Label)Controls["progressPct"];
+                    if (pct != null) { pct.Text = percent + "%"; pct.Left = PAD_X + CONTENT_W - pct.PreferredSize.Width; }
+                    _lastBaseStatus = line.Substring(divider + 1).TrimEnd('.', ' ');
+                }
+            }
+            _statusLbl.Text = _lastBaseStatus + new string('.', (_animTick / 4) % 4);
         }
     }
-
     static class Setup
     {
         [STAThread]
@@ -700,14 +941,16 @@ namespace AutoEdit
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                int resultCode;
                 using (var form = new InstallerForm(tmp, statusPath))
                 {
                     Application.Run(form);
+                    resultCode = form.ResultCode;
                 }
 
                 try { File.Delete(statusPath); } catch { }
                 try { Directory.Delete(tmp, true); } catch { }
-                return 0;
+                return resultCode;
             }
             catch (Exception ex)
             {

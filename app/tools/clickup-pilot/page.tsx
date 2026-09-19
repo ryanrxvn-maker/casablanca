@@ -6968,7 +6968,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       if (entregou) {
         logHistory({
           tool: 'clickup-pilot',
-          title: `${adNameClean} entregue`,
+          title: `${rTaskName} entregue`,
           meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
           ref: refsDaEntregaPilot({
             taskId,
@@ -8072,7 +8072,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       if (entregou) {
         logHistory({
           tool: 'clickup-pilot',
-          title: `${adNameClean} entregue`,
+          title: `${state.taskName} entregue`,
           meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
           ref: refsDaEntregaPilot({
             taskId,
@@ -13061,7 +13061,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           .map((p) => ({ label: p.renamedTo || p.label || 'take', videoId: p.videoId! }));
         logHistory({
           tool: 'clickup-pilot',
-          title: `${adNameClean} (VA) entregue`,
+          title: `${a.taskName} (VA) entregue`,
           meta: `${okAvas} avatares`,
           ref: [
             { via: 'zip', key: `va:${taskId}:zip`, name: zipName, label: 'ZIP VA', taskId },
@@ -13467,7 +13467,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           .map((p) => ({ label: p.renamedTo || p.label || 'take', videoId: p.videoId! }));
         logHistory({
           tool: 'clickup-pilot',
-          title: `${adNameClean} (VA) entregue`,
+          title: `${a.taskName} (VA) entregue`,
           meta: `${okCount} avatares · texto`,
           ref: [
             { via: 'zip', key: `va:${taskId}:zip`, name: zipName, label: 'ZIP VA', taskId },

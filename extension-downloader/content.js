@@ -81,334 +81,119 @@
     return null;
   }
 
-  let btn, toastEl;
-  // Marca que o download REALMENTE comecou: o background so emite
-  // 'darko-dl-progress' depois de chamar chrome.downloads.download. Sem
-  // isso nao afirmamos "iniciou" (era a mentira do toast otimista).
-  let gotProgress = false;
 
-  // SVG do ícone de download (seta pra baixo) — gradient violet
-  const DOWNLOAD_SVG = `
-    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="dl-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#e9d5ff"/>
-          <stop offset="50%" stop-color="#c084fc"/>
-          <stop offset="100%" stop-color="#a78bfa"/>
-        </linearGradient>
-        <filter id="dl-glow">
-          <feGaussianBlur stdDeviation="1.2"/>
-        </filter>
-      </defs>
-      <path d="M12 3v13" stroke="url(#dl-grad)" stroke-width="2.4" stroke-linecap="round"/>
-      <path d="M6 12l6 6 6-6" stroke="url(#dl-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M4 21h16" stroke="url(#dl-grad)" stroke-width="2.4" stroke-linecap="round"/>
-    </svg>
-  `;
-
+  let btn, toastEl, currentJobId, pollTimer, buttonStateTimer;
+  const DOWNLOAD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg>';
+  const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12.5 4.2 4.2L19 7"/></svg>';
+  const ERROR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 7v6m0 4h.01"/></svg>';
   function ensureButton() {
     if (btn) return btn;
     btn = document.createElement('button');
-    btn.id = 'darko-dl-btn';
-    btn.type = 'button';
-    btn.setAttribute('aria-label', 'Baixar');
-    btn.title = 'Baixar com Auto Edit';
-    btn.dataset.state = 'idle';
-
-    // Halo de fundo (glow pulsante)
-    const halo = document.createElement('span');
-    halo.className = 'd-halo';
-
-    // Anel rotativo (idle)
-    const ring = document.createElement('span');
-    ring.className = 'd-ring';
-
-    // Núcleo do botão (com ícone SVG dentro)
-    const core = document.createElement('span');
-    core.className = 'd-core';
-    core.innerHTML = DOWNLOAD_SVG;
-
-    // Anel de progresso (download em andamento)
-    const prog = document.createElement('span');
-    prog.className = 'd-prog';
-    prog.style.setProperty('--p', '0');
-
-    // Label percentual
-    const pct = document.createElement('span');
-    pct.className = 'd-pct';
-
-    btn.appendChild(halo);
-    btn.appendChild(ring);
-    btn.appendChild(core);
-    btn.appendChild(prog);
-    btn.appendChild(pct);
+    btn.id = 'darko-dl-btn'; btn.type = 'button'; btn.dataset.state = 'idle';
+    btn.title = 'Baixar este vídeo com Auto Edit';
+    btn.setAttribute('aria-label', 'Baixar este vídeo com Auto Edit');
+    btn.innerHTML = `<span class="d-orbit" aria-hidden="true"></span><span class="d-core" aria-hidden="true"><span class="d-icon d-download">${DOWNLOAD_SVG}</span><span class="d-icon d-success">${CHECK_SVG}</span><span class="d-icon d-error">${ERROR_SVG}</span></span>`;
     btn.addEventListener('click', onClick);
     document.documentElement.appendChild(btn);
     return btn;
   }
-
-  function setProgress(p) {
-    if (!btn) return;
-    const prog = btn.querySelector('.d-prog');
-    const lbl = btn.querySelector('.d-pct');
-    if (!prog || !lbl) return;
-    if (p < 0) {
-      // tamanho desconhecido — anel indeterminado, sem %
-      btn.dataset.prog = 'indet';
-      lbl.textContent = '';
-      prog.style.setProperty('--p', '0');
-      return;
+  function setButton(state, label, pct = -1) {
+    ensureButton();
+    clearTimeout(buttonStateTimer);
+    btn.dataset.state = state;
+    btn.disabled = state === 'loading';
+    btn.setAttribute('aria-busy', String(state === 'loading'));
+    btn.setAttribute('aria-label', label + ' com Auto Edit');
+    btn.title = label + ' · Auto Edit';
+    btn.dataset.progress = pct >= 0 ? 'known' : 'unknown';
+    btn.style.setProperty('--progress-angle', `${Math.max(0, pct) * 3.6}deg`);
+    if (state === 'ok') {
+      buttonStateTimer = setTimeout(() => {
+        if (btn?.dataset.state === 'ok') setButton('idle', 'Baixar este vídeo');
+      }, 5000);
     }
-    btn.dataset.prog = 'on';
-    prog.style.setProperty('--p', String(p));
-    lbl.textContent = p >= 100 ? '' : p + '%';
   }
-  function clearProgress() {
-    if (!btn) return;
-    btn.dataset.prog = '';
-    const lbl = btn.querySelector('.d-pct');
-    if (lbl) lbl.textContent = '';
-  }
-
-  // Recebe progresso REAL do background (chrome.downloads): anel + %
-  // mostram que o download disparou e quanto falta ate subir na barra.
-  try {
-    chrome.runtime.onMessage.addListener((m) => {
-      if (!m || m.type !== 'darko-dl-progress') return;
-      const pct = typeof m.pct === 'number' ? m.pct : -1;
-      if (m.state === 'complete') {
-        gotProgress = true;
-        setProgress(100);
-        setTimeout(clearProgress, 1200);
-      } else if (m.state === 'interrupted') {
-        clearProgress();
-      } else {
-        gotProgress = true; // download registrou de verdade
-        setProgress(pct);
-      }
-    });
-  } catch {
-    /* contexto invalido */
-  }
-
-  function toast(msg, kind) {
+  function toast(text, kind = '') {
     if (!toastEl) {
-      toastEl = document.createElement('div');
-      toastEl.id = 'darko-dl-toast';
+      toastEl = document.createElement('div'); toastEl.id = 'darko-dl-toast';
+      toastEl.setAttribute('role', 'status'); toastEl.setAttribute('aria-live', 'polite');
       document.documentElement.appendChild(toastEl);
     }
-    toastEl.textContent = msg;
-    toastEl.className = kind || '';
-    toastEl.style.opacity = '1';
-    clearTimeout(toastEl._t);
-    toastEl._t = setTimeout(() => {
-      toastEl.style.opacity = '0';
-    }, 5000);
+    toastEl.textContent = text; toastEl.className = kind; toastEl.dataset.visible = 'true';
+    clearTimeout(toastEl._timer);
+    toastEl._timer = setTimeout(() => { toastEl.dataset.visible = 'false'; }, kind === 'err' ? 12000 : 5000);
   }
-
-  function setBtn(state) {
-    if (!btn) return;
-    btn.dataset.state = state;
-    if (state === 'loading') {
-      btn.title = 'Baixando…';
-      btn.disabled = true;
-    } else if (state === 'ok') {
-      btn.title = 'Pronto!';
-      btn.disabled = false;
-      setTimeout(() => setBtn('idle'), 2600);
-    } else if (state === 'err') {
-      btn.title = 'Erro';
-      btn.disabled = false;
-      setTimeout(() => setBtn('idle'), 3000);
-    } else {
-      btn.title = 'Baixar';
-      btn.disabled = false;
-    }
-  }
-
-  // ── Instagram: baixa DENTRO da sessão logada ─────────────────────
-  // Desde 2026 o Instagram não serve mais mídia pra acesso anônimo
-  // (headless do motor e yt-dlp sem cookies recebem "empty media
-  // response"). O caminho confiável é a própria aba logada do usuário:
-  // media_id da página → API interna do IG (mesma sessão) →
-  // video_versions (mp4 progressivo COM áudio) → baixa do CDN aqui
-  // mesmo, com progresso no anel. Se qualquer passo falhar, cai no
-  // fluxo antigo pelo motor — nada do que funciona muda.
-  const IG_APP_ID = '936619743392459'; // app id oficial do web client
-
-  function igShortcode() {
-    const m = location.pathname.match(/\/(?:reel|reels|p|tv)\/([\w-]+)/);
-    return m ? m[1] : null;
-  }
-
-  async function resolveInstagramMp4() {
-    const tmo = (ms) =>
-      typeof AbortSignal !== 'undefined' && AbortSignal.timeout
-        ? AbortSignal.timeout(ms)
-        : undefined;
-    // HTML fresco do permalink (server-render logado) → media_id do post.
-    // al:ios:url aponta SEMPRE pro post principal; "media_id" é fallback.
-    const html = await fetch(location.href, {
-      credentials: 'include',
-      signal: tmo(20000),
-    }).then((r) => r.text());
-    const mid =
-      (html.match(/instagram:\/\/media\?id=(\d+)/) || [])[1] ||
-      (html.match(/"media_id":"(\d+)"/) || [])[1];
-    if (!mid) return null;
-    const r = await fetch(`${location.origin}/api/v1/media/${mid}/info/`, {
-      credentials: 'include',
-      headers: { 'x-ig-app-id': IG_APP_ID },
-      signal: tmo(20000),
+  function message(data) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('A extensão demorou para responder. Abra a extensão para conferir a fila.')), 12000);
+      try { chrome.runtime.sendMessage(data, result => {
+        clearTimeout(timer); const error = chrome.runtime.lastError;
+        if (error) reject(new Error('A extensão foi atualizada. Recarregue esta página para continuar.'));
+        else resolve(result);
+      }); } catch { clearTimeout(timer); reject(new Error('Recarregue esta página para conectar a extensão atualizada.')); }
     });
-    if (!r.ok) return null;
-    const item = (((await r.json()) || {}).items || [])[0];
-    const best = (it) =>
-      it && it.video_versions && it.video_versions.length
-        ? [...it.video_versions].sort(
-            (a, b) => (b.width || 0) - (a.width || 0),
-          )[0].url
-        : null;
-    let url = best(item);
-    if (!url && item && item.carousel_media) {
-      for (const cm of item.carousel_media) {
-        url = best(cm);
-        if (url) break;
-      }
-    }
-    return url || null;
   }
-
-  async function instagramDirectDownload() {
-    try {
-      const url = await resolveInstagramMp4();
-      if (!url) return false;
-      const resp = await fetch(url);
-      if (!resp.ok || !resp.body) return false;
-      const total = Number(resp.headers.get('content-length')) || 0;
-      const reader = resp.body.getReader();
-      const chunks = [];
-      let recv = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        recv += value.byteLength;
-        setProgress(
-          total > 0 ? Math.min(99, Math.floor((recv / total) * 100)) : -1,
-        );
-      }
-      if (recv < 80_000) return false; // lixo/erro — deixa o motor tentar
-      const blob = new Blob(chunks, { type: 'video/mp4' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `instagram-${igShortcode() || Date.now()}.mp4`;
-      document.documentElement.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
-      setProgress(100);
-      setTimeout(clearProgress, 1200);
-      setBtn('ok');
-      toast('Download iniciado!', 'ok');
-      return true;
-    } catch {
-      return false;
+  const phaseLabels = { queued: 'Na fila', preparing: 'Baixando da fonte', resolving: 'Localizando', reconnecting: 'Reconectando', retrying: 'Tentando novamente', saving: 'Salvando' };
+  function progress(job) {
+    if (!job || (job.id !== currentJobId && job.jobId !== currentJobId)) return;
+    if (job.state === 'complete') {
+      clearInterval(pollTimer); currentJobId = null;
+      setButton('ok', 'Arquivo salvo', 100);
+      toast('Download concluído. O arquivo está na sua pasta de downloads.', 'ok');
+    } else if (['error', 'canceled'].includes(job.state)) {
+      clearInterval(pollTimer); currentJobId = null;
+      setButton('err', 'Tentar novamente');
+      toast(job.error || 'Não foi possível concluir este download.', 'err');
+    } else {
+      const label = job.pct >= 0 ? `Salvando · ${job.pct}%` : phaseLabels[job.phase] || 'Baixando da fonte';
+      setButton('loading', label, job.pct);
     }
   }
-
+  function follow(job) {
+    currentJobId = job.id; progress(job); clearInterval(pollTimer);
+    if (!currentJobId) return;
+    pollTimer = setInterval(async () => {
+      try { const response = await message({ type: 'darko-job', jobId: currentJobId }); if (response?.job) progress(response.job); }
+      catch { /* Closing/restarting the worker does not lose the persistent job. */ }
+    }, 2500);
+  }
+  try { chrome.runtime.onMessage.addListener(msg => { if (msg?.type === 'darko-dl-progress') progress(msg); }); } catch {}
   async function onClick() {
-    const t = videoTarget();
-    if (!t) {
-      toast('Abra um vídeo para baixar.', 'err');
-      return;
-    }
-    if (!t.adult && /(^|\.)instagram\.com$/.test(host)) {
-      setBtn('loading');
-      setProgress(-1);
-      toast('Enviando…', '');
-      if (await instagramDirectDownload()) return;
-      clearProgress(); // falhou o caminho direto → segue pelo motor
-    }
-    setBtn('loading');
-    setProgress(-1); // anel indeterminado ate chegar % real
-    toast('Enviando…', '');
-    gotProgress = false;
-    let done = false;
-    // Fallback de UI: o background so responde quando o download TERMINA
-    // (pode levar minutos), entao damos feedback antes. Mas so afirmamos
-    // "iniciou" se recebemos progresso REAL — se nada chegou, o motor
-    // provavelmente esta fora e o texto e honesto (nao mente mais).
-    const timeout = setTimeout(() => {
-      if (done) return;
-      done = true;
-      if (gotProgress) {
-        setBtn('ok');
-        toast('Baixando… veja a barra de downloads.', 'ok');
-      } else {
-        setBtn('idle');
-        toast(
-          'Ainda processando… se não baixar, clique em ↻ na extensão.',
-          '',
-        );
-      }
-    }, 6000);
-    chrome.runtime.sendMessage(
-      {
-        type: 'darko-download',
-        url: t.url,
-        mode: 'video',
-        quality: '1080',
-        adult: t.adult === true,
-      },
-      (resp) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timeout);
-        if (chrome.runtime.lastError) {
-          setBtn('err');
-          toast('Extensão não respondeu. Recarregue a página.', 'err');
-          return;
-        }
-        if (resp && resp.ok) {
-          setBtn('ok');
-          toast('Download iniciado!', 'ok');
-        } else {
-          setBtn('err');
-          toast((resp && resp.error) || 'Falha no download.', 'err');
-        }
-      },
-    );
+    const target = videoTarget(); if (!target || currentJobId) return;
+    setButton('loading', 'Adicionando');
+    try {
+      const response = await message({ type: 'darko-enqueue', reqId: crypto.randomUUID(), url: target.url,
+        mode: 'video', quality: '1080', adult: target.adult === true });
+      if (!response?.ok) throw new Error(response?.error || 'Não foi possível adicionar este download.');
+      follow(response.job);
+      if (currentJobId) toast('Adicionado à fila. Você pode continuar navegando.');
+    } catch (error) { setButton('err', 'Tentar novamente'); toast(error.message, 'err'); }
   }
-
-  function refresh() {
-    const isVideo = !!videoTarget();
-    if (isVideo) {
-      ensureButton().style.display = 'flex';
-    } else if (btn) {
-      btn.style.display = 'none';
+  function normalizedUrl(input) {
+    try { const url = new URL(input); if (url.hostname.endsWith('youtube.com') && url.searchParams.has('v')) return `https://www.youtube.com/watch?v=${url.searchParams.get('v')}`; url.hash = ''; return url.href; } catch { return input; }
+  }
+  async function refresh() {
+    const target = videoTarget();
+    if (!target) { if (btn) btn.style.display = 'none'; return; }
+    ensureButton().style.display = 'flex';
+    if (!currentJobId) {
+      setButton('idle', 'Baixar este vídeo');
+      try {
+        const response = await message({ type: 'darko-jobs' });
+        const existing = response?.jobs?.find(job => !['complete', 'error', 'canceled'].includes(job.state) && normalizedUrl(job.url) === normalizedUrl(target.url));
+        if (existing) follow(existing);
+      } catch { /* Only surface connection errors on an explicit click. */ }
     }
   }
-
-  // SPA: YouTube/TikTok/Instagram trocam URL sem reload.
-  const fire = () => setTimeout(refresh, 300);
-  for (const m of ['pushState', 'replaceState']) {
-    const orig = history[m];
-    history[m] = function () {
-      const r = orig.apply(this, arguments);
-      window.dispatchEvent(new Event('darko-locchange'));
-      return r;
-    };
-  }
-  window.addEventListener('darko-locchange', fire);
-  window.addEventListener('popstate', fire);
   let last = location.href;
   setInterval(() => {
-    if (location.href !== last) {
-      last = location.href;
-      refresh();
-    }
+    if (location.href === last) return;
+    const sameVideo = normalizedUrl(location.href) === normalizedUrl(last);
+    last = location.href;
+    // YouTube cleans playlist/radio tracking while a download is active.
+    // Keep following that file when the actual video id has not changed.
+    if (!sameVideo) { currentJobId = null; clearInterval(pollTimer); refresh(); }
   }, 1000);
-
+  window.addEventListener('popstate', refresh);
   refresh();
 })();

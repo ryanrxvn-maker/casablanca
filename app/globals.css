@@ -2247,7 +2247,7 @@ html[data-theme='light'] .hist-fab__label {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(100vw, 560px);
+  width: min(100vw, 640px);
   height: 100%;
   border-left: 1px solid rgb(var(--line-strong));
   background: linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)));
@@ -2362,9 +2362,10 @@ html[data-theme='light'] .hist-fab__label {
     inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 .hist-row__titulo {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-size: 12.8px;
   font-weight: 600;
   line-height: 1.25;
@@ -2538,7 +2539,7 @@ html[data-theme='light'] .hist-row__icone {
 .hist-seg__item--on b {
   opacity: 0.9;
 }
-/* Segunda linha de filtros: DATA e ORIGEM do disparo (Pilot/Creator/Docs).
+/* Segunda linha de filtros: DATA e ORIGEM do disparo (Creator/Docs/ClickUp).
    Só aparece quando tem o que filtrar — filtro morto vira ruído. */
 .hist-filtros2 {
   display: flex;
@@ -2554,50 +2555,93 @@ html[data-theme='light'] .hist-row__icone {
 }
 .hist-fchips {
   display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.24);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
 }
 .hist-fchip {
+  --hist-origem: #a78bfa;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  border-radius: 999px;
-  padding: 5px 11px;
+  gap: 7px;
+  min-height: 30px;
+  border-radius: 9px;
+  padding: 5px 9px;
   font-family: var(--font-tech);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: rgb(var(--text-dim));
-  background: rgba(0, 0, 0, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
   transition:
     transform 0.3s var(--hist-mola),
     background 0.2s ease,
     color 0.2s ease,
     box-shadow 0.2s ease;
 }
+.hist-fchip[data-origem='creator'] { --hist-origem: #c084fc; }
+.hist-fchip[data-origem='docs'] { --hist-origem: #22d3ee; }
+.hist-fchip[data-origem='clickup'] { --hist-origem: #fb7185; }
+.hist-fchip__sinal {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--hist-origem);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--hist-origem) 65%, transparent);
+  opacity: 0.72;
+}
 .hist-fchip b {
+  min-width: 20px;
+  border-radius: 6px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.055);
+  text-align: center;
   font-variant-numeric: tabular-nums;
-  opacity: 0.6;
+  opacity: 0.72;
 }
 .hist-fchip:hover {
   color: rgb(var(--text-muted));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
 }
 .hist-fchip--on {
   color: #fff;
-  background: linear-gradient(180deg, rgba(167, 139, 250, 0.26), rgba(124, 58, 237, 0.12));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--hist-origem) 22%, rgba(255, 255, 255, 0.05)),
+    color-mix(in srgb, var(--hist-origem) 10%, transparent)
+  );
   box-shadow:
-    inset 0 0 0 1px rgba(196, 181, 253, 0.5),
+    inset 0 0 0 1px color-mix(in srgb, var(--hist-origem) 48%, rgba(255, 255, 255, 0.08)),
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 6px 16px -10px rgba(139, 92, 246, 0.9);
+    0 8px 18px -12px var(--hist-origem);
 }
+.hist-fchip--on .hist-fchip__sinal { opacity: 1; }
 .hist-fchip--on b {
   opacity: 0.9;
 }
+.hist-fchip:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+.hist-fchip:disabled:hover {
+  color: rgb(var(--text-dim));
+  background: transparent;
+  box-shadow: inset 0 0 0 1px transparent;
+}
 html[data-theme='light'] .hist-fchip {
-  background: rgba(16, 16, 24, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.12);
+  color: rgba(16, 16, 24, 0.62);
+}
+html[data-theme='light'] .hist-fchips {
+  background: rgba(16, 16, 24, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.1);
 }
 html[data-theme='light'] .hist-filtros2 {
   border-bottom-color: rgba(16, 16, 24, 0.08);
@@ -2791,7 +2835,7 @@ html[data-theme='light'] .hist-chip {
 }
 .hist-row__topo .hist-row__titulo {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
 }
 /* Chip de CANAL (YOUTUBE/META/KWAI) — mesma leitura do card da fila do Pilot.
    A cor vem do ClickUp, então o contraste do texto é calculado no componente. */

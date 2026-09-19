@@ -21,13 +21,15 @@ import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import { processDownload, type Mode, type Quality } from '../lib/downloader-core';
+import { DownloadJobs } from './jobs';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.1';
 const DEFAULT_PORT = 47923;
 
 type Config = { token: string; port: number; allowAdult: boolean };
 
 function configDir(): string {
+  if (process.env.AUTOEDIT_ENGINE_CONFIG_DIR) return path.resolve(process.env.AUTOEDIT_ENGINE_CONFIG_DIR);
   const base =
     process.platform === 'win32'
       ? process.env.LOCALAPPDATA || os.homedir()
@@ -81,7 +83,7 @@ function cors(res: http.ServerResponse, origin: string | undefined) {
   if (isExtensionOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin as string);
     res.setHeader('Access-Control-Allow-Headers', 'authorization,content-type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,OPTIONS');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
 }
@@ -100,10 +102,23 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 
 async function main() {
   const cfg = await loadConfig();
+  const jobs = new DownloadJobs(path.join(configDir(), 'jobs'));
+  await jobs.init();
+  setInterval(() => { void jobs.prune().catch(console.error); }, 60_000).unref();
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer((req, res) => {
+    void handle(req, res).catch((error) => {
+      console.error('[engine] request failed:', error instanceof Error ? error.message : error);
+      if (res.headersSent) return res.destroy();
+      res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ error: 'Não foi possível concluir o pedido. Tente novamente.' }));
+    });
+  });
+  async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
     const origin = req.headers.origin;
     cors(res, origin);
+    res.setHeader('cache-control', 'no-store');
+    res.setHeader('x-content-type-options', 'nosniff');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -120,6 +135,7 @@ async function main() {
           ok: true,
           app: 'darkolab-downloader-engine',
           version: VERSION,
+          capabilities: ['download-jobs-v1'],
           allowAdult: cfg.allowAdult,
         }),
       );
@@ -141,6 +157,7 @@ async function main() {
           port: cfg.port,
           allowAdult: cfg.allowAdult,
           version: VERSION,
+          capabilities: ['download-jobs-v1'],
         }),
       );
     }
@@ -154,6 +171,80 @@ async function main() {
       } catch {
         return false;
       }
+    }
+
+    if (url.pathname === '/jobs' || url.pathname.startsWith('/jobs/')) {
+      const fileRequest = /^\/jobs\/([a-f0-9-]{36})\/file$/.exec(url.pathname);
+      const tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || (fileRequest ? url.searchParams.get('t') || '' : '');
+      if (!tokenOk(tok) || (origin && !isExtensionOrigin(origin))) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Conexão expirada. Reconecte a extensão.' }));
+      }
+      if (req.method === 'POST' && url.pathname === '/jobs') {
+        let b: { url?: unknown; mode?: Mode; quality?: Quality; adult?: boolean; requestId?: unknown };
+        try { b = JSON.parse(await readBody(req)); }
+        catch { res.writeHead(400); return res.end(JSON.stringify({ error: 'Pedido inválido.' })); }
+        if (!b || typeof b.url !== 'string' || typeof b.requestId !== 'string' || !b.requestId || b.requestId.length > 160) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Link ou identificador de download inválido.' }));
+        }
+        if (b.adult && !cfg.allowAdult) {
+          res.writeHead(403, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'O modo +18 está desativado neste Motor.' }));
+        }
+        try {
+          const job = await jobs.create({ url: b.url, mode: b.mode || 'video', quality: b.quality || '1080', adult: b.adult === true }, b.requestId);
+          res.writeHead(202, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify(jobs.public(job)));
+        } catch (e) {
+          res.writeHead(409, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'Não foi possível adicionar à fila.' }));
+        }
+      }
+      const match = /^\/jobs\/([a-f0-9-]{36})(?:\/file)?$/.exec(url.pathname);
+      const job = match ? jobs.get(match[1]) : undefined;
+      if (!job) {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Este download expirou. Inicie novamente.' }));
+      }
+      if (!fileRequest && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify(jobs.public(job)));
+      }
+      if (fileRequest && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (job.state !== 'ready' || !job.size || !job.mime) {
+          res.writeHead(409, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ error: job.error || 'O arquivo ainda está sendo preparado.' }));
+        }
+        let start = 0;
+        let end = job.size - 1;
+        if (req.headers.range) {
+          const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+          if (range && (range[1] || range[2])) {
+            start = range[1] ? Number(range[1]) : Math.max(0, job.size - Number(range[2]));
+            end = range[1] && range[2] ? Math.min(Number(range[2]), end) : end;
+          } else start = job.size;
+          if (start > end || start >= job.size) {
+            res.writeHead(416, { 'content-range': `bytes */${job.size}` });
+            return res.end();
+          }
+          res.setHeader('content-range', `bytes ${start}-${end}/${job.size}`);
+        }
+        res.writeHead(req.headers.range ? 206 : 200, {
+          'content-type': job.mime,
+          'content-length': String(end - start + 1),
+          'content-disposition': `attachment; filename="${(job.filename || 'download').replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(job.filename || 'download')}`,
+          'accept-ranges': 'bytes',
+        });
+        if (req.method === 'HEAD') return res.end();
+        const stream = createReadStream(jobs.filePath(job.id), { start, end });
+        res.on('close', () => stream.destroy());
+        stream.on('error', () => res.destroy());
+        stream.pipe(res);
+        return;
+      }
+      res.writeHead(405);
+      return res.end();
     }
 
     async function serve(params: {
@@ -287,7 +378,7 @@ async function main() {
 
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found' }));
-  });
+  }
 
   function announce() {
     // SEMPRE grava a config com o token/porta REAIS desta instancia —
@@ -297,16 +388,12 @@ async function main() {
       JSON.stringify({
         event: 'listening',
         port: cfg.port,
-        token: cfg.token,
         allowAdult: cfg.allowAdult,
         configDir: configDir(),
       }),
     );
     console.log(
       `\n[DarkoLab Downloader] motor rodando em http://127.0.0.1:${cfg.port}`,
-    );
-    console.log(
-      `[DarkoLab Downloader] CODIGO DE PAREAMENTO (cole na extensao):\n  ${cfg.token}\n`,
     );
   }
 

@@ -29,6 +29,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Chamado por Node/PowerShell 7, PSModulePath pode nao incluir os modulos
+# nativos do Windows PowerShell. Carregue o provedor Cert: explicitamente.
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+
 if (-not (Test-Path $Exe)) {
   Write-Host "[sign] ERRO: exe nao encontrado: $Exe"
   exit 1
@@ -46,6 +50,7 @@ $existing = Get-ChildItem Cert:\CurrentUser\My | Where-Object {
 } | Select-Object -First 1
 
 if (-not $existing) {
+  Import-Module (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules\PKI\pki.psd1') -ErrorAction Stop
   Write-Host "[sign] gerando novo cert self-signed (validade 5 anos)..."
   $existing = New-SelfSignedCertificate `
     -Subject "CN=$Subject" `
@@ -85,6 +90,12 @@ $result = Set-AuthenticodeSignature `
   -HashAlgorithm SHA256 `
   -TimestampServer 'http://timestamp.digicert.com'
 
+# WinTrust pode manter o digest anterior quando o mesmo .exe foi recompilado
+# ha instantes. Reassinar corrige essa condicao; hash invalido nunca e release.
+if ($result.Status -eq 'HashMismatch') {
+  $result = Set-AuthenticodeSignature -FilePath $Exe -Certificate $existing -HashAlgorithm SHA256 -TimestampServer 'http://timestamp.digicert.com'
+}
+
 if ($result.Status -ne 'Valid' -and $result.Status -ne 'UnknownError') {
   # 'UnknownError' aqui é normal pra self-signed (CA não confiada)
   # mas a assinatura está aplicada — só não é confiável globalmente.
@@ -94,6 +105,9 @@ if ($result.Status -ne 'Valid' -and $result.Status -ne 'UnknownError') {
 
 # Verifica
 $sig = Get-AuthenticodeSignature -FilePath $Exe
+if ($sig.Status -eq 'HashMismatch' -or -not $sig.SignerCertificate) {
+  throw 'A assinatura nao passou na verificacao. O instalador nao deve ser publicado.'
+}
 Write-Host "[sign] assinatura aplicada:"
 Write-Host "       Signer:    $($sig.SignerCertificate.Subject)"
 Write-Host "       Thumbprint: $($sig.SignerCertificate.Thumbprint)"

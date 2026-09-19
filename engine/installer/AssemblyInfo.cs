@@ -25,6 +25,12 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 [assembly: Guid("a9c8b7d2-3e4f-4a1b-9c8d-7e6f5a4b3c2d")]
 
+#if REMOVER
 [assembly: AssemblyVersion("3.0.0.0")]
 [assembly: AssemblyFileVersion("3.0.0.0")]
 [assembly: AssemblyInformationalVersion("3.0.0")]
+#else
+[assembly: AssemblyVersion("3.1.1.0")]
+[assembly: AssemblyFileVersion("3.1.1.0")]
+[assembly: AssemblyInformationalVersion("3.1.1 / engine 1.2.1")]
+#endif

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
           headers: {
             'content-type': 'application/javascript; charset=utf-8',
             'content-length': String(buf.length),
-            'cache-control': 'public, max-age=300',
+            'cache-control': 'no-store, max-age=0',
           },
         });
       } catch {
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
       headers: {
         // text/plain: o cliente le no navegador antes de rodar, se quiser.
         'content-type': 'text/plain; charset=utf-8',
-        'cache-control': 'public, max-age=300',
+        'cache-control': 'no-store, max-age=0',
       },
     });
   } catch (e) {

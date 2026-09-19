@@ -66,15 +66,10 @@ export function useFiltroDeOrigemEData(base: HistoryEvent[]): FiltroOrigemData {
     };
   }, [base, origem]);
 
-  // Só vale mostrar quando há de fato mais de uma procedência na lista.
+  // Basta haver um disparo: os três modos ficam sempre no mesmo lugar. Além de
+  // mais previsível, isto deixa explícito quando um modo está zerado.
   const mostrarOrigem = useMemo(() => {
-    const vistas = new Set<OrigemDoDisparo>();
-    for (const e of base) {
-      const o = origemDoEvento(e);
-      if (o) vistas.add(o);
-      if (vistas.size > 1) return true;
-    }
-    return false;
+    return base.some((e) => origemDoEvento(e) !== null);
   }, [base]);
 
   const escolherOrigem = useCallback((o: OrigemDoDisparo) => {
@@ -102,12 +97,12 @@ export function useFiltroDeOrigemEData(base: HistoryEvent[]): FiltroOrigemData {
 }
 
 const NOME_DA_ORIGEM: Record<OrigemDoDisparo, string> = {
-  clickup: 'Pilot',
+  clickup: 'ClickUp',
   creator: 'Creator',
   docs: 'Docs',
 };
 
-const ORDEM: OrigemDoDisparo[] = ['clickup', 'creator', 'docs'];
+const ORDEM: OrigemDoDisparo[] = ['creator', 'docs', 'clickup'];
 
 export function FiltrosDeOrigemEData({
   origem,
@@ -160,20 +155,26 @@ export function FiltrosDeOrigemEData({
 
       {mostrarOrigem ? (
         <div className="hist-fchips" role="group" aria-label="Filtrar pela origem do disparo">
-          {ORDEM.filter((o) => porOrigem[o] > 0 || origem === o).map((o) => (
+          {ORDEM.map((o) => (
             <button
               key={o}
               type="button"
               onClick={() => escolherOrigem(o)}
+              disabled={porOrigem[o] === 0 && origem !== o}
               aria-pressed={origem === o}
+              data-origem={o}
               title={
                 origem === o
                   ? 'Clique de novo pra tirar o filtro'
-                  : `Só o que veio do ${NOME_DA_ORIGEM[o]}`
+                  : porOrigem[o] === 0
+                    ? `Nenhuma task do ${NOME_DA_ORIGEM[o]} neste período`
+                    : `Só o que veio do ${NOME_DA_ORIGEM[o]}`
               }
               className={'hist-fchip' + (origem === o ? ' hist-fchip--on' : '')}
             >
-              {NOME_DA_ORIGEM[o]} <b>{porOrigem[o]}</b>
+              <i className="hist-fchip__sinal" aria-hidden />
+              <span>{NOME_DA_ORIGEM[o]}</span>
+              <b>{porOrigem[o]}</b>
             </button>
           ))}
         </div>

@@ -1,115 +1,35 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="popup.css" />
-  </head>
-  <body>
-    <!-- Atmosfera de fundo -->
-    <div class="bg-mesh" aria-hidden="true"></div>
-    <div class="bg-grid" aria-hidden="true"></div>
-
-    <header class="topbar">
-      <div class="brand">
-        <img src="icons/icon-32.png" alt="" class="brand-logo" />
-        <span class="brand-text">
-          <span class="brand-name">Auto Edit</span>
-          <span class="brand-sub">Downloader</span>
-        </span>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Auto Edit · Downloader</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icons/icon-32.png" alt="" width="32" height="32" /><div><strong>Auto Edit</strong><span>Downloader</span></div></div>
+    <button id="hardRefresh" class="connection" type="button" title="Verificar conexão com o Motor" aria-label="Verificar conexão com o Motor"><i id="engineDot" class="dot"></i><span id="engineLabel">Conectando</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7"/></svg></button>
+  </header>
+  <main>
+    <section id="updateBox" class="notice hidden" aria-live="polite"><strong>Uma versão melhor está disponível</strong><p>Atualize a extensão para receber as últimas correções.</p><a id="extensionUpdate" href="https://www.darkoautoedit.com/tools/downloader?setup=extension" target="_blank" rel="noopener">Atualizar extensão <span aria-hidden="true">↗</span></a></section>
+    <section id="noEngine" class="notice hidden" aria-live="polite"><strong id="engineTitle">Abra o Motor para conectar</strong><p id="engineHelp">Abra Auto Edit Downloader no menu Iniciar. A conexão será refeita automaticamente.</p><a id="engineSetup" href="https://www.darkoautoedit.com/tools/downloader?setup=motor" target="_blank" rel="noopener">Instalar Motor <span aria-hidden="true">↗</span></a></section>
+    <section class="composer" aria-label="Novo download">
+      <div class="section-heading"><h1>Seu próximo download</h1><span id="linkCount">01 — Links</span></div>
+      <label class="sr-only" for="urls">Links dos vídeos, um por linha</label>
+      <textarea id="urls" rows="3" spellcheck="false" placeholder="Cole o link do vídeo aqui&#10;Para baixar vários, use um link por linha."></textarea>
+      <div id="inputError" class="input-error hidden" role="alert"></div>
+      <div class="options">
+        <fieldset><legend>Formato</legend><div id="modes" class="segments"><button type="button" data-v="video" class="on" aria-pressed="true">Vídeo</button><button type="button" data-v="audio-mp3" aria-pressed="false">MP3</button><button type="button" data-v="audio-wav" aria-pressed="false">WAV</button></div></fieldset>
+        <fieldset><legend>Qualidade <span id="audioHint" class="hidden">do áudio original</span></legend><div id="quals" class="segments"><button type="button" data-v="1080" class="on" aria-pressed="true">1080p</button><button type="button" data-v="720" aria-pressed="false">720p</button><button type="button" data-v="480" aria-pressed="false">480p</button><button type="button" data-v="best" aria-pressed="false">Máx.</button></div></fieldset>
       </div>
-      <div class="status">
-        <span id="engineDot" class="dot off" title="Motor"></span>
-        <span id="engineLabel">Conectando</span>
-        <button
-          id="hardRefresh"
-          class="reconnect-btn"
-          type="button"
-          title="Reconectar (força reconexão limpa)"
-          aria-label="Reconectar"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-            <path d="M21 3v6h-6" />
-          </svg>
-        </button>
-      </div>
-    </header>
-
-    <main>
-      <section id="appBox" class="hidden">
-        <label class="lbl">Links · um por linha</label>
-        <textarea
-          id="urls"
-          rows="4"
-          placeholder="https://youtube.com/watch?v=...
-https://tiktok.com/@user/video/...
-https://instagram.com/reel/..."
-        ></textarea>
-
-        <div class="grid">
-          <div>
-            <label class="lbl">Formato</label>
-            <div id="modes" class="chips">
-              <button data-v="video" class="chip on">Vídeo</button>
-              <button data-v="audio-mp3" class="chip">MP3</button>
-              <button data-v="audio-wav" class="chip">WAV</button>
-            </div>
-          </div>
-          <div>
-            <label class="lbl">Qualidade</label>
-            <div id="quals" class="chips">
-              <button data-v="1080" class="chip on">1080p</button>
-              <button data-v="720" class="chip">720p</button>
-              <button data-v="480" class="chip">480p</button>
-              <button data-v="best" class="chip">Máx</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="adult-row">
-          <button id="adultBtn" class="adult" title="Modo +18">+18</button>
-        </div>
-        <div id="adultList" class="adultlist hidden"></div>
-
-        <!-- Botão de download com loop de fumaça -->
-        <button id="go" class="download-btn">
-          <span class="download-btn-glow" aria-hidden="true"></span>
-          <span class="download-btn-smoke" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-          <span class="download-btn-content">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3v12" />
-              <path d="M7 10l5 5 5-5" />
-              <path d="M5 21h14" />
-            </svg>
-            <span>Baixar</span>
-          </span>
-        </button>
-
-        <div id="jobs" class="jobs"></div>
-      </section>
-
-      <section id="noEngine" class="card hidden">
-        <p class="muted">
-          <span class="d-dot-pulse"></span>
-          <b>Conectando ao motor…</b><br />
-          O Auto Edit Downloader sobe junto com o Windows e a extensão
-          se conecta sozinha — sem pareamento manual. Se não subir,
-          abra <b>AutoEditDownloader.cmd</b>,
-          <a id="retry" href="#">tente de novo</a>
-          ou <a id="reloadExt" href="#">recarregue a extensão</a>.
-        </p>
-      </section>
-    </main>
-    <script src="popup.js"></script>
-  </body>
+      <div class="pre-download"><span>Salvo na sua pasta de downloads</span><button id="adultBtn" class="adult" type="button" aria-pressed="false" title="Ativar modo +18">+18</button></div>
+      <button id="go" class="download-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4"/></svg><span id="goLabel">Baixar arquivo</span><span class="key-hint" aria-hidden="true">↓</span></button>
+      <p class="continuity">Pode fechar esta janela. A fila continua por aqui.</p>
+    </section>
+    <section class="queue" aria-label="Fila de downloads"><div class="queue-heading"><h2>Downloads <span id="jobCount">0</span></h2><button id="clearJobs" class="text-btn hidden" type="button">Limpar concluídos</button></div><div id="jobs"></div><div id="emptyState" class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 5h16v15H4zM8 2v6m8-6v6M8 13h8m-8 4h5"/></svg><div><strong>Sua fila começa aqui</strong><p>Acompanhe cada arquivo até ele ser salvo.</p></div></div></section>
+  </main>
+  <footer><span id="version"></span><a href="https://www.darkoautoedit.com/tools/downloader" target="_blank" rel="noopener">Abrir no Auto Edit <span aria-hidden="true">↗</span></a></footer>
+  <script src="download-utils.js"></script><script src="popup.js"></script>
+</body>
 </html>

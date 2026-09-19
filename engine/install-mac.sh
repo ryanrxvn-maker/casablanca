@@ -119,11 +119,9 @@ fetch() {
        --progress-bar -o "$2" "$1"
 }
 
-# ------------------------------------------------- 1. parar motor antigo
+# ------------------------------------------------- 1. preparar sem parar
 step "Preparando..."
-launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 \
-  || launchctl unload -w "$PLIST" >/dev/null 2>&1 || true
-mkdir -p "$BASE/bin" "$BASE/node" "$HOME/Library/LaunchAgents" || fatal "sem permissao de escrita em $BASE"
+mkdir -p "$TMP/staged/bin" "$TMP/staged/node" "$BASE" "$HOME/Library/LaunchAgents" || fatal "sem permissao de escrita em $BASE"
 good "pasta pronta"
 
 # ------------------------------------------------------------ 2. Node
@@ -132,17 +130,24 @@ NODE_TGZ="$TMP/node.tar.gz"
 NODE_URL="https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-$ARCH.tar.gz"
 fetch "$NODE_URL" "$NODE_TGZ" || fatal "nao consegui baixar o Node ($NODE_URL)"
 # so o binario interessa - npm/lib nao sao usados pelo motor
-tar -xzf "$NODE_TGZ" -C "$BASE/node" --strip-components=2 \
+tar -xzf "$NODE_TGZ" -C "$TMP/staged/node" --strip-components=2 \
     "node-$NODE_VER-darwin-$ARCH/bin/node" 2>/dev/null \
   || fatal "o pacote do Node veio corrompido"
-chmod +x "$BASE/node/node"
+chmod +x "$TMP/staged/node/node"
 good "node"
 
 # ----------------------------------------------------------- 3. yt-dlp
-step "Baixando yt-dlp (standalone, sem Python)..."
-fetch "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
-      "$BASE/bin/yt-dlp" || fatal "nao consegui baixar o yt-dlp"
-chmod +x "$BASE/bin/yt-dlp"
+step "Atualizando yt-dlp (standalone, sem Python)..."
+if ! fetch "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
+      "$TMP/staged/bin/yt-dlp"; then
+  if "$BASE/bin/yt-dlp" --version >/dev/null 2>&1; then
+    cp "$BASE/bin/yt-dlp" "$TMP/staged/bin/yt-dlp" || fatal "nao consegui preservar o yt-dlp instalado"
+    warn "Atualizacao indisponivel; a versao funcional foi preservada e o motor tentara novamente."
+  else
+    fatal "nao consegui baixar o yt-dlp"
+  fi
+fi
+chmod +x "$TMP/staged/bin/yt-dlp"
 good "yt-dlp"
 
 # ----------------------------------------------------------- 4. ffmpeg
@@ -150,18 +155,18 @@ step "Baixando ffmpeg ($ARCH)..."
 FF_GZ="$TMP/ffmpeg.gz"
 fetch "https://github.com/eugeneware/ffmpeg-static/releases/download/$FFMPEG_TAG/ffmpeg-darwin-$ARCH.gz" \
       "$FF_GZ" || fatal "nao consegui baixar o ffmpeg"
-gunzip -c "$FF_GZ" > "$BASE/bin/ffmpeg" || fatal "ffmpeg veio corrompido"
-chmod +x "$BASE/bin/ffmpeg"
+gunzip -c "$FF_GZ" > "$TMP/staged/bin/ffmpeg" || fatal "ffmpeg veio corrompido"
+chmod +x "$TMP/staged/bin/ffmpeg"
 good "ffmpeg"
 
 # -------------------------------------------------------- 5. server.cjs
 step "Baixando o motor..."
-fetch "$SITE/api/downloader-engine/mac?part=server" "$BASE/server.cjs" \
+fetch "$SITE/api/downloader-engine/mac?part=server" "$TMP/staged/server.cjs" \
   || fatal "nao consegui baixar o motor de $SITE"
 # Guard honesto: tamanho sozinho mente (uma pagina de erro pode ser
 # grande, e o bundle real tem so ~37KB). O identificador do motor nao.
-SRV_SIZE=$(wc -c < "$BASE/server.cjs" | tr -d ' ')
-if [ "$SRV_SIZE" -lt 10000 ] || ! grep -q 'darkolab-downloader-engine' "$BASE/server.cjs"; then
+SRV_SIZE=$(wc -c < "$TMP/staged/server.cjs" | tr -d ' ')
+if [ "$SRV_SIZE" -lt 10000 ] || ! grep -q 'darkolab-downloader-engine' "$TMP/staged/server.cjs"; then
   fatal "o motor baixado veio invalido ($SRV_SIZE bytes) - tente de novo"
 fi
 good "server.cjs ($((SRV_SIZE / 1024)) KB)"
@@ -171,15 +176,37 @@ good "server.cjs ($((SRV_SIZE / 1024)) KB)"
 # Node e yt-dlp ja vem assinados pelos projetos; o ffmpeg estatico nem
 # sempre. Assinar ad-hoc (-s -) e local, gratuito e nao exige conta Apple.
 step "Liberando os binarios no macOS..."
-xattr -dr com.apple.quarantine "$BASE" >/dev/null 2>&1 || true
+xattr -dr com.apple.quarantine "$TMP/staged" >/dev/null 2>&1 || true
 if command -v codesign >/dev/null 2>&1; then
-  for b in "$BASE/node/node" "$BASE/bin/yt-dlp" "$BASE/bin/ffmpeg"; do
+  for b in "$TMP/staged/node/node" "$TMP/staged/bin/yt-dlp" "$TMP/staged/bin/ffmpeg"; do
     codesign --force --sign - "$b" >/dev/null 2>&1 || true
   done
   good "assinados ad-hoc"
 else
   warn "codesign ausente - se algum binario nao rodar, instale as Command Line Tools"
 fi
+
+# Nao sobrescreva uma instalacao funcional com HTML, download parcial ou
+# binario do chip errado. O servico antigo continua vivo ate estes testes.
+"$TMP/staged/node/node" --check "$TMP/staged/server.cjs" >/dev/null 2>&1 || fatal "o motor baixado nao executa neste Mac"
+if ! "$TMP/staged/bin/yt-dlp" --version >/dev/null 2>&1; then
+  if "$BASE/bin/yt-dlp" --version >/dev/null 2>&1; then
+    cp "$BASE/bin/yt-dlp" "$TMP/staged/bin/yt-dlp" || fatal "nao consegui preservar o yt-dlp instalado"
+    warn "O componente novo nao executou; a versao funcional foi preservada."
+  else
+    fatal "o yt-dlp baixado nao executa neste Mac"
+  fi
+fi
+"$TMP/staged/bin/ffmpeg" -version >/dev/null 2>&1 || fatal "o ffmpeg baixado nao executa neste Mac"
+step "Aplicando a atualizacao verificada..."
+launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 \
+  || launchctl bootout "user/$(id -u)/$LABEL" >/dev/null 2>&1 \
+  || launchctl unload -w "$PLIST" >/dev/null 2>&1 || true
+mkdir -p "$BASE/bin" "$BASE/node" || fatal "sem permissao de escrita em $BASE"
+for part in node/node bin/yt-dlp bin/ffmpeg server.cjs; do
+  cp "$TMP/staged/$part" "$BASE/$part.next" || fatal "nao consegui copiar $part"
+  mv -f "$BASE/$part.next" "$BASE/$part" || fatal "nao consegui aplicar $part"
+done
 
 # --------------------------------------------------------- 7. launcher
 step "Instalando o servico..."
@@ -211,7 +238,12 @@ cat > "$PLIST" <<PLISTXML
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
