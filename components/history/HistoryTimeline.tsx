@@ -24,6 +24,7 @@ import {
   pedirAcaoEEsperar,
   podeVirarCard,
   rotuloVersaoDoTaskId,
+  tituloVisivelDoHistorico,
   prefixosDoDisparo,
   taskIdDoEvento,
   temFilaDeDisparo,
@@ -670,6 +671,7 @@ export function HistoryTimeline({
               // mesmo jeito enquanto a task estiver lá.
               const canais =
                 (e.channels?.length ? e.channels : taskId ? fila.canais[taskId] : undefined) ?? [];
+              const tituloVisivel = tituloVisivelDoHistorico(e.title);
               return (
                 <li
                   key={grupo.chave}
@@ -693,8 +695,8 @@ export function HistoryTimeline({
 
                   <div className="hist-row__corpo">
                     <div className="hist-row__topo">
-                      <p className="hist-row__titulo" title={e.title}>
-                        {e.title}
+                      <p className="hist-row__titulo" title={tituloVisivel}>
+                        {tituloVisivel}
                       </p>
                       {/* CANAL do AD (YOUTUBE/META/KWAI). Fica gravado no
                           evento: a task já saiu do board quando alguém vem
@@ -791,7 +793,7 @@ export function HistoryTimeline({
                         color="fuchsia"
                         icon={<IcoOlho />}
                         title="Ver os takes deste disparo"
-                        onClick={() => setPreviews({ taskId, titulo: e.title })}
+                        onClick={() => setPreviews({ taskId, titulo: tituloVisivel })}
                       />
                     ) : null}
                     <PilotBtn3D

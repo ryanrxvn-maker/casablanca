@@ -14,8 +14,8 @@ import type { HistoryEvent } from '@/lib/history';
  * FILTRO DO HISTÓRICO: por DATA e por ORIGEM do disparo.
  *
  * Duas perguntas que o dono faz o tempo todo olhando a lista: "o que eu fiz
- * hoje?" e "o que saiu do Creator?". O resto (ferramenta, busca, com arquivo)
- * já tem filtro próprio.
+ * hoje?" e "o que saiu do Creator?". O resto (ferramenta e busca) já tem
+ * filtro próprio.
  *
  * A régua dos contadores é cruzada de propósito: a contagem de cada origem
  * respeita a data escolhida e vice-versa. Assim o número no chip é o número de

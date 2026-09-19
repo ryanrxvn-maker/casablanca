@@ -133,6 +133,10 @@ export function prefixosDoDisparo(taskId: string): string[] {
  *
  * Só agrupa o que é do MESMO dia e do MESMO tipo: um disparo e a entrega dele
  * continuam sendo dois momentos distintos na linha do tempo.
+ *
+ * Registro REPETIDO da mesma versão não vira opção do seletor: o Pilot chegou a
+ * gravar o mesmo disparo duas vezes com 13 segundos de diferença, e o menu
+ * mostrava "v1" e "v1" — duas linhas que não se distinguem. Fica a mais nova.
  */
 export type GrupoDeVersoes = {
   /** Identidade estável do grupo (serve de chave da escolha na tela). */
@@ -143,19 +147,24 @@ export type GrupoDeVersoes = {
 
 export function agruparPorVersao(events: HistoryEvent[]): GrupoDeVersoes[] {
   const grupos: GrupoDeVersoes[] = [];
-  const porChave = new Map<string, GrupoDeVersoes>();
+  const porChave = new Map<string, { grupo: GrupoDeVersoes; versoes: Set<number> }>();
   for (const e of events) {
     const taskId = taskIdDoEvento(e);
     const base = taskId ? taskIdBaseDaVersao(taskId) : null;
     // Sem task (ferramenta comum) cada registro é o seu próprio grupo.
     const chave = base ? `${base}|${e.kind}` : `ev:${e.id}`;
+    const versao = taskId ? versaoDoTaskId(taskId) : 1;
     const existente = porChave.get(chave);
     if (existente) {
-      existente.eventos.push(e);
+      // A lista chega da mais nova pra mais antiga: a primeira de cada versão
+      // é a que vale, e a repetida vai embora em vez de virar um "v1" gêmeo.
+      if (existente.versoes.has(versao)) continue;
+      existente.versoes.add(versao);
+      existente.grupo.eventos.push(e);
       continue;
     }
     const grupo: GrupoDeVersoes = { chave, eventos: [e] };
-    porChave.set(chave, grupo);
+    porChave.set(chave, { grupo, versoes: new Set([versao]) });
     grupos.push(grupo);
   }
   return grupos;
@@ -165,6 +174,22 @@ export function agruparPorVersao(events: HistoryEvent[]): GrupoDeVersoes[] {
 export function rotuloVersaoDoTaskId(taskId: string | null | undefined): string {
   if (!taskId) return '';
   return `v${versaoDoTaskId(taskId)}`;
+}
+
+/**
+ * Nome que aparece na linha do histórico.
+ *
+ * "Entregue" é estado, não parte da nomenclatura do AD: a mesma linha já tem
+ * o selo PRONTO. Remove apenas o sufixo de estado gravado pelos fluxos antigos
+ * e preserva o resto byte a byte (inclusive "(VA)" e "(camuflado)").
+ */
+export function tituloVisivelDoHistorico(title: string): string {
+  const original = String(title || '').trim();
+  const limpo = original
+    .replace(/\s+entregue(?=\s*(?:\([^)]*\))?\s*$)/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return limpo || original;
 }
 
 /**

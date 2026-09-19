@@ -44,7 +44,6 @@ export function ToolHistoryPanel({
   filaDeTeste?: FilaAoVivo;
 }) {
   const [query, setQuery] = useState('');
-  const [soComArquivo, setSoComArquivo] = useState(false);
   const fecharRef = useRef<HTMLButtonElement>(null);
   // Instante em que a gaveta abriu: um clique rapido demais no fundo, vindo do
   // mesmo gesto que abriu, nao pode fechar o que o usuario acabou de pedir.
@@ -69,16 +68,12 @@ export function ToolHistoryPanel({
   }, [onClose]);
 
   const daFerramenta = useMemo(() => filterHistory(todos, { tool }), [todos, tool]);
-  // Filtro por DATA e por ORIGEM (Pilot/Creator/Docs) antes de tudo: os
-  // contadores dos outros filtros precisam falar da mesma lista que a tela.
+  // Filtro por DATA e por ORIGEM (Pilot/Creator/Docs) antes da busca: os
+  // contadores precisam falar da mesma lista que a tela.
   const filtro = useFiltroDeOrigemEData(daFerramenta);
   const visiveis = useMemo(
-    () => filterHistory(filtro.eventos, { query, soRecuperaveis: soComArquivo }),
-    [filtro.eventos, query, soComArquivo],
-  );
-  const comArquivo = useMemo(
-    () => filtro.eventos.filter((e) => (e.ref?.length ?? 0) > 0).length,
-    [filtro.eventos],
+    () => filterHistory(filtro.eventos, { query }),
+    [filtro.eventos, query],
   );
   // Pergunta a existência só das chaves que estão na tela (ver o porquê em
   // zipKeysExistentes: enumerar o store lia GBs e derrubava todo o botão).
@@ -128,38 +123,20 @@ export function ToolHistoryPanel({
           </button>
         </header>
 
-        {/* Filtros — dois estados num segmento só, e a busca quando faz falta */}
-        <div className="hist-filtros">
-          <div className="hist-seg" role="group" aria-label="Filtrar registros">
-            <button
-              type="button"
-              onClick={() => setSoComArquivo(false)}
-              className={'hist-seg__item' + (!soComArquivo ? ' hist-seg__item--on' : '')}
-              aria-pressed={!soComArquivo}
-            >
-              Tudo <b>{filtro.eventos.length}</b>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSoComArquivo(true)}
-              className={'hist-seg__item' + (soComArquivo ? ' hist-seg__item--on' : '')}
-              aria-pressed={soComArquivo}
-              title="Só os registros que ainda têm arquivo pra baixar"
-            >
-              Com arquivo <b>{comArquivo}</b>
-            </button>
-          </div>
-          {daFerramenta.length > 6 ? (
+        {/* Busca só quando faz falta. Todo resultado continua visível; a
+            disponibilidade do arquivo já é comunicada pelo botão de download. */}
+        {daFerramenta.length > 6 ? (
+          <div className="hist-filtros">
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar…"
               aria-label="Buscar no histórico desta ferramenta"
-              className="hist-busca"
+              className="hist-busca w-full"
             />
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         <FiltrosDeOrigemEData {...filtro} />
 

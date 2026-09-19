@@ -83,11 +83,6 @@ export default function HistoricoPage() {
   // Contagem por ferramenta (pros chips) — só ferramentas com eventos.
   const counts = useMemo(() => countByTool(events), [events]);
 
-  const recuperaveis = useMemo(
-    () => events.filter((e) => (e.ref?.length ?? 0) > 0).length,
-    [events],
-  );
-
   const porFerramenta = useMemo(() => filterHistory(events, { tool }), [events, tool]);
   // Data e origem entram entre a ferramenta e a busca: os contadores dos chips
   // de origem falam da ferramenta escolhida, que e' o que esta' na tela.
@@ -121,8 +116,6 @@ export default function HistoricoPage() {
       {/* Resumo — números grandes, rótulo miúdo: a faixa inteira cabe num olhar */}
       <div className="hist-faixa">
         <Stat valor={String(events.length)} rotulo="registros" />
-        <span className="hist-faixa__div" aria-hidden />
-        <Stat valor={String(recuperaveis)} rotulo="com arquivo" tom="var(--hist-lime)" />
         <span className="hist-faixa__div" aria-hidden />
         <Stat
           valor={vaultInfo ? fmtBytes(vaultInfo.bytes) : '—'}

@@ -2247,7 +2247,7 @@ html[data-theme='light'] .hist-fab__label {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(100vw, 520px);
+  width: min(100vw, 560px);
   height: 100%;
   border-left: 1px solid rgb(var(--line-strong));
   background: linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)));

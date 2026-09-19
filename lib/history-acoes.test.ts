@@ -23,6 +23,7 @@ import {
   rotaDaTask,
   taskIdDoEvento,
   temFilaDeDisparo,
+  tituloVisivelDoHistorico,
   VALIDADE_INTENCAO_MS,
 } from './history-acoes';
 import { buildChains, type FileRef, type HistoryEvent } from './history-tools';
@@ -178,6 +179,17 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
     'disparo e entrega da MESMA task não se fundem: são momentos diferentes',
   );
 
+  // O MESMO disparo gravado duas vezes (aconteceu de verdade, 13s de
+  // diferença): uma linha só, sem seletor de versão gêmea.
+  const repetido = [
+    ev({ id: 'dispatch:86ad:2', kind: 'dispatch', t: 1_700_000_100_000 }),
+    ev({ id: 'dispatch:86ad:1', kind: 'dispatch', t: 1_700_000_000_000 }),
+  ];
+  const gRepetido = agruparPorVersao(repetido);
+  ok(gRepetido.length === 1, 'disparo repetido continua sendo uma linha só');
+  ok(gRepetido[0].eventos.length === 1, 'a repetição não vira opção do seletor');
+  ok(gRepetido[0].eventos[0].id === 'dispatch:86ad:2', 'fica a mais nova');
+
   const semTask = [ev({ id: 'z1', tool: 'compressor' }), ev({ id: 'z2', tool: 'compressor' })];
   ok(agruparPorVersao(semTask).length === 2, 'ferramenta comum não agrupa nada');
 
@@ -185,6 +197,36 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
   ok(rotuloVersaoDoTaskId('86ad-yt') === 'v2', 'a versão YouTube é a 2');
   ok(rotuloVersaoDoTaskId('86ad') === 'v1', 'a mãe é a v1');
   ok(rotuloVersaoDoTaskId(null) === '', 'sem task, sem rótulo');
+
+  // Variação de hook mora DENTRO do pacote da mesma task. Referências extras
+  // nunca inventam versão: versão real só existe no taskId do Pilot.
+  const hooksNaMesmaTask = entrega('hooks', '86hooks', 'AD08 entregue');
+  hooksNaMesmaTask.ref?.push({
+    via: 'zip',
+    key: 'batch:86hooks:hooks',
+    name: 'AD08_HOOKS.zip',
+    label: 'Variações de hook',
+    taskId: '86hooks',
+  });
+  const grupoHooks = agruparPorVersao([hooksNaMesmaTask]);
+  ok(
+    grupoHooks.length === 1 && grupoHooks[0].eventos.length === 1,
+    'variações de hook não viram versões do AD',
+  );
+}
+
+// (D4b) nomenclatura visível: estado não duplica o selo PRONTO
+{
+  ok(tituloVisivelDoHistorico('AD42 entregue') === 'AD42', 'remove o estado "entregue" do nome');
+  ok(tituloVisivelDoHistorico('AD42 (VA) entregue') === 'AD42 (VA)', 'preserva a marca VA');
+  ok(
+    tituloVisivelDoHistorico('AD07 entregue (camuflado)') === 'AD07 (camuflado)',
+    'preserva o tipo camuflado',
+  );
+  ok(
+    tituloVisivelDoHistorico('Arquivo entregue ao cliente') === 'Arquivo entregue ao cliente',
+    'não apaga palavra que faz parte de uma frase real',
+  );
 }
 
 // (D5) origem do disparo e filtro por data
