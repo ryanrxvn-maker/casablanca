@@ -6,7 +6,7 @@ export const RECORDS_EVENT = 'autoedit:durable-records';
 const ROOT = 'autoedit:records:v2:';
 const LEGACY = { background: 'darkolab:clickup-pilot:batches', history: 'autoedit:history:v1' };
 type CloudRow = { kind: RecordKind; record_id: string; payload: RecordData | null; deleted: boolean; revision: number };
-type LocalRow = { kind: RecordKind; id: string; data: RecordData | null; base: RecordData | null; revision: number; pending?: string; recovery?: RecordData | null; conflict?: boolean };
+type LocalRow = { kind: RecordKind; id: string; data: RecordData | null; base: RecordData | null; revision: number; pending?: string; recovery?: RecordData | null; conflict?: boolean; revive?: boolean };
 export type DurabilityStatus = { ready: boolean; message: string; pending: number; conflicts: number; legacy: number; error: boolean };
 let owner: string | null = null;
 let status: DurabilityStatus = { ready: false, message: 'Recuperando os registros da conta…', pending: 0, conflicts: 0, legacy: 0, error: false };
@@ -20,6 +20,16 @@ let pulling: Promise<void> | null = null;
 let initError = '';
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const keyFor = (kind: RecordKind, id: string) => `${ROOT}${owner}:${kind}:${encodeURIComponent(id)}`;
+
+/**
+ * A tombstone blocks delayed checkpoints, but it must not make a ClickUp task
+ * unusable forever. A real new execution has the same task id and a different
+ * startedAt; a stale writer still carries the startedAt it saw before removal.
+ */
+function isNewBackgroundExecution(id: string, previous: RecordData | undefined, data: RecordData): boolean {
+  if (data.taskId !== id || typeof data.startedAt !== 'number') return false;
+  return typeof previous?.startedAt !== 'number' || previous.startedAt !== data.startedAt;
+}
 
 export function durabilityStatus(): DurabilityStatus { return { ...status }; }
 function notify(message?: string, error = false) {
@@ -143,15 +153,23 @@ export function createRecordWriter(kind: RecordKind) {
             const raw = localStorage.getItem(keyFor(kind, id));
             const row: LocalRow = raw ? JSON.parse(raw) : { kind, id, data: null, base: null, revision: 0 };
             try {
-            // An explicit removal always wins over a late checkpoint from an
-            // older tab. It must never resurrect the task.
-            if (raw && row.data === null) continue;
-            if (row.conflict) {
-              const reconciled = mergeRecord(row.base, row.recovery ?? row.data, row.data);
-              row.data = reconciled; row.base = reconciled;
-              row.recovery = undefined; row.conflict = false;
-            }
+            // An explicit removal wins over late progress from an older tab.
+            // A deliberate NEW background execution is different: ClickUp
+            // reuses task ids, so a permanent tombstone would silently discard
+            // every future dispatch of that task after the next refresh.
+            if (raw && row.data === null) {
+              if (kind !== 'background' || !isNewBackgroundExecution(id, seen[id], data)) continue;
+              row.data = data;
+              row.base = null;
+              row.revive = true;
+            } else {
+              if (row.conflict) {
+                const reconciled = mergeRecord(row.base, row.recovery ?? row.data, row.data);
+                row.data = reconciled; row.base = reconciled;
+                row.recovery = undefined; row.conflict = false;
+              }
               row.data = mergeRecord(seen[id] ?? null, data, row.data);
+            }
               row.pending = crypto.randomUUID();
               saveLocal(row);
               seen[id] = clone(data);
@@ -204,7 +222,7 @@ export async function deleteDurableRecords(kind: RecordKind, ids: string[]): Pro
         const raw = localStorage.getItem(keyFor(kind, id));
         if (!raw) continue;
         const row: LocalRow = JSON.parse(raw);
-        saveLocal({ ...row, data: null, pending: crypto.randomUUID(), conflict: false, recovery: undefined });
+        saveLocal({ ...row, data: null, pending: crypto.randomUUID(), conflict: false, recovery: undefined, revive: undefined });
       }
       refreshStatus();
     });
@@ -255,6 +273,7 @@ export async function syncDurableRecords(): Promise<void> {
         // Network is outside the local lock: another tab can keep working offline.
         const { body, conflict } = await fetchJSON('/api/user/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           userId: expectedOwner, kind: candidate.kind, id: candidate.id, data: candidate.data,
+          revive: candidate.revive === true,
           revision: candidate.revision, operationId: candidate.pending,
         }) });
         if (owner !== expectedOwner) return;
@@ -266,8 +285,10 @@ export async function syncDurableRecords(): Promise<void> {
           const remote: CloudRow = body.record;
           if (current.revision > remote.revision) return;
           // Keep a new local edit that arrived while this request was in flight.
+          const operationFinished = current.pending === candidate.pending;
           saveLocal({ ...current, base: remote.payload, revision: remote.revision,
-            pending: current.pending === candidate.pending ? undefined : current.pending });
+            pending: operationFinished ? undefined : current.pending,
+            revive: operationFinished ? undefined : current.revive });
         });
       }
       if (pending.length) initError = '';

@@ -39,7 +39,11 @@ Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (u
   if (receipts.has(opKey)) return Response.json(receipts.get(opKey));
   const key = `${account}:${b.kind}:${b.id}`;
   const current = cloud.get(key);
-  if ((current?.revision ?? 0) !== b.revision || (current?.deleted && b.data !== null)) return Response.json({ conflict: true, record: current }, { status: 409 });
+  const validRevival = current?.deleted && b.data !== null && b.revive === true && b.kind === 'background' &&
+    b.data?.taskId === b.id && typeof b.data?.startedAt === 'number';
+  if ((current?.revision ?? 0) !== b.revision || (current?.deleted && b.data !== null && !validRevival)) {
+    return Response.json({ conflict: true, record: current }, { status: 409 });
+  }
   const record = { user_id: account, kind: b.kind, record_id: b.id, payload: b.data, deleted: b.data === null,
     revision: b.revision + 1, occurred_at: current?.occurred_at ?? (b.kind === 'history' ? b.data?.t : Date.now()) };
   cloud.set(key, record);
@@ -96,6 +100,13 @@ async function main() {
   assert(!restored.readDurableRecords('background').B);
   assert(Object.keys(restored.readDurableRecords('history')).length > 0, 'dispatch history survives browser loss');
 
+  const revivalWriter = restored.createRecordWriter('background');
+  const afterTombstone = revivalWriter.hydrate<any>();
+  const B2 = job('B', { startedAt: B.startedAt + 1, message: 'deliberate new execution' });
+  await revivalWriter.save({ ...afterTombstone, B: B2 }); await settled(restored);
+  assert.equal(restored.readDurableRecords<any>('background').B.message, 'deliberate new execution', 'a new execution can reuse a deliberately removed ClickUp task id');
+  assert.equal(cloud.get('account-a:background:B').deleted, false, 'the exact tombstone revision is revived in the account');
+
   const draftWriter = restored.createRecordWriter('background'); draftWriter.hydrate();
   const draft = { taskId: 'pilot-draft:team:A', sourceTaskId: 'A', taskName: 'AD01', baseAdId: 'AD01', phase: 'draft', parts: [], startedAt: 1, scope: 'clickup:team', analysis: { taskId: 'A', taskName: 'AD01', roleSlots: [], partTemplates: [] }, updatedAt: 1 };
   await draftWriter.save({ [draft.taskId]: draft }); await settled(restored);
@@ -146,6 +157,6 @@ async function main() {
   assert.deepEqual(mergeRecord({ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 2 }), { x: 2, y: 2 });
   assert.deepEqual(mergeRecord({ x: 1 }, { x: 2 }, { x: 3 }), { x: 2 });
   assert.equal(mergeRecord({ x: 1 }, { x: 2 }, null), null, 'explicit remote deletion wins over stale progress');
-  console.log('PASS: empty reload, stale tab reconciliation, distinct writers, explicit deletion, tombstones, browser wipe recovery, offline queue, lost response, account isolation, quota, retention and sanitization.');
+  console.log('PASS: empty reload, stale tab reconciliation, distinct writers, explicit deletion, protected tombstone revival, browser wipe recovery, offline queue, lost response, account isolation, quota, retention and sanitization.');
 }
 void main().catch(e => { console.error(e); process.exitCode = 1; });

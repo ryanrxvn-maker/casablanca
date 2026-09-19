@@ -28,12 +28,13 @@ export async function POST(req: Request) {
   if (!isObject(body)) return NextResponse.json({ error: 'Registro inválido.' }, { status: 400 });
   const invalid = validateRecord(body.kind, body.id, body.data);
   if (invalid || typeof body.revision !== 'number' || !Number.isSafeInteger(body.revision) || body.revision < 0 ||
+      (body.revive !== undefined && typeof body.revive !== 'boolean') ||
       typeof body.operationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.operationId) || body.userId !== user.id) {
     return NextResponse.json({ error: invalid ?? 'Conta ou versão inválida.' }, { status: 400 });
   }
-  const { data, error } = await db.rpc('save_durable_record', {
+  const { data, error } = await db.rpc('save_durable_record_v2', {
     p_kind: body.kind, p_id: body.id, p_payload: isObject(body.data) ? checkpoint(body.data) : null,
-    p_revision: body.revision, p_operation: body.operationId,
+    p_revision: body.revision, p_operation: body.operationId, p_revive: body.revive === true,
   });
   if (error) return NextResponse.json({ error: 'Não foi possível confirmar o salvamento na conta. A cópia local foi mantida.' }, { status: 503 });
   return NextResponse.json(data, { status: data.conflict ? 409 : 200, headers: { 'Cache-Control': 'no-store' } });

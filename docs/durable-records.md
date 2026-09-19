@@ -24,6 +24,8 @@ o evento; recarregar ou atualizar um evento não reinicia esse prazo.
   bloqueio transacional e recibos compactos para repetição após perda de resposta.
 - Divergências no mesmo campo preservam uma cópia de recuperação e ficam visíveis.
 - Exclusão grava um tombstone; abas antigas não ressuscitam o registro.
+- Um novo disparo pode reutilizar o mesmo task ID após exclusão somente com um
+  `startedAt` novo, intenção explícita de reativação e a revisão exata da lápide.
 - Reiniciar uma task com outro `startedAt` arquiva a execução anterior no background.
 - Recuperar o Pilot não inicia outro worker automaticamente. O usuário escolhe
   Retomar após conferir se há uma aba já processando.

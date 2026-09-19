@@ -11,7 +11,10 @@ async function asUser(uid) {
   await db.query("select set_config('request.jwt.claim.sub', $1, false)", [uid]);
   await db.exec('set role authenticated');
 }
-async function save(kind, id, payload, revision, op = randomUUID()) {
+async function save(kind, id, payload, revision, op = randomUUID(), revive = false) {
+  return (await db.query('select public.save_durable_record_v2($1,$2,$3::jsonb,$4,$5::uuid,$6) as result', [kind, id, payload === null ? null : JSON.stringify(payload), revision, op, revive])).rows[0].result;
+}
+async function saveLegacy(kind, id, payload, revision, op = randomUUID()) {
   return (await db.query('select public.save_durable_record($1,$2,$3::jsonb,$4,$5::uuid) as result', [kind, id, payload === null ? null : JSON.stringify(payload), revision, op])).rows[0].result;
 }
 async function run() {
@@ -25,6 +28,9 @@ async function run() {
   const sql = fs.readFileSync(root + '/supabase/migrations/035_durable_records.sql', 'utf8');
   await db.exec(sql);
   await db.exec(sql); // migration is repeatable
+  const reviveSql = fs.readFileSync(root + '/supabase/migrations/036_durable_record_revive.sql', 'utf8');
+  await db.exec(reviveSql);
+  await db.exec(reviveSql); // follow-up migration is repeatable too
   await asUser(a);
   const job = { taskId: 'A', taskName: 'A', parts: [], startedAt: 1, phase: 'done' };
   const op = randomUUID();
@@ -38,7 +44,18 @@ async function run() {
   let rows = (await db.query('select * from public.durable_records')).rows;
   assert(rows.some(r => r.record_id.startsWith('archive:') && r.payload.startedAt === 1), 'restart preserves prior execution');
   assert.equal((await save('background','A',null,2)).record.deleted, true);
-  assert.equal((await save('background','A',job,3)).conflict, true, 'deleted row cannot resurrect');
+  assert.equal((await save('background','A',job,3)).conflict, true, 'ordinary checkpoint cannot resurrect a deleted row');
+  assert.equal((await saveLegacy('background','A',job,3)).conflict, true, 'legacy clients cannot resurrect a deleted row');
+  assert.equal((await save('background','A',{...job,taskId:'other',startedAt:3},3,randomUUID(),true)).conflict, true, 'revival requires the exact task identity');
+  const historyProbe = { id:'A', t:Date.now(), title:'probe', tool:'test' };
+  assert.equal((await save('history','A',historyProbe,0,randomUUID(),true)).conflict, false, 'revive has no special behavior for a new history row');
+  assert.equal((await save('history','A',null,1)).record.deleted, true);
+  assert.equal((await save('history','A',historyProbe,2,randomUUID(),true)).conflict, true, 'revival is never allowed for history tombstones');
+  const revived = await save('background','A',{...job,startedAt:3},3,randomUUID(),true);
+  assert.equal(revived.conflict, false, 'an explicit new execution can revive the exact tombstone revision');
+  assert.equal(revived.record.deleted, false);
+  assert.equal((await save('background','A',null,4)).record.deleted, true);
+  assert.equal((await save('background','A',{...job,startedAt:4},3,randomUUID(),true)).conflict, true, 'a stale revision cannot revive a newer tombstone');
   await assert.rejects(db.query("update public.durable_records set deleted=false"));
   await assert.rejects(db.query("delete from public.durable_records"));
   const ev = { id:'H', t:Date.now(), title:'test', tool:'test' };
@@ -60,6 +77,6 @@ async function run() {
   await db.exec('set role anon');
   await assert.rejects(db.query('select * from public.durable_records'));
   await assert.rejects(save('background','anonymous',job,0));
-  console.log('PASS SQL: migration twice, CAS, idempotency, archived executions, tombstones, RLS, forbidden direct writes, 7-day expiry, cleanup isolation and anonymous denial.');
+  console.log('PASS SQL: migration twice, CAS, idempotency, archived executions, protected tombstone revival, RLS, forbidden direct writes, 7-day expiry, cleanup isolation and anonymous denial.');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>db.close());
