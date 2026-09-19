@@ -28,7 +28,7 @@ type Draft = { settings: FlowSettings; projectUrl: string; range: Range | null; 
 type RecoveredJob = { state?: string; stage?: string; submitted?: boolean; assets?: StudioAsset[]; projectUrl?: string; account?: FlowAccount; error?: string };
 type Busy = 'inspect' | 'quote' | 'generate' | 'download' | 'prompt' | null;
 type PromptMode = 'image-video' | 'video-only';
-type PromptSuggestion = { imagePrompt?: string; videoPrompt: string; strategy?: string; source?: string };
+type PromptSuggestion = { imagePrompt?: string; videoPrompt: string; explanation?: string; strategy?: string; source?: string };
 type Session = {
   busy: Busy; progress: string; error: string; inspection: FlowInspection | null;
   quote: FlowQuote | null; quoteKey: string; assets: StudioAsset[]; projectUrl: string;
@@ -206,7 +206,7 @@ function mediaUrl(value?: string): string | undefined {
 function FlowMark({ size = 22 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.4 15.3 9.1 5.4c.5-1.1 2-1.1 2.5 0l2 4.2m-3.2 8.1 4.8-10.1c.5-1.1 2-1.1 2.5 0l3 6.5c.4.9-.2 1.9-1.2 1.9H5.6c-1 0-1.6-1-1.2-1.9Z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M7.4 20h9.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".55"/></svg>;
 }
-function Icon({ name }: { name: 'close' | 'arrow' | 'image' | 'video' | 'upload' | 'check' | 'refresh' | 'external' | 'trash' | 'spark' }) {
+function Icon({ name }: { name: 'close' | 'arrow' | 'image' | 'video' | 'upload' | 'check' | 'refresh' | 'external' | 'trash' | 'spark' | 'copy' | 'info' }) {
   const paths: Record<typeof name, ReactNode> = {
     close: <path d="m6 6 12 12M18 6 6 18" />,
     arrow: <path d="M5 12h14m-5-5 5 5-5 5" />,
@@ -218,6 +218,8 @@ function Icon({ name }: { name: 'close' | 'arrow' | 'image' | 'video' | 'upload'
     external: <><path d="M14 3h7v7m0-7L10 14M10 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-4"/></>,
     trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></>,
     spark: <><path d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3Z"/></>,
+    copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
+    info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></>,
   };
   return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -250,7 +252,13 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const [storageError, setStorageError] = useState('');
   const [referenceBusy, setReferenceBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [promptMenu, setPromptMenu] = useState(false);
+  const [promptStudioOpen, setPromptStudioOpen] = useState(false);
+  const [promptMode, setPromptMode] = useState<PromptMode>('image-video');
+  const [promptSuggestion, setPromptSuggestion] = useState<PromptSuggestion | null>(null);
+  const [promptExplanationOpen, setPromptExplanationOpen] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState<'image' | 'video' | null>(null);
+  const promptStudioRef = useRef(false);
+  promptStudioRef.current = promptStudioOpen;
   const [localPreview, setLocalPreview] = useState<{ key: string; url: string | null; state: 'loading' | 'missing' | 'ready' | 'error' } | null>(null);
   const previewAttempts = useRef(new Set<string>());
   const [notice, setNotice] = useState('');
@@ -259,6 +267,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const preferredModels = useRef<Record<FlowSettings['mode'], string>>({ image: FLOW_IMAGE_MODELS[0], video: FLOW_VIDEO_MODELS[0] });
   const inspectionAttempt = useRef('');
   const automaticQuote = useRef({ key: '', attempts: 0 });
+  const quoteRevision = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const draftRef = useRef<Draft>({ settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null, suggestedMotion: session.suggestedMotion || '' });
   draftRef.current = { settings: session.preparedSettings || settings, projectUrl, range, assets: session.assets, account: session.account || session.quote?.account || session.inspection?.account || null, activeJob: session.activeJob, selectedModels: preferredModels.current, suggestedMotion: session.suggestedMotion || '' };
@@ -277,7 +286,9 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const fingerprint = useMemo(() => JSON.stringify({ settings, projectUrl }), [settings, projectUrl]);
   const quoteValid = !!session.quote && session.quoteKey === fingerprint && typeof session.quote.credits === 'number' && Number.isFinite(session.quote.credits) && !!session.quote.account?.email;
   const insufficient = quoteValid && typeof account?.credits === 'number' && account.credits < (session.quote?.credits || 0);
-  const busy = !!session.busy;
+  // Pricing runs in the background: the user can keep typing or changing the
+  // scene while an older quote is being discarded and recalculated.
+  const busy = !!session.busy && session.busy !== 'quote';
   const montageBusy = atualizandoMontagem || !!session.montage?.busy;
   const unresolved = !!session.activeJob;
   const chosenAsset = session.assets.find((asset) => asset.id === selected) || session.assets[session.assets.length - 1];
@@ -381,7 +392,11 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     const node = dialog.current;
     node?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRef.current(); }
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation();
+        if (promptStudioRef.current) { setPromptStudioOpen(false); return; }
+        closeRef.current();
+      }
       if (event.key !== 'Tab' || !node) return;
       const focusable = Array.from(node.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')).filter((el) => el.getClientRects().length > 0);
       const first = focusable[0]; const last = focusable[focusable.length - 1];
@@ -394,6 +409,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   }, [mounted]);
 
   const change = useCallback((value: Partial<FlowSettings>) => {
+    quoteRevision.current += 1;
     setSettings((previous) => {
       const next = { ...previous, ...value };
       preferredModels.current[next.mode] = next.model;
@@ -492,6 +508,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   async function quote(automatic = false) {
     if (sessionFor(taskId).busy || sessionFor(taskId).activeJob || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || !settings.prompt.trim()) return;
     const requested = settings;
+    const revision = quoteRevision.current;
     updateSession(taskId, { busy: 'quote', error: '', progress: 'Conferindo a conta e as opções deste motor…', quote: null, quoteKey: '' });
     try {
       // Reuse the live capability snapshot. Reopening the account panel and the
@@ -500,6 +517,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       const inspection = cached?.account?.email && cached.mode === requested.mode && cached.controls?.model === requested.model
         ? cached
         : await flowInspect(projectUrl || undefined, { mode: requested.mode, model: requested.model });
+      if (quoteRevision.current !== revision) return;
       const adjusted = settingsForInspection(requested, inspection);
       const controls = availableControls(inspection, adjusted);
       if (!controls.matches || !controls.aspects.includes(adjusted.aspectRatio) || !controls.counts.includes(adjusted.count) ||
@@ -507,7 +525,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
         throw new Error('Este motor não disponibilizou uma combinação compatível. Escolha outro motor ou atualize as opções do Flow.');
       }
       if (adjusted.mode === 'video' && adjusted.videoMode === 'frames' && adjusted.references.length > 2) {
-        throw new Error('Frames aceita até 2 imagens: primeiro e último frame. Use Ingredientes para mais referências.');
+        throw new Error('START AND END aceita até 2 imagens: início e fim. Use Imagens para mais referências.');
       }
       const inspectedProject = inspection.projectUrl || projectUrl;
       preferredModels.current[adjusted.mode] = adjusted.model;
@@ -515,6 +533,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       setProjectUrl(inspectedProject);
       updateSession(taskId, { inspection, projectUrl: inspectedProject, progress: 'Lendo o custo desta configuração no Flow…' });
       const quoted = await flowQuote(adjusted, inspectedProject || undefined);
+      if (quoteRevision.current !== revision) return;
       if (!quoted.account?.email || quoted.account.email.toLowerCase() !== inspection.account.email.toLowerCase()) {
         throw new Error('A conta do Flow mudou durante a consulta. Confira a conta e consulte os créditos novamente.');
       }
@@ -535,7 +554,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     if (automaticQuote.current.key !== key) automaticQuote.current = { key, attempts: 0 };
     if (!loaded || busy || unresolved || quoteValid || referenceBusy || !account?.email || !settings.prompt.trim() ||
         capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || automaticQuote.current.attempts >= 3) return;
-    const delay = automaticQuote.current.attempts ? 1300 * automaticQuote.current.attempts : 650;
+    const delay = automaticQuote.current.attempts ? 700 * automaticQuote.current.attempts : 320;
     const timer = setTimeout(() => {
       automaticQuote.current.attempts += 1;
       void quote(true);
@@ -578,7 +597,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     updateSession(taskId, { error: '' });
     try {
       const picked = Array.from(files);
-      if (settings.references.length + picked.length > referenceLimit) throw new Error(usesFrames ? 'Frames aceita até 2 imagens: primeiro o início, depois o fim.' : 'Use até 4 imagens de referência por criação.');
+      if (settings.references.length + picked.length > referenceLimit) throw new Error(usesFrames ? 'START AND END aceita até 2 imagens: primeiro o início, depois o fim.' : 'Use até 4 imagens de referência por criação.');
       for (const file of picked) {
         if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error(`${file.name}: envie uma imagem JPG, PNG ou WebP.`);
         if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: o limite é 10 MB por referência.`);
@@ -660,21 +679,39 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       });
       const result = await response.json().catch(() => null) as (PromptSuggestion & { error?: string }) | null;
       if (!response.ok || !result?.videoPrompt) throw new Error(result?.error || 'Não foi possível criar o prompt agora.');
-      if (mode === 'image-video' && result.imagePrompt) {
-        const pairedSettings: FlowSettings = { ...settings, prompt: result.imagePrompt, mode: 'image', model: preferredModels.current.image, animateMediaId: undefined, references: [] };
-        change(pairedSettings);
-        updateSession(taskId, { suggestedMotion: result.videoPrompt });
-        await saveDraft(taskId, { ...draftRef.current, settings: pairedSettings, suggestedMotion: result.videoPrompt });
-        setNotice('Frame cinematográfico pronto. Gere a imagem e clique em Animar com Flow; o movimento já ficará preenchido.');
-      } else {
-        const directSettings: FlowSettings = { ...settings, prompt: result.videoPrompt, mode: 'video', model: preferredModels.current.video, animateMediaId: undefined };
-        change(directSettings);
-        updateSession(taskId, { suggestedMotion: '' });
-        await saveDraft(taskId, { ...draftRef.current, settings: directSettings, suggestedMotion: '' });
-        setNotice('Prompt de vídeo criado para o trecho selecionado. O custo será calculado automaticamente.');
-      }
+      setPromptMode(mode);
+      setPromptSuggestion(result);
+      setPromptExplanationOpen(false);
+      setCopiedPrompt(null);
     } catch (error) { updateSession(taskId, { error: errorText(error) }); }
     finally { updateSession(taskId, { busy: null, progress: '' }); }
+  }
+  async function applyPromptSuggestion() {
+    const result = promptSuggestion;
+    if (!result?.videoPrompt || sessionFor(taskId).busy) return;
+    if (promptMode === 'image-video' && result.imagePrompt) {
+      const pairedSettings: FlowSettings = { ...settings, prompt: result.imagePrompt, mode: 'image', model: preferredModels.current.image, animateMediaId: undefined, references: [] };
+      change(pairedSettings);
+      updateSession(taskId, { suggestedMotion: result.videoPrompt });
+      await saveDraft(taskId, { ...draftRef.current, settings: pairedSettings, suggestedMotion: result.videoPrompt });
+      setNotice('Direção aplicada. Gere o frame e clique em Animar com Flow; o movimento já está guardado.');
+    } else {
+      const directSettings: FlowSettings = { ...settings, prompt: result.videoPrompt, mode: 'video', model: preferredModels.current.video, animateMediaId: undefined };
+      change(directSettings);
+      updateSession(taskId, { suggestedMotion: '' });
+      await saveDraft(taskId, { ...draftRef.current, settings: directSettings, suggestedMotion: '' });
+      setNotice('Direção de vídeo aplicada. O custo será calculado automaticamente.');
+    }
+    setPromptStudioOpen(false);
+  }
+  async function copyGeneratedPrompt(kind: 'image' | 'video') {
+    const value = kind === 'image' ? promptSuggestion?.imagePrompt : promptSuggestion?.videoPrompt;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedPrompt(kind);
+      window.setTimeout(() => setCopiedPrompt((current) => current === kind ? null : current), 1800);
+    } catch { updateSession(taskId, { error: 'Não foi possível copiar automaticamente. Selecione o texto e copie pelo navegador.' }); }
   }
   function chooseWord(index: number) {
     if (rangeStart == null) { setRangeStart(index); setRange(null); }
@@ -712,22 +749,28 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
             <button type="button" aria-pressed={settings.mode === 'image'} className={settings.mode === 'image' ? s.modeSelected : ''} disabled={busy || !loaded} onClick={() => change({ mode: 'image', model: preferredModels.current.image, animateMediaId: undefined })}><Icon name="image"/>Imagem</button>
           </div>
           <div className={s.promptBox}><label htmlFor={`${uid}-prompt`}>Sua direção criativa <span>{settings.prompt.length.toLocaleString('pt-BR')} / 5.000</span></label><textarea id={`${uid}-prompt`} value={settings.prompt} disabled={busy || !loaded} onChange={(event) => change({ prompt: event.target.value })} maxLength={5000} placeholder={settings.animateMediaId ? 'Descreva o movimento da câmera, a ação e a luz…' : 'Descreva a cena, o enquadramento, a luz e o que acontece…'} rows={4}/><div className={s.promptHint}><Icon name="spark"/><span>{settings.animateMediaId ? 'Animando uma imagem criada neste projeto' : 'Escreva a cena que vai acompanhar a sua fala'}</span>{settings.animateMediaId && <button type="button" disabled={busy} className={s.textButton} onClick={() => change({ animateMediaId: undefined, references: settings.references.slice(1) })}>Remover frame</button>}</div></div>
-          <div className={s.referenceHeader}><label htmlFor={`${uid}-refs`}>{usesFrames ? 'Frames · início e fim' : 'Referências visuais'}</label><span>{settings.references.length}/{referenceLimit} imagens</span></div>
-          <div className={s.references}>
-            {settings.references.map((reference, index) => <div className={s.reference} key={`${index}-${reference.name}`}><img src={reference.dataUrl} alt={`${usesFrames && index < 2 ? index === 0 ? 'Frame inicial' : 'Frame final' : `Referência ${index + 1}`}: ${reference.name}`}/><span>{usesFrames ? index === 0 ? 'INÍCIO' : index === 1 ? 'FIM' : 'EXTRA' : String(index + 1).padStart(2, '0')}</span><button type="button" disabled={busy || referenceBusy} onClick={() => change({ references: settings.references.filter((_, item) => item !== index), ...(index === 0 ? { animateMediaId: undefined } : {}) })} aria-label={`Remover referência ${index + 1}`}><Icon name="close"/></button></div>)}
-            {settings.references.length < referenceLimit && <button type="button" className={s.addReference} disabled={busy || referenceBusy || !loaded} onClick={() => fileInput.current?.click()}><Icon name="upload"/><span>{referenceBusy ? 'Lendo…' : usesFrames ? settings.references.length ? 'Adicionar fim' : 'Adicionar início' : 'Adicionar'}<small>JPG, PNG, WEBP · 10 MB</small></span></button>}
-            <input ref={fileInput} id={`${uid}-refs`} type="file" accept="image/png,image/jpeg,image/webp" multiple className={s.hidden} onChange={(event) => void addReferences(event.target.files)}/>
-          </div>
-          {referencesOverLimit && <p className={s.inlineError}>Frames aceita apenas início e fim. Remova as referências extras ou selecione Ingredientes.</p>}
+          <div className={s.referenceHeader}><label htmlFor={`${uid}-refs`}>{usesFrames ? 'START AND END' : 'Imagens de referência'}</label><span>{settings.references.length}/{referenceLimit} imagens</span></div>
+          {usesFrames ? <div className={s.frameRail} aria-label="START AND END">
+            {[0, 1].map((index) => { const reference = settings.references[index]; const label = index === 0 ? 'START' : 'END'; return <div className={s.frameNode} key={label}>
+              {reference ? <div className={s.frameMedia}><img src={reference.dataUrl} alt={`${label}: ${reference.name}`}/><button type="button" disabled={busy || referenceBusy} onClick={() => change({ references: settings.references.filter((_, item) => item !== index), ...(index === 0 ? { animateMediaId: undefined } : {}) })} aria-label={`Remover ${label}`}><Icon name="close"/></button></div> : <button type="button" className={s.frameEmpty} disabled={busy || referenceBusy || !loaded || index > settings.references.length} onClick={() => fileInput.current?.click()} aria-label={`Adicionar ${label}`}><Icon name="upload"/><small>Adicionar</small></button>}
+              <span>{label}</span>
+            </div>; })}
+            <div className={s.frameBridge} aria-hidden="true"><i/><Icon name="arrow"/><i/></div>
+          </div> : <div className={s.references}>
+            {settings.references.map((reference, index) => <div className={s.reference} key={`${index}-${reference.name}`}><img src={reference.dataUrl} alt={`Imagem ${index + 1}: ${reference.name}`}/><span>{String(index + 1).padStart(2, '0')}</span><button type="button" disabled={busy || referenceBusy} onClick={() => change({ references: settings.references.filter((_, item) => item !== index) })} aria-label={`Remover imagem ${index + 1}`}><Icon name="close"/></button></div>)}
+            {settings.references.length < referenceLimit && <button type="button" className={s.addReference} disabled={busy || referenceBusy || !loaded} onClick={() => fileInput.current?.click()}><Icon name="upload"/><span>{referenceBusy ? 'Lendo…' : 'Adicionar imagens'}<small>JPG, PNG, WEBP · 10 MB</small></span></button>}
+          </div>}
+          <input ref={fileInput} id={`${uid}-refs`} type="file" accept="image/png,image/jpeg,image/webp" multiple={!usesFrames} className={s.hidden} onChange={(event) => void addReferences(event.target.files)}/>
+          {referencesOverLimit && <p className={s.inlineError}>START AND END aceita apenas duas imagens. Remova as extras ou selecione Imagens.</p>}
           <div className={s.settingsGrid}>
             <label className={s.field}>Motor<select value={settings.model} disabled={busy || !loaded} onChange={(event) => change({ model: event.target.value })}>{modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
             <div className={s.field}><span>Formato</span><div className={s.segments} role="group" aria-label="Formato">{capabilities.aspects.map((ratio) => <button type="button" key={ratio} disabled={busy || !loaded} aria-pressed={settings.aspectRatio === ratio} className={settings.aspectRatio === ratio ? s.segmentSelected : ''} onClick={() => change({ aspectRatio: ratio })}><i className={ratio === '9:16' ? s.portrait : s.landscape}/>{ratio}</button>)}</div></div>
             {settings.mode === 'video' && <><div className={s.field}><span>Duração</span><div className={s.segments} role="group" aria-label="Duração do vídeo">{capabilities.durations.map((duration) => <button type="button" key={duration} disabled={busy || !loaded} aria-pressed={settings.durationSeconds === duration} className={settings.durationSeconds === duration ? s.segmentSelected : ''} onClick={() => change({ durationSeconds: duration })}>{duration}s</button>)}</div></div><div className={s.field}><span>Resolução de geração</span><div className={s.segments} role="group" aria-label="Resolução de geração">{capabilities.resolutions.map((resolution) => <button type="button" key={resolution} disabled={busy || !loaded} aria-pressed={settings.resolution === resolution} className={settings.resolution === resolution ? s.segmentSelected : ''} onClick={() => change({ resolution })}>{resolution}</button>)}</div></div></>}
             <div className={s.field}><span>Variações</span><div className={s.segments} role="group" aria-label="Quantidade de variações">{capabilities.counts.map((count) => <button type="button" key={count} disabled={busy || !loaded} aria-pressed={settings.count === count} className={settings.count === count ? s.segmentSelected : ''} onClick={() => change({ count })}>×{count}</button>)}</div></div>
-            {settings.mode === 'video' ? <label className={s.field}>Entrada de imagem<select value={settings.videoMode} disabled={busy || !loaded || !!settings.animateMediaId} onChange={(event) => change({ videoMode: event.target.value as FlowSettings['videoMode'] })}>{animationUnsupported && <option value="frames" disabled>Frames</option>}{capabilities.videoModes.map((mode) => <option key={mode} value={mode}>{mode === 'frames' ? 'Frames' : 'Ingredientes'}</option>)}</select></label> : <div className={`${s.field} ${s.nativeInfo}`}><Icon name="image"/><span>Imagem em 2K<small>Pronta para animar no Flow</small></span></div>}
+            {settings.mode === 'video' ? <label className={s.field}>Entrada de imagem<select value={settings.videoMode} disabled={busy || !loaded || !!settings.animateMediaId} onChange={(event) => change({ videoMode: event.target.value as FlowSettings['videoMode'] })}>{animationUnsupported && <option value="frames" disabled>START AND END</option>}{capabilities.videoModes.map((mode) => <option key={mode} value={mode}>{mode === 'frames' ? 'START AND END' : 'Imagens'}</option>)}</select></label> : <div className={`${s.field} ${s.nativeInfo}`}><Icon name="image"/><span>Imagem em 2K<small>Pronta para animar no Flow</small></span></div>}
           </div>
-          {capabilitiesUnsupported && <p className={s.inlineError}>{animationUnsupported ? 'Este motor não aceita esta imagem como primeiro frame. Escolha um motor com Frames para continuar a animação.' : 'Este motor não disponibilizou uma combinação compatível. Escolha outro motor ou atualize as opções do Flow.'}</p>}
-          <div className={s.exportNote}><span className={s.exportBadge}>{settings.mode === 'video' ? '1080p' : '2K'}</span><span>{settings.mode === 'video' ? 'Download aprimorado no Flow antes de entrar na montagem.' : 'Download em 2K no Flow para a montagem ou animação.'}</span></div>
+          {capabilitiesUnsupported && <p className={s.inlineError}>{animationUnsupported ? 'Este motor não aceita esta imagem como primeiro frame. Escolha um motor com START AND END para continuar a animação.' : 'Este motor não disponibilizou uma combinação compatível. Escolha outro motor ou atualize as opções do Flow.'}</p>}
+          {settings.mode === 'image' && <div className={s.exportNote}><span className={s.exportBadge}>2K</span><span>Imagem pronta para montagem ou animação.</span></div>}
           <details className={s.projectDetails}><summary>Projeto do Flow <Icon name="external"/></summary><label htmlFor={`${uid}-project`}>Link do projeto <span>opcional</span></label><input id={`${uid}-project`} type="url" value={projectUrl} disabled={busy || !loaded} onChange={(event) => { setProjectUrl(event.target.value); updateSession(taskId, { inspection: null, account: null, quote: null, quoteKey: '' }); }} placeholder="https://flow.google.com/project/…"/><p>Vazio: usa o projeto aberto no navegador.</p></details>
         </section>
         <section className={s.previewColumn} aria-label="Prévia e conta do Flow">
@@ -740,20 +783,48 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
             </div> : chosenAsset && previewUrl ? chosenAsset.kind === 'video' ? <video key={chosenAsset.id} src={previewUrl} poster={mediaUrl(chosenAsset.posterUrl)} controls playsInline muted preload="metadata" aria-label="Prévia do vídeo criado no Flow" onLoadedMetadata={(event) => { const { videoWidth: width, videoHeight: height } = event.currentTarget; if (width && height && (chosenAsset.width !== width || chosenAsset.height !== height)) updateSession(taskId, { assets: sessionFor(taskId).assets.map((asset) => asset.id === chosenAsset.id ? { ...asset, width, height } : asset) }); }} onError={() => setPreviewError(chosenAsset.id)}/> : <img src={previewUrl} alt="Imagem criada no Flow" onError={() => setPreviewError(chosenAsset.id)}/> : <div className={s.emptyPreview}><div className={s.emptyMark}><FlowMark size={54}/></div><span className={s.eyebrow}>UM NOVO TAKE COMEÇA AQUI</span><h4>Dê forma à sua ideia.</h4><p>Escreva o prompt, confira os créditos<br/>e gere sua primeira criação.</p><div className={s.previewCorners} aria-hidden="true"><i/><i/><i/><i/></div></div>}
             {busy && <div className={`${s.progressOverlay} ${session.busy === 'download' && mediaUrl(chosenAsset?.posterUrl) ? s.progressCompact : ''}`} role="status"><span className={s.spinner}/><strong>{session.progress || 'Processando…'}</strong><span>{session.busy === 'generate' ? 'O acompanhamento continua mesmo com a janela fechada.' : session.busy === 'quote' ? 'O custo aparece sozinho assim que o Flow confirmar.' : 'Aguarde a confirmação do Flow.'}</span></div>}
           </div><div className={s.previewMeta}><span>{chosenAsset ? chosenAsset.kind === 'video' ? 'VÍDEO GERADO' : 'IMAGEM GERADA' : 'PREVIEW'}</span><span>{chosenAsset?.width && chosenAsset?.height ? `${chosenAsset.width} × ${chosenAsset.height}` : settings.aspectRatio} <i/> {chosenAsset?.kind === 'image' || (!chosenAsset && settings.mode === 'image') ? 'Imagem' : `${settings.durationSeconds}s`}</span></div></div>
-          {session.assets.length > 0 && <div className={s.results} role="group" aria-label="Criações do Flow">{session.assets.map((asset, index) => { const binding = inserts.find((insert) => insertMatchesAsset(insert, asset)); return <button type="button" key={asset.id} disabled={busy} onClick={() => setSelected(asset.id)} className={`${chosenAsset?.id === asset.id ? s.resultSelected : ''} ${binding ? s.resultBound : ''}`} aria-label={`Selecionar ${asset.kind === 'video' ? 'vídeo' : 'imagem'} ${index + 1}${binding ? `, usado em ${binding.ancora}` : ''}`} aria-pressed={chosenAsset?.id === asset.id}>{assetUrl(asset) || mediaUrl(asset.posterUrl) ? <img src={assetUrl(asset) || mediaUrl(asset.posterUrl)} alt=""/> : <Icon name="video"/>}<span>{String(index + 1).padStart(2, '0')}</span>{binding && <b>{binding.ancora}</b>}{chosenAsset?.id === asset.id && <i><Icon name="check"/></i>}</button>; })}</div>}
+          {session.assets.length > 0 && <div className={s.results} role="group" aria-label="Criações do Flow">{session.assets.map((asset, index) => { const binding = inserts.find((insert) => insertMatchesAsset(insert, asset)); const poster = mediaUrl(asset.posterUrl); const selectedLocal = chosenAsset?.id === asset.id ? previewUrl : undefined; const source = selectedLocal || assetUrl(asset); return <button type="button" key={asset.id} disabled={busy} onClick={() => setSelected(asset.id)} className={`${chosenAsset?.id === asset.id ? s.resultSelected : ''} ${binding ? s.resultBound : ''}`} aria-label={`Selecionar ${asset.kind === 'video' ? 'vídeo' : 'imagem'} ${index + 1}${binding ? `, usado em ${binding.ancora}` : ''}`} aria-pressed={chosenAsset?.id === asset.id}>{asset.kind === 'image' && source ? <img src={source} alt={`Imagem ${index + 1} criada no Flow`}/> : asset.kind === 'video' && poster ? <img src={poster} alt={`Capa do vídeo ${index + 1}`}/> : asset.kind === 'video' && source ? <video src={source} muted playsInline preload="metadata" aria-label={`Miniatura do vídeo ${index + 1}`}/> : <span className={s.resultFallback}><Icon name={asset.kind === 'video' ? 'video' : 'image'}/></span>}<span>{String(index + 1).padStart(2, '0')}</span>{binding && <b>{binding.ancora}</b>}{chosenAsset?.id === asset.id && <i><Icon name="check"/></i>}</button>; })}</div>}
           {chosenAsset?.kind === 'image' && <button type="button" className={s.animateButton} disabled={busy} onClick={animate}><span className={s.animateIcon}><Icon name="video"/></span><span><b>Animar com Flow</b><small>Transforme este frame em um take cinematográfico</small></span><em>IMAGE → VIDEO</em><i><Icon name="arrow"/></i></button>}
           {unresolved && !busy && <div className={`${s.recoveryCard} ${s.recoveryLive}`} role="status"><span className={s.livePulse}/><strong>{session.recoveryState === 'unknown' ? 'Pedido precisa de conferência' : 'Acompanhamento automático ativo'}</strong><p>{session.recoveryMessage || 'O Pilot continuará verificando o Flow até o take ficar pronto.'}</p><div><button type="button" className={s.textButton} onClick={() => void recoverActiveJob()}><Icon name="refresh"/>Verificar agora</button><button type="button" className={s.textButton} onClick={() => void openFlow()}>Conferir no Flow<Icon name="external"/></button></div><small>{session.recoveryState === 'unknown' ? 'Esta instalação não reconheceu o pedido antigo.' : 'Nova verificação automática em instantes · nenhum crédito adicional.'}</small>{['needs_attention', 'unknown'].includes(session.recoveryState || '') && <><p>Se o projeto pertencer a outra instalação, confira o resultado antes de liberar.</p><button type="button" className={s.textButton} onClick={() => void acknowledgePreviousJob()}>Conferi no Flow · liberar novo pedido</button></>}</div>}
-          <div className={s.creditCard}><div><span className={s.smallLabel}>CUSTO DESTA CRIAÇÃO</span><strong>{quoteValid ? session.quote?.credits?.toLocaleString('pt-BR') : '—'} <small>créditos</small></strong><p>{quoteValid ? `${settings.count} ${settings.count === 1 ? 'variação' : 'variações'} · calculado automaticamente no Flow` : settings.prompt.trim() ? session.busy === 'quote' ? 'Calculando automaticamente…' : 'Aguardando a confirmação automática do Flow.' : 'Escreva o prompt para calcular automaticamente.'}</p></div><button type="button" className={s.quoteButton} disabled={busy || unresolved || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || referenceBusy || !loaded || !settings.prompt.trim()} onClick={() => void quote()} aria-label="Recalcular custo no Flow"><Icon name="refresh"/>{session.busy === 'quote' ? 'Calculando…' : quoteValid ? 'Recalcular' : 'Calcular agora'}</button></div>
+          <div className={s.creditCard}><div><span className={s.smallLabel}>CUSTO DESTA CRIAÇÃO</span><strong>{quoteValid ? session.quote?.credits?.toLocaleString('pt-BR') : '—'} <small>créditos</small></strong><p>{quoteValid ? `${settings.count} ${settings.count === 1 ? 'variação' : 'variações'} · atualizado automaticamente` : settings.prompt.trim() ? session.busy === 'quote' ? 'Calculando automaticamente…' : 'Sincronizando com o Flow…' : 'Escreva o prompt para calcular automaticamente.'}</p></div><div className={`${s.autoQuote} ${session.busy === 'quote' ? s.autoQuoteBusy : quoteValid ? s.autoQuoteReady : ''}`} role="status" aria-label={session.busy === 'quote' ? 'Calculando custo automaticamente' : quoteValid ? 'Custo atualizado automaticamente' : 'Aguardando cálculo automático'}><i/><span>{session.busy === 'quote' ? 'CALCULANDO' : quoteValid ? 'AUTO' : 'AGUARDANDO'}</span></div></div>
           {insufficient && <p className={s.inlineError} role="alert">Esta conta não tem créditos suficientes para a configuração escolhida.</p>}
           <button type="button" className={s.generateButton} disabled={busy || unresolved || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || referenceBusy || !quoteValid || insufficient || !loaded} onClick={() => void generate()}><Icon name="spark"/><span>{session.busy === 'generate' ? 'Gerando no Flow…' : `Gerar ${settings.count > 1 ? `${settings.count} ${settings.mode === 'video' ? 'vídeos' : 'imagens'}` : settings.mode === 'video' ? 'vídeo' : 'imagem'} no Flow`}</span><i><Icon name="arrow"/></i></button>
         </section>
         <section className={s.placement} aria-label="Escolher trecho da copy">
           <div className={s.sectionHeading}><span className={s.step}>03</span><h3>O lugar certo na copy</h3><span className={s.smallLabel}>INÍCIO → FIM</span></div>
           {chosenAsset && <div className={`${s.takeBinding} ${assignedInsert ? s.takeBindingSaved : ''}`}><span className={s.takeNumber}>TAKE {String(chosenTake).padStart(2, '0')}</span><div><strong>{assignedInsert ? 'Take vinculado à copy' : selectedRange ? 'Vínculo pronto para confirmar' : 'Escolha o trecho deste take'}</strong><p>{assignedInsert ? rangeText(assignedInsert, copyParts) : selectedRange ? rangeText({ ancora: selectedRange.ancora, palavraDe: selectedRange.de, palavraAte: selectedRange.ate }, copyParts) : 'Marque a primeira e a última palavra que receberão este insert.'}</p></div>{assignedInsert && <Icon name="check"/>}</div>}
-          {copyParts.length ? <><div className={s.parts} role="group" aria-label="Parte da copy">{copyParts.map((item) => <button type="button" key={item.label} aria-pressed={part.label === item.label} className={part.label === item.label ? s.partSelected : ''} onClick={() => { setAnchor(item.label); setRangeStart(null); }}>{item.label}</button>)}</div><div className={s.copy} aria-label={`Palavras de ${part.label}`}>{words.map((word, index) => <button type="button" key={index} onClick={() => chooseWord(index)} aria-pressed={!!selectedRange && index >= selectedRange.de && index <= selectedRange.ate} aria-label={`${word}, palavra ${index + 1}${rangeStart == null ? ', marcar início' : ', marcar fim'}`} className={`${selectedRange && index >= selectedRange.de && index <= selectedRange.ate ? s.wordSelected : ''} ${rangeStart === index ? s.wordStart : ''}`}>{word}</button>)}</div><div className={s.rangeFooter}><p aria-live="polite">{rangeStart != null ? <>Início em <b>“{words[rangeStart]}”</b>. Clique na última palavra.</> : selectedRange ? <>De <b>“{words[selectedRange.de]}”</b> até <b>“{words[selectedRange.ate]}”</b> · {selectedRange.ate - selectedRange.de + 1} palavras</> : 'Clique na primeira palavra e depois na última.'}</p><div className={s.rangeActions}><button type="button" className={s.textButton} onClick={() => { setRange({ ancora: part.label, de: 0, ate: words.length - 1 }); setRangeStart(null); }}>Parte inteira</button><div className={s.promptMagicWrap}><button type="button" className={s.promptMagicButton} disabled={!selectedRange || rangeStart != null || busy} onClick={() => setPromptMenu((open) => !open)} aria-label="Criar prompt cinematográfico para o trecho" aria-haspopup="menu" aria-expanded={promptMenu}><span/><Icon name="spark"/></button>{promptMenu && <div className={s.promptMenu} role="menu"><span>CRIAR DIREÇÃO · 0 CRÉDITOS FLOW</span><button type="button" role="menuitem" onClick={() => { setPromptMenu(false); void generatePrompt('image-video'); }}><Icon name="image"/><span><b>Imagem + vídeo</b><small>Frame inicial e movimento</small></span><Icon name="arrow"/></button><button type="button" role="menuitem" onClick={() => { setPromptMenu(false); void generatePrompt('video-only'); }}><Icon name="video"/><span><b>Vídeo direto</b><small>Take completo em um prompt</small></span><Icon name="arrow"/></button></div>}</div></div></div></> : <div className={s.emptyCopy}>A copy desta task ainda não está disponível. Analise a task para escolher onde o insert entra.</div>}
+          {copyParts.length ? <><div className={s.parts} role="group" aria-label="Parte da copy">{copyParts.map((item) => <button type="button" key={item.label} aria-pressed={part.label === item.label} className={part.label === item.label ? s.partSelected : ''} onClick={() => { setAnchor(item.label); setRangeStart(null); }}>{item.label}</button>)}</div><div className={s.copy} aria-label={`Palavras de ${part.label}`}>{words.map((word, index) => <button type="button" key={index} onClick={() => chooseWord(index)} aria-pressed={!!selectedRange && index >= selectedRange.de && index <= selectedRange.ate} aria-label={`${word}, palavra ${index + 1}${rangeStart == null ? ', marcar início' : ', marcar fim'}`} className={`${selectedRange && index >= selectedRange.de && index <= selectedRange.ate ? s.wordSelected : ''} ${rangeStart === index ? s.wordStart : ''}`}>{word}</button>)}</div><div className={s.rangeFooter}><p aria-live="polite">{rangeStart != null ? <>Início em <b>“{words[rangeStart]}”</b>. Clique na última palavra.</> : selectedRange ? <>De <b>“{words[selectedRange.de]}”</b> até <b>“{words[selectedRange.ate]}”</b> · {selectedRange.ate - selectedRange.de + 1} palavras</> : 'Clique na primeira palavra e depois na última.'}</p><div className={s.rangeActions}><button type="button" className={s.textButton} onClick={() => { setRange({ ancora: part.label, de: 0, ate: words.length - 1 }); setRangeStart(null); }}>Parte inteira</button><div className={s.promptMagicWrap}><button type="button" className={s.promptMagicButton} disabled={!selectedRange || rangeStart != null || busy} onClick={() => { setPromptStudioOpen(true); setPromptExplanationOpen(false); }} aria-label="Abrir diretor de prompt para o trecho" aria-haspopup="dialog" aria-expanded={promptStudioOpen}><span/><Icon name="spark"/></button></div></div></div></> : <div className={s.emptyCopy}>A copy desta task ainda não está disponível. Analise a task para escolher onde o insert entra.</div>}
           <div className={s.attachRow}><p><Icon name="video"/>{chosenAsset ? assignedInsert ? `Take ${String(chosenTake).padStart(2, '0')} já está em ${assignedInsert.ancora}. Selecione outro trecho para mover.` : chosenAsset.kind === 'video' ? 'O vídeo será baixado em 1080p e salvo na montagem.' : 'A imagem será baixada em 2K e salva na montagem.' : 'Sua criação aparecerá aqui quando estiver pronta.'}</p><button type="button" className={s.attachButton} disabled={!chosenAsset || !selectedRange || rangeStart != null || busy || referenceBusy || montageBusy} onClick={() => void attach()}><span>{session.busy === 'download' ? 'Preparando insert…' : assignedInsert ? 'Atualizar vínculo' : 'Usar neste trecho'}</span><Icon name="arrow"/></button></div>
         </section>
       </div>
+      {promptStudioOpen && selectedRange && <div className={s.promptStudioBackdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !session.busy) setPromptStudioOpen(false); }}>
+        <section className={s.promptStudio} role="dialog" aria-modal="true" aria-labelledby={`${uid}-prompt-studio-title`} aria-describedby={`${uid}-prompt-studio-description`}>
+          <header className={s.promptStudioHeader}>
+            <div className={s.promptStudioMark}><Icon name="spark"/></div>
+            <div><span className={s.eyebrow}>PROMPT DIRECTOR <i/> 0 CRÉDITOS</span><h3 id={`${uid}-prompt-studio-title`}>Direção do take</h3><p id={`${uid}-prompt-studio-description`}>Transforme o trecho selecionado em uma cena pronta para o Flow.</p></div>
+            <button type="button" className={s.iconButton} disabled={session.busy === 'prompt'} onClick={() => setPromptStudioOpen(false)} aria-label="Fechar diretor de prompt"><Icon name="close"/></button>
+          </header>
+          <div className={s.promptStudioBody}>
+            <div className={s.promptSelection}><span>TRECHO SELECIONADO</span><p>“{words.slice(selectedRange.de, selectedRange.ate + 1).join(' ')}”</p><b>{part.label} · {selectedRange.ate - selectedRange.de + 1} palavras</b></div>
+            <div className={s.promptModeTabs} role="group" aria-label="Formato da direção">
+              <button type="button" aria-pressed={promptMode === 'image-video'} className={promptMode === 'image-video' ? s.promptModeActive : ''} disabled={session.busy === 'prompt'} onClick={() => { setPromptMode('image-video'); setPromptSuggestion(null); setPromptExplanationOpen(false); }}><Icon name="image"/><span><b>Imagem + vídeo</b><small>Frame e movimento</small></span></button>
+              <button type="button" aria-pressed={promptMode === 'video-only'} className={promptMode === 'video-only' ? s.promptModeActive : ''} disabled={session.busy === 'prompt'} onClick={() => { setPromptMode('video-only'); setPromptSuggestion(null); setPromptExplanationOpen(false); }}><Icon name="video"/><span><b>Vídeo direto</b><small>Take em um prompt</small></span></button>
+            </div>
+            {!promptSuggestion ? <div className={s.promptEmpty}>
+              <div><Icon name={promptMode === 'image-video' ? 'image' : 'video'}/><span/><i/></div>
+              <h4>{session.busy === 'prompt' ? 'Dirigindo seu take…' : 'Pronto para criar a direção.'}</h4>
+              <p>{session.busy === 'prompt' ? 'Analisando intenção, ação, câmera, luz e realismo sem textos na cena.' : 'A direção nasce do trecho marcado e respeita a linguagem ideal para essa parte da copy.'}</p>
+              <button type="button" className={s.promptGenerate} disabled={session.busy === 'prompt'} onClick={() => void generatePrompt(promptMode)}>{session.busy === 'prompt' ? <span className={s.spinner}/> : <Icon name="spark"/>}<span>{session.busy === 'prompt' ? 'Criando direção…' : 'Gerar direção'}</span><i><Icon name="arrow"/></i></button>
+            </div> : <div className={s.promptOutputs}>
+              {promptMode === 'image-video' && promptSuggestion.imagePrompt && <article className={s.promptOutputCard}><header><span><Icon name="image"/><b>PROMPT DE IMAGEM</b></span><button type="button" className={s.promptCopyButton} onClick={() => void copyGeneratedPrompt('image')} aria-label="Copiar prompt de imagem" title="Copiar prompt de imagem">{copiedPrompt === 'image' ? <Icon name="check"/> : <Icon name="copy"/>}</button></header><textarea readOnly value={promptSuggestion.imagePrompt} aria-label="Prompt de imagem gerado"/></article>}
+              <article className={s.promptOutputCard}><header><span><Icon name="video"/><b>PROMPT DE VÍDEO</b></span><button type="button" className={s.promptCopyButton} onClick={() => void copyGeneratedPrompt('video')} aria-label="Copiar prompt de vídeo" title="Copiar prompt de vídeo">{copiedPrompt === 'video' ? <Icon name="check"/> : <Icon name="copy"/>}</button></header><textarea readOnly value={promptSuggestion.videoPrompt} aria-label="Prompt de vídeo gerado"/></article>
+              <div className={s.promptExplainRow}><button type="button" className={`${s.promptExplainButton} ${promptExplanationOpen ? s.promptExplainActive : ''}`} onClick={() => setPromptExplanationOpen((open) => !open)} aria-label="Explicar como será o take" title="Como será o take"><Icon name="info"/></button><span><b>Visualize antes de aplicar</b><small>Veja o que a direção pretende reproduzir.</small></span></div>
+              {promptExplanationOpen && <div className={s.promptExplanation} role="status"><span>COMO SERÁ O TAKE</span><p>{promptSuggestion.explanation || 'Um take cinematográfico contínuo, com ação clara, câmera controlada e acabamento realista, sem textos, legendas ou elementos de interface.'}</p></div>}
+              <div className={s.promptStudioActions}><button type="button" className={s.promptRegenerate} disabled={session.busy === 'prompt'} onClick={() => { setPromptSuggestion(null); setPromptExplanationOpen(false); }}>Gerar outra direção</button><button type="button" className={s.promptApply} disabled={session.busy === 'prompt'} onClick={() => void applyPromptSuggestion()}><Icon name="spark"/><span>Aplicar no Flow</span><i><Icon name="arrow"/></i></button></div>
+            </div>}
+          </div>
+        </section>
+      </div>}
       {(session.error || storageError || notice) && <div className={`${s.feedback} ${session.error || storageError ? s.feedbackError : s.feedbackSuccess}`} role={session.error || storageError ? 'alert' : 'status'}><Icon name={session.error || storageError ? 'external' : 'check'}/><span>{session.error || storageError || notice}</span>{session.error && <a className={s.textButton} href="https://flow.google.com/" target="_blank" rel="noopener noreferrer">Abrir Flow <Icon name="external"/></a>}</div>}
       {(session.montage?.error || session.montage?.notice) && <div className={`${s.feedback} ${session.montage.error ? s.feedbackError : s.feedbackSuccess}`} role={session.montage.error ? 'alert' : 'status'}><Icon name={session.montage.error ? 'external' : 'check'}/><span>{session.montage.error || session.montage.notice}</span></div>}
       <footer className={s.footer}><div className={s.savedSummary}><span className={s.savedCount}>{inserts.length}</span><div><strong>{inserts.length === 1 ? 'insert na montagem' : 'inserts na montagem'}</strong><span>{enabled ? 'Flow ligado nesta versão' : 'Ative o Flow para incluir estes inserts'}</span></div></div><div className={s.footerActions}>{inserts.length > 0 && <button type="button" className={s.secondaryButton} onClick={onEditarInserts} disabled={busy || montageBusy}>Editar inserts e enquadramento</button>}{onAtualizarMontagem && <button type="button" className={s.rebuildButton} disabled={busy || referenceBusy || montageBusy} aria-busy={montageBusy} onClick={() => void atualizarMontagem()} title="Refaz a montagem com os takes já gerados e os inserts atuais.">{montageBusy ? <span className={s.spinner} aria-hidden="true"/> : <Icon name="refresh"/>}{montageBusy ? 'Atualizando montagem…' : 'Atualizar montagem'}</button>}<button type="button" className={s.doneButton} onClick={onFechar}>Concluir<Icon name="check"/></button></div></footer>

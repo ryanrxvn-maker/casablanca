@@ -20,10 +20,11 @@ Keep one coherent shot suitable for 4–10 seconds. Never invent readable packag
 HARD RULE: no visible text, captions, subtitles, letters, labels, logos, watermarks or user interface anywhere in the generated scene.
 
 Return JSON only:
-{"strategy":"medical-3d|product-macro|human-story|cinematic-metaphor","imagePrompt":"English prompt or empty when video-only","videoPrompt":"English prompt"}
+{"strategy":"medical-3d|product-macro|human-story|cinematic-metaphor","imagePrompt":"English prompt or empty when video-only","videoPrompt":"English prompt","explanation":"2–3 concise sentences in Brazilian Portuguese explaining the visible beginning, action, ending, camera and look of the take"}
 
 For image-video, imagePrompt is a production-ready first frame and videoPrompt describes only a coherent animation of that exact frame.
-For video-only, videoPrompt is a complete direct text-to-video prompt.`;
+For video-only, videoPrompt is a complete direct text-to-video prompt.
+The explanation must describe what the user will see, in plain Brazilian Portuguese, and must never promise unsupported medical outcomes.`;
 
 function validBody(value: unknown): FlowPromptRequest | null {
   if (!value || typeof value !== 'object') return null;

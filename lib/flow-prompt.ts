@@ -9,6 +9,7 @@ export type FlowPromptRequest = {
 export type FlowPromptSuggestion = {
   imagePrompt?: string;
   videoPrompt: string;
+  explanation: string;
   strategy: 'medical-3d' | 'product-macro' | 'human-story' | 'cinematic-metaphor';
   source: 'claude' | 'local';
 };
@@ -48,7 +49,14 @@ export function localFlowPrompt(input: FlowPromptRequest): FlowPromptSuggestion 
     : 'ultra-realistic live action, natural skin and materials, subtle imperfections, documentary authenticity, physically correct light, premium commercial cinematography';
   const imagePrompt = `${subject}. ${look}. One decisive story moment with a clear subject and readable depth, ${aspect}, 35mm lens, controlled shallow depth of field, natural motivated lighting, fine surface texture, cinematic color separation. ${negative}`;
   const videoPrompt = `${subject}. ${look}. ${duration}-second single continuous shot: begin with a clear establishing detail, reveal the cause through one physically plausible action, end on a strong visual consequence. Smooth restrained camera push-in with subtle parallax, 35mm lens, stable subject identity, coherent hands and objects, natural motion blur, ${aspect}. ${negative}`;
-  return { ...(input.mode === 'image-video' ? { imagePrompt } : {}), videoPrompt, strategy, source: 'local' };
+  const explanation = strategy === 'medical-3d'
+    ? `O take transforma “${excerpt}” em uma animação médica 3D clara: começa situando a anatomia, revela o mecanismo por dentro e termina mostrando sua consequência. A câmera avança com suavidade, a anatomia permanece coerente e nada aparece escrito na imagem.`
+    : strategy === 'product-macro'
+      ? `O take mostra “${excerpt}” como uma ação de produto filmada de perto: primeiro apresenta os materiais, depois acompanha o preparo ou uso e termina no resultado visual. Luz, textura e movimento parecem captados por uma equipe real, sem rótulos ou textos legíveis.`
+      : strategy === 'human-story'
+        ? `O take encena “${excerpt}” como um momento humano real: começa situando a pessoa e o ambiente, acompanha uma ação simples e termina na reação que comunica a ideia. A câmera é discreta, a luz é natural e a cena não contém textos nem legendas.`
+        : `O take traduz “${excerpt}” em uma metáfora cinematográfica fácil de entender: estabelece um detalhe, desenvolve uma ação física e conclui com uma imagem forte. O movimento de câmera é contido, o visual é realista e não há textos ou legendas.`;
+  return { ...(input.mode === 'image-video' ? { imagePrompt } : {}), videoPrompt, explanation, strategy, source: 'local' };
 }
 
 export function parseFlowPrompt(value: unknown, input: FlowPromptRequest): FlowPromptSuggestion | null {
@@ -56,10 +64,12 @@ export function parseFlowPrompt(value: unknown, input: FlowPromptRequest): FlowP
   const candidate = value as Record<string, unknown>;
   const videoPrompt = clean(String(candidate.videoPrompt || ''), 7000);
   const imagePrompt = clean(String(candidate.imagePrompt || ''), 7000);
+  const explanation = clean(String(candidate.explanation || ''), 1800);
   const strategy = candidate.strategy;
   if (videoPrompt.length < 80 || (input.mode === 'image-video' && imagePrompt.length < 80)) return null;
   if (!['medical-3d', 'product-macro', 'human-story', 'cinematic-metaphor'].includes(String(strategy))) return null;
   const guard = ' No visible text, no captions, no subtitles, no logos, no watermark.';
   const ensureGuard = (prompt: string) => /no visible text/i.test(prompt) ? prompt : `${prompt}${guard}`;
-  return { ...(input.mode === 'image-video' ? { imagePrompt: ensureGuard(imagePrompt) } : {}), videoPrompt: ensureGuard(videoPrompt), strategy: strategy as FlowPromptSuggestion['strategy'], source: 'claude' };
+  const safeExplanation = explanation.length >= 40 ? explanation : localFlowPrompt(input).explanation;
+  return { ...(input.mode === 'image-video' ? { imagePrompt: ensureGuard(imagePrompt) } : {}), videoPrompt: ensureGuard(videoPrompt), explanation: safeExplanation, strategy: strategy as FlowPromptSuggestion['strategy'], source: 'claude' };
 }

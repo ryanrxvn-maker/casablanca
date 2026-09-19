@@ -61,7 +61,11 @@ assert.ok(modal.includes('assets, account: resultAccount, projectUrl: result.pro
 assert.ok(modal.includes('assets, account: refreshedAccount, projectUrl: actualProject, activeJob: null'), 'recovered generation persists its refreshed account before releasing the request lock');
 assert.ok(modal.includes('void quote(true)'), 'valid prompt/settings trigger the automatic credit consultation');
 assert.ok(modal.includes('1800'), 'an active paid request is polled automatically without a manual status click');
-assert.ok(modal.includes("generatePrompt('image-video')") && modal.includes("generatePrompt('video-only')"), 'the copy-range director exposes paired and direct-video prompts');
+assert.ok(modal.includes('setPromptStudioOpen(true)') && modal.includes('generatePrompt(promptMode)') && modal.includes('applyPromptSuggestion'), 'the copy-range director opens a review studio before applying paired or direct-video prompts');
+assert.ok(modal.includes('promptSuggestion.explanation') && modal.includes("copyGeneratedPrompt('video')"), 'the prompt studio explains and copies its generated direction');
+assert.ok(modal.includes("mode === 'frames' ? 'START AND END' : 'Imagens'"), 'image inputs use the requested START AND END and Imagens labels');
+assert.ok(!modal.includes('aria-label="Recalcular custo no Flow"'), 'credit calculation has no manual recalculate control');
+assert.ok(modal.includes('<video src={source} muted playsInline preload="metadata"'), 'video results use a playable thumbnail instead of an image tag with an MP4 source');
 assert.ok(modal.includes('flowAssetId: asset.id'), 'an inserted take keeps its exact Flow identity for visible take-to-copy binding');
 const modalAst = ts.createSourceFile('PilotFlowInserts.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const quoteNodes = [];
@@ -90,6 +94,7 @@ function quoteHarness({ settings = quoteSettings, inspection = quoteInspection, 
   const context = {
     exports: {}, taskId: 'first-quote', settings, projectUrl: '', capabilitiesPending: false,
     capabilitiesUnsupported: false, referencesOverLimit: false,
+    quoteRevision: { current: 0 },
     preferredModels: { current: {} }, inspectionAttempt: { current: '' },
     sessionFor: () => state,
     updateSession: (_, update) => { state = { ...state, ...update }; },
@@ -125,6 +130,16 @@ assert.equal(firstQuote.state().inspection.account.credits, 249, 'account card u
 assert.equal(firstQuote.state().quoteKey, JSON.stringify({ settings: firstQuote.context.settings, projectUrl: firstQuote.context.projectUrl }), 'the first price fingerprint matches the settings now displayed');
 assert.ok(firstQuote.context.exports.controls(firstQuote.state().inspection, firstQuote.context.settings).matches, 'settled first consultation already has capabilities so the automatic effect cannot clear its price');
 assert.equal(firstQuote.state().busy, null, 'quote unlocks after publishing capabilities and price');
+
+let releaseStaleInspection;
+const staleQuote = quoteHarness({ inspectGate: new Promise((resolve) => { releaseStaleInspection = resolve; }) });
+const stalePending = staleQuote.run();
+staleQuote.context.quoteRevision.current += 1;
+releaseStaleInspection();
+await stalePending;
+assert.deepEqual(staleQuote.calls.map((call) => call.action), ['inspect'], 'editing during an automatic quote discards the stale response before pricing the old prompt');
+assert.equal(staleQuote.state().quote, null, 'a stale automatic quote cannot overwrite the newest prompt state');
+assert.equal(staleQuote.state().busy, null, 'discarding a stale quote releases background pricing for the newest input');
 
 const inspectionFailure = quoteHarness({ inspectError: new Error('Flow indisponível') });
 await inspectionFailure.run();

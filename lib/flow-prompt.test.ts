@@ -19,6 +19,8 @@ assert.equal(paired.source, 'local');
 assert.equal(paired.strategy, 'human-story');
 assert.ok(paired.imagePrompt && paired.imagePrompt.length > 80);
 assert.ok(paired.videoPrompt.length > 80);
+assert.ok(paired.explanation.length > 80);
+assert.match(paired.explanation, /take/i);
 assert.match(paired.imagePrompt!, /No visible text/i);
 assert.match(paired.videoPrompt, /No visible text/i);
 assert.match(paired.videoPrompt, /8-second/i);
@@ -35,10 +37,19 @@ const parsed = parseFlowPrompt({
   strategy: 'human-story',
   imagePrompt: 'An authentic woman in a lived-in Brazilian home, framed on a 35mm lens with natural window light and restrained documentary texture. '.repeat(2),
   videoPrompt: 'The camera slowly moves closer while she opens the door, pauses, and exhales with coherent natural motion and physically accurate light. '.repeat(2),
+  explanation: 'O take começa dentro de uma casa real, acompanha a mulher abrindo a porta e termina em seu alívio. A câmera se aproxima devagar, com luz natural e movimento discreto.',
 }, base);
 assert.ok(parsed);
 assert.equal(parsed?.source, 'claude');
 assert.match(parsed?.imagePrompt || '', /No visible text/i);
 assert.match(parsed?.videoPrompt || '', /No visible text/i);
+assert.match(parsed?.explanation || '', /câmera/i);
 
-console.log('Flow prompt director: strategy, paired prompts, video-only prompts and hard visual guards passed.');
+const parsedWithoutExplanation = parseFlowPrompt({
+  strategy: 'human-story',
+  imagePrompt: 'An authentic woman in a lived-in Brazilian home, framed on a 35mm lens with natural window light and restrained documentary texture. '.repeat(2),
+  videoPrompt: 'The camera slowly moves closer while she opens the door, pauses, and exhales with coherent natural motion and physically accurate light. '.repeat(2),
+}, base);
+assert.ok(parsedWithoutExplanation?.explanation.length, 'older provider payloads receive a safe local explanation');
+
+console.log('Flow prompt director: strategy, prompts, take explanations and hard visual guards passed.');
