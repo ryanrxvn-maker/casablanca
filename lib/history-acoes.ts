@@ -162,22 +162,65 @@ export function consolidarCiclosDeDisparo(events: HistoryEvent[]): HistoryEvent[
   const ordenados = [...events].sort((a, b) => b.t - a.t);
   const absorvidos = new Set<number>();
   const taskIds = ordenados.map(taskIdDoEvento);
+  const JANELA_DE_UMA_EXECUCAO = 24 * 60 * 60 * 1000;
+  const nomenclatura = (title: string) => tituloVisivelDoHistorico(title)
+    .toUpperCase()
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const mesmaNomenclatura = (a: string, b: string) => {
+    const na = nomenclatura(a);
+    const nb = nomenclatura(b);
+    if (na === nb) return true;
+    // Entregas antigas guardavam só "AD124VN" enquanto o dispatch guardava
+    // "AD124VN - PRPB07". O hífen obrigatório impede prefixos acidentais
+    // (AD12 nunca casa com AD120).
+    return na.startsWith(`${nb} - `) || nb.startsWith(`${na} - `);
+  };
 
   return ordenados.flatMap((evento, indice) => {
     if (absorvidos.has(indice)) return [];
     const taskId = taskIds[indice];
     if (evento.kind === 'dispatch' || !taskId || !evento.ref?.length) return [evento];
 
-    const indiceDoDisparo = ordenados.findIndex((candidato, i) =>
+    let indiceDoDisparo = ordenados.findIndex((candidato, i) =>
       i > indice &&
       !absorvidos.has(i) &&
       candidato.kind === 'dispatch' &&
       taskIds[i] === taskId,
     );
+    // Migração antiga: a entrega e o dispatch podiam receber IDs internos
+    // diferentes apesar de serem o mesmo card. Sem o match exato, usa a
+    // nomenclatura + ordem temporal, nunca apenas o número do AD.
+    if (indiceDoDisparo < 0) {
+      indiceDoDisparo = ordenados.findIndex((candidato, i) =>
+        i > indice &&
+        !absorvidos.has(i) &&
+        candidato.kind === 'dispatch' &&
+        evento.t - candidato.t <= JANELA_DE_UMA_EXECUCAO &&
+        mesmaNomenclatura(evento.title, candidato.title),
+      );
+    }
     if (indiceDoDisparo < 0) return [evento];
 
     absorvidos.add(indiceDoDisparo);
     const disparo = ordenados[indiceDoDisparo];
+    // Alguns registros legados cunharam DOIS IDs internos para o mesmo card.
+    // Depois de casar o ID correto, absorve apenas dispatches também ANTERIORES
+    // à entrega, com a mesma nomenclatura e dentro da mesma janela de execução.
+    // Um redisparo posterior ao arquivo pronto não entra aqui e segue visível.
+    for (let i = indice + 1; i < ordenados.length; i++) {
+      const candidato = ordenados[i];
+      if (
+        !absorvidos.has(i) &&
+        candidato.kind === 'dispatch' &&
+        evento.t >= candidato.t &&
+        evento.t - candidato.t <= JANELA_DE_UMA_EXECUCAO &&
+        mesmaNomenclatura(evento.title, candidato.title)
+      ) {
+        absorvidos.add(i);
+      }
+    }
     const atualVisivel = tituloVisivelDoHistorico(evento.title);
     const disparoVisivel = tituloVisivelDoHistorico(disparo.title);
     const titulo = disparoVisivel.length > atualVisivel.length ? disparo.title : evento.title;

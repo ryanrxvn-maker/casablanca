@@ -258,6 +258,18 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
   ok(umaLinha[0].title === 'AD124VN - PRPB07', 'recupera do disparo o nome completo da task');
   ok(umaLinha[0].channels?.[0]?.label === 'META', 'preserva o canal gravado no disparo');
 
+  const disparoLegadoDuplicado = ev({
+    id: 'dispatch:legacy-id:1699999950000',
+    t: 1_699_999_950_000,
+    title: 'AD124VN - PRPB07',
+    kind: 'dispatch',
+  });
+  const legadoConsolidado = consolidarCiclosDeDisparo([pronto, disparo, disparoLegadoDuplicado]);
+  ok(
+    legadoConsolidado.length === 1,
+    'ID legado duplicado da mesma execução também é absorvido pela entrega pronta',
+  );
+
   const redisparoNovo = ev({
     id: `dispatch:${taskId}:1700000600000`,
     t: 1_700_000_600_000,
