@@ -67,7 +67,7 @@ import {
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
 import { getHeyGenHealth, decideEsperaDoBatch, TETO_MODERACAO_MS } from '@/lib/heygen-health';
-import { canaisDoCard, precisaGravarCanais, idDoBoardParaCanal } from '@/lib/pilot-canais';
+import { canaisDoCard, precisaGravarCanais, idDoBoardParaCanal, resolverCanaisDaTask } from '@/lib/pilot-canais';
 import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
 import {
   getLibrarySnapshot,
@@ -925,23 +925,6 @@ function shortHash(s: string): string {
  *  laranja, META azul, YOUTUBE/TIKTOK vermelho, etc).
  *  100% READ-ONLY: so leitura do que ja vem na listagem, nao escreve nada
  *  no ClickUp (respeita o GET-only do proxy). */
-const CHANNEL_BRAND_COLORS: Record<string, string> = {
-  kwai: '#FF6E00',
-  meta: '#0866FF',
-  facebook: '#0866FF',
-  fb: '#0866FF',
-  instagram: '#E1306C',
-  insta: '#E1306C',
-  ig: '#E1306C',
-  youtube: '#FF0000',
-  yt: '#FF0000',
-  tiktok: '#FF2D55',
-  tt: '#FF2D55',
-  google: '#4285F4',
-  ads: '#4285F4',
-  taboola: '#0A66C2',
-};
-
 /** Cor de texto legivel sobre um fundo solido (preto em cores claras,
  *  branco em cores escuras/saturadas). */
 function channelTextColor(hex: string): string {
@@ -957,42 +940,7 @@ function channelTextColor(hex: string): string {
 /** Resolve o(s) canal(is) de uma task. Retorna [] se nao houver campo CANAL
  *  preenchido. Suporta drop_down (value = orderindex/id) e labels (multi). */
 function resolveChannels(task: ClickUpTask): Array<{ label: string; color: string }> {
-  const fields = task.custom_fields || [];
-  const f = fields.find((x) => /\b(canal|channel|plataforma|platform)\b/i.test(x.name || '')) as any;
-  if (!f) return [];
-  const val = f.value;
-  if (val == null || val === '' || (Array.isArray(val) && val.length === 0)) return [];
-  const options: any[] = (f.type_config && (f.type_config.options || f.type_config.labels)) || [];
-
-  const labelFor = (raw: any): { label: string; color: string } | null => {
-    let name: string | null = null;
-    let optColor: string | null = null;
-    // raw pode ser orderindex (num), id (string), ou ja o nome
-    if (options.length) {
-      const opt = options.find(
-        (o) =>
-          String(o.orderindex) === String(raw) ||
-          String(o.id) === String(raw) ||
-          o.name === raw ||
-          o.label === raw,
-      );
-      if (opt) {
-        name = opt.name || opt.label || null;
-        optColor = opt.color || null;
-      }
-    }
-    if (!name) {
-      if (typeof raw === 'string') name = raw;
-      else if (raw && typeof raw === 'object') name = raw.name || raw.label || null;
-    }
-    if (!name) return null;
-    const key = name.trim().toLowerCase();
-    const color = optColor || CHANNEL_BRAND_COLORS[key] || '#8a8a8a';
-    return { label: name.trim().toUpperCase(), color };
-  };
-
-  const raws = Array.isArray(val) ? val : [val];
-  return raws.map(labelFor).filter((x): x is { label: string; color: string } => !!x);
+  return resolverCanaisDaTask(task);
 }
 
 /** Canais ORGANICOS (KWAI/YouTube/TikTok). VA com esses canais NAO usa o
@@ -7146,6 +7094,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           tool: 'clickup-pilot',
           title: `${rTaskName} entregue`,
           meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
+          channels: batchStatesRef.current[taskId]?.channels,
           ref: refsDaEntregaPilot({
             taskId,
             adNameClean,
@@ -8251,6 +8200,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           tool: 'clickup-pilot',
           title: `${state.taskName} entregue`,
           meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
+          channels: state.channels,
           ref: refsDaEntregaPilot({
             taskId,
             adNameClean,
@@ -10150,8 +10100,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       if (somenteCache) {
         try { logHistory({
-          tool: 'clickup-pilot', title: `${adNameClean} · montagem atualizada`,
+          tool: 'clickup-pilot', title: `${b.taskName} · montagem atualizada`,
           meta: 'Takes locais · inserts Flow',
+          channels: b.channels,
           ref: [
             { via: 'zip', key: montadoKey, name: montadoName, label: 'Montado', taskId },
             ...(camuName ? [{ via: 'zip' as const, key: camufladoKey, name: camuName, label: 'Camuflado', taskId }] : []),
@@ -13401,6 +13352,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           tool: 'clickup-pilot',
           title: `${a.taskName} (VA) entregue`,
           meta: `${okAvas} avatares`,
+          channels: batchStatesRef.current[taskId]?.channels,
           ref: [
             { via: 'zip', key: `va:${taskId}:zip`, name: zipName, label: 'ZIP VA', taskId },
             ...(vaParts.length > 0
@@ -13807,6 +13759,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           tool: 'clickup-pilot',
           title: `${a.taskName} (VA) entregue`,
           meta: `${okCount} avatares · texto`,
+          channels: batchStatesRef.current[taskId]?.channels,
           ref: [
             { via: 'zip', key: `va:${taskId}:zip`, name: zipName, label: 'ZIP VA', taskId },
             ...(vaParts.length > 0

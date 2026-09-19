@@ -1,7 +1,7 @@
 'use client';
 import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
 import { RETENTION_MS, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
-import { faseAtiva, podeVirarCard } from './history-acoes';
+import { faseAtiva, podeVirarCard, preencherCanaisAusentes } from './history-acoes';
 
 /**
  * Histórico geral na conta, separado do background, com retenção de 7 dias.
@@ -59,6 +59,7 @@ export function logHistory(ev: {
   kind?: HistoryKind;
   meta?: string;
   ref?: FileRef[];
+  channels?: Array<{ label: string; color: string }>;
 }) {
   if (typeof window === 'undefined') return;
   try {
@@ -72,10 +73,11 @@ export function logHistory(ev: {
         now - e.t < 1500,
     );
     if (dup) {
-      // Evento idêntico recém-gravado: se o novo traz refs e o antigo não,
-      // aproveita pra anexar (double-fire de StrictMode não perde download).
-      if (ev.ref?.length && !dup.ref?.length) {
-        dup.ref = ev.ref;
+      // Evento idêntico recém-gravado: anexa refs/canal que chegaram no
+      // segundo fire (StrictMode não perde download nem metadado).
+      if ((ev.ref?.length && !dup.ref?.length) || (ev.channels?.length && !dup.channels?.length)) {
+        if (ev.ref?.length && !dup.ref?.length) dup.ref = ev.ref;
+        if (ev.channels?.length && !dup.channels?.length) dup.channels = ev.channels;
         safeWrite(prune(events));
         window.dispatchEvent(new CustomEvent('autoedit:history'));
       }
@@ -89,6 +91,7 @@ export function logHistory(ev: {
       kind: ev.kind ?? 'done',
       meta: ev.meta ? ev.meta.slice(0, 120) : undefined,
       ref: ev.ref?.length ? ev.ref : undefined,
+      channels: ev.channels?.length ? ev.channels : undefined,
     };
     // FUSÃO (captura → evento da página): se a captura automática de download
     // criou eventos provisórios pra essa ferramenta há poucos segundos e a
@@ -116,6 +119,24 @@ export function logHistory(ev: {
   } catch {
     /* nunca propaga */
   }
+}
+
+/**
+ * Persiste o canal recuperado em eventos legados e sincroniza com a conta.
+ * A atualização é aditiva: eventos que já conhecem o canal nunca são
+ * sobrescritos por uma consulta posterior.
+ */
+export async function backfillHistoryChannels(
+  canaisPorTask: Record<string, Array<{ label: string; color: string }>>,
+): Promise<number> {
+  if (typeof window === 'undefined' || Object.keys(canaisPorTask).length === 0) return 0;
+  const writer = createRecordWriter('history');
+  const atuais = Object.values(writer.hydrate<HistoryEvent>());
+  const { events, alterados } = preencherCanaisAusentes(atuais, canaisPorTask);
+  if (!alterados) return 0;
+  await writer.save(Object.fromEntries(events.map((evento) => [evento.id, evento])));
+  window.dispatchEvent(new CustomEvent('autoedit:history'));
+  return alterados;
 }
 
 /** Janela de fusão entre a captura automática do download e o logHistory da página. */

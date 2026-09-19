@@ -10,6 +10,7 @@ import {
   precisaGravarCanais,
   mesmosCanais,
   idDoBoardParaCanal,
+  resolverCanaisDaTask,
   type CanalChip,
 } from './pilot-canais';
 
@@ -86,6 +87,25 @@ ok(mesmosCanais(YT, [{ label: 'YOUTUBE', color: '#e11d48' }]), 'mesmo conteúdo 
 ok(!mesmosCanais(YT, META), 'canais diferentes = diferentes');
 ok(!mesmosCanais(YT, []), 'lista vazia não é igual a lista com chip');
 ok(mesmosCanais(undefined, []), 'ausente e vazio são a mesma coisa pra comparação');
+
+// ── Uma regra única lê o campo CANAL no card e na migração do histórico ──
+const ytDoClickUp = resolverCanaisDaTask({
+  custom_fields: [{
+    name: 'CANAL',
+    value: 1,
+    type_config: { options: [{ orderindex: 1, name: 'YouTube', color: '#f00000' }] },
+  }],
+});
+ok(ytDoClickUp[0]?.label === 'YOUTUBE', 'dropdown do ClickUp vira YOUTUBE no histórico');
+ok(ytDoClickUp[0]?.color === '#f00000', 'preserva a cor configurada no ClickUp');
+
+const tiktokDireto = resolverCanaisDaTask({ custom_fields: [{ name: 'Plataforma', value: 'TikTok' }] });
+ok(tiktokDireto[0]?.label === 'TIKTOK', 'valor textual legado também vira chip');
+ok(tiktokDireto[0]?.color === '#FF2D55', 'valor textual recebe a cor oficial de fallback');
+ok(
+  resolverCanaisDaTask({ custom_fields: [{ name: 'CANAL', value: null }] }).length === 0,
+  'campo realmente vazio não inventa canal',
+);
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

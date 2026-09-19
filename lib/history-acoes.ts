@@ -232,6 +232,31 @@ export function consolidarCiclosDeDisparo(events: HistoryEvent[]): HistoryEvent[
   });
 }
 
+/**
+ * Repara eventos antigos que ainda não carregavam o snapshot de canal.
+ *
+ * Nunca troca um canal já gravado: o histórico deve contar como a task era no
+ * momento do disparo, mesmo que o campo seja alterado depois no ClickUp. O
+ * mapa é montado pelo chamador a partir da fila durável e, como último recurso,
+ * de uma leitura GET da própria task.
+ */
+export function preencherCanaisAusentes(
+  events: HistoryEvent[],
+  canaisPorTask: Record<string, Array<{ label: string; color: string }>>,
+): { events: HistoryEvent[]; alterados: number } {
+  let alterados = 0;
+  const atualizados = events.map((evento) => {
+    if (evento.channels?.length) return evento;
+    const taskId = taskIdDoEvento(evento);
+    if (!taskId) return evento;
+    const canais = canaisPorTask[taskId];
+    if (!canais?.length) return evento;
+    alterados += 1;
+    return { ...evento, channels: canais };
+  });
+  return { events: atualizados, alterados };
+}
+
 export function agruparPorVersao(events: HistoryEvent[]): GrupoDeVersoes[] {
   const grupos: GrupoDeVersoes[] = [];
   const porChave = new Map<string, { grupo: GrupoDeVersoes; versoes: Set<number> }>();

@@ -9,6 +9,7 @@ import { PilotBtn3D } from '@/components/PilotCardActions';
 import {
   buildChains,
   canonicalTool,
+  backfillHistoryChannels,
   chainState,
   disparoNaFila,
   historyToolLabel,
@@ -22,6 +23,7 @@ import {
   agruparPorVersao,
   consolidarCiclosDeDisparo,
   chainDeDownload,
+  origemDoEvento,
   pedirAcaoEEsperar,
   podeVirarCard,
   rotuloVersaoDoTaskId,
@@ -40,6 +42,8 @@ import {
   type StatusDisparo,
 } from '@/lib/history-fila';
 import { readDurableRecords } from '@/lib/durable-records';
+import { getClickUpToken, getTask } from '@/lib/clickup-client';
+import { idDoBoardParaCanal, resolverCanaisDaTask } from '@/lib/pilot-canais';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -486,6 +490,7 @@ export function HistoryTimeline({
   const fila = filaDeTeste ?? filaReal;
   const router = useRouter();
   const confirmTimer = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const canaisLegadosTentados = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const timers = confirmTimer.current;
@@ -493,6 +498,74 @@ export function HistoryTimeline({
       for (const t of Object.values(timers)) clearTimeout(t);
     };
   }, []);
+
+  /**
+   * MIGRAÇÃO DO CANAL EM HISTÓRICOS ANTIGOS.
+   *
+   * Antes do snapshot de canal existir, a entrega pronta guardava arquivo e
+   * taskId, mas não YOUTUBE/TIKTOK/META. O chip parecia funcionar enquanto a
+   * fila viva ainda conhecia a task e sumia depois que ela era removida. Aqui
+   * recuperamos primeiro do registro durável e, se necessário, fazemos apenas
+   * GET da task no ClickUp. O resultado volta para o próprio evento e fica
+   * sincronizado na conta; não é um remendo apenas visual desta sessão.
+   */
+  useEffect(() => {
+    if (filaDeTeste) return;
+    const faltantes = consolidarCiclosDeDisparo(events)
+      .filter((evento) =>
+        canonicalTool(evento.tool) === 'clickup-pilot' &&
+        origemDoEvento(evento) === 'clickup' &&
+        !evento.channels?.length,
+      )
+      .map(taskIdDoEvento)
+      .filter((taskId): taskId is string => !!taskId && podeVirarCard(taskId));
+    const taskIds = [...new Set(faltantes)].filter((taskId) => !canaisLegadosTentados.current.has(taskId));
+    if (!taskIds.length) return;
+    taskIds.forEach((taskId) => canaisLegadosTentados.current.add(taskId));
+
+    void (async () => {
+      const locais = readDurableRecords<{ channels?: Array<{ label: string; color: string }> }>('background');
+      const resolvidos: Record<string, Array<{ label: string; color: string }>> = {};
+      const aindaSemCanal: string[] = [];
+      for (const taskId of taskIds) {
+        const canais = locais[taskId]?.channels || locais[idDoBoardParaCanal(taskId)]?.channels;
+        if (canais?.length) resolvidos[taskId] = canais;
+        else aindaSemCanal.push(taskId);
+      }
+      if (Object.keys(resolvidos).length) await backfillHistoryChannels(resolvidos);
+      if (!aindaSemCanal.length || !getClickUpToken()) return;
+
+      // Uma task pode ter irmã `-yt`; uma única leitura da mãe repara as duas.
+      const porTaskDoBoard = new Map<string, string[]>();
+      for (const taskId of aindaSemCanal) {
+        const boardId = idDoBoardParaCanal(taskId);
+        porTaskDoBoard.set(boardId, [...(porTaskDoBoard.get(boardId) || []), taskId]);
+      }
+      const idsDoBoard = [...porTaskDoBoard.keys()];
+      // Quatro GETs por rodada, com respiro entre rodadas, respeitam a API e
+      // fazem os primeiros chips aparecerem em poucos segundos.
+      for (let i = 0; i < idsDoBoard.length; i += 4) {
+        const lote = idsDoBoard.slice(i, i + 4);
+        const encontrados: Record<string, Array<{ label: string; color: string }>> = {};
+        await Promise.all(lote.map(async (boardId) => {
+          try {
+            const canais = resolverCanaisDaTask(await getTask(boardId));
+            if (!canais.length) return;
+            for (const taskId of porTaskDoBoard.get(boardId) || []) encontrados[taskId] = canais;
+          } catch {
+            // Registro e tela continuam íntegros; uma próxima abertura tenta
+            // novamente caso tenha sido uma indisponibilidade temporária.
+            for (const taskId of porTaskDoBoard.get(boardId) || []) canaisLegadosTentados.current.delete(taskId);
+          }
+        }));
+        if (Object.keys(encontrados).length) await backfillHistoryChannels(encontrados);
+        if (i + 4 < idsDoBoard.length) await new Promise((resolve) => setTimeout(resolve, 2500));
+      }
+    })().catch(() => {
+      // Histórico é observabilidade: uma migração não pode derrubar a lista.
+      for (const taskId of taskIds) canaisLegadosTentados.current.delete(taskId);
+    });
+  }, [events, filaDeTeste]);
 
   // Menu de versões fecha com ESC ou clique fora — nunca fica preso na tela.
   useEffect(() => {

@@ -21,6 +21,80 @@
 
 export type CanalChip = { label: string; color: string };
 
+const CORES_DE_CANAL: Record<string, string> = {
+  kwai: '#FF6E00',
+  meta: '#0866FF',
+  facebook: '#0866FF',
+  fb: '#0866FF',
+  instagram: '#E1306C',
+  insta: '#E1306C',
+  ig: '#E1306C',
+  youtube: '#FF0000',
+  yt: '#FF0000',
+  tiktok: '#FF2D55',
+  tt: '#FF2D55',
+  google: '#4285F4',
+  ads: '#4285F4',
+  taboola: '#0A66C2',
+};
+
+type TaskComCamposDeCanal = {
+  custom_fields?: Array<{
+    name?: string;
+    value?: unknown;
+    type_config?: { options?: unknown[]; labels?: unknown[] };
+  }>;
+};
+
+/**
+ * Extrai o snapshot de canal diretamente de uma task do ClickUp.
+ *
+ * Fica numa lib pura porque o card, o histórico e a migração de registros
+ * antigos precisam obedecer exatamente à mesma leitura. Aceita dropdown
+ * simples e campo de múltiplos labels, preservando a cor configurada no
+ * ClickUp e usando a cor oficial apenas como fallback.
+ */
+export function resolverCanaisDaTask(task: TaskComCamposDeCanal): CanalChip[] {
+  const campo = (task.custom_fields || []).find((field) =>
+    /\b(canal|channel|plataforma|platform)\b/i.test(field.name || ''),
+  );
+  if (!campo) return [];
+  const valor = campo.value;
+  if (valor == null || valor === '' || (Array.isArray(valor) && valor.length === 0)) return [];
+
+  const config = campo.type_config || {};
+  const opcoes = (config.options || config.labels || []) as Array<Record<string, unknown>>;
+  const resolveUm = (raw: unknown): CanalChip | null => {
+    let nome: string | null = null;
+    let cor: string | null = null;
+    const opcao = opcoes.find((item) =>
+      String(item.orderindex) === String(raw) ||
+      String(item.id) === String(raw) ||
+      item.name === raw ||
+      item.label === raw,
+    );
+    if (opcao) {
+      nome = typeof opcao.name === 'string'
+        ? opcao.name
+        : typeof opcao.label === 'string' ? opcao.label : null;
+      cor = typeof opcao.color === 'string' ? opcao.color : null;
+    }
+    if (!nome && typeof raw === 'string') nome = raw;
+    if (!nome && raw && typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      nome = typeof obj.name === 'string' ? obj.name : typeof obj.label === 'string' ? obj.label : null;
+    }
+    if (!nome) return null;
+    const label = nome.trim().toUpperCase();
+    if (!label) return null;
+    return { label, color: cor || CORES_DE_CANAL[nome.trim().toLowerCase()] || '#8a8a8a' };
+  };
+
+  return (Array.isArray(valor) ? valor : [valor])
+    .map(resolveUm)
+    .filter((canal): canal is CanalChip => !!canal);
+}
+
 /** Igualdade de conteúdo — pra não regravar estado e disparar render à toa. */
 export function mesmosCanais(a?: CanalChip[] | null, b?: CanalChip[] | null): boolean {
   const x = a || [];

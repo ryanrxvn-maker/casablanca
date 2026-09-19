@@ -16,6 +16,7 @@ import {
   faseAtiva,
   filtrarPorOrigemEData,
   origemDoEvento,
+  preencherCanaisAusentes,
   podeVirarCard,
   rotuloVersaoDoTaskId,
   chainDeDownload,
@@ -279,6 +280,16 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
   const duasExecucoes = consolidarCiclosDeDisparo([redisparoNovo, pronto, disparo]);
   ok(duasExecucoes.length === 2, 'um redisparo realmente novo continua separado');
   ok(duasExecucoes[0].id === redisparoNovo.id, 'o redisparo atual fica na frente');
+
+  const yt = [{ label: 'YOUTUBE', color: '#ff0000' }];
+  const reparado = preencherCanaisAusentes([pronto, disparo], { [taskId]: yt });
+  ok(reparado.alterados === 1, 'migração repara somente o evento legado sem canal');
+  ok(reparado.events[0].channels?.[0]?.label === 'YOUTUBE', 'entrega legada recebe o canal pelo taskId');
+  ok(reparado.events[1].channels?.[0]?.label === 'META', 'canal histórico já gravado nunca é sobrescrito');
+
+  const semTaskId = ev({ id: 'legacy-without-task', title: 'AD999 entregue' });
+  const intocado = preencherCanaisAusentes([semTaskId], { [taskId]: yt });
+  ok(intocado.alterados === 0 && !intocado.events[0].channels, 'sem taskId não adivinha nem inventa canal');
 }
 
 // (D5) origem do disparo e filtro por data
