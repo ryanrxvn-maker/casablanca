@@ -1358,8 +1358,12 @@ export async function pollVideosUntilReady(
 export type RedispatchVerdict =
   /** Pode re-disparar: nunca disparou, ou o HeyGen recusou de verdade. */
   | { action: 'redispatch'; reason: string; rejectedVideoId?: string | null }
-  /** PROIBIDO re-disparar: o render está VIVO no HeyGen agora. */
-  | { action: 'wait'; reason: string; videoId: string }
+  /** PROIBIDO re-disparar: o render está VIVO no HeyGen agora, OU o take caiu
+   *  na REVISÃO DE MODERAÇÃO (`moderation: true`). Os dois proíbem re-disparo,
+   *  mas são situações OPOSTAS pra quem espera: render vivo termina sozinho;
+   *  moderação é fila humana e re-submeter o MESMO texto cai nela de novo — o
+   *  chamador NÃO pode ficar esperando esse, senão vira loop eterno. */
+  | { action: 'wait'; reason: string; videoId: string; moderation?: boolean }
   /** Nem precisa: o vídeo ficou pronto — é só baixar. */
   | { action: 'rescue'; reason: string; videoId: string; videoUrl: string };
 
@@ -1447,6 +1451,7 @@ export async function classifyForRedispatch(
     if (action === 'wait') {
       out[i] = {
         action: 'wait',
+        moderation: !!s?.moderationPending,
         reason: s?.moderationPending
           ? 'O HeyGen mandou esse take pra REVISÃO DE MODERAÇÃO. Não é falha de render e re-disparar o mesmo texto cai na mesma fila — ou a revisão libera, ou o texto precisa ser quebrado/ajustado.'
           : 'O HeyGen AINDA está renderizando esse take — re-disparar duplicaria o gasto.',

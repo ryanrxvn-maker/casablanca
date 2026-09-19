@@ -42,8 +42,13 @@ export type PartePlanejada = {
  */
 export function assinaturaMontagem(parts?: ParteAssinavel[]): string {
   if (!parts?.length) return '';
+  // PREFIXO DE POSICAO (18.09). O label NAO e' chave unica: AD com 2+ hooks tem
+  // duas partes chamadas "HOOK 1". Sem a posicao, a leitura da assinatura
+  // sobrescrevia a 1a pelo videoId da 2a e o card acusava "1 take mudou" em
+  // TODO AD multi-hook — falso alarme eterno, com o Baixar travado e pedindo
+  // "Atualizar montagem" de uma montagem que estava certa (AD41VN - PRWA10).
   return parts
-    .map((p) => `${p.label}=${p.videoId || (p.videoStatus === 'completed' ? 'ok' : '-')}`)
+    .map((p, i) => `${i}:${p.label}=${p.videoId || (p.videoStatus === 'completed' ? 'ok' : '-')}`)
     .join('|');
 }
 
@@ -60,16 +65,45 @@ export function partesDesatualizadas(b: {
   montagemSig?: string;
 }): string[] {
   const mudou = new Set(b.dirtyParts || []);
-  if (b.montagemSig) {
-    const antes = new Map<string, string>();
-    for (const item of b.montagemSig.split('|')) {
-      const i = item.indexOf('=');
-      if (i > 0) antes.set(item.slice(0, i), item.slice(i + 1));
-    }
-    for (const p of b.parts || []) {
-      const agora = p.videoId || (p.videoStatus === 'completed' ? 'ok' : '-');
-      const ref = antes.get(p.label);
-      if (ref !== undefined && ref !== agora) mudou.add(p.label);
+  const sig = b.montagemSig;
+  if (sig) {
+    const valorAgora = (p: ParteAssinavel) =>
+      p.videoId || (p.videoStatus === 'completed' ? 'ok' : '-');
+    // Assinatura NOVA: "<i>:<label>=<valor>" — compara por POSICAO, entao label
+    // repetido (AD com 2 hooks) nao se atropela. So acusa se o label daquela
+    // posicao continuar o mesmo; se a lista de takes foi remontada, fica calado
+    // (conservador de proposito — alarme falso e' pior que silencio).
+    const posicional = /^\d+:/.test(sig.split('|')[0] || '');
+    if (posicional) {
+      const antes = sig.split('|').map((item) => {
+        const c = item.indexOf(':');
+        const e = item.indexOf('=');
+        if (c < 0 || e < c) return null;
+        return { label: item.slice(c + 1, e), valor: item.slice(e + 1) };
+      });
+      (b.parts || []).forEach((p, i) => {
+        const ref = antes[i];
+        if (!ref || ref.label !== p.label) return;
+        if (ref.valor !== valorAgora(p)) mudou.add(p.label);
+      });
+    } else {
+      // LEGADO (montagem anterior a 18.09): mapa por label. Label REPETIDO nao
+      // da' pra desambiguar — ficaria sempre sujo, que e' exatamente o bug.
+      const antes = new Map<string, string>();
+      const vistos = new Map<string, number>();
+      for (const item of sig.split('|')) {
+        const i = item.indexOf('=');
+        if (i > 0) {
+          const lab = item.slice(0, i);
+          antes.set(lab, item.slice(i + 1));
+          vistos.set(lab, (vistos.get(lab) || 0) + 1);
+        }
+      }
+      for (const p of b.parts || []) {
+        if ((vistos.get(p.label) || 0) > 1) continue; // ambiguo: nao acusa
+        const ref = antes.get(p.label);
+        if (ref !== undefined && ref !== valorAgora(p)) mudou.add(p.label);
+      }
     }
   }
   return Array.from(mudou);

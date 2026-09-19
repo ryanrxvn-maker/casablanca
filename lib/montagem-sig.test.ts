@@ -104,6 +104,48 @@ ok(partesDesatualizadas({ parts: durante, montagemSig: sigEntrou }).join() === '
 ok(partesDesatualizadas({ parts: antesDeMontar, montagemSig: sigEntrou }).length === 0,
    'nada mudou durante a montagem: dirty zerado');
 
+// ── AD COM 2 HOOKS: label REPETIDO nao pode virar alarme eterno ─────────
+// Caso real (18.09, AD41VN - PRWA10, 9 takes / 2 montagens): as duas partes
+// se chamam "HOOK 1". A assinatura por LABEL sobrescrevia a 1a pela 2a e o
+// card acusava "Montagem desatualizada — 1 take mudou" pra sempre, com o
+// Baixar travado, numa montagem que estava perfeitamente certa.
+const doisHooks = [
+  { label: 'HOOK 1', videoId: 'hookA', videoStatus: 'completed' },
+  { label: 'HOOK 1', videoId: 'hookB', videoStatus: 'completed' },
+  { label: 'BODY 1', videoId: 'b1', videoStatus: 'completed' },
+];
+const sigDois = assinaturaMontagem(doisHooks);
+ok(partesDesatualizadas({ parts: doisHooks, montagemSig: sigDois }).length === 0,
+   'AD com 2 hooks (label repetido): nada sujo quando nada mudou');
+const doisHooksRegerado = [
+  { label: 'HOOK 1', videoId: 'hookA', videoStatus: 'completed' },
+  { label: 'HOOK 1', videoId: 'hookB-REGERADO', videoStatus: 'completed' },
+  { label: 'BODY 1', videoId: 'b1', videoStatus: 'completed' },
+];
+ok(partesDesatualizadas({ parts: doisHooksRegerado, montagemSig: sigDois }).join() === 'HOOK 1',
+   'AD com 2 hooks: re-gerar o 2o hook AINDA acusa (nao perdeu sensibilidade)');
+const doisHooksPrimeiro = [
+  { label: 'HOOK 1', videoId: 'hookA-REGERADO', videoStatus: 'completed' },
+  { label: 'HOOK 1', videoId: 'hookB', videoStatus: 'completed' },
+  { label: 'BODY 1', videoId: 'b1', videoStatus: 'completed' },
+];
+ok(partesDesatualizadas({ parts: doisHooksPrimeiro, montagemSig: sigDois }).join() === 'HOOK 1',
+   'AD com 2 hooks: re-gerar o 1o hook tambem acusa');
+
+// LEGADO: assinatura gravada antes de 18.09 (sem posicao). Label unico segue
+// funcionando igual; label repetido fica CALADO em vez de mentir.
+const sigLegadoUnico = 'HOOK 1=v1|BODY 1=v2';
+ok(partesDesatualizadas({
+  parts: [
+    { label: 'HOOK 1', videoId: 'v1', videoStatus: 'completed' },
+    { label: 'BODY 1', videoId: 'v2-NOVO', videoStatus: 'completed' },
+  ],
+  montagemSig: sigLegadoUnico,
+}).join() === 'BODY 1', 'assinatura LEGADA com label unico continua acusando');
+const sigLegadoDuplo = 'HOOK 1=hookA|HOOK 1=hookB|BODY 1=b1';
+ok(partesDesatualizadas({ parts: doisHooks, montagemSig: sigLegadoDuplo }).length === 0,
+   'assinatura LEGADA com label repetido nao acusa falso (o bug do AD41)');
+
 console.log('');
 console.log(falhas ? falhas + ' FALHA(S)' : 'montagem-sig: tudo ok');
 if (falhas) process.exit(1);
