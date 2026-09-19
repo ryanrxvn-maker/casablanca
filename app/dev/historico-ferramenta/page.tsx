@@ -165,6 +165,11 @@ const parte = (id: string | null, pronto: boolean) => ({ videoId: id, videoStatu
 const FILA: FilaAoVivo = {
   agora: AGORA,
   url: { '86aj6nfue': 'https://app.clickup.com/t/exemplo' },
+  canais: {
+    'viva-1': [{ label: 'YOUTUBE', color: '#ff2d55' }],
+    'viva-2': [{ label: 'META', color: '#1877f2' }],
+    'viva-3': [{ label: 'KWAI', color: '#ff7a00' }, { label: 'TIKTOK', color: '#111111' }],
+  },
   inicio: { 'viva-1': AGORA - 32_000, 'viva-2': AGORA - 43_000, 'viva-3': AGORA - 48_000 },
   status: {
     'viva-1': statusDoDisparo({

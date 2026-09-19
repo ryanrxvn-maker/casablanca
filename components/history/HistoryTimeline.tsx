@@ -368,11 +368,13 @@ export type FilaAoVivo = {
   inicio: Record<string, number>;
   /** Link da task no ClickUp, quando o disparo guardou. */
   url: Record<string, string>;
+  /** Canal do AD (YOUTUBE/META/KWAI) guardado no registro do disparo. */
+  canais: Record<string, Array<{ label: string; color: string }>>;
   agora: number;
 };
 
 export function useFilaAoVivo(ativo: boolean): FilaAoVivo {
-  const [fila, setFila] = useState<FilaAoVivo>(() => ({ status: {}, inicio: {}, url: {}, agora: Date.now() }));
+  const [fila, setFila] = useState<FilaAoVivo>(() => ({ status: {}, inicio: {}, url: {}, canais: {}, agora: Date.now() }));
 
   useEffect(() => {
     if (!ativo) return;
@@ -383,10 +385,17 @@ export function useFilaAoVivo(ativo: boolean): FilaAoVivo {
     const ler = () => {
       if (!vivo) return;
       try {
-        const recs = readDurableRecords<RegistroDeFila & { startedAt?: number; taskUrl?: string }>('background');
+        const recs = readDurableRecords<
+          RegistroDeFila & {
+            startedAt?: number;
+            taskUrl?: string;
+            channels?: Array<{ label: string; color: string }>;
+          }
+        >('background');
         const status: Record<string, StatusDisparo | null> = {};
         const inicio: Record<string, number> = {};
         const url: Record<string, string> = {};
+        const canais: Record<string, Array<{ label: string; color: string }>> = {};
         for (const [id, r] of Object.entries(recs)) {
           // Arquivo morto/rascunho/Hey Auto nunca viram card: manter no mapa
           // acenderia acao que a tela do Pilot nao tem como executar.
@@ -394,8 +403,9 @@ export function useFilaAoVivo(ativo: boolean): FilaAoVivo {
           status[id] = statusDoDisparo(r);
           if (typeof r?.startedAt === 'number') inicio[id] = r.startedAt;
           if (typeof r?.taskUrl === 'string' && r.taskUrl) url[id] = r.taskUrl;
+          if (Array.isArray(r?.channels) && r.channels.length) canais[id] = r.channels;
         }
-        setFila({ status, inicio, url, agora: Date.now() });
+        setFila({ status, inicio, url, canais, agora: Date.now() });
         // Com trabalho em curso a barra precisa andar; parada a fila, ler de
         // novo seria puro desperdício (a leitura varre o armazenamento todo).
         if (relogio) clearTimeout(relogio);
@@ -635,6 +645,11 @@ export function HistoryTimeline({
               // vivo; sem ela, o estado do próprio registro. Linha sem selo do
               // lado de linha com selo lê como defeito, e é.
               const selo = vivo ? { rotulo: vivo.rotulo, tom: vivo.tom } : seloDoRegistro(e.kind);
+              // CANAL: o evento carrega o seu desde 18.09; disparo mais antigo
+              // ainda tem o canal no registro da fila, então o chip aparece do
+              // mesmo jeito enquanto a task estiver lá.
+              const canais =
+                (e.channels?.length ? e.channels : taskId ? fila.canais[taskId] : undefined) ?? [];
               return (
                 <li
                   key={grupo.chave}
@@ -664,9 +679,9 @@ export function HistoryTimeline({
                       {/* CANAL do AD (YOUTUBE/META/KWAI). Fica gravado no
                           evento: a task já saiu do board quando alguém vem
                           olhar o histórico. */}
-                      {e.channels?.length ? (
+                      {canais.length ? (
                         <span className="hist-canais">
-                          {e.channels.map((ch, i) => (
+                          {canais.map((ch, i) => (
                             <span
                               key={`${ch.label}-${i}`}
                               className="hist-canal"
