@@ -11,6 +11,7 @@
  */
 
 import { canonicalTool, type Chain, type HistoryEvent } from './history-tools';
+import { taskIdBaseDaVersao, versaoDoTaskId } from './versoes-ad';
 
 /** Evento disparado na própria página quando ela JÁ é a dona da fila. */
 export const EVENTO_ACAO_FILA = 'autoedit:fila-acao';
@@ -118,6 +119,51 @@ export function podeVirarCard(taskId: string | null | undefined): boolean {
 /** Chaves do zip-store que pertencem a este disparo (usado ao remover). */
 export function prefixosDoDisparo(taskId: string): string[] {
   return [`batch:${taskId}:`, `pilot:${taskId}:`, `va:${taskId}:`, `troca:white:${taskId}`];
+}
+
+/**
+ * AS VERSÕES DO MESMO AD viram UMA linha só.
+ *
+ * O Pilot deixa gerar até 10 versões do mesmo anúncio (avatar diferente por
+ * versão), e cada uma tem taskId próprio (`-v2`, `-yt`). No histórico elas
+ * apareciam como registros repetidos, com o mesmo nome, e o dono tinha que
+ * adivinhar quem era quem. Aqui elas se juntam por AD + tipo de registro, do
+ * mesmo jeito que a fila do Pilot colapsa os cards, e a linha ganha o seletor.
+ *
+ * Só agrupa o que é do MESMO dia e do MESMO tipo: um disparo e a entrega dele
+ * continuam sendo dois momentos distintos na linha do tempo.
+ */
+export type GrupoDeVersoes = {
+  /** Identidade estável do grupo (serve de chave da escolha na tela). */
+  chave: string;
+  /** Da versão mais nova pra mais antiga, como o histórico já vinha. */
+  eventos: HistoryEvent[];
+};
+
+export function agruparPorVersao(events: HistoryEvent[]): GrupoDeVersoes[] {
+  const grupos: GrupoDeVersoes[] = [];
+  const porChave = new Map<string, GrupoDeVersoes>();
+  for (const e of events) {
+    const taskId = taskIdDoEvento(e);
+    const base = taskId ? taskIdBaseDaVersao(taskId) : null;
+    // Sem task (ferramenta comum) cada registro é o seu próprio grupo.
+    const chave = base ? `${base}|${e.kind}` : `ev:${e.id}`;
+    const existente = porChave.get(chave);
+    if (existente) {
+      existente.eventos.push(e);
+      continue;
+    }
+    const grupo: GrupoDeVersoes = { chave, eventos: [e] };
+    porChave.set(chave, grupo);
+    grupos.push(grupo);
+  }
+  return grupos;
+}
+
+/** Rótulo curto da versão de uma task ("v1", "v2"…). */
+export function rotuloVersaoDoTaskId(taskId: string | null | undefined): string {
+  if (!taskId) return '';
+  return `v${versaoDoTaskId(taskId)}`;
 }
 
 // ---------- Intenção entre páginas ----------------------------------------

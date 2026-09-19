@@ -511,6 +511,43 @@ async function baixarBlob(blob: Blob, filename: string): Promise<void> {
   await downloadBlob(blob, filename, { capture: false });
 }
 
+/**
+ * Entrega o artefato do jeito que o dono espera RECEBER.
+ *
+ * A entrega do Pilot é guardada como .zip porque pode levar um vídeo por hook
+ * mais os diagnósticos. Quando tem UM vídeo só dentro (o caso comum: avatar
+ * único, sem variação de gancho), baixar o zip obriga a descompactar pra achar
+ * um mp4 — foi exatamente a reclamação no AD42. Aqui o índice do zip é lido
+ * (uns KB no fim do arquivo) e, havendo um único vídeo, ele sai limpo.
+ *
+ * Com VÁRIOS vídeos o zip continua sendo a entrega: são N arquivos, e
+ * empacotado é como eles se mantêm juntos.
+ */
+async function entregarArtefato(blob: Blob, nomeSugerido: string): Promise<void> {
+  const pareceZip = /\.zip$/i.test(nomeSugerido) || /zip/i.test(blob.type || '');
+  if (!pareceZip) {
+    await baixarBlob(blob, nomeSugerido);
+    return;
+  }
+  try {
+    const { lerEntradasDoZip, videosDoZip, abrirEntrada } = await import('./zip-entries');
+    const entradas = await lerEntradasDoZip(blob);
+    const videos = entradas ? videosDoZip(entradas) : [];
+    if (videos.length === 1) {
+      const v = videos[0];
+      const mp4 = new Blob([await new Response(await abrirEntrada(blob, v)).arrayBuffer()], {
+        type: 'video/mp4',
+      });
+      const nome = v.nome.split('/').pop() || nomeSugerido.replace(/\.zip$/i, '.mp4');
+      await baixarBlob(mp4, nome);
+      return;
+    }
+  } catch {
+    /* zip ilegível ou compressão exótica: entrega o pacote como está */
+  }
+  await baixarBlob(blob, nomeSugerido);
+}
+
 function sanitizeName(s: string): string {
   return s.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || 'take';
 }
@@ -537,7 +574,7 @@ export async function recoverRef(
             'Esse arquivo já saiu do cofre do navegador (7 dias, ou limpeza de espaço). Gere de novo na ferramenta.',
         };
       }
-      await baixarBlob(blob, ref.name);
+      await entregarArtefato(blob, ref.name);
       return { ok: true };
     }
 
@@ -552,7 +589,8 @@ export async function recoverRef(
           sugerirHeygen: true,
         };
       }
-      await baixarBlob(blob, ref.name);
+      onProgress?.('Preparando o arquivo…');
+      await entregarArtefato(blob, ref.name);
       return { ok: true };
     }
 

@@ -60,6 +60,19 @@ const PILOT: HistoryEvent[] = [
       { via: 'zip', key: 'zs:sumiu', name: 'AD03G1GL - FLPB09.mp4', label: 'Montado', taskId: '86aj6nfug' },
     ],
   },
+  // TRES VERSOES do mesmo AD: a linha colapsa e ganha o seletor.
+  {
+    id: 'v1', t: AGORA - 5 * H, tool: 'clickup-pilot', title: 'AD05 entregue', kind: 'done', meta: '8 takes · 120.4MB',
+    ref: [{ via: 'vault', key: 'hv:1', name: 'AD05G1GL.mp4', label: 'Montado', taskId: '86ad5' }],
+  },
+  {
+    id: 'v2', t: AGORA - 5 * H + 60_000, tool: 'clickup-pilot', title: 'AD05 entregue', kind: 'done', meta: '8 takes · 118.9MB',
+    ref: [{ via: 'vault', key: 'hv:2', name: 'AD05G1GL-v2.mp4', label: 'Montado', taskId: '86ad5-v2' }],
+  },
+  {
+    id: 'v3', t: AGORA - 5 * H + 120_000, tool: 'clickup-pilot', title: 'AD05 entregue', kind: 'done', meta: '8 takes · 121.7MB',
+    ref: [{ via: 'zip', key: 'zs:sumiu', name: 'AD05G1GL-v3.mp4', label: 'Montado', taskId: '86ad5-v3' }],
+  },
   { id: 'dispatch:86aj6nfue:1', t: AGORA - 4 * H, tool: 'clickup-pilot', title: 'AD01 - CREATOR', kind: 'dispatch' },
   { id: 'dispatch:86aj6nfuh:2', t: AGORA - 26 * H, tool: 'clickup-pilot', title: 'AD03 - CREATOR', kind: 'dispatch' },
   {

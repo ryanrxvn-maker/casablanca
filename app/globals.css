@@ -3039,6 +3039,119 @@ html[data-theme='light'] .hist-previews {
   }
 }
 
+/* ───────────── SELETOR DE VERSOES NA LINHA DO HISTORICO ─────────────
+   O AD pode sair em ate' 10 versoes (avatar diferente por versao). A linha
+   mostra UMA e o seletor troca, igual ao card do Pilot. */
+.hist-versoes {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.hist-versoes__botao {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-family: var(--font-tech);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: rgb(var(--text-muted));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: transform 0.3s var(--hist-mola), box-shadow 0.25s ease, color 0.25s ease;
+}
+.hist-versoes__botao b {
+  display: inline-flex;
+  min-width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.hist-versoes__botao:hover {
+  transform: translateY(-1px);
+  color: rgb(var(--text));
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.5), 0 8px 18px -14px rgba(139, 92, 246, 0.9);
+}
+.hist-versoes__menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 6;
+  display: flex;
+  min-width: 210px;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 14px;
+  padding: 6px;
+  background: linear-gradient(180deg, rgb(var(--bg-elev)), rgb(var(--bg-soft)));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 26px 50px -26px rgba(0, 0, 0, 0.95);
+  animation: hist-pop 0.22s var(--hist-mola) both;
+}
+.hist-versoes__menu--cima {
+  top: auto;
+  bottom: calc(100% + 7px);
+}
+.hist-versoes__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 6px 9px;
+  text-align: left;
+  font-size: 11.5px;
+  color: rgb(var(--text-muted));
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.hist-versoes__item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgb(var(--text));
+}
+.hist-versoes__item--on {
+  background: rgba(167, 139, 250, 0.16);
+  color: #fff;
+}
+.hist-versoes__item b {
+  font-family: var(--font-tech);
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 20px;
+}
+.hist-versoes__estado {
+  flex: 1;
+  font-size: 10.5px;
+  color: rgb(var(--text-dim));
+}
+.hist-versoes__estado[data-tom='success'] {
+  color: #d9f99d;
+}
+.hist-versoes__estado[data-tom='progress'] {
+  color: #f9d4ff;
+}
+.hist-versoes__estado[data-tom='error'] {
+  color: #fecdd3;
+}
+.hist-versoes__hora {
+  font-family: var(--font-mono, ui-monospace), monospace;
+  font-size: 10px;
+  color: rgb(var(--text-dim));
+}
+html[data-theme='light'] .hist-versoes__botao {
+  box-shadow: inset 0 0 0 1px rgba(16, 16, 24, 0.14);
+}
+html[data-theme='light'] .hist-versoes__menu {
+  background: #fff;
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 16, 24, 0.1),
+    0 26px 50px -30px rgba(16, 16, 24, 0.4);
+}
+
 /* ─────────────── SOMBRA DOS SLIDES DO HERÓI ───────────────
    Era inline com rgba(0,0,0,.95): no tema CLARO isso vira uma mancha cinza
    em volta do card, que lia como "borda sobrando". Aqui a sombra é escura no

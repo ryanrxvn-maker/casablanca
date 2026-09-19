@@ -1680,6 +1680,10 @@ function ClickUpPilotInner() {
    *  pra sincronizar com /configuracoes/clickup-pilot. */
   const [teams, setTeams] = useState<ClickUpTeam[]>([]);
   const [selectedTeam, setSelectedTeamState] = useState<string | null>(null);
+  /** Espelho da empresa ativa pra leitura fora do ciclo de render (ponte do
+   *  histórico): o efeito dela tem deps [] e leria sempre o valor inicial. */
+  const selectedTeamRef = useRef<string | null>(null);
+  selectedTeamRef.current = selectedTeam;
   const [selectedEditor, setSelectedEditorState] = useState<string | null>(null);
   const setSelectedTeam = (v: string | null) => { setSelectedTeamState(v); setPilotTeam(v); };
   const setSelectedEditor = (v: string | null) => { setSelectedEditorState(v); setPilotEditor(v); };
@@ -4665,8 +4669,40 @@ function ClickUpPilotInner() {
    */
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    /**
+     * LEVA A LISTA ATÉ A TASK antes de agir.
+     *
+     * A fila mostra só a origem (ClickUp/Creator/Docs), a empresa e a VERSÃO
+     * escolhidas. Os painéis de retomar e de reiniciar moram DENTRO do card —
+     * então pedir a ação com a lista noutro filtro abria um painel que não
+     * tinha onde aparecer: o usuário clicava em "Sim, editar" e não vinha nada.
+     * Aqui a tela vai até a task, e só depois a ação acontece.
+     */
+    const levarListaAteTask = (taskId: string) => {
+      try {
+        const base = taskIdBaseDaVersao(taskId);
+        const modoDaTask = (modoDaTaskLocal(base) ?? 'clickup') as ModoPilot;
+        if (modoRef.current !== modoDaTask) trocarModo(modoDaTask);
+        // Versão: a fila colapsa as irmãs num card só; a escolhida tem que ser
+        // a que o histórico pediu, senão o card aberto é o da outra versão.
+        if (taskId !== base) {
+          setVersaoVisivel((v) => (v[base] === taskId ? v : { ...v, [base]: taskId }));
+        }
+        if (modoDaTask === 'clickup') {
+          const team =
+            batchStatesRef.current[taskId]?.teamId ?? batchStatesRef.current[base]?.teamId;
+          if (team && selectedTeamRef.current && team !== selectedTeamRef.current) {
+            void switchWorkspace(team);
+          }
+        }
+      } catch {
+        /* levar a lista é conveniência: a ação ainda tenta acontecer */
+      }
+    };
+
     const executar = (acao: 'retomar' | 'debug' | 'abrir', taskId: string): boolean => {
       if (!batchStatesRef.current[taskId]) return false;
+      levarListaAteTask(taskId);
       // ABRIR: só põe o card na tela com os previews abertos — nada é
       // reiniciado. É o caminho de "que task é essa mesmo?".
       if (acao === 'abrir') {
@@ -4682,21 +4718,27 @@ function ClickUpPilotInner() {
             ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } catch {}
       }, 80);
-      // CONFERÊNCIA: existir registro não garante card na tela — a fila mostra
-      // só a empresa e a origem selecionadas. Sem card, a ação seria um clique
-      // mudo, então quem pediu recebe o motivo de volta e mostra na hora.
-      setTimeout(() => {
+      // CONFERÊNCIA: o card tem que estar NA TELA, senão o painel abre no
+      // vazio. Troca de empresa recarrega a lista, então confere de novo antes
+      // de desistir — e só aí conta o motivo pra quem pediu.
+      const conferir = (tentativa: number) => {
         try {
           if (document.getElementById(`batch-card-${taskId}`)) {
+            setError(null);
             responderAcaoDeFila(taskId, true);
             return;
           }
+          if (tentativa < 3) {
+            setTimeout(() => conferir(tentativa + 1), 900);
+            return;
+          }
           const motivo =
-            'Esse disparo existe, mas o card dele não está nesta lista: ele é de outra empresa ou de outra origem (Creator/Docs). Troque ali em cima pra ver a task.';
+            'Esse disparo existe, mas o card dele não apareceu na fila. Ele pode ter saído do filtro da empresa ou da origem em uso.';
           responderAcaoDeFila(taskId, false, motivo);
           setError(motivo);
         } catch {}
-      }, 700);
+      };
+      setTimeout(() => conferir(1), 700);
       return true;
     };
     const semTask = () =>

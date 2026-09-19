@@ -11,8 +11,10 @@
  */
 import {
   aceitaAcaoDeFila,
+  agruparPorVersao,
   faseAtiva,
   podeVirarCard,
+  rotuloVersaoDoTaskId,
   chainDeDownload,
   intencaoValida,
   prefixosDoDisparo,
@@ -148,6 +150,39 @@ console.log('\nGARANTIA — ações do histórico (download/remontar/debug):');
   ok(!podeVirarCard('pilot-draft:team:A'), 'rascunho NÃO vira card');
   ok(!podeVirarCard('heygenauto:heygen:1:2'), 'fila do Hey Auto NÃO vira card do Pilot');
   ok(!podeVirarCard(null), 'sem task, sem card');
+}
+
+// (D4) versões do mesmo AD viram uma linha só
+{
+  const entrega = (id: string, taskId: string, titulo: string): HistoryEvent =>
+    ev({ id, title: titulo, ref: [{ via: 'zip', key: `batch:${taskId}:montado`, name: `${titulo}.mp4`, label: 'Montado', taskId }] });
+  const lista = [
+    entrega('a', '86ad-v3', 'AD05 entregue'),
+    entrega('b', '86ad-v2', 'AD05 entregue'),
+    entrega('c', '86ad', 'AD05 entregue'),
+    entrega('d', '86out', 'AD09 entregue'),
+  ];
+  const grupos = agruparPorVersao(lista);
+  ok(grupos.length === 2, 'três versões do mesmo AD viram um grupo (e o outro AD fica só)');
+  ok(grupos[0].eventos.length === 3, 'o grupo reúne as três versões');
+  ok(grupos[0].eventos[0].id === 'a', 'a mais nova continua na frente');
+
+  const disparoEEntrega = [
+    ev({ id: 'x', kind: 'dispatch', ref: [{ via: 'zip', key: 'k', name: 'n', taskId: '86ad' }] }),
+    entrega('y', '86ad', 'AD05 entregue'),
+  ];
+  ok(
+    agruparPorVersao(disparoEEntrega).length === 2,
+    'disparo e entrega da MESMA task não se fundem: são momentos diferentes',
+  );
+
+  const semTask = [ev({ id: 'z1', tool: 'compressor' }), ev({ id: 'z2', tool: 'compressor' })];
+  ok(agruparPorVersao(semTask).length === 2, 'ferramenta comum não agrupa nada');
+
+  ok(rotuloVersaoDoTaskId('86ad-v3') === 'v3', 'rótulo da versão 3');
+  ok(rotuloVersaoDoTaskId('86ad-yt') === 'v2', 'a versão YouTube é a 2');
+  ok(rotuloVersaoDoTaskId('86ad') === 'v1', 'a mãe é a v1');
+  ok(rotuloVersaoDoTaskId(null) === '', 'sem task, sem rótulo');
 }
 
 // (E) intenção entre páginas vence

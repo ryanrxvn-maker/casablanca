@@ -18,9 +18,11 @@ import {
 } from '@/lib/history';
 import {
   aceitaAcaoDeFila,
+  agruparPorVersao,
   chainDeDownload,
   pedirAcaoEEsperar,
   podeVirarCard,
+  rotuloVersaoDoTaskId,
   prefixosDoDisparo,
   taskIdDoEvento,
   temFilaDeDisparo,
@@ -451,6 +453,10 @@ export function HistoryTimeline({
 }) {
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
   const [previews, setPreviews] = useState<{ taskId: string; titulo: string } | null>(null);
+  /** Versão escolhida em cada grupo de versões (chave do grupo -> id do evento). */
+  const [versaoEscolhida, setVersaoEscolhida] = useState<Record<string, string>>({});
+  /** Grupo com o seletor de versões aberto, e pra que lado ele abre. */
+  const [menuVersoes, setMenuVersoes] = useState<{ chave: string; praCima: boolean } | null>(null);
   const filaReal = useFilaAoVivo(!filaDeTeste);
   const fila = filaDeTeste ?? filaReal;
   const router = useRouter();
@@ -463,15 +469,37 @@ export function HistoryTimeline({
     };
   }, []);
 
+  // Menu de versões fecha com ESC ou clique fora — nunca fica preso na tela.
+  useEffect(() => {
+    if (!menuVersoes) return;
+    const fechar = () => setMenuVersoes(null);
+    const noEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') fechar();
+    };
+    const noClique = (e: MouseEvent) => {
+      const alvo = e.target as HTMLElement | null;
+      if (alvo?.closest('.hist-versoes')) return;
+      fechar();
+    };
+    document.addEventListener('keydown', noEsc);
+    document.addEventListener('mousedown', noClique);
+    return () => {
+      document.removeEventListener('keydown', noEsc);
+      document.removeEventListener('mousedown', noClique);
+    };
+  }, [menuVersoes]);
+
   const groups = useMemo(() => {
-    const out: { day: string; items: HistoryEvent[] }[] = [];
+    const porDia: { day: string; items: HistoryEvent[] }[] = [];
     for (const e of events) {
       const day = dayLabel(e.t);
-      const last = out[out.length - 1];
+      const last = porDia[porDia.length - 1];
       if (last && last.day === day) last.items.push(e);
-      else out.push({ day, items: [e] });
+      else porDia.push({ day, items: [e] });
     }
-    return out;
+    // As VERSÕES do mesmo AD viram uma linha só, com seletor — igual à fila do
+    // Pilot, que também colapsa as irmãs num card.
+    return porDia.map((d) => ({ day: d.day, grupos: agruparPorVersao(d.items) }));
   }, [events]);
 
   const patch = useCallback((id: string, p: Partial<RowState>) => {
@@ -571,13 +599,17 @@ export function HistoryTimeline({
   return (
     <div className={'flex flex-col ' + (compacto ? 'gap-5' : 'gap-7 pb-4')}>
       {groups.map((g) => (
-        <section key={g.day + g.items[0].id}>
+        <section key={g.day + (g.grupos[0]?.chave ?? "")}>
           <div className="hist-dia-linha">
             <h3 className="hist-dia">{g.day}</h3>
             <span className="hist-hairline" aria-hidden />
           </div>
           <ul className="hist-lista">
-            {g.items.map((e) => {
+            {g.grupos.map((grupo) => {
+              const escolhido = versaoEscolhida[grupo.chave];
+              const e =
+                (escolhido && grupo.eventos.find((x) => x.id === escolhido)) || grupo.eventos[0];
+              const temVersoes = grupo.eventos.length > 1;
               const st = rowState[e.id];
               const chains = buildChains(e.ref);
               const alvo = chainDeDownload(e, chains);
@@ -605,7 +637,7 @@ export function HistoryTimeline({
               const selo = vivo ? { rotulo: vivo.rotulo, tom: vivo.tom } : seloDoRegistro(e.kind);
               return (
                 <li
-                  key={e.id}
+                  key={grupo.chave}
                   className={
                     'hist-row' +
                     (compacto ? ' hist-row--compacta' : '') +
@@ -653,6 +685,72 @@ export function HistoryTimeline({
                         {vivo?.ativo ? <i className="hist-selo__ponto" aria-hidden /> : null}
                         {selo.rotulo}
                       </span>
+                      {temVersoes ? (
+                        <span className="hist-versoes">
+                          <button
+                            type="button"
+                            className="hist-versoes__botao"
+                            aria-haspopup="listbox"
+                            aria-expanded={menuVersoes?.chave === grupo.chave}
+                            title={`${grupo.eventos.length} versões deste AD`}
+                            onClick={(ev) => {
+                              if (menuVersoes?.chave === grupo.chave) {
+                                setMenuVersoes(null);
+                                return;
+                              }
+                              // Perto do rodapé o menu abre pra CIMA, senão
+                              // ficaria escondido atrás da borda da lista.
+                              const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+                              setMenuVersoes({
+                                chave: grupo.chave,
+                                praCima: r.bottom > window.innerHeight - 220,
+                              });
+                            }}
+                          >
+                            {rotuloVersaoDoTaskId(taskId) || 'v1'}
+                            <b>{grupo.eventos.length}</b>
+                          </button>
+                          {menuVersoes?.chave === grupo.chave ? (
+                            <span
+                              role="listbox"
+                              className={
+                                'hist-versoes__menu' +
+                                (menuVersoes.praCima ? ' hist-versoes__menu--cima' : '')
+                              }
+                            >
+                              {grupo.eventos.map((irma) => {
+                                const idIrma = taskIdDoEvento(irma);
+                                const st2 = idIrma ? fila.status[idIrma] ?? null : null;
+                                const marca = st2
+                                  ? { rotulo: st2.rotulo, tom: st2.tom }
+                                  : seloDoRegistro(irma.kind);
+                                return (
+                                  <button
+                                    key={irma.id}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={irma.id === e.id}
+                                    className={
+                                      'hist-versoes__item' +
+                                      (irma.id === e.id ? ' hist-versoes__item--on' : '')
+                                    }
+                                    onClick={() => {
+                                      setVersaoEscolhida((p) => ({ ...p, [grupo.chave]: irma.id }));
+                                      setMenuVersoes(null);
+                                    }}
+                                  >
+                                    <b>{rotuloVersaoDoTaskId(idIrma) || 'v1'}</b>
+                                    <span className="hist-versoes__estado" data-tom={marca.tom}>
+                                      {marca.rotulo}
+                                    </span>
+                                    <span className="hist-versoes__hora">{timeLabel(irma.t)}</span>
+                                  </button>
+                                );
+                              })}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </div>
                     <p className="hist-row__meta">
                       {mostrarFerramenta ? <span>{historyToolLabel(e.tool)}</span> : null}
