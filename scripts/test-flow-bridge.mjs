@@ -17,7 +17,7 @@ const tick = async () => { await Promise.resolve(); await Promise.resolve(); awa
 let checks = 0;
 
 function environment(code = bridgeCode, { browser = true, width = 1920, height = 1080,
-  autoDiscovery = true, extensions = [{ id: 'fixture-extension', version: '4.45.3' }], throwPost = '' } = {}) {
+  autoDiscovery = true, extensions = [{ id: 'fixture-extension', version: '4.45.4' }], throwPost = '' } = {}) {
   const timers = new Map();
   const listeners = [];
   const posted = [];
@@ -206,7 +206,7 @@ await run('simultaneous request correlation cannot swap quote and account result
 await run('multiple installed extensions receive only one targeted generation command', async () => {
   const env = environment(bridgeCode, { extensions: [
     { id: 'older-extension', version: '4.9.9' },
-    { id: 'fixture-extension', version: '4.45.3' },
+    { id: 'fixture-extension', version: '4.45.4' },
     { id: 'middle-extension', version: '4.45.1' },
   ] });
   const generated = env.api.flowGenerate(valid(), { projectUrl: PROJECT, expectedAccountEmail: ACCOUNT.email, maxCredits: 15 });
@@ -223,22 +223,22 @@ await run('multiple installed extensions receive only one targeted generation co
   await generated;
 });
 await run('extensions before the corrected Flow release cannot inspect, quote, generate or download', async () => {
-  for (const version of ['4.44.0', '4.44.3', '4.44.4', '4.45.0', '4.45.1', '4.45.2', '4.9.9']) {
+  for (const version of ['4.44.0', '4.44.3', '4.44.4', '4.45.0', '4.45.1', '4.45.2', '4.45.3', '4.9.9']) {
     const env = environment(bridgeCode, { extensions: [{ id: 'fixture-extension', version }] });
-    await assert.rejects(env.api.flowInspect(PROJECT), /4\.45\.3 ou superior/);
-    await assert.rejects(env.api.flowQuote(valid(), PROJECT), /4\.45\.3 ou superior/);
-    await assert.rejects(env.api.flowGenerate(valid(), { projectUrl: PROJECT, expectedAccountEmail: ACCOUNT.email, maxCredits: 15 }), /4\.45\.3 ou superior/);
-    await assert.rejects(env.api.flowDownload({ id: 'existing-asset', kind: 'video' }, PROJECT), /4\.45\.3 ou superior/);
+    await assert.rejects(env.api.flowInspect(PROJECT), /4\.45\.4 ou superior/);
+    await assert.rejects(env.api.flowQuote(valid(), PROJECT), /4\.45\.4 ou superior/);
+    await assert.rejects(env.api.flowGenerate(valid(), { projectUrl: PROJECT, expectedAccountEmail: ACCOUNT.email, maxCredits: 15 }), /4\.45\.4 ou superior/);
+    await assert.rejects(env.api.flowDownload({ id: 'existing-asset', kind: 'video' }, PROJECT), /4\.45\.4 ou superior/);
     assert.equal(env.posted.length, 0, 'incompatible extension receives no operation');
     assert.equal(env.timers.size, 0);
   }
 });
 await run('published extension version is the corrected Flow release', () => {
   const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '4.45.3');
+  assert.equal(manifest.version, '4.45.4');
 });
 await run('corrected release and newer versions can quote and generate exactly once', async () => {
-  for (const version of ['4.45.3', '4.45.4', '4.46.0', '5.0.0']) {
+  for (const version of ['4.45.4', '4.46.0', '5.0.0']) {
     const env = environment(bridgeCode, { extensions: [{ id: 'fixture-extension', version }] });
     const quote = env.api.flowQuote(valid(), PROJECT);
     assert.equal(env.posted.length, 1);

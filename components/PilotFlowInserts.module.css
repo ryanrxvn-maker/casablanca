@@ -202,3 +202,123 @@
 @media (max-width: 420px) { .brandTile { display: none; } .settingsGrid { gap: 13px 11px; } .addReference { gap: 5px; } .addReference small { display: none; } .reference { width: 55px; height: 55px; } .attachRow { flex-direction: column; align-items: stretch; gap: 10px; } .attachButton { align-self: flex-end; } .footer { flex-wrap: wrap; } .footerActions { margin-left: auto; } .savedSummary { gap: 7px; } .savedSummary > div > span { max-width: unset; } }
 @media (prefers-reduced-motion: reduce) { .triggerActive .triggerOrbit, .spinner, .dialog { animation: none; } .layer *, .trigger, .switchTrack i, .generateButton > i { transition: none !important; } .trigger:hover, .generateButton:not(:disabled):hover > i { transform: none; } }
 @media (max-width: 760px) { .footer { flex-wrap: wrap; } .footerActions { width: 100%; } }
+
+/* Premium readability pass — the studio remains dense, but no essential copy
+   drops below a comfortable interface size. */
+.layer { padding: 20px; font-size: 14px; line-height: 1.55; }
+.backdrop { background: radial-gradient(circle at 50% 42%, #18241633 0, #030604f2 45%, #010302fa 100%); backdrop-filter: blur(3px); }
+.dialog { width: min(1280px, 100%); max-height: calc(100dvh - 40px); border-color: #d9efbd36; border-radius: 27px; background: linear-gradient(145deg, #131913 0%, #101510 56%, #0d120e 100%); box-shadow: 0 38px 120px #000c, 0 0 0 1px #dfffaf0b, 0 0 65px #9fcf6a0a, inset 0 1px 0 #f4ffe81c; }
+.header { padding: 26px 32px 25px; background: radial-gradient(ellipse at 23% -60%, #c6e68d1c, transparent 68%), linear-gradient(90deg, #161d15, #111711); }
+.brandTile { width: 58px; height: 58px; border-radius: 18px; }
+.eyebrow, .smallLabel { font-size: 11px; }
+.heading h2 { margin-top: 5px; font-size: 29px; }
+.heading p { margin-top: 5px; font-size: 13px; }
+.switch { font-size: 12px !important; }
+.switchTrack { width: 34px; height: 20px; padding: 3px; }
+.switchTrack i { width: 12px; height: 12px; }
+.switchOn .switchTrack i { transform: translateX(14px); }
+.iconButton { width: 36px; height: 36px; }
+.workspace { grid-template-columns: minmax(0,1.16fr) minmax(0,.94fr); }
+.creator, .previewColumn { padding: 28px 32px 30px; }
+.previewColumn { background: radial-gradient(ellipse at 50% 0%, #a8d68c0a, transparent 62%), #0d130e; }
+.sectionHeading { margin-bottom: 20px; }
+.sectionHeading h3 { font-size: 16px; font-weight: 600; }
+.step { width: 25px; height: 25px; font-size: 10px; }
+.modeSwitch { margin-bottom: 19px; }
+.modeSwitch button { padding: 12px; font-size: 13px; }
+.promptBox label { padding: 15px 17px 0; font-size: 12px; }
+.promptBox label span { font-size: 11px; }
+.promptBox textarea { min-height: 132px; padding: 13px 17px 15px; font-size: 14px; line-height: 1.65; }
+.promptHint { padding: 11px 16px; font-size: 11px; }
+.promptHint svg { width: 14px; height: 14px; }
+.referenceHeader { margin: 19px 0 10px; font-size: 12px; }
+.referenceHeader span { font-size: 11px; }
+.references { min-height: 66px; margin-bottom: 23px; }
+.reference { width: 66px; height: 66px; }
+.reference > span { font-size: 10px; }
+.addReference { min-height: 66px; padding: 10px 13px; }
+.addReference > span { font-size: 12px; }
+.addReference small { font-size: 10px; }
+.settingsGrid { gap: 16px 18px; }
+.field { gap: 8px; font-size: 12px; }
+.field select, .projectDetails input { min-height: 43px; padding: 11px 13px; border-radius: 10px; font-size: 13px; }
+.segments { min-height: 43px; border-radius: 10px; }
+.segments button { font-size: 12px; }
+.nativeInfo small { font-size: 10px; }
+.exportNote { margin-top: 20px; padding-top: 17px; font-size: 11px; }
+.exportBadge { font-size: 10px; padding: 4px 8px; }
+.projectDetails { margin-top: 18px; font-size: 11px; }
+.projectDetails summary svg { width: 13px; height: 13px; }
+.projectDetails input { min-height: 39px; font-size: 12px; }
+.projectDetails p { font-size: 10px; }
+.accountCard { position: relative; isolation: isolate; margin-bottom: 26px; padding: 5px; border-radius: 18px; overflow: hidden; background: linear-gradient(145deg, #c8e8a90d, #71985508); box-shadow: inset 0 1px 0 #f0ffe51b, 0 14px 35px #0003; }
+.accountCard::before { content: ''; position: absolute; z-index: -1; inset: -80% 25% 35% -25%; background: radial-gradient(circle, #b9ed7740, transparent 64%); opacity: .2; transition: opacity .35s var(--flow-bezier); }
+.accountCardDisconnected { border-color: #d7f1ad50; box-shadow: inset 0 1px 0 #f0ffe524, 0 18px 42px #0004, 0 0 30px #aee7700c; }
+.accountCardDisconnected::before { opacity: .48; animation: accountAura 4.8s ease-in-out infinite; }
+.accountCardConnected { border-color: #d5e5c32d; }
+.accountIdentity { gap: 13px; padding: 14px 15px 15px; border-radius: 13px 13px 7px 7px; background: linear-gradient(135deg, #1c2718, #151d14); }
+.accountIdentity > img, .accountAvatar { width: 43px; height: 43px; }
+.accountAvatar { font-size: 21px; }
+.accountIdentity .smallLabel { font-size: 10px; }
+.accountIdentity strong { font-size: 15px; }
+.accountIdentity > div > span:last-child:not(.smallLabel) { font-size: 12px; }
+.statusDot { width: 8px; height: 8px; }
+.statusConnected { box-shadow: 0 0 0 4px #bde99112, 0 0 14px #bde9915c; }
+.accountFooter { min-height: 54px; padding: 10px 11px 7px 15px; font-size: 12px; }
+.accountFooter b { font-size: 14px; }
+.accountFooter button { font-size: 12px; }
+.accountLink { padding: 8px 9px !important; color: #c9ddaF !important; }
+.accountFooter .connectButton { position: relative; isolation: isolate; min-height: 38px; padding: 9px 13px 9px 16px; border: 1px solid #e1f9bd88; border-radius: 20px; overflow: hidden; color: #263819; background: linear-gradient(120deg, #e4f7c6 0%, #bde28b 48%, #dcf8b8 100%); box-shadow: inset 0 1px 0 #fff9, 0 5px 18px #a9dc6a2e; font-weight: 700; }
+.connectButton::before { content: ''; position: absolute; z-index: -1; width: 52px; height: 160%; left: -70px; top: -30%; transform: rotate(17deg); background: linear-gradient(90deg, transparent, #fff9, transparent); animation: connectShine 3.6s cubic-bezier(.4,0,.2,1) infinite; }
+.accountFooter .connectButton:hover { transform: translateY(-1px); border-color: #f2ffd8; box-shadow: inset 0 1px 0 #fff, 0 8px 27px #b4e57b4d, 0 0 0 4px #c7ee9414; }
+.connectButton svg { width: 14px !important; height: 14px !important; }
+.textButton { font-size: 11px !important; }
+.textButton svg { width: 13px; height: 13px; }
+.previewShell { padding: 6px; border-radius: 18px; box-shadow: 0 16px 38px #0003, inset 0 1px 0 #efffde0b; }
+.preview { min-height: 276px; height: 306px; border-radius: 12px; }
+.preview > video, .preview > img { max-height: 306px; }
+.emptyMark { width: 86px; height: 86px; margin-bottom: 22px; }
+.emptyPreview .eyebrow { font-size: 10px; }
+.emptyPreview h4 { margin: 10px 0 7px; font-size: 23px; }
+.emptyPreview p { font-size: 12px; }
+.previewMeta { padding: 10px 9px 6px; font-size: 10px; }
+.previewPrepare { padding: 11px 14px; font-size: 12px; }
+.progressOverlay strong { font-size: 13px; }
+.progressOverlay > span:last-child { font-size: 11px; }
+.results button { width: 60px; height: 64px; }
+.results button > span { font-size: 9px; }
+.animateButton { padding: 12px 14px; }
+.animateButton > span { font-size: 12px; }
+.animateButton small { font-size: 10px; }
+.recoveryCard strong { font-size: 12px; }
+.recoveryCard p { font-size: 11px; }
+.recoveryCard small { font-size: 10px; }
+.creditCard { padding: 22px 0 18px; }
+.creditCard .smallLabel { font-size: 10px; }
+.creditCard strong { font-size: 33px; }
+.creditCard strong small { font-size: 12px; }
+.creditCard p { font-size: 11px; }
+.quoteButton { min-height: 38px; padding: 9px 13px; font-size: 11px !important; }
+.generateButton { min-height: 50px; padding: 8px 8px 8px 19px; font-size: 13px !important; box-shadow: inset 0 1px 0 #fff9, 0 9px 24px #9fcd6a24; }
+.generateButton > i { width: 32px; height: 32px; }
+.inlineError { font-size: 12px; }
+.placement { padding: 27px 32px 24px; }
+.parts button { padding: 7px 12px; font-size: 10px; }
+.copy { padding: 17px 19px; line-height: 2.25; }
+.copy button { font-size: 14px; }
+.rangeFooter p, .attachRow > p { font-size: 11px; }
+.attachButton { min-height: 42px; padding: 10px 18px; font-size: 12px !important; }
+.emptyCopy { font-size: 13px; }
+.feedback { padding: 13px 32px; font-size: 12px; }
+.footer { padding: 18px 32px; }
+.savedCount { min-width: 34px; height: 34px; font-size: 14px; }
+.savedSummary strong { font-size: 12px; }
+.savedSummary > div > span { font-size: 10px; }
+.secondaryButton, .rebuildButton { min-height: 38px; padding: 9px 13px; font-size: 11px !important; }
+.doneButton { min-height: 38px; padding: 9px 15px; font-size: 12px !important; }
+@keyframes accountAura { 0%,100% { transform: translate3d(-2%,0,0) scale(.94); opacity: .35; } 50% { transform: translate3d(12%,8%,0) scale(1.08); opacity: .62; } }
+@keyframes connectShine { 0%,54% { left: -70px; opacity: 0; } 62% { opacity: 1; } 82%,100% { left: calc(100% + 28px); opacity: 0; } }
+@media (max-height: 850px) and (min-width: 761px) { .layer { padding: 14px; } .dialog { max-height: calc(100dvh - 28px); } .header { padding-top: 20px; padding-bottom: 20px; } .creator, .previewColumn { padding-top: 23px; padding-bottom: 23px; } .preview { height: 260px; min-height: 238px; } .preview > video, .preview > img { max-height: 260px; } }
+@media (max-width: 760px) { .layer { padding: 8px; } .dialog { max-height: calc(100dvh - 16px); border-radius: 21px; } .header { padding: 19px 18px; } .heading h2 { font-size: 24px; } .heading p { font-size: 12px; } .eyebrow { font-size: 10px; } .workspace { grid-template-columns: minmax(0,1fr); } .creator, .previewColumn { padding: 23px 19px; border-right: 0; } .previewColumn { border-top: 1px solid var(--flow-line); } .preview { height: 300px; } .preview > video, .preview > img { max-height: 300px; } .placement { grid-column: 1; padding: 22px 19px; } .placement .sectionHeading .smallLabel { font-size: 10px; } .footer { padding: 14px 17px; } .savedSummary > div > span { font-size: 10px; } .secondaryButton { max-width: 155px; } }
+@media (max-width: 500px) { .accountFooter { align-items: stretch; flex-direction: column; } .accountFooter .connectButton { justify-content: center; width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .accountCardDisconnected::before, .connectButton::before { animation: none; } .accountFooter .connectButton:hover { transform: none; } }

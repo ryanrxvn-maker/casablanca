@@ -209,11 +209,49 @@ test('failed menu opening reports the real missing state without repeating the c
 });
 test('account panel failure is not swallowed before trying the settings menu', async () => {
   let settingsCalls = 0;
-  const ctx = { closeSettings: async () => { settingsCalls++; }, dom: async () => ({ accountOpen: false }),
+  const ctx = { Number, closeSettings: async () => { settingsCalls++; }, dom: async (_, op) => op === 'account' ? null : ({ accountOpen: false }),
     waitDom: async (_, op) => { if (op === 'uiState') throw new Error('a abertura da conta Google'); return {}; } };
   vm.runInNewContext(declaration('readAccount') + ';this.readAccount=readAccount;', ctx);
   await assert.rejects(ctx.readAccount(1), /abertura da conta Google/);
   assert.equal(settingsCalls, 1);
+});
+test('account connection uses the nested Google role button before the inert visual shell', () => {
+  const google = { ariaLabel: 'Conta do Google: Silas Ryan (ryanrxvn@gmail.com), Assinatura do Google' };
+  const shell = { ariaLabel: 'Detalhes da conta' };
+  const ctx = {
+    all: selector => selector === 'button,[role="button"]' ? [shell, google] : [],
+    label: element => element.ariaLabel,
+    one: elements => elements[0],
+  };
+  vm.runInNewContext(declaration('accountControl', contentSource) + ';this.accountControl=accountControl;', ctx);
+  assert.equal(ctx.accountControl(), google);
+});
+test('account identity is parsed from the current Flow role button before the panel mounts', () => {
+  const header = {
+    getAttribute: name => name === 'aria-label' ? 'Conta do Google: Silas Ryan (ryanrxvn@gmail.com), Assinatura do Google' : null,
+  };
+  const ctx = {
+    Number,
+    all: () => [],
+    text: () => '',
+    accountAvatar: () => 'avatar.png',
+    document: {
+      querySelector: selector => selector.includes('[role="button"]') ? header : null,
+    },
+  };
+  vm.runInNewContext(declaration('account', contentSource) + ';this.account=account;', ctx);
+  assert.deepEqual({ ...ctx.account() }, { name: 'Silas Ryan', email: 'ryanrxvn@gmail.com', avatarUrl: 'avatar.png', credits: null });
+});
+test('background account lookup keeps the verified header identity if Flow defers its overlay', async () => {
+  const identity = { name: 'Silas Ryan', email: 'ryanrxvn@gmail.com', credits: null };
+  const ctx = {
+    Number,
+    closeSettings: async () => {},
+    dom: async (_, op) => op === 'account' ? identity : op === 'uiState' ? { accountOpen: false } : null,
+    waitDom: async (_, op) => { if (op === 'accountButton') throw new Error('Conta Google não foi encontrado'); return null; },
+  };
+  vm.runInNewContext(declaration('readAccount') + ';this.readAccount=readAccount;', ctx);
+  assert.deepEqual({ ...(await ctx.readAccount(1)) }, identity);
 });
 test('Flow model names remove only the observed banana prefix', () => {
   const ctx = {};

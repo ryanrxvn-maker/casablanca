@@ -57,9 +57,14 @@
     return { activated: true };
   }
   function accountControl() {
-    const details = all('button[aria-label="Detalhes da conta"]');
-    if (details.length === 1) return details[0];
     const candidates = all('button,[role="button"]');
+    // Flow now nests the actual Google account trigger (a role=button) inside
+    // its visual "Detalhes da conta" shell. Clicking the shell no longer opens
+    // the account panel, so prefer the semantic Google control explicitly.
+    const googleControls = candidates.filter((element) => /^(conta do google|google account)\s*:/i.test(label(element).trim()));
+    if (googleControls.length === 1) return googleControls[0];
+    const details = candidates.filter((element) => /^(detalhes da conta|account details)$/i.test(label(element).trim()));
+    if (details.length === 1) return details[0];
     const labelled = candidates.filter((element) => /conta.*google|google.*conta|google account|abrir.*conta|menu.*conta/i.test(label(element)));
     if (labelled.length === 1) return labelled[0];
     return one(candidates.filter((element) => element.querySelector('img') && /plus|pro|ultra|conta|account/i.test(label(element))), 'Conta Google');
@@ -101,11 +106,11 @@
     const candidates = roots.filter((root) => /@[^\s]+\./.test(text(root)));
     const root = candidates.sort((a, b) => text(a).length - text(b).length)[0];
     if (!root) {
-      const header = document.querySelector('a[role="button"][aria-label^="Conta do Google:"]');
+      const header = document.querySelector('[role="button"][aria-label^="Conta do Google:"], [role="button"][aria-label^="Google Account:"]');
       const value = header?.getAttribute('aria-label') || '';
       const email = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
       if (!email) return null;
-      const name = value.replace(/^Conta do Google:\s*/, '').split(/\n|\(/)[0].trim();
+      const name = value.replace(/^(?:Conta do Google|Google Account):\s*/i, '').split(/\n|\(/)[0].trim();
       const creditsValue = document.querySelector('.credits-count')?.textContent?.match(/[\d.,]+/)?.[0];
       return { name, email, avatarUrl: accountAvatar(header), credits: creditsValue ? Number(creditsValue.replace(/[.,](?=\d{3}(?:\D|$))/g, '').replace(',', '.')) : null };
     }

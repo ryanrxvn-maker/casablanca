@@ -20,7 +20,7 @@ type Pending = {
 };
 const pending = new Map<string, Pending>();
 let installed = false;
-const MIN_FLOW_VERSION = '4.45.3';
+const MIN_FLOW_VERSION = '4.45.4';
 function supportsFlow(version: string): boolean {
   const actual = version.split('.').map(Number);
   const required = MIN_FLOW_VERSION.split('.').map(Number);

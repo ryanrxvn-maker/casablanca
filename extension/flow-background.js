@@ -271,16 +271,26 @@
   }
   async function readAccount(tabId) {
     await closeSettings(tabId);
+    // The header already exposes the signed-in identity even before its panel
+    // opens. Keep it as a safe fallback for background project tabs, where
+    // Flow may defer mounting the account overlay until the tab is foreground.
+    const headerAccount = await dom(tabId, 'account');
+    if (headerAccount?.email && Number.isFinite(headerAccount.credits)) return headerAccount;
     const state = await dom(tabId, 'uiState');
-    if (!state.accountOpen) {
-      await waitDom(tabId, 'accountButton', {}, () => true, 'o controle da conta');
-      await dom(tabId, 'activateAccount');
+    try {
+      if (!state.accountOpen) {
+        await waitDom(tabId, 'accountButton', {}, () => true, 'o controle da conta');
+        await dom(tabId, 'activateAccount');
+      }
+      await waitDom(tabId, 'uiState', {}, (value) => value.accountOpen, 'a abertura da conta Google');
+      const account = await waitDom(tabId, 'account', {}, (value) => Boolean(value?.email), 'os dados da conta Google');
+      await clickButton(tabId, 'Fechar painel da conta');
+      await waitDom(tabId, 'uiState', {}, (value) => !value.accountOpen, 'o fechamento da conta Google');
+      return account;
+    } catch (error) {
+      if (headerAccount?.email) return headerAccount;
+      throw error;
     }
-    await waitDom(tabId, 'uiState', {}, (value) => value.accountOpen, 'a abertura da conta Google');
-    const account = await waitDom(tabId, 'account', {}, (value) => Boolean(value?.email), 'os dados da conta Google');
-    await clickButton(tabId, 'Fechar painel da conta');
-    await waitDom(tabId, 'uiState', {}, (value) => !value.accountOpen, 'o fechamento da conta Google');
-    return account;
   }
   function validate(payload, generating = false) {
     if (!['image', 'video'].includes(payload.mode)) throw new Error('Escolha Imagem ou Vídeo.');
