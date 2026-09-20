@@ -35,7 +35,15 @@ try {
   const cards = desktopDialog.getByRole('button', { name: /^Ver / });
   const desktopCards = await cards.count();
   if (desktopCards < 6) throw new Error(`Catálogo renderizou apenas ${desktopCards} cards.`);
-  await desktop.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] video')].filter((video) => video.readyState >= 2).length >= 3, null, { timeout: 15_000 });
+  await desktop.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] article img')].filter((image) => image.complete && image.naturalWidth > 0).length >= 6, null, { timeout: 15_000 });
+  if (await desktopDialog.locator('article video').count()) throw new Error('O catálogo carregou vídeos antes do hover em vez de preservar as thumbs leves.');
+  await cards.first().hover();
+  await desktop.waitForFunction(() => {
+    const video = document.querySelector('[role="dialog"] article video');
+    return video instanceof HTMLVideoElement && video.readyState >= 2 && !video.paused && video.dataset.ready === 'true';
+  }, null, { timeout: 15_000 });
+  await desktopDialog.getByRole('textbox').hover();
+  await desktop.waitForFunction(() => !document.querySelector('[role="dialog"] article video'));
   await desktop.screenshot({ path: resolve(outputDir, 'library-desktop.png'), fullPage: false });
 
   await cards.first().click();
@@ -93,6 +101,7 @@ try {
     desktopCards,
     smartPlan: true,
     mobileModeSwitch: true,
+    thumbnailsIdleAndVideoOnHover: true,
     repeatedTakeReusesDownload: true,
     changedCoverageAndPaceInvalidatePlan: true,
     unrelatedBodyPartRejected: true,

@@ -84,6 +84,14 @@ function first(source: Record<string, unknown>, keys: string[]): unknown {
   return undefined;
 }
 
+function firstAcross(sources: Record<string, unknown>[], keys: string[]): unknown {
+  for (const source of sources) {
+    const value = first(source, keys);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : typeof value === 'number' ? String(value) : '';
 }
@@ -169,13 +177,19 @@ export function normalizeStockFrameVideo(value: unknown): StockFrameVideo | null
   const title = text(first(source, ['title', 'name', 'nome', 'headline'])) || `Stock ${id.slice(0, 8)}`;
   const description = text(first(source, ['description', 'descricao', 'caption', 'summary', 'prompt']));
   const tags = tagsOf(first(source, ['tags', 'keywords', 'palavras_chave', 'palavrasChave']));
-  const previewUrl = safeMediaUrl(first(source, [
+  const media = record(first(source, ['media', 'assets', 'files', 'urls']));
+  const preview = record(first(source, ['preview', 'video_preview', 'videoPreview']));
+  const thumbnail = record(first(source, ['thumbnail', 'poster', 'cover']));
+  const previewUrl = safeMediaUrl(firstAcross([source, preview, media], [
     'preview_url', 'previewUrl', 'video_url', 'videoUrl', 'playback_url', 'playbackUrl',
-    'watermarked_url', 'watermarkedUrl', 'src', 'url',
+    'preview_signed_url', 'previewSignedUrl', 'signed_preview_url', 'signedPreviewUrl',
+    'preview_webm_url', 'previewWebmUrl', 'webm_url', 'webmUrl',
+    'watermarked_url', 'watermarkedUrl', 'signed_url', 'signedUrl', 'src', 'url',
   ]));
-  const posterUrl = safeMediaUrl(first(source, [
+  const posterUrl = safeMediaUrl(firstAcross([source, thumbnail, media], [
     'poster_url', 'posterUrl', 'thumbnail_url', 'thumbnailUrl', 'thumb_url', 'thumbUrl',
-    'cover_url', 'coverUrl', 'image_url', 'imageUrl',
+    'thumbnail_signed_url', 'thumbnailSignedUrl', 'signed_thumbnail_url', 'signedThumbnailUrl',
+    'cover_url', 'coverUrl', 'image_url', 'imageUrl', 'signed_url', 'signedUrl', 'src', 'url',
   ]));
 
   return {
@@ -259,7 +273,7 @@ export function normalizeStockFramePage(value: unknown, requested: { page?: numb
 export function normalizeStockFrameAccount(value: unknown): StockFrameAccount {
   const root = record(value);
   const source = Object.keys(record(root.data)).length ? record(root.data) : root;
-  const downloads = record(first(source, ['downloads', 'download_usage', 'downloadUsage']));
+  const downloads = record(first(source, ['quota', 'downloads', 'download_usage', 'downloadUsage']));
   const used = first(source, ['downloads_today', 'downloadsToday', 'daily_downloads', 'dailyDownloads']) ?? first(downloads, ['used', 'today', 'count']);
   const limit = first(source, ['downloads_limit', 'downloadsLimit', 'daily_limit', 'dailyLimit']) ?? first(downloads, ['limit', 'daily_limit', 'dailyLimit']);
   return {

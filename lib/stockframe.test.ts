@@ -23,6 +23,12 @@ ok(normalized?.previewUrl === 'https://biblioteca.stockframe.space/media/preview
 ok(normalized?.nicheId === 'dores' && normalized.subcategoryId === 'andar', 'preserva nicho e subpasta');
 ok(normalizeStockFrameVideo({ title: 'sem id' }) === null, 'take sem id nunca vira download ambíguo');
 ok(normalizeStockFrameVideo({ id: 'x', preview_url: 'javascript:alert(1)' })?.previewUrl === undefined, 'URL insegura não entra no player');
+const signedMedia = normalizeStockFrameVideo({
+  id: 'signed-media', title: 'Take com mídia assinada',
+  preview_signed_url: 'https://cdn.example.com/preview.webm?token=preview',
+  thumbnail: { signed_url: 'https://cdn.example.com/thumb.jpg?token=thumb' },
+});
+ok(signedMedia?.previewUrl?.includes('preview.webm') && signedMedia.posterUrl?.includes('thumb.jpg'), 'aceita URLs assinadas e mídia aninhada do catálogo');
 
 const page = normalizeStockFramePage({ data: { videos: [normalized?.raw], pagination: { current_page: 2, per_page: 1, total: 8, last_page: 8 } } });
 ok(page.videos.length === 1 && page.page === 2 && page.totalPages === 8, 'normaliza wrapper data + pagination');
@@ -34,6 +40,8 @@ ok(outerMeta.total === 300 && outerMeta.page === 2 && outerMeta.totalPages === 1
 const account = normalizeStockFrameAccount({ data: { username: 'Silas', email: 'silas@example.com', downloads_today: 3, daily_limit: 130, plan: 'PACK' } });
 ok(account.downloadsToday === 3 && account.downloadsLimit === 130, 'conta preserva a cota paga da API');
 ok(account.plan === 'PACK', 'plano da conta é exibível sem conceder acesso local');
+const quotaAccount = normalizeStockFrameAccount({ user_id: 'user-1', quota: { used: 1, limit: 130, remaining: 129 } });
+ok(quotaAccount.downloadsToday === 1 && quotaAccount.downloadsLimit === 130, 'normaliza o objeto quota real devolvido por /me');
 
 const parts = [{ label: 'BODY 1', text: 'A dor no joelho piora ao subir escadas. A cartilagem inflamada dificulta caminhar todos os dias. Depois do tratamento, a idosa volta a se movimentar com confiança.' }];
 const p30 = planSmartStockSegments(parts, { coverage: 30, pace: 'fast' });

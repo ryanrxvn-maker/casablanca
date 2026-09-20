@@ -82,6 +82,9 @@ function LazyVideo({ video, active = false }: { video: StockFrameVideo; active?:
   const root = useRef<HTMLDivElement>(null);
   const player = useRef<HTMLVideoElement>(null);
   const [visible, setVisible] = useState(active);
+  const [hovering, setHovering] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
   useEffect(() => {
     if (active) { setVisible(true); return; }
     const node = root.current;
@@ -90,12 +93,20 @@ function LazyVideo({ video, active = false }: { video: StockFrameVideo; active?:
     observer.observe(node);
     return () => observer.disconnect();
   }, [active]);
+  useEffect(() => { setVideoReady(false); setVideoFailed(false); }, [video.previewUrl]);
+  const playVideo = active || hovering;
   useEffect(() => {
-    if (!active || !player.current) return;
-    player.current.play().catch(() => {});
-  }, [active, visible, video.previewUrl]);
-  return <div ref={root} className={s.media} onMouseEnter={() => player.current?.play().catch(() => {})} onMouseLeave={() => { if (!active && player.current) { player.current.pause(); player.current.currentTime = 0; } }}>
-    {visible && video.previewUrl ? <video ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline preload={active ? 'auto' : 'metadata'}/> : video.posterUrl ? <img src={video.posterUrl} alt="" loading="lazy"/> : <span className={s.mediaFallback}><Icon name="play" size={28}/></span>}
+    const node = player.current;
+    if (!node || !playVideo) return;
+    node.play().catch(() => {});
+  }, [playVideo, visible, video.previewUrl]);
+  return <div ref={root} className={s.media} onMouseEnter={() => setHovering(true)} onMouseLeave={() => {
+    setHovering(false);
+    if (!active && player.current) { player.current.pause(); player.current.currentTime = 0; }
+  }}>
+    {visible && video.posterUrl ? <img src={video.posterUrl} alt="" loading="lazy"/> : null}
+    {visible && playVideo && video.previewUrl && !videoFailed ? <video ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline preload={active ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'} onCanPlay={() => setVideoReady(true)} onError={() => setVideoFailed(true)}/> : null}
+    {!video.posterUrl && (!playVideo || !video.previewUrl || videoFailed) ? <span className={s.mediaFallback}><Icon name="play" size={28}/></span> : null}
     <span className={s.duration}>{formatDuration(video.durationSec)}</span>
     <span className={s.ratio}>{video.aspectRatio === 'unknown' ? 'vídeo' : video.aspectRatio}</span>
   </div>;
