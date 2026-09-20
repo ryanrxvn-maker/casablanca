@@ -21,7 +21,7 @@ import {
 } from '@/lib/stockframe-smart';
 import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
-import type { StockFrameAccount, StockFrameFilters, StockFrameNiche, StockFramePage, StockFrameVideo } from '@/lib/stockframe';
+import { mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo } from '@/lib/stockframe';
 import s from './PilotStockFrame.module.css';
 
 type InsertMedia = { key: string; nome: string; tipo: 'video' | 'imagem'; w: number; h: number; durSec?: number };
@@ -53,7 +53,7 @@ function StockFrameMark({ compact = false }: { compact?: boolean }) {
   </span>;
 }
 
-function Icon({ name, size = 18 }: { name: 'close' | 'search' | 'key' | 'spark' | 'download' | 'check' | 'tune' | 'back' | 'play' | 'wand' | 'refresh' | 'edit' | 'shield'; size?: number }) {
+function Icon({ name, size = 18 }: { name: 'close' | 'search' | 'key' | 'spark' | 'download' | 'check' | 'tune' | 'back' | 'play' | 'wand' | 'refresh' | 'edit' | 'shield' | 'folder' | 'grid'; size?: number }) {
   const paths = {
     close: <path d="m6 6 12 12M18 6 6 18"/>,
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
@@ -68,6 +68,8 @@ function Icon({ name, size = 18 }: { name: 'close' | 'search' | 'key' | 'spark' 
     refresh: <><path d="M20 7a9 9 0 1 0 .5 9"/><path d="M20 3v5h-5"/></>,
     edit: <><path d="m4 20 4-.8L19 8l-3-3L4.8 16Z"/><path d="m14 7 3 3"/></>,
     shield: <><path d="M12 3 5 6v5c0 4.5 2.8 8 7 10 4.2-2 7-5.5 7-10V6Z"/><path d="m9 12 2 2 4-5"/></>,
+    folder: <><path d="M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M3 10h18"/></>,
+    grid: <><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -239,7 +241,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     try {
       const status = await stockFrameStatus();
       setConfigured(status.configured);
-      setAccount(status.account || null);
+      const nextAccount = status.account || null;
+      setAccount(nextAccount);
+      if (nextAccount?.niches?.length) setNiches((current) => mergeStockFrameNiches(current, nextAccount.niches));
       if (!status.configured && status.error) setError(status.error);
     } catch (reason) {
       setConfigured(false);
@@ -261,10 +265,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     stockFrameList(filters).then((result) => {
       if (!live) return;
       setPage(result);
-      setNiches((current) => {
-        const map = new Map([...current, ...result.niches].map((item) => [item.id, item]));
-        return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-      });
+      setNiches((current) => mergeStockFrameNiches(current, result.niches));
     }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
@@ -276,7 +277,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     try {
       const status = await stockFrameConfigure(apiKey);
       importedMedia.current.clear(); downloadedFiles.current.clear();
-      setConfigured(true); setAccount(status.account || null); setApiKey('');
+      const nextAccount = status.account || null;
+      setConfigured(true); setAccount(nextAccount); setApiKey('');
+      if (nextAccount?.niches?.length) setNiches((current) => mergeStockFrameNiches(current, nextAccount.niches));
       setNotice('Conta StockFrame validada. O catálogo respeita o seu plano e a sua cota.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setConnecting(false); }
@@ -482,8 +485,8 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         {mode === 'manual' ? <main className={s.workspace}>
           <aside className={s.sidebar}>
             <div className={s.sideTitle}><small>BIBLIOTECA</small><b>{page.total.toLocaleString('pt-BR')} takes disponíveis</b></div>
-            <button type="button" className={!filters.nicheId ? s.sideActive : ''} onClick={() => setFilters((current) => ({ ...current, nicheId: undefined, subcategoryId: undefined, page: 1 }))}>Todos os vídeos <span>{page.total || ''}</span></button>
-            {niches.map((niche) => <div key={niche.id} className={s.sideGroup}><button type="button" className={filters.nicheId === niche.id && !filters.subcategoryId ? s.sideActive : ''} onClick={() => setFilters((current) => ({ ...current, nicheId: niche.id, subcategoryId: undefined, page: 1 }))}>{niche.name}<span>{niche.count || ''}</span></button>{filters.nicheId === niche.id && niche.subcategories?.length ? <div className={s.sideChildren}>{niche.subcategories.map((subcategory) => <button type="button" key={subcategory.id} className={filters.subcategoryId === subcategory.id ? s.sideActive : ''} onClick={() => setFilters((current) => ({ ...current, nicheId: niche.id, subcategoryId: subcategory.id, page: 1 }))}>{subcategory.name}<span>{subcategory.count || ''}</span></button>)}</div> : null}</div>)}
+            <button type="button" className={!filters.nicheId ? s.sideActive : ''} onClick={() => setFilters((current) => ({ ...current, nicheId: undefined, subcategoryId: undefined, page: 1 }))}><span className={s.sideLabel}><Icon name="grid" size={16}/>Todos os vídeos</span><span className={s.sideCount}>{page.total || ''}</span></button>
+            {niches.map((niche) => <div key={niche.id} className={s.sideGroup}><button type="button" className={filters.nicheId === niche.id && !filters.subcategoryId ? s.sideActive : ''} onClick={() => setFilters((current) => ({ ...current, nicheId: niche.id, subcategoryId: undefined, page: 1 }))}><span className={s.sideLabel}><Icon name="folder" size={16}/>{niche.name}</span><span className={s.sideCount}>{niche.count || ''}</span></button>{filters.nicheId === niche.id && niche.subcategories?.length ? <div className={s.sideChildren}>{niche.subcategories.map((subcategory) => <button type="button" key={subcategory.id} className={filters.subcategoryId === subcategory.id ? s.sideActive : ''} onClick={() => setFilters((current) => ({ ...current, nicheId: niche.id, subcategoryId: subcategory.id, page: 1 }))}><span className={s.sideLabel}><Icon name="folder" size={13}/>{subcategory.name}</span><span className={s.sideCount}>{subcategory.count || ''}</span></button>)}</div> : null}</div>)}
           </aside>
           <section className={s.library}>
             <div className={s.libraryTop}>

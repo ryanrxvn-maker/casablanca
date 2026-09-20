@@ -138,6 +138,7 @@ const STOCKFRAME_DEV_VIDEOS = [
 const STOCKFRAME_DEV_NICHES = [
   { id: 'saude', name: 'Saúde', count: 5, subcategories: [{ id: 'alimentacao', name: 'Alimentação', count: 2 }, { id: 'prostata', name: 'Próstata', count: 1 }, { id: 'anatomia', name: '3D', count: 2 }] },
   { id: 'dores', name: 'Dores Articulares', count: 1, subcategories: [{ id: 'joelho', name: 'Joelho', count: 1 }] },
+  { id: 'ed', name: 'ED', count: 286, subcategories: [{ id: 'depoimentos', name: 'Depoimentos', count: 41 }, { id: 'explicacoes', name: 'Explicações', count: 57 }, { id: 'rotina', name: 'Rotina', count: 33 }] },
 ];
 
 const TRECHOS_MOCK = [
@@ -827,7 +828,7 @@ function Conteudo() {
         if (message.action === 'status') {
           reply(message.requestId, 'SF_RESULT', configured ? {
             configured: true,
-            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium' },
+            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium', niches: STOCKFRAME_DEV_NICHES },
             version: '4.46.1',
           } : { configured: false, version: '4.46.1' });
           return;
@@ -841,7 +842,7 @@ function Conteudo() {
           configured = true;
           reply(message.requestId, 'SF_RESULT', {
             configured: true,
-            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium' },
+            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium', niches: STOCKFRAME_DEV_NICHES },
           });
           return;
         }
@@ -858,7 +859,7 @@ function Conteudo() {
               || query.split(/\s+/).some((word: string) => word.length > 3 && `${video.title} ${video.description} ${video.tags.join(' ')}`.toLocaleLowerCase('pt-BR').includes(word));
           });
           reply(message.requestId, 'SF_RESULT', { data: {
-            videos, niches: STOCKFRAME_DEV_NICHES,
+            videos,
             pagination: { current_page: 1, per_page: 24, total: videos.length, last_page: 1 },
           } });
           return;

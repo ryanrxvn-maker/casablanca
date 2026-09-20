@@ -46,6 +46,7 @@ export type StockFrameAccount = {
   downloadsToday: number | null;
   downloadsLimit: number | null;
   plan?: string;
+  niches: StockFrameNiche[];
 };
 
 export type StockFramePage = {
@@ -223,15 +224,32 @@ function arrayAt(source: Record<string, unknown>, keys: string[]): unknown[] {
   return [];
 }
 
+function collectionAt(source: Record<string, unknown>, keys: string[]): unknown[] {
+  const array = arrayAt(source, keys);
+  if (array.length) return array;
+  for (const key of keys) {
+    const value = record(source[key]);
+    if (Object.keys(value).length) {
+      return Object.entries(value).map(([entryKey, item]) => {
+        const entry = record(item);
+        return Object.keys(entry).length && !first(entry, ['id', 'uuid', 'slug', 'niche_id', 'nicheId', 'subcategory_id', 'subcategoryId', 'subfolder_id', 'subfolderId', 'folder_id', 'folderId'])
+          ? { id: entryKey, ...entry }
+          : item;
+      });
+    }
+  }
+  return [];
+}
+
 function normalizeNiche(value: unknown): StockFrameNiche | null {
   const source = record(value);
   const id = text(first(source, ['id', 'uuid', 'slug', 'niche_id', 'nicheId']));
   const name = text(first(source, ['name', 'title', 'label', 'nome']));
   if (!id || !name) return null;
-  const subcategories = arrayAt(source, ['subcategories', 'subpastas', 'folders']).map((item) => {
+  const subcategories = collectionAt(source, ['subcategories', 'sub_folders', 'subfolders', 'subpastas', 'folders']).map((item) => {
     const child = record(item);
-    const childId = text(first(child, ['id', 'uuid', 'slug']));
-    const childName = text(first(child, ['name', 'title', 'label', 'nome']));
+    const childId = text(first(child, ['id', 'uuid', 'slug', 'subcategory_id', 'subcategoryId', 'subfolder_id', 'subfolderId', 'folder_id', 'folderId']));
+    const childName = text(first(child, ['name', 'title', 'label', 'nome', 'subcategory_name', 'subcategoryName', 'subfolder_name', 'subfolderName', 'folder_name', 'folderName']));
     return childId && childName ? { id: childId, name: childName, count: finite(first(child, ['count', 'videos_count', 'videoCount'])) || undefined } : null;
   }).filter((item): item is NonNullable<typeof item> => !!item);
   return {
@@ -240,6 +258,39 @@ function normalizeNiche(value: unknown): StockFrameNiche | null {
     count: finite(first(source, ['count', 'videos_count', 'videoCount', 'total'])) || undefined,
     subcategories: subcategories.length ? subcategories : undefined,
   };
+}
+
+export function mergeStockFrameNiches(...groups: StockFrameNiche[][]): StockFrameNiche[] {
+  const merged = new Map<string, StockFrameNiche>();
+  for (const group of groups) {
+    for (const incoming of group) {
+      if (!incoming?.id || !incoming.name) continue;
+      const current = merged.get(incoming.id);
+      const children = new Map<string, NonNullable<StockFrameNiche['subcategories']>[number]>();
+      for (const child of current?.subcategories || []) children.set(child.id, { ...child });
+      for (const child of incoming.subcategories || []) {
+        const previous = children.get(child.id);
+        children.set(child.id, {
+          id: child.id,
+          name: child.name || previous?.name || child.id,
+          count: previous?.count === undefined && child.count === undefined
+            ? undefined
+            : Math.max(previous?.count || 0, child.count || 0),
+        });
+      }
+      merged.set(incoming.id, {
+        id: incoming.id,
+        name: incoming.name || current?.name || incoming.id,
+        count: current?.count === undefined && incoming.count === undefined
+          ? undefined
+          : Math.max(current?.count || 0, incoming.count || 0),
+        subcategories: children.size
+          ? [...children.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+          : undefined,
+      });
+    }
+  }
+  return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
 export function normalizeStockFramePage(value: unknown, requested: { page?: number; perPage?: number } = {}): StockFramePage {
@@ -276,12 +327,15 @@ export function normalizeStockFrameAccount(value: unknown): StockFrameAccount {
   const downloads = record(first(source, ['quota', 'downloads', 'download_usage', 'downloadUsage']));
   const used = first(source, ['downloads_today', 'downloadsToday', 'daily_downloads', 'dailyDownloads']) ?? first(downloads, ['used', 'today', 'count']);
   const limit = first(source, ['downloads_limit', 'downloadsLimit', 'daily_limit', 'dailyLimit']) ?? first(downloads, ['limit', 'daily_limit', 'dailyLimit']);
+  const niches = collectionAt(source, ['niches', 'categories', 'libraries'])
+    .map(normalizeNiche).filter((item): item is StockFrameNiche => !!item);
   return {
     name: text(first(source, ['name', 'username', 'display_name', 'displayName'])) || 'Conta StockFrame',
     email: text(first(source, ['email', 'user_email', 'userEmail'])),
     downloadsToday: used === undefined ? null : Math.max(0, Math.round(finite(used))),
     downloadsLimit: limit === undefined ? null : Math.max(0, Math.round(finite(limit))),
     plan: text(first(source, ['plan', 'pack', 'subscription', 'tier'])) || undefined,
+    niches: mergeStockFrameNiches(niches),
   };
 }
 

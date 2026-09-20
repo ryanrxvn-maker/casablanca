@@ -31,10 +31,35 @@ try {
     });
   });
   const desktopDialog = await openPreview(desktop);
+  const edCategory = desktopDialog.locator('aside button').filter({ hasText: 'ED' }).first();
+  if (!await edCategory.isVisible()) throw new Error('A taxonomia completa de /me não exibiu a categoria ED na lateral.');
+  await edCategory.click();
+  for (const folder of ['Depoimentos', 'Explicações', 'Rotina']) {
+    if (!await desktopDialog.getByText(folder, { exact: true }).isVisible()) throw new Error(`A pasta ${folder} da categoria ED não apareceu.`);
+  }
+  await desktopDialog.locator('aside button').filter({ hasText: 'Todos os vídeos' }).first().click();
   await desktop.waitForFunction(() => (document.querySelector('[role="dialog"]')?.querySelectorAll('article').length || 0) >= 6, null, { timeout: 10_000 });
   const cards = desktopDialog.getByRole('button', { name: /^Ver / });
   const desktopCards = await cards.count();
   if (desktopCards < 6) throw new Error(`Catálogo renderizou apenas ${desktopCards} cards.`);
+  const fontSizes = await desktop.evaluate(() => {
+    const dialog = document.querySelector('[role="dialog"]');
+    const size = (selector) => {
+      const element = dialog?.querySelector(selector);
+      return element ? Number.parseFloat(getComputedStyle(element).fontSize) : 0;
+    };
+    return {
+      sidebar: size('aside button'),
+      search: size('input[placeholder*="Buscar cenas"]'),
+      filter: size('[class*="filters"] button'),
+      title: size('[class*="takeTitle"]'),
+      description: size('article [class*="takeBody"] > p'),
+    };
+  });
+  const minimumFonts = { sidebar: 14, search: 14, filter: 12, title: 15, description: 13 };
+  for (const [area, minimum] of Object.entries(minimumFonts)) {
+    if ((fontSizes[area] || 0) < minimum) throw new Error(`Texto de ${area} continua pequeno: ${fontSizes[area] || 0}px.`);
+  }
   await desktop.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] article img')].filter((image) => image.complete && image.naturalWidth > 0).length >= 6, null, { timeout: 15_000 });
   if (await desktopDialog.locator('article video').count()) throw new Error('O catálogo carregou vídeos antes do hover em vez de preservar as thumbs leves.');
   await cards.first().hover();
@@ -48,6 +73,7 @@ try {
 
   await cards.first().click();
   await desktop.getByLabel('Preview do take').waitFor({ state: 'visible' });
+  await desktop.waitForTimeout(350);
   await desktop.screenshot({ path: resolve(outputDir, 'take-preview-desktop.png'), fullPage: false });
   await desktop.getByRole('button', { name: 'Fechar preview' }).click();
 
@@ -102,6 +128,8 @@ try {
     smartPlan: true,
     mobileModeSwitch: true,
     thumbnailsIdleAndVideoOnHover: true,
+    categoriesFromAccount: true,
+    readableTypography: fontSizes,
     repeatedTakeReusesDownload: true,
     changedCoverageAndPaceInvalidatePlan: true,
     unrelatedBodyPartRejected: true,

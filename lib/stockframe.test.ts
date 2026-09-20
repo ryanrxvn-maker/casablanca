@@ -1,4 +1,4 @@
-import { normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
+import { mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
 import { chooseSmartStockAssignments, planSmartStockSegments, rankStockFrameVideos } from './stockframe-smart';
 
 let passed = 0;
@@ -40,8 +40,14 @@ ok(outerMeta.total === 300 && outerMeta.page === 2 && outerMeta.totalPages === 1
 const account = normalizeStockFrameAccount({ data: { username: 'Silas', email: 'silas@example.com', downloads_today: 3, daily_limit: 130, plan: 'PACK' } });
 ok(account.downloadsToday === 3 && account.downloadsLimit === 130, 'conta preserva a cota paga da API');
 ok(account.plan === 'PACK', 'plano da conta é exibível sem conceder acesso local');
-const quotaAccount = normalizeStockFrameAccount({ user_id: 'user-1', quota: { used: 1, limit: 130, remaining: 129 } });
+const quotaAccount = normalizeStockFrameAccount({
+  user_id: 'user-1', quota: { used: 1, limit: 130, remaining: 129 },
+  niches: [{ niche_id: 'ed', name: 'ED', videos_count: 286, subfolders: [{ subfolder_id: 'depoimentos', name: 'Depoimentos', videos_count: 41 }] }],
+});
 ok(quotaAccount.downloadsToday === 1 && quotaAccount.downloadsLimit === 130, 'normaliza o objeto quota real devolvido por /me');
+ok(quotaAccount.niches[0]?.id === 'ed' && quotaAccount.niches[0]?.subcategories?.[0]?.name === 'Depoimentos', 'preserva nichos e pastas devolvidos por /me');
+const mergedNiches = mergeStockFrameNiches(quotaAccount.niches, [{ id: 'ed', name: 'ED', count: 12, subcategories: [{ id: 'rotina', name: 'Rotina', count: 4 }] }]);
+ok(mergedNiches[0]?.count === 286 && mergedNiches[0]?.subcategories?.length === 2, 'mescla a taxonomia completa da conta sem perder pastas descobertas no catálogo');
 
 const parts = [{ label: 'BODY 1', text: 'A dor no joelho piora ao subir escadas. A cartilagem inflamada dificulta caminhar todos os dias. Depois do tratamento, a idosa volta a se movimentar com confiança.' }];
 const p30 = planSmartStockSegments(parts, { coverage: 30, pace: 'fast' });
