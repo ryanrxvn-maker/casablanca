@@ -107,7 +107,10 @@ export type BatchJob3DProps = {
   /** SELOS do que foi aplicado neste vídeo (31.08): economia, decupagem, legenda, zoom.
    *  Ícone puro, sem texto — o `title` conta a história no hover. */
   selos?: Array<{
-    tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline';
+    /** 'insert' = subido na mão. 'stockframe'/'flow' = veio da ferramenta, e
+     *  cada uma carrega a marca dela (20.09): olhando o card pronto dá pra
+     *  saber de onde veio o b-roll daquele AD. */
+    tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline';
     title: string;
     /** LIGADO na config mas NÃO aplicado no vídeo entregue (02.09). O selo
      *  vira âmbar e riscado. Sem isto o card exibia o ícone de zoom sobre um
@@ -749,6 +752,22 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <rect x="2" y="5" width="13" height="11" rx="2" />
                           <path d="M22 9v9a2 2 0 0 1-2 2H8" opacity="0.55" />
+                        </svg>
+                      ) : sl.tipo === 'stockframe' ? (
+                        /* A marca do StockFrame: os dois cantos do quadro, o
+                         * anel girando e o play no meio — o mesmo glifo do
+                         * botão da barra, reduzido pro selo. */
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M3.4 8.6V5.2A1.8 1.8 0 0 1 5.2 3.4h3.4" />
+                          <path d="M20.6 15.4v3.4a1.8 1.8 0 0 1-1.8 1.8h-3.4" />
+                          <circle className="selo-anel" cx="12" cy="12" r="6.1" strokeWidth="1.5" strokeDasharray="7 5.5" opacity="0.62" />
+                          <path d="m10.3 9.1 4.9 2.9-4.9 2.9Z" fill="currentColor" stroke="none" />
+                        </svg>
+                      ) : sl.tipo === 'flow' ? (
+                        /* O mesmo traço do botão do Flow (as duas "asas" que
+                         * se cruzam), engrossado pra ler bem a 12px. */
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M4.4 15.3 9.1 5.4c.5-1.1 2-1.1 2.5 0l2 4.2m-3.2 8.1 4.8-10.1c.5-1.1 2-1.1 2.5 0l3 6.5c.4.9-.2 1.9-1.2 1.9H5.6c-1 0-1.6-1-1.2-1.9Z" />
                         </svg>
                       ) : (
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

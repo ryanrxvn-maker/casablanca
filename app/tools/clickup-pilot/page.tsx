@@ -257,6 +257,7 @@ import {
   type PilotRunnerPulse,
 } from '@/lib/pilot-runner-pulse';
 import { findPilotTextIntegrityIssue } from '@/lib/pilot-text-integrity';
+import { selosDeInserts, tituloDoSeloDeInsert } from '@/lib/pilot-selos';
 import {
   cardMenteNaFila,
   disparoJaEmAndamento,
@@ -2538,7 +2539,7 @@ function ClickUpPilotInner() {
   function selosDoCard(
     taskId: string,
     economia = false,
-  ): Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> {
+  ): Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline'; title: string; falhou?: boolean }> {
     const cfgId = taskIdBaseDaVersao(taskId);
     // Legenda, zoom, inserts e headline saem TODOS do mesmo render. Se ele não
     // entrou no vídeo entregue, nenhum deles foi aplicado — o selo tem que
@@ -2546,7 +2547,7 @@ function ClickUpPilotInner() {
     const posFalhou = posResultado[taskId] ? !posResultado[taskId].aplicou : false;
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'headline'; title: string; falhou?: boolean }> = [];
+    const out: Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline'; title: string; falhou?: boolean }> = [];
     // O selo lê o snapshot do próprio batch, não o toggle atual. Assim um AD
     // pronto continua identificado como Economia mesmo depois de a tela mudar.
     if (economia) {
@@ -2576,13 +2577,13 @@ function ClickUpPilotInner() {
     if (hl.on) {
       out.push({ tipo: 'headline', title: `Com headline — sai no fim de ${hl.ancoraAte || 'hook'}, mascarada pelo corte`, falhou: posFalhou });
     }
-    const ins = insertsDaMontagem(taskId);
-    if (ins.length > 0) {
-      out.push({
-        tipo: 'insert',
-        title: `${ins.length} insert${ins.length === 1 ? '' : 's'} na montagem — ${ins.map((x) => x.ancora).join(', ')}`,
-        falhou: posFalhou,
-      });
+
+    // B-ROLL POR ORIGEM (20.09): o selo azul genérico virava a única pista de
+    // que o AD levou insert — não dizia se veio da mão, do StockFrame ou do
+    // Flow. Agora cada origem entra com a marca dela; usou as duas, saem as
+    // duas. A lista já vem filtrada pelo que REALMENTE entra na montagem.
+    for (const selo of selosDeInserts(insertsDaMontagem(taskId))) {
+      out.push({ tipo: selo.tipo, title: tituloDoSeloDeInsert(selo), falhou: posFalhou });
     }
     if (zm.on) {
       const movimento = zm.modo === 'in' ? 'zoom in' : zm.modo === 'out' ? 'zoom out' : 'zoom in e out';

@@ -52,6 +52,7 @@ const ETAPAS = [
   { tsc: "lib/pilot-copy-creator.ts lib/pilot-copy-creator.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-copy-creator.test.js"] },
   { tsc: "lib/pilot-economia.ts lib/pilot-economia.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-economia.test.js"] },
   { tsc: "lib/pilot-runner-pulse.ts lib/pilot-runner-pulse.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/pilot-runner-pulse.test.js"] },
+  { tsc: "lib/pilot-selos.ts lib/pilot-selos.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-selos.test.js"] },
   { tsc: "lib/pilot-fila.ts lib/pilot-fila.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-fila.test.js"] },
   { tsc: "lib/pilot-progresso.ts lib/pilot-progresso.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/pilot-progresso.test.js"] },
   // trava de scroll com CONTADOR (04.09): 10 modais dependem dela; duas janelas abertas nao podem travar a pagina pra sempre
