@@ -68,6 +68,7 @@ assert.ok(modal.includes("mode === 'frames' ? 'START AND END' : 'IMAGENS'"), 'im
 assert.ok(!modal.includes('aria-label="Recalcular custo no Flow"'), 'credit calculation has no manual recalculate control');
 assert.ok(modal.includes('poster !== media') && modal.includes("!pathname.includes('/video/')") && modal.includes("candidate.kind === 'image'"), 'video results reject MP4 poster URLs and inherit the nearest generated image as their thumbnail');
 assert.ok(modal.includes("type FlowMediaStore = 'media' | 'thumbnails'") && modal.includes('readFlowThumbnail') && modal.includes('captureFlowThumbnailFile'), 'video covers have a dedicated persistent IndexedDB cache');
+assert.ok(modal.includes('scene-frame-v2:') && modal.includes('await seekThumbnailFrame(video);'), 'persisted video covers invalidate the old opening frame and seek into the real scene before capture');
 assert.ok(modal.includes('onLoadedData={(event) => void rememberPreviewFrame(event.currentTarget, chosenAsset)}'), 'the visible Flow preview captures and retains its real frame');
 assert.ok(!modal.includes('<video src={source} muted playsInline preload="auto"'), 'the results rail never preloads every MP4 just to render thumbnails');
 assert.ok(modal.includes('data-flow-linked-take') && modal.includes('data-flow-copy-preview') && modal.includes('showCopyTakePreview') && modal.includes('thumbnailFor(copyTakePreview.asset'), 'hovering a linked copy range uses the exact persisted image/video thumbnail');

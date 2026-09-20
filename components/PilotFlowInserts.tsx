@@ -139,14 +139,35 @@ async function saveFlowMedia(asset: StudioAsset, file: File): Promise<void> {
   await flowMediaStore('readwrite', (store) => store.put({ file, size: file.size }, flowMediaKey(asset)));
 }
 async function readFlowThumbnail(asset: StudioAsset): Promise<Blob | null> {
-  const stored = await flowMediaStore<{ blob?: Blob; size?: number } | undefined>('readonly', (store) => store.get(flowMediaKey(asset)), 'thumbnails');
+  const stored = await flowMediaStore<{ blob?: Blob; size?: number } | undefined>('readonly', (store) => store.get(`scene-frame-v2:${flowMediaKey(asset)}`), 'thumbnails');
   const blob = stored?.blob;
   if (!(blob instanceof Blob) || !blob.size || blob.size !== stored?.size || !blob.type.startsWith('image/')) return null;
   return blob;
 }
 async function saveFlowThumbnail(asset: StudioAsset, blob: Blob): Promise<void> {
   if (!blob.size || !blob.type.startsWith('image/')) throw new Error('A captura da prévia do Flow ficou inválida.');
-  await flowMediaStore('readwrite', (store) => store.put({ blob, size: blob.size }, flowMediaKey(asset)), 'thumbnails');
+  await flowMediaStore('readwrite', (store) => store.put({ blob, size: blob.size }, `scene-frame-v2:${flowMediaKey(asset)}`), 'thumbnails');
+}
+function thumbnailTimestamp(video: HTMLVideoElement): number {
+  return Number.isFinite(video.duration) && video.duration > .45
+    ? Math.min(1, Math.max(.35, video.duration * .08))
+    : 0;
+}
+async function seekThumbnailFrame(video: HTMLVideoElement): Promise<void> {
+  const target = thumbnailTimestamp(video);
+  if (!target || Math.abs(video.currentTime - target) < .04) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('O vídeo demorou para abrir o quadro da capa.')), 5000);
+    const done = (error?: Error) => {
+      window.clearTimeout(timer);
+      video.onseeked = null;
+      error ? reject(error) : resolve();
+    };
+    video.onseeked = () => done();
+    try { video.currentTime = target; }
+    catch (error) { done(error instanceof Error ? error : new Error(String(error))); }
+  });
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 function thumbnailBlob(video: HTMLVideoElement): Promise<Blob | null> {
   if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return Promise.resolve(null);
@@ -177,7 +198,7 @@ async function captureFlowThumbnailFile(asset: StudioAsset, file: File): Promise
       const timer = window.setTimeout(() => reject(new Error('A captura da prévia demorou demais.')), 12000);
       const done = (error?: Error) => { window.clearTimeout(timer); error ? reject(error) : resolve(); };
       video.onloadedmetadata = () => {
-        const target = Number.isFinite(video.duration) && video.duration > .25 ? Math.min(.35, video.duration * .08) : 0;
+        const target = thumbnailTimestamp(video);
         if (target > 0) { video.onseeked = () => done(); video.currentTime = target; }
         else if (video.readyState >= 2) done();
         else video.onloadeddata = () => done();
@@ -528,6 +549,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     try {
       const existing = await readFlowThumbnail(asset);
       if (existing) return;
+      await seekThumbnailFrame(video);
       const blob = await thumbnailBlob(video);
       if (!blob) { thumbnailCaptureAttempts.current.delete(key); return; }
       await saveFlowThumbnail(asset, blob);
