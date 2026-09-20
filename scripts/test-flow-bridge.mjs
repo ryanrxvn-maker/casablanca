@@ -233,9 +233,15 @@ await run('extensions before the corrected Flow release cannot inspect, quote, g
     assert.equal(env.timers.size, 0);
   }
 });
-await run('published extension version is the corrected Flow release', () => {
+await run('published extension version includes the corrected Flow release', () => {
   const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '4.45.5');
+  const actual = String(manifest.version).split('.').map(Number);
+  const minimum = [4, 45, 5];
+  const compatible = minimum.every((value, index) =>
+    (actual[index] || 0) === value || (actual[index] || 0) > value ||
+    actual.slice(0, index).some((part, earlier) => part > minimum[earlier]),
+  );
+  assert.equal(compatible, true, `manifest ${manifest.version} precisa preservar Flow >= 4.45.5`);
 });
 await run('corrected release and newer versions can quote and generate exactly once', async () => {
   for (const version of ['4.45.5', '4.46.0', '5.0.0']) {

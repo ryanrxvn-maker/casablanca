@@ -32,6 +32,8 @@ const FILES = [
   'flow-background.js',
   'flow-bridge.js',
   'flow-content.js',
+  'stockframe-background.js',
+  'stockframe-bridge.js',
 ];
 
 const ICONS = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];

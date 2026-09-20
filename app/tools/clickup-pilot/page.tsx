@@ -97,8 +97,9 @@ import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
 import { PilotInsertsModal } from '@/components/PilotInserts';
 import { PilotFlowButton, PilotFlowInsertsModal } from '@/components/PilotFlowInserts';
+import { PilotStockFrameButton, PilotStockFrameModal } from '@/components/PilotStockFrame';
 import { PilotHeadlineModal } from '@/components/PilotHeadline';
-import { HEADLINE_CFG_DEFAULT, insertsAtivosNaMontagem, mesclarInsertsDaOrigem, type Insert, type HeadlineCfg } from '@/lib/pilot-inserts';
+import { HEADLINE_CFG_DEFAULT, insertsAtivosNaMontagem, mesclarInsertsDaOrigem, type Insert, type HeadlineCfg, type OrigemInsert } from '@/lib/pilot-inserts';
 import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
 import {
   LEGENDA_CFG_DEFAULT,
@@ -2298,6 +2299,7 @@ function ClickUpPilotInner() {
   /** Qual popover está aberto ('legenda' | 'zoom') por task. */
   const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | 'headline' | null>>({});
   const [flowDialog, setFlowDialog] = useState<{ analysis: TaskAnalysis; editor: boolean } | null>(null);
+  const [stockFrameDialog, setStockFrameDialog] = useState<{ analysis: TaskAnalysis; editor: boolean } | null>(null);
   const legendaBtnRefs = useRef<Record<string, HTMLElement | null>>({});
   const zoomBtnRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -2427,7 +2429,7 @@ function ClickUpPilotInner() {
           palavra da copy — tela cheia ou dividindo a tela com o
           avatar. Nada disto toca o que foi pro HeyGen. */}
       {(() => {
-        const lista = getInserts(a.taskId).filter((ins) => ins.source !== 'flow');
+        const lista = getInserts(a.taskId).filter((ins) => !ins.source);
         const aberto = posPopover[a.taskId] === 'inserts';
         const partesDaCopy = (
           batchStates[a.taskId]?.replan?.parts?.length
@@ -2475,6 +2477,15 @@ function ClickUpPilotInner() {
         onClick={() => {
           setPosPopover((prev) => ({ ...prev, [a.taskId]: null }));
           setFlowDialog({ analysis: a, editor: false });
+        }}
+      />
+      <PilotStockFrameButton
+        enabled={isStockFrameEnabled(a.taskId)}
+        count={getInserts(a.taskId).filter((ins) => ins.source === 'stockframe').length}
+        onClick={() => {
+          setPosPopover((prev) => ({ ...prev, [a.taskId]: null }));
+          setFlowDialog(null);
+          setStockFrameDialog({ analysis: a, editor: false });
         }}
       />
       {/* HEADLINE (01.09) — manchete parada por cima do vídeo,
@@ -2840,11 +2851,11 @@ function ClickUpPilotInner() {
   const setInsertsDaOrigem = (
     taskId: string,
     valor: Insert[] | ((atuais: Insert[]) => Insert[]),
-    origem: 'flow' | 'manual',
+    origem: OrigemInsert,
   ) => {
     setInsertsPorTask((prev) => {
       const atuais = prev[taskId] || prev[taskIdBaseDaVersao(taskId)] || [];
-      const daOrigem = atuais.filter((ins) => origem === 'flow' ? ins.source === 'flow' : ins.source !== 'flow');
+      const daOrigem = atuais.filter((ins) => origem === 'manual' ? !ins.source : ins.source === origem);
       const novos = typeof valor === 'function' ? valor(daOrigem) : valor;
       const next = { ...prev, [taskId]: mesclarInsertsDaOrigem(atuais, novos, origem) };
       try { localStorage.setItem(INSERTS_KEY, JSON.stringify(next)); } catch {}
@@ -2879,10 +2890,36 @@ function ClickUpPilotInner() {
       return next;
     });
   };
+
+  const STOCKFRAME_ENABLED_KEY = 'darkolab:clickup-pilot:stockframe-enabled';
+  const [stockFrameEnabled, setStockFrameEnabled] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(STOCKFRAME_ENABLED_KEY) || '{}');
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    } catch { return {}; }
+  });
+  const stockFrameEnabledRef = useRef(stockFrameEnabled);
+  stockFrameEnabledRef.current = stockFrameEnabled;
+  const isStockFrameEnabled = (taskId: string): boolean => {
+    const baseId = taskIdBaseDaVersao(taskId);
+    const config = stockFrameEnabledRef.current;
+    if (typeof config[taskId] === 'boolean') return config[taskId];
+    if (typeof config[baseId] === 'boolean') return config[baseId];
+    return (insertsRef.current[taskId] || insertsRef.current[baseId] || []).some((insert) => insert.source === 'stockframe');
+  };
+  const setStockFrameEnabledFor = (taskId: string, enabled: boolean) => {
+    setStockFrameEnabled((previous) => {
+      const next = { ...previous, [taskId]: enabled };
+      try { localStorage.setItem(STOCKFRAME_ENABLED_KEY, JSON.stringify(next)); } catch {}
+      stockFrameEnabledRef.current = next;
+      return next;
+    });
+  };
   function insertsDaMontagem(taskId: string): Insert[] {
     // O runner continua lendo refs atuais, mesmo depois de gerações longas.
     const lista = insertsRef.current[taskId] || insertsRef.current[taskIdBaseDaVersao(taskId)] || [];
-    return insertsAtivosNaMontagem(lista, isFlowEnabled(taskId));
+    return insertsAtivosNaMontagem(lista, isFlowEnabled(taskId), isStockFrameEnabled(taskId));
   }
 
   /* ═══════════════ HEADLINE (01.09) ═══════════════
@@ -3026,6 +3063,33 @@ function ClickUpPilotInner() {
     }
   }
 
+  /** StockFrame entrega o arquivo original da conta. Confere o roundtrip no
+   * IDB antes de publicar o insert, sem exigir upscale: o catálogo possui
+   * verticais nativos de resoluções diferentes. */
+  async function subirMidiaDeStockFrame(taskId: string, f: File, ancora: string) {
+    const meta = await subirMidiaDeInsert(taskId, f, ancora);
+    if (!meta) throw new Error(`Não foi possível importar ${f.name}. Confira o arquivo e tente novamente.`);
+    try {
+      if (meta.tipo !== 'video' || !(meta.w > 0 && meta.h > 0) || !(meta.durSec && meta.durSec > 0)) {
+        throw new Error('O StockFrame não devolveu um vídeo reproduzível com duração e dimensões válidas.');
+      }
+      const { loadBlob } = await import('@/lib/zip-store');
+      const saved = await loadBlob(meta.key, f.type);
+      if (!saved || saved.size !== f.size) {
+        throw new Error('Não foi possível guardar o take neste navegador. Libere espaço e tente novamente.');
+      }
+      return meta;
+    } catch (reason) {
+      try {
+        const { deleteZip } = await import('@/lib/zip-store');
+        await deleteZip(meta.key);
+      } catch {}
+      setInsertThumbs((previous) => { const next = { ...previous }; delete next[meta.key]; return next; });
+      setInsertDurs((previous) => { const next = { ...previous }; delete next[meta.key]; return next; });
+      throw reason;
+    }
+  }
+
   /** Uma janela na raiz, ainda que a toolbar apareça em várias vistas da task. */
   function janelaDeFlow() {
     if (!flowDialog) return null;
@@ -3097,6 +3161,80 @@ function ClickUpPilotInner() {
             : undefined
         }
         atualizandoMontagem={flowRebuildLocksRef.current.has(taskId)}
+      />
+    );
+  }
+
+  /** Biblioteca StockFrame e editor avançado compartilham uma única janela
+   * na raiz, mesmo quando a task aparece em mais de um card do Pilot. */
+  function janelaDeStockFrame() {
+    if (!stockFrameDialog) return null;
+    const taskId = stockFrameDialog.analysis.taskId;
+    const analysis = taskAnalyses[taskId] || stockFrameDialog.analysis;
+    const parts = (
+      batchStates[taskId]?.replan?.parts?.length
+        ? batchStates[taskId]!.replan!.parts!
+        : analysis.partTemplates || []
+    ).map((item: any) => ({ label: String(item.label || ''), text: String(item.text || '') }));
+    const list = getInserts(taskId).filter((insert) => insert.source === 'stockframe');
+    if (stockFrameDialog.editor) {
+      return (
+        <PilotInsertsModal
+          key={`stockframe-editor:${taskId}`}
+          partes={parts}
+          inserts={list}
+          onFechar={() => setStockFrameDialog((previous) => previous?.analysis.taskId === taskId ? { ...previous, editor: false } : previous)}
+          onMudar={(nextList) => {
+            const ids = new Set(nextList.map((insert) => insert.id));
+            const removed = new Set(list.filter((insert) => !ids.has(insert.id)).map((insert) => insert.id));
+            const changed = nextList.filter((insert) => !list.includes(insert));
+            setInsertsDaOrigem(taskId, (current) => {
+              const next = current.filter((insert) => !removed.has(insert.id));
+              for (const insert of changed) {
+                const index = next.findIndex((item) => item.id === insert.id);
+                if (index < 0) next.push(insert); else next[index] = insert;
+              }
+              return next;
+            }, 'stockframe');
+          }}
+          onSubirMidia={async (file, anchor) => {
+            try { return await subirMidiaDeStockFrame(taskId, file, anchor); }
+            catch (reason) { setError((reason as Error)?.message || 'Não foi possível importar o take do StockFrame.'); return null; }
+          }}
+          thumbDaMidia={(key) => insertThumbs[key] || null}
+          duracaoDaMidia={(key) => insertDurs[key] ?? null}
+          lerMidia={async (key) => {
+            try {
+              const { loadBlob } = await import('@/lib/zip-store');
+              return await loadBlob(key);
+            } catch (reason) {
+              console.warn(`[clickup-pilot] StockFrame: mídia ${key} não voltou do IDB:`, reason);
+              return null;
+            }
+          }}
+          thumbAvatar={(analysis.roleSlots || []).find((slot) => slot.avatarThumb)?.avatarThumb || null}
+        />
+      );
+    }
+    return (
+      <PilotStockFrameModal
+        key={`stockframe:${taskId}`}
+        taskId={taskId}
+        parts={parts}
+        inserts={list}
+        enabled={isStockFrameEnabled(taskId)}
+        onEnabledChange={(value) => setStockFrameEnabledFor(taskId, value)}
+        onClose={() => setStockFrameDialog(null)}
+        onChange={(value) => setInsertsDaOrigem(taskId, value, 'stockframe')}
+        onImportMedia={(file, anchor) => subirMidiaDeStockFrame(taskId, file, anchor)}
+        onEditInserts={() => setStockFrameDialog((previous) => previous?.analysis.taskId === taskId ? { ...previous, editor: true } : previous)}
+        onUpdateMontage={
+          batchStates[taskId]?.kind !== 'troca' && !batchStates[taskId]?.isVA
+          && (batchStates[taskId]?.phase === 'done' || flowRebuildLocksRef.current.has(taskId))
+            ? () => rebuildMontage(taskId, { somenteCache: true })
+            : undefined
+        }
+        updatingMontage={flowRebuildLocksRef.current.has(taskId)}
       />
     );
   }
@@ -18870,6 +19008,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           ) : null}
       </ToolShell>
       {janelaDeFlow()}
+      {janelaDeStockFrame()}
       {/* Modal pra editar 1 take e re-gerar so essa parte */}
       {editingPart ? (
         <EditPartModal

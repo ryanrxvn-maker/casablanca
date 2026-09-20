@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Hey Auto",
-  "version": "4.45.5",
-  "description": "Avatares HeyGen e inserts do Google Flow no Pilot, usando suas contas conectadas no navegador.",
+  "version": "4.46.1",
+  "description": "Avatares HeyGen, Google Flow e StockFrame no Pilot, usando suas próprias contas conectadas.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -18,6 +18,8 @@
   "host_permissions": [
     "https://flow.google.com/*",
     "https://labs.google/*",
+    "https://biblioteca.stockframe.space/*",
+    "https://*.stockframe.space/*",
     "https://storage.googleapis.com/*",
     "https://app.heygen.com/*",
     "https://api2.heygen.com/*",
@@ -50,7 +52,8 @@
       ],
       "js": [
         "bridge.js",
-        "flow-bridge.js"
+        "flow-bridge.js",
+        "stockframe-bridge.js"
       ],
       "run_at": "document_start"
     },

@@ -17,6 +17,23 @@ Sem consumir API publica (usa sua mensalidade HeyGen).
 
 ## Como usar
 
+### Atualização 4.46.1 — integração StockFrame + Smart Stocks
+
+O botão StockFrame fica ao lado do Google Flow no card do Pilot. Cada usuário
+precisa ter a própria conta **paga e ativa** no StockFrame e gerar uma chave em
+**Meu perfil e API**. A chave fica somente no `chrome.storage.local` da extensão;
+ela nunca é salva no servidor do Auto Edit nem exposta à página.
+
+A integração lista e baixa apenas o conteúdo que a conta já pode acessar. Ela
+não libera vídeos fora do plano: os downloads descontam da cota diária normal do
+StockFrame. O Pilot bloqueia a conexão quando a API informa plano inativo,
+expirado ou sem cota contratada.
+
+Na Biblioteca, escolha um trecho da copy e visualize o take antes de inserir.
+O Smart Stocks analisa a copy localmente, sem API de IA paga, oferece cobertura
+de 30%, 60% ou 100% e ritmo rápido, longo ou inteligente. A análise não consome
+download; a cota só é usada depois de revisar o plano e clicar em aplicar.
+
 ### Atualização 4.44.3 — inserts do Google Flow
 
 O módulo Flow usa arquivos, fila e aba de automação próprios. O funcionamento
@@ -88,10 +105,11 @@ recusa essa operação; liberar o Pilot não altera os recursos do plano HeyGen.
 ## Privacidade
 
 A extensao:
-- Acessa HeyGen, Google Flow, os arquivos de mídia e documentos Google usados
-  pelo Pilot, além do site DARKO LAB
+- Acessa HeyGen, Google Flow, StockFrame, os arquivos de mídia e documentos
+  Google usados pelo Pilot, além do site DARKO LAB
 - NAO envia suas credenciais pra nenhum servidor (tudo roda local + sua sessao HeyGen)
 - A automação do Flow usa uma aba própria e identifica a conta antes de gerar
+- A chave StockFrame vai apenas para a API oficial e permanece no armazenamento local da extensão
 - Codigo aberto — voce pode auditar todos os arquivos
 
 ## Troubleshooting

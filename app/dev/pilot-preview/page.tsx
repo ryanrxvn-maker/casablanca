@@ -10,7 +10,7 @@
  */
 
 import { notFound } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RedispatchPanel, type RedispatchPart } from '@/components/RedispatchPanel';
 import { IndicacaoPanel } from '@/components/IndicacaoPanel';
 import { resolverLinkIndicacao } from '@/lib/pilot-indicacoes';
@@ -31,6 +31,7 @@ import { PreviewProgressoEconomia } from '@/components/PreviewProgressoEconomia'
 import { PilotEconomiaBtn } from '@/components/PilotEconomiaBtn';
 import { DocsBar, CreatorBar, type DocChip } from '@/components/PilotFontesBar';
 import type { ModoPilot } from '@/lib/pilot-fontes';
+import { PilotStockFrameButton, PilotStockFrameModal } from '@/components/PilotStockFrame';
 
 const FRAME_FAKE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="160"><rect width="90" height="160" fill="#3b1d5e"/><circle cx="45" cy="58" r="22" fill="#c4b5fd"/><rect x="18" y="88" width="54" height="60" rx="14" fill="#a78bfa"/></svg>');
 
@@ -81,6 +82,62 @@ const PARTES: RedispatchPart[] = [
     username: 'drrobertokalil 1',
     briefingFileId: null,
   },
+];
+
+const STOCKFRAME_DEV_VIDEOS = [
+  {
+    id: 'dev-azeite-01', code: 'SAU-AZ01', title: 'AZEITE EXTRA VIRGEM NA COZINHA',
+    description: 'Close de azeite extra virgem sendo servido em uma colher, ambiente de cozinha.',
+    tags: ['azeite', 'cozinha', 'oleocantal', 'ingrediente', 'saude'],
+    preview_url: 'https://darkoautoedit.com/cards/auto-broll.mp4', poster_url: 'https://darkoautoedit.com/cards/auto-broll.jpg',
+    duration: 8, width: 1080, height: 1920, origin: 'organic', downloads: 32, recent: true,
+    niche_id: 'saude', niche_name: 'Saúde', subcategory_id: 'alimentacao', subcategory_name: 'Alimentação',
+  },
+  {
+    id: 'dev-prostata-02', code: 'SAU-PR02', title: 'MÉDICO EXPLICANDO SAÚDE DA PRÓSTATA',
+    description: 'Especialista explica como hábitos e compostos naturais afetam a próstata.',
+    tags: ['medico', 'prostata', 'saude masculina', 'explicacao', 'doutor'],
+    preview_url: 'https://darkoautoedit.com/cards/hey-auto.mp4', poster_url: 'https://darkoautoedit.com/cards/hey-auto.jpg',
+    duration: 9, width: 1080, height: 1920, origin: 'organic', downloads: 74, favorite: true,
+    niche_id: 'saude', niche_name: 'Saúde', subcategory_id: 'prostata', subcategory_name: 'Próstata',
+  },
+  {
+    id: 'dev-anatomia-03', code: 'SAU-3D03', title: 'ANATOMIA DA PRÓSTATA EM 3D',
+    description: 'Visualização médica destacando a próstata e o sistema urinário masculino.',
+    tags: ['prostata', 'anatomia', '3d', 'sistema urinario', 'masculino'],
+    preview_url: 'https://darkoautoedit.com/cards/fluxo-automatico.mp4', poster_url: 'https://darkoautoedit.com/cards/fluxo-automatico.jpg',
+    duration: 7, width: 1080, height: 1920, origin: 'ai', downloads: 51,
+    niche_id: 'saude', niche_name: 'Saúde', subcategory_id: 'anatomia', subcategory_name: '3D',
+  },
+  {
+    id: 'dev-calor-04', code: 'ALI-CL04', title: 'INGREDIENTE SENDO AQUECIDO NA PANELA',
+    description: 'Óleo aquecido em fogo alto, representando perda de compostos pelo calor.',
+    tags: ['calor', 'cozinha', 'composto', 'oleo', 'panela'],
+    preview_url: 'https://darkoautoedit.com/cards/b-rolls.mp4', poster_url: 'https://darkoautoedit.com/cards/b-rolls.jpg',
+    duration: 6, width: 1080, height: 1920, origin: 'organic', downloads: 19,
+    niche_id: 'saude', niche_name: 'Saúde', subcategory_id: 'alimentacao', subcategory_name: 'Alimentação',
+  },
+  {
+    id: 'dev-joelho-05', code: 'DOR-JO05', title: 'HOMEM MAIS VELHO COM DOR NO JOELHO',
+    description: 'Homem demonstra desconforto no joelho ao levantar, com foco na articulação.',
+    tags: ['dor', 'joelho', 'idoso', 'articulacao', 'desconforto'],
+    preview_url: 'https://darkoautoedit.com/cards/lipsync.mp4', poster_url: 'https://darkoautoedit.com/cards/lipsync.jpg',
+    duration: 8, width: 1080, height: 1920, origin: 'organic', downloads: 88,
+    niche_id: 'dores', niche_name: 'Dores Articulares', subcategory_id: 'joelho', subcategory_name: 'Joelho',
+  },
+  {
+    id: 'dev-composto-06', code: 'SAU-OL06', title: 'COMPOSTO OLEOCANTAL EM DESTAQUE',
+    description: 'Composição visual científica para explicar o oleocantal presente no azeite.',
+    tags: ['oleocantal', 'composto', 'azeite', 'ciencia', 'molecula'],
+    preview_url: 'https://darkoautoedit.com/hero/fakeprint-reporter.mp4', poster_url: 'https://darkoautoedit.com/hero/fakeprint-reporter.jpg',
+    duration: 5, width: 1080, height: 1920, origin: 'ai', downloads: 13, recent: true,
+    niche_id: 'saude', niche_name: 'Saúde', subcategory_id: 'anatomia', subcategory_name: '3D',
+  },
+];
+
+const STOCKFRAME_DEV_NICHES = [
+  { id: 'saude', name: 'Saúde', count: 5, subcategories: [{ id: 'alimentacao', name: 'Alimentação', count: 2 }, { id: 'prostata', name: 'Próstata', count: 1 }, { id: 'anatomia', name: '3D', count: 2 }] },
+  { id: 'dores', name: 'Dores Articulares', count: 1, subcategories: [{ id: 'joelho', name: 'Joelho', count: 1 }] },
 ];
 
 const TRECHOS_MOCK = [
@@ -195,7 +252,6 @@ async function rodarProvaVelocidade(
     setMsg(`VELOCIDADE FALHOU: ${(e as Error)?.message || e}`);
   }
 }
-
 async function rodarProvaFluidez(
   setMsg: (m: string | null) => void,
   setUrl: (u: string | null) => void,
@@ -728,6 +784,9 @@ function Conteudo() {
   const [insLista, setInsLista] = useState<Insert[]>([
     insertPadrao('d1', 'BODY 1', { key: 'demo:broll.mp4', nome: 'broll-azeite.mp4', tipo: 'video', w: 1920, h: 1080, durSec: 4 }),
   ]);
+  const [stockFrameAberto, setStockFrameAberto] = useState(false);
+  const [stockFrameEnabled, setStockFrameEnabled] = useState(true);
+  const [stockFrameInserts, setStockFrameInserts] = useState<Insert[]>([]);
   const [motorCfg, setMotorCfg] = useState<MotorConfig>({ kind: 'individual', perSlot: {} });
   const [slotsDemo, setSlotsDemo] = useState([
     { id: '0', nome: 'Confident Business Executive', thumb: null as string | null, motor: 'III' as Motor, motionPrompt: null as string | null, imageMode: false },
@@ -742,9 +801,110 @@ function Conteudo() {
   const partsCount = 7;
   const pct = 92;
 
+  // Ponte falsa apenas desta rota dev: deixa a interface completa auditável
+  // sem chave, sem conta real e sem gastar um download do StockFrame.
+  useEffect(() => {
+    let configured = true;
+    const extensionId = 'stockframe-dev-preview';
+    const reply = (requestId: string, type: string, payload: unknown) => {
+      window.postMessage({
+        source: 'stockframe-extension', extensionId, version: '4.46.1', requestId, type, payload,
+      }, window.location.origin);
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      const message = event.data;
+      if (message?.source !== 'pilot-stockframe' || typeof message.requestId !== 'string') return;
+      if (message.type === 'SF_PING') {
+        window.postMessage({
+          source: 'stockframe-extension', extensionId, version: '4.46.1', requestId: message.requestId, type: 'SF_PONG',
+        }, window.location.origin);
+        return;
+      }
+      if (message.type !== 'SF_REQUEST' || message.extensionId !== extensionId) return;
+      const filters = message.payload?.filters || {};
+      window.setTimeout(() => {
+        if (message.action === 'status') {
+          reply(message.requestId, 'SF_RESULT', configured ? {
+            configured: true,
+            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium' },
+            version: '4.46.1',
+          } : { configured: false, version: '4.46.1' });
+          return;
+        }
+        if (message.action === 'disconnect') {
+          configured = false;
+          reply(message.requestId, 'SF_RESULT', { configured: false });
+          return;
+        }
+        if (message.action === 'configure') {
+          configured = true;
+          reply(message.requestId, 'SF_RESULT', {
+            configured: true,
+            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium' },
+          });
+          return;
+        }
+        if (message.action === 'list') {
+          const query = String(filters.search || '').toLocaleLowerCase('pt-BR');
+          const videos = STOCKFRAME_DEV_VIDEOS.filter((video) => {
+            if (filters.nicheId && video.niche_id !== filters.nicheId) return false;
+            if (filters.subcategoryId && video.subcategory_id !== filters.subcategoryId) return false;
+            if (filters.aspectRatio && filters.aspectRatio !== '9:16') return false;
+            if (filters.origin && video.origin !== filters.origin) return false;
+            if (filters.favorites && !('favorite' in video && video.favorite)) return false;
+            if (!query) return true;
+            return `${video.title} ${video.description} ${video.tags.join(' ')}`.toLocaleLowerCase('pt-BR').includes(query)
+              || query.split(/\s+/).some((word: string) => word.length > 3 && `${video.title} ${video.description} ${video.tags.join(' ')}`.toLocaleLowerCase('pt-BR').includes(word));
+          });
+          reply(message.requestId, 'SF_RESULT', { data: {
+            videos, niches: STOCKFRAME_DEV_NICHES,
+            pagination: { current_page: 1, per_page: 24, total: videos.length, last_page: 1 },
+          } });
+          return;
+        }
+        if (message.action === 'download') {
+          reply(message.requestId, 'SF_DOWNLOAD_CHUNK', { index: 0, data: btoa('stockframe-dev-video') });
+          reply(message.requestId, 'SF_RESULT', { totalChunks: 1, mimeType: 'video/mp4', filename: 'StockFrame-preview.mp4' });
+        }
+      }, 35);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   return (
     <main className="mx-auto grid max-w-[760px] gap-8 px-4 py-10">
       <h1 className="text-lg font-bold text-text">DEV · preview Pilot 29.08</h1>
+
+      <section
+        id="stockframe"
+        className="rounded-[14px] border border-violet-400/20 bg-gradient-to-br from-violet-500/[0.09] via-white/[0.02] to-transparent p-3"
+      >
+        <div className="mb-3 flex items-center justify-between gap-4">
+          <div>
+            <div className="label-tech text-[9.5px] tracking-[0.18em] text-violet-200">StockFrame · integração do Pilot</div>
+            <p className="mt-1 text-[10px] text-text-muted">Catálogo, preview, filtros, seleção por copy e Smart Stocks com conta premium simulada somente nesta rota dev.</p>
+          </div>
+          <PilotStockFrameButton enabled={stockFrameEnabled} count={stockFrameInserts.length} onClick={() => setStockFrameAberto(true)} />
+        </div>
+        <button type="button" className="rounded-lg border border-violet-400/25 bg-violet-500/10 px-3 py-2 text-[10px] font-bold text-violet-100 hover:bg-violet-500/20" onClick={() => setStockFrameAberto(true)}>
+          Abrir integração StockFrame
+        </button>
+      </section>
+
+      {stockFrameAberto ? <PilotStockFrameModal
+        taskId="dev-stockframe-task"
+        parts={PARTES.map((part) => ({ label: part.label, text: part.text }))}
+        inserts={stockFrameInserts}
+        enabled={stockFrameEnabled}
+        onEnabledChange={setStockFrameEnabled}
+        onClose={() => setStockFrameAberto(false)}
+        onChange={setStockFrameInserts}
+        onImportMedia={async (file) => ({ key: `dev-stockframe:${file.name}:${Date.now()}`, nome: file.name, tipo: 'video', w: 1080, h: 1920, durSec: 8 })}
+        onEditInserts={() => setStockFrameAberto(false)}
+        onUpdateMontage={async () => true}
+      /> : null}
 
       {/* ══════════ BARRA DE PROGRESSO do MODO ECONOMIA (08.09) ══════════ */}
       <section

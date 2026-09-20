@@ -41,10 +41,21 @@ export type MidiaTipo = 'video' | 'imagem';
 export type Insert = {
   id: string;
   /** Origem da mídia; ausente preserva os inserts enviados manualmente. */
-  source?: 'flow';
+  source?: 'flow' | 'stockframe';
   /** Resultado exato do Flow que originou o insert. Opcional nos registros
    * antigos; permite ao estúdio mostrar take → trecho sem depender do nome. */
   flowAssetId?: string;
+  /** Identidade visual do take de catálogo; a chave da API nunca entra aqui. */
+  stockFrame?: {
+    videoId: string;
+    code?: string;
+    title: string;
+    previewUrl?: string;
+    smart?: boolean;
+    /** Cobertura escolhida ao criar o plano Smart; ausente mantém a âncora estrita. */
+    coverage?: 30 | 60 | 100;
+    semanticScore?: number;
+  };
   /** label da parte da copy onde ancora — 'HOOK 1', 'BODY 2'... */
   ancora: string;
   /**
@@ -97,13 +108,21 @@ export type Insert = {
   volume?: number;
 };
 
-/** As duas janelas editam coleções independentes dentro da mesma montagem. */
-export function mesclarInsertsDaOrigem(atuais: Insert[], novos: Insert[], origem: 'flow' | 'manual'): Insert[] {
-  const recebidos = origem === 'flow' ? novos.map((ins) => ({ ...ins, source: 'flow' as const })) : novos;
+/** As janelas de manual, Flow e StockFrame editam coleções independentes. */
+export type OrigemInsert = 'flow' | 'stockframe' | 'manual';
+
+function pertenceAOrigem(insert: Insert, origem: OrigemInsert): boolean {
+  return origem === 'manual' ? !insert.source : insert.source === origem;
+}
+
+export function mesclarInsertsDaOrigem(atuais: Insert[], novos: Insert[], origem: OrigemInsert): Insert[] {
+  const recebidos = origem === 'manual'
+    ? novos.map((ins) => ({ ...ins, source: undefined }))
+    : novos.map((ins) => ({ ...ins, source: origem }));
   const pendentes = new Map(recebidos.map((ins) => [ins.id, ins]));
   const resultado: Insert[] = [];
   for (const atual of atuais) {
-    const pertence = origem === 'flow' ? atual.source === 'flow' : atual.source !== 'flow';
+    const pertence = pertenceAOrigem(atual, origem);
     if (!pertence) {
       resultado.push(atual);
     } else {
@@ -116,9 +135,13 @@ export function mesclarInsertsDaOrigem(atuais: Insert[], novos: Insert[], origem
   return [...resultado, ...pendentes.values()];
 }
 
-/** Desligar Flow preserva seus arquivos e deixa todos os inserts manuais ativos. */
-export function insertsAtivosNaMontagem(inserts: Insert[], flowAtivo: boolean): Insert[] {
-  return flowAtivo ? inserts : inserts.filter((ins) => ins.source !== 'flow');
+/** Cada integração pode ser desligada sem apagar seus arquivos ou as demais origens. */
+export function insertsAtivosNaMontagem(inserts: Insert[], flowAtivo: boolean, stockFrameAtivo = true): Insert[] {
+  return inserts.filter((insert) => {
+    if (insert.source === 'flow') return flowAtivo;
+    if (insert.source === 'stockframe') return stockFrameAtivo;
+    return true;
+  });
 }
 
 export const INSERT_FOCO_PADRAO = 0.34;
@@ -354,6 +377,35 @@ export function mapearPartesNoAsr(
 /** Janela de tempo (segundos) que um insert ocupa no vídeo final. */
 export type JanelaInsert = { id: string; start: number; end: number };
 
+/** Só um plano full completo pode assumir também os silêncios do vídeo.
+ * Coexistência com manual/Flow (ou StockFrame manual) conserva as prioridades
+ * normais: esticar o full nesse caso poderia deslocar um insert do editor. */
+function planoSmartStockFrameCompleto(
+  inserts: Insert[],
+  partes: Array<{ label: string; text: string }>,
+): boolean {
+  if (partes.length === 0 || new Set(partes.map((p) => p.label)).size !== partes.length) return false;
+  if (new Set(inserts.map((ins) => ins.id)).size !== inserts.length) return false;
+  if (!inserts.every((ins) =>
+    ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100 &&
+    ins.layout.tipo === 'cheia' && partes.some((p) => p.label === ins.ancora) &&
+    Number.isInteger(ins.palavraDe) && Number.isInteger(ins.palavraAte) &&
+    ins.palavraDe >= 0 && ins.palavraAte >= ins.palavraDe,
+  )) return false;
+
+  return partes.every((parte) => {
+    const tamanho = parte.text.trim().split(/\s+/).length;
+    const trechos = inserts.filter((ins) => ins.ancora === parte.label)
+      .sort((a, b) => a.palavraDe - b.palavraDe);
+    let proxima = 0;
+    for (const trecho of trechos) {
+      if (trecho.palavraDe !== proxima || trecho.palavraAte >= tamanho) return false;
+      proxima = trecho.palavraAte + 1;
+    }
+    return proxima === tamanho;
+  });
+}
+
 /**
  * Converte cada insert em janela de tempo.
  *
@@ -457,6 +509,13 @@ export function janelasDosInserts(
       ultimo.end = start;
     }
     out.push({ id: j.id, start, end });
+  }
+  // FULL 100% inclui a entrada, pausas e cauda que o ASR não transcreve.
+  // Só estende um plano íntegro cujas janelas sobreviveram ao alinhamento;
+  // as fronteiras seguintes continuam mandando, sem sobreposição.
+  if (out.length === inserts.length && planoSmartStockFrameCompleto(inserts, validas)) {
+    out[0].start = 0;
+    for (let i = 0; i < out.length; i++) out[i].end = out[i + 1]?.start ?? durSec;
   }
   return out;
 }

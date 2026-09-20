@@ -5,6 +5,7 @@
 // Flow is a separate module. A broken/missing Flow file must never prevent
 // the established HeyGen worker from loading.
 try { importScripts('flow-background.js'); } catch (error) { console.error('[AutoEdit Flow] Module unavailable:', error); }
+try { importScripts('stockframe-background.js'); } catch (error) { console.error('[AutoEdit StockFrame] Module unavailable:', error); }
 
 const activeJobs = new Map();
 // Map<requestId, { bridgeTabId, timeoutId }> pra correlacionar push do

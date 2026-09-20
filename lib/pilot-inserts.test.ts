@@ -564,5 +564,75 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
     'com corte dos dois lados a janela abraça o take inteiro');
 }
 
+/* ═══ (11) STOCKFRAME FULL: a cobertura inclui pontas e pausas do ASR ═══ */
+{
+  const partes = [
+    { label: 'HOOK 1', text: 'subir escadas sem sentir' },
+    { label: 'BODY 1', text: 'dor nos seus joelhos' },
+  ];
+  const tempos = [1000, 1400, 1800, 2200, 5000, 5400, 6000, 7000];
+  const asr = partes.flatMap((p) => p.text.split(' ')).map((text, i) => ({
+    text, start: tempos[i], end: tempos[i] + 400,
+  }));
+  const full: Insert[] = partes.map((p, i) => ({
+    ...insertPadrao(`full-${i}`, p.label, { key: `k${i}`, nome: 'stock.mp4', tipo: 'video', w: 1080, h: 1920 }),
+    source: 'stockframe',
+    stockFrame: { videoId: `v${i}`, title: 'Stock', smart: true, coverage: 100 },
+    palavraDe: 0, palavraAte: 3,
+  }));
+  const j = janelasDosInserts(full, partes, asr, 10);
+  ok(j.length === 2 && aprox(j[0].start, 0) && aprox(j[1].end, 10),
+    'Smart full100 cobre a entrada de 1s e a cauda após o ASR terminar em 7,4s');
+  ok(aprox(j[0].end, j[1].start) && aprox(j.reduce((n, w) => n + w.end - w.start, 0), 10),
+    'Smart full100 cobre também a pausa entre partes, sem janelas sobrepostas');
+
+  const fragmentado = [
+    { ...full[0], id: 'inicio', palavraAte: 1 },
+    { ...full[0], id: 'meio', palavraDe: 2 },
+    full[1],
+  ];
+  const jf = janelasDosInserts(fragmentado, partes, asr, 10);
+  ok(jf.length === 3 && jf.every((w, i) => i === 0 ? w.start === 0 : aprox(jf[i - 1].end, w.start)) && jf[2].end === 10,
+    'trechos contíguos dentro de uma parte e entre partes também fecham 100%');
+
+  const estrito = (inserts: Insert[]) => {
+    const windows = janelasDosInserts(inserts, partes, asr, 10);
+    return windows.length > 0 && windows[0].start >= 1 && windows[windows.length - 1].end < 10;
+  };
+  for (const coverage of [30, 60, undefined] as const) {
+    ok(estrito(full.map((ins) => ({ ...ins, stockFrame: { ...ins.stockFrame!, coverage } }))),
+      `cobertura ${coverage ?? 'sem marcador'} conserva pontas e pausas originais`);
+  }
+  ok(estrito(full.map((ins) => ({ ...ins, stockFrame: { ...ins.stockFrame!, smart: false } }))),
+    'StockFrame manual não herda expansão mesmo com marcador 100');
+  ok(estrito(full.map((ins) => ({ ...ins, source: 'flow' }))),
+    'Flow nunca herda expansão de metadados StockFrame');
+  ok(estrito([full[0]]), 'uma parte sem stocks impede expansão do plano inteiro');
+  ok(estrito([{ ...full[0], palavraAte: 2 }, full[1]]),
+    'uma palavra descoberta impede preencher um plano incompleto');
+  ok(estrito([{ ...fragmentado[0], palavraAte: 0 }, fragmentado[1], full[1]]),
+    'um buraco entre trechos da mesma parte impede expansão');
+  ok(estrito([full[0], { ...full[1], palavraAte: 99 }]),
+    'índice antigo além da copy não certifica cobertura completa');
+  ok(estrito([{ ...full[0], layout: { tipo: 'faixas', avatar: 'cima' } }, full[1]]),
+    'plano com layout dividido conserva o avatar e as âncoras estritas');
+
+  const orfao: Insert = { ...full[0], id: 'orfao', ancora: 'BODY REMOVIDO' };
+  const comOrfao = janelasDosInserts([...full, orfao], partes, asr, 10);
+  ok(comOrfao.length === 2 && comOrfao[0].start === 1 && comOrfao[1].end === 7.4,
+    'insert de parte removida é descartado e invalida expansão full do plano');
+  for (const source of [undefined, 'flow', 'stockframe'] as const) {
+    const extra: Insert = {
+      ...full[0], id: `extra-${source ?? 'manual'}`, source,
+      stockFrame: source === 'stockframe' ? { videoId: 'extra', title: 'Manual' } : undefined,
+      palavraDe: 2, palavraAte: 3,
+    };
+    const normal = janelasDosInserts([...full.map((ins) => ({ ...ins, stockFrame: { ...ins.stockFrame!, coverage: undefined } })), extra], partes, asr, 10);
+    const misturado = janelasDosInserts([...full, extra], partes, asr, 10);
+    ok(JSON.stringify(misturado) === JSON.stringify(normal),
+      `full100 coexistindo com ${source ?? 'manual'} preserva exatamente a prioridade anterior`);
+  }
+}
+
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-inserts: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);
