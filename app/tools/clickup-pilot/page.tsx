@@ -258,6 +258,12 @@ import {
 } from '@/lib/pilot-runner-pulse';
 import { findPilotTextIntegrityIssue } from '@/lib/pilot-text-integrity';
 import {
+  cardMenteNaFila,
+  disparoJaEmAndamento,
+  ocupaVaga,
+  type FaseDoCard,
+} from '@/lib/pilot-fila';
+import {
   readJobCommands,
   clearJobCommand,
   pruneStaleJobCommands,
@@ -5198,6 +5204,12 @@ function ClickUpPilotInner() {
   /** Dedup de wrappers gated por taskId. Se ja ha um wrapper esperando
    *  vaga pra essa task, segundo clique e no-op (idempotente). */
   const heygenPendingRef = useRef<Record<string, 'run' | 'resume'>>({});
+  /** Quem está com a VAGA NA MÃO agora (pegou o slot e está rodando de fato).
+   *  Subconjunto do heygenPendingRef, que também inclui quem só espera vaga.
+   *  Existe porque 'queued' com a vaga na mão é MENTIRA (20.09): o card dizia
+   *  "NA FILA" com os takes rendendo, travava o Retomar e ainda sumia da
+   *  contagem de vagas. Ver [[project_pilot_play_em_disparo_vivo_virava_fila]]. */
+  const heygenRunningRef = useRef<Record<string, true>>({});
   // rank 17: se o user clica Retomar enquanto o run ANTERIOR ainda está encerrando
   // (heygenPendingRef preso), o clique era descartado em silêncio (Retomar "não fazia
   // nada"). Aqui guardamos a intenção; o finally do run que está saindo re-dispara.
@@ -8490,7 +8502,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // destrava quando o HeyGen DAQUELA task conclui, entao so faz sentido
       // pra tasks que de fato vao rodar HeyGen (ready). Task 'partial' com
       // JSON: nao roda HeyGen, entao seria job preso — pulada (use Only).
-      const ready = Array.from(selectedTaskIds).filter((id) => taskAnalyses[id]?.status === 'ready');
+      // Mesma trava do fluxo clássico (20.09): quem já está disparando não é
+      // re-enfileirado — o skeleton abaixo zeraria takes/relógio de um card vivo
+      // e o porteiro voltaria calado, deixando "NA FILA" mentindo por cima dele.
+      const ready = Array.from(selectedTaskIds).filter(
+        (id) => taskAnalyses[id]?.status === 'ready'
+          && !disparoJaEmAndamento({
+            fase: batchStates[id]?.phase as FaseDoCard,
+            wrapperVivo: !!heygenPendingRef.current[id],
+          }),
+      );
       const withJson = ready.filter(
         (id) => !taskAnalyses[id]?.vaBriefing && (taskMagnificJson[id] || '').trim(),
       );
@@ -8545,14 +8566,39 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     //  - TROCA: precisa do WHITE upado + uma fonte (arquivo OU pasta colada).
     //  - Normais: status 'ready' (avatares + voz OK).
     const selected = Array.from(selectedTaskIds);
-    const vaTasks = selected.filter(isVaDispatchable);
+    let vaTasks = selected.filter(isVaDispatchable);
     const trocaTasks = selected.filter(isTrocaDispatchable);
-    const normalTasks = selected.filter(
+    let normalTasks = selected.filter(
       (id) =>
         taskAnalyses[id]?.status === 'ready' &&
         !taskAnalyses[id]?.vaBriefing &&
         !taskAnalyses[id]?.trocaBriefing,
     );
+
+    // START em cima de um disparo VIVO não pode ZERAR o card dele (20.09). O
+    // skeleton mais abaixo reescreve parts/startedAt/genId e marca 'queued';
+    // o porteiro, vendo o wrapper já vivo, dedupa e volta calado — sobrava um
+    // card mentindo "NA FILA", sem takes e com o relógio reiniciado, enquanto o
+    // run seguia trabalhando por baixo. Quem já está de pé é PULADO; o resto
+    // do START segue normal (uma task travada não pode segurar o lote).
+    const jaDePe = [...vaTasks, ...normalTasks].filter((id) =>
+      disparoJaEmAndamento({
+        fase: batchStates[id]?.phase as FaseDoCard,
+        wrapperVivo: !!heygenPendingRef.current[id],
+      }),
+    );
+    let avisoJaDePe: string | null = null;
+    if (jaDePe.length > 0) {
+      const nomes = jaDePe.map((id) => taskAnalyses[id]?.taskName || id);
+      console.warn(`[clickup-pilot] START pulou ${jaDePe.length} task(s) que já estão disparando: ${nomes.join(', ')}`);
+      vaTasks = vaTasks.filter((id) => !jaDePe.includes(id));
+      normalTasks = normalTasks.filter((id) => !jaDePe.includes(id));
+      // Guardado, não mostrado agora: logo abaixo há um setError(null) que
+      // limparia o aviso antes do user ler.
+      avisoJaDePe =
+        `${jaDePe.length === 1 ? 'Essa task já está disparando' : `${jaDePe.length} tasks já estão disparando`} e ${jaDePe.length === 1 ? 'ficou' : 'ficaram'} como ${jaDePe.length === 1 ? 'está' : 'estão'}: ${nomes.join(' · ')}. `
+        + 'Acompanhe pelo card em "Tasks em produção" — pra recomeçar do zero, use REINICIAR nele.';
+    }
 
     // CREATOR: escolher o avatar já deixa 'ready' antes de existir copy. Sem
     // trecho, a task entraria na fila só pra falhar em 'Nenhum trecho com texto'.
@@ -8592,19 +8638,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
 
     if (vaTasks.length === 0 && trocaTasks.length === 0 && normalTasks.length === 0) {
-      // Mensagem util: diz exatamente o que falta por tipo selecionado.
+      // Mensagem util: diz exatamente o que falta por tipo selecionado. Quando
+      // o lote inteiro era só a task que JÁ está disparando, a verdade é essa —
+      // e não um "nenhuma task pronta" que faria o user mexer em avatar/voz à toa.
       const selVA = selected.some((id) => taskAnalyses[id]?.vaBriefing);
       const selTroca = selected.some((id) => taskAnalyses[id]?.trocaBriefing);
       setError(
-        selVA
-          ? 'VA: escolha o avatar HeyGen de TODOS os avatares antes de disparar.'
-          : selTroca
-            ? 'Troca de áudio: suba o novo WHITE e confirme o link do criativo (arquivo ou pasta).'
-            : 'Nenhuma task pronta. Confira avatares + voz.',
+        avisoJaDePe
+          ? avisoJaDePe
+          : selVA
+            ? 'VA: escolha o avatar HeyGen de TODOS os avatares antes de disparar.'
+            : selTroca
+              ? 'Troca de áudio: suba o novo WHITE e confirme o link do criativo (arquivo ou pasta).'
+              : 'Nenhuma task pronta. Confira avatares + voz.',
       );
       return;
     }
-    setError(null);
+    setError(avisoJaDePe);
 
     // 1. Normais via HeyGen Auto gated
     setBatchStates((prev) => {
@@ -9097,6 +9147,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         await sleepUnthrottled(1000); // não-estrangulado: a fila escoa mesmo com a aba em segundo plano
       }
       heygenSlotsRef.current++;
+      // A VAGA ESTÁ NA MÃO a partir daqui: qualquer 'queued' escrito no card
+      // desta task daqui pra frente é mentira (o watchdog conserta) e ela
+      // segue OCUPANDO vaga mesmo que a fase diga outra coisa.
+      heygenRunningRef.current[taskId] = true;
       acquireKeepAlive(); // mantém a aba viva (anti-freeze) por TODO o run desta task (dispatch→render→download→montagem)
       // Marca fase ATIVA imediatamente ao pegar o slot — fecha o gap entre
       // acquire e o runTaskInBackground setar 'dispatching'. Sem isso, o
@@ -9141,6 +9195,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         if (chunkMsg) reloadOnceForChunk();
       } finally {
         heygenSlotsRef.current = Math.max(0, heygenSlotsRef.current - 1);
+        delete heygenRunningRef.current[taskId];
         releaseKeepAlive();
       }
     } finally {
@@ -9165,8 +9220,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  Uma task so ocupa slot quando esta numa fase ATIVA (dispatching..post).
    *  'queued' = esperando (nao ocupa); 'done'/'failed' = liberou. */
   function countActiveSlots(): number {
-    return Object.values(batchStatesRef.current).filter(
-      (b) => b.kind !== 'troca' && ACTIVE_BATCH_PHASES.includes(b.phase),
+    return Object.values(batchStatesRef.current).filter((b) =>
+      // A fase É a fonte principal (sobrevive reload/remount), mas quem está
+      // com a vaga na mão conta mesmo que a fase minta 'queued' por um
+      // instante — senão a auto-cura do contador abaixo zerava o slot de um
+      // run VIVO e deixava entrar um 3º disparo (20.09).
+      ocupaVaga({
+        fase: b.phase as FaseDoCard,
+        comVagaNaMao: !!heygenRunningRef.current[b.taskId],
+        kind: b.kind,
+      }),
     ).length;
   }
 
@@ -9421,6 +9484,35 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // zera o contador de quem deixou de ser órfã (voltou a rodar / terminou)
       for (const id of Object.keys(orphanTicksRef.current)) {
         if (!orphanIds.has(id)) delete orphanTicksRef.current[id];
+      }
+
+      // 4) A MENTIRA INVERSA DA ÓRFÃ (20.09): card em 'queued' com a VAGA NA
+      //    MÃO. É o disparo andando de verdade enquanto o card diz "NA FILA" —
+      //    com o Retomar travado e nenhuma task na frente pra justificar a
+      //    espera. O caminho conhecido (▶ Play em cima do run vivo) já está
+      //    fechado na origem; isto é a rede pra QUALQUER caminho futuro que
+      //    volte a escrever 'queued' por cima de um run vivo. Cura no tique
+      //    seguinte, sem esperar 2: não há ambiguidade nenhuma aqui — se o
+      //    wrapper tem a vaga, a task NÃO está na fila.
+      for (const b of Object.values(batchStatesRef.current)) {
+        if (!cardMenteNaFila({ fase: b.phase as FaseDoCard, comVagaNaMao: !!heygenRunningRef.current[b.taskId] })) continue;
+        console.warn(`[promoter] card dizia "na fila" com o disparo vivo: ${b.taskId} → devolvido pra fase ativa`);
+        setBatchStates((prev) => {
+          const cur = prev[b.taskId];
+          if (!cur || !cardMenteNaFila({ fase: cur.phase as FaseDoCard, comVagaNaMao: !!heygenRunningRef.current[b.taskId] })) return prev;
+          return {
+            ...prev,
+            [b.taskId]: {
+              ...cur,
+              // 'dispatching' é o piso honesto: está rodando. O próprio run
+              // reescreve a fase certa (rendering/downloading/post) no
+              // próximo passo dele — aqui só tiramos a mentira do caminho.
+              phase: 'dispatching',
+              message: 'Disparo em andamento — o card tinha voltado pra fila sozinho.',
+              finishedAt: undefined,
+            },
+          };
+        });
       }
 
       promoterRef.current();
@@ -12385,6 +12477,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   async function dispatchTaskToHeyGen(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a) return;
+    // ▶ EM CIMA DE UM DISPARO VIVO = CLIQUE SEM EFEITO (20.09).
+    //
+    // O Play ficava clicável durante o disparo. Um clique sem querer reescrevia
+    // o card pra 'queued' ("NA FILA") ANTES de chamar o porteiro; o porteiro via
+    // o wrapper já vivo (heygenPendingRef), voltava calado — e ninguém desfazia
+    // a marca. Resultado: card mentindo "na fila" com os takes rendendo, Retomar
+    // travado (em 'queued' ele é desabilitado de propósito, e isso está certo) e
+    // NENHUMA task na frente. Só se corrigia no próximo write do run.
+    //
+    // Agora o clique redundante não encosta no estado: nem fase, nem takes, nem
+    // relógio. O card em produção continua sendo a única fonte da verdade.
+    if (disparoJaEmAndamento({
+      fase: batchStates[taskId]?.phase as FaseDoCard,
+      wrapperVivo: !!heygenPendingRef.current[taskId],
+    })) {
+      setError(
+        `"${a.taskName}" já está disparando — acompanhe o card em "Tasks em produção" logo acima. `
+        + 'Pra recomeçar do zero, use REINICIAR no próprio card.',
+      );
+      return;
+    }
     // ROUTER VA — se task eh VA briefing, roteia pro pipeline correto
     // automaticamente. User pediu: "VA NAO DEVE RODAR PIPELINE SEPARADO,
     // DEVE IR PRA MESMA FILA E DISPARAR NO START TAMBEM".
@@ -16305,15 +16418,29 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         href={docDeepLink(a.docUrl, a.docHeadingId) || a.taskUrl}
                                       />
                                     ) : null}
-                                    {/* Disparar HeyGen */}
-                                    <PilotBtn3D
-                                      icon={<PilotIconPlay size={18} />}
-                                      color="lime"
-                                      title={a.status === 'partial' ? 'Tem avatar pendente abaixo' : 'Disparar — gerar videos HeyGen'}
-                                      disabled={a.status === 'partial'}
-                                      onClick={() => void dispatchTaskToHeyGen(a.taskId)}
-                                      pulse={a.status === 'ready'}
-                                    />
+                                    {/* Disparar HeyGen — TRAVADO enquanto o disparo
+                                      * desta task está de pé (na fila ou rodando).
+                                      * Era clicável e o clique sem querer jogava o
+                                      * card de volta pra "NA FILA" (20.09). */}
+                                    {(() => {
+                                      const jaDisparando = disparoJaEmAndamento({
+                                        fase: batchStates[a.taskId]?.phase as FaseDoCard,
+                                      });
+                                      return (
+                                        <PilotBtn3D
+                                          icon={<PilotIconPlay size={18} />}
+                                          color="lime"
+                                          title={
+                                            jaDisparando
+                                              ? 'Já está disparando — acompanhe o card em "Tasks em produção"'
+                                              : a.status === 'partial' ? 'Tem avatar pendente abaixo' : 'Disparar — gerar videos HeyGen'
+                                          }
+                                          disabled={a.status === 'partial' || jaDisparando}
+                                          onClick={() => void dispatchTaskToHeyGen(a.taskId)}
+                                          pulse={a.status === 'ready' && !jaDisparando}
+                                        />
+                                      );
+                                    })()}
                                   </div>
                                 ) : null}
                               </div>
