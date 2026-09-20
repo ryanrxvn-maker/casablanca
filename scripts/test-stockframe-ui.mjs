@@ -111,6 +111,32 @@ try {
     throw new Error('A janela desktop escapou da viewport.');
   }
 
+  const wide = await browser.newPage({ viewport: { width: 2400, height: 1068 }, deviceScaleFactor: 1 });
+  const wideDialog = await openPreview(wide);
+  await wide.waitForFunction(() => (document.querySelector('[role="dialog"]')?.querySelectorAll('article').length || 0) >= 6, null, { timeout: 10_000 });
+  const wideMetrics = await wide.evaluate(() => {
+    const dialog = document.querySelector('[role="dialog"]');
+    const read = (selector) => {
+      const element = dialog?.querySelector(selector);
+      return element ? Number.parseFloat(getComputedStyle(element).fontSize) : 0;
+    };
+    const bounds = dialog?.getBoundingClientRect();
+    return {
+      dialogWidth: bounds?.width || 0,
+      sidebar: read('aside button'),
+      search: read('input[placeholder*="Buscar cenas"]'),
+      filter: read('[class*="filters"] button'),
+      title: read('[class*="takeTitle"]'),
+      description: read('article [class*="takeBody"] > p'),
+    };
+  });
+  if (wideMetrics.dialogWidth < 2280) throw new Error(`A janela larga continua pequena: ${wideMetrics.dialogWidth}px.`);
+  const wideMinimumFonts = { sidebar: 17, search: 18, filter: 16, title: 18, description: 15.5 };
+  for (const [area, minimum] of Object.entries(wideMinimumFonts)) {
+    if ((wideMetrics[area] || 0) < minimum) throw new Error(`Texto largo de ${area} continua pequeno: ${wideMetrics[area] || 0}px.`);
+  }
+  await wide.screenshot({ path: resolve(outputDir, 'library-wide.png'), fullPage: false });
+
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const mobileDialog = await openPreview(mobile);
   const smartTab = mobile.getByRole('button', { name: 'Smart Stocks', exact: true });
@@ -133,7 +159,8 @@ try {
     repeatedTakeReusesDownload: true,
     changedCoverageAndPaceInvalidatePlan: true,
     unrelatedBodyPartRejected: true,
-    screenshots: ['library-desktop.png', 'take-preview-desktop.png', 'smart-plan-desktop.png', 'smart-mobile.png'],
+    wideWorkstation: wideMetrics,
+    screenshots: ['library-desktop.png', 'take-preview-desktop.png', 'smart-plan-desktop.png', 'library-wide.png', 'smart-mobile.png'],
   }, null, 2));
 } finally {
   await browser.close();
