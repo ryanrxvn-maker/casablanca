@@ -14,7 +14,8 @@
  *   node scripts/test.mjs typography  roda so as etapas cujo nome casa
  */
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 
 /** Etapa: ou compila com tsc e roda o JS (`tsc` + `run`), ou roda o TS direto
  *  pelo tsx (`tsx`). O tsx existe pros testes que dependem de pacote ESM de
@@ -109,15 +110,26 @@ if (alvo.length === 0) {
  * argumentos precisariam de escape manual no Windows. Chamar o bin do
  * typescript direto e' mais rapido e nao depende de shell nenhum.
  */
-// fileURLToPath e OBRIGATORIO: o caminho tem acento ("Area de Trabalho") e
-// o .pathname da URL vem percent-encoded (%C3%81rea) — o require nao acha.
-const TSC = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url));
+// Resolve pelo Node em vez de assumir node_modules dentro do checkout. Git
+// worktrees compartilham as dependencias do repositorio principal e precisam
+// subir diretorios exatamente como qualquer import normal.
+const localRequire = createRequire(import.meta.url);
+const TSC = join(dirname(localRequire.resolve('typescript/package.json')), 'bin', 'tsc');
+const { buildSync } = localRequire('esbuild');
 let falhou = 0;
 
 for (const etapa of alvo) {
   if (etapa.tsx) {
     for (const arquivo of etapa.tsx) {
-      const r = spawnSync('npx', ['tsx', arquivo], { stdio: 'inherit', shell: true });
+      const saida = join('.test-tmp', 'esm', arquivo.replace(/[\\/]/g, '_').replace(/\.tsx?$/, '.mjs'));
+      try {
+        buildSync({ entryPoints: [arquivo], outfile: saida, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node20', logLevel: 'silent' });
+      } catch (error) {
+        console.error('\n[test] esbuild falhou em: ' + arquivo, error);
+        falhou++;
+        continue;
+      }
+      const r = spawnSync(process.execPath, [saida], { stdio: 'inherit' });
       if (r.status !== 0) {
         console.error('\n[test] FALHOU: ' + arquivo);
         falhou++;

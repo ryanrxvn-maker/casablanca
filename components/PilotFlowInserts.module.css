@@ -574,3 +574,137 @@
   .autoQuoteBusy i, .secondaryButton::before, .promptStudioBackdrop, .promptStudio, .promptExplanation { animation: none; }
   .secondaryButton:not(:disabled):hover, .promptGenerate:not(:disabled):hover, .promptApply:not(:disabled):hover, .promptCopyButton:hover, .promptExplainButton:hover, .frameEmpty:not(:disabled):hover { transform: none; }
 }
+
+/* Premium neutral pass — lime is an action/status accent, not the whole UI. */
+.layer {
+  --flow-ink: #f3f5f8;
+  --flow-muted: #a4a9b4;
+  --flow-faint: #6f7582;
+  --flow-lime: #d7f2a5;
+  --flow-cyan: #78d7dc;
+  --flow-violet: #a78bfa;
+  --flow-blue: #73a7ff;
+  --flow-line: #ffffff12;
+  font-family: var(--font-sans, var(--font-display, Inter)), Inter, ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01" 1, "cv02" 1, "cv03" 1;
+  -webkit-font-smoothing: antialiased;
+}
+.layer button:focus-visible, .layer input:focus-visible, .layer select:focus-visible, .layer textarea:focus-visible, .layer summary:focus-visible, .trigger:focus-visible { outline-color: #9b8cff; }
+.backdrop { background: radial-gradient(circle at 50% 36%, #171a2559 0, #06070bf2 46%, #020306fa 100%); backdrop-filter: blur(5px) saturate(.82); }
+.dialog { border-color: #ffffff24; background: linear-gradient(145deg, #15171d 0%, #0e1015 55%, #090b10 100%); box-shadow: 0 42px 130px #000d, 0 0 0 1px #ffffff08, 0 0 80px #7457d815, inset 0 1px 0 #ffffff17; }
+.header { background: radial-gradient(ellipse at 12% -90%, #8f73ff27, transparent 58%), linear-gradient(100deg, #191b23, #111319 62%, #0e1015); border-bottom-color: #ffffff12; }
+.header::after { background: linear-gradient(112deg, transparent 22%, #b9a8ff0c 44%, transparent 64%); }
+.brandTile, .dialogEnabled .brandTile { color: #e9e2ff; border-color: #b9a7ff66; background: radial-gradient(circle at 28% 16%, #d6c8ff4f, transparent 36%), linear-gradient(145deg, #493783, #1b1c2b 64%, #10131a); box-shadow: inset 1px 1px 0 #ffffff5e, inset -8px -10px 18px #090714a8, 0 15px 30px #0008, 0 0 27px #8f72ff2e; }
+.heading h2 { color: #f7f8fb; font-weight: 650; letter-spacing: -.038em; }
+.heading h2 span { color: #c8baff; }
+.heading p { color: #9da2ae; }
+.eyebrow, .smallLabel { color: #8f96a4; font-weight: 700; letter-spacing: .13em; }
+.step { color: #c0b6ff; border-color: #a999ff3d; background: #8f79ff12; }
+.switch { color: #b2b6c0; }
+.switchOn { color: #e7ebdf; }
+.switchTrack { background: #252932; border-color: #ffffff24; }
+.switchOn .switchTrack { background: #667e393d; border-color: #c9ec8870; }
+.switchOn .switchTrack i { background: #ddf9aa; box-shadow: 0 0 10px #c8ef7a7d; }
+.iconButton { color: #b8bdc7; border-color: #ffffff18; background: #1b1e25; }
+.iconButton:hover { color: #fff; border-color: #a896ff61; background: #29263a; }
+.workspace { scrollbar-color: #555b68 #111319; }
+.creator { border-right-color: #ffffff10; background: radial-gradient(circle at 2% 12%, #7b62dc0b, transparent 31%), linear-gradient(150deg, #12141a, #0d0f14 72%); }
+.previewColumn { background: radial-gradient(ellipse at 50% -8%, #4d7edc12, transparent 50%), linear-gradient(160deg, #11141b, #090b10 72%); box-shadow: inset 18px 0 46px #0004; }
+.sectionHeading h3 { color: #eceef3; font-weight: 650; }
+.modeSwitch { border-color: #ffffff14; background: #080a0e; box-shadow: inset 0 1px 0 #ffffff08, 0 10px 24px #0003; }
+.modeSwitch button { color: #878d99; }
+.modeSwitch button.modeSelected { color: #f0edff; border-color: #a993ff3d; background: linear-gradient(145deg, #3a3157, #232331); box-shadow: inset 0 1px 0 #ffffff20, 0 7px 15px #0005, 0 0 18px #8b6bf716; }
+.promptBox, .field select, .segments, .copy, .previewShell, .accountCard { border-color: #ffffff18; background-color: #0b0d12; box-shadow: inset 0 1px 0 #ffffff0b, inset 0 -10px 28px #0002, 0 13px 30px #0003; }
+.promptBox { background: linear-gradient(145deg, #11141a, #0a0c10); }
+.promptBox:focus-within { border-color: #9985f56b; box-shadow: 0 0 0 4px #8f78f50c, 0 18px 38px #0004; }
+.promptBox label { color: #c2c6cf; font-weight: 650; }
+.promptBox label span, .promptBox textarea::placeholder { color: #747b88; }
+.promptBox textarea { color: #eef0f4; font-weight: 460; letter-spacing: -.005em; }
+.promptHint { color: #8c94a2; border-top-color: #ffffff0e; background: #ffffff03; }
+.referenceHeader { color: #c1c5ce; font-weight: 600; }
+.referenceHeader span { color: #777e8b; }
+.addReference { color: #aeb4c1; border-color: #9b89e935; background: #8e75e907; }
+.addReference:hover { color: #e8e3ff; border-color: #a995fb70; background: #947bea10; }
+.field { color: #aeb3bf; font-weight: 600; letter-spacing: .018em; }
+.field select, .projectDetails input { color: #eef0f4; border-color: #ffffff18; background: #171a21; }
+.segments { border-color: #ffffff13; background: #090b0f; }
+.segments button { color: #898f9c; }
+.segments button.segmentSelected { color: #f2efff; border-color: #a995fb38; background: linear-gradient(145deg, #3a3158, #20222d); box-shadow: inset 0 1px 0 #ffffff21, 0 5px 13px #0005; }
+.nativeInfo { color: #c1c6d0; }
+.nativeInfo small, .exportNote { color: #7f8795; }
+.exportBadge { color: #c9bcff; border-color: #a993ff40; background: #8f75ee12; }
+.projectDetails, .projectDetails label span, .projectDetails p { color: #7e8592; }
+.accountCard { border-color: #ffffff20; background: linear-gradient(145deg, #171a21, #0f1117); }
+.accountCard::before { background: radial-gradient(circle, #6ea7ff4d, transparent 64%); }
+.accountCardConnected { border-color: #6fa5e83b; }
+.accountIdentity { background: linear-gradient(135deg, #191d26, #12151b); }
+.accountIdentity .smallLabel { color: #7d9ed0; }
+.accountIdentity strong { color: #f0f2f6; }
+.accountIdentity > div > span:last-child:not(.smallLabel), .accountFooter { color: #9299a7; }
+.accountFooter b { color: #dfe4ec; }
+.accountLink, .textButton { color: #aebfff !important; }
+.textButton:hover, .accountLink:hover { color: #e6eaff !important; }
+.statusConnected { background: #bff179; box-shadow: 0 0 0 4px #bff1790e, 0 0 12px #bff17976; }
+.previewShell { border-color: #ffffff1d; background: linear-gradient(145deg, #ffffff08, #5d75a606); }
+.preview { background: #050609; }
+.emptyPreview { background: radial-gradient(ellipse at 50% 18%, #8168e918, transparent 68%); }
+.emptyMark { color: #a996f2; border-color: #ab99f22d; background: linear-gradient(140deg, #9580ef18, #1720340c); }
+.emptyPreview .eyebrow { color: #8879c5; }
+.emptyPreview h4 { color: #d8dbe2; font-weight: 560; }
+.emptyPreview p { color: #7f8591; }
+.progressOverlay { background: #090b11e8; }
+.progressOverlay strong { color: #eef0f5; }
+.progressOverlay > span:last-child { color: #949ba8; }
+.results button { border-color: #ffffff22; color: #aeb5c1; background: linear-gradient(145deg, #20242d, #101218); box-shadow: inset 0 1px 0 #ffffff12, 0 9px 20px #0005; }
+.results button.resultSelected { color: #efeaff; border-color: #a992ffb0; box-shadow: inset 0 1px 0 #ffffff48, 0 11px 25px #0008, 0 0 20px #9579ff35; }
+.results .resultBound { border-color: #73b9d698; }
+.results button > b { color: #0b1420; border-color: #bdeaff; background: #8fd9f2; }
+.results button > i { color: #211a38; background: #c2b4ff; }
+.results .resultFallback { color: #b4a5ef; background: radial-gradient(circle at 50% 30%, #3f375f, #0d0f15 74%); }
+.animateButton { border-color: #9f8aff57; background: radial-gradient(circle at 0 0, #967df32a, transparent 42%), linear-gradient(145deg, #252038, #11131b); }
+.creditCard { border-top-color: #ffffff0d; }
+.creditCard .smallLabel { color: #8e96a4; }
+.creditCard strong { color: #f1f3f7; font-weight: 570; }
+.creditCard strong small, .creditCard p { color: #8a929f; }
+.quoteActivity { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; color: #b8adf4; font: 700 9px var(--font-mono), monospace; letter-spacing: .12em; }
+.quoteActivity i { width: 7px; height: 7px; border-radius: 50%; background: #ad98ff; box-shadow: 0 0 0 4px #ad98ff12, 0 0 14px #9a82ff70; animation: quotePulse 1.15s ease-in-out infinite; }
+.placement { border-top-color: #ffffff11; background: radial-gradient(circle at 2% 0%, #6f58d30c, transparent 37%), linear-gradient(180deg, #12141a, #0c0e13); }
+.takeBinding { color: #a0a6b2; border-color: #ffffff18; background: linear-gradient(135deg, #171a22, #0e1015); }
+.takeBindingSaved { border-color: #7cb9d557; background: radial-gradient(circle at 0 0, #57b7dc19, transparent 40%), linear-gradient(135deg, #18222c, #101319); }
+.takeBinding strong { color: #dfe3e9; }
+.takeBinding p { color: #8f96a2; }
+.takeBinding > svg { color: #83d7e2; filter: drop-shadow(0 0 7px #65cbe760); }
+.parts button { color: #858c99; border-color: #ffffff15; background: #0d0f14; }
+.parts button.partSelected { color: #eeeaff; border-color: #a48eff69; background: #8c70ef24; }
+.copy { border-color: #ffffff18; background: linear-gradient(145deg, #0d0f14, #08090d); }
+.copy button { color: #b5bac4; }
+.copy button:hover { border-color: #a28df136; background: #9175ed12; }
+.copy button.wordSelected, .copy button.wordStart { color: #f2efff; border-color: #ae99ff42; background: linear-gradient(180deg, #8e74ed4a, #5d52a234); }
+.copy button.wordHasTake::after { border-color: #d5f7ff; background: #79d7e9; box-shadow: 0 0 8px #68d6ebc7; }
+.rangeFooter p, .attachRow > p { color: #8e96a3; }
+.rangeFooter b { color: #c8bcff; }
+.attachRow { border-top-color: #ffffff0e; }
+.frameRail { border-color: #ffffff1b; background: radial-gradient(circle at 50% 50%, #7d63e71b, transparent 34%), linear-gradient(145deg, #141720, #090b10); }
+.frameNode > span { color: #c5baff; }
+.frameMedia, .frameEmpty { color: #acb2be; border-color: #ffffff24; background: linear-gradient(145deg, #20242e, #0c0e13); }
+.frameBridge { color: #bbaaff; filter: drop-shadow(0 0 9px #977cff70); }
+.frameBridge i { background: linear-gradient(90deg, transparent, #a992ff91); }
+.frameBridge i:last-child { background: linear-gradient(90deg, #a992ff91, transparent); }
+.frameBridge svg { border-color: #ad98ff5e; background: #262237; }
+.copyTakePreview { border-color: #a996ff72; background: radial-gradient(circle at 12% 5%, #a185ff2d, transparent 35%), linear-gradient(145deg, #202030f7, #090b11fa 62%, #111723f8); box-shadow: inset 0 1px 0 #ffffff42, 0 25px 64px #000e, 0 0 42px #8d71ff2c; }
+.copyTakePreviewMedia { border-color: #ffffff2c; background: radial-gradient(circle at 50% 30%, #29273c, #030407 72%); }
+.copyTakePreviewInfo > span, .copyTakePreviewInfo > b { color: #a39abf; }
+.copyTakePreviewInfo > strong { color: #f1edff; text-shadow: 0 0 18px #a48cff32; }
+.copyTakePreviewInfo > p { color: #9da3af; }
+.copyTakePreviewInfo > small { color: #b7dce8; }
+.copyTakePreviewInfo > small i { background: #72d7e7; box-shadow: 0 0 10px #61cee4ad; }
+.footer { border-top-color: #ffffff14; background: #11131a; }
+.rebuildButton, .doneButton { border-color: #ffffff27; color: #e5e8ee; background: #ffffff0a; }
+.doneButton { border-color: #b9dc7e57; color: #e9f6d5; background: #91bd4b22; }
+
+@media (max-width: 760px) {
+  .creator, .previewColumn { border-color: #ffffff10; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .quoteActivity i { animation: none; }
+}

@@ -64,11 +64,15 @@ assert.ok(modal.includes('1800'), 'an active paid request is polled automaticall
 assert.ok(modal.includes('setPromptStudioOpen(true)') && modal.includes('generatePrompt(promptMode)') && modal.includes('applyPromptSuggestion'), 'the copy-range director opens a review studio before applying paired or direct-video prompts');
 assert.ok(modal.includes('promptSuggestion.explanation') && modal.includes("copyGeneratedPrompt('video')"), 'the prompt studio explains and copies its generated direction');
 assert.ok(modal.includes("document.execCommand('copy')"), 'prompt copy retains a user-gesture fallback when the modern clipboard API is denied');
-assert.ok(modal.includes("mode === 'frames' ? 'START AND END' : 'Imagens'"), 'image inputs use the requested START AND END and Imagens labels');
+assert.ok(modal.includes("mode === 'frames' ? 'START AND END' : 'IMAGENS'"), 'image inputs use the requested uppercase START AND END and IMAGENS labels');
 assert.ok(!modal.includes('aria-label="Recalcular custo no Flow"'), 'credit calculation has no manual recalculate control');
 assert.ok(modal.includes('poster !== media') && modal.includes("!pathname.includes('/video/')") && modal.includes("candidate.kind === 'image'"), 'video results reject MP4 poster URLs and inherit the nearest generated image as their thumbnail');
-assert.ok(modal.includes('<video src={source} muted playsInline preload="auto"'), 'direct videos without a generated frame keep a playable thumbnail fallback');
-assert.ok(modal.includes('data-flow-linked-take') && modal.includes('data-flow-copy-preview') && modal.includes('showCopyTakePreview') && modal.includes('imagePosterUrl(copyTakePreview.asset'), 'hovering a linked copy range shows the exact image/video thumbnail without reusing an MP4 as an image');
+assert.ok(modal.includes("type FlowMediaStore = 'media' | 'thumbnails'") && modal.includes('readFlowThumbnail') && modal.includes('captureFlowThumbnailFile'), 'video covers have a dedicated persistent IndexedDB cache');
+assert.ok(modal.includes('onLoadedData={(event) => void rememberPreviewFrame(event.currentTarget, chosenAsset)}'), 'the visible Flow preview captures and retains its real frame');
+assert.ok(!modal.includes('<video src={source} muted playsInline preload="auto"'), 'the results rail never preloads every MP4 just to render thumbnails');
+assert.ok(modal.includes('data-flow-linked-take') && modal.includes('data-flow-copy-preview') && modal.includes('showCopyTakePreview') && modal.includes('thumbnailFor(copyTakePreview.asset'), 'hovering a linked copy range uses the exact persisted image/video thumbnail');
+assert.ok(!modal.includes("quoteValid ? 'AUTO'"), 'the visual AUTO badge was removed without disabling automatic pricing');
+assert.ok(!modal.includes('if (!loaded || busy || unresolved || !account?.email) return;'), 'changing Video/Image no longer triggers a blocking capability inspection');
 assert.ok(modal.includes('flowAssetId: asset.id'), 'an inserted take keeps its exact Flow identity for visible take-to-copy binding');
 const modalAst = ts.createSourceFile('PilotFlowInserts.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const quoteNodes = [];

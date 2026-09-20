@@ -94,7 +94,8 @@ function flowMediaKey(asset: StudioAsset): string {
   if (!project || !asset.accountEmail || !asset.id) throw new Error('A mídia ainda não tem conta e projeto de origem confirmados.');
   return JSON.stringify([asset.accountEmail.toLowerCase(), project, asset.kind, asset.id]);
 }
-async function flowMediaStore<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+type FlowMediaStore = 'media' | 'thumbnails';
+async function flowMediaStore<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>, storeName: FlowMediaStore = 'media'): Promise<T> {
   return new Promise((resolve, reject) => {
     let db: IDBDatabase | undefined;
     let settled = false;
@@ -105,17 +106,20 @@ async function flowMediaStore<T>(mode: IDBTransactionMode, operation: (store: ID
     };
     const timer = setTimeout(() => finish(new Error('O navegador demorou a salvar ou recuperar a prévia do Flow.')), 90000);
     let request: IDBOpenDBRequest;
-    try { request = indexedDB.open('pilot-flow-media-v1', 1); }
+    try { request = indexedDB.open('pilot-flow-media-v1', 2); }
     catch (error) { finish(error); return; }
-    request.onupgradeneeded = () => request.result.createObjectStore('media');
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('media')) request.result.createObjectStore('media');
+      if (!request.result.objectStoreNames.contains('thumbnails')) request.result.createObjectStore('thumbnails');
+    };
     request.onerror = () => finish(request.error || new Error('Não foi possível abrir o armazenamento de prévias.'));
     request.onblocked = () => finish(new Error('Outra aba bloqueou o armazenamento da prévia do Flow.'));
     request.onsuccess = () => {
       db = request.result;
       if (settled) { db.close(); return; }
       try {
-        const tx = db.transaction('media', mode);
-        const result = operation(tx.objectStore('media'));
+        const tx = db.transaction(storeName, mode);
+        const result = operation(tx.objectStore(storeName));
         tx.oncomplete = () => finish(undefined, result.result);
         tx.onerror = () => finish(tx.error || new Error('Não foi possível salvar a prévia do Flow.'));
         tx.onabort = () => finish(tx.error || new Error('O navegador interrompeu o armazenamento da prévia.'));
@@ -133,6 +137,63 @@ async function readFlowMedia(asset: StudioAsset): Promise<File | null> {
 }
 async function saveFlowMedia(asset: StudioAsset, file: File): Promise<void> {
   await flowMediaStore('readwrite', (store) => store.put({ file, size: file.size }, flowMediaKey(asset)));
+}
+async function readFlowThumbnail(asset: StudioAsset): Promise<Blob | null> {
+  const stored = await flowMediaStore<{ blob?: Blob; size?: number } | undefined>('readonly', (store) => store.get(flowMediaKey(asset)), 'thumbnails');
+  const blob = stored?.blob;
+  if (!(blob instanceof Blob) || !blob.size || blob.size !== stored?.size || !blob.type.startsWith('image/')) return null;
+  return blob;
+}
+async function saveFlowThumbnail(asset: StudioAsset, blob: Blob): Promise<void> {
+  if (!blob.size || !blob.type.startsWith('image/')) throw new Error('A captura da prévia do Flow ficou inválida.');
+  await flowMediaStore('readwrite', (store) => store.put({ blob, size: blob.size }, flowMediaKey(asset)), 'thumbnails');
+}
+function thumbnailBlob(video: HTMLVideoElement): Promise<Blob | null> {
+  if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return Promise.resolve(null);
+  const longest = 480;
+  const scale = Math.min(1, longest / Math.max(video.videoWidth, video.videoHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+  canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+  const context = canvas.getContext('2d', { alpha: false });
+  if (!context) return Promise.resolve(null);
+  try { context.drawImage(video, 0, 0, canvas.width, canvas.height); }
+  catch { return Promise.resolve(null); }
+  return new Promise((resolve) => {
+    try { canvas.toBlob(resolve, 'image/jpeg', .82); }
+    catch { resolve(null); }
+  });
+}
+async function captureFlowThumbnailFile(asset: StudioAsset, file: File): Promise<boolean> {
+  if (asset.kind !== 'video' || await readFlowThumbnail(asset)) return false;
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    video.src = objectUrl;
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error('A captura da prévia demorou demais.')), 12000);
+      const done = (error?: Error) => { window.clearTimeout(timer); error ? reject(error) : resolve(); };
+      video.onloadedmetadata = () => {
+        const target = Number.isFinite(video.duration) && video.duration > .25 ? Math.min(.35, video.duration * .08) : 0;
+        if (target > 0) { video.onseeked = () => done(); video.currentTime = target; }
+        else if (video.readyState >= 2) done();
+        else video.onloadeddata = () => done();
+      };
+      video.onerror = () => done(new Error('O vídeo local não abriu para criar a capa.'));
+      video.load();
+    });
+    const blob = await thumbnailBlob(video);
+    if (!blob) return false;
+    await saveFlowThumbnail(asset, blob);
+    return true;
+  } finally {
+    video.removeAttribute('src');
+    video.load();
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 async function flowMediaFile(asset: StudioAsset, origin: string, onProgress: (event: { message: string }) => void): Promise<File> {
   const cached = await readFlowMedia(asset);
@@ -280,7 +341,9 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const promptStudioRef = useRef(false);
   promptStudioRef.current = promptStudioOpen;
   const [localPreview, setLocalPreview] = useState<{ key: string; url: string | null; state: 'loading' | 'missing' | 'ready' | 'error' } | null>(null);
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
   const previewAttempts = useRef(new Set<string>());
+  const thumbnailCaptureAttempts = useRef(new Set<string>());
   const [notice, setNotice] = useState('');
   const montageInputs = JSON.stringify({ enabled, inserts });
   const previousMontageInputs = useRef(montageInputs);
@@ -313,7 +376,11 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   const unresolved = !!session.activeJob;
   const chosenAsset = session.assets.find((asset) => asset.id === selected) || session.assets[session.assets.length - 1];
   const chosenTake = chosenAsset ? Math.max(1, session.assets.findIndex((asset) => asset.id === chosenAsset.id) + 1) : 0;
-  const chosenPoster = chosenAsset ? imagePosterUrl(chosenAsset, session.assets, chosenTake - 1) : undefined;
+  const thumbnailFor = (asset: StudioAsset, index: number) => {
+    try { return thumbnailUrls[flowMediaKey(asset)] || imagePosterUrl(asset, session.assets, index); }
+    catch { return imagePosterUrl(asset, session.assets, index); }
+  };
+  const chosenPoster = chosenAsset ? thumbnailFor(chosenAsset, chosenTake - 1) : undefined;
   const assignedInsert = chosenAsset ? inserts.find((insert) => insertMatchesAsset(insert, chosenAsset)) : undefined;
   const chosenMediaKey = useMemo(() => { try { return chosenAsset ? flowMediaKey(chosenAsset) : ''; } catch { return ''; } }, [chosenAsset?.id, chosenAsset?.kind, chosenAsset?.projectUrl, chosenAsset?.accountEmail]);
   const previewUrl = localPreview?.key === chosenMediaKey && localPreview.url ? localPreview.url : chosenAsset ? assetUrl(chosenAsset) : undefined;
@@ -376,13 +443,27 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     preferredModels.current[session.preparedSettings.mode] = session.preparedSettings.model;
     updateSession(taskId, { preparedSettings: null });
   }, [session.preparedSettings, taskId]);
+  const thumbnailAssetKey = useMemo(() => session.assets.map((asset) => {
+    try { return flowMediaKey(asset); } catch { return `${asset.kind}:${asset.id}`; }
+  }).join('|'), [session.assets]);
   useEffect(() => {
-    if (!loaded || busy || unresolved || !account?.email) return;
-    const key = `${account.email}:${projectUrl}:${settings.mode}:${settings.model}`;
-    if (capabilities.matches || inspectionAttempt.current === key) return;
-    inspectionAttempt.current = key;
-    void inspect();
-  }, [loaded, busy, unresolved, account?.email, projectUrl, settings.mode, settings.model, capabilities.matches]);
+    let alive = true;
+    const objectUrls: string[] = [];
+    void Promise.all(session.assets.filter((asset) => asset.kind === 'video').map(async (asset) => {
+      try {
+        const key = flowMediaKey(asset);
+        const blob = await readFlowThumbnail(asset);
+        if (!blob || !alive) return null;
+        const url = URL.createObjectURL(blob);
+        objectUrls.push(url);
+        return [key, url] as const;
+      } catch { return null; }
+    })).then((entries) => {
+      if (!alive) return;
+      setThumbnailUrls(Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => !!entry)));
+    });
+    return () => { alive = false; objectUrls.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [thumbnailAssetKey, session.mediaRevision]);
   useEffect(() => {
     if (!chosenAsset || !chosenMediaKey) { setLocalPreview(null); return; }
     let alive = true;
@@ -439,6 +520,24 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     setNotice('');
     updateSession(taskId, { quote: null, quoteKey: '', error: '' });
   }, [taskId]);
+  async function rememberPreviewFrame(video: HTMLVideoElement, asset: StudioAsset) {
+    let key = '';
+    try { key = flowMediaKey(asset); } catch { return; }
+    if (thumbnailUrls[key] || thumbnailCaptureAttempts.current.has(key)) return;
+    thumbnailCaptureAttempts.current.add(key);
+    try {
+      const existing = await readFlowThumbnail(asset);
+      if (existing) return;
+      const blob = await thumbnailBlob(video);
+      if (!blob) { thumbnailCaptureAttempts.current.delete(key); return; }
+      await saveFlowThumbnail(asset, blob);
+      updateSession(taskId, { mediaRevision: (sessionFor(taskId).mediaRevision || 0) + 1 });
+    } catch {
+      // Some temporary/CDN URLs do not allow canvas capture. The verified local
+      // 1080p download creates the same thumbnail later without blocking play.
+      thumbnailCaptureAttempts.current.delete(key);
+    }
+  }
   async function recoverActiveJob(active = sessionFor(taskId).activeJob, restoredDraft?: Draft, quiet = false) {
     const current = sessionFor(taskId);
     if (!active || current.checkingStatus || current.busy === 'generate' || current.busy === 'download') return;
@@ -527,7 +626,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     finally { updateSession(taskId, { busy: null, progress: '' }); }
   }
   async function quote(automatic = false) {
-    if (sessionFor(taskId).busy || sessionFor(taskId).activeJob || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || !settings.prompt.trim()) return;
+    if (sessionFor(taskId).busy || sessionFor(taskId).activeJob || capabilitiesUnsupported || referencesOverLimit || !settings.prompt.trim()) return;
     const requested = settings;
     const revision = quoteRevision.current;
     updateSession(taskId, { busy: 'quote', error: '', progress: 'Conferindo a conta e as opções deste motor…', quote: null, quoteKey: '' });
@@ -574,7 +673,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
     const key = `${account?.email || ''}:${fingerprint}`;
     if (automaticQuote.current.key !== key) automaticQuote.current = { key, attempts: 0 };
     if (!loaded || busy || unresolved || quoteValid || referenceBusy || !account?.email || !settings.prompt.trim() ||
-        capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || automaticQuote.current.attempts >= 3) return;
+        capabilitiesUnsupported || referencesOverLimit || automaticQuote.current.attempts >= 3) return;
     const delay = automaticQuote.current.attempts ? 700 * automaticQuote.current.attempts : 320;
     const timer = setTimeout(() => {
       automaticQuote.current.attempts += 1;
@@ -659,6 +758,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
   async function assetFile(asset: StudioAsset): Promise<File> {
     const origin = await verifiedAssetProject(asset);
     const file = await flowMediaFile(asset, origin, (event) => updateSession(taskId, { progress: event.message }));
+    if (asset.kind === 'video') await captureFlowThumbnailFile(asset, file).catch(() => false);
     updateSession(taskId, { mediaRevision: (sessionFor(taskId).mediaRevision || 0) + 1 });
     return file;
   }
@@ -821,7 +921,7 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
             <div className={s.field}><span>Formato</span><div className={s.segments} role="group" aria-label="Formato">{capabilities.aspects.map((ratio) => <button type="button" key={ratio} disabled={busy || !loaded} aria-pressed={settings.aspectRatio === ratio} className={settings.aspectRatio === ratio ? s.segmentSelected : ''} onClick={() => change({ aspectRatio: ratio })}><i className={ratio === '9:16' ? s.portrait : s.landscape}/>{ratio}</button>)}</div></div>
             {settings.mode === 'video' && <><div className={s.field}><span>Duração</span><div className={s.segments} role="group" aria-label="Duração do vídeo">{capabilities.durations.map((duration) => <button type="button" key={duration} disabled={busy || !loaded} aria-pressed={settings.durationSeconds === duration} className={settings.durationSeconds === duration ? s.segmentSelected : ''} onClick={() => change({ durationSeconds: duration })}>{duration}s</button>)}</div></div><div className={s.field}><span>Resolução de geração</span><div className={s.segments} role="group" aria-label="Resolução de geração">{capabilities.resolutions.map((resolution) => <button type="button" key={resolution} disabled={busy || !loaded} aria-pressed={settings.resolution === resolution} className={settings.resolution === resolution ? s.segmentSelected : ''} onClick={() => change({ resolution })}>{resolution}</button>)}</div></div></>}
             <div className={s.field}><span>Variações</span><div className={s.segments} role="group" aria-label="Quantidade de variações">{capabilities.counts.map((count) => <button type="button" key={count} disabled={busy || !loaded} aria-pressed={settings.count === count} className={settings.count === count ? s.segmentSelected : ''} onClick={() => change({ count })}>×{count}</button>)}</div></div>
-            {settings.mode === 'video' ? <label className={s.field}>Entrada de imagem<select value={settings.videoMode} disabled={busy || !loaded || !!settings.animateMediaId} onChange={(event) => change({ videoMode: event.target.value as FlowSettings['videoMode'] })}>{animationUnsupported && <option value="frames" disabled>START AND END</option>}{capabilities.videoModes.map((mode) => <option key={mode} value={mode}>{mode === 'frames' ? 'START AND END' : 'Imagens'}</option>)}</select></label> : <div className={`${s.field} ${s.nativeInfo}`}><Icon name="image"/><span>Imagem em 2K<small>Pronta para animar no Flow</small></span></div>}
+            {settings.mode === 'video' ? <label className={s.field}>ENTRADA DE IMAGEM<select value={settings.videoMode} disabled={busy || !loaded || !!settings.animateMediaId} onChange={(event) => change({ videoMode: event.target.value as FlowSettings['videoMode'] })}>{animationUnsupported && <option value="frames" disabled>START AND END</option>}{capabilities.videoModes.map((mode) => <option key={mode} value={mode}>{mode === 'frames' ? 'START AND END' : 'IMAGENS'}</option>)}</select></label> : <div className={`${s.field} ${s.nativeInfo}`}><Icon name="image"/><span>IMAGEM EM 2K<small>Pronta para animar no Flow</small></span></div>}
           </div>
           {capabilitiesUnsupported && <p className={s.inlineError}>{animationUnsupported ? 'Este motor não aceita esta imagem como primeiro frame. Escolha um motor com START AND END para continuar a animação.' : 'Este motor não disponibilizou uma combinação compatível. Escolha outro motor ou atualize as opções do Flow.'}</p>}
           {settings.mode === 'image' && <div className={s.exportNote}><span className={s.exportBadge}>2K</span><span>Imagem pronta para montagem ou animação.</span></div>}
@@ -834,13 +934,13 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
             {chosenAsset && (previewError === chosenAsset.id || !previewUrl) ? <div className={`${s.pendingPreview} ${chosenPoster ? s.pendingPreviewWithPoster : ''}`}>
               {chosenPoster && <img className={s.previewPoster} src={chosenPoster} alt=""/>}
               <div className={s.emptyPreview}><Icon name={chosenAsset.kind === 'video' ? 'video' : 'image'}/><h4>{previewError === chosenAsset.id ? 'Vamos recuperar a prévia.' : chosenAsset.kind === 'video' ? 'Seu vídeo está pronto.' : 'Sua imagem está pronta.'}</h4><p>{chosenAsset.kind === 'video' ? chosenPoster ? 'O take já apareceu. A versão 1080p está sendo preparada automaticamente.' : 'A versão 1080p será preparada automaticamente para tocar aqui.' : 'A imagem em 2K será recuperada automaticamente.'}<br/>Ela também ficará salva para a montagem.</p><button type="button" className={s.previewPrepare} disabled={busy || !loaded} onClick={() => void preparePreview(chosenAsset)}><Icon name="video"/>{chosenAsset.kind === 'video' ? 'Preparar agora em 1080p' : 'Recuperar agora em 2K'}</button><button type="button" className={s.textButton} disabled={busy} onClick={() => void openFlow(chosenAsset)}>Conferir no Flow <Icon name="external"/></button></div>
-            </div> : chosenAsset && previewUrl ? chosenAsset.kind === 'video' ? <video key={chosenAsset.id} src={previewUrl} poster={chosenPoster} controls playsInline muted preload="metadata" aria-label="Prévia do vídeo criado no Flow" onLoadedMetadata={(event) => { const { videoWidth: width, videoHeight: height } = event.currentTarget; if (width && height && (chosenAsset.width !== width || chosenAsset.height !== height)) updateSession(taskId, { assets: sessionFor(taskId).assets.map((asset) => asset.id === chosenAsset.id ? { ...asset, width, height } : asset) }); }} onError={() => setPreviewError(chosenAsset.id)}/> : <img src={previewUrl} alt="Imagem criada no Flow" onError={() => setPreviewError(chosenAsset.id)}/> : <div className={s.emptyPreview}><div className={s.emptyMark}><FlowMark size={54}/></div><span className={s.eyebrow}>UM NOVO TAKE COMEÇA AQUI</span><h4>Dê forma à sua ideia.</h4><p>Escreva o prompt, confira os créditos<br/>e gere sua primeira criação.</p><div className={s.previewCorners} aria-hidden="true"><i/><i/><i/><i/></div></div>}
+            </div> : chosenAsset && previewUrl ? chosenAsset.kind === 'video' ? <video key={chosenAsset.id} src={previewUrl} poster={chosenPoster} controls playsInline muted preload="metadata" aria-label="Prévia do vídeo criado no Flow" onLoadedMetadata={(event) => { const { videoWidth: width, videoHeight: height } = event.currentTarget; if (width && height && (chosenAsset.width !== width || chosenAsset.height !== height)) updateSession(taskId, { assets: sessionFor(taskId).assets.map((asset) => asset.id === chosenAsset.id ? { ...asset, width, height } : asset) }); }} onLoadedData={(event) => void rememberPreviewFrame(event.currentTarget, chosenAsset)} onError={() => setPreviewError(chosenAsset.id)}/> : <img src={previewUrl} alt="Imagem criada no Flow" onError={() => setPreviewError(chosenAsset.id)}/> : <div className={s.emptyPreview}><div className={s.emptyMark}><FlowMark size={54}/></div><span className={s.eyebrow}>UM NOVO TAKE COMEÇA AQUI</span><h4>Dê forma à sua ideia.</h4><p>Escreva o prompt, confira os créditos<br/>e gere sua primeira criação.</p><div className={s.previewCorners} aria-hidden="true"><i/><i/><i/><i/></div></div>}
             {busy && <div className={`${s.progressOverlay} ${session.busy === 'download' && chosenPoster ? s.progressCompact : ''}`} role="status"><span className={s.spinner}/><strong>{session.progress || 'Processando…'}</strong><span>{session.busy === 'generate' ? 'O acompanhamento continua mesmo com a janela fechada.' : session.busy === 'quote' ? 'O custo aparece sozinho assim que o Flow confirmar.' : 'Aguarde a confirmação do Flow.'}</span></div>}
           </div><div className={s.previewMeta}><span>{chosenAsset ? chosenAsset.kind === 'video' ? 'VÍDEO GERADO' : 'IMAGEM GERADA' : 'PREVIEW'}</span><span>{chosenAsset?.width && chosenAsset?.height ? `${chosenAsset.width} × ${chosenAsset.height}` : settings.aspectRatio} <i/> {chosenAsset?.kind === 'image' || (!chosenAsset && settings.mode === 'image') ? 'Imagem' : `${settings.durationSeconds}s`}</span></div></div>
-          {session.assets.length > 0 && <div className={s.results} role="group" aria-label="Criações do Flow">{session.assets.map((asset, index) => { const binding = inserts.find((insert) => insertMatchesAsset(insert, asset)); const poster = imagePosterUrl(asset, session.assets, index); const selectedLocal = chosenAsset?.id === asset.id ? previewUrl : undefined; const source = selectedLocal || assetUrl(asset); return <button type="button" key={asset.id} disabled={busy} onClick={() => setSelected(asset.id)} className={`${chosenAsset?.id === asset.id ? s.resultSelected : ''} ${binding ? s.resultBound : ''}`} aria-label={`Selecionar ${asset.kind === 'video' ? 'vídeo' : 'imagem'} ${index + 1}${binding ? `, usado em ${binding.ancora}` : ''}`} aria-pressed={chosenAsset?.id === asset.id}>{asset.kind === 'image' && source ? <img src={source} alt={`Imagem ${index + 1} criada no Flow`}/> : asset.kind === 'video' && poster ? <img src={poster} alt={`Capa do vídeo ${index + 1}`}/> : asset.kind === 'video' && source ? <video src={source} muted playsInline preload="auto" aria-label={`Miniatura do vídeo ${index + 1}`} onLoadedData={(event) => { if (event.currentTarget.currentTime === 0) event.currentTarget.currentTime = .05; }}/> : <span className={s.resultFallback}><Icon name={asset.kind === 'video' ? 'video' : 'image'}/></span>}<span>{String(index + 1).padStart(2, '0')}</span>{binding && <b>{binding.ancora}</b>}{chosenAsset?.id === asset.id && <i><Icon name="check"/></i>}</button>; })}</div>}
+          {session.assets.length > 0 && <div className={s.results} role="group" aria-label="Criações do Flow">{session.assets.map((asset, index) => { const binding = inserts.find((insert) => insertMatchesAsset(insert, asset)); const poster = thumbnailFor(asset, index); const source = chosenAsset?.id === asset.id ? previewUrl || assetUrl(asset) : assetUrl(asset); return <button type="button" key={asset.id} disabled={busy} onClick={() => setSelected(asset.id)} className={`${chosenAsset?.id === asset.id ? s.resultSelected : ''} ${binding ? s.resultBound : ''}`} aria-label={`Selecionar ${asset.kind === 'video' ? 'vídeo' : 'imagem'} ${index + 1}${binding ? `, usado em ${binding.ancora}` : ''}`} aria-pressed={chosenAsset?.id === asset.id}>{asset.kind === 'image' && source ? <img src={source} alt={`Imagem ${index + 1} criada no Flow`}/> : asset.kind === 'video' && poster ? <img src={poster} alt={`Capa persistida do vídeo ${index + 1}`}/> : <span className={s.resultFallback}><Icon name={asset.kind === 'video' ? 'video' : 'image'}/></span>}<span>{String(index + 1).padStart(2, '0')}</span>{binding && <b>{binding.ancora}</b>}{chosenAsset?.id === asset.id && <i><Icon name="check"/></i>}</button>; })}</div>}
           {chosenAsset?.kind === 'image' && <button type="button" className={s.animateButton} disabled={busy} onClick={animate}><span className={s.animateIcon}><Icon name="video"/></span><span><b>Animar com Flow</b><small>Transforme este frame em um take cinematográfico</small></span><em>IMAGE → VIDEO</em><i><Icon name="arrow"/></i></button>}
           {unresolved && !busy && <div className={`${s.recoveryCard} ${s.recoveryLive}`} role="status"><span className={s.livePulse}/><strong>{session.recoveryState === 'unknown' ? 'Pedido precisa de conferência' : 'Acompanhamento automático ativo'}</strong><p>{session.recoveryMessage || 'O Pilot continuará verificando o Flow até o take ficar pronto.'}</p><div><button type="button" className={s.textButton} onClick={() => void recoverActiveJob()}><Icon name="refresh"/>Verificar agora</button><button type="button" className={s.textButton} onClick={() => void openFlow()}>Conferir no Flow<Icon name="external"/></button></div><small>{session.recoveryState === 'unknown' ? 'Esta instalação não reconheceu o pedido antigo.' : 'Nova verificação automática em instantes · nenhum crédito adicional.'}</small>{['needs_attention', 'unknown'].includes(session.recoveryState || '') && <><p>Se o projeto pertencer a outra instalação, confira o resultado antes de liberar.</p><button type="button" className={s.textButton} onClick={() => void acknowledgePreviousJob()}>Conferi no Flow · liberar novo pedido</button></>}</div>}
-          <div className={s.creditCard}><div><span className={s.smallLabel}>CUSTO DESTA CRIAÇÃO</span><strong>{quoteValid ? session.quote?.credits?.toLocaleString('pt-BR') : '—'} <small>créditos</small></strong><p>{quoteValid ? `${settings.count} ${settings.count === 1 ? 'variação' : 'variações'} · atualizado automaticamente` : settings.prompt.trim() ? session.busy === 'quote' ? 'Calculando automaticamente…' : 'Sincronizando com o Flow…' : 'Escreva o prompt para calcular automaticamente.'}</p></div><div className={`${s.autoQuote} ${session.busy === 'quote' ? s.autoQuoteBusy : quoteValid ? s.autoQuoteReady : ''}`} role="status" aria-label={session.busy === 'quote' ? 'Calculando custo automaticamente' : quoteValid ? 'Custo atualizado automaticamente' : 'Aguardando cálculo automático'}><i/><span>{session.busy === 'quote' ? 'CALCULANDO' : quoteValid ? 'AUTO' : 'AGUARDANDO'}</span></div></div>
+          <div className={s.creditCard} role="status" aria-label={session.busy === 'quote' ? 'Calculando custo no Flow' : quoteValid ? 'Custo atualizado' : 'Custo ainda não calculado'}><div><span className={s.smallLabel}>CUSTO DESTA CRIAÇÃO</span><strong>{quoteValid ? session.quote?.credits?.toLocaleString('pt-BR') : '—'} <small>créditos</small></strong><p>{quoteValid ? `${settings.count} ${settings.count === 1 ? 'variação' : 'variações'} · custo atualizado` : settings.prompt.trim() ? session.busy === 'quote' ? 'Calculando em segundo plano…' : 'Aguardando confirmação do Flow…' : 'Escreva o prompt para calcular.'}</p></div>{session.busy === 'quote' && <span className={s.quoteActivity}><i/>CALCULANDO</span>}</div>
           {insufficient && <p className={s.inlineError} role="alert">Esta conta não tem créditos suficientes para a configuração escolhida.</p>}
           <button type="button" className={s.generateButton} disabled={busy || unresolved || capabilitiesPending || capabilitiesUnsupported || referencesOverLimit || referenceBusy || !quoteValid || insufficient || !loaded} onClick={() => void generate()}><Icon name="spark"/><span>{session.busy === 'generate' ? 'Gerando no Flow…' : `Gerar ${settings.count > 1 ? `${settings.count} ${settings.mode === 'video' ? 'vídeos' : 'imagens'}` : settings.mode === 'video' ? 'vídeo' : 'imagem'} no Flow`}</span><i><Icon name="arrow"/></i></button>
         </section>
@@ -884,11 +984,11 @@ export function PilotFlowInsertsModal({ taskId, partes, inserts, enabled, onEnab
       <footer className={s.footer}><div className={s.savedSummary}><span className={s.savedCount}>{inserts.length}</span><div><strong>{inserts.length === 1 ? 'insert na montagem' : 'inserts na montagem'}</strong><span>{enabled ? 'Flow ligado nesta versão' : 'Ative o Flow para incluir estes inserts'}</span></div></div><div className={s.footerActions}>{inserts.length > 0 && <button type="button" className={s.secondaryButton} onClick={onEditarInserts} disabled={busy || montageBusy}>Editar inserts e enquadramento</button>}{onAtualizarMontagem && <button type="button" className={s.rebuildButton} disabled={busy || referenceBusy || montageBusy} aria-busy={montageBusy} onClick={() => void atualizarMontagem()} title="Refaz a montagem com os takes já gerados e os inserts atuais.">{montageBusy ? <span className={s.spinner} aria-hidden="true"/> : <Icon name="refresh"/>}{montageBusy ? 'Atualizando montagem…' : 'Atualizar montagem'}</button>}<button type="button" className={s.doneButton} onClick={onFechar}>Concluir<Icon name="check"/></button></div></footer>
     </div>
     {copyTakePreview && (() => {
-      const poster = copyTakePreview.asset.kind === 'video' ? imagePosterUrl(copyTakePreview.asset, session.assets, copyTakePreview.assetIndex) : '';
+      const poster = copyTakePreview.asset.kind === 'video' ? thumbnailFor(copyTakePreview.asset, copyTakePreview.assetIndex) : '';
       const source = assetUrl(copyTakePreview.asset);
       return <aside className={s.copyTakePreview} data-flow-copy-preview="true" role="tooltip" aria-label={`Prévia do TAKE ${String(copyTakePreview.takeNumber).padStart(2, '0')}`} style={{ left: copyTakePreview.left, top: copyTakePreview.top }}>
         <div className={s.copyTakePreviewMedia}>
-          {copyTakePreview.asset.kind === 'video' && poster ? <img src={poster} alt=""/> : copyTakePreview.asset.kind === 'image' && source ? <img src={source} alt=""/> : copyTakePreview.asset.kind === 'video' && source ? <video src={source} muted playsInline preload="metadata" onLoadedData={(event) => { try { event.currentTarget.currentTime = .05; } catch { /* frame extraction is best effort */ } }}/> : <span><Icon name={copyTakePreview.asset.kind === 'video' ? 'video' : 'image'}/></span>}
+          {copyTakePreview.asset.kind === 'video' && poster ? <img src={poster} alt=""/> : copyTakePreview.asset.kind === 'image' && source ? <img src={source} alt=""/> : <span><Icon name={copyTakePreview.asset.kind === 'video' ? 'video' : 'image'}/></span>}
           <i><Icon name={copyTakePreview.asset.kind === 'video' ? 'video' : 'image'}/></i>
         </div>
         <div className={s.copyTakePreviewInfo}>

@@ -2729,9 +2729,12 @@ function ClickUpPilotInner() {
    */
   const [extFaltando, setExtFaltando] = useState(false);
   const [extVersao, setExtVersao] = useState<string | null>(null);
+  const [extVersaoPublicada, setExtVersaoPublicada] = useState<string | null>(null);
   const [baixandoExtensao, setBaixandoExtensao] = useState(false);
   const extFaltandoRef = useRef(false);
   extFaltandoRef.current = extFaltando;
+  const extVersaoPublicadaRef = useRef(extVersaoPublicada);
+  extVersaoPublicadaRef.current = extVersaoPublicada;
   /* A extensão é o motor de TUDO que o Pilot dispara. Até 06.09 o aviso de
    * "falta a extensão" só nascia dentro da análise — quem estava no CREATOR
    * (que nem passa por lá) desinstalava a extensão e a tela não dizia nada.
@@ -2739,20 +2742,39 @@ function ClickUpPilotInner() {
    * volta ao foco: instalou, o aviso some sozinho. */
   useEffect(() => {
     let vivo = true;
-    const conferir = async () => {
+    let versaoPublicada: string | null = null;
+    const lerVersaoPublicada = async () => {
       try {
+        const response = await fetch('/api/extension/version', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json() as { version?: string };
+        if (!/^\d+(?:\.\d+){1,3}$/.test(payload.version || '')) throw new Error('Versão publicada inválida.');
+        versaoPublicada = payload.version!;
+        if (vivo) setExtVersaoPublicada(versaoPublicada);
+      } catch {
+        // Fail closed: an old protocol minimum must never be mistaken for the
+        // release currently offered by the Pilot. Focus/polling retries it.
+        versaoPublicada = null;
+        if (vivo) setExtVersaoPublicada(null);
+        throw new Error('Não foi possível confirmar a versão publicada da extensão.');
+      }
+      return versaoPublicada;
+    };
+    const conferir = async (atualizarVersao = false) => {
+      try {
+        const exigida = atualizarVersao || !versaoPublicada ? await lerVersaoPublicada() : versaoPublicada;
         const ext = await detectExtension();
         if (vivo) {
           setExtVersao(ext.connected ? ext.version : null);
-          setExtFaltando(!ext.connected || !extensionVersionAtLeast(ext.version));
+          setExtFaltando(!ext.connected || !extensionVersionAtLeast(ext.version, exigida));
         }
       } catch {
         if (vivo) setExtFaltando(true);
       }
     };
-    void conferir();
+    void conferir(true);
     const aoVoltar = () => {
-      if (document.visibilityState === 'visible') void conferir();
+      if (document.visibilityState === 'visible') void conferir(true);
     };
     // Procura sozinha enquanto o aviso estiver na tela: instalou a extensão, o
     // aviso some por conta própria. É o que substitui o antigo "já instalei",
@@ -2777,7 +2799,7 @@ function ClickUpPilotInner() {
       // O fallback via Blob evita que o Chrome trate o ZIP como um download
       // automático bloqueável. O endpoint continua sendo o mesmo e valida o
       // pacote antes de entregar os bytes.
-      const response = await fetch('/api/extension/download', { cache: 'no-store' });
+      const response = await fetch(`/api/extension/download?v=${encodeURIComponent(extVersaoPublicadaRef.current || 'latest')}`, { cache: 'no-store' });
       if (!response.ok) {
         let detail = `HTTP ${response.status}`;
         try {
@@ -2794,6 +2816,7 @@ function ClickUpPilotInner() {
       // nunca da constante minima do Pilot: com a constante, o zip da 4.44.7
       // chegava chamado v4.43.0 e parecia a extensao antiga.
       const versaoServida = (response.headers.get("x-autoedit-extension-version") || "").replace(/[^0-9.]/g, "");
+      if (versaoServida) setExtVersaoPublicada(versaoServida);
       const nomeDoServidor = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") || "")?.[1];
       link.download = versaoServida
         ? `auto-edit-heygen-extension-v${versaoServida}.zip`
@@ -2812,12 +2835,13 @@ function ClickUpPilotInner() {
 
   async function garantirExtensaoEconomia(): Promise<boolean> {
     const ext = await detectExtension();
-    const ok = ext.connected && extensionVersionAtLeast(ext.version);
+    const exigida = extVersaoPublicadaRef.current;
+    const ok = !!exigida && ext.connected && extensionVersionAtLeast(ext.version, exigida);
     setExtVersao(ext.connected ? ext.version : null);
     setExtFaltando(!ok);
     if (!ok) {
       setError(
-        `Modo Economia exige a extensão v${ECONOMY_EXTENSION_VERSION} ou mais nova. ` +
+        `${exigida ? `O Pilot exige a extensão publicada v${exigida} ou mais nova.` : 'O Pilot ainda não conseguiu confirmar a versão publicada.'} ` +
         `Detectada: ${ext.connected ? `v${ext.version}` : 'não conectada'}. Baixe a versão atual e recarregue o Pilot.`,
       );
     }
@@ -14522,7 +14546,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 </h3>
                 <p className="ext-falta-texto">
                   {extVersao
-                    ? `O Modo Economia requer a v${ECONOMY_EXTENSION_VERSION} ou mais nova. O Pilot bloqueia o início até receber o protocolo completo da fila.`
+                    ? extVersaoPublicada
+                      ? `A versão publicada é a v${extVersaoPublicada}. O Pilot detectou a v${extVersao} e oferece abaixo o pacote mais recente.`
+                      : 'O Pilot detectou a extensão, mas ainda está conferindo qual versão está publicada. A verificação será repetida automaticamente.'
                     : 'É ela que dispara no HeyGen, lê o Google Docs e traz a sua biblioteca de avatares. Sem ela o Pilot analisa, mas não dispara.'}
                 </p>
                 <div className="ext-falta-acoes">
@@ -14537,7 +14563,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       o aviso some. */}
                   <span className="ext-falta-status">
                     <span className="ext-falta-radar" aria-hidden />
-                    {extVersao ? `aguardando v${ECONOMY_EXTENSION_VERSION}+` : 'procurando a extensão'}
+                    {extVersaoPublicada ? extVersao ? `aguardando v${extVersaoPublicada}+` : `procurando a v${extVersaoPublicada}` : 'conferindo versão publicada'}
                   </span>
                 </div>
                 <details className="ext-falta-passos">
@@ -14552,7 +14578,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       <b>Carregar sem compactação</b> apontando pra essa pasta. Se houver uma versão
                       antiga, remova antes.
                     </li>
-                    <li>Pronto. O aviso some sozinho assim que eu encontrar a extensão.</li>
+                    <li>Atualize esta página. O Pilot confere a nova versão e o aviso some automaticamente.</li>
                   </ol>
                 </details>
               </div>
