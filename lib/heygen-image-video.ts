@@ -374,17 +374,38 @@ export async function contaDoToken(accessToken: string): Promise<string | null> 
 }
 
 /**
- * A voz existe PARA ESTE token? `true` visível · `false` 404 (clone de outra
- * conta/voz apagada) · `null` não deu pra saber (rede/5xx) — nesse caso quem
- * chama NÃO deve barrar o disparo por palpite.
+ * A voz serve PARA ESTE token? `true` serve · `false` não serve · `null` não deu
+ * pra saber (rede/5xx) — nesse caso quem chama NÃO barra o disparo por palpite.
+ *
+ * ⚠ `GET /v3/voices/{id}` NÃO basta: ele acha a voz de QUALQUER conta (medido
+ * 23.09: o clone "LUCIE" da drmillion01 voltava 200 pelo token da b2c, e o
+ * `/v3/videos` desse mesmo token recusava com "Voice not found"). O que separa:
+ * clone vem com `status` na consulta, voz da biblioteca não. Biblioteca é
+ * pública → serve. Clone → tem que estar na lista PRIVADA desta conta.
  */
 export async function vozVisivel(accessToken: string, voiceId: string): Promise<boolean | null> {
   try {
     const r = await fetch(`${API_BASE}/v3/voices/${encodeURIComponent(voiceId)}`, {
       headers: headers(accessToken),
     });
-    if (r.ok) return true;
     if (r.status === 404) return false;
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    const ehClone = !!j?.data && 'status' in j.data;
+    if (!ehClone) return true;
+
+    let token: string | null = null;
+    for (let pagina = 0; pagina < 20; pagina++) {
+      const qs = new URLSearchParams({ type: 'private', limit: '100' });
+      if (token) qs.set('token', token);
+      const rl = await fetch(`${API_BASE}/v3/voices?${qs}`, { headers: headers(accessToken) });
+      if (!rl.ok) return null;
+      const jl = await rl.json().catch(() => null);
+      const lista: Array<{ voice_id?: string }> = Array.isArray(jl?.data) ? jl.data : jl?.data?.voices || [];
+      if (lista.some((v) => v?.voice_id === voiceId)) return true;
+      token = jl?.next_token || jl?.token || null;
+      if (!jl?.has_more || !token) return false;
+    }
     return null;
   } catch {
     return null;
