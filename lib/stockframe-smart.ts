@@ -529,6 +529,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (INVASIVE_PROCEDURE_SCENE.test(prepared.contentText) && !INVASIVE_PROCEDURE_COPY.test(ranking.contextNormalized)) {
     return { video, score: -100, reasons: ['a fala não descreve um procedimento invasivo'] };
   }
+  if (/\b(?:mulher(?:es)?|esposa|parceira|casal)\b/.test(ranking.spokenNormalized)
+      && /\b(?:dinheiro|grana|pagamento|pagar)\b/.test(ranking.spokenNormalized)
+      && /\b(?:industria farmaceutica|farmaceutic\w*|laboratorio de remedios)\b/.test(prepared.contentText)) {
+    return { video, score: -100, reasons: ['dinheiro da indústria farmacêutica não representa a fala sobre relacionamento'] };
+  }
   if (smart?.negativeKeywords.some((keyword) => ranking.contextNormalized.includes(normalize(keyword)))) {
     return { video, score: -100, reasons: ['metadado visual exclui o assunto deste trecho'] };
   }
@@ -609,17 +614,20 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     // plus a real thematic connection in its own title/description/metadata.
     const neutralHuman = /\b(?:homem|mulher|pessoa|idos[ao]|casal|familia)\b/.test(prepared.contentText)
       && /\b(?:convers\w*|sentad\w*|olhando|caminh\w*|rotina|abra[cç]\w*)\b/.test(prepared.contentText);
-    const healthcare = /\b(?:medico|doutor|consulta|clinica|consultorio|profissional de saude)\b/.test(prepared.contentText);
+    const healthcare = /\b(?:medico|doutor|urologista|consulta|clinica|consultorio|profissional de saude)\b/.test(prepared.contentText);
     const educationalAnatomy = /\b(?:anatomia|3d|ilustracao)\b/.test(prepared.contentText)
       && shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
+    const thematicEducationalHealth = /\b(?:anatomia|animacao|3d|sistema reprodutor|fluxo sanguineo)\b/.test(prepared.contentText)
+      && prepared.concepts.some((concept) => concept.startsWith('saude-') && ranking.campaignConcepts.includes(concept));
     const themeLink = videoConcepts.some((concept) => ranking.campaignConcepts.includes(concept))
       || (healthcare && ranking.campaignIsHealth)
       || educationalAnatomy
+      || thematicEducationalHealth
       || (neutralHuman && /\bcasal\b/.test(prepared.contentText) && ranking.campaignConcepts.includes('saude-homem'));
     const anatomyConflict = shownAnatomy.length > 0
       && !shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
     if (!allowGenericFallback || recipe || videoDirection !== 'neutral' || anatomyConflict
-        || !(neutralHuman || healthcare || educationalAnatomy) || !themeLink) {
+        || !(neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth) || !themeLink) {
       return { video, score: -100, reasons: ['sem evidência visual do trecho ou da frase de contexto'] };
     }
     score += 3;

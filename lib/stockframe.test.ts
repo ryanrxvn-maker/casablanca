@@ -450,6 +450,15 @@ const czechMoney = { ...czechOpening, semanticText: 'Algumas mulheres querem ape
   campaignText: 'Disfunção erétil. Truque com bicarbonato.' };
 ok(!rankStockFrameVideos(czechMoney, [video({ id: 'woman-only', title: 'Mulher na cozinha com bicarbonato', nicheId: 'ed', nicheName: 'ED' })], 10, true).length,
   'mulher e nicho ED não são evidência suficiente para uma frase sobre dinheiro');
+const pharmaMoney = video({ id: 'pharma-money', title: 'MÉDICO COM DINHEIRO NA INDUSTRIA FARMACEUTICA',
+  nicheId: 'ed', nicheName: 'ED', tags: ['dinheiro', 'potência'] });
+ok(!rankStockFrameVideos(czechMoney, [pharmaMoney], 10, true).length
+  && !rankStockFrameGenericFallback(czechMoney, [pharmaMoney], 10).length,
+  'dinheiro de indústria farmacêutica não representa mulheres e relacionamento');
+const educationalEdFallback = video({ id: 'ed-anatomy-fallback', title: 'ANIMAÇÃO 3D EREÇÃO SANGUE',
+  description: 'Anatomia do sistema reprodutor masculino e fluxo sanguíneo', nicheId: 'ed', nicheName: 'ED' });
+ok(rankStockFrameGenericFallback(czechOpening, [educationalEdFallback], 10).some(candidate => candidate.video.id === 'ed-anatomy-fallback'),
+  'anatomia educativa do mesmo nicho pode preencher último recurso quando a fala não tem cena específica');
 const crossPackFallback = rankStockFrameGenericFallback({ ...czechOpening,
   campaignText: 'A potência masculina diminui; há um truque com bicarbonato.', campaignNicheId: 'ed' }, [
   video({ id: 'general-couple', title: 'Casal conversando sentado no sofá', nicheId: 'relacionamento', nicheName: 'Relacionamento' }),
