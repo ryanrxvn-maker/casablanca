@@ -28,7 +28,8 @@ export type SmartStockSegment = {
   selectedVideoId?: string;
 };
 
-const STOP = new Set(`a o as os um uma uns umas de da do das dos e em no na nos nas por para pra pro com sem sob sobre entre que quem qual quais como quando onde porque se ao aos esta este esse essa isso isto seu sua seus suas meu minha meus minhas voce você voces vocês ele ela eles elas eu nos nós mas ou ja já muito muita mais menos tem ter foi ser sao são era vai vao vão pode podem pelo pela pelos pelas ate até tambem também ainda mesmo mesma assim aqui ali entao então cada todo toda todos todas nao não`.split(/\s+/));
+const STOP = new Set(`a o as os um uma uns umas de da do das dos e em no na nos nas por para pra pro com sem sob sobre entre que quem qual quais como quando onde porque se ao aos esta este esse essa isso isto seu sua seus suas meu minha meus minhas voce você voces vocês ele ela eles elas eu nos nós mas ou ja já muito muita mais menos tem ter foi ser sao são era vai vao vão pode podem pelo pela pelos pelas ate até tambem também ainda mesmo mesma assim aqui ali entao então cada todo toda todos todas nao não video vídeos videos clique clicar botao cena cenas take takes`.split(/\s+/));
+const GENERIC_PERSON_TOKENS = new Set(['homem', 'mulher', 'pessoa', 'idoso', 'idosa', 'senhor', 'senhora']);
 
 const CONCEPTS: Record<string, string[]> = {
   'dor-articular': ['dor no joelho', 'dor nas articulacoes', 'articulacao', 'joelho', 'quadril', 'ombro', 'artrite', 'artrose', 'cartilagem', 'inflamacao', 'reumatismo'],
@@ -38,8 +39,8 @@ const CONCEPTS: Record<string, string[]> = {
   'intestino': ['intestino', 'digestao', 'barriga inchada', 'constipacao', 'diarreia', 'microbiota', 'estomago'],
   'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
-  'saude-homem': ['prostata', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia masculina', 'testosterona', 'homem', 'masculino', 'libido masculina'],
-  'saude-mulher': ['menopausa', 'mulher', 'feminino', 'ovario', 'utero', 'menstruacao'],
+  'saude-homem': ['prostata', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia', 'testosterona', 'libido masculina'],
+  'saude-mulher': ['menopausa', 'ovario', 'utero', 'menstruacao'],
   'medico': ['medico', 'doutor', 'consulta', 'hospital', 'clinica', 'diagnostico', 'exame', 'tratamento'],
   'procedimento': ['procedimento', 'cirurgia', 'agulha', 'aplicacao', 'terapia', 'laser', 'massagem', 'radiografia'],
   'remedio': ['remedio', 'medicamento', 'capsula', 'comprimido', 'suplemento', 'frasco', 'dose', 'farmacia'],
@@ -89,8 +90,8 @@ const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|recet
 // These describe a visible sexual act, not reproductive health. In particular,
 // "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
 const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
-const SUGGESTIVE_SCENE = /\b(?:apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*)\b/;
-const SPECIFIC_INTIMACY_COPY = /\b(?:relacao sexual|sexo|sex|massage\w*|massag\w*|coxa|desejo)\b/;
+const SUGGESTIVE_SCENE = /\b(?:apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|gestos? sexua\w*|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*)\b/;
+const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
 const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
 const INVASIVE_PROCEDURE_COPY = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
@@ -376,13 +377,9 @@ export function planSmartStockSegments(parts: StockFrameCopyPart[], options: { c
 }
 
 export function balanceMechanismPresence(segments: SmartStockSegment[]): SmartStockSegment[] {
-  const mechanism = segments.map((segment, index) => segment.visualBeat === 'demonstration' ? index : -1).filter((index) => index >= 0);
-  if (!mechanism.length) return segments;
-  return segments.map((segment, index) => {
-    if (segment.visualBeat !== 'context') return segment;
-    const adjacent = mechanism.some((position) => Math.abs(position - index) === 1 && segments[position].anchor === segment.anchor);
-    return adjacent ? { ...segment, visualBeat: 'demonstration' as const } : segment;
-  });
+  // Vizinhança temporal não torna uma fala sobre sintomas ou CTA uma cena de
+  // receita. A promoção antiga espalhava o mecanismo para frases sem relação.
+  return segments;
 }
 
 export function measureSmartStockCoverage(parts: StockFrameCopyPart[], segments: SmartStockSegment[]) {
@@ -526,8 +523,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (prepared.explicitSexualScene) {
     return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
   }
-  if (SUGGESTIVE_SCENE.test(prepared.title) && !SPECIFIC_INTIMACY_COPY.test(ranking.spokenNormalized)) {
-    return { video, score: -100, reasons: ['ação íntima não descrita na fala'] };
+  if (SUGGESTIVE_SCENE.test(prepared.title)) {
+    return { video, score: -100, reasons: ['cena sugestiva não entra na seleção automática de anúncios'] };
   }
   if (INVASIVE_PROCEDURE_SCENE.test(prepared.contentText) && !INVASIVE_PROCEDURE_COPY.test(ranking.contextNormalized)) {
     return { video, score: -100, reasons: ['a fala não descreve um procedimento invasivo'] };
@@ -541,10 +538,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (campaignIngredients.length && videoIngredients.some((ingredient) => !campaignIngredients.includes(ingredient))) {
     return { video, score: -100, reasons: ['ingrediente diferente da combinação da copy'] };
   }
+  const localRecipeReference = LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized);
   const ingredientEvidence = videoIngredients.some((ingredient) => ranking.localIngredients.includes(ingredient)
-    || ranking.contextIngredients.includes(ingredient)
-    || (beat === 'demonstration' && campaignIngredients.includes(ingredient)));
-  const botanicalEvidence = ranking.localBotanical && BOTANICAL.test(prepared.contentText);
+    || (localRecipeReference && ranking.contextIngredients.includes(ingredient))
+    || (localRecipeReference && beat === 'demonstration' && campaignIngredients.includes(ingredient)));
+  const botanicalEvidence = BOTANICAL.test(ranking.spokenNormalized) && BOTANICAL.test(prepared.contentText);
   const compatibleMechanism = (beat === 'demonstration' || ranking.contextHasIngredients)
     && (ingredientEvidence || botanicalEvidence);
   const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
@@ -552,6 +550,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId
       && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene) {
     return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
+  }
+  if (recipe && !localRecipeReference && !ranking.localIngredients.length) {
+    return { video, score: -100, reasons: ['receita não mencionada neste trecho da fala'] };
   }
   if (smart?.graphicContent || smart?.containsWatermark) return { video, score: -100, reasons: ['conteúdo impróprio para anúncio'] };
   // The scene's explicit subject outranks catalog taxonomy. "Homem" can
@@ -589,7 +590,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       }
     }
     if (best) {
-      if (visualMatch && ranking.localTokens.has(token)) lexicalEvidence++;
+      if (visualMatch && ranking.localTokens.has(token) && !GENERIC_PERSON_TOKENS.has(token)) lexicalEvidence++;
       score += best * (1 + Math.min(.8, token.length / 20));
     }
   }
@@ -598,7 +599,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   // aspect ratio and remote numeric score cannot stand in for scene evidence.
   const contextualConcepts = ranking.contextConcepts.filter((concept) => videoConcepts.includes(concept));
   const contextLexicalEvidence = prepared.fields.some((field) => field.visual && field.tokens.some((token) => token.length >= 4 && ranking.contextTokens.has(token)));
-  if (!lexicalEvidence && !sharedConcepts.length && !contextualConcepts.length && !contextLexicalEvidence && !ingredientEvidence && !botanicalEvidence) {
+  if (!lexicalEvidence && !sharedConcepts.length && !ingredientEvidence && !botanicalEvidence) {
     // Invoked only by the explicit last-resort helper, after broad retrieval.
     // Same pack alone is insufficient: require a neutral identifiable scene
     // plus a real thematic connection in its own title/description/metadata.

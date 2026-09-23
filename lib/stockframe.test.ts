@@ -268,7 +268,9 @@ const mechanismSegments = [
   { ...painSegment, id: 'relief', visualBeat: 'relief' as const },
 ];
 const balanced = balanceMechanismPresence(mechanismSegments);
-ok(balanced[0].visualBeat === 'demonstration' && balanced[2].visualBeat === 'demonstration' && balanced[3].visualBeat === 'relief', 'mecanismo recebe presença forte sem apagar o momento de alívio');
+ok(balanced[0].visualBeat === 'context' && balanced[1].visualBeat === 'demonstration'
+  && balanced[2].visualBeat === 'context' && balanced[3].visualBeat === 'relief',
+  'mecanismo não contamina frases vizinhas de sintomas ou alívio');
 
 // Real ED catalog titles seen in the live full-coverage plan. Automatic ad
 // selection must not depend on the optional graphic_content API flag.
@@ -416,6 +418,37 @@ ok(!smartStockMechanismQueries([{ ...neutralCta, campaignText: 'Sklenice sody.',
 const unambiguousCzechRecipe = { ...explicitCzechSoda, campaignText: 'Misture mel. Trik s jedlou sodou.' };
 ok(rankStockFrameVideos(unambiguousCzechRecipe, recipePack, 20, true).some((candidate) => candidate.video.id === 'pack-honey-soda'),
   'ranking conserva ingrediente inequívoco do original quando a tradução local o perdeu');
+
+// Regressão observada no Pilot publicado: a receita no fim da frase tcheca
+// contaminava o primeiro corte (que só fala da dificuldade após os 50 anos).
+const czechOpeningSource = planSmartStockSegments([{ label: 'BODY 1', text: 'Pokud si myslíte, že po padesátce je normální, že už' }], { coverage: 100, pace: 'long' });
+const czechOpening = { ...localizeSmartSegments(czechOpeningSource,
+  ['Se você acha que depois dos cinquenta é normal não conseguir mais'],
+  ['Se você acha que depois dos cinquenta é normal não conseguir mais porque não tentou o truque com bicarbonato.'])[0],
+  campaignText: 'Disfunção erétil. Truque com bicarbonato.', campaignNicheId: 'ed' };
+ok(!rankStockFrameVideos(czechOpening, [video({ id: 'woman-soda', title: 'MULHER 25 | COZINHA | BICARBONATO', nicheId: 'ed', nicheName: 'ED' })], 10, true).length,
+  'ingrediente na frase de contexto não ocupa trecho local sobre sintoma');
+const czechMechanism = { ...czechOpening, semanticText: 'Conheça este truque com bicarbonato.',
+  semanticContextText: 'Conheça este truque com bicarbonato.' };
+ok(rankStockFrameVideos(czechMechanism, [video({ id: 'woman-soda', title: 'MULHER 25 | COZINHA | BICARBONATO', nicheId: 'ed', nicheName: 'ED' })], 10, true).length > 0,
+  'ingrediente continua elegível quando o próprio corte menciona o mecanismo');
+const misleadingEdTitles = [
+  'MULHER TIRANDO CALCINHA', 'MULHER NO ATO', 'MULHER FAZENDO GESTOS SEXUAIS COM A MÃO',
+  'MULHER NA ACADEMIA COM SEGUNDAS INTENÇÕES', 'CASAL DORMINDO JUNTOS HOT', 'MULHER BISCOITANDO',
+];
+const misleadingEd = misleadingEdTitles.map((title, index) => video({ id: `misleading-${index}`, title,
+  nicheId: 'ed', nicheName: 'ED', tags: ['potência', 'bicarbonato', 'especialista', 'casal'] }));
+const czechCta = { ...czechOpening, semanticText: 'Há um vídeo gratuito da especialista que mostra como preparar.',
+  semanticContextText: 'Há um vídeo gratuito da especialista que mostra como preparar.',
+  campaignText: 'Disfunção erétil. Truque com bicarbonato.' };
+ok(!rankStockFrameVideos(czechCta, misleadingEd, 20, true).length
+  && !rankStockFrameGenericFallback(czechCta, misleadingEd, 20).length,
+  'cenas sexualizadas e caça-cliques não entram no Smart nem no fallback do CTA');
+const czechMoney = { ...czechOpening, semanticText: 'Algumas mulheres querem apenas dinheiro, diz a desculpa.',
+  semanticContextText: 'Algumas mulheres querem apenas dinheiro, diz a desculpa.',
+  campaignText: 'Disfunção erétil. Truque com bicarbonato.' };
+ok(!rankStockFrameVideos(czechMoney, [video({ id: 'woman-only', title: 'Mulher na cozinha com bicarbonato', nicheId: 'ed', nicheName: 'ED' })], 10, true).length,
+  'mulher e nicho ED não são evidência suficiente para uma frase sobre dinheiro');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

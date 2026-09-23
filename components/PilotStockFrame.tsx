@@ -488,6 +488,33 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           if (completed.every((segment) => segment.candidates.length)) break;
         }
       }
+      // O nicho médico não costuma catalogar cenas neutras de relacionamento,
+      // dinheiro ou consulta. Só se ainda houver lacuna no plano 100%, buscar
+      // essas cenas na biblioteca inteira antes do fallback final, sem baixar.
+      if (coverage === 100 && completed.some((segment) => !segment.candidates.length)) {
+        const missingText = completed.filter(segment => !segment.candidates.length)
+          .map(segment => (segment.semanticText || segment.text).toLowerCase()).join(' ');
+        const broadQueries = new Set<string>();
+        if (/dinheiro|grana|preço|preco|pagar|pagamento/.test(missingText)) {
+          broadQueries.add('dinheiro'); broadQueries.add('casal discutindo dinheiro');
+        }
+        if (/casal|mulher|marido|esposa|relacionamento|companheir/.test(missingText)) {
+          broadQueries.add('casal conversando'); broadQueries.add('casal preocupado');
+        }
+        if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
+        broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
+        const searches = [...broadQueries].slice(0, 6);
+        for (let index = 0; index < searches.length; index += 3) {
+          setSmartProgress('Procurando alternativas visuais neutras para as lacunas…');
+          const results = await Promise.all(searches.slice(index, index + 3).map(search => stockFrameList({
+            page: 1, perPage: 48, search, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
+          })));
+          for (const video of enrichStockFrameVideos(results.flatMap(result => result.videos), niches)) {
+            globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
+          }
+        }
+        completed = rankSegments(completed, true);
+      }
       const recipeTheme = chooseCampaignRecipeTheme(completed);
       if (recipeTheme.length) completed = completed.map((segment) => ({
         ...segment,
