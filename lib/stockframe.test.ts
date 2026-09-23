@@ -482,5 +482,22 @@ ok(crossPackFallback.some(candidate => candidate.video.id === 'general-couple')
   && !crossPackFallback.some(candidate => candidate.video.id === 'other-illness'),
   'fallback médico admite casal neutro de pack geral, mas não patologias de outro nicho');
 
+const ctaOnly = { ...czechOpening, text: 'Clique no botão e assista ao vídeo.',
+  semanticText: 'Clique no botão e assista ao vídeo.',
+  semanticContextText: 'Clique no botão e assista ao vídeo.', concepts: [], query: '' };
+const ctaPhone = video({ id: 'cta-phone', title: 'Pessoa clicando no celular para assistir vídeo',
+  nicheId: 'geral', nicheName: 'Geral' });
+const ctaOptions = rankStockFrameGenericFallback(ctaOnly, [educationalEdFallback, genericEdScenes[1], ctaPhone], 10);
+ok(ctaOptions[0]?.video.id === 'cta-phone',
+  'CTA prioriza ação visível de celular sobre anatomia genérica e consulta');
+ok(rankStockFrameGenericFallback(ctaOnly, [educationalEdFallback], 10).some(candidate => candidate.video.id === 'ed-anatomy-fallback'),
+  'penalidade editorial não quebra cobertura 100% quando anatomia é a única alternativa segura');
+const neutralBridge = { ...czechOpening, text: 'Eu sei que muitos vão me perguntar.',
+  semanticText: 'Eu sei que muitos vão me perguntar.',
+  semanticContextText: 'Eu sei que muitos vão me perguntar.', concepts: [], query: '' };
+const bridgeOptions = rankStockFrameGenericFallback(neutralBridge, [educationalEdFallback, genericEdScenes[1]], 10);
+ok(bridgeOptions[0]?.video.id === 'generic-doctor',
+  'frase de ligação prefere consulta humana a anatomia repetida');
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

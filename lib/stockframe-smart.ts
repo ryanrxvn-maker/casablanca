@@ -97,6 +97,8 @@ const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
 const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
 const INVASIVE_PROCEDURE_COPY = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
+const CTA_COPY = /\b(?:clic\w*|botao|saiba mais|assist\w* (?:ao? )?video|ver (?:o |esse )?video|watch (?:the )?video|click\w*|tap\w*|button|learn more)\b/;
+const CTA_SCENE = /\b(?:clic\w*|apert\w*|tocando (?:na )?tela|botao|celular|smartphone|telefone|assist\w* (?:ao? )?video|video (?:no |em )?celular|click\w*|tap\w*|phone|screen)\b/;
 // Cross-pack recipe shots can be useful, but a different medical niche must
 // not become a source of unrelated pathology just because it mentions honey.
 const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare)\b/;
@@ -512,6 +514,7 @@ function prepareRanking(segment: SmartStockSegment) {
     contextHasIngredients: contextIngredients.length > 0,
     direction,
     beat: segment.visualBeat || visualBeat(spokenText, direction),
+    callToAction: CTA_COPY.test(normalize(spokenText)),
   };
 }
 
@@ -564,12 +567,15 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     && (ingredientEvidence || botanicalEvidence);
   const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
     && segment.concepts.some((concept) => prepared.concepts.includes(concept));
+  const neutralDigitalAction = allowGenericFallback && ranking.callToAction
+    && !MEDICAL_NICHE.test(prepared.taxonomy) && CTA_SCENE.test(prepared.title)
+    && /\b(?:celular|smartphone|telefone|phone|tela|screen)\b/.test(prepared.title);
   const neutralCrossPackFallback = allowGenericFallback && ranking.campaignIsHealth
     && !MEDICAL_NICHE.test(prepared.taxonomy)
     && /\b(?:casal|homem|mulher|pessoa|idos[ao]|familia)\b/.test(prepared.contentText)
     && /\b(?:convers\w*|sentad\w*|olhando|caminh\w*|rotina|abrac\w*|consulta|consultorio)\b/.test(prepared.contentText);
   if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId
-      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback) {
+      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback && !neutralDigitalAction) {
     return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
   }
   if (recipe && !localRecipeReference && !ranking.localIngredients.length) {
@@ -635,11 +641,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       || (healthcare && ranking.campaignIsHealth)
       || educationalAnatomy
       || thematicEducationalHealth
+      || neutralDigitalAction
       || (neutralHuman && /\bcasal\b/.test(prepared.contentText) && ranking.campaignConcepts.includes('saude-homem'));
     const anatomyConflict = shownAnatomy.length > 0
       && !shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
     if (!allowGenericFallback || recipe || videoDirection !== 'neutral' || anatomyConflict
-        || !(neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth) || !themeLink) {
+        || !(neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth || neutralDigitalAction) || !themeLink) {
       return { video, score: -100, reasons: ['sem evidência visual do trecho ou da frase de contexto'] };
     }
     score += 3;
@@ -679,6 +686,21 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (video.matchedConcepts.length) score += Math.min(6, video.matchedConcepts.length * 2);
   if (smart?.adSuitabilityScore !== undefined) score += Math.max(0, Math.min(1, smart.adSuitabilityScore)) * 2;
   if (smart?.containsText) score -= 5;
+  if (allowGenericFallback) {
+    // A campanha ser de saúde não transforma um CTA ou frase de ligação em
+    // explicação anatômica. É uma preferência editorial, não um veto: quando
+    // o catálogo só oferece esse take seguro, a cobertura total continua
+    // possível e o editor pode revisá-lo antes de consumir a cota.
+    const educationalScene = /\b(?:anatomia|animacao|3d|sistema reprodutor|erecao|orgao|fluxo sanguineo)\b/.test(prepared.title);
+    if (ranking.callToAction && CTA_SCENE.test(prepared.title)) {
+      score += 11;
+      reasons.push('ação visual acompanha a chamada para assistir');
+    } else if (educationalScene && !ranking.localIngredients.length
+      && !ranking.spokenAnatomy.length && !segment.concepts.some((concept) => concept.startsWith('saude-') || concept === 'anatomia')) {
+      score -= ranking.callToAction ? 9 : 5;
+      reasons.push('anatomia reduzida em fala sem assunto clínico local');
+    }
+  }
   if (beat === 'problem' && /\b(?:dor|dificuldade|frustr\w*|problema|impotencia|disfuncao|triste|desconforto)\b/.test(videoVisualText)) score += 7;
   if (beat === 'relief' && /\b(?:alivio|melhora|feliz|sorris\w*|confian\w*|recuper\w*|casal)\b/.test(videoVisualText)) score += 8;
   if (beat === 'proof' && /\b(?:depoimento|resultado|antes e depois|medico|doutor|explic\w*)\b/.test(videoVisualText)) score += 5;

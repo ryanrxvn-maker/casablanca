@@ -502,8 +502,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           broadQueries.add('casal conversando'); broadQueries.add('casal preocupado');
         }
         if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
+        if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais/.test(missingText)) {
+          broadQueries.add('celular clicando'); broadQueries.add('assistindo video celular');
+        }
         broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
-        const searches = [...broadQueries].slice(0, 6);
+        const searches = [...broadQueries].slice(0, 8);
         for (let index = 0; index < searches.length; index += 3) {
           setSmartProgress('Procurando alternativas visuais neutras para as lacunas…');
           const results = await Promise.all(searches.slice(index, index + 3).map(search => stockFrameList({
