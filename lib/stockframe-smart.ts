@@ -220,6 +220,7 @@ function narrativeDirection(value: string): NonNullable<SmartStockSegment['narra
   if (/\b(?:frustrad\w*|sofrend\w*|impotencia|disfuncao eretil|dificuldade (?:de|para) erecao|sem erecao|broxa|nao (?:consegue|consigo|conseguia) durar)\b/.test(text)) return 'distress';
   if (/\b(?:dor(?:es)? (?:ainda )?(?:continua\w*|persist\w*|pior\w*)|ainda (?:sinto|sente|sentia|sofr\w*)|nao (?:consigo|consegue|conseguia) (?:mais )?(?:andar|caminhar|subir|dormir)|sem alivio|nao (?:houve |senti |sentiu )?melhora)\b/.test(text)) return 'distress';
   if (/\b(?:nao (?:sinto|sente|sentimos|tem|tenho|sente\w*) mais (?:a |as |nenhuma )?(?:dor|dores|desconforto)|sem (?:sentir |nenhuma )?(?:dor|dores|desconforto)|livre d[ae] (?:dor|dores)|dor(?:es)? (?:desaparec\w*|sumiu|passou)|alivio|recuperad\w*|volte?i? a (?:andar|caminhar)|voltou a (?:andar|caminhar)|melhora\w*|feliz|alegria)\b/.test(text)) return 'recovery';
+  if (/\b(?:recuper\w*|volt\w*)\b.{0,35}\b(?:energia|vigor|disposicao|potencia)\b/.test(text)) return 'recovery';
   if (/\b(?:durar|dure|dura|aguentar|resistir)\b.{0,45}\b(?:mais|longer|tempo|minutos|horas)\b/.test(text)) return 'recovery';
   return conceptsOf(text).includes('emocao-negativa') ? 'distress' : 'neutral';
 }
@@ -566,6 +567,14 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !/\b(?:acord\w*|wake\w*|sono|dorm\w*|sleep\w*)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['acordar alguém não é a ação narrada'] };
   }
+  if (/\b(?:dormind\w*|sleep\w*)\b/.test(prepared.title)
+      && !/\b(?:dorm\w*|sono|sleep\w*|adormec\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['casal dormindo não representa desempenho ou ação na cama'] };
+  }
+  if (/\b(?:treinand\w*|academia|workout|exercic\w*)\b/.test(prepared.title)
+      && !/\b(?:trein\w*|academia|workout|exercic\w*|fitness|muscul\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['treino não é a ação narrada'] };
+  }
   if (smart?.negativeKeywords.some((keyword) => ranking.contextNormalized.includes(normalize(keyword)))) {
     return { video, score: -100, reasons: ['metadado visual exclui o assunto deste trecho'] };
   }
@@ -598,8 +607,13 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     && !MEDICAL_NICHE.test(prepared.taxonomy)
     && /\b(?:casal|homem|mulher|pessoa|idos[ao]|familia)\b/.test(prepared.contentText)
     && /\b(?:convers\w*|sentad\w*|olhando|caminh\w*|rotina|abrac\w*|consulta|consultorio)\b/.test(prepared.contentText);
+  const recoveryCrossPackFallback = allowGenericFallback && ranking.campaignIsHealth && direction === 'recovery'
+    && !MEDICAL_NICHE.test(prepared.taxonomy)
+    && /\b(?:homem|casal|pessoa|idos[ao])\b/.test(prepared.title)
+    && /\b(?:sorrind\w*|feliz|caminh\w*|ativo|abrac\w*)\b/.test(prepared.title)
+    && prepared.direction !== 'distress';
   if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId
-      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback && !neutralDigitalAction) {
+      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback && !recoveryCrossPackFallback && !neutralDigitalAction) {
     return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
   }
   if (recipe && !localRecipeReference && !ranking.localIngredients.length) {
@@ -666,11 +680,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       || educationalAnatomy
       || thematicEducationalHealth
       || neutralDigitalAction
+      || recoveryCrossPackFallback
       || (neutralHuman && /\bcasal\b/.test(prepared.contentText) && ranking.campaignConcepts.includes('saude-homem'));
     const anatomyConflict = shownAnatomy.length > 0
       && !shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
-    if (!allowGenericFallback || recipe || videoDirection !== 'neutral' || anatomyConflict
-        || !(neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth || neutralDigitalAction) || !themeLink) {
+    if (!allowGenericFallback || recipe || (videoDirection !== 'neutral' && !(recoveryCrossPackFallback && videoDirection === 'recovery')) || anatomyConflict
+        || !(neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth || recoveryCrossPackFallback || neutralDigitalAction) || !themeLink) {
       return { video, score: -100, reasons: ['sem evidência visual do trecho ou da frase de contexto'] };
     }
     score += 3;

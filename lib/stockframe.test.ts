@@ -543,6 +543,24 @@ const symptomDoctor = video({ id: 'doctor-broxa', title: 'MÉDICO APONTANDO PARA
 ok(!rankStockFrameVideos(durationSegment, [unrelatedActions[1], symptomDoctor], 10, true).length
   && !rankStockFrameGenericFallback(durationSegment, [unrelatedActions[1], symptomDoctor], 10).length,
   'benefício de duração não recebe marido sendo acordado nem imagem do sintoma oposto');
+const unrelatedBedActions = [
+  video({ id: 'sleeping-couple', title: 'HOMEM E MULHER DORMINDO JUNTOS', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'gym-woman', title: 'MULHER TREINANDO COM PRAZER', nicheId: 'ed', nicheName: 'ED' }),
+];
+ok(!rankStockFrameVideos(durationSegment, unrelatedBedActions, 10, true).length
+  && !rankStockFrameGenericFallback(durationSegment, unrelatedBedActions, 10).length,
+  'fala de desempenho não vira casal dormindo ou treino de academia só por estar no pack ED');
+const sleepSegment = { ...durationSegment, semanticText: 'O casal dorme junto depois de um longo dia.',
+  semanticContextText: 'O casal dorme junto depois de um longo dia.' };
+ok(rankStockFrameVideos(sleepSegment, [unrelatedBedActions[0]], 10, true).length > 0,
+  'cena de sono continua permitida quando a copy realmente fala de dormir');
+const energyReturn = { ...czechOpening, semanticText: 'Este método recupera a energia que o homem tinha quando era jovem.',
+  semanticContextText: 'Este método recupera a energia que o homem tinha quando era jovem.',
+  narrativeDirection: 'recovery' as const, visualBeat: 'relief' as const };
+const happyMan = video({ id: 'happy-man', title: 'HOMEM SORRINDO FELIZ', nicheId: 'relacionamento', nicheName: 'Relacionamento' });
+const wrongPain = video({ id: 'wrong-pain', title: 'HOMEM COM DOR NO JOELHO', nicheId: 'dores', nicheName: 'Dores Articulares' });
+ok(rankStockFrameGenericFallback(energyReturn, [happyMan, educationalEdFallback, wrongPain], 10)[0]?.video.id === 'happy-man',
+  'retorno da energia pode preferir homem feliz de pack geral a anatomia genérica, sem aceitar outra patologia');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);
