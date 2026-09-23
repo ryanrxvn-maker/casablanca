@@ -102,6 +102,7 @@ function LazyVideo({ video, active = false, focused = false, suspended = false, 
   const [hovering, setHovering] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
+  const [posterFailed, setPosterFailed] = useState(false);
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const [decodedAspect, setDecodedAspect] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -116,8 +117,9 @@ function LazyVideo({ video, active = false, focused = false, suspended = false, 
   useEffect(() => {
     setVideoReady(false); setVideoFailed(false); setPlaybackBlocked(false); setDecodedAspect(null);
   }, [video.id, video.previewUrl]);
+  useEffect(() => { setPosterFailed(false); }, [video.id, video.posterUrl]);
   const playVideo = !suspended && (active || hovering || focused);
-  useEffect(() => { if (!playVideo || !visible) setVideoReady(false); }, [playVideo, visible]);
+  useEffect(() => { if (!visible) setVideoReady(false); }, [visible]);
   useEffect(() => {
     const node = player.current;
     if (!node || !playVideo) return;
@@ -130,14 +132,39 @@ function LazyVideo({ video, active = false, focused = false, suspended = false, 
   const metadataAspect = video.width > 0 && video.height > 0 ? video.width / video.height : video.aspectRatio === '9:16' ? 9 / 16 : 16 / 9;
   const mediaAspect = decodedAspect || metadataAspect;
   const mediaState = suspended ? 'suspended' : !video.previewUrl ? 'unavailable' : videoFailed ? 'error' : playbackBlocked ? 'paused' : !videoReady ? 'loading' : 'ready';
+  // A preview can supply a still frame when a thumbnail is missing or broken.
+  // Only visible cards load that fallback; healthy cards remain image-only until hover.
+  const usePreviewAsPoster = !video.posterUrl || posterFailed;
+  const showVideo = visible && (playVideo || usePreviewAsPoster) && !!video.previewUrl && !videoFailed;
+  useEffect(() => {
+    const node = player.current;
+    if (!showVideo || !usePreviewAsPoster || playVideo || !node) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Playing a muted fraction is more reliable than seeking a signed preview:
+    // some storage hosts do not support byte-range seeking on short previews.
+    void node.play().then(() => {
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        node.pause();
+        setVideoReady(true);
+      }, 700);
+    }).catch(() => { if (!cancelled) setVideoReady(true); });
+    return () => { cancelled = true; if (timer) clearTimeout(timer); node.pause(); };
+  }, [showVideo, usePreviewAsPoster, playVideo, video.previewUrl, attempt]);
   return <div ref={root} className={`${s.media} ${active ? s.mediaActive : ''}`} data-preview-active={active ? 'true' : undefined} data-media-state={active ? mediaState : undefined}
     style={active ? { aspectRatio: mediaAspect, maxWidth: `min(100%, calc(min(54dvh, 560px) * ${mediaAspect}))` } : undefined}
     onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-    {visible && video.posterUrl ? <img src={video.posterUrl} alt="" loading="lazy" onError={() => onMediaError?.(video.id)}/> : null}
-    {visible && playVideo && video.previewUrl && !videoFailed ? <video key={`${video.id}:${video.previewUrl}:${attempt}`} ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline controls={active} preload={active ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'}
+    {visible && video.posterUrl && !posterFailed ? <img src={video.posterUrl} alt="" loading="lazy" onError={() => { setPosterFailed(true); onMediaError?.(video.id); }}/> : null}
+    {showVideo ? <video key={`${video.id}:${video.previewUrl}:${attempt}`} ref={player} src={video.previewUrl} poster={posterFailed ? undefined : video.posterUrl} muted loop playsInline controls={active} preload={active || usePreviewAsPoster ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'}
       aria-label={active ? `Prévia de ${video.title}` : undefined}
-      onLoadedMetadata={(event) => { const node = event.currentTarget; if (node.videoWidth > 0 && node.videoHeight > 0) setDecodedAspect(node.videoWidth / node.videoHeight); }}
-      onCanPlay={() => setVideoReady(true)} onPlaying={() => setPlaybackBlocked(false)}
+      onLoadedMetadata={(event) => {
+        const node = event.currentTarget;
+        if (node.videoWidth > 0 && node.videoHeight > 0) setDecodedAspect(node.videoWidth / node.videoHeight);
+      }}
+      onLoadedData={() => { if (playVideo || !usePreviewAsPoster) setVideoReady(true); }}
+      onCanPlay={() => { if (playVideo || !usePreviewAsPoster) setVideoReady(true); }}
+      onPlaying={() => setPlaybackBlocked(false)}
       onError={() => { setVideoFailed(true); onMediaError?.(video.id); }}/> : null}
     {active && !suspended && mediaState !== 'ready' ? <div className={s.mediaStatus} role="status" aria-live="polite">
       {mediaState === 'loading' ? <><span className={s.miniLoader} aria-hidden="true"/><strong>Carregando prévia…</strong><span>A imagem é a miniatura deste take.</span></> :
@@ -145,7 +172,7 @@ function LazyVideo({ video, active = false, focused = false, suspended = false, 
           mediaState === 'error' ? <><strong>Não foi possível reproduzir</strong><span>A prévia falhou ao carregar.</span><button type="button" onClick={() => { setVideoFailed(false); setVideoReady(false); setPlaybackBlocked(false); setAttempt((value) => value + 1); }}>Tentar novamente</button></> :
             <><strong>Prévia pausada</strong><button type="button" onClick={() => { void player.current?.play().then(() => setPlaybackBlocked(false)).catch(() => setPlaybackBlocked(true)); }}><Icon name="play" size={15}/>Reproduzir prévia</button></>}
     </div> : null}
-    {!active && !video.posterUrl && (!playVideo || !video.previewUrl || videoFailed) ? <span className={s.mediaFallback}><Icon name="play" size={28}/></span> : null}
+    {!active && usePreviewAsPoster && (!video.previewUrl || videoFailed) ? <span className={s.mediaFallback}><Icon name="play" size={28}/></span> : null}
     <span className={s.duration}>{formatDuration(video.durationSec)}</span>
     <span className={s.ratio}>{video.aspectRatio === 'unknown' ? 'vídeo' : video.aspectRatio}</span>
   </div>;
@@ -246,6 +273,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const downloadedFiles = useRef(new Map<string, File>());
   const operationLocked = useRef(false);
   const mediaRefreshAttempts = useRef(new Map<string, number>());
+  const mediaRepairAttempts = useRef(new Map<string, number>());
   const planContext = JSON.stringify({ parts, coverage, pace, nicheId: filters.nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin });
   const planIsCurrent = plannedContext === planContext;
 
@@ -331,6 +359,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
 
   async function repairMedia(id: string) {
     if (!account?.capabilities.mediaUrls) return;
+    // Broken source assets may receive a fresh signed URL for the same unusable
+    // file. Bound automatic retries so one card cannot continuously re-sign it.
+    const attempts = mediaRepairAttempts.current.get(id) || 0;
+    if (attempts >= 2) return;
+    mediaRepairAttempts.current.set(id, attempts + 1);
     mediaRefreshAttempts.current.delete(id);
     const all = [...page.videos, ...smart.flatMap((segment) => segment.candidates.map((candidate) => candidate.video)), ...(selected ? [selected] : [])];
     const target = all.find((video) => video.id === id);

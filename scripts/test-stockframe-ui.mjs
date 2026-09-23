@@ -107,6 +107,62 @@ async function previewStateScenario(mode) {
   }
 }
 
+async function brokenThumbnailFallbackScenario() {
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await page.addInitScript(() => {
+    window.__stockFrameMediaRefreshes = 0;
+    const post = window.postMessage.bind(window);
+    window.postMessage = (message, ...args) => {
+      if (message?.source === 'pilot-stockframe' && message.action === 'mediaUrls') window.__stockFrameMediaRefreshes++;
+      if (message?.source === 'stockframe-extension' && message?.extensionId === 'stockframe-dev-preview' && Array.isArray(message.payload?.data?.videos)) {
+        message = structuredClone(message);
+        message.payload.data.videos = message.payload.data.videos.map((video, index) => index === 0
+          ? { ...video, poster_url: 'https://darkoautoedit.com/__stockframe-broken-poster.jpg', thumbnail_url: 'https://darkoautoedit.com/__stockframe-broken-poster.jpg', preview_url: 'https://darkoautoedit.com/__stockframe-preview-test.mp4' }
+          : video);
+      }
+      return post(message, ...args);
+    };
+  });
+  await page.route('https://darkoautoedit.com/__stockframe-broken-poster.jpg', route => route.fulfill({ status: 200, contentType: 'image/jpeg', body: 'not an image' }));
+  await page.route('https://darkoautoedit.com/__stockframe-preview-test.mp4', route => route.fulfill({ status: 200, contentType: 'video/mp4', path: resolve('public/lipsync-talking-1.mp4') }));
+  try {
+    const dialog = await openPreview(page);
+    const card = dialog.locator('article').first();
+    await page.waitForFunction(() => {
+      const card = document.querySelector('[role="dialog"] article');
+      const video = card?.querySelector('video');
+      return video instanceof HTMLVideoElement && video.readyState >= 2 && video.dataset.ready === 'true' && video.paused
+        && video.currentTime >= 0.2 && Number(getComputedStyle(video).opacity) > .95;
+    }, null, { timeout: 20_000 });
+    if (await card.locator('img').count()) throw new Error('Thumbnail quebrada continua visível no card.');
+    await page.waitForTimeout(500);
+    const videoMetrics = await card.locator('video').evaluate((video) => ({
+      opacity: getComputedStyle(video).opacity,
+      ready: video.dataset.ready,
+      paused: video.paused,
+      currentTime: video.currentTime,
+      duration: video.duration,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      readyState: video.readyState,
+      src: video.currentSrc,
+    }));
+    if (videoMetrics.opacity !== '1' || videoMetrics.currentTime < 0.2) throw new Error(`Fallback não exibiu um quadro real do preview: ${JSON.stringify(videoMetrics)}`);
+    const refreshes = await page.evaluate(() => window.__stockFrameMediaRefreshes);
+    if (refreshes > 2) throw new Error(`A thumbnail quebrada disparou ${refreshes} renovações de URL.`);
+    await page.screenshot({ path: resolve(outputDir, 'broken-thumbnail-fallback.png'), fullPage: false });
+    return { pausedVideoFrame: true, mediaRefreshes: refreshes, videoMetrics };
+  } finally {
+    await page.close();
+  }
+}
+
+if (process.env.STOCKFRAME_ONLY_BROKEN_THUMB === '1') {
+  try { console.log(JSON.stringify(await brokenThumbnailFallbackScenario(), null, 2)); }
+  finally { await browser.close(); }
+  process.exit(0);
+}
+
 try {
   const desktop = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
   await desktop.addInitScript(() => {
@@ -262,6 +318,7 @@ try {
     unavailable: await previewStateScenario('unavailable'),
     error: await previewStateScenario('error'),
     loadingThenPortrait: await previewStateScenario('loading'),
+    brokenThumbnailFallback: await brokenThumbnailFallbackScenario(),
   };
 
   if (errors.length) throw new Error(errors.join('\n'));
