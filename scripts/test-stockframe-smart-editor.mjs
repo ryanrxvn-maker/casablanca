@@ -64,8 +64,25 @@ try {
   await open();
   dialog = page.getByRole('dialog');
   assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'Plano com take escolhido deve permanecer ON');
+
+  const full = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await full.goto(process.env.STOCKFRAME_PREVIEW_URL || 'http://127.0.0.1:3100/dev/pilot-preview');
+  await full.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
+  const fullDialog = full.getByRole('dialog');
+  await fullDialog.getByText('Conta Premium de Teste').waitFor();
+  await fullDialog.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
+  await fullDialog.getByRole('button', { name: '100% de cobertura' }).click();
+  await fullDialog.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
+  await fullDialog.getByRole('heading', { name: /takes · 100% da copy/ }).waitFor({ timeout: 25000 });
+  await fullDialog.getByRole('button', { name: 'Deixar com avatar' }).click();
+  await fullDialog.getByRole('button', { name: 'Adicionar take' }).first().click();
+  await fullDialog.getByRole('button', { name: 'Usar no plano' }).first().click();
+  await fullDialog.getByRole('heading', { name: /takes · 100% da copy/ }).waitFor({ timeout: 10000 });
+  await fullDialog.getByRole('button', { name: 'Aplicar na montagem' }).click();
+  await fullDialog.getByRole('button', { name: /Ajustar \d+ takes/ }).waitFor({ timeout: 30000 });
+  await full.close();
   assert.deepEqual(errors, []);
-  console.log('StockFrame Smart editor: OFF/ON, avatar gaps, add/remove without download, alternatives outside plan OK.');
+  console.log('StockFrame Smart editor: OFF/ON, avatar gaps, add/remove without download, alternatives outside plan, edited 100% apply OK.');
 } finally {
   await browser.close();
 }

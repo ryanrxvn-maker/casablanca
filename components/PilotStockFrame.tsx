@@ -616,10 +616,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     if (!planIsCurrent) { setError('A copy ou as opções mudaram. Analise novamente antes de aplicar.'); return; }
     const planned = smart.map((segment) => ({ segment, candidate: selectedSmartCandidate(segment) })).filter((item) => !!item.candidate);
     if (!planned.length) { setError('Escolha pelo menos um take no plano inteligente.'); return; }
-    if (coverage === 100 && planned.length !== smart.length) {
-      setError('Para cobertura de 100%, todos os trechos precisam de um take. Escolha as alternativas dos trechos vazios ou reduza a cobertura.'); return;
-    }
-    const measured = measureSmartStockCoverage(parts, smart);
+    const measured = measureSmartStockCoverage(parts, planned.map(({ segment }) => segment));
     if (coverage === 100 && !measured.complete) {
       setError('A cobertura 100% precisa preencher todas as palavras da copy, sem lacunas nem sobreposição. Revise os limites editados antes de aplicar.'); return;
     }
