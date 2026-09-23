@@ -355,6 +355,42 @@ function describeError(status: number, body: any): string {
   return `${msg}${code} (HTTP ${status})`;
 }
 
+/**
+ * De QUAL conta é o token do modo imagem. O modo imagem roda na conta conectada
+ * por OAuth no site — que pode NÃO ser a conta logada na extensão (o disparo
+ * normal). Em 23.09 um clone de voz da drmillion01 dava "Voice not found" porque
+ * o OAuth estava em outra conta: voz da biblioteca é pública e funciona em
+ * qualquer uma; clone é privado da conta que clonou. Só lê, não cobra.
+ */
+export async function contaDoToken(accessToken: string): Promise<string | null> {
+  try {
+    const r = await fetch(`${API_BASE}/v3/users/me`, { headers: headers(accessToken) });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    return j?.data?.email || j?.data?.username || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A voz existe PARA ESTE token? `true` visível · `false` 404 (clone de outra
+ * conta/voz apagada) · `null` não deu pra saber (rede/5xx) — nesse caso quem
+ * chama NÃO deve barrar o disparo por palpite.
+ */
+export async function vozVisivel(accessToken: string, voiceId: string): Promise<boolean | null> {
+  try {
+    const r = await fetch(`${API_BASE}/v3/voices/${encodeURIComponent(voiceId)}`, {
+      headers: headers(accessToken),
+    });
+    if (r.ok) return true;
+    if (r.status === 404) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function createImageVideo(
   accessToken: string,
   p: CreateImageVideoParams,

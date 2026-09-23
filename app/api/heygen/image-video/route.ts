@@ -9,6 +9,8 @@ import {
   getImageVideoStatus,
   accessTokenDoRefresh,
   lerCredencial,
+  contaDoToken,
+  vozVisivel,
   type ImageInput,
 } from '@/lib/heygen-image-video';
 
@@ -186,6 +188,23 @@ export async function POST(req: Request) {
       return jsonError('Suba uma imagem (ou informe uma URL HTTPS).', 400);
     }
 
+    // A voz tem que existir NA CONTA DO OAUTH. Clone de outra conta volta
+    // "Voice not found" cru e o take morre sem dizer por quê (23.09). Checar
+    // antes custa uma leitura e troca o erro cru por um que diz o que fazer.
+    if (!temAudio) {
+      const visivel = await vozVisivel(accessToken, voiceId);
+      if (visivel === false) {
+        const conta = await contaDoToken(accessToken);
+        return jsonError(
+          `A voz escolhida (${voiceId}) não existe na conta HeyGen do modo imagem` +
+            (conta ? ` (${conta})` : '') +
+            '. Clone de voz é privado da conta onde foi clonado. Use uma voz da biblioteca, ' +
+            'clone a voz nessa conta, ou reconecte o modo imagem com a conta onde o clone está.',
+          400,
+        );
+      }
+    }
+
     const RESOLUCOES = new Set(['720p', '1080p', '4k']);
     const EXPRESSIVIDADES = new Set(['low', 'medium', 'high']);
 
@@ -243,8 +262,12 @@ export async function GET(req: Request) {
       // diferença entre "vai renovar toda instância fria" e "renova a cada 10
       // dias". Nada aqui expõe o token — só forma e validade.
       const cred = lerCredencial(keyResult.key);
+      // `&voiceId=...`: essa voz existe na conta do modo imagem? Só leitura.
+      const vozDiag = new URL(req.url).searchParams.get('voiceId');
       return NextResponse.json({
         autenticou: true,
+        conta: await contaDoToken(accessToken),
+        ...(vozDiag ? { voiceId: vozDiag, vozExisteNestaConta: await vozVisivel(accessToken, vozDiag) } : {}),
         origemDoAccess: origem, // cache | banco | renovou
         gravadoComoPacote: !!cred.access,
         accessValeAte: cred.exp ? new Date(cred.exp).toISOString() : null,
