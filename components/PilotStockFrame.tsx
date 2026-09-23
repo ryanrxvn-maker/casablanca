@@ -415,9 +415,12 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       if (!skeleton.length) throw new Error('A copy não tem palavras suficientes para planejar os inserts.');
       const translation = await translateStockFrameCopy(skeleton, setSmartProgress);
       const localized = translation.translated ? localizeSmartSegments(skeleton, translation.texts, translation.contexts) : skeleton;
+      // Infer from the *entire* original copy first. A partial 60% plan may
+      // omit the one sentence naming ED/diabetes/etc.; inferring solely from
+      // translated selected snippets can incorrectly search another pack.
       const inferredNiche = filters.nicheId ? niches.find((niche) => niche.id === filters.nicheId)
-        : (translation.translated ? inferStockFrameNiche([{ label: 'COPY', text: translation.texts.join(' ') }], niches) : undefined)
-          || inferStockFrameNiche(parts, niches);
+        : inferStockFrameNiche(parts, niches)
+          || (translation.translated ? inferStockFrameNiche([{ label: 'COPY', text: translation.texts.join(' ') }], niches) : undefined);
       const nicheId = inferredNiche?.id || filters.nicheId;
       const campaignText = (translation.translated ? `${translation.texts.join(' ')} ${parts.map((part) => part.text).join(' ')}` : parts.map((part) => part.text).join(' ')).slice(0, 15_000);
       const segments = balanceMechanismPresence(localized).map((segment) => ({ ...segment, campaignText, campaignNicheId: nicheId }));
@@ -456,10 +459,14 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       // named mechanisms globally, then let the ingredient/anatomy gates decide.
       // Queries are deduplicated, bounded and never download originals.
       const mechanismVideos: StockFrameVideo[] = [];
-      const sceneQueries = segments.some((segment) => /\bcasal\b/i.test(segment.semanticText || segment.text)
-        && /\bconvers\w*/i.test(segment.semanticText || segment.text))
-        ? ['casal conversando', 'casal sorrindo', 'casal abracando', 'casal sentado'] : [];
-      const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])];
+      const storyText = segments.map((segment) => segment.semanticText || segment.text).join(' ').toLowerCase();
+      const sceneQueries: string[] = [];
+      if (/\b(?:energia|vigor|jovem|disposi[cç][aã]o)\b/.test(storyText)) sceneQueries.push('homem ativo', 'homem sorrindo');
+      if (/\b(?:testosterona|circula[cç][aã]o|fluxo sangu[ií]neo)\b/.test(storyText)) sceneQueries.push('fluxo sanguineo', 'sistema reprodutor masculino');
+      if (/\b(?:mulher(?:es)?|casal|marido|esposa|relacionamento|satisfazer)\b/.test(storyText)) sceneQueries.push('casal conversando', 'homem preocupado');
+      if (/\b(?:especialista|urologista|m[eé]dic[ao])\b/.test(storyText)) sceneQueries.push('urologista explicando');
+      if (/\b(?:durar|aguentar|resistir)\b.{0,45}\b(?:mais|tempo|minutos|horas)\b/.test(storyText)) sceneQueries.push('casal sorrindo');
+      const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])].slice(0, 12);
       for (let index = 0; index < globalQueries.length; index += 3) {
         setSmartProgress('Buscando cenas congruentes em toda a biblioteca…');
         const results = await Promise.all(globalQueries.slice(index, index + 3).map(search => stockFrameList({

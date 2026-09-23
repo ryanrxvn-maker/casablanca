@@ -519,5 +519,30 @@ const bridgeOptions = rankStockFrameGenericFallback(neutralBridge, [educationalE
 ok(bridgeOptions[0]?.video.id === 'generic-doctor',
   'frase de ligação prefere consulta humana a anatomia repetida');
 
+// Regressão do Pilot real: 60% escolhe somente parte da copy tcheca. O nicho
+// deve vir da copy completa, onde "potenci" aparece, não só dos recortes que
+// podem falar de juventude e cair indevidamente em Rejuvenescimento.
+const czechFullNiche = inferStockFrameNiche([{ label: 'BODY 1',
+  text: 'Pokud si myslíte, že po padesátce je normální, že už to nestojí, tento trik s jedlou sodou vrací potenci.' }], [
+  { id: 'rejuvenescimento', name: 'Rejuvenescimento', count: 100 },
+  { id: 'ed', name: 'ED', count: 286 },
+]);
+ok(czechFullNiche?.id === 'ed', 'copy tcheca completa ancora o catálogo no nicho ED antes dos recortes traduzidos');
+const unrelatedActions = [
+  video({ id: 'dressing', title: 'MULHER VESTINDO ROUPA', nicheId: 'ed', nicheName: 'ED', tags: ['especialista', 'potência'] }),
+  video({ id: 'wakeup', title: 'MULHER TENTANDO ACORDAR MARIDO', nicheId: 'ed', nicheName: 'ED', tags: ['potência'] }),
+];
+const specialistSegment = { ...czechOpening, semanticText: 'A especialista mostra em vídeo como preparar a receita.',
+  semanticContextText: 'A especialista mostra em vídeo como preparar a receita.' };
+ok(!rankStockFrameVideos(specialistSegment, [unrelatedActions[0]], 10, true).length
+  && !rankStockFrameGenericFallback(specialistSegment, [unrelatedActions[0]], 10).length,
+  'especialista ensinando preparo não vira mulher vestindo roupa');
+const durationSegment = { ...czechOpening, semanticText: 'Este truque ajuda o homem a durar pelo menos 20 minutos mais.',
+  semanticContextText: 'Este truque ajuda o homem a durar pelo menos 20 minutos mais.' };
+const symptomDoctor = video({ id: 'doctor-broxa', title: 'MÉDICO APONTANDO PARA BROXA', nicheId: 'ed', nicheName: 'ED' });
+ok(!rankStockFrameVideos(durationSegment, [unrelatedActions[1], symptomDoctor], 10, true).length
+  && !rankStockFrameGenericFallback(durationSegment, [unrelatedActions[1], symptomDoctor], 10).length,
+  'benefício de duração não recebe marido sendo acordado nem imagem do sintoma oposto');
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

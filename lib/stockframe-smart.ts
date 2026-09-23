@@ -217,9 +217,10 @@ function conceptsOf(value: string): string[] {
  * separate from recovery even when both descriptions contain "dor". */
 function narrativeDirection(value: string): NonNullable<SmartStockSegment['narrativeDirection']> {
   const text = normalize(value);
-  if (/\b(?:frustrad\w*|sofrend\w*|impotencia|disfuncao eretil|dificuldade (?:de|para) erecao|sem erecao)\b/.test(text)) return 'distress';
+  if (/\b(?:frustrad\w*|sofrend\w*|impotencia|disfuncao eretil|dificuldade (?:de|para) erecao|sem erecao|broxa|nao (?:consegue|consigo|conseguia) durar)\b/.test(text)) return 'distress';
   if (/\b(?:dor(?:es)? (?:ainda )?(?:continua\w*|persist\w*|pior\w*)|ainda (?:sinto|sente|sentia|sofr\w*)|nao (?:consigo|consegue|conseguia) (?:mais )?(?:andar|caminhar|subir|dormir)|sem alivio|nao (?:houve |senti |sentiu )?melhora)\b/.test(text)) return 'distress';
   if (/\b(?:nao (?:sinto|sente|sentimos|tem|tenho|sente\w*) mais (?:a |as |nenhuma )?(?:dor|dores|desconforto)|sem (?:sentir |nenhuma )?(?:dor|dores|desconforto)|livre d[ae] (?:dor|dores)|dor(?:es)? (?:desaparec\w*|sumiu|passou)|alivio|recuperad\w*|volte?i? a (?:andar|caminhar)|voltou a (?:andar|caminhar)|melhora\w*|feliz|alegria)\b/.test(text)) return 'recovery';
+  if (/\b(?:durar|dure|dura|aguentar|resistir)\b.{0,45}\b(?:mais|longer|tempo|minutos|horas)\b/.test(text)) return 'recovery';
   return conceptsOf(text).includes('emocao-negativa') ? 'distress' : 'neutral';
 }
 
@@ -553,6 +554,17 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   }
   if (CONFLICT_SCENE.test(prepared.title) && !CONFLICT_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['cena de conflito não descrita na fala'] };
+  }
+  // Generic human imagery must still depict the action being spoken. These
+  // two catalog scenes used to displace specialist/benefit shots on a Czech
+  // ED ad solely because their tags mentioned the same niche.
+  if (/\b(?:vestind\w*|tirando roupa|getting dressed)\b/.test(prepared.title)
+      && !/\b(?:vestind\w*|roupa|dress\w*|clothes)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['troca de roupa não é a ação narrada'] };
+  }
+  if (/\b(?:acord\w*|wake\w*)\b/.test(prepared.title)
+      && !/\b(?:acord\w*|wake\w*|sono|dorm\w*|sleep\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['acordar alguém não é a ação narrada'] };
   }
   if (smart?.negativeKeywords.some((keyword) => ranking.contextNormalized.includes(normalize(keyword)))) {
     return { video, score: -100, reasons: ['metadado visual exclui o assunto deste trecho'] };
