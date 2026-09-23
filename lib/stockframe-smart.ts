@@ -89,8 +89,10 @@ const BOTANICAL = /\b(?:erva|ervas|hierba|hierbas|herb|herbs|ziola|ziol|krauter|
 const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|receta|rezept|przepis|mistura|mixture|mezcla|mischung|caseiro|caseira|homemade|casero|domowy|ervas?|herbs?|ziola|plantas?|plants?|formula natural)\b/;
 // These describe a visible sexual act, not reproductive health. In particular,
 // "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
-const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|fazendo anal|sexo anal|penetracao anal|pau defeituoso|pau mole|boquete|gemendo|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
-const SUGGESTIVE_SCENE = /\b(?:apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|gestos? sexua\w*|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*)\b/;
+const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|fazendo anal|sexo anal|penetracao anal|pau defeituoso|pau mole|boquete|gemendo|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculacao|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
+const SUGGESTIVE_SCENE = /\b(?:duplo sentido|safad\w*|seux\w*|sexua\w*|apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*|(?:homem|velho) com erecao)\b/;
+const CONFLICT_SCENE = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
+const CONFLICT_COPY = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
 const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
@@ -531,8 +533,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   }
   if (/\b(?:mulher(?:es)?|esposa|parceira|casal)\b/.test(ranking.spokenNormalized)
       && /\b(?:dinheiro|grana|pagamento|pagar)\b/.test(ranking.spokenNormalized)
-      && /\b(?:industria farmaceutica|farmaceutic\w*|laboratorio de remedios)\b/.test(prepared.contentText)) {
+      && /\b(?:medico|industria|farmaceutic\w*|laboratorio de remedios)\b/.test(prepared.title)
+      && !/\b(?:mulher(?:es)?|esposa|parceira|casal)\b/.test(prepared.title)) {
     return { video, score: -100, reasons: ['dinheiro da indústria farmacêutica não representa a fala sobre relacionamento'] };
+  }
+  if (CONFLICT_SCENE.test(prepared.title) && !CONFLICT_COPY.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['cena de conflito não descrita na fala'] };
   }
   if (smart?.negativeKeywords.some((keyword) => ranking.contextNormalized.includes(normalize(keyword)))) {
     return { video, score: -100, reasons: ['metadado visual exclui o assunto deste trecho'] };
@@ -544,6 +550,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['ingrediente diferente da combinação da copy'] };
   }
   const localRecipeReference = LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized);
+  const namedRecipeIngredients = ranking.localIngredients.length ? ranking.localIngredients
+    : localRecipeReference ? campaignIngredients : [];
+  if (namedRecipeIngredients.length && /\b(?:cozinh\w*|receita|prepar\w*|mistur\w*|mix\w*)\b/.test(prepared.title)
+      && !videoIngredients.some(ingredient => namedRecipeIngredients.includes(ingredient))) {
+    return { video, score: -100, reasons: ['cena de preparo não mostra o ingrediente nomeado neste trecho'] };
+  }
   const ingredientEvidence = videoIngredients.some((ingredient) => ranking.localIngredients.includes(ingredient)
     || (localRecipeReference && ranking.contextIngredients.includes(ingredient))
     || (localRecipeReference && beat === 'demonstration' && campaignIngredients.includes(ingredient)));

@@ -437,7 +437,9 @@ ok(rankStockFrameVideos(czechMechanism, [video({ id: 'woman-soda', title: 'MULHE
 const misleadingEdTitles = [
   'MULHER TIRANDO CALCINHA', 'MULHER NO ATO', 'MULHER FAZENDO GESTOS SEXUAIS COM A MÃO',
   'MULHER NA ACADEMIA COM SEGUNDAS INTENÇÕES', 'CASAL DORMINDO JUNTOS HOT', 'MULHER BISCOITANDO',
-  'PAU DEFEITUOSO FAZENDO ANAL',
+  'PAU DEFEITUOSO FAZENDO ANAL', 'HOMEM ENFIANDO DEDO EM COCO E SAINDO AGUA DUPLO SENTIDO SEXUAL',
+  'DUPLO SENTIDO BROXA', 'MULHER FAZENDO GESTOS SEUXAIS COM A MÃO', 'DUPLO SENTIDO/IREAL',
+  'MULHER SAFADA', 'VELHO COM EREÇÃO', 'ANIMAÇÃO 3D EREÇÃO E EJACULAÇÃO',
 ];
 const misleadingEd = misleadingEdTitles.map((title, index) => video({ id: `misleading-${index}`, title,
   nicheId: 'ed', nicheName: 'ED', tags: ['potência', 'bicarbonato', 'especialista', 'casal'] }));
@@ -454,9 +456,19 @@ ok(!rankStockFrameVideos(czechMoney, [video({ id: 'woman-only', title: 'Mulher n
   'mulher e nicho ED não são evidência suficiente para uma frase sobre dinheiro');
 const pharmaMoney = video({ id: 'pharma-money', title: 'MÉDICO COM DINHEIRO NA INDUSTRIA FARMACEUTICA',
   nicheId: 'ed', nicheName: 'ED', tags: ['dinheiro', 'potência'] });
-ok(!rankStockFrameVideos(czechMoney, [pharmaMoney], 10, true).length
-  && !rankStockFrameGenericFallback(czechMoney, [pharmaMoney], 10).length,
+const pharmaMoneyVariant = video({ id: 'pharma-money-2', title: 'MEDICO CONTANDO DINHEIRO NA INDUSTRIA',
+  nicheId: 'ed', nicheName: 'ED', tags: ['dinheiro', 'potência'] });
+ok(!rankStockFrameVideos(czechMoney, [pharmaMoney, pharmaMoneyVariant], 10, true).length
+  && !rankStockFrameGenericFallback(czechMoney, [pharmaMoney, pharmaMoneyVariant], 10).length,
   'dinheiro de indústria farmacêutica não representa mulheres e relacionamento');
+const wrongRecipeScene = video({ id: 'romantic-cooking', title: 'CASAL APAIXONADO COZINHANDO',
+  nicheId: 'ed', nicheName: 'ED', tags: ['receita', 'preparo'] });
+ok(!rankStockFrameVideos({ ...czechMechanism, campaignIngredients: ['bicarbonato'] }, [wrongRecipeScene], 10, true).length,
+  'fala que nomeia bicarbonato não recebe cozinha genérica sem o ingrediente');
+const wrongConflict = video({ id: 'couple-fighting', title: 'MULHER DISCUTINDO COM MARIDO NA CAMA',
+  nicheId: 'ed', nicheName: 'ED', tags: ['casal', 'relacionamento'] });
+ok(!rankStockFrameVideos({ ...czechOpening, semanticText: 'A especialista mostra como ter mais potência na cama.' }, [wrongConflict], 10, true).length,
+  'prova de desempenho não vira conflito do casal na cama');
 const educationalEdFallback = video({ id: 'ed-anatomy-fallback', title: 'ANIMAÇÃO 3D EREÇÃO SANGUE',
   description: 'Anatomia do sistema reprodutor masculino e fluxo sanguíneo', nicheId: 'ed', nicheName: 'ED' });
 ok(rankStockFrameGenericFallback(czechOpening, [educationalEdFallback], 10).some(candidate => candidate.video.id === 'ed-anatomy-fallback'),
