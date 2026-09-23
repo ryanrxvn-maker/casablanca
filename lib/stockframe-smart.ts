@@ -145,7 +145,7 @@ export function smartStockMechanismQueries(segments: SmartStockSegment[]): strin
 export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockFrameNiche[]): StockFrameNiche | undefined {
   const copy = normalize(parts.map((part) => part.text).join(' '));
   const aliases: [RegExp, RegExp][] = [
-    [/\b(?:ed|disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|impotence|disfuncion erectil|ereccion|zaburzenia erekcji|erekcja|erektionsstorung)\b/, /\b(?:ed|erecao|disfuncao eretil|erectile|erekcja|ereccion)\b/],
+    [/\b(?:ed|disfuncao eretil|erecao|impotencia|potencia|desempenho sexual|erectile dysfunction|erection|impotence|potency|disfuncion erectil|ereccion|zaburzenia erekcji|erekcja|erekci|potenci|erektionsstorung)\b/, /\b(?:ed|erecao|disfuncao eretil|erectile|erekcja|ereccion)\b/],
     [/\b(?:prostata|prostate|prostaty|prostatitis|prostatite)\b/, /\b(?:prostata|prostate)\b/],
     [/\b(?:joelho|artrose|artrite|articulac\w*|dor(?:es)? articulares?|joint pain|arthritis|dolor articular|bol stawow|gelenkschmerz)\b/, /\b(?:dores? articulares?|articulac\w*|joint|stawow|arthritis)\b/],
     [/\b(?:diabetes|diabetico|glicose|glicemia|insulina|blood sugar|glucose|azucar en sangre|cukrzyca|blutzucker)\b/, /\b(?:diabetes|diabetic|cukrzyca)\b/],

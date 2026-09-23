@@ -250,6 +250,8 @@ for (const [copy, id] of [
   ['Prostate health and frequent urination', 'prostate'],
   ['Mi vista empeoró y mis ojos cansados', 'vision'],
   ['Zaburzenia erekcji i moja partnerka', 'ed'],
+  ['S potencí, kterou by vám záviděl každý dvacetiletý mladík.', 'ed'],
+  ['Um truque que devolve sua potência depois dos cinquenta.', 'ed'],
   ['Cukrzyca typu 2 i poziom glukozy', 'diabetes'],
   ['Menopause symptoms and hot flashes', 'menopause'],
   ['Lipoedema affects my legs', 'lipedema'],
