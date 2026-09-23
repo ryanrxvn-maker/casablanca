@@ -89,6 +89,8 @@ export type PipelineInputs = {
     info: {
       filename: string;
       partesSec: number[] | null;
+      /** Labels na ordem EXATA dos blobs deste montado (um hook + body). */
+      partLabels?: string[];
       /** durações dos PEDAÇOS de cada parte depois da decupagem, na mesma
        *  ordem. Cada corte de silêncio é um jump cut, e o zoom não pode
        *  atravessar nenhum. `null` = decupagem desligada ou sem medida. */
@@ -957,7 +959,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // vídeo original segue inteiro.
   if (posProcessar) {
     for (let g = 0; g < out.length; g++) {
-      const item = out[g] as AssembledPart & { _leveledParts?: Blob[] };
+      const item = out[g] as AssembledPart & { _leveledParts?: Blob[]; _partLabels?: string[] };
       if (item.errors?.assemble) continue;
       const src = item.decupado || item.rawAssembled;
       if (!src || src.size === 0) continue;
@@ -985,7 +987,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       })();
 
       try {
-        const novo = await posProcessar(src, { filename: item.filename, partesSec, cortesInternosSec: pedacos });
+        const novo = await posProcessar(src, { filename: item.filename, partesSec, partLabels: item._partLabels?.slice(), cortesInternosSec: pedacos });
         if (novo && novo.size > 50_000) {
           // O entregue passa a ser o pós-produzido. `decupado` é o campo que o
           // downstream prefere (camuflado ?? decupado ?? rawAssembled), então
@@ -1001,7 +1003,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         if (/terminat/i.test(msg1)) {
           console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: ffmpeg terminado POR FORA — refazendo uma vez`);
           try {
-            const novo2 = await posProcessar(src, { filename: item.filename, partesSec, cortesInternosSec: pedacos });
+            const novo2 = await posProcessar(src, { filename: item.filename, partesSec, partLabels: item._partLabels?.slice(), cortesInternosSec: pedacos });
             if (novo2 && novo2.size > 50_000) {
               item.decupado = novo2;
               console.log(`[clickup-pilot-pipeline] posprod ${item.filename}: OK na retentativa ${(novo2.size / (1024 * 1024)).toFixed(1)}MB`);
@@ -1011,6 +1013,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
               continue;
             }
           } catch (e2) {
+            if ((e2 as Error)?.name === 'IncompleteStockFrameCoverageError') throw e2;
             console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: retentativa também falhou:`, e2);
           }
         }

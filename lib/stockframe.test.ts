@@ -1,5 +1,5 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
-import { balanceMechanismPresence, chooseCampaignRecipeTheme, chooseSmartStockAssignments, inferStockFrameNiche, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameVideos } from './stockframe-smart';
+import { balanceMechanismPresence, chooseCampaignRecipeTheme, chooseSmartStockAssignments, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries } from './stockframe-smart';
 
 let passed = 0;
 let failed = 0;
@@ -189,11 +189,15 @@ const recipes = [
   video({ id: 'limao', title: 'Cortando limão', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas' }),
   video({ id: 'bicarb-vick', title: 'Bicarbonato com Vick', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas', finalScore: 0.99 }),
   video({ id: 'bicarb-babosa', title: 'Bicarbonato com babosa', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas', finalScore: 0.99 }),
+  video({ id: 'banana-mel-limao', title: 'RECEITA DE BANANA COM MEL E LIMAO', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas' }),
+  video({ id: 'cebola-laranja-mel', title: 'CEBOLA COM LARANJA MEL E LIMAO', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas' }),
+  video({ id: 'limao-vaselina', title: 'JOGANDO LIMAO NA VASELINA', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas' }),
+  video({ id: 'limao-abobora', title: 'JOGANDO LIMAO NA SEMENTE DE ABOBORA', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Receitas' }),
   video({ id: 'dores-recipe', title: 'Bicarbonato com mel', nicheId: 'dores', nicheName: 'Dores Articulares', finalScore: 0.99 }),
 ];
 const recipeRanking = rankStockFrameVideos(recipeSegment, recipes, 20, true);
 ok(['bicarb-mel', 'mel', 'limao'].every((id) => recipeRanking.some((candidate) => candidate.video.id === id)), 'combinação da copy admite qualquer subconjunto de ingredientes');
-ok(!recipeRanking.some((candidate) => ['bicarb-vick', 'bicarb-babosa', 'dores-recipe'].includes(candidate.video.id)), 'combinação da copy rejeita ingrediente extra e nicho estranho mesmo com score remoto alto');
+ok(!recipeRanking.some((candidate) => ['bicarb-vick', 'bicarb-babosa', 'banana-mel-limao', 'cebola-laranja-mel', 'limao-vaselina', 'limao-abobora', 'dores-recipe'].includes(candidate.video.id)), 'combinação da copy rejeita ingredientes extras reais do catálogo e nicho estranho mesmo com score remoto alto');
 const edNonRecipe = video({ id: 'ed-casal', title: 'Casal mais velho conversando com intimidade', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Relacionamento', smartMetadata: { summary: 'Casal conversa com intimidade', concepts: ['ereção', 'confiança'], subjects: ['casal'], actions: ['conversar'], objects: [], bodyParts: [], positiveKeywords: ['saúde masculina'], negativeKeywords: [], containsText: false, containsWatermark: false, graphicContent: false } });
 const edCoverage = edSegments.map((segment) => ({ ...segment, candidates: rankStockFrameVideos(segment, [edNonRecipe, ...recipes], 20, true) }));
 ok(edCoverage.some((segment) => segment.candidates.some((candidate) => candidate.video.id === 'ed-casal')), 'Smart Stocks considera cenas humanas do pack ED além de receitas');
@@ -265,6 +269,153 @@ const mechanismSegments = [
 ];
 const balanced = balanceMechanismPresence(mechanismSegments);
 ok(balanced[0].visualBeat === 'demonstration' && balanced[2].visualBeat === 'demonstration' && balanced[3].visualBeat === 'relief', 'mecanismo recebe presença forte sem apagar o momento de alívio');
+
+// Real ED catalog titles seen in the live full-coverage plan. Automatic ad
+// selection must not depend on the optional graphic_content API flag.
+const explicitEdTitles = [
+  'VELHO TRANSANDO COM MULHER (4)',
+  'MULHER FAZENDO ORAL EM VELHO',
+  'HOMEM EJACULANDO NO ROSTO DE MULHER DUPLO SENTIDO',
+  'CASAL EM MOMENTO LIBIDINOSO',
+  'RELAÇÃO SEXUAL/SEXO',
+];
+const explicitEd = explicitEdTitles.map((title, index) => video({ id: `explicit-${index}`, title,
+  nicheId: 'ed', nicheName: 'ED', finalScore: .99, downloads: 10000,
+  tags: ['ereção', 'saúde masculina', 'confiança', 'bicarbonato', 'mel'],
+}));
+ok(edSegments.every((segment) => !rankStockFrameVideos(segment, explicitEd, 20, true).length),
+  'títulos explícitos reais do catálogo ED não entram em full100 mesmo sem flags e com score remoto alto');
+const educationalEd = [
+  video({ id: 'ed-doctor', title: 'Médico explicando disfunção erétil e problemas com ereção', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'ed-anatomy', title: 'Anatomia 3D do pênis: circulação durante a ereção', nicheId: 'ed', nicheName: 'ED' }),
+];
+const edProblem = edSegments[0];
+ok(rankStockFrameVideos(edProblem, educationalEd, 10, true).length === 2,
+  'educação médica e anatomia reprodutiva continuam permitidas: ereção/pênis não são bloqueios');
+const surgeryEd = video({ id: 'ed-surgery', title: 'BROXA/CIRURGIA NO PENIS', nicheId: 'ed', nicheName: 'ED', tags: ['ereção'] });
+ok(!rankStockFrameVideos(edProblem, [surgeryEd], 10, true).length,
+  'cirurgia não é selecionada automaticamente quando a copy fala só da dificuldade de ereção');
+const surgeryCopy = { ...edProblem, text: 'O médico explica como funciona a cirurgia no pênis.', semanticText: 'O médico explica como funciona a cirurgia no pênis.',
+  contextText: 'O médico explica como funciona a cirurgia no pênis.', semanticContextText: 'O médico explica como funciona a cirurgia no pênis.' };
+ok(rankStockFrameVideos(surgeryCopy, [surgeryEd], 10, true).length > 0,
+  'cirurgia permanece disponível quando o procedimento é o assunto explícito da fala');
+const coupleConversation = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'Depois, o casal conversa com confiança.' }], { coverage: 100, pace: 'long' })[0],
+  campaignText: edCopy[0].text, campaignNicheId: 'ed' };
+const actualConversation = video({ id: 'couple-conversation', title: 'Casal conversando em casa', nicheId: 'relacionamento', nicheName: 'Relacionamento' });
+const neutralConversation = video({ id: 'couple-neutral', title: 'Casal sorrindo sentado no sofá', nicheId: 'relacionamento', nicheName: 'Relacionamento' });
+const wrongCoupleAction = video({ id: 'couple-massage', title: 'Mulher massageando namorado', nicheId: 'ed', nicheName: 'ED', tags: ['casal', 'confiança'] });
+ok(rankStockFrameVideos(coupleConversation, [actualConversation], 10, true).some((candidate) => candidate.video.id === 'couple-conversation'),
+  'uma cena real de conversa pode vir de um pack geral compatível com a campanha ED');
+ok(rankStockFrameVideos(coupleConversation, [neutralConversation], 10, true).some((candidate) => candidate.video.id === 'couple-neutral'),
+  'casal neutro permanece como alternativa visual para a fala de conversa');
+ok(!rankStockFrameVideos(coupleConversation, [wrongCoupleAction], 10, true).length,
+  'falar de conversa não seleciona massagem íntima apenas por coincidir com casal e confiança');
+const afterSex = video({ id: 'after-sex', title: 'HOMEM SUADO E CANSADO APÓS RELAÇÃO', nicheId: 'ed', nicheName: 'ED', tags: ['ereção', 'frustração', 'casal'] });
+const afterSexVariant = video({ id: 'after-sex-7', title: 'HOMEM SUADO E CANSADO APÓS RELAÇÃO7', nicheId: 'ed', nicheName: 'ED', tags: ['ereção', 'frustração', 'casal'] });
+ok(!rankStockFrameVideos(edProblem, [afterSex, afterSexVariant], 10, true).length,
+  'dificuldade de ereção não vira cena pós-relação, incluindo títulos com número colado');
+const explicitDescription = video({ id: 'explicit-description', title: 'Cena de confiança masculina', nicheId: 'ed',
+  description: 'Homem ejaculando no rosto de mulher', tags: ['ereção'] });
+ok(!rankStockFrameVideos(edProblem, [explicitDescription], 10, true).length,
+  'descrição explícita também prevalece sobre um título genérico e metadados de saúde');
+
+const neutralCta = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'Clique abaixo agora para saber todos os detalhes.' }], { coverage: 100, pace: 'long' })[0],
+  campaignNicheId: 'ed', campaignText: edCopy[0].text };
+const formatOnly = video({ id: 'format-only', title: 'Porta de madeira', nicheId: 'ed', nicheName: 'ED',
+  downloads: 999999, durationSec: neutralCta.targetSeconds, finalScore: 1, matchedConcepts: ['ereção'] });
+ok(!rankStockFrameVideos(neutralCta, [formatOnly, ...explicitEd], 20, true).length,
+  'full100 não admite cena por nicho, vertical, duração, popularidade ou score remoto sem evidência local');
+const taxonomyOnly = video({ id: 'taxonomy-only', title: 'Paisagem sem pessoas', nicheId: 'ed', nicheName: 'ED', subcategoryName: 'Problemas de ereção' });
+ok(!rankStockFrameVideos(edProblem, [taxonomyOnly], 10, true).length,
+  'nome da pasta não inventa ação visual ausente no título, descrição e metadados do take');
+
+const recipePack = [
+  video({ id: 'pack-honey-soda', title: 'Misturando bicarbonato e mel', nicheId: 'receitas', nicheName: 'Receitas caseiras', subcategoryName: 'Ingredientes' }),
+  video({ id: 'pack-lemon', title: 'Limão sendo espremido', nicheId: 'receitas', nicheName: 'Receitas caseiras' }),
+  video({ id: 'pack-vick', title: 'Bicarbonato com Vick', nicheId: 'receitas', nicheName: 'Receitas caseiras' }),
+  video({ id: 'other-pathology', title: 'Preparando bicarbonato e mel', nicheId: 'diabetes', nicheName: 'Diabetes Tipo 2' }),
+];
+const crossPack = rankStockFrameVideos(recipeSegment, recipePack, 20, true);
+ok(crossPack.some((candidate) => candidate.video.id === 'pack-honey-soda') && crossPack.some((candidate) => candidate.video.id === 'pack-lemon'),
+  'campanha ED usa ingredientes congruentes do pack de receitas e seus subconjuntos');
+ok(!crossPack.some((candidate) => ['pack-vick', 'other-pathology'].includes(candidate.video.id)),
+  'abertura de pack para mecanismos não libera fórmula extra nem outro nicho patológico');
+const isolatedEdProblem = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'Eu tinha problemas com ereção e me sentia frustrado.' }], { coverage: 100, pace: 'long' })[0],
+  campaignText: edCopy[0].text, campaignNicheId: 'ed' };
+ok(!rankStockFrameVideos(isolatedEdProblem, recipePack, 20, true).length,
+  'mecanismo de outro pack não ocupa trecho exclusivamente sobre problemas de ereção');
+
+const czechSource = planSmartStockSegments([{ label: 'BODY 1', text: 'Smíchejte jedlou sodu s medem a citronem.' }], { coverage: 100, pace: 'long' });
+const translatedRecipe = { ...localizeSmartSegments(czechSource, ['Misture bicarbonato com mel e limão.'], ['Misture bicarbonato com mel e limão.'])[0],
+  campaignNicheId: 'ed' };
+const translatedRanking = rankStockFrameVideos(translatedRecipe, [...recipePack, ...explicitEd, formatOnly], 20, true);
+ok(translatedRanking.some((candidate) => candidate.video.id === 'pack-honey-soda')
+  && !translatedRanking.some((candidate) => candidate.video.id.startsWith('explicit') || ['pack-vick', 'format-only', 'other-pathology'].includes(candidate.video.id)),
+  'copy tcheca traduzida para PT usa evidência semântica e bloqueia todos os falsos positivos do catálogo vivo');
+ok(translatedRecipe.text === czechSource[0].text && translatedRecipe.wordFrom === czechSource[0].wordFrom && translatedRecipe.wordTo === czechSource[0].wordTo,
+  'ranking traduzido conserva texto e âncoras originais da copy');
+const englishFallback = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'Mix baking soda with honey and lemon.' }], { coverage: 100, pace: 'long' })[0],
+  campaignText: 'Mix baking soda with honey and lemon.', campaignNicheId: 'ed' };
+const fallbackRanking = rankStockFrameVideos(englishFallback, [...recipePack, ...explicitEd], 20, true);
+ok(fallbackRanking.some((candidate) => candidate.video.id === 'pack-honey-soda')
+  && !fallbackRanking.some((candidate) => candidate.video.id === 'pack-vick' || candidate.video.id.startsWith('explicit')),
+  'fallback sem tradução reconhece ingredientes multilíngues e mantém a combinação congruente');
+ok(!rankStockFrameVideos({ ...czechSource[0], campaignNicheId: 'ed' }, [formatOnly, ...explicitEd], 20, true).length,
+  'idioma sem interpretação não vira correspondência falsa apenas por estar no pack ED');
+
+const splitRecipe = { ...recipeSegment, text: 'Misture com cuidado.', semanticText: undefined,
+  concepts: [], query: '', contextText: 'Misture com cuidado o bicarbonato com mel e limão.',
+  campaignText: edCopy[0].text };
+ok(rankStockFrameVideos(splitRecipe, recipePack, 20, true).some((candidate) => candidate.video.id === 'pack-honey-soda'),
+  'trecho dividido usa a evidência da própria frase e preserva a receita certa');
+
+const genericEdScenes = [
+  video({ id: 'generic-couple', title: 'Casal conversando sentado no sofá', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'generic-doctor', title: 'Médico em consulta no consultório', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'generic-knee', title: 'Anatomia 3D do joelho', nicheId: 'ed', nicheName: 'ED' }),
+  formatOnly, ...explicitEd, ...recipePack,
+];
+ok(!rankStockFrameVideos(neutralCta, genericEdScenes, 20, true).length,
+  'ranking full100 normal continua estrito: fallback genérico só existe por chamada explícita');
+const genericFallback = rankStockFrameGenericFallback(neutralCta, genericEdScenes, 20);
+ok(['generic-couple', 'generic-doctor'].every((id) => genericFallback.some((candidate) => candidate.video.id === id)),
+  'fase final admite casal neutro e consulta com vínculo real ao tema de saúde masculina');
+ok(genericFallback.every((candidate) => candidate.genericFallback === true && candidate.reasons.some((reason) => reason.startsWith('alternativa genérica'))),
+  'alternativa genérica é marcada e explicada sem se passar por correspondência específica');
+ok(!genericFallback.some((candidate) => candidate.video.id === 'format-only' || candidate.video.id === 'generic-knee'
+  || candidate.video.id.startsWith('explicit') || candidate.video.id.startsWith('pack-') || candidate.video.id === 'other-pathology'),
+  'fallback final não abre cenas explícitas, receita fora da fala, anatomia sem vínculo ou nicho patológico alheio');
+ok(!rankStockFrameGenericFallback(recipeSegment, [recipes[3], recipes[4], recipePack[3]], 20).length,
+  'fallback final preserva bloqueio de ingredientes extras e outros nichos patológicos');
+ok(!rankStockFrameGenericFallback(recovering, [recoveryCatalog[0]], 20).length,
+  'fallback final preserva a rejeição de ação dolorosa quando a copy fala de alívio');
+const prostateCta = { ...neutralCta, campaignText: 'Saúde da próstata para homens maduros.', campaignNicheId: 'prostata' };
+ok(!rankStockFrameGenericFallback(prostateCta, [{ ...genericEdScenes[2], nicheId: 'prostata' }], 20).length,
+  'fallback genérico usa anatomia da campanha para impedir joelho no CTA de próstata');
+ok(!rankStockFrameGenericFallback(neutralCta, [video({ id: 'neutral-wrong-anatomy', title: 'Homem sentado olhando radiografia do joelho', nicheId: 'ed', nicheName: 'ED' })], 20).length,
+  'cena humana neutra não introduz anatomia específica que a campanha não menciona');
+
+const mechanismQueries = smartStockMechanismQueries(edSegments);
+ok(['bicarbonato', 'mel', 'limao'].every((query) => mechanismQueries.includes(query)) && mechanismQueries.includes('bicarbonato mel limao'),
+  'buscas globais do mecanismo incluem a fórmula e ingredientes individuais para achar outros packs');
+ok(mechanismQueries.length <= 8 && new Set(mechanismQueries).size === mechanismQueries.length
+  && smartStockMechanismQueries([...edSegments, ...edSegments]).join('|') === mechanismQueries.join('|'),
+  'buscas de mecanismo são limitadas, deduplicadas e estáveis com segmentos repetidos');
+ok(smartStockMechanismQueries([herbalSegment]).includes('ervas plantas'),
+  'mecanismo botânico genérico emite busca global por ervas e plantas');
+const genericOnlyRecipe = { ...neutralCta, campaignText: genericCopy, text: genericCopy };
+ok(smartStockMechanismQueries([genericOnlyRecipe]).includes('receita caseira')
+  && smartStockMechanismQueries([{ ...neutralCta, campaignText: 'Saúde masculina.', text: 'Saúde masculina.' }]).length === 0,
+  'busca de receita genérica exige um mecanismo na copy, não apenas nicho de saúde');
+const explicitCzechSoda = { ...translatedRecipe, text: 'Smíchejte med s jedlou sodou.', campaignText: 'Trik s medem a jedlou sodou.',
+  semanticText: 'Misture mel com refrigerante.', semanticContextText: 'Misture mel com refrigerante.', contextText: 'Smíchejte med s jedlou sodou.' };
+ok(smartStockMechanismQueries([explicitCzechSoda]).includes('bicarbonato'),
+  'expressão alimentar explícita jedlou sodou no original resgata a busca por bicarbonato mesmo com tradução ruim');
+ok(!smartStockMechanismQueries([{ ...neutralCta, campaignText: 'Sklenice sody.', text: 'Sklenice sody.' }]).includes('bicarbonato'),
+  'soda/sody isolada não é convertida arbitrariamente em bicarbonato');
+const unambiguousCzechRecipe = { ...explicitCzechSoda, campaignText: 'Misture mel. Trik s jedlou sodou.' };
+ok(rankStockFrameVideos(unambiguousCzechRecipe, recipePack, 20, true).some((candidate) => candidate.video.id === 'pack-honey-soda'),
+  'ranking conserva ingrediente inequívoco do original quando a tradução local o perdeu');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

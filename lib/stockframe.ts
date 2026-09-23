@@ -188,7 +188,7 @@ function nestedLabel(value: unknown): { id?: string; name?: string } {
 }
 
 function inferAspect(width: number, height: number, value: unknown): StockFrameVideo['aspectRatio'] {
-  const explicit = text(value).replace(/\s/g, '');
+  const explicit = text(value).toLowerCase().replace(/\s/g, '');
   if (explicit.includes('9:16') || explicit === 'vertical' || explicit === 'portrait') return '9:16';
   if (explicit.includes('16:9') || explicit === 'horizontal' || explicit === 'landscape') return '16:9';
   if (!(width > 0 && height > 0)) return 'unknown';
@@ -214,11 +214,11 @@ export function normalizeStockFrameVideo(value: unknown): StockFrameVideo | null
   const width = Math.max(0, Math.round(finite(first(source, ['width', 'video_width', 'videoWidth']))));
   const height = Math.max(0, Math.round(finite(first(source, ['height', 'video_height', 'videoHeight']))));
   const niche = nestedLabel(first(source, ['niche', 'nicho', 'category', 'categoria']));
-  const subcategory = nestedLabel(first(source, ['subcategory', 'sub_category', 'subCategory', 'subpasta', 'folder']));
+  const subcategory = nestedLabel(first(source, ['subcategory', 'sub_category', 'subCategory', 'subfolder', 'sub_folder', 'subFolder', 'subpasta', 'folder']));
   const nicheId = text(first(source, ['niche_id', 'nicheId', 'category_id', 'categoryId'])) || niche.id;
   const nicheName = text(first(source, ['niche_name', 'nicheName', 'category_name', 'categoryName'])) || niche.name;
-  const subcategoryId = text(first(source, ['subcategory_id', 'subCategoryId', 'sub_category_id', 'folder_id'])) || subcategory.id;
-  const subcategoryName = text(first(source, ['subcategory_name', 'subCategoryName', 'sub_category_name', 'folder_name'])) || subcategory.name;
+  const subcategoryId = text(first(source, ['subcategory_id', 'subcategoryId', 'subCategoryId', 'sub_category_id', 'subfolder_id', 'subfolderId', 'subFolderId', 'folder_id', 'folderId'])) || subcategory.id;
+  const subcategoryName = text(first(source, ['subcategory_name', 'subcategoryName', 'subCategoryName', 'sub_category_name', 'subfolder_name', 'subfolderName', 'subFolderName', 'folder_name', 'folderName'])) || subcategory.name;
   const title = text(first(source, ['title', 'name', 'nome', 'headline'])) || `Stock ${id.slice(0, 8)}`;
   const description = text(first(source, ['description', 'descricao', 'caption', 'summary', 'prompt']));
   const tags = tagsOf(first(source, ['tags', 'keywords', 'palavras_chave', 'palavrasChave']));
@@ -366,6 +366,34 @@ export function mergeStockFrameNiches(...groups: StockFrameNiche[][]): StockFram
   return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
+/** Completa os nomes que /videos omite usando apenas a taxonomia oficial.
+ * IDs são a ligação, nunca título/tags: não inventa pastas nem mistura filhos
+ * de nichos diferentes. Preserva os nomes já recebidos e a identidade dos
+ * takes inalterados para que o cache de ranking continue válido. */
+export function enrichStockFrameVideos(videos: StockFrameVideo[], niches: StockFrameNiche[]): StockFrameVideo[] {
+  const taxonomy = new Map<string, { name: string; children: Map<string, string> }>();
+  for (const niche of niches) {
+    if (!niche.id) continue;
+    const entry = taxonomy.get(niche.id) || { name: '', children: new Map<string, string>() };
+    if (!entry.name && niche.name) entry.name = niche.name;
+    for (const child of niche.subcategories || []) {
+      if (child.id && child.name && !entry.children.has(child.id)) entry.children.set(child.id, child.name);
+    }
+    taxonomy.set(niche.id, entry);
+  }
+  let changed = false;
+  const enriched = videos.map((video) => {
+    const official = video.nicheId ? taxonomy.get(video.nicheId) : undefined;
+    if (!official) return video;
+    const nicheName = video.nicheName || official.name || undefined;
+    const subcategoryName = video.subcategoryName || (video.subcategoryId ? official.children.get(video.subcategoryId) : undefined);
+    if (nicheName === video.nicheName && subcategoryName === video.subcategoryName) return video;
+    changed = true;
+    return { ...video, nicheName, subcategoryName };
+  });
+  return changed ? enriched : videos;
+}
+
 export function normalizeStockFramePage(value: unknown, requested: { page?: number; perPage?: number } = {}): StockFramePage {
   const root = record(value);
   const data = record(root.data);
@@ -391,7 +419,8 @@ export function normalizeStockFramePage(value: unknown, requested: { page?: numb
     }
     inferred.set(niche.id, niche);
   }
-  return { videos, niches: explicitNiches.length ? explicitNiches : [...inferred.values()], page, perPage, total, totalPages };
+  const niches = explicitNiches.length ? explicitNiches : [...inferred.values()];
+  return { videos: enrichStockFrameVideos(videos, niches), niches, page, perPage, total, totalPages };
 }
 
 export function normalizeStockFrameAccount(value: unknown): StockFrameAccount {

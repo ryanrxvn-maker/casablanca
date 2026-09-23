@@ -39,6 +39,15 @@
 .setupRecovery{height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px;margin-top:12px;padding:0 15px;color:#efe3ff;font-size:9px;font-weight:850;letter-spacing:.025em;background:linear-gradient(180deg,rgba(102,52,164,.62),rgba(53,27,87,.72));border:1px solid rgba(185,126,255,.28);border-radius:9px;box-shadow:inset 0 1px rgba(255,255,255,.1),0 9px 22px rgba(45,14,81,.24)}.setupRecovery:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(205,163,255,.5);filter:brightness(1.08)}.setupRecovery:disabled{opacity:.55}
 .setupActions{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}.setupActions a{text-decoration:none}.setupActions>small{flex-basis:100%;margin-top:2px;color:#93879f;font-size:9px;line-height:1.6}.setupCard>.error,.setupCard>.notice{max-width:100%;margin-top:14px;font-size:10px;text-align:left}
 
+/* Detail previews preserve the entire frame. Only catalog cards use cover. */
+.mediaActive{width:100%;height:auto;min-width:0;margin-inline:auto;align-self:center;background:#08070d;border-radius:13px}
+.mediaActive video,.mediaActive img{object-fit:contain;object-position:center}
+.segmentDetail>.mediaActive{max-height:none}
+.previewDrawer>.mediaActive{flex:0 0 auto}
+.mediaStatus{position:absolute;z-index:2;left:12px;right:12px;bottom:48px;display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 12px;color:#f3edff;text-align:center;background:rgba(15,10,24,.92);border:1px solid rgba(178,124,255,.25);border-radius:10px;box-shadow:0 8px 26px rgba(4,1,10,.24)}
+.mediaStatus strong{font-size:13px;font-weight:700;line-height:1.35;text-wrap:balance}.mediaStatus>span:not(.miniLoader){color:#c0b5cf;font-size:12px;line-height:1.45;text-wrap:pretty}
+.mediaStatus button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;margin-top:2px;padding:7px 11px;color:#efe4ff;font-size:12px;font-weight:700;background:#322047;border:1px solid rgba(178,124,255,.35);border-radius:7px}.mediaStatus button:hover{background:#422a5e}
+
 /* Readability pass: keep the dense editor layout, but never rely on microtype. */
 .accountBar p{font-size:12px}.accountBar b{font-size:12.5px}.accountBar small{font-size:10.5px}.accountBar>button{font-size:11.5px}
 .workspace{grid-template-columns:252px minmax(0,1fr)}

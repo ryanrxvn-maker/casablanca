@@ -20,6 +20,8 @@ import {
   measureSmartStockCoverage,
   planSmartStockSegments,
   rankStockFrameVideos,
+  rankStockFrameGenericFallback,
+  smartStockMechanismQueries,
   selectedSmartCandidate,
   type SmartCoverage,
   type SmartPace,
@@ -28,7 +30,7 @@ import {
 } from '@/lib/stockframe-smart';
 import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
-import { mergeStockFrameMediaUrls, mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo, type StockFrameSmartQuery } from '@/lib/stockframe';
+import { enrichStockFrameVideos, mergeStockFrameMediaUrls, mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo, type StockFrameSmartQuery } from '@/lib/stockframe';
 import { translateStockFrameCopy } from '@/lib/stockframe-translate';
 import s from './PilotStockFrame.module.css';
 
@@ -93,13 +95,16 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
 }
 
-function LazyVideo({ video, active = false, onMediaError }: { video: StockFrameVideo; active?: boolean; onMediaError?: (id: string) => void }) {
+function LazyVideo({ video, active = false, focused = false, suspended = false, onMediaError }: { video: StockFrameVideo; active?: boolean; focused?: boolean; suspended?: boolean; onMediaError?: (id: string) => void }) {
   const root = useRef<HTMLDivElement>(null);
   const player = useRef<HTMLVideoElement>(null);
   const [visible, setVisible] = useState(active);
   const [hovering, setHovering] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
+  const [decodedAspect, setDecodedAspect] = useState<number | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (active) { setVisible(true); return; }
     const node = root.current;
@@ -108,20 +113,39 @@ function LazyVideo({ video, active = false, onMediaError }: { video: StockFrameV
     observer.observe(node);
     return () => observer.disconnect();
   }, [active]);
-  useEffect(() => { setVideoReady(false); setVideoFailed(false); }, [video.previewUrl]);
-  const playVideo = active || hovering;
+  useEffect(() => {
+    setVideoReady(false); setVideoFailed(false); setPlaybackBlocked(false); setDecodedAspect(null);
+  }, [video.id, video.previewUrl]);
+  const playVideo = !suspended && (active || hovering || focused);
+  useEffect(() => { if (!playVideo || !visible) setVideoReady(false); }, [playVideo, visible]);
   useEffect(() => {
     const node = player.current;
     if (!node || !playVideo) return;
-    node.play().catch(() => {});
-  }, [playVideo, visible, video.previewUrl]);
-  return <div ref={root} className={s.media} onMouseEnter={() => setHovering(true)} onMouseLeave={() => {
-    setHovering(false);
-    if (!active && player.current) { player.current.pause(); player.current.currentTime = 0; }
-  }}>
+    let current = true;
+    node.play().catch((error: DOMException) => {
+      if (current && error?.name !== 'AbortError') setPlaybackBlocked(true);
+    });
+    return () => { current = false; node.pause(); };
+  }, [playVideo, visible, video.previewUrl, attempt]);
+  const metadataAspect = video.width > 0 && video.height > 0 ? video.width / video.height : video.aspectRatio === '9:16' ? 9 / 16 : 16 / 9;
+  const mediaAspect = decodedAspect || metadataAspect;
+  const mediaState = suspended ? 'suspended' : !video.previewUrl ? 'unavailable' : videoFailed ? 'error' : playbackBlocked ? 'paused' : !videoReady ? 'loading' : 'ready';
+  return <div ref={root} className={`${s.media} ${active ? s.mediaActive : ''}`} data-preview-active={active ? 'true' : undefined} data-media-state={active ? mediaState : undefined}
+    style={active ? { aspectRatio: mediaAspect, maxWidth: `min(100%, calc(min(54dvh, 560px) * ${mediaAspect}))` } : undefined}
+    onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
     {visible && video.posterUrl ? <img src={video.posterUrl} alt="" loading="lazy" onError={() => onMediaError?.(video.id)}/> : null}
-    {visible && playVideo && video.previewUrl && !videoFailed ? <video ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline preload={active ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'} onCanPlay={() => setVideoReady(true)} onError={() => { setVideoFailed(true); onMediaError?.(video.id); }}/> : null}
-    {!video.posterUrl && (!playVideo || !video.previewUrl || videoFailed) ? <span className={s.mediaFallback}><Icon name="play" size={28}/></span> : null}
+    {visible && playVideo && video.previewUrl && !videoFailed ? <video key={`${video.id}:${video.previewUrl}:${attempt}`} ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline controls={active} preload={active ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'}
+      aria-label={active ? `Prévia de ${video.title}` : undefined}
+      onLoadedMetadata={(event) => { const node = event.currentTarget; if (node.videoWidth > 0 && node.videoHeight > 0) setDecodedAspect(node.videoWidth / node.videoHeight); }}
+      onCanPlay={() => setVideoReady(true)} onPlaying={() => setPlaybackBlocked(false)}
+      onError={() => { setVideoFailed(true); onMediaError?.(video.id); }}/> : null}
+    {active && !suspended && mediaState !== 'ready' ? <div className={s.mediaStatus} role="status" aria-live="polite">
+      {mediaState === 'loading' ? <><span className={s.miniLoader} aria-hidden="true"/><strong>Carregando prévia…</strong><span>A imagem é a miniatura deste take.</span></> :
+        mediaState === 'unavailable' ? <><strong>Prévia indisponível</strong><span>O StockFrame não enviou uma prévia em vídeo para este take.</span></> :
+          mediaState === 'error' ? <><strong>Não foi possível reproduzir</strong><span>A prévia falhou ao carregar.</span><button type="button" onClick={() => { setVideoFailed(false); setVideoReady(false); setPlaybackBlocked(false); setAttempt((value) => value + 1); }}>Tentar novamente</button></> :
+            <><strong>Prévia pausada</strong><button type="button" onClick={() => { void player.current?.play().then(() => setPlaybackBlocked(false)).catch(() => setPlaybackBlocked(true)); }}><Icon name="play" size={15}/>Reproduzir prévia</button></>}
+    </div> : null}
+    {!active && !video.posterUrl && (!playVideo || !video.previewUrl || videoFailed) ? <span className={s.mediaFallback}><Icon name="play" size={28}/></span> : null}
     <span className={s.duration}>{formatDuration(video.durationSec)}</span>
     <span className={s.ratio}>{video.aspectRatio === 'unknown' ? 'vídeo' : video.aspectRatio}</span>
   </div>;
@@ -130,8 +154,9 @@ function LazyVideo({ video, active = false, onMediaError }: { video: StockFrameV
 function TakeCard({ video, selected, onOpen, onMediaError, action, compact = false }: {
   video: StockFrameVideo; selected?: boolean; onOpen: () => void; onMediaError?: (id: string) => void; action?: { label: string; onClick: () => void; disabled?: boolean }; compact?: boolean;
 }) {
+  const [previewFocused, setPreviewFocused] = useState(false);
   return <article className={`${s.takeCard} ${selected ? s.takeSelected : ''} ${compact ? s.takeCompact : ''}`}>
-    <button type="button" className={s.takePreview} onClick={onOpen} aria-label={`Ver ${video.title}`}><LazyVideo video={video} onMediaError={onMediaError}/></button>
+    <button type="button" className={s.takePreview} onClick={onOpen} onFocus={() => setPreviewFocused(true)} onBlur={() => setPreviewFocused(false)} aria-label={`Ver ${video.title}`}><LazyVideo video={video} focused={previewFocused} suspended={selected} onMediaError={onMediaError}/></button>
     <div className={s.takeBody}>
       <div className={s.takeMeta}>
         <span className={video.origin === 'ai' ? s.ai : s.organic}>{video.origin === 'ai' ? 'I.A' : video.origin === 'organic' ? 'ORGÂNICO' : 'STOCK'}</span>
@@ -278,11 +303,12 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     setError('');
     stockFrameList(filters).then(async (result) => {
       if (!live) return;
-      setPage(result);
+      const videos = enrichStockFrameVideos(result.videos, mergeStockFrameNiches(account?.niches || [], result.niches));
+      setPage({ ...result, videos });
       setNiches((current) => mergeStockFrameNiches(current, result.niches));
       if (account?.capabilities.mediaUrls) {
-        const refreshed = await renewMedia(result.videos);
-        if (live && refreshed !== result.videos) setPage((current) => ({ ...current, videos: refreshed }));
+        const refreshed = await renewMedia(videos);
+        if (live && refreshed !== videos) setPage((current) => ({ ...current, videos: refreshed }));
       }
     }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (live) setLoading(false); });
@@ -426,7 +452,23 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           setSmartProgress(`Comparando takes do catálogo… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
         }
       }
-      const globalPool = new Map<string, StockFrameVideo>([...page.videos, ...[...bySegment.values()].flat()]
+      // The health niche and the recipe pack are different libraries. Search
+      // named mechanisms globally, then let the ingredient/anatomy gates decide.
+      // Queries are deduplicated, bounded and never download originals.
+      const mechanismVideos: StockFrameVideo[] = [];
+      const sceneQueries = segments.some((segment) => /\bcasal\b/i.test(segment.semanticText || segment.text)
+        && /\bconvers\w*/i.test(segment.semanticText || segment.text))
+        ? ['casal conversando', 'casal sorrindo', 'casal abracando', 'casal sentado'] : [];
+      const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])];
+      for (let index = 0; index < globalQueries.length; index += 3) {
+        setSmartProgress('Buscando cenas congruentes em toda a biblioteca…');
+        const results = await Promise.all(globalQueries.slice(index, index + 3).map(search => stockFrameList({
+          page: 1, perPage: 48, search, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
+        })));
+        mechanismVideos.push(...results.flatMap(result => result.videos));
+      }
+      for (const [id, videos] of bySegment) bySegment.set(id, enrichStockFrameVideos(videos, niches));
+      const globalPool = new Map<string, StockFrameVideo>(enrichStockFrameVideos([...page.videos, ...mechanismVideos, ...[...bySegment.values()].flat()], niches)
         .map((video) => [video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] }]));
       const rankSegments = (current: typeof segments, onlyMissing = false) => current.map((segment) => {
         if (onlyMissing && segment.candidates.length) return segment;
@@ -441,7 +483,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           setSmartProgress(`Ampliando o catálogo para cobrir toda a copy… página ${pageNo}/${maxPages}`);
           const more = await stockFrameList({ page: pageNo, perPage: 48, nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' });
           maxPages = Math.min(10, more.totalPages || 1);
-          for (const video of more.videos) globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
+          for (const video of enrichStockFrameVideos(more.videos, niches)) globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
           completed = rankSegments(completed, true);
           if (completed.every((segment) => segment.candidates.length)) break;
         }
@@ -453,6 +495,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         candidates: rankStockFrameVideos({ ...segment, campaignIngredients: recipeTheme },
           [...new Map([...globalPool, ...(bySegment.get(segment.id) || []).map((video): [string, StockFrameVideo] => [video.id, video])]).values()], 12, coverage === 100),
       }));
+      // Generic scenes are a LAST resort for full coverage, never competitors
+      // against an exact match. All congruence gates stay active in this pass.
+      if (coverage === 100) completed = completed.map(segment => segment.candidates.length ? segment : {
+        ...segment, candidates: rankStockFrameGenericFallback(segment, [...globalPool.values()], 12),
+      });
       let chosen = chooseSmartStockAssignments(completed, coverage === 100);
       if (account?.capabilities.mediaUrls) {
         const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 4).map((candidate) => [candidate.video.id, candidate.video]))).values()];
@@ -465,8 +512,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       const first = chosen.find((segment) => segment.selectedVideoId);
       if (first) setActiveSegment(first.id);
       const missing = chosen.filter((segment) => !segment.selectedVideoId).length;
+      const generic = chosen.filter(segment => selectedSmartCandidate(segment)?.genericFallback).length;
       const languageNote = translation.translated ? `Copy ${translation.language.toUpperCase()} interpretada no dispositivo. ` : translation.note ? `${translation.note} ` : '';
-      setNotice(languageNote + (missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram sem alternativa segura no catálogo acessível. Nenhum download foi consumido.` : `${chosen.length} trechos prontos para revisão. Nenhum download foi consumido ainda.`));
+      setNotice(languageNote + (missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram sem alternativa segura no catálogo acessível. Nenhum download foi consumido.` : `${chosen.length} trechos prontos para revisão. Nenhum download foi consumido ainda.`) + (generic ? ` ${generic} alternativa(s) genérica(s), usadas somente após a busca específica.` : ''));
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setSmartBusy(false); setSmartProgress(''); operationLocked.current = false; }
   }
@@ -640,11 +688,12 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
             {!smart.length ? <div className={s.planEmpty}><span><Icon name="spark" size={35}/></span><h3>A copy vira uma timeline revisável</h3><p>O sistema marca os melhores trechos, apresenta o take escolhido e mantém alternativas para você trocar antes de consumir downloads.</p></div> : <div className={s.planBody}>
               <div className={s.timeline}>{smart.map((segment, index) => {
                 const candidate = selectedSmartCandidate(segment);
-                return <button type="button" key={segment.id} className={`${s.segment} ${activeSmart?.id === segment.id ? s.segmentActive : ''} ${!candidate ? s.segmentMissing : ''}`} onClick={() => { setActiveSegment(segment.id); if (candidate) setSelected(candidate.video); }}><span>{String(index + 1).padStart(2, '0')}</span><div><small>{segment.anchor} · {segment.targetSeconds.toFixed(1)}s</small><p>{segment.text}</p><b>{candidate ? candidate.video.title : 'Nenhum take confiável'}</b></div>{candidate?.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <i><Icon name="spark"/></i>}</button>;
+                return <button type="button" key={segment.id} className={`${s.segment} ${activeSmart?.id === segment.id ? s.segmentActive : ''} ${!candidate ? s.segmentMissing : ''}`} onClick={() => setActiveSegment(segment.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><small>{segment.anchor} · {segment.targetSeconds.toFixed(1)}s</small><p>{segment.text}</p><b>{candidate ? candidate.video.title : 'Nenhum take confiável'}</b></div>{candidate?.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <i><Icon name="spark"/></i>}</button>;
               })}</div>
               <div className={s.segmentDetail}>{activeSmart ? <>
+                {activeSmart.semanticText && activeSmart.semanticText !== activeSmart.text && <details className={s.reasons}><summary>Interpretação usada na busca</summary><p>{activeSmart.semanticText}</p></details>}
                 <div className={s.detailCopy}><small>{activeSmart.anchor} · PALAVRAS {activeSmart.wordFrom + 1}–{activeSmart.wordTo + 1} · ~{activeSmart.targetSeconds.toFixed(1)}s</small><p>“{activeSmart.text}”</p><div className={s.rangeEdit}><span>Início</span><button type="button" onClick={() => adjustActiveRange('from', -1)} aria-label="Adiantar início">−</button><button type="button" onClick={() => adjustActiveRange('from', 1)} aria-label="Atrasar início">+</button><i/><span>Fim</span><button type="button" onClick={() => adjustActiveRange('to', -1)} aria-label="Adiantar fim">−</button><button type="button" onClick={() => adjustActiveRange('to', 1)} aria-label="Atrasar fim">+</button></div></div>
-                {activeCandidate ? <><LazyVideo video={activeCandidate.video} active onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
+                {activeCandidate ? <><LazyVideo video={activeCandidate.video} active suspended={!!selected} onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
                 {activeSmart.candidates.length > 1 && <div className={s.alternatives}><small>ALTERNATIVAS</small><div>{activeSmart.candidates.map((candidate) => <button type="button" key={candidate.video.id} className={candidate.video.id === activeSmart.selectedVideoId ? s.altActive : ''} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b></button>)}</div></div>}
               </> : null}</div>
             </div>}

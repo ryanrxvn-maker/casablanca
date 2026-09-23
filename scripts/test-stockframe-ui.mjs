@@ -22,6 +22,91 @@ async function openPreview(page) {
   return dialog;
 }
 
+async function assertActiveFrame(page, selector) {
+  try {
+    await page.locator(`${selector} [data-preview-active="true"] video`).waitFor({ state: 'visible' });
+  } catch (error) {
+    await page.screenshot({ path: resolve(outputDir, 'preview-failure.png'), fullPage: false });
+    const detail = await page.locator(selector).count() ? await page.locator(selector).innerText() : 'Painel de preview ausente';
+    throw new Error(`Prévia ativa sem vídeo: ${detail}\n${error.message}`);
+  }
+  await page.waitForFunction((rootSelector) => {
+    const video = document.querySelector(`${rootSelector} [data-preview-active="true"] video`);
+    return video instanceof HTMLVideoElement && video.videoWidth > 0 && video.readyState >= 2 && video.dataset.ready === 'true' && !video.paused;
+  }, selector);
+  const metrics = await page.locator(`${selector} [data-preview-active="true"]`).evaluate((frame) => {
+    const video = frame.querySelector('video');
+    const bounds = frame.getBoundingClientRect();
+    const parent = frame.parentElement.getBoundingClientRect();
+    return { width: bounds.width, height: bounds.height, ratio: video.videoWidth / video.videoHeight,
+      fit: getComputedStyle(video).objectFit, posterFit: getComputedStyle(frame.querySelector('img')).objectFit,
+      parentWidth: parent.width, viewportHeight: innerHeight, controls: video.controls,
+      horizontallyInside: bounds.left >= parent.left - 1 && bounds.right <= parent.right + 1 };
+  });
+  if (metrics.fit !== 'contain' || metrics.posterFit !== 'contain') throw new Error('O preview ativo continua cortando o take com cover.');
+  if (Math.abs(metrics.width - metrics.height * metrics.ratio) > 3) throw new Error(`Preview distorceu a proporção real: ${JSON.stringify(metrics)}`);
+  if (!metrics.horizontallyInside || metrics.height > Math.min(metrics.viewportHeight * .54, 560) + 3) throw new Error(`Preview ultrapassou os limites do painel/viewport: ${JSON.stringify(metrics)}`);
+  if (!metrics.controls) throw new Error('Preview ativo não oferece controles de reprodução.');
+  return metrics;
+}
+
+// Overrides only the dev extension's mock replies, never a real account/API.
+async function previewStateScenario(mode) {
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await page.addInitScript((state) => {
+    const post = window.postMessage.bind(window);
+    window.postMessage = (message, ...args) => {
+      if (message?.source === 'stockframe-extension' && message?.extensionId === 'stockframe-dev-preview' && Array.isArray(message.payload?.data?.videos)) {
+        message = structuredClone(message);
+        message.payload.data.videos = message.payload.data.videos.map(video => ({ ...video,
+          preview_url: state === 'unavailable' ? undefined : 'https://darkoautoedit.com/__stockframe-preview-test.mp4',
+        }));
+      }
+      return post(message, ...args);
+    };
+  }, mode);
+  let releaseLoading;
+  let failPreview = mode === 'error';
+  const loadingGate = new Promise(resolveGate => { releaseLoading = resolveGate; });
+  await page.route('https://darkoautoedit.com/__stockframe-preview-test.mp4', async route => {
+    if (mode === 'loading') await loadingGate;
+    await route.fulfill(failPreview
+      ? { status: 200, contentType: 'video/mp4', body: 'invalid mp4 for controlled media error' }
+      : { status: 200, contentType: 'video/mp4', path: resolve('public/lipsync-talking-1.mp4') });
+  });
+  try {
+    const dialog = await openPreview(page);
+    await dialog.getByRole('button', { name: /^Ver / }).first().click();
+    const drawer = page.getByLabel('Preview do take');
+    const frame = drawer.locator('[data-preview-active="true"]');
+    const expected = mode === 'unavailable' ? 'Prévia indisponível' : mode === 'error' ? 'Não foi possível reproduzir' : 'Carregando prévia…';
+    await drawer.getByText(expected, { exact: true }).waitFor({ state: 'visible' });
+    if (mode !== 'loading' && await frame.locator('video').count()) throw new Error(`${mode} ainda renderizou vídeo inexistente.`);
+    const ratioBefore = await frame.evaluate(element => { const bounds = element.getBoundingClientRect(); return bounds.width / bounds.height; });
+    if (Math.abs(ratioBefore - 9 / 16) > .01) throw new Error('Preview sem metadados decodificados não respeitou9:16 da API.');
+    if (mode === 'error') {
+      failPreview = false;
+      await drawer.getByRole('button', { name: 'Tentar novamente' }).click();
+      await assertActiveFrame(page, '[aria-label="Preview do take"]');
+      if (await drawer.getByText('Não foi possível reproduzir', { exact: true }).isVisible()) throw new Error('Retry recuperou vídeo mas manteve mensagem de erro.');
+    }
+    if (mode === 'loading') {
+      releaseLoading();
+      const portrait = await assertActiveFrame(page, '[aria-label="Preview do take"]');
+      if (portrait.ratio >= 1) throw new Error('Fixture portrait não validou preview vertical.');
+      await page.screenshot({ path: resolve(outputDir, 'portrait-preview-desktop.png'), fullPage: false });
+      await page.setViewportSize({ width: 390, height: 844 });
+      const mobilePortrait = await assertActiveFrame(page, '[aria-label="Preview do take"]');
+      await page.screenshot({ path: resolve(outputDir, 'portrait-preview-mobile.png'), fullPage: false });
+      return { desktop: portrait, mobile: mobilePortrait };
+    }
+    return true;
+  } finally {
+    releaseLoading();
+    await page.close();
+  }
+}
+
 try {
   const desktop = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
   await desktop.addInitScript(() => {
@@ -69,11 +154,16 @@ try {
   }, null, { timeout: 15_000 });
   await desktopDialog.getByRole('textbox').hover();
   await desktop.waitForFunction(() => !document.querySelector('[role="dialog"] article video'));
+  await cards.first().focus();
+  await desktop.waitForFunction(() => document.querySelectorAll('[role="dialog"] article video').length === 1);
+  await desktopDialog.getByRole('textbox').focus();
+  await desktop.waitForFunction(() => !document.querySelector('[role="dialog"] article video'));
   await desktop.screenshot({ path: resolve(outputDir, 'library-desktop.png'), fullPage: false });
 
   await cards.first().click();
   await desktop.getByLabel('Preview do take').waitFor({ state: 'visible' });
-  await desktop.waitForTimeout(350);
+  const drawerPreview = await assertActiveFrame(desktop, '[aria-label="Preview do take"]');
+  if (await desktopDialog.locator('article video').count()) throw new Error('O drawer deixou o mesmo take tocando também na grade.');
   await desktop.screenshot({ path: resolve(outputDir, 'take-preview-desktop.png'), fullPage: false });
   await desktop.getByRole('button', { name: 'Fechar preview' }).click();
 
@@ -95,6 +185,7 @@ try {
   if (!plannedSegments.length || plannedSegments.some((text) => /dor no joelho/i.test(text))) {
     throw new Error('O plano da copy sobre azeite/próstata escolheu uma cena de joelho fora de contexto.');
   }
+  const smartPreview = await assertActiveFrame(desktop, '[class*="segmentDetail"]');
   await desktop.screenshot({ path: resolve(outputDir, 'smart-plan-desktop.png'), fullPage: false });
   await desktop.getByRole('button', { name: 'Aplicar na montagem' }).click();
   await desktop.getByText(/Há inserts manuais ou do Flow nesta montagem/).waitFor({ state: 'visible' });
@@ -113,7 +204,6 @@ try {
   if (!desktopBounds || desktopBounds.x < 0 || desktopBounds.y < 0 || desktopBounds.x + desktopBounds.width > 1601 || desktopBounds.y + desktopBounds.height > 1001) {
     throw new Error('A janela desktop escapou da viewport.');
   }
-
   const clean = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
   await clean.addInitScript(() => {
     window.__stockFrameTestDownloads = 0;
@@ -168,6 +258,12 @@ try {
   if (!mobileBounds || mobileBounds.x < -1 || mobileBounds.width > 392) throw new Error('A janela mobile criou overflow horizontal.');
   await mobile.screenshot({ path: resolve(outputDir, 'smart-mobile.png'), fullPage: false });
 
+  const previewStates = {
+    unavailable: await previewStateScenario('unavailable'),
+    error: await previewStateScenario('error'),
+    loadingThenPortrait: await previewStateScenario('loading'),
+  };
+
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(JSON.stringify({
     ok: true,
@@ -175,6 +271,9 @@ try {
     smartPlan: true,
     mobileModeSwitch: true,
     thumbnailsIdleAndVideoOnHover: true,
+    keyboardPreviewLoadsOnlyFocusedCard: true,
+    activePreviewContainsFullFrame: { drawer: drawerPreview, smart: smartPreview },
+    honestPreviewStates: previewStates,
     categoriesFromAccount: true,
     readableTypography: fontSizes,
     repeatedTakeReusesDownload: true,
@@ -183,7 +282,7 @@ try {
     mixedManualFlowCoverageBlockedWithoutDeletion: true,
     unrelatedBodyPartRejected: true,
     wideWorkstation: wideMetrics,
-    screenshots: ['library-desktop.png', 'take-preview-desktop.png', 'smart-plan-desktop.png', 'library-wide.png', 'smart-mobile.png'],
+    screenshots: ['library-desktop.png', 'take-preview-desktop.png', 'smart-plan-desktop.png', 'library-wide.png', 'smart-mobile.png', 'portrait-preview-desktop.png', 'portrait-preview-mobile.png'],
   }, null, 2));
 } finally {
   await browser.close();

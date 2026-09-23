@@ -3,7 +3,7 @@ import { stockFrameSearchText, type StockFrameNiche, type StockFrameVideo } from
 export type SmartCoverage = 30 | 60 | 100;
 export type SmartPace = 'fast' | 'long' | 'adaptive';
 export type StockFrameCopyPart = { label: string; text: string };
-export type SmartStockCandidate = { video: StockFrameVideo; score: number; reasons: string[] };
+export type SmartStockCandidate = { video: StockFrameVideo; score: number; reasons: string[]; genericFallback?: boolean };
 export type SmartStockSegment = {
   id: string;
   anchor: string;
@@ -71,15 +71,32 @@ function normalize(value: string): string {
 }
 
 const INGREDIENTS: [string, RegExp][] = [
-  ['bicarbonato', /\b(?:bicarbonato|bicarbonate|baking soda|bicarbonat|natron|soda oczyszczona)\b/], ['mel', /\b(?:mel|honey|miel|miod|honig)\b/], ['vick', /\b(?:vick|vicks|vaporub)\b/],
+  ['bicarbonato', /\b(?:bicarbonato|bicarbonate|baking soda|bicarbonat|natron|soda oczyszczona|jedl(?:a|e|ou|y|u) sod(?:a|y|ou|u|e))\b/], ['mel', /\b(?:mel|honey|miel|miod|honig)\b/], ['vick', /\b(?:vick|vicks|vaporub)\b/],
   ['babosa', /\b(?:babosa|aloe vera|aloes)\b/], ['limao', /\b(?:limao|lemon|limon|citron|cytryna|zitrone)\b/], ['vinagre', /\b(?:vinagre|vinegar|essig|ocet)\b/],
   ['gengibre', /\b(?:gengibre|ginger|jengibre|imbir|ingwer)\b/], ['canela', /\b(?:canela|cinnamon|cynamon|zimt)\b/], ['alho', /\b(?:alho|garlic|ajo|czosnek|knoblauch)\b/],
   ['hortela', /\bhortela\b/], ['camomila', /\bcamomila\b/], ['alecrim', /\balecrim\b/],
   ['ginseng', /\bginseng\b/], ['maca', /\bmaca peruana\b/], ['guarana', /\bguarana\b/],
   ['cafe', /\bcafe\b/], ['oleo', /\boleo\b/], ['sal', /\bsal\b/],
+  ['banana', /\b(?:banana|platano|plantain)\b/], ['cebola', /\b(?:cebola|onion|cebolla|zwiebel|cebula)\b/],
+  ['laranja', /\b(?:laranja|orange|naranja|apfelsine|pomarancza)\b/], ['vaselina', /\b(?:vaselina|vaseline|petroleum jelly)\b/],
+  ['acucar', /\b(?:acucar|sugar|azucar|zucker|cukier)\b/], ['leite', /\b(?:leite|milk|leche|milch|mleko)\b/],
+  ['ovo', /\b(?:ovo|ovos|egg|eggs|huevo|huevos|ei|jajko)\b/], ['abacate', /\b(?:abacate|avocado|aguacate|awokado)\b/],
+  ['curcuma', /\b(?:curcuma|turmeric|azafran|kurkuma)\b/], ['aveia', /\b(?:aveia|oats|oatmeal|avena|hafer|owies)\b/],
+  ['abobora', /\b(?:abobora|pumpkin|calabaza|kurbis|dynia)\b/],
 ];
 const BOTANICAL = /\b(?:erva|ervas|hierba|hierbas|herb|herbs|ziola|ziol|krauter|planta|plantas|plants|pflanzen|rosliny|folha|folhas|leaves|hojas|liscie|botanic\w*|fitoterap\w*|hortela|camomila|alecrim|ginseng|maca peruana|guarana)\b/;
 const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|receta|rezept|przepis|mistura|mixture|mezcla|mischung|caseiro|caseira|homemade|casero|domowy|ervas?|herbs?|ziola|plantas?|plants?|formula natural)\b/;
+// These describe a visible sexual act, not reproductive health. In particular,
+// "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
+const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
+const SUGGESTIVE_SCENE = /\b(?:apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*)\b/;
+const SPECIFIC_INTIMACY_COPY = /\b(?:relacao sexual|sexo|sex|massage\w*|massag\w*|coxa|desejo)\b/;
+const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
+const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
+const INVASIVE_PROCEDURE_COPY = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
+// Cross-pack recipe shots can be useful, but a different medical niche must
+// not become a source of unrelated pathology just because it mentions honey.
+const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare)\b/;
 
 function ingredientsOf(value: string): string[] {
   const normalized = normalize(value);
@@ -101,6 +118,27 @@ export function chooseCampaignRecipeTheme(segments: SmartStockSegment[]): string
     themes.set(key, { ingredients, score: Math.max(prior?.score || 0, candidate.score) + (prior ? 1 : 0), occurrences: (prior?.occurrences || 0) + 1 });
   }
   return [...themes.values()].sort((a, b) => (b.score + b.occurrences * 2 + b.ingredients.length) - (a.score + a.occurrences * 2 + a.ingredients.length))[0]?.ingredients || [];
+}
+
+/** Broad catalog searches for the mechanism, independent of the campaign's
+ * health pack. These are discovery queries only; all results still pass the
+ * ingredient, anatomy and visual-evidence gates when ranked for a segment. */
+export function smartStockMechanismQueries(segments: SmartStockSegment[]): string[] {
+  const source = [...new Set(segments.flatMap((segment) => [segment.campaignText || '', segment.text,
+    segment.semanticText || '', segment.contextText || '', segment.semanticContextText || '']))].join(' ');
+  const ingredients = [...new Set([...ingredientsOf(source), ...segments.flatMap((segment) => segment.campaignIngredients || [])])];
+  const queries: string[] = [];
+  const add = (query: string) => { if (query && !queries.includes(query) && queries.length < 8) queries.push(query); };
+  if (ingredients.length > 1) add(ingredients.slice(0, 4).join(' '));
+  // Individual ingredients must remain discoverable: a shot of only honey is
+  // valid for honey + lemon, even if the API treats multiword search as AND.
+  for (const ingredient of ingredients) add(ingredient);
+  for (let i = 0; i < ingredients.length && queries.length < 6; i++) {
+    for (let j = i + 1; j < ingredients.length && queries.length < 6; j++) add(`${ingredients[i]} ${ingredients[j]}`);
+  }
+  if (BOTANICAL.test(normalize(source))) { add('ervas plantas'); add('preparando folhas'); }
+  if (!queries.length && GENERIC_RECIPE.test(normalize(source))) { add('receita caseira'); add('preparando mistura'); }
+  return queries;
 }
 
 export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockFrameNiche[]): StockFrameNiche | undefined {
@@ -397,11 +435,14 @@ type PreparedVideo = {
   taxonomy: string;
   visualText: string;
   visualSearchText: string;
+  contentText: string;
+  explicitSexualScene: boolean;
   ingredients: string[];
   shownAnatomy: string[];
   concepts: string[];
   direction: NonNullable<SmartStockSegment['narrativeDirection']>;
-  fields: { tokens: string[]; weight: number }[];
+  recipe: boolean;
+  fields: { tokens: string[]; weight: number; visual: boolean }[];
 };
 
 const preparedVideos = new WeakMap<StockFrameVideo, PreparedVideo>();
@@ -416,40 +457,82 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
   const smart = video.smartMetadata;
   const visualText = normalize([smart?.summary, smart?.concepts.join(' '), smart?.subjects.join(' '), smart?.actions.join(' '), smart?.objects.join(' '), smart?.bodyParts.join(' '), smart?.positiveKeywords.join(' ')].filter(Boolean).join(' '));
   const visualSearchText = normalize(stockFrameSearchText(video));
+  const contentText = [title, tags, description, visualText].filter(Boolean).join(' ');
   const titleAnatomy = anatomyOf(video.title);
   const descriptionAnatomy = anatomyOf(video.description);
-  const direction = narrativeDirection(visualSearchText);
-  let concepts = conceptsOf(visualSearchText);
+  const direction = narrativeDirection(contentText);
+  let concepts = conceptsOf(contentText);
   if (direction === 'recovery') concepts = [...new Set([...concepts.filter((concept) => concept !== 'emocao-negativa'), 'emocao-positiva'])];
   if (direction === 'distress') concepts = concepts.filter((concept) => concept !== 'emocao-positiva');
   const prepared = {
-    title, taxonomy, visualText, visualSearchText,
+    title, taxonomy, visualText, visualSearchText, contentText,
+    explicitSexualScene: EXPLICIT_SEXUAL_SCENE.test(contentText),
     ingredients: ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
     shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : anatomyOf(video.tags.join(' ')),
     concepts, direction,
+    recipe: /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0,
     fields: [
-      { tokens: meaningful(title), weight: 4.4 },
-      { tokens: meaningful(tags), weight: 3.5 },
-      { tokens: meaningful(taxonomy), weight: 2.8 },
-      { tokens: meaningful(description), weight: 1.4 },
-      { tokens: meaningful(visualText), weight: 3.8 },
+      { tokens: meaningful(title), weight: 4.4, visual: true },
+      { tokens: meaningful(tags), weight: 3.5, visual: true },
+      { tokens: meaningful(taxonomy), weight: 2.8, visual: false },
+      { tokens: meaningful(description), weight: 1.4, visual: true },
+      { tokens: meaningful(visualText), weight: 3.8, visual: true },
     ],
   };
   preparedVideos.set(video, prepared);
   return prepared;
 }
 
-function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartStockCandidate {
-  if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
-  const prepared = prepareVideo(video);
-  const { title, taxonomy, visualText, visualSearchText, ingredients: videoIngredients, shownAnatomy } = prepared;
-  const smart = video.smartMetadata;
+/** Prepare a segment once per ranking, not once for every catalog candidate.
+ * Deliberately not cached by identity: the editor can change its context or
+ * recipe lock between rankings, and those edits must take effect immediately. */
+function prepareRanking(segment: SmartStockSegment) {
   const spokenText = segment.semanticText || segment.text;
   const spokenContext = segment.semanticContextText || segment.contextText || spokenText;
-  const campaignIngredients = segment.campaignIngredients || ingredientsOf(segment.campaignText || '');
-  const herbalCampaign = BOTANICAL.test(normalize(segment.campaignText || ''));
+  const spokenHere = anatomyOf(spokenText);
+  const localIngredients = [...new Set([...ingredientsOf(spokenText), ...ingredientsOf(segment.text)])];
+  const contextIngredients = [...new Set([...ingredientsOf(spokenContext), ...ingredientsOf(segment.contextText || '')])];
+  const campaignIngredients = segment.campaignIngredients?.length ? segment.campaignIngredients : ingredientsOf(segment.campaignText || '');
+  const direction = segment.narrativeDirection || narrativeDirection(spokenContext);
+  return {
+    spokenNormalized: normalize(spokenText),
+    contextNormalized: normalize(spokenContext),
+    campaignIngredients: campaignIngredients.length ? campaignIngredients : contextIngredients,
+    herbalCampaign: BOTANICAL.test(normalize(segment.campaignText || '')),
+    queryTokens: [...new Set(meaningful(`${spokenText} ${segment.query}`))],
+    localTokens: new Set(meaningful(spokenText)),
+    contextTokens: new Set(meaningful(spokenContext)),
+    contextConcepts: conceptsOf(spokenContext),
+    localIngredients,
+    contextIngredients,
+    localBotanical: BOTANICAL.test(normalize(`${spokenText} ${spokenContext}`)),
+    campaignConcepts: conceptsOf(segment.campaignText || spokenContext),
+    campaignAnatomy: anatomyOf(segment.campaignText || spokenContext),
+    campaignIsHealth: MEDICAL_NICHE.test(normalize(segment.campaignText || spokenContext)) || /\b(?:saude|erecao|glicose|joelho|artrite|olhos|health|erection)\b/.test(normalize(segment.campaignText || spokenContext)),
+    spokenAnatomy: spokenHere.length ? spokenHere : anatomyOf(spokenContext),
+    contextHasIngredients: contextIngredients.length > 0,
+    direction,
+    beat: segment.visualBeat || visualBeat(spokenText, direction),
+  };
+}
+
+function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking: ReturnType<typeof prepareRanking>, allowGenericFallback = false): SmartStockCandidate {
+  if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
+  const prepared = prepareVideo(video);
+  const { title, visualSearchText, ingredients: videoIngredients, shownAnatomy, recipe } = prepared;
+  const smart = video.smartMetadata;
+  const { campaignIngredients, herbalCampaign, queryTokens, spokenAnatomy, direction, beat } = ranking;
   const videoVisualText = visualSearchText;
-  if (smart?.negativeKeywords.some((keyword) => normalize(spokenContext).includes(normalize(keyword)))) {
+  if (prepared.explicitSexualScene) {
+    return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
+  }
+  if (SUGGESTIVE_SCENE.test(prepared.title) && !SPECIFIC_INTIMACY_COPY.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['ação íntima não descrita na fala'] };
+  }
+  if (INVASIVE_PROCEDURE_SCENE.test(prepared.contentText) && !INVASIVE_PROCEDURE_COPY.test(ranking.contextNormalized)) {
+    return { video, score: -100, reasons: ['a fala não descreve um procedimento invasivo'] };
+  }
+  if (smart?.negativeKeywords.some((keyword) => ranking.contextNormalized.includes(normalize(keyword)))) {
     return { video, score: -100, reasons: ['metadado visual exclui o assunto deste trecho'] };
   }
   if (herbalCampaign && videoIngredients.length && !BOTANICAL.test(videoVisualText)) {
@@ -458,21 +541,34 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
   if (campaignIngredients.length && videoIngredients.some((ingredient) => !campaignIngredients.includes(ingredient))) {
     return { video, score: -100, reasons: ['ingrediente diferente da combinação da copy'] };
   }
-  if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId) {
+  const ingredientEvidence = videoIngredients.some((ingredient) => ranking.localIngredients.includes(ingredient)
+    || ranking.contextIngredients.includes(ingredient)
+    || (beat === 'demonstration' && campaignIngredients.includes(ingredient)));
+  const botanicalEvidence = ranking.localBotanical && BOTANICAL.test(prepared.contentText);
+  const compatibleMechanism = (beat === 'demonstration' || ranking.contextHasIngredients)
+    && (ingredientEvidence || botanicalEvidence);
+  const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
+    && segment.concepts.some((concept) => prepared.concepts.includes(concept));
+  if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId
+      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene) {
     return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
   }
   if (smart?.graphicContent || smart?.containsWatermark) return { video, score: -100, reasons: ['conteúdo impróprio para anúncio'] };
-  const queryTokens = [...new Set(meaningful(`${spokenText} ${segment.query}`))];
-  const spokenHere = anatomyOf(spokenText);
-  const spokenAnatomy = spokenHere.length ? spokenHere : anatomyOf(spokenContext);
   // The scene's explicit subject outranks catalog taxonomy. "Homem" can
   // share the men's-health niche with prostate content while the shot plainly
   // shows knee pain. Prostate tags must not override a knee-only scene title.
   if (spokenAnatomy.length && shownAnatomy.length && !spokenAnatomy.some((part) => shownAnatomy.includes(part))) {
     return { video, score: -100, reasons: ['parte do corpo diferente da fala'] };
   }
+  const neutralCoupleAction = /\b(?:casal|namorad\w*|marido|esposa)\b/.test(prepared.title)
+    && /\b(?:abrac\w*|sorri\w*|sorris\w*|sentad\w*|caminh\w*|maos dadas|olhando um para o outro)\b/.test(prepared.title);
+  const genericHealthcareScene = allowGenericFallback && ranking.campaignIsHealth
+    && /\b(?:medico|urologista|doutor|consulta|consultorio)\b/.test(`${prepared.title} ${prepared.visualText}`);
+  if (CONVERSATION.test(ranking.spokenNormalized)
+      && !CONVERSATION.test(`${prepared.title} ${prepared.visualText}`) && !neutralCoupleAction && !genericHealthcareScene) {
+    return { video, score: -100, reasons: ['a fala descreve conversa, mas o take mostra outra ação'] };
+  }
   const videoConcepts = prepared.concepts;
-  const direction = segment.narrativeDirection || narrativeDirection(spokenContext);
   const videoDirection = prepared.direction;
   if ((direction === 'recovery' && videoDirection === 'distress') || (direction === 'distress' && videoDirection === 'recovery')) {
     return { video, score: -100, reasons: ['ação oposta ao contexto da fala'] };
@@ -482,17 +578,55 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
   let lexicalEvidence = 0;
   for (const token of queryTokens) {
     let best = 0;
+    let visualMatch = false;
     for (const field of prepared.fields) {
       const tokens = field.tokens;
-      if (tokens.includes(token)) best = Math.max(best, field.weight);
-      else if (token.length >= 5 && tokens.some((candidate) => candidate.startsWith(token) || token.startsWith(candidate))) best = Math.max(best, field.weight * .68);
+      const exact = tokens.includes(token);
+      const partial = token.length >= 5 && tokens.some((candidate) => candidate.startsWith(token) || token.startsWith(candidate));
+      if (exact || partial) {
+        best = Math.max(best, field.weight * (exact ? 1 : .68));
+        if (field.visual) visualMatch = true;
+      }
     }
     if (best) {
-      lexicalEvidence++;
+      if (visualMatch && ranking.localTokens.has(token)) lexicalEvidence++;
       score += best * (1 + Math.min(.8, token.length / 20));
     }
   }
   const sharedConcepts = segment.concepts.filter((concept) => videoConcepts.includes(concept));
+  // A split sentence can inherit its own subject, but the campaign's niche,
+  // aspect ratio and remote numeric score cannot stand in for scene evidence.
+  const contextualConcepts = ranking.contextConcepts.filter((concept) => videoConcepts.includes(concept));
+  const contextLexicalEvidence = prepared.fields.some((field) => field.visual && field.tokens.some((token) => token.length >= 4 && ranking.contextTokens.has(token)));
+  if (!lexicalEvidence && !sharedConcepts.length && !contextualConcepts.length && !contextLexicalEvidence && !ingredientEvidence && !botanicalEvidence) {
+    // Invoked only by the explicit last-resort helper, after broad retrieval.
+    // Same pack alone is insufficient: require a neutral identifiable scene
+    // plus a real thematic connection in its own title/description/metadata.
+    const neutralHuman = /\b(?:homem|mulher|pessoa|idos[ao]|casal|familia)\b/.test(prepared.contentText)
+      && /\b(?:convers\w*|sentad\w*|olhando|caminh\w*|rotina|abra[cç]\w*)\b/.test(prepared.contentText);
+    const healthcare = /\b(?:medico|doutor|consulta|clinica|consultorio|profissional de saude)\b/.test(prepared.contentText);
+    const educationalAnatomy = /\b(?:anatomia|3d|ilustracao)\b/.test(prepared.contentText)
+      && shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
+    const themeLink = videoConcepts.some((concept) => ranking.campaignConcepts.includes(concept))
+      || (healthcare && ranking.campaignIsHealth)
+      || educationalAnatomy
+      || (neutralHuman && /\bcasal\b/.test(prepared.contentText) && ranking.campaignConcepts.includes('saude-homem'));
+    const anatomyConflict = shownAnatomy.length > 0
+      && !shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
+    if (!allowGenericFallback || recipe || videoDirection !== 'neutral' || anatomyConflict
+        || !(neutralHuman || healthcare || educationalAnatomy) || !themeLink) {
+      return { video, score: -100, reasons: ['sem evidência visual do trecho ou da frase de contexto'] };
+    }
+    score += 3;
+    reasons.push('alternativa genérica com vínculo ao tema da campanha; sem correspondência específica com a fala');
+  }
+  if (ingredientEvidence) { score += 12; reasons.push('ingrediente congruente com a receita'); }
+  if (botanicalEvidence) { score += 8; reasons.push('cena botânica congruente'); }
+  if (lexicalEvidence) reasons.push('termos visuais do trecho');
+  if (!lexicalEvidence && !sharedConcepts.length && (contextualConcepts.length || contextLexicalEvidence)) {
+    score += Math.min(8, contextualConcepts.length * 4 + (contextLexicalEvidence ? 3 : 0));
+    reasons.push('contexto visual da mesma frase');
+  }
   if (sharedConcepts.length) {
     score += sharedConcepts.length * 8;
     reasons.push(`contexto: ${sharedConcepts.slice(0, 2).join(', ')}`);
@@ -520,13 +654,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
   if (video.matchedConcepts.length) score += Math.min(6, video.matchedConcepts.length * 2);
   if (smart?.adSuitabilityScore !== undefined) score += Math.max(0, Math.min(1, smart.adSuitabilityScore)) * 2;
   if (smart?.containsText) score -= 5;
-  const beat = segment.visualBeat || visualBeat(spokenText, direction);
   if (beat === 'problem' && /\b(?:dor|dificuldade|frustr\w*|problema|impotencia|disfuncao|triste|desconforto)\b/.test(videoVisualText)) score += 7;
   if (beat === 'relief' && /\b(?:alivio|melhora|feliz|sorris\w*|confian\w*|recuper\w*|casal)\b/.test(videoVisualText)) score += 8;
   if (beat === 'proof' && /\b(?:depoimento|resultado|antes e depois|medico|doutor|explic\w*)\b/.test(videoVisualText)) score += 5;
   if (beat === 'demonstration' && /\b(?:prepar\w*|mistura|ingrediente|receita|aplic\w*|folha|erva|planta)\b/.test(videoVisualText)) score += 6;
-  const recipe = /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0;
-  if (recipe && beat !== 'demonstration' && !ingredientsOf(spokenContext).length && segment.campaignNicheId
+  if (recipe && beat !== 'demonstration' && !ranking.contextHasIngredients && segment.campaignNicheId
       && !(herbalCampaign && BOTANICAL.test(videoVisualText))) {
     score -= 30;
     reasons.push('receita fora deste trecho');
@@ -538,11 +670,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
   }
   if (video.origin === 'organic') score += .7;
   if (video.downloads > 0) score += Math.min(2.2, Math.log10(video.downloads + 1) * .8);
-  if (title && normalize(spokenText).includes(title) && title.length > 7) score += 6;
-  // Popularidade, formato e duração só desempataM candidatos que já
-  // possuem evidência semântica. Sem isto, um take irrelevante muito baixado
-  // poderia ultrapassar o limiar apenas por ser vertical e ter 8 segundos.
-  if (!lexicalEvidence && !sharedConcepts.length && video.finalScore === undefined) score -= 8;
+  if (title && ranking.spokenNormalized.includes(title) && title.length > 7) score += 6;
+  // Format, popularity and remote scores are tie-breaks only: the hard scene
+  // evidence gate above also applies when full coverage lowers the threshold.
   if (score > 0 && !reasons.length) reasons.push('termos e descrição compatíveis');
   return { video, score: Math.round(score * 100) / 100, reasons };
 }
@@ -552,7 +682,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
  * segmento fica sem escolha em vez de a ferramenta preencher com lixo.
  */
 export function rankStockFrameVideos(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8, fullCoverage = false): SmartStockCandidate[] {
-  return videos.map((video) => scoreVideo(segment, video))
+  const ranking = prepareRanking(segment);
+  return videos.map((video) => scoreVideo(segment, video, ranking))
     .filter((candidate) => candidate.score >= (fullCoverage ? 1 : segment.concepts.length ? 5 : 3.5))
     .sort((a, b) => b.score - a.score || b.video.downloads - a.video.downloads || a.video.id.localeCompare(b.video.id))
     .slice(0, Math.max(1, limit));
@@ -676,6 +807,19 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
     if (alternative) current.selectedVideoId = alternative.video.id;
   }
   return result;
+}
+
+/** Last resort for unfilled full100 slots ONLY, after the caller has exhausted
+ * specific and broad catalog searches. Normal ranking never invokes this. */
+export function rankStockFrameGenericFallback(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8): SmartStockCandidate[] {
+  const ranking = prepareRanking(segment);
+  return videos.map((video) => scoreVideo(segment, video, ranking, true))
+    .filter((candidate) => candidate.score >= 1)
+    .sort((a, b) => b.score - a.score || a.video.id.localeCompare(b.video.id))
+    .slice(0, Math.max(1, limit))
+    .map((candidate) => ({ ...candidate, genericFallback: true,
+      reasons: candidate.reasons.some((reason) => reason.startsWith('alternativa genérica')) ? candidate.reasons
+        : ['alternativa genérica após esgotar a busca específica', ...candidate.reasons] }));
 }
 
 export function selectedSmartCandidate(segment: SmartStockSegment): SmartStockCandidate | undefined {

@@ -44,7 +44,7 @@ assert.ok(windows[1].start >= windows[0].end, 'both sources respect existing col
 
 const page = readFileSync(new URL('../app/tools/clickup-pilot/page.tsx', import.meta.url), 'utf8');
 assert.equal((page.match(/\{janelaDeFlow\(\)\}/g) || []).length, 1, 'one root modal mount despite repeated toolbar');
-assert.ok(page.includes('inserts: insertsDaMontagem(taskId)'), 'actual compositor receives enabled-filtered source list');
+assert.ok(page.includes('const insertsAtuais = insertsDaMontagem(taskId)') && page.includes('escopoDaPosProducao(copy, insertsAtuais, info.partLabels)') && page.includes('inserts: insertsDoMontado'), 'actual compositor receives enabled inserts scoped to the rendered hook and body');
 assert.ok(page.includes('const insDaTask = insertsDaMontagem(taskId)'), 'postprocessing activates for Flow-only tasks');
 assert.ok(page.includes('salvo.size !== f.size'), 'Flow import checks IDB roundtrip size');
 assert.ok(page.includes('Math.min(meta.w, meta.h) < 1080'), 'Flow video import rejects lower-resolution downloads');
@@ -700,9 +700,14 @@ await test('legacy caller does not receive strict post options or cache rejectio
 // Verify the actual post-production wrapper rejects warnings before deleting
 // orphan configuration. No real browser media operation runs in this unit test.
 const posCode = compile(`${extract('fazerPosProcessar')}\nexports.run = fazerPosProcessar;`);
+const postScope = { exports: {} };
+vm.runInNewContext(compile(readFileSync(new URL('../lib/pilot-post-scope.ts', import.meta.url), 'utf8')), postScope);
 function postHarness(strict, result) {
   let removed = 0;
   const ctx = { exports: {}, console: { log() {}, warn() {} },
+    copyDaPosProducao: postScope.exports.copyDaPosProducao,
+    escopoDaPosProducao: postScope.exports.escopoDaPosProducao,
+    planoSmartStockFrameCompleto: () => true,
     taskIdBaseDaVersao: (id) => id, CHAVE_PADRAO: 'default',
     legendaCfgsRef: { current: {} }, zoomCfgsRef: { current: {} }, headlineRef: { current: {} },
     LEGENDA_CFG_DEFAULT: { on: false }, ZOOM_CFG_DEFAULT: { on: false }, HEADLINE_CFG_DEFAULT: { on: false },

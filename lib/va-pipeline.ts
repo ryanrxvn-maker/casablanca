@@ -80,8 +80,9 @@ export type VAPipelineInput = {
    *  Zoom ligado montava e entregava sem zoom nenhum, calada, porque só o
    *  pipeline normal chamava a pós-produção.
    *
-   *  Devolve o vídeo novo, ou `null` pra manter o original (falha aqui é
-   *  REALCE perdido, nunca conteúdo perdido). */
+   *  Devolve o vídeo novo, ou `null` pra manter o original. Falhas de realce
+   *  preservam o original; IncompleteStockFrameCoverageError é fatal, pois
+   *  entregar o original violaria a cobertura integral solicitada. */
   posProcessar?: (
     blob: Blob,
     info: { filename: string; partesSec: number[] | null },
@@ -421,6 +422,31 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const maxSec = input.maxSegmentSec ?? 35;
   const progress = input.onProgress ?? (() => {});
 
+  // A mesma etapa atende Studio e montagem local. Studio antes retornava
+  // cedo e pulava todos os inserts (inclusive a validação de full StockFrame).
+  async function posProcessarItems(items: VAPipelineResult['items']): Promise<void> {
+    if (!input.posProcessar) return;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.blob || it.blob.size === 0) continue;
+      progress({ stage: 'mount', message: `Pós-produção de ${it.avaCode} (legenda/zoom)...`, percent: 96 });
+      try {
+        // VA não conserva durações por take aqui; mantém a cadência própria
+        // da pós-produção, como no caminho sem decupagem do Pilot.
+        const novo = await input.posProcessar(it.blob, { filename: it.filename, partesSec: null });
+        if (novo && novo.size > 50_000) {
+          items[i] = { ...it, blob: novo };
+          console.log(`[va-pipeline] pós-produção ${it.avaCode}: OK ${(novo.size / (1024 * 1024)).toFixed(1)}MB`);
+        }
+      } catch (e) {
+        // Só a violação explícita de full100 é fatal. Legenda/zoom opcionais
+        // continuam podendo falhar sem descartar a montagem já concluída.
+        if ((e as Error)?.name === 'IncompleteStockFrameCoverageError') throw e;
+        console.warn(`[va-pipeline] pós-produção ${it.avaCode} falhou — entregue sem legenda/zoom:`, e);
+      }
+    }
+  }
+
   // 1. Extract audio do MP4
   progress({ stage: 'extract_audio', message: 'Extraindo audio do AD original...', percent: 5 });
   const adVideoBlob = input.adVideoBytes instanceof Blob
@@ -700,6 +726,7 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
         studioItems.push({ avaCode: av.avaCode, filename, blob: null, error: (e as Error)?.message || 'falha Studio' });
       }
     }
+    await posProcessarItems(studioItems);
     progress({ stage: 'done', message: 'Pipeline VA (Studio) concluido', percent: 100 });
     return {
       items: studioItems,
@@ -753,20 +780,6 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
         message: `Smart Mode: ${swapCount}/${boundaries.length} segmentos com avatar (${faceResults.length - swapCount} b-rolls mantidos)`,
         percent: 30,
       });
-      if (activeSwapBoundaries.length === 0) {
-        // Nada pra trocar — output = original.
-        progress({ stage: 'done', message: 'Smart Mode: nenhum segmento com avatar detectado. Output = original.', percent: 100 });
-        return {
-          items: input.avatares.map((av) => ({
-            avaCode: av.avaCode,
-            filename: `${input.baseAdId}-${av.avaCode}-smart.mp4`,
-            blob: adVideoBlob, // copia original
-          })),
-          audioSegmentCount: 0,
-          summary: 'Smart Mode: zero swap (nenhum segmento com face). Output = original.',
-          smartModeStats,
-        };
-      }
     } catch (e) {
       // Face detection completamente falhou — fallback: assume todos talking
       console.warn('[va-pipeline] face detection falhou (fallback):', e);
@@ -776,6 +789,24 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
         keepSegments: 0,
         fallbackSegments: boundaries.length,
         detectorFailed: true,
+      };
+    }
+    if (activeSwapBoundaries.length === 0) {
+      // Nada para trocar não significa nada para pós-produzir. Mantém este
+      // passo FORA do catch do detector: full100 inválido deve subir ao caller.
+      const unchangedItems = input.avatares.map((av) => ({
+        avaCode: av.avaCode,
+        filename: `${input.baseAdId}-${av.avaCode}-smart.mp4`,
+        blob: adVideoBlob,
+      }));
+      await posProcessarItems(unchangedItems);
+      const outputNote = input.posProcessar ? 'Pós-produção verificada.' : 'Output = original.';
+      progress({ stage: 'done', message: `Smart Mode: nenhum segmento com avatar detectado. ${outputNote}`, percent: 100 });
+      return {
+        items: unchangedItems,
+        audioSegmentCount: 0,
+        summary: `Smart Mode: zero swap (nenhum segmento com face). ${outputNote}`,
+        smartModeStats,
       };
     }
   }
@@ -899,29 +930,7 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   // Roda DEPOIS de tudo montado e FORA do lock do ffmpeg (aqui o lock é por
   // operação, não pela pipeline inteira) — por isso o chamador passa
   // `ffmpegJaExclusivo: false` na config dela.
-  if (input.posProcessar) {
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (!it.blob || it.blob.size === 0) continue;
-      progress({
-        stage: 'mount',
-        message: `Pós-produção de ${it.avaCode} (legenda/zoom)...`,
-        percent: 96,
-      });
-      try {
-        // O VA monta take a take; as durações de cada um não sobrevivem até
-        // aqui, então o plano de zoom usa a cadência própria dele — que é o
-        // mesmo caminho já usado quando a decupagem está desligada.
-        const novo = await input.posProcessar(it.blob, { filename: it.filename, partesSec: null });
-        if (novo && novo.size > 50_000) {
-          items[i] = { ...it, blob: novo };
-          console.log(`[va-pipeline] pós-produção ${it.avaCode}: OK ${(novo.size / (1024 * 1024)).toFixed(1)}MB`);
-        }
-      } catch (e) {
-        console.warn(`[va-pipeline] pós-produção ${it.avaCode} falhou — entregue sem legenda/zoom:`, e);
-      }
-    }
-  }
+  await posProcessarItems(items);
 
   progress({ stage: 'done', message: 'Pipeline concluido', percent: 100 });
   const summary = smartMode

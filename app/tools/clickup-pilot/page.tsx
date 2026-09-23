@@ -99,7 +99,8 @@ import { PilotInsertsModal } from '@/components/PilotInserts';
 import { PilotFlowButton, PilotFlowInsertsModal } from '@/components/PilotFlowInserts';
 import { PilotStockFrameButton, PilotStockFrameModal } from '@/components/PilotStockFrame';
 import { PilotHeadlineModal } from '@/components/PilotHeadline';
-import { HEADLINE_CFG_DEFAULT, insertsAtivosNaMontagem, mesclarInsertsDaOrigem, type Insert, type HeadlineCfg, type OrigemInsert } from '@/lib/pilot-inserts';
+import { HEADLINE_CFG_DEFAULT, insertsAtivosNaMontagem, mesclarInsertsDaOrigem, planoSmartStockFrameCompleto, type Insert, type HeadlineCfg, type OrigemInsert } from '@/lib/pilot-inserts';
+import { copyDaPosProducao, escopoDaPosProducao } from '@/lib/pilot-post-scope';
 import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
 import {
   LEGENDA_CFG_DEFAULT,
@@ -2623,7 +2624,7 @@ function ClickUpPilotInner() {
      *  (esperaria a si mesma). O VA pega o lock por operação — lá ela PRECISA
      *  pedir. Errar isto é deadlock de um lado, corrida do outro. */
     opts?: { ffmpegJaExclusivo?: boolean; exigirCompleta?: boolean },
-  ): ((blob: Blob, info: { filename: string; partesSec: number[] | null }) => Promise<Blob | null>) | undefined {
+  ): ((blob: Blob, info: { filename: string; partesSec: number[] | null; partLabels?: string[]; cortesInternosSec?: number[][] | null }) => Promise<Blob | null>) | undefined {
     // Versão irmã (-yt / -v3...) herda a config da task MÃE — é nela que o
     // user clicou os botões; a irmã nem aparece na lista.
     const cfgId = taskIdBaseDaVersao(taskId);
@@ -2633,12 +2634,23 @@ function ClickUpPilotInner() {
     const insDaTask = insertsDaMontagem(taskId);
     if (!legenda.on && !zoom.on && !hl.on && insDaTask.length === 0) return undefined;
     return async (blob, info) => {
-      const rp = batchStatesRef.current?.[taskId]?.replan?.parts;
-      const an = taskAnalysesRef.current?.[taskId];
-      const partes = (rp && rp.length ? rp : an?.partTemplates || []).map((x: any) => ({
-        label: String(x.label || ''),
-        text: String(x.text || ''),
-      }));
+      const an = taskAnalysesRef.current?.[taskId] || taskAnalysesRef.current?.[cfgId];
+      const copy = copyDaPosProducao([
+        batchStatesRef.current?.[taskId]?.replan?.parts,
+        taskAnalysesRef.current?.[taskId]?.partTemplates,
+        batchStatesRef.current?.[cfgId]?.replan?.parts,
+        taskAnalysesRef.current?.[cfgId]?.partTemplates,
+      ]);
+      const insertsAtuais = insertsDaMontagem(taskId);
+      const { partes, inserts: insertsDoMontado, labelsDesconhecidas } = escopoDaPosProducao(copy, insertsAtuais, info.partLabels);
+      // Preserve a intenção ANTES de excluir hooks alternativos. Um plano
+      // que só cobre outro hook não pode fazer o requisito 100% desaparecer.
+      const exigeStockFrame100 = insertsAtuais.some((ins) => ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100);
+      if (exigeStockFrame100 && (labelsDesconhecidas.length || !planoSmartStockFrameCompleto(insertsDoMontado, partes))) {
+        const error = new Error(`A montagem 100% StockFrame foi interrompida: o plano não cobre integralmente as partes deste vídeo${labelsDesconhecidas.length ? ` (${labelsDesconhecidas.join(', ')})` : ''}.`);
+        error.name = 'IncompleteStockFrameCoverageError';
+        throw error;
+      }
       const { montarPosProducao } = await import('@/lib/pilot-pos-producao-run');
       const { semOQueFoiPedido } = await import('@/lib/pilot-pos-producao');
       // Idioma do ASR: o drLang só existe no fluxo DR MILLION (e o default
@@ -2674,7 +2686,7 @@ function ClickUpPilotInner() {
         ffmpegJaExclusivo: opts?.ffmpegJaExclusivo !== false,
         // INSERTS: a config é da task MÃE (a irmã de versão herda), e os bytes
         // vêm do IDB na hora do render — nunca ficam presos na memória.
-        inserts: insertsDaMontagem(taskId),
+        inserts: insertsDoMontado,
         headline: headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT,
         lerMidia: async (key: string) => {
           try {
@@ -2693,19 +2705,19 @@ function ClickUpPilotInner() {
       // Um pedido omitido não substitui a entrega anterior. Avisos de ajuste
       // de duração ou alinhamento estimado continuam informativos, como antes.
       const avisosDeFalha = r.avisos.filter((av) => /não (?:entrou|entraram|abriu|coube|está mais salvo|consegui ler os arquivos dos inserts|consegui misturar o som dos inserts)|saiu sem áudio/i.test(av));
-      if (opts?.exigirCompleta && (avisosDeFalha.length || r.insertsOrfaos?.length)) {
-        throw new Error(`A pós-produção não foi concluída: ${avisosDeFalha.join(' · ') || 'uma mídia de insert ficou indisponível'}`);
-      }
       // Full b-roll é uma promessa literal sobre o vídeo FINAL, não apenas
       // sobre a seleção de palavras. Nunca publique o avatar ou um render
       // parcial se um take sumiu, não coube ou a timeline perdeu um quadro.
-      if (insDaTask.some((ins) => ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100)) {
+      if (exigeStockFrame100) {
         const falha100 = r.avisos.find((av) => av.includes('cobertura 100% do StockFrame'));
         if (!r.blob || avisosDeFalha.length || r.insertsOrfaos?.length || falha100) {
           const error = new Error(`A montagem 100% StockFrame foi interrompida para não entregar cobertura incompleta: ${falha100 || avisosDeFalha.join(' · ') || 'o render ou algum take ficou indisponível'}`);
           error.name = 'IncompleteStockFrameCoverageError';
           throw error;
         }
+      }
+      if (opts?.exigirCompleta && (avisosDeFalha.length || r.insertsOrfaos?.length)) {
+        throw new Error(`A pós-produção não foi concluída: ${avisosDeFalha.join(' · ') || 'uma mídia de insert ficou indisponível'}`);
       }
       // INSERT ÓRFÃO (03.09): a mídia foi varrida da faxina do cache do
       // navegador (o AD ficou parado tempo demais). O card já avisa em
@@ -10185,7 +10197,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const posOriginal = fazerPosProcessar(taskId, somenteCache ? { exigirCompleta: true } : undefined);
       let posConcluidos = 0;
       const posProcessar = somenteCache && posOriginal
-        ? async (blob: Blob, info: { filename: string; partesSec: number[] | null }) => {
+        ? async (blob: Blob, info: { filename: string; partesSec: number[] | null; partLabels?: string[]; cortesInternosSec?: number[][] | null }) => {
             conferirSnapshot();
             const novo = await posOriginal(blob, info);
             conferirSnapshot();
