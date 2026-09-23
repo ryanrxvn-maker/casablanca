@@ -11,6 +11,7 @@ const route = readFileSync(new URL('../app/api/extension/download/route.ts', imp
 const sync = readFileSync(new URL('./ext-sync.mjs', import.meta.url), 'utf8');
 const page = readFileSync(new URL('../app/tools/clickup-pilot/page.tsx', import.meta.url), 'utf8');
 const component = readFileSync(new URL('../components/PilotStockFrame.tsx', import.meta.url), 'utf8');
+const pipeline = readFileSync(new URL('../lib/clickup-pilot-pipeline.ts', import.meta.url), 'utf8');
 
 assert.ok(manifest.host_permissions.includes('https://biblioteca.stockframe.space/*'), 'extension owns the official StockFrame API origin');
 assert.ok(manifest.content_scripts.some((entry) => entry.js.includes('stockframe-bridge.js')), 'Pilot receives the StockFrame bridge');
@@ -38,6 +39,8 @@ assert.ok(component.includes('rankStockFrameVideos(segment'), 'Smart Stocks sema
 assert.ok(component.includes('Nenhum download foi consumido ainda'), 'analysis is preview-only and does not burn download quota');
 assert.ok(component.includes('current.filter((insert) => !insert.stockFrame?.smart)'), 're-running Smart replaces only the previous smart plan');
 assert.ok(component.includes('freshAccount.downloadsLimit - freshAccount.downloadsToday'), 'plan checks fresh paid-account quota before applying');
+assert.ok(page.includes("error.name = 'IncompleteStockFrameCoverageError'"), 'Pilot marks 100% failure as critical instead of silently accepting an incomplete render');
+assert.ok(pipeline.includes("if ((e as Error)?.name === 'IncompleteStockFrameCoverageError') throw e;"), 'pipeline propagates 100% failure instead of delivering the avatar-only fallback');
 
 const premium = { name: 'Premium Test', email: 'premium@test.dev', downloads_today: 3, downloads_limit: 130, plan: 'premium' };
 function jsonResponse(value, status = 200, headers = {}) {

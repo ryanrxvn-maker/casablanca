@@ -2702,7 +2702,9 @@ function ClickUpPilotInner() {
       if (insDaTask.some((ins) => ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100)) {
         const falha100 = r.avisos.find((av) => av.includes('cobertura 100% do StockFrame'));
         if (!r.blob || avisosDeFalha.length || r.insertsOrfaos?.length || falha100) {
-          throw new Error(`A montagem 100% StockFrame foi interrompida para não entregar cobertura incompleta: ${falha100 || avisosDeFalha.join(' · ') || 'o render ou algum take ficou indisponível'}`);
+          const error = new Error(`A montagem 100% StockFrame foi interrompida para não entregar cobertura incompleta: ${falha100 || avisosDeFalha.join(' · ') || 'o render ou algum take ficou indisponível'}`);
+          error.name = 'IncompleteStockFrameCoverageError';
+          throw error;
         }
       }
       // INSERT ÓRFÃO (03.09): a mídia foi varrida da faxina do cache do

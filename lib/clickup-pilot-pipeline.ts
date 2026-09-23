@@ -995,6 +995,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         }
       } catch (e) {
         const msg1 = (e as Error)?.message || 'falhou';
+        // O restante da pós-produção é realce opcional, mas 100% StockFrame
+        // é requisito de entrega. Não substitua a falha pelo avatar original.
+        if ((e as Error)?.name === 'IncompleteStockFrameCoverageError') throw e;
         if (/terminat/i.test(msg1)) {
           console.warn(`[clickup-pilot-pipeline] posprod ${item.filename}: ffmpeg terminado POR FORA — refazendo uma vez`);
           try {
