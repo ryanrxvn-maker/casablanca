@@ -78,6 +78,14 @@ for (const pace of ['fast', 'long', 'adaptive'] as const) {
     ok(limited.every((segment) => segment.text === shortParts[0].text.match(/\S+/g)!.slice(segment.wordFrom, segment.wordTo + 1).join(' ')), `${pace} ${coverage}% mantém texto e índices do trecho alinhados`);
   }
 }
+const longToleranceCase = Array.from({ length: 100 }, (_, index) => index + 60).map((total) => {
+  const copy = [{ label: 'BODY 1', text: Array.from({ length: total }, (_, index) => index % 7 === 0 ? 'saúde.' : 'saúde').join(' ') }];
+  const selected = planSmartStockSegments(copy, { coverage: 60, pace: 'adaptive' });
+  const covered = selected.reduce((sum, segment) => sum + segment.wordTo - segment.wordFrom + 1, 0);
+  return { total, selected, covered, target: Math.round(total * .6) };
+}).find(({ total, covered, target }) => target - covered > 0 && target - covered <= Math.ceil(total * .03));
+ok(!!longToleranceCase && longToleranceCase.selected.every((segment) => segment.wordTo - segment.wordFrom + 1 >= 5),
+  '60% de copy longa evita microinsert de 2–4 palavras dentro da tolerância permitida');
 
 const video = (patch: Partial<StockFrameVideo> & Pick<StockFrameVideo, 'id' | 'title'>): StockFrameVideo => {
   const { id, title, ...rest } = patch;

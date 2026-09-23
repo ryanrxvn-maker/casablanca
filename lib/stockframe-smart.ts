@@ -358,6 +358,10 @@ export function planSmartStockSegments(parts: StockFrameCopyPart[], options: { c
     if (words >= target && chosen.size) break;
     const remaining = target - words;
     const length = item.segment.wordTo - item.segment.wordFrom + 1;
+    // In a long AD, forcing a two- or three-word insert just to hit the
+    // arithmetic target creates an editorial flash that says nothing. The
+    // caller already accepts a 3% tolerance for 30/60% coverage.
+    if (totalWords >= 60 && remaining < 5 && remaining <= Math.ceil(totalWords * .03) && chosen.size) break;
     let segment = { ...item.segment, candidates: [] } as SmartStockSegment;
     if (length > remaining) {
       // A short copy must not turn 30% into 100% just because it fits in a

@@ -477,10 +477,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 12, coverage === 100) };
       });
       let completed = rankSegments(segments);
-      if (coverage === 100 && completed.some((segment) => !segment.candidates.length)) {
+      if (completed.some((segment) => !segment.candidates.length)) {
         let maxPages = 10;
         for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
-          setSmartProgress(`Ampliando o catálogo para cobrir toda a copy… página ${pageNo}/${maxPages}`);
+          setSmartProgress(`Ampliando o catálogo para cobrir os trechos escolhidos… página ${pageNo}/${maxPages}`);
           const more = await stockFrameList({ page: pageNo, perPage: 48, nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' });
           maxPages = Math.min(10, more.totalPages || 1);
           for (const video of enrichStockFrameVideos(more.videos, niches)) globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
@@ -489,9 +489,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         }
       }
       // O nicho médico não costuma catalogar cenas neutras de relacionamento,
-      // dinheiro ou consulta. Só se ainda houver lacuna no plano 100%, buscar
+      // dinheiro ou consulta. Se ainda houver lacuna no plano, buscar
       // essas cenas na biblioteca inteira antes do fallback final, sem baixar.
-      if (coverage === 100 && completed.some((segment) => !segment.candidates.length)) {
+      if (completed.some((segment) => !segment.candidates.length)) {
         const missingText = completed.filter(segment => !segment.candidates.length)
           .map(segment => (segment.semanticText || segment.text).toLowerCase()).join(' ');
         const broadQueries = new Set<string>();
@@ -528,12 +528,17 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         candidates: rankStockFrameVideos({ ...segment, campaignIngredients: recipeTheme },
           [...new Map([...globalPool, ...(bySegment.get(segment.id) || []).map((video): [string, StockFrameVideo] => [video.id, video])]).values()], 12, coverage === 100),
       }));
-      // Generic scenes are a LAST resort for full coverage, never competitors
-      // against an exact match. All congruence gates stay active in this pass.
-      if (coverage === 100) completed = completed.map(segment => segment.candidates.length ? segment : {
+      // Generic scenes are a LAST resort for every requested coverage level,
+      // never competitors against an exact match. A 60% plan cannot silently
+      // become 20% just because only the recipe shots matched the first query.
+      // All ingredient, anatomy and visual-safety gates stay active.
+      completed = completed.map(segment => segment.candidates.length ? segment : {
         ...segment, candidates: rankStockFrameGenericFallback(segment, [...globalPool.values()], 12),
       });
-      let chosen = chooseSmartStockAssignments(completed, coverage === 100);
+      // planSmartStockSegments already selected precisely the requested word
+      // budget for 30/60. Fill each of those slots whenever a safe candidate
+      // exists; the strict coverage check before download remains unchanged.
+      let chosen = chooseSmartStockAssignments(completed, true);
       if (account?.capabilities.mediaUrls) {
         const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 4).map((candidate) => [candidate.video.id, candidate.video]))).values()];
         const refreshed = await renewMedia(previewVideos);
