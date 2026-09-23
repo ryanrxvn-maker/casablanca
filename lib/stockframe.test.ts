@@ -435,6 +435,7 @@ ok(rankStockFrameVideos(czechMechanism, [video({ id: 'woman-soda', title: 'MULHE
 const misleadingEdTitles = [
   'MULHER TIRANDO CALCINHA', 'MULHER NO ATO', 'MULHER FAZENDO GESTOS SEXUAIS COM A MÃO',
   'MULHER NA ACADEMIA COM SEGUNDAS INTENÇÕES', 'CASAL DORMINDO JUNTOS HOT', 'MULHER BISCOITANDO',
+  'PAU DEFEITUOSO FAZENDO ANAL',
 ];
 const misleadingEd = misleadingEdTitles.map((title, index) => video({ id: `misleading-${index}`, title,
   nicheId: 'ed', nicheName: 'ED', tags: ['potência', 'bicarbonato', 'especialista', 'casal'] }));
@@ -449,6 +450,14 @@ const czechMoney = { ...czechOpening, semanticText: 'Algumas mulheres querem ape
   campaignText: 'Disfunção erétil. Truque com bicarbonato.' };
 ok(!rankStockFrameVideos(czechMoney, [video({ id: 'woman-only', title: 'Mulher na cozinha com bicarbonato', nicheId: 'ed', nicheName: 'ED' })], 10, true).length,
   'mulher e nicho ED não são evidência suficiente para uma frase sobre dinheiro');
+const crossPackFallback = rankStockFrameGenericFallback({ ...czechOpening,
+  campaignText: 'A potência masculina diminui; há um truque com bicarbonato.', campaignNicheId: 'ed' }, [
+  video({ id: 'general-couple', title: 'Casal conversando sentado no sofá', nicheId: 'relacionamento', nicheName: 'Relacionamento' }),
+  video({ id: 'other-illness', title: 'Mulher diabética preparando insulina', nicheId: 'diabetes', nicheName: 'Diabetes' }),
+], 10);
+ok(crossPackFallback.some(candidate => candidate.video.id === 'general-couple')
+  && !crossPackFallback.some(candidate => candidate.video.id === 'other-illness'),
+  'fallback médico admite casal neutro de pack geral, mas não patologias de outro nicho');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

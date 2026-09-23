@@ -89,7 +89,7 @@ const BOTANICAL = /\b(?:erva|ervas|hierba|hierbas|herb|herbs|ziola|ziol|krauter|
 const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|receta|rezept|przepis|mistura|mixture|mezcla|mischung|caseiro|caseira|homemade|casero|domowy|ervas?|herbs?|ziola|plantas?|plants?|formula natural)\b/;
 // These describe a visible sexual act, not reproductive health. In particular,
 // "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
-const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
+const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|fazendo anal|sexo anal|penetracao anal|pau defeituoso|pau mole|boquete|gemendo|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
 const SUGGESTIVE_SCENE = /\b(?:apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|gestos? sexua\w*|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
@@ -505,7 +505,7 @@ function prepareRanking(segment: SmartStockSegment) {
     localBotanical: BOTANICAL.test(normalize(`${spokenText} ${spokenContext}`)),
     campaignConcepts: conceptsOf(segment.campaignText || spokenContext),
     campaignAnatomy: anatomyOf(segment.campaignText || spokenContext),
-    campaignIsHealth: MEDICAL_NICHE.test(normalize(segment.campaignText || spokenContext)) || /\b(?:saude|erecao|glicose|joelho|artrite|olhos|health|erection)\b/.test(normalize(segment.campaignText || spokenContext)),
+    campaignIsHealth: MEDICAL_NICHE.test(normalize(segment.campaignText || spokenContext)) || /\b(?:saude|erecao|potencia|testosterona|glicose|joelho|artrite|olhos|health|erection|potency)\b/.test(normalize(segment.campaignText || spokenContext)),
     spokenAnatomy: spokenHere.length ? spokenHere : anatomyOf(spokenContext),
     contextHasIngredients: contextIngredients.length > 0,
     direction,
@@ -547,8 +547,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     && (ingredientEvidence || botanicalEvidence);
   const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
     && segment.concepts.some((concept) => prepared.concepts.includes(concept));
+  const neutralCrossPackFallback = allowGenericFallback && ranking.campaignIsHealth
+    && !MEDICAL_NICHE.test(prepared.taxonomy)
+    && /\b(?:casal|homem|mulher|pessoa|idos[ao]|familia)\b/.test(prepared.contentText)
+    && /\b(?:convers\w*|sentad\w*|olhando|caminh\w*|rotina|abrac\w*|consulta|consultorio)\b/.test(prepared.contentText);
   if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId
-      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene) {
+      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback) {
     return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
   }
   if (recipe && !localRecipeReference && !ranking.localIngredients.length) {
