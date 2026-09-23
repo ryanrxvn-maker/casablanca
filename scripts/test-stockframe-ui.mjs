@@ -237,7 +237,7 @@ try {
   if (!await desktop.getByRole('button', { name: 'Aplicar na montagem' }).isVisible()) {
     throw new Error('O plano Smart não chegou ao estado revisável antes do download.');
   }
-  const plannedSegments = await desktopDialog.locator('[class*="timeline"] > button').allTextContents();
+  const plannedSegments = await desktopDialog.locator('[aria-label="Dinâmica completa da copy"] [class*="segmentMain"]').allTextContents();
   if (!plannedSegments.length || plannedSegments.some((text) => /dor no joelho/i.test(text))) {
     throw new Error('O plano da copy sobre azeite/próstata escolheu uma cena de joelho fora de contexto.');
   }
@@ -272,7 +272,7 @@ try {
   await clean.getByRole('button', { name: '100% de cobertura' }).click();
   await clean.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
   await clean.getByRole('heading', { name: /\d+ takes · 100% da copy/ }).waitFor({ state: 'visible', timeout: 20_000 });
-  const cleanSegments = await clean.locator('[class*="timeline"] > button').count();
+  const cleanSegments = await clean.locator('[aria-label="Dinâmica completa da copy"] [class*="timelineRow"]:not([class*="avatarRow"])').count();
   await clean.getByRole('button', { name: 'Aplicar na montagem' }).click();
   await clean.getByRole('button', { name: `Ajustar ${cleanSegments} takes` }).waitFor({ state: 'visible', timeout: 30_000 });
   const cleanDownloads = await clean.evaluate(() => window.__stockFrameTestDownloads);

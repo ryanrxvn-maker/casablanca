@@ -28,6 +28,45 @@ export type SmartStockSegment = {
   selectedVideoId?: string;
 };
 
+export type SmartStockTimelineBlock = {
+  id: string;
+  kind: 'stock' | 'avatar';
+  anchor: string;
+  wordFrom: number;
+  wordTo: number;
+  text: string;
+  targetSeconds: number;
+  segmentId?: string;
+};
+
+/** Show the entire copy, including the words deliberately left to the avatar. */
+export function buildSmartStockTimeline(parts: StockFrameCopyPart[], segments: SmartStockSegment[]): SmartStockTimelineBlock[] {
+  const timeline: SmartStockTimelineBlock[] = [];
+  for (const [partIndex, part] of parts.entries()) {
+    const words = part.text.match(/\S+/g) || [];
+    const chosen = segments.filter((segment) => segment.anchor === part.label && segment.selectedVideoId)
+      .sort((a, b) => a.wordFrom - b.wordFrom || a.wordTo - b.wordTo);
+    let cursor = 0;
+    const addAvatar = (to: number) => {
+      if (to < cursor) return;
+      const from = cursor;
+      timeline.push({ id: `avatar:${partIndex}:${from}-${to}`, kind: 'avatar', anchor: part.label,
+        wordFrom: from, wordTo: to, text: words.slice(from, to + 1).join(' '),
+        targetSeconds: Math.round((to - from + 1) / 2.35 * 10) / 10 });
+    };
+    for (const segment of chosen) {
+      if (segment.wordFrom < cursor || segment.wordTo >= words.length || segment.wordFrom < 0) continue;
+      addAvatar(segment.wordFrom - 1);
+      timeline.push({ id: `stock:${segment.id}`, kind: 'stock', anchor: part.label,
+        wordFrom: segment.wordFrom, wordTo: segment.wordTo, text: words.slice(segment.wordFrom, segment.wordTo + 1).join(' '),
+        targetSeconds: segment.targetSeconds, segmentId: segment.id });
+      cursor = segment.wordTo + 1;
+    }
+    addAvatar(words.length - 1);
+  }
+  return timeline;
+}
+
 const STOP = new Set(`a o as os um uma uns umas de da do das dos e em no na nos nas por para pra pro com sem sob sobre entre que quem qual quais como quando onde porque se ao aos esta este esse essa isso isto seu sua seus suas meu minha meus minhas voce você voces vocês ele ela eles elas eu nos nós mas ou ja já muito muita mais menos tem ter foi ser sao são era vai vao vão pode podem pelo pela pelos pelas ate até tambem também ainda mesmo mesma assim aqui ali entao então cada todo toda todos todas nao não video vídeos videos clique clicar botao cena cenas take takes`.split(/\s+/));
 const GENERIC_PERSON_TOKENS = new Set(['homem', 'mulher', 'pessoa', 'idoso', 'idosa', 'senhor', 'senhora']);
 
@@ -91,6 +130,8 @@ const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|recet
 // "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
 const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|fazendo anal|sexo anal|penetracao anal|pau defeituoso|pau mole|boquete|gemendo|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculacao|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
 const SUGGESTIVE_SCENE = /\b(?:duplo sentido|safad\w*|seux\w*|sexua\w*|apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*|(?:homem|velho) com erecao)\b/;
+const ED_CAMPAIGN = /\b(?:disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|erectile|erekcja|erekci|erektionsstorung|disfuncion erectil|ereccion)\b/;
+const ED_INTIMATE_MOMENT = /\b(?:casal|parceir\w*|esposa|mulher|namorad\w*|intim\w*|desejo|libido|sedu\w*|relacionamento|satisf\w*|cama|quarto|desempenho|potencia|erecao|erect\w*|couple|partner|wife|desire|intimacy|relationship|bedroom|performanc\w*|libido|pareja|intimidad|esposa|kobiet\w*|zona|partnerk\w*|lozk\w*)\b/;
 const CONFLICT_SCENE = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const CONFLICT_COPY = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
@@ -542,7 +583,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
   }
   if (SUGGESTIVE_SCENE.test(prepared.title)) {
-    return { video, score: -100, reasons: ['cena sugestiva não entra na seleção automática de anúncios'] };
+    const edContext = ED_CAMPAIGN.test(normalize(segment.campaignText || '')) || ranking.campaignConcepts.includes('saude-homem');
+    const intimateMoment = ED_INTIMATE_MOMENT.test(ranking.spokenNormalized);
+    const unsuitable = /\b(?:pelad\w*|nudez|nude|naked|genitais|lingerie|calcinha|apos relac\w*|depois da relac\w*|no ato|tamanho ideal|medindo o tamanho)\b/.test(prepared.title);
+    if (!edContext || !intimateMoment || ranking.callToAction || ranking.localIngredients.length || unsuitable || recipe) {
+      return { video, score: -100, reasons: ['cena sugestiva não combina com este momento da fala'] };
+    }
   }
   if (INVASIVE_PROCEDURE_SCENE.test(prepared.contentText) && !INVASIVE_PROCEDURE_COPY.test(ranking.contextNormalized)) {
     return { video, score: -100, reasons: ['a fala não descreve um procedimento invasivo'] };

@@ -1,5 +1,5 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
-import { balanceMechanismPresence, chooseCampaignRecipeTheme, chooseSmartStockAssignments, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries } from './stockframe-smart';
+import { balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries } from './stockframe-smart';
 
 let passed = 0;
 let failed = 0;
@@ -185,6 +185,13 @@ const reusedPlan = chooseSmartStockAssignments([
 ok(reusedPlan[0].selectedVideoId === 'oleocantal' && reusedPlan[2].selectedVideoId === 'oleocantal'
   && reusedPlan[2].candidates[0].reasons.includes('take reutilizado em trecho distante'), 'reuso distante confiável é permitido e explicado');
 ok(!reusedPlan[1].selectedVideoId, 'atribuição global e reuso mantêm vazio o trecho sem correspondência');
+const timelineCopy = [{ label: 'BODY 1', text: 'Primeiro mostramos a dor depois a solução e o resultado.' }];
+const timelineShot = { ...planSmartStockSegments(timelineCopy, { coverage: 100, pace: 'long' })[0],
+  wordFrom: 3, wordTo: 5, selectedVideoId: 'take-1' };
+const timelineBlocks = buildSmartStockTimeline(timelineCopy, [timelineShot]);
+ok(timelineBlocks.map((block) => block.kind).join(',') === 'avatar,stock,avatar'
+  && timelineBlocks.map((block) => block.text).join(' ') === timelineCopy[0].text,
+  'timeline revisável mantém toda a copy em ordem, inclusive os trechos sem b-roll');
 
 const edNiches = [{ id: 'ed', name: 'ED' }, { id: 'dores', name: 'Dores Articulares' }];
 const edCopy = [{ label: 'BODY 1', text: 'Eu tinha problemas com ereção. Descobri um truque de bicarbonato com mel e limão. Agora me sinto confiante.' }];
@@ -330,6 +337,16 @@ const explicitDescription = video({ id: 'explicit-description', title: 'Cena de 
   description: 'Homem ejaculando no rosto de mulher', tags: ['ereção'] });
 ok(!rankStockFrameVideos(edProblem, [explicitDescription], 10, true).length,
   'descrição explícita também prevalece sobre um título genérico e metadados de saúde');
+
+const intimateEd = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'O casal recupera a intimidade e o desejo com confiança.' }], { coverage: 100, pace: 'long' })[0],
+  campaignText: `${edCopy[0].text} A disfunção erétil afetou o relacionamento.`, campaignNicheId: 'ed' };
+const suggestiveCouple = video({ id: 'ed-sensual', title: 'Casal sensual se abraçando no quarto', nicheId: 'ed', nicheName: 'ED', tags: ['casal', 'intimidade', 'desejo'] });
+ok(rankStockFrameVideos(intimateEd, [suggestiveCouple], 10, true).some((candidate) => candidate.video.id === suggestiveCouple.id),
+  'momento íntimo da copy ED admite cena sugestiva não explícita e congruente');
+ok(!rankStockFrameVideos({ ...intimateEd, campaignText: 'Diabetes tipo 2 altera a glicose.', campaignNicheId: 'diabetes' }, [suggestiveCouple], 10, true).length,
+  'cena sugestiva ED não entra em outro nicho');
+ok(!rankStockFrameVideos({ ...intimateEd, text: 'Clique aqui para saber mais.', semanticText: 'Clique aqui para saber mais.' }, [suggestiveCouple], 10, true).length,
+  'CTA não recebe cena íntima apenas pelo contexto da campanha');
 
 const neutralCta = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'Clique abaixo agora para saber todos os detalhes.' }], { coverage: 100, pace: 'long' })[0],
   campaignNicheId: 'ed', campaignText: edCopy[0].text };

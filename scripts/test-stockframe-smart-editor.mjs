@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { chromium } from 'playwright';
+
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+const errors = [];
+page.on('pageerror', error => errors.push(error.message));
+try {
+  await page.addInitScript(() => {
+    window.__stockFrameTestDownloads = 0;
+    window.addEventListener('message', event => {
+      if (event.data?.source === 'pilot-stockframe' && event.data?.type === 'SF_REQUEST' && event.data?.action === 'download') window.__stockFrameTestDownloads++;
+    });
+  });
+  await page.goto(process.env.STOCKFRAME_PREVIEW_URL || 'http://127.0.0.1:3100/dev/pilot-preview');
+  const open = () => page.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
+  await open();
+  let dialog = page.getByRole('dialog');
+  await dialog.getByText('Conta Premium de Teste').waitFor();
+  const toggle = dialog.getByRole('checkbox', { name: 'Ativar StockFrame' });
+  await dialog.locator('label[class*="masterToggle"]').click();
+  assert.equal(await toggle.isChecked(), false);
+  await dialog.getByRole('heading', { name: 'StockFrame desligado' }).waitFor();
+  assert.equal(await dialog.getByRole('button', { name: 'Smart Stocks', exact: true }).isEnabled(), false);
+  assert.equal(await dialog.locator('article').count(), 0);
+  await dialog.locator('label[class*="masterToggle"]').click();
+  assert.equal(await toggle.isChecked(), true);
+  await dialog.getByText('Conta Premium de Teste').waitFor();
+  await dialog.getByRole('button', { name: 'Fechar', exact: true }).click();
+  await open();
+  dialog = page.getByRole('dialog');
+  await dialog.getByRole('heading', { name: 'StockFrame desligado' }).waitFor();
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), false, 'Fechar sem escolher take deve voltar para OFF');
+
+  await dialog.locator('label[class*="masterToggle"]').click();
+  await dialog.getByText('Conta Premium de Teste').waitFor();
+  await dialog.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
+  await dialog.getByRole('heading', { name: /takes · \d+(?:\.\d+)?% da copy/ }).waitFor({ timeout: 25_000 });
+  const timeline = dialog.getByLabel('Dinâmica completa da copy');
+  const avatarRows = timeline.locator('[class*="avatarRow"]');
+  assert.ok(await avatarRows.count() > 0, '60% deve exibir os trechos de avatar sem b-roll');
+  const initialTakeCount = await timeline.locator('[data-video-id]').count();
+  assert.ok(initialTakeCount > 0);
+  const selectedIds = await timeline.locator('[data-video-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-video-id')));
+  const altIds = await dialog.locator('[class*="alternatives"] button[data-video-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-video-id')));
+  assert.ok(altIds.every(id => !selectedIds.includes(id)), 'Alternativas não podem incluir takes já selecionados');
+  await mkdir('.artifacts/stockframe', { recursive: true });
+  await avatarRows.first().locator('[class*="segmentMain"]').click();
+  await page.screenshot({ path: resolve('.artifacts/stockframe/smart-60-avatar-timeline.png') });
+  await avatarRows.first().getByRole('button', { name: 'Adicionar take' }).click();
+  await dialog.getByText('ADICIONAR B-ROLL').waitFor();
+  await dialog.locator('aside button').filter({ hasText: 'ED' }).first().click();
+  await dialog.locator('aside button').filter({ hasText: 'Todos os vídeos' }).first().click();
+  await dialog.getByRole('button', { name: 'Usar no plano' }).first().click();
+  await dialog.getByLabel('Dinâmica completa da copy').waitFor();
+  assert.equal(await page.evaluate(() => window.__stockFrameTestDownloads), 0, 'Editar plano não deve baixar takes');
+  assert.equal(await timeline.locator('[data-video-id]').count(), initialTakeCount + 1);
+  await dialog.getByRole('button', { name: 'Deixar com avatar' }).click();
+  assert.equal(await timeline.locator('[data-video-id]').count(), initialTakeCount);
+  await dialog.getByRole('button', { name: 'Concluir' }).click();
+  await open();
+  dialog = page.getByRole('dialog');
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'Plano com take escolhido deve permanecer ON');
+  assert.deepEqual(errors, []);
+  console.log('StockFrame Smart editor: OFF/ON, avatar gaps, add/remove without download, alternatives outside plan OK.');
+} finally {
+  await browser.close();
+}

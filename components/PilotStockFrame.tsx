@@ -12,6 +12,7 @@ import {
   stockFrameStatus,
 } from '@/lib/stockframe-extension-bridge';
 import {
+  buildSmartStockTimeline,
   chooseSmartStockAssignments,
   chooseCampaignRecipeTheme,
   balanceMechanismPresence,
@@ -268,19 +269,23 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const [smartBusy, setSmartBusy] = useState(false);
   const [smartProgress, setSmartProgress] = useState('');
   const [activeSegment, setActiveSegment] = useState('');
+  const [smartEditTarget, setSmartEditTarget] = useState<{ anchor: string; from: number; to: number; segmentId?: string } | null>(null);
   const [plannedContext, setPlannedContext] = useState('');
   const importedMedia = useRef(new Map<string, InsertMedia>());
   const downloadedFiles = useRef(new Map<string, File>());
   const operationLocked = useRef(false);
   const mediaRefreshAttempts = useRef(new Map<string, number>());
   const mediaRepairAttempts = useRef(new Map<string, number>());
-  const planContext = JSON.stringify({ parts, coverage, pace, nicheId: filters.nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin });
+  // Catalog browsing while replacing a take must never erase a reviewed plan.
+  // Only changes to the copy or Smart settings invalidate its word coverage.
+  const planContext = JSON.stringify({ parts, coverage, pace });
   const planIsCurrent = plannedContext === planContext;
 
   useEffect(() => {
     if (!plannedContext || planIsCurrent) return;
     setSmart([]);
     setActiveSegment('');
+    setSmartEditTarget(null);
     setPlannedContext('');
     setNotice('A copy ou as opções mudaram. Analise novamente para revisar o plano atualizado.');
   }, [planIsCurrent, plannedContext]);
@@ -291,7 +296,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialog.current?.focus();
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+      if (event.key === 'Escape') { event.preventDefault(); closeStockFrame(); return; }
       if (event.key !== 'Tab' || !dialog.current) return;
       const focusable = [...dialog.current.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex="0"]')].filter((node) => node.getClientRects().length);
       if (!focusable.length) return;
@@ -301,7 +306,12 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     };
     document.addEventListener('keydown', keydown, true);
     return () => { document.removeEventListener('keydown', keydown, true); previous?.focus(); };
-  }, [mounted, onClose]);
+  }, [mounted, onClose, enabled, inserts, smart]);
+
+  function closeStockFrame() {
+    if (enabled && !inserts.some((insert) => insert.source === 'stockframe') && !smart.some((segment) => segment.selectedVideoId)) onEnabledChange(false);
+    onClose();
+  }
 
   const refreshStatus = useCallback(async () => {
     setError('');
@@ -317,7 +327,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       setError(reason instanceof Error ? reason.message : String(reason));
     }
   }, []);
-  useEffect(() => { void refreshStatus(); }, [refreshStatus]);
+  useEffect(() => { if (enabled) void refreshStatus(); }, [enabled, refreshStatus]);
 
   useEffect(() => {
     const timer = setTimeout(() => setFilters((current) => current.search === searchDraft.trim() ? current : { ...current, search: searchDraft.trim(), page: 1 }), 320);
@@ -325,7 +335,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   }, [searchDraft]);
 
   useEffect(() => {
-    if (!configured) return;
+    if (!enabled || !configured) return;
     let live = true;
     setLoading(true);
     setError('');
@@ -341,7 +351,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [configured, filters, account?.capabilities.mediaUrls]);
+  }, [enabled, configured, filters, account?.capabilities.mediaUrls]);
 
   async function renewMedia(videos: StockFrameVideo[], force = false): Promise<StockFrameVideo[]> {
     if (!account?.capabilities.mediaUrls || !videos.length) return videos;
@@ -425,7 +435,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   }
 
   const importVideo = async (video: StockFrameVideo, placement: StockPlacement) => {
-    if (operationLocked.current) return false;
+    if (!enabled || operationLocked.current) return false;
     operationLocked.current = true;
     setBusyTake(video.id); setError(''); setNotice('');
     try {
@@ -440,7 +450,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   };
 
   async function runSmart() {
-    if (operationLocked.current) return;
+    if (!enabled || operationLocked.current) return;
     operationLocked.current = true;
     setSmartBusy(true); setError(''); setNotice(''); setSmart([]);
     try {
@@ -497,6 +507,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       if (/\b(?:energia|vigor|jovem|disposi[cç][aã]o)\b/.test(storyText)) sceneQueries.push('homem ativo', 'homem sorrindo');
       if (/\b(?:testosterona|circula[cç][aã]o|fluxo sangu[ií]neo)\b/.test(storyText)) sceneQueries.push('fluxo sanguineo', 'sistema reprodutor masculino');
       if (/\b(?:mulher(?:es)?|casal|marido|esposa|relacionamento|satisfazer)\b/.test(storyText)) sceneQueries.push('casal conversando', 'homem preocupado');
+      if (/\b(?:disfuncao eretil|erecao|desempenho sexual|erectile|erekcja|ereccion)\b/.test(campaignText.toLowerCase())
+        && /\b(?:casal|intimidade|desejo|esposa|parceira|relacionamento|couple|intimacy|desire|partner|wife|pareja|intimidad|partnerk)\b/.test(storyText)) {
+        sceneQueries.push('casal sensual', 'casal intimidade');
+      }
       if (/\b(?:especialista|urologista|m[eé]dic[ao])\b/.test(storyText)) sceneQueries.push('urologista explicando');
       if (/\b(?:durar|aguentar|resistir)\b.{0,45}\b(?:mais|tempo|minutos|horas)\b/.test(storyText)) sceneQueries.push('casal sorrindo');
       const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])].slice(0, 12);
@@ -598,7 +612,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   }
 
   async function applySmart() {
-    if (operationLocked.current) return;
+    if (!enabled || operationLocked.current) return;
     if (!planIsCurrent) { setError('A copy ou as opções mudaram. Analise novamente antes de aplicar.'); return; }
     const planned = smart.map((segment) => ({ segment, candidate: selectedSmartCandidate(segment) })).filter((item) => !!item.candidate);
     if (!planned.length) { setError('Escolha pelo menos um take no plano inteligente.'); return; }
@@ -685,8 +699,49 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     }));
   }
 
-  const activeSmart = smart.find((segment) => segment.id === activeSegment) || smart[0];
+  function editTimelineBlock(block: ReturnType<typeof buildSmartStockTimeline>[number]) {
+    setActiveSegment(block.segmentId || block.id);
+    setSmartEditTarget({ anchor: block.anchor, from: block.wordFrom, to: block.wordTo, segmentId: block.segmentId });
+    setAnchor(block.anchor);
+    setWordFrom(block.wordFrom);
+    setWordTo(block.wordTo);
+    setSelected(null);
+    setMode('manual');
+  }
+
+  function chooseForPlan(video: StockFrameVideo) {
+    if (!enabled || !smartEditTarget) return;
+    if (smart.some((segment) => segment.selectedVideoId === video.id && segment.id !== smartEditTarget.segmentId)) {
+      setError('Este take já está escolhido em outro trecho. Selecione um take diferente para manter a montagem variada.');
+      return;
+    }
+    const { anchor: targetAnchor, from, to, segmentId } = smartEditTarget;
+    const part = parts.find((item) => item.label === targetAnchor);
+    const words = part?.text.match(/\S+/g) || [];
+    const text = words.slice(from, to + 1).join(' ');
+    if (!text) return;
+    const manualCandidate = { video, score: 0, reasons: ['Escolhido manualmente na biblioteca'] };
+    const newId = `manual:${crypto.randomUUID()}`;
+    setSmart((current) => segmentId ? current.map((segment) => segment.id === segmentId
+      ? { ...segment, selectedVideoId: video.id,
+        candidates: segment.candidates.some((candidate) => candidate.video.id === video.id) ? segment.candidates : [manualCandidate, ...segment.candidates] }
+      : segment) : [...current, { id: newId, anchor: targetAnchor, wordFrom: from, wordTo: to, text,
+        query: text, concepts: [], visualScore: 0, targetSeconds: Math.round(Math.max(2.5, Math.min(10, (to - from + 1) / 2.35)) * 10) / 10,
+        candidates: [manualCandidate], selectedVideoId: video.id }]);
+    setActiveSegment(segmentId || newId);
+    setSmartEditTarget(null);
+    setSelected(null);
+    setMode('smart');
+    setError('');
+    setNotice(`${video.title} escolhido para ${targetAnchor}. O download só acontece ao aplicar na montagem.`);
+  }
+
+  const timeline = useMemo(() => buildSmartStockTimeline(parts, smart), [parts, smart]);
+  const activeBlock = timeline.find((block) => block.id === activeSegment || block.segmentId === activeSegment) || timeline[0];
+  const activeSmart = smart.find((segment) => segment.id === activeBlock?.segmentId);
   const activeCandidate = activeSmart ? selectedSmartCandidate(activeSmart) : undefined;
+  const chosenElsewhere = new Set(smart.filter((segment) => segment.id !== activeSmart?.id && segment.selectedVideoId).map((segment) => segment.selectedVideoId));
+  const alternatives = activeSmart?.candidates.filter((candidate) => candidate.video.id !== activeSmart.selectedVideoId && !chosenElsewhere.has(candidate.video.id)) || [];
   const availableVideos = useMemo(() => page.videos.filter((video) => {
     if (filters.aspectRatio && video.aspectRatio !== 'unknown' && video.aspectRatio !== filters.aspectRatio) return false;
     if (filters.audio !== undefined && video.hasAudio !== null && video.hasAudio !== filters.audio) return false;
@@ -696,22 +751,22 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   }), [page.videos, filters.aspectRatio, filters.audio, filters.origin, filters.favorites]);
 
   if (!mounted) return null;
-  return createPortal(<div className={s.backdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  return createPortal(<div className={s.backdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeStockFrame(); }}>
     <div ref={dialog} className={s.dialog} role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`} tabIndex={-1}>
       <header className={s.header}>
         <StockFrameMark/>
         <div className={s.headerCenter}>
-          <button type="button" className={mode === 'manual' ? s.modeActive : ''} onClick={() => setMode('manual')}><Icon name="search"/>Biblioteca</button>
-          <button type="button" className={mode === 'smart' ? s.modeActive : ''} onClick={() => setMode('smart')}><Icon name="spark"/>Smart Stocks</button>
+          <button type="button" disabled={!enabled} className={mode === 'manual' ? s.modeActive : ''} onClick={() => setMode('manual')}><Icon name="search"/>Biblioteca</button>
+          <button type="button" disabled={!enabled} className={mode === 'smart' ? s.modeActive : ''} onClick={() => { setSmartEditTarget(null); setMode('smart'); }}><Icon name="spark"/>Smart Stocks</button>
         </div>
         <div className={s.headerActions}>
           {account && <span className={s.quota}><small>downloads hoje</small><b>{account.downloadsToday ?? '—'}<i>/</i>{account.downloadsLimit ?? '—'}</b></span>}
-          <label className={s.masterToggle} title="Ativar takes StockFrame na montagem"><input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)}/><span/><em>{enabled ? 'ON' : 'OFF'}</em></label>
-          <button type="button" className={s.iconButton} onClick={onClose} aria-label="Fechar"><Icon name="close" size={21}/></button>
+          <label className={`${s.masterToggle} ${enabled ? s.masterToggleOn : ''}`} title="Ativar takes StockFrame na montagem"><input type="checkbox" checked={enabled} onChange={(event) => { onEnabledChange(event.target.checked); if (!event.target.checked) { setSelected(null); setSmartEditTarget(null); } }} aria-label="Ativar StockFrame"/><span/><em>{enabled ? 'ON' : 'OFF'}</em></label>
+          <button type="button" className={s.iconButton} onClick={closeStockFrame} aria-label="Fechar"><Icon name="close" size={21}/></button>
         </div>
       </header>
 
-      {configured === null ? <div className={s.centerState}><span className={s.loader}/><h2>Conectando ao StockFrame</h2><p>Validando a extensão e a conta deste navegador.</p></div> : !configured ? <main className={s.setup}>
+      {!enabled ? <main className={s.lockedState}><span className={s.lockedIcon}><Icon name="spark" size={32}/></span><h1 id={`${uid}-title`}>StockFrame desligado</h1><p>Ative o botão ON no canto superior para acessar a biblioteca e o Smart Stocks. Nenhuma busca, prévia ou download é iniciado enquanto estiver OFF.</p></main> : configured === null ? <div className={s.centerState}><span className={s.loader}/><h2>Conectando ao StockFrame</h2><p>Validando a extensão e a conta deste navegador.</p></div> : !configured ? <main className={s.setup}>
         <div className={s.setupAmbient}/>
         <section className={s.setupCard}>
           <span className={s.setupIcon}><Icon name="key" size={26}/></span>
@@ -747,8 +802,8 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
               <div><button type="button" className={!filters.favorites && filters.sort === 'relevance' ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, favorites: undefined, sort: 'relevance', page: 1 }))}>Todos</button><button type="button" className={filters.favorites ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, favorites: !current.favorites, page: 1 }))}>Favoritos</button><button type="button" className={filters.sort === 'downloads' ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, sort: 'downloads', favorites: undefined, page: 1 }))}>Mais baixados</button><button type="button" className={filters.sort === 'recent' ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, sort: 'recent', favorites: undefined, page: 1 }))}>Recentes</button></div>
               <div>{([undefined, 'organic', 'ai'] as const).map((value) => <button type="button" key={value || 'all'} className={filters.origin === value ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, origin: value, page: 1 }))}>{value === 'organic' ? 'Orgânico' : value === 'ai' ? 'I.A' : 'Origem'}</button>)}</div>
             </div>
-            <CopyRange parts={parts} anchor={anchor} from={wordFrom} to={wordTo} onAnchor={(value) => { setAnchor(value); setWordFrom(0); setWordTo(Math.min(8, Math.max(0, (parts.find((item) => item.label === value)?.text.match(/\S+/g)?.length || 1) - 1))); }} onRange={(from, to) => { setWordFrom(from); setWordTo(to); }}/>
-            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} onMediaError={(id) => void repairMedia(id)} action={{ label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
+            {smartEditTarget ? <div className={s.editBanner}><span><b>{smartEditTarget.segmentId ? 'TROCAR TAKE' : 'ADICIONAR B-ROLL'}</b><small>{smartEditTarget.anchor} · palavras {smartEditTarget.from + 1}–{smartEditTarget.to + 1} · escolha um take abaixo, sem download</small></span><button type="button" onClick={() => { setSmartEditTarget(null); setMode('smart'); }}>Voltar ao plano</button></div> : <CopyRange parts={parts} anchor={anchor} from={wordFrom} to={wordTo} onAnchor={(value) => { setAnchor(value); setWordFrom(0); setWordTo(Math.min(8, Math.max(0, (parts.find((item) => item.label === value)?.text.match(/\S+/g)?.length || 1) - 1))); }} onRange={(from, to) => { setWordFrom(from); setWordTo(to); }}/>}
+            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} onMediaError={(id) => void repairMedia(id)} action={smartEditTarget ? { label: chosenElsewhere.has(video.id) ? 'Já no plano' : 'Usar no plano', disabled: chosenElsewhere.has(video.id), onClick: () => chooseForPlan(video) } : { label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
             <nav className={s.pagination} aria-label="Páginas"><button type="button" disabled={page.page <= 1 || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.max(1, (current.page || 1) - 1) }))}><Icon name="back"/>Anterior</button><span>{page.page} <i>/</i> {page.totalPages}</span><button type="button" disabled={page.page >= page.totalPages || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.min(page.totalPages, (current.page || 1) + 1) }))}>Próxima <Icon name="back"/></button></nav>
           </section>
         </main> : <main className={s.smartWorkspace}>
@@ -764,27 +819,34 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           <section className={s.plan}>
             <header><div><small>PLANO DE B-ROLL</small><h2>{smart.length ? `${smart.filter((item) => item.selectedVideoId).length} takes · ${measureSmartStockCoverage(parts, smart).percent}% da copy` : 'Aguardando análise'}</h2></div>{smart.length ? <button type="button" onClick={() => void applySmart()} disabled={smartBusy || !planIsCurrent}><Icon name="download"/>{smartBusy ? 'Preparando…' : 'Aplicar na montagem'}</button> : null}</header>
             {!smart.length ? <div className={s.planEmpty}><span><Icon name="spark" size={35}/></span><h3>A copy vira uma timeline revisável</h3><p>O sistema marca os melhores trechos, apresenta o take escolhido e mantém alternativas para você trocar antes de consumir downloads.</p></div> : <div className={s.planBody}>
-              <div className={s.timeline}>{smart.map((segment, index) => {
-                const candidate = selectedSmartCandidate(segment);
-                return <button type="button" key={segment.id} className={`${s.segment} ${activeSmart?.id === segment.id ? s.segmentActive : ''} ${!candidate ? s.segmentMissing : ''}`} onClick={() => setActiveSegment(segment.id)}><span>{String(index + 1).padStart(2, '0')}</span><div><small>{segment.anchor} · {segment.targetSeconds.toFixed(1)}s</small><p>{segment.text}</p><b>{candidate ? candidate.video.title : 'Nenhum take confiável'}</b></div>{candidate?.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <i><Icon name="spark"/></i>}</button>;
+              <div className={s.timeline} aria-label="Dinâmica completa da copy">{timeline.map((block, index) => {
+                const segment = block.segmentId ? smart.find((item) => item.id === block.segmentId) : undefined;
+                const candidate = segment && selectedSmartCandidate(segment);
+                return <div key={block.id} className={`${s.timelineRow} ${block.kind === 'avatar' ? s.avatarRow : ''} ${activeBlock?.id === block.id ? s.segmentActive : ''}`}>
+                  <button type="button" className={s.segmentMain} data-video-id={candidate?.video.id} onClick={() => setActiveSegment(block.segmentId || block.id)} aria-label={`${block.anchor}, ${block.kind === 'avatar' ? 'avatar sem b-roll' : candidate?.video.title || 'b-roll'}, palavras ${block.wordFrom + 1} a ${block.wordTo + 1}`}>
+                    <span>{String(index + 1).padStart(2, '0')}</span><div><small>{block.anchor} · ~{block.targetSeconds.toFixed(1)}s · {block.kind === 'avatar' ? 'AVATAR' : 'STOCKFRAME'}</small><p>{block.text}</p><b>{candidate ? candidate.video.title : 'Avatar · sem b-roll'}</b></div>{candidate?.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <i><Icon name={block.kind === 'avatar' ? 'play' : 'spark'}/></i>}
+                  </button>
+                  <button type="button" className={s.rowAction} onClick={() => editTimelineBlock(block)}><Icon name="edit" size={14}/>{block.kind === 'avatar' ? 'Adicionar take' : 'Trocar take'}</button>
+                </div>;
               })}</div>
               <div className={s.segmentDetail}>{activeSmart ? <>
                 {activeSmart.semanticText && activeSmart.semanticText !== activeSmart.text && <details className={s.reasons}><summary>Interpretação usada na busca</summary><p>{activeSmart.semanticText}</p></details>}
                 <div className={s.detailCopy}><small>{activeSmart.anchor} · PALAVRAS {activeSmart.wordFrom + 1}–{activeSmart.wordTo + 1} · ~{activeSmart.targetSeconds.toFixed(1)}s</small><p>“{activeSmart.text}”</p><div className={s.rangeEdit}><span>Início</span><button type="button" onClick={() => adjustActiveRange('from', -1)} aria-label="Adiantar início">−</button><button type="button" onClick={() => adjustActiveRange('from', 1)} aria-label="Atrasar início">+</button><i/><span>Fim</span><button type="button" onClick={() => adjustActiveRange('to', -1)} aria-label="Adiantar fim">−</button><button type="button" onClick={() => adjustActiveRange('to', 1)} aria-label="Atrasar fim">+</button></div></div>
                 {activeCandidate ? <><LazyVideo video={activeCandidate.video} active suspended={!!selected} onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
-                {activeSmart.candidates.length > 1 && <div className={s.alternatives}><small>ALTERNATIVAS</small><div>{activeSmart.candidates.map((candidate) => <button type="button" key={candidate.video.id} className={candidate.video.id === activeSmart.selectedVideoId ? s.altActive : ''} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b></button>)}</div></div>}
-              </> : null}</div>
+                <div className={s.detailActions}><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="refresh" size={16}/>Buscar outro take</button><button type="button" onClick={() => { setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: undefined } : segment)); setActiveSegment(`avatar:${parts.findIndex((part) => part.label === activeSmart.anchor)}:${activeSmart.wordFrom}-${activeSmart.wordTo}`); }}><Icon name="close" size={16}/>Deixar com avatar</button></div>
+                {alternatives.length > 0 && <div className={s.alternatives}><small>ALTERNATIVAS · FORA DO PLANO ATUAL</small><div>{alternatives.map((candidate) => <button type="button" key={candidate.video.id} data-video-id={candidate.video.id} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b></button>)}</div></div>}
+              </> : activeBlock ? <div className={s.avatarDetail}><span className={s.avatarBadge}>AVATAR · SEM B-ROLL</span><h3>{activeBlock.anchor} · palavras {activeBlock.wordFrom + 1}–{activeBlock.wordTo + 1}</h3><p>“{activeBlock.text}”</p><small>O avatar permanece visível neste trecho. Você pode cobri-lo com um take da biblioteca e revisar a cobertura antes de aplicar.</small><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="spark" size={17}/>Adicionar b-roll aqui</button></div> : null}</div>
             </div>}
           </section>
         </main>}
 
         <footer className={s.footer}>
           <div>{error ? <span className={s.error}>{error}</span> : notice ? <span className={s.notice}>{notice}</span> : <span><Icon name="shield" size={15}/>A chave fica somente na extensão. Downloads respeitam o plano StockFrame.</span>}</div>
-          <div><button type="button" className={s.secondary} onClick={onEditInserts} disabled={!inserts.length}><Icon name="edit"/>Ajustar {inserts.length || ''} takes</button>{onUpdateMontage && <button type="button" className={s.secondary} onClick={() => void onUpdateMontage()} disabled={updatingMontage}><Icon name="refresh"/>{updatingMontage ? 'Atualizando…' : 'Atualizar montagem'}</button>}<button type="button" className={s.done} onClick={onClose}><Icon name="check"/>Concluir</button></div>
+          <div><button type="button" className={s.secondary} onClick={onEditInserts} disabled={!inserts.length}><Icon name="edit"/>Ajustar {inserts.length || ''} takes</button>{onUpdateMontage && <button type="button" className={s.secondary} onClick={() => void onUpdateMontage()} disabled={updatingMontage}><Icon name="refresh"/>{updatingMontage ? 'Atualizando…' : 'Atualizar montagem'}</button>}<button type="button" className={s.done} onClick={closeStockFrame}><Icon name="check"/>Concluir</button></div>
         </footer>
       </>}
 
-      {selected && configured ? <aside className={s.previewDrawer} aria-label="Preview do take"><button type="button" className={s.drawerClose} onClick={() => setSelected(null)} aria-label="Fechar preview"><Icon name="close"/></button><LazyVideo video={selected} active onMediaError={(id) => void repairMedia(id)}/><div className={s.drawerBody}><div className={s.drawerTitle}><div><small>{selected.code ? `#${selected.code}` : selected.nicheName || 'STOCKFRAME'}</small><h2>{selected.title}</h2></div><span>{formatDuration(selected.durationSec)}</span></div><p>{selected.description || 'Take disponível no catálogo da sua conta StockFrame.'}</p><div className={s.tagList}>{selected.tags.slice(0, 14).map((tag) => <span key={tag}>{tag}</span>)}</div><dl><div><dt>Formato</dt><dd>{selected.aspectRatio}</dd></div><div><dt>Origem</dt><dd>{selected.origin === 'ai' ? 'I.A' : selected.origin === 'organic' ? 'Orgânico' : 'StockFrame'}</dd></div><div><dt>Resolução</dt><dd>{selected.width && selected.height ? `${selected.width} × ${selected.height}` : 'Automática'}</dd></div></dl>{mode === 'manual' && <button type="button" className={s.drawerAction} disabled={!!busyTake} onClick={() => void importVideo(selected, { anchor, from: wordFrom, to: wordTo })}><Icon name="download"/>{busyTake === selected.id ? 'Baixando e preparando…' : 'Inserir no trecho selecionado'}</button>}</div></aside> : null}
+      {selected && configured && enabled ? <aside className={s.previewDrawer} aria-label="Preview do take"><button type="button" className={s.drawerClose} onClick={() => setSelected(null)} aria-label="Fechar preview"><Icon name="close"/></button><LazyVideo video={selected} active onMediaError={(id) => void repairMedia(id)}/><div className={s.drawerBody}><div className={s.drawerTitle}><div><small>{selected.code ? `#${selected.code}` : selected.nicheName || 'STOCKFRAME'}</small><h2>{selected.title}</h2></div><span>{formatDuration(selected.durationSec)}</span></div><p>{selected.description || 'Take disponível no catálogo da sua conta StockFrame.'}</p><div className={s.tagList}>{selected.tags.slice(0, 14).map((tag) => <span key={tag}>{tag}</span>)}</div><dl><div><dt>Formato</dt><dd>{selected.aspectRatio}</dd></div><div><dt>Origem</dt><dd>{selected.origin === 'ai' ? 'I.A' : selected.origin === 'organic' ? 'Orgânico' : 'StockFrame'}</dd></div><div><dt>Resolução</dt><dd>{selected.width && selected.height ? `${selected.width} × ${selected.height}` : 'Automática'}</dd></div></dl>{mode === 'manual' && <button type="button" className={s.drawerAction} disabled={!!busyTake || !!smartEditTarget && chosenElsewhere.has(selected.id)} onClick={() => smartEditTarget ? chooseForPlan(selected) : void importVideo(selected, { anchor, from: wordFrom, to: wordTo })}><Icon name={smartEditTarget ? 'check' : 'download'}/>{smartEditTarget ? chosenElsewhere.has(selected.id) ? 'Já usado em outro trecho' : 'Usar neste trecho sem baixar' : busyTake === selected.id ? 'Baixando e preparando…' : 'Inserir no trecho selecionado'}</button>}</div></aside> : null}
     </div>
   </div>, document.body);
 }
