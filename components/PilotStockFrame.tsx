@@ -503,7 +503,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         }
         if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
         if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais/.test(missingText)) {
-          broadQueries.add('celular clicando'); broadQueries.add('assistindo video celular');
+          // A busca da API pode tratar duas palavras como AND. A biblioteca
+          // real tem "CASAL IDOSO USANDO CELULAR", mas não necessariamente
+          // "celular clicando". O ranking local valida a cena depois.
+          broadQueries.add('celular'); broadQueries.add('celular clicando');
         }
         broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
         const searches = [...broadQueries].slice(0, 8);

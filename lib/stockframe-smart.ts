@@ -693,7 +693,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     // possível e o editor pode revisá-lo antes de consumir a cota.
     const educationalScene = /\b(?:anatomia|animacao|3d|sistema reprodutor|erecao|orgao|fluxo sanguineo)\b/.test(prepared.title);
     if (ranking.callToAction && CTA_SCENE.test(prepared.title)) {
-      score += 11;
+      score += 14;
       reasons.push('ação visual acompanha a chamada para assistir');
     } else if (educationalScene && !ranking.localIngredients.length
       && !ranking.spokenAnatomy.length && !segment.concepts.some((concept) => concept.startsWith('saude-') || concept === 'anatomia')) {
