@@ -21,6 +21,8 @@ import {
 import type { CaptionTemplate } from './typography/caption-script';
 import {
   janelasDosInserts,
+  planoSmartStockFrameCompleto,
+  coberturaIntegralDeJanelas,
   palcoDoLayout,
   coberturaNoInstante,
   planoDeVelocidade,
@@ -420,6 +422,13 @@ export async function montarPosProducao(
             (id) => durNatural.get(id) ?? null,
             cortesDoVideo(info.partesSec, info.cortesInternosSec),
           );
+          if (cfg.inserts!.some((ins) => ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100)
+              && (usaveis.length !== cfg.inserts!.length
+                || !planoSmartStockFrameCompleto(usaveis, cfg.partes)
+                || janelas.length !== usaveis.length
+                || !coberturaIntegralDeJanelas(janelas, durSec))) {
+            avisos.push('a cobertura 100% do StockFrame não entrou integralmente nesta montagem — algum take ou trecho ficou indisponível. O Pilot não deve entregar este vídeo como 100%; recupere os inserts e clique RETOMAR.');
+          }
           // ⭐ AGORA dá pra decidir a velocidade: cada mídia tem que caber na
           // janela dela. Longa CORTA (roda normal e morre no fim da parte),
           // curta DESACELERA. É o que faz o insert preencher o trecho da fala

@@ -1,4 +1,4 @@
-import { stockFrameSearchText, type StockFrameVideo } from './stockframe';
+import { stockFrameSearchText, type StockFrameNiche, type StockFrameVideo } from './stockframe';
 
 export type SmartCoverage = 30 | 60 | 100;
 export type SmartPace = 'fast' | 'long' | 'adaptive';
@@ -18,6 +18,12 @@ export type SmartStockSegment = {
   contextText?: string;
   contextConcepts?: string[];
   narrativeDirection?: 'recovery' | 'distress' | 'neutral';
+  visualBeat?: 'problem' | 'demonstration' | 'relief' | 'proof' | 'context';
+  campaignText?: string;
+  campaignNicheId?: string;
+  campaignIngredients?: string[];
+  semanticText?: string;
+  semanticContextText?: string;
   candidates: SmartStockCandidate[];
   selectedVideoId?: string;
 };
@@ -32,12 +38,13 @@ const CONCEPTS: Record<string, string[]> = {
   'intestino': ['intestino', 'digestao', 'barriga inchada', 'constipacao', 'diarreia', 'microbiota', 'estomago'],
   'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
-  'saude-homem': ['prostata', 'erecao', 'testosterona', 'homem', 'masculino', 'libido masculina'],
+  'saude-homem': ['prostata', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia masculina', 'testosterona', 'homem', 'masculino', 'libido masculina'],
   'saude-mulher': ['menopausa', 'mulher', 'feminino', 'ovario', 'utero', 'menstruacao'],
   'medico': ['medico', 'doutor', 'consulta', 'hospital', 'clinica', 'diagnostico', 'exame', 'tratamento'],
   'procedimento': ['procedimento', 'cirurgia', 'agulha', 'aplicacao', 'terapia', 'laser', 'massagem', 'radiografia'],
   'remedio': ['remedio', 'medicamento', 'capsula', 'comprimido', 'suplemento', 'frasco', 'dose', 'farmacia'],
   'alimentacao': ['comida', 'alimento', 'cozinha', 'receita', 'prato', 'fruta', 'verdura', 'cafe', 'cha', 'colher'],
+  'botanico': ['erva', 'ervas', 'planta', 'plantas', 'folha', 'folhas', 'botanico', 'extrato vegetal', 'fitoterapico', 'hortela', 'camomila', 'alecrim'],
   'sono': ['sono', 'dormir', 'insomnia', 'cama', 'acordar', 'cansaco', 'ronco'],
   'pele': ['pele', 'ruga', 'rosto', 'acne', 'mancha', 'colageno', 'creme'],
   'cabelo': ['cabelo', 'calvicie', 'queda de cabelo', 'fio', 'couro cabeludo'],
@@ -60,7 +67,79 @@ const INCOMPATIBLE: [string, string][] = [
 ];
 
 function normalize(value: string): string {
-  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  return value.toLowerCase().replace(/ł/g, 'l').replace(/ß/g, 'ss').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+const INGREDIENTS: [string, RegExp][] = [
+  ['bicarbonato', /\b(?:bicarbonato|bicarbonate|baking soda|bicarbonat|natron|soda oczyszczona)\b/], ['mel', /\b(?:mel|honey|miel|miod|honig)\b/], ['vick', /\b(?:vick|vicks|vaporub)\b/],
+  ['babosa', /\b(?:babosa|aloe vera|aloes)\b/], ['limao', /\b(?:limao|lemon|limon|citron|cytryna|zitrone)\b/], ['vinagre', /\b(?:vinagre|vinegar|essig|ocet)\b/],
+  ['gengibre', /\b(?:gengibre|ginger|jengibre|imbir|ingwer)\b/], ['canela', /\b(?:canela|cinnamon|cynamon|zimt)\b/], ['alho', /\b(?:alho|garlic|ajo|czosnek|knoblauch)\b/],
+  ['hortela', /\bhortela\b/], ['camomila', /\bcamomila\b/], ['alecrim', /\balecrim\b/],
+  ['ginseng', /\bginseng\b/], ['maca', /\bmaca peruana\b/], ['guarana', /\bguarana\b/],
+  ['cafe', /\bcafe\b/], ['oleo', /\boleo\b/], ['sal', /\bsal\b/],
+];
+const BOTANICAL = /\b(?:erva|ervas|hierba|hierbas|herb|herbs|ziola|ziol|krauter|planta|plantas|plants|pflanzen|rosliny|folha|folhas|leaves|hojas|liscie|botanic\w*|fitoterap\w*|hortela|camomila|alecrim|ginseng|maca peruana|guarana)\b/;
+const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|receta|rezept|przepis|mistura|mixture|mezcla|mischung|caseiro|caseira|homemade|casero|domowy|ervas?|herbs?|ziola|plantas?|plants?|formula natural)\b/;
+
+function ingredientsOf(value: string): string[] {
+  const normalized = normalize(value);
+  return INGREDIENTS.filter(([, pattern]) => pattern.test(normalized)).map(([name]) => name);
+}
+
+export function chooseCampaignRecipeTheme(segments: SmartStockSegment[]): string[] {
+  const copy = segments[0]?.campaignText || '';
+  const explicit = ingredientsOf(copy);
+  if (explicit.length || !GENERIC_RECIPE.test(normalize(copy))) return explicit;
+  const herbal = BOTANICAL.test(normalize(copy));
+  const themes = new Map<string, { ingredients: string[]; score: number; occurrences: number }>();
+  for (const segment of segments) for (const candidate of segment.candidates.slice(0, 8)) {
+    const videoText = stockFrameSearchText(candidate.video);
+    const ingredients = ingredientsOf(videoText);
+    if (!ingredients.length || (herbal && !BOTANICAL.test(normalize(videoText)))) continue;
+    const key = [...ingredients].sort().join('|');
+    const prior = themes.get(key);
+    themes.set(key, { ingredients, score: Math.max(prior?.score || 0, candidate.score) + (prior ? 1 : 0), occurrences: (prior?.occurrences || 0) + 1 });
+  }
+  return [...themes.values()].sort((a, b) => (b.score + b.occurrences * 2 + b.ingredients.length) - (a.score + a.occurrences * 2 + a.ingredients.length))[0]?.ingredients || [];
+}
+
+export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockFrameNiche[]): StockFrameNiche | undefined {
+  const copy = normalize(parts.map((part) => part.text).join(' '));
+  const aliases: [RegExp, RegExp][] = [
+    [/\b(?:ed|disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|impotence|disfuncion erectil|ereccion|zaburzenia erekcji|erekcja|erektionsstorung)\b/, /\b(?:ed|erecao|disfuncao eretil|erectile|erekcja|ereccion)\b/],
+    [/\b(?:prostata|prostate|prostaty|prostatitis|prostatite)\b/, /\b(?:prostata|prostate)\b/],
+    [/\b(?:joelho|artrose|artrite|articulac\w*|dor(?:es)? articulares?|joint pain|arthritis|dolor articular|bol stawow|gelenkschmerz)\b/, /\b(?:dores? articulares?|articulac\w*|joint|stawow|arthritis)\b/],
+    [/\b(?:diabetes|diabetico|glicose|glicemia|insulina|blood sugar|glucose|azucar en sangre|cukrzyca|blutzucker)\b/, /\b(?:diabetes|diabetic|cukrzyca)\b/],
+    [/\b(?:emagrec\w*|perder peso|gordura corporal|weight loss|lose weight|perdida de peso|odchudzanie|schudnac|abnehmen)\b/, /\b(?:emagrecimento|weight loss|perdida de peso|odchudzanie)\b/],
+    [/\b(?:memoria|alzheimer|demencia|memory loss|memory|dementia|pamiec|demenz)\b/, /\b(?:memoria|memory|pamiec|alzheimer)\b/],
+    [/\b(?:visao|vista|olhos|enxergar|vision|eyesight|sight|ojos|wzrok|sehen|yeux)\b/, /\b(?:visao|visao ocular|vision|vista|wzrok|eyesight)\b/],
+    [/\b(?:menopausa|menopause|menopauza|wechseljahre)\b/, /\b(?:menopausa|menopause|menopauza)\b/],
+    [/\b(?:lipedema|lipoedema)\b/, /\b(?:lipedema|lipoedema)\b/],
+    [/\b(?:celulite|cellulite|celulitis|cellulit)\b/, /\b(?:celulite|cellulite|celulitis)\b/],
+    [/\b(?:pele|skin care|skincare|cuidado de la piel|piel|skora|peau|hautpflege)\b/, /\b(?:pele|skin care|skincare|piel|skora|peau)\b/],
+    [/\b(?:gravidez|gestante|gravida|pregnancy|embarazo|ciaza|schwangerschaft)\b/, /\b(?:gravidez|pregnancy|embarazo|ciaza)\b/],
+    [/\b(?:intestino|constipacao|digestao|gut health|bowel|intestine|intestino|jelita|darm)\b/, /\b(?:intestino|gut|bowel|jelita)\b/],
+  ];
+  for (const [copyPattern, nichePattern] of aliases) {
+    if (copyPattern.test(copy)) {
+      const match = niches.find((niche) => nichePattern.test(normalize(niche.name)));
+      if (match) return match;
+      const nested = niches.filter((niche) => niche.subcategories?.some((folder) => nichePattern.test(normalize(folder.name))));
+      if (nested.length === 1) return nested[0];
+    }
+  }
+  // A taxonomia da conta também reconhece nichos adicionados depois, sem
+  // exigir nova versão da extensão para cada pasta criada pelo StockFrame.
+  const tokens = new Set(meaningful(copy));
+  const ranked = niches.map((niche) => {
+    const nameTokens = meaningful(niche.name).filter((token) => !['saud', 'video', 'stock', 'geral'].includes(token));
+    const hits = nameTokens.filter((token) => tokens.has(token)).length;
+    const folderTokens = (niche.subcategories || []).flatMap((folder) => meaningful(folder.name));
+    const folderHits = [...new Set(folderTokens)].filter((token) => token.length >= 5 && tokens.has(token)).length;
+    return { niche, hits, score: hits * 5 + Math.min(3, folderHits) };
+  }).filter((item) => item.hits > 0 && (meaningful(item.niche.name).length === 1 || item.hits >= 2))
+    .sort((a, b) => b.score - a.score || a.niche.name.localeCompare(b.niche.name, 'pt-BR'));
+  return ranked[0]?.niche;
 }
 
 function stem(value: string): string {
@@ -92,6 +171,7 @@ function conceptsOf(value: string): string[] {
  * separate from recovery even when both descriptions contain "dor". */
 function narrativeDirection(value: string): NonNullable<SmartStockSegment['narrativeDirection']> {
   const text = normalize(value);
+  if (/\b(?:frustrad\w*|sofrend\w*|impotencia|disfuncao eretil|dificuldade (?:de|para) erecao|sem erecao)\b/.test(text)) return 'distress';
   if (/\b(?:dor(?:es)? (?:ainda )?(?:continua\w*|persist\w*|pior\w*)|ainda (?:sinto|sente|sentia|sofr\w*)|nao (?:consigo|consegue|conseguia) (?:mais )?(?:andar|caminhar|subir|dormir)|sem alivio|nao (?:houve |senti |sentiu )?melhora)\b/.test(text)) return 'distress';
   if (/\b(?:nao (?:sinto|sente|sentimos|tem|tenho|sente\w*) mais (?:a |as |nenhuma )?(?:dor|dores|desconforto)|sem (?:sentir |nenhuma )?(?:dor|dores|desconforto)|livre d[ae] (?:dor|dores)|dor(?:es)? (?:desaparec\w*|sumiu|passou)|alivio|recuperad\w*|volte?i? a (?:andar|caminhar)|voltou a (?:andar|caminhar)|melhora\w*|feliz|alegria)\b/.test(text)) return 'recovery';
   return conceptsOf(text).includes('emocao-negativa') ? 'distress' : 'neutral';
@@ -140,6 +220,15 @@ function semanticFields(text: string, contextText = text) {
     return mentioned[0] || concept.replace(/-/g, ' ');
   });
   return { concepts, narrativeDirection: direction, query: [...new Set([...conceptTerms, ...queryTokens])].slice(0, 5).join(' ') };
+}
+
+function visualBeat(value: string, direction: SmartStockSegment['narrativeDirection']): NonNullable<SmartStockSegment['visualBeat']> {
+  const text = normalize(value);
+  if (/\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistura|mixture|prepar\w*|aplic\w*|apply|truque|trick|erva|herb|planta|plant|ingrediente|ingredient|produto|product|suplemento|supplement|frasco|bottle|comprimido|tablet|creme|cream|aparelho|device|procedimento|procedure|mecanismo|mechanism|tratamento|treatment)\b/.test(text)) return 'demonstration';
+  if (/\b(?:depoimento|prova|resultado|antes e depois|comprov\w*|mostr\w*)\b/.test(text)) return 'proof';
+  if (direction === 'recovery' || /\b(?:alivio|melhora|confianca|volt\w* a|consegu\w* novamente)\b/.test(text)) return 'relief';
+  if (direction === 'distress' || /\b(?:problema|dificuldade|frustr\w*|impotencia|disfuncao)\b/.test(text)) return 'problem';
+  return 'context';
 }
 
 type Word = { text: string; index: number; endSentence: boolean };
@@ -200,6 +289,7 @@ function segmentPart(part: StockFrameCopyPart, pace: SmartPace): Omit<SmartStock
       ...semantics,
       contextText,
       contextConcepts: conceptsOf(part.text).filter((concept) => !concept.startsWith('emocao-')),
+      visualBeat: visualBeat(text, semantics.narrativeDirection),
       visualScore,
       targetSeconds: Math.round(targetSeconds * 10) / 10,
     });
@@ -247,35 +337,143 @@ export function planSmartStockSegments(parts: StockFrameCopyPart[], options: { c
   return all.flatMap((segment) => chosen.has(segment.id) ? [chosen.get(segment.id)!] : []);
 }
 
-function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartStockCandidate {
+export function balanceMechanismPresence(segments: SmartStockSegment[]): SmartStockSegment[] {
+  const mechanism = segments.map((segment, index) => segment.visualBeat === 'demonstration' ? index : -1).filter((index) => index >= 0);
+  if (!mechanism.length) return segments;
+  return segments.map((segment, index) => {
+    if (segment.visualBeat !== 'context') return segment;
+    const adjacent = mechanism.some((position) => Math.abs(position - index) === 1 && segments[position].anchor === segment.anchor);
+    return adjacent ? { ...segment, visualBeat: 'demonstration' as const } : segment;
+  });
+}
+
+export function measureSmartStockCoverage(parts: StockFrameCopyPart[], segments: SmartStockSegment[]) {
+  const seenLabels = new Set<string>();
+  const counts = new Map<string, Uint8Array>();
+  let totalWords = 0;
+  let valid = true;
+  for (const part of parts) {
+    const words = part.text.match(/\S+/g)?.length || 0;
+    if (!words) continue;
+    if (seenLabels.has(part.label)) valid = false;
+    seenLabels.add(part.label);
+    counts.set(part.label, new Uint8Array(words));
+    totalWords += words;
+  }
+  for (const segment of segments) {
+    if (!segment.selectedVideoId) continue;
+    const words = counts.get(segment.anchor);
+    if (!words || !Number.isInteger(segment.wordFrom) || !Number.isInteger(segment.wordTo)
+      || segment.wordFrom < 0 || segment.wordTo < segment.wordFrom || segment.wordTo >= words.length) {
+      valid = false;
+      continue;
+    }
+    for (let index = segment.wordFrom; index <= segment.wordTo; index++) words[index] = Math.min(2, words[index] + 1);
+  }
+  let coveredWords = 0;
+  let overlaps = 0;
+  for (const words of counts.values()) for (const count of words) {
+    if (count) coveredWords++;
+    if (count > 1) overlaps++;
+  }
+  return { totalWords, coveredWords, overlaps, percent: totalWords ? Math.round(coveredWords / totalWords * 1000) / 10 : 0,
+    complete: valid && totalWords > 0 && coveredWords === totalWords && overlaps === 0 };
+}
+
+export function localizeSmartSegments(segments: SmartStockSegment[], texts: string[], contexts: string[]): SmartStockSegment[] {
+  const campaignText = texts.join(' ');
+  return segments.map((segment, index) => {
+    const translated = texts[index] || segment.text;
+    const context = contexts[index] || translated;
+    const semantics = semanticFields(translated, context);
+    return { ...segment, ...semantics, semanticText: translated, semanticContextText: context,
+      campaignText, contextConcepts: conceptsOf(campaignText).filter((concept) => !concept.startsWith('emocao-')),
+      visualBeat: visualBeat(translated, semantics.narrativeDirection) };
+  });
+}
+
+type PreparedVideo = {
+  title: string;
+  taxonomy: string;
+  visualText: string;
+  visualSearchText: string;
+  ingredients: string[];
+  shownAnatomy: string[];
+  concepts: string[];
+  direction: NonNullable<SmartStockSegment['narrativeDirection']>;
+  fields: { tokens: string[]; weight: number }[];
+};
+
+const preparedVideos = new WeakMap<StockFrameVideo, PreparedVideo>();
+
+function prepareVideo(video: StockFrameVideo): PreparedVideo {
+  const cached = preparedVideos.get(video);
+  if (cached) return cached;
   const title = normalize(video.title);
   const tags = normalize(video.tags.join(' '));
   const description = normalize(video.description);
   const taxonomy = normalize(`${video.nicheName || ''} ${video.subcategoryName || ''}`);
-  const fields = [
-    { text: title, weight: 4.4 },
-    { text: tags, weight: 3.5 },
-    { text: taxonomy, weight: 2.8 },
-    { text: description, weight: 1.4 },
-  ];
-  const queryTokens = [...new Set(meaningful(`${segment.text} ${segment.query}`))];
-  const videoText = stockFrameSearchText(video);
-  const spokenHere = anatomyOf(segment.text);
-  const spokenAnatomy = spokenHere.length ? spokenHere : anatomyOf(segment.contextText || '');
+  const smart = video.smartMetadata;
+  const visualText = normalize([smart?.summary, smart?.concepts.join(' '), smart?.subjects.join(' '), smart?.actions.join(' '), smart?.objects.join(' '), smart?.bodyParts.join(' '), smart?.positiveKeywords.join(' ')].filter(Boolean).join(' '));
+  const visualSearchText = normalize(stockFrameSearchText(video));
+  const titleAnatomy = anatomyOf(video.title);
+  const descriptionAnatomy = anatomyOf(video.description);
+  const direction = narrativeDirection(visualSearchText);
+  let concepts = conceptsOf(visualSearchText);
+  if (direction === 'recovery') concepts = [...new Set([...concepts.filter((concept) => concept !== 'emocao-negativa'), 'emocao-positiva'])];
+  if (direction === 'distress') concepts = concepts.filter((concept) => concept !== 'emocao-positiva');
+  const prepared = {
+    title, taxonomy, visualText, visualSearchText,
+    ingredients: ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
+    shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : anatomyOf(video.tags.join(' ')),
+    concepts, direction,
+    fields: [
+      { tokens: meaningful(title), weight: 4.4 },
+      { tokens: meaningful(tags), weight: 3.5 },
+      { tokens: meaningful(taxonomy), weight: 2.8 },
+      { tokens: meaningful(description), weight: 1.4 },
+      { tokens: meaningful(visualText), weight: 3.8 },
+    ],
+  };
+  preparedVideos.set(video, prepared);
+  return prepared;
+}
+
+function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartStockCandidate {
+  if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
+  const prepared = prepareVideo(video);
+  const { title, taxonomy, visualText, visualSearchText, ingredients: videoIngredients, shownAnatomy } = prepared;
+  const smart = video.smartMetadata;
+  const spokenText = segment.semanticText || segment.text;
+  const spokenContext = segment.semanticContextText || segment.contextText || spokenText;
+  const campaignIngredients = segment.campaignIngredients || ingredientsOf(segment.campaignText || '');
+  const herbalCampaign = BOTANICAL.test(normalize(segment.campaignText || ''));
+  const videoVisualText = visualSearchText;
+  if (smart?.negativeKeywords.some((keyword) => normalize(spokenContext).includes(normalize(keyword)))) {
+    return { video, score: -100, reasons: ['metadado visual exclui o assunto deste trecho'] };
+  }
+  if (herbalCampaign && videoIngredients.length && !BOTANICAL.test(videoVisualText)) {
+    return { video, score: -100, reasons: ['a copy pede ervas ou plantas; a cena mostra outra fórmula'] };
+  }
+  if (campaignIngredients.length && videoIngredients.some((ingredient) => !campaignIngredients.includes(ingredient))) {
+    return { video, score: -100, reasons: ['ingrediente diferente da combinação da copy'] };
+  }
+  if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId) {
+    return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
+  }
+  if (smart?.graphicContent || smart?.containsWatermark) return { video, score: -100, reasons: ['conteúdo impróprio para anúncio'] };
+  const queryTokens = [...new Set(meaningful(`${spokenText} ${segment.query}`))];
+  const spokenHere = anatomyOf(spokenText);
+  const spokenAnatomy = spokenHere.length ? spokenHere : anatomyOf(spokenContext);
   // The scene's explicit subject outranks catalog taxonomy. "Homem" can
   // share the men's-health niche with prostate content while the shot plainly
   // shows knee pain. Prostate tags must not override a knee-only scene title.
-  const titleAnatomy = anatomyOf(video.title);
-  const descriptionAnatomy = anatomyOf(video.description);
-  const shownAnatomy = titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : anatomyOf(video.tags.join(' '));
   if (spokenAnatomy.length && shownAnatomy.length && !spokenAnatomy.some((part) => shownAnatomy.includes(part))) {
     return { video, score: -100, reasons: ['parte do corpo diferente da fala'] };
   }
-  let videoConcepts = conceptsOf(videoText);
-  const direction = segment.narrativeDirection || narrativeDirection(segment.contextText || segment.text);
-  const videoDirection = narrativeDirection(videoText);
-  if (videoDirection === 'recovery') videoConcepts = [...new Set([...videoConcepts.filter((concept) => concept !== 'emocao-negativa'), 'emocao-positiva'])];
-  if (videoDirection === 'distress') videoConcepts = videoConcepts.filter((concept) => concept !== 'emocao-positiva');
+  const videoConcepts = prepared.concepts;
+  const direction = segment.narrativeDirection || narrativeDirection(spokenContext);
+  const videoDirection = prepared.direction;
   if ((direction === 'recovery' && videoDirection === 'distress') || (direction === 'distress' && videoDirection === 'recovery')) {
     return { video, score: -100, reasons: ['ação oposta ao contexto da fala'] };
   }
@@ -284,8 +482,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
   let lexicalEvidence = 0;
   for (const token of queryTokens) {
     let best = 0;
-    for (const field of fields) {
-      const tokens = meaningful(field.text);
+    for (const field of prepared.fields) {
+      const tokens = field.tokens;
       if (tokens.includes(token)) best = Math.max(best, field.weight);
       else if (token.length >= 5 && tokens.some((candidate) => candidate.startsWith(token) || token.startsWith(candidate))) best = Math.max(best, field.weight * .68);
     }
@@ -311,6 +509,28 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
     }
   }
   if (video.aspectRatio === '9:16') { score += 2.5; reasons.push('vertical'); }
+  if (segment.campaignNicheId && video.nicheId === segment.campaignNicheId) {
+    score += 7;
+    reasons.push('nicho da campanha');
+  }
+  if (video.finalScore !== undefined) {
+    score += Math.max(0, Math.min(1, video.finalScore)) * 24;
+    if (video.matchReason) reasons.push(video.matchReason.slice(0, 160));
+  }
+  if (video.matchedConcepts.length) score += Math.min(6, video.matchedConcepts.length * 2);
+  if (smart?.adSuitabilityScore !== undefined) score += Math.max(0, Math.min(1, smart.adSuitabilityScore)) * 2;
+  if (smart?.containsText) score -= 5;
+  const beat = segment.visualBeat || visualBeat(spokenText, direction);
+  if (beat === 'problem' && /\b(?:dor|dificuldade|frustr\w*|problema|impotencia|disfuncao|triste|desconforto)\b/.test(videoVisualText)) score += 7;
+  if (beat === 'relief' && /\b(?:alivio|melhora|feliz|sorris\w*|confian\w*|recuper\w*|casal)\b/.test(videoVisualText)) score += 8;
+  if (beat === 'proof' && /\b(?:depoimento|resultado|antes e depois|medico|doutor|explic\w*)\b/.test(videoVisualText)) score += 5;
+  if (beat === 'demonstration' && /\b(?:prepar\w*|mistura|ingrediente|receita|aplic\w*|folha|erva|planta)\b/.test(videoVisualText)) score += 6;
+  const recipe = /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0;
+  if (recipe && beat !== 'demonstration' && !ingredientsOf(spokenContext).length && segment.campaignNicheId
+      && !(herbalCampaign && BOTANICAL.test(videoVisualText))) {
+    score -= 30;
+    reasons.push('receita fora deste trecho');
+  }
   if (video.durationSec > 0) {
     const ratio = Math.min(video.durationSec, segment.targetSeconds) / Math.max(video.durationSec, segment.targetSeconds);
     score += ratio * 2.5;
@@ -318,11 +538,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
   }
   if (video.origin === 'organic') score += .7;
   if (video.downloads > 0) score += Math.min(2.2, Math.log10(video.downloads + 1) * .8);
-  if (title && normalize(segment.text).includes(title) && title.length > 7) score += 6;
+  if (title && normalize(spokenText).includes(title) && title.length > 7) score += 6;
   // Popularidade, formato e duração só desempataM candidatos que já
   // possuem evidência semântica. Sem isto, um take irrelevante muito baixado
   // poderia ultrapassar o limiar apenas por ser vertical e ter 8 segundos.
-  if (!lexicalEvidence && !sharedConcepts.length) score -= 8;
+  if (!lexicalEvidence && !sharedConcepts.length && video.finalScore === undefined) score -= 8;
   if (score > 0 && !reasons.length) reasons.push('termos e descrição compatíveis');
   return { video, score: Math.round(score * 100) / 100, reasons };
 }
@@ -331,9 +551,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo): SmartSt
  * Ranking semantico local. Limiar conservador: se nenhum take faz sentido, o
  * segmento fica sem escolha em vez de a ferramenta preencher com lixo.
  */
-export function rankStockFrameVideos(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8): SmartStockCandidate[] {
+export function rankStockFrameVideos(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8, fullCoverage = false): SmartStockCandidate[] {
   return videos.map((video) => scoreVideo(segment, video))
-    .filter((candidate) => candidate.score >= (segment.concepts.length ? 5 : 3.5))
+    .filter((candidate) => candidate.score >= (fullCoverage ? 1 : segment.concepts.length ? 5 : 3.5))
     .sort((a, b) => b.score - a.score || b.video.downloads - a.video.downloads || a.video.id.localeCompare(b.video.id))
     .slice(0, Math.max(1, limit));
 }
@@ -341,9 +561,9 @@ export function rankStockFrameVideos(segment: SmartStockSegment, videos: StockFr
 /** Global bipartite assignment: maximize reliable unique choices first, then
  * their existing evidence scores. A chronological greedy choice can steal the
  * only exact take from a later, much more specific sentence. */
-export function chooseSmartStockAssignments(segments: SmartStockSegment[]): SmartStockSegment[] {
+export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullCoverage = false): SmartStockSegment[] {
   if (!segments.length) return [];
-  const eligible = segments.map((segment) => segment.candidates.filter((candidate) => Number.isFinite(candidate.score) && candidate.score >= 3));
+  const eligible = segments.map((segment) => segment.candidates.filter((candidate) => Number.isFinite(candidate.score) && candidate.score >= (fullCoverage ? 1 : 3)));
   const videoIds = [...new Set(eligible.flatMap((candidates) => candidates.map((candidate) => candidate.video.id)))].sort();
   const columns = new Map(videoIds.map((id, index) => [id, index + 1]));
   const rows = segments.length;
@@ -428,6 +648,32 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[]): Smar
       ? { ...candidate, reasons: [...candidate.reasons.filter((reason) => reason !== 'take reutilizado em trecho distante'), 'take reutilizado em trecho distante'] }
       : candidate);
     occurrences.set(chosen.video.id, [...(occurrences.get(chosen.video.id) || []), index]);
+  }
+  if (fullCoverage) {
+    // A cobertura total pode reutilizar um take seguro somente quando não há
+    // outra alternativa. Jamais transforma um conflito em correspondência.
+    for (let index = 0; index < result.length; index++) {
+      if (result[index].selectedVideoId) continue;
+      const candidate = eligible[index].sort((a, b) => b.score - a.score)[0];
+      if (candidate) result[index].selectedVideoId = candidate.video.id;
+    }
+  }
+  // A mesma pasta visual três vezes em seguida deixa o anúncio monótono.
+  // Só troca quando a alternativa é quase tão relevante e ainda não foi usada.
+  for (let index = 2; index < result.length; index++) {
+    const current = result[index];
+    const selected = current.candidates.find((candidate) => candidate.video.id === current.selectedVideoId);
+    const previous = result[index - 1].candidates.find((candidate) => candidate.video.id === result[index - 1].selectedVideoId);
+    const earlier = result[index - 2].candidates.find((candidate) => candidate.video.id === result[index - 2].selectedVideoId);
+    if (!selected || !previous || !earlier) continue;
+    const group = (video: StockFrameVideo) => video.subcategoryId || video.subcategoryName || video.duplicateGroupId || '';
+    if (!group(selected.video) || group(selected.video) !== group(previous.video) || group(selected.video) !== group(earlier.video)) continue;
+    const used = new Set(result.map((segment) => segment.selectedVideoId).filter(Boolean));
+    const alternative = current.candidates.find((candidate) => candidate.score >= selected.score - 6
+      && candidate.video.id !== selected.video.id && !used.has(candidate.video.id)
+      && group(candidate.video) !== group(selected.video)
+      && (!candidate.video.duplicateGroupId || candidate.video.duplicateGroupId !== selected.video.duplicateGroupId));
+    if (alternative) current.selectedVideoId = alternative.video.id;
   }
   return result;
 }

@@ -2696,6 +2696,15 @@ function ClickUpPilotInner() {
       if (opts?.exigirCompleta && (avisosDeFalha.length || r.insertsOrfaos?.length)) {
         throw new Error(`A pós-produção não foi concluída: ${avisosDeFalha.join(' · ') || 'uma mídia de insert ficou indisponível'}`);
       }
+      // Full b-roll é uma promessa literal sobre o vídeo FINAL, não apenas
+      // sobre a seleção de palavras. Nunca publique o avatar ou um render
+      // parcial se um take sumiu, não coube ou a timeline perdeu um quadro.
+      if (insDaTask.some((ins) => ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100)) {
+        const falha100 = r.avisos.find((av) => av.includes('cobertura 100% do StockFrame'));
+        if (!r.blob || avisosDeFalha.length || r.insertsOrfaos?.length || falha100) {
+          throw new Error(`A montagem 100% StockFrame foi interrompida para não entregar cobertura incompleta: ${falha100 || avisosDeFalha.join(' · ') || 'o render ou algum take ficou indisponível'}`);
+        }
+      }
       // INSERT ÓRFÃO (03.09): a mídia foi varrida da faxina do cache do
       // navegador (o AD ficou parado tempo demais). O card já avisa em
       // português; aqui a config se limpa sozinha, senão o MESMO erro voltaria

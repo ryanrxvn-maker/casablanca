@@ -7,10 +7,17 @@ import {
   stockFrameDisconnect,
   stockFrameDownload,
   stockFrameList,
+  stockFrameMediaUrls,
+  stockFrameSmartSearch,
   stockFrameStatus,
 } from '@/lib/stockframe-extension-bridge';
 import {
   chooseSmartStockAssignments,
+  chooseCampaignRecipeTheme,
+  balanceMechanismPresence,
+  localizeSmartSegments,
+  inferStockFrameNiche,
+  measureSmartStockCoverage,
   planSmartStockSegments,
   rankStockFrameVideos,
   selectedSmartCandidate,
@@ -21,7 +28,8 @@ import {
 } from '@/lib/stockframe-smart';
 import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
-import { mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo } from '@/lib/stockframe';
+import { mergeStockFrameMediaUrls, mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo, type StockFrameSmartQuery } from '@/lib/stockframe';
+import { translateStockFrameCopy } from '@/lib/stockframe-translate';
 import s from './PilotStockFrame.module.css';
 
 type InsertMedia = { key: string; nome: string; tipo: 'video' | 'imagem'; w: number; h: number; durSec?: number };
@@ -29,9 +37,14 @@ type Change = Insert[] | ((current: Insert[]) => Insert[]);
 type StockPlacement = { anchor: string; from: number; to: number; smart?: boolean; score?: number; coverage?: SmartCoverage };
 
 function stockFrameInsert(video: StockFrameVideo, media: InsertMedia, placement: StockPlacement): Insert {
+  const trimFrom = Math.max(0, video.recommendedStartSec ?? 0);
+  const trimTo = Math.min(video.durationSec || video.recommendedEndSec || 0, video.recommendedEndSec || 0);
   return {
     ...insertPadrao(`stockframe:${video.id}:${crypto.randomUUID()}`, placement.anchor, media),
     source: 'stockframe',
+    ...(placement.smart && Number.isFinite(trimFrom) && Number.isFinite(trimTo) && trimTo > trimFrom + .25
+      ? { recorteDe: trimFrom, recorteAte: trimTo }
+      : {}),
     palavraDe: Math.max(0, Math.min(placement.from, placement.to)),
     palavraAte: Math.max(0, Math.max(placement.from, placement.to)),
     stockFrame: {
@@ -80,7 +93,7 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
 }
 
-function LazyVideo({ video, active = false }: { video: StockFrameVideo; active?: boolean }) {
+function LazyVideo({ video, active = false, onMediaError }: { video: StockFrameVideo; active?: boolean; onMediaError?: (id: string) => void }) {
   const root = useRef<HTMLDivElement>(null);
   const player = useRef<HTMLVideoElement>(null);
   const [visible, setVisible] = useState(active);
@@ -106,19 +119,19 @@ function LazyVideo({ video, active = false }: { video: StockFrameVideo; active?:
     setHovering(false);
     if (!active && player.current) { player.current.pause(); player.current.currentTime = 0; }
   }}>
-    {visible && video.posterUrl ? <img src={video.posterUrl} alt="" loading="lazy"/> : null}
-    {visible && playVideo && video.previewUrl && !videoFailed ? <video ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline preload={active ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'} onCanPlay={() => setVideoReady(true)} onError={() => setVideoFailed(true)}/> : null}
+    {visible && video.posterUrl ? <img src={video.posterUrl} alt="" loading="lazy" onError={() => onMediaError?.(video.id)}/> : null}
+    {visible && playVideo && video.previewUrl && !videoFailed ? <video ref={player} src={video.previewUrl} poster={video.posterUrl} muted loop playsInline preload={active ? 'auto' : 'metadata'} data-ready={videoReady ? 'true' : 'false'} onCanPlay={() => setVideoReady(true)} onError={() => { setVideoFailed(true); onMediaError?.(video.id); }}/> : null}
     {!video.posterUrl && (!playVideo || !video.previewUrl || videoFailed) ? <span className={s.mediaFallback}><Icon name="play" size={28}/></span> : null}
     <span className={s.duration}>{formatDuration(video.durationSec)}</span>
     <span className={s.ratio}>{video.aspectRatio === 'unknown' ? 'vídeo' : video.aspectRatio}</span>
   </div>;
 }
 
-function TakeCard({ video, selected, onOpen, action, compact = false }: {
-  video: StockFrameVideo; selected?: boolean; onOpen: () => void; action?: { label: string; onClick: () => void; disabled?: boolean }; compact?: boolean;
+function TakeCard({ video, selected, onOpen, onMediaError, action, compact = false }: {
+  video: StockFrameVideo; selected?: boolean; onOpen: () => void; onMediaError?: (id: string) => void; action?: { label: string; onClick: () => void; disabled?: boolean }; compact?: boolean;
 }) {
   return <article className={`${s.takeCard} ${selected ? s.takeSelected : ''} ${compact ? s.takeCompact : ''}`}>
-    <button type="button" className={s.takePreview} onClick={onOpen} aria-label={`Ver ${video.title}`}><LazyVideo video={video}/></button>
+    <button type="button" className={s.takePreview} onClick={onOpen} aria-label={`Ver ${video.title}`}><LazyVideo video={video} onMediaError={onMediaError}/></button>
     <div className={s.takeBody}>
       <div className={s.takeMeta}>
         <span className={video.origin === 'ai' ? s.ai : s.organic}>{video.origin === 'ai' ? 'I.A' : video.origin === 'organic' ? 'ORGÂNICO' : 'STOCK'}</span>
@@ -207,6 +220,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const importedMedia = useRef(new Map<string, InsertMedia>());
   const downloadedFiles = useRef(new Map<string, File>());
   const operationLocked = useRef(false);
+  const mediaRefreshAttempts = useRef(new Map<string, number>());
   const planContext = JSON.stringify({ parts, coverage, pace, nicheId: filters.nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin });
   const planIsCurrent = plannedContext === planContext;
 
@@ -262,14 +276,46 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     let live = true;
     setLoading(true);
     setError('');
-    stockFrameList(filters).then((result) => {
+    stockFrameList(filters).then(async (result) => {
       if (!live) return;
       setPage(result);
       setNiches((current) => mergeStockFrameNiches(current, result.niches));
+      if (account?.capabilities.mediaUrls) {
+        const refreshed = await renewMedia(result.videos);
+        if (live && refreshed !== result.videos) setPage((current) => ({ ...current, videos: refreshed }));
+      }
     }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : String(reason)); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [configured, filters]);
+  }, [configured, filters, account?.capabilities.mediaUrls]);
+
+  async function renewMedia(videos: StockFrameVideo[], force = false): Promise<StockFrameVideo[]> {
+    if (!account?.capabilities.mediaUrls || !videos.length) return videos;
+    const now = Date.now();
+    const targets = videos.filter((video) => {
+      const expired = video.mediaExpiresAt && Date.parse(video.mediaExpiresAt) < now + 5 * 60_000;
+      const absent = !video.posterUrl || !video.previewUrl;
+      return (force || expired || absent) && now - (mediaRefreshAttempts.current.get(video.id) || 0) > 60_000;
+    }).slice(0, 100);
+    if (!targets.length) return videos;
+    targets.forEach((video) => mediaRefreshAttempts.current.set(video.id, now));
+    try { return mergeStockFrameMediaUrls(videos, await stockFrameMediaUrls(targets.map((video) => video.id))); }
+    catch { return videos; }
+  }
+
+  async function repairMedia(id: string) {
+    if (!account?.capabilities.mediaUrls) return;
+    mediaRefreshAttempts.current.delete(id);
+    const all = [...page.videos, ...smart.flatMap((segment) => segment.candidates.map((candidate) => candidate.video)), ...(selected ? [selected] : [])];
+    const target = all.find((video) => video.id === id);
+    if (!target) return;
+    const refreshed = await renewMedia([target], true);
+    const updated = refreshed[0];
+    if (!updated || (updated.previewUrl === target.previewUrl && updated.posterUrl === target.posterUrl)) return;
+    setPage((current) => ({ ...current, videos: current.videos.map((video) => video.id === id ? { ...video, ...updated } : video) }));
+    setSmart((current) => current.map((segment) => ({ ...segment, candidates: segment.candidates.map((candidate) => candidate.video.id === id ? { ...candidate, video: { ...candidate.video, ...updated } } : candidate) })));
+    setSelected((current) => current?.id === id ? { ...current, ...updated } : current);
+  }
 
   async function connect() {
     if (connecting) return;
@@ -306,11 +352,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     if (reused) return reused;
     let file = downloadedFiles.current.get(video.id);
     if (!file) {
-      file = await stockFrameDownload(video, onProgress);
+      file = await stockFrameDownload(video, onProgress, taskId);
       // A cota foi consumida assim que o arquivo chegou, mesmo se a importação
       // local falhar. Repetir a tentativa reutiliza os bytes já recebidos.
       downloadedFiles.current.set(video.id, file);
-      setAccount((current) => current && current.downloadsToday !== null ? { ...current, downloadsToday: current.downloadsToday + 1 } : current);
+      setAccount((current) => current && current.downloadsToday !== null ? { ...current, downloadsToday: current.downloadsToday + video.downloadCost } : current);
     }
     const media = await onImportMedia(file, anchor);
     if (!media) throw new Error(`O take ${video.title} foi baixado, mas o Pilot não conseguiu prepará-lo.`);
@@ -341,27 +387,86 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     try {
       const skeleton = planSmartStockSegments(parts, { coverage, pace });
       if (!skeleton.length) throw new Error('A copy não tem palavras suficientes para planejar os inserts.');
-      const completed: SmartStockSegment[] = [];
-      for (let index = 0; index < skeleton.length; index += 3) {
-        const batch = skeleton.slice(index, index + 3);
-        const results = await Promise.all(batch.map(async (segment) => {
-          const result = await stockFrameList({
-            page: 1, perPage: 32, search: segment.query || segment.text.slice(0, 120),
-            nicheId: filters.nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
-          });
-          const pool = new Map([...page.videos, ...result.videos].map((video) => [video.id, video]));
-          return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 10) };
-        }));
-        completed.push(...results);
-        setSmartProgress(`Interpretando a copy e comparando takes… ${Math.min(skeleton.length, index + batch.length)}/${skeleton.length}`);
+      const translation = await translateStockFrameCopy(skeleton, setSmartProgress);
+      const localized = translation.translated ? localizeSmartSegments(skeleton, translation.texts, translation.contexts) : skeleton;
+      const inferredNiche = filters.nicheId ? niches.find((niche) => niche.id === filters.nicheId)
+        : (translation.translated ? inferStockFrameNiche([{ label: 'COPY', text: translation.texts.join(' ') }], niches) : undefined)
+          || inferStockFrameNiche(parts, niches);
+      const nicheId = inferredNiche?.id || filters.nicheId;
+      const campaignText = (translation.translated ? `${translation.texts.join(' ')} ${parts.map((part) => part.text).join(' ')}` : parts.map((part) => part.text).join(' ')).slice(0, 15_000);
+      const segments = balanceMechanismPresence(localized).map((segment) => ({ ...segment, campaignText, campaignNicheId: nicheId }));
+      const bySegment = new Map<string, StockFrameVideo[]>();
+      if (account?.capabilities.smartSearch) {
+        for (let index = 0; index < segments.length; index += 12) {
+          const batch = segments.slice(index, index + 12);
+          const queries: StockFrameSmartQuery[] = batch.map((segment, offset) => ({
+            id: segment.id,
+            text: segment.semanticText || segment.text,
+            context_before: segments[index + offset - 1]?.anchor === segment.anchor ? segments[index + offset - 1].semanticText || segments[index + offset - 1].text : '',
+            context_after: segments[index + offset + 1]?.anchor === segment.anchor ? segments[index + offset + 1].semanticText || segments[index + offset + 1].text : '',
+            full_copy_summary: campaignText.slice(0, 1000),
+            desired_duration: segment.targetSeconds,
+            niche_id: nicheId || null,
+            subcategory_id: filters.subcategoryId || null,
+            aspect_ratio: filters.aspectRatio || '9:16',
+            origin: filters.origin,
+          }));
+          const results = await stockFrameSmartSearch(queries);
+          for (const segment of batch) bySegment.set(segment.id, results.get(segment.id) || []);
+          setSmartProgress(`Busca contextual no StockFrame… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
+        }
+      } else {
+        for (let index = 0; index < segments.length; index += 3) {
+          const batch = segments.slice(index, index + 3);
+          const results = await Promise.all(batch.map(async (segment) => stockFrameList({
+            page: 1, perPage: 48, search: segment.query || segment.text.slice(0, 120),
+            nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
+          })));
+          batch.forEach((segment, offset) => bySegment.set(segment.id, results[offset].videos));
+          setSmartProgress(`Comparando takes do catálogo… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
+        }
       }
-      const chosen = chooseSmartStockAssignments(completed);
+      const globalPool = new Map<string, StockFrameVideo>([...page.videos, ...[...bySegment.values()].flat()]
+        .map((video) => [video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] }]));
+      const rankSegments = (current: typeof segments, onlyMissing = false) => current.map((segment) => {
+        if (onlyMissing && segment.candidates.length) return segment;
+        const pool = new Map(globalPool);
+        for (const video of bySegment.get(segment.id) || []) pool.set(video.id, video);
+        return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 12, coverage === 100) };
+      });
+      let completed = rankSegments(segments);
+      if (coverage === 100 && completed.some((segment) => !segment.candidates.length)) {
+        let maxPages = 10;
+        for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+          setSmartProgress(`Ampliando o catálogo para cobrir toda a copy… página ${pageNo}/${maxPages}`);
+          const more = await stockFrameList({ page: pageNo, perPage: 48, nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' });
+          maxPages = Math.min(10, more.totalPages || 1);
+          for (const video of more.videos) globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
+          completed = rankSegments(completed, true);
+          if (completed.every((segment) => segment.candidates.length)) break;
+        }
+      }
+      const recipeTheme = chooseCampaignRecipeTheme(completed);
+      if (recipeTheme.length) completed = completed.map((segment) => ({
+        ...segment,
+        campaignIngredients: recipeTheme,
+        candidates: rankStockFrameVideos({ ...segment, campaignIngredients: recipeTheme },
+          [...new Map([...globalPool, ...(bySegment.get(segment.id) || []).map((video): [string, StockFrameVideo] => [video.id, video])]).values()], 12, coverage === 100),
+      }));
+      let chosen = chooseSmartStockAssignments(completed, coverage === 100);
+      if (account?.capabilities.mediaUrls) {
+        const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 4).map((candidate) => [candidate.video.id, candidate.video]))).values()];
+        const refreshed = await renewMedia(previewVideos);
+        const media = new Map(refreshed.map((video) => [video.id, video]));
+        chosen = chosen.map((segment) => ({ ...segment, candidates: segment.candidates.map((candidate) => ({ ...candidate, video: media.get(candidate.video.id) || candidate.video })) }));
+      }
       setPlannedContext(planContext);
       setSmart(chosen);
       const first = chosen.find((segment) => segment.selectedVideoId);
       if (first) setActiveSegment(first.id);
       const missing = chosen.filter((segment) => !segment.selectedVideoId).length;
-      setNotice(missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram vazios porque nenhum resultado passou o limiar de contexto.` : `${chosen.length} trechos prontos para revisão. Nenhum download foi consumido ainda.`);
+      const languageNote = translation.translated ? `Copy ${translation.language.toUpperCase()} interpretada no dispositivo. ` : translation.note ? `${translation.note} ` : '';
+      setNotice(languageNote + (missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram sem alternativa segura no catálogo acessível. Nenhum download foi consumido.` : `${chosen.length} trechos prontos para revisão. Nenhum download foi consumido ainda.`));
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setSmartBusy(false); setSmartProgress(''); operationLocked.current = false; }
   }
@@ -374,11 +479,29 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     if (coverage === 100 && planned.length !== smart.length) {
       setError('Para cobertura de 100%, todos os trechos precisam de um take. Escolha as alternativas dos trechos vazios ou reduza a cobertura.'); return;
     }
-    const remaining = account?.downloadsLimit !== null && account?.downloadsLimit !== undefined && account.downloadsToday !== null
-      ? account.downloadsLimit - account.downloadsToday : null;
-    const newDownloads = new Set(planned.map((item) => item.candidate!.video.id).filter((id) => !importedMedia.current.has(id) && !downloadedFiles.current.has(id))).size;
-    if (remaining !== null && remaining < newDownloads) {
-      setError(`O plano precisa de ${newDownloads} novos downloads, mas esta conta StockFrame tem ${Math.max(0, remaining)} disponíveis hoje.`); return;
+    const measured = measureSmartStockCoverage(parts, smart);
+    if (coverage === 100 && !measured.complete) {
+      setError('A cobertura 100% precisa preencher todas as palavras da copy, sem lacunas nem sobreposição. Revise os limites editados antes de aplicar.'); return;
+    }
+    if (coverage === 100 && inserts.some((insert) => !insert.stockFrame?.smart)) {
+      setError('Há inserts manuais ou do Flow nesta montagem. Para garantir 100% StockFrame sem alterar esses inserts, remova-os no editor ou use a cobertura de 60%/30%. Nada foi substituído.'); return;
+    }
+    if (coverage !== 100) {
+      const expected = Math.round(measured.totalWords * coverage / 100);
+      const tolerance = Math.max(1, Math.ceil(measured.totalWords * .03));
+      if (measured.overlaps || Math.abs(measured.coveredWords - expected) > tolerance) {
+        setError(`A cobertura atual é ${measured.percent}% e está fora da faixa de ${coverage}% após a edição dos trechos. Ajuste os limites ou analise novamente.`); return;
+      }
+    }
+    let freshAccount = account;
+    try { freshAccount = (await stockFrameStatus()).account || account; if (freshAccount) setAccount(freshAccount); }
+    catch (reason) { setError(`Não foi possível conferir a cota StockFrame antes de baixar: ${reason instanceof Error ? reason.message : String(reason)}`); return; }
+    const remaining = freshAccount?.downloadsRemaining ?? (freshAccount?.downloadsLimit !== null && freshAccount?.downloadsLimit !== undefined && freshAccount.downloadsToday !== null
+      ? freshAccount.downloadsLimit - freshAccount.downloadsToday : null);
+    const newVideos = [...new Map(planned.map((item) => item.candidate!.video).filter((video) => !importedMedia.current.has(video.id) && !downloadedFiles.current.has(video.id)).map((video) => [video.id, video])).values()];
+    const newDownloads = newVideos.reduce((sum, video) => sum + video.downloadCost, 0);
+    if (remaining !== null && remaining !== undefined && remaining < newDownloads) {
+      setError(`O plano precisa de ${newDownloads} downloads da cota, mas esta conta StockFrame tem ${Math.max(0, remaining)} disponíveis hoje.`); return;
     }
     operationLocked.current = true;
     setSmartBusy(true); setError('');
@@ -499,7 +622,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
               <div>{([undefined, 'organic', 'ai'] as const).map((value) => <button type="button" key={value || 'all'} className={filters.origin === value ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, origin: value, page: 1 }))}>{value === 'organic' ? 'Orgânico' : value === 'ai' ? 'I.A' : 'Origem'}</button>)}</div>
             </div>
             <CopyRange parts={parts} anchor={anchor} from={wordFrom} to={wordTo} onAnchor={(value) => { setAnchor(value); setWordFrom(0); setWordTo(Math.min(8, Math.max(0, (parts.find((item) => item.label === value)?.text.match(/\S+/g)?.length || 1) - 1))); }} onRange={(from, to) => { setWordFrom(from); setWordTo(to); }}/>
-            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} action={{ label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
+            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} onMediaError={(id) => void repairMedia(id)} action={{ label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
             <nav className={s.pagination} aria-label="Páginas"><button type="button" disabled={page.page <= 1 || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.max(1, (current.page || 1) - 1) }))}><Icon name="back"/>Anterior</button><span>{page.page} <i>/</i> {page.totalPages}</span><button type="button" disabled={page.page >= page.totalPages || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.min(page.totalPages, (current.page || 1) + 1) }))}>Próxima <Icon name="back"/></button></nav>
           </section>
         </main> : <main className={s.smartWorkspace}>
@@ -513,7 +636,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
             <div className={s.smartProof}><span><Icon name="check"/>Sem custo de IA</span><span><Icon name="check"/>Sem download durante análise</span><span><Icon name="check"/>Revisão antes de aplicar</span></div>
           </section>
           <section className={s.plan}>
-            <header><div><small>PLANO DE B-ROLL</small><h2>{smart.length ? `${smart.filter((item) => item.selectedVideoId).length} takes escolhidos` : 'Aguardando análise'}</h2></div>{smart.length ? <button type="button" onClick={() => void applySmart()} disabled={smartBusy || !planIsCurrent}><Icon name="download"/>{smartBusy ? 'Preparando…' : 'Aplicar na montagem'}</button> : null}</header>
+            <header><div><small>PLANO DE B-ROLL</small><h2>{smart.length ? `${smart.filter((item) => item.selectedVideoId).length} takes · ${measureSmartStockCoverage(parts, smart).percent}% da copy` : 'Aguardando análise'}</h2></div>{smart.length ? <button type="button" onClick={() => void applySmart()} disabled={smartBusy || !planIsCurrent}><Icon name="download"/>{smartBusy ? 'Preparando…' : 'Aplicar na montagem'}</button> : null}</header>
             {!smart.length ? <div className={s.planEmpty}><span><Icon name="spark" size={35}/></span><h3>A copy vira uma timeline revisável</h3><p>O sistema marca os melhores trechos, apresenta o take escolhido e mantém alternativas para você trocar antes de consumir downloads.</p></div> : <div className={s.planBody}>
               <div className={s.timeline}>{smart.map((segment, index) => {
                 const candidate = selectedSmartCandidate(segment);
@@ -521,7 +644,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
               })}</div>
               <div className={s.segmentDetail}>{activeSmart ? <>
                 <div className={s.detailCopy}><small>{activeSmart.anchor} · PALAVRAS {activeSmart.wordFrom + 1}–{activeSmart.wordTo + 1} · ~{activeSmart.targetSeconds.toFixed(1)}s</small><p>“{activeSmart.text}”</p><div className={s.rangeEdit}><span>Início</span><button type="button" onClick={() => adjustActiveRange('from', -1)} aria-label="Adiantar início">−</button><button type="button" onClick={() => adjustActiveRange('from', 1)} aria-label="Atrasar início">+</button><i/><span>Fim</span><button type="button" onClick={() => adjustActiveRange('to', -1)} aria-label="Adiantar fim">−</button><button type="button" onClick={() => adjustActiveRange('to', 1)} aria-label="Atrasar fim">+</button></div></div>
-                {activeCandidate ? <><LazyVideo video={activeCandidate.video} active/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
+                {activeCandidate ? <><LazyVideo video={activeCandidate.video} active onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
                 {activeSmart.candidates.length > 1 && <div className={s.alternatives}><small>ALTERNATIVAS</small><div>{activeSmart.candidates.map((candidate) => <button type="button" key={candidate.video.id} className={candidate.video.id === activeSmart.selectedVideoId ? s.altActive : ''} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b></button>)}</div></div>}
               </> : null}</div>
             </div>}
@@ -534,7 +657,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         </footer>
       </>}
 
-      {selected && configured ? <aside className={s.previewDrawer} aria-label="Preview do take"><button type="button" className={s.drawerClose} onClick={() => setSelected(null)} aria-label="Fechar preview"><Icon name="close"/></button><LazyVideo video={selected} active/><div className={s.drawerBody}><div className={s.drawerTitle}><div><small>{selected.code ? `#${selected.code}` : selected.nicheName || 'STOCKFRAME'}</small><h2>{selected.title}</h2></div><span>{formatDuration(selected.durationSec)}</span></div><p>{selected.description || 'Take disponível no catálogo da sua conta StockFrame.'}</p><div className={s.tagList}>{selected.tags.slice(0, 14).map((tag) => <span key={tag}>{tag}</span>)}</div><dl><div><dt>Formato</dt><dd>{selected.aspectRatio}</dd></div><div><dt>Origem</dt><dd>{selected.origin === 'ai' ? 'I.A' : selected.origin === 'organic' ? 'Orgânico' : 'StockFrame'}</dd></div><div><dt>Resolução</dt><dd>{selected.width && selected.height ? `${selected.width} × ${selected.height}` : 'Automática'}</dd></div></dl>{mode === 'manual' && <button type="button" className={s.drawerAction} disabled={!!busyTake} onClick={() => void importVideo(selected, { anchor, from: wordFrom, to: wordTo })}><Icon name="download"/>{busyTake === selected.id ? 'Baixando e preparando…' : 'Inserir no trecho selecionado'}</button>}</div></aside> : null}
+      {selected && configured ? <aside className={s.previewDrawer} aria-label="Preview do take"><button type="button" className={s.drawerClose} onClick={() => setSelected(null)} aria-label="Fechar preview"><Icon name="close"/></button><LazyVideo video={selected} active onMediaError={(id) => void repairMedia(id)}/><div className={s.drawerBody}><div className={s.drawerTitle}><div><small>{selected.code ? `#${selected.code}` : selected.nicheName || 'STOCKFRAME'}</small><h2>{selected.title}</h2></div><span>{formatDuration(selected.durationSec)}</span></div><p>{selected.description || 'Take disponível no catálogo da sua conta StockFrame.'}</p><div className={s.tagList}>{selected.tags.slice(0, 14).map((tag) => <span key={tag}>{tag}</span>)}</div><dl><div><dt>Formato</dt><dd>{selected.aspectRatio}</dd></div><div><dt>Origem</dt><dd>{selected.origin === 'ai' ? 'I.A' : selected.origin === 'organic' ? 'Orgânico' : 'StockFrame'}</dd></div><div><dt>Resolução</dt><dd>{selected.width && selected.height ? `${selected.width} × ${selected.height}` : 'Automática'}</dd></div></dl>{mode === 'manual' && <button type="button" className={s.drawerAction} disabled={!!busyTake} onClick={() => void importVideo(selected, { anchor, from: wordFrom, to: wordTo })}><Icon name="download"/>{busyTake === selected.id ? 'Baixando e preparando…' : 'Inserir no trecho selecionado'}</button>}</div></aside> : null}
     </div>
   </div>, document.body);
 }

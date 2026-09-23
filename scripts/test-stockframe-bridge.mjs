@@ -13,7 +13,7 @@ const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', i
 const flush = async () => { for (let index = 0; index < 8; index++) await Promise.resolve(); };
 let checks = 0;
 
-function environment({ extensions = [{ id: 'stockframe-latest', version: '4.46.1' }], autoDiscovery = true } = {}) {
+function environment({ extensions = [{ id: 'stockframe-latest', version: '4.46.2' }], autoDiscovery = true } = {}) {
   const timers = new Map();
   const listeners = [];
   const posted = [];
@@ -90,18 +90,18 @@ function chunk(env, request, index, bytes) {
 const take = { id: 'take-test', title: 'Take de teste', code: 'ST-TEST' };
 const run = async (name, fn) => { await fn(); checks++; console.log(`  ok ${name}`); };
 
-await run('discovers the newest 4.46.1 instance and dispatches only to it', async () => {
+await run('discovers the newest 4.46.2 instance and dispatches only to it', async () => {
   const env = environment({ extensions: [
-    { id: 'legacy', version: '4.45.9' }, { id: 'previous', version: '4.46.0' }, { id: 'stockframe-latest', version: '4.46.1' },
+    { id: 'legacy', version: '4.45.9' }, { id: 'previous', version: '4.46.1' }, { id: 'stockframe-latest', version: '4.46.2' },
   ] });
-  assert.equal(manifest.version, '4.46.1', 'downloadable extension has the reliability version');
+  assert.equal(manifest.version, '4.46.2', 'downloadable extension has the reliability version');
   assert.equal(env.api.MIN_STOCKFRAME_VERSION, manifest.version, 'bridge requires the same reliability version');
   const { observed, request } = await start(env);
   assert.equal(request.extensionId, 'stockframe-latest');
   assert.equal(request.action, 'status');
-  env.send(request, 'SF_RESULT', { configured: false, version: '4.46.1' });
+  env.send(request, 'SF_RESULT', { configured: false, version: '4.46.2' });
   await observed.finished;
-  assert.equal(observed.value.version, '4.46.1');
+  assert.equal(observed.value.version, '4.46.2');
   assert.equal(env.timers.size, 0, 'success cleans all operation/discovery timers');
 });
 
@@ -110,7 +110,7 @@ await run('rejects an outdated extension before any account or download request'
   const observed = observe(env.api.stockFrameStatus());
   await env.advance(420);
   assert.equal(observed.state, 'rejected');
-  assert.match(observed.error.message, /4\.46\.1/);
+  assert.match(observed.error.message, /4\.46\.2/);
   assert.equal(env.posted.length, 0);
   assert.equal(env.timers.size, 0);
 });

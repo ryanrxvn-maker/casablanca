@@ -380,7 +380,7 @@ export type JanelaInsert = { id: string; start: number; end: number };
 /** Só um plano full completo pode assumir também os silêncios do vídeo.
  * Coexistência com manual/Flow (ou StockFrame manual) conserva as prioridades
  * normais: esticar o full nesse caso poderia deslocar um insert do editor. */
-function planoSmartStockFrameCompleto(
+export function planoSmartStockFrameCompleto(
   inserts: Insert[],
   partes: Array<{ label: string; text: string }>,
 ): boolean {
@@ -404,6 +404,16 @@ function planoSmartStockFrameCompleto(
     }
     return proxima === tamanho;
   });
+}
+
+/** Certifica a cobertura temporal REAL, incluindo silêncio, entrada e cauda. */
+export function coberturaIntegralDeJanelas(janelas: JanelaInsert[], durSec: number): boolean {
+  if (!(durSec > 0) || !janelas.length || janelas[0].start !== 0) return false;
+  for (let i = 0; i < janelas.length; i++) {
+    if (!(janelas[i].end > janelas[i].start)) return false;
+    if (i > 0 && Math.abs(janelas[i].start - janelas[i - 1].end) > 1e-6) return false;
+  }
+  return Math.abs(janelas[janelas.length - 1].end - durSec) <= 1e-6;
 }
 
 /**

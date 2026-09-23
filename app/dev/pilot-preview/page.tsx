@@ -809,7 +809,7 @@ function Conteudo() {
     const extensionId = 'stockframe-dev-preview';
     const reply = (requestId: string, type: string, payload: unknown) => {
       window.postMessage({
-        source: 'stockframe-extension', extensionId, version: '4.46.1', requestId, type, payload,
+        source: 'stockframe-extension', extensionId, version: '4.46.2', requestId, type, payload,
       }, window.location.origin);
     };
     const onMessage = (event: MessageEvent) => {
@@ -818,7 +818,7 @@ function Conteudo() {
       if (message?.source !== 'pilot-stockframe' || typeof message.requestId !== 'string') return;
       if (message.type === 'SF_PING') {
         window.postMessage({
-          source: 'stockframe-extension', extensionId, version: '4.46.1', requestId: message.requestId, type: 'SF_PONG',
+          source: 'stockframe-extension', extensionId, version: '4.46.2', requestId: message.requestId, type: 'SF_PONG',
         }, window.location.origin);
         return;
       }
@@ -828,9 +828,9 @@ function Conteudo() {
         if (message.action === 'status') {
           reply(message.requestId, 'SF_RESULT', configured ? {
             configured: true,
-            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium', niches: STOCKFRAME_DEV_NICHES },
-            version: '4.46.1',
-          } : { configured: false, version: '4.46.1' });
+            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, quota: { used: 4, limit: 130, remaining: 126 }, capabilities: { media_urls: true, taxonomy: true, smart_search: true }, plan: 'Premium', niches: STOCKFRAME_DEV_NICHES },
+            version: '4.46.2',
+          } : { configured: false, version: '4.46.2' });
           return;
         }
         if (message.action === 'disconnect') {
@@ -842,7 +842,7 @@ function Conteudo() {
           configured = true;
           reply(message.requestId, 'SF_RESULT', {
             configured: true,
-            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, plan: 'Premium', niches: STOCKFRAME_DEV_NICHES },
+            account: { name: 'Conta Premium de Teste', email: 'preview@stockframe.dev', downloads_today: 4, downloads_limit: 130, quota: { used: 4, limit: 130, remaining: 126 }, capabilities: { media_urls: true, taxonomy: true, smart_search: true }, plan: 'Premium', niches: STOCKFRAME_DEV_NICHES },
           });
           return;
         }
@@ -862,6 +862,24 @@ function Conteudo() {
             videos,
             pagination: { current_page: 1, per_page: 24, total: videos.length, last_page: 1 },
           } });
+          return;
+        }
+        if (message.action === 'mediaUrls') {
+          reply(message.requestId, 'SF_RESULT', { data: { videos: STOCKFRAME_DEV_VIDEOS.filter((video) => message.payload?.videoIds?.includes(video.id))
+            .map((video) => ({ id: video.id, thumbnail_url: video.poster_url, preview_url: video.preview_url, media_expires_at: '2099-01-01T00:00:00Z' })) } });
+          return;
+        }
+        if (message.action === 'smartSearch') {
+          const queries = Array.isArray(message.payload?.queries) ? message.payload.queries : [];
+          reply(message.requestId, 'SF_RESULT', { data: { results: queries.map((query: { id: string; text: string; niche_id?: string }) => {
+            const words = String(query.text || '').toLocaleLowerCase('pt-BR').split(/\W+/).filter((word) => word.length > 3);
+            const videos = STOCKFRAME_DEV_VIDEOS.filter((video) => !query.niche_id || video.niche_id === query.niche_id)
+              .filter((video) => !/pr[oó]stata/i.test(query.text) || !/joelho/i.test(video.title))
+              .map((video) => ({ video, score: words.filter((word) => `${video.title} ${video.description} ${video.tags.join(' ')}`.toLocaleLowerCase('pt-BR').includes(word)).length }))
+              .sort((a, b) => b.score - a.score)
+              .map(({ video, score }) => ({ ...video, thumbnail_url: video.poster_url, final_score: Math.min(.95, .35 + score * .1), match_reason: 'Cena visual compatível com o contexto da copy.' }));
+            return { query_id: query.id, videos };
+          }) } });
           return;
         }
         if (message.action === 'download') {

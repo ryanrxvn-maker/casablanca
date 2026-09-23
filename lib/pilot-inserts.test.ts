@@ -13,6 +13,8 @@
 import {
   mapearPartesNoAsr,
   janelasDosInserts,
+  coberturaIntegralDeJanelas,
+  planoSmartStockFrameCompleto,
   coverComFoco,
   palcoDoLayout,
   coberturaDaTransicao,
@@ -581,6 +583,12 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
     palavraDe: 0, palavraAte: 3,
   }));
   const j = janelasDosInserts(full, partes, asr, 10);
+  ok(planoSmartStockFrameCompleto(full, partes) && coberturaIntegralDeJanelas(j, 10),
+    'plano e janela final certificam 100% de mídia sobre toda a duração');
+  ok(!coberturaIntegralDeJanelas([{ ...j[0], start: .01 }, j[1]], 10)
+    && !coberturaIntegralDeJanelas([j[0], { ...j[1], start: j[1].start + .01 }], 10)
+    && !coberturaIntegralDeJanelas([j[0], { ...j[1], end: 9.99 }], 10),
+    'um único frame sem StockFrame na entrada, entre takes ou na cauda invalida 100%');
   ok(j.length === 2 && aprox(j[0].start, 0) && aprox(j[1].end, 10),
     'Smart full100 cobre a entrada de 1s e a cauda após o ASR terminar em 7,4s');
   ok(aprox(j[0].end, j[1].start) && aprox(j.reduce((n, w) => n + w.end - w.start, 0), 10),

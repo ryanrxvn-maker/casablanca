@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 const manifest = JSON.parse(readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
 const worker = readFileSync(new URL('../extension/stockframe-background.js', import.meta.url), 'utf8');
@@ -36,7 +37,7 @@ assert.ok(component.includes('planSmartStockSegments(parts, { coverage, pace })'
 assert.ok(component.includes('rankStockFrameVideos(segment'), 'Smart Stocks semantically ranks the API catalog');
 assert.ok(component.includes('Nenhum download foi consumido ainda'), 'analysis is preview-only and does not burn download quota');
 assert.ok(component.includes('current.filter((insert) => !insert.stockFrame?.smart)'), 're-running Smart replaces only the previous smart plan');
-assert.ok(component.includes('account.downloadsLimit - account.downloadsToday'), 'plan checks remaining paid-account quota before applying');
+assert.ok(component.includes('freshAccount.downloadsLimit - freshAccount.downloadsToday'), 'plan checks fresh paid-account quota before applying');
 
 const premium = { name: 'Premium Test', email: 'premium@test.dev', downloads_today: 3, downloads_limit: 130, plan: 'premium' };
 function jsonResponse(value, status = 200, headers = {}) {
@@ -57,8 +58,8 @@ function defaultFetch(url) {
 
 // Run the real worker with virtual time. Advancing a minute never waits a real
 // minute, and every observed provider call retains its virtual timestamp.
-function createWorkerHarness(initialKey = '') {
-  const stored = initialKey ? { 'autoedit.stockframe.api-key.v1': initialKey } : {};
+function createWorkerHarness(initialKey = '', sharedStored) {
+  const stored = sharedStored || (initialKey ? { 'autoedit.stockframe.api-key.v1': initialKey } : {});
   const emitted = [];
   const fetches = [];
   const terminal = new Map();
@@ -100,7 +101,8 @@ function createWorkerHarness(initialKey = '') {
       fetches.push({ url: String(url), options, at: now });
       return fetchHandler(String(url), options);
     }, Response, URL, URLSearchParams, Uint8Array, Date: FakeDate, Math, JSON, Promise, String, Number,
-    Object, Array, Set, Map, RegExp, Error, encodeURIComponent, decodeURIComponent, btoa, AbortController,
+    Object, Array, Set, Map, RegExp, Error, encodeURIComponent, decodeURIComponent, btoa, AbortController, TextEncoder,
+    crypto: { randomUUID: () => `test-${++sequence}`, subtle: webcrypto.subtle },
     setTimeout: (fn, delay) => schedule(fn, delay), clearTimeout: (id) => timers.delete(id),
     setInterval: (fn, delay) => schedule(fn, delay, delay), clearInterval: (id) => timers.delete(id),
     console: { log() {} },
@@ -154,6 +156,20 @@ assert.equal(listed.message.payload.data.videos[0].id, 'take-1', 'catalog respon
 const listUrl = fetches.at(-1).url;
 assert.ok(listUrl.includes('search=dor+no+joelho') && listUrl.includes('per_page=24'), 'documented catalog filters reach the API');
 assert.ok(!listUrl.includes('rogue'), 'unknown query fields never reach the API');
+
+const modernApi = createWorkerHarness(secret);
+modernApi.setFetch((url) => {
+  if (url.endsWith('/videos/smart-search')) return jsonResponse({ results: [{ query_id: 'seg-1', videos: [{ id: 'ed-1', final_score: .94 }] }] });
+  if (url.endsWith('/videos/media-urls')) return jsonResponse({ videos: [{ id: 'ed-1', thumbnail_url: 'https://cdn.example/thumb.jpg', preview_url: 'https://cdn.example/preview.webm' }] });
+  return defaultFetch(url);
+});
+const searched = await modernApi.request('smartSearch', { queries: [{ id: 'seg-1', text: 'Disfunção erétil e mel', desired_duration: 5 }] });
+assert.equal(searched.message.payload.data.results[0].videos[0].id, 'ed-1', 'Smart Search em lote devolve vídeos autorizados ao Pilot');
+const renewed = await modernApi.request('mediaUrls', { videoIds: ['ed-1'] });
+assert.equal(renewed.message.payload.data.videos[0].preview_url, 'https://cdn.example/preview.webm', 'renovação devolve o preview sem download');
+assert.equal(modernApi.fetches.length, 2, 'Smart Search e mídia usam apenas dois pedidos, nenhum download');
+assert.ok(modernApi.fetches.every((item) => item.options.method === 'POST' && item.options.headers.Authorization === `Bearer ${secret}`), 'novos endpoints recebem POST autenticado na extensão');
+assert.deepEqual(JSON.parse(modernApi.fetches[0].options.body).queries[0].id, 'seg-1', 'segmento e contexto chegam ao Smart Search');
 
 const downloaded = await workerRequest('download', { videoId: 'take-1' });
 assert.equal(downloaded.message.payload.filename, 'take-premium.mp4', 'download preserves the safe API filename');
@@ -220,6 +236,15 @@ const networkFailure = createWorkerHarness(secret);
 networkFailure.setFetch(() => { throw new TypeError('network connection interrupted'); });
 assert.equal((await networkFailure.request('download', { videoId: 'ambiguous' })).message.type, 'SF_ERROR', 'ambiguous network failure is returned to the user');
 assert.equal(networkFailure.fetches.length, 1, 'ambiguous failure never repeats a quota-consuming download');
+networkFailure.setFetch(() => videoResponse());
+assert.equal((await networkFailure.request('download', { videoId: 'ambiguous' })).message.type, 'SF_RESULT', 'manual retry after ambiguous failure can finish');
+assert.equal(networkFailure.fetches[0].options.headers['Idempotency-Key'], networkFailure.fetches[1].options.headers['Idempotency-Key'], 'manual retry reuses Idempotency-Key and cannot debit the same operation twice');
+const afterRestart = createWorkerHarness(secret, networkFailure.stored);
+assert.equal((await afterRestart.request('download', { videoId: 'ambiguous' })).message.type, 'SF_RESULT', 'worker restart preserves a retryable project operation');
+assert.equal(networkFailure.fetches[0].options.headers['Idempotency-Key'], afterRestart.fetches[0].options.headers['Idempotency-Key'], 'worker restart cannot create a second charge for the same project/take');
+const anotherProject = await afterRestart.request('download', { videoId: 'ambiguous', taskId: 'project-2' });
+assert.equal(anotherProject.message.type, 'SF_RESULT', 'another project can download the same take');
+assert.notEqual(afterRestart.fetches[0].options.headers['Idempotency-Key'], afterRestart.fetches[1].options.headers['Idempotency-Key'], 'a different project remains a new quota-consuming operation');
 
 const hanging = createWorkerHarness(secret);
 hanging.setFetch((_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))));

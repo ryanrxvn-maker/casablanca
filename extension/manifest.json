@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hey Auto",
-  "version": "4.46.1",
+  "version": "4.46.2",
   "description": "Avatares HeyGen, Google Flow e StockFrame no Pilot, usando suas próprias contas conectadas.",
   "icons": {
     "16": "icons/icon-16.png",

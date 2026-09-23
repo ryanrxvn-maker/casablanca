@@ -3,10 +3,12 @@
 import {
   normalizeStockFrameAccount,
   normalizeStockFramePage,
+  normalizeStockFrameSmartResults,
   type StockFrameAccount,
   type StockFrameFilters,
   type StockFramePage,
   type StockFrameVideo,
+  type StockFrameSmartQuery,
 } from './stockframe';
 
 type StockFrameStatus = {
@@ -34,7 +36,7 @@ type Pending = {
 
 const pending = new Map<string, Pending>();
 const MAX_DOWNLOAD = 256 * 1024 * 1024;
-const MIN_STOCKFRAME_VERSION = '4.46.1';
+const MIN_STOCKFRAME_VERSION = '4.46.2';
 let listenerInstalled = false;
 
 function versionAtLeast(version: string, minimum = MIN_STOCKFRAME_VERSION): boolean {
@@ -208,9 +210,19 @@ export async function stockFrameList(filters: StockFrameFilters = {}): Promise<S
   return normalizeStockFramePage(result.data ?? result, { page: filters.page, perPage: filters.perPage });
 }
 
-export async function stockFrameDownload(video: Pick<StockFrameVideo, 'id' | 'title' | 'code'>, onProgress?: (message: string, percent?: number) => void): Promise<File> {
+export async function stockFrameSmartSearch(queries: StockFrameSmartQuery[]): Promise<Map<string, StockFrameVideo[]>> {
+  const result = await request<{ data?: unknown }>('smartSearch', { queries }, { timeoutMs: 90_000 });
+  return normalizeStockFrameSmartResults(result.data ?? result);
+}
+
+export async function stockFrameMediaUrls(videoIds: string[]): Promise<unknown> {
+  const result = await request<{ data?: unknown }>('mediaUrls', { videoIds });
+  return result.data ?? result;
+}
+
+export async function stockFrameDownload(video: Pick<StockFrameVideo, 'id' | 'title' | 'code'>, onProgress?: (message: string, percent?: number) => void, taskId = 'pilot'): Promise<File> {
   if (!/^[\w-]{1,180}$/.test(video.id)) throw new Error('Este take não tem um identificador válido para download.');
-  const result = await request<{ blob: Blob; filename?: string; mimeType?: string }>('download', { videoId: video.id }, { timeoutMs: 12 * 60_000, onProgress });
+  const result = await request<{ blob: Blob; filename?: string; mimeType?: string }>('download', { videoId: video.id, taskId }, { timeoutMs: 12 * 60_000, onProgress });
   if (!result.blob?.size || result.blob.size > MAX_DOWNLOAD || !result.blob.type.startsWith('video/')) {
     throw new Error('O StockFrame não devolveu um arquivo de vídeo válido.');
   }

@@ -30,7 +30,49 @@ export type StockFrameVideo = {
   subcategoryId?: string;
   subcategoryName?: string;
   createdAt?: string;
+  mediaExpiresAt?: string;
+  downloadCost: number;
+  available: boolean;
+  duplicateGroupId?: string;
+  finalScore?: number;
+  conflictingConcepts: string[];
+  matchedConcepts: string[];
+  matchReason?: string;
+  recommendedStartSec?: number;
+  recommendedEndSec?: number;
+  smartMetadata?: StockFrameSmartMetadata;
   raw?: Record<string, unknown>;
+};
+
+export type StockFrameSmartMetadata = {
+  summary: string;
+  concepts: string[];
+  subjects: string[];
+  actions: string[];
+  objects: string[];
+  bodyParts: string[];
+  positiveKeywords: string[];
+  negativeKeywords: string[];
+  duplicateGroupId?: string;
+  adSuitabilityScore?: number;
+  containsText: boolean;
+  containsWatermark: boolean;
+  graphicContent: boolean;
+};
+
+export type StockFrameSmartQuery = {
+  id: string;
+  text: string;
+  context_before?: string;
+  context_after?: string;
+  full_copy_summary?: string;
+  desired_duration?: number;
+  niche_id?: string | null;
+  subcategory_id?: string | null;
+  aspect_ratio?: '9:16' | '16:9';
+  origin?: 'organic' | 'ai';
+  exclude_video_ids?: string[];
+  exclude_duplicate_groups?: string[];
 };
 
 export type StockFrameNiche = {
@@ -45,6 +87,8 @@ export type StockFrameAccount = {
   email: string;
   downloadsToday: number | null;
   downloadsLimit: number | null;
+  downloadsRemaining: number | null;
+  capabilities: { mediaUrls: boolean; taxonomy: boolean; smartSearch: boolean };
   plan?: string;
   niches: StockFrameNiche[];
 };
@@ -182,16 +226,20 @@ export function normalizeStockFrameVideo(value: unknown): StockFrameVideo | null
   const preview = record(first(source, ['preview', 'video_preview', 'videoPreview']));
   const thumbnail = record(first(source, ['thumbnail', 'poster', 'cover']));
   const previewUrl = safeMediaUrl(firstAcross([source, preview, media], [
-    'preview_url', 'previewUrl', 'video_url', 'videoUrl', 'playback_url', 'playbackUrl',
+    'preview_url', 'previewUrl',
     'preview_signed_url', 'previewSignedUrl', 'signed_preview_url', 'signedPreviewUrl',
     'preview_webm_url', 'previewWebmUrl', 'webm_url', 'webmUrl',
-    'watermarked_url', 'watermarkedUrl', 'signed_url', 'signedUrl', 'src', 'url',
-  ]));
+    'watermarked_url', 'watermarkedUrl',
+  ]) ?? first(preview, ['src', 'url']));
   const posterUrl = safeMediaUrl(firstAcross([source, thumbnail, media], [
     'poster_url', 'posterUrl', 'thumbnail_url', 'thumbnailUrl', 'thumb_url', 'thumbUrl',
     'thumbnail_signed_url', 'thumbnailSignedUrl', 'signed_thumbnail_url', 'signedThumbnailUrl',
-    'cover_url', 'coverUrl', 'image_url', 'imageUrl', 'signed_url', 'signedUrl', 'src', 'url',
-  ]));
+    'cover_url', 'coverUrl', 'image_url', 'imageUrl', 'signed_url', 'signedUrl',
+  ]) ?? first(thumbnail, ['src', 'url']));
+  const metadata = record(first(source, ['smart_metadata', 'smartMetadata']));
+  const score = first(source, ['final_score', 'finalScore']);
+  const recommendedStart = first(source, ['recommended_start_sec', 'recommendedStartSec']);
+  const recommendedEnd = first(source, ['recommended_end_sec', 'recommendedEndSec']);
 
   return {
     id,
@@ -215,6 +263,31 @@ export function normalizeStockFrameVideo(value: unknown): StockFrameVideo | null
     subcategoryId: subcategoryId || undefined,
     subcategoryName: subcategoryName || undefined,
     createdAt: text(first(source, ['created_at', 'createdAt', 'published_at', 'publishedAt'])) || undefined,
+    mediaExpiresAt: text(first(source, ['media_expires_at', 'mediaExpiresAt'])) || undefined,
+    downloadCost: Math.max(0, finite(first(source, ['download_cost', 'downloadCost']), 1)),
+    available: bool(first(source, ['available', 'access_allowed', 'accessAllowed'])) !== false,
+    duplicateGroupId: text(first(source, ['duplicate_group_id', 'duplicateGroupId'])) || text(first(metadata, ['duplicate_group_id', 'duplicateGroupId'])) || undefined,
+    finalScore: score === undefined ? undefined : finite(score),
+    conflictingConcepts: tagsOf(first(source, ['conflicting_concepts', 'conflictingConcepts'])),
+    matchedConcepts: tagsOf(first(source, ['matched_concepts', 'matchedConcepts'])),
+    matchReason: text(first(source, ['match_reason', 'matchReason'])) || undefined,
+    recommendedStartSec: recommendedStart === undefined ? undefined : finite(recommendedStart),
+    recommendedEndSec: recommendedEnd === undefined ? undefined : finite(recommendedEnd),
+    smartMetadata: Object.keys(metadata).length ? {
+      summary: text(first(metadata, ['summary'])),
+      concepts: tagsOf(first(metadata, ['concepts'])),
+      subjects: tagsOf(first(metadata, ['subjects'])),
+      actions: tagsOf(first(metadata, ['actions'])),
+      objects: tagsOf(first(metadata, ['objects'])),
+      bodyParts: tagsOf(first(metadata, ['body_parts', 'bodyParts'])),
+      positiveKeywords: tagsOf(first(metadata, ['positive_keywords', 'positiveKeywords'])),
+      negativeKeywords: tagsOf(first(metadata, ['negative_keywords', 'negativeKeywords'])),
+      duplicateGroupId: text(first(metadata, ['duplicate_group_id', 'duplicateGroupId'])) || undefined,
+      adSuitabilityScore: first(metadata, ['ad_suitability_score', 'adSuitabilityScore']) === undefined ? undefined : finite(first(metadata, ['ad_suitability_score', 'adSuitabilityScore'])),
+      containsText: bool(first(metadata, ['contains_text', 'containsText'])) === true,
+      containsWatermark: bool(first(metadata, ['contains_watermark', 'containsWatermark'])) === true,
+      graphicContent: bool(first(metadata, ['graphic_content', 'graphicContent'])) === true,
+    } : undefined,
     raw: source,
   };
 }
@@ -329,17 +402,50 @@ export function normalizeStockFrameAccount(value: unknown): StockFrameAccount {
   const limit = first(source, ['downloads_limit', 'downloadsLimit', 'daily_limit', 'dailyLimit']) ?? first(downloads, ['limit', 'daily_limit', 'dailyLimit']);
   const niches = collectionAt(source, ['niches', 'categories', 'libraries'])
     .map(normalizeNiche).filter((item): item is StockFrameNiche => !!item);
+  const remaining = first(downloads, ['remaining']);
+  const capabilities = record(source.capabilities);
   return {
     name: text(first(source, ['name', 'username', 'display_name', 'displayName'])) || 'Conta StockFrame',
     email: text(first(source, ['email', 'user_email', 'userEmail'])),
     downloadsToday: used === undefined ? null : Math.max(0, Math.round(finite(used))),
     downloadsLimit: limit === undefined ? null : Math.max(0, Math.round(finite(limit))),
+    downloadsRemaining: remaining === undefined ? null : Math.max(0, Math.round(finite(remaining))),
+    capabilities: {
+      mediaUrls: bool(first(capabilities, ['media_urls', 'mediaUrls'])) === true,
+      taxonomy: bool(first(capabilities, ['taxonomy'])) === true,
+      smartSearch: bool(first(capabilities, ['smart_search', 'smartSearch'])) === true,
+    },
     plan: text(first(source, ['plan', 'pack', 'subscription', 'tier'])) || undefined,
     niches: mergeStockFrameNiches(niches),
   };
 }
 
 export function stockFrameSearchText(video: StockFrameVideo): string {
-  return [video.title, video.description, video.tags.join(' '), video.nicheName, video.subcategoryName]
+  const smart = video.smartMetadata;
+  return [video.title, video.description, video.tags.join(' '), video.nicheName, video.subcategoryName,
+    smart?.summary, smart?.concepts.join(' '), smart?.subjects.join(' '), smart?.actions.join(' '), smart?.objects.join(' '), smart?.bodyParts.join(' '), smart?.positiveKeywords.join(' ')]
     .filter(Boolean).join(' ');
+}
+
+export function normalizeStockFrameSmartResults(value: unknown): Map<string, StockFrameVideo[]> {
+  const root = record(value);
+  const payload = record(root.data);
+  const rows = arrayAt(Object.keys(payload).length ? payload : root, ['results']);
+  return new Map(rows.map((row) => {
+    const item = record(row);
+    return [text(first(item, ['query_id', 'queryId', 'id'])), arrayAt(item, ['videos', 'results', 'items'])
+      .map(normalizeStockFrameVideo).filter((video): video is StockFrameVideo => !!video)];
+  }).filter(([id]) => !!id) as [string, StockFrameVideo[]][]);
+}
+
+export function mergeStockFrameMediaUrls(videos: StockFrameVideo[], value: unknown): StockFrameVideo[] {
+  const root = record(value);
+  const payload = record(root.data);
+  const updates = new Map(arrayAt(Object.keys(payload).length ? payload : root, ['videos', 'items'])
+    .map(normalizeStockFrameVideo).filter((video): video is StockFrameVideo => !!video).map((video) => [video.id, video]));
+  return videos.map((video) => {
+    const update = updates.get(video.id);
+    return update ? { ...video, posterUrl: update.posterUrl || video.posterUrl,
+      previewUrl: update.previewUrl || video.previewUrl, mediaExpiresAt: update.mediaExpiresAt || video.mediaExpiresAt } : video;
+  });
 }

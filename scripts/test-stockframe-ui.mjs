@@ -87,7 +87,7 @@ try {
   await desktop.getByRole('button', { name: '100% de cobertura' }).click();
   await desktop.getByRole('button', { name: 'Cortes rápidos' }).click();
   await desktop.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
-  await desktop.getByText(/takes escolhidos/).waitFor({ state: 'visible', timeout: 20_000 });
+  await desktop.getByRole('heading', { name: /\d+ takes · \d+(?:\.\d+)?% da copy/ }).waitFor({ state: 'visible', timeout: 20_000 });
   if (!await desktop.getByRole('button', { name: 'Aplicar na montagem' }).isVisible()) {
     throw new Error('O plano Smart não chegou ao estado revisável antes do download.');
   }
@@ -96,12 +96,15 @@ try {
     throw new Error('O plano da copy sobre azeite/próstata escolheu uma cena de joelho fora de contexto.');
   }
   await desktop.screenshot({ path: resolve(outputDir, 'smart-plan-desktop.png'), fullPage: false });
+  await desktop.getByRole('button', { name: 'Aplicar na montagem' }).click();
+  await desktop.getByText(/Há inserts manuais ou do Flow nesta montagem/).waitFor({ state: 'visible' });
+  if (await desktop.evaluate(() => window.__stockFrameTestDownloads) !== 1) throw new Error('O bloqueio de 100% misto consumiu download antes de avisar.');
 
   await desktop.getByRole('button', { name: '30% de cobertura' }).click();
   await desktop.getByRole('heading', { name: 'Aguardando análise' }).waitFor({ state: 'visible' });
   if (await desktop.getByRole('button', { name: 'Aplicar na montagem' }).isVisible()) throw new Error('Trocar cobertura deixou aplicar o plano antigo.');
   await desktop.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
-  await desktop.getByText(/takes escolhidos/).waitFor({ state: 'visible' });
+  await desktop.getByRole('heading', { name: /\d+ takes · \d+(?:\.\d+)?% da copy/ }).waitFor({ state: 'visible' });
   await desktop.getByRole('button', { name: 'Takes mais longos' }).click();
   await desktop.getByRole('heading', { name: 'Aguardando análise' }).waitFor({ state: 'visible' });
   if (await desktop.getByRole('button', { name: 'Aplicar na montagem' }).isVisible()) throw new Error('Trocar ritmo deixou aplicar o plano antigo.');
@@ -110,6 +113,24 @@ try {
   if (!desktopBounds || desktopBounds.x < 0 || desktopBounds.y < 0 || desktopBounds.x + desktopBounds.width > 1601 || desktopBounds.y + desktopBounds.height > 1001) {
     throw new Error('A janela desktop escapou da viewport.');
   }
+
+  const clean = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
+  await clean.addInitScript(() => {
+    window.__stockFrameTestDownloads = 0;
+    window.addEventListener('message', (event) => {
+      if (event.data?.source === 'pilot-stockframe' && event.data?.type === 'SF_REQUEST' && event.data?.action === 'download') window.__stockFrameTestDownloads++;
+    });
+  });
+  await openPreview(clean);
+  await clean.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
+  await clean.getByRole('button', { name: '100% de cobertura' }).click();
+  await clean.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
+  await clean.getByRole('heading', { name: /\d+ takes · 100% da copy/ }).waitFor({ state: 'visible', timeout: 20_000 });
+  const cleanSegments = await clean.locator('[class*="timeline"] > button').count();
+  await clean.getByRole('button', { name: 'Aplicar na montagem' }).click();
+  await clean.getByRole('button', { name: `Ajustar ${cleanSegments} takes` }).waitFor({ state: 'visible', timeout: 30_000 });
+  const cleanDownloads = await clean.evaluate(() => window.__stockFrameTestDownloads);
+  if (cleanDownloads < 1 || cleanDownloads > cleanSegments) throw new Error(`A aplicação 100% baixou ${cleanDownloads} arquivos para ${cleanSegments} trechos.`);
 
   const wide = await browser.newPage({ viewport: { width: 2400, height: 1068 }, deviceScaleFactor: 1 });
   const wideDialog = await openPreview(wide);
@@ -158,6 +179,8 @@ try {
     readableTypography: fontSizes,
     repeatedTakeReusesDownload: true,
     changedCoverageAndPaceInvalidatePlan: true,
+    fullCoverageAppliedWithoutGaps: true,
+    mixedManualFlowCoverageBlockedWithoutDeletion: true,
     unrelatedBodyPartRejected: true,
     wideWorkstation: wideMetrics,
     screenshots: ['library-desktop.png', 'take-preview-desktop.png', 'smart-plan-desktop.png', 'library-wide.png', 'smart-mobile.png'],

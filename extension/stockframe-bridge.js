@@ -2,7 +2,7 @@
 (function () {
   const extensionId = chrome.runtime.id;
   const version = chrome.runtime.getManifest().version;
-  const allowed = new Set(['status', 'configure', 'disconnect', 'list', 'download']);
+  const allowed = new Set(['status', 'configure', 'disconnect', 'list', 'smartSearch', 'mediaUrls', 'download']);
 
   function page(message) {
     window.postMessage({ ...message, source: 'stockframe-extension', extensionId, version }, window.location.origin);
