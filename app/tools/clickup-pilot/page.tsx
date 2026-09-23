@@ -8,6 +8,7 @@ import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilit
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
+import { useAvisoContaModoImagem } from '@/components/ModoImagemContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   getClickUpToken,
@@ -11213,6 +11214,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
+  // Aviso de conta ao LIGAR o modo imagem: o disparo normal usa a conta do
+  // navegador (extensão), o modo imagem usa a do OAuth. Só incomoda se forem
+  // diferentes. Ver components/ModoImagemContaAviso.tsx.
+  const { pedir: pedirModoImagem, janela: janelaModoImagem } = useAvisoContaModoImagem();
+
   /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz.
    *  Side-effect: salva memoria voice↔avatar quando ambos estao definidos +
    *  matchedBy nao e 'memory' (evita loop de re-salvar a mesma memoria). */
@@ -14492,7 +14498,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       >
           {/* Credencial do HeyGen: avisa token expirado ou contas divergentes
               ANTES do disparo. Silencioso quando esta tudo certo. */}
-          <HeyGenContaAviso />
+          {/* ignorarConflitoApiKey: no Pilot a API key NÃO escolhe avatar nem voz
+              (vêm da conta do navegador, pela extensão). Comparar key × OAuth
+              aqui era alarme falso; a divergência que importa é navegador ×
+              modo imagem, e ela é avisada no clique do modo imagem. */}
+          <HeyGenContaAviso ignorarConflitoApiKey />
+          {janelaModoImagem}
 
           {/* VISOR DE ENTRADA (05.09) — de onde vem a task: CREATOR / DOCS /
               CLICKUP. Só muda a origem; o resto do Pilot é o mesmo. */}
@@ -18102,7 +18113,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 <button
                                                   type="button"
                                                   disabled={!!slot.audioKey && !slot.imageMode}
-                                                  onClick={() => updateRoleSlot(a.taskId, sIdx, { imageMode: !slot.imageMode })}
+                                                  onClick={() => (slot.imageMode
+                                                    ? updateRoleSlot(a.taskId, sIdx, { imageMode: false })
+                                                    : void pedirModoImagem(() => updateRoleSlot(a.taskId, sIdx, { imageMode: true })))}
                                                   className={'ver-modo-btn' + (slot.imageMode ? ' is-on' : '') + (slot.audioKey && !slot.imageMode ? ' pointer-events-none opacity-35' : '')}
                                                   title={slot.imageMode
                                                     ? 'Modo imagem LIGADO — o HeyGen anima a imagem (sem avatar da biblioteca); clica pra voltar pro avatar'

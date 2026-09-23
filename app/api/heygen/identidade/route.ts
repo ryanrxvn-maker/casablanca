@@ -81,8 +81,10 @@ export async function GET(req: Request) {
       }
     }
 
-    const opcional = new URL(req.url).searchParams.get('apiKeyOpcional') === '1';
-    return NextResponse.json(montarDiagnostico(ladoKey, ladoOauth, opcional));
+    const sp = new URL(req.url).searchParams;
+    const opcional = sp.get('apiKeyOpcional') === '1';
+    const ignorarConflito = sp.get('ignorarConflito') === '1';
+    return NextResponse.json(montarDiagnostico(ladoKey, ladoOauth, opcional, ignorarConflito));
   } catch (e) {
     // Falha de diagnóstico NÃO pode travar a ferramenta: o banner simplesmente
     // não aparece. Por isso 200 com aviso nulo em vez de 500.

@@ -38,7 +38,13 @@ export function HeyGenContaAviso({
    * nada ali — o usuário conectava, recarregava e continuava vendo aviso.
    */
   apiKeyOpcional,
-}: { apiKeyOpcional?: boolean } = {}) {
+  /**
+   * `true` nas telas onde avatar e voz vêm da conta do NAVEGADOR (extensão),
+   * como o Pilot: lá a API key não escolhe nada, então "API key × OAuth em
+   * contas diferentes" é alarme falso (23.09). Token vencido continua avisando.
+   */
+  ignorarConflitoApiKey,
+}: { apiKeyOpcional?: boolean; ignorarConflitoApiKey?: boolean } = {}) {
   const [diag, setDiag] = useState<Diagnostico | null>(null);
   const [fechado, setFechado] = useState(false);
 
@@ -46,7 +52,10 @@ export function HeyGenContaAviso({
     let vivo = true;
     // Falha silenciosa de propósito: se o diagnóstico não responder, a
     // ferramenta segue normal — o banner é proteção, não dependência.
-    fetch(`/api/heygen/identidade${apiKeyOpcional ? '?apiKeyOpcional=1' : ''}`)
+    const qs = new URLSearchParams();
+    if (apiKeyOpcional) qs.set('apiKeyOpcional', '1');
+    if (ignorarConflitoApiKey) qs.set('ignorarConflito', '1');
+    fetch(`/api/heygen/identidade${qs.toString() ? `?${qs}` : ''}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (vivo && j) setDiag(j as Diagnostico);
@@ -55,7 +64,7 @@ export function HeyGenContaAviso({
     return () => {
       vivo = false;
     };
-  }, [apiKeyOpcional]);
+  }, [apiKeyOpcional, ignorarConflitoApiKey]);
 
   const aviso = diag?.aviso ?? null;
   const falta = diag?.falta ?? null;
@@ -91,7 +100,7 @@ export function HeyGenContaAviso({
             </p>
           ) : null}
 
-          {emailKey && emailOauth && emailKey !== emailOauth ? (
+          {!ignorarConflitoApiKey && emailKey && emailOauth && emailKey !== emailOauth ? (
             <div className="mono mt-2 space-y-0.5 text-[11.5px] opacity-80">
               <div>avatares e vozes (API key): {emailKey}</div>
               <div>modo imagem (OAuth): {emailOauth}</div>

@@ -208,10 +208,17 @@ export function montarDiagnostico(
    * ali é pedir uma coisa que não desbloqueia nada.
    */
   apiKeyOpcional = false,
+  /**
+   * `true` quando avatar e voz NÃO vêm da API key (Pilot: vêm da conta do
+   * navegador, pela extensão). Aí key × OAuth em contas diferentes não quebra
+   * nada e o aviso vermelho era alarme falso (23.09).
+   */
+  ignorarConflito = false,
 ): Diagnostico {
   const emailKey = apiKey.conta?.email ?? null;
   const emailOAuth = oauth.conta?.email ?? null;
   const conflito =
+    !ignorarConflito &&
     apiKey.valida && oauth.valida && !!emailKey && !!emailOAuth && emailKey !== emailOAuth;
 
   let aviso: Diagnostico['aviso'] = null;
