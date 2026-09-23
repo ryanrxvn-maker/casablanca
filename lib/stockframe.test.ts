@@ -345,6 +345,8 @@ ok(rankStockFrameVideos(intimateEd, [suggestiveCouple], 10, true).some((candidat
   'momento íntimo da copy ED admite cena sugestiva não explícita e congruente');
 ok(!rankStockFrameVideos({ ...intimateEd, campaignText: 'Diabetes tipo 2 altera a glicose.', campaignNicheId: 'diabetes' }, [suggestiveCouple], 10, true).length,
   'cena sugestiva ED não entra em outro nicho');
+ok(!rankStockFrameVideos({ ...intimateEd, campaignText: 'A próstata afeta o casal.', campaignNicheId: 'prostata' }, [suggestiveCouple], 10, true).length,
+  'saúde masculina genérica não libera cena sugestiva quando a campanha não é ED');
 ok(!rankStockFrameVideos({ ...intimateEd, text: 'Clique aqui para saber mais.', semanticText: 'Clique aqui para saber mais.' }, [suggestiveCouple], 10, true).length,
   'CTA não recebe cena íntima apenas pelo contexto da campanha');
 

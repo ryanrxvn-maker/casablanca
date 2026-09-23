@@ -130,7 +130,7 @@ const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|recet
 // "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
 const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|fazendo anal|sexo anal|penetracao anal|pau defeituoso|pau mole|boquete|gemendo|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculacao|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
 const SUGGESTIVE_SCENE = /\b(?:duplo sentido|safad\w*|seux\w*|sexua\w*|apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*|(?:homem|velho) com erecao)\b/;
-const ED_CAMPAIGN = /\b(?:disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|erectile|erekcja|erekci|erektionsstorung|disfuncion erectil|ereccion)\b/;
+const ED_CAMPAIGN = /\b(?:ed|disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|erectile|potency|potencia|potenci\w*|erekcja|erekci|zaburzenia erekcji|erektionsstorung|disfuncion erectil|ereccion)\b/;
 const ED_INTIMATE_MOMENT = /\b(?:casal|parceir\w*|esposa|mulher|namorad\w*|intim\w*|desejo|libido|sedu\w*|relacionamento|satisf\w*|cama|quarto|desempenho|potencia|erecao|erect\w*|couple|partner|wife|desire|intimacy|relationship|bedroom|performanc\w*|libido|pareja|intimidad|esposa|kobiet\w*|zona|partnerk\w*|lozk\w*)\b/;
 const CONFLICT_SCENE = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const CONFLICT_COPY = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
@@ -583,7 +583,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
   }
   if (SUGGESTIVE_SCENE.test(prepared.title)) {
-    const edContext = ED_CAMPAIGN.test(normalize(segment.campaignText || '')) || ranking.campaignConcepts.includes('saude-homem');
+    const edContext = ED_CAMPAIGN.test(normalize(segment.campaignText || ''));
     const intimateMoment = ED_INTIMATE_MOMENT.test(ranking.spokenNormalized);
     const unsuitable = /\b(?:pelad\w*|nudez|nude|naked|genitais|lingerie|calcinha|apos relac\w*|depois da relac\w*|no ato|tamanho ideal|medindo o tamanho)\b/.test(prepared.title);
     if (!edContext || !intimateMoment || ranking.callToAction || ranking.localIngredients.length || unsuitable || recipe) {
