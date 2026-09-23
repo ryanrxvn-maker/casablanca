@@ -99,6 +99,9 @@ const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bistur
 const INVASIVE_PROCEDURE_COPY = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
 const CTA_COPY = /\b(?:clic\w*|botao|saiba mais|assist\w* (?:ao? )?video|ver (?:o |esse )?video|watch (?:the )?video|click\w*|tap\w*|button|learn more)\b/;
 const CTA_SCENE = /\b(?:clic\w*|apert\w*|tocando (?:na )?tela|botao|celular|smartphone|telefone|assist\w* (?:ao? )?video|video (?:no |em )?celular|click\w*|tap\w*|phone|screen)\b/;
+const CTA_PHONE = /\b(?:celular|smartphone|telefone|phone|tela|screen)\b/;
+const CTA_NEUTRAL_ACTION = /\b(?:usand\w*|olhand\w*|clic\w*|apert\w*|tocand\w*|assistind\w*|vendo|using|looking|watching|clicking|tapping)\b/;
+const CTA_CONFLICT_SCENE = /\b(?:toxic\w*|chor\w*|trist\w*|discut\w*|brig\w*|briga|desesper\w*|pagament\w*|pagando|paying)\b/;
 // Cross-pack recipe shots can be useful, but a different medical niche must
 // not become a source of unrelated pathology just because it mentions honey.
 const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare)\b/;
@@ -525,6 +528,10 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   const smart = video.smartMetadata;
   const { campaignIngredients, herbalCampaign, queryTokens, spokenAnatomy, direction, beat } = ranking;
   const videoVisualText = visualSearchText;
+  if (allowGenericFallback && ranking.callToAction && CTA_PHONE.test(prepared.title)
+      && (!CTA_NEUTRAL_ACTION.test(prepared.title) || CTA_CONFLICT_SCENE.test(prepared.title))) {
+    return { video, score: -100, reasons: ['celular com ação ou emoção incompatível com a chamada para assistir'] };
+  }
   if (prepared.explicitSexualScene) {
     return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
   }
@@ -569,7 +576,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     && segment.concepts.some((concept) => prepared.concepts.includes(concept));
   const neutralDigitalAction = allowGenericFallback && ranking.callToAction
     && !MEDICAL_NICHE.test(prepared.taxonomy) && CTA_SCENE.test(prepared.title)
-    && /\b(?:celular|smartphone|telefone|phone|tela|screen)\b/.test(prepared.title);
+    && CTA_PHONE.test(prepared.title) && CTA_NEUTRAL_ACTION.test(prepared.title)
+    && !CTA_CONFLICT_SCENE.test(prepared.title);
   const neutralCrossPackFallback = allowGenericFallback && ranking.campaignIsHealth
     && !MEDICAL_NICHE.test(prepared.taxonomy)
     && /\b(?:casal|homem|mulher|pessoa|idos[ao]|familia)\b/.test(prepared.contentText)

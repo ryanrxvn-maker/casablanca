@@ -490,6 +490,18 @@ const ctaPhone = video({ id: 'cta-phone', title: 'Pessoa clicando no celular par
 const ctaOptions = rankStockFrameGenericFallback(ctaOnly, [educationalEdFallback, genericEdScenes[1], ctaPhone], 10);
 ok(ctaOptions[0]?.video.id === 'cta-phone',
   'CTA prioriza ação visível de celular sobre anatomia genérica e consulta');
+const liveCtaOptions = rankStockFrameGenericFallback(ctaOnly, [
+  video({ id: 'toxic-phone', title: 'CASAL TOXICO CELULAR', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'crying-phone', title: 'MULHER CHORANDO COM CELULAR NA MAO', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'vague-phone', title: 'MULHER COM CELULAR MARIDO', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'paying-phone', title: 'PAGAMENTO PELO CELULAR', nicheId: 'ed', nicheName: 'ED' }),
+  video({ id: 'older-phone', title: 'CASAL IDOSO USANDO CELULAR', nicheId: 'vsl', nicheName: 'VSL' }),
+  video({ id: 'person-phone', title: 'PESSOAS USANDO CELULAR', nicheId: 'vsl', nicheName: 'VSL' }),
+], 12);
+ok(liveCtaOptions.some(candidate => candidate.video.id === 'older-phone')
+  && liveCtaOptions.some(candidate => candidate.video.id === 'person-phone')
+  && !liveCtaOptions.some(candidate => ['toxic-phone', 'crying-phone', 'vague-phone', 'paying-phone'].includes(candidate.video.id)),
+  'CTA real usa pessoas no celular e rejeita cenas tóxicas, choro, pagamento e título sem ação');
 ok(rankStockFrameGenericFallback(ctaOnly, [educationalEdFallback], 10).some(candidate => candidate.video.id === 'ed-anatomy-fallback'),
   'penalidade editorial não quebra cobertura 100% quando anatomia é a única alternativa segura');
 const neutralBridge = { ...czechOpening, text: 'Eu sei que muitos vão me perguntar.',
