@@ -309,7 +309,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   }, [mounted, onClose, enabled, inserts, smart]);
 
   function closeStockFrame() {
-    if (enabled && !inserts.some((insert) => insert.source === 'stockframe') && !smart.some((segment) => segment.selectedVideoId)) onEnabledChange(false);
+    // Smart selections live only in this dialog until applied. Closing an
+    // unapplied plan must not leave the task ON with no persisted stock take.
+    if (enabled && !inserts.some((insert) => insert.source === 'stockframe')) onEnabledChange(false);
     onClose();
   }
 

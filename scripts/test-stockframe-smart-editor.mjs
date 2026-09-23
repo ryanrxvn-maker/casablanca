@@ -63,7 +63,7 @@ try {
   await dialog.getByRole('button', { name: 'Concluir' }).click();
   await open();
   dialog = page.getByRole('dialog');
-  assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'Plano com take escolhido deve permanecer ON');
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), false, 'Plano ainda não aplicado não deve deixar StockFrame ON sem take salvo');
 
   const full = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   await full.goto(process.env.STOCKFRAME_PREVIEW_URL || 'http://127.0.0.1:3100/dev/pilot-preview');
@@ -80,6 +80,9 @@ try {
   await fullDialog.getByRole('heading', { name: /takes · 100% da copy/ }).waitFor({ timeout: 10000 });
   await fullDialog.getByRole('button', { name: 'Aplicar na montagem' }).click();
   await fullDialog.getByRole('button', { name: /Ajustar \d+ takes/ }).waitFor({ timeout: 30000 });
+  await fullDialog.getByRole('button', { name: 'Concluir' }).click();
+  await full.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
+  assert.equal(await full.getByRole('dialog').getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'Take aplicado na montagem deve manter StockFrame ON');
   await full.close();
   assert.deepEqual(errors, []);
   console.log('StockFrame Smart editor: OFF/ON, avatar gaps, add/remove without download, alternatives outside plan, edited 100% apply OK.');
