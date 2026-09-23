@@ -559,8 +559,11 @@ const energyReturn = { ...czechOpening, semanticText: 'Este método recupera a e
   narrativeDirection: 'recovery' as const, visualBeat: 'relief' as const };
 const happyMan = video({ id: 'happy-man', title: 'HOMEM SORRINDO FELIZ', nicheId: 'relacionamento', nicheName: 'Relacionamento' });
 const wrongPain = video({ id: 'wrong-pain', title: 'HOMEM COM DOR NO JOELHO', nicheId: 'dores', nicheName: 'Dores Articulares' });
-ok(rankStockFrameGenericFallback(energyReturn, [happyMan, educationalEdFallback, wrongPain], 10)[0]?.video.id === 'happy-man',
+const smilingPhone = video({ id: 'smiling-phone', title: 'MULHER SORRINDO COM CELULAR', nicheId: 'vsl', nicheName: 'VSL' });
+ok(rankStockFrameGenericFallback(energyReturn, [happyMan, educationalEdFallback, wrongPain, smilingPhone], 10)[0]?.video.id === 'happy-man',
   'retorno da energia pode preferir homem feliz de pack geral a anatomia genérica, sem aceitar outra patologia');
+ok(rankStockFrameGenericFallback(energyReturn, [educationalEdFallback, smilingPhone], 10)[0]?.video.id === 'ed-anatomy-fallback',
+  'celular sorridente não domina uma fala de recuperação sem ação digital');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

@@ -740,6 +740,14 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       reasons.push('anatomia reduzida em fala sem assunto clínico local');
     }
   }
+  // A smiling person holding a phone is useful for a click/watch CTA, not as
+  // the primary visual proof of restored energy, pain relief or performance.
+  // Keep it as a low-priority last resort if no better safe take exists.
+  if (!ranking.callToAction && CTA_PHONE.test(prepared.title)
+      && !/\b(?:celular|telefone|smartphone|phone|tela|screen)\b/.test(ranking.spokenNormalized)) {
+    score -= 7;
+    reasons.push('celular sem ação digital nesta fala');
+  }
   if (beat === 'problem' && /\b(?:dor|dificuldade|frustr\w*|problema|impotencia|disfuncao|triste|desconforto)\b/.test(videoVisualText)) score += 7;
   if (beat === 'relief' && /\b(?:alivio|melhora|feliz|sorris\w*|confian\w*|recuper\w*|casal)\b/.test(videoVisualText)) score += 8;
   if (beat === 'proof' && /\b(?:depoimento|resultado|antes e depois|medico|doutor|explic\w*)\b/.test(videoVisualText)) score += 5;
