@@ -22,6 +22,9 @@ export function CompactVoiceSelector({
   const [query, setQuery] = useState('');
   const [allVoices, setAllVoices] = useState<VoiceOption[]>([]);
   const [loading, setLoading] = useState(false);
+  // Sobe quando a lista de clones muda (clone novo / Recarregar biblioteca):
+  // zera a lista e o efeito de carga relê — aberto agora ou na próxima abertura.
+  const [versaoVozes, setVersaoVozes] = useState(0);
   const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -99,6 +102,16 @@ export function CompactVoiceSelector({
   // /v1/voice.list. NUNCA usa /api/heygen/voices (API key fixa = conta errada
   // quando o user troca de conta no HeyGen). Filtro é client-side.
   useEffect(() => {
+    let vivo = true;
+    let sair = () => {};
+    import('@/lib/heygen-api-direct').then((m) => {
+      if (!vivo) return;
+      sair = m.aoMudarVozesClonadas(() => { setAllVoices([]); setVersaoVozes((v) => v + 1); });
+    }).catch(() => {});
+    return () => { vivo = false; sair(); };
+  }, []);
+
+  useEffect(() => {
     if (!open || allVoices.length > 0) return;
     let cancelled = false;
     setLoading(true);
@@ -158,7 +171,7 @@ export function CompactVoiceSelector({
       if (!cancelled) { setAllVoices(list); setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [open, allVoices.length]);
+  }, [open, allVoices.length, versaoVozes]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();

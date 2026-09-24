@@ -126,8 +126,10 @@ export async function getActiveAccountInfo(): Promise<{
   email: string | null;
   spaceId: string | null;
   spaceName: string | null;
+  /** Plano da conta ativa (creator, pro...) — a janela de clonar voz mostra. */
+  plano?: string | null;
 }> {
-  const vazio = { email: null, spaceId: null, spaceName: null };
+  const vazio = { email: null, spaceId: null, spaceName: null, plano: null };
   try {
     const r = await heygenApiFetch({
       url: 'https://api2.heygen.com/v1/pacific/account.get?include_ff=true',
@@ -142,10 +144,12 @@ export async function getActiveAccountInfo(): Promise<{
       d.space_id ?? d.current_space_id ?? d.active_space_id ?? null;
     const email = u?.email ?? u?.username ?? null;
     const spaceName = si.name ?? si.space_name ?? si.display_name ?? null;
+    const plano = si.user_plan_v2?.plan_name ?? si.user_plan_v2?.tier ?? null;
     return {
       email: email ? String(email) : null,
       spaceId: spaceId ? String(spaceId) : null,
       spaceName: spaceName ? String(spaceName) : null,
+      plano: plano ? String(plano) : null,
     };
   } catch {
     return vazio;
@@ -604,6 +608,37 @@ export async function listStockVoices(): Promise<StockVoice[]> {
 }
 
 let _clonedVoicesCache: { at: number; voices: StockVoice[] } | null = null;
+
+/* Quem guarda a lista de clones em estado (o seletor de voz) escuta aqui: clone
+ * novo, "Recarregar biblioteca" ou troca de conta derrubam o cache de 5 min e
+ * avisam. Antes o seletor carregava a lista UMA vez e nunca mais — voz recém
+ * clonada não aparecia nem depois de recarregar a biblioteca. */
+const _vozesClonadasSubs = new Set<() => void>();
+export function invalidarVozesClonadas(): void {
+  _clonedVoicesCache = null;
+  for (const cb of Array.from(_vozesClonadasSubs)) {
+    try { cb(); } catch { /* assinante quebrado não derruba os outros */ }
+  }
+}
+export function aoMudarVozesClonadas(cb: () => void): () => void {
+  _vozesClonadasSubs.add(cb);
+  return () => { _vozesClonadasSubs.delete(cb); };
+}
+
+/** Quantas vozes clonadas a conta ATIVA do navegador tem (`total` do mesmo
+ *  voice_clone/voice.list da tela de vozes do HeyGen). null = não deu pra ler. */
+export async function contarVozesClonadas(): Promise<number | null> {
+  try {
+    const r = await jsonCall('GET', '/v1/pacific/voice_clone/voice.list?limit=1');
+    if (!r.ok) return null;
+    const d = r.body?.data;
+    if (typeof d?.total === 'number') return d.total;
+    const arr = d?.list || d?.voices;
+    return Array.isArray(arr) ? arr.length : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Lista as vozes CLONADAS da PRÓPRIA conta ativa (Instant Voice Clone / ElevenLabs)
  *  via `/v1/pacific/voice_clone/voice.list` — o MESMO endpoint que a tela de vozes

@@ -15,7 +15,7 @@ import {
   listMyHeyGenAvatars,
   type LibraryAvatarGroup,
 } from './heygen-extension-bridge';
-import { getActiveAccountInfo, getActiveSpaceId } from './heygen-api-direct';
+import { getActiveAccountInfo, getActiveSpaceId, invalidarVozesClonadas } from './heygen-api-direct';
 
 type CacheState = {
   groups: LibraryAvatarGroup[];
@@ -134,6 +134,9 @@ export function getLibrarySnapshot(): CacheState {
 }
 
 export async function reloadLibrary(force = false): Promise<void> {
+  // "Recarregar biblioteca" também refaz a lista de VOZES CLONADAS (24.09): o
+  // cache delas vivia 5 min à parte e o seletor de voz nunca relia.
+  if (force) invalidarVozesClonadas();
   const hadGroupsBefore = state.groups.length > 0;
   hydrate();
   // Se a hidratação (localStorage) trouxe a lista agora, avisa os subscribers
@@ -184,6 +187,8 @@ export async function reloadLibrary(force = false): Promise<void> {
       // lista cacheada fica "carimbada" com o workspace em que foi buscada.
       const [r, ident] = await Promise.all([listMyHeyGenAvatars(), getActiveAccountInfo()]);
       const sid = ident.spaceId;
+      // Trocou de conta no HeyGen: os clones da lista antiga são de OUTRA conta.
+      if (ident.email && state.conta?.email && ident.email !== state.conta.email) invalidarVozesClonadas();
       if (ident.email || ident.spaceName) state.conta = { email: ident.email, spaceName: ident.spaceName };
       if (r.ok) {
         state.groups = r.groups ?? [];

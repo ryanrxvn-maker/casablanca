@@ -12,7 +12,7 @@ const MAX_SEG = 75;
 
 export type ClonarVozOAuthResult =
   | { ok: true; voiceId: string; voiceName: string; conta: string | null }
-  | { ok: false; error: string; limite?: boolean };
+  | { ok: false; error: string; limite?: boolean; clones?: number | null; plano?: string | null };
 
 function wavMono16(samples: Float32Array, sampleRate: number): Blob {
   const buf = new ArrayBuffer(44 + samples.length * 2);
@@ -76,16 +76,23 @@ async function lerErro(r: Response): Promise<string> {
   return (j && (j.error || j.message)) || `HTTP ${r.status}`;
 }
 
-/** Conta HeyGen do OAuth do site (onde o clone por código vai nascer). */
-export async function contaDoCloneOAuth(): Promise<string | null> {
+/** Conta HeyGen do OAuth do site (onde o clone por código vai nascer), com o
+ *  plano e — se `contar` — quantas vozes clonadas ela tem. null = sem OAuth. */
+export async function infoContaOAuth(
+  contar = false,
+): Promise<{ conta: string; plano: string | null; clones: number | null } | null> {
   try {
-    const r = await fetch('/api/heygen/voice-clone?conta=1', { cache: 'no-store' });
+    const r = await fetch(`/api/heygen/voice-clone?conta=1${contar ? '&contar=1' : ''}`, { cache: 'no-store' });
     if (!r.ok) return null;
     const j = await r.json().catch(() => null);
-    return j?.conta || null;
+    return j?.conta ? { conta: String(j.conta), plano: j.plano || null, clones: typeof j.clones === 'number' ? j.clones : null } : null;
   } catch {
     return null;
   }
+}
+
+export async function contaDoCloneOAuth(): Promise<string | null> {
+  return (await infoContaOAuth())?.conta || null;
 }
 
 export async function clonarVozPorOAuth(
@@ -106,7 +113,13 @@ export async function clonarVozPorOAuth(
     fd.append('name', opts.nome.slice(0, 50));
     if (opts.language) fd.append('language', opts.language);
     const r = await fetch('/api/heygen/voice-clone', { method: 'POST', body: fd });
-    if (!r.ok) return { ok: false, error: await lerErro(r), limite: r.status === 409 };
+    if (!r.ok) {
+      if (r.status === 409) {
+        const j = await r.json().catch(() => null);
+        return { ok: false, error: (j && j.error) || 'limite de clones', limite: true, clones: j?.clones ?? null, plano: j?.plano ?? null };
+      }
+      return { ok: false, error: await lerErro(r) };
+    }
     const j = await r.json();
     const voiceId = String(j.voiceId || '');
     if (!voiceId) return { ok: false, error: 'Servidor não devolveu o id da voz.' };

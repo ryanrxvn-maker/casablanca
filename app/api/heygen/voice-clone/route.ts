@@ -11,8 +11,8 @@ import { contaDoToken } from '@/lib/heygen-image-video';
  *        → { voiceId, conta }       (voiceId = voice_clone_id, já serve de voice_id)
  *   GET  /api/heygen/voice-clone?id=<voiceId>
  *        → { status: processing|complete|failed, name, erro? }
- *   GET  /api/heygen/voice-clone?conta=1
- *        → { conta }                (só lê; o client decide se a conta serve)
+ *   GET  /api/heygen/voice-clone?conta=1[&contar=1]
+ *        → { conta, plano, clones? } (só lê; o client decide se a conta serve)
  *
  * ⚠ O clone nasce na conta do OAuth. Disparo normal do Pilot usa a conta do
  * NAVEGADOR (extensão) — se forem diferentes, a voz não aparece lá. Quem chama
@@ -45,6 +45,40 @@ function descreve(status: number, body: any): string {
   const msg = (typeof e === 'string' ? e : e?.message) || body?.message || 'sem detalhe';
   const code = e?.code ? ` [${e.code}]` : '';
   return `${msg}${code} (HTTP ${status})`;
+}
+
+/** Conta + plano do token (`/v3/users/me`). Só lê. */
+async function infoConta(token: string): Promise<{ conta: string | null; plano: string | null }> {
+  try {
+    const r = await fetch(`${API}/v3/users/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json().catch(() => null);
+    const d = j?.data || {};
+    return { conta: d.email || d.username || null, plano: d.subscription?.plan || null };
+  } catch {
+    return { conta: null, plano: null };
+  }
+}
+
+/** Vozes clonadas (privadas) da conta do token — paginado. null = não deu. */
+async function contarClones(token: string): Promise<number | null> {
+  try {
+    let total = 0;
+    let cursor: string | null = null;
+    for (let p = 0; p < 50; p++) {
+      const qs = new URLSearchParams({ type: 'private', limit: '100' });
+      if (cursor) qs.set('token', cursor);
+      const r = await fetch(`${API}/v3/voices?${qs}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return null;
+      const j = await r.json().catch(() => null);
+      const lista = Array.isArray(j?.data) ? j.data : j?.data?.voices || [];
+      total += lista.length;
+      cursor = j?.next_token || null;
+      if (!j?.has_more || !cursor) return total;
+    }
+    return total;
+  } catch {
+    return null;
+  }
 }
 
 async function gate() {
@@ -90,8 +124,15 @@ export async function POST(req: Request) {
     const j = await r.json().catch(() => null);
     if (!r.ok) {
       const d = descreve(r.status, j);
-      if (/resource_limit|limit/i.test(d)) {
-        return erro(`O HeyGen recusou: limite de clones da conta atingido. ${d}`, 409);
+      if (/resource_limit|voice clones included/i.test(d)) {
+        // Números pra mensagem: limite (vem no texto do HeyGen) e quantas vozes
+        // clonadas a conta tem. A janela mostra os dois.
+        const [info, clones] = await Promise.all([infoConta(b.accessToken), contarClones(b.accessToken)]);
+        const lim = d.match(/reached the (\d+) voice clones/i);
+        return NextResponse.json(
+          { error: d, limite: lim ? Number(lim[1]) : null, clones, conta: info.conta, plano: info.plano },
+          { status: 409 },
+        );
       }
       return erro(`O HeyGen recusou o clone: ${d}`, 502);
     }
@@ -112,7 +153,11 @@ export async function GET(req: Request) {
     if (!b.ok) return b.response;
     const u = new URL(req.url);
     if (u.searchParams.get('conta')) {
-      return NextResponse.json({ conta: await contaDoToken(b.accessToken) });
+      const [info, clones] = await Promise.all([
+        infoConta(b.accessToken),
+        u.searchParams.get('contar') ? contarClones(b.accessToken) : Promise.resolve(null),
+      ]);
+      return NextResponse.json({ conta: info.conta || (await contaDoToken(b.accessToken)), plano: info.plano, clones });
     }
     const id = (u.searchParams.get('id') || '').trim();
     if (!/^[A-Za-z0-9_-]{6,80}$/.test(id)) return erro('id inválido.', 400);

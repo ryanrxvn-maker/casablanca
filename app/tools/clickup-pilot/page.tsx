@@ -55,7 +55,9 @@ import {
   canalDoTaskId,
   taskIdBase,
 } from '@/lib/versao-canal';
-import { clonarVozPorOAuth, contaDoCloneOAuth } from '@/lib/heygen-voice-clone-oauth';
+import { clonarVozPorOAuth, infoContaOAuth } from '@/lib/heygen-voice-clone-oauth';
+import { getActiveAccountInfo, contarVozesClonadas, invalidarVozesClonadas } from '@/lib/heygen-api-direct';
+import { VoiceCloneJanela, type RotaClone, type EstadoClone } from '@/components/VoiceCloneJanela';
 import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension, gerarPelaEconomia, ECONOMY_EXTENSION_VERSION, extensionVersionAtLeast } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
@@ -1457,19 +1459,29 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
   );
 }
 
-/** Erro cru do HeyGen → o que fazer. O mais comum é o teto de clones do plano
- *  (code 400834, "You have reached the 40 voice clones included with your plan"),
- *  medido 24.09 na b2caffiliates — não é bug, é a conta cheia. */
-function explicarErroClone(erro: string, conta: string | null): string {
+/** Erro cru do HeyGen → o que fazer. O mais comum é o teto de clones do plano:
+ *  code 400834 (sessão) / resource_limit_reached (API oficial), "You have reached
+ *  the 40 voice clones included with your plan". Medido 24.09 na b2caffiliates:
+ *  vale igual na tela do HeyGen, na sessão e na API oficial. A mensagem diz o
+ *  limite e quantas vozes clonadas a conta tem. */
+function explicarErroClone(
+  erro: string,
+  ctx: { conta: string | null; plano?: string | null; clones?: number | null },
+): string {
   const e = String(erro || '');
   const teto = e.match(/reached the (\d+) voice clones/i);
-  if (teto || /400834|resource_limit|limite de clones/i.test(e)) {
+  if (teto || /400834|resource_limit/i.test(e)) {
+    const plano = ctx.plano
+      ? ` (plano ${ctx.plano.charAt(0).toUpperCase()}${ctx.plano.slice(1).toLowerCase()})`
+      : '';
+    const limite = teto ? `o plano permite ${teto[1]} vozes clonadas` : 'o plano chegou no limite de vozes clonadas';
+    const tem = typeof ctx.clones === 'number' ? ` e a conta já tem ${ctx.clones}` : '';
     return (
-      `a conta HeyGen${conta ? ` ${conta}` : ''} chegou no limite${teto ? ` de ${teto[1]}` : ''} clones de voz do plano. ` +
-      'Apague no HeyGen (Vozes → Minhas vozes) um clone que não usa mais e clique de novo.'
+      `Limite de clones atingido na conta ${ctx.conta || 'do HeyGen'}${plano}: ${limite}${tem}. ` +
+      'Apague no HeyGen (Vozes → Minhas vozes) uma voz clonada que não usa mais e tente de novo.'
     );
   }
-  if (/moderation|not allowed|violat/i.test(e)) return `o HeyGen barrou o áudio na moderação (${e.slice(0, 160)}).`;
+  if (/moderation|not allowed|violat/i.test(e)) return `O HeyGen barrou o áudio na moderação (${e.slice(0, 160)}).`;
   return e;
 }
 
@@ -12953,6 +12965,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  Key: `${taskId}:${sIdx}` → { stage, percent, message } */
   const [cloningVoice, setCloningVoice] = useState<Record<string, { stage: string; percent: number; message: string }>>({});
   const clonandoVozRef = useRef<Set<string>>(new Set());
+  /** Janela de clonar voz (uma por vez), a rota decidida por slot e o erro. */
+  const [janelaClone, setJanelaClone] = useState<{ key: string; taskId: string; sIdx: number; imageMode: boolean; anchor: DOMRect } | null>(null);
+  const [rotaClone, setRotaClone] = useState<Record<string, RotaClone | 'carregando' | { erro: string }>>({});
+  const [erroClone, setErroClone] = useState<Record<string, string>>({});
+  /** Slot da janela aberta AGORA (lido dentro do clone assíncrono). Com a janela
+   *  aberta o erro fica nela; fechada, sobe pro aviso do topo. */
+  const janelaCloneKeyRef = useRef<string | null>(null);
 
   /** VA: avatar HeyGen escolhido por avaCode pra cada task VA.
    *  Key: `${taskId}:${avaCode}` → AvatarOption */
@@ -14439,7 +14458,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
   }
 
   /** Dispara clone de voz pro slot. Aceita audio (mp3/wav) ou video.
-   *  No ready: seta voiceOverride no slot e adiciona voz na library cache. */
+   *  No ready: seta voiceOverride no slot e relê a lista de clones. */
   async function handleCloneVoiceForSlot(
     taskId: string,
     sIdx: number,
@@ -14452,6 +14471,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       removeBackgroundMusic?: boolean;
       /** Slot em modo imagem: gera na conta do OAuth, então clona lá. */
       imageMode?: boolean;
+      /** Rota já resolvida pela janela (a mesma conta que o usuário viu). */
+      rota?: RotaClone;
     },
   ) {
     const key = `${taskId}:${sIdx}`;
@@ -14465,14 +14486,83 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
     }
   }
 
-  /** Botão-ícone ao lado da voz do avatar: abre o seletor de arquivo e clona. */
+  /** ONDE a voz vai nascer — decidido antes do clique e mostrado na janela.
+   *  Clone é privado da conta. Vai pelo servidor (API oficial, OAuth do site)
+   *  só quando é a conta que vai USAR a voz: slot em modo imagem, ou navegador
+   *  na mesma conta. Senão vai pela sessão do navegador (extensão). Sem
+   *  fallback entre os dois: o teto de clones vale igual nos dois (24.09) e cair
+   *  pro outro só faria a voz nascer na conta errada. */
+  async function resolverRotaClone(imageMode: boolean): Promise<RotaClone | { erro: string }> {
+    const [oauth, ext] = await Promise.all([
+      infoContaOAuth(false),
+      detectExtension().catch(() => null),
+    ]);
+    const nav = ext?.connected ? await getActiveAccountInfo().catch(() => null) : null;
+    const contaNav = nav?.email || (ext?.connected ? getLibrarySnapshot().conta?.email : null) || null;
+    const mesma = !!oauth && !!contaNav && oauth.conta.toLowerCase() === contaNav.toLowerCase();
+    if (oauth && (imageMode || mesma)) {
+      const comTotal = await infoContaOAuth(true);
+      return {
+        via: 'servidor',
+        conta: oauth.conta,
+        plano: comTotal?.plano ?? oauth.plano,
+        clones: comTotal?.clones ?? null,
+        motivo: imageMode && !mesma
+          ? `Este avatar está em modo imagem, que gera na conta conectada no site — por isso a voz nasce nela${contaNav ? ` (o navegador está em ${contaNav})` : ''}.`
+          : null,
+      };
+    }
+    if (ext?.connected && contaNav) {
+      return {
+        via: 'navegador',
+        conta: contaNav,
+        plano: nav?.plano ?? null,
+        clones: await contarVozesClonadas(),
+        motivo: oauth && !mesma
+          ? `O site está conectado em ${oauth.conta}, mas este avatar gera na conta do navegador — por isso a voz nasce aqui.`
+          : null,
+      };
+    }
+    if (imageMode) {
+      return { erro: 'Este avatar está em modo imagem e o HeyGen não está conectado no site. Conecte o HeyGen e tente de novo.' };
+    }
+    return {
+      erro: ext?.connected
+        ? 'Não consegui ler a conta do HeyGen deste navegador. Abra o HeyGen logado e tente de novo.'
+        : 'A extensão do Auto Edit não está ativa neste navegador — é por ela que a voz nasce na conta do HeyGen daqui.',
+    };
+  }
+
+  /** Botão-ícone do slot: abre a janela (conta + caminho), já lendo a rota. */
+  function abrirJanelaClone(taskId: string, sIdx: number, imageMode: boolean, el: HTMLElement) {
+    const key = `${taskId}:${sIdx}`;
+    if (janelaClone?.key === key) { fecharJanelaClone(); return; }
+    janelaCloneKeyRef.current = key;
+    setJanelaClone({ key, taskId, sIdx, imageMode, anchor: el.getBoundingClientRect() });
+    // Clone rodando: a janela mostra a rota DELE. Fora disso relê a conta — pode
+    // ter trocado de conta no HeyGen desde a última vez.
+    const cv = cloningVoice[key];
+    if (cv && cv.stage !== 'done') return;
+    setErroClone((p) => { const c = { ...p }; delete c[key]; return c; });
+    setRotaClone((p) => ({ ...p, [key]: 'carregando' }));
+    void resolverRotaClone(imageMode).then((r) => setRotaClone((p) => ({ ...p, [key]: r })));
+  }
+
+  function fecharJanelaClone() {
+    janelaCloneKeyRef.current = null;
+    setJanelaClone(null);
+  }
+
   function escolherArquivoPraClonarVoz(taskId: string, sIdx: number, imageMode: boolean) {
+    const key = `${taskId}:${sIdx}`;
+    const r = rotaClone[key];
+    const rota = r && typeof r === 'object' && 'via' in r ? r : undefined;
     const inp = document.createElement('input');
     inp.type = 'file';
     inp.accept = 'audio/*,video/mp4,video/quicktime,video/webm,.mp3,.wav,.m4a,.ogg,.mp4,.mov,.webm';
     inp.onchange = () => {
       const f = inp.files?.[0];
-      if (f) void handleCloneVoiceForSlot(taskId, sIdx, f, { imageMode });
+      if (f) void handleCloneVoiceForSlot(taskId, sIdx, f, { imageMode, rota });
     };
     inp.click();
   }
@@ -14484,73 +14574,80 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
     file: File,
     opts?: Parameters<typeof handleCloneVoiceForSlot>[3],
   ) {
+    const falhar = (msg: string) => {
+      setErroClone((p) => ({ ...p, [key]: msg }));
+      if (janelaCloneKeyRef.current !== key) setError(`Falha ao clonar voz: ${msg}`);
+      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+    };
     if (file.size > 200 * 1024 * 1024) {
-      setError(`Arquivo grande demais pra clonar voz (${(file.size / 1048576).toFixed(0)}MB). Use um áudio ou um trecho menor.`);
+      falhar(`Arquivo grande demais pra clonar voz (${(file.size / 1048576).toFixed(0)}MB). Use um áudio ou um trecho menor.`);
       return;
     }
-    setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'starting', percent: 0, message: 'Conferindo a conta...' } }));
+    setErroClone((p) => { const c = { ...p }; delete c[key]; return c; });
+    setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'starting', percent: 2, message: 'Conferindo a conta...' } }));
+    const rota = opts?.rota ?? (await resolverRotaClone(!!opts?.imageMode));
+    if ('erro' in rota) { falhar(rota.erro); return; }
+    setRotaClone((p) => ({ ...p, [key]: rota }));
+
     const concluir = (voiceId: string, voiceName: string, via: string) => {
       updateRoleSlot(taskId, sIdx, { voiceOverride: { id: voiceId, name: voiceName } });
+      // A voz nova tem que aparecer JÁ no seletor e na busca por @nome.
+      invalidarVozesClonadas();
+      setRotaClone((p) => {
+        const r = p[key];
+        return r && typeof r === 'object' && 'via' in r && typeof r.clones === 'number'
+          ? { ...p, [key]: { ...r, clones: r.clones + 1 } }
+          : p;
+      });
       reloadLibrary().catch(() => {});
-      console.info('[Pilot] voz clonada', { voiceId, nome: voiceName, slot: key, via });
+      console.info('[Pilot] voz clonada', { voiceId, nome: voiceName, slot: key, via, conta: rota.conta });
       setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'done', percent: 100, message: `Voz clonada: ${voiceName}` } }));
       setTimeout(() => {
         setCloningVoice((prev) => {
           if (prev[key]?.stage !== 'done') return prev;
           const c = { ...prev }; delete c[key]; return c;
         });
-      }, 5000);
+      }, 6000);
     };
+    const nome = file.name.replace(/\.[^.]+$/, '').trim() || 'Voz clonada';
+    const language = opts?.language && opts.language !== 'auto' ? opts.language : null;
 
-    // 1) POR CÓDIGO no servidor (OAuth, trilho do modo imagem): sem aba e sem
-    //    tela do HeyGen. Só quando a voz vai nascer na conta que vai USÁ-LA —
-    //    clone é privado da conta. Modo imagem gera na conta do OAuth; o disparo
-    //    normal gera na conta do navegador, então as duas têm que bater.
-    const contaOAuth = await contaDoCloneOAuth();
-    const contaNavegador = getLibrarySnapshot().conta?.email || null;
-    const mesmaConta = !!contaOAuth && !!contaNavegador && contaOAuth.toLowerCase() === contaNavegador.toLowerCase();
-    if (contaOAuth && (opts?.imageMode || mesmaConta)) {
+    // 1) SERVIDOR — API oficial com o OAuth do site. Nada de aba nem tela.
+    if (rota.via === 'servidor') {
       const r = await clonarVozPorOAuth(file, {
-        nome: file.name.replace(/\.[^.]+$/, '').trim() || 'Voz clonada',
-        language: opts?.language && opts.language !== 'auto' ? opts.language : null,
+        nome,
+        language,
         onProgress: (stage, percent, message) =>
           setCloningVoice((prev) => ({ ...prev, [key]: { stage, percent, message } })),
       });
-      if (r.ok) { concluir(r.voiceId, r.voiceName, `oauth:${r.conta || contaOAuth}`); return; }
-      // Teto da API pública: o trilho da sessão (abaixo) conta à parte. Só vale
-      // cair pra ele quando a conta do navegador É a do OAuth — senão a voz
-      // nasceria na conta errada (modo imagem gera na do OAuth).
-      if (!r.limite || !mesmaConta) {
-        setError(`Falha ao clonar voz: ${explicarErroClone(r.error, contaOAuth)}`);
-        setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
-        return;
-      }
-      console.warn('[Pilot] clone OAuth bateu no teto da API — seguindo pela sessão do navegador');
-    }
-
-    // 2) Sessão do navegador (extensão). Também é só API — nenhum clique na tela.
-    // Sem extensão o bridge nunca responde (não tem timeout do lado da página):
-    // o botão girava pra sempre. Checa antes de começar.
-    const ext = await detectExtension().catch(() => null);
-    if (!ext?.connected) {
-      setError(
-        contaOAuth && !mesmaConta
-          ? `A conta do HeyGen conectada no site (${contaOAuth}) não é a do navegador (${contaNavegador || 'desconhecida'}), e a extensão não está conectada pra clonar na conta do navegador.`
-          : 'Clonar voz precisa do HeyGen conectado no site (Conectar HeyGen) ou da extensão do Auto Edit.',
-      );
-      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+      if (r.ok) { concluir(r.voiceId, r.voiceName, `servidor:${r.conta || rota.conta}`); return; }
+      falhar(explicarErroClone(r.error, { conta: rota.conta, plano: r.plano ?? rota.plano, clones: r.clones ?? rota.clones }));
       return;
     }
+
+    // 2) SESSÃO DO NAVEGADOR (extensão). Também é só API — nenhum clique na tela.
+    // Sem extensão o bridge nunca responde (não tem timeout do lado da página).
+    const ext = await detectExtension().catch(() => null);
+    if (!ext?.connected) {
+      falhar('A extensão do Auto Edit parou de responder neste navegador. Recarregue a página e tente de novo.');
+      return;
+    }
+    const explicar = async (erro: string) => {
+      const ehTeto = /400834|resource_limit|reached the \d+ voice clones/i.test(erro);
+      const clones = ehTeto ? ((await contarVozesClonadas()) ?? rota.clones) : rota.clones;
+      return explicarErroClone(erro, { conta: rota.conta, plano: rota.plano, clones });
+    };
     // Retry ate 2x em falhas transientes (rede, timeout)
     const MAX_ATTEMPTS = 2;
     let lastError = '';
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const res = await cloneVoiceViaExtension(file, {
+          displayName: nome,
           removeBackgroundNoise: opts?.removeBackgroundNoise ?? true,
           removeBackgroundMusic: opts?.removeBackgroundMusic ?? true,
           model: opts?.model ?? 'V3',
-          language: opts?.language && opts.language !== 'auto' ? opts.language : null,
+          language,
           trimToSeconds: opts?.trimToSeconds ?? 90,
           onProgress: (stage, percent, message) => {
             setCloningVoice((prev) => ({
@@ -14570,12 +14667,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             await new Promise((r) => setTimeout(r, 2000));
             continue;
           }
-          setError(`Falha ao clonar voz: ${explicarErroClone(res.error, contaNavegador)}`);
-          setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+          falhar(await explicar(res.error));
           return;
         }
         // SUCESSO — auto-select da voz no slot + selo de OK no botão
-        concluir(res.voiceId, res.voiceName, 'extensao');
+        concluir(res.voiceId, res.voiceName, 'navegador');
         return;
       } catch (e) {
         lastError = (e as Error)?.message || String(e);
@@ -14585,10 +14681,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         }
       }
     }
-    setError(`Falha ao clonar voz apos ${MAX_ATTEMPTS} tentativas: ${explicarErroClone(lastError, contaNavegador)}`);
-    setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+    falhar(`${MAX_ATTEMPTS} tentativas sem sucesso: ${await explicar(lastError)}`);
   }
-
   return (
     <>
       <ToolShell
@@ -14598,6 +14692,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         hue="rgba(200,232,124,0.45)"
         icon={<IconClickUpPilot size={56} />}
       >
+          {/* JANELA DE CLONAR VOZ (24.09) — aberta pelo botão-ícone do slot. */}
+          {janelaClone ? (() => {
+            const k = janelaClone.key;
+            const cv = cloningVoice[k];
+            const estado: EstadoClone =
+              cv && cv.stage !== 'done'
+                ? { fase: 'rodando', percent: cv.percent || 0, message: cv.message || '' }
+                : cv?.stage === 'done'
+                  ? { fase: 'ok', nome: (cv.message || '').replace(/^Voz clonada:\s*/, '') }
+                  : erroClone[k]
+                    ? { fase: 'erro', message: erroClone[k] }
+                    : { fase: 'pronto' };
+            return (
+              <VoiceCloneJanela
+                anchor={janelaClone.anchor}
+                rota={rotaClone[k] || 'carregando'}
+                estado={estado}
+                onEscolher={() => escolherArquivoPraClonarVoz(janelaClone.taskId, janelaClone.sIdx, janelaClone.imageMode)}
+                onClose={fecharJanelaClone}
+              />
+            );
+          })() : null}
           {/* Credencial do HeyGen: avisa token expirado ou contas divergentes
               ANTES do disparo. Silencioso quando esta tudo certo. */}
           {/* ignorarConflitoApiKey: no Pilot a API key NÃO escolhe avatar nem voz
@@ -18318,9 +18434,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   </svg>
                                                 </button>
                                               ) : null}
-                                              {/* CLONAR VOZ (23.09): ícone-only. Abre o arquivo (áudio ou
-                                                * vídeo), clona pela EXTENSÃO na sessão do HeyGen deste
-                                                * navegador e já põe a voz nova neste slot. */}
+                                              {/* CLONAR VOZ (23.09): ícone-only. Abre a JANELA de clonagem (conta do
+                                                * HeyGen onde a voz nasce, caminho e progresso); de lá
+                                                * escolhe o arquivo e a voz nova entra neste slot. */}
                                               {(() => {
                                                 const cv = cloningVoice[`${a.taskId}:${sIdx}`];
                                                 const rodando = !!cv && cv.stage !== 'done';
@@ -18329,8 +18445,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 return (
                                                   <button
                                                     type="button"
-                                                    onClick={() => { if (!cv) escolherArquivoPraClonarVoz(a.taskId, sIdx, !!slot.imageMode); }}
-                                                    disabled={rodando}
+                                                    onMouseDown={(e) => e.stopPropagation()}
+                                                    onClick={(e) => abrirJanelaClone(a.taskId, sIdx, !!slot.imageMode, e.currentTarget)}
                                                     className={'vc-btn' + (rodando ? ' is-busy' : '') + (ok ? ' is-ok' : '')}
                                                     style={rodando ? ({ ['--vc-pct' as any]: `${pct}%` }) : undefined}
                                                     title={rodando
@@ -18340,6 +18456,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         : 'Clonar uma voz nova (áudio ou vídeo) e usar neste avatar'}
                                                     aria-label="Clonar voz"
                                                     aria-busy={rodando}
+                                                    aria-haspopup="dialog"
                                                   >
                                                     {ok ? (
                                                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
