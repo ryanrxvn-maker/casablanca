@@ -7,7 +7,9 @@
  * estiver em `apagar` no plano. Excluir voz no HeyGen NÃO tem volta.
  *
  *   HEYGEN_API_KEY=<chave da conta> node cli/heygen-vozes.mjs listar [--manter 30]
- *   HEYGEN_API_KEY=<chave da conta> node cli/heygen-vozes.mjs apagar
+ *   HEYGEN_API_KEY=<chave da conta> node cli/heygen-vozes.mjs apagar [--sim]
+ *
+ * `--sim` pula a confirmação digitada (para rodar listar + apagar de uma vez).
  *
  * Como mede "mais usada" (a API pública não diz qual voz cada vídeo usou):
  *   • usos   — quantos títulos de vídeo da conta citam o nome da voz ou o nome
@@ -84,7 +86,8 @@ const norm = (s) => (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, ''
 async function listar() {
   const manterN = Number(arg('manter', 30));
   process.stdout.write('Buscando vozes clonadas… ');
-  const vozes = (await todos('/v3/voices?type=private')).filter((v) => v.voice_id);
+  // Só clonadas: `type=private`. Voz pública da biblioteca nunca entra no plano.
+  const vozes = (await todos('/v3/voices?type=private')).filter((v) => v.voice_id && (!v.type || v.type === 'private'));
   console.log(vozes.length);
 
   process.stdout.write('Buscando avatares e looks… ');
@@ -146,10 +149,12 @@ async function apagar() {
 
   console.log(`Vai APAGAR ${alvo.length} vozes (não tem volta):`);
   alvo.forEach((v) => console.log(`  - ${v.nome || v.voice_id}`));
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const resp = await rl.question(`\nDigite APAGAR ${alvo.length} para confirmar: `);
-  rl.close();
-  if (resp.trim() !== `APAGAR ${alvo.length}`) return console.log('Cancelado. Nada foi apagado.');
+  if (!process.argv.includes('--sim')) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const resp = await rl.question(`\nDigite APAGAR ${alvo.length} para confirmar: `);
+    rl.close();
+    if (resp.trim() !== `APAGAR ${alvo.length}`) return console.log('Cancelado. Nada foi apagado.');
+  }
 
   let ok = 0;
   const falhas = [];
