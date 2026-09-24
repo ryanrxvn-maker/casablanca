@@ -18324,13 +18324,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     aria-busy={rodando}
                                                   >
                                                     {ok ? (
-                                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                        <path d="M20 6 9 17l-5-5" />
+                                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                        <path className="vc-check" d="M20 6 9 17l-5-5" />
                                                       </svg>
                                                     ) : (
-                                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                                        <path d="M2 10v4M6 6v12M10 3v18M14 8v8" />
-                                                        <path d="M18 5v6M15 8h6" />
+                                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                                        <rect className="vc-bar" x="2.5" y="9.5" width="2.6" height="5" rx="1.3" />
+                                                        <rect className="vc-bar" x="7" y="5.5" width="2.6" height="13" rx="1.3" />
+                                                        <rect className="vc-bar" x="11.5" y="2.5" width="2.6" height="19" rx="1.3" />
+                                                        <rect className="vc-bar" x="16" y="6.5" width="2.6" height="11" rx="1.3" />
+                                                        <rect className="vc-bar" x="20.5" y="10" width="2.6" height="4" rx="1.3" />
                                                       </svg>
                                                     )}
                                                   </button>
