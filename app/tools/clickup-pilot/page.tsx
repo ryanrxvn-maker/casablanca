@@ -55,6 +55,7 @@ import {
   canalDoTaskId,
   taskIdBase,
 } from '@/lib/versao-canal';
+import { clonarVozPorOAuth, contaDoCloneOAuth } from '@/lib/heygen-voice-clone-oauth';
 import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension, gerarPelaEconomia, ECONOMY_EXTENSION_VERSION, extensionVersionAtLeast } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
@@ -12935,6 +12936,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** Estado por slot do clone de voz em andamento.
    *  Key: `${taskId}:${sIdx}` → { stage, percent, message } */
   const [cloningVoice, setCloningVoice] = useState<Record<string, { stage: string; percent: number; message: string }>>({});
+  const clonandoVozRef = useRef<Set<string>>(new Set());
 
   /** VA: avatar HeyGen escolhido por avaCode pra cada task VA.
    *  Key: `${taskId}:${avaCode}` → AvatarOption */
@@ -14432,10 +14434,95 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       trimToSeconds?: number;
       removeBackgroundNoise?: boolean;
       removeBackgroundMusic?: boolean;
+      /** Slot em modo imagem: gera na conta do OAuth, então clona lá. */
+      imageMode?: boolean;
     },
   ) {
     const key = `${taskId}:${sIdx}`;
-    setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'starting', percent: 0, message: 'Iniciando...' } }));
+    // Clique duplo não abre dois clones (o state ainda não re-renderizou).
+    if (clonandoVozRef.current.has(key)) return;
+    clonandoVozRef.current.add(key);
+    try {
+      await clonarVozDoSlot(key, taskId, sIdx, file, opts);
+    } finally {
+      clonandoVozRef.current.delete(key);
+    }
+  }
+
+  /** Botão-ícone ao lado da voz do avatar: abre o seletor de arquivo e clona. */
+  function escolherArquivoPraClonarVoz(taskId: string, sIdx: number, imageMode: boolean) {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'audio/*,video/mp4,video/quicktime,video/webm,.mp3,.wav,.m4a,.ogg,.mp4,.mov,.webm';
+    inp.onchange = () => {
+      const f = inp.files?.[0];
+      if (f) void handleCloneVoiceForSlot(taskId, sIdx, f, { imageMode });
+    };
+    inp.click();
+  }
+
+  async function clonarVozDoSlot(
+    key: string,
+    taskId: string,
+    sIdx: number,
+    file: File,
+    opts?: Parameters<typeof handleCloneVoiceForSlot>[3],
+  ) {
+    if (file.size > 200 * 1024 * 1024) {
+      setError(`Arquivo grande demais pra clonar voz (${(file.size / 1048576).toFixed(0)}MB). Use um áudio ou um trecho menor.`);
+      return;
+    }
+    setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'starting', percent: 0, message: 'Conferindo a conta...' } }));
+    const concluir = (voiceId: string, voiceName: string, via: string) => {
+      updateRoleSlot(taskId, sIdx, { voiceOverride: { id: voiceId, name: voiceName } });
+      reloadLibrary().catch(() => {});
+      console.info('[Pilot] voz clonada', { voiceId, nome: voiceName, slot: key, via });
+      setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'done', percent: 100, message: `Voz clonada: ${voiceName}` } }));
+      setTimeout(() => {
+        setCloningVoice((prev) => {
+          if (prev[key]?.stage !== 'done') return prev;
+          const c = { ...prev }; delete c[key]; return c;
+        });
+      }, 5000);
+    };
+
+    // 1) POR CÓDIGO no servidor (OAuth, trilho do modo imagem): sem aba e sem
+    //    tela do HeyGen. Só quando a voz vai nascer na conta que vai USÁ-LA —
+    //    clone é privado da conta. Modo imagem gera na conta do OAuth; o disparo
+    //    normal gera na conta do navegador, então as duas têm que bater.
+    const contaOAuth = await contaDoCloneOAuth();
+    const contaNavegador = getLibrarySnapshot().conta?.email || null;
+    const mesmaConta = !!contaOAuth && !!contaNavegador && contaOAuth.toLowerCase() === contaNavegador.toLowerCase();
+    if (contaOAuth && (opts?.imageMode || mesmaConta)) {
+      const r = await clonarVozPorOAuth(file, {
+        nome: file.name.replace(/\.[^.]+$/, '').trim() || 'Voz clonada',
+        language: opts?.language && opts.language !== 'auto' ? opts.language : null,
+        onProgress: (stage, percent, message) =>
+          setCloningVoice((prev) => ({ ...prev, [key]: { stage, percent, message } })),
+      });
+      if (r.ok) { concluir(r.voiceId, r.voiceName, `oauth:${r.conta || contaOAuth}`); return; }
+      // Teto de clones da API pública: o trilho da sessão (abaixo) não tem esse teto.
+      if (!r.limite) {
+        setError(`Falha ao clonar voz: ${r.error}`);
+        setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+        return;
+      }
+      console.warn('[Pilot] clone OAuth bateu no teto da API — seguindo pela sessão do navegador');
+    }
+
+    // 2) Sessão do navegador (extensão). Também é só API — nenhum clique na tela.
+    // Sem extensão o bridge nunca responde (não tem timeout do lado da página):
+    // o botão girava pra sempre. Checa antes de começar.
+    const ext = await detectExtension().catch(() => null);
+    if (!ext?.connected) {
+      setError(
+        contaOAuth && !mesmaConta
+          ? `A conta do HeyGen conectada no site (${contaOAuth}) não é a do navegador (${contaNavegador || 'desconhecida'}), e a extensão não está conectada pra clonar na conta do navegador.`
+          : 'Clonar voz precisa do HeyGen conectado no site (Conectar HeyGen) ou da extensão do Auto Edit.',
+      );
+      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+      return;
+    }
     // Retry ate 2x em falhas transientes (rede, timeout)
     const MAX_ATTEMPTS = 2;
     let lastError = '';
@@ -14469,11 +14556,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
           return;
         }
-        // SUCESSO — auto-select da voz no slot
-        updateRoleSlot(taskId, sIdx, { voiceOverride: { id: res.voiceId, name: res.voiceName } });
-        // Recarrega biblioteca pra voz nova aparecer no picker
-        reloadLibrary().catch(() => {});
-        setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+        // SUCESSO — auto-select da voz no slot + selo de OK no botão
+        concluir(res.voiceId, res.voiceName, 'extensao');
         return;
       } catch (e) {
         lastError = (e as Error)?.message || String(e);
@@ -18216,6 +18300,42 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   </svg>
                                                 </button>
                                               ) : null}
+                                              {/* CLONAR VOZ (23.09): ícone-only. Abre o arquivo (áudio ou
+                                                * vídeo), clona pela EXTENSÃO na sessão do HeyGen deste
+                                                * navegador e já põe a voz nova neste slot. */}
+                                              {(() => {
+                                                const cv = cloningVoice[`${a.taskId}:${sIdx}`];
+                                                const rodando = !!cv && cv.stage !== 'done';
+                                                const ok = cv?.stage === 'done';
+                                                const pct = Math.max(4, Math.min(100, Math.round(cv?.percent || 0)));
+                                                return (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => { if (!cv) escolherArquivoPraClonarVoz(a.taskId, sIdx, !!slot.imageMode); }}
+                                                    disabled={rodando}
+                                                    className={'vc-btn' + (rodando ? ' is-busy' : '') + (ok ? ' is-ok' : '')}
+                                                    style={rodando ? ({ ['--vc-pct' as any]: `${pct}%` }) : undefined}
+                                                    title={rodando
+                                                      ? `Clonando voz… ${pct}% — ${cv?.message || ''}`
+                                                      : ok
+                                                        ? cv?.message || 'Voz clonada'
+                                                        : 'Clonar uma voz nova (áudio ou vídeo) e usar neste avatar'}
+                                                    aria-label="Clonar voz"
+                                                    aria-busy={rodando}
+                                                  >
+                                                    {ok ? (
+                                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                        <path d="M20 6 9 17l-5-5" />
+                                                      </svg>
+                                                    ) : (
+                                                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                                        <path d="M2 10v4M6 6v12M10 3v18M14 8v8" />
+                                                        <path d="M18 5v6M15 8h6" />
+                                                      </svg>
+                                                    )}
+                                                  </button>
+                                                );
+                                              })()}
                                               </div>
                                             ) : null}
                                             {/* ═══ VERSÕES 2..10 DESTE PAPEL (30.08) ═══

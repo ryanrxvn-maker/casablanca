@@ -7204,6 +7204,33 @@ html[data-theme='light'] .au-x { background: rgba(16,16,24,0.06); }
   box-shadow: 0 6px 16px -8px rgba(34, 211, 238, 0.95);
 }
 
+/* ══ CLONAR VOZ no slot do avatar: ícone-only (23.09) ═══════════════════ */
+.vc-btn {
+  position: relative; flex-shrink: 0; width: 34px; height: 34px; margin-bottom: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; color: rgb(var(--text-muted));
+  background: rgba(217, 70, 239, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(217, 70, 239, 0.32);
+  transition: color 0.14s, background-color 0.14s, transform 0.14s, box-shadow 0.14s;
+}
+.vc-btn:hover:not(:disabled) { color: rgb(var(--text)); transform: translateY(-1px); background: rgba(217, 70, 239, 0.16); }
+.vc-btn.is-busy { cursor: progress; color: #f0abfc; box-shadow: none; }
+.vc-btn.is-busy::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  background: conic-gradient(#e879f9 var(--vc-pct, 4%), rgba(217, 70, 239, 0.16) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  transition: background 0.3s;
+}
+.vc-btn.is-busy svg { animation: vc-pulse 1.1s ease-in-out infinite; }
+.vc-btn.is-ok {
+  color: #1a2e05;
+  background: linear-gradient(140deg, #d9f99d, #a3e635);
+  box-shadow: 0 6px 16px -8px rgba(163, 230, 53, 0.95);
+}
+@keyframes vc-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .vc-btn.is-busy svg { animation: none; } }
+
 /* ══ TOGGLES DO PAINEL DE MONTAGEM: ícone-only (03.09) ═══════════════════ */
 .mtg-icone {
   width: 34px; height: 34px; border-radius: 999px;
