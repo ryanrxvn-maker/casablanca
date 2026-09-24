@@ -67,7 +67,7 @@ async function todos(caminho, maxPaginas = 100) {
   let token = null;
   for (let p = 0; p < maxPaginas; p++) {
     const sep = caminho.includes('?') ? '&' : '?';
-    const url = `${caminho}${sep}limit=100${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+    const url = `${caminho}${sep}limit=${caminho.includes('/avatars') ? 50 : 100}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
     const { status, corpo } = await api('GET', url);
     if (status !== 200) {
       const msg = corpo?.error?.message || JSON.stringify(corpo).slice(0, 200);
@@ -92,8 +92,8 @@ async function listar() {
 
   process.stdout.write('Buscando avatares e looks… ');
   const [grupos, looks] = await Promise.all([
-    todos('/v3/avatars?ownership=private').catch(() => []),
-    todos('/v3/avatars/looks?ownership=private').catch(() => []),
+    todos('/v3/avatars?ownership=private'),
+    todos('/v3/avatars/looks?ownership=private'),
   ]);
   console.log(`${grupos.length} avatares, ${looks.length} looks`);
 
