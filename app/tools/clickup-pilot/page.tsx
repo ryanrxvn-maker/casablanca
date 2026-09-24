@@ -1457,6 +1457,22 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
   );
 }
 
+/** Erro cru do HeyGen → o que fazer. O mais comum é o teto de clones do plano
+ *  (code 400834, "You have reached the 40 voice clones included with your plan"),
+ *  medido 24.09 na b2caffiliates — não é bug, é a conta cheia. */
+function explicarErroClone(erro: string, conta: string | null): string {
+  const e = String(erro || '');
+  const teto = e.match(/reached the (\d+) voice clones/i);
+  if (teto || /400834|resource_limit|limite de clones/i.test(e)) {
+    return (
+      `a conta HeyGen${conta ? ` ${conta}` : ''} chegou no limite${teto ? ` de ${teto[1]}` : ''} clones de voz do plano. ` +
+      'Apague no HeyGen (Vozes → Minhas vozes) um clone que não usa mais e clique de novo.'
+    );
+  }
+  if (/moderation|not allowed|violat/i.test(e)) return `o HeyGen barrou o áudio na moderação (${e.slice(0, 160)}).`;
+  return e;
+}
+
 export default function ClickUpPilotPage() {
   return (
     <TierGate require="admin" toolName="Pilot" toolPath="/tools/clickup-pilot">
@@ -14501,9 +14517,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           setCloningVoice((prev) => ({ ...prev, [key]: { stage, percent, message } })),
       });
       if (r.ok) { concluir(r.voiceId, r.voiceName, `oauth:${r.conta || contaOAuth}`); return; }
-      // Teto de clones da API pública: o trilho da sessão (abaixo) não tem esse teto.
-      if (!r.limite) {
-        setError(`Falha ao clonar voz: ${r.error}`);
+      // Teto da API pública: o trilho da sessão (abaixo) conta à parte. Só vale
+      // cair pra ele quando a conta do navegador É a do OAuth — senão a voz
+      // nasceria na conta errada (modo imagem gera na do OAuth).
+      if (!r.limite || !mesmaConta) {
+        setError(`Falha ao clonar voz: ${explicarErroClone(r.error, contaOAuth)}`);
         setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
         return;
       }
@@ -14552,7 +14570,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             await new Promise((r) => setTimeout(r, 2000));
             continue;
           }
-          setError(`Falha ao clonar voz: ${res.error}`);
+          setError(`Falha ao clonar voz: ${explicarErroClone(res.error, contaNavegador)}`);
           setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
           return;
         }
@@ -14567,7 +14585,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         }
       }
     }
-    setError(`Falha ao clonar voz apos ${MAX_ATTEMPTS} tentativas: ${lastError}`);
+    setError(`Falha ao clonar voz apos ${MAX_ATTEMPTS} tentativas: ${explicarErroClone(lastError, contaNavegador)}`);
     setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
   }
 
