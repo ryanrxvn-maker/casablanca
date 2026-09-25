@@ -3,7 +3,8 @@
 import { FORMATOS, normalizarFormato, type FormatoVideo } from '@/lib/pilot-formato';
 
 /**
- * FORMATO DO DISPARO — 9:16 (vertical) ou 16:9 (horizontal) no HeyGen.
+ * FORMATO DO DISPARO — a mesma escolha Portrait/Landscape do HeyGen, feita
+ * aqui ANTES de disparar. 9:16 = portrait, 16:9 = landscape.
  *
  * Mesmo desenho do botão de motor (pílula 3D, h-9). A escolha vale pro PRÓXIMO
  * disparo desta task: um disparo em andamento já carimbou o formato dele e não
@@ -12,44 +13,34 @@ import { FORMATOS, normalizarFormato, type FormatoVideo } from '@/lib/pilot-form
 export function PilotFormatoToggle({
   formato,
   onChange,
-  bloqueado,
-  motivoBloqueio,
 }: {
   formato: FormatoVideo;
   onChange: (f: FormatoVideo) => void;
-  /** Trava a troca (ex.: modo economia, que só renderiza 9:16 no Studio). */
-  bloqueado?: boolean;
-  motivoBloqueio?: string;
 }) {
   const atual = normalizarFormato(formato);
   return (
     <div
       role="radiogroup"
       aria-label="Formato do vídeo no HeyGen"
-      className={`inline-flex h-9 items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] ${bloqueado ? 'opacity-70' : ''}`}
-      title={bloqueado ? motivoBloqueio : 'Formato do vídeo gerado no HeyGen (vale pro próximo disparo)'}
+      className="inline-flex h-9 items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+      title="Formato do vídeo gerado no HeyGen (vale pro próximo disparo)"
     >
       {FORMATOS.map((f) => {
         const ativo = atual === f;
         const vertical = f === '9:16';
-        // Só o 16:9 trava — voltar pra 9:16 é sempre permitido.
-        const travado = !!bloqueado && !vertical && !ativo;
         return (
           <button
             key={f}
             type="button"
             role="radio"
             aria-checked={ativo}
-            disabled={travado}
             onClick={() => { if (!ativo) onChange(f); }}
-            title={travado ? motivoBloqueio : vertical ? 'Vertical 9:16 (1080x1920)' : 'Horizontal 16:9 (1920x1080)'}
+            title={vertical ? 'Portrait — vertical 9:16 (1080x1920)' : 'Landscape — horizontal 16:9 (1920x1080)'}
             className={
               'label-tech inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
               (ativo
                 ? 'bg-gradient-to-b from-cyan-400/30 to-cyan-400/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_-2px_rgba(34,211,238,0.4)]'
-                : travado
-                  ? 'cursor-not-allowed text-text-muted'
-                  : 'text-text-muted hover:text-white')
+                : 'text-text-muted hover:text-white')
             }
           >
             <svg

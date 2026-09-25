@@ -1416,12 +1416,6 @@ function Conteudo() {
         <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Formato do disparo no HeyGen</div>
         <div className="flex flex-wrap items-center gap-3">
           <PilotFormatoToggle formato={formatoDemo} onChange={setFormatoDemo} />
-          <PilotFormatoToggle
-            formato="9:16"
-            onChange={() => {}}
-            bloqueado
-            motivoBloqueio="Modo economia só gera 9:16 (o Studio renderiza em pé). Desligue o modo economia pra usar 16:9."
-          />
         </div>
       </section>
 

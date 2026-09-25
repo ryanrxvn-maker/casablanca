@@ -6111,24 +6111,6 @@ function ClickUpPilotInner() {
       }));
       return;
     }
-    // MODO ECONOMIA × 16:9: o Studio renderiza a cena no formato do projeto
-    // dele (em pé). Deixar seguir entregaria 9:16 pra quem pediu 16:9 — falha
-    // AGORA, com o motivo, antes de gastar qualquer coisa.
-    if (formato === '16:9' && isEconomiaEnabled(taskId)) {
-      const now = Date.now();
-      setBatchStates((prev) => ({
-        ...prev,
-        [taskId]: {
-          ...(prev[taskId] || { taskId, taskName: rTaskName, baseAdId: rBaseAdId, parts: [], startedAt: now }),
-          formato,
-          phase: 'failed',
-          message: 'Modo economia só gera 9:16 (o Studio renderiza em pé). Desligue o modo economia pra disparar em 16:9, ou volte o formato pra 9:16.',
-          finishedAt: now,
-          replan,
-        } as BatchTaskState,
-      }));
-      return;
-    }
     // De que versão é esta task? A irmã do YouTube tem id próprio (`<id>-yt`),
     // então TODO nome derivado — zip de takes, montado, camuflado e até o
     // título do vídeo no HeyGen — já sai distinguível.
@@ -7444,15 +7426,6 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // videoIds como a task normal). Roteia pro runner VA.
     if (state.isVA || taskAnalyses[taskId]?.vaBriefing) {
       await runVAPipelineForTask(taskId);
-      return;
-    }
-    // Geração 16:9 não pode ser completada pelo Studio (renderiza em pé): o AD
-    // sairia com takes nos dois formatos. Para com o motivo.
-    if (economiaNoResume && formatoDaGeracaoDe(taskId) === '16:9') {
-      setBatchStates((prev) => (prev[taskId] ? {
-        ...prev,
-        [taskId]: { ...prev[taskId], phase: 'failed', message: 'Este disparo é 16:9 e o modo economia só gera 9:16. Desligue o modo economia pra retomar.', finishedAt: Date.now() },
-      } : prev));
       return;
     }
     // ISOLAÇÃO POR GERAÇÃO: o resume SÓ enxerga os takes/clips desta MESMA
@@ -16605,8 +16578,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <PilotFormatoToggle
                                     formato={getFormato(a.taskId)}
                                     onChange={(f) => setFormatoFor(a.taskId, f)}
-                                    bloqueado={isEconomiaEnabled(a.taskId)}
-                                    motivoBloqueio="Modo economia só gera 9:16 (o Studio renderiza em pé). Desligue o modo economia pra usar 16:9."
                                   />
                                 </div>
                               ) : null}
