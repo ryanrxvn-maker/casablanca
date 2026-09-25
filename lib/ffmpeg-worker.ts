@@ -18,6 +18,7 @@
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
+import { filtroDeEnquadramento, type FormatoVideo } from './pilot-formato';
 
 export type FFProgress = { ratio: number; time: number };
 export type FFLog = (line: string) => void;
@@ -250,6 +251,11 @@ export type RunOptions = {
   onStage?: FFLoadStage;
   onLog?: FFLog;
 };
+
+/** Opções da montagem do avatar. `formato` ausente = 9:16 (1080x1920), o
+ *  enquadramento de sempre; '16:9' monta em 1920x1080 sem cortar o take
+ *  horizontal pra caber em pé. */
+export type ConcatOptions = RunOptions & { formato?: FormatoVideo };
 
 /**
  * exec com rc virando ERRO. O exec do @ffmpeg/ffmpeg 0.12 NÃO lança quando o
@@ -2954,7 +2960,7 @@ export function assertValidMp4(data: Uint8Array, ctx = 'vídeo'): void {
  */
 export async function concatAvatarParts(
   parts: Blob[],
-  opts: RunOptions = {},
+  opts: ConcatOptions = {},
 ): Promise<Blob> {
   if (parts.length === 0) throw new Error('Nenhuma parte pra concatenar.');
   if (parts.length === 1) return parts[0];
@@ -2981,9 +2987,10 @@ export async function concatAvatarParts(
 
     const filterParts: string[] = [];
     const concatInputs: string[] = [];
+    const enquadra = filtroDeEnquadramento(opts.formato);
     inputNames.forEach((_, i) => {
       filterParts.push(
-        `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setpts=PTS-STARTPTS[v${i}]`,
+        `[${i}:v]${enquadra},fps=30,format=yuv420p,setpts=PTS-STARTPTS[v${i}]`,
         `[${i}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a${i}]`,
       );
       concatInputs.push(`[v${i}][a${i}]`);
@@ -3036,7 +3043,7 @@ export async function concatAvatarParts(
  * codecs diferentes, concat falhava → "INCOMPLETO 0 montagens"). Memoria por
  * chamada = 1 parte pequena, nunca estoura.
  */
-export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Promise<Blob> {
+export async function normalizeForConcat(file: Blob, opts: ConcatOptions = {}): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const inputName = 'norm_in.' + guessExt(file, 'mp4');
   const outputName = 'norm_out.mp4';
@@ -3045,7 +3052,7 @@ export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Pro
     await ff.writeFile(inputName, await fetchFile(file));
     await execOrThrow(ff, [
       '-i', inputName,
-      '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setpts=PTS-STARTPTS',
+      '-vf', `${filtroDeEnquadramento(opts.formato)},fps=30,format=yuv420p,setpts=PTS-STARTPTS`,
       '-af', 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'fastdecode', '-crf', '22',
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',

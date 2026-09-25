@@ -24,6 +24,9 @@ import { dirname, join } from 'node:path';
 const ETAPAS = [
   { tsc: "lib/heygen-extension-bridge.ts lib/heygen-extension-version.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/heygen-extension-version.test.js"] },
   { run: ["scripts/test-pilot-economia-runtime.mjs"] },
+  // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo
+  { tsx: ["lib/pilot-formato.test.ts"] },
+  { run: ["scripts/test-pilot-formato-runtime.mjs"] },
   { run: ["scripts/test-pilot-biblioteca-avatares.mjs"] },
   { run: ["scripts/test-pilot-post-scope.mjs"] },
   { run: ["scripts/test-va-stockframe-coverage.mjs"] },

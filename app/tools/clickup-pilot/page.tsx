@@ -145,6 +145,8 @@ import {
   IconDownload as PilotIconDownload,
 } from '@/components/PilotCardActions';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
+import { PilotFormatoToggle } from '@/components/PilotFormatoToggle';
+import { normalizarFormato, orientacaoHeyGen, formatoDaGeracao, formatoDoNovoDisparo, type FormatoVideo } from '@/lib/pilot-formato';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName, recallAvatarVoice, rememberAvatarVoice } from '@/lib/voice-avatar-memory';
@@ -1020,6 +1022,11 @@ type BatchTaskState = {
    *  o toggle da tela e local ao navegador e pode mudar/recarregar enquanto o
    *  job continua. Economia ocupa a bancada inteira e portanto e sempre serial. */
   economia?: boolean;
+  /** FORMATO deste disparo no HeyGen (9:16 | 16:9), carimbado quando ele
+   *  começa do zero. Retomar, auto-cura, regerar take e remontar usam ESTE
+   *  valor — nunca o botão atual — pra um AD nunca misturar take em pé com
+   *  take deitado. Ausente = disparo de antes do recurso = 9:16. */
+  formato?: FormatoVideo;
   /** ISOLAÇÃO POR GERAÇÃO (fix 2026-07-08): id único do disparo/re-disparo DO
    *  ZERO que produziu os videoIds atuais. Namespaceia os artefatos por-parte
    *  no IDB (`pilot:<taskId>:g:<genId>:...`) pra que um RETOMAR NUNCA hidrate um
@@ -3389,6 +3396,35 @@ function ClickUpPilotInner() {
     setEconomiaFor(taskId, ligado);
   };
 
+  /* ═══════════ FORMATO DO DISPARO: 9:16 × 16:9 ═══════════
+   *  Por task, persistido (mesma regra dos outros toggles: a versão irmã herda
+   *  da mãe). Default 9:16 — sem escolha, o disparo é exatamente o de sempre.
+   *  O botão só decide o PRÓXIMO disparo do zero; quem já disparou carimbou
+   *  `formato` no próprio registro (ver formatoDaGeracaoDe). */
+  const FORMATO_KEY = 'darkolab:clickup-pilot:formato';
+  const [formatoCfgs, setFormatoCfgs] = useState<Record<string, FormatoVideo>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(FORMATO_KEY) || '{}'); } catch { return {}; }
+  });
+  const getFormato = (taskId: string): FormatoVideo =>
+    normalizarFormato(taskId in formatoCfgs ? formatoCfgs[taskId] : formatoCfgs[taskIdBaseDaVersao(taskId)]);
+  const setFormatoFor = (taskId: string, f: FormatoVideo) => {
+    setFormatoCfgs((prev) => {
+      const next = { ...prev, [taskId]: normalizarFormato(f) };
+      try { localStorage.setItem(FORMATO_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  /** Carimbo SÍNCRONO do formato de quem enfileirou um disparo do zero. O
+   *  `batchStates` só é visto no próximo render, e o run pode pegar a vaga
+   *  antes disso — o ref garante que ele dispara no formato escolhido. */
+  const formatoCarimboRef = useRef<Record<string, FormatoVideo>>({});
+  const carimbarFormato = (taskId: string): FormatoVideo => {
+    const f = getFormato(taskId);
+    formatoCarimboRef.current[taskId] = f;
+    return f;
+  };
+
   // INTENSIDADE da decupagem (keepSilence em segundos) — por task, persistida.
   // É o MESMO parâmetro da ferramenta /decupagem: quanta pausa FICA no lugar de
   // cada silêncio cortado. Menor = corte mais seco. O valor escolhido é repassado
@@ -4992,6 +5028,11 @@ function ClickUpPilotInner() {
    *  velho e nunca veria tasks novas na fila. */
   const batchStatesRef = useRef<Record<string, BatchTaskState>>({});
   batchStatesRef.current = batchStates;
+  /** Formato de uma geração JÁ DISPARADA (retomar, auto-cura, regerar take,
+   *  remontar): o carimbo do registro; sem carimbo, o do enfileiramento; sem
+   *  nenhum, é disparo antigo = 9:16. Nunca o botão atual. */
+  const formatoDaGeracaoDe = (taskId: string): FormatoVideo =>
+    formatoDaGeracao(batchStatesRef.current[taskId]?.formato ?? formatoCarimboRef.current[taskId]);
   const [foreignRunnerPulse, setForeignRunnerPulse] = useState<PilotRunnerPulse | null>(null);
 
   /**
@@ -6024,6 +6065,16 @@ function ClickUpPilotInner() {
     if (!plan) return;
     const partsLen = plan.parts.length;
 
+    // FORMATO DESTE DISPARO (9:16 | 16:9): o carimbo de quem enfileirou vence
+    // (ref síncrono → registro); sem carimbo, a escolha atual do botão. Fica
+    // gravado no registro abaixo pra retomar/auto-cura/regerar/remontar
+    // seguirem o MESMO formato até o fim.
+    const formato = formatoDoNovoDisparo(
+      formatoCarimboRef.current[taskId] ?? batchStatesRef.current[taskId]?.formato,
+      getFormato(taskId),
+    );
+    formatoCarimboRef.current[taskId] = formato;
+
     // Gate estrutural antes de tocar no HeyGen. Um paste acidental do JSON do
     // plano de cenas dentro de um textarea vira milhares de caracteres de
     // configuracao falados pelo avatar. A combinacao de chaves abaixo e
@@ -6042,6 +6093,7 @@ function ClickUpPilotInner() {
           // Economia é um snapshot do disparo. O toggle pode mudar depois;
           // nunca deixe a reconstrução da fase apagar a marca da fila.
           economia: prev[taskId]?.economia ?? isEconomiaEnabled(taskId),
+          formato,
           phase: 'failed',
           parts: plan!.parts.map((p: any) => ({
             label: p.label,
@@ -6056,6 +6108,24 @@ function ClickUpPilotInner() {
           taskUrl: batchStates[taskId]?.taskUrl || taskAnalyses[taskId]?.taskUrl,
           teamId: isTaskLocal(taskId) ? undefined : (batchStates[taskId]?.teamId ?? selectedTeam ?? undefined),
         },
+      }));
+      return;
+    }
+    // MODO ECONOMIA × 16:9: o Studio renderiza a cena no formato do projeto
+    // dele (em pé). Deixar seguir entregaria 9:16 pra quem pediu 16:9 — falha
+    // AGORA, com o motivo, antes de gastar qualquer coisa.
+    if (formato === '16:9' && isEconomiaEnabled(taskId)) {
+      const now = Date.now();
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName: rTaskName, baseAdId: rBaseAdId, parts: [], startedAt: now }),
+          formato,
+          phase: 'failed',
+          message: 'Modo economia só gera 9:16 (o Studio renderiza em pé). Desligue o modo economia pra disparar em 16:9, ou volte o formato pra 9:16.',
+          finishedAt: now,
+          replan,
+        } as BatchTaskState,
       }));
       return;
     }
@@ -6096,6 +6166,7 @@ function ClickUpPilotInner() {
         // A entrada queued já carrega a escolha do motor. Esta reconstrução
         // acontece exatamente ao pegar a vaga e precisa carregá-la até done.
         economia: prev[taskId]?.economia ?? isEconomiaEnabled(taskId),
+        formato,
         genId,
         phase: 'dispatching',
         parts: plan!.parts.map((p: any) => ({ label: p.label, videoId: null, renamedTo: labelToFilename(p.label) })),
@@ -6574,6 +6645,7 @@ function ClickUpPilotInner() {
         avatarId: plan!.parts[0]?.avatarId || '',
         voiceId: undefined,
         motor: motorCfg.kind === 'global' ? motorCfg.motor : 'III', // fallback global; per-job vence
+        orientation: orientacaoHeyGen(formato),
         adNameSafe: adNameClean,
         isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: () => {},
@@ -6944,7 +7016,7 @@ function ClickUpPilotInner() {
           try {
             healResults = await runHeyGenJobs(healJobs, {
               parallel: 3, mode: 'copy', avatarId: healJobs[0].avatarId, voiceId: undefined,
-              motor: 'III', adNameSafe: adNameClean,
+              motor: 'III', orientation: orientacaoHeyGen(formato), adNameSafe: adNameClean,
               isCancelled: () => !!batchCancelRef.current[taskId],
               onProgress: () => {},
               onResult: (r) => {
@@ -7120,6 +7192,7 @@ function ClickUpPilotInner() {
         pipeRes = await runPostPipelineSerial({
           baseAdId: rBaseAdId,
           parts: partBlobs,
+          formato,
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
           nivelarVoz: isNivelamentoEnabled(taskId),
@@ -7371,6 +7444,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // videoIds como a task normal). Roteia pro runner VA.
     if (state.isVA || taskAnalyses[taskId]?.vaBriefing) {
       await runVAPipelineForTask(taskId);
+      return;
+    }
+    // Geração 16:9 não pode ser completada pelo Studio (renderiza em pé): o AD
+    // sairia com takes nos dois formatos. Para com o motivo.
+    if (economiaNoResume && formatoDaGeracaoDe(taskId) === '16:9') {
+      setBatchStates((prev) => (prev[taskId] ? {
+        ...prev,
+        [taskId]: { ...prev[taskId], phase: 'failed', message: 'Este disparo é 16:9 e o modo economia só gera 9:16. Desligue o modo economia pra retomar.', finishedAt: Date.now() },
+      } : prev));
       return;
     }
     // ISOLAÇÃO POR GERAÇÃO: o resume SÓ enxerga os takes/clips desta MESMA
@@ -7961,6 +8043,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               avatarId: jobsToRedispatch[0].avatarId,
               voiceId: undefined,
               motor: 'III',
+              orientation: orientacaoHeyGen(formatoDaGeracaoDe(taskId)),
               adNameSafe: adNameClean,
               isCancelled: () => !!batchCancelRef.current[taskId],
               onProgress: () => {},
@@ -8245,6 +8328,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         pipeRes = await runPostPipelineSerial({
           baseAdId: state.baseAdId,
           parts: partBlobs,
+          formato: formatoDaGeracaoDe(taskId),
           decupagem: isDecupagemEnabled(taskId),
           keepSilenceSec: getDecupIntensity(taskId),
           nivelarVoz: isNivelamentoEnabled(taskId),
@@ -8599,6 +8683,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             parts: [],
             startedAt,
             economia: isEconomiaEnabled(id),
+            formato: carimbarFormato(id),
             phase: 'queued',
             message: 'Na fila — aguardando vaga...',
             finishedAt: undefined,
@@ -8752,6 +8837,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           startedAt,
           genId: undefined,
           economia: isEconomiaEnabled(id),
+          formato: carimbarFormato(id),
           progressoMotor: undefined,
           pipeStats: undefined,
           deliveryOk: undefined,
@@ -9852,7 +9938,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const motionDaParte = gestoDaParte;
         if (motionDaParte) fd.append('motionPrompt', String(motionDaParte));
         fd.append('title', `${adNameSafe}_${label}_edit`);
-        fd.append('aspectRatio', '9:16');
+        // Mesmo formato do disparo desta geração — take novo nunca sai deitado num AD em pé.
+        fd.append('aspectRatio', formatoDaGeracaoDe(taskId));
         const r = await fetch('/api/heygen/image-video', { method: 'POST', body: fd });
         const j = await r.json().catch(() => null);
         if (!r.ok || !j?.videoId) throw new Error(j?.error || `Falha no modo imagem (HTTP ${r.status}).`);
@@ -9866,7 +9953,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarId: effectiveAvatarId!,
           engine: motorParte.toLowerCase() as 'iii' | 'iv' | 'v',
           motionPrompt: gestoDaParte || undefined,
-          orientation: 'portrait',
+          orientation: orientacaoHeyGen(formatoDaGeracaoDe(taskId)),
         });
       }
       if (!job.videoId) throw new Error('O disparo nao retornou videoId.');
@@ -10027,7 +10114,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         title: `${adNameSafe}_${label}_audio`,
         avatarId: effectiveAvatarId,
         engine: 'iii',
-        orientation: 'portrait',
+        orientation: orientacaoHeyGen(formatoDaGeracaoDe(taskId)),
       });
       if (!job.videoId) throw new Error('processJob (áudio) não retornou videoId.');
 
@@ -10239,6 +10326,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const pipeRes = await runPostPipelineSerial({
         baseAdId: b.baseAdId,
         parts: partBlobs,
+        formato: formatoDaGeracao(b.formato),
         decupagem: decupagemDaMontagem,
         keepSilenceSec: respiroDaMontagem,
         nivelarVoz: nivelamentoDaMontagem,
@@ -10504,10 +10592,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setTimeout(() => {
       batchCancelRef.current[taskId] = false;
       // Marca queued pra UI; runHeyGenGated promove direto se ha vaga.
+      // Reinício do zero = geração nova: vale o formato escolhido AGORA.
+      const formatoDoReinicio = carimbarFormato(taskId);
       setBatchStates((prev) => {
         const cur = prev[taskId];
         if (!cur) return prev;
-        return { ...prev, [taskId]: { ...cur, phase: 'queued', message: 'Reiniciando do zero (aguardando vaga)...', finishedAt: undefined } };
+        return { ...prev, [taskId]: { ...cur, formato: formatoDoReinicio, phase: 'queued', message: 'Reiniciando do zero (aguardando vaga)...', finishedAt: undefined } };
       });
       void runHeyGenGated(taskId, 'run');
     }, 300);
@@ -10785,6 +10875,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     //    quando o promoter acordar, e ninguém dispara a task duas vezes.
     setTimeout(() => {
       batchCancelRef.current[taskId] = false;
+      // Disparo do ZERO: vale o formato escolhido AGORA no botão.
+      const formatoDoReinicio = carimbarFormato(taskId);
       setBatchStates((prev) => {
         const cur = prev[taskId];
         if (!cur) return prev;
@@ -10792,6 +10884,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ...prev,
           [taskId]: {
             ...cur,
+            formato: formatoDoReinicio,
             phase: 'queued',
             message: 'Reiniciando com o plano editado...',
             // Disparo do ZERO: os takes antigos não existem mais pra este run.
@@ -12600,11 +12693,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // avatar, gesto (motor IV), versões, decupagem e pós-produção. Antes, task
     // só de texto pulava pro Hey Auto com um handoff por sessionStorage — duas
     // telas pra mesma coisa, e o Hey Auto deixou de ser ferramenta separada.
+    // Disparo do zero: vale o formato escolhido AGORA no botão.
+    const formatoDoPlay = carimbarFormato(taskId);
     setBatchStates((prev) => ({
       ...prev,
       [taskId]: {
         ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName, parts: [], startedAt: Date.now() }),
         teamId: isTaskLocal(taskId) ? undefined : (prev[taskId]?.teamId ?? selectedTeam ?? undefined),
+        formato: formatoDoPlay,
         phase: 'queued',
         message: 'Na fila — aguardando vaga...',
         finishedAt: undefined,
@@ -15864,6 +15960,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         total={previews.length}
                                         percent={pct}
                                         fileBase={b.baseAdId || b.taskName}
+                                        formato={formatoDaGeracao(b.formato)}
                                         isRegenerating={isRegenThis}
                                         // AUTO-CURA DA PREVIA: a object URL guardada no state morre
                                         // se alguem revogar, e o <video> nao avisa — vira um
@@ -16496,6 +16593,20 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         if (esc?.avatarId) setAvatarDaVersao(a.taskId, n, sl.role, { ...esc, engine: m } as never);
                                       }
                                     }}
+                                  />
+                                </div>
+                              ) : null}
+
+                              {/* FORMATO DO DISPARO — 9:16 (vertical) ou 16:9 (horizontal)
+                                  no HeyGen. Mesmas condições do motor; VA fica de fora
+                                  (a variação é montada em cima do AD original, em pé). */}
+                              {!onlyMagnificMode && !a.trocaBriefing && !a.vaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
+                                <div className="mt-2">
+                                  <PilotFormatoToggle
+                                    formato={getFormato(a.taskId)}
+                                    onChange={(f) => setFormatoFor(a.taskId, f)}
+                                    bloqueado={isEconomiaEnabled(a.taskId)}
+                                    motivoBloqueio="Modo economia só gera 9:16 (o Studio renderiza em pé). Desligue o modo economia pra usar 16:9."
                                   />
                                 </div>
                               ) : null}

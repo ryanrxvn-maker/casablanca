@@ -138,6 +138,7 @@ function pipeline() {
   return loadTs('lib/clickup-pilot-pipeline.ts', {
     './audio-engine': {}, './speech-detect': {}, './ffmpeg-worker': ffmpeg, './camuflagem': {},
     './video-duracao': { duracaoDeVideo: async () => 3 },
+    './pilot-formato': loadTs('lib/pilot-formato.ts').exports,
   }).exports.runPostPipeline;
 }
 const input = { baseAdId: 'AD99GL', parts: copy.map(p => ({ label: p.label, blob: render(), expected: true })),

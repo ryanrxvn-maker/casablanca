@@ -22,6 +22,8 @@ import { LegendaZoomPopover } from '@/components/PilotLegendaZoom';
 import { BUILTIN_TEMPLATES } from '@/lib/typography/caption-script';
 import { LEGENDA_CFG_DEFAULT, ZOOM_CFG_DEFAULT, type LegendaCfg, type ZoomCfg } from '@/lib/pilot-pos-producao';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
+import { PilotFormatoToggle } from '@/components/PilotFormatoToggle';
+import type { FormatoVideo } from '@/lib/pilot-formato';
 import type { Motor, MotorConfig } from '@/lib/motor-config';
 import { FrameDaVersao } from '@/components/FrameDaVersao';
 import { VersoesDoDisparo, type VersaoNoCard } from '@/components/VersoesDoDisparo';
@@ -789,6 +791,7 @@ function Conteudo() {
   const [stockFrameEnabled, setStockFrameEnabled] = useState(true);
   const [stockFrameInserts, setStockFrameInserts] = useState<Insert[]>([]);
   const [motorCfg, setMotorCfg] = useState<MotorConfig>({ kind: 'individual', perSlot: {} });
+  const [formatoDemo, setFormatoDemo] = useState<FormatoVideo>('9:16');
   const [slotsDemo, setSlotsDemo] = useState([
     { id: '0', nome: 'Confident Business Executive', thumb: null as string | null, motor: 'III' as Motor, motionPrompt: null as string | null, imageMode: false },
     { id: '1', nome: 'Dra. Marina', thumb: null as string | null, motor: 'IV' as Motor, motionPrompt: 'mexe a gelatina', imageMode: false },
@@ -1407,6 +1410,20 @@ function Conteudo() {
           thumbAvatar={null}
         />
       ) : null}
+
+      {/* ══════════ 0.25 FORMATO DO DISPARO (9:16 × 16:9) ══════════ */}
+      <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">
+        <div className="label-tech mb-2 text-[9.5px] tracking-[0.18em] text-text-muted">Formato do disparo no HeyGen</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <PilotFormatoToggle formato={formatoDemo} onChange={setFormatoDemo} />
+          <PilotFormatoToggle
+            formato="9:16"
+            onChange={() => {}}
+            bloqueado
+            motivoBloqueio="Modo economia só gera 9:16 (o Studio renderiza em pé). Desligue o modo economia pra usar 16:9."
+          />
+        </div>
+      </section>
 
       {/* ══════════ 0.3 MOTOR POR AVATAR (lista ao vivo) ══════════ */}
       <section className="rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3">

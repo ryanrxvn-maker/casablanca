@@ -360,6 +360,9 @@ function compile(text) {
 }
 const helpers = { exports: {} };
 vm.runInNewContext(compile(readFileSync(new URL('lib/montagem-sig.ts', root), 'utf8')), helpers);
+// Formato do disparo (9:16 × 16:9): o handler real usa os helpers de produção.
+const formatoHelpers = { exports: {} };
+vm.runInNewContext(compile(readFileSync(new URL('lib/pilot-formato.ts', root), 'utf8')), formatoHelpers);
 const handler = compile(`${extract('rebuildMontage')}\nexports.run = rebuildMontage;`);
 const video = new Blob([randomFillSync(Buffer.alloc(100_000))], { type: 'video/mp4' });
 const oldZip = new Blob(['previous real deliverable']);
@@ -393,7 +396,7 @@ function harness(options = {}) {
   let enabled = options.enabled !== false;
   let rebuilding = null;
   const context = {
-    exports: {}, Blob, console, Date, Set, JSON, ...helpers.exports,
+    exports: {}, Blob, console, Date, Set, JSON, ...helpers.exports, ...formatoHelpers.exports,
     crypto: { randomUUID: () => `fixture-nonce-${calls.persisted.length}` },
     flushSync: (fn) => {
       if (calls.signature.length) options.onReactCommit?.({ context, state, refs });
@@ -425,6 +428,7 @@ function harness(options = {}) {
     },
     async runPostPipelineSerial(cfg, id) {
       calls.pipeline++;
+      calls.formatos = [...(calls.formatos || []), cfg.formato];
       await options.onPipeline?.({ context, refs, state, cfg, setEnabled: (value) => { enabled = value; } });
       if (options.pipelineThrows) throw new Error(options.pipelineThrows);
       const item = { filename: 'AD99_H1.mp4', rawAssembled: video, decupado: options.decup ? video : undefined, camuflado: options.camo ? video : undefined, ...options.item };
@@ -477,6 +481,16 @@ function unchanged(h) {
   assert.equal(h.calls.provider, 0);
   assert.equal(h.locks.current.size, 0);
 }
+
+await test('remount keeps the generation format: legacy → 9:16, stamped 16:9 → 16:9', async () => {
+  const legado = harness();
+  assert.equal(await legado.run(), true);
+  assert.deepEqual(legado.calls.formatos, ['9:16']);
+  const deitado = harness({ job: { formato: '16:9' } });
+  assert.equal(await deitado.run(), true);
+  assert.deepEqual(deitado.calls.formatos, ['16:9']);
+  assert.equal(deitado.calls.provider, 0);
+});
 
 await test('successful cached remount persists actual video ZIP, signature and URL only after output', async () => {
   const h = harness();

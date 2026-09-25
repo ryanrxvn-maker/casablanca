@@ -51,6 +51,7 @@ export function LipsyncPreviewCard({
   onUploadAudio,
   isRegenerating = false,
   recuperarVideo,
+  formato = '9:16',
 }: {
   take: LipsyncTake;
   position: number;
@@ -78,6 +79,10 @@ export function LipsyncPreviewCard({
   onUploadAudio?: (file: File) => void;
   /** Marca esse card como "re-gerando agora" — overlay shimmer + bloqueia clicks. */
   isRegenerating?: boolean;
+  /** Moldura do preview. Default 9:16 (o de sempre); '16:9' pra take gerado
+   *  deitado — senão o `object-cover` cortaria o preview e o take pareceria
+   *  errado sem estar. */
+  formato?: '9:16' | '16:9';
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -222,8 +227,8 @@ export function LipsyncPreviewCard({
         </span>
       </div>
 
-      {/* BODY 9:16 */}
-      <div className="relative mx-3 mb-3 aspect-[9/16] overflow-hidden rounded-[10px] border border-line bg-black">
+      {/* BODY 9:16 (ou 16:9 quando o disparo foi deitado) */}
+      <div className={`relative mx-3 mb-3 ${formato === '16:9' ? 'aspect-[16/9]' : 'aspect-[9/16]'} overflow-hidden rounded-[10px] border border-line bg-black`}>
         {videoUrl ? (
           <>
             <video
@@ -488,6 +493,7 @@ export function LipsyncPreviewCard({
             <ExpandedVideoModal
               videoUrl={videoUrl}
               label={take.label}
+              formato={formato}
               onClose={() => setExpanded(false)}
               onDownload={downloadOne}
               downloading={downloading}
@@ -502,12 +508,14 @@ export function LipsyncPreviewCard({
 function ExpandedVideoModal({
   videoUrl,
   label,
+  formato = '9:16',
   onClose,
   onDownload,
   downloading,
 }: {
   videoUrl: string;
   label: string;
+  formato?: '9:16' | '16:9';
   onClose: () => void;
   onDownload: () => void;
   downloading: boolean;
@@ -562,7 +570,7 @@ function ExpandedVideoModal({
         playsInline
         onClick={(e) => e.stopPropagation()}
         className="max-h-[90vh] max-w-full rounded-[14px] shadow-[0_30px_80px_rgba(0,0,0,0.8)]"
-        style={{ aspectRatio: '9/16' }}
+        style={{ aspectRatio: formato === '16:9' ? '16/9' : '9/16' }}
       />
       <style jsx>{`
         @keyframes lcModalIn { from { opacity: 0; } to { opacity: 1; } }

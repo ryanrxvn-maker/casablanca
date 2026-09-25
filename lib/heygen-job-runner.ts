@@ -57,6 +57,9 @@ export type RunnerOptions = {
    *  (voz original). Só vale pra mode 'audio'. */
   voiceMirroring?: boolean;
   motor: 'III' | 'IV' | 'V';
+  /** FORMATO do take no HeyGen. Ausente = 'portrait' (9:16), o de sempre.
+   *  'landscape' = 16:9. Vale pro batch inteiro — um AD nunca mistura. */
+  orientation?: 'portrait' | 'landscape';
   adNameSafe: string;
   isCancelled: () => boolean;
   onProgress: (msg: string) => void;
@@ -96,6 +99,7 @@ export async function runHeyGenJobs(
    * porque vão pela extensão e não tocam no OAuth.
    */
   let filaImagem: Promise<unknown> = Promise.resolve();
+  const orientation: 'portrait' | 'landscape' = opts.orientation === 'landscape' ? 'landscape' : 'portrait';
   function emSerie<T>(fn: () => Promise<T>): Promise<T> {
     const proxima = filaImagem.then(fn, fn);
     filaImagem = proxima.catch(() => {});
@@ -152,7 +156,7 @@ export async function runHeyGenJobs(
           fd.append('voiceId', effectiveVoiceId);
           if (motion) fd.append('motionPrompt', motion);
           fd.append('title', `${opts.adNameSafe}_${label}`);
-          fd.append('aspectRatio', '9:16');
+          fd.append('aspectRatio', orientation === 'landscape' ? '16:9' : '9:16');
           // uma de cada vez: a rotação do refresh não tolera concorrência
           const j = await emSerie(async () => {
             const r = await fetch('/api/heygen/image-video', { method: 'POST', body: fd });
@@ -183,7 +187,7 @@ export async function runHeyGenJobs(
           title: `${opts.adNameSafe}_${label}`,
           avatarId: effectiveAvatarId,
           engine: motorToEngine(effectiveMotor),
-          orientation: 'portrait',
+          orientation,
           motionPrompt: motion || undefined,
         };
         if (motion) {

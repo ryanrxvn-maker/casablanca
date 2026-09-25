@@ -22,6 +22,7 @@ import { decodeAudioRobust } from './audio-engine';
 import { planSpeechCut } from './speech-detect';
 import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem, cancelFFmpeg, normalizeForConcat } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
+import { normalizarFormato, type FormatoVideo } from './pilot-formato';
 
 export type AssembledPart = {
   /** Nome do arquivo final ja com sufixo G[N], ex: AD140G1GL.mp4 */
@@ -76,6 +77,11 @@ export type PipelineInputs = {
   keepSilenceSec?: number;
   /** Callback de progresso */
   onProgress?: (p: PipelineProgress) => void;
+
+  /** FORMATO da montagem (o mesmo do disparo no HeyGen). Ausente = 9:16
+   *  (1080x1920), o de sempre. '16:9' monta em 1920x1080 — sem isto a
+   *  normalização cortaria o take horizontal pra caber em pé. */
+  formato?: FormatoVideo;
 
   /** ── PÓS-PRODUÇÃO (legenda automática + dinâmica de zoom, 30.08) ──
    *  Roda DEPOIS da decupagem e ANTES da camuflagem, no vídeo que vai ser
@@ -340,13 +346,15 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // partes Avatar 1+2 → concat falhava → "INCOMPLETO 0 montagens"). Se a
   // normalização de uma parte falhar, usa a original (o fast-concat tenta; e há
   // o fallback monolítico no fim).
+  // Enquadramento da montagem: o MESMO formato em que os takes foram gerados.
+  const montagemOpts = { formato: normalizarFormato(input.formato) };
   const concatRobust = async (blobs: Blob[], label: string): Promise<Blob> => {
     if (blobs.length === 1) return blobs[0];
     const normalized: Blob[] = [];
     let allNormalized = true;
     for (let i = 0; i < blobs.length; i++) {
       try {
-        normalized.push(await retryFFmpeg(() => normalizeForConcat(blobs[i]), 120_000, `norm ${label} p${i + 1}/${blobs.length}`, 2));
+        normalized.push(await retryFFmpeg(() => normalizeForConcat(blobs[i], montagemOpts), 120_000, `norm ${label} p${i + 1}/${blobs.length}`, 2));
       } catch {
         console.warn(`[clickup-pilot-pipeline] norm ${label} p${i + 1}: falhou — parte fica com params ORIGINAIS (não-uniformes)`);
         normalized.push(blobs[i]);
@@ -370,11 +378,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       try {
         return await withTimeout(concatVideosFast(normalized), concatTimeoutMs(normalized, false), `concat-norm ${label}`);
       } catch {
-        return await retryFFmpeg(() => concatAvatarParts(normalized), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
+        return await retryFFmpeg(() => concatAvatarParts(normalized, montagemOpts), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
       }
     }
     // alguma parte NÃO normalizou → re-encode monolítico direto (não arrisca copy)
-    return await retryFFmpeg(() => concatAvatarParts(normalized), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
+    return await retryFFmpeg(() => concatAvatarParts(normalized, montagemOpts), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
   };
 
   // ── GATE DE SINCRONIA (rede final) ────────────────────────────────────────
@@ -395,7 +403,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     console.warn(`[clickup-pilot-pipeline] ${label}: DESSINCRONIZADO v=${sync.videoSec.toFixed(1)}s a=${sync.audioSec.toFixed(1)}s (diff ${diff.toFixed(1)}s) → re-encode pra sincronizar`);
     let fixed: Blob | null = null;
     try {
-      fixed = await retryFFmpeg(() => concatAvatarParts(parts), concatTimeoutMs(parts, true), `concat-resync ${label}`, 2);
+      fixed = await retryFFmpeg(() => concatAvatarParts(parts, montagemOpts), concatTimeoutMs(parts, true), `concat-resync ${label}`, 2);
     } catch (e) {
       console.warn(`[clickup-pilot-pipeline] ${label}: re-encode de sync falhou (${(e as Error)?.message?.slice(0, 60)})`);
     }
