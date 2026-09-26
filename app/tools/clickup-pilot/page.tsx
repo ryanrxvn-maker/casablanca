@@ -9846,6 +9846,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const prevPart = b.parts[partIdx];
     const rejectedVideoId = prevPart?.videoStatus === 'failed' ? (prevPart.videoId || null) : null;
     marcarRegen(taskId, label, true);
+    /* ⛔ REIVINDICA A TASK (26.09). Task restaurada do armazenamento fica em
+     * `recoveredBatchIdsRef` = só-leitura nesta aba, e o persist PULA ela.
+     * Retomar/Rodar/Atualizar montagem tiram da lista; o lápis não tirava.
+     * AD130/AD131-PRPB07: 3 takes re-gerados com texto novo, a tela mostrando
+     * "montagem desatualizada" — e o registro salvo com o texto e o vídeo
+     * ANTIGOS 40 min depois. Um F5 devolvia o plano velho e o card voltava a
+     * PRONTO com o montado sem a correção. Corrigir um take é agir na task. */
+    recoveredBatchIdsRef.current.delete(taskId);
     setRegenError(null);
     // FECHA O MODAL NA HORA: a re-geração (dispatch + poll de até 25min + download)
     // roda em BACKGROUND — o card já mostra o progresso da parte (isRegenThis) e, se
@@ -10059,6 +10067,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
     // Marca a parte como "re-gerando agora" (overlay no card) + reseta erro.
     marcarRegen(taskId, label, true);
+    // Mesmo motivo do lápis por texto: task restaurada é só-leitura até o
+    // usuário agir nela, e sem isto o take novo nunca é gravado.
+    recoveredBatchIdsRef.current.delete(taskId);
     setBatchStates((prev) => {
       const cur = prev[taskId];
       if (!cur) return prev;

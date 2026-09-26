@@ -47,6 +47,8 @@ const ETAPAS = [
   { tsx: ["lib/pilot-plano-copy.test.ts"] },
   // parte decupada com vídeo sobrando (congelado mudo) nunca vai pra montagem
   { tsx: ["lib/pilot-decup-sync.test.ts"] },
+  // take re-gerado é gravado (task restaurada é reivindicada pelo lápis)
+  { run: ["scripts/test-pilot-regen-persist.mjs"] },
   { tsx: ["lib/zip-entries.test.ts"] },
   { tsc: "lib/idioma.ts lib/idioma.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck", run: [".test-tmp/idioma.test.js"] },
   { tsc: "lib/pilot-inserts.ts lib/pilot-inserts.test.ts --outDir .test-tmp --module commonjs --target es2022 --moduleResolution node --skipLibCheck --lib esnext,dom,dom.iterable", run: [".test-tmp/pilot-inserts.test.js"] },
