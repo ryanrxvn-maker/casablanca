@@ -54,6 +54,27 @@ t('cena sem texto nao gera take e nao quebra a numeracao', () => {
   ]);
 });
 
+t('cena de hook vira HOOK n inteiro, fora da numeracao do body', () => {
+  const cenas = [
+    { texto: 'Gancho um. Longo.', falante: 'Drew', hook: 1 },
+    { texto: 'Gancho dois.', falante: 'Drew', hook: 2 },
+    { texto: 'Corpo. Mais.', falante: 'Meghan' },
+    { texto: 'Pergunta?', falante: 'Drew' },
+  ];
+  const partes = partesDoPlanoComCopy(cenas, ['Cena 1', 'Cena 2', 'Cena 3', 'Cena 4'], () => false, porFrase);
+  assert.deepEqual(
+    partes.map((p) => [p.label, p.text, p.matchByRole]),
+    [
+      ['HOOK 1', 'Gancho um. Longo.', 'cena 1'],
+      ['HOOK 2', 'Gancho dois.', 'cena 2'],
+      ['BODY 1', 'Corpo.', 'cena 3'],
+      ['BODY 2', 'Mais.', 'cena 3'],
+      ['BODY 3', 'Pergunta?', 'cena 4'],
+    ],
+  );
+  assert.equal(diferencaDeCobertura(cenas, partes), 0);
+});
+
 t('cobertura: zero quando nada foi comido, negativo quando falta', () => {
   const cenas = [{ texto: 'Tohle zabíjí vaše oči.\n\nOd dětství jsem sledoval…' }];
   const partes = partesDoPlanoComCopy(cenas, ['Cena 1'], () => false, porFrase);

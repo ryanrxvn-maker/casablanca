@@ -12,7 +12,10 @@
  *  - take único (IV/V, gesto, modo imagem): o texto inteiro num take só;
  *  - numeração BODY global na task (sem hook = um vídeo "full body");
  *  - cada take pertence à cena (matchByRole = role da cena, minúsculo) e
- *    carrega o falante declarado, pra o preview e a legenda saberem quem fala.
+ *    carrega o falante declarado, pra o preview e a legenda saberem quem fala;
+ *  - cena com `hook: n` (25.09) vira UM take "HOOK n", nunca cortado e fora da
+ *    numeração do BODY: sem isso um AD de 2 hooks saía com os dois ganchos
+ *    colados no mesmo vídeo, em vez de G1 e G2 com o mesmo body.
  *
  * Puro: o corte entra por parâmetro, então roda em teste sem navegador.
  */
@@ -20,6 +23,8 @@
 export type CenaComCopy = {
   texto?: string | null;
   falante?: string | null;
+  /** Número do hook (1 = G1, 2 = G2...). Ausente = cena de body. */
+  hook?: number | null;
 };
 
 export type ParteDoPlanoComCopy = {
@@ -55,6 +60,16 @@ export function partesDoPlanoComCopy(
   cenas.forEach((c, i) => {
     const texto = (c.texto || '').replace(/\r\n/g, '\n').trim();
     if (!texto) return;
+    const hook = Number(c.hook);
+    if (Number.isInteger(hook) && hook > 0) {
+      out.push({
+        label: `HOOK ${hook}`,
+        text: texto,
+        matchByRole: (roles[i] || '').toLowerCase(),
+        speaker: c.falante || null,
+      });
+      return;
+    }
     const pedacos = takeUnico(i) ? [texto] : cortar(texto);
     for (const p of pedacos) {
       const t = p.trim();
