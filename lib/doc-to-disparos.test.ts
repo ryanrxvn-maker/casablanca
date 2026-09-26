@@ -17,7 +17,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
-import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, parseGlobalAvatarLinks, sanitizeSpokenCopy, type DocLink } from './copy-parser';
+import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, parseGlobalAvatarLinks, sanitizeSpokenCopy, detectSpeakerLabelLine, splitBySpeaker, type DocLink } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -1679,6 +1679,80 @@ console.log('REFERENCIA DE AD na linha do avatar (AD119/AD120 - PRPB07):');
   const g2 = parseGlobalAvatarLinks('Link do avatar: monetzamoraa.mp4 + feliperocha3.mp4');
   assert(g2.length === 2 && g2[0].username === 'monetzamoraa' && g2[1].username === 'feliperocha3',
     `multi-avatar na mesma linha continua igual (got ${g2.map((a) => a.username).join(', ')})`);
+}
+
+// (26.09.2026) PRPB07 AD130/AD131 — dois jeitos de a copy perder fala.
+{
+  console.log('\n# frase com ":" nao e locutor + rodape de comentarios nao come a ultima frase');
+  const DOC_PRPB07 = [
+    'AD129 à 131',
+    'AD130G1VN-PRPB07',
+    'Link do avatar: @andrecosta.uro+.mp4 colocar avatar nesse cenário: manotargino',
+    'Instruções para edição: Somente para Youtube, sem edição e sem camuflagem',
+    '',
+    'GANCHO',
+    'Pegue papel e caneta porque vou ensinar o ritual com quiabo que encolhe a prósta.',
+    'BODY',
+    'Um mês depois, olharam a prósta de novo. Tinha diminuído pela metade.',
+    'Perguntaram a ele:',
+    '"seu João, o senhor começou algum prescrito novo?"',
+    'Ele não estava tomando nada, só estava fazendo um ritual com o quiabo.',
+    'A primeira pergunta que todo paciente me faz é:',
+    '"como eu sei se tenho plástico cravado na minha prósta?"',
+    'É só preparar o truque com quiabo da forma correta.',
+    '',
+    'AD131G1VN-PRPB07',
+    'Link do avatar:',
+    'Instruções para edição: Somente para Youtube, sem edição e sem camuflagem',
+    '',
+    'GANCHO',
+    'O quiabo é o alimento que qualquer um deveria comer se quisesse encolher a prósta.',
+    'BODY',
+    'Eu te garanto que é tão fácil que não vai precisar da ajuda da patroa na cozinha.',
+    'É só clicar no botão aqui embaixo para assistir.[c]',
+    'Assiste esse passo a passo o quanto antes, porque isso vai ajudar a sumir com seus problemas no banheiro e na cama mais rápido do que imagina.',
+    '',
+    '[a]Tela dividida:',
+    'https://drive.google.com/open?id=1UBGr819Xtb_ucvfoCsXMTvDiIy4xMw9-&usp=drive_copy',
+    '',
+    '[b]EM CIMA: AVATAR',
+    'EMBAIXO: ESSES DOIS UM DO LADO DO OUTRO',
+    '',
+    '[c]Censurado',
+  ].join('\n');
+
+  const ad130 = parseDarkoBriefing(DOC_PRPB07, 'AD130VN', null, []);
+  const fala130 = (ad130?.bodySegments || []).map((s) => s.text).join('\n');
+  assert(!!ad130 && ad130.bodySegments.length === 1, `AD130: um locutor so (got ${ad130?.bodySegments.map((s) => s.role).join(' | ')})`);
+  assert(!(ad130?.bodySegments || []).some((s) => /perguntaram|primeira pergunta/i.test(s.role || '')), 'AD130: frase com ":" nao virou role');
+  assert(fala130.includes('Perguntaram a ele:'), 'AD130: "Perguntaram a ele:" continua na fala');
+  assert(fala130.includes('A primeira pergunta que todo paciente me faz é:'), 'AD130: "A primeira pergunta... é:" continua na fala');
+  assert(fala130.includes('seu João') && fala130.includes('como eu sei'), 'AD130: as citacoes continuam na fala');
+
+  const ad131 = parseDarkoBriefing(DOC_PRPB07, 'AD131VN', null, []);
+  const fala131 = (ad131?.bodySegments || []).map((s) => s.text).join('\n');
+  assert(/mais rápido do que imagina\.$/.test(fala131.trim()), `AD131: a ULTIMA frase entra (fim: "${fala131.trim().slice(-50)}")`);
+  assert(fala131.includes('aqui embaixo para assistir.'), 'AD131: ancora "[c]" no fim da frase sai e a frase fica');
+  assert(!/Tela dividida|EMBAIXO: ESSES|EM CIMA: AVATAR|Censurado|drive\.google|\[[a-z]\]/.test(fala131), `AD131: nada do rodape de comentarios vaza (got "${fala131.slice(-120)}")`);
+
+  // NAO DESFAZER O QUE FUNCIONA: rotulo de locutor de verdade continua rotulo.
+  for (const [linha, esperado] of [
+    ['Doutor:', 'Doutor'],
+    ['Mulher:', 'Mulher'],
+    ['Voz do Homem:', 'Voz do Homem'],
+    ['Mulher (Esposa de Leandro): @anapaulalima.mp4', 'Mulher'],
+    ['Leandro (Homem depoimento): @kiko.urso3.mp4', 'Leandro'],
+    ['Ana a paciente:', 'Ana a paciente'],
+    ['Avatar 2:', 'Avatar 2'],
+  ] as const) {
+    const got = detectSpeakerLabelLine(linha);
+    assert(got === esperado, `locutor "${linha}" continua detectado (got ${got})`);
+  }
+  assert(detectSpeakerLabelLine('Perguntaram a ele:') === null, 'frase "Perguntaram a ele:" nao e locutor');
+  assert(detectSpeakerLabelLine('A primeira pergunta que todo paciente me faz é:') === null, 'frase "A primeira pergunta...:" nao e locutor');
+  const dialogo = splitBySpeaker('Mulher:\nOi amor, tudo bem?\nHomem:\nTudo sim.\n', [], null, []);
+  assert(dialogo.length === 2 && dialogo[0].role === 'Mulher' && dialogo[1].role === 'Homem',
+    `dialogo Mulher/Homem continua em 2 locutores (got ${dialogo.map((d) => d.role).join(' | ')})`);
 }
 
 console.log('');

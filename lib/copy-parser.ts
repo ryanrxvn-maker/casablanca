@@ -1280,6 +1280,7 @@ function isPureRoleOrMentionLine(line: string): boolean {
   // fala ("Doutor, voce sabe que..." nao deve ser tratado como label).
   const colon = t.indexOf(':');
   if (colon > 0 && t.slice(0, colon).includes(',')) return false;
+  if (colon > 0 && isNarrativaAntesDosDoisPontos(t.slice(0, colon))) return false;
 
   // Pattern unico flexivel:
   //   <Role-head: 1-3 palavras alpha>
@@ -1341,7 +1342,19 @@ function extractTextBlock(rawLines: string[]): { text: string; role: string | nu
   // Skip leading empty novamente
   while (lines.length && !lines[0].trim()) lines.shift();
 
-  const cleaned = lines.join('\n').replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  // RODAPÉ DE COMENTÁRIOS do Google Docs: o export põe os comentários no FIM
+  // do documento, cada um numa linha que COMEÇA pela âncora ("[a]Tela
+  // dividida:"). No ÚLTIMO AD do doc eles caem dentro da seção. Âncora de
+  // fala fica no FIM do trecho comentado, nunca no começo da linha — então a
+  // 1ª linha que começa com "[x]" abre o rodapé, e dali pra baixo não é fala.
+  const rodape = lines.findIndex((l) => /^\s*\[[a-z]{1,3}\]/i.test(l));
+  if (rodape >= 0) lines.splice(rodape);
+
+  // Só o espaço HORIZONTAL antes da âncora sai junto. Com `\s*` a quebra de
+  // linha ia embora e a linha seguinte grudava na fala — bug real (26.09.2026,
+  // AD131VN-PRPB07): "...do que imagina.Tela dividida:" e o sanitizador
+  // descartava a ÚLTIMA FRASE inteira por conter "Tela dividida".
+  const cleaned = lines.join('\n').replace(/[ \t]*\[[a-z]{1,3}\]/gi, '');
   return { text: cleaned.trim(), role: detectedRole };
 }
 
@@ -1616,7 +1629,7 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropE
       const colonIdx = t.indexOf(':');
       const beforeColon = colonIdx > 0 ? t.slice(0, colonIdx) : '';
       const hasCommaBeforeColon = beforeColon.includes(',');
-      if (!hasCommaBeforeColon && /^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*:\s*(?:[^@\w]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?\s*$/i.test(t)) {
+      if (!hasCommaBeforeColon && !isNarrativaAntesDosDoisPontos(beforeColon, knownRoles) && /^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*:\s*(?:[^@\w]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?\s*$/i.test(t)) {
         // head = primeira palavra antes de qualquer separador
         const head = t.split(/[\s\-–—():]/)[0];
         if (head.length >= 2 && head.length <= 30) {
@@ -1664,6 +1677,39 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropE
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** Palavras que NUNCA compõem um rótulo de locutor, mas enchem frase
+ *  narrativa: artigo, pronome, verbo de fala. */
+const PALAVRAS_DE_FRASE = new Set([
+  'a', 'o', 'as', 'os', 'um', 'uma', 'que', 'me', 'te', 'se', 'lhe', 'nos',
+  'ele', 'ela', 'eles', 'elas', 'eu', 'você', 'voce', 'é', 'foi', 'era',
+  'são', 'sao', 'está', 'esta', 'disse', 'diz', 'perguntaram', 'perguntou',
+  'respondeu', 'responde', 'falou', 'contou', 'faz', 'fez', 'tinha', 'tem',
+]);
+
+/** True quando o que vem antes do ":" é FRASE da copy, não rótulo de locutor.
+ *
+ *  Bug real (26.09.2026, AD130VN-PRPB07): "Perguntaram a ele:" e "A primeira
+ *  pergunta que todo paciente me faz é:" — linhas de fala que apresentam a
+ *  citação da linha de baixo — viravam locutor ("Perguntaram a ele" em todos
+ *  os takes) e SUMIAM do roteiro. O avatar pulava a frase e a citação ficava
+ *  solta, como se fosse dele.
+ *
+ *  Rótulo que começa por locutor conhecido nunca é frase ("Voz do Homem",
+ *  "Mulher (Esposa de Leandro)"). Fora isso, 2+ palavras de frase fora dos
+ *  parênteses = narrativa. Uma só não basta ("Ana a paciente" segue rótulo). */
+function isNarrativaAntesDosDoisPontos(label: string, knownRoles: string[] = []): boolean {
+  const semParens = (label || '').replace(/\([^)]*\)/g, ' ');
+  const tokens = semParens.toLowerCase().split(/[\s\-–—]+/).filter(Boolean);
+  if (tokens.length < 2) return false;
+  const conhecidos = new Set<string>([
+    'doutor', 'doutora', 'dr', 'dra', 'mulher', 'homem', 'narrador', 'narradora',
+    'locutor', 'locutora', 'avatar', 'voz', 'depoimento', 'esposa', 'marido',
+    ...knownRoles.map((r) => r.toLowerCase().trim().split(/[\s(\-]/)[0]),
+  ].filter(Boolean));
+  if (conhecidos.has(tokens[0])) return false;
+  return tokens.filter((w) => PALAVRAS_DE_FRASE.has(w)).length >= 2;
+}
+
 /**
  * Detecta se uma linha e um "speaker label" — indica QUEM fala a partir dali.
  * Retorna o role normalizado (ex "Mulher", "Doutor", "Leandro") ou null.
@@ -1693,6 +1739,8 @@ export function detectSpeakerLabelLine(line: string, knownRoles: string[] = []):
   // (ex "Doutor, voce sabe...:").
   const colonIdx = t.indexOf(':');
   if (colonIdx > 0 && t.slice(0, colonIdx).includes(',')) return null;
+  // "Perguntaram a ele:" é fala que apresenta a citação de baixo, não locutor.
+  if (colonIdx > 0 && isNarrativaAntesDosDoisPontos(t.slice(0, colonIdx), knownRoles)) return null;
 
   // "Avatar N" NUMERADO é um speaker DISTINTO (Avatar 1 ≠ Avatar 2). O regex
   // geral abaixo captura só o head alpha "Avatar" e PERDE o número → os dois
