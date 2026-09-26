@@ -39,6 +39,11 @@ type InsertMedia = { key: string; nome: string; tipo: 'video' | 'imagem'; w: num
 type Change = Insert[] | ((current: Insert[]) => Insert[]);
 type StockPlacement = { anchor: string; from: number; to: number; smart?: boolean; score?: number; coverage?: SmartCoverage };
 
+/** Ids dos takes StockFrame inseridos à mão (fora do plano Smart). */
+function manualStockFrameIds(inserts: Insert[]): Set<string> {
+  return new Set(inserts.filter((insert) => insert.source === 'stockframe' && !insert.stockFrame?.smart && insert.stockFrame?.videoId).map((insert) => insert.stockFrame!.videoId));
+}
+
 function stockFrameInsert(video: StockFrameVideo, media: InsertMedia, placement: StockPlacement): Insert {
   const trimFrom = Math.max(0, video.recommendedStartSec ?? 0);
   const trimTo = Math.min(video.durationSec || video.recommendedEndSec || 0, video.recommendedEndSec || 0);
@@ -591,6 +596,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       completed = completed.map(segment => segment.candidates.length ? segment : {
         ...segment, candidates: rankStockFrameGenericFallback(segment, [...globalPool.values()], 12),
       });
+      // Takes StockFrame inseridos à mão continuam na montagem ao aplicar o
+      // plano: o Smart não pode escolhê-los de novo nem oferecê-los como
+      // alternativa (a montagem repetiria o mesmo take).
+      const manualIds = manualStockFrameIds(inserts);
+      if (manualIds.size) completed = completed.map((segment) => ({ ...segment, candidates: segment.candidates.filter((candidate) => !manualIds.has(candidate.video.id)) }));
       // planSmartStockSegments already selected precisely the requested word
       // budget for 30/60. Fill each of those slots whenever a safe candidate
       // exists; the strict coverage check before download remains unchanged.
@@ -710,6 +720,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
 
   function chooseForPlan(video: StockFrameVideo) {
     if (!enabled || !smartEditTarget) return;
+    if (manualStockFrameIds(inserts).has(video.id)) {
+      setError('Este take já está na montagem (inserido manualmente). Selecione um take diferente para manter a montagem variada.');
+      return;
+    }
     if (smart.some((segment) => segment.selectedVideoId === video.id && segment.id !== smartEditTarget.segmentId)) {
       setError('Este take já está escolhido em outro trecho. Selecione um take diferente para manter a montagem variada.');
       return;
@@ -739,7 +753,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const activeBlock = timeline.find((block) => block.id === activeSegment || block.segmentId === activeSegment) || timeline[0];
   const activeSmart = smart.find((segment) => segment.id === activeBlock?.segmentId);
   const activeCandidate = activeSmart ? selectedSmartCandidate(activeSmart) : undefined;
-  const chosenElsewhere = new Set(smart.filter((segment) => segment.id !== activeSmart?.id && segment.selectedVideoId).map((segment) => segment.selectedVideoId));
+  // "Já na montagem" = o plano Smart atual + os takes StockFrame inseridos à
+  // mão, que continuam na montagem quando o plano é aplicado. Nenhum deles
+  // pode reaparecer como alternativa ou ser escolhido de novo.
+  const inMontage = manualStockFrameIds(inserts);
+  const chosenElsewhere = new Set([...smart.filter((segment) => segment.id !== activeSmart?.id && segment.selectedVideoId).map((segment) => segment.selectedVideoId), ...inMontage]);
   const alternatives = activeSmart?.candidates.filter((candidate) => candidate.video.id !== activeSmart.selectedVideoId && !chosenElsewhere.has(candidate.video.id)) || [];
   const availableVideos = useMemo(() => page.videos.filter((video) => {
     if (filters.aspectRatio && video.aspectRatio !== 'unknown' && video.aspectRatio !== filters.aspectRatio) return false;

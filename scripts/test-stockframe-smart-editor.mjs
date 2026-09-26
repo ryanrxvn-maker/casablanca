@@ -84,8 +84,50 @@ try {
   await full.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
   assert.equal(await full.getByRole('dialog').getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'Take aplicado na montagem deve manter StockFrame ON');
   await full.close();
+
+  // Take StockFrame inserido À MÃO continua na montagem quando o plano Smart
+  // é aplicado: o Smart não pode escolhê-lo de novo nem oferecê-lo como
+  // alternativa, e a biblioteca no modo "Trocar/Adicionar" o marca como usado.
+  const manual = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+  await manual.goto(process.env.STOCKFRAME_PREVIEW_URL || 'http://127.0.0.1:3100/dev/pilot-preview');
+  await manual.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
+  const md = manual.getByRole('dialog');
+  await md.getByText('Conta Premium de Teste').waitFor();
+  await md.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
+  await md.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
+  await md.getByRole('heading', { name: /takes · \d+(?:\.\d+)?% da copy/ }).waitFor({ timeout: 25_000 });
+  const firstPick = md.getByLabel('Dinâmica completa da copy').locator('[data-video-id]').first();
+  const pickedId = await firstPick.getAttribute('data-video-id');
+  const pickedTitle = (await firstPick.locator('b').innerText()).trim();
+  assert.ok(pickedId && pickedTitle, 'o Smart deve escolher ao menos um take');
+  await md.getByRole('button', { name: 'Biblioteca', exact: true }).click();
+  await md.getByPlaceholder('Buscar cenas, sintomas, ações, pessoas…').fill(pickedTitle);
+  await md.getByRole('button', { name: 'Buscar', exact: true }).click();
+  const card = md.locator('article').filter({ hasText: pickedTitle }).first();
+  await card.getByRole('button', { name: 'Inserir' }).click();
+  await md.getByRole('button', { name: /Ajustar \d+ takes/ }).waitFor({ timeout: 30_000 });
+  await md.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
+  await md.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
+  await md.getByRole('heading', { name: /takes · \d+(?:\.\d+)?% da copy/ }).waitFor({ timeout: 25_000 });
+  const replanned = await md.getByLabel('Dinâmica completa da copy').locator('[data-video-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-video-id')));
+  assert.ok(!replanned.includes(pickedId), 'o Smart não pode escolher de novo um take já inserido à mão na montagem');
+  const rows = md.getByLabel('Dinâmica completa da copy').locator('[class*="timelineRow"]');
+  for (let i = 0; i < await rows.count(); i++) {
+    await rows.nth(i).locator('[class*="segmentMain"]').click();
+    const alts = await md.locator('[class*="alternatives"] button[data-video-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-video-id')));
+    assert.ok(!alts.includes(pickedId), 'take já inserido à mão não pode aparecer como alternativa');
+  }
+  await md.getByRole('button', { name: 'Trocar take' }).first().click();
+  await md.getByText('TROCAR TAKE').waitFor();
+  await md.getByPlaceholder('Buscar cenas, sintomas, ações, pessoas…').fill(pickedTitle);
+  await md.getByRole('button', { name: 'Buscar', exact: true }).click();
+  const usedCard = md.locator('article').filter({ hasText: pickedTitle }).first();
+  await usedCard.getByRole('button', { name: 'Já no plano' }).waitFor();
+  assert.equal(await usedCard.getByRole('button', { name: 'Já no plano' }).isDisabled(), true, 'a biblioteca deve travar o take já inserido à mão');
+  await manual.close();
+
   assert.deepEqual(errors, []);
-  console.log('StockFrame Smart editor: OFF/ON, avatar gaps, add/remove without download, alternatives outside plan, edited 100% apply OK.');
+  console.log('StockFrame Smart editor: OFF/ON, avatar gaps, add/remove without download, alternatives outside plan and outside manual inserts, edited 100% apply OK.');
 } finally {
   await browser.close();
 }
