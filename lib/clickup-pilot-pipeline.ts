@@ -183,7 +183,15 @@ export type PipelineResult = {
  *  divergentes dropa o vídeo dela mas mantém o áudio → faixa de vídeo fica bem
  *  mais curta que a de áudio. Retorna null se não conseguir medir (aí o caller
  *  confia no resultado, pra não piorar). */
-async function probeAVSync(blob: Blob): Promise<{ videoSec: number; audioSec: number } | null> {
+/** Mesma tolerância do gate de sync da montagem: cauda natural de áudio do
+ *  HeyGen fica abaixo de ~0.5s; acima disso as faixas não andam juntas.
+ *  null (não deu pra medir) nunca reprova — não piora o que já passava. */
+export function avForaDeSincronia(s: { videoSec: number; audioSec: number } | null): boolean {
+  if (!s) return false;
+  return Math.abs(s.audioSec - s.videoSec) > Math.max(0.5, s.audioSec * 0.02);
+}
+
+export async function probeAVSync(blob: Blob): Promise<{ videoSec: number; audioSec: number } | null> {
   try {
     // Lê só um PREFIXO quando o blob é grande. Materializar 181MB inteiros logo
     // após um concat que já estressou a memória podia lançar RangeError/OOM → o
@@ -810,6 +818,17 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
           // Parte é curta; teto generoso por segurança (não é o tempo esperado).
           const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
           const cortado = await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label} (t${attempt})`);
+          /* ⛔ PARTE DECUPADA COM VÍDEO SOBRANDO (26.09). AD129VN-PRPB07: o
+           * corte de BODY 1 e BODY 2 saiu com a faixa de VÍDEO de 58s e 54s pra
+           * um ÁUDIO de 16s e 14s — o resto era imagem CONGELADA e muda. O gate
+           * de sync da montagem não via: ele compara o concat com as partes, e
+           * as partes já vinham tortas. A montagem saiu com 80s parados e o card
+           * disse PRONTO. Aqui a parte torta vira falha da tentativa: retry com
+           * worker limpo e, esgotado, cai no nivelado (que está íntegro). */
+          const syncCorte = await probeAVSync(cortado);
+          if (avForaDeSincronia(syncCorte)) {
+            throw new Error(`corte dessincronizado v=${syncCorte!.videoSec.toFixed(1)}s a=${syncCorte!.audioSec.toFixed(1)}s`);
+          }
           /* ⚠ SÓ DEPOIS DE O CORTE DAR CERTO (04.09). Isto era gravado ANTES
            * do `cutVideoSegments`. Quando o corte falhava nas 3 tentativas, a
            * parte seguia INTEIRA (fallback pro nivelado) — mas o zoom já tinha
@@ -842,7 +861,14 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       let cut: Blob | null = null;
       if (readClipCache && loadCachedClip && lbl) {
         try {
-          const c = await loadCachedClip('decupado', lbl);
+          let c = await loadCachedClip('decupado', lbl);
+          // Cache gravado ANTES do gate acima pode guardar parte torta (vídeo
+          // bem mais longo que o áudio). Reusar = repetir o defeito em todo
+          // RETOMAR. Descarta e corta de novo.
+          if (c && c.size > 1024 && avForaDeSincronia(await probeAVSync(c))) {
+            console.warn(`[clickup-pilot-pipeline] decup ${lbl}: cache DESSINCRONIZADO — descartado, corta de novo`);
+            c = null;
+          }
           if (c && c.size > 1024) {
             cut = c;
             console.log(`[clickup-pilot-pipeline] decup ${lbl}: CACHE HIT (pulou corte)`);
