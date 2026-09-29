@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
  *  verdade — mp4box, por exemplo — que nao sobrevive ao --module commonjs.
  *  @type {{ tsc?: string, run?: string[], tsx?: string[] }[]} */
 const ETAPAS = [
+  { tsc: "lib/clickup-pilot-config.ts lib/clickup-pilot-config.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom", run: [".test-tmp/clickup-pilot-config.test.js"] },
   { tsc: "lib/heygen-extension-bridge.ts lib/heygen-extension-version.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/heygen-extension-version.test.js"] },
   { run: ["scripts/test-pilot-economia-runtime.mjs"] },
   // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo

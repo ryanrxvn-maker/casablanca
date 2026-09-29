@@ -158,6 +158,8 @@ import { TierGate } from '@/components/TierGate';
 import {
   getPilotTeam,
   ALL_EDITORS_ID,
+  pilotPrimaryEditorId,
+  pilotMayAutoLoadEditor,
   setPilotTeam,
   getPilotEditor,
   setPilotEditor,
@@ -1685,6 +1687,7 @@ function ClickUpPilotInner() {
   const selectedTeamRef = useRef<string | null>(null);
   selectedTeamRef.current = selectedTeam;
   const [selectedEditor, setSelectedEditorState] = useState<string | null>(null);
+  const [allEditorsExplicitlyLoaded, setAllEditorsExplicitlyLoaded] = useState(false);
   const setSelectedTeam = (v: string | null) => { setSelectedTeamState(v); setPilotTeam(v); };
   const setSelectedEditor = (v: string | null) => { setSelectedEditorState(v); setPilotEditor(v); };
   useEffect(() => {
@@ -1899,7 +1902,10 @@ function ClickUpPilotInner() {
       // Volta pro fluxo de sempre: a lista é recarregada do ClickUp (se der).
       if (!filaAtiva) setTasks([]);
       setSelectedTaskIds(new Set());
-      if (hasToken && selectedTeam && selectedEditor) void loadTasks();
+      setAllEditorsExplicitlyLoaded(false);
+      // Uma escolha antiga de "todos" nunca dispara uma busca ampla ao voltar
+      // de DOCS/CREATOR. A carga ampla precisa de clique explícito nesta tela.
+      if (hasToken && selectedTeam && pilotMayAutoLoadEditor(selectedEditor)) void loadTasks();
     } else {
       const lista = tasksSinteticasDoModo(m, tasksLocaisRef.current, docsLocaisRef.current, docAtivoKey);
       if (lista.length > 0 || !filaAtiva) setTasks(lista);
@@ -3719,6 +3725,36 @@ function ClickUpPilotInner() {
     }
   }
 
+  async function loadPrimaryClickUpTasks(includeReviewOverride?: boolean): Promise<void> {
+    const ownId = authUser ? String(authUser.id) : null;
+    const editorId = pilotPrimaryEditorId(selectedEditor, ownId);
+    if (!editorId || !selectedTeam) {
+      setError('Não consegui identificar seu usuário ClickUp. Recarregue a conexão antes de buscar tasks.');
+      return;
+    }
+    if (selectedEditor === ALL_EDITORS_ID) {
+      // A ação principal é sempre segura: "minhas tasks" não reutiliza um
+      // filtro amplo deixado por outra aba/sessão. O modo amplo segue disponível
+      // no botão separado, sem apagar rascunhos ou filas existentes.
+      setSelectedEditor(editorId);
+      setPilotEditorForTeam(selectedTeam, editorId);
+      setSelectedTaskIds(new Set());
+      setSelectedTask(null);
+      setTaskDetail(null);
+    }
+    setAllEditorsExplicitlyLoaded(false);
+    await loadTasks(includeReviewOverride, { teamId: selectedTeam, editorId });
+  }
+
+  async function loadAllEditorsTasks(): Promise<void> {
+    if (selectedEditor !== ALL_EDITORS_ID) return;
+    setSelectedTaskIds(new Set());
+    setSelectedTask(null);
+    setTaskDetail(null);
+    setAllEditorsExplicitlyLoaded(true);
+    await loadTasks(undefined, { teamId: selectedTeam, editorId: ALL_EDITORS_ID });
+  }
+
   /* ========== Troca de EMPRESA (workspace) ==========
    *  Você atende duas empresas com o mesmo login do ClickUp. Trocar aqui
    *  muda de onde as tasks vêm, sem passar por /configuracoes.
@@ -3838,6 +3874,7 @@ function ClickUpPilotInner() {
       (b) => b && (!b.teamId || b.teamId === teamId),
     );
     setSwitchingTeam(true);
+    setAllEditorsExplicitlyLoaded(false);
     setSelectedTeam(teamId);
     setSelectedEditor(editor);
     setPilotEditorForTeam(teamId, editor);
@@ -3847,6 +3884,9 @@ function ClickUpPilotInner() {
     setError(null);
     if (!filaAtiva) setTasks([]);
     try {
+      // "Todos" salvo no workspace de destino não puxa tarefas de terceiros
+      // automaticamente; o botão separado exige intenção explícita.
+      if (editor === ALL_EDITORS_ID) return;
       const ok = await loadTasks(undefined, { teamId, editorId: editor });
       // Falhou (rede/token): não deixa a lista da empresa anterior no ar
       // fingindo ser a nova. Com fila ativa, mantém pra não matar o painel —
@@ -15172,11 +15212,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                      *  fica no card de quem importou doc bilíngue. */}
                   </div>
                 ) : null}
+                {selectedEditor === ALL_EDITORS_ID ? (
+                  <p role="status" className="mb-3 rounded-lg border border-amber-400/35 bg-amber-400/10 px-3 py-2 text-[12px] font-medium text-amber-100">
+                    O filtro salvo inclui tasks de outros editores. Para ver só as suas, use o botão principal. A busca de todos exige o botão separado.
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => loadTasks()}
-                    disabled={loadingTasks}
+                    onClick={() => void loadPrimaryClickUpTasks()}
+                    disabled={loadingTasks || (selectedEditor === ALL_EDITORS_ID && !authUser)}
                     className="cp-load-cta group relative overflow-hidden rounded-[14px] border border-lime/60 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-70"
                     style={{
                       fontFamily: 'var(--font-tech)',
@@ -15198,7 +15243,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             <path d="M21 12a9 9 0 1 1-9-9" />
                             <path d="M21 3v6h-6" />
                           </svg>
-                          Carregar tasks
+                          {selectedEditor === ALL_EDITORS_ID || (authUser && selectedEditor === String(authUser.id))
+                            ? 'Carregar minhas tasks'
+                            : 'Carregar tasks deste editor'}
                           <span className="transition-transform group-hover:translate-x-1">→</span>
                         </>
                       )}
@@ -15208,6 +15255,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 group-hover:translate-x-full"
                     />
                   </button>
+                  {selectedEditor === ALL_EDITORS_ID ? (
+                    <button
+                      type="button"
+                      onClick={() => void loadAllEditorsTasks()}
+                      disabled={loadingTasks}
+                      className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-100 transition hover:bg-amber-400/20 disabled:opacity-60"
+                    >
+                      Carregar tasks de todos os editores
+                    </button>
+                  ) : null}
                   {/* Toggle 3D (olho) — incluir tasks em REVISÃO na listagem.
                    *  Ícone sem texto (pedido do user). Ao alternar, recarrega
                    *  as tasks NA HORA com o valor novo (override explícito —
@@ -15216,7 +15273,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     on={includeReview}
                     onChange={(next) => {
                       setIncludeReview(next);
-                      void loadTasks(next);
+                      if (selectedEditor !== ALL_EDITORS_ID || allEditorsExplicitlyLoaded) {
+                        void loadTasks(next);
+                      }
                     }}
                     icon={<ReviewEyeIcon className="h-full w-full" />}
                     title={includeReview ? 'Lendo tasks em REVISÃO também — clique pra voltar ao filtro normal' : 'Incluir tasks em REVISÃO na listagem'}

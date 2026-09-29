@@ -25,6 +25,19 @@ const KEY_EDITOR_BY_TEAM = 'darkolab:clickup-pilot:editorId:'; // + teamId
 const KEY_EXTRA_STATUSES = 'darkolab:clickup-pilot:extra-statuses:'; // + teamId
 export const ALL_EDITORS_ID = 'all';
 
+/** A escolha ampla pode ficar salva para um lote, mas nunca deve transformar
+ *  o botão principal de carregar tasks em uma busca de outras pessoas. */
+export function pilotPrimaryEditorId(
+  configuredEditorId: string | null,
+  ownEditorId: string | null,
+): string | null {
+  return configuredEditorId === ALL_EDITORS_ID ? ownEditorId : configuredEditorId;
+}
+
+export function pilotMayAutoLoadEditor(editorId: string | null): boolean {
+  return !!editorId && editorId !== ALL_EDITORS_ID;
+}
+
 export function getPilotTeam(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(KEY_TEAM);
