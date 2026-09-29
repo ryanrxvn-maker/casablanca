@@ -172,7 +172,7 @@ export async function loadZip(
       resolve({ blobUrl: URL.createObjectURL(blob), filename: rec.filename, size: rec.size, blob });
     };
     req.onerror = () => reject(req.error);
-  });
+  }, DB_WRITE_TIMEOUT_MS);
 }
 
 export async function listZipKeys(): Promise<Array<{ key: string; filename: string; size: number; createdAt: number }>> {

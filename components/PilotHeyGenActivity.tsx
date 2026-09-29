@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
 import { logHistory, readHistory, type FileRef, type HistoryEvent } from '@/lib/history';
+import { createRecordWriter } from '@/lib/durable-records';
 import type { HistoryVideo } from '@/lib/heygen-api-direct';
 
 // The 30 ready cards recorded immediately before START on 29 Sep 2026.
@@ -23,6 +24,7 @@ export const PILOT_RECOVERY_TASKS = [
 const STARTED = Date.parse('2026-09-29T20:22:00Z');
 const TITLE = /^(AD\d+VN)_(HOOK|BODY)\s+(\d+)$/i;
 const taskKey = (name: string) => `pilot-recovery-20260929:${name.replace(/[^A-Z0-9]+/gi, '_')}`;
+const dispatchId = (name: string) => `dispatch:${taskKey(name)}:${STARTED}`;
 const labelsFor = (count: number) => ['HOOK 1', ...Array.from({ length: count - 1 }, (_, i) => `BODY ${i + 1}`)];
 const labelOf = (video: HistoryVideo) => {
   const m = video.name.match(TITLE);
@@ -84,6 +86,22 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+async function ensureRecoveryHistory() {
+  const writer = createRecordWriter('history');
+  const existing = writer.hydrate<HistoryEvent>();
+  const additions: Record<string, HistoryEvent> = {};
+  PILOT_RECOVERY_TASKS.forEach(([name, count], index) => {
+    const id = dispatchId(name);
+    if (existing[id]) return;
+    additions[id] = {
+      id, t: STARTED + index, tool: 'clickup-pilot', title: name,
+      kind: 'dispatch', meta: `Fila YouTube de 29/09 · ${count} takes planejados`,
+      channels: [{ label: 'YOUTUBE', color: '#ff3333' }],
+    };
+  });
+  if (Object.keys(additions).length) await writer.save({ ...existing, ...additions });
+}
+
 /** Rendered inside the Pilot's existing Tasks em produção list. Recovery
  * only reads existing IDs; it never submits or regenerates a HeyGen take. */
 export function PilotHeyGenActivity({ active }: { active: boolean }) {
@@ -92,6 +110,7 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
   const [availableZips, setAvailableZips] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Record<string, string>>({});
   const busyRef = useRef(new Set<string>());
+  const badZipRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     if (!active) return;
@@ -114,22 +133,24 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
     } catch (e) { console.warn('[Pilot recovery] HeyGen read failed', e); }
     const events = readHistory();
     setHistory(events);
-    const { loadZip } = await import('@/lib/zip-store');
-    const existing = new Set<string>();
+    const keys: string[] = [];
     for (const event of events) for (const ref of event.ref || []) {
       if (!PILOT_RECOVERY_TASKS.some(([name]) => event.title === `${name} entregue`)) continue;
       if (ref.via !== 'zip' || ref.label !== 'Montado') continue;
-      try {
-        const saved = await loadZip(ref.key);
-        if (saved) { existing.add(ref.key); URL.revokeObjectURL(saved.blobUrl); }
-      } catch { /* Missing local artifact must never display as Pronto. */ }
+      keys.push(ref.key);
     }
-    setAvailableZips(existing);
+    try {
+      const { zipKeysExistentes } = await import('@/lib/zip-store');
+      const found = await zipKeysExistentes(keys);
+      for (const key of badZipRef.current) found.delete(key);
+      setAvailableZips(found);
+    } catch { setAvailableZips(new Set()); }
   }, [active]);
 
   useEffect(() => {
     if (!active) return;
-    void refresh();
+    void ensureRecoveryHistory().catch(e => console.warn('[Pilot recovery] History save failed', e))
+      .then(() => void refresh());
     const timer = window.setInterval(() => void refresh(), 60_000);
     const onHistory = () => setHistory(readHistory());
     window.addEventListener('autoedit:history', onHistory);
@@ -182,6 +203,7 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
       const key = `batch:${taskKey(name)}:montado`;
       await saveZip(key, zipBlob, zipName);
+      badZipRef.current.delete(key);
       const ref: FileRef = { via: 'zip', key, name: zipName, label: 'Montado', taskId: taskKey(name) };
       logHistory({ tool: 'clickup-pilot', title: `${name} entregue`, meta: `${count} takes`, ref: [ref], channels: [{ label: 'YOUTUBE', color: '#ff3333' }] });
       setHistory(readHistory());
@@ -198,6 +220,47 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       });
     }
   }, [refresh]);
+
+  const downloadMounted = useCallback(async (
+    name: string, ref: Extract<FileRef, { via: 'zip' }>, takes: HistoryVideo[], count: number,
+  ) => {
+    if (busyRef.current.has(name)) return;
+    busyRef.current.add(name);
+    setBusy(prev => ({ ...prev, [name]: 'Lendo vídeo montado…' }));
+    let loaded = false;
+    try {
+      const [{ loadZip }, { lerEntradasDoZip, abrirEntrada }] = await Promise.all([
+        import('@/lib/zip-store'), import('@/lib/zip-entries'),
+      ]);
+      const saved = await loadZip(ref.key);
+      if (saved) {
+        try {
+          const entries = await lerEntradasDoZip(saved.blob);
+          const videos = entries?.filter(e => /\.mp4$/i.test(e.nome) && !e.nome.startsWith('__MACOSX/')) || [];
+          if (videos.length === 1) {
+            const blob = await new Response(await abrirEntrada(saved.blob, videos[0])).blob();
+            if (blob.size > 1024) {
+              downloadBlob(blob, videos[0].nome.split('/').pop() || `${name}.mp4`);
+              loaded = true;
+            }
+          }
+        } finally { URL.revokeObjectURL(saved.blobUrl); }
+      }
+    } catch (e) { console.warn('[Pilot recovery] stored montado unavailable', e); }
+    finally {
+      busyRef.current.delete(name);
+      setBusy(prev => { const next = { ...prev }; delete next[name]; return next; });
+    }
+    if (loaded) return;
+    badZipRef.current.add(ref.key);
+    setAvailableZips(prev => { const next = new Set(prev); next.delete(ref.key); return next; });
+    if (labelsFor(count).every(label => takes.some(v => labelOf(v) === label && v.status === 'completed'))) {
+      await assemble(name, takes, count);
+    } else {
+      setBusy(prev => ({ ...prev, [name]: 'Arquivo local indisponível; conferindo takes no HeyGen' }));
+      await refresh();
+    }
+  }, [assemble, refresh]);
 
   if (!active) return null;
   return <>
@@ -218,15 +281,13 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
         phase={phase} partsTotal={count} hooksTotal={1}
         partsDispatched={dispatched} partsRendered={rendered}
         message={progress || (mounted ? 'Montado salvo' : `${dispatched}/${count} takes confirmados no HeyGen`)}
+        statusLabel={mounted ? 'Pronto' : progress ? 'Conferindo entrega' : complete ? 'Takes prontos' : `${rendered}/${count} takes prontos`}
+        suppressBanner resumeTitle={complete && !mounted ? 'Montar vídeo' : 'Atualizar status do HeyGen'}
         elapsedMs={Date.now() - STARTED} allOk={!!mounted}
         isPartialDone={false} downloadBlocked={!mounted && !complete}
         montadoFilename={mounted?.name}
-        loadDeliverables={mounted ? async () => {
-          const { loadZip } = await import('@/lib/zip-store');
-          const zip = await loadZip(mounted.key);
-          return zip?.blobUrl ? [{ url: zip.blobUrl, name: mounted.name, revoke: true, blob: zip.blob }] : [];
-        } : undefined}
-        onDownload={!mounted && complete ? () => void assemble(name, takes, count) : undefined}
+        onDownload={mounted ? () => void downloadMounted(name, mounted, takes, count)
+          : complete ? () => void assemble(name, takes, count) : undefined}
         onRetomar={() => complete && !mounted ? void assemble(name, takes, count) : void refresh()}
         isRunning={phase === 'rendering' || phase === 'post'} isQueued={false}
       >

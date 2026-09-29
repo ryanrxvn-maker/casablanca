@@ -52,6 +52,10 @@ export type BatchJob3DProps = {
   progressoMotor?: number;
   /** Mensagem livre (curta, fica embaixo da barra) */
   message?: string;
+  /** Optional factual label for a recovered card whose old runner state is unavailable. */
+  statusLabel?: string;
+  suppressBanner?: boolean;
+  resumeTitle?: string;
   /** Elapsed em ms desde o start (pra mostrar tempo decorrido) */
   elapsedMs: number;
   /** Tudo OK = mostra download buttons */
@@ -499,6 +503,9 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     partsRendered,
     progressoMotor,
     message,
+    statusLabel,
+    suppressBanner = false,
+    resumeTitle = 'Retomar',
     elapsedMs,
     allOk,
     isPartialDone,
@@ -584,7 +591,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               ? 'MONTANDO'
               : 'PÓS-PRODUÇÃO'
     : null;
-  const effectiveLabel = downloadBlocked
+  const effectiveLabel = statusLabel || (downloadBlocked
     ? 'Incompleto — clica Retomar'
     : renderizando
       ? `Renderizando ${takesPendentes} take${takesPendentes === 1 ? '' : 's'} — ainda não`
@@ -594,7 +601,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
         ? `Montagem desatualizada — ${dirtyPartsCount} take${dirtyPartsCount === 1 ? '' : 's'} mudou`
         : isPartialDone
           ? 'Pronto · pós-processo parcial'
-          : postLabel || phaseInfo.label;
+          : postLabel || phaseInfo.label);
   const ringColor =
     showAsWarn ? 'border-amber-400/35'
     : phase === 'done' ? 'border-lime/35'
@@ -645,7 +652,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const friendlyMsg = humanizeMessage(message, phase);
   // Banner especial (limite diário / falha): curto, sem termo técnico, sempre
   // visível (mesmo com o card recolhido) — substitui o texto miúdo nesses casos.
-  const banner = classifyBanner(message, phase);
+  const banner = suppressBanner ? null : classifyBanner(message, phase);
   const showProgress = phase !== 'done' && phase !== 'failed';
 
   /**
@@ -1168,7 +1175,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               <Btn3D
                 icon={<IconRefresh size={16} />}
                 color="cyan"
-                title="Retomar"
+                title={resumeTitle}
                 onClick={onRetomar}
                 disabled={isRunning || (isQueued && !queuedRecoverable)}
               />
