@@ -56,6 +56,14 @@ function saveLocal(row: LocalRow) {
   // Failure is propagated: callers must never announce cloud protection on quota errors.
   localStorage.setItem(keyFor(row.kind, row.id), JSON.stringify(row));
 }
+/** Clean records already have an account copy; keeping both data and base in
+ * localStorage doubles the queue's size and can block every later checkpoint.
+ * A base snapshot is needed only while an edit is pending. */
+function compactLocalRows() {
+  for (const row of readLocal()) {
+    if (!row.pending && row.base !== null) saveLocal({ ...row, base: null });
+  }
+}
 /** Fold legacy strict-conflict snapshots into a normal pending checkpoint. */
 function reconcileLocalConflicts() {
   for (const row of readLocal()) {
@@ -91,6 +99,7 @@ export function refreshDurableRecords(): Promise<void> {
   const expectedOwner = owner;
   pulling = (async () => {
     try {
+      await locked(compactLocalRows);
       let page = 0;
       let more = true;
       while (more) {
@@ -163,6 +172,7 @@ export function createRecordWriter(kind: RecordKind) {
               row.base = null;
               row.revive = true;
             } else {
+              if (!row.pending) row.base = row.data;
               if (row.conflict) {
                 const reconciled = mergeRecord(row.base, row.recovery ?? row.data, row.data);
                 row.data = reconciled; row.base = reconciled;
@@ -242,7 +252,7 @@ async function absorb(remote: CloudRow) {
   if (local && local.revision > remote.revision) return;
   const remoteData = remote.deleted ? null : remote.payload;
   if (!local || !local.pending) {
-    saveLocal({ kind: remote.kind, id: remote.record_id, data: remoteData, base: remoteData, revision: remote.revision,
+    saveLocal({ kind: remote.kind, id: remote.record_id, data: remoteData, base: null, revision: remote.revision,
       recovery: local?.recovery, conflict: local?.conflict });
     return;
   }
@@ -286,7 +296,7 @@ export async function syncDurableRecords(): Promise<void> {
           if (current.revision > remote.revision) return;
           // Keep a new local edit that arrived while this request was in flight.
           const operationFinished = current.pending === candidate.pending;
-          saveLocal({ ...current, base: remote.payload, revision: remote.revision,
+          saveLocal({ ...current, base: operationFinished ? null : remote.payload, revision: remote.revision,
             pending: operationFinished ? undefined : current.pending,
             revive: operationFinished ? undefined : current.revive });
         });
@@ -323,6 +333,7 @@ export function initializeDurableRecords(): Promise<void> {
         const { body } = await fetchJSON(`/api/user/records?page=${page++}`);
         if (owner && owner !== body.userId) throw new Error('A conta mudou. Recarregue para usar o armazenamento da conta correta.');
         owner = body.userId;
+        if (page === 1) await locked(compactLocalRows);
         await locked(async () => { for (const remote of body.records) await absorb(remote); });
         more = body.more;
       }
@@ -331,10 +342,17 @@ export function initializeDurableRecords(): Promise<void> {
       status.legacy = !imported ? Object.keys(legacy.background).length + Object.keys(legacy.history).length : 0;
       status.ready = true;
       initError = '';
-      await locked(() => { reconcileLocalConflicts(); refreshStatus(); });
+      await locked(() => { compactLocalRows(); reconcileLocalConflicts(); refreshStatus(); });
       await syncDurableRecords();
     } catch (e) {
       initError = (e as Error).message;
+      // The authenticated GET may have identified the account before a later
+      // page or local checkpoint failed. Keep its existing local queue visible
+      // and let the normal retry repair cloud sync instead of trapping the
+      // Pilot behind a permanently unready provider.
+      if (owner) {
+        try { readLocal(); status.ready = true; } catch { /* preserve the error */ }
+      }
       notify(initError, true);
       initialization = null;
     }
