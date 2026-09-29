@@ -33,9 +33,9 @@ function matchVideos(videos: HistoryVideo[], history: HistoryEvent[]): Map<strin
   const matched = new Map<string, HistoryVideo[]>();
   const assigned = new Set<string>();
   for (const [name] of PILOT_RECOVERY_TASKS) {
-    const event = history.find(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED);
-    const ids = event?.ref?.filter((r): r is Extract<FileRef, { via: 'heygen' }> => r.via === 'heygen')
-      .flatMap(r => r.parts.map(p => p.videoId)) || [];
+    const ids = history.filter(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED)
+      .flatMap(e => e.ref || []).filter((r): r is Extract<FileRef, { via: 'heygen' }> => r.via === 'heygen')
+      .flatMap(r => r.parts.map(p => p.videoId));
     const takes = videos.filter(v => ids.includes(v.videoId));
     if (takes.length) {
       matched.set(name, takes);
@@ -89,6 +89,7 @@ function downloadBlob(blob: Blob, filename: string) {
 export function PilotHeyGenActivity({ active }: { active: boolean }) {
   const [videos, setVideos] = useState<HistoryVideo[]>([]);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
+  const [availableZips, setAvailableZips] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Record<string, string>>({});
   const busyRef = useRef(new Set<string>());
 
@@ -98,7 +99,9 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       const { listMyVideos } = await import('@/lib/heygen-api-direct');
       const found = new Map<string, HistoryVideo>();
       for (let page = 1; page <= 8; page++) {
-        const result = await listMyVideos({ limit: 300, page });
+        // HeyGen rejects limits above 100 on some accounts. A rejected page
+        // previously made every recovered card look like it had zero takes.
+        const result = await listMyVideos({ limit: 100, page });
         let added = 0;
         for (const v of result.items) {
           if (!TITLE.test(v.name) || v.createdAt < STARTED) continue;
@@ -109,7 +112,19 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       }
       setVideos([...found.values()]);
     } catch (e) { console.warn('[Pilot recovery] HeyGen read failed', e); }
-    setHistory(readHistory());
+    const events = readHistory();
+    setHistory(events);
+    const { loadZip } = await import('@/lib/zip-store');
+    const existing = new Set<string>();
+    for (const event of events) for (const ref of event.ref || []) {
+      if (!PILOT_RECOVERY_TASKS.some(([name]) => event.title === `${name} entregue`)) continue;
+      if (ref.via !== 'zip' || ref.label !== 'Montado') continue;
+      try {
+        const saved = await loadZip(ref.key);
+        if (saved) { existing.add(ref.key); URL.revokeObjectURL(saved.blobUrl); }
+      } catch { /* Missing local artifact must never display as Pronto. */ }
+    }
+    setAvailableZips(existing);
   }, [active]);
 
   useEffect(() => {
@@ -170,6 +185,7 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       const ref: FileRef = { via: 'zip', key, name: zipName, label: 'Montado', taskId: taskKey(name) };
       logHistory({ tool: 'clickup-pilot', title: `${name} entregue`, meta: `${count} takes`, ref: [ref], channels: [{ label: 'YOUTUBE', color: '#ff3333' }] });
       setHistory(readHistory());
+      setAvailableZips(prev => new Set(prev).add(key));
       downloadBlob(mp4, filename);
     } catch (e) {
       progress(`Falha na montagem: ${(e as Error)?.message || String(e)}`);
@@ -192,8 +208,8 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       const dispatched = labels.filter(label => byLabel.has(label)).length;
       const rendered = labels.filter(label => byLabel.get(label)?.status === 'completed').length;
       const complete = rendered === count;
-      const event = history.find(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED);
-      const mounted = event?.ref?.find((ref): ref is Extract<FileRef, { via: 'zip' }> => ref.via === 'zip' && ref.label === 'Montado');
+      const mounted = history.filter(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED)
+        .flatMap(e => e.ref || []).find((ref): ref is Extract<FileRef, { via: 'zip' }> => ref.via === 'zip' && ref.label === 'Montado' && availableZips.has(ref.key));
       const progress = busy[name];
       const phase = mounted ? 'done' : progress ? 'post' : takes.some(v => v.status === 'pending') ? 'rendering' : 'recoverable';
       return <BatchJobCard3D
