@@ -55,15 +55,23 @@ function loadAll(): Record<string, VoiceAvatarMapping> {
 
 function saveAll(map: Record<string, VoiceAvatarMapping>): void {
   if (typeof window === 'undefined') return;
-  // LRU eviction se passou o cap
-  const entries = Object.entries(map);
-  if (entries.length > MAX_ENTRIES) {
-    entries.sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
-    const trimmed = Object.fromEntries(entries.slice(0, MAX_ENTRIES));
-    localStorage.setItem(KEY, JSON.stringify(trimmed));
-  } else {
-    localStorage.setItem(KEY, JSON.stringify(map));
+  saveWithinQuota(KEY, map);
+}
+
+/** LocalStorage may already be near its browser quota. Keep the newest pairings
+ * that fit, without letting a cache write crash the Pilot's selected tasks. */
+function saveWithinQuota<T extends { lastUsed: number }>(key: string, map: Record<string, T>): void {
+  const entries = Object.entries(map).sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
+  let size = Math.min(entries.length, MAX_ENTRIES);
+  while (size > 0) {
+    try {
+      localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries.slice(0, size))));
+      return;
+    } catch {
+      size = Math.floor(size / 2);
+    }
   }
+  // This is an optional cache. If even one entry cannot fit, retain its old value.
 }
 
 /** Busca: dado um voice_name (ja normalizado ou nao), retorna a memoria */
@@ -138,13 +146,7 @@ function loadAvAll(): Record<string, AvatarVoiceMapping> {
 
 function saveAvAll(map: Record<string, AvatarVoiceMapping>): void {
   if (typeof window === 'undefined') return;
-  const entries = Object.entries(map);
-  if (entries.length > MAX_ENTRIES) {
-    entries.sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
-    localStorage.setItem(AV_KEY, JSON.stringify(Object.fromEntries(entries.slice(0, MAX_ENTRIES))));
-  } else {
-    localStorage.setItem(AV_KEY, JSON.stringify(map));
-  }
+  saveWithinQuota(AV_KEY, map);
 }
 
 /** Lembra a voz escolhida pra esse avatar. */
