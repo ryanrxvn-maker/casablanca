@@ -150,8 +150,10 @@ const BETRAYAL_COPY = /\b(?:traind\w*|traic\w*|infidel\w*|adulter\w*)\b/;
 const ERECTILE_SCENE = /\b(?:brox\w*|pau mole)\b/;
 const ERECTILE_MOMENT = /\b(?:brox\w*|erecao|disfuncao eretil|impotencia|potencia|desempenho sexual|sexo|desejo|libido|relacionamento|namor\w*|parceir\w*|cama)\b/;
 const NAMED_PUBLIC_FIGURE = /\b(?:vini jr|vinicius junior|neymar|cristiano ronaldo|ronaldo|messi)\b/;
-const URINARY_BLEEDING_SCENE = /\b(?:mij\w* sangu\w*|urin\w* sangu\w*|sangu\w* (?:na|ao) urin\w*|hematuria)\b/;
-const RECTAL_EXAM_SCENE = /\b(?:exame de toque|toque retal|exame retal)\b/;
+const URINARY_BLEEDING_SCENE = /(?:\b(?:mij\w*|urin\w*)\b.{0,40}\bsangu\w*\b|\bsangu\w*\b.{0,40}\b(?:mij\w*|urin\w*)\b|\bhematuria\b)/;
+const RECTAL_EXAM_SCENE = /(?:\bexame\w*\b.{0,30}\btoque\b|\btoque\b.{0,30}\bexame\w*\b|\bprosta\w*\b.{0,30}\btoque\b|\btoque\b.{0,30}\bprosta\w*\b|\btoque retal\b)/;
+const PROSTATE_EXAM_SCENE = /(?:\bexame\w*\b.{0,25}\bprosta\w*\b|\bprosta\w*\b.{0,25}\bexame\w*\b)/;
+const ERECTILE_ANATOMY_SCENE = /\b(?:erecao|ejaculacao)\b/;
 const URINARY_ACTION_SCENE = /\b(?:urin\w*|mij\w*|bexiga|jato urinario|mangueira jato)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
@@ -681,8 +683,17 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['sangue na urina não é um sintoma narrado'] };
   }
   if (RECTAL_EXAM_SCENE.test(sceneTitle)
-      && !/\b(?:exame de toque|toque retal|exame retal|exame (?:da|de) prosta\w*)\b/.test(ranking.spokenNormalized)) {
+      && !/\b(?:exame de toque|toque retal|exame retal)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['exame íntimo não é o procedimento narrado'] };
+  }
+  if (PROSTATE_EXAM_SCENE.test(sceneTitle)
+      && !/\b(?:exame\w*|teste\w*|diagnostico|avaliacao clinica)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['exame de próstata não representa este trecho'] };
+  }
+  if (ERECTILE_ANATOMY_SCENE.test(sceneTitle)
+      && !ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+      && !ERECTILE_MOMENT.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['ereção ou ejaculação não representa este momento da copy'] };
   }
   if (URINARY_ACTION_SCENE.test(sceneTitle)
       && !/\b(?:urin\w*|mij\w*|bexiga|banheiro|jato|prosta\w*)\b/.test(ranking.spokenNormalized)) {
@@ -706,7 +717,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['celular fora de um momento digital da copy'] };
   }
   if (!allowGenericFallback && ranking.callToAction
-      && !LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized) && !CTA_SCENE.test(sceneTitle)) {
+      && !CTA_SCENE.test(sceneTitle)
+      && !(LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized) && recipe)) {
     return { video, score: -100, reasons: ['chamada para assistir pede ação visual digital antes de cena genérica'] };
   }
   // Generic human imagery must still depict the action being spoken. These

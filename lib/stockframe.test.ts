@@ -753,6 +753,32 @@ const rectalCopy = { ...prostateResearch, text: 'O médico recomendou exame de t
   semanticText: 'O médico recomendou exame de toque retal.', semanticContextText: 'O médico recomendou exame de toque retal.' };
 ok(rankStockFrameVideos(rectalCopy, [prostateUnsafeCuts[1]], 10, true).length > 0,
   'exame de toque continua elegível quando narrado');
+const liveBleeding = video({ id: 'blood-urine-variant', title: 'VELHO MIJANDO MUITOO SANGUE', nicheId: 'prostata', nicheName: 'Próstata' });
+const liveTouchA = video({ id: 'touch-variant-a', title: 'EXAME DE PROSTATA TOQUE', nicheId: 'prostata', nicheName: 'Próstata' });
+const liveTouchB = video({ id: 'touch-variant-b', title: 'PROSTATA TOQUE EXAME', nicheId: 'prostata', nicheName: 'Próstata' });
+const liveProstateExam = video({ id: 'exam-variant', title: 'EXAME DE PROSTA 3', nicheId: 'prostata', nicheName: 'Próstata' });
+const pureCta = { ...prostateBase, text: 'É só clicar nesse botão aqui embaixo para assistir.',
+  semanticText: 'É só clicar nesse botão aqui embaixo para assistir.',
+  semanticContextText: 'É só clicar nesse botão aqui embaixo para assistir.' };
+const recipeCta = { ...prostateBase, text: 'Clique nesse botão para começar a fazer a receita.',
+  semanticText: 'Clique nesse botão para começar a fazer a receita.',
+  semanticContextText: 'Clique nesse botão para começar a fazer a receita.' };
+ok(rejectsBoth(prostateBathroom, liveBleeding),
+  'variação real mijando muitoo sangue também não representa urgência urinária');
+ok(rejectsBoth(prostateResearch, liveTouchA) && rejectsBoth(prostateResearch, liveTouchB),
+  'variações reais de exame de toque não representam pesquisa sem procedimento');
+ok(rejectsBoth(pureCta, liveProstateExam) && rejectsBoth(recipeCta, liveProstateExam),
+  'exame de próstata não ocupa CTA mesmo quando ele menciona receita');
+const liveErection = video({ id: 'erection-animation', title: 'ANIMAÇÃO 3D EREÇÃO E EJACULAÇÃO', nicheId: 'prostata', nicheName: 'Próstata' });
+const pastProblem = { ...prostateBase, text: 'Mas hoje tudo isso é coisa do passado.',
+  semanticText: 'Mas hoje tudo isso é coisa do passado.', semanticContextText: 'Mas hoje tudo isso é coisa do passado.' };
+ok(rejectsBoth(pastProblem, liveErection),
+  'alívio inespecífico não vira anatomia de ereção/ejaculação em copy de próstata');
+const appropriateExam = { ...prostateResearch, text: 'Refiz meus exames de próstata e o resultado melhorou.',
+  semanticText: 'Refiz meus exames de próstata e o resultado melhorou.',
+  semanticContextText: 'Refiz meus exames de próstata e o resultado melhorou.' };
+ok(rankStockFrameVideos(appropriateExam, [liveProstateExam], 10, true).length > 0,
+  'exame de próstata ainda é elegível quando o trecho realmente cita exames');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);
