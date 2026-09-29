@@ -23,6 +23,7 @@ const KEY_TEAM = 'darkolab:clickup-pilot:teamId';
 const KEY_EDITOR = 'darkolab:clickup-pilot:editorId';
 const KEY_EDITOR_BY_TEAM = 'darkolab:clickup-pilot:editorId:'; // + teamId
 const KEY_EXTRA_STATUSES = 'darkolab:clickup-pilot:extra-statuses:'; // + teamId
+export const ALL_EDITORS_ID = 'all';
 
 export function getPilotTeam(): string | null {
   if (typeof window === 'undefined') return null;

@@ -16,7 +16,7 @@ import {
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
 import { ClickUpPilotExtraStatusSection } from '@/components/ClickUpPilotExtraStatusSection';
 import { memoryCount } from '@/lib/voice-avatar-memory';
-import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditorForTeam } from '@/lib/clickup-pilot-config';
+import { ALL_EDITORS_ID, getPilotTeam, setPilotTeam, getPilotEditor, getPilotEditorForTeamStrict, setPilotEditorForTeam } from '@/lib/clickup-pilot-config';
 
 /**
  * /configuracoes/clickup-pilot — central de config do Pilot.
@@ -52,8 +52,9 @@ export default function ClickUpPilotConfigPage() {
     setPilotEditorForTeam(teamOverride ?? selectedTeam, v);
   }
   useEffect(() => {
-    setSelectedTeamState(getPilotTeam());
-    setSelectedEditorState(getPilotEditor());
+    const team = getPilotTeam();
+    setSelectedTeamState(team);
+    setSelectedEditorState(getPilotEditorForTeamStrict(team) ?? getPilotEditor());
   }, []);
 
   function flash(kind: 'ok' | 'err', msg: string) {
@@ -77,7 +78,7 @@ export default function ClickUpPilotConfigPage() {
           const b2c = t.find((x) => /b2c/i.test(x.name));
           if (b2c) setSelectedTeam(b2c.id);
         }
-        if (!selectedEditor && u) setSelectedEditor(String(u.id));
+        if (!selectedEditor && u && !getPilotEditorForTeamStrict(getPilotTeam()) && !getPilotEditor()) setSelectedEditor(String(u.id));
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoadingTeams(false));
@@ -206,6 +207,7 @@ export default function ClickUpPilotConfigPage() {
                     className="input-field"
                   >
                     <option value="">— Editor —</option>
+                    <option value={ALL_EDITORS_ID}>Todos os editores</option>
                     {authUser ? (
                       <option value={String(authUser.id)}>{authUser.username || authUser.email} (voce)</option>
                     ) : null}
