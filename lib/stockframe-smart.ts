@@ -143,6 +143,13 @@ const SOCIAL_PROOF_COPY = /\b(?:likes?|comentari\w*|comments?|viral|plataforma|p
 const SOCIAL_PROOF_SCENE = /\b(?:celular|smartphone|telefone|phone|tela|screen|rede social|social media|comentari\w*|comments?|likes?|video|apresentador|falando para camera)\b/;
 const CONFLICT_SCENE = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const CONFLICT_COPY = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
+const BETRAYAL_SCENE = /\b(?:traind\w*|traic\w*|infidel\w*|adulter\w*)\b/;
+const BETRAYAL_COPY = /\b(?:traind\w*|traic\w*|infidel\w*|adulter\w*)\b/;
+// Educational anatomy can show an erection even during a generic health
+// explanation. Only the negative/sexual metaphor needs the stricter moment.
+const ERECTILE_SCENE = /\b(?:brox\w*|pau mole)\b/;
+const ERECTILE_MOMENT = /\b(?:brox\w*|erecao|disfuncao eretil|impotencia|potencia|desempenho sexual|sexo|desejo|libido|relacionamento|namor\w*|parceir\w*|cama)\b/;
+const NAMED_PUBLIC_FIGURE = /\b(?:vini jr|vinicius junior|neymar|cristiano ronaldo|ronaldo|messi)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
 const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
@@ -638,6 +645,31 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   }
   if (CONFLICT_SCENE.test(prepared.title) && !CONFLICT_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['cena de conflito não descrita na fala'] };
+  }
+  if (BETRAYAL_SCENE.test(prepared.title) && !BETRAYAL_COPY.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['traição não representa a situação narrada'] };
+  }
+  if ((ERECTILE_SCENE.test(prepared.title) || audit?.beats.includes('broxa'))
+      && (!ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+        || (!ERECTILE_MOMENT.test(ranking.spokenNormalized)
+          && !(INVASIVE_PROCEDURE_SCENE.test(prepared.title) && INVASIVE_PROCEDURE_COPY.test(ranking.spokenNormalized))))) {
+    return { video, score: -100, reasons: ['metáfora de disfunção erétil fora do momento ED da copy'] };
+  }
+  const namedFigure = prepared.title.match(NAMED_PUBLIC_FIGURE)?.[0];
+  if (namedFigure && !ranking.spokenNormalized.includes(namedFigure)) {
+    return { video, score: -100, reasons: ['pessoa famosa não é citada neste trecho'] };
+  }
+  if (/\b(?:estabulo|cavalo|fazenda)\b/.test(prepared.title)
+      && !/\b(?:estabulo|cavalo|fazenda|rancho|haras)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['ambiente rural específico não é narrado'] };
+  }
+  if (/\b(?:nao querendo mulher|rejeitando mulher|recusando mulher)\b/.test(prepared.title)
+      && !/\b(?:mulher|esposa|namorad\w*|parceir\w*|relacionamento|desejo|rejeic\w*|recus\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['rejeição da parceira não é a ação narrada'] };
+  }
+  if (/\b(?:mostrando pacote|pacote de produto|embalagem)\b/.test(prepared.title)
+      && !/\b(?:produto|pacote|embalagem|vick|comprimido|frasco|suplemento|receita|ingrediente)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['embalagem não representa esta fala'] };
   }
   // Generic human imagery must still depict the action being spoken. These
   // two catalog scenes used to displace specialist/benefit shots on a Czech

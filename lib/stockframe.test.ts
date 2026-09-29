@@ -682,5 +682,41 @@ ok(!rankStockFrameVideos(homemadePrice, [video({ id: '14ea38fc-1649-4550-a38f-ff
   title: 'BANANA MURCHANDO DUPLO SENTIDO BROXA', nicheId: 'ed', nicheName: 'ED' })], 10, true).length,
   'preço e preparo caseiro não recebe a metáfora visual de broxa');
 
+const prostateCopy = 'A próstata inflamada causa dificuldade para urinar. Um ritual com Vick ajuda a rotina, mas o corpo não elimina microplásticos e o homem acorda para ir ao banheiro.';
+const prostateBase = { ...czechOpening, campaignText: prostateCopy, campaignNicheId: 'prostata',
+  concepts: ['urinario'], contextConcepts: ['urinario'] };
+const prostateMechanism = { ...prostateBase, text: 'O corpo não consegue quebrar nem eliminar as partículas.',
+  semanticText: 'O corpo não consegue quebrar nem eliminar as partículas.',
+  semanticContextText: 'O corpo não consegue quebrar nem eliminar as partículas.' };
+const prostateBathroom = { ...prostateBase, text: 'Voltar a mijar normalmente e esvaziar a bexiga.',
+  semanticText: 'Voltar a mijar normalmente e esvaziar a bexiga.',
+  semanticContextText: 'Voltar a mijar normalmente e esvaziar a bexiga.' };
+const prostateResearch = { ...prostateBase, text: 'Saíram pesquisas recentes que mostraram os resultados.',
+  semanticText: 'Saíram pesquisas recentes que mostraram os resultados.',
+  semanticContextText: 'Saíram pesquisas recentes que mostraram os resultados.' };
+const prostatePrice = { ...prostateBase, text: 'Ele queria que eu gastasse trinta mil.',
+  semanticText: 'Ele queria que eu gastasse trinta mil.',
+  semanticContextText: 'Ele queria que eu gastasse trinta mil.' };
+const misleadingProstateScenes = [
+  video({ id: 'prostate-betrayal', title: 'HOMEM TRAINDO A SUA NAMORADA', nicheId: 'prostata', nicheName: 'Próstata', tags: ['homem', 'problema'] }),
+  video({ id: 'prostate-broxa', title: 'DUPLO SENTIDO/BROXA', nicheId: 'prostata', nicheName: 'Próstata', tags: ['homem', 'problema'] }),
+  video({ id: 'prostate-barn', title: 'CASAL SAINDO DO ESTÁBULO', nicheId: 'prostata', nicheName: 'Próstata', tags: ['casal'] }),
+  video({ id: 'prostate-celebrity', title: 'VINI JR PASSANDO VICK NO PEITO', nicheId: 'prostata', nicheName: 'Próstata', tags: ['vick'] }),
+  video({ id: 'prostate-package', title: 'MOSTRANDO PACOTE', nicheId: 'prostata', nicheName: 'Próstata', tags: ['pesquisa'] }),
+  video({ id: 'prostate-refusal', title: 'HOMEM NAO QUERENDO MULHER', nicheId: 'prostata', nicheName: 'Próstata', tags: ['homem'] }),
+];
+ok(!rankStockFrameVideos(prostateMechanism, misleadingProstateScenes.slice(0, 4), 10, true).length
+  && !rankStockFrameGenericFallback(prostateMechanism, misleadingProstateScenes.slice(0, 4), 10).length,
+  'próstata e microplásticos não viram traição, broxa, celebridade ou estábulo nem com 100%');
+ok(!rankStockFrameVideos(prostateResearch, [misleadingProstateScenes[4]], 10, true).length,
+  'pesquisa que mostrou resultado não vira pacote mostrado por semelhança de verbo');
+ok(!rankStockFrameVideos(prostatePrice, [misleadingProstateScenes[5]], 10, true).length,
+  'preço não vira homem rejeitando mulher por semelhança de verbo');
+ok(!rankStockFrameVideos(prostateBathroom, [misleadingProstateScenes[1]], 10, true).length,
+  'sintoma urinário não recebe metáfora de falha erétil');
+ok(rankStockFrameVideos(prostateBathroom,
+  [video({ id: 'prostate-urinary', title: 'HOMEM INDO AO BANHEIRO COM URGÊNCIA', nicheId: 'prostata', nicheName: 'Próstata', tags: ['urinar', 'bexiga'] })], 10, true).length > 0,
+  'cena urinária congruente continua disponível para a copy de próstata');
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);
