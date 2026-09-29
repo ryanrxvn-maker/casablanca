@@ -6,6 +6,7 @@ import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPrevie
 import { logHistory, readHistory, type FileRef, type HistoryEvent } from '@/lib/history';
 import { createRecordWriter } from '@/lib/durable-records';
 import type { HistoryVideo } from '@/lib/heygen-api-direct';
+import { PILOT_RECOVERY_IDS } from '@/lib/pilot-recovery-ids';
 
 // The 30 ready cards recorded immediately before START on 29 Sep 2026.
 // HeyGen omits the PR code from its titles, so both copy and count matter.
@@ -35,7 +36,15 @@ const labelOf = (video: HistoryVideo) => {
 function matchVideos(videos: HistoryVideo[], history: HistoryEvent[]): Map<string, HistoryVideo[]> {
   const matched = new Map<string, HistoryVideo[]>();
   const assigned = new Set<string>();
+  for (const [name, ids] of Object.entries(PILOT_RECOVERY_IDS)) {
+    const takes = ids.filter(Boolean).map(id => videos.find(v => v.videoId === id)).filter((v): v is HistoryVideo => !!v);
+    if (takes.length) {
+      matched.set(name, takes);
+      takes.forEach(v => assigned.add(v.videoId));
+    }
+  }
   for (const [name] of PILOT_RECOVERY_TASKS) {
+    if (matched.has(name)) continue;
     const ids = history.filter(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED)
       .flatMap(e => e.ref || []).filter((r): r is Extract<FileRef, { via: 'heygen' }> => r.via === 'heygen')
       .flatMap(r => r.parts.map(p => p.videoId));
@@ -130,6 +139,28 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
           found.set(v.videoId, v);
         }
         if (!result.hasMore || !addedRaw) break;
+      }
+      const missing: Array<{ id: string; name: string; label: string }> = [];
+      for (const [name, ids] of Object.entries(PILOT_RECOVERY_IDS)) {
+        ids.forEach((id, index) => {
+          if (id && !found.has(id)) missing.push({ id, name, label: index === 0 ? 'HOOK 1' : `BODY ${index}` });
+        });
+      }
+      if (missing.length) {
+        const { getVideosStatus } = await import('@/lib/heygen-api-direct');
+        for (let i = 0; i < missing.length; i += 40) {
+          const batch = missing.slice(i, i + 40);
+          const status = await getVideosStatus(batch.map(x => x.id)).catch(() => ({} as Awaited<ReturnType<typeof getVideosStatus>>));
+          for (const { id, name, label } of batch) {
+            const s = status[id];
+            found.set(id, {
+              videoId: id, name: `${name.match(/^AD\d+VN/)?.[0]}_${label}`,
+              status: s?.status === 'failed' ? 'failed' : s?.status === 'pending' ? 'pending' : 'completed',
+              videoUrl: s?.videoUrl || null, thumbUrl: null, durationSec: null,
+              createdAt: STARTED, error: s?.error,
+            });
+          }
+        }
       }
       setVideos([...found.values()]);
     } catch (e) { console.warn('[Pilot recovery] HeyGen read failed', e); }
