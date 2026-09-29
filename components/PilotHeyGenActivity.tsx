@@ -257,6 +257,7 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
   const downloadMounted = useCallback(async (
     name: string, ref: Extract<FileRef, { via: 'zip' }>, takes: HistoryVideo[], count: number,
   ) => {
+    console.info('[Pilot recovery] download requested', name);
     if (busyRef.current.has(name)) return;
     busyRef.current.add(name);
     setBusy(prev => ({ ...prev, [name]: 'Lendo vídeo montado…' }));
@@ -266,6 +267,7 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
         import('@/lib/zip-store'), import('@/lib/zip-entries'),
       ]);
       const saved = await loadZip(ref.key);
+      console.info('[Pilot recovery] stored ZIP read', name, saved?.size ?? 0);
       if (saved) {
         try {
           const entries = await lerEntradasDoZip(saved.blob);
@@ -273,6 +275,7 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
           if (videos.length === 1) {
             const blob = await new Response(await abrirEntrada(saved.blob, videos[0])).blob();
             if (blob.size > 1024) {
+              console.info('[Pilot recovery] mounted MP4 extracted', name, blob.size);
               downloadBlob(blob, videos[0].nome.split('/').pop() || `${name}.mp4`);
               loaded = true;
             }
