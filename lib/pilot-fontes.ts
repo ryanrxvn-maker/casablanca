@@ -423,8 +423,8 @@ export function salvarAnalisesDoEscopo(
   escopo: string,
   analises: Record<string, unknown>,
   store: Armazem | null = armazem(),
-): void {
-  if (!store) return;
+): boolean {
+  if (!store) return false;
   const todas = lerTodasAnalises(store);
   if (Object.keys(analises).length === 0) delete todas[escopo];
   else todas[escopo] = analises as Record<string, AnaliseSalva>;
@@ -434,12 +434,14 @@ export function salvarAnalisesDoEscopo(
     json = JSON.stringify(todas, semImagem);
   } catch (e) {
     console.warn('[pilot-fontes] análises não serializaram (nada gravado):', e);
-    return;
+    return false;
   }
   try {
     store.setItem(ANALISES_KEY, json);
+    return true;
   } catch (e) {
     console.warn(`[pilot-fontes] análises não couberam no localStorage (${json.length} chars):`, e);
+    return false;
   }
 }
 

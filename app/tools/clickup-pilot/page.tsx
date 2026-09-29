@@ -15,6 +15,7 @@ import {
   setClickUpToken,
   listTeams,
   listTasks,
+  listTasksAll,
   getTask,
   getTaskComments,
   getCurrentUser,
@@ -156,6 +157,7 @@ import { IconClickUpPilot } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 import {
   getPilotTeam,
+  ALL_EDITORS_ID,
   setPilotTeam,
   getPilotEditor,
   setPilotEditor,
@@ -1686,8 +1688,9 @@ function ClickUpPilotInner() {
   const setSelectedTeam = (v: string | null) => { setSelectedTeamState(v); setPilotTeam(v); };
   const setSelectedEditor = (v: string | null) => { setSelectedEditorState(v); setPilotEditor(v); };
   useEffect(() => {
-    setSelectedTeamState(getPilotTeam());
-    setSelectedEditorState(getPilotEditor());
+    const team = getPilotTeam();
+    setSelectedTeamState(team);
+    setSelectedEditorState(getPilotEditorForTeamStrict(team) ?? getPilotEditor());
   }, []);
   const [loadingTeams, setLoadingTeams] = useState(false);
   // User autenticado (auto-fetch via /v2/user). Critico pra workspaces com
@@ -1728,7 +1731,7 @@ function ClickUpPilotInner() {
 
   // Quando authUser carrega + nao tem editor selecionado: auto-pick o user
   useEffect(() => {
-    if (authUser && !selectedEditor) {
+    if (authUser && !selectedEditor && !getPilotEditorForTeamStrict(selectedTeam) && !getPilotEditor()) {
       setSelectedEditor(String(authUser.id));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2128,6 +2131,38 @@ function ClickUpPilotInner() {
     restauradosRef.current.add(esc);
     creatorRestauradoRef.current = true;
     void rehidratarImagens(Object.keys(next));
+    // A sincronização da conta pode estar indisponível e o localStorage cheio.
+    // O IndexedDB já guarda os frames; nele fica também uma cópia do plano.
+    if (Object.keys(next).length === 0) {
+      idbDraftRestorePendingRef.current.add(esc);
+      void restaurarAnalisesDoIdb(esc);
+    }
+  }
+  async function restaurarAnalisesDoIdb(esc: string) {
+    try {
+      const { loadBlob } = await import('@/lib/zip-store');
+      const blob = await loadBlob(`pilot:analises:${esc}`, 'application/json');
+      console.info('[pilot] rascunho local lido', esc, blob?.size ?? 0);
+      if (!blob || escopoRef.current !== esc) return;
+      const salvas = JSON.parse(await blob.text()) as Record<string, TaskAnalysis>;
+      const validas: Record<string, TaskAnalysis> = {};
+      for (const [id, a] of Object.entries(salvas)) {
+        if (!pertenceAoEscopo(id, esc) || !a || !Array.isArray(a.roleSlots) ||
+            (a.status !== 'ready' && a.status !== 'partial' && a.status !== 'error')) continue;
+        validas[id] = a.status === 'error' ? a : {
+          ...a, status: a.roleSlots.length > 0 && a.roleSlots.every(slotPronto) ? 'ready' : 'partial',
+        };
+      }
+      if (!Object.keys(validas).length || Object.keys(taskAnalysesRef.current).length) return;
+      taskAnalysesRef.current = validas;
+      setTaskAnalyses(validas);
+      setSelectedTaskIds(new Set(Object.keys(validas)));
+      void rehidratarImagens(Object.keys(validas));
+    } catch (err) {
+      console.warn('[pilot] rascunho do IndexedDB não pôde ser restaurado:', err);
+    } finally {
+      idbDraftRestorePendingRef.current.delete(esc);
+    }
   }
   /** Slot em MODO IMAGEM restaurado vem só com `imageKey`: a imagem volta do
    *  IDB, como o RETOMAR faz, e updateRoleSlot recalcula o status. */
@@ -2194,6 +2229,10 @@ function ClickUpPilotInner() {
   const durableDraftsRef = useRef<Record<string, PilotDraftRecord>>({});
   const draftsHydratedRef = useRef(false);
   const batchHydratedRef = useRef(false);
+  const idbDraftSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const idbDraftRestorePendingRef = useRef<Set<string>>(new Set());
+  const idbDraftSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const localDraftQuotaFailedRef = useRef<Set<string>>(new Set());
 
   // A análise salva do Creator/Docs também pode chegar depois do primeiro
   // render quando a recuperação da conta demora. O evento garante que ela seja
@@ -2228,13 +2267,39 @@ function ClickUpPilotInner() {
       for (const t of tasksLocaisRef.current) if (t.modo === 'creator' && !mapa[t.id] && salvas[t.id]) mapa[t.id] = salvas[t.id];
       for (const id of Object.keys(mapa)) if (!tasksLocaisRef.current.some((t) => t.id === id)) delete mapa[id];
     }
-    if (!draftsHydratedRef.current) {
-      salvarAnalisesDoEscopo(esc, mapa);
-    } else {
+    // Tenta o fallback legado uma vez por escopo. Se a quota acabou, o IDB
+    // abaixo guarda o plano e evita repetir dezenas de falhas por lote.
+    if (!localDraftQuotaFailedRef.current.has(esc) && !salvarAnalisesDoEscopo(esc, mapa)) {
+      localDraftQuotaFailedRef.current.add(esc);
+    }
+    const semImagem = JSON.stringify(mapa, (key, value) =>
+      key === 'imageDataUrl' ? undefined : value,
+    );
+    const idbKey = `pilot:analises:${esc}`;
+    if (Object.keys(mapa).length || !idbDraftRestorePendingRef.current.has(esc)) {
+      const timer = idbDraftSaveTimersRef.current.get(esc);
+      if (timer) clearTimeout(timer);
+      idbDraftSaveTimersRef.current.set(esc, setTimeout(() => {
+        idbDraftSaveTimersRef.current.delete(esc);
+        idbDraftSaveChainRef.current = idbDraftSaveChainRef.current
+          .catch(() => {})
+          .then(async () => {
+            const { saveBlob } = await import('@/lib/zip-store');
+            await saveBlob(idbKey, new Blob([semImagem], { type: 'application/json' }), 'application/json');
+            console.info('[pilot] rascunho local salvo', esc, Object.keys(mapa).length, semImagem.length);
+          })
+          .catch((err) => console.warn('[pilot] rascunho não foi salvo no IndexedDB:', err));
+      }, 1000));
+    }
+    if (draftsHydratedRef.current) {
       const records: Record<string, PilotDraftRecord> = {};
       for (const [taskId, analysis] of Object.entries(mapa)) {
         const id = pilotDraftId(esc, taskId);
-        const a = analysis as TaskAnalysis;
+        // Frames vivem no IndexedDB pelo imageKey. Um data URL dentro de cada
+        // registro excede a cota do outbox e pode perder os 40 cards no F5.
+        const a = JSON.parse(JSON.stringify(analysis, (key, value) =>
+          key === 'imageDataUrl' ? undefined : value,
+        )) as TaskAnalysis;
         records[id] = {
           taskId: id, sourceTaskId: taskId, taskName: a.taskName,
           baseAdId: a.baseAdId || a.taskName, phase: 'draft', parts: [],
@@ -2243,13 +2308,6 @@ function ClickUpPilotInner() {
         durableDraftsRef.current[id] = records[id];
       }
       void draftWriterRef.current.save(records)
-        .then(() => {
-          // A chave monolítica antiga era a causa do estouro de quota. Só sai
-          // depois que os registros individuais foram aceitos pelo outbox.
-          if (Object.keys(records).length > 0) {
-            try { localStorage.removeItem('darkolab:clickup-pilot:analises'); } catch {}
-          }
-        })
         .catch((e) => setError((e as Error).message));
     }
   }, [taskAnalyses]);
@@ -3614,25 +3672,30 @@ function ClickUpPilotInner() {
         const seen = new Set(statuses.map((s) => s.toLowerCase()));
         for (const st of REVIEW_STATUSES) if (!seen.has(st)) statuses.push(st);
       }
-      const r = await listTasks(teamId, {
-        assigneeIds: [editorId],
-        statuses,
-        page: 0,
-        subtasks: false,
-      });
-      setTasks(r.tasks);
-      if (r.tasks.length === 0) {
+      const allEditors = editorId === ALL_EDITORS_ID;
+      const loadedTasks = allEditors
+        ? await listTasksAll(teamId, { statuses, subtasks: false })
+        : (await listTasks(teamId, {
+            assigneeIds: [editorId],
+            statuses,
+            page: 0,
+            subtasks: false,
+          })).tasks;
+      setTasks(loadedTasks);
+      if (loadedTasks.length === 0) {
         // Tenta sem filtro de status — talvez o editor tenha tasks mas com
         // status fora dos defaults
-        const r2 = await listTasks(teamId, {
-          assigneeIds: [editorId],
-          page: 0,
-          subtasks: false,
-        });
-        if (r2.tasks.length > 0) {
+        const fallbackTasks = allEditors
+          ? await listTasksAll(teamId, { subtasks: false })
+          : (await listTasks(teamId, {
+              assigneeIds: [editorId],
+              page: 0,
+              subtasks: false,
+            })).tasks;
+        if (fallbackTasks.length > 0) {
           // Coleta status existentes pra mostrar pro user
           const statusCounts = new Map<string, number>();
-          for (const t of r2.tasks) {
+          for (const t of fallbackTasks) {
             const s = t.status?.status || '?';
             statusCounts.set(s, (statusCounts.get(s) || 0) + 1);
           }
@@ -3641,10 +3704,10 @@ function ClickUpPilotInner() {
             .map(([s, c]) => `${s} (${c})`)
             .join(', ');
           setError(
-            `0 tasks com filtros atuais, mas o editor TEM ${r2.tasks.length} tasks sem filtro. Status disponiveis: ${breakdown}. Edita o filtro acima OU usa esses status.`,
+            `0 tasks com filtros atuais, mas ha ${fallbackTasks.length} tasks sem filtro. Status disponiveis: ${breakdown}. Edita o filtro acima OU usa esses status.`,
           );
         } else {
-          setError(`Editor sem tasks neste workspace. Confira se selecionou o workspace certo (atual: ${teamName ?? currentTeam?.name}).`);
+          setError(`Nenhuma task neste workspace. Confira se selecionou o workspace certo (atual: ${teamName ?? currentTeam?.name}).`);
         }
       }
       return true;
@@ -3752,7 +3815,7 @@ function ClickUpPilotInner() {
     const members = team?.members || [];
     // Sem membros visíveis (o B2C responde assim) não dá pra validar —
     // confia no salvo, e cai pro authUser quando não houver nada.
-    if (saved && (members.length === 0 || members.some((m) => String(m.user?.id) === String(saved)))) {
+    if (saved && (saved === ALL_EDITORS_ID || members.length === 0 || members.some((m) => String(m.user?.id) === String(saved)))) {
       return saved;
     }
     if (authUser) return String(authUser.id);
@@ -11872,7 +11935,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       for (const [ad, cenas] of Object.entries(plano)) {
         if (!Array.isArray(cenas) || cenas.length === 0) continue;
         // casa o AD com a task analisada (nome tipo "AD37 - GL - COD WL PL")
-        const alvo = Object.values(next).find((a) =>
+        // IDs de task permitem planos sem colisao entre lotes que usam o
+        // mesmo AD (ex.: AD47 em PRPB09 e PRWA10). Mantem AD37 legado.
+        const alvo = next[ad] || Object.values(next).find((a) =>
           new RegExp(`\\b${ad}\\b`).test(a?.baseAdId || a?.taskName || ''),
         );
         if (!alvo) { relato.push(`⚠ ${ad}: nenhuma task analisada com esse nome`); continue; }
@@ -14849,7 +14914,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
             // CREATOR e DOCS não dependem do ClickUp: estão sempre "online".
             const clickupOK = hasToken && selectedTeam && selectedEditor;
             const setupOK = modo !== 'clickup' || clickupOK;
-            const editorName = editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?';
+            const editorName = selectedEditor === ALL_EDITORS_ID
+              ? 'Todos os editores'
+              : editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?';
             return (
               <div
                 className="cp-command-center mb-5 relative overflow-hidden rounded-[18px] border p-4 md:p-5"
