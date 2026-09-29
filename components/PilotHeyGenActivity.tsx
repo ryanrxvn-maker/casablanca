@@ -20,8 +20,14 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
         const found: HistoryVideo[] = [];
         for (let page = 1; page <= 8; page++) {
           const result = await listMyVideos({ limit: 100, page });
+          if (page === 1) console.info('[Pilot] HeyGen recent projects', result.items.length, result.items.slice(0, 3).map((v) => ({ name: v.name, status: v.status, createdAt: v.createdAt })));
           if (cancelled) return;
           found.push(...result.items);
+          const latest = new Map<string, HistoryVideo>();
+          for (const video of found) {
+            if (TITLE.test(video.name) && video.createdAt >= BATCH_STARTED_AT) latest.set(video.videoId, video);
+          }
+          setVideos([...latest.values()]);
           if (!result.hasMore || result.items.some((v) => v.createdAt > 0 && v.createdAt < BATCH_STARTED_AT)) break;
         }
         const unique = new Map<string, HistoryVideo>();

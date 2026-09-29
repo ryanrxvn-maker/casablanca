@@ -1119,7 +1119,7 @@ export async function listMyVideos(opts: {
   const page = opts.page ?? 1;
   // Tenta varios endpoints — HeyGen tem inconsistencia entre v1/v2
   const candidates = [
-    `/v1/project/items?limit=${limit}&page=${page}&item_types=heygen_video&sort_key=created_ts&sort_order=desc`,
+    `/v1/project/items?limit=${limit}&page=${page}`,
     `/v1/pacific/video.list?limit=${limit}&page=${page}`,
     `/v1/video.list?limit=${limit}&page=${page}`,
     `/v2/video.list?limit=${limit}&page=${page}`,
