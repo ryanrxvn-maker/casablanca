@@ -15332,6 +15332,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               {/* A FILA aparece mesmo sem o board carregado: disparo em
                   andamento (ou o card que o histórico quer abrir) não pode
                   depender de alguém ter clicado pra carregar as tasks. */}
+              <PilotHeyGenActivity active={modo === 'clickup' && selectedTeam === '90132634310'} />
               {tasks.length > 0 || Object.keys(batchStatesVisiveis).length > 0 ? (
                 <section>
                   {tasks.length > 0 ? (
@@ -15872,8 +15873,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
                   </>
                   ) : null}
-
-                  <PilotHeyGenActivity active={modo === 'clickup' && selectedTeam === '90132634310'} />
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStatesVisiveis).length > 0 ? (
