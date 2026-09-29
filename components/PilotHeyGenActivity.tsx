@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
+import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { logHistory, readHistory, type FileRef, type HistoryEvent } from '@/lib/history';
 import { createRecordWriter } from '@/lib/durable-records';
 import type { HistoryVideo } from '@/lib/heygen-api-direct';
@@ -275,14 +276,16 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       const mounted = history.filter(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED)
         .flatMap(e => e.ref || []).find((ref): ref is Extract<FileRef, { via: 'zip' }> => ref.via === 'zip' && ref.label === 'Montado' && availableZips.has(ref.key));
       const progress = busy[name];
-      const phase = mounted ? 'done' : progress ? 'post' : takes.some(v => v.status === 'pending') ? 'rendering' : 'recoverable';
+      const phase = mounted ? 'done' : progress ? 'post' : dispatched === 0 ? 'queued'
+        : complete ? 'post' : 'rendering';
       return <BatchJobCard3D
         key={name} taskId={taskKey(name)} taskName={name}
         channels={[{ label: 'YOUTUBE', color: '#ff3333' }]}
         phase={phase} partsTotal={count} hooksTotal={1}
         partsDispatched={dispatched} partsRendered={rendered}
-        message={progress || (mounted ? 'Montado salvo' : `${dispatched}/${count} takes confirmados no HeyGen`)}
-        statusLabel={mounted ? 'Pronto' : progress ? 'Conferindo entrega' : complete ? 'Takes prontos' : `${rendered}/${count} takes prontos`}
+        message={progress || (mounted ? 'Montado salvo' : dispatched ? `${dispatched}/${count} takes confirmados no HeyGen` : '')}
+        statusLabel={mounted ? 'Pronto' : progress ? 'Montando' : dispatched === 0 ? 'Em fila'
+          : complete ? 'Montando' : 'Renderizando'}
         suppressBanner resumeTitle={complete && !mounted ? 'Montar vídeo' : 'Atualizar status do HeyGen'}
         elapsedMs={Date.now() - STARTED} allOk={!!mounted}
         isPartialDone={false} downloadBlocked={!mounted && !complete}
@@ -290,18 +293,24 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
         onDownload={mounted ? () => void downloadMounted(name, mounted, takes, count)
           : complete ? () => void assemble(name, takes, count) : undefined}
         onRetomar={() => complete && !mounted ? void assemble(name, takes, count) : void refresh()}
-        isRunning={phase === 'rendering' || phase === 'post'} isQueued={false}
+        isRunning={phase === 'rendering' || phase === 'post'} isQueued={phase === 'queued'} queuedRecoverable
       >
-        {takes.length ? <div className="grid gap-1 text-[11px] text-text-muted">
-          {labels.map(label => {
-            const take = byLabel.get(label);
-            return <div key={label}>{take
-              ? <a className="hover:text-white hover:underline" href={`https://app.heygen.com/videos/${take.videoId}`} target="_blank" rel="noreferrer">
-                  {label} · {take.status === 'completed' ? 'renderizado' : take.status === 'failed' ? 'falhou' : 'gerando'}
-                </a>
-              : <span>{label} · sem envio confirmado</span>}</div>;
-          })}
-        </div> : null}
+        {dispatched > 0 ? <>
+          <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Takes ({rendered}/{dispatched} prontos)</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+            {labels.flatMap((label, index) => {
+              const take = byLabel.get(label);
+              if (!take) return [];
+              const preview: LipsyncTake = {
+                label, status: take.status === 'unknown' ? 'processing' : take.status,
+                videoUrl: take.videoUrl, error: take.error || null,
+              };
+              return <LipsyncPreviewCard key={take.videoId} take={preview} position={index + 1}
+                total={count} percent={Math.round(rendered / count * 100)} fileBase={name.match(/^AD\d+VN/)?.[0] || name}
+                formato="9:16" />;
+            })}
+          </div>
+        </> : null}
       </BatchJobCard3D>;
     })}
   </>;
