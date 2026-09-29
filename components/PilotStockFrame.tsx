@@ -593,6 +593,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         // Provider search is relevance-paged; a verified neutral take can be
         // pushed off the first "celular" page. It is fetched only for gaps.
         const broadQueries = new Set<string>(['PESSOAS USANDO CELULAR']);
+        if (inferredNiche?.name) broadQueries.add(inferredNiche.name);
+        if (/prosta|urin|mij|bexiga|banheiro/.test(missingText)) {
+          broadQueries.add('homem urinando'); broadQueries.add('bexiga');
+        }
         if (/dinheiro|grana|preço|preco|pagar|pagamento/.test(missingText)) {
           broadQueries.add('dinheiro'); broadQueries.add('casal discutindo dinheiro');
         }
@@ -608,7 +612,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           broadQueries.add('celular'); broadQueries.add('celular clicando');
         }
         broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
-        const searches = [...broadQueries].slice(0, 8);
+        const searches = [...broadQueries].slice(0, 12);
         for (let index = 0; index < searches.length; index += 3) {
           setSmartProgress('Procurando alternativas visuais neutras para as lacunas…');
           const results = await Promise.all(searches.slice(index, index + 3).map(search => stockFrameList({

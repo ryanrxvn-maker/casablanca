@@ -79,8 +79,8 @@ const CONCEPTS: Record<string, string[]> = {
   'intestino': ['intestino', 'digestao', 'barriga inchada', 'constipacao', 'diarreia', 'microbiota', 'estomago'],
   'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
-  'saude-homem': ['prostata', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia', 'testosterona', 'libido masculina'],
-  'urinario': ['urina', 'urinar', 'bexiga', 'jato urinario', 'jato fraco', 'miccao', 'nocturia', 'ir ao banheiro'],
+  'saude-homem': ['prostata', 'prosta', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia', 'testosterona', 'libido masculina'],
+  'urinario': ['urina', 'urinar', 'mijar', 'mijando', 'bexiga', 'jato urinario', 'jato fraco', 'miccao', 'nocturia', 'ir ao banheiro'],
   'saude-mulher': ['menopausa', 'ovario', 'utero', 'menstruacao'],
   'medico': ['medico', 'doutor', 'consulta', 'hospital', 'clinica', 'diagnostico', 'exame', 'tratamento'],
   'procedimento': ['procedimento', 'cirurgia', 'agulha', 'aplicacao', 'terapia', 'laser', 'massagem', 'radiografia'],
@@ -161,7 +161,7 @@ const CTA_NEUTRAL_ACTION = /\b(?:usand\w*|olhand\w*|clic\w*|apert\w*|tocand\w*|a
 const CTA_CONFLICT_SCENE = /\b(?:toxic\w*|chor\w*|trist\w*|discut\w*|brig\w*|briga|desesper\w*|pagament\w*|pagando|paying)\b/;
 // Cross-pack recipe shots can be useful, but a different medical niche must
 // not become a source of unrelated pathology just because it mentions honey.
-const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare)\b/;
+const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prosta|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare)\b/;
 
 function ingredientsOf(value: string): string[] {
   const normalized = normalize(value);
@@ -210,7 +210,7 @@ export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockF
   const copy = normalize(parts.map((part) => part.text).join(' '));
   const aliases: [RegExp, RegExp][] = [
     [/\b(?:ed|disfuncao eretil|erecao|impotencia|potencia|desempenho sexual|erectile dysfunction|erection|impotence|potency|disfuncion erectil|ereccion|zaburzenia erekcji|erekcja|erekci|potenci|erektionsstorung)\b/, /\b(?:ed|erecao|disfuncao eretil|erectile|erekcja|ereccion)\b/],
-    [/\b(?:prostata|prostate|prostaty|prostatitis|prostatite)\b/, /\b(?:prostata|prostate)\b/],
+    [/\b(?:prosta|prostata|prostate|prostaty|prostatitis|prostatite)\b/, /\b(?:prostata|prostate)\b/],
     [/\b(?:joelho|artrose|artrite|articulac\w*|dor(?:es)? articulares?|joint pain|arthritis|dolor articular|bol stawow|gelenkschmerz)\b/, /\b(?:dores? articulares?|articulac\w*|joint|stawow|arthritis)\b/],
     [/\b(?:diabetes|diabetico|glicose|glicemia|insulina|blood sugar|glucose|azucar en sangre|cukrzyca|blutzucker)\b/, /\b(?:diabetes|diabetic|cukrzyca)\b/],
     [/\b(?:emagrec\w*|perder peso|gordura corporal|weight loss|lose weight|perdida de peso|odchudzanie|schudnac|abnehmen)\b/, /\b(?:emagrecimento|weight loss|perdida de peso|odchudzanie)\b/],
@@ -287,7 +287,7 @@ const POSITIVE_VISUAL_WORDS = new Set(['alivio', 'alegria', 'feliz', 'melhora', 
 const ANATOMY: [string, RegExp][] = [
   ['joelho', /\bjoelhos?\b/], ['ombro', /\bombros?\b/], ['quadril', /\b(?:quadril|quadris)\b/],
   ['cotovelo', /\bcotovelos?\b/], ['tornozelo', /\btornozelos?\b/], ['punho', /\bpunhos?\b/], ['pescoco', /\bpescocos?\b/],
-  ['prostata', /\b(?:prostata|prostatic[ao]s?)\b/], ['pancreas', /\b(?:pancreas|pancreatic[ao]s?)\b/],
+  ['prostata', /\b(?:prosta|prostata|prostatic[ao]s?)\b/], ['pancreas', /\b(?:pancreas|pancreatic[ao]s?)\b/],
   ['intestino', /\b(?:intestinos?|intestinal|intestinais|colon)\b/], ['estomago', /\b(?:estomago|gastric[ao]s?)\b/],
   ['cerebro', /\b(?:cerebro|cerebral|cerebrais)\b/], ['coracao', /\b(?:coracao|cardiac[ao]s?)\b/],
   ['figado', /\b(?:figado|hepatic[ao]s?)\b/], ['rim', /\b(?:rim|rins|renal|renais)\b/],

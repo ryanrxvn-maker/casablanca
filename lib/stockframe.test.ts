@@ -683,6 +683,11 @@ ok(!rankStockFrameVideos(homemadePrice, [video({ id: '14ea38fc-1649-4550-a38f-ff
   'preço e preparo caseiro não recebe a metáfora visual de broxa');
 
 const prostateCopy = 'A próstata inflamada causa dificuldade para urinar. Um ritual com Vick ajuda a rotina, mas o corpo não elimina microplásticos e o homem acorda para ir ao banheiro.';
+ok(inferStockFrameNiche([{ label: 'BODY 1', text: 'A prósta inchada me fazia mijar toda noite.' }], [
+  { id: 'ed', name: 'ED', count: 100 }, { id: 'prostata', name: 'Próstata', count: 100 },
+])?.id === 'prostata', 'copy coloquial prósta ancora a busca no pack Próstata, sem cair em ED');
+ok(planSmartStockSegments([{ label: 'BODY 1', text: 'Voltei a mijar normalmente.' }], { coverage: 100, pace: 'long' })[0].concepts.includes('urinario'),
+  'mijar é interpretado como cena urinária, não como sintoma sexual');
 const prostateBase = { ...czechOpening, campaignText: prostateCopy, campaignNicheId: 'prostata',
   concepts: ['urinario'], contextConcepts: ['urinario'] };
 const prostateMechanism = { ...prostateBase, text: 'O corpo não consegue quebrar nem eliminar as partículas.',
