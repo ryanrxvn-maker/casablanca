@@ -16,7 +16,10 @@ let queue = Promise.resolve();
 Object.defineProperty(globalThis, 'localStorage', { value: local, configurable: true });
 Object.defineProperty(globalThis, 'window', { value: new EventTarget(), configurable: true });
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: {
-  request: (_: string, fn: () => unknown) => { const result = queue.then(fn); queue = result.then(() => {}, () => {}); return result; },
+  request: (_: string, optionsOrFn: unknown, callback?: () => unknown) => {
+    const fn = (typeof optionsOrFn === 'function' ? optionsOrFn : callback) as () => unknown;
+    const result = queue.then(fn); queue = result.then(() => {}, () => {}); return result;
+  },
 } } });
 const cloud = new Map<string, any>();
 const receipts = new Map<string, any>();

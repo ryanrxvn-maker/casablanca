@@ -316,15 +316,14 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
         partsDispatched={dispatched} partsRendered={rendered}
         message={progress || (mounted ? 'Montado salvo' : dispatched ? `${dispatched}/${count} takes confirmados no HeyGen` : '')}
         statusLabel={mounted ? 'Pronto' : progress ? 'Montando' : dispatched === 0 ? 'Em fila'
-          : complete ? 'Montando' : 'Renderizando'}
+          : complete ? 'Takes prontos' : 'Renderizando'}
         suppressBanner resumeTitle={complete && !mounted ? 'Montar vídeo' : 'Atualizar status do HeyGen'}
         elapsedMs={Date.now() - STARTED} allOk={!!mounted}
         isPartialDone={false} downloadBlocked={!mounted && !complete}
         montadoFilename={mounted?.name}
-        onDownload={mounted ? () => void downloadMounted(name, mounted, takes, count)
-          : complete ? () => void assemble(name, takes, count) : undefined}
+        onDownload={mounted ? () => void downloadMounted(name, mounted, takes, count) : undefined}
         onRetomar={() => complete && !mounted ? void assemble(name, takes, count) : void refresh()}
-        isRunning={phase === 'rendering' || phase === 'post'} isQueued={phase === 'queued'} queuedRecoverable
+        isRunning={!!progress} isQueued={phase === 'queued'} queuedRecoverable
       >
         {dispatched > 0 ? <>
           <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Takes ({rendered}/{dispatched} prontos)</div>
