@@ -516,6 +516,12 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       const mechanismVideos: StockFrameVideo[] = [];
       const storyText = segments.map((segment) => segment.semanticText || segment.text).join(' ').toLowerCase();
       const sceneQueries: string[] = [];
+      if (/\b(?:lipedema|lipoedema)\b/.test(campaignText.toLowerCase())) {
+        // The provider indexes lipedema shots under Emagrecimento, not under
+        // a same-named niche. Retrieve the condition and its key beats even
+        // when a split segment only says "she", "legs" or "inflammation".
+        sceneQueries.push('pernas inchadas', 'mulher na academia');
+      }
       if (/\b(?:energia|vigor|jovem|disposi[cç][aã]o)\b/.test(storyText)) sceneQueries.push('homem ativo', 'homem sorrindo');
       if (/\b(?:testosterona|circula[cç][aã]o|fluxo sangu[ií]neo)\b/.test(storyText)) sceneQueries.push('fluxo sanguineo', 'sistema reprodutor masculino');
       if (/\b(?:mulher(?:es)?|casal|marido|esposa|relacionamento|satisfazer)\b/.test(storyText)) sceneQueries.push('casal conversando', 'homem preocupado');

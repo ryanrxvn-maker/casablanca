@@ -76,6 +76,8 @@ const CONCEPTS: Record<string, string[]> = {
   'mobilidade': ['dificuldade para andar', 'subir escada', 'caminhar', 'movimento', 'mobilidade', 'alongamento', 'fisioterapia', 'exercicio', 'levantando', 'caindo'],
   'diabetes': ['diabetes', 'glicose', 'acucar no sangue', 'insulina', 'glicemia', 'pancreas'],
   'emagrecimento': ['emagrecer', 'perder peso', 'gordura', 'balanca', 'obesidade', 'metabolismo', 'barriga', 'dieta'],
+  'lipedema': ['lipedema', 'lipoedema', 'pernas inchadas', 'perna inflamada', 'sistema linfatico'],
+  'celulite': ['celulite', 'cellulite', 'furinhos nas pernas'],
   'intestino': ['intestino', 'digestao', 'barriga inchada', 'constipacao', 'diarreia', 'microbiota', 'estomago'],
   'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
@@ -154,6 +156,9 @@ const URINARY_BLEEDING_SCENE = /(?:\b(?:mij\w*|urin\w*)\b.{0,40}\bsangu\w*\b|\bs
 const RECTAL_EXAM_SCENE = /(?:\bexame\w*\b.{0,30}\btoque\b|\btoque\b.{0,30}\bexame\w*\b|\bprosta\w*\b.{0,30}\btoque\b|\btoque\b.{0,30}\bprosta\w*\b|\btoque retal\b)/;
 const PROSTATE_EXAM_SCENE = /(?:\bexame\w*\b.{0,25}\bprosta\w*\b|\bprosta\w*\b.{0,25}\bexame\w*\b)/;
 const ERECTILE_ANATOMY_SCENE = /\b(?:erecao|ejaculacao)\b/;
+const LIPEDEMA_CAMPAIGN = /\b(?:lipedema|lipoedema)\b/;
+const LIPEDEMA_VISUAL = /\b(?:lipedema|lipoedema)\b/;
+const MEDICATION_SCENE = /\b(?:remedio|medicamento|capsula|comprimido|tomando pilulas?)\b/;
 const URINARY_ACTION_SCENE = /\b(?:urin\w*|mij\w*|bexiga|jato urinario|mangueira jato)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
@@ -208,6 +213,9 @@ export function smartStockMechanismQueries(segments: SmartStockSegment[]): strin
   }
   if (BOTANICAL.test(normalize(source))) { add('ervas plantas'); add('preparando folhas'); }
   if (!queries.length && GENERIC_RECIPE.test(normalize(source))) { add('receita caseira'); add('preparando mistura'); }
+  if (LIPEDEMA_CAMPAIGN.test(normalize(source))) {
+    add('lipedema'); add('pernas inflamadas lipedema'); add('celulite');
+  }
   return queries;
 }
 
@@ -235,6 +243,12 @@ export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockF
       const nested = niches.filter((niche) => niche.subcategories?.some((folder) => nichePattern.test(normalize(folder.name))));
       if (nested.length === 1) return nested[0];
     }
+  }
+  // The current StockFrame catalog files lipedema clips under Emagrecimento.
+  // A dedicated niche or subfolder, if added later, wins in the loop above.
+  if (LIPEDEMA_CAMPAIGN.test(copy)) {
+    const parent = niches.find((niche) => /\bemagrecimento\b/.test(normalize(niche.name)));
+    if (parent) return parent;
   }
   // A taxonomia da conta também reconhece nichos adicionados depois, sem
   // exigir nova versão da extensão para cada pasta criada pelo StockFrame.
@@ -620,6 +634,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   const smart = video.smartMetadata;
   const { campaignIngredients, herbalCampaign, queryTokens, spokenAnatomy, direction, beat } = ranking;
   const videoVisualText = visualSearchText;
+  const lipedemaCampaign = LIPEDEMA_CAMPAIGN.test(normalize(segment.campaignText || ''));
+  const lipedemaVisual = lipedemaCampaign && LIPEDEMA_VISUAL.test(sceneTitle);
   if (allowGenericFallback && ranking.callToAction && CTA_PHONE.test(prepared.title)
       && (!CTA_NEUTRAL_ACTION.test(prepared.title) || CTA_CONFLICT_SCENE.test(prepared.title))) {
     return { video, score: -100, reasons: ['celular com ação ou emoção incompatível com a chamada para assistir'] };
@@ -695,6 +711,18 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !ERECTILE_MOMENT.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['ereção ou ejaculação não representa este momento da copy'] };
   }
+  if (lipedemaCampaign && /\b(?:homem|velho|idoso)\b/.test(sceneTitle)
+      && !/\b(?:homem|senhor|marido|idoso|pai)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['personagem masculino não representa a paciente de lipedema'] };
+  }
+  if (MEDICATION_SCENE.test(sceneTitle)
+      && !/\b(?:remedio|medicamento|capsula|comprimido|pilula|farmacia|dose)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['medicação não representa esta fala'] };
+  }
+  if (/\bvideo chamativo\b/.test(sceneTitle) && !ranking.callToAction
+      && !/\b(?:video|assistir|ver na tela)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['take de vídeo genérico não ilustra a explicação clínica'] };
+  }
   if (URINARY_ACTION_SCENE.test(sceneTitle)
       && !/\b(?:urin\w*|mij\w*|bexiga|banheiro|jato|prosta\w*)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['ação urinária não representa este trecho'] };
@@ -711,7 +739,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !/\b(?:mangueira|jato|fluxo|urin\w*|mij\w*|pressao)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['metáfora de jato não representa a fala'] };
   }
-  if (!allowGenericFallback && CTA_PHONE.test(sceneTitle)
+  if (CTA_PHONE.test(sceneTitle)
       && !ranking.callToAction && !SOCIAL_PROOF_COPY.test(ranking.spokenNormalized)
       && !/\b(?:celular|telefone|tela|mensagem|internet|aplicativo|app)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['celular fora de um momento digital da copy'] };
@@ -864,7 +892,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
     const thematicEducationalHealth = /\b(?:anatomia|animacao|3d|sistema reprodutor|fluxo sanguineo)\b/.test(prepared.contentText)
       && prepared.concepts.some((concept) => concept.startsWith('saude-') && ranking.campaignConcepts.includes(concept));
-    const themeLink = videoConcepts.some((concept) => ranking.campaignConcepts.includes(concept))
+    const themeLink = lipedemaVisual || videoConcepts.some((concept) => ranking.campaignConcepts.includes(concept))
       || (healthcare && ranking.campaignIsHealth)
       || educationalAnatomy
       || thematicEducationalHealth
@@ -874,7 +902,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     const anatomyConflict = shownAnatomy.length > 0
       && !shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
     if (!allowGenericFallback || recipe || (videoDirection !== 'neutral' && !(recoveryCrossPackFallback && videoDirection === 'recovery')) || anatomyConflict
-        || !(neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth || recoveryCrossPackFallback || neutralDigitalAction) || !themeLink) {
+        || !(lipedemaVisual || neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth || recoveryCrossPackFallback || neutralDigitalAction) || !themeLink) {
       return { video, score: -100, reasons: ['sem evidência visual do trecho ou da frase de contexto'] };
     }
     score += 3;
@@ -891,6 +919,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     score += sharedConcepts.length * 8;
     reasons.push(`contexto: ${sharedConcepts.slice(0, 2).join(', ')}`);
   }
+  if (lipedemaVisual) { score += 16; reasons.push('condição da campanha visível no take'); }
   // A small topical tie-break uses the rest of the part only after local
   // evidence. Global context cannot admit an otherwise unrelated clip.
   if (lexicalEvidence || sharedConcepts.length) {

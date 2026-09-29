@@ -780,5 +780,38 @@ const appropriateExam = { ...prostateResearch, text: 'Refiz meus exames de prós
 ok(rankStockFrameVideos(appropriateExam, [liveProstateExam], 10, true).length > 0,
   'exame de próstata ainda é elegível quando o trecho realmente cita exames');
 
+const lipedemaCopy = 'A paciente tem lipedema: pernas inchadas, dor e celulite. Treinar pernas não resolve a inflamação. Ela começou um protocolo natural e voltou a subir escadas sem dor.';
+const weightLossNiche = { id: 'emagrecimento', name: 'Emagrecimento', count: 500 };
+ok(inferStockFrameNiche([{ label: 'BODY', text: lipedemaCopy }], [weightLossNiche])?.id === 'emagrecimento',
+  'copy de lipedema usa a pasta Emagrecimento onde o StockFrame cataloga esses takes');
+ok(inferStockFrameNiche([{ label: 'BODY', text: lipedemaCopy }], [weightLossNiche,
+  { id: 'lipedema', name: 'Lipedema', count: 18 }])?.id === 'lipedema',
+  'pasta dedicada Lipedema vence o fallback Emagrecimento quando aparecer');
+const lipedemaBase = { ...prostateBase, campaignText: lipedemaCopy, campaignNicheId: 'emagrecimento',
+  concepts: ['lipedema'], contextConcepts: ['lipedema'] };
+ok(smartStockMechanismQueries([lipedemaBase]).includes('lipedema'),
+  'busca global encontra takes de lipedema mesmo sem pasta dedicada');
+const swollenLegs = { ...lipedemaBase, text: 'As pernas dela estavam inchadas e doloridas.',
+  semanticText: 'As pernas dela estavam inchadas e doloridas.',
+  semanticContextText: 'As pernas dela estavam inchadas e doloridas.' };
+const lipedemaLegs = video({ id: 'lipedema-legs', title: 'PERNAS IINFLAMADAS LIPEDEMA',
+  nicheId: 'emagrecimento', nicheName: 'Emagrecimento', description: 'Pernas inflamadas com lipedema.' });
+const maleDriving = video({ id: 'male-driving', title: 'HOMEM ROMANTICO DIRIGINDO',
+  nicheId: 'emagrecimento', nicheName: 'Emagrecimento' });
+const genericPills = video({ id: 'generic-pills', title: 'VELHO/A TOMANDO REMÉDIO',
+  nicheId: 'emagrecimento', nicheName: 'Emagrecimento' });
+const pointlessPhone = video({ id: 'cellphone', title: 'IDOSAS COMPARTILHANDO CELULARES',
+  nicheId: 'emagrecimento', nicheName: 'Emagrecimento' });
+const vagueLipedema = { ...lipedemaBase, text: 'Mas não é isso. Precisamos mudar o protocolo.',
+  semanticText: 'Mas não é isso. Precisamos mudar o protocolo.',
+  semanticContextText: 'Mas não é isso. Precisamos mudar o protocolo.' };
+ok(rankStockFrameVideos(swollenLegs, [lipedemaLegs, maleDriving, genericPills], 10, true)[0]?.video.id === 'lipedema-legs',
+  'pernas inchadas recebem take da condição, não homem dirigindo nem remédio');
+ok(!rankStockFrameVideos(vagueLipedema, [maleDriving, genericPills, pointlessPhone], 10, true).length
+  && !rankStockFrameGenericFallback(vagueLipedema, [maleDriving, genericPills, pointlessPhone], 10).length,
+  'fallback do lipedema não usa homem, remédio nem celular sem ação narrada');
+ok(rankStockFrameGenericFallback(vagueLipedema, [lipedemaLegs], 10)[0]?.video.id === 'lipedema-legs',
+  'último recurso ainda pode manter 100% com take neutro da condição da campanha');
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);
