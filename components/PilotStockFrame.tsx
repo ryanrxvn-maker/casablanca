@@ -600,9 +600,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
         if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais|likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?/.test(missingText)) {
           // A busca da API pode tratar duas palavras como AND. A biblioteca
-          // real tem "CASAL IDOSO USANDO CELULAR", mas não necessariamente
-          // "celular clicando". O ranking local valida a cena depois.
-          broadQueries.add('celular'); broadQueries.add('celular clicando');
+          // real tem takes neutros como "PESSOAS USANDO CELULAR". A busca
+          // ampla por "celular" pode relegá-los à página seguinte; o título
+          // exato traz a cena à revisão e o ranking ainda valida o contexto.
+          broadQueries.add('PESSOAS USANDO CELULAR'); broadQueries.add('celular'); broadQueries.add('celular clicando');
         }
         broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
         const searches = [...broadQueries].slice(0, 8);

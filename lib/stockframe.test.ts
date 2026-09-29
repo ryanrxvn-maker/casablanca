@@ -668,6 +668,19 @@ const erectionPressure = { ...czechOpening, text: 'O pênis incha com a pressão
 ok(!rankStockFrameVideos(erectionPressure, [microplasticBlood], 10, true).length
   && !rankStockFrameGenericFallback(erectionPressure, [microplasticBlood], 10).length,
   'fluxo sanguíneo não autoriza microplásticos que a copy não menciona');
+const teaser = { ...czechOpening, text: 'Preste atenção, esta pode ser a última vez que mostro isto.',
+  semanticText: 'Preste atenção, esta pode ser a última vez que mostro isto.',
+  semanticContextText: 'Preste atenção, esta pode ser a última vez que mostro isto.' };
+const exhibition = video({ id: 'exhibition', title: 'MULHER SE EXIBINDO', nicheId: 'ed', nicheName: 'ED' });
+ok(!rankStockFrameVideos(teaser, [exhibition], 10, true).length
+  && !rankStockFrameGenericFallback(teaser, [exhibition], 10).length,
+  'frase de atenção não vira mulher se exibindo só por estar no pack ED');
+const homemadePrice = { ...czechOpening, text: 'É natural, caseiro e custa menos de cinco dólares.',
+  semanticText: 'É natural, caseiro e custa menos de cinco dólares.',
+  semanticContextText: 'É natural, caseiro e custa menos de cinco dólares.', visualBeat: 'demonstration' as const };
+ok(!rankStockFrameVideos(homemadePrice, [video({ id: '14ea38fc-1649-4550-a38f-ff2a2f87cfba',
+  title: 'BANANA MURCHANDO DUPLO SENTIDO BROXA', nicheId: 'ed', nicheName: 'ED' })], 10, true).length,
+  'preço e preparo caseiro não recebe a metáfora visual de broxa');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

@@ -135,7 +135,7 @@ const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um
 // Nonetheless, that source title is unsuitable for automatic ad selection;
 // educational words such as "ejaculação" remain governed by the visual audit.
 const EXPLICIT_STOCK_TITLE = /\b(?:transando|fazendo sexo|having sex|fucking|porn\w*|boquete|sexo oral|sexo anal|penetracao sexual)\b/;
-const SUGGESTIVE_SCENE = /\b(?:duplo sentido|safad\w*|seux\w*|sexua\w*|apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*|(?:homem|velho) com erecao)\b/;
+const SUGGESTIVE_SCENE = /\b(?:duplo sentido|safad\w*|seux\w*|sexua\w*|apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|segundas intencoes|biscoitando|exibind\w*|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*|(?:homem|velho) com erecao)\b/;
 const ED_CAMPAIGN = /\b(?:ed|disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|erectile|potency|potencia|potenci\w*|erekcja|erekci|zaburzenia erekcji|erektionsstorung|disfuncion erectil|ereccion)\b/;
 const ED_INTIMATE_MOMENT = /\b(?:casal|parceir\w*|esposa|mulher|namorad\w*|intim\w*|desejo|libido|sedu\w*|relacionamento|satisf\w*|cama|quarto|couple|partner|wife|desire|intimacy|relationship|bedroom|pareja|intimidad|kobiet\w*|zona|partnerk\w*|lozk\w*)\b/;
 const MECHANISM_DETAIL_COPY = /\b(?:valv\w*|blood|sangue|arter\w*|circula\w*|microscop\w*|fluxo|toxins?|toxina\w*|pesquisa\w*|research|studies|study|estudo\w*)\b/;
@@ -687,7 +687,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (namedExpertShowing && !expertOrDemonstrationVisible) {
     return { video, score: -100, reasons: ['a fala apresenta um especialista demonstrando, mas a cena não mostra especialista nem preparo'] };
   }
-  if (audit?.beats.includes('broxa') && (ranking.beat === 'demonstration' || ranking.localIngredients.length)) {
+  if (audit?.beats.includes('broxa') && (ranking.beat === 'demonstration' || ranking.localIngredients.length
+      || (LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized) && ranking.beat !== 'problem'))) {
     return { video, score: -100, reasons: ['metáfora de disfunção não representa preparo de ingrediente'] };
   }
   const localRecipeReference = LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized);
