@@ -7,6 +7,7 @@ import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, respo
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
+import { PilotHeyGenActivity } from '@/components/PilotHeyGenActivity';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { useAvisoContaModoImagem } from '@/components/ModoImagemContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -8892,9 +8893,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     setError(avisoJaDePe);
 
-    // 1. Normais via HeyGen Auto gated
-    setBatchStates((prev) => {
-      const next = { ...prev };
+    // 1. Normais via HeyGen Auto gated. Confirma o checkpoint ANTES de
+    // enviar qualquer take: um F5 não pode apagar um lote já disparado.
+    if (normalTasks.length > 0) {
+      if (!batchHydratedRef.current || !durabilityStatus().ready) {
+        setError('A fila ainda está sendo recuperada. Aguarde a sincronização antes de iniciar.');
+        return;
+      }
+      const next = { ...batchStatesRef.current };
       const startedAt = Date.now();
       for (const id of normalTasks) {
         // as irmãs recém-criadas ainda não estão no state deste tick
@@ -8961,8 +8967,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           finishedAt: undefined,
         } as BatchTaskState;
       }
-      return next;
-    });
+      try {
+        await batchWriterRef.current.save(next);
+      } catch (err) {
+        setError(`O lote não foi iniciado: não consegui gravar os ${normalTasks.length} cards para sobreviver ao F5. ${(err as Error).message}`);
+        return;
+      }
+      batchStatesRef.current = next;
+      setBatchStates(next);
+    }
     for (const taskId of normalTasks) {
       // Disparo pela ANÁLISE: uma edição antiga do painel de reiniciar não pode
       // continuar mandando (o par disto é o `replanManual: false` acima).
@@ -15859,6 +15872,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
                   </>
                   ) : null}
+
+                  <PilotHeyGenActivity active={modo === 'clickup' && selectedTeam === '90132634310'} />
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStatesVisiveis).length > 0 ? (
