@@ -25,9 +25,6 @@ export function DurableRecordsProvider({ children }: { children: React.ReactNode
   // React remontava a ferramenta inteira. Na Decupagem isso apagava os Files
   // da fila e fazia o clique parecer um reload/no-op em loop.
   return <>
-    <p className={state.error ? 'mx-5 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200' : 'sr-only'} aria-live="polite">
-      {state.error ? `Sincronização dos registros: ${state.message}` : ''}
-    </p>
     {/* Persistência é proteção adicional, nunca uma barreira para a ferramenta.
         Se a rede falhar no bootstrap, o estado local continua disponível e o
         usuário não pode ficar diante de uma tela vazia ao iniciar uma fila. */}
