@@ -117,17 +117,18 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
     try {
       const { listMyVideos } = await import('@/lib/heygen-api-direct');
       const found = new Map<string, HistoryVideo>();
-      for (let page = 1; page <= 8; page++) {
+      const seenRaw = new Set<string>();
+      for (let page = 1; page <= 30; page++) {
         // HeyGen rejects limits above 100 on some accounts. A rejected page
         // previously made every recovered card look like it had zero takes.
         const result = await listMyVideos({ limit: 100, page });
-        let added = 0;
+        let addedRaw = 0;
         for (const v of result.items) {
+          if (!seenRaw.has(v.videoId)) { addedRaw++; seenRaw.add(v.videoId); }
           if (!TITLE.test(v.name) || v.createdAt < STARTED) continue;
-          if (!found.has(v.videoId)) added++;
           found.set(v.videoId, v);
         }
-        if (!result.hasMore || !added) break;
+        if (!result.hasMore || !addedRaw) break;
       }
       setVideos([...found.values()]);
     } catch (e) { console.warn('[Pilot recovery] HeyGen read failed', e); }
