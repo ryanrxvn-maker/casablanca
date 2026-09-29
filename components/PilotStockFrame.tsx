@@ -523,7 +523,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         && /\b(?:casal|intimidade|desejo|esposa|parceira|relacionamento|couple|intimacy|desire|partner|wife|pareja|intimidad|partnerk)\b/.test(storyText)) {
         sceneQueries.push('casal sensual', 'casal intimidade');
       }
-      if (/\b(?:especialista|urologista|m[eé]dic[ao])\b/.test(storyText)) sceneQueries.push('urologista explicando');
+      if (/\b(?:especialista|urologista|m[eé]dic[ao]|doctor|physician|expert|dr)\b/.test(storyText)) sceneQueries.push('urologista explicando');
+      if (/\b(?:likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?)\b/.test(storyText)) {
+        sceneQueries.push('celular comentarios', 'video no celular');
+      }
       if (/\b(?:durar|aguentar|resistir)\b.{0,45}\b(?:mais|tempo|minutos|horas)\b/.test(storyText)) sceneQueries.push('casal sorrindo');
       const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])].slice(0, 12);
       for (let index = 0; index < globalQueries.length; index += 3) {

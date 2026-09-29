@@ -131,9 +131,16 @@ const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|recet
 // These describe a visible sexual act, not reproductive health. In particular,
 // "ereção", "pênis", "próstata" and educational anatomy are not exclusions.
 const EXPLICIT_SEXUAL_SCENE = /\b(?:transando|fodendo|trepando|chupando (?:o |um )?(?:pau|pinto|penis)|fazendo (?:sexo )?oral|fazendo anal|sexo anal|penetracao anal|pau defeituoso|pau mole|boquete|gemendo|sexo oral|oral sex|relacao sexual|casal em momento libidinoso|blowjob|handjob|cumshot|gangbang|porn\w*|ejaculando|ejaculacao|ejaculating|gozando|masturbando|masturbating|penetrando|fucking|having sex|sexually explicit|nude genitals|genitais expostos)\b/;
+// A checked frame can be non-explicit even under an explicit catalog title.
+// Nonetheless, that source title is unsuitable for automatic ad selection;
+// educational words such as "ejaculação" remain governed by the visual audit.
+const EXPLICIT_STOCK_TITLE = /\b(?:transando|fazendo sexo|having sex|fucking|porn\w*|boquete|sexo oral|sexo anal|penetracao sexual)\b/;
 const SUGGESTIVE_SCENE = /\b(?:duplo sentido|safad\w*|seux\w*|sexua\w*|apos relac\w*|depois da relac\w*|pegando na coxa|tocando na coxa|massag\w*|massage\w*|costas arranhad\w*|desejo com namorad\w*|surpreend\w* com tamanho|libidinos\w*|calcinha|lingerie|pelad[ao]\w*|nudez|tirando a roupa|no ato|segundas intencoes|biscoitando|hot|18|tamanho ideal|medindo o tamanho|sensual\w*|erotic\w*|(?:homem|velho) com erecao)\b/;
 const ED_CAMPAIGN = /\b(?:ed|disfuncao eretil|erecao|impotencia|potencia masculina|desempenho sexual|erectile dysfunction|erection|erectile|potency|potencia|potenci\w*|erekcja|erekci|zaburzenia erekcji|erektionsstorung|disfuncion erectil|ereccion)\b/;
-const ED_INTIMATE_MOMENT = /\b(?:casal|parceir\w*|esposa|mulher|namorad\w*|intim\w*|desejo|libido|sedu\w*|relacionamento|satisf\w*|cama|quarto|desempenho|potencia|erecao|erect\w*|couple|partner|wife|desire|intimacy|relationship|bedroom|performanc\w*|libido|pareja|intimidad|esposa|kobiet\w*|zona|partnerk\w*|lozk\w*)\b/;
+const ED_INTIMATE_MOMENT = /\b(?:casal|parceir\w*|esposa|mulher|namorad\w*|intim\w*|desejo|libido|sedu\w*|relacionamento|satisf\w*|cama|quarto|couple|partner|wife|desire|intimacy|relationship|bedroom|pareja|intimidad|kobiet\w*|zona|partnerk\w*|lozk\w*)\b/;
+const MECHANISM_DETAIL_COPY = /\b(?:valv\w*|blood|sangue|arter\w*|circula\w*|microscop\w*|fluxo|toxins?|toxina\w*|pesquisa\w*|research|studies|study|estudo\w*)\b/;
+const SOCIAL_PROOF_COPY = /\b(?:likes?|comentari\w*|comments?|viral|plataforma|platform|views?|visualiza\w*|exploded|explodiu)\b/;
+const SOCIAL_PROOF_SCENE = /\b(?:celular|smartphone|telefone|phone|tela|screen|rede social|social media|comentari\w*|comments?|likes?|video|apresentador|falando para camera)\b/;
 const CONFLICT_SCENE = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const CONFLICT_COPY = /\b(?:discut\w*|brig\w*|conflito|separac\w*|arguing|fight\w*)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
@@ -535,7 +542,8 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
   if (direction === 'distress') concepts = concepts.filter((concept) => concept !== 'emocao-positiva');
   const prepared = {
     title, taxonomy, visualText, visualSearchText, contentText,
-    explicitSexualScene: /\bed\s*18\b/.test(taxonomy) || (audit ? audit.appeal === 3 : EXPLICIT_SEXUAL_SCENE.test(contentText)),
+    explicitSexualScene: /\bed\s*18\b/.test(taxonomy) || EXPLICIT_STOCK_TITLE.test(normalize(video.title))
+      || (audit ? audit.appeal === 3 : EXPLICIT_SEXUAL_SCENE.test(contentText)),
     ingredients: audit ? audit.beats.filter((beat) => beat.startsWith('ing:')).map((beat) => beat.slice(4))
       : ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
     shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : audit ? [] : anatomyOf(video.tags.join(' ')),
@@ -654,6 +662,26 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   }
   if (campaignIngredients.length && videoIngredients.some((ingredient) => !campaignIngredients.includes(ingredient))) {
     return { video, score: -100, reasons: ['ingrediente diferente da combinação da copy'] };
+  }
+  const romanticOnly = audit
+    ? audit.beats.some((beat) => ['desejo', 'intimidade', 'satisfacao', 'romance'].includes(beat))
+      && !audit.beats.some((beat) => ['anatomia', 'sangue', 'medico', 'celula', 'prova'].includes(beat))
+    : /\b(?:casal|mulher sensual|mulher provocante|beijo|romance|romantico)\b/.test(prepared.title)
+      && !/\b(?:anatomia|sangue|medico|celula|fluxo)\b/.test(prepared.title);
+  if (MECHANISM_DETAIL_COPY.test(ranking.spokenNormalized) && romanticOnly) {
+    return { video, score: -100, reasons: ['cena de romance ou desejo não demonstra o mecanismo técnico narrado'] };
+  }
+  if (SOCIAL_PROOF_COPY.test(ranking.spokenNormalized) && !SOCIAL_PROOF_SCENE.test(prepared.visualText)) {
+    return { video, score: -100, reasons: ['fala de repercussão online pede vídeo, tela, comentários ou apresentador visível'] };
+  }
+  const namedExpertShowing = /\b(?:dr|doutor|medico|doctor|physician|urologist|especialista|expert)\b/.test(ranking.spokenNormalized)
+    && /\b(?:video|filme|recording|gravacao)\b/.test(ranking.spokenNormalized)
+    && /\b(?:mostr\w*|ensin\w*|explic\w*|show\w*|teach\w*|explain\w*)\b/.test(ranking.spokenNormalized);
+  const expertOrDemonstrationVisible = audit
+    ? audit.beats.some((beat) => ['medico', 'avatar', 'receita'].includes(beat))
+    : /\b(?:medico|doutor|doctor|physician|urologista|especialista|apresentador|prepar\w*|mistur\w*|receita)\b/.test(prepared.visualText);
+  if (namedExpertShowing && !expertOrDemonstrationVisible) {
+    return { video, score: -100, reasons: ['a fala apresenta um especialista demonstrando, mas a cena não mostra especialista nem preparo'] };
   }
   if (audit?.beats.includes('broxa') && (ranking.beat === 'demonstration' || ranking.localIngredients.length)) {
     return { video, score: -100, reasons: ['metáfora de disfunção não representa preparo de ingrediente'] };

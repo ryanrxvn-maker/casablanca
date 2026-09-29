@@ -113,6 +113,40 @@ ok(rankStockFrameVideos(auditedAnatomySegment, [video({ id: auditedAnatomyId, ti
   'anatomia educacional conferida não vira sexo explícito só pela nomenclatura da API');
 ok(!rankStockFrameVideos(auditedAnatomySegment, [video({ id: 'adult-uncurated', title: 'Casal feliz', nicheName: 'ED +18 - EM BREVE' })]).length,
   'pasta adulta permanece fora da seleção automática mesmo com título inocente');
+const intimateEdSegment = {
+  ...p100[0], text: 'Sua esposa quer ficar satisfeita no quarto.',
+  semanticText: 'Sua esposa quer ficar satisfeita no quarto.',
+  campaignText: 'Disfunção erétil e intimidade com a esposa.',
+  concepts: ['saude-homem', 'relacionamento'], campaignNicheId: undefined,
+};
+ok(!rankStockFrameVideos(intimateEdSegment, [video({ id: 'fb821c45-c733-42cb-a248-6e878734607d', title: 'MULHER TRANSANDO', nicheName: 'ED' })]).length,
+  'rótulo de ato sexual não entra na escolha automática mesmo quando o quadro isolado parece menos explícito');
+const technicalEdSegment = {
+  ...p100[0], text: 'Pesquisas mostram válvulas microscópicas que seguram o sangue no pênis durante a ereção.',
+  semanticText: 'Pesquisas mostram válvulas microscópicas que seguram o sangue no pênis durante a ereção.',
+  campaignText: 'Disfunção erétil, fluxo de sangue e bicarbonato de sódio.',
+  concepts: ['saude-homem', 'sangue', 'anatomia'], campaignNicheId: undefined,
+};
+ok(!rankStockFrameVideos(technicalEdSegment, [video({ id: '16a64fc8-39c3-4875-89a1-8a7295ed553b', title: 'DUPLO SENTIDO FRUTA / SEXO', nicheName: 'ED' })]).length,
+  'metáfora sexual não substitui explicação técnica de válvulas sanguíneas');
+const bloodMechanismSegment = {
+  ...technicalEdSegment, text: 'A mistura dissolve o acúmulo nas válvulas e o sangue fica preso.',
+  semanticText: 'A mistura dissolve o acúmulo nas válvulas e o sangue fica preso.',
+};
+ok(!rankStockFrameVideos(bloodMechanismSegment, [video({ id: '16a64fc8-39c3-4875-89a1-8a7295ed553b', title: 'DUPLO SENTIDO FRUTA / SEXO', nicheName: 'ED' })]).length,
+  'metáfora provocativa não substitui a etapa de circulação no mecanismo');
+const viralProofSegment = {
+  ...intimateEdSegment, text: 'O vídeo explodiu com milhares de likes e comentários.',
+  semanticText: 'O vídeo explodiu com milhares de likes e comentários.',
+};
+ok(!rankStockFrameVideos(viralProofSegment, [video({ id: 'irrelevant-viral', title: 'DUPLO SENTIDO AUMENTO PENIANO', nicheName: 'ED' })]).length,
+  'fala de repercussão online não recebe metáfora sexual sem tela ou apresentador');
+const physicianVideoSegment = {
+  ...technicalEdSegment, text: 'Dr. Peter Attia shows the right way in the video.',
+  semanticText: 'Dr. Peter Attia shows the right way in the video.',
+};
+ok(!rankStockFrameVideos(physicianVideoSegment, [video({ id: 'wrong-physician', title: 'ANATOMIA 3D SISTEMA MASCULINO COM BACTERIA', nicheName: 'ED' })]).length,
+  'apresentação do especialista não é ilustrada por bactéria anatômica sem médico ou preparo');
 const prostateSegment = {
   ...p100[0], text: 'A próstata inchada dificulta a passagem da urina.',
   semanticText: 'A próstata inchada dificulta a passagem da urina.',
