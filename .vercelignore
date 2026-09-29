@@ -1,0 +1,28 @@
+# Dependencias, builds e caches locais. O build da Vercel recria o necessario.
+node_modules/
+.next/
+.next-*/
+.claude/
+.agents/
+.codex/
+.test-tmp/
+.test-tmp-*/
+.verify-tmp/
+.artifacts/
+.codex-release-check-*/
+**/__pycache__/
+
+# Lotes e material de producao local; nunca fazem parte do site.
+Delegado - Elder/
+PACK 300 TAKES MEMORIA ALZHEIMER/
+
+# Artefatos de diagnostico/operacao gerados na raiz.
+/_*
+/tiny-test.mp4
+/avatares_dr_million.png
+/chrome_debug.bat
+/flow_cli.mjs
+
+# Saidas temporarias comuns.
+*.log
+*.tmp
