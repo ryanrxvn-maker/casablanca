@@ -723,5 +723,36 @@ ok(rankStockFrameVideos(prostateBathroom,
   [video({ id: 'prostate-urinary', title: 'HOMEM INDO AO BANHEIRO COM URGÊNCIA', nicheId: 'prostata', nicheName: 'Próstata', tags: ['urinar', 'bexiga'] })], 10, true).length > 0,
   'cena urinária congruente continua disponível para a copy de próstata');
 
+const prostateUnsafeCuts = [
+  video({ id: 'blood-urine', title: 'HOMEM MIJANDO SANGUEEE', nicheId: 'prostata', nicheName: 'Próstata' }),
+  video({ id: 'rectal-exam', title: 'EXAME DE TOQUE DE PROSTATA', nicheId: 'prostata', nicheName: 'Próstata' }),
+  video({ id: 'urine-animation', title: 'URINA PASSANDO PELA PROSTATA', nicheId: 'prostata', nicheName: 'Próstata' }),
+  video({ id: 'radiograph', title: 'RADIOGRAFIA', nicheId: 'prostata', nicheName: 'Próstata' }),
+  video({ id: 'sleeping-man', title: 'IDOSO DORMINDO', nicheId: 'prostata', nicheName: 'Próstata' }),
+  video({ id: 'hose', title: 'MANGUEIRA JATO FORTEE', nicheId: 'prostata', nicheName: 'Próstata' }),
+];
+const rejectsBoth = (segment: Parameters<typeof rankStockFrameVideos>[0], clip: StockFrameVideo) =>
+  !rankStockFrameVideos(segment, [clip], 10, true).length && !rankStockFrameGenericFallback(segment, [clip], 10).length;
+ok(rejectsBoth(prostateBathroom, prostateUnsafeCuts[0]),
+  'urgência urinária não inventa sangue na urina, inclusive no fallback 100%');
+ok(rejectsBoth(prostateResearch, prostateUnsafeCuts[1]),
+  'pesquisa clínica não vira exame de toque retal não citado');
+ok(rejectsBoth(prostatePrice, prostateUnsafeCuts[2]),
+  'preço de tratamento não vira animação de urina só por ser do nicho');
+ok(rejectsBoth(homemadePrice, prostateUnsafeCuts[3]),
+  'preparo caseiro não vira radiografia por proximidade médica');
+ok(rejectsBoth(prostateBathroom, prostateUnsafeCuts[4]),
+  'urgência noturna para banheiro não vira idoso dormindo');
+ok(rejectsBoth(prostateResearch, prostateUnsafeCuts[5]),
+  'resultados da pesquisa não viram metáfora de mangueira');
+const bleedingCopy = { ...prostateBathroom, text: 'Ao urinar havia sangue na urina.',
+  semanticText: 'Ao urinar havia sangue na urina.', semanticContextText: 'Ao urinar havia sangue na urina.' };
+ok(rankStockFrameVideos(bleedingCopy, [prostateUnsafeCuts[0]], 10, true).length > 0,
+  'sangue na urina permanece elegível quando a copy realmente diz isso');
+const rectalCopy = { ...prostateResearch, text: 'O médico recomendou exame de toque retal.',
+  semanticText: 'O médico recomendou exame de toque retal.', semanticContextText: 'O médico recomendou exame de toque retal.' };
+ok(rankStockFrameVideos(rectalCopy, [prostateUnsafeCuts[1]], 10, true).length > 0,
+  'exame de toque continua elegível quando narrado');
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

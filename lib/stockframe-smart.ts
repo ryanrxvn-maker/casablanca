@@ -150,6 +150,9 @@ const BETRAYAL_COPY = /\b(?:traind\w*|traic\w*|infidel\w*|adulter\w*)\b/;
 const ERECTILE_SCENE = /\b(?:brox\w*|pau mole)\b/;
 const ERECTILE_MOMENT = /\b(?:brox\w*|erecao|disfuncao eretil|impotencia|potencia|desempenho sexual|sexo|desejo|libido|relacionamento|namor\w*|parceir\w*|cama)\b/;
 const NAMED_PUBLIC_FIGURE = /\b(?:vini jr|vinicius junior|neymar|cristiano ronaldo|ronaldo|messi)\b/;
+const URINARY_BLEEDING_SCENE = /\b(?:mij\w* sangu\w*|urin\w* sangu\w*|sangu\w* (?:na|ao) urin\w*|hematuria)\b/;
+const RECTAL_EXAM_SCENE = /\b(?:exame de toque|toque retal|exame retal)\b/;
+const URINARY_ACTION_SCENE = /\b(?:urin\w*|mij\w*|bexiga|jato urinario|mangueira jato)\b/;
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
 const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
@@ -608,6 +611,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
   const prepared = prepareVideo(video);
   const { title, visualSearchText, ingredients: videoIngredients, shownAnatomy, recipe } = prepared;
+  // The visual audit can use a shorter scene label. Keep the provider's
+  // original title for safety checks: "mijando sangue" must not disappear.
+  const sceneTitle = `${normalize(video.title)} ${title}`;
   const audit = prepared.audit;
   const smart = video.smartMetadata;
   const { campaignIngredients, herbalCampaign, queryTokens, spokenAnatomy, direction, beat } = ranking;
@@ -646,30 +652,62 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (CONFLICT_SCENE.test(prepared.title) && !CONFLICT_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['cena de conflito não descrita na fala'] };
   }
-  if (BETRAYAL_SCENE.test(prepared.title) && !BETRAYAL_COPY.test(ranking.spokenNormalized)) {
+  if (BETRAYAL_SCENE.test(sceneTitle) && !BETRAYAL_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['traição não representa a situação narrada'] };
   }
-  if ((ERECTILE_SCENE.test(prepared.title) || audit?.beats.includes('broxa'))
+  if ((ERECTILE_SCENE.test(sceneTitle) || audit?.beats.includes('broxa'))
       && (!ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
         || (!ERECTILE_MOMENT.test(ranking.spokenNormalized)
           && !(INVASIVE_PROCEDURE_SCENE.test(prepared.title) && INVASIVE_PROCEDURE_COPY.test(ranking.spokenNormalized))))) {
     return { video, score: -100, reasons: ['metáfora de disfunção erétil fora do momento ED da copy'] };
   }
-  const namedFigure = prepared.title.match(NAMED_PUBLIC_FIGURE)?.[0];
+  const namedFigure = sceneTitle.match(NAMED_PUBLIC_FIGURE)?.[0];
   if (namedFigure && !ranking.spokenNormalized.includes(namedFigure)) {
     return { video, score: -100, reasons: ['pessoa famosa não é citada neste trecho'] };
   }
-  if (/\b(?:estabulo|cavalo|fazenda)\b/.test(prepared.title)
+  if (/\b(?:estabulo|cavalo|fazenda)\b/.test(sceneTitle)
       && !/\b(?:estabulo|cavalo|fazenda|rancho|haras)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['ambiente rural específico não é narrado'] };
   }
-  if (/\b(?:nao querendo mulher|rejeitando mulher|recusando mulher)\b/.test(prepared.title)
+  if (/\b(?:nao querendo mulher|rejeitando mulher|recusando mulher)\b/.test(sceneTitle)
       && !/\b(?:mulher|esposa|namorad\w*|parceir\w*|relacionamento|desejo|rejeic\w*|recus\w*)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['rejeição da parceira não é a ação narrada'] };
   }
-  if (/\b(?:mostrando pacote|pacote de produto|embalagem)\b/.test(prepared.title)
+  if (/\b(?:mostrando pacote|pacote de produto|embalagem)\b/.test(sceneTitle)
       && !/\b(?:produto|pacote|embalagem|vick|comprimido|frasco|suplemento|receita|ingrediente)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['embalagem não representa esta fala'] };
+  }
+  if (URINARY_BLEEDING_SCENE.test(sceneTitle) && !URINARY_BLEEDING_SCENE.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['sangue na urina não é um sintoma narrado'] };
+  }
+  if (RECTAL_EXAM_SCENE.test(sceneTitle)
+      && !/\b(?:exame de toque|toque retal|exame retal|exame (?:da|de) prosta\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['exame íntimo não é o procedimento narrado'] };
+  }
+  if (URINARY_ACTION_SCENE.test(sceneTitle)
+      && !/\b(?:urin\w*|mij\w*|bexiga|banheiro|jato|prosta\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['ação urinária não representa este trecho'] };
+  }
+  if (/\b(?:radiografia|raio x|raiox)\b/.test(sceneTitle)
+      && !/\b(?:radiografia|raio x|raiox|exame|diagnostico|imagem medica)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['radiografia não foi narrada'] };
+  }
+  if (/\b(?:dormind\w*|sleep\w*|adormec\w*)\b/.test(sceneTitle)
+      && !/\b(?:dorm\w*|sono|insomnia|sleep\w*|adormec\w*)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['sono não é a ação narrada'] };
+  }
+  if (/\b(?:mangueira|hose)\b/.test(sceneTitle)
+      && !/\b(?:mangueira|jato|fluxo|urin\w*|mij\w*|pressao)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['metáfora de jato não representa a fala'] };
+  }
+  if (!allowGenericFallback && CTA_PHONE.test(sceneTitle)
+      && !ranking.callToAction && !SOCIAL_PROOF_COPY.test(ranking.spokenNormalized)
+      && !/\b(?:celular|telefone|tela|mensagem|internet|aplicativo|app)\b/.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['celular fora de um momento digital da copy'] };
+  }
+  if (!allowGenericFallback && ranking.callToAction
+      && !LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized) && !CTA_SCENE.test(sceneTitle)) {
+    return { video, score: -100, reasons: ['chamada para assistir pede ação visual digital antes de cena genérica'] };
   }
   // Generic human imagery must still depict the action being spoken. These
   // two catalog scenes used to displace specialist/benefit shots on a Czech
