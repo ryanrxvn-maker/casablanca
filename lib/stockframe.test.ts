@@ -1,5 +1,7 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
 import { balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries } from './stockframe-smart';
+import { installStockFrameVisualAuditForTest, stockFrameAuditedSearchSeeds, stockFrameVisualAudit } from './stockframe-visual-audit';
+import { visualAuditEntries } from '../data/stockframe-visual-audit';
 
 let passed = 0;
 let failed = 0;
@@ -95,6 +97,41 @@ const video = (patch: Partial<StockFrameVideo> & Pick<StockFrameVideo, 'id' | 't
     downloadCost: 1, available: true, conflictingConcepts: [], matchedConcepts: [], ...rest,
   };
 };
+installStockFrameVisualAuditForTest(visualAuditEntries);
+const auditedSeeds = stockFrameAuditedSearchSeeds();
+ok(auditedSeeds.length > 1400 && auditedSeeds.every((seed) => !seed.previewUrl && !seed.posterUrl),
+  'índice visual é recuperado por ID sem expor links de mídia ou usar proxies como takes reais');
+const auditedAnatomyId = 'ebc63ee4-93b7-4492-930c-5ed5a1b7ab34';
+ok(stockFrameVisualAudit(auditedAnatomyId)?.title.includes('PÊNIS'), 'ficha visual validada é recuperada por ID');
+const auditedAnatomySegment = {
+  ...p100[0], text: 'A anatomia da ereção mostra o tecido erétil masculino.',
+  semanticText: 'A anatomia da ereção mostra o tecido erétil masculino.',
+  campaignText: 'Disfunção erétil e circulação no corpo masculino.',
+  concepts: ['saude-homem', 'anatomia'], campaignNicheId: undefined,
+};
+ok(rankStockFrameVideos(auditedAnatomySegment, [video({ id: auditedAnatomyId, title: 'ANIMAÇÃO 3D EREÇÃO E EJACULAÇÃO', nicheName: 'Prostata' })]).length === 1,
+  'anatomia educacional conferida não vira sexo explícito só pela nomenclatura da API');
+ok(!rankStockFrameVideos(auditedAnatomySegment, [video({ id: 'adult-uncurated', title: 'Casal feliz', nicheName: 'ED +18 - EM BREVE' })]).length,
+  'pasta adulta permanece fora da seleção automática mesmo com título inocente');
+const prostateSegment = {
+  ...p100[0], text: 'A próstata inchada dificulta a passagem da urina.',
+  semanticText: 'A próstata inchada dificulta a passagem da urina.',
+  campaignText: 'Problemas da próstata e dificuldade para urinar.',
+  concepts: ['saude-homem', 'urinario', 'anatomia'], campaignNicheId: undefined,
+};
+ok(!rankStockFrameVideos(prostateSegment, [video({ id: '0d232461-f137-4cb5-b266-c62e3a27f651', title: 'PROSTATA 3D ANATOMIA', nicheName: 'Prostata' })]).length,
+  'rótulo próstata não transforma uma ilustração de útero em cena prostática');
+ok(!rankStockFrameVideos(prostateSegment, [video({ id: 'c0df323c-db60-445e-b913-aabd4e0aa68c', title: 'PROSTATA DEFORMADA COM TUMOR', nicheName: 'Prostata' })]).length,
+  'rótulo próstata não transforma intestinos em cena prostática');
+const bananaMetaphorId = '556fb083-ed58-4927-88a8-bf3b75108f96';
+const bananaRecipeSegment = {
+  ...p100[0], text: 'Misture banana e mel nesta receita caseira.',
+  semanticText: 'Misture banana e mel nesta receita caseira.',
+  campaignText: 'Receita de banana com mel.', concepts: ['alimentacao'],
+  campaignNicheId: undefined, visualBeat: 'demonstration' as const,
+};
+ok(!rankStockFrameVideos(bananaRecipeSegment, [video({ id: bananaMetaphorId, title: 'BANANA FLACIDA MOLE BROXA' })]).length,
+  'banana como metáfora de falha erétil não é tomada por demonstração da receita');
 const catalog: StockFrameVideo[] = [
   video({ id: 'knee', title: 'Idosa com dor no joelho subindo escada', description: 'Dificuldade para andar por inflamação articular', tags: ['joelho', 'dor', 'escada'], downloads: 90 }),
   video({ id: 'money', title: 'Homem contando dinheiro no celular', tags: ['dinheiro', 'aplicativo', 'pagamento'], downloads: 400 }),

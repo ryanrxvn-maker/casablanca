@@ -1,4 +1,5 @@
 import { stockFrameSearchText, type StockFrameNiche, type StockFrameVideo } from './stockframe';
+import { stockFrameVisualAudit, type StockFrameVisualAudit } from './stockframe-visual-audit';
 
 export type SmartCoverage = 30 | 60 | 100;
 export type SmartPace = 'fast' | 'long' | 'adaptive';
@@ -79,6 +80,7 @@ const CONCEPTS: Record<string, string[]> = {
   'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
   'saude-homem': ['prostata', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia', 'testosterona', 'libido masculina'],
+  'urinario': ['urina', 'urinar', 'bexiga', 'jato urinario', 'jato fraco', 'miccao', 'nocturia', 'ir ao banheiro'],
   'saude-mulher': ['menopausa', 'ovario', 'utero', 'menstruacao'],
   'medico': ['medico', 'doutor', 'consulta', 'hospital', 'clinica', 'diagnostico', 'exame', 'tratamento'],
   'procedimento': ['procedimento', 'cirurgia', 'agulha', 'aplicacao', 'terapia', 'laser', 'massagem', 'radiografia'],
@@ -494,41 +496,60 @@ type PreparedVideo = {
   direction: NonNullable<SmartStockSegment['narrativeDirection']>;
   recipe: boolean;
   fields: { tokens: string[]; weight: number; visual: boolean }[];
+  audit?: StockFrameVisualAudit;
 };
 
 const preparedVideos = new WeakMap<StockFrameVideo, PreparedVideo>();
+const AUDITED_BEAT_WORDS: Record<string, string> = {
+  broxa: 'falha eretil impotencia disfuncao erecao mole frustracao',
+  potencia: 'erecao potencia firme desempenho sexual vigor',
+  desejo: 'desejo atracao seducao parceira',
+  intimidade: 'casal intimidade relacionamento cama',
+  satisfacao: 'satisfacao prazer mulher satisfeita casal feliz',
+  vergonha: 'vergonha frustracao decepcao',
+  sangue: 'fluxo sanguineo circulacao sangue',
+  alivio: 'alivio melhora recuperacao',
+  urina: 'urina urinar bexiga jato urinario miccao banheiro noturno',
+};
 
 function prepareVideo(video: StockFrameVideo): PreparedVideo {
   const cached = preparedVideos.get(video);
   if (cached) return cached;
-  const title = normalize(video.title);
-  const tags = normalize(video.tags.join(' '));
-  const description = normalize(video.description);
+  const audit = stockFrameVisualAudit(video.id);
+  const auditedBeats = audit?.beats.map((beat) => AUDITED_BEAT_WORDS[beat] || beat.replace(/^ing:/, '')).join(' ') || '';
+  // A checked scene description outranks sometimes misleading catalog tags.
+  // Unknown IDs retain their existing provider-metadata path unchanged.
+  const title = normalize(audit?.title || video.title);
+  const tags = normalize(audit ? auditedBeats : video.tags.join(' '));
+  const description = normalize(audit ? audit.title : video.description);
   const taxonomy = normalize(`${video.nicheName || ''} ${video.subcategoryName || ''}`);
   const smart = video.smartMetadata;
-  const visualText = normalize([smart?.summary, smart?.concepts.join(' '), smart?.subjects.join(' '), smart?.actions.join(' '), smart?.objects.join(' '), smart?.bodyParts.join(' '), smart?.positiveKeywords.join(' ')].filter(Boolean).join(' '));
-  const visualSearchText = normalize(stockFrameSearchText(video));
+  const visualText = normalize(audit ? `${audit.title} ${auditedBeats}` : [smart?.summary, smart?.concepts.join(' '), smart?.subjects.join(' '), smart?.actions.join(' '), smart?.objects.join(' '), smart?.bodyParts.join(' '), smart?.positiveKeywords.join(' ')].filter(Boolean).join(' '));
+  const visualSearchText = normalize(audit ? `${audit.title} ${auditedBeats}` : stockFrameSearchText(video));
   const contentText = [title, tags, description, visualText].filter(Boolean).join(' ');
-  const titleAnatomy = anatomyOf(video.title);
-  const descriptionAnatomy = anatomyOf(video.description);
+  const titleAnatomy = anatomyOf(audit?.title || video.title);
+  const descriptionAnatomy = audit ? [] : anatomyOf(video.description);
   const direction = narrativeDirection(contentText);
   let concepts = conceptsOf(contentText);
   if (direction === 'recovery') concepts = [...new Set([...concepts.filter((concept) => concept !== 'emocao-negativa'), 'emocao-positiva'])];
   if (direction === 'distress') concepts = concepts.filter((concept) => concept !== 'emocao-positiva');
   const prepared = {
     title, taxonomy, visualText, visualSearchText, contentText,
-    explicitSexualScene: EXPLICIT_SEXUAL_SCENE.test(contentText),
-    ingredients: ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
-    shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : anatomyOf(video.tags.join(' ')),
+    explicitSexualScene: /\bed\s*18\b/.test(taxonomy) || (audit ? audit.appeal === 3 : EXPLICIT_SEXUAL_SCENE.test(contentText)),
+    ingredients: audit ? audit.beats.filter((beat) => beat.startsWith('ing:')).map((beat) => beat.slice(4))
+      : ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
+    shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : audit ? [] : anatomyOf(video.tags.join(' ')),
     concepts, direction,
-    recipe: /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0,
+    recipe: audit ? audit.beats.includes('receita') || audit.beats.some((beat) => beat.startsWith('ing:'))
+      : /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0,
     fields: [
-      { tokens: meaningful(title), weight: 4.4, visual: true },
-      { tokens: meaningful(tags), weight: 3.5, visual: true },
+      { tokens: meaningful(title), weight: audit ? 5.2 : 4.4, visual: true },
+      { tokens: meaningful(tags), weight: audit ? 4.4 : 3.5, visual: true },
       { tokens: meaningful(taxonomy), weight: 2.8, visual: false },
       { tokens: meaningful(description), weight: 1.4, visual: true },
-      { tokens: meaningful(visualText), weight: 3.8, visual: true },
+      { tokens: meaningful(visualText), weight: audit ? 4.6 : 3.8, visual: true },
     ],
+    audit,
   };
   preparedVideos.set(video, prepared);
   return prepared;
@@ -572,6 +593,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
   const prepared = prepareVideo(video);
   const { title, visualSearchText, ingredients: videoIngredients, shownAnatomy, recipe } = prepared;
+  const audit = prepared.audit;
   const smart = video.smartMetadata;
   const { campaignIngredients, herbalCampaign, queryTokens, spokenAnatomy, direction, beat } = ranking;
   const videoVisualText = visualSearchText;
@@ -582,7 +604,10 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (prepared.explicitSexualScene) {
     return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
   }
-  if (SUGGESTIVE_SCENE.test(prepared.title)) {
+  if (audit?.flags.includes('CRIANCA') && ED_CAMPAIGN.test(normalize(segment.campaignText || ''))) {
+    return { video, score: -100, reasons: ['criança não entra em criativo de desempenho sexual'] };
+  }
+  if (audit ? audit.appeal >= 2 : SUGGESTIVE_SCENE.test(prepared.title)) {
     const edContext = ED_CAMPAIGN.test(normalize(segment.campaignText || ''));
     const intimateMoment = ED_INTIMATE_MOMENT.test(ranking.spokenNormalized);
     const unsuitable = /\b(?:pelad\w*|nudez|nude|naked|genitais|lingerie|calcinha|apos relac\w*|depois da relac\w*|no ato|tamanho ideal|medindo o tamanho)\b/.test(prepared.title);
@@ -629,6 +654,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   }
   if (campaignIngredients.length && videoIngredients.some((ingredient) => !campaignIngredients.includes(ingredient))) {
     return { video, score: -100, reasons: ['ingrediente diferente da combinação da copy'] };
+  }
+  if (audit?.beats.includes('broxa') && (ranking.beat === 'demonstration' || ranking.localIngredients.length)) {
+    return { video, score: -100, reasons: ['metáfora de disfunção não representa preparo de ingrediente'] };
   }
   const localRecipeReference = LOCAL_RECIPE_REFERENCE.test(ranking.spokenNormalized);
   const namedRecipeIngredients = ranking.localIngredients.length ? ranking.localIngredients
@@ -771,6 +799,15 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (video.matchedConcepts.length) score += Math.min(6, video.matchedConcepts.length * 2);
   if (smart?.adSuitabilityScore !== undefined) score += Math.max(0, Math.min(1, smart.adSuitabilityScore)) * 2;
   if (smart?.containsText) score -= 5;
+  if (audit) {
+    if (audit.flags.includes('Q')) score -= 14;
+    if (audit.flags.includes('T')) score -= 6;
+    if (audit.flags.includes('E')) score -= 3;
+    if (audit.flags.includes('IA')) score -= 1.5;
+    if (audit.appeal === 2 && ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+      && ED_INTIMATE_MOMENT.test(ranking.spokenNormalized)) score += 5;
+    reasons.push('cena conferida visualmente');
+  }
   if (allowGenericFallback) {
     // A campanha ser de saúde não transforma um CTA ou frase de ligação em
     // explicação anatômica. É uma preferência editorial, não um veto: quando

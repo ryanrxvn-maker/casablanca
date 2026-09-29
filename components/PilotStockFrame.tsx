@@ -29,6 +29,7 @@ import {
   type SmartStockSegment,
   type StockFrameCopyPart,
 } from '@/lib/stockframe-smart';
+import { loadStockFrameVisualAudit, stockFrameAuditedSearchSeeds } from '@/lib/stockframe-visual-audit';
 import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { enrichStockFrameVideos, mergeStockFrameMediaUrls, mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo, type StockFrameSmartQuery } from '@/lib/stockframe';
@@ -461,9 +462,13 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     operationLocked.current = true;
     setSmartBusy(true); setError(''); setNotice(''); setSmart([]);
     try {
+      // Start the small local visual index in parallel with translation. A
+      // chunk failure must never prevent the existing StockFrame search path.
+      const visualAuditReady = loadStockFrameVisualAudit().catch(() => undefined);
       const skeleton = planSmartStockSegments(parts, { coverage, pace });
       if (!skeleton.length) throw new Error('A copy não tem palavras suficientes para planejar os inserts.');
       const translation = await translateStockFrameCopy(skeleton, setSmartProgress);
+      await visualAuditReady;
       const localized = translation.translated ? localizeSmartSegments(skeleton, translation.texts, translation.contexts) : skeleton;
       // Infer from the *entire* original copy first. A partial 60% plan may
       // omit the one sentence naming ED/diabetes/etc.; inferring solely from
@@ -538,6 +543,33 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 12, coverage === 100) };
       });
       let completed = rankSegments(segments);
+      // The provider cannot search our richer private labels directly. When
+      // its first pass is weak, use visually verified IDs only to derive a
+      // few original-title searches. Live API results still enforce the paid
+      // account's access, quota and real media identity.
+      const weak = completed.filter((segment) => !segment.candidates.length || segment.candidates[0].score < 12);
+      if (weak.length) {
+        const audited = stockFrameAuditedSearchSeeds();
+        const searches: string[] = [];
+        for (const segment of weak) {
+          const matches = rankStockFrameVideos(segment, audited, 2, coverage === 100);
+          const seed = matches.find((candidate) => !globalPool.has(candidate.video.id)
+            && candidate.video.title.trim().length > 5
+            && !searches.includes(candidate.video.title));
+          if (seed) searches.push(seed.video.title);
+          if (searches.length >= 6) break;
+        }
+        for (let index = 0; index < searches.length; index += 3) {
+          setSmartProgress('Conferindo cenas do catálogo com as fichas visuais…');
+          const results = await Promise.all(searches.slice(index, index + 3).map((search) => stockFrameList({
+            page: 1, perPage: 48, search, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
+          })));
+          for (const video of enrichStockFrameVideos(results.flatMap((result) => result.videos), niches)) {
+            globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
+          }
+        }
+        if (searches.length) completed = rankSegments(segments);
+      }
       if (completed.some((segment) => !segment.candidates.length)) {
         let maxPages = 10;
         for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
