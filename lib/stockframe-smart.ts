@@ -626,6 +626,10 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (INVASIVE_PROCEDURE_SCENE.test(prepared.contentText) && !INVASIVE_PROCEDURE_COPY.test(ranking.contextNormalized)) {
     return { video, score: -100, reasons: ['a fala não descreve um procedimento invasivo'] };
   }
+  if (/\bmicroplastic\w*\b/.test(prepared.title)
+      && !/\bmicroplastic\w*\b/.test(ranking.contextNormalized)) {
+    return { video, score: -100, reasons: ['microplásticos não são o mecanismo narrado'] };
+  }
   if (/\b(?:mulher(?:es)?|esposa|parceira|casal)\b/.test(ranking.spokenNormalized)
       && /\b(?:dinheiro|grana|pagamento|pagar)\b/.test(ranking.spokenNormalized)
       && /\b(?:medico|industria|farmaceutic\w*|laboratorio de remedios)\b/.test(prepared.title)
@@ -671,7 +675,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (MECHANISM_DETAIL_COPY.test(ranking.spokenNormalized) && romanticOnly) {
     return { video, score: -100, reasons: ['cena de romance ou desejo não demonstra o mecanismo técnico narrado'] };
   }
-  if (SOCIAL_PROOF_COPY.test(ranking.spokenNormalized) && !SOCIAL_PROOF_SCENE.test(prepared.visualText)) {
+  if (SOCIAL_PROOF_COPY.test(ranking.spokenNormalized) && !SOCIAL_PROOF_SCENE.test(`${prepared.title} ${prepared.visualText}`)) {
     return { video, score: -100, reasons: ['fala de repercussão online pede vídeo, tela, comentários ou apresentador visível'] };
   }
   const namedExpertShowing = /\b(?:dr|doutor|medico|doctor|physician|urologist|especialista|expert)\b/.test(ranking.spokenNormalized)
@@ -701,7 +705,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     && (ingredientEvidence || botanicalEvidence);
   const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
     && segment.concepts.some((concept) => prepared.concepts.includes(concept));
-  const neutralDigitalAction = allowGenericFallback && ranking.callToAction
+  const neutralDigitalAction = allowGenericFallback && (ranking.callToAction || SOCIAL_PROOF_COPY.test(ranking.spokenNormalized))
     && !MEDICAL_NICHE.test(prepared.taxonomy) && CTA_SCENE.test(prepared.title)
     && CTA_PHONE.test(prepared.title) && CTA_NEUTRAL_ACTION.test(prepared.title)
     && !CTA_CONFLICT_SCENE.test(prepared.title);

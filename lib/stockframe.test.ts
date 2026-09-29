@@ -654,6 +654,20 @@ ok(rankStockFrameGenericFallback(energyReturn, [happyMan, educationalEdFallback,
   'retorno da energia pode preferir homem feliz de pack geral a anatomia genérica, sem aceitar outra patologia');
 ok(rankStockFrameGenericFallback(energyReturn, [educationalEdFallback, smilingPhone], 10)[0]?.video.id === 'ed-anatomy-fallback',
   'celular sorridente não domina uma fala de recuperação sem ação digital');
+const socialProof = { ...czechOpening, text: 'O vídeo viralizou com milhares de comentários na plataforma.',
+  semanticText: 'O vídeo viralizou com milhares de comentários na plataforma.',
+  semanticContextText: 'O vídeo viralizou com milhares de comentários na plataforma.', concepts: [], query: '' };
+const socialPhone = video({ id: 'social-phone', title: 'PESSOAS USANDO CELULAR', nicheId: 'vsl', nicheName: 'VSL' });
+ok(rankStockFrameGenericFallback(socialProof, [socialPhone], 10).some(candidate => candidate.video.id === 'social-phone'),
+  'repercussão online aceita celular neutro de outro pack quando o título prova a ação e o catálogo não traz metadado visual');
+const microplasticBlood = video({ id: 'microplastic-blood', title: 'MICROPLASTICOS RETIRADOS DO ORGANISMO HUMANO, FLUXO SANGUINEO',
+  nicheId: 'ed', nicheName: 'ED' });
+const erectionPressure = { ...czechOpening, text: 'O pênis incha com a pressão do sangue na ereção.',
+  semanticText: 'O pênis incha com a pressão do sangue na ereção.',
+  semanticContextText: 'O pênis incha com a pressão do sangue na ereção.' };
+ok(!rankStockFrameVideos(erectionPressure, [microplasticBlood], 10, true).length
+  && !rankStockFrameGenericFallback(erectionPressure, [microplasticBlood], 10).length,
+  'fluxo sanguíneo não autoriza microplásticos que a copy não menciona');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

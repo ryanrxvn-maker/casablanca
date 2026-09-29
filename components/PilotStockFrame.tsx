@@ -525,7 +525,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       }
       if (/\b(?:especialista|urologista|m[eé]dic[ao]|doctor|physician|expert|dr)\b/.test(storyText)) sceneQueries.push('urologista explicando');
       if (/\b(?:likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?)\b/.test(storyText)) {
-        sceneQueries.push('celular comentarios', 'video no celular');
+        sceneQueries.push('celular comentarios', 'video no celular', 'celular');
       }
       if (/\b(?:durar|aguentar|resistir)\b.{0,45}\b(?:mais|tempo|minutos|horas)\b/.test(storyText)) sceneQueries.push('casal sorrindo');
       const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])].slice(0, 12);
@@ -598,7 +598,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           broadQueries.add('casal conversando'); broadQueries.add('casal preocupado');
         }
         if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
-        if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais/.test(missingText)) {
+        if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais|likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?/.test(missingText)) {
           // A busca da API pode tratar duas palavras como AND. A biblioteca
           // real tem "CASAL IDOSO USANDO CELULAR", mas não necessariamente
           // "celular clicando". O ranking local valida a cena depois.
