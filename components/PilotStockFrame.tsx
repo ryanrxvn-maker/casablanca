@@ -590,7 +590,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       if (completed.some((segment) => !segment.candidates.length)) {
         const missingText = completed.filter(segment => !segment.candidates.length)
           .map(segment => (segment.semanticText || segment.text).toLowerCase()).join(' ');
-        const broadQueries = new Set<string>();
+        // Provider search is relevance-paged; a verified neutral take can be
+        // pushed off the first "celular" page. It is fetched only for gaps.
+        const broadQueries = new Set<string>(['PESSOAS USANDO CELULAR']);
         if (/dinheiro|grana|preço|preco|pagar|pagamento/.test(missingText)) {
           broadQueries.add('dinheiro'); broadQueries.add('casal discutindo dinheiro');
         }
@@ -603,7 +605,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
           // real tem takes neutros como "PESSOAS USANDO CELULAR". A busca
           // ampla por "celular" pode relegá-los à página seguinte; o título
           // exato traz a cena à revisão e o ranking ainda valida o contexto.
-          broadQueries.add('PESSOAS USANDO CELULAR'); broadQueries.add('celular'); broadQueries.add('celular clicando');
+          broadQueries.add('celular'); broadQueries.add('celular clicando');
         }
         broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
         const searches = [...broadQueries].slice(0, 8);
