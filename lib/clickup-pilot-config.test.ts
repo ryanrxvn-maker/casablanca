@@ -1,4 +1,11 @@
-import { ALL_EDITORS_ID, pilotMayAutoLoadEditor, pilotPrimaryEditorId } from './clickup-pilot-config';
+import {
+  ALL_EDITORS_ID,
+  getPilotEditor,
+  getPilotEditorForTeamStrict,
+  pilotMayAutoLoadEditor,
+  pilotPrimaryEditorId,
+  setPilotEditorForTeam,
+} from './clickup-pilot-config';
 
 function check(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -12,4 +19,26 @@ check(!pilotMayAutoLoadEditor(ALL_EDITORS_ID), 'filtro amplo salvo não pode car
 check(!pilotMayAutoLoadEditor(null), 'sem editor não há carga automática');
 check(pilotMayAutoLoadEditor('silas'), 'carga automática do próprio editor continua funcionando');
 
-console.log('ClickUp Pilot editor scope: primary=own, all=explicit, saved-all=no-autoload OK.');
+const values = new Map<string, string>([
+  ['darkolab:clickup-pilot:editorId', ALL_EDITORS_ID],
+  ['darkolab:clickup-pilot:editorId:b2c', ALL_EDITORS_ID],
+  ['darkolab:clickup-pilot:drafts', 'rascunho preservado'],
+]);
+Object.defineProperty(globalThis, 'window', { value: {}, configurable: true });
+Object.defineProperty(globalThis, 'localStorage', {
+  value: {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      if (value.length > ALL_EDITORS_ID.length) throw new DOMException('Storage full', 'QuotaExceededError');
+      values.set(key, value);
+    },
+    removeItem: (key: string) => { values.delete(key); },
+  },
+  configurable: true,
+});
+setPilotEditorForTeam('b2c', 'silas');
+check(getPilotEditorForTeamStrict('b2c') === null, 'quota cheia remove apenas o filtro amplo desse workspace');
+check(getPilotEditor() === null, 'quota cheia remove apenas o filtro amplo global');
+check(values.get('darkolab:clickup-pilot:drafts') === 'rascunho preservado', 'rascunhos não podem ser apagados');
+
+console.log('ClickUp Pilot editor scope: primary=own, all=explicit, saved-all=no-autoload, full-storage safe OK.');

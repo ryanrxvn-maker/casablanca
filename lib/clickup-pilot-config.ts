@@ -52,10 +52,26 @@ export function getPilotEditor(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(KEY_EDITOR);
 }
+function savePilotEditorPreference(key: string, v: string | null): void {
+  try {
+    if (v === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, v);
+  } catch {
+    // Um localStorage cheio não pode impedir a busca das tasks. Se a preferência
+    // antiga era "Todos", retire APENAS esta chave: no próximo acesso o Pilot
+    // escolherá o próprio usuário. Outros dados e rascunhos ficam intocados.
+    try {
+      if (v !== ALL_EDITORS_ID && localStorage.getItem(key) === ALL_EDITORS_ID) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // Storage indisponível: a seleção desta sessão ainda deve funcionar.
+    }
+  }
+}
 export function setPilotEditor(v: string | null): void {
   if (typeof window === 'undefined') return;
-  if (v === null) localStorage.removeItem(KEY_EDITOR);
-  else localStorage.setItem(KEY_EDITOR, v);
+  savePilotEditorPreference(KEY_EDITOR, v);
 }
 
 /* ══════════════ Editor por workspace ══════════════
@@ -83,8 +99,7 @@ export function setPilotEditorForTeam(
 ): void {
   if (typeof window === 'undefined') return;
   if (teamId) {
-    if (v === null) localStorage.removeItem(KEY_EDITOR_BY_TEAM + teamId);
-    else localStorage.setItem(KEY_EDITOR_BY_TEAM + teamId, v);
+    savePilotEditorPreference(KEY_EDITOR_BY_TEAM + teamId, v);
   }
   // Mantém o global em sincronia — é o que o resto do app (e a página de
   // configurações) continua lendo.
