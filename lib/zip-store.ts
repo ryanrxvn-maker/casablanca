@@ -88,10 +88,13 @@ function runTx<T>(
       try { db.close(); } catch { /* ignora */ }
       fn();
     };
-    const to = setTimeout(
-      () => finish(() => reject(new Error('IndexedDB transação timeout (possível bloqueio por outra aba)'))),
-      timeoutMs,
-    );
+    const to = setTimeout(() => {
+      // Closing the connection does not cancel an active cursor/transaction.
+      // A timed-out cleanup could keep the object store locked and block the
+      // next read, including the user's mounted-video download.
+      try { tx?.abort(); } catch { /* transaction may already be inactive */ }
+      finish(() => reject(new Error('IndexedDB transação timeout (possível bloqueio por outra aba)')));
+    }, timeoutMs);
     let tx: IDBTransaction;
     try {
       tx = db.transaction(STORE, mode);

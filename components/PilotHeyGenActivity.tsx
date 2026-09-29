@@ -124,6 +124,26 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
 
   const refresh = useCallback(async () => {
     if (!active) return;
+    // Read saved deliveries before the slower HeyGen pagination. The Pilot's
+    // global zip cleanup starts shortly after boot; waiting for the network
+    // used to make this lookup contend with that large IndexedDB transaction.
+    const events = readHistory();
+    setHistory(events);
+    const keys: string[] = [];
+    for (const event of events) for (const ref of event.ref || []) {
+      if (!PILOT_RECOVERY_TASKS.some(([name]) => event.title === `${name} entregue`)) continue;
+      if (ref.via !== 'zip' || ref.label !== 'Montado') continue;
+      keys.push(ref.key);
+    }
+    try {
+      const { zipKeysExistentes } = await import('@/lib/zip-store');
+      const found = await zipKeysExistentes(keys);
+      for (const key of badZipRef.current) found.delete(key);
+      setAvailableZips(found);
+    } catch (e) {
+      console.warn('[Pilot recovery] stored ZIP lookup failed', e);
+      // A transient IDB timeout does not prove that a saved file vanished.
+    }
     try {
       const { listMyVideos } = await import('@/lib/heygen-api-direct');
       const found = new Map<string, HistoryVideo>();
@@ -164,26 +184,12 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
       }
       setVideos([...found.values()]);
     } catch (e) { console.warn('[Pilot recovery] HeyGen read failed', e); }
-    const events = readHistory();
-    setHistory(events);
-    const keys: string[] = [];
-    for (const event of events) for (const ref of event.ref || []) {
-      if (!PILOT_RECOVERY_TASKS.some(([name]) => event.title === `${name} entregue`)) continue;
-      if (ref.via !== 'zip' || ref.label !== 'Montado') continue;
-      keys.push(ref.key);
-    }
-    try {
-      const { zipKeysExistentes } = await import('@/lib/zip-store');
-      const found = await zipKeysExistentes(keys);
-      for (const key of badZipRef.current) found.delete(key);
-      setAvailableZips(found);
-    } catch { setAvailableZips(new Set()); }
   }, [active]);
 
   useEffect(() => {
     if (!active) return;
-    void ensureRecoveryHistory().catch(e => console.warn('[Pilot recovery] History save failed', e))
-      .then(() => void refresh());
+    void refresh();
+    void ensureRecoveryHistory().catch(e => console.warn('[Pilot recovery] History save failed', e));
     const timer = window.setInterval(() => void refresh(), 60_000);
     const onHistory = () => setHistory(readHistory());
     window.addEventListener('autoedit:history', onHistory);
