@@ -2137,20 +2137,25 @@ function ClickUpPilotInner() {
     restauradosRef.current.add(esc);
     creatorRestauradoRef.current = true;
     void rehidratarImagens(Object.keys(next));
-    // A sincronização da conta pode estar indisponível e o localStorage cheio.
-    // O IndexedDB já guarda os frames; nele fica também uma cópia do plano.
-    if (Object.keys(next).length === 0) {
+    // A cópia do localStorage/conta pode estar ANTIGA, mesmo não vazia.
+    // Sempre conferir o plano no IDB antes de permitir uma escrita sobre ele.
+    if (!idbDraftRestorePendingRef.current.has(esc)) {
       idbDraftRestorePendingRef.current.add(esc);
       void restaurarAnalisesDoIdb(esc);
     }
   }
-  async function restaurarAnalisesDoIdb(esc: string) {
+  async function restaurarAnalisesDoIdb(esc: string, tentativa = 0) {
+    let leituraConcluida = false;
     try {
       const { loadBlob } = await import('@/lib/zip-store');
       const blob = await loadBlob(`pilot:analises:${esc}`, 'application/json');
       console.info('[pilot] rascunho local lido', esc, blob?.size ?? 0);
-      if (!blob || escopoRef.current !== esc) return;
+      if (!blob || escopoRef.current !== esc) {
+        leituraConcluida = true;
+        return;
+      }
       const salvas = JSON.parse(await blob.text()) as Record<string, TaskAnalysis>;
+      leituraConcluida = true;
       const validas: Record<string, TaskAnalysis> = {};
       for (const [id, a] of Object.entries(salvas)) {
         if (!pertenceAoEscopo(id, esc) || !a || !Array.isArray(a.roleSlots) ||
@@ -2159,15 +2164,31 @@ function ClickUpPilotInner() {
           ...a, status: a.roleSlots.length > 0 && a.roleSlots.every(slotPronto) ? 'ready' : 'partial',
         };
       }
-      if (!Object.keys(validas).length || Object.keys(taskAnalysesRef.current).length) return;
-      taskAnalysesRef.current = validas;
-      setTaskAnalyses(validas);
-      setSelectedTaskIds(new Set(Object.keys(validas)));
-      void rehidratarImagens(Object.keys(validas));
+      if (!Object.keys(validas).length) return;
+      const atual = taskAnalysesRef.current;
+      const prontas = (mapa: Record<string, TaskAnalysis>) =>
+        Object.values(mapa).filter((a) => a.status === 'ready').length;
+      // O backup mais completo vence o fallback antigo. Se esta aba já tem
+      // mais cards prontos por edições recentes, preserva o trabalho em memória.
+      if (prontas(validas) > prontas(atual) ||
+          (prontas(validas) === prontas(atual) && Object.keys(validas).length > Object.keys(atual).length)) {
+        taskAnalysesRef.current = validas;
+        setTaskAnalyses(validas);
+        setSelectedTaskIds(new Set(Object.keys(validas)));
+        void rehidratarImagens(Object.keys(validas));
+      }
     } catch (err) {
       console.warn('[pilot] rascunho do IndexedDB não pôde ser restaurado:', err);
+      if (escopoRef.current === esc && tentativa < 8) {
+        setTimeout(() => { void restaurarAnalisesDoIdb(esc, tentativa + 1); }, 2000);
+        return;
+      }
+      setError('O plano mais recente ainda não pôde ser lido do navegador. Os rascunhos antigos não serão salvos por cima dele.');
     } finally {
-      idbDraftRestorePendingRef.current.delete(esc);
+      if (leituraConcluida && escopoRef.current === esc) {
+        idbDraftRestorePendingRef.current.delete(esc);
+        setTaskAnalyses((prev) => ({ ...prev }));
+      }
     }
   }
   /** Slot em MODO IMAGEM restaurado vem só com `imageKey`: a imagem volta do
@@ -2282,7 +2303,7 @@ function ClickUpPilotInner() {
       key === 'imageDataUrl' ? undefined : value,
     );
     const idbKey = `pilot:analises:${esc}`;
-    if (Object.keys(mapa).length || !idbDraftRestorePendingRef.current.has(esc)) {
+    if (!idbDraftRestorePendingRef.current.has(esc)) {
       const timer = idbDraftSaveTimersRef.current.get(esc);
       if (timer) clearTimeout(timer);
       idbDraftSaveTimersRef.current.set(esc, setTimeout(() => {
