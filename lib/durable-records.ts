@@ -77,7 +77,12 @@ function reconcileLocalConflicts() {
 async function locked<T>(work: () => Promise<T> | T): Promise<T> {
   if (!owner) throw new Error('A conta ainda não foi identificada. Os registros existentes não foram alterados.');
   if (!navigator.locks) throw new Error('Este navegador não oferece a proteção necessária para salvar entre abas. Use o Chrome atualizado.');
-  return navigator.locks.request(`${ROOT}${owner}`, work);
+  // Another tab can retain the account lock while a large checkpoint or a
+  // suspended browser task is in progress. Never leave the whole Pilot behind
+  // its loading screen indefinitely: abort only the WAIT for the lock. The
+  // initialization catch then exposes the intact local snapshot and retries
+  // cloud synchronization later.
+  return navigator.locks.request(`${ROOT}${owner}`, { signal: AbortSignal.timeout(12000) }, work);
 }
 function refreshStatus() {
   const rows = readLocal();
