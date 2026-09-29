@@ -7,7 +7,7 @@ import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, respo
 import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
-import { PilotHeyGenActivity } from '@/components/PilotHeyGenActivity';
+import { PilotHeyGenActivity, PILOT_RECOVERY_TASKS } from '@/components/PilotHeyGenActivity';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { useAvisoContaModoImagem } from '@/components/ModoImagemContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -1809,6 +1809,8 @@ function ClickUpPilotInner() {
   const MODO_KEY = 'darkolab:clickup-pilot:modo';
   const DOC_ATIVO_KEY = 'darkolab:clickup-pilot:doc-ativo';
   const [modo, setModoRaw] = useState<ModoPilot>('clickup');
+  const recoveryBatchActive = modo === 'clickup' && selectedTeam === '90132634310'
+    && /silas/i.test(editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '');
   const modoRef = useRef<ModoPilot>('clickup');
   modoRef.current = modo;
   const [tasksLocais, setTasksLocaisState] = useState<TaskLocal[]>([]);
@@ -15332,8 +15334,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               {/* A FILA aparece mesmo sem o board carregado: disparo em
                   andamento (ou o card que o histórico quer abrir) não pode
                   depender de alguém ter clicado pra carregar as tasks. */}
-              <PilotHeyGenActivity active={modo === 'clickup' && selectedTeam === '90132634310'} />
-              {tasks.length > 0 || Object.keys(batchStatesVisiveis).length > 0 ? (
+              {tasks.length > 0 || Object.keys(batchStatesVisiveis).length > 0 || recoveryBatchActive ? (
                 <section>
                   {tasks.length > 0 ? (
                   <>
@@ -15875,7 +15876,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   ) : null}
 
                   {/* Painel batch — tasks rodando ou completas */}
-                  {Object.keys(batchStatesVisiveis).length > 0 ? (
+                  {Object.keys(batchStatesVisiveis).length > 0 || recoveryBatchActive ? (
                     <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
                       <div className="label-tech mb-3 flex items-center justify-between text-[10px] tracking-widest text-fuchsia-200">
                         <span className="inline-flex items-center gap-2">
@@ -15883,7 +15884,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
                             <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-300" />
                           </span>
-                          Tasks em produção · {Object.keys(batchStatesVisiveis).length}
+                          Tasks em produção · {Object.keys(batchStatesVisiveis).length + (recoveryBatchActive ? PILOT_RECOVERY_TASKS.length : 0)}
                         </span>
                         {batchesEmOutrasEmpresas.length ? (
                           <span
@@ -15895,6 +15896,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         ) : null}
                       </div>
                       <ul className="grid gap-3">
+                        <PilotHeyGenActivity active={recoveryBatchActive} />
                         {Object.values(batchStatesVisiveis).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           // Quando já entrou em download/pós, todo videoId já foi

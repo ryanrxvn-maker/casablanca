@@ -70,6 +70,9 @@ export function rotaDaTask(taskId: string): string {
  * disparo velho dele seria um botão que não faz nada.
  */
 export function aceitaAcaoDeFila(taskId: string): boolean {
+  // Incident recovery cards can download and show takes, but they have no
+  // original replan; offering redispatch from History would spend again.
+  if (taskId.startsWith('pilot-recovery-20260929:')) return false;
   return rotaDaTask(taskId) === '/tools/clickup-pilot';
 }
 

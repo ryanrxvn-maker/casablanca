@@ -1119,6 +1119,7 @@ export async function listMyVideos(opts: {
   const page = opts.page ?? 1;
   // Tenta varios endpoints — HeyGen tem inconsistencia entre v1/v2
   const candidates = [
+    `/v1/project/items?limit=${limit}&page=${page}&item_types=heygen_video&sort_key=created_ts&sort_order=desc`,
     `/v1/project/items?limit=${limit}&page=${page}`,
     `/v1/pacific/video.list?limit=${limit}&page=${page}`,
     `/v1/video.list?limit=${limit}&page=${page}`,
@@ -1150,7 +1151,9 @@ export async function listMyVideos(opts: {
         error: it.error || it.failed_reason || undefined,
       };
     }).filter((v) => v.videoId);
-    return { items, hasMore: items.length >= limit, totalLoaded: items.length };
+    // Project items can cap a requested limit at 100. Continue pagination at
+    // that boundary; the caller stops if a server repeats the previous page.
+    return { items, hasMore: items.length >= Math.min(limit, 100), totalLoaded: items.length };
   }
   return { items: [], hasMore: false, totalLoaded: 0 };
 }

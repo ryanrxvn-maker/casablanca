@@ -1,89 +1,230 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BatchJobCard3D } from '@/components/BatchJobCard3D';
+import { logHistory, readHistory, type FileRef, type HistoryEvent } from '@/lib/history';
 import type { HistoryVideo } from '@/lib/heygen-api-direct';
 
-// The batch started on 29 Sep 2026 at 20:22 UTC. Only show projects
-// submitted since then; older videos with the same AD title are unrelated.
-const BATCH_STARTED_AT = Date.parse('2026-09-29T20:22:00Z');
-const TITLE = /^(AD\d+VN)_(HOOK|BODY)\s+(\d+)$/i;
+// The 30 ready cards recorded immediately before START on 29 Sep 2026.
+// HeyGen omits the PR code from its titles, so both copy and count matter.
+export const PILOT_RECOVERY_TASKS = [
+  ['AD65VN - PRWA10', 9], ['AD64VN - PRWA10', 9], ['AD63VN - PRWA10', 8],
+  ['AD62VN - PRWA10', 9], ['AD61VN - PRWA10', 9], ['AD60VN - PRWA10', 8],
+  ['AD59VN - PRWA10', 10], ['AD58VN - PRWA10', 5], ['AD56VN - PRWA10', 9],
+  ['AD63VN - PRPB09', 12], ['AD59VN - PRPB09', 8], ['AD56VN - PRPB09', 5],
+  ['AD54VN - PRPB09', 12], ['AD53VN - PRPB09', 8], ['AD52VN - PRPB09', 7],
+  ['AD51VN - PRPB09', 10], ['AD50VN - PRPB09', 8], ['AD49VN - PRPB09', 8],
+  ['AD48VN - PRPB09', 8], ['AD47VN - PRPB09', 6], ['AD46VN - PRPB09', 8],
+  ['AD45VN - PRPB09', 7], ['AD44VN - PRPB09', 7], ['AD55VN - PRWA10', 7],
+  ['AD54VN - PRWA10', 8], ['AD53VN - PRWA10', 11], ['AD52VN - PRWA10', 10],
+  ['AD51VN - PRWA10', 8], ['AD48VN - PRWA10', 7], ['AD47VN - PRWA10', 15],
+] as const;
 
+const STARTED = Date.parse('2026-09-29T20:22:00Z');
+const TITLE = /^(AD\d+VN)_(HOOK|BODY)\s+(\d+)$/i;
+const taskKey = (name: string) => `pilot-recovery-20260929:${name.replace(/[^A-Z0-9]+/gi, '_')}`;
+const labelsFor = (count: number) => ['HOOK 1', ...Array.from({ length: count - 1 }, (_, i) => `BODY ${i + 1}`)];
+const labelOf = (video: HistoryVideo) => {
+  const m = video.name.match(TITLE);
+  return m ? `${m[2].toUpperCase()} ${m[3]}` : '';
+};
+
+function matchVideos(videos: HistoryVideo[], history: HistoryEvent[]): Map<string, HistoryVideo[]> {
+  const matched = new Map<string, HistoryVideo[]>();
+  const assigned = new Set<string>();
+  for (const [name] of PILOT_RECOVERY_TASKS) {
+    const event = history.find(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED);
+    const ids = event?.ref?.filter((r): r is Extract<FileRef, { via: 'heygen' }> => r.via === 'heygen')
+      .flatMap(r => r.parts.map(p => p.videoId)) || [];
+    const takes = videos.filter(v => ids.includes(v.videoId));
+    if (takes.length) {
+      matched.set(name, takes);
+      for (const take of takes) assigned.add(take.videoId);
+    }
+  }
+  const byAd = new Map<string, HistoryVideo[]>();
+  for (const video of videos) {
+    const ad = video.name.match(TITLE)?.[1]?.toUpperCase();
+    if (ad && video.createdAt >= STARTED && !assigned.has(video.videoId)) byAd.set(ad, [...(byAd.get(ad) || []), video]);
+  }
+  for (const [ad, all] of byAd) {
+    const chunks: HistoryVideo[][] = [];
+    for (const video of all.sort((a, b) => a.createdAt - b.createdAt)) {
+      if (labelOf(video) === 'HOOK 1' || chunks.length === 0) chunks.push([]);
+      chunks[chunks.length - 1].push(video);
+    }
+    const candidates = PILOT_RECOVERY_TASKS.filter(([name]) => name.startsWith(`${ad} - `));
+    const available = new Set(candidates.map(([name]) => name).filter(name => !matched.has(name)));
+    // Exact matches first. A partial second copy gets only the remaining slot.
+    chunks.sort((a, b) => b.length - a.length);
+    for (const chunk of chunks) {
+      const unique = new Map<string, HistoryVideo>();
+      for (const v of chunk) unique.set(labelOf(v), v);
+      const count = unique.size;
+      const options = candidates.filter(([name]) => available.has(name));
+      const target = options.find(([, n]) => n === count)
+        || options.filter(([, n]) => n >= count).sort((a, b) => a[1] - b[1])[0];
+      if (target) {
+        available.delete(target[0]);
+        matched.set(target[0], [...unique.values()]);
+      }
+    }
+  }
+  return matched;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Rendered inside the Pilot's existing Tasks em produção list. Recovery
+ * only reads existing IDs; it never submits or regenerates a HeyGen take. */
 export function PilotHeyGenActivity({ active }: { active: boolean }) {
   const [videos, setVideos] = useState<HistoryVideo[]>([]);
+  const [history, setHistory] = useState<HistoryEvent[]>([]);
+  const [busy, setBusy] = useState<Record<string, string>>({});
+  const busyRef = useRef(new Set<string>());
+
+  const refresh = useCallback(async () => {
+    if (!active) return;
+    try {
+      const { listMyVideos } = await import('@/lib/heygen-api-direct');
+      const found = new Map<string, HistoryVideo>();
+      for (let page = 1; page <= 8; page++) {
+        const result = await listMyVideos({ limit: 300, page });
+        let added = 0;
+        for (const v of result.items) {
+          if (!TITLE.test(v.name) || v.createdAt < STARTED) continue;
+          if (!found.has(v.videoId)) added++;
+          found.set(v.videoId, v);
+        }
+        if (!result.hasMore || !added) break;
+      }
+      setVideos([...found.values()]);
+    } catch (e) { console.warn('[Pilot recovery] HeyGen read failed', e); }
+    setHistory(readHistory());
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const { listMyVideos } = await import('@/lib/heygen-api-direct');
-        const found: HistoryVideo[] = [];
-        for (let page = 1; page <= 8; page++) {
-          const result = await listMyVideos({ limit: 100, page });
-          if (page === 1) console.info('[Pilot] HeyGen recent projects', result.items.length, result.items.slice(0, 3).map((v) => ({ name: v.name, status: v.status, createdAt: v.createdAt })));
-          if (cancelled) return;
-          found.push(...result.items);
-          const latest = new Map<string, HistoryVideo>();
-          for (const video of found) {
-            if (TITLE.test(video.name) && video.createdAt >= BATCH_STARTED_AT) latest.set(video.videoId, video);
-          }
-          setVideos([...latest.values()]);
-          if (!result.hasMore || result.items.some((v) => v.createdAt > 0 && v.createdAt < BATCH_STARTED_AT)) break;
-        }
-        const unique = new Map<string, HistoryVideo>();
-        for (const video of found) {
-          if (!TITLE.test(video.name) || video.createdAt < BATCH_STARTED_AT || !video.createdAt) continue;
-          unique.set(video.videoId, video);
-        }
-        if (!cancelled) setVideos([...unique.values()]);
-      } catch (error) {
-        // This is supplemental visibility. A failed HeyGen read must not
-        // replace or mutate the Pilot's actual background queue.
-        console.warn('[Pilot] HeyGen activity could not be read:', error);
-      }
-    };
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 60_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [active]);
+    const timer = window.setInterval(() => void refresh(), 60_000);
+    const onHistory = () => setHistory(readHistory());
+    window.addEventListener('autoedit:history', onHistory);
+    return () => { window.clearInterval(timer); window.removeEventListener('autoedit:history', onHistory); };
+  }, [active, refresh]);
 
-  const groups = useMemo(() => {
-    const byAd = new Map<string, HistoryVideo[]>();
-    for (const video of videos) {
-      const ad = video.name.match(TITLE)?.[1];
-      if (ad) byAd.set(ad, [...(byAd.get(ad) || []), video]);
+  const matched = useMemo(() => matchVideos(videos, history), [videos, history]);
+
+  const assemble = useCallback(async (name: string, takes: HistoryVideo[], count: number) => {
+    if (busyRef.current.has(name)) return;
+    const labels = labelsFor(count);
+    const byLabel = new Map(takes.map(v => [labelOf(v), v]));
+    if (!labels.every(label => byLabel.get(label)?.status === 'completed')) { await refresh(); return; }
+    busyRef.current.add(name);
+    const progress = (message: string) => setBusy(prev => ({ ...prev, [name]: message }));
+    try {
+      progress('Baixando takes existentes do HeyGen…');
+      const [{ getVideosStatus, downloadVideoBytes }, { runPostPipeline }, { saveZip }, { default: JSZip }] = await Promise.all([
+        import('@/lib/heygen-api-direct'), import('@/lib/clickup-pilot-pipeline'),
+        import('@/lib/zip-store'), import('jszip'),
+      ]);
+      const ids = labels.map(label => byLabel.get(label)!.videoId);
+      const statuses = await getVideosStatus(ids);
+      const parts: Array<{ label: string; blob: Blob; expected: true }> = [];
+      for (let i = 0; i < labels.length; i++) {
+        const label = labels[i];
+        const take = byLabel.get(label)!;
+        const status = statuses[take.videoId];
+        if (status?.status !== 'completed' || !(status.videoUrl || take.videoUrl)) throw new Error(`${label} ainda não tem MP4 disponível`);
+        progress(`Baixando ${i + 1}/${labels.length} · ${label}`);
+        const bytes = await downloadVideoBytes(status.videoUrl || take.videoUrl!);
+        parts.push({ label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }), expected: true });
+      }
+      progress('Montando o vídeo…');
+      const ad = name.match(/^AD\d+VN/i)![0];
+      const output = await runPostPipeline({
+        baseAdId: ad, parts, decupagem: false, nivelarVoz: true,
+        camuflagem: false, formato: '9:16',
+        onProgress: p => progress(`${p.stage} ${p.doneCount}/${p.totalCount}`),
+      });
+      const item = output.items[0];
+      const mp4 = item?.rawAssembled;
+      if (!mp4 || mp4.size < 1024 || item.errors?.assemble || item.missingParts?.length) {
+        throw new Error(item?.errors?.assemble || 'montagem não gerou o MP4 completo');
+      }
+      const filename = `${ad}G1VN_${name.endsWith('PRWA10') ? 'PRWA10' : 'PRPB09'}.mp4`;
+      const zipName = filename.replace(/\.mp4$/i, '.zip');
+      const zip = new JSZip();
+      zip.file(filename, mp4);
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      const key = `batch:${taskKey(name)}:montado`;
+      await saveZip(key, zipBlob, zipName);
+      const ref: FileRef = { via: 'zip', key, name: zipName, label: 'Montado', taskId: taskKey(name) };
+      logHistory({ tool: 'clickup-pilot', title: `${name} entregue`, meta: `${count} takes`, ref: [ref], channels: [{ label: 'YOUTUBE', color: '#ff3333' }] });
+      setHistory(readHistory());
+      downloadBlob(mp4, filename);
+    } catch (e) {
+      progress(`Falha na montagem: ${(e as Error)?.message || String(e)}`);
+      return;
+    } finally {
+      busyRef.current.delete(name);
+      setBusy(prev => {
+        if (prev[name]?.startsWith('Falha')) return prev;
+        const next = { ...prev }; delete next[name]; return next;
+      });
     }
-    return [...byAd.entries()].sort((a, b) => Math.max(...b[1].map((v) => v.createdAt)) - Math.max(...a[1].map((v) => v.createdAt)));
-  }, [videos]);
+  }, [refresh]);
 
-  if (!active || groups.length === 0) return null;
-  return (
-    <section className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-bg-soft p-4" aria-label="Takes no HeyGen">
-      <h2 className="label-tech mb-3 text-[10px] tracking-widest text-fuchsia-200">
-        Em produção no HeyGen · {groups.length} ADs · {videos.length} takes
-      </h2>
-      <div className="grid gap-2">
-        {groups.map(([ad, takes]) => {
-          const pending = takes.filter((v) => v.status === 'pending' || v.status === 'unknown').length;
-          const failed = takes.filter((v) => v.status === 'failed').length;
-          return (
-            <details key={ad} className="rounded-[10px] border border-line bg-bg/60 px-3 py-2">
-              <summary className="cursor-pointer text-[12px] text-white">
-                <strong>{ad}</strong> · {takes.length} takes · {pending ? `${pending} gerando` : 'renderizados'}{failed ? ` · ${failed} falha(s)` : ''}
-              </summary>
-              <ul className="mt-2 grid gap-1 text-[11px] text-text-muted">
-                {takes.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })).map((take) => (
-                  <li key={take.videoId}>
-                    <a className="hover:text-white hover:underline" href={`https://app.heygen.com/videos/${take.videoId}`} target="_blank" rel="noreferrer">
-                      {take.name} · {take.status === 'completed' ? 'pronto' : take.status === 'failed' ? 'falhou' : 'gerando'}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          );
-        })}
-      </div>
-    </section>
-  );
+  if (!active) return null;
+  return <>
+    {PILOT_RECOVERY_TASKS.map(([name, count]) => {
+      const takes = matched.get(name) || [];
+      const byLabel = new Map(takes.map(v => [labelOf(v), v]));
+      const labels = labelsFor(count);
+      const dispatched = labels.filter(label => byLabel.has(label)).length;
+      const rendered = labels.filter(label => byLabel.get(label)?.status === 'completed').length;
+      const complete = rendered === count;
+      const event = history.find(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED);
+      const mounted = event?.ref?.find((ref): ref is Extract<FileRef, { via: 'zip' }> => ref.via === 'zip' && ref.label === 'Montado');
+      const progress = busy[name];
+      const phase = mounted ? 'done' : progress ? 'post' : takes.some(v => v.status === 'pending') ? 'rendering' : 'recoverable';
+      return <BatchJobCard3D
+        key={name} taskId={taskKey(name)} taskName={name}
+        channels={[{ label: 'YOUTUBE', color: '#ff3333' }]}
+        phase={phase} partsTotal={count} hooksTotal={1}
+        partsDispatched={dispatched} partsRendered={rendered}
+        message={progress || (mounted ? 'Montado salvo' : `${dispatched}/${count} takes confirmados no HeyGen`)}
+        elapsedMs={Date.now() - STARTED} allOk={!!mounted}
+        isPartialDone={false} downloadBlocked={!mounted && !complete}
+        montadoFilename={mounted?.name}
+        loadDeliverables={mounted ? async () => {
+          const { loadZip } = await import('@/lib/zip-store');
+          const zip = await loadZip(mounted.key);
+          return zip?.blobUrl ? [{ url: zip.blobUrl, name: mounted.name, revoke: true, blob: zip.blob }] : [];
+        } : undefined}
+        onDownload={!mounted && complete ? () => void assemble(name, takes, count) : undefined}
+        onRetomar={() => complete && !mounted ? void assemble(name, takes, count) : void refresh()}
+        isRunning={phase === 'rendering' || phase === 'post'} isQueued={false}
+      >
+        {takes.length ? <div className="grid gap-1 text-[11px] text-text-muted">
+          {labels.map(label => {
+            const take = byLabel.get(label);
+            return <div key={label}>{take
+              ? <a className="hover:text-white hover:underline" href={`https://app.heygen.com/videos/${take.videoId}`} target="_blank" rel="noreferrer">
+                  {label} · {take.status === 'completed' ? 'renderizado' : take.status === 'failed' ? 'falhou' : 'gerando'}
+                </a>
+              : <span>{label} · sem envio confirmado</span>}</div>;
+          })}
+        </div> : null}
+      </BatchJobCard3D>;
+    })}
+  </>;
 }

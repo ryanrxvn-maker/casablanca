@@ -71,9 +71,9 @@ export type BatchJob3DProps = {
   camufladoFilename?: string;
   /** Handlers */
   onRetomar: () => void;
-  onPausar: () => void;
-  onDebug: () => void;
-  onRemove: () => void;
+  onPausar?: () => void;
+  onDebug?: () => void;
+  onRemove?: () => void;
   /** Download custom (opcional): quando presente, o botao de download chama
    *  ISSO em vez do fluxo baseado em montadoUrl/camufladoUrl. Usado pelo Hey
    *  Auto (dispensa direta), que dispara o pipeline+download on-click em vez
@@ -1172,23 +1172,23 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 onClick={onRetomar}
                 disabled={isRunning || (isQueued && !queuedRecoverable)}
               />
-              <Btn3D
+              {onPausar ? <Btn3D
                 icon={<IconPause size={14} />}
                 color="amber"
                 title="Pausar"
                 onClick={onPausar}
                 disabled={!isRunning}
                 pulse={isRunning}
-              />
-              <Btn3D
+              /> : null}
+              {onDebug ? <Btn3D
                 icon={<IconBug size={16} />}
                 color={temTopPanel ? 'violet' : 'fuchsia'}
                 title="Reiniciar disparo — pergunta se você quer editar antes"
                 onClick={onDebug}
                 disabled={isQueued && !queuedRecoverable}
                 pulse={temTopPanel}
-              />
-              {!isRunning ? (
+              /> : null}
+              {!isRunning && onRemove ? (
                 <Btn3D icon={<IconX size={14} />} color="neutral" title="Remover" onClick={onRemove} />
               ) : null}
               {/* Acoes extras (ex: VA "baixar AD original") */}
