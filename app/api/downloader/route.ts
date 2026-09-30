@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/api/admin/_helpers';
-import { createClient } from '@/lib/supabase/server';
+import { requireTier } from '@/lib/require-tier';
 import { safeFetch } from '@/lib/safe-fetch';
 import {
   processDownload,
@@ -25,16 +25,8 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
-  // Exige sessão: /api/* fica fora do gate do middleware, então sem isto a rota
-  // era chamável anonimamente (abuso de recurso). A página /tools/downloader já
-  // é login-only, então usuário legítimo sempre traz o cookie de sessão.
-  const {
-    data: { user },
-  } = await createClient().auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
-  }
-
+  const gate = await requireTier('basic');
+  if (!gate.ok) return gate.response;
   let body: {
     url?: string;
     mode?: Mode;

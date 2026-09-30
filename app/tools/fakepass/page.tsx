@@ -51,6 +51,8 @@ function CatIcon({ id }: { id: string }) {
 }
 
 export default function FakePassPage() {
+  const [premiumAccess, setPremiumAccess] = useState<'loading' | 'allowed' | 'denied' | 'error'>('loading');
+  const [accessAttempt, setAccessAttempt] = useState(0);
   const [modelId, setModelId] = useToolState<string>('fakepass:model', MODELS[0].id);
   const [cat, setCat] = useToolState<string>('fakepass:cat', 'story');
   const [status, setStatus] = useState<StatusCfg>(defaultStatus);
@@ -68,9 +70,13 @@ export default function FakePassPage() {
   const [pscale, setPscale] = useState(1);
 
   const model = MODELS.find((m) => m.id === modelId) ?? MODELS[0];
+  const premiumModel = model.category === 'news' || model.category === 'sites';
+  const lockedModel = premiumModel && premiumAccess !== 'allowed';
   const s = states[model.id];
-  const set = (patch: any) =>
+  const set = (patch: any) => {
+    if (lockedModel) return;
     setStates((prev) => ({ ...prev, [model.id]: { ...prev[model.id], ...patch } }));
+  };
   const setStatusCfg = (patch: Partial<StatusCfg>) => setStatus((p) => ({ ...p, ...patch }));
 
   // Dimensões efetivas do palco: dinâmicas (dims(s), ex.: orientação 16:9↔9:16)
@@ -78,6 +84,19 @@ export default function FakePassPage() {
   const dims = model.dims ? model.dims(s) : { stageW: model.stageW, ratio: model.ratio, exportW: model.exportW };
 
   const modelsInCat = MODELS.filter((m) => m.category === cat);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPremiumAccess('loading');
+    fetch('/api/fakepass/access', { cache: 'no-store', signal: controller.signal })
+      .then((response) => {
+        setPremiumAccess(response.ok ? 'allowed' : response.status === 403 || response.status === 401 ? 'denied' : 'error');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPremiumAccess('error');
+      });
+    return () => { controller.abort(); };
+  }, [accessAttempt]);
 
   // Auto-scale da prévia: se o palco for mais largo que a área disponível,
   // encolhe VISUALMENTE pra caber. O PNG continua em alta porque o export usa
@@ -97,7 +116,7 @@ export default function FakePassPage() {
 
   const baixar = async () => {
     const node = stageRef.current;
-    if (!node || gerando) return;
+    if (!node || gerando || lockedModel) return;
     setGerando(true);
     try {
       await downloadNodeAsPng(node, `fakepass-${model.id}.png`, dims.exportW, dims.stageW);
@@ -114,7 +133,7 @@ export default function FakePassPage() {
   // + vídeo de fundo rodando). Com WebCodecs sai MAIS RÁPIDO que tempo real.
   const baixarVideo = async () => {
     const node = stageRef.current;
-    if (!node || gravandoVid) return;
+    if (!node || gravandoVid || lockedModel) return;
     setGravandoVid(true);
     setVidMsg(`Renderizando ${vidSecs} segundos de animação…`);
     try {
@@ -177,6 +196,7 @@ export default function FakePassPage() {
                     <CatIcon id={c.id} />
                     {c.label}
                     <span className={'ml-0.5 rounded-full px-1.5 py-px text-[10px] font-bold ' + (active ? 'bg-white/15 text-white' : 'bg-white/[0.05] text-text-dim')}>{count}</span>
+                    {(c.id === 'news' || c.id === 'sites') && premiumAccess !== 'allowed' ? <LockIcon size={12} /> : null}
                   </button>
                 );
               })}
@@ -195,6 +215,7 @@ export default function FakePassPage() {
               const active = m.id === modelId;
               const primary = m.group ?? m.label;
               const secondary = m.group ? m.label : '';
+              const premium = m.category === 'news' || m.category === 'sites';
               return (
                 <button
                   key={m.id}
@@ -214,6 +235,7 @@ export default function FakePassPage() {
                     </span>
                     {secondary ? <span className="truncate text-[10.5px] leading-tight text-text-dim">{secondary}</span> : null}
                   </span>
+                  {premium && premiumAccess !== 'allowed' ? <span className="ml-auto shrink-0 rounded-md border border-white/15 bg-white/[0.06] p-1.5 text-text-muted" aria-label="Modelo Premium"><LockIcon size={12} /></span> : null}
                 </button>
               );
             })}
@@ -224,7 +246,20 @@ export default function FakePassPage() {
       {/* ─── Controles + Preview ─── */}
       <div className={'grid grid-cols-1 gap-6 ' + (dims.ratio < 1 ? 'lg:grid-cols-[1fr_560px]' : 'lg:grid-cols-[1fr_360px]')}>
         <div className="flex flex-col gap-5">
-          {model.Controls({ s, set })}
+          {lockedModel ? (
+            <div role="status" className="flex items-start gap-3 rounded-[16px] border border-violet/35 bg-violet/[0.08] p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-violet/35 bg-violet/15 text-violet"><LockIcon size={17} /></span>
+              <div>
+                <p className="text-[13px] font-bold text-white">{premiumAccess === 'loading' ? 'Verificando acesso' : premiumAccess === 'error' ? 'Não foi possível verificar seu plano' : 'Modelo exclusivo do Premium'}</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-text-muted">{premiumAccess === 'loading' ? 'Aguarde enquanto conferimos seu plano.' : premiumAccess === 'error' ? 'Confira sua conexão e tente novamente.' : 'Explore a prévia e a timeline. A edição dos campos e o download são liberados no Premium.'}</p>
+                {premiumAccess === 'denied' ? <a href="/planos?upgrade=premium&from=/tools/fakepass" className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-bold text-violet underline-offset-4 hover:underline focus-visible:underline">Ver plano Premium <span aria-hidden>→</span></a> : null}
+                {premiumAccess === 'error' ? <button type="button" onClick={() => setAccessAttempt((n) => n + 1)} className="mt-3 text-[12px] font-bold text-violet underline-offset-4 hover:underline focus-visible:underline">Tentar novamente</button> : null}
+              </div>
+            </div>
+          ) : null}
+          <fieldset disabled={lockedModel} aria-label={lockedModel ? 'Controles disponíveis no Premium' : undefined} className={lockedModel ? 'relative min-w-0 rounded-[16px] border border-white/[0.08] bg-white/[0.025] p-4 opacity-60 grayscale-[0.7]' : 'min-w-0'}>
+            {model.Controls({ s, set })}
+          </fieldset>
 
           {model.usesPhone ? (
             <div className="rounded-[16px] border border-line/60 bg-bg-soft/30 p-4">
@@ -302,6 +337,11 @@ export default function FakePassPage() {
                   </div>
                 </div>
               </div>
+              {lockedModel ? (
+                <div className="pointer-events-none absolute inset-0 z-[5] rounded-[10px] bg-slate-950/35 backdrop-grayscale-[0.45]" aria-hidden="true">
+                  <span className="absolute right-2 top-2 flex items-center gap-1.5 rounded-[9px] border border-white/25 bg-[#17151f]/90 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white shadow-lg backdrop-blur-md"><LockIcon size={12} /> Premium</span>
+                </div>
+              ) : null}
               {/* VÉU durante a geração (fora do palco → não sai no export): cobre
                   os renders de sondagem, que mexem no zoom por baixo dos panos. */}
               {gerando || gravandoVid ? (
@@ -320,7 +360,7 @@ export default function FakePassPage() {
             <button
               type="button"
               onClick={baixar}
-              disabled={gerando}
+              disabled={gerando || lockedModel}
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3.5 text-[14px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 fontFamily: 'var(--font-tech)',
@@ -336,16 +376,17 @@ export default function FakePassPage() {
               ) : (
                 <>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
-                  Baixar PNG
+                  {lockedModel ? 'Download Premium' : 'Baixar PNG'}
                 </>
               )}
             </button>
             <p className="mt-2 text-center text-[11px] text-text-muted">
-              Imagem em alta ({dims.exportW}×{Math.round(dims.exportW * dims.ratio)}px) — pronta pra postar.
+              {lockedModel ? 'Prévia do modelo. Edição e exportação disponíveis no Premium.' : `Imagem em alta (${dims.exportW}×${Math.round(dims.exportW * dims.ratio)}px) — pronta pra postar.`}
             </p>
 
             {model.anim ? (
               <div className="mt-4 flex flex-col gap-3 rounded-[14px] border border-line/60 bg-bg-soft/30 p-3.5">
+                <fieldset disabled={lockedModel}>
                 <RangeField
                   label="Duração do vídeo"
                   value={vidSecs}
@@ -354,10 +395,11 @@ export default function FakePassPage() {
                   onChange={setVidSecs}
                   display={(v) => v + 's'}
                 />
+                </fieldset>
                 <button
                   type="button"
                   onClick={baixarVideo}
-                  disabled={gravandoVid || gerando}
+                  disabled={gravandoVid || gerando || lockedModel}
                   className="flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3 text-[13.5px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                   style={{
                     fontFamily: 'var(--font-tech)',
@@ -376,7 +418,7 @@ export default function FakePassPage() {
                         <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
                         <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
                       </svg>
-                      Exportar vídeo
+                      {lockedModel ? 'Vídeo Premium' : 'Exportar vídeo'}
                     </>
                   )}
                 </button>
@@ -409,4 +451,8 @@ function IconFakePass({ size = 56 }: { size?: number }) {
       <path d="M9 16h6M9 18h3.5" stroke="url(#fp-hero)" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
     </svg>
   );
+}
+
+function LockIcon({ size = 16 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>;
 }

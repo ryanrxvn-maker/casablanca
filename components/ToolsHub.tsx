@@ -347,13 +347,14 @@ export function ToolsHub() {
           </div>
         </div>
         <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:-mx-6 2xl:-mx-10">
-          <TipografiaFeaturedCard delay={120} />
+          <TipografiaFeaturedCard delay={120} locked={!tierAllowsTool(tier, '/tools/tipografia')} />
           {featured.map((it, i) =>
             it.video ? (
               <FeaturedVideoCard
                 key={it.href}
                 entry={it}
                 delay={140 + i * 60}
+                locked={!tierAllowsTool(tier, it.href)}
               />
             ) : (
               <FeaturedCard
@@ -471,8 +472,7 @@ function PromoBanner({
   isAdmin: boolean;
 }) {
   const canStartAutomation = isAdmin || tierCanAutomate(tier);
-  // FakePrint e Tipografia Automática são os heróis de TODOS (ferramentas
-  // free) — arrastou o FakePrint pro lado, a Tipografia assume. As automações
+  // FakePrint é o herói Free; Tipografia aparece para assinantes.
   // internas (Pilot / Auto B-roll) só existem no carrossel do admin.
   const slides = [
     // Famous Hey abre o carrossel (pedido em 18.08). Fica atras do mesmo gate
@@ -480,8 +480,8 @@ function PromoBanner({
     // bloqueada e pior que herói nenhum.
     // Na janela grátis o herói é pra todo mundo; fechada, volta a ser interno.
     ...(isAdmin || famousHeyGratis() ? [<FamousHeySlide key="famoushey" />] : []),
-    <FakePrintSlide key="fakeprint" />,
-    <TipografiaSlide key="tipografia" />,
+    <FakePrintSlide key="fakeprint" newsPremium={tier === 'free' || tier === null} />,
+    ...(tier === 'basic' || tier === 'pro' || tier === 'admin' ? [<TipografiaSlide key="tipografia" />] : []),
     ...(isAdmin
       ? [
           <PilotSlide key="pilot" canStartAutomation={canStartAutomation} />,
@@ -1027,7 +1027,7 @@ function FamousHeySlide() {
   );
 }
 
-function FakePrintSlide() {
+function FakePrintSlide({ newsPremium }: { newsPremium: boolean }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // O pôster só sai quando o vídeo REALMENTE começou. Escondê-lo antes disso
   // mostrava um retângulo preto em quem tem autoplay bloqueado.
@@ -1117,7 +1117,10 @@ function FakePrintSlide() {
               FakePrint · Zona de Notícias
             </span>
           </div>
-          <BroadcastClock />
+          <div className="flex items-center gap-2">
+            {newsPremium ? <span className="inline-flex items-center gap-1.5 rounded-[6px] border border-white/25 bg-black/65 px-2.5 py-1 text-[9.5px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md"><LockIcon size={11} /> Notícias Premium</span> : null}
+            <BroadcastClock />
+          </div>
         </div>
 
         {/* CHYRON — todo o texto do card vive aqui */}
@@ -1800,14 +1803,14 @@ function Sparkle({ className, delay = 0 }: { className?: string; delay?: number 
  * visual dos FeaturedVideoCard: título sobre a mídia, painel no hover,
  * borda conic acesa.
  */
-function TipografiaFeaturedCard({ delay }: { delay: number }) {
+function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; locked?: boolean }) {
   return (
     <div
       className="dark-island featured-card-wrap fade-in-up relative z-0 hover:z-20"
       style={{ animationDelay: `${delay}ms` }}
     >
       <Link
-        href="/tools/tipografia"
+        href={locked ? '/planos?upgrade=premium&from=/tools/tipografia' : '/tools/tipografia'}
         className="group relative block overflow-hidden rounded-[20px] border border-line/60 bg-[#0b0b0f]"
       >
         <div className="relative aspect-video w-full overflow-hidden">
@@ -1820,6 +1823,7 @@ function TipografiaFeaturedCard({ delay }: { delay: number }) {
             }}
           />
           <TipoShowcase variant="card" />
+          {locked ? <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-slate-950/45 backdrop-blur-[2px]"><span className="flex items-center gap-2 rounded-full border border-white/25 bg-black/75 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white"><LockIcon size={14} /> Premium</span></div> : null}
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"
@@ -1860,7 +1864,7 @@ function TipografiaFeaturedCard({ delay }: { delay: number }) {
               className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              Abrir ferramenta
+              {locked ? 'Ver plano Premium' : 'Abrir ferramenta'}
               <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
             </span>
           </div>
@@ -1886,9 +1890,11 @@ function TipografiaFeaturedCard({ delay }: { delay: number }) {
 function FeaturedVideoCard({
   entry,
   delay,
+  locked = false,
 }: {
   entry: ToolEntry;
   delay: number;
+  locked?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -1980,9 +1986,7 @@ function FeaturedVideoCard({
           {entry.label}
         </h3>
 
-        {/* SEM cadeado/bloqueio visual nos destaques: o card é sempre bonito e
-            clicável pra TODOS. O gating real é server-side (middleware):
-            Premium abre a ferramenta; Free cai direto em /planos. */}
+        {locked ? <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-slate-950/45 backdrop-blur-[2px]"><span className="flex items-center gap-2 rounded-full border border-white/25 bg-black/75 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white"><LockIcon size={14} /> Premium</span></div> : null}
       </div>
 
       {/* PAINEL — abre ABAIXO do vídeo no hover (copy + botão animado).
@@ -2000,7 +2004,7 @@ function FeaturedVideoCard({
             className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            Abrir ferramenta
+            {locked ? 'Ver plano Premium' : 'Abrir ferramenta'}
             <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
           </span>
         </div>
@@ -2029,10 +2033,8 @@ function FeaturedVideoCard({
       onMouseEnter={play}
       onMouseLeave={stop}
     >
-      {/* Sempre clicável pra TODOS — sem estado visual de bloqueio. O acesso
-          real é decidido server-side no clique (Premium abre; Free → /planos). */}
       <Link
-        href={entry.href}
+        href={locked ? `/planos?upgrade=premium&from=${entry.href}` : entry.href}
         className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
       >
         {inner}
@@ -2145,7 +2147,7 @@ function FeaturedCard({
                 className="rounded-full border border-white/15 bg-black/40 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-white/70 backdrop-blur-md"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
-                BETA
+                PREMIUM
               </span>
             ) : null}
             {entry.badge ? (

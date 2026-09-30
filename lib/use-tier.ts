@@ -6,19 +6,14 @@ import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
 import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 import { emailUnlocksPath, setSessionToolUnlocks } from '@/lib/tool-unlocks';
+import { FREE_TOOL_PATHS } from '@/lib/free-tools';
 
 export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 
 /** Conjunto de ferramentas (paths) liberadas por tier. */
 const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
   free: new Set([
-    '/tools/decupagem',
-    '/tools/tipografia',
-    '/tools/downloader',
-    '/tools/caixinha-pergunta',
-    '/tools/fakepass',
-    '/tools/compressor',
-    '/tools/normalizador', // liberado pra TODOS em 14.08.2026 (roda no navegador, custo zero)
+    ...FREE_TOOL_PATHS,
     '/tools/historico',
   ]),
   // basic = plano PREMIUM (nome de exibição). Tier interno continua 'basic'

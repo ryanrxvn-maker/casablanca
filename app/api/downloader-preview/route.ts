@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireTier } from '@/lib/require-tier';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,8 @@ async function oembed(endpoint: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const gate = await requireTier('basic');
+  if (!gate.ok) return gate.response;
   const raw = request.nextUrl.searchParams.get('url') || '';
   let source: URL;
   try { source = new URL(raw); } catch { return NextResponse.json({ error: 'URL inválida.' }, { status: 400 }); }

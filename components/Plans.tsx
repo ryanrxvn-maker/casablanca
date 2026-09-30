@@ -46,7 +46,7 @@ const ALL_TOOLS: Tool[] = [
 /** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS).
  *  Espelha EXATAMENTE o acesso real de lib/use-tier.ts (TIER_PATHS). */
 const UNLOCKED: Record<'free' | 'basic', Set<string>> = {
-  free: new Set(['decupagem', 'downloader', 'fakepass', 'compressor', 'normalizador', 'tipografia']),
+  free: new Set(['decupagem', 'fakepass', 'compressor']),
   // basic = plano PREMIUM (nome de exibição) — libera a suíte inteira.
   basic: new Set(ALL_TOOLS.map((t) => t.key)),
 };
@@ -551,7 +551,13 @@ function PlanCard({
                     </span>
                   )}
                   <span className={isUnlocked ? '' : 'line-through opacity-65'}>
-                    {tool.label}
+                    {isFree && tool.key === 'decupagem'
+                      ? 'Decupagem (exportação de áudio)'
+                      : isFree && tool.key === 'fakepass'
+                        ? 'FakePrint (redes sociais)'
+                        : !isFree && tool.key === 'fakepass'
+                          ? 'FakePrint (inclui notícias e telejornais)'
+                          : tool.label}
                   </span>
                 </li>
               );

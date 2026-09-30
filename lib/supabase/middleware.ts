@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { emailUnlocksPath, pathUnlockedByList } from '@/lib/tool-unlocks';
+import { FREE_TOOL_PATHS } from '@/lib/free-tools';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -18,7 +19,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  *  Após login:
  *    • tier='admin' → acessa tudo
  *    • tier='beta'  → acessa tudo (exceto rotas admin-only)
- *    • tier='free'  → SÓ /tools (hub) + /tools/decupagem + /configuracoes.
+ *    • tier='free'  → hub, Decupagem (áudio), Compressor, FakePrint e conta.
  *                     Tudo o mais redireciona pra /tools?locked=1.
  *                     Dentro de /tools/decupagem, a opção "vídeo" é
  *                     desabilitada na UI (e o backend também filtra).
@@ -46,18 +47,8 @@ const FREE_ALLOWED_PREFIXES = [
 
 // Ferramentas específicas liberadas pro 'free'
 const FREE_ALLOWED_TOOLS = [
-  '/tools/decupagem',
-  '/tools/tipografia', // Tipografia Automática — BYOK + render local, liberada pra todos
-  '/tools/downloader',
-  '/tools/caixinha-pergunta',
-  '/tools/fakepass',
-  '/tools/compressor',
-  '/tools/normalizador', // liberado pra TODOS em 14.08.2026 (roda no navegador, custo zero)
+  ...FREE_TOOL_PATHS,
   '/tools/historico', // histórico geral — todo tier vê o próprio trabalho
-  // Famous Hey na janela grátis. Tirar do gate de ADMIN não bastava: sem estar
-  // AQUI o free continuava sendo mandado pra /planos. Duas listas, e eu só
-  // tinha mexido numa.
-  ...(famousHeyGratis() ? ['/tools/famous-hey'] : []),
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
 const FREE_EXTRA_OK_PREFIXES = ['/planos'];

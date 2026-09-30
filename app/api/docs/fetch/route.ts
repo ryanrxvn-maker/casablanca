@@ -32,10 +32,11 @@ function extractGoogleDocId(rawUrl: string): string | null {
 }
 
 export async function GET(req: Request) {
-  // Exige sessão logada (free basta). Fecha o uso anônimo do servidor como
-  // proxy/anonimizador de leitura de docs. Os únicos callers (páginas do Pilot
-  // e do Hey Auto) chamam de dentro do app logado → cookie de sessão vai junto.
-  const gate = await requireTier('free');
+  // Endpoint de uso interno do Pilot e Hey Auto; desbloqueios individuais
+  // dessas ferramentas continuam válidos.
+  const gate = await requireTier('admin', {
+    unlockTools: ['/tools/clickup-pilot', '/tools/heygen-auto'],
+  });
   if (!gate.ok) return gate.response;
 
   try {

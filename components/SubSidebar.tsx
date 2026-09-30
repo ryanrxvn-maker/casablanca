@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { isToolInMaintenance } from '@/lib/maintenance';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
+import { tierAllowsTool, useTier } from '@/lib/use-tier';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -75,6 +76,7 @@ const TOOL_PATHS = TOOL_ITEMS.map((i) => i.href);
  *   └──────────────────────┘
  */
 export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
+  const tier = useTier();
   const actualPath = usePathname();
   const pathname = currentPath ?? actualPath;
   const [isAdmin, setIsAdmin] = useState(false);
@@ -148,6 +150,7 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
               pathname === it.href || pathname.startsWith(it.href + '/');
             const inMaint = isToolInMaintenance(it.href);
             const blocked = inMaint && !isAdmin; // não-admin não acessa
+            const locked = !tierAllowsTool(tier, it.href) && !emailUnlocksPath(userEmail, it.href);
             const rowCls =
               'group relative flex items-center gap-3 rounded-[12px] border px-3 py-2.5 transition-all duration-300 ' +
               (blocked
@@ -193,7 +196,12 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
                 >
                   {it.label}
                 </span>
-                {inMaint ? (
+                  {locked && !inMaint ? (
+                    <span className="ml-auto flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-violet/40 bg-violet/10 text-violet" title="Disponível no Premium" aria-label="Disponível no Premium">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+                    </span>
+                  ) : null}
+                  {inMaint ? (
                   <span
                     title="Em manutenção"
                     className="ml-auto flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-amber-400/50 bg-amber-400/10 text-amber-300"
@@ -216,7 +224,7 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
                     {inner}
                   </div>
                 ) : (
-                  <Link href={it.href} className={rowCls} aria-current={active ? 'page' : undefined}>
+                  <Link href={locked ? `/planos?upgrade=premium&from=${it.href}` : it.href} className={rowCls} aria-current={active ? 'page' : undefined}>
                     {inner}
                   </Link>
                 )}
