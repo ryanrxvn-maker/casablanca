@@ -8,18 +8,19 @@ import { createRecordWriter } from '@/lib/durable-records';
 import type { HistoryVideo } from '@/lib/heygen-api-direct';
 import { PILOT_RECOVERY_IDS } from '@/lib/pilot-recovery-ids';
 
-// The 30 ready cards recorded immediately before START on 29 Sep 2026.
+// Recoverable cards from the 30 selected on 29 Sep 2026. The two excluded
+// references (missing source and rejected voice) are deliberately absent.
 // HeyGen omits the PR code from its titles, so both copy and count matter.
 export const PILOT_RECOVERY_TASKS = [
   ['AD65VN - PRWA10', 9], ['AD64VN - PRWA10', 9], ['AD63VN - PRWA10', 8],
   ['AD62VN - PRWA10', 9], ['AD61VN - PRWA10', 9], ['AD60VN - PRWA10', 8],
   ['AD59VN - PRWA10', 10], ['AD58VN - PRWA10', 5], ['AD56VN - PRWA10', 9],
   ['AD63VN - PRPB09', 12], ['AD59VN - PRPB09', 8], ['AD56VN - PRPB09', 5],
-  ['AD54VN - PRPB09', 12], ['AD53VN - PRPB09', 8], ['AD52VN - PRPB09', 7],
-  ['AD51VN - PRPB09', 10], ['AD50VN - PRPB09', 8], ['AD49VN - PRPB09', 8],
+  ['AD54VN - PRPB09', 12], ['AD53VN - PRPB09', 10], ['AD52VN - PRPB09', 8],
+  ['AD51VN - PRPB09', 10], ['AD50VN - PRPB09', 9], ['AD49VN - PRPB09', 11],
   ['AD48VN - PRPB09', 8], ['AD47VN - PRPB09', 6], ['AD46VN - PRPB09', 8],
-  ['AD45VN - PRPB09', 7], ['AD44VN - PRPB09', 7], ['AD55VN - PRWA10', 7],
-  ['AD54VN - PRWA10', 8], ['AD53VN - PRWA10', 11], ['AD52VN - PRWA10', 10],
+  ['AD44VN - PRPB09', 7], ['AD55VN - PRWA10', 7],
+  ['AD54VN - PRWA10', 8], ['AD52VN - PRWA10', 10],
   ['AD51VN - PRWA10', 8], ['AD48VN - PRWA10', 7], ['AD47VN - PRWA10', 15],
 ] as const;
 
@@ -114,7 +115,7 @@ async function ensureRecoveryHistory() {
 
 /** Rendered inside the Pilot's existing Tasks em produção list. Recovery
  * only reads existing IDs; it never submits or regenerates a HeyGen take. */
-export function PilotHeyGenActivity({ active }: { active: boolean }) {
+export function PilotHeyGenActivity({ active, hiddenNames = [] }: { active: boolean; hiddenNames?: string[] }) {
   const [videos, setVideos] = useState<HistoryVideo[]>([]);
   const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [availableZips, setAvailableZips] = useState<Set<string>>(new Set());
@@ -173,11 +174,12 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
           const status = await getVideosStatus(batch.map(x => x.id)).catch(() => ({} as Awaited<ReturnType<typeof getVideosStatus>>));
           for (const { id, name, label } of batch) {
             const s = status[id];
+            if (!s) continue;
             found.set(id, {
               videoId: id, name: `${name.match(/^AD\d+VN/)?.[0]}_${label}`,
-              status: s?.status === 'failed' ? 'failed' : s?.status === 'pending' ? 'pending' : 'completed',
-              videoUrl: s?.videoUrl || null, thumbUrl: null, durationSec: null,
-              createdAt: STARTED, error: s?.error,
+              status: s.status === 'failed' ? 'failed' : s.status === 'completed' ? 'completed' : 'pending',
+              videoUrl: s.videoUrl || null, thumbUrl: null, durationSec: null,
+              createdAt: STARTED, error: s.error,
             });
           }
         }
@@ -306,26 +308,29 @@ export function PilotHeyGenActivity({ active }: { active: boolean }) {
 
   if (!active) return null;
   return <>
-    {PILOT_RECOVERY_TASKS.map(([name, count]) => {
+    {PILOT_RECOVERY_TASKS.filter(([name]) => !hiddenNames.includes(name)).map(([name, count]) => {
       const takes = matched.get(name) || [];
       const byLabel = new Map(takes.map(v => [labelOf(v), v]));
       const labels = labelsFor(count);
       const dispatched = labels.filter(label => byLabel.has(label)).length;
       const rendered = labels.filter(label => byLabel.get(label)?.status === 'completed').length;
       const complete = rendered === count;
+      const pending = labels.some(label => byLabel.get(label)?.status === 'pending');
       const mounted = history.filter(e => e.tool === 'clickup-pilot' && e.title === `${name} entregue` && e.t >= STARTED)
         .flatMap(e => e.ref || []).find((ref): ref is Extract<FileRef, { via: 'zip' }> => ref.via === 'zip' && ref.label === 'Montado' && availableZips.has(ref.key));
       const progress = busy[name];
-      const phase = mounted ? 'done' : progress ? 'post' : dispatched === 0 ? 'queued'
-        : complete ? 'post' : 'rendering';
+      const phase = mounted ? 'done' : progress ? 'post' : complete ? 'post'
+        : pending ? 'rendering' : 'queued';
       return <BatchJobCard3D
         key={name} taskId={taskKey(name)} taskName={name}
         channels={[{ label: 'YOUTUBE', color: '#ff3333' }]}
         phase={phase} partsTotal={count} hooksTotal={1}
         partsDispatched={dispatched} partsRendered={rendered}
-        message={progress || (mounted ? 'Montado salvo' : dispatched ? `${dispatched}/${count} takes confirmados no HeyGen` : '')}
-        statusLabel={mounted ? 'Pronto' : progress ? 'Montando' : dispatched === 0 ? 'Em fila'
-          : complete ? 'Takes prontos' : 'Renderizando'}
+        message={progress || (mounted ? 'Montado salvo' : complete ? `${count}/${count} takes prontos no HeyGen`
+          : pending ? `${dispatched}/${count} takes confirmados no HeyGen`
+          : dispatched ? `${dispatched}/${count} takes existentes; envio restante não confirmado` : 'Nenhum take enviado ao HeyGen')}
+        statusLabel={mounted ? 'Pronto' : progress ? 'Montando' : complete ? 'Takes prontos'
+          : pending ? 'Renderizando' : dispatched ? 'Envio incompleto' : 'Aguardando envio'}
         suppressBanner resumeTitle={complete && !mounted ? 'Montar vídeo' : 'Atualizar status do HeyGen'}
         elapsedMs={Date.now() - STARTED} allOk={!!mounted}
         isPartialDone={false} downloadBlocked={!mounted && !complete}

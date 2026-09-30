@@ -15884,7 +15884,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
                             <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-300" />
                           </span>
-                          Tasks em produção · {Object.keys(batchStatesVisiveis).length + (recoveryBatchActive ? PILOT_RECOVERY_TASKS.length : 0)}
+                          Tasks em produção · {Object.keys(batchStatesVisiveis).length + (recoveryBatchActive ? PILOT_RECOVERY_TASKS.filter(([name]) => !Object.values(batchStatesVisiveis).some((batch) => batch.taskName === name)).length : 0)}
                         </span>
                         {batchesEmOutrasEmpresas.length ? (
                           <span
@@ -15896,7 +15896,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         ) : null}
                       </div>
                       <ul className="grid gap-3">
-                        <PilotHeyGenActivity active={recoveryBatchActive} />
+                        <PilotHeyGenActivity active={recoveryBatchActive} hiddenNames={Object.values(batchStatesVisiveis).map((batch) => batch.taskName)} />
                         {Object.values(batchStatesVisiveis).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           // Quando já entrou em download/pós, todo videoId já foi
@@ -17956,7 +17956,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       const noVoice = slot.imageMode
                                         ? !slot.voiceOverride   // modo imagem: sem avatar, a voz TEM que ser escolhida
                                         : slot.avatarId && !slot.avatarVoiceId && !slot.voiceOverride;
-                                      const effectiveVoiceLabel = slot.voiceOverride?.name || (slot.avatarVoiceId ? 'voz padrao do avatar' : noVoice ? 'sem voz' : '?');
+                                      const effectiveVoiceLabel = slot.voiceOverride?.name || (slot.avatarVoiceId ? candFull?.voiceName || 'voz padrao do avatar' : noVoice ? 'sem voz' : '?');
                                       const visualKey = `${a.taskId}:${sIdx}`;
                                       const isVisualSearching = visualMatching[visualKey];
                                       // Thumb do briefing: arquivo do Drive OU, quando o avatar
