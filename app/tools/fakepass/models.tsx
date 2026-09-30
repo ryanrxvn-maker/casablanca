@@ -26,6 +26,7 @@ import NEWS_CNN from './model-news-cnn';
 import NEWS_CNNBR from './model-news-cnnbr';
 import NEWS_BBC from './model-news-bbc';
 import NEWS_FOX from './model-news-fox';
+import NEWS_FOX_FRIENDS from './model-news-fox-friends';
 import NEWS_MSNBC from './model-news-msnbc';
 import NEWS_CNBC from './model-news-cnbc';
 import NEWS_CBS from './model-news-cbs';
@@ -84,6 +85,7 @@ export const MODELS: FakeModel[] = [
   ...NEWS_CNN,
   ...NEWS_BBC,
   ...NEWS_FOX,
+  ...NEWS_FOX_FRIENDS,
   ...NEWS_MSNBC,
   ...NEWS_CNBC,
   ...NEWS_CBS,
