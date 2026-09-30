@@ -174,7 +174,7 @@ export default function AceleradorPage() {
         updateJob(job.id, { state: 'running', progress: 0 });
         try {
           // FILA GLOBAL do ffmpeg-wasm: o worker é um singleton compartilhado
-          // com Decupagem/Camuflagem/etc — sem a fila, um cancel/timeout da
+          // com Remover Silêncios/Camuflagem/etc — sem a fila, um cancel/timeout da
           // outra ferramenta matava ESTE job com "called FFmpeg.terminate()".
           await runFfmpegExclusive(() => processOne(job, i, initial.length));
         } catch (e) {

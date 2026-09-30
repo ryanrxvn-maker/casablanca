@@ -35,33 +35,33 @@ export type Pillar = {
 export const PILLARS: Pillar[] = [
   {
     slug: 'decupagem-automatica',
-    keyword: 'decupagem automática',
-    title: 'Decupagem automática de vídeo: corte silêncios em segundos',
+    keyword: 'remoção automática de silêncios',
+    title: 'Remover Silêncios: áudio grátis e vídeo no Premium',
     description:
-      'Decupagem automática que remove silêncios e cortes mortos sozinha. O que levava 1 hora vira segundos, em lote e no navegador. Comece grátis.',
-    kicker: 'Decupagem',
-    h1: 'Decupagem automática de vídeo',
+      'Remover Silêncios limpa as pausas da fala em lote no navegador. Exporte áudio no Free ou áudio e vídeo no Premium.',
+    kicker: 'Remover Silêncios',
+    h1: 'Remover Silêncios em áudio e vídeo',
     intro: [
-      'Decupagem automática é o processo de cortar os silêncios, pausas e trechos mortos de um vídeo sem fazer isso na mão. Você sobe o arquivo, a ferramenta detecta onde não tem fala e remove tudo sozinha — o que levava cerca de uma hora na timeline fica pronto em segundos.',
-      'No Auto Edit a decupagem automática roda direto no navegador e em lote: você joga vários vídeos na fila e volta com todos já apertados, no ritmo, prontos pra finalizar.',
+      'Remover Silêncios corta as pausas e trechos mortos de áudio ou vídeo sem trabalho manual. Você sobe o arquivo, a ferramenta detecta onde não tem fala e remove esses trechos. A saída em áudio é grátis; a saída em vídeo está no Premium.',
+      'No Auto Edit a remoção automática de silêncios roda direto no navegador e em lote: você joga vários vídeos na fila e volta com todos já apertados, no ritmo, prontos pra finalizar.',
     ],
     blocks: [
       {
-        h2: 'Como funciona a decupagem automática?',
+        h2: 'Como funciona a remoção automática de silêncios?',
         body: [
           'A ferramenta analisa o áudio do vídeo e identifica os intervalos de silêncio entre as falas. Esses intervalos são removidos automaticamente, e os cortes são unidos pra que o resultado fique fluido — sem aquele tempo morto que cansa quem assiste.',
           'Você define o vídeo, liga a fila e faz outra coisa. Não precisa marcar corte por corte nem arrastar clipe na timeline.',
         ],
       },
       {
-        h2: 'Quanto tempo a decupagem automática economiza?',
+        h2: 'Quanto tempo a remoção automática de silêncios economiza?',
         body: [
-          'Decupar um vídeo de fala na mão costuma levar de 40 minutos a mais de uma hora, dependendo da duração. A decupagem automática faz o mesmo trabalho em segundos por vídeo.',
+          'Decupar um vídeo de fala na mão costuma levar de 40 minutos a mais de uma hora, dependendo da duração. A remoção automática de silêncios faz o mesmo trabalho em segundos por vídeo.',
           'Pra quem edita em volume — editores freelancer e agências — o ganho é multiplicado: em vez de uma tarde inteira cortando silêncio, a fila entrega o dia todo enquanto você cuida do que importa.',
         ],
       },
       {
-        h2: 'Decupagem em lote para editores e agências',
+        h2: 'Remover Silêncios em lote para editores e agências',
         body: [
           'O diferencial do Auto Edit é o processamento em lote. Em vez de um vídeo por vez, você empilha vários na fila e o estúdio processa todos em sequência.',
         ],
@@ -73,24 +73,24 @@ export const PILLARS: Pillar[] = [
         ],
       },
       {
-        h2: 'Precisa instalar algo para fazer decupagem automática?',
+        h2: 'Precisa instalar algo para fazer remoção automática de silêncios?',
         body: [
-          'Não. O Auto Edit roda 100% no navegador. Você faz login, sobe o vídeo e usa a decupagem direto pela web — sem baixar programa, sem plugin, em qualquer computador. Dá pra começar no plano grátis, sem cartão.',
+          'Não. O Auto Edit roda no navegador, sem plugin. Você faz login, sobe o arquivo e usa Remover Silêncios pela web. O Free exporta áudio; para exportar vídeo é preciso Premium.',
         ],
       },
     ],
     faq: [
       {
-        q: 'A decupagem automática funciona em qualquer idioma?',
-        a: 'A decupagem trabalha em cima do silêncio do áudio, não da transcrição, então funciona com fala em qualquer idioma — inclusive português. Ela corta onde não há voz, independentemente da língua.',
+        q: 'A remoção automática de silêncios funciona em qualquer idioma?',
+        a: 'A remoção de silêncios trabalha em cima do silêncio do áudio, não da transcrição, então funciona com fala em qualquer idioma — inclusive português. Ela corta onde não há voz, independentemente da língua.',
       },
       {
         q: 'Dá pra ajustar quanto silêncio é removido?',
         a: 'Sim. Você controla a sensibilidade do corte pra deixar o ritmo mais apertado ou mais respirado, conforme o estilo do vídeo.',
       },
       {
-        q: 'A decupagem automática é gratuita?',
-        a: 'Você pode começar no plano grátis do Auto Edit, sem cartão. O plano Premium (R$ 57/mês) libera todas as ferramentas e mais volume.',
+        q: 'A remoção automática de silêncios é gratuita?',
+        a: 'Sim, para exportação de áudio. O plano Premium (R$ 57/mês) também permite exportar o vídeo sem silêncios.',
       },
     ],
     related: [
@@ -103,7 +103,7 @@ export const PILLARS: Pillar[] = [
     keyword: 'automação de edição de vídeo',
     title: 'Automação de edição de vídeo: edite no automático e em lote',
     description:
-      'Automação de edição de vídeo: decupagem, lipsync e legendas em lote, no navegador. Você liga a fila e o estúdio entrega. Comece grátis.',
+      'Automação de edição de vídeo: remoção de silêncios, lipsync e legendas em lote, no navegador. Você liga a fila e o estúdio entrega. Comece grátis.',
     kicker: 'Automação',
     h1: 'Automação de edição de vídeo',
     intro: [
@@ -117,7 +117,7 @@ export const PILLARS: Pillar[] = [
           'As partes mais lentas e repetitivas são exatamente as que mais ganham com automação. No Auto Edit, cada uma tem sua ferramenta dedicada:',
         ],
         list: [
-          'Decupagem automática — remove silêncios e cortes mortos',
+          'Remover Silêncios — remove silêncios e cortes mortos',
           'Lipsync Video to Video — o avatar falando exatamente a sua copy',
           'Compressão e ajuste de velocidade em lote',
           'Legendas automáticas alinhadas à copy',
@@ -146,7 +146,7 @@ export const PILLARS: Pillar[] = [
     faq: [
       {
         q: 'A automação substitui o editor de vídeo?',
-        a: 'Não. Ela automatiza o trabalho repetitivo (decupagem, legenda, lipsync) pra o editor focar na parte criativa e produzir muito mais por dia.',
+        a: 'Não. Ela automatiza o trabalho repetitivo (remoção de silêncios, legenda, lipsync) pra o editor focar na parte criativa e produzir muito mais por dia.',
       },
       {
         q: 'Automação de edição de vídeo funciona pra canais dark?',
@@ -158,7 +158,7 @@ export const PILLARS: Pillar[] = [
       },
     ],
     related: [
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'decupagem-automatica', label: 'Remover Silêncios' },
       { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
     ],
   },
@@ -167,11 +167,11 @@ export const PILLARS: Pillar[] = [
     keyword: 'editar vídeo mais rápido',
     title: 'Como editar vídeo mais rápido: automatize o trabalho repetitivo',
     description:
-      'O jeito de editar vídeo mais rápido é automatizar decupagem e legendas e processar em lote. Menos timeline, mais entrega. Comece grátis.',
+      'O jeito de editar vídeo mais rápido é automatizar remoção de silêncios e legendas e processar em lote. Menos timeline, mais entrega. Comece grátis.',
     kicker: 'Velocidade',
     h1: 'Como editar vídeo mais rápido',
     intro: [
-      'A forma real de editar vídeo mais rápido não é apertar atalho na timeline — é tirar de você o trabalho repetitivo. Decupagem e legenda consomem a maior parte do tempo e não exigem criatividade. Quando essas etapas viram automáticas, o vídeo fica pronto em uma fração do tempo.',
+      'A forma real de editar vídeo mais rápido não é apertar atalho na timeline — é tirar de você o trabalho repetitivo. Remover Silêncios e legenda consomem a maior parte do tempo e não exigem criatividade. Quando essas etapas viram automáticas, o vídeo fica pronto em uma fração do tempo.',
       'No Auto Edit você joga essas tarefas numa fila em lote e elas acontecem sozinhas, no navegador, enquanto você avança no resto.',
     ],
     blocks: [
@@ -182,9 +182,9 @@ export const PILLARS: Pillar[] = [
         ],
       },
       {
-        h2: 'Automatize a decupagem para ganhar tempo',
+        h2: 'Automatize a remoção de silêncios para ganhar tempo',
         body: [
-          'Cortar silêncio na mão leva de 40 minutos a mais de uma hora por vídeo. A decupagem automática faz isso em segundos, removendo as pausas e unindo os cortes sozinha. É o maior ganho de velocidade isolado.',
+          'Cortar silêncio na mão leva de 40 minutos a mais de uma hora por vídeo. A remoção automática de silêncios faz isso em segundos, removendo as pausas e unindo os cortes sozinha. É o maior ganho de velocidade isolado.',
         ],
       },
       {
@@ -196,14 +196,14 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Edite em lote, não um por um',
         body: [
-          'O ganho final vem do lote: empilhe os vídeos do dia numa fila e deixe processar. Em vez de uma tarde por vídeo, a fila entrega o dia inteiro. Tudo no navegador, começando no plano grátis.',
+          'O ganho final vem do lote: empilhe os vídeos do dia numa fila e deixe processar. Em vez de uma tarde por vídeo, a fila entrega o dia inteiro. A exportação em vídeo está disponível no Premium.',
         ],
       },
     ],
     faq: [
       {
         q: 'Qual a forma mais rápida de editar um vídeo de fala?',
-        a: 'Automatizar a decupagem (corte de silêncios) e a legenda, e processar em lote. Essas etapas são as mais lentas e as que mais ganham com automação.',
+        a: 'Automatizar a remoção de silêncios (corte de silêncios) e a legenda, e processar em lote. Essas etapas são as mais lentas e as que mais ganham com automação.',
       },
       {
         q: 'Editar mais rápido piora a qualidade?',
@@ -215,7 +215,7 @@ export const PILLARS: Pillar[] = [
       },
     ],
     related: [
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'decupagem-automatica', label: 'Remover Silêncios' },
       { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
     ],
   },
@@ -224,7 +224,7 @@ export const PILLARS: Pillar[] = [
     keyword: 'legenda automática',
     title: 'Gerar legenda automática em vídeo (e exportar SRT) no automático',
     description:
-      'Gere legenda automática a partir da fala do vídeo e exporte em SRT, sem digitar. Em lote e no navegador. Comece grátis no Auto Edit.',
+      'Gere legenda automática a partir da fala do vídeo e exporte em SRT, sem digitar. Ferramenta Premium no navegador.',
     kicker: 'Legendas',
     h1: 'Gerar legenda automática',
     intro: [
@@ -253,7 +253,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para legendar?',
         body: [
-          'Não. A legenda automática funciona 100% no navegador, sem download. Você começa no plano grátis e amplia o volume no plano Premium (R$ 57/mês).',
+          'Não. A legenda automática funciona no navegador, sem download. O acesso à ferramenta faz parte do Premium (R$ 57/mês).',
         ],
       },
     ],
@@ -272,7 +272,7 @@ export const PILLARS: Pillar[] = [
       },
     ],
     related: [
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'decupagem-automatica', label: 'Remover Silêncios' },
       { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
     ],
   },
@@ -281,11 +281,11 @@ export const PILLARS: Pillar[] = [
     keyword: 'editar vídeos para canais dark',
     title: 'Editar vídeos para canais dark no automático e em lote',
     description:
-      'Editar vídeos para canais dark em escala: decupagem, lipsync e legendas no automático e em lote. Poste vários por dia sem travar. Comece grátis.',
+      'Editar vídeos para canais dark em escala: remoção de silêncios, lipsync e legendas no automático e em lote. Poste vários por dia sem travar. Comece grátis.',
     kicker: 'Canais dark',
     h1: 'Editar vídeos para canais dark',
     intro: [
-      'Editar vídeos para canais dark em escala é um problema de volume: pra monetizar, você precisa postar muito, e a edição manual não acompanha. A saída é automatizar as etapas repetitivas — decupagem, lipsync e legenda — e processar tudo em lote.',
+      'Editar vídeos para canais dark em escala é um problema de volume: pra monetizar, você precisa postar muito, e a edição manual não acompanha. A saída é automatizar as etapas repetitivas — remoção de silêncios, lipsync e legenda — e processar tudo em lote.',
       'O Auto Edit foi feito pra esse ritmo: você empilha os vídeos do dia numa fila e o estúdio entrega, no navegador, sem você ficar na timeline.',
     ],
     blocks: [
@@ -301,7 +301,7 @@ export const PILLARS: Pillar[] = [
           'Em vez de abrir um editor pesado pra cada vídeo, você usa cada automação na fila:',
         ],
         list: [
-          'Decupagem automática corta os silêncios da narração',
+          'Remover Silêncios corta os silêncios da narração',
           'Lipsync Video to Video gera o avatar falando, se o canal usar avatar',
           'Legenda automática fecha o vídeo',
         ],
@@ -335,7 +335,7 @@ export const PILLARS: Pillar[] = [
     ],
     related: [
       { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'decupagem-automatica', label: 'Remover Silêncios' },
     ],
   },
   {
@@ -343,12 +343,12 @@ export const PILLARS: Pillar[] = [
     keyword: 'automação de UGC',
     title: 'Automação de UGC: produza criativos em lote sem regravar',
     description:
-      'Automação de UGC pra agências: lipsync, decupagem e legendas pra multiplicar criativos em escala. Comece grátis no Auto Edit.',
+      'Automação de UGC pra agências: lipsync, remoção de silêncios e legendas pra multiplicar criativos em escala. Comece grátis no Auto Edit.',
     kicker: 'UGC',
     h1: 'Automação de UGC',
     intro: [
       'Automação de UGC é produzir e adaptar criativos de usuário (user-generated content) em escala, sem regravar e sem montar cada variação na mão. Pra agência, o gargalo nunca é gravar — é multiplicar o mesmo criativo em dezenas de versões.',
-      'O Auto Edit resolve isso com ferramentas em lote: lipsync de avatar, decupagem automática e legenda alinhada pra cada variação.',
+      'O Auto Edit resolve isso com ferramentas em lote: lipsync de avatar, remoção automática de silêncios e legenda alinhada pra cada variação.',
     ],
     blocks: [
       {
@@ -358,7 +358,7 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Lipsync Video to Video — o avatar falando cada variação da copy',
-          'Decupagem automática pra limpar cada take sem editar na mão',
+          'Remover Silêncios pra limpar cada take sem editar na mão',
           'Legenda automática pra cada variação',
         ],
       },
@@ -397,7 +397,7 @@ export const PILLARS: Pillar[] = [
     ],
     related: [
       { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'decupagem-automatica', label: 'Remover Silêncios' },
     ],
   },
   {
@@ -457,7 +457,7 @@ export const PILLARS: Pillar[] = [
       },
     ],
     related: [
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'decupagem-automatica', label: 'Remover Silêncios' },
       { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
     ],
   },

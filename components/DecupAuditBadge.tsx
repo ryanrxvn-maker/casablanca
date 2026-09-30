@@ -1,5 +1,5 @@
 /**
- * O SELO DE AUDITORIA da Decupagem — a prova, em número, de que o corte não
+ * O SELO DE AUDITORIA da Remover Silêncios — a prova, em número, de que o corte não
  * encostou em palavra.
  *
  * Por que existe: o motor (lib/speech-detect) reexamina as bordas de cada

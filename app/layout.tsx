@@ -19,7 +19,7 @@ const label = localFont({ src: '../public/fonts/site-inter.woff2', variable: '--
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
-  'Decupagem automática, camuflagem de áudio com selo por plataforma, 41 modelos de print de notícia, lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.';
+  'Remover Silêncios, camuflagem de áudio com selo por plataforma, 41 modelos de print de notícia, lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   description: SITE_DESC,
   keywords: [
     'automação de edição de vídeo',
-    'decupagem automática',
+    'remover silêncios',
     'camuflagem de áudio',
     'print de telejornal',
     'manchete de jornal para vídeo',
@@ -138,7 +138,7 @@ const JSON_LD = {
       inLanguage: 'pt-BR',
       publisher: { '@id': `${SITE_URL}/#org` },
       featureList: [
-        'Decupagem automática de vídeo',
+        'Remover Silêncios de vídeo',
         'Camuflagem de áudio com verificação por plataforma',
         'FakePrint — prints de telejornal, site de notícia e redes sociais',
         'Lipsync Video to Video',

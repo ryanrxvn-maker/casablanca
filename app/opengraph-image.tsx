@@ -58,7 +58,7 @@ export default function OpengraphImage() {
             maxWidth: 940,
           }}
         >
-          Decupagem, lipsync e legendas — direto no navegador.
+          Remover Silêncios, lipsync e legendas — direto no navegador.
         </div>
         <div
           style={{

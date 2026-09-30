@@ -5,7 +5,7 @@
  *
  * Mesma direção da landing v3 (components/landing/v3): tarja de edição no topo,
  * cabeçalho de jornal e, do lado esquerdo, o SHOWCASE — um banner temático por
- * ferramenta (Legendas Automáticas, Decupagem, FakePrint, Camuflagem), cada um
+ * ferramenta (Legendas Automáticas, Remover Silêncios, FakePrint, Camuflagem), cada um
  * com a cena animada real e a própria copy, trocando de 6 em 6 segundos. O
  * formulário fica à direita, com fio vermelho de retranca.
  *

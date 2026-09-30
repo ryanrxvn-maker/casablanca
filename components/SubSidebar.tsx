@@ -39,18 +39,18 @@ type Item = {
 // interno levam adminOnly e somem pra cliente.
 const TOOL_ITEMS: Item[] = [
   { href: '/tools/fakepass', label: 'FakePrint', icon: <IconFakePass size={20} />, hue: 'rgba(167,139,250,0.4)' },
-  { href: '/tools/decupagem', label: 'Decupagem', icon: <IconDecupagem size={20} />, hue: 'rgba(163,230,53,0.4)' },
-  { href: '/tools/camuflagem', label: 'Camuflagem', icon: <IconCamuflagem size={20} />, hue: 'rgba(45,212,191,0.4)' },
+  { href: '/tools/decupagem', label: 'Remover Silêncios', icon: <IconDecupagem size={20} />, hue: 'rgba(163,230,53,0.4)' },
+  { href: '/tools/camuflagem', label: 'Camuflagem de Áudio', icon: <IconCamuflagem size={20} />, hue: 'rgba(45,212,191,0.4)' },
   { href: '/tools/downloader', label: 'Downloader', icon: <IconDownloader size={20} />, hue: 'rgba(96,165,250,0.4)' },
   { href: '/tools/compressor', label: 'Compressor', icon: <IconCompressor size={20} />, hue: 'rgba(129,140,248,0.4)' },
-  { href: '/tools/audio-split', label: 'Dividir áudios', icon: <IconAudioSplit size={20} />, hue: 'rgba(34,211,238,0.4)' },
+  { href: '/tools/audio-split', label: 'Dividir Voz', icon: <IconAudioSplit size={20} />, hue: 'rgba(34,211,238,0.4)' },
   { href: '/tools/acelerador', label: 'Mixer de Velocidade', icon: <IconAcelerador size={20} />, hue: 'rgba(251,191,36,0.4)' },
   { href: '/tools/lipsync', label: 'Lipsync Video to Video', icon: <IconLipsync size={20} />, hue: 'rgba(232,121,249,0.45)' },
-  { href: '/tools/decupagem-copy', label: 'Decupagem Inteligente', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)', adminOnly: true },
+  { href: '/tools/decupagem-copy', label: 'Remover Silêncios por Copy', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)', adminOnly: true },
   { href: '/tools/copy-srt', label: 'Gerador de SRT', icon: <IconCopySRT size={20} />, hue: 'rgba(196,181,253,0.45)' },
   { href: '/tools/tipografia', label: 'Legendas Automáticas', icon: <IconTipografia size={20} />, hue: 'rgba(251,191,36,0.45)' },
   { href: '/tools/auto-cortes', label: 'Auto Cortes', icon: <IconAutoCortes size={20} />, hue: 'rgba(244,114,182,0.42)', adminOnly: true },
-  { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)' },
+  { href: '/tools/normalizador', label: 'Normalizador de Áudio', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)' },
   { href: '/tools/separador-audio', label: 'Separador de Áudio', icon: <IconSeparadorAudio size={20} />, hue: 'rgba(167,139,250,0.45)', adminOnly: true },
   { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
   { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)', adminOnly: true },
@@ -69,7 +69,7 @@ const TOOL_PATHS = TOOL_ITEMS.map((i) => i.href);
  *   │ FERRAMENTAS          │ ← eyebrow
  *   │ 10 ferramentas       │ ← contador
  *   ├──────────────────────┤
- *   │ [ic] Decupagem       │ ← lista vertical
+ *   │ [ic] Remover Silêncios       │ ← lista vertical
  *   │ [ic] Camuflagem ←    │
  *   │ [ic] Downloader      │
  *   │ ...                  │

@@ -32,21 +32,34 @@ type Tool = {
 const ALL_TOOLS: Tool[] = [
   { key: 'lipsync', label: 'Lipsync Video to Video' },
   { key: 'gerador-srt', label: 'Gerador de SRT' },
-  { key: 'decupagem', label: 'Decupagem' },
-  { key: 'camuflagem', label: 'Camuflagem' },
+  { key: 'decupagem', label: 'Remover Silêncios' },
+  { key: 'camuflagem', label: 'Camuflagem de Áudio' },
   { key: 'mixer-velocidade', label: 'Mixer de Velocidade' },
-  { key: 'separar-audios', label: 'Dividir áudios' },
-  { key: 'normalizador', label: 'Normalizador' },
+  { key: 'separar-audios', label: 'Dividir Voz' },
+  { key: 'normalizador', label: 'Normalizador de Áudio' },
   { key: 'tipografia', label: 'Legendas Automáticas' },
   { key: 'compressor', label: 'Compressor' },
   { key: 'downloader', label: 'Downloader' },
   { key: 'fakepass', label: 'FakePrint' },
 ];
 
+function planToolLabel(tool: Tool, isFree: boolean): string {
+  if (tool.key === 'decupagem') {
+    return isFree ? 'Remover Silêncios (áudio)' : 'Remover Silêncios (áudio/vídeo)';
+  }
+  if (tool.key === 'mixer-velocidade') return 'Mixer de Velocidade (voz sem efeito robótico)';
+  if (tool.key === 'separar-audios') return 'Dividir Voz (sem cortar no meio da fala)';
+  if (tool.key === 'downloader') return 'Downloader (YouTube, Instagram, Pinterest, TikTok e +18)';
+  if (tool.key === 'fakepass') {
+    return isFree ? 'FakePrint (redes sociais)' : 'FakePrint (inclui notícias e telejornais)';
+  }
+  return tool.label;
+}
+
 /** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS).
  *  Espelha EXATAMENTE o acesso real de lib/use-tier.ts (TIER_PATHS). */
 const UNLOCKED: Record<'free' | 'basic', Set<string>> = {
-  free: new Set(['decupagem', 'fakepass', 'compressor']),
+  free: new Set(['decupagem', 'fakepass', 'compressor', 'downloader']),
   // basic = plano PREMIUM (nome de exibição) — libera a suíte inteira.
   basic: new Set(ALL_TOOLS.map((t) => t.key)),
 };
@@ -551,13 +564,7 @@ function PlanCard({
                     </span>
                   )}
                   <span className={isUnlocked ? '' : 'line-through opacity-65'}>
-                    {isFree && tool.key === 'decupagem'
-                      ? 'Decupagem (exportação de áudio)'
-                      : isFree && tool.key === 'fakepass'
-                        ? 'FakePrint (redes sociais)'
-                        : !isFree && tool.key === 'fakepass'
-                          ? 'FakePrint (inclui notícias e telejornais)'
-                          : tool.label}
+                    {planToolLabel(tool, isFree)}
                   </span>
                 </li>
               );
@@ -894,7 +901,7 @@ type ToolInfo = {
   name: string;
   desc: string;
   win: string;
-  cat: 'Vídeo' | 'Áudio' | 'IA' | 'Web' | 'Automação';
+  cat: 'Vídeo' | 'Áudio' | 'Áudio/Vídeo' | 'IA' | 'Web' | 'Automação';
   hue: string;
   /** Featured cards visualmente turbinados */
   featured?: boolean;
@@ -917,10 +924,10 @@ const TOOL_DETAILS: ToolInfo[] = [
   },
   {
     key: 'decupagem',
-    name: 'Decupagem',
-    cat: 'Vídeo',
+    name: 'Remover Silêncios',
+    cat: 'Áudio/Vídeo',
     hue: 'rgba(163,230,53,0.5)',
-    desc: 'Vídeo ou áudio: remove o silêncio mantendo o ritmo natural da fala.',
+    desc: 'Remove o silêncio mantendo o ritmo natural da fala. Áudio no Free; áudio e vídeo no Premium.',
     win: 'O que tomava a sua tarde sai em minutos. Corte limpo, pronto pra timeline.',
   },
   {
@@ -928,7 +935,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Downloader',
     cat: 'Web',
     hue: 'rgba(96,165,250,0.5)',
-    desc: 'Baixa vídeos e áudios do YouTube, Instagram, TikTok e Pinterest direto no seu computador.',
+    desc: 'Baixa vídeos e áudios do YouTube, Instagram, TikTok, Pinterest e sites +18 compatíveis direto no seu computador.',
     win: 'Cola o link, recebe o arquivo. Sem código, sem servidor.',
   },
   {
@@ -936,7 +943,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'FakePrint',
     cat: 'Web',
     hue: 'rgba(167,139,250,0.5)',
-    desc: 'Gera prints e stickers de redes sociais fiéis aos originais.',
+    desc: 'Gera prints de redes sociais no Free. Telejornais e sites de notícias no Premium.',
     win: 'Prova social na hora, sem abrir o Photoshop.',
   },
   {
@@ -952,20 +959,20 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Mixer de Velocidade',
     cat: 'Vídeo',
     hue: 'rgba(251,191,36,0.5)',
-    desc: 'Acelera ou desacelera vídeo e áudio sem ficar com voz robotizada.',
-    win: 'Mantém o tom natural mesmo em 1.5×. O ouvido nem percebe.',
+    desc: 'Acelera ou desacelera vídeo e áudio sem deixar a voz robótica.',
+    win: 'Mantém o tom natural mesmo em 1,5×.',
   },
   {
     key: 'separar-audios',
-    name: 'Dividir áudios',
+    name: 'Dividir Voz',
     cat: 'Áudio',
     hue: 'rgba(34,211,238,0.5)',
-    desc: 'Divide um áudio longo em pedaços, sempre respeitando as pausas.',
-    win: 'Cada fala vira um arquivo. Sem cortar palavra no meio.',
+    desc: 'Divide uma gravação longa nas pausas, sem cortar no meio da fala.',
+    win: 'Cada trecho vira um arquivo, com a voz inteira.',
   },
   {
     key: 'normalizador',
-    name: 'Normalizador',
+    name: 'Normalizador de Áudio',
     cat: 'Áudio',
     hue: 'rgba(94,234,212,0.5)',
     desc: 'Iguala o volume da voz e limpa o chiado de fundo, sem você mexer em nada.',
@@ -989,7 +996,7 @@ const TOOL_DETAILS: ToolInfo[] = [
   },
   {
     key: 'camuflagem',
-    name: 'Camuflagem',
+    name: 'Camuflagem de Áudio',
     cat: 'Áudio',
     hue: 'rgba(45,212,191,0.5)',
     desc: 'Disfarça o áudio pra dificultar detecção automática de plataformas.',

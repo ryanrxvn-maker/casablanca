@@ -70,14 +70,14 @@ type Dash = {
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  decupagem: 'Decupagem',
-  'decupagem-copy': 'Decupagem Inteligente',
+  decupagem: 'Remover Silêncios',
+  'decupagem-copy': 'Remover Silêncios por Copy',
   downloader: 'Downloader',
-  camuflagem: 'Camuflagem',
+  camuflagem: 'Camuflagem de Áudio',
   compressor: 'Compressor',
-  'audio-split': 'Dividir Áudios',
+  'audio-split': 'Dividir Voz',
   acelerador: 'Mixer de Velocidade',
-  normalizador: 'Normalizador',
+  normalizador: 'Normalizador de Áudio',
   calculadora: 'Calculadora',
   'copy-srt': 'Gerador de SRT',
   'auto-cortes': 'Auto Cortes',

@@ -54,7 +54,7 @@ async function oembed(endpoint: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const gate = await requireTier('basic');
+  const gate = await requireTier('free');
   if (!gate.ok) return gate.response;
   const raw = request.nextUrl.searchParams.get('url') || '';
   let source: URL;

@@ -99,14 +99,14 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/decupagem',
-    label: 'Decupagem',
-    description: 'Vídeo ou áudio: o silêncio some, a fala fica. Corte limpo.',
+    label: 'Remover Silêncios',
+    description: 'Silêncios removidos. Áudio grátis; vídeo no Premium.',
     icon: <IconDecupagem size={26} />,
     hue: 'rgba(163, 230, 53, 0.4)',
   },
   {
     href: '/tools/camuflagem',
-    label: 'Camuflagem',
+    label: 'Camuflagem de Áudio',
     description: 'O público ouve um áudio. A transcrição lê outro.',
     icon: <IconCamuflagem size={26} />,
     hue: 'rgba(45, 212, 191, 0.4)',
@@ -114,7 +114,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/downloader',
     label: 'Downloader',
-    description: 'Baixa vídeo, áudio e imagem do YouTube, TikTok, Insta e Pinterest.',
+    description: 'YouTube, Instagram, TikTok, Pinterest e sites +18 compatíveis.',
     icon: <IconDownloader size={26} />,
     hue: 'rgba(96, 165, 250, 0.4)',
   },
@@ -127,7 +127,7 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/audio-split',
-    label: 'Dividir áudios',
+    label: 'Dividir Voz',
     description: 'Divide o áudio em pedaços pelas pausas. Sem cortar falas.',
     icon: <IconAudioSplit size={26} />,
     hue: 'rgba(34, 211, 238, 0.4)',
@@ -141,7 +141,7 @@ const TOOLS: ToolEntry[] = [
   },
   {
     href: '/tools/normalizador',
-    label: 'Normalizador',
+    label: 'Normalizador de Áudio',
     description: 'Iguala o volume da voz e limpa o chiado. Com relatório antes × depois.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
@@ -183,7 +183,7 @@ const TOOLS: ToolEntry[] = [
   {
     href: '/tools/decupagem-copy',
     adminOnly: true,
-    label: 'Decupagem Inteligente',
+    label: 'Remover Silêncios por Copy',
     description: 'IA lê a copy. Escolhe o take certo.',
     icon: <IconDecupageCopy size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
@@ -2530,11 +2530,11 @@ function LockIcon({ size = 18 }: { size?: number }) {
 // ainda faz o cinto de segurança — need='admin' nunca imprime nome.
 const TOOL_LABELS: Record<string, string> = {
   '/tools/lipsync': 'Lipsync Video to Video',
-  '/tools/camuflagem': 'Camuflagem',
+  '/tools/camuflagem': 'Camuflagem de Áudio',
   '/tools/compressor': 'Compressor',
-  '/tools/audio-split': 'Dividir áudios',
+  '/tools/audio-split': 'Dividir Voz',
   '/tools/acelerador': 'Mixer de Velocidade',
-  '/tools/normalizador': 'Normalizador',
+  '/tools/normalizador': 'Normalizador de Áudio',
   '/tools/copy-srt': 'Gerador de SRT',
   '/tools/calculadora': 'Calculadora',
 };

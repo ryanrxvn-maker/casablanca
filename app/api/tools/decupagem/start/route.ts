@@ -22,7 +22,7 @@ export async function POST(req: Request) {
 
   if (!process.env.DECUP_KEY?.trim()) {
     return NextResponse.json(
-      { error: 'Decupagem no servidor não configurada (DECUP_KEY ausente).' },
+      { error: 'Remover Silêncios no servidor não configurada (DECUP_KEY ausente).' },
       { status: 500 },
     );
   }

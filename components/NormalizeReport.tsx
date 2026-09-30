@@ -6,7 +6,7 @@ import type { NormalizeEngineInfo } from '@/lib/ffmpeg-worker';
 
 /**
  * NormalizeReport — relatório visual antes × depois de UM arquivo do
- * Normalizador. Prova a diferença de várias formas:
+ * Normalizador de Áudio. Prova a diferença de várias formas:
  *
  *   1. ONDA SONORA: as duas ondas (antes em cinza, depois em teal) na mesma
  *      escala, com a guarda de true-peak (−1.5 dB) tracejada no depois.

@@ -20,7 +20,7 @@ export async function POST() {
 
   if (!process.env.DECUP_UPLOAD_SECRET?.trim()) {
     return NextResponse.json(
-      { error: 'Decupagem no servidor não configurada (DECUP_UPLOAD_SECRET ausente).' },
+      { error: 'Remover Silêncios no servidor não configurada (DECUP_UPLOAD_SECRET ausente).' },
       { status: 500 },
     );
   }

@@ -3,7 +3,7 @@
 /**
  * sections — corpo da landing v3.
  *
- *   01 EM DESTAQUE  → os três blocos-herói (Camuflagem, Decupagem, FakePrint),
+ *   01 EM DESTAQUE  → os três blocos-herói (Camuflagem, Remover Silêncios, FakePrint),
  *                     cada um com paleta, cena e copy próprias.
  *   02 A SUÍTE      → grade de programação: toda ferramenta com o PLANO REAL.
  *   03 COMO FUNCIONA
@@ -69,7 +69,7 @@ const HIGHLIGHTS: Highlight[] = [
       'Editor no preview: arrasta, redimensiona, edita o texto e marca trechos',
       'O que você vê é o que sai — preview e MP4 usam o mesmo motor',
     ],
-    note: 'Grátis pra qualquer conta — a animação aqui do lado é o motor real rodando, não um vídeo.',
+    note: 'Disponível no Premium — a animação aqui do lado é o motor real rodando, não um vídeo.',
     scene: <LegendasScene />,
   },
   {
@@ -92,7 +92,7 @@ const HIGHLIGHTS: Highlight[] = [
     scene: <CamuflagemScene />,
   },
   {
-    tag: 'Decupagem automática',
+    tag: 'Remover Silêncios',
     tone: '#c8d684',
     title: (
       <>
@@ -100,7 +100,7 @@ const HIGHLIGHTS: Highlight[] = [
       </>
     ),
     lead:
-      'Sobe o vídeo (ou só o áudio) e recebe de volta sem os silêncios: sem tempo morto, sem respiro esticado no meio da frase, e com a voz já nivelada. Você escolhe quanta pausa fica — corte seco de anúncio ou respiro natural.',
+      'Sobe o áudio ou vídeo e recebe de volta sem os silêncios: sem tempo morto, sem respiro esticado no meio da frase, e com a voz já nivelada. A exportação de áudio é grátis; a de vídeo fica no Premium.',
     bullets: [
       'Fila em lote: vários arquivos de uma vez, um atrás do outro',
       'Volume nivelado antes do corte — dois locutores no mesmo patamar',
@@ -120,11 +120,11 @@ const HIGHLIGHTS: Highlight[] = [
       </>
     ),
     lead:
-      'Telejornal, site de notícia, conversa de WhatsApp, chamada de vídeo, post e story do Instagram, notificação de celular e live. São 41 modelos: você preenche os campos e a manchete é sua.',
+      'São 41 modelos: conversas, posts, stories, telejornais e sites de notícia. Modelos sociais são grátis. Nos telejornais e sites, o Free vê a prévia; edição e exportação ficam no Premium.',
     bullets: [
       'Prévia ao vivo: o print muda a cada tecla, e o que você vê é o PNG que baixa',
       'Tela verde em tudo que é cena — telejornal, site e live prontos pro chroma key',
-      'Telejornais e lives exportam .webm animado: relógio andando, reações subindo',
+      'No Premium, telejornais exportam .webm animado: relógio andando, reações subindo',
     ],
     note:
       'A barra de status do celular é editável até a bateria: 63% às 21:47 conta uma história, 100% às 9:00 conta outra.',
@@ -250,14 +250,14 @@ type Tool = {
 
 const TOOLS: Tool[] = [
   {
-    name: 'Decupagem',
-    desc: 'Corta silêncio e respiro de vídeo ou áudio, em lote.',
+    name: 'Remover Silêncios',
+    desc: 'Remove silêncios em lote. Exporta áudio no Free e áudio ou vídeo no Premium.',
     plan: 'free',
     icon: <IconDecupagem size={20} />,
   },
   {
     name: 'FakePrint',
-    desc: '41 modelos de print: telejornal, site, conversa, post, story e live.',
+    desc: 'Prints de redes sociais grátis. Telejornais e sites de notícias no Premium.',
     plan: 'free',
     icon: <IconFakePass size={20} />,
   },
@@ -269,24 +269,24 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'Downloader',
-    desc: 'Baixa vídeo, áudio e imagem de YouTube, TikTok, Insta e Pinterest.',
+    desc: 'Baixa vídeo, áudio e imagem de YouTube, TikTok, Instagram, Pinterest e sites +18 compatíveis.',
     plan: 'free',
     icon: <IconDownloader size={20} />,
   },
   {
-    name: 'Normalizador',
+    name: 'Normalizador de Áudio',
     desc: 'Iguala o volume da voz e limpa o chiado, com relatório antes × depois.',
-    plan: 'free',
+    plan: 'premium',
     icon: <IconNormalizador size={20} />,
   },
   {
     name: 'Legendas Automáticas',
     desc: 'Legendas animadas no tempo do áudio, com centenas de modelos prontos.',
-    plan: 'free',
+    plan: 'premium',
     icon: <IconTipografia size={20} />,
   },
   {
-    name: 'Camuflagem',
+    name: 'Camuflagem de Áudio',
     desc: 'Duas trilhas no mesmo arquivo, com selo por plataforma.',
     plan: 'premium',
     icon: <IconCamuflagem size={20} />,
@@ -310,7 +310,7 @@ const TOOLS: Tool[] = [
     icon: <IconAcelerador size={20} />,
   },
   {
-    name: 'Dividir Áudios',
+    name: 'Dividir Voz',
     desc: 'Quebra o áudio em pedaços pelas pausas, sem cortar fala.',
     plan: 'premium',
     icon: <IconAudioSplit size={20} />,
@@ -428,12 +428,12 @@ const STEPS = [
   {
     n: '01',
     title: 'Cria a conta grátis',
-    desc: 'Sem cartão. Você cai direto no hub e já usa as ferramentas do plano grátis — inclusive o FakePrint inteiro.',
+    desc: 'Sem cartão. Você cai direto no hub e já usa Remover Silêncios em áudio, Compressor, Downloader e modelos sociais do FakePrint.',
   },
   {
     n: '02',
     title: 'Escolhe a ferramenta e sobe o arquivo',
-    desc: 'Decupagem, compressão e camuflagem processam no seu navegador. Dá pra mandar vários arquivos de uma vez e acompanhar a fase de cada um ao vivo.',
+    desc: 'Remover Silêncios, compressão e camuflagem processam no seu navegador. Dá pra mandar vários arquivos de uma vez e acompanhar a fase de cada um ao vivo.',
   },
   {
     n: '03',
@@ -443,7 +443,7 @@ const STEPS = [
 ];
 
 const CHECKS = [
-  'Decupagem, compressão e camuflagem rodam no navegador — o arquivo nem sobe.',
+  'Remover Silêncios, compressão e camuflagem rodam no navegador — o arquivo nem sobe.',
   'A fila continua em segundo plano enquanto você faz outra coisa.',
   'Lote em todas as ferramentas de arquivo: vários itens na mesma fila.',
   'Assinatura no cartão, cancelamento na própria conta. Sem letra miúda.',
@@ -538,7 +538,7 @@ export function PricingSection() {
               Pra sentir o corte. Sem cartão, sem prazo.
             </p>
             <ul className="mt-7 flex-1 space-y-2.5">
-              {['Decupagem', 'FakePrint (41 modelos, com Caixinha de Pergunta)', 'Compressor', 'Downloader', 'Histórico'].map(
+              {['Remover Silêncios (áudio)', 'FakePrint (redes sociais)', 'Compressor', 'Downloader (inclui sites +18 compatíveis)'].map(
                 (f) => (
                   <Feat key={f} text={f} tone="#c8d684" />
                 ),
@@ -593,11 +593,15 @@ export function PricingSection() {
             <ul className="mt-7 flex-1 space-y-2.5">
               <Feat text="Tudo do Free" tone="#c4b5fd" strong />
               {[
-                'Camuflagem (com selo por plataforma)',
+                'Remover Silêncios (áudio/vídeo)',
+                'FakePrint (telejornais e sites de notícias)',
+                'Camuflagem de Áudio (com selo por plataforma)',
                 'Lipsync Video to Video',
                 'Gerador de SRT pela copy',
-                'Mixer de Velocidade',
-                'Dividir Áudios',
+                'Mixer de Velocidade (voz sem efeito robótico)',
+                'Dividir Voz (sem cortar no meio da fala)',
+                'Normalizador de Áudio',
+                'Legendas Automáticas',
                 'Calculadora',
               ].map((f) => (
                 <Feat key={f} text={f} tone="#c4b5fd" />
@@ -785,7 +789,7 @@ export function LandingFooter() {
         tone="#2a2a32"
         speed={54}
         items={[
-          'Decupagem automática',
+          'Remover Silêncios',
           'Camuflagem de áudio',
           'FakePrint · 41 modelos',
           'Gerador de SRT',

@@ -61,9 +61,9 @@ const META: Array<{
       'Chave alfanumerica longa. Pega em assemblyai.com (dashboard, sidebar).',
     link: 'https://www.assemblyai.com/app/account',
     usedBy:
-      'Legendas Automáticas · Decupagem por Copy · Gerador de SRT · Camuflagem · Diarização de vozes (VA)',
+      'Legendas Automáticas · Remover Silêncios por Copy · Gerador de SRT · Camuflagem · Diarização de vozes (VA)',
     note:
-      'TRANSCRIÇÃO: esta chave e a do Groq fazem a mesma coisa — basta UMA das duas pra Legendas Automáticas, Decupagem por Copy e Gerador de SRT. Só a Camuflagem e a Diarização exigem esta aqui.',
+      'TRANSCRIÇÃO: esta chave e a do Groq fazem a mesma coisa — basta UMA das duas pra Legendas Automáticas, Remover Silêncios por Copy e Gerador de SRT. Só a Camuflagem e a Diarização exigem esta aqui.',
   },
   {
     id: 'heygen',
@@ -112,7 +112,7 @@ const META: Array<{
     helper:
       'Token gsk_... — Whisper-large-v3 a ~$0.04/h (vs $0.45 AssemblyAI). Crie em console.groq.com → API Keys.',
     link: 'https://console.groq.com/keys',
-    usedBy: 'Legendas Automáticas · Decupagem por Copy · Gerador de SRT',
+    usedBy: 'Legendas Automáticas · Remover Silêncios por Copy · Gerador de SRT',
     note:
       'TRANSCRIÇÃO: esta chave e a do AssemblyAI fazem a mesma coisa — basta UMA das duas. Se você já configurou o AssemblyAI, estas ferramentas JÁ funcionam e este card é opcional: com as duas salvas, o AutoEdit usa a Groq (mais barata) e cai pro AssemblyAI se ela falhar.',
   },

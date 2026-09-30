@@ -521,7 +521,7 @@ export default function DecupagemPage() {
   return (
     <div className="mx-auto w-full max-w-[920px] px-5 md:px-8">
       <ToolHero
-        title="Decupagem"
+        title="Remover Silêncios"
         eyebrow="VÍDEO / ÁUDIO · FILA ATÉ 10"
         subtitle="Remova silêncios de áudio e vídeo. Adicione até 10 arquivos e acompanhe cada entrega na fila."
         hue="rgba(163,230,53,0.4)"
@@ -727,7 +727,7 @@ export default function DecupagemPage() {
                   <ToolResultCard key={item.id} title={item.file.name} meta={`${reduced}% menor`}>
                     <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
                       <ToolMetric value={formatTime(r.originalDur)} label="Original" />
-                      <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
+                      <ToolMetric value={formatTime(r.newDur)} label="Após remover silêncios" accent="lime" />
                       <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
                     </div>
                     {r.audit ? <DecupAuditBadge audit={r.audit} /> : null}

@@ -1695,7 +1695,7 @@ function CapabilitiesSection() {
     {
       icon: <IconDecupagem size={32} />,
       hue: 'rgba(163,230,53,0.45)',
-      title: 'Decupagem automática',
+      title: 'Remover Silêncios',
       desc: 'Os silêncios somem sozinhos, em lote — o corte limpo sai em minutos, não em tardes.',
     },
     {
@@ -1802,7 +1802,7 @@ function SuiteSection() {
   const tools = [
     {
       img: '/cards/decupagem-inteligente.jpg',
-      title: 'Decupagem Inteligente',
+      title: 'Remover Silêncios por Copy',
       desc: 'Corta o vídeo seguindo a sua copy, sem comer palavra.',
     },
     {

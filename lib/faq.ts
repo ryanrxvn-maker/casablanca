@@ -20,11 +20,11 @@ export type FaqItem = { q: string; a: string };
 export const FAQ: FaqItem[] = [
   {
     q: 'O que é o Auto Edit?',
-    a: 'O Auto Edit é uma suíte de ferramentas de edição de vídeo que roda no navegador. Ele faz decupagem automática, legendas animadas, prints de notícia e conversa (FakePrint), lipsync de avatar, legenda SRT alinhada à copy e ajustes de arquivo em lote — cada etapa chata do dia do editor tem uma ferramenta.',
+    a: 'O Auto Edit é uma suíte de ferramentas de edição de vídeo que roda no navegador. Remover Silêncios limpa pausas da fala, e a suíte também oferece legendas animadas, FakePrint, lipsync de avatar, SRT alinhado à copy e ajustes de arquivo em lote.',
   },
   {
-    q: 'Como funciona a decupagem automática?',
-    a: 'Você sobe o vídeo e a decupagem automática remove os silêncios e cortes mortos sozinha, com o volume da voz nivelado. O que tomava uma tarde no manual sai em minutos, e dá pra processar vários vídeos na mesma fila — ideal pra editores e agências com volume alto.',
+    q: 'Como funciona Remover Silêncios?',
+    a: 'Você sobe áudio ou vídeo e a ferramenta remove as pausas sem cortar a fala, com a voz nivelada. Pode processar vários arquivos na mesma fila. O plano Free exporta áudio; o Premium exporta áudio e vídeo.',
   },
   {
     q: 'O que é a Camuflagem de áudio?',
@@ -32,7 +32,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'O que dá pra criar no FakePrint?',
-    a: 'O FakePrint tem 41 modelos de print para criativos: telejornais (14 emissoras), sites de notícia (11 layouts), conversa de WhatsApp e Instagram DM, chamada de vídeo, post do Instagram, tweet, comentários, stories, notificação de celular e lives. A prévia atualiza a cada tecla e o download sai em PNG de alta resolução. Telejornais e lives também exportam vídeo .webm animado, e o fundo pode sair em tela verde (chroma key) pra encaixar atrás no editor.',
+    a: 'O FakePrint tem modelos de redes sociais, telejornais e sites de notícias. No Free, você edita e baixa os modelos sociais; os telejornais e sites ficam visíveis para prévia, com edição e exportação disponíveis no Premium. A prévia atualiza enquanto você digita e os modelos liberados saem em PNG de alta resolução.',
   },
   {
     q: 'Como o Auto Edit gera legendas (SRT) alinhadas à copy?',
@@ -44,7 +44,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'Tem plano grátis? Quanto custa?',
-    a: 'Tem plano grátis pra começar sem cartão. O plano pago é o Premium (R$ 57/mês), que libera todas as ferramentas — incluindo Lipsync Video to Video e Gerador de SRT. A assinatura mensal é recorrente no cartão e o plano anual pode ser parcelado em até 12×.',
+    a: 'Tem plano grátis sem cartão com Remover Silêncios em áudio, Compressor, Downloader e modelos sociais do FakePrint. O Premium (R$ 57/mês) libera as demais ferramentas e exportação de vídeo em Remover Silêncios. A assinatura mensal é recorrente e o plano anual pode ser parcelado em até 12×.',
   },
   {
     q: 'Serve pra agência e produção em escala?',

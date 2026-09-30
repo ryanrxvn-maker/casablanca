@@ -19,7 +19,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  *  Após login:
  *    • tier='admin' → acessa tudo
  *    • tier='beta'  → acessa tudo (exceto rotas admin-only)
- *    • tier='free'  → hub, Decupagem (áudio), Compressor, FakePrint e conta.
+ *    • tier='free'  → hub, Remover Silêncios (áudio), Compressor, Downloader, FakePrint e conta.
  *                     Tudo o mais redireciona pra /tools?locked=1.
  *                     Dentro de /tools/decupagem, a opção "vídeo" é
  *                     desabilitada na UI (e o backend também filtra).

@@ -9,7 +9,7 @@
  * (Instrument Serif) pra manchete, Bricolage pra títulos, Inter pros rótulos.
  *
  * O que mudou em relação à v2 (além do visual): as três ferramentas que mais
- * pesam na entrega — Camuflagem, Decupagem e FakePrint — ganharam bloco-herói
+ * pesam na entrega — Camuflagem, Remover Silêncios e FakePrint — ganharam bloco-herói
  * próprio, com cena animada e copy específica, em vez de virarem mais um card
  * numa grade.
  *
@@ -58,7 +58,7 @@ export function LandingV3() {
         className="mt-14 md:mt-20"
         tag="Plantão"
         items={[
-          'Decupagem — o silêncio sai sozinho',
+          'Remover Silêncios — o silêncio sai sozinho',
           'Camuflagem — duas trilhas no mesmo arquivo',
           'FakePrint — 41 modelos de print',
           'Legendas Automáticas — sua fala vira legenda animada',

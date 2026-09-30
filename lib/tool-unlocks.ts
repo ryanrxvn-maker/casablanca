@@ -60,7 +60,7 @@ export const UNLOCKABLE_TOOLS: ReadonlyArray<{
   },
   {
     path: '/tools/decupagem-copy',
-    label: 'Decupagem Inteligente',
+    label: 'Remover Silêncios por Copy',
     desc: 'Decupa seguindo a copy (consome créditos de transcrição da casa).',
   },
   // '/tools/normalizador' saiu daqui em 14.08.2026: liberado pra TODOS os

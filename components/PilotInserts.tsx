@@ -1198,7 +1198,7 @@ export function PilotInsertsModal({
           <span className="pi-rodape-txt">
             {inserts.length === 0
               ? 'Nenhum insert — o AD sai só com o avatar.'
-              : `${inserts.length} insert${inserts.length === 1 ? '' : 's'} · entram na montagem, depois da decupagem.`}
+              : `${inserts.length} insert${inserts.length === 1 ? '' : 's'} · entram na montagem, depois da remoção de silêncios.`}
           </span>
           <button type="button" className="pi-ok" onClick={onFechar}>
             Pronto

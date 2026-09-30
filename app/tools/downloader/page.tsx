@@ -411,7 +411,7 @@ export default function DownloaderPage() {
     // arquivo cai na barra de downloads do navegador; aqui só marcamos o
     // andamento. Sem extensão, segue pro /api/downloader (que orienta o
     // usuário a instalar a extensão).
-    if (mode === 'video' && !(isAdmin && adult) && isInstagramUrl(url)) {
+    if (mode === 'video' && !adult && isInstagramUrl(url)) {
       const canIgPaste = extensionCurrent;
       if (!canIgPaste) {
         setJobs((prev) =>
@@ -475,7 +475,7 @@ export default function DownloaderPage() {
     // MOTOR CONECTADO: baixa pelo Motor no computador do usuário (via
     // extensão). É o caminho que sempre funciona pra YouTube, TikTok e
     // Pinterest — o servidor não baixa esses sites; o Motor baixa.
-    if (engineOk && knownSource && !(isAdmin && adult)) {
+    if (engineOk && knownSource && !adult) {
       try {
         setJobs((prev) =>
           prev.map((j, i) =>
@@ -527,7 +527,7 @@ export default function DownloaderPage() {
     // SEM MOTOR: o servidor só resolve TikTok em vídeo. Pro resto, o que
     // resolve é instalar o Motor — orienta na hora, sem deixar o cliente
     // esperando uma falha.
-    if (!engineOk && knownSource && !(isAdmin && adult)) {
+    if (!engineOk && knownSource && !adult) {
       const serverCan = source === 'TikTok' && mode === 'video';
       if (!serverCan) {
         setJobs((prev) =>
@@ -550,7 +550,7 @@ export default function DownloaderPage() {
       const res = await fetch('/api/downloader', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url, mode, quality, adult: isAdmin && adult }),
+        body: JSON.stringify({ url, mode, quality, adult }),
         signal: AbortSignal.timeout(180000),
       });
 
@@ -697,7 +697,7 @@ export default function DownloaderPage() {
     <ToolShell
       title="Downloader"
       eyebrow="WEB · MULTI-SITE"
-      description="Baixe vídeos, áudios e imagens do YouTube, Instagram, TikTok e Pinterest. Adicione um link por linha para organizar os downloads."
+      description="Baixe vídeos, áudios e imagens do YouTube, Instagram, TikTok, Pinterest e sites +18 compatíveis. Adicione um link por linha para organizar os downloads."
       hue={HUE}
       icon={<IconDownloader size={56} />}
     >
@@ -778,8 +778,7 @@ export default function DownloaderPage() {
               onChange={(e) => setRaw(e.target.value)}
               disabled={running}
             />
-            {isAdmin ? (
-              <button
+            <button
                 type="button"
                 aria-label="Modo +18"
                 title={adult ? 'Modo +18 ativado' : 'Ativar modo +18'}
@@ -791,8 +790,7 @@ export default function DownloaderPage() {
                 }`}
               >
                 +18
-              </button>
-            ) : null}
+            </button>
           </div>
           <div className="mt-2 flex items-center justify-between">
             <span

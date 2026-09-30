@@ -32,7 +32,7 @@ import { TierGate } from '@/components/TierGate';
 const HUE = 'rgba(232,121,249,0.45)';
 
 /**
- * Decupagem com Copy — re-edita um video bruto pra seguir a ordem de uma
+ * Remover Silêncios com Copy — re-edita um video bruto pra seguir a ordem de uma
  * copy/script, escolhendo automaticamente a melhor take de cada frase.
  *
  * Pipeline (1 video por vez, ate 800MB/40min):
@@ -91,7 +91,7 @@ export default function DecupagemCopyPage() {
   return (
     <TierGate
       require="admin"
-      toolName="Decupagem Inteligente"
+      toolName="Remover Silêncios por Copy"
       toolPath="/tools/decupagem-copy"
     >
       <DecupagemCopyInner />
@@ -562,7 +562,7 @@ function DecupagemCopyInner() {
         src="/cards/decupagem-inteligente.mp4"
         poster="/cards/decupagem-inteligente.jpg"
         eyebrow="Corte por IA"
-        title="Decupagem Inteligente"
+        title="Remover Silêncios por Copy"
         subtitle="IA lê a copy. Escolhe o take certo."
         glow="rgba(232,121,249,0.5)"
       />
@@ -730,7 +730,7 @@ function DecupagemCopyInner() {
                   <span className="absolute inline-flex h-full w-full animate-pulse-soft rounded-full bg-lime opacity-60" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,232,124,0.9)]" />
                 </span>
-                Decupagem pronta · {cuts.length} cortes na ordem da copy
+                Remover Silêncios pronta · {cuts.length} cortes na ordem da copy
               </h3>
               <div className="flex items-center gap-2">
                 <button

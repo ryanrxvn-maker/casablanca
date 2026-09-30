@@ -225,7 +225,7 @@ function HeyGenAutoInner() {
     false,
   );
 
-  /* --------------- Decupagem (tesoura) — corta silêncios no montado --------- */
+  /* --------------- Remover Silêncios (tesoura) — corta silêncios no montado --------- */
   /** Default ON pra preservar o comportamento antigo (era hardcoded true). */
   const [decupagemEnabled, setDecupagemEnabled] = useToolState<boolean>(
     'hgauto:decupagem',
@@ -2517,7 +2517,7 @@ function HeyGenAutoInner() {
     }
 
     // ===== Fase 4: MONTADO (HOOK+BODY decupado) — entrega 1 MP4 DIRETO, sem pasta =====
-    stage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`, 92, 'post');
+    stage(`Montando HOOK+BODY${item.decupagem ? ' + remoção de silêncios' : ''}...`, 92, 'post');
     const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
     // Serializa no singleton do ffmpeg-wasm (mesmo padrão do Pilot) — a fila
     // e um download manual nunca montam ao mesmo tempo.
@@ -3269,7 +3269,7 @@ function HeyGenAutoInner() {
                 <Toggle3D
                   on={decupagemEnabled}
                   onChange={setDecupagemEnabled}
-                  label={decupagemEnabled ? 'Decupagem ON' : 'Decupagem OFF'}
+                  label={decupagemEnabled ? 'Remover Silêncios ON' : 'Remover Silêncios OFF'}
                   hint="Corta silêncios/respiros no vídeo montado HOOK+BODY"
                   variant="cyan"
                   icon={<span className="text-base">✂️</span>}

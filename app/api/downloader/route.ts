@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/api/admin/_helpers';
 import { requireTier } from '@/lib/require-tier';
 import { safeFetch } from '@/lib/safe-fetch';
 import {
@@ -17,7 +16,7 @@ import { Readable } from 'stream';
  *
  * Toda a logica (YouTube/Instagram/TikTok/Pinterest/+18) vive no core,
  * compartilhado com o motor da extensao. Aqui so: validacao do gate
- * +18 (requireAdmin, Supabase) e serializacao da resposta HTTP.
+ * +18 (opt-in no pedido) e serializacao da resposta HTTP.
  */
 
 export const runtime = 'nodejs';
@@ -25,7 +24,7 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
-  const gate = await requireTier('basic');
+  const gate = await requireTier('free');
   if (!gate.ok) return gate.response;
   let body: {
     url?: string;
@@ -41,8 +40,7 @@ export async function POST(req: NextRequest) {
   const url = (body.url ?? '').trim();
   const adult = body.adult === true;
 
-  // Gate +18: SO admin autenticado. Usuario normal nao acessa nem
-  // forjando o body — o gate roda ANTES do core.
+  // +18 exige opt-in explícito no pedido; autenticação roda ANTES do core.
   let host = '';
   try {
     host = new URL(url).hostname;
@@ -54,12 +52,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'Conteudo +18: ative o modo +18 no Downloader.' },
         { status: 400 },
-      );
-    const guard = await requireAdmin();
-    if (!guard.ok)
-      return NextResponse.json(
-        { error: 'Modo +18 restrito a administradores.' },
-        { status: 403 },
       );
   }
 

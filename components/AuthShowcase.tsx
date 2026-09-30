@@ -3,7 +3,7 @@
 /**
  * AuthShowcase — o palco do login: um banner temático por ferramenta,
  * trocando sozinho de 6 em 6 segundos com deslize lateral. Cada slide usa a
- * CENA REAL da landing (as Legendas rodam o engine de verdade, a Decupagem
+ * CENA REAL da landing (as Legendas rodam o engine de verdade, a Remover Silêncios
  * anima a timeline, o telejornal digita a manchete) + uma copy própria da
  * ferramenta.
  *
@@ -42,7 +42,7 @@ const SLIDES: Slide[] = [
   },
   {
     id: 'decupagem',
-    tag: 'Decupagem',
+    tag: 'Remover Silêncios',
     tone: '#c8d684',
     copy:
       'Sobe o vídeo e recebe de volta sem os silêncios, com a voz nivelada — em lote, direto no navegador.',

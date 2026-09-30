@@ -48,7 +48,7 @@ export const GUIDES: Record<string, ToolGuide> = {
   /* ── Trabalho rápido ─────────────────────────────────────────────── */
 
   '/tools/decupagem': {
-    title: 'Decupagem',
+    title: 'Remover Silêncios',
     tagline:
       'Corta os silêncios em lote e devolve cada arquivo limpo — vídeo vira vídeo, áudio vira áudio.',
     steps: [
@@ -56,7 +56,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Solte os arquivos na fila',
         text: 'No card "Solta os arquivos (até 10)", arraste seus vídeos ou áudios — ou clique na área pra abrir o seletor. Aceita MP3, WAV, MP4, WEBM e MOV, até 800 MB cada, e pode misturar vídeo com áudio na mesma fila. Cada arquivo vira um item numerado com o tamanho e o status "na fila". O contador embaixo da área mostra quantos já entraram (ex.: "3/10 na fila"). Entrou arquivo errado? O "×" ao lado do item tira ele da fila.',
         visual: (
-          <Shot label="Decupagem · fila">
+          <Shot label="Remover Silêncios · fila">
             <MStack>
               <MDrop
                 label="Arraste ou clique pra subir"
@@ -71,7 +71,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Escolha como receber os vídeos',
         text: 'Se a fila tiver vídeo, aparece o card "Como receber os vídeos?" com duas opções: "Vídeo" (o arquivo volta em MP4, já cortado) ou "Áudio" (só a trilha de voz limpa — útil quando o vídeo era apenas o meio de transporte da fala). A escolha vale pra fila inteira. No plano grátis a saída é sempre o áudio; receber o vídeo em MP4 é recurso das contas pagas — a própria tela sinaliza com "🔒 Vídeo bloqueado no plano grátis."',
         visual: (
-          <Shot label="Decupagem · como receber">
+          <Shot label="Remover Silêncios · como receber">
             <MRow>
               <MBtn tone="primary">Vídeo</MBtn>
               <MBtn tone="dark">Áudio</MBtn>
@@ -83,7 +83,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Defina o formato do áudio',
         text: 'Quando a saída for áudio (ou a fila só tiver áudio), o card "Formato do áudio" deixa você escolher entre "MP3" (leve, serve pra quase tudo) e "WAV" (sem compressão, ideal se o arquivo ainda vai passar por outra etapa de edição). O padrão é MP3.',
         visual: (
-          <Shot label="Decupagem · formato">
+          <Shot label="Remover Silêncios · formato">
             <MRow>
               <MChip tone="violet">MP3</MChip>
               <MChip tone="dim">WAV</MChip>
@@ -95,7 +95,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Calibre quanto de silêncio manter',
         text: 'O card "Quanto de silêncio manter?" controla o ritmo do corte com o controle "Tolerância de silêncio" (de 0.01s a 0.5s). Puxando pra esquerda, as pausas somem quase por completo — corte seco, estilo anúncio. Puxando pra direita, a fala respira mais natural. Na dúvida, deixe no padrão (0.05s): remove o tempo morto preservando uma pausa curta e confortável entre as frases.',
         visual: (
-          <Shot label="Decupagem · ajuste">
+          <Shot label="Remover Silêncios · ajuste">
             <MSlider label="Tolerância de silêncio" pct={10} val="0.05s" />
           </Shot>
         ),
@@ -104,7 +104,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Decupe a fila e acompanhe',
         text: 'Clique em "Decupar fila (N)". Os arquivos processam um por vez, na ordem, e cada item mostra a fase em tempo real: "Analisando...", "Regulando a voz...", "Cortando silêncios...", "Gerando arquivo...". Precisa parar? "Cancelar fila" interrompe sem perder o que já ficou pronto — depois o botão vira "Continuar fila (N restantes)" e retoma de onde parou.',
         visual: (
-          <Shot label="Decupagem · processando">
+          <Shot label="Remover Silêncios · processando">
             <MStack>
               <MBtn tone="lime">Decupar fila (3)</MBtn>
               <MQueueItem name="ad-hook-03.mp4" status="Cortando silêncios..." pct={64} />
@@ -115,9 +115,9 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Confira o resultado e baixe',
-        text: 'Cada arquivo pronto ganha um card "PRONTO" com player de preview e três métricas: "Original", "Após decupagem" e "Redução" (ex.: −31%). Ouça o começo e um trecho do meio pra confirmar que o corte ficou no ritmo que você queria. Baixe cada arquivo pelo botão "Baixar MP4/MP3/WAV" do card (sai nomeado como "_decupado") ou, com 2 ou mais prontos, use "↓ Baixar todos (ZIP)" pra pegar tudo de uma vez.',
+        text: 'Cada arquivo pronto ganha um card "PRONTO" com player de preview e três métricas: "Original", "Após remoção de silêncios" e "Redução" (ex.: −31%). Ouça o começo e um trecho do meio pra confirmar que o corte ficou no ritmo que você queria. Baixe cada arquivo pelo botão "Baixar MP4/MP3/WAV" do card (sai nomeado como "_decupado") ou, com 2 ou mais prontos, use "↓ Baixar todos (ZIP)" pra pegar tudo de uma vez.',
         visual: (
-          <Shot label="Decupagem · resultado">
+          <Shot label="Remover Silêncios · resultado">
             <MStack>
               <MQueueItem name="ad-hook-03_decupado.mp4" status="PRONTO · −31%" pct={100} tone="lime" />
               <MRow>
@@ -392,27 +392,27 @@ export const GUIDES: Record<string, ToolGuide> = {
   },
 
   '/tools/audio-split': {
-    title: 'Dividir áudios',
+    title: 'Dividir Voz',
     tagline: 'Quebra um áudio longo em partes, cortando apenas nas pausas — sem partir frase.',
     steps: [
       {
         title: 'Envie o arquivo',
         text: 'Um arquivo por vez: MP3, WAV, MP4, WEBM ou OGG. Se você subir um vídeo, a ferramenta aproveita só a trilha de áudio e descarta a imagem.',
         visual: (
-          <Shot label="Dividir áudios · arquivo">
+          <Shot label="Dividir Voz · arquivo">
             <MDrop label="Selecione ou arraste um arquivo" sub="MP3, WAV, MP4, WEBM ou OGG" />
           </Shot>
         ),
       },
       {
         title: 'Entenda onde a ferramenta corta',
-        text: 'A divisão procura as pausas mais longas da fala e quebra em partes equilibradas — cerca de 4 partes por minuto de fala, nunca no meio de uma frase. Por isso as partes saem com durações diferentes entre si: o corte respeita o ritmo de quem fala, não um relógio. Importante: esta ferramenta DIVIDE o áudio; ela não remove silêncios — pra isso, use a Decupagem (a própria tela indica o caminho).',
+        text: 'A divisão procura as pausas mais longas da fala e quebra em partes equilibradas — cerca de 4 partes por minuto de fala, nunca no meio de uma frase. Por isso as partes saem com durações diferentes entre si: o corte respeita o ritmo de quem fala, não um relógio. Importante: esta ferramenta DIVIDE o áudio; ela não remove silêncios — pra isso, use a Remover Silêncios (a própria tela indica o caminho).',
       },
       {
         title: 'Processe, ouça e baixe',
         text: 'Clique em "Processar" e acompanhe o status ("Carregando...", "Dividindo...", "Gerando arquivos..."). O resultado lista cada parte numerada com duração e player próprio — ouça o fim de uma e o começo da seguinte pra conferir a emenda. Baixe cada parte pelo "Baixar" (saem como parte1.wav, parte2.wav...) ou pegue tudo com "Baixar ZIP".',
         visual: (
-          <Shot label="Dividir áudios · resultado">
+          <Shot label="Dividir Voz · resultado">
             <MStack>
               <MQueueItem name="Parte 1 · 0:19" status="pronta" pct={100} tone="lime" />
               <MQueueItem name="Parte 2 · 0:22" status="pronta" pct={100} tone="lime" />
@@ -926,14 +926,14 @@ export const GUIDES: Record<string, ToolGuide> = {
   },
 
   '/tools/decupagem-copy': {
-    title: 'Decupagem Inteligente',
+    title: 'Remover Silêncios por Copy',
     tagline: 'A IA lê a sua copy, escolhe o melhor take de cada frase no vídeo bruto e audita o resultado.',
     steps: [
       {
         title: 'Envie o vídeo bruto',
         text: 'A gravação inteira, sem cortar nada antes — erros, repetições e retakes fazem parte do jogo: é desse material que a IA garimpa as melhores tomadas. Limites: 800 MB e 40 minutos (MP4, MOV, WEBM ou MKV). Passou do peso? Comprima primeiro na ferramenta Compressor.',
         visual: (
-          <Shot label="Decupagem Inteligente · vídeo">
+          <Shot label="Remover Silêncios por Copy · vídeo">
             <MDrop label="Selecione ou arraste um arquivo" sub="MP4, MOV, WEBM, MKV — até 800MB e 40min" />
           </Shot>
         ),
@@ -942,7 +942,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Cole a copy frase por frase',
         text: 'No card "Copy / Script", cole o texto na ordem desejada, quebrando por linha ou pontuação — o rodapé mostra quantas frases foram detectadas. Cada frase é o que a IA procura no vídeo: se o locutor gravou a mesma frase três vezes, ela transcreve tudo, compara as tomadas e escolhe a mais limpa. Escreva as frases como foram realmente ditas.',
         visual: (
-          <Shot label="Decupagem Inteligente · copy">
+          <Shot label="Remover Silêncios por Copy · copy">
             <MStack>
               <MField value="Você já tentou de tudo pra dormir melhor?" />
               <MField value="Então presta atenção nos próximos 30 segundos." />
@@ -954,7 +954,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Decida sobre os silêncios',
         text: 'A opção "Remover silêncios entre as falas" vem LIGADA: depois de montar as frases na ordem da copy, toda pausa de 0,10s ou mais é cortada — calibrado pra tirar o tempo morto sem comer palavra. Desligue se quiser preservar as pausas originais entre as frases escolhidas.',
         visual: (
-          <Shot label="Decupagem Inteligente · silêncios">
+          <Shot label="Remover Silêncios por Copy · silêncios">
             <MToggle on label="Remover silêncios entre as falas" />
           </Shot>
         ),
@@ -965,11 +965,11 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Leia o laudo e baixe o MP4',
-        text: 'O resultado aparece como "Decupagem pronta · N cortes na ordem da copy", com player, o chip de auditoria ("auditado ✓ 12/12" é o cenário ideal) e a confiança da transcrição. Quer prova extra? "Transcrever (AssemblyAI)" re-transcreve o vídeo final pra você comparar com a copy. A lista "Cortes detectados" mostra frase por frase com o score de cada match — os itens marcados "revisar" merecem uma ouvida antes de usar. Tudo certo, clique em "Baixar MP4".',
+        text: 'O resultado aparece como "Remover Silêncios pronta · N cortes na ordem da copy", com player, o chip de auditoria ("auditado ✓ 12/12" é o cenário ideal) e a confiança da transcrição. Quer prova extra? "Transcrever (AssemblyAI)" re-transcreve o vídeo final pra você comparar com a copy. A lista "Cortes detectados" mostra frase por frase com o score de cada match — os itens marcados "revisar" merecem uma ouvida antes de usar. Tudo certo, clique em "Baixar MP4".',
         visual: (
-          <Shot label="Decupagem Inteligente · laudo">
+          <Shot label="Remover Silêncios por Copy · laudo">
             <MStack>
-              <MQueueItem name="Decupagem pronta · 12 cortes" status="auditado ✓ 12/12" pct={100} tone="lime" />
+              <MQueueItem name="Remover Silêncios pronta · 12 cortes" status="auditado ✓ 12/12" pct={100} tone="lime" />
               <MRow>
                 <MBtn tone="lime">Baixar MP4</MBtn>
                 <MBtn tone="ghost">Transcrever (AssemblyAI)</MBtn>
@@ -1193,14 +1193,14 @@ export const GUIDES: Record<string, ToolGuide> = {
   },
 
   '/tools/normalizador': {
-    title: 'Normalizador',
+    title: 'Normalizador de Áudio',
     tagline: 'Duas ou mais vozes em volumes diferentes saem no mesmo nível — e o chiado de fundo vai embora.',
     steps: [
       {
         title: 'Solte os arquivos',
         text: 'Até 10 por lote — MP3, WAV, MP4, WEBM ou MOV. O caso clássico: dois locutores gravaram em volumes diferentes e precisam sair no mesmo patamar pra edição não denunciar.',
         visual: (
-          <Shot label="Normalizador · arquivos">
+          <Shot label="Normalizador de Áudio · arquivos">
             <MDrop label="Selecione ou arraste arquivos" sub="MP3, WAV, MP4, WEBM ou MOV — até 10 por lote" />
           </Shot>
         ),
@@ -1209,7 +1209,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Escolha o formato de saída',
         text: 'No card "Formato de saída": "MP4" mantém o vídeo e normaliza só a trilha de áudio; "MP3" e "WAV" entregam só o som (se a entrada for vídeo, a imagem é descartada — a tela avisa). Se houver áudio puro no lote, o MP4 desativa sozinho.',
         visual: (
-          <Shot label="Normalizador · formato">
+          <Shot label="Normalizador de Áudio · formato">
             <MRow>
               <MChip tone="violet">MP4</MChip>
               <MChip tone="dim">MP3</MChip>
@@ -1222,7 +1222,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Normalize',
         text: 'Clique em "Normalizar N". Cada arquivo passa por duas fases (limpeza de ruído + análise, depois normalização) e o banner mostra qual item está rodando. Se a voz oscila MUITO (um trecho sussurrado, outro gritado), o motor detecta sozinho e reforça o nivelamento — sem inflar o ruído das pausas. No fim, todas as vozes saem no mesmo nível, sem estouro nos picos e com o chiado atenuado.',
         visual: (
-          <Shot label="Normalizador · fila">
+          <Shot label="Normalizador de Áudio · fila">
             <MStack>
               <MQueueItem name="locutor-a_normalizado.mp3" status="OK" pct={100} tone="lime" />
               <MQueueItem name="locutor-b.mp3" status="44%" pct={44} />
@@ -1234,7 +1234,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         title: 'Confira o relatório antes × depois e baixe',
         text: 'Cada arquivo pronto ganha um relatório: a ONDA SONORA antes (cinza) e depois (verde-água) na mesma escala; a CURVA DE VOLUME DA VOZ, com o "antes" oscilando e o "depois" reto dentro da faixa nivelada (passe o mouse pra ler os dois valores em qualquer ponto); as MÉTRICAS medidas de verdade no resultado — volume médio, oscilação da voz, pico e ruído de fundo, cada uma antes → depois; e o player "Comparar de ouvido", que troca ANTES/DEPOIS no mesmo ponto do áudio. Depois baixe por arquivo ("Baixar MP4/MP3/WAV" — sai nomeado "_normalizado") ou tudo com "Baixar ZIP (N)".',
         visual: (
-          <Shot label="Normalizador · relatório">
+          <Shot label="Normalizador de Áudio · relatório">
             <MStack>
               <MRow>
                 <MChip tone="dim">Oscilação ±12.6</MChip>
@@ -1368,7 +1368,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Acompanhe cada task de perto',
-        text: 'Cada card mostra a fase ("Na fila" → "Disparando" → "Renderizando" → "Baixando" → "Pos-prod (concat/decupagem/camo)" → "Concluido"), a porcentagem, e o raio-X das partes: quantas foram disparadas, renderizadas e quantas falharam. O "✕ Cancelar" para uma task; "Remover" tira do painel sem apagar arquivos já baixados.',
+        text: 'Cada card mostra a fase ("Na fila" → "Disparando" → "Renderizando" → "Baixando" → "Pos-prod (concat/remoção de silêncios/camo)" → "Concluido"), a porcentagem, e o raio-X das partes: quantas foram disparadas, renderizadas e quantas falharam. O "✕ Cancelar" para uma task; "Remover" tira do painel sem apagar arquivos já baixados.',
         visual: (
           <Shot label="Segundo plano · task">
             <MStack>
@@ -1412,7 +1412,7 @@ export const GUIDES: Record<string, ToolGuide> = {
           <Shot label="Histórico geral · timeline">
             <MStack>
               <MQueueItem name="criativo-final.mp4 · Compressor" status="PRONTO · 14:32" pct={100} tone="lime" />
-              <MQueueItem name="AD140GL.mp4 · Decupagem" status="PRONTO · 11:05" pct={100} tone="violet" />
+              <MQueueItem name="AD140GL.mp4 · Remover Silêncios" status="PRONTO · 11:05" pct={100} tone="violet" />
             </MStack>
           </Shot>
         ),
@@ -1424,7 +1424,7 @@ export const GUIDES: Record<string, ToolGuide> = {
           <Shot label="Histórico geral · filtros">
             <MRow>
               <MChip tone="violet">TUDO · 24</MChip>
-              <MChip tone="dim">DECUPAGEM · 6</MChip>
+              <MChip tone="dim">SILÊNCIOS · 6</MChip>
               <MChip tone="dim">COMPRESSOR · 4</MChip>
             </MRow>
           </Shot>
@@ -1542,13 +1542,13 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Ajuste os modos extra: Decupagem e Camuflagem',
-        text: 'A "Decupagem" vem LIGADA: o vídeo montado sai com os silêncios e respiros já cortados, com intensidade ajustável ("Agressivo · 0.05s", "Padrão · 0.12s" ou "Suave · 0.20s"). A "Camuflagem" vem desligada; ligando, você sobe o áudio escondido e define o volume — e o disparo entrega também a versão camuflada de cada vídeo montado.',
+        title: 'Ajuste os modos extra: Remover Silêncios e Camuflagem',
+        text: 'A "Remover Silêncios" vem LIGADA: o vídeo montado sai com os silêncios e respiros já cortados, com intensidade ajustável ("Agressivo · 0.05s", "Padrão · 0.12s" ou "Suave · 0.20s"). A "Camuflagem" vem desligada; ligando, você sobe o áudio escondido e define o volume — e o disparo entrega também a versão camuflada de cada vídeo montado.',
         visual: (
           <Shot label="Hey Auto · modos extra">
             <MStack>
               <MRow>
-                <MToggle on label="Decupagem ON" />
+                <MToggle on label="Remover Silêncios ON" />
                 <MToggle on={false} label="Camuflagem" />
               </MRow>
               <MRow>
@@ -1562,7 +1562,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Monte a fila e processe',
-        text: '"+ Adicionar config atual à fila" captura o AD inteiro (avatar, voz, motor, estrutura, decupagem, camuflagem) como um item — monte quantos quiser antes de disparar. Depois, "▶ Processar fila (N)" roda tudo sozinho, item por item: disparo das partes no HeyGen, renderização, download e montagem final. O card de cada item mostra a fase ao vivo (Enviando → Renderizando → Baixando → Montando → Pronto). Pra um AD único, o botão "Gerar todas as partes via HeyGen" dispara direto, sem fila — e também termina sozinho.',
+        text: '"+ Adicionar config atual à fila" captura o AD inteiro (avatar, voz, motor, estrutura, remoção de silêncios, camuflagem) como um item — monte quantos quiser antes de disparar. Depois, "▶ Processar fila (N)" roda tudo sozinho, item por item: disparo das partes no HeyGen, renderização, download e montagem final. O card de cada item mostra a fase ao vivo (Enviando → Renderizando → Baixando → Montando → Pronto). Pra um AD único, o botão "Gerar todas as partes via HeyGen" dispara direto, sem fila — e também termina sozinho.',
         visual: (
           <Shot label="Hey Auto · fila rodando">
             <MStack>
@@ -1659,7 +1659,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Analise e ajuste cada task',
-        text: 'Marque as tasks e clique em "Start": o Pilot lê a copy de cada uma, separa hooks e body em takes, identifica os avatares e monta o card. Puxou três e mudou de ideia? Marque mais uma a qualquer momento: ela entra sem reiniciar o que já está rodando. No card você escolhe avatar e voz por papel, o motor (III, IV ou V), a decupagem e a intensidade do corte, o normalizador de volume, a legenda automática, o zoom, os inserts, a headline e a camuflagem. Em "+ versões" cada versão pode ter pós-produção própria: uma com decupagem, outra sem; inserts e legendas diferentes. Tudo isso fica salvo sozinho: recarregou a página, o card volta como estava.',
+        text: 'Marque as tasks e clique em "Start": o Pilot lê a copy de cada uma, separa hooks e body em takes, identifica os avatares e monta o card. Puxou três e mudou de ideia? Marque mais uma a qualquer momento: ela entra sem reiniciar o que já está rodando. No card você escolhe avatar e voz por papel, o motor (III, IV ou V), a remoção de silêncios e a intensidade do corte, o Normalizador de Áudio, a legenda automática, o zoom, os inserts, a headline e a camuflagem. Em "+ versões" cada versão pode ter pós-produção própria: uma com remoção de silêncios, outra sem; inserts e legendas diferentes. Tudo isso fica salvo sozinho: recarregou a página, o card volta como estava.',
         visual: (
           <Shot label="Pilot · análise">
             <MStack>
@@ -1669,7 +1669,7 @@ export const GUIDES: Record<string, ToolGuide> = {
                 <MChip tone="lime">PRONTA</MChip>
               </MRow>
               <MRow>
-                <MToggle on={true} label="Decupagem" />
+                <MToggle on={true} label="Remover Silêncios" />
                 <MToggle on={true} label="Legenda" />
                 <MChip tone="dim">MOTOR III</MChip>
               </MRow>
@@ -1692,7 +1692,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Receba o vídeo montado',
-        text: 'Task pronta é vídeo pronto: o botão "Baixar MP4" entrega o lipsync montado, um vídeo por hook, com decupagem, legenda e o resto do que você ligou. O nome do arquivo vem do AD da task. Faltou alguma parte? O "Retomar" completa só o que falta, sem gerar de novo o que já ficou pronto.',
+        text: 'Task pronta é vídeo pronto: o botão "Baixar MP4" entrega o lipsync montado, um vídeo por hook, com remoção de silêncios, legenda e o resto do que você ligou. O nome do arquivo vem do AD da task. Faltou alguma parte? O "Retomar" completa só o que falta, sem gerar de novo o que já ficou pronto.',
         visual: (
           <Shot label="Pilot · entrega">
             <MStack>

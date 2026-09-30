@@ -654,7 +654,7 @@ function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.05, genId
   // a invalidação por parte (deletePrefix `...:decupado:<label>@k`) atinja todas
   // as intensidades daquela parte sem tocar nas outras partes.
   // 'leveled2' (23.08): o nivelamento passou a usar o motor da ferramenta
-  // Normalizador (profile 'full'). Trocar o nome da chave invalida de uma vez os
+  // Normalizador de Áudio (profile 'full'). Trocar o nome da chave invalida de uma vez os
   // clips nivelados pelo motor antigo — senão um RETOMAR reusaria o áudio velho e
   // o conserto não apareceria pra quem já tinha rodado a task.
   // `pedacos` acompanha o clipe decupado (mesma tag de motor): guarda o JSON
@@ -780,8 +780,8 @@ function PainelDeMontagem({
           type="button"
           className={'mtg-icone' + (nivel ? ' is-on' : '')}
           onClick={onNivel}
-          title={nivel ? 'Normalizador LIGADO — cada parte nivelada a -16 LUFS antes de juntar' : 'Normalizador desligado — clica pra nivelar o volume'}
-          aria-label="Normalizador"
+          title={nivel ? 'Normalizador de Áudio LIGADO — cada parte nivelada a -16 LUFS antes de juntar' : 'Normalizador de Áudio desligado — clica pra nivelar o volume'}
+          aria-label="Normalizador de Áudio"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
             <path d="M4 14v-4M9 17V7M14 15V9M19 18V6" />
@@ -791,8 +791,8 @@ function PainelDeMontagem({
           type="button"
           className={'mtg-icone' + (decup ? ' is-on' : '')}
           onClick={onDecup}
-          title={decup ? 'Decupagem LIGADA — os silêncios entre as falas são cortados' : 'Decupagem desligada — clica pra cortar os silêncios'}
-          aria-label="Decupagem"
+          title={decup ? 'Remover Silêncios LIGADA — os silêncios entre as falas são cortados' : 'Remover Silêncios desligada — clica pra cortar os silêncios'}
+          aria-label="Remover Silêncios"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="6" cy="6" r="2.6" />
@@ -801,7 +801,7 @@ function PainelDeMontagem({
           </svg>
         </button>
         {decup ? (
-          <span className="mtg-respiro" title="Quanta pausa FICA entre as falas (o respiro da decupagem)">
+          <span className="mtg-respiro" title="Quanta pausa FICA entre as falas após remover silêncios">
             <button type="button" className="mtg-respiro-btn" onClick={() => onRespiro(respiro - 0.02)} aria-label="Menos respiro">−</button>
             <span className="mono">{respiro.toFixed(2)}s</span>
             <button type="button" className="mtg-respiro-btn" onClick={() => onRespiro(respiro + 0.02)} aria-label="Mais respiro">+</button>
@@ -2364,7 +2364,7 @@ function ClickUpPilotInner() {
     setAvatarFirstEnabled((prev) => ({ ...prev, [`${taskId}:${sIdx}`]: enabled }));
   };
 
-  // Decupagem — toggle por task. Default OFF: AD vem montado SEM cortar
+  // Remover Silêncios — toggle por task. Default OFF: AD vem montado SEM cortar
   // silencios. ON = roda stage 2 do pipeline (detectSilences + cutVideoSegments).
   // Persiste em localStorage pra escolha sobreviver reload.
   const DECUPAGEM_KEY = 'darkolab:clickup-pilot:decupagem';
@@ -7377,7 +7377,7 @@ function ClickUpPilotInner() {
           if (item.decupado) {
             zipMont.file(item.filename, item.decupado);
           } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
-            // Decupagem falhou mas tem montagem — entrega o montado raw + nota
+            // Remover Silêncios falhou mas tem montagem — entrega o montado raw + nota
             const baseName = item.filename.replace('.mp4', '_sem_decupagem.mp4');
             zipMont.file(baseName, item.rawAssembled);
             zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
@@ -14909,7 +14909,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       <ToolShell
         title="Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
-        description="O cérebro do estúdio. A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com decupagem e legenda em fila, sem você abrir uma aba sequer."
+        description="O cérebro do estúdio. A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com silêncios removidos e legenda em fila, sem você abrir uma aba sequer."
         hue="rgba(200,232,124,0.45)"
         icon={<IconClickUpPilot size={56} />}
       >
@@ -15956,7 +15956,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           const allOk = dispatchOk && renderOk && pipeOk && vaOk;
                           const isPartialDone = b.phase === 'done' && !allOk;
                           // CONTEÚDO do montado completo = todas as partes/texto
-                          // presentes. Decupagem e camuflagem são pós-processos
+                          // presentes. Remover Silêncios e camuflagem são pós-processos
                           // OPCIONAIS: se falharem, o montado ainda tem TODO o
                           // texto + áudio nivelado (não é "zoada"), então o
                           // download NÃO trava — só o aviso aparece. Travava
@@ -16813,7 +16813,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         icon={<PilotIconScissors size={16} />}
                                         color={isDecupagemEnabled(a.taskId) ? 'lime' : 'neutral'}
                                         active={isDecupagemEnabled(a.taskId)}
-                                        title={isDecupagemEnabled(a.taskId) ? 'Decupagem ON' : 'Decupagem OFF'}
+                                        title={isDecupagemEnabled(a.taskId) ? 'Remover Silêncios ON' : 'Remover Silêncios OFF'}
                                         onClick={() => setDecupagemFor(a.taskId, !isDecupagemEnabled(a.taskId))}
                                       />
                                       {isDecupagemEnabled(a.taskId) ? (
@@ -16874,8 +16874,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       color={isNivelamentoEnabled(a.taskId) ? 'cyan' : 'neutral'}
                                       active={isNivelamentoEnabled(a.taskId)}
                                       title={isNivelamentoEnabled(a.taskId)
-                                        ? 'Normalizador de volume ON — cada parte sai no mesmo patamar (-16 LUFS)'
-                                        : 'Normalizador de volume OFF — o volume sai como veio do HeyGen'}
+                                        ? 'Normalizador de Áudio ON — cada parte sai no mesmo patamar (-16 LUFS)'
+                                        : 'Normalizador de Áudio OFF — o volume sai como veio do HeyGen'}
                                       onClick={() => setNivelamentoFor(a.taskId, !isNivelamentoEnabled(a.taskId))}
                                     />
                                     {/* MODO ECONOMIA (06.09): dispara pelo Studio e renderiza
@@ -17871,7 +17871,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     <div className="vp-versoes">
                                                       <div className="vp-titulo">Pós-produção por versão</div>
                                                       <div className="vp-dica">
-                                                        Cada versão herda a v1 até você mexer nela. Decupagem, nivelamento, legenda, zoom e inserts podem ser diferentes em cada uma.
+                                                        Cada versão herda a v1 até você mexer nela. Remover Silêncios, nivelamento, legenda, zoom e inserts podem ser diferentes em cada uma.
                                                       </div>
                                                       {Array.from({ length: total }, (_, i) => i + 1).map((n) => {
                                                         const vid = taskIdDaVersao(a.taskId, n);
@@ -17894,14 +17894,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                                 icon={<PilotIconScissors size={14} />}
                                                                 color={decupV ? 'lime' : 'neutral'}
                                                                 active={decupV}
-                                                                title={decupV ? `Decupagem ON na v${n}` : `Decupagem OFF na v${n}`}
+                                                                title={decupV ? `Remover Silêncios ON na v${n}` : `Remover Silêncios OFF na v${n}`}
                                                                 onClick={() => setDecupagemFor(vid, !decupV)}
                                                               />
                                                               <PilotBtn3D
                                                                 icon={<IconNivelar size={14} />}
                                                                 color={nivelV ? 'cyan' : 'neutral'}
                                                                 active={nivelV}
-                                                                title={nivelV ? `Normalizador de volume ON na v${n}` : `Normalizador de volume OFF na v${n}`}
+                                                                title={nivelV ? `Normalizador de Áudio ON na v${n}` : `Normalizador de Áudio OFF na v${n}`}
                                                                 onClick={() => setNivelamentoFor(vid, !nivelV)}
                                                               />
                                                               {acoesDePosProducao({ ...a, taskId: vid })}

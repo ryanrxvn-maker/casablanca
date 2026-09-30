@@ -22,7 +22,7 @@ export function DurableRecordsProvider({ children }: { children: React.ReactNode
   }, []);
   // A posição dos filhos precisa ser estável. Antes, alternar entre o retorno
   // "saudável" e o retorno de erro inseria um banner antes de `children` e o
-  // React remontava a ferramenta inteira. Na Decupagem isso apagava os Files
+  // React remontava a ferramenta inteira. Na Remover Silêncios isso apagava os Files
   // da fila e fazia o clique parecer um reload/no-op em loop.
   return <>
     {/* Persistência é proteção adicional, nunca uma barreira para a ferramenta.

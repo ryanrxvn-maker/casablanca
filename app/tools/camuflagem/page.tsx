@@ -645,7 +645,7 @@ export default function CamuflagemPage() {
 
   return (
     <ToolShell
-      title="Camuflagem"
+      title="Camuflagem de Áudio"
       eyebrow="ÁUDIO"
       description="Combine duas trilhas de áudio e confira a leitura dos serviços de transcrição. Revise o resultado e os selos de verificação antes de exportar."
       hue={HUE}

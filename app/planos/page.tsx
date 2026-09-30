@@ -5,7 +5,7 @@ import { Plans } from '@/components/Plans';
 export const metadata: Metadata = {
   title: 'Planos e preços',
   description:
-    'Comece grátis. Plano Premium (R$ 57/mês) com todas as ferramentas: lipsync, decupagem, legendas e processamento em lote. Mensal recorrente ou anual parcelável.',
+    'Free com Remover Silêncios em áudio, Compressor, Downloader e FakePrint social. Premium com vídeo, legendas, lipsync e as demais ferramentas.',
   alternates: { canonical: '/planos' },
   openGraph: {
     title: 'Planos e preços · Auto Edit',

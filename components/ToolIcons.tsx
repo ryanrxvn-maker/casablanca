@@ -4,7 +4,7 @@
  * ToolIcons v4 — ícones COLORIDOS com gradientes por categoria.
  *
  * Usa React.useId() (React 18+) pra gerar IDs estáveis e únicos em
- * SSR + CSR, sem hydration mismatch (motivo do Normalizador aparecer
+ * SSR + CSR, sem hydration mismatch (motivo do Normalizador de Áudio aparecer
  * sem ícone na versão anterior).
  */
 
@@ -61,7 +61,7 @@ export function IconFakePass(p: IconProps) {
 
 /* ------------------------------ BASE ------------------------------ */
 
-/** Decupagem — corte fino, gradient verde/lime */
+/** Remover Silêncios — corte fino, gradient verde/lime */
 export function IconDecupagem(p: IconProps) {
   const raw = useId();
   const id = `g-${raw.replace(/:/g, '')}`;
@@ -193,7 +193,7 @@ export function IconAcelerador(p: IconProps) {
   );
 }
 
-/** Normalizador — equalizer bars FILLED (sem stroke fino que some) */
+/** Normalizador de Áudio — equalizer bars FILLED (sem stroke fino que some) */
 export function IconNormalizador(p: IconProps) {
   const raw = useId();
   const id = `g-${raw.replace(/:/g, '')}`;
@@ -393,7 +393,7 @@ export function IconCopySRT(p: IconProps) {
   );
 }
 
-/** Decupagem com Copy — gradient violeta/rosa */
+/** Remover Silêncios com Copy — gradient violeta/rosa */
 export function IconDecupageCopy(p: IconProps) {
   const raw = useId();
   const id = `g-${raw.replace(/:/g, '')}`;

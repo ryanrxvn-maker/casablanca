@@ -27,7 +27,7 @@ import { IconNormalizador, IconStepFiles, IconStepFormat } from '@/components/To
 const HUE = 'rgba(94,234,212,0.4)';
 
 /**
- * Normalizador de Volume — motor de duas passadas EBU R128 (denoise IA +
+ * Normalizador de Áudio — motor de duas passadas EBU R128 (denoise IA +
  * leveling + ganho estático medido; ver normalizeVolume no ffmpeg-worker),
  * com reforço automático pra casos extremos de oscilação.
  *
@@ -278,7 +278,7 @@ export default function NormalizadorPage() {
 
   return (
     <ToolShell
-      title="Normalizador"
+      title="Normalizador de Áudio"
       eyebrow="ÁUDIO · VOLUME"
       description="Equilibre o volume das vozes e reduza o ruído de fundo. Compare o áudio original com o resultado e confira o relatório de cada arquivo."
       hue={HUE}
