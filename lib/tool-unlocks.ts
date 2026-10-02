@@ -81,6 +81,8 @@ export const UNLOCKABLE_TOOLS: ReadonlyArray<{
 const TOOL_UNLOCKS_BASE: Record<string, readonly string[]> = {
   // Pedão — cliente PRO de confiança (liberado em 20.07.2026)
   'pedro.99antuness@gmail.com': ['/tools/heygen-auto', '/tools/clickup-pilot'],
+  // Funcionário novo (entrou no lugar do Elder em 02.10.2026)
+  'dokin021099@icloud.com': ['/tools/clickup-pilot'],
 };
 
 // Páginas de APOIO que cada ferramenta precisa pra funcionar de verdade

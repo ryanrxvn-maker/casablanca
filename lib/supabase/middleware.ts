@@ -376,8 +376,8 @@ export async function updateSession(request: NextRequest) {
 
     // ─── MANUTENÇÃO (depois do gate de tier) ─────────────────────────
     // Quem chega aqui numa ferramenta em manutenção é Pro/Admin. Bloqueia
-    // TODOS menos admin e emails do allowlist (clientes de confiança, ex.:
-    // Elder). Free/Basic já foram pra /planos acima. Defesa real server-side.
+    // TODOS menos admin e emails do allowlist (clientes de confiança).
+    // Free/Basic já foram pra /planos acima. Defesa real server-side.
     if (!isAdmin && !canBypassMaintenance(user.email) && isToolInMaintenance(pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';

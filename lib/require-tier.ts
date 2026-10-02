@@ -175,7 +175,7 @@ export async function requireTier(
  *
  * Regras:
  *   1. Exige o tier mínimo (Free/Basic em tool Pro → 403 "faça upgrade").
- *   2. Se a tool está em manutenção: só admin + allowlist (ex.: Elder) passam;
+ *   2. Se a tool está em manutenção: só admin + allowlist passam;
  *      o resto recebe 503.
  */
 export async function requireToolAccess(
