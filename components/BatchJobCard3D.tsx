@@ -1082,16 +1082,23 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       const resto = out.filter((m) => !m.videos || m.videos.length <= 1);
                       for (const m of resto) triggerDownload(m.url, m.name);
                       for (const m of out) if (m.revoke) setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
+                      // ⛔ NUNCA EM SILENCIO (02.10): gravar em pasta nao passa pela
+                      // barra de downloads do Chrome. Sem este aviso o user via o
+                      // seletor fechar e nada aparecer — e achava que nao baixou,
+                      // com os MP4 ja no disco, dentro de uma SUBPASTA (AD59GL_montado).
+                      const lista = pacotes
+                        .map((p) => `${raiz.name}\\${(p.name || 'entrega').replace(/\.zip$/i, '')}\\\n`
+                          + p.videos!.map((v) => `   • ${v.nome.split('/').pop() || v.nome}`).join('\n'))
+                        .join('\n\n');
+                      alert(`✓ ${gravados} vídeo${gravados === 1 ? '' : 's'} salvo${gravados === 1 ? '' : 's'} na pasta que você escolheu:\n\n${lista}`);
                       return;
                     } catch (e: any) {
                       setSalvandoEmPasta(null);
-                      // O user fechou o seletor de pasta: nao baixa nada pelas costas.
-                      if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) {
-                        for (const m of out) if (m.revoke) setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
-                        return;
-                      }
-                      // Qualquer outra falha (disco cheio, permissao) cai no zip.
-                      console.warn('[card] gravar em pasta falhou, entregando o zip:', e);
+                      // Seletor fechado, permissao de editar recusada, ou qualquer
+                      // falha de disco: ANTES saia calado ("clico em baixar e nao
+                      // baixa"). Agora cai no download normal do zip, que aparece na
+                      // barra do Chrome e vai pra pasta de downloads.
+                      console.warn('[card] gravar em pasta nao rolou, entregando o zip pelo download normal:', e);
                     }
                   }
 
