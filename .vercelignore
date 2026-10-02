@@ -13,7 +13,7 @@ node_modules/
 **/__pycache__/
 
 # Lotes e material de producao local; nunca fazem parte do site.
-Delegado - Elder/
+Delegado - */
 PACK 300 TAKES MEMORIA ALZHEIMER/
 
 # Artefatos de diagnostico/operacao gerados na raiz.

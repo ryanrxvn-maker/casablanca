@@ -25,7 +25,7 @@ export function isToolInMaintenance(path: string): boolean {
  * Configurável SEM novo deploy via env na Vercel (lista separada por vírgula):
  *   • NEXT_PUBLIC_MAINTENANCE_BYPASS_EMAILS  (vale no client + server)
  *   • MAINTENANCE_BYPASS_EMAILS              (só server, extra)
- * Ex.: NEXT_PUBLIC_MAINTENANCE_BYPASS_EMAILS="elder@gmail.com,fulano@x.com"
+ * Ex.: NEXT_PUBLIC_MAINTENANCE_BYPASS_EMAILS="ciclano@gmail.com,fulano@x.com"
  */
 function parseEmails(v?: string | null): string[] {
   if (!v) return [];
@@ -36,9 +36,8 @@ function parseEmails(v?: string | null): string[] {
 }
 
 // Clientes de confiança fixos (sempre liberados). Pode somar mais via env.
-const MAINTENANCE_BYPASS_BASE = [
-  'elderemanoel.13@gmail.com', // Elder Manoel — cliente PRO de confiança
-];
+// (Elder Manoel saiu da lista em 02.10.2026 — desligado.)
+const MAINTENANCE_BYPASS_BASE: readonly string[] = [];
 
 const MAINTENANCE_BYPASS_EMAILS: ReadonlySet<string> = new Set<string>([
   ...parseEmails(MAINTENANCE_BYPASS_BASE.join(',')),

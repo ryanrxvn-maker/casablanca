@@ -288,7 +288,7 @@ export function ToolsHub() {
   const tools = TOOLS.filter(canSeeTool);
   const featured = FEATURED.filter(canSeeTool);
 
-  // Manutenção: admin acessa (modo 'admin'); emails liberados (ex.: Elder)
+  // Manutenção: admin acessa (modo 'admin'); emails liberados (allowlist)
   // acessam normal (undefined); o resto é bloqueado.
   const maintOf = (href: string): MaintMode => {
     if (!isToolInMaintenance(href)) return undefined;
