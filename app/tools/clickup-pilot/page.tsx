@@ -6049,15 +6049,14 @@ function ClickUpPilotInner() {
     };
   }, []);
 
-  /** Tick a cada 1s pra atualizar elapsed time nas batches rodando.
-   *  So roda quando ha batch nao finalizada — evita re-render constante. */
-  const [nowTick, setNowTick] = useState(Date.now());
-  useEffect(() => {
-    const hasRunning = Object.values(batchStates).some((b) => b.phase !== 'done' && b.phase !== 'failed');
-    if (!hasRunning) return;
-    const id = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [batchStates]);
+  /** Tempo decorrido dos cards. PERFORMANCE (05.10): era um tick de 1s AQUI
+   *  (setNowTick) que re-renderizava a página INTEIRA a cada segundo enquanto
+   *  houvesse batch rodando — travadinha a cada segundo em quem estava
+   *  digitando/rolando durante o disparo. Agora o relógio anda dentro do
+   *  próprio card (BatchJobCard3D → ElapsedClock, prop `elapsedLive`) e só ele
+   *  re-renderiza. `nowTick` fica como o instante do mount: é o mesmo valor
+   *  que o card mostrava, parado, pra batch sem `finishedAt` quando nada roda. */
+  const [nowTick] = useState(() => Date.now());
 
   /** Renomeia label do parser pra naming Portuguese pedido pelo user:
    *  HOOK 1 → GANCHO1.mp4, HOOK 2 → GANCHO2.mp4
@@ -16175,6 +16174,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               progressoMotor={b.progressoMotor}
                               message={b.message}
                               elapsedMs={elapsedMs}
+                              startedAt={b.startedAt}
+                              elapsedLive={!b.finishedAt && b.phase !== 'done' && b.phase !== 'failed'}
                               allOk={allOk}
                               isPartialDone={isPartialDone}
                               // Trava download só quando FALTA conteúdo (parte/

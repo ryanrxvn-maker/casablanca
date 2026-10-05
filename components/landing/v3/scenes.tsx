@@ -116,24 +116,39 @@ export function BreakingCard({ className = '' }: { className?: string }) {
               'linear-gradient(to bottom, rgba(2,2,6,0.5) 0%, transparent 20%)',
           }}
         />
-        {/* tela verde entrando por cima, com o divisor deslizando */}
+        {/* tela verde entrando por cima, com o divisor deslizando.
+            PERFORMANCE (05.10): era clip-path + `left` animados — os dois
+            rodam na thread principal e repintavam o card a cada quadro (a
+            landing parada ocupava ~23% da CPU). Agora é só transform, que a
+            GPU anima sozinha: a janela (overflow-hidden) anda pra direita e
+            o verde anda o mesmo tanto pra esquerda — fica parado no lugar e
+            só a borda da janela desliza, igual ao inset() de antes. */}
         <div
           aria-hidden
-          className={'absolute inset-0 ' + (wiping ? 'bc-wipe' : '')}
-          style={{
-            clipPath: 'inset(0 0 0 58%)',
-            background: `radial-gradient(75% 70% at 50% 40%, #14c559 0%, ${CHROMA} 62%, #009439 100%)`,
-          }}
-        />
-        <span
+          className={'absolute inset-0 overflow-hidden ' + (wiping ? 'bc-wipe' : '')}
+          style={{ transform: 'translateX(58%)' }}
+        >
+          <div
+            className={'absolute inset-0 ' + (wiping ? 'bc-wipe-in' : '')}
+            style={{
+              transform: 'translateX(-58%)',
+              background: `radial-gradient(75% 70% at 50% 40%, #14c559 0%, ${CHROMA} 62%, #009439 100%)`,
+            }}
+          />
+        </div>
+        <div
           aria-hidden
-          className={'absolute inset-y-0 w-px ' + (wiping ? 'bc-line' : '')}
-          style={{
-            left: '58%',
-            background: 'rgba(255,255,255,0.75)',
-            boxShadow: '0 0 12px rgba(255,255,255,0.5)',
-          }}
-        />
+          className={'pointer-events-none absolute inset-0 ' + (wiping ? 'bc-line' : '')}
+          style={{ transform: 'translateX(58%)' }}
+        >
+          <span
+            className="absolute inset-y-0 left-0 w-px"
+            style={{
+              background: 'rgba(255,255,255,0.75)',
+              boxShadow: '0 0 12px rgba(255,255,255,0.5)',
+            }}
+          />
+        </div>
         {/* linhas de varredura */}
         <div
           aria-hidden
@@ -265,26 +280,27 @@ export function BreakingCard({ className = '' }: { className?: string }) {
       </p>
 
       <style jsx>{`
-        .bc-wipe {
+        .bc-wipe,
+        .bc-line {
           animation: bc-wipe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
         }
-        .bc-line {
-          animation: bc-line 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+        .bc-wipe-in {
+          animation: bc-wipe-in 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
         }
         @keyframes bc-wipe {
           from {
-            clip-path: inset(0 0 0 26%);
+            transform: translateX(26%);
           }
           to {
-            clip-path: inset(0 0 0 82%);
+            transform: translateX(82%);
           }
         }
-        @keyframes bc-line {
+        @keyframes bc-wipe-in {
           from {
-            left: 26%;
+            transform: translateX(-26%);
           }
           to {
-            left: 82%;
+            transform: translateX(-82%);
           }
         }
         .bc-dot {
@@ -318,6 +334,7 @@ export function BreakingCard({ className = '' }: { className?: string }) {
           .bc-dot,
           .bc-caret,
           .bc-wipe,
+          .bc-wipe-in,
           .bc-line {
             animation: none;
           }
@@ -539,7 +556,17 @@ export function TelejornalCard({ className = '' }: { className?: string }) {
         .tj-dot {
           animation: tj-pulse 1.6s ease-in-out infinite;
         }
-        .tj-chroma {
+        /* PERFORMANCE (05.10): o brilho verde respirava animando box-shadow —
+           repintura a cada quadro na thread principal. Agora a sombra é fixa
+           numa camada própria e só a OPACIDADE dela anima (GPU). */
+        .tj-chroma::after {
+          content: '';
+          position: absolute;
+          inset: -1px;
+          border-radius: inherit;
+          pointer-events: none;
+          box-shadow: 0 0 34px -6px rgba(0, 177, 64, 0.45);
+          opacity: 0;
           animation: tj-breathe 4.5s ease-in-out infinite;
         }
         .tj-caret {
@@ -579,10 +606,10 @@ export function TelejornalCard({ className = '' }: { className?: string }) {
         @keyframes tj-breathe {
           0%,
           100% {
-            box-shadow: 0 0 0 0 rgba(0, 177, 64, 0.0);
+            opacity: 0;
           }
           50% {
-            box-shadow: 0 0 34px -6px rgba(0, 177, 64, 0.45);
+            opacity: 1;
           }
         }
         @keyframes tj-pulse {
@@ -604,7 +631,7 @@ export function TelejornalCard({ className = '' }: { className?: string }) {
         @media (prefers-reduced-motion: reduce) {
           .tj-dot,
           .tj-caret,
-          .tj-chroma,
+          .tj-chroma::after,
           .tj-sweep,
           .tj-ticker {
             animation: none;

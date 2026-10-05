@@ -41,6 +41,11 @@ const SHOW_CARD: Array<{ id: string; text: string }> = [
   { id: 'extensao-script', text: 'SEM DIGITAR NADA' },
 ];
 const STEP_MS = 2600; // mesmo ciclo da demo do engine
+// PERFORMANCE (05.10): a vitrine redesenhava o canvas a cada quadro do monitor
+// (60-144x/s). 30 quadros/s é a taxa do vídeo que a ferramenta exporta — o que
+// aparece no card continua sendo exatamente o que sai no MP4 — pela metade
+// (ou menos) do custo. A folga de 4 ms evita cair pra 20 quadros/s por jitter.
+const FRAME_MS = 1000 / 30 - 4;
 
 export function TipoShowcase({
   className,
@@ -75,6 +80,7 @@ export function TipoShowcase({
     let cancelled = false;
     let loaded = false;
     let t0 = performance.now() - 1200;
+    let lastPaint = 0;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     const paint = (time: number) => {
       const wrap = canvas.parentElement;
@@ -92,7 +98,11 @@ export function TipoShowcase({
     };
     const tick = () => {
       if (cancelled || !loaded || !visRef.current || reduced.matches || document.visibilityState !== 'visible') return;
-      paint(performance.now() - t0);
+      const now = performance.now();
+      if (now - lastPaint >= FRAME_MS) {
+        lastPaint = now;
+        paint(now - t0);
+      }
       raf = requestAnimationFrame(tick);
     };
     const update = () => {

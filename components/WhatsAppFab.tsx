@@ -58,7 +58,7 @@ export function WhatsAppFab() {
         {/* Pulso de respiração */}
         <span
           aria-hidden
-          className="wa-pulse absolute inset-0 rounded-full"
+          className="wa-pulse ae-ambient absolute inset-0 rounded-full"
           style={{
             border: '2px solid rgba(37,211,102,0.55)',
           }}

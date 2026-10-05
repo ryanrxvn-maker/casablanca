@@ -58,6 +58,10 @@ export type BatchJob3DProps = {
   resumeTitle?: string;
   /** Elapsed em ms desde o start (pra mostrar tempo decorrido) */
   elapsedMs: number;
+  /** Com `startedAt` + `elapsedLive`, o relógio do card anda SOZINHO a cada 1s
+   *  (só ele re-renderiza). Sem eles, mostra o `elapsedMs` recebido. */
+  startedAt?: number;
+  elapsedLive?: boolean;
   /** Tudo OK = mostra download buttons */
   allOk: boolean;
   /** parcial = phase=done mas algo faltou */
@@ -408,6 +412,33 @@ function formatElapsed(ms: number): string {
 }
 
 /**
+ * Relógio do card. PERFORMANCE (05.10): o tempo decorrido era um `nowTick` de
+ * 1s na PÁGINA do Pilot — a página inteira (~20 mil linhas, todos os cards,
+ * takes e listas) re-renderizava a cada segundo enquanto houvesse disparo.
+ * Agora só este texto re-renderiza. Fica no topo do módulo de propósito
+ * (componente definido dentro de outro remonta a cada render).
+ */
+function ElapsedClock({
+  elapsedMs,
+  startedAt,
+  live,
+}: {
+  elapsedMs: number;
+  startedAt?: number;
+  live: boolean;
+}) {
+  const ticking = live && typeof startedAt === 'number' && startedAt > 0;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [ticking]);
+  return <>{formatElapsed(ticking ? now - (startedAt as number) : elapsedMs)}</>;
+}
+
+/**
  * Filtra mensagens tecnicas em algo humano. Se a mensagem tiver gírias
  * tecnicas, troca por uma frase amigavel baseada na fase.
  */
@@ -507,6 +538,8 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     suppressBanner = false,
     resumeTitle = 'Retomar',
     elapsedMs,
+    startedAt,
+    elapsedLive = false,
     allOk,
     isPartialDone,
     downloadBlocked,
@@ -788,7 +821,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               ) : null}
               <span className="mono inline-flex items-center gap-1 text-[10px] text-text-muted">
                 <IconClock size={10} />
-                {formatElapsed(elapsedMs)}
+                <ElapsedClock elapsedMs={elapsedMs} startedAt={startedAt} live={elapsedLive} />
               </span>
             </div>
             {/* POR QUE o realce não entrou. Um AD entregue sem o zoom/legenda

@@ -89,32 +89,34 @@ body {
   background-size: auto, auto, auto, 52px 52px, 52px 52px;
 }
 
-/* Spotlight sutil seguindo o mouse — tom violet pra reduzir presenca lime. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
+/* Spotlight sutil seguindo o mouse — tom violet pra reduzir presenca lime.
+   PERFORMANCE (05.10): era um body::before lendo --mx/--my do :root, o que
+   recalculava o estilo da página INTEIRA a cada movimento do mouse. Agora é
+   o elemento .mouse-spotlight (components/MouseGlow.tsx), movido por
+   transform — mesmo gradiente (420px, violet 4%, some em 65%), centrado no
+   elemento, que fica centrado no cursor. Tamanho 840px = 2x o raio. */
+.mouse-spotlight {
+  position: fixed !important;
+  top: -420px;
+  left: -420px;
+  width: 840px;
+  height: 840px;
   pointer-events: none;
-  z-index: 1;
+  z-index: 1 !important;
   background: radial-gradient(
-    420px circle at var(--mx) var(--my),
+    420px circle at 50% 50%,
     rgba(167, 139, 250, 0.04),
     transparent 65%
   );
-  transition: background 0.2s ease-out;
+  will-change: transform;
 }
 
-/* Grain/noise overlay leve. */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.03;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
-}
+/* Grain/noise overlay — REMOVIDO NO ESCURO (05.10; no claro continua, ver
+   html[data-theme='light'] body::after). Ficava em z-index 1, ABAIXO de todo
+   o conteúdo (body > * = z-index 2), então só misturava com o fundo escuro:
+   opacity .03 + overlay sobre ~#070708 dá variação < 0,1% (menos de 1 nível
+   de cor em 255 — invisível), mas custava uma camada de tela cheia com
+   mix-blend-mode recomposta a cada quadro. */
 
 body > * {
   position: relative;
@@ -1212,38 +1214,60 @@ input[type='range']::-moz-range-thumb {
   background: #2a2a32;
 }
 
-/* Floating ambient orbs (background) — tons violet/cyan/lime suaves */
+/* Floating ambient orbs (background) — tons violet/cyan/lime suaves.
+   PERFORMANCE (05.10): eram `filter: blur(70px) saturate(.85)` +
+   `mix-blend-mode: screen` animando sem parar — a GPU refazia o blur de 3
+   camadas enormes a cada quadro, em TODA página. O blur agora vem ASSADO no
+   gradiente (perfil do blur gaussiano σ=70px calculado numericamente, cor já
+   com o saturate .85), na caixa aumentada pro espalhamento do blur e com o
+   MESMO centro. Comparado por screenshot: diferença máx. de 1 nível de cor
+   em 255 (escuro) / 2 (claro). O mix-blend era inócuo: o container fixed é um
+   contexto de empilhamento isolado, então o screen misturava com fundo
+   transparente = normal. A animação (só transform) segue o mesmo trajeto, em
+   30 degraus por trecho: a bolha é tão difusa que cada degrau (~1,6px) muda
+   qualquer pixel em <0,1 nível de cor (invisível), e entre degraus a GPU não
+   precisa redesenhar a tela — parada, a página caiu de ~2,5s para ~0,36s de
+   GPU a cada 8s (medido). */
 .orb {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(70px) saturate(0.85);
   opacity: 0.3;
-  mix-blend-mode: screen;
   will-change: transform;
 }
 .orb-a {
-  width: 560px;
-  height: 560px;
-  top: -200px;
-  left: -160px;
-  background: radial-gradient(circle, rgba(167, 139, 250, 0.28), transparent 65%);
-  animation: orb-float-a 26s ease-in-out infinite;
+  width: 780px;
+  height: 780px;
+  top: -310px;
+  left: -270px;
+  background: radial-gradient(circle closest-side at 50% 50%, rgba(165, 141, 235, 0.1846) 0px, rgba(165, 141, 235, 0.1817) 24px, rgba(165, 141, 235, 0.1735) 48px, rgba(165, 141, 235, 0.1608) 72px, rgba(165, 141, 235, 0.1444) 96px, rgba(165, 141, 235, 0.1255) 120px, rgba(165, 141, 235, 0.1054) 144px, rgba(165, 141, 235, 0.085) 168px, rgba(165, 141, 235, 0.0656) 192px, rgba(165, 141, 235, 0.0481) 216px, rgba(165, 141, 235, 0.0333) 240px, rgba(165, 141, 235, 0.0216) 264px, rgba(165, 141, 235, 0.0131) 288px, rgba(165, 141, 235, 0.0073) 312px, rgba(165, 141, 235, 0.0038) 336px, rgba(165, 141, 235, 0.0018) 360px, rgba(165, 141, 235, 0.0008) 384px, rgba(165, 141, 235, 0) 390px);
+  animation: orb-float-a 26s steps(30, end) infinite;
 }
 .orb-b {
-  width: 420px;
-  height: 420px;
-  bottom: -140px;
-  right: -120px;
-  background: radial-gradient(circle, rgba(103, 232, 249, 0.16), transparent 65%);
-  animation: orb-float-b 32s ease-in-out infinite;
+  width: 640px;
+  height: 640px;
+  bottom: -250px;
+  right: -230px;
+  background: radial-gradient(circle closest-side at 50% 50%, rgba(118, 228, 243, 0.0877) 0px, rgba(118, 228, 243, 0.0863) 20px, rgba(118, 228, 243, 0.0821) 40px, rgba(118, 228, 243, 0.0757) 60px, rgba(118, 228, 243, 0.0674) 80px, rgba(118, 228, 243, 0.058) 100px, rgba(118, 228, 243, 0.0481) 120px, rgba(118, 228, 243, 0.0383) 140px, rgba(118, 228, 243, 0.0293) 160px, rgba(118, 228, 243, 0.0214) 180px, rgba(118, 228, 243, 0.0149) 200px, rgba(118, 228, 243, 0.0099) 220px, rgba(118, 228, 243, 0.0062) 240px, rgba(118, 228, 243, 0.0037) 260px, rgba(118, 228, 243, 0.002) 280px, rgba(118, 228, 243, 0.0011) 300px, rgba(118, 228, 243, 0) 320px);
+  animation: orb-float-b 32s steps(30, end) infinite;
 }
 .orb-c {
-  width: 300px;
-  height: 300px;
-  top: 50%;
-  left: 60%;
-  background: radial-gradient(circle, rgba(200, 240, 120, 0.02), transparent 65%);
-  animation: orb-float-c 36s ease-in-out infinite;
+  width: 400px;
+  height: 400px;
+  top: calc(50% - 50px);
+  left: calc(60% - 50px);
+  background: radial-gradient(circle closest-side at 50% 50%, rgba(203, 237, 135, 0.0079) 0px, rgba(203, 237, 135, 0.0073) 36px, rgba(203, 237, 135, 0.0063) 60px, rgba(203, 237, 135, 0.0051) 84px, rgba(203, 237, 135, 0.0039) 108px, rgba(203, 237, 135, 0.0027) 132px, rgba(203, 237, 135, 0.0017) 156px, rgba(203, 237, 135, 0.001) 180px, rgba(203, 237, 135, 0) 200px);
+  animation: orb-float-c 36s steps(30, end) infinite;
+}
+
+/* MODO DESCANSO (components/AmbientCalm.tsx): sem foco na janela ou 30s sem
+   interação, os ENFEITES animados pausam (continuam de onde pararam ao voltar).
+   Só decoração entra aqui — nunca spinner/progresso/indicador de trabalho. */
+html.ae-calm .ae-ambient,
+html.ae-calm .orb,
+html.ae-calm .guide-fab__btn,
+html.ae-calm .guide-fab__label,
+html.ae-calm .search-ambient {
+  animation-play-state: paused !important;
 }
 
 /* Keyframes */
@@ -1506,7 +1530,7 @@ html[data-theme='light'] .hero-light-veil {
 
 /* Reduce motion */
 @media (prefers-reduced-motion: reduce) {
-  body::before,
+  .mouse-spotlight,
   body::after,
   .orb {
     display: none;
@@ -1635,15 +1659,24 @@ html[data-theme='light'] body {
     radial-gradient(60% 45% at 50% 100%, rgba(14, 116, 144, 0.022), transparent 75%);
   background-size: auto, auto;
 }
-html[data-theme='light'] body::before {
+html[data-theme='light'] .mouse-spotlight {
   background: radial-gradient(
-    480px circle at var(--mx) var(--my),
+    480px circle at 50% 50%,
     rgba(109, 78, 232, 0.04),
     transparent 65%
   );
 }
+/* Grain SÓ no claro: sobre o fundo #cdccc6 o overlay ainda dá textura (±2-5
+   níveis); no escuro ele era invisível e saiu (ver .mouse-spotlight). */
 html[data-theme='light'] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
   opacity: 0.18;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
 }
 
 /* Texto branco utilitário (títulos) vira escuro no claro. Não atinge os

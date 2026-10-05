@@ -722,7 +722,7 @@ function TierAvatar({
       {isPremium ? (
         <div
           aria-hidden
-          className="pointer-events-none absolute -inset-1.5 rounded-full opacity-70 blur-md"
+          className="ae-ambient pointer-events-none absolute -inset-1.5 rounded-full opacity-70 blur-md"
           style={{
             background: color,
             animation: 'tier-glow-pulse 2.6s ease-in-out infinite',
@@ -732,7 +732,7 @@ function TierAvatar({
 
       {/* Anel conic giratório (basic+, pro, admin) */}
       <div
-        className="relative h-12 w-12 rounded-full p-[2px]"
+        className="ae-ambient relative h-12 w-12 rounded-full p-[2px]"
         style={ringStyle}
       >
         <div className="relative h-full w-full overflow-hidden rounded-full bg-bg">
@@ -783,7 +783,7 @@ function TierAvatar({
       {tier === 'pro' ? (
         <span
           aria-hidden
-          className="absolute -right-1 -top-1"
+          className="ae-ambient absolute -right-1 -top-1"
           style={{
             animation: 'tier-spark 2.4s ease-in-out infinite',
           }}
@@ -818,7 +818,7 @@ function TierAvatar({
           </span>
           <span
             aria-hidden
-            className="absolute -left-1 top-1"
+            className="ae-ambient absolute -left-1 top-1"
             style={{ animation: 'tier-spark 2.6s ease-in-out infinite' }}
           >
             <svg width="8" height="8" viewBox="0 0 10 10" fill="none">

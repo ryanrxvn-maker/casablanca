@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 
 import localFont from 'next/font/local';
 import { MouseGlow } from '@/components/MouseGlow';
+import { AmbientCalm } from '@/components/AmbientCalm';
 import { RippleRoot } from '@/components/RippleRoot';
 import { FloatingOrbs } from '@/components/FloatingOrbs';
 import { WhatsAppFab } from '@/components/WhatsAppFab';
@@ -186,6 +187,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
         />
         <ChunkGuard />
+        <AmbientCalm />
         <ThemeManager />
         <FloatingOrbs />
         <MouseGlow />
