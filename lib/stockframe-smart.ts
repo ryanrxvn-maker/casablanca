@@ -1,5 +1,6 @@
 import { stockFrameSearchText, type StockFrameNiche, type StockFrameVideo } from './stockframe';
 import { stockFrameVisualAudit, type StockFrameVisualAudit } from './stockframe-visual-audit';
+import { stockFrameFeelingNiche, type StockFrameFeelingNiche } from './stockframe-feeling';
 
 export type SmartCoverage = 30 | 60 | 100;
 export type SmartPace = 'fast' | 'long' | 'adaptive';
@@ -100,7 +101,7 @@ const CONCEPTS: Record<string, string[]> = {
   'remedio': ['remedio', 'medicamento', 'capsula', 'comprimido', 'suplemento', 'frasco', 'dose', 'farmacia', 'finasterida', 'dutasterida', 'tansulosina', 'tamsulosina', 'prescrito', 'receitado', 'azulzinho', 'viagra', 'pilula'],
   'alimentacao': ['comida', 'alimento', 'cozinha', 'receita', 'prato', 'fruta', 'verdura', 'cafe', 'cha', 'colher'],
   'botanico': ['erva', 'ervas', 'planta', 'plantas', 'folha', 'folhas', 'botanico', 'extrato vegetal', 'fitoterapico', 'hortela', 'camomila', 'alecrim'],
-  'sono': ['sono', 'dormir', 'insomnia', 'cama', 'acordar', 'cansaco', 'ronco'],
+  'sono': ['sono', 'dormir', 'insomnia', 'cama', 'acordar', 'cansaco', 'ronco', 'acordando', 'acordou', 'acordo', 'madrugada', 'noite inteira', 'insonia'],
   'pele': ['pele', 'ruga', 'rosto', 'acne', 'mancha', 'colageno', 'creme'],
   'cabelo': ['cabelo', 'calvicie', 'queda de cabelo', 'fio', 'couro cabeludo'],
   'coracao': ['coracao', 'pressao', 'arteria', 'circulacao', 'infarto', 'cardiaco'],
@@ -216,7 +217,7 @@ const MALE_OR_COUPLE_SCENE = /\b(?:homem|homens|idoso|idosos|senhor|velho|marido
 const FEMALE_COPY = /\b(?:mulher(?:es)?|esposa|parceira|namorada|companheira|filha|mae|avo|idosa|senhora|wife|woman|women|partner|girlfriend|kobiet\w*|zona)\b/;
 // Insônia, levantar de madrugada e cansaço são o PROBLEMA; nunca podem
 // ilustrar "dormir a noite inteira".
-const DISTRESS_VISUAL = /\b(?:acord\w* (?:a|de|durante a|no meio da) (?:noite|madrugada)|levant\w* (?:a|de|durante a|no meio da) (?:noite|madrugada)|insoni\w*|nao consegu\w* dormir|dificuldade de dormir|cansad\w*|exaust\w*|debilitad\w*|caind\w*|caiu|queda|tombo|escorreg\w*|tropec\w*|chorand\w*|desesperad\w*)\b/;
+const DISTRESS_VISUAL = /\b(?:acord\w* (?:a|de|durante a|no meio da) (?:noite|madrugada)|levant\w* (?:a|de|durante a|no meio da) (?:noite|madrugada)|insoni\w*|nao consegu\w* dormir|dificuldade de dormir|cansad\w*|exaust\w*|debilitad\w*|caind\w*|caiu|queda|tombo|escorreg\w*|tropec\w*|chorand\w*|desesperad\w*|inchad\w*|inflamad\w*|tumor\w*|deformad\w*|apodrec\w*|infeccionad\w*|doente)\b/;
 const DISTRESS_AUDIT_BEATS = new Set(['doenca', 'dor', 'cansaco', 'vergonha']);
 
 /** Segundos que a montagem de fato usa: o melhor trecho recomendado pelo
@@ -748,6 +749,74 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
   return prepared;
 }
 
+/** Qual feeling do Silas vale para a campanha (célula nicho do acervo dele). */
+function feelingNicheOf(campaign: string): string | undefined {
+  const text = normalize(campaign);
+  if (/\bprosta\w*/.test(text)) return 'prostata';
+  if (ED_CAMPAIGN.test(text) || /\bbrox\w*|broch\w*/.test(text)) return 'ed';
+  if (/\b(?:memoria|alzheimer|demencia|esquec\w*)\b/.test(text)) return 'memoria';
+  if (/\b(?:diabet\w*|glicose|glicemia)\b/.test(text)) return 'diabetes';
+  if (LIPEDEMA_CAMPAIGN.test(text)) return 'lipedema';
+  return undefined;
+}
+
+/** Palavras e pares de palavras da fala, no formato das chaves do feeling. */
+function feelingKeysOf(spoken: string, campaign: string) {
+  const words = normalize(spoken).split(/\s+/).filter(Boolean);
+  const keys = new Set<string>();
+  for (let index = 0; index < words.length; index++) {
+    if (words[index].length >= 4 && !STOP.has(words[index])) keys.add(words[index]);
+    if (index + 1 < words.length) keys.add(`${words[index]} ${words[index + 1]}`);
+  }
+  return { keys: [...keys], niche: feelingNicheOf(campaign) };
+}
+
+const feelingSceneTokens = new WeakMap<StockFrameFeelingNiche, Set<string>[]>();
+function sceneTokensOf(niche: StockFrameFeelingNiche): Set<string>[] {
+  let cached = feelingSceneTokens.get(niche);
+  if (!cached) {
+    cached = niche.scenes.map((scene) => new Set(meaningful(scene).filter((token) => token.length >= 3)));
+    feelingSceneTokens.set(niche, cached);
+  }
+  return cached;
+}
+
+/** O que o Silas pôs na tela em falas com as mesmas palavras, comparado com
+ * o que este take mostra (título, tags e ficha visual). Só pontua — as
+ * travas de contexto já decidiram se o take pode entrar. */
+function feelingMatch(ranking: { feeling: { keys: string[]; niche?: string } }, prepared: PreparedVideo) {
+  const sources: [StockFrameFeelingNiche, number][] = [];
+  const own = ranking.feeling.niche ? stockFrameFeelingNiche(ranking.feeling.niche) : undefined;
+  if (own) sources.push([own, 1]);
+  const general = stockFrameFeelingNiche('geral');
+  if (general) sources.push([general, .5]);
+  if (!sources.length || !ranking.feeling.keys.length) return { total: 0, strong: false, example: '' };
+  const videoTokens = new Set(prepared.fields.filter((field) => field.visual).flatMap((field) => field.tokens));
+  let total = 0;
+  let strong = false;
+  let best = 0;
+  let example = '';
+  for (const [niche, factor] of sources) {
+    const scenes = sceneTokensOf(niche);
+    for (const key of ranking.feeling.keys) {
+      for (const [sceneIndex, weight] of niche.keys[key] || []) {
+        const sceneTokens = scenes[sceneIndex];
+        if (!sceneTokens?.size) continue;
+        const shared = [...sceneTokens].filter((token) => videoTokens.has(token));
+        const similarity = shared.length / sceneTokens.size;
+        if (similarity < .5 || !shared.some((token) => token.length >= 4)) continue;
+        const contribution = weight * similarity * factor;
+        total += contribution;
+        // Palavra de conteúdo, associação repetida e cena quase igual: é o
+        // tipo de take que ele usa ali, vale como evidência de cena.
+        if (factor === 1 && !key.includes(' ') && key.length >= 5 && weight >= 1.5 && similarity >= .67) strong = true;
+        if (contribution > best) { best = contribution; example = `"${key}" → ${niche.scenes[sceneIndex]}`; }
+      }
+    }
+  }
+  return { total, strong, example };
+}
+
 /** Prepare a segment once per ranking, not once for every catalog candidate.
  * Deliberately not cached by identity: the editor can change its context or
  * recipe lock between rankings, and those edits must take effect immediately. */
@@ -779,6 +848,7 @@ function prepareRanking(segment: SmartStockSegment) {
     direction,
     beat: segment.visualBeat || visualBeat(spokenText, direction),
     callToAction: CTA_COPY.test(normalize(spokenText)),
+    feeling: feelingKeysOf(spokenText, segment.campaignText || spokenContext),
   };
 }
 
@@ -945,8 +1015,10 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !/\b(?:vestind\w*|roupa|dress\w*|clothes)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['troca de roupa não é a ação narrada'] };
   }
+  // "Levanta de madrugada pra urinar" É a cena de acordar à noite — a que o
+  // Silas mais usa ali ("IDOSO LEVANTA DE MADRUGADA PRA MIJAR").
   if (/\b(?:acord\w*|wake\w*)\b/.test(prepared.title)
-      && !/\b(?:acord\w*|wake\w*|sono|dorm\w*|sleep\w*)\b/.test(ranking.spokenNormalized)) {
+      && !/\b(?:acord\w*|wake\w*|sono|dorm\w*|sleep\w*|madrugada|noite|noturn\w*|nocturia|insoni\w*)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['acordar alguém não é a ação narrada'] };
   }
   if (/\b(?:dormind\w*|sleep\w*)\b/.test(prepared.title)
@@ -1008,8 +1080,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   // "INDÚSTRIA FARMACÊUTICA CONTANDO DINHEIRO", mesmo sem conceito mapeado.
   const sharedTitleTokens = prepared.fields[0].tokens.filter((token) => ranking.localTokens.has(token) && !GENERIC_PERSON_TOKENS.has(token));
   const strongTitleMatch = sharedTitleTokens.length >= 2 || sharedTitleTokens.some((token) => token.length >= 7);
+  const feeling = feelingMatch(ranking, prepared);
+  // Mecanismo e cena neutra atravessam nicho (lei 6 do Silas); anatomia e
+  // sintoma de outro nicho de saúde, nunca — nem pelo feeling.
   const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
-    && (segment.concepts.some((concept) => prepared.concepts.includes(concept)) || strongTitleMatch);
+    && (segment.concepts.some((concept) => prepared.concepts.includes(concept)) || strongTitleMatch || feeling.strong);
   const neutralDigitalAction = allowGenericFallback && (ranking.callToAction || SOCIAL_PROOF_COPY.test(ranking.spokenNormalized))
     && !MEDICAL_NICHE.test(prepared.taxonomy) && CTA_SCENE.test(prepared.title)
     && CTA_PHONE.test(prepared.title) && CTA_NEUTRAL_ACTION.test(prepared.title)
@@ -1075,7 +1150,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   // aspect ratio and remote numeric score cannot stand in for scene evidence.
   const contextualConcepts = ranking.contextConcepts.filter((concept) => videoConcepts.includes(concept));
   const contextLexicalEvidence = prepared.fields.some((field) => field.visual && field.tokens.some((token) => token.length >= 4 && ranking.contextTokens.has(token)));
-  if (!lexicalEvidence && !sharedConcepts.length && !ingredientEvidence && !botanicalEvidence) {
+  if (!lexicalEvidence && !sharedConcepts.length && !ingredientEvidence && !botanicalEvidence && !feeling.strong) {
     // Invoked only by the explicit last-resort helper, after broad retrieval.
     // Same pack alone is insufficient: require a neutral identifiable scene
     // plus a real thematic connection in its own title/description/metadata.
@@ -1109,6 +1184,13 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       score += 3;
       reasons.push('alternativa genérica com vínculo ao tema da campanha; sem correspondência específica com a fala');
     }
+  }
+  if (feeling.total > 0) {
+    // Retorno decrescente: o feeling desempata e puxa o take do jeito dele,
+    // sem transformar uma associação frequente em vale-tudo.
+    const bonus = Math.min(8, 3 * Math.log2(1 + feeling.total));
+    score += bonus;
+    if (bonus >= 2) reasons.push(`feeling Silas: ${feeling.example}`);
   }
   if (ingredientEvidence) { score += 12; reasons.push('ingrediente congruente com a receita'); }
   if (botanicalEvidence) { score += 8; reasons.push('cena botânica congruente'); }

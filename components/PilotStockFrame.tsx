@@ -35,6 +35,7 @@ import {
   type StockFrameCopyPart,
 } from '@/lib/stockframe-smart';
 import { loadStockFrameVisualAudit, stockFrameAuditedSearchSeeds } from '@/lib/stockframe-visual-audit';
+import { loadStockFrameFeeling } from '@/lib/stockframe-feeling';
 import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { enrichStockFrameVideos, mergeStockFrameMediaUrls, mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo, type StockFrameSmartQuery } from '@/lib/stockframe';
@@ -485,10 +486,13 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       // Start the small local visual index in parallel with translation. A
       // chunk failure must never prevent the existing StockFrame search path.
       const visualAuditReady = loadStockFrameVisualAudit().catch(() => undefined);
+      // Feeling do Silas (fala → cena que ele usou nos drafts revisados).
+      // Sem ele o ranking segue igual; só perde o desempate "do jeito dele".
+      const feelingReady = loadStockFrameFeeling().catch(() => undefined);
       const skeleton = planSmartStockSegments(parts, { coverage, pace });
       if (!skeleton.length) throw new Error('A copy não tem palavras suficientes para planejar os inserts.');
       const translation = await translateStockFrameCopy(skeleton, setSmartProgress);
-      await visualAuditReady;
+      await Promise.all([visualAuditReady, feelingReady]);
       const localized = translation.translated ? localizeSmartSegments(skeleton, translation.texts, translation.contexts) : skeleton;
       // Infer from the *entire* original copy first. A partial 60% plan may
       // omit the one sentence naming ED/diabetes/etc.; inferring solely from

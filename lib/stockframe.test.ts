@@ -1,6 +1,7 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
 import { absorbUnfilledSmartSegments, balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries, stockFrameSeriesKey, stockFrameUsableSeconds } from './stockframe-smart';
 import { installStockFrameVisualAuditForTest, stockFrameAuditedSearchSeeds, stockFrameVisualAudit } from './stockframe-visual-audit';
+import { installStockFrameFeelingForTest } from './stockframe-feeling';
 import { visualAuditEntries } from '../data/stockframe-visual-audit';
 
 let passed = 0;
@@ -924,6 +925,22 @@ const absorbed = absorbUnfilledSmartSegments(absorbCopy, [
 ]);
 ok(absorbed.length === 1 && absorbed[0].wordFrom === 0 && absorbed[0].wordTo === 9 && absorbed[0].selectedVideoId === 'long',
   '100%: trecho sem take único é absorvido pelo vizinho em vez de repetir take');
+
+const wakeAtNight = quiaboSegment('Se você tem mais de 50 anos e levanta de madrugada pra urinar,');
+ok(explainSmartStockScore(wakeAtNight, prostateVideo('acorda-noite', 'HOMEM ACORDANDO A NOITE')).score > 0,
+  '"levanta de madrugada pra urinar" aceita a cena de acordar à noite');
+const healing = quiaboSegment('Ele limpa as toxinas e desincha a glândula de dentro pra fora.');
+ok(explainSmartStockScore(healing, prostateVideo('inchada', 'SEGURANDO PROSTATA INCHADA'), 'generic').score < 0,
+  'fala de melhora ("desincha") não recebe próstata inchada');
+const finasterideSegment = quiaboSegment('Aí o médico passa a finasterida e diz que é pra vida toda.');
+const pillsScene = video({ id: 'velho-remedio', title: 'VELHO TOMANDO REMEDIO', nicheId: 'mecanismos', nicheName: 'Mecanismos Gerais' });
+const withoutFeeling = explainSmartStockScore(finasterideSegment, pillsScene).score;
+installStockFrameFeelingForTest({ prostata: { scenes: ['remedios pilulas'], keys: { finasterida: [[0, 2.5]] } } });
+const withFeeling = explainSmartStockScore(finasterideSegment, pillsScene);
+ok(withFeeling.score > withoutFeeling && withFeeling.reasons.some((reason) => reason.startsWith('feeling Silas')),
+  'feeling do Silas puxa a cena que ele usa nessa fala e explica o porquê');
+ok(explainSmartStockScore(kitchen, coffeeForGirlfriend, 'generic').score < 0, 'feeling nunca passa por cima das travas de contexto');
+installStockFrameFeelingForTest({});
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

@@ -20,12 +20,15 @@ import {
 } from '../lib/stockframe-smart';
 import { installStockFrameVisualAuditForTest, stockFrameVisualAudit } from '../lib/stockframe-visual-audit';
 import { visualAuditEntries } from '../data/stockframe-visual-audit';
+import { installStockFrameFeelingForTest } from '../lib/stockframe-feeling';
+import { stockFrameFeeling } from '../data/stockframe-feeling';
 import type { StockFrameNiche, StockFrameVideo } from '../lib/stockframe';
 
 type DumpVideo = { id: string; code?: string; title: string; description?: string; tags?: string[]; nicho: string; nicheId: string;
   subcategoryId?: string; subpasta?: string; dur?: number; aspect?: string; w?: number; h?: number };
 
 installStockFrameVisualAuditForTest(visualAuditEntries);
+if (process.env.SEM_FEELING !== '1') installStockFrameFeelingForTest(stockFrameFeeling);
 const [copyFile, coverageArg = '60', paceArg = 'adaptive'] = process.argv.slice(2);
 if (!copyFile) { console.error('Informe o JSON da copy: [{ "label": "HOOK", "text": "..." }, ...]'); process.exit(2); }
 const catalogPath = process.env.STOCKFRAME_CATALOG || 'D:/Área de Trabalho/CASABLANCA/.stockframe-catalogo/catalogo.json';
