@@ -1,5 +1,5 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
-import { balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries } from './stockframe-smart';
+import { absorbUnfilledSmartSegments, balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries, stockFrameSeriesKey, stockFrameUsableSeconds } from './stockframe-smart';
 import { installStockFrameVisualAuditForTest, stockFrameAuditedSearchSeeds, stockFrameVisualAudit } from './stockframe-visual-audit';
 import { visualAuditEntries } from '../data/stockframe-visual-audit';
 
@@ -253,9 +253,10 @@ const reusedPlan = chooseSmartStockAssignments([
   { ...painSegment, id: 'unrelated', candidates: [] },
   { ...painSegment, id: 'reuse-later', candidates: [{ video: exactCompound, score: 30, reasons: [] }] },
 ]);
-ok(reusedPlan[0].selectedVideoId === 'oleocantal' && reusedPlan[2].selectedVideoId === 'oleocantal'
-  && reusedPlan[2].candidates[0].reasons.includes('take reutilizado em trecho distante'), 'reuso distante confiável é permitido e explicado');
-ok(!reusedPlan[1].selectedVideoId, 'atribuição global e reuso mantêm vazio o trecho sem correspondência');
+// Silas, 03.10: "ta repetindo takes ainda, isso não deve acontecer".
+ok(reusedPlan[0].selectedVideoId === 'oleocantal' && !reusedPlan[2].selectedVideoId,
+  'take nunca é reutilizado, nem em trecho distante: o segundo trecho fica com o avatar');
+ok(!reusedPlan[1].selectedVideoId, 'atribuição global mantém vazio o trecho sem correspondência');
 const timelineCopy = [{ label: 'BODY 1', text: 'Primeiro mostramos a dor depois a solução e o resultado.' }];
 const timelineShot = { ...planSmartStockSegments(timelineCopy, { coverage: 100, pace: 'long' })[0],
   wordFrom: 3, wordTo: 5, selectedVideoId: 'take-1' };
@@ -310,7 +311,8 @@ const oneSafeTake = chooseSmartStockAssignments([
   { ...herbalSegment, candidates: [{ video: herbalVideo, score: 12, reasons: [] }] },
   { ...herbalSegment, id: 'herbal-next', candidates: [{ video: herbalVideo, score: 10, reasons: [] }] },
 ], true);
-ok(oneSafeTake.every((segment) => segment.selectedVideoId === 'hortela'), 'modo 100% cobre dois trechos com único take seguro quando não há alternativa');
+ok(oneSafeTake.filter((segment) => segment.selectedVideoId === 'hortela').length === 1,
+  'modo 100% não repete o único take seguro em dois trechos');
 const reliefCopy = [{ label: 'BODY 1', text: 'Antes eu sofria com o problema de ereção. Agora sinto alívio e voltei a ter confiança com minha parceira.' }];
 const reliefSegment = planSmartStockSegments(reliefCopy, { coverage: 100, pace: 'fast' }).at(-1)!;
 const reliefRanked = rankStockFrameVideos({ ...reliefSegment, campaignNicheId: 'ed' }, [
@@ -812,6 +814,116 @@ ok(!rankStockFrameVideos(vagueLipedema, [maleDriving, genericPills, pointlessPho
   'fallback do lipedema não usa homem, remédio nem celular sem ação narrada');
 ok(rankStockFrameGenericFallback(vagueLipedema, [lipedemaLegs], 10)[0]?.video.id === 'lipedema-legs',
   'último recurso ainda pode manter 100% com take neutro da condição da campanha');
+
+console.log('\nSMART STOCKS — feeling do Silas (03.10): sem repetição, contexto e alternativas:');
+const quiaboCopy = 'Por que acha que mesmo tomando por tanto tempo a próstata não para de crescer? Esse composto está na baba do quiabo. '
+  + 'Muitos relataram a próstata reduzir de tamanho em cerca de 14 dias, voltar a mijar forte e dormir a noite inteira. '
+  + 'A parte boa, o quiabo custa quase nada e se faz tudo na sua cozinha. A parte que ninguém te conta, existe um detalhe no preparo. '
+  + 'Aí o médico passa a finasterida e diz que é pra vida toda. Vou te mostrar o que a indústria farmacêutica não quer.';
+const quiaboSegment = (text: string) => ({ ...planSmartStockSegments([{ label: 'BODY 1', text }], { coverage: 100, pace: 'long' })[0],
+  campaignText: quiaboCopy, campaignNicheId: 'prostata' });
+const prostateVideo = (id: string, title: string, patch: Partial<StockFrameVideo> = {}) =>
+  video({ id, title, nicheId: 'prostata', nicheName: 'Prostata', ...patch });
+
+ok(stockFrameSeriesKey({ title: 'MANGUEIRA JATO FORTEE' }) === stockFrameSeriesKey({ title: 'MANGUEIRA JATO FORTE (2)' })
+  && stockFrameSeriesKey({ title: 'PROSTATA INFALAMADA 3D(3)' }) === stockFrameSeriesKey({ title: 'PROSTATA INFALAMADA 3D(8)' })
+  && stockFrameSeriesKey({ title: 'HOMEM MIJANDO SANGUEEE' }) === stockFrameSeriesKey({ title: 'HOMEM MIJANDO SANGUE' }),
+  'série visual ignora numeração e letra repetida de digitação');
+ok(stockFrameSeriesKey({ title: 'ANIMAÇÃO 3D PROSTATA E RINS' }) !== stockFrameSeriesKey({ title: 'ANIMAÇÃO DE PROSTATA 3D(3)' }),
+  'cenas diferentes do mesmo pack continuam séries diferentes');
+
+const growth = quiaboSegment('Por que a próstata não para de crescer?');
+const series3 = prostateVideo('serie-3', 'PROSTATA INFALAMADA 3D(3)');
+const series8 = prostateVideo('serie-8', 'PROSTATA INFALAMADA 3D(8)');
+const urgency = prostateVideo('urgencia', 'URGENCIA DE URINAR');
+const seriesPlan = chooseSmartStockAssignments([
+  { ...growth, id: 'growth-1', candidates: [{ video: series3, score: 40, reasons: [] }] },
+  { ...growth, id: 'growth-2', candidates: [{ video: series8, score: 39, reasons: [] }, { video: urgency, score: 20, reasons: [] }] },
+], true);
+ok(seriesPlan[0].selectedVideoId === 'serie-3' && seriesPlan[1].selectedVideoId === 'urgencia',
+  'duas variações da mesma série nunca entram no mesmo plano');
+const twinA = prostateVideo('twin-a', 'VELHO ACORDANDO DE MADRUGADA');
+const twinB = prostateVideo('twin-b', 'VELHO ACORDANDO DE MADRUGADA');
+const twinPlan = chooseSmartStockAssignments([
+  { ...growth, id: 'twin-1', candidates: [{ video: twinA, score: 30, reasons: [] }] },
+  { ...growth, id: 'twin-2', candidates: [{ video: twinB, score: 30, reasons: [] }] },
+], true);
+ok(twinPlan.filter((segment) => segment.selectedVideoId).length === 1, 'o mesmo take subido duas vezes (ids diferentes) não repete');
+const dupPlan = chooseSmartStockAssignments([
+  { ...growth, id: 'dup-1', candidates: [{ video: prostateVideo('dup-a', 'CENA A', { duplicateGroupId: 'g1' }), score: 30, reasons: [] }] },
+  { ...growth, id: 'dup-2', candidates: [{ video: prostateVideo('dup-b', 'CENA B', { duplicateGroupId: 'g1' }), score: 30, reasons: [] }] },
+], true);
+ok(dupPlan.filter((segment) => segment.selectedVideoId).length === 1, 'grupo de duplicata do StockFrame conta como o mesmo take');
+
+const kitchen = quiaboSegment('A parte boa, o quiabo custa quase nada e se faz tudo na sua cozinha.');
+const coffeeForGirlfriend = video({ id: 'cafe-namorada', title: 'HOMEM PREPARANDO CAFE PARA NAMORADA', nicheId: 'relacionamento', nicheName: 'Relacionamento' });
+ok(explainSmartStockScore(kitchen, coffeeForGirlfriend, 'generic').score < 0
+  && explainSmartStockScore(kitchen, coffeeForGirlfriend, 'pack').score < 0,
+  'AD de próstata: "faz tudo na sua cozinha" nunca vira café do namorado pra namorada');
+ok(explainSmartStockScore(kitchen, video({ id: 'loira-colher', title: 'LOIRA FAZENDO TRUQUE DA COLHER', nicheId: 'rejuv', nicheName: 'Rejuvenescimento' }), 'generic').score < 0,
+  'truque de outro nicho de saúde não ilustra a cozinha do quiabo');
+ok(explainSmartStockScore(kitchen, video({ id: 'monges', title: 'MONGES PREPARANDO BOLO', nicheId: 'prosp', nicheName: 'Prosperidade / Religioso' }), 'generic').score < 0
+  && explainSmartStockScore(kitchen, video({ id: 'ostentando', title: 'OSTENTANDO DINHEIRO', nicheId: 'prosp', nicheName: 'Prosperidade / Religioso' }), 'generic').score < 0,
+  '"custa quase nada" não puxa monge, anjo nem ostentação');
+ok(explainSmartStockScore(kitchen, video({ id: 'avatar-cozinha', title: 'HOMEM 70 | GRISALHO | COZINHA', nicheId: 'avatares', nicheName: 'Avatares Realistas I.A' }), 'generic').score < 0
+  && explainSmartStockScore(kitchen, video({ id: 'seta', title: 'SETA NEON', nicheId: 'edicao', nicheName: 'Edição' }), 'generic').score < 0,
+  'packs de avatar falante e de efeitos de edição não entram como b-roll');
+const toldSecret = quiaboSegment('A parte que ninguém te conta, existe um detalhe no preparo.');
+ok(explainSmartStockScore(toldSecret, video({ id: 'conta-banco', title: 'DINHEIRO NA CONTA DO BANCO', nicheId: 'renda', nicheName: 'Renda Extra' }), 'generic').score < 0,
+  '"ninguém te conta" não casa com "conta do banco"');
+
+const recovered = quiaboSegment('voltar a mijar forte e dormir a noite inteira.');
+const recoveredRank = rankStockFrameVideos(recovered, [
+  prostateVideo('acordando', 'HOMEM ACORDANDO A NOITE'), prostateVideo('dormindo', 'VELHO DORMINDO'),
+], 10, true);
+ok(recoveredRank.some((candidate) => candidate.video.id === 'dormindo') && !recoveredRank.some((candidate) => candidate.video.id === 'acordando'),
+  '"dormir a noite inteira" é melhora: acordar de madrugada (o sintoma) fica de fora');
+
+const prescribed = quiaboSegment('Aí o médico passa a finasterida e diz que é pra vida toda.');
+ok(explainSmartStockScore(prescribed, video({ id: 'tomando-remedio', title: 'VELHO TOMANDO REMEDIO', nicheId: 'mecanismos', nicheName: 'Mecanismos Gerais' })).score > 0,
+  'finasterida é fala de remédio: cena de remédio passa');
+const pharma = quiaboSegment('Vou te mostrar o que a indústria farmacêutica não quer.');
+ok(explainSmartStockScore(pharma, video({ id: 'pharma', title: 'INDUSTRIA FARMACEUTICA CONTANDO DINHEIRO', nicheId: 'mecanismos', nicheName: 'Mecanismos Gerais' })).score > 0,
+  'pack neutro atravessa nicho quando o título diz o que a fala diz');
+
+const shortClip = explainSmartStockScore({ ...growth, targetSeconds: 8 }, prostateVideo('curto', 'PROSTATA 3D CURTA', { durationSec: 3 }));
+ok(shortClip.reasons.includes('take mais curto que o trecho: o fim congelaria'), 'take curto demais para o trecho é penalizado (congelaria)');
+ok(stockFrameUsableSeconds({ durationSec: 20, recommendedStartSec: 2, recommendedEndSec: 6.5 }) === 4.5
+  && stockFrameUsableSeconds({ durationSec: 7 }) === 7, 'duração útil segue o mesmo recorte do insert');
+
+const packVideos = ['ANIMAÇÃO DE PROSTATA 3D', 'ANIMAÇÃO 3D PROSTATA E RINS', 'MÉDICO ANALISANDO PROSTATA INCHADA (1)',
+  'MÉDICO ANALISANDO PROSTATA INCHADA (2)', 'SISTEMA REPRODUTOR MASCULINO 3D', 'URINA PASSANDO PELA PROSTATA',
+  'CORPO HUMANO 3D SISTEMA MASCULINO', 'MÉDICO EXPLICANDO SOBRE PROSTATA', 'PROSTATA COM INFLAMAÇÃO ANIMAÇÃO 3D']
+  .map((title, index) => prostateVideo(`pack-${index}`, title));
+const filled = fillSmartStockAlternatives([{ ...quiaboSegment('Esse composto está na baba do quiabo.'), candidates: [] as ReturnType<typeof rankStockFrameVideos> }],
+  { pool: packVideos, pack: packVideos, minimum: 6 })[0];
+ok(filled.candidates.length >= 6, 'trecho sem cena específica recebe alternativas do pack do nicho');
+ok(new Set(filled.candidates.map((candidate) => stockFrameSeriesKey(candidate.video))).size === filled.candidates.length,
+  'alternativas não repetem a mesma série');
+ok(filled.candidates.every((candidate) => candidate.reasons.some((reason) => reason.includes('pack') || reason.includes('genérica'))),
+  'alternativa do pack é rotulada como tal na revisão');
+const excluded = fillSmartStockAlternatives([{ ...quiaboSegment('Esse composto está na baba do quiabo.'), candidates: [] as ReturnType<typeof rankStockFrameVideos> }],
+  { pool: packVideos, pack: packVideos, minimum: 6, exclude: [prostateVideo('manual', 'MÉDICO ANALISANDO PROSTATA INCHADA (7)')] })[0];
+ok(!excluded.candidates.some((candidate) => stockFrameSeriesKey(candidate.video) === stockFrameSeriesKey({ title: 'MÉDICO ANALISANDO PROSTATA INCHADA' })),
+  'série já inserida à mão na montagem não volta como alternativa');
+
+const burstCopy = [{ label: 'BODY 8', text: 'Muitos relataram a próstata reduzir de tamanho em cerca de 14 dias, voltar a mijar forte e dormir a noite inteira sem levantar.' }];
+const bursts = planSmartStockSegments(burstCopy, { coverage: 100, pace: 'adaptive' });
+const longTakes = planSmartStockSegments(burstCopy, { coverage: 100, pace: 'long' });
+ok(bursts.length >= 2 && bursts.every((segment) => segment.wordTo - segment.wordFrom + 1 >= 5 && segment.wordTo - segment.wordFrom + 1 <= 14),
+  'divisão inteligente quebra o trecho longo em rajada de takes curtos (ritmo do Silas)');
+ok(bursts.some((segment) => segment.text.startsWith('voltar')), 'a rajada corta onde a fala respira (vírgula)');
+ok(measureSmartStockCoverage(burstCopy, bursts.map((segment) => ({ ...segment, selectedVideoId: 'x' }))).complete,
+  'rajada cobre exatamente as mesmas palavras, sem buraco nem sobreposição');
+ok(longTakes.length === 1, 'ritmo "takes mais longos" continua sem dividir');
+
+const absorbCopy = [{ label: 'BODY 1', text: 'um dois três quatro cinco seis sete oito nove dez' }];
+const absorbed = absorbUnfilledSmartSegments(absorbCopy, [
+  { ...growth, id: 'a', anchor: 'BODY 1', wordFrom: 0, wordTo: 4, targetSeconds: 2.5, selectedVideoId: 'long', candidates: [{ video: prostateVideo('long', 'TAKE LONGO', { durationSec: 12 }), score: 20, reasons: [] }] },
+  { ...growth, id: 'b', anchor: 'BODY 1', wordFrom: 5, wordTo: 9, targetSeconds: 2.5, candidates: [] as ReturnType<typeof rankStockFrameVideos> },
+]);
+ok(absorbed.length === 1 && absorbed[0].wordFrom === 0 && absorbed[0].wordTo === 9 && absorbed[0].selectedVideoId === 'long',
+  '100%: trecho sem take único é absorvido pelo vizinho em vez de repetir take');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

@@ -12,18 +12,23 @@ import {
   stockFrameStatus,
 } from '@/lib/stockframe-extension-bridge';
 import {
+  absorbUnfilledSmartSegments,
   buildSmartStockTimeline,
   chooseSmartStockAssignments,
   chooseCampaignRecipeTheme,
   balanceMechanismPresence,
+  fillSmartStockAlternatives,
   localizeSmartSegments,
   inferStockFrameNiche,
   measureSmartStockCoverage,
   planSmartStockSegments,
   rankStockFrameVideos,
   rankStockFrameGenericFallback,
+  smartSegmentForRange,
   smartStockMechanismQueries,
   selectedSmartCandidate,
+  stockFrameSameVisual,
+  type SmartStockCandidate,
   type SmartCoverage,
   type SmartPace,
   type SmartStockSegment,
@@ -43,6 +48,17 @@ type StockPlacement = { anchor: string; from: number; to: number; smart?: boolea
 /** Ids dos takes StockFrame inseridos à mão (fora do plano Smart). */
 function manualStockFrameIds(inserts: Insert[]): Set<string> {
   return new Set(inserts.filter((insert) => insert.source === 'stockframe' && !insert.stockFrame?.smart && insert.stockFrame?.videoId).map((insert) => insert.stockFrame!.videoId));
+}
+
+/** Os mesmos takes manuais como cenas: o Smart compara por SÉRIE visual
+ * (mesmo take subido duas vezes, "(1)…(9)"), não só pelo id. */
+function manualStockFrameScenes(inserts: Insert[]): StockFrameVideo[] {
+  return inserts.filter((insert) => insert.source === 'stockframe' && !insert.stockFrame?.smart && insert.stockFrame?.videoId)
+    .map((insert) => ({
+      id: insert.stockFrame!.videoId, title: insert.stockFrame!.title || '', description: '', tags: [], durationSec: 0,
+      width: 0, height: 0, aspectRatio: 'unknown' as const, hasAudio: null, origin: 'unknown' as const, downloads: 0,
+      favorite: false, recent: false, downloadCost: 0, available: true, conflictingConcepts: [], matchedConcepts: [],
+    }));
 }
 
 function stockFrameInsert(video: StockFrameVideo, media: InsertMedia, placement: StockPlacement): Insert {
@@ -282,6 +298,10 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const operationLocked = useRef(false);
   const mediaRefreshAttempts = useRef(new Map<string, number>());
   const mediaRepairAttempts = useRef(new Map<string, number>());
+  // Catálogo já listado na última análise: alimenta as sugestões dos trechos
+  // que ficaram com o avatar sem nova busca nem download.
+  const smartPools = useRef<{ pool: StockFrameVideo[]; pack: StockFrameVideo[]; campaignText: string; nicheId?: string; campaignIngredients: string[] } | null>(null);
+  const [suggestionMedia, setSuggestionMedia] = useState(new Map<string, StockFrameVideo>());
   // Catalog browsing while replacing a take must never erase a reviewed plan.
   // Only changes to the copy or Smart settings invalidate its word coverage.
   const planContext = JSON.stringify({ parts, coverage, pace });
@@ -410,7 +430,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
 
   async function disconnect() {
     setConnecting(true); setError('');
-    try { await stockFrameDisconnect(); importedMedia.current.clear(); downloadedFiles.current.clear(); setSmart([]); setPlannedContext(''); setConfigured(false); setAccount(null); setPage(EMPTY_PAGE); setNiches([]); }
+    try { await stockFrameDisconnect(); importedMedia.current.clear(); downloadedFiles.current.clear(); smartPools.current = null; setSmart([]); setPlannedContext(''); setConfigured(false); setAccount(null); setPage(EMPTY_PAGE); setNiches([]); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setConnecting(false); }
   }
@@ -542,14 +562,32 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         })));
         mechanismVideos.push(...results.flatMap(result => result.videos));
       }
+      // O pack do nicho da campanha (ex.: Prostata) vem inteiro: é dele que
+      // saem as alternativas quando a fala não tem cena específica — nenhum
+      // trecho fica sem opção. Só listagem: nenhum download, nenhuma cota.
+      const packListing: StockFrameVideo[] = [];
+      let packComplete = false;
+      if (nicheId) {
+        let packPages = 6;
+        for (let pageNo = 1; pageNo <= packPages; pageNo++) {
+          setSmartProgress(`Carregando o pack ${inferredNiche?.name || 'do nicho'} para as alternativas… ${pageNo}/${packPages}`);
+          const result = await stockFrameList({ page: pageNo, perPage: 48, nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' }).catch(() => null);
+          if (!result) break;
+          packListing.push(...result.videos);
+          packPages = Math.min(6, result.totalPages || 1);
+          packComplete = pageNo >= (result.totalPages || 1);
+        }
+      }
       for (const [id, videos] of bySegment) bySegment.set(id, enrichStockFrameVideos(videos, niches));
-      const globalPool = new Map<string, StockFrameVideo>(enrichStockFrameVideos([...page.videos, ...mechanismVideos, ...[...bySegment.values()].flat()], niches)
+      const globalPool = new Map<string, StockFrameVideo>(enrichStockFrameVideos([...page.videos, ...mechanismVideos, ...packListing, ...[...bySegment.values()].flat()], niches)
         .map((video) => [video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] }]));
+      const packIds = new Set(packListing.map((video) => video.id));
       const rankSegments = (current: typeof segments, onlyMissing = false) => current.map((segment) => {
         if (onlyMissing && segment.candidates.length) return segment;
         const pool = new Map(globalPool);
         for (const video of bySegment.get(segment.id) || []) pool.set(video.id, video);
-        return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 12, coverage === 100) };
+        // 24 antes de juntar variações da mesma série: sobram opções distintas.
+        return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 24, coverage === 100) };
       });
       let completed = rankSegments(segments);
       // The provider cannot search our richer private labels directly. When
@@ -579,7 +617,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         }
         if (searches.length) completed = rankSegments(segments);
       }
-      if (completed.some((segment) => !segment.candidates.length)) {
+      if (completed.some((segment) => !segment.candidates.length) && !packComplete) {
         let maxPages = 10;
         for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
           setSmartProgress(`Ampliando o catálogo para cobrir os trechos escolhidos… página ${pageNo}/${maxPages}`);
@@ -635,7 +673,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         ...segment,
         campaignIngredients: recipeTheme,
         candidates: rankStockFrameVideos({ ...segment, campaignIngredients: recipeTheme },
-          [...new Map([...globalPool, ...(bySegment.get(segment.id) || []).map((video): [string, StockFrameVideo] => [video.id, video])]).values()], 12, coverage === 100),
+          [...new Map([...globalPool, ...(bySegment.get(segment.id) || []).map((video): [string, StockFrameVideo] => [video.id, video])]).values()], 24, coverage === 100),
       }));
       // Generic scenes are a LAST resort for every requested coverage level,
       // never competitors against an exact match. A 60% plan cannot silently
@@ -646,15 +684,27 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       });
       // Takes StockFrame inseridos à mão continuam na montagem ao aplicar o
       // plano: o Smart não pode escolhê-los de novo nem oferecê-los como
-      // alternativa (a montagem repetiria o mesmo take).
-      const manualIds = manualStockFrameIds(inserts);
-      if (manualIds.size) completed = completed.map((segment) => ({ ...segment, candidates: segment.candidates.filter((candidate) => !manualIds.has(candidate.video.id)) }));
+      // alternativa (a montagem repetiria o mesmo take) — nem outra variação
+      // da mesma série.
+      const manualScenes = manualStockFrameScenes(inserts);
+      if (manualScenes.length) completed = completed.map((segment) => ({ ...segment, candidates: segment.candidates.filter((candidate) => !manualScenes.some((scene) => stockFrameSameVisual(scene, candidate.video))) }));
+      const fullPool = [...globalPool.values()];
+      const packPool = fullPool.filter((video) => packIds.has(video.id) || (!!nicheId && video.nicheId === nicheId));
+      // Uma cena por série e opções de sobra (específicas → genéricas seguras
+      // → pack do nicho) ANTES da atribuição, que nunca repete cena.
+      completed = fillSmartStockAlternatives(completed, { pool: fullPool, pack: packPool, minimum: 8, exclude: manualScenes });
       // planSmartStockSegments already selected precisely the requested word
       // budget for 30/60. Fill each of those slots whenever a safe candidate
       // exists; the strict coverage check before download remains unchanged.
       let chosen = chooseSmartStockAssignments(completed, true);
+      // 100% sem repetir: trecho sem cena única é absorvido pelo vizinho.
+      if (coverage === 100) chosen = absorbUnfilledSmartSegments(parts, chosen);
+      // Depois da escolha, cada trecho ainda precisa de alternativas LIVRES
+      // (fora das cenas usadas nos outros trechos) para a revisão.
+      chosen = fillSmartStockAlternatives(chosen, { pool: fullPool, pack: packPool, minimum: 6, exclude: manualScenes });
+      smartPools.current = { pool: fullPool, pack: packPool, campaignText, nicheId, campaignIngredients: recipeTheme };
       if (account?.capabilities.mediaUrls) {
-        const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 4).map((candidate) => [candidate.video.id, candidate.video]))).values()];
+        const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 5).map((candidate) => [candidate.video.id, candidate.video]))).values()];
         const refreshed = await renewMedia(previewVideos);
         const media = new Map(refreshed.map((video) => [video.id, video]));
         chosen = chosen.map((segment) => ({ ...segment, candidates: segment.candidates.map((candidate) => ({ ...candidate, video: media.get(candidate.video.id) || candidate.video })) }));
@@ -768,12 +818,13 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
 
   function chooseForPlan(video: StockFrameVideo) {
     if (!enabled || !smartEditTarget) return;
-    if (manualStockFrameIds(inserts).has(video.id)) {
-      setError('Este take já está na montagem (inserido manualmente). Selecione um take diferente para manter a montagem variada.');
+    if (manualStockFrameScenes(inserts).some((scene) => stockFrameSameVisual(scene, video))) {
+      setError('Este take (ou outro da mesma série) já está na montagem, inserido manualmente. Selecione um take diferente para manter a montagem variada.');
       return;
     }
-    if (smart.some((segment) => segment.selectedVideoId === video.id && segment.id !== smartEditTarget.segmentId)) {
-      setError('Este take já está escolhido em outro trecho. Selecione um take diferente para manter a montagem variada.');
+    if (smart.some((segment) => segment.id !== smartEditTarget.segmentId && selectedSmartCandidate(segment)
+      && stockFrameSameVisual(selectedSmartCandidate(segment)!.video, video))) {
+      setError('Este take (ou outro da mesma série) já está escolhido em outro trecho. Selecione um take diferente para manter a montagem variada.');
       return;
     }
     const { anchor: targetAnchor, from, to, segmentId } = smartEditTarget;
@@ -804,9 +855,55 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   // "Já na montagem" = o plano Smart atual + os takes StockFrame inseridos à
   // mão, que continuam na montagem quando o plano é aplicado. Nenhum deles
   // pode reaparecer como alternativa ou ser escolhido de novo.
-  const inMontage = manualStockFrameIds(inserts);
-  const chosenElsewhere = new Set([...smart.filter((segment) => segment.id !== activeSmart?.id && segment.selectedVideoId).map((segment) => segment.selectedVideoId), ...inMontage]);
-  const alternatives = activeSmart?.candidates.filter((candidate) => candidate.video.id !== activeSmart.selectedVideoId && !chosenElsewhere.has(candidate.video.id)) || [];
+  // Comparado por CENA (série visual), não só pelo id: o mesmo take subido
+  // duas vezes ou outra variação "(n)" também conta como repetição.
+  const inMontage = manualStockFrameScenes(inserts);
+  const scenesElsewhere = [...smart.filter((segment) => segment.id !== activeSmart?.id).flatMap((segment) => {
+    const candidate = selectedSmartCandidate(segment);
+    return candidate ? [candidate.video] : [];
+  }), ...inMontage];
+  const usedElsewhere = (video: StockFrameVideo) => scenesElsewhere.some((scene) => stockFrameSameVisual(scene, video));
+  const alternatives = activeSmart?.candidates.filter((candidate) => candidate.video.id !== activeSmart.selectedVideoId && !usedElsewhere(candidate.video)) || [];
+  // Trecho que ficou com o avatar também ganha sugestões prontas (mesma
+  // leitura do plano, pack do nicho como reserva) — nunca fica sem opção.
+  const avatarSuggestions = useMemo(() => {
+    const pools = smartPools.current;
+    if (!pools || activeSmart || activeBlock?.kind !== 'avatar' || !planIsCurrent) return null;
+    const segment = smartSegmentForRange(parts, activeBlock.anchor, activeBlock.wordFrom, activeBlock.wordTo,
+      { campaignText: pools.campaignText, campaignNicheId: pools.nicheId, campaignIngredients: pools.campaignIngredients });
+    if (!segment) return null;
+    const used = [...smart.flatMap((item) => {
+      const candidate = selectedSmartCandidate(item);
+      return candidate ? [candidate.video] : [];
+    }), ...manualStockFrameScenes(inserts)];
+    const [filled] = fillSmartStockAlternatives([{ ...segment, candidates: rankStockFrameVideos(segment, pools.pool, 24, true) }],
+      { pool: pools.pool, pack: pools.pack, minimum: 6, exclude: used });
+    const candidates = filled.candidates.filter((candidate) => !used.some((video) => stockFrameSameVisual(video, candidate.video))).slice(0, 8);
+    return candidates.length ? { segment, candidates } : null;
+  }, [activeBlock?.id, activeBlock?.kind, activeSmart, smart, inserts, parts, planIsCurrent]);
+  useEffect(() => {
+    if (!avatarSuggestions || !account?.capabilities.mediaUrls) return;
+    let live = true;
+    void renewMedia(avatarSuggestions.candidates.map((candidate) => candidate.video)).then((videos) => {
+      if (live) setSuggestionMedia((current) => new Map([...current, ...videos.map((video): [string, StockFrameVideo] => [video.id, video])]));
+    });
+    return () => { live = false; };
+    // renewMedia só renova o que expirou ou falta; a lista é o gatilho.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avatarSuggestions, account?.capabilities.mediaUrls]);
+
+  function addSuggestion(candidate: SmartStockCandidate) {
+    if (!enabled || !avatarSuggestions) return;
+    const { segment, candidates } = avatarSuggestions;
+    const video = suggestionMedia.get(candidate.video.id) || candidate.video;
+    const id = `sugestao:${crypto.randomUUID()}`;
+    const ordered = [{ ...candidate, video }, ...candidates.filter((item) => item.video.id !== candidate.video.id)
+      .map((item) => ({ ...item, video: suggestionMedia.get(item.video.id) || item.video }))];
+    setSmart((current) => [...current, { ...segment, id, candidates: ordered, selectedVideoId: video.id }]);
+    setActiveSegment(id);
+    setError('');
+    setNotice(`${video.title} entrou em ${segment.anchor} (palavras ${segment.wordFrom + 1}–${segment.wordTo + 1}). Ajuste início/fim se quiser; o download só acontece ao aplicar.`);
+  }
   const availableVideos = useMemo(() => page.videos.filter((video) => {
     if (filters.aspectRatio && video.aspectRatio !== 'unknown' && video.aspectRatio !== filters.aspectRatio) return false;
     if (filters.audio !== undefined && video.hasAudio !== null && video.hasAudio !== filters.audio) return false;
@@ -868,7 +965,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
               <div>{([undefined, 'organic', 'ai'] as const).map((value) => <button type="button" key={value || 'all'} className={filters.origin === value ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, origin: value, page: 1 }))}>{value === 'organic' ? 'Orgânico' : value === 'ai' ? 'I.A' : 'Origem'}</button>)}</div>
             </div>
             {smartEditTarget ? <div className={s.editBanner}><span><b>{smartEditTarget.segmentId ? 'TROCAR TAKE' : 'ADICIONAR B-ROLL'}</b><small>{smartEditTarget.anchor} · palavras {smartEditTarget.from + 1}–{smartEditTarget.to + 1} · escolha um take abaixo, sem download</small></span><button type="button" onClick={() => { setSmartEditTarget(null); setMode('smart'); }}>Voltar ao plano</button></div> : <CopyRange parts={parts} anchor={anchor} from={wordFrom} to={wordTo} onAnchor={(value) => { setAnchor(value); setWordFrom(0); setWordTo(Math.min(8, Math.max(0, (parts.find((item) => item.label === value)?.text.match(/\S+/g)?.length || 1) - 1))); }} onRange={(from, to) => { setWordFrom(from); setWordTo(to); }}/>}
-            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} onMediaError={(id) => void repairMedia(id)} action={smartEditTarget ? { label: chosenElsewhere.has(video.id) ? 'Já no plano' : 'Usar no plano', disabled: chosenElsewhere.has(video.id), onClick: () => chooseForPlan(video) } : { label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
+            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} onMediaError={(id) => void repairMedia(id)} action={smartEditTarget ? { label: usedElsewhere(video) ? 'Já no plano' : 'Usar no plano', disabled: usedElsewhere(video), onClick: () => chooseForPlan(video) } : { label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
             <nav className={s.pagination} aria-label="Páginas"><button type="button" disabled={page.page <= 1 || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.max(1, (current.page || 1) - 1) }))}><Icon name="back"/>Anterior</button><span>{page.page} <i>/</i> {page.totalPages}</span><button type="button" disabled={page.page >= page.totalPages || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.min(page.totalPages, (current.page || 1) + 1) }))}>Próxima <Icon name="back"/></button></nav>
           </section>
         </main> : <main className={s.smartWorkspace}>
@@ -900,7 +997,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
                 {activeCandidate ? <><LazyVideo video={activeCandidate.video} active suspended={!!selected} onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
                 <div className={s.detailActions}><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="refresh" size={16}/>Buscar outro take</button><button type="button" onClick={() => { setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: undefined } : segment)); setActiveSegment(`avatar:${parts.findIndex((part) => part.label === activeSmart.anchor)}:${activeSmart.wordFrom}-${activeSmart.wordTo}`); }}><Icon name="close" size={16}/>Deixar com avatar</button></div>
                 {alternatives.length > 0 && <div className={s.alternatives}><small>ALTERNATIVAS · FORA DO PLANO ATUAL</small><div>{alternatives.map((candidate) => <button type="button" key={candidate.video.id} data-video-id={candidate.video.id} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b></button>)}</div></div>}
-              </> : activeBlock ? <div className={s.avatarDetail}><span className={s.avatarBadge}>AVATAR · SEM B-ROLL</span><h3>{activeBlock.anchor} · palavras {activeBlock.wordFrom + 1}–{activeBlock.wordTo + 1}</h3><p>“{activeBlock.text}”</p><small>O avatar permanece visível neste trecho. Você pode cobri-lo com um take da biblioteca e revisar a cobertura antes de aplicar.</small><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="spark" size={17}/>Adicionar b-roll aqui</button></div> : null}</div>
+              </> : activeBlock ? <div className={s.avatarDetail}><span className={s.avatarBadge}>AVATAR · SEM B-ROLL</span><h3>{activeBlock.anchor} · palavras {activeBlock.wordFrom + 1}–{activeBlock.wordTo + 1}</h3><p>“{activeBlock.text}”</p><small>O avatar permanece visível neste trecho. Você pode cobri-lo com um take da biblioteca e revisar a cobertura antes de aplicar.</small><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="spark" size={17}/>Adicionar b-roll aqui</button></div> : null}
+                {!activeSmart && avatarSuggestions ? <div className={s.alternatives} data-avatar-suggestions="true"><small>SUGESTÕES PARA ESTE TRECHO · PALAVRAS {avatarSuggestions.segment.wordFrom + 1}–{avatarSuggestions.segment.wordTo + 1} · SEM DOWNLOAD</small><div>{avatarSuggestions.candidates.map((candidate) => {
+                  const video = suggestionMedia.get(candidate.video.id) || candidate.video;
+                  return <button type="button" key={video.id} data-video-id={video.id} title={candidate.reasons.join(' · ')} onClick={() => addSuggestion(candidate)}>{video.posterUrl ? <img src={video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{video.title}</span><b>{candidate.score.toFixed(0)}</b></button>;
+                })}</div></div> : null}</div>
             </div>}
           </section>
         </main>}
@@ -911,7 +1012,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
         </footer>
       </>}
 
-      {selected && configured && enabled ? <aside className={s.previewDrawer} aria-label="Preview do take"><button type="button" className={s.drawerClose} onClick={() => setSelected(null)} aria-label="Fechar preview"><Icon name="close"/></button><LazyVideo video={selected} active onMediaError={(id) => void repairMedia(id)}/><div className={s.drawerBody}><div className={s.drawerTitle}><div><small>{selected.code ? `#${selected.code}` : selected.nicheName || 'STOCKFRAME'}</small><h2>{selected.title}</h2></div><span>{formatDuration(selected.durationSec)}</span></div><p>{selected.description || 'Take disponível no catálogo da sua conta StockFrame.'}</p><div className={s.tagList}>{selected.tags.slice(0, 14).map((tag) => <span key={tag}>{tag}</span>)}</div><dl><div><dt>Formato</dt><dd>{selected.aspectRatio}</dd></div><div><dt>Origem</dt><dd>{selected.origin === 'ai' ? 'I.A' : selected.origin === 'organic' ? 'Orgânico' : 'StockFrame'}</dd></div><div><dt>Resolução</dt><dd>{selected.width && selected.height ? `${selected.width} × ${selected.height}` : 'Automática'}</dd></div></dl>{mode === 'manual' && <button type="button" className={s.drawerAction} disabled={!!busyTake || !!smartEditTarget && chosenElsewhere.has(selected.id)} onClick={() => smartEditTarget ? chooseForPlan(selected) : void importVideo(selected, { anchor, from: wordFrom, to: wordTo })}><Icon name={smartEditTarget ? 'check' : 'download'}/>{smartEditTarget ? chosenElsewhere.has(selected.id) ? 'Já usado em outro trecho' : 'Usar neste trecho sem baixar' : busyTake === selected.id ? 'Baixando e preparando…' : 'Inserir no trecho selecionado'}</button>}</div></aside> : null}
+      {selected && configured && enabled ? <aside className={s.previewDrawer} aria-label="Preview do take"><button type="button" className={s.drawerClose} onClick={() => setSelected(null)} aria-label="Fechar preview"><Icon name="close"/></button><LazyVideo video={selected} active onMediaError={(id) => void repairMedia(id)}/><div className={s.drawerBody}><div className={s.drawerTitle}><div><small>{selected.code ? `#${selected.code}` : selected.nicheName || 'STOCKFRAME'}</small><h2>{selected.title}</h2></div><span>{formatDuration(selected.durationSec)}</span></div><p>{selected.description || 'Take disponível no catálogo da sua conta StockFrame.'}</p><div className={s.tagList}>{selected.tags.slice(0, 14).map((tag) => <span key={tag}>{tag}</span>)}</div><dl><div><dt>Formato</dt><dd>{selected.aspectRatio}</dd></div><div><dt>Origem</dt><dd>{selected.origin === 'ai' ? 'I.A' : selected.origin === 'organic' ? 'Orgânico' : 'StockFrame'}</dd></div><div><dt>Resolução</dt><dd>{selected.width && selected.height ? `${selected.width} × ${selected.height}` : 'Automática'}</dd></div></dl>{mode === 'manual' && <button type="button" className={s.drawerAction} disabled={!!busyTake || !!smartEditTarget && usedElsewhere(selected)} onClick={() => smartEditTarget ? chooseForPlan(selected) : void importVideo(selected, { anchor, from: wordFrom, to: wordTo })}><Icon name={smartEditTarget ? 'check' : 'download'}/>{smartEditTarget ? usedElsewhere(selected) ? 'Já usado em outro trecho' : 'Usar neste trecho sem baixar' : busyTake === selected.id ? 'Baixando e preparando…' : 'Inserir no trecho selecionado'}</button>}</div></aside> : null}
     </div>
   </div>, document.body);
 }

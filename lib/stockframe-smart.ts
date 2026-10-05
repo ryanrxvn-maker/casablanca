@@ -68,11 +68,18 @@ export function buildSmartStockTimeline(parts: StockFrameCopyPart[], segments: S
   return timeline;
 }
 
-const STOP = new Set(`a o as os um uma uns umas de da do das dos e em no na nos nas por para pra pro com sem sob sobre entre que quem qual quais como quando onde porque se ao aos esta este esse essa isso isto seu sua seus suas meu minha meus minhas voce você voces vocês ele ela eles elas eu nos nós mas ou ja já muito muita mais menos tem ter foi ser sao são era vai vao vão pode podem pelo pela pelos pelas ate até tambem também ainda mesmo mesma assim aqui ali entao então cada todo toda todos todas nao não video vídeos videos clique clicar botao cena cenas take takes`.split(/\s+/));
-const GENERIC_PERSON_TOKENS = new Set(['homem', 'mulher', 'pessoa', 'idoso', 'idosa', 'senhor', 'senhora']);
+const STOP = new Set(`a o as os um uma uns umas de da do das dos e em no na nos nas por para pra pro com sem sob sobre entre que quem qual quais como quando onde porque se ao aos esta este esse essa isso isto seu sua seus suas meu minha meus minhas voce você voces vocês ele ela eles elas eu nos nós mas ou ja já muito muita mais menos tem ter foi ser sao são era vai vao vão pode podem pelo pela pelos pelas ate até tambem também ainda mesmo mesma assim aqui ali entao então cada todo toda todos todas nao não video vídeos videos clique clicar botao cena cenas take takes
+parte conta contam contar ninguem detalhe jeito final atencao presta prestar existe muda completamente quase nada tudo sempre nunca coisa coisas vez vezes relataram muitos muitas maioria sabe saiba saber quer querem acha acham servia deixar fica ficar faz fazer diz dizer passa`.split(/\s+/));
+// "A parte que ninguém te CONTA" não é "conta do banco"; palavras de ligação
+// e de discurso não são evidência visual. Pessoas genéricas pontuam, mas
+// sozinhas não provam que a cena mostra o que a fala diz.
+const GENERIC_PERSON_TOKENS = new Set(['homem', 'mulher', 'pessoa', 'idoso', 'idosa', 'senhor', 'senhora', 'pessoa', 'gente', 'homen', 'mulhere']);
 
 const CONCEPTS: Record<string, string[]> = {
-  'dor-articular': ['dor no joelho', 'dor nas articulacoes', 'articulacao', 'joelho', 'quadril', 'ombro', 'artrite', 'artrose', 'cartilagem', 'inflamacao', 'reumatismo'],
+  'dor-articular': ['dor no joelho', 'dor nas articulacoes', 'articulacao', 'joelho', 'quadril', 'ombro', 'artrite', 'artrose', 'cartilagem', 'reumatismo'],
+  // Inflamação não é só de articulação: a próstata inflamada mostrava
+  // "contexto: dor-articular" na revisão.
+  'inflamacao': ['inflamacao', 'inflamado', 'inflamada', 'inchaco', 'inchado', 'inchada', 'incha', 'desincha'],
   'mobilidade': ['dificuldade para andar', 'subir escada', 'caminhar', 'movimento', 'mobilidade', 'alongamento', 'fisioterapia', 'exercicio', 'levantando', 'caindo'],
   'diabetes': ['diabetes', 'glicose', 'acucar no sangue', 'insulina', 'glicemia', 'pancreas'],
   'emagrecimento': ['emagrecer', 'perder peso', 'gordura', 'balanca', 'obesidade', 'metabolismo', 'barriga', 'dieta'],
@@ -82,23 +89,27 @@ const CONCEPTS: Record<string, string[]> = {
   'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
   'saude-homem': ['prostata', 'prosta', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia', 'testosterona', 'libido masculina'],
-  'urinario': ['urina', 'urinar', 'mijar', 'mijando', 'bexiga', 'jato urinario', 'jato fraco', 'miccao', 'nocturia', 'ir ao banheiro'],
+  'urinario': ['urina', 'urinar', 'mijar', 'mijando', 'bexiga', 'jato urinario', 'jato fraco', 'miccao', 'nocturia', 'ir ao banheiro', 'fralda', 'fraldas', 'sonda', 'incontinencia', 'vazando', 'xixi'],
   'saude-mulher': ['menopausa', 'ovario', 'utero', 'menstruacao'],
   'medico': ['medico', 'doutor', 'consulta', 'hospital', 'clinica', 'diagnostico', 'exame', 'tratamento'],
-  'procedimento': ['procedimento', 'cirurgia', 'agulha', 'aplicacao', 'terapia', 'laser', 'massagem', 'radiografia'],
-  'remedio': ['remedio', 'medicamento', 'capsula', 'comprimido', 'suplemento', 'frasco', 'dose', 'farmacia'],
+  'procedimento': ['procedimento', 'cirurgia', 'cortar o tecido', 'raspar a prostata', 'agulha', 'aplicacao', 'terapia', 'laser', 'massagem', 'radiografia'],
+  'incontinencia': ['fralda', 'fraldas', 'incontinencia', 'vazando', 'mijando na calca', 'xixi na calca', 'urina escapando', 'pinga na cueca', 'gotejando'],
+  'disfuncao': ['broxa', 'broxar', 'broxava', 'broxei', 'brochar', 'brochava', 'brochei', 'falha eretil', 'impotencia', 'impotente', 'pau mole', 'nao subia', 'falhando na cama', 'falhei na cama'],
+  'industria-farmaceutica': ['industria farmaceutica', 'farmaceutica', 'farmaceuticas', 'big pharma', 'laboratorio de remedios', 'industria de remedios'],
+  'toxina': ['toxina', 'toxinas', 'toxico', 'toxica', 'toxicos', 'toxicas', 'veneno', 'impurezas', 'microplastico', 'microplasticos', 'placas toxicas'],
+  'remedio': ['remedio', 'medicamento', 'capsula', 'comprimido', 'suplemento', 'frasco', 'dose', 'farmacia', 'finasterida', 'dutasterida', 'tansulosina', 'tamsulosina', 'prescrito', 'receitado', 'azulzinho', 'viagra', 'pilula'],
   'alimentacao': ['comida', 'alimento', 'cozinha', 'receita', 'prato', 'fruta', 'verdura', 'cafe', 'cha', 'colher'],
   'botanico': ['erva', 'ervas', 'planta', 'plantas', 'folha', 'folhas', 'botanico', 'extrato vegetal', 'fitoterapico', 'hortela', 'camomila', 'alecrim'],
   'sono': ['sono', 'dormir', 'insomnia', 'cama', 'acordar', 'cansaco', 'ronco'],
   'pele': ['pele', 'ruga', 'rosto', 'acne', 'mancha', 'colageno', 'creme'],
   'cabelo': ['cabelo', 'calvicie', 'queda de cabelo', 'fio', 'couro cabeludo'],
   'coracao': ['coracao', 'pressao', 'arteria', 'circulacao', 'infarto', 'cardiaco'],
-  'dinheiro': ['dinheiro', 'preco', 'caro', 'barato', 'economia', 'conta', 'pagamento', 'cartao'],
+  'dinheiro': ['dinheiro', 'preco', 'caro', 'barato', 'economia', 'conta bancaria', 'conta de luz', 'pagamento', 'cartao', 'custa', 'custo', 'gastar', 'gasto', 'reais', 'centavos'],
   'celular': ['celular', 'telefone', 'aplicativo', 'app', 'tela', 'mensagem', 'internet'],
   'trabalho': ['trabalho', 'escritorio', 'computador', 'reuniao', 'profissional'],
   'relacionamento': ['casal', 'relacionamento', 'marido', 'esposa', 'amor', 'beijo', 'discussao'],
   'familia': ['familia', 'mae', 'pai', 'filho', 'filha', 'avo', 'avó', 'idosa', 'idoso'],
-  'emocao-negativa': ['dor', 'sofrimento', 'triste', 'preocupado', 'ansiedade', 'medo', 'desconforto', 'frustracao'],
+  'emocao-negativa': ['dor', 'dores', 'doendo', 'dolorido', 'dolorida', 'sofrimento', 'triste', 'preocupado', 'ansiedade', 'medo', 'desconforto', 'frustracao'],
   'emocao-positiva': ['feliz', 'sorrindo', 'alegria', 'alivio', 'confiante', 'resultado', 'melhora'],
   'anatomia': ['anatomia', '3d', 'raio x', 'orgao', 'celula', 'musculo', 'osso', 'nervo'],
 };
@@ -125,8 +136,17 @@ const INGREDIENTS: [string, RegExp][] = [
   ['laranja', /\b(?:laranja|orange|naranja|apfelsine|pomarancza)\b/], ['vaselina', /\b(?:vaselina|vaseline|petroleum jelly)\b/],
   ['acucar', /\b(?:acucar|sugar|azucar|zucker|cukier)\b/], ['leite', /\b(?:leite|milk|leche|milch|mleko)\b/],
   ['ovo', /\b(?:ovo|ovos|egg|eggs|huevo|huevos|ei|jajko)\b/], ['abacate', /\b(?:abacate|avocado|aguacate|awokado)\b/],
-  ['curcuma', /\b(?:curcuma|turmeric|azafran|kurkuma)\b/], ['aveia', /\b(?:aveia|oats|oatmeal|avena|hafer|owies)\b/],
+  ['curcuma', /\b(?:curcuma|acafrao|turmeric|azafran|kurkuma)\b/], ['aveia', /\b(?:aveia|oats|oatmeal|avena|hafer|owies)\b/],
   ['abobora', /\b(?:abobora|pumpkin|calabaza|kurbis|dynia)\b/],
+  // Heróis de oferta que o catálogo ainda não cobre (quiabo) precisam ser
+  // reconhecidos mesmo assim: sem isso, "faz tudo na sua cozinha" aceitava
+  // qualquer cena de cozinha com OUTRO alimento — o café de um casal.
+  ['quiabo', /\b(?:quiabos?|okra|quimbombo|ocra)\b/], ['melancia', /\b(?:melancia|watermelon|sandia|arbuz)\b/],
+  ['abacaxi', /\b(?:abacaxi|pineapple|pina|ananas)\b/], ['pepino', /\b(?:pepino|cucumber|ogorek|gurke)\b/],
+  ['beterraba', /\b(?:beterraba|beetroot|beet|remolacha|burak)\b/], ['chia', /\bchia\b/],
+  ['cerveja', /\b(?:cerveja|beer|cerveza|piwo|bier)\b/], ['ginkgo', /\b(?:ginkgo|ginko|gingko)\b/],
+  // Bases como azeite e iogurte ficam de fora de propósito: "azeite de
+  // alecrim" é o mesmo ritual do alecrim, não uma oferta diferente.
 ];
 const BOTANICAL = /\b(?:erva|ervas|hierba|hierbas|herb|herbs|ziola|ziol|krauter|planta|plantas|plants|pflanzen|rosliny|folha|folhas|leaves|hojas|liscie|botanic\w*|fitoterap\w*|hortela|camomila|alecrim|ginseng|maca peruana|guarana)\b/;
 const GENERIC_RECIPE = /\b(?:truque|trick|truc|truco|sposob|receita|recipe|receta|rezept|przepis|mistura|mixture|mezcla|mischung|caseiro|caseira|homemade|casero|domowy|ervas?|herbs?|ziola|plantas?|plants?|formula natural)\b/;
@@ -149,8 +169,8 @@ const BETRAYAL_SCENE = /\b(?:traind\w*|traic\w*|infidel\w*|adulter\w*)\b/;
 const BETRAYAL_COPY = /\b(?:traind\w*|traic\w*|infidel\w*|adulter\w*)\b/;
 // Educational anatomy can show an erection even during a generic health
 // explanation. Only the negative/sexual metaphor needs the stricter moment.
-const ERECTILE_SCENE = /\b(?:brox\w*|pau mole)\b/;
-const ERECTILE_MOMENT = /\b(?:brox\w*|erecao|disfuncao eretil|impotencia|potencia|desempenho sexual|sexo|desejo|libido|relacionamento|namor\w*|parceir\w*|cama)\b/;
+const ERECTILE_SCENE = /\b(?:brox\w*|broch\w*|pau mole)\b/;
+const ERECTILE_MOMENT = /\b(?:brox\w*|broch\w*|erecao|disfuncao eretil|impotencia|potencia|desempenho sexual|sexo|desejo|libido|relacionamento|namor\w*|parceir\w*|cama)\b/;
 const NAMED_PUBLIC_FIGURE = /\b(?:vini jr|vinicius junior|neymar|cristiano ronaldo|ronaldo|messi)\b/;
 const URINARY_BLEEDING_SCENE = /(?:\b(?:mij\w*|urin\w*)\b.{0,40}\bsangu\w*\b|\bsangu\w*\b.{0,40}\b(?:mij\w*|urin\w*)\b|\bhematuria\b)/;
 const RECTAL_EXAM_SCENE = /(?:\bexame\w*\b.{0,30}\btoque\b|\btoque\b.{0,30}\bexame\w*\b|\bprosta\w*\b.{0,30}\btoque\b|\btoque\b.{0,30}\bprosta\w*\b|\btoque retal\b)/;
@@ -163,7 +183,7 @@ const URINARY_ACTION_SCENE = /\b(?:urin\w*|mij\w*|bexiga|jato urinario|mangueira
 const LOCAL_RECIPE_REFERENCE = /\b(?:bicarbonato|mel|limao|receita|recipe|receta|mistur\w*|mix\w*|mixture|prepar\w*|truque|trick|ingrediente|ingredient|caseir\w*|homemade|formula|erva|herb|planta|plant|soda|colher|produto|product|suplemento|supplement)\b/;
 const CONVERSATION = /\b(?:convers\w*|dialog\w*|talk\w*|chatting)\b/;
 const INVASIVE_PROCEDURE_SCENE = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
-const INVASIVE_PROCEDURE_COPY = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery)\b/;
+const INVASIVE_PROCEDURE_COPY = /\b(?:cirurg\w*|operac\w*|sutura|incisao|bisturi|surgical procedure|surgery|cortar o tecido|cortar a prostata|raspar a prostata|retirar a prostata|tirar a prostata)\b/;
 const CTA_COPY = /\b(?:clic\w*|botao|saiba mais|assist\w* (?:ao? )?video|ver (?:o |esse )?video|watch (?:the )?video|click\w*|tap\w*|button|learn more)\b/;
 const CTA_SCENE = /\b(?:clic\w*|apert\w*|tocando (?:na )?tela|botao|celular|smartphone|telefone|assist\w* (?:ao? )?video|video (?:no |em )?celular|click\w*|tap\w*|phone|screen)\b/;
 const CTA_PHONE = /\b(?:celular|smartphone|telefone|phone|tela|screen)\b/;
@@ -171,7 +191,55 @@ const CTA_NEUTRAL_ACTION = /\b(?:usand\w*|olhand\w*|clic\w*|apert\w*|tocand\w*|a
 const CTA_CONFLICT_SCENE = /\b(?:toxic\w*|chor\w*|trist\w*|discut\w*|brig\w*|briga|desesper\w*|pagament\w*|pagando|paying)\b/;
 // Cross-pack recipe shots can be useful, but a different medical niche must
 // not become a source of unrelated pathology just because it mentions honey.
-const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prosta|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare)\b/;
+const MEDICAL_NICHE = /\b(?:ed|eretil|erectile|prosta|prostata|prostate|diabetes|diabetico|articular\w*|artrite|arthritis|artrose|joint pain|memoria|memory|alzheimer|demencia|menopausa|menopause|lipedema|lipoedema|celulite|cellulite|gravidez|pregnancy|intestino|visao|vision|emagrecimento|weight loss|pele|skin care|skincare|rejuvenesc\w*|neuropatia|zumbido)\b/;
+// Cena de casal/namoro só ilustra fala que fala de parceira, desejo ou
+// desempenho. Num AD de próstata, "faz tudo na sua cozinha" virava o café
+// que o namorado prepara pra namorada de toalha na cama.
+const ROMANCE_SCENE = /\b(?:namorad\w*|casal|casais|beij\w*|romant\w*|romance|amante|apaixonad\w*|lua de mel)\b/;
+const PARTNER_OR_INTIMACY_COPY = /\b(?:mulher(?:es)?|esposa|parceir\w*|namorad\w*|casal|marido|companheir\w*|relacionamento|amor|romance|desejo|intim\w*|libido|sexo|sexual|cama|potencia|erecao|eretil|impoten\w*|brox\w*|broch\w*|wife|partner|couple|girlfriend|desire|intimacy|relationship|sex|bedroom|kobiet\w*|zona|partnerk\w*|pareja|esposa)\b/;
+const RELATIONSHIP_PACK = /\brelacionamento\b/;
+// Remédio por nome comercial ou "prescrito" também é fala de medicação.
+const MEDICATION_COPY = /\b(?:remedio\w*|medicament\w*|capsula\w*|comprimido\w*|pilula\w*|farmacia\w*|dose|prescri\w*|receitad\w*|finasterid\w*|finas|dutasterid\w*|tansulosin\w*|tamsulosin\w*|sildenafil\w*|tadalafil\w*|viagra|cialis|metformin\w*|tratamento|farmaceutic\w*|azulzinho)\b/;
+// Packs que não são b-roll: cabeças falantes de I.A (viram outra pessoa
+// falando por cima do avatar) e efeitos/SFX/setas de edição.
+const NON_BROLL_PACK = /\b(?:avatares realistas|edicao)\b/;
+// Packs de renda/prosperidade só ilustram fala de dinheiro, riqueza ou fé —
+// "o quiabo custa quase nada" puxava ostentação, anjo e dashboard de lucro.
+const WEALTH_PACK = /\b(?:renda extra|prosperidade|religios\w*)\b/;
+const WEALTH_COPY = /\b(?:rico|ricos|riqueza|luxo|milion\w*|milhoes|ostent\w*|lucr\w*|faturamento|faturar|vendas|renda|enriquec\w*|fortuna|dinheiro|grana|pagar|pagamento|gast\w*|conta bancaria|salario|aposentadoria|divida\w*|endivid\w*)\b/;
+const LUXURY_SCENE = /\b(?:luxo|luxuos\w*|ostent\w*|grife|mansao|iate|jatinho|diamante|louis vuitton|dashboard|lucro|notificacao de vendas)\b/;
+const LUXURY_COPY = /\b(?:rico|ricos|riqueza|luxo|milion\w*|milhoes|ostent\w*|lucr\w*|faturamento|faturar|vendas|enriquec\w*|fortuna)\b/;
+const RELIGIOUS_SCENE = /\b(?:anjo\w*|serafim|deus|jesus|biblia|biblic\w*|igreja|templo|monge\w*|oracao|rezand\w*|judeu|santo|santa|milagre|ritual com)\b/;
+const RELIGIOUS_COPY = /\b(?:deus|jesus|biblia|biblic\w*|igreja|templo|monge\w*|oracao|orar|reza\w*|milagre\w*|anjo\w*|espiritual\w*|bencao|abencoad\w*|senhor jesus|fe em)\b/;
+const FEMALE_ONLY_SCENE =/\b(?:mulher(?:es)?|idosas?|senhoras?|esposa|namorada|menina|garota|loira|morena|ruiva|gravida|gestante)\b/;
+const MALE_OR_COUPLE_SCENE = /\b(?:homem|homens|idoso|idosos|senhor|velho|marido|casal|pessoas|familia|medico|urologista)\b/;
+const FEMALE_COPY = /\b(?:mulher(?:es)?|esposa|parceira|namorada|companheira|filha|mae|avo|idosa|senhora|wife|woman|women|partner|girlfriend|kobiet\w*|zona)\b/;
+// Insônia, levantar de madrugada e cansaço são o PROBLEMA; nunca podem
+// ilustrar "dormir a noite inteira".
+const DISTRESS_VISUAL = /\b(?:acord\w* (?:a|de|durante a|no meio da) (?:noite|madrugada)|levant\w* (?:a|de|durante a|no meio da) (?:noite|madrugada)|insoni\w*|nao consegu\w* dormir|dificuldade de dormir|cansad\w*|exaust\w*|debilitad\w*|caind\w*|caiu|queda|tombo|escorreg\w*|tropec\w*|chorand\w*|desesperad\w*)\b/;
+const DISTRESS_AUDIT_BEATS = new Set(['doenca', 'dor', 'cansaco', 'vergonha']);
+
+/** Segundos que a montagem de fato usa: o melhor trecho recomendado pelo
+ * StockFrame quando existe (o mesmo recorte de stockFrameInsert), senão o take. */
+export function stockFrameUsableSeconds(video: Pick<StockFrameVideo, 'durationSec' | 'recommendedStartSec' | 'recommendedEndSec'>): number {
+  const from = Math.max(0, video.recommendedStartSec ?? 0);
+  const to = Math.min(video.durationSec || video.recommendedEndSec || 0, video.recommendedEndSec || 0);
+  if (Number.isFinite(from) && Number.isFinite(to) && to > from + .25) return to - from;
+  return video.durationSec > 0 ? video.durationSec : 0;
+}
+
+/** Série visual do take: o mesmo título sem numeração nem letra repetida de
+ * digitação. "PROSTATA INFALAMADA 3D(3)" e "(8)", "MANGUEIRA JATO FORTE" e
+ * "FORTEE" são o MESMO conceito na tela — o Silas nunca usa dois no mesmo AD. */
+export function stockFrameSeriesKey(video: Pick<StockFrameVideo, 'title'>): string {
+  const base = normalize(video.title)
+    .replace(/(?:\s*\d+)+$/, '')
+    .split(/\s+/)
+    .map((word) => word.length > 3 ? word.replace(/([a-z])\1+$/, '$1') : word)
+    .join(' ')
+    .trim();
+  return base || normalize(video.title);
+}
 
 function ingredientsOf(value: string): string[] {
   const normalized = normalize(value);
@@ -236,9 +304,13 @@ export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockF
     [/\b(?:gravidez|gestante|gravida|pregnancy|embarazo|ciaza|schwangerschaft)\b/, /\b(?:gravidez|pregnancy|embarazo|ciaza)\b/],
     [/\b(?:intestino|constipacao|digestao|gut health|bowel|intestine|intestino|jelita|darm)\b/, /\b(?:intestino|gut|bowel|jelita)\b/],
   ];
+  // "ED +18 - EM BREVE" também casa com "ed", mas é o pack adulto bloqueado:
+  // a campanha de ED usa o pack "ED". Entre vários, vence o nome mais direto.
+  const restricted = (niche: StockFrameNiche) => /\b(?:18|em breve)\b/.test(normalize(niche.name));
   for (const [copyPattern, nichePattern] of aliases) {
     if (copyPattern.test(copy)) {
-      const match = niches.find((niche) => nichePattern.test(normalize(niche.name)));
+      const match = niches.filter((niche) => nichePattern.test(normalize(niche.name)))
+        .sort((a, b) => Number(restricted(a)) - Number(restricted(b)) || normalize(a.name).length - normalize(b.name).length)[0];
       if (match) return match;
       const nested = niches.filter((niche) => niche.subcategories?.some((folder) => nichePattern.test(normalize(folder.name))));
       if (nested.length === 1) return nested[0];
@@ -293,11 +365,16 @@ function conceptsOf(value: string): string[] {
  * separate from recovery even when both descriptions contain "dor". */
 function narrativeDirection(value: string): NonNullable<SmartStockSegment['narrativeDirection']> {
   const text = normalize(value);
-  if (/\b(?:frustrad\w*|sofrend\w*|impotencia|disfuncao eretil|dificuldade (?:de|para) erecao|sem erecao|broxa|nao (?:consegue|consigo|conseguia) durar)\b/.test(text)) return 'distress';
+  if (/\b(?:frustrad\w*|sofrend\w*|impotencia|disfuncao eretil|dificuldade (?:de|para) erecao|sem erecao|broxa|brox(?:ava|ei|ando|ou)|broch\w*|falhando na cama|falhei na cama|nao (?:consegue|consigo|conseguia) durar)\b/.test(text)) return 'distress';
   if (/\b(?:dor(?:es)? (?:ainda )?(?:continua\w*|persist\w*|pior\w*)|ainda (?:sinto|sente|sentia|sofr\w*)|nao (?:consigo|consegue|conseguia) (?:mais )?(?:andar|caminhar|subir|dormir)|sem alivio|nao (?:houve |senti |sentiu )?melhora)\b/.test(text)) return 'distress';
-  if (/\b(?:nao (?:sinto|sente|sentimos|tem|tenho|sente\w*) mais (?:a |as |nenhuma )?(?:dor|dores|desconforto)|sem (?:sentir |nenhuma )?(?:dor|dores|desconforto)|livre d[ae] (?:dor|dores)|dor(?:es)? (?:desaparec\w*|sumiu|passou)|alivio|recuperad\w*|volte?i? a (?:andar|caminhar)|voltou a (?:andar|caminhar)|melhora\w*|feliz|alegria)\b/.test(text)) return 'recovery';
+  if (/\b(?:nao (?:sinto|sente|sentimos|tem|tenho|sente\w*) mais (?:a |as |nenhuma )?(?:dor|dores|desconforto)|sem (?:sentir |nenhuma )?(?:dor|dores|desconforto)|livre d[ae] (?:dor|dores)|dor(?:es)? (?:desaparec\w*|sumiu|passou)|alivio|recuperad\w*|volte?i? a (?:andar|caminhar)|voltou a (?:andar|caminhar)|melhora\w*|feliz|alegria|apaixonad\w*|satisfeit\w*)\b/.test(text)) return 'recovery';
   if (/\b(?:recuper\w*|volt\w*)\b.{0,35}\b(?:energia|vigor|disposicao|potencia)\b/.test(text)) return 'recovery';
+  // Melhora urinária/prostática: "voltar a mijar forte", "dormir a noite
+  // inteira", "reduzir de tamanho", "desinchar". Sem isso o trecho ficava
+  // neutro e aceitava "homem acordando à noite" — o sintoma, não a cura.
+  if (/\b(?:volt\w* a (?:mijar|urinar|dormir|funcionar|esvaziar|lembrar|enxergar|ouvir|escutar|correr|trabalhar|sorrir|viver|dancar|brincar|dirigir|subir|transar|namorar)|volt\w* a ter (?:erec\w*|vontade|energia|disposicao|desejo|forca|vida|memoria)|dorm\w* (?:a noite (?:inteira|toda)|bem|tranquil\w*|direto)|reduz\w* (?:de |o )?tamanho|desinch\w*|encolh\w*|jato forte|bexiga vazia|esvazi\w* (?:a bexiga|tudo|completamente))\b/.test(text)) return 'recovery';
   if (/\b(?:durar|dure|dura|aguentar|resistir)\b.{0,45}\b(?:mais|longer|tempo|minutos|horas)\b/.test(text)) return 'recovery';
+  if (DISTRESS_VISUAL.test(text)) return 'distress';
   return conceptsOf(text).includes('emocao-negativa') ? 'distress' : 'neutral';
 }
 
@@ -306,7 +383,7 @@ const POSITIVE_VISUAL_WORDS = new Set(['alivio', 'alegria', 'feliz', 'melhora', 
 const ANATOMY: [string, RegExp][] = [
   ['joelho', /\bjoelhos?\b/], ['ombro', /\bombros?\b/], ['quadril', /\b(?:quadril|quadris)\b/],
   ['cotovelo', /\bcotovelos?\b/], ['tornozelo', /\btornozelos?\b/], ['punho', /\bpunhos?\b/], ['pescoco', /\bpescocos?\b/],
-  ['prostata', /\b(?:prosta|prostata|prostatic[ao]s?)\b/], ['pancreas', /\b(?:pancreas|pancreatic[ao]s?)\b/],
+  ['prostata', /\b(?:prosta|prostata|prostatic[ao]s?|glandula prostatica|glandula)\b/], ['pancreas', /\b(?:pancreas|pancreatic[ao]s?)\b/],
   ['intestino', /\b(?:intestinos?|intestinal|intestinais|colon)\b/], ['estomago', /\b(?:estomago|gastric[ao]s?)\b/],
   ['cerebro', /\b(?:cerebro|cerebral|cerebrais)\b/], ['coracao', /\b(?:coracao|cardiac[ao]s?)\b/],
   ['figado', /\b(?:figado|hepatic[ao]s?)\b/], ['rim', /\b(?:rim|rins|renal|renais)\b/],
@@ -384,6 +461,18 @@ function segmentPart(part: StockFrameCopyPart, pace: SmartPace): Omit<SmartStock
       .filter((word) => word.endSentence);
     if (sentenceCandidates.length) {
       to = sentenceCandidates.reduce((best, word) => Math.abs((word.index - from + 1) - desired) < Math.abs((best.index - from + 1) - desired) ? word : best).index;
+    } else if (to < words.length - 1) {
+      // Sem ponto final por perto, corta onde a fala respira — vírgula ou
+      // antes de uma conjunção — em vez de "em cerca de | 14 dias".
+      const window = words.slice(from + min - 1, Math.min(words.length - 1, from + max));
+      const pause = (word: Word) => /,["')\]]*$/.test(word.text) ? 2 : BURST_JOINERS.has(normalize(words[word.index + 1]?.text || '')) ? 1 : 0;
+      const breathing = window.filter((word) => pause(word) > 0);
+      if (breathing.length) {
+        to = breathing.reduce((best, word) => {
+          const cost = (item: Word) => Math.abs((item.index - from + 1) - desired) - pause(item) * 2;
+          return cost(word) < cost(best) ? word : best;
+        }).index;
+      }
     }
     const slice = words.slice(from, to + 1);
     const text = slice.map((word) => word.text).join(' ');
@@ -422,8 +511,65 @@ function segmentPart(part: StockFrameCopyPart, pace: SmartPace): Omit<SmartStock
   return out;
 }
 
+const BURST_JOINERS = new Set(['e', 'mas', 'que', 'porque', 'pra', 'para', 'quando', 'ou', 'se', 'como', 'enquanto', 'depois', 'sem', 'and', 'but', 'when', 'because']);
+
+/** Divisão inteligente = o RITMO do Silas (230 drafts revisados: take mediano
+ * de 2,5s, 61% abaixo de 3s, 31% encadeados em rajada). Um trecho escolhido
+ * longo vira 2–3 takes seguidos, cortados onde a fala respira, cada um com a
+ * sua própria cena: "reduzir de tamanho" ≠ "voltar a mijar forte". Também
+ * evita o take curto do catálogo congelar no fim de um bloco de 9s. */
+function splitIntoBursts(segment: SmartStockSegment, words: Word[]): SmartStockSegment[] {
+  const length = segment.wordTo - segment.wordFrom + 1;
+  if (length < 15) return [segment];
+  const pieces = length >= 26 ? 3 : 2;
+  const minimum = 5;
+  const cuts: number[] = [];
+  let from = segment.wordFrom;
+  for (let piece = 1; piece < pieces; piece++) {
+    const ideal = segment.wordFrom + Math.round(length * piece / pieces) - 1;
+    let best = -1;
+    let bestScore = -Infinity;
+    for (let end = Math.max(from + minimum - 1, ideal - 4); end <= Math.min(segment.wordTo - minimum * (pieces - piece), ideal + 4); end++) {
+      const word = words[end]?.text || '';
+      const next = normalize(words[end + 1]?.text || '');
+      const score = (/[.!?;:]["')\]]*$/.test(word) ? 3 : /,["')\]]*$/.test(word) ? 2.5 : BURST_JOINERS.has(next) ? 1.2 : 0)
+        - Math.abs(end - ideal) * .35;
+      if (score > bestScore) { bestScore = score; best = end; }
+    }
+    if (best < 0) break;
+    cuts.push(best);
+    from = best + 1;
+  }
+  if (!cuts.length) return [segment];
+  const bounds = [segment.wordFrom - 1, ...cuts, segment.wordTo];
+  return bounds.slice(1).map((to, index) => {
+    const pieceFrom = bounds[index] + 1;
+    const text = words.slice(pieceFrom, to + 1).map((word) => word.text).join(' ');
+    const semantics = semanticFields(text, segment.contextText || text);
+    const targetSeconds = Math.round(Math.max(2.2, (to - pieceFrom + 1) / 2.35) * 10) / 10;
+    // Pedaço sem imagem própria ("presta atenção nesse vídeo até o final")
+    // continua a rajada do assunto do trecho: busca pelo texto inteiro e a
+    // atribuição dá a ele OUTRA cena do mesmo tema, nunca a mesma.
+    const weak = !semantics.concepts.length && !anatomyOf(text).length && !ingredientsOf(text).length
+      && meaningful(text).filter((token) => token.length > 5).length < 2;
+    if (weak) {
+      return { ...segment, id: `${segment.id}~${index + 1}`, wordFrom: pieceFrom, wordTo: to, text,
+        semanticText: segment.semanticText || segment.text, targetSeconds };
+    }
+    return { ...segment, ...semantics, id: `${segment.id}~${index + 1}`, wordFrom: pieceFrom, wordTo: to, text,
+      visualBeat: visualBeat(text, semantics.narrativeDirection), targetSeconds };
+  });
+}
+
 /** Planeja os melhores momentos antes de consultar o catalogo. */
 export function planSmartStockSegments(parts: StockFrameCopyPart[], options: { coverage: SmartCoverage; pace: SmartPace }): SmartStockSegment[] {
+  const planned = planSmartStockMoments(parts, options);
+  if (options.pace !== 'adaptive') return planned;
+  const wordsByLabel = new Map(parts.map((part) => [part.label, wordsOf(part.text)]));
+  return planned.flatMap((segment) => splitIntoBursts(segment, wordsByLabel.get(segment.anchor) || []));
+}
+
+function planSmartStockMoments(parts: StockFrameCopyPart[], options: { coverage: SmartCoverage; pace: SmartPace }): SmartStockSegment[] {
   const all = parts.flatMap((part) => segmentPart(part, options.pace));
   if (options.coverage === 100) return all.map((segment) => ({ ...segment, candidates: [] }));
   const totalWords = all.reduce((sum, segment) => sum + segment.wordTo - segment.wordFrom + 1, 0);
@@ -562,7 +708,18 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
   const contentText = [title, tags, description, visualText].filter(Boolean).join(' ');
   const titleAnatomy = anatomyOf(audit?.title || video.title);
   const descriptionAnatomy = audit ? [] : anatomyOf(video.description);
-  const direction = narrativeDirection(contentText);
+  // O título (e a ficha conferida) diz o que a cena mostra; a descrição
+  // automática do catálogo mistura "alívio ou indicação de dor" e não pode
+  // virar "IDOSA COM DOR NA COLUNA" em cena de melhora.
+  const titleDirection = narrativeDirection([title, audit ? tags : ''].join(' '));
+  let direction = titleDirection !== 'neutral' ? titleDirection : narrativeDirection(contentText);
+  // A ficha conferida diz quando a cena mostra doença, dor ou cansaço: isso é
+  // o problema da copy, nunca a melhora ("reduzir de tamanho", "dormir bem").
+  if (direction === 'neutral' && audit?.beats.some((beat) => DISTRESS_AUDIT_BEATS.has(beat))) direction = 'distress';
+  // Desejo, intimidade e satisfação são a PROMESSA, não o problema: nunca
+  // ilustram "eu brochava e minha esposa desconfiava".
+  else if (direction === 'neutral' && audit?.beats.some((beat) => ['desejo', 'intimidade', 'satisfacao', 'alegria', 'alivio'].includes(beat))
+    && !audit.beats.some((beat) => ['broxa', 'vergonha', 'conflito'].includes(beat))) direction = 'recovery';
   let concepts = conceptsOf(contentText);
   if (direction === 'recovery') concepts = [...new Set([...concepts.filter((concept) => concept !== 'emocao-negativa'), 'emocao-positiva'])];
   if (direction === 'distress') concepts = concepts.filter((concept) => concept !== 'emocao-positiva');
@@ -570,7 +727,9 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
     title, taxonomy, visualText, visualSearchText, contentText,
     explicitSexualScene: /\bed\s*18\b/.test(taxonomy) || EXPLICIT_STOCK_TITLE.test(normalize(video.title))
       || (audit ? audit.appeal === 3 : EXPLICIT_SEXUAL_SCENE.test(contentText)),
-    ingredients: audit ? audit.beats.filter((beat) => beat.startsWith('ing:')).map((beat) => beat.slice(4))
+    // A ficha só marca ingrediente de receita; o título ainda revela o
+    // alimento em cena ("prepara CAFÉ na cozinha"), e ele também conta.
+    ingredients: audit ? [...new Set([...audit.beats.filter((beat) => beat.startsWith('ing:')).map((beat) => beat.slice(4)), ...ingredientsOf(`${video.title} ${audit.title}`)])]
       : ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
     shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : audit ? [] : anatomyOf(video.tags.join(' ')),
     concepts, direction,
@@ -623,9 +782,13 @@ function prepareRanking(segment: SmartStockSegment) {
   };
 }
 
-function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking: ReturnType<typeof prepareRanking>, allowGenericFallback = false): SmartStockCandidate {
+function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking: ReturnType<typeof prepareRanking>, fallback: false | 'generic' | 'pack' = false): SmartStockCandidate {
+  const allowGenericFallback = fallback !== false;
   if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
   const prepared = prepareVideo(video);
+  if (NON_BROLL_PACK.test(prepared.taxonomy)) {
+    return { video, score: -100, reasons: ['pack de avatar falante ou efeito de edição não é b-roll'] };
+  }
   const { title, visualSearchText, ingredients: videoIngredients, shownAnatomy, recipe } = prepared;
   // The visual audit can use a shorter scene label. Keep the provider's
   // original title for safety checks: "mijando sangue" must not disappear.
@@ -654,6 +817,10 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       return { video, score: -100, reasons: ['cena sugestiva não combina com este momento da fala'] };
     }
   }
+  if (/\b(?:amput\w*|sem perna|cadeira de rodas|muleta\w*)\b/.test(sceneTitle)
+      && !/\b(?:amput\w*|perna\w*|cadeira de rodas|muleta\w*|deficien\w*)\b/.test(ranking.contextNormalized)) {
+    return { video, score: -100, reasons: ['amputação ou cadeira de rodas não é narrada'] };
+  }
   if (INVASIVE_PROCEDURE_SCENE.test(prepared.contentText) && !INVASIVE_PROCEDURE_COPY.test(ranking.contextNormalized)) {
     return { video, score: -100, reasons: ['a fala não descreve um procedimento invasivo'] };
   }
@@ -672,6 +839,27 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   }
   if (BETRAYAL_SCENE.test(sceneTitle) && !BETRAYAL_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['traição não representa a situação narrada'] };
+  }
+  const spokenWithContext = `${ranking.spokenNormalized} ${ranking.contextNormalized}`;
+  if (RELIGIOUS_SCENE.test(sceneTitle) && !RELIGIOUS_COPY.test(spokenWithContext)) {
+    return { video, score: -100, reasons: ['cena religiosa sem fé ou religião na fala'] };
+  }
+  if (LUXURY_SCENE.test(sceneTitle) && !LUXURY_COPY.test(spokenWithContext)) {
+    return { video, score: -100, reasons: ['luxo, ostentação ou lucro não é o que a fala diz'] };
+  }
+  if (WEALTH_PACK.test(prepared.taxonomy) && !(segment.campaignNicheId && video.nicheId === segment.campaignNicheId)
+      && !WEALTH_COPY.test(ranking.spokenNormalized)) {
+    return { video, score: -100, reasons: ['pack de renda/prosperidade fora de uma fala sobre dinheiro'] };
+  }
+  const clinicalScene = audit
+    ? audit.beats.some((beat) => ['anatomia', 'sangue', 'medico', 'celula', 'prova'].includes(beat))
+    : /\b(?:anatomia|sangue|medic\w*|consult\w*|celula|fluxo|doutor|urologista)\b/.test(sceneTitle);
+  const romanticScene = !clinicalScene && (ROMANCE_SCENE.test(sceneTitle) || RELATIONSHIP_PACK.test(prepared.taxonomy)
+    || !!audit?.beats.some((beat) => ['romance', 'desejo', 'intimidade', 'satisfacao'].includes(beat)));
+  if (romanticScene && !ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+      && !(segment.campaignNicheId && video.nicheId === segment.campaignNicheId)
+      && !PARTNER_OR_INTIMACY_COPY.test(`${ranking.spokenNormalized} ${ranking.contextNormalized}`)) {
+    return { video, score: -100, reasons: ['cena de casal ou romance sem parceira, desejo ou relacionamento na fala'] };
   }
   if ((ERECTILE_SCENE.test(sceneTitle) || audit?.beats.includes('broxa'))
       && (!ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
@@ -695,7 +883,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !/\b(?:produto|pacote|embalagem|vick|comprimido|frasco|suplemento|receita|ingrediente)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['embalagem não representa esta fala'] };
   }
-  if (URINARY_BLEEDING_SCENE.test(sceneTitle) && !URINARY_BLEEDING_SCENE.test(ranking.spokenNormalized)) {
+  const bleedingScene = URINARY_BLEEDING_SCENE.test(sceneTitle) || /\bmangueira\b.{0,30}\bsangu\w*/.test(sceneTitle)
+    || (!!audit?.beats.includes('urina') && audit.beats.includes('sangue') && !audit.beats.includes('anatomia'));
+  if (bleedingScene && !URINARY_BLEEDING_SCENE.test(ranking.spokenNormalized) && !/\bsangu\w*\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['sangue na urina não é um sintoma narrado'] };
   }
   if (RECTAL_EXAM_SCENE.test(sceneTitle)
@@ -715,8 +905,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !/\b(?:homem|senhor|marido|idoso|pai)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['personagem masculino não representa a paciente de lipedema'] };
   }
-  if (MEDICATION_SCENE.test(sceneTitle)
-      && !/\b(?:remedio|medicamento|capsula|comprimido|pilula|farmacia|dose)\b/.test(ranking.spokenNormalized)) {
+  if (MEDICATION_SCENE.test(sceneTitle) && !MEDICATION_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['medicação não representa esta fala'] };
   }
   if (/\bvideo chamativo\b/.test(sceneTitle) && !ranking.callToAction
@@ -724,7 +913,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['take de vídeo genérico não ilustra a explicação clínica'] };
   }
   if (URINARY_ACTION_SCENE.test(sceneTitle)
-      && !/\b(?:urin\w*|mij\w*|bexiga|banheiro|jato|prosta\w*)\b/.test(ranking.spokenNormalized)) {
+      && !/\b(?:urin\w*|mij\w*|bexiga|banheiro|jato|prosta\w*|fralda\w*|sonda|incontinen\w*|xixi)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['ação urinária não representa este trecho'] };
   }
   if (/\b(?:radiografia|raio x|raiox)\b/.test(sceneTitle)
@@ -814,8 +1003,13 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   const botanicalEvidence = BOTANICAL.test(ranking.spokenNormalized) && BOTANICAL.test(prepared.contentText);
   const compatibleMechanism = (beat === 'demonstration' || ranking.contextHasIngredients)
     && (ingredientEvidence || botanicalEvidence);
+  // Pack NEUTRO (Mecanismos Gerais, VSL…) atravessa nicho quando o próprio
+  // título da cena diz o que a fala diz: "indústria farmacêutica" é a cena
+  // "INDÚSTRIA FARMACÊUTICA CONTANDO DINHEIRO", mesmo sem conceito mapeado.
+  const sharedTitleTokens = prepared.fields[0].tokens.filter((token) => ranking.localTokens.has(token) && !GENERIC_PERSON_TOKENS.has(token));
+  const strongTitleMatch = sharedTitleTokens.length >= 2 || sharedTitleTokens.some((token) => token.length >= 7);
   const compatibleGeneralScene = beat !== 'demonstration' && !MEDICAL_NICHE.test(prepared.taxonomy)
-    && segment.concepts.some((concept) => prepared.concepts.includes(concept));
+    && (segment.concepts.some((concept) => prepared.concepts.includes(concept)) || strongTitleMatch);
   const neutralDigitalAction = allowGenericFallback && (ranking.callToAction || SOCIAL_PROOF_COPY.test(ranking.spokenNormalized))
     && !MEDICAL_NICHE.test(prepared.taxonomy) && CTA_SCENE.test(prepared.title)
     && CTA_PHONE.test(prepared.title) && CTA_NEUTRAL_ACTION.test(prepared.title)
@@ -901,12 +1095,20 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       || (neutralHuman && /\bcasal\b/.test(prepared.contentText) && ranking.campaignConcepts.includes('saude-homem'));
     const anatomyConflict = shownAnatomy.length > 0
       && !shownAnatomy.some((part) => ranking.campaignAnatomy.includes(part));
-    if (!allowGenericFallback || recipe || (videoDirection !== 'neutral' && !(recoveryCrossPackFallback && videoDirection === 'recovery')) || anatomyConflict
+    // Pack do nicho da campanha (ex.: Prostata) como ALTERNATIVA revisável
+    // quando a fala não tem cena específica. Todas as travas acima valem.
+    const packScene = fallback === 'pack' && !!segment.campaignNicheId && video.nicheId === segment.campaignNicheId
+      && (videoDirection === 'neutral' || videoDirection === direction);
+    if (packScene && !recipe && !anatomyConflict) {
+      score += 2 + (shownAnatomy.length ? 2 : 0) + (healthcare ? 1 : 0);
+      reasons.push(`alternativa do pack ${video.nicheName || 'da campanha'}; sem correspondência específica com a fala`);
+    } else if (!allowGenericFallback || recipe || (videoDirection !== 'neutral' && !(recoveryCrossPackFallback && videoDirection === 'recovery')) || anatomyConflict
         || !(lipedemaVisual || neutralHuman || healthcare || educationalAnatomy || thematicEducationalHealth || recoveryCrossPackFallback || neutralDigitalAction) || !themeLink) {
       return { video, score: -100, reasons: ['sem evidência visual do trecho ou da frase de contexto'] };
+    } else {
+      score += 3;
+      reasons.push('alternativa genérica com vínculo ao tema da campanha; sem correspondência específica com a fala');
     }
-    score += 3;
-    reasons.push('alternativa genérica com vínculo ao tema da campanha; sem correspondência específica com a fala');
   }
   if (ingredientEvidence) { score += 12; reasons.push('ingrediente congruente com a receita'); }
   if (botanicalEvidence) { score += 8; reasons.push('cena botânica congruente'); }
@@ -920,6 +1122,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     reasons.push(`contexto: ${sharedConcepts.slice(0, 2).join(', ')}`);
   }
   if (lipedemaVisual) { score += 16; reasons.push('condição da campanha visível no take'); }
+  // Fala que nomeia o órgão pede a cena que MOSTRA o órgão (o beat de ciência
+  // do Silas), antes de uma metáfora genérica do mesmo assunto.
+  if (anatomyOf(ranking.spokenNormalized).some((part) => shownAnatomy.includes(part))) {
+    score += 6;
+    reasons.push('mostra o órgão citado na fala');
+  }
   // A small topical tie-break uses the rest of the part only after local
   // evidence. Global context cannot admit an otherwise unrelated clip.
   if (lexicalEvidence || sharedConcepts.length) {
@@ -952,6 +1160,23 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && ED_INTIMATE_MOMENT.test(ranking.spokenNormalized)) score += 5;
     reasons.push('cena conferida visualmente');
   }
+  // Outra pessoa falando para a câmera por cima da voz do avatar confunde
+  // quem está falando. Só cabe quando a fala apresenta alguém, um vídeo ou
+  // repercussão online.
+  const talkingHead = audit ? audit.beats.includes('avatar')
+    : /\b(?:fala(?:ndo)? (?:para|pra|diretamente para) (?:a )?camera|talking to camera)\b/.test(prepared.visualText);
+  if (talkingHead && !ranking.callToAction && !SOCIAL_PROOF_COPY.test(ranking.spokenNormalized)
+      && !/\b(?:dr|doutor|medico|especialista|urologista|apresent\w*|entrevist\w*|depoimento|video)\b/.test(ranking.spokenNormalized)) {
+    score -= 9;
+    reasons.push('pessoa falando para a câmera por cima do avatar');
+  }
+  // Saúde masculina: a cena é do homem (Silas limita mulher a quando a fala
+  // pede). Penalidade, não veto — o editor ainda vê como alternativa.
+  if (ranking.campaignConcepts.includes('saude-homem') && FEMALE_ONLY_SCENE.test(sceneTitle)
+      && !MALE_OR_COUPLE_SCENE.test(sceneTitle) && !FEMALE_COPY.test(`${ranking.spokenNormalized} ${ranking.contextNormalized}`)) {
+    score -= 8;
+    reasons.push('cena só feminina num anúncio de saúde masculina');
+  }
   if (allowGenericFallback) {
     // A campanha ser de saúde não transforma um CTA ou frase de ligação em
     // explicação anatômica. É uma preferência editorial, não um veto: quando
@@ -975,7 +1200,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     score -= 7;
     reasons.push('celular sem ação digital nesta fala');
   }
-  if (beat === 'problem' && /\b(?:dor|dificuldade|frustr\w*|problema|impotencia|disfuncao|triste|desconforto)\b/.test(videoVisualText)) score += 7;
+  if (beat === 'problem' && /\b(?:dor|dificuldade|frustr\w*|problema|impotencia|disfuncao|triste|desconforto|doenca|inflamad\w*|inchad\w*|urgencia|fraco|insoni\w*|cansad\w*|cansaco)\b/.test(videoVisualText)) score += 7;
   if (beat === 'relief' && /\b(?:alivio|melhora|feliz|sorris\w*|confian\w*|recuper\w*|casal)\b/.test(videoVisualText)) score += 8;
   if (beat === 'proof' && /\b(?:depoimento|resultado|antes e depois|medico|doutor|explic\w*)\b/.test(videoVisualText)) score += 5;
   if (beat === 'demonstration' && /\b(?:prepar\w*|mistura|ingrediente|receita|aplic\w*|folha|erva|planta)\b/.test(videoVisualText)) score += 6;
@@ -984,10 +1209,17 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     score -= 30;
     reasons.push('receita fora deste trecho');
   }
-  if (video.durationSec > 0) {
-    const ratio = Math.min(video.durationSec, segment.targetSeconds) / Math.max(video.durationSec, segment.targetSeconds);
-    score += ratio * 2.5;
-    if (video.durationSec + .35 < Math.min(2.5, segment.targetSeconds)) score -= 3;
+  const usableSec = stockFrameUsableSeconds(video);
+  if (usableSec > 0) {
+    // Take mais longo é só cortado no fim do trecho; o mais curto desacelera
+    // até 0,75x e CONGELA o último quadro no que faltar (pilot-inserts). Regra
+    // do Silas: o bloco nunca é maior que o take.
+    score += (usableSec >= segment.targetSeconds ? 1 : usableSec / segment.targetSeconds) * 2.5;
+    if (usableSec + .35 < Math.min(2.5, segment.targetSeconds)) score -= 3;
+    if (usableSec / .75 + .2 < segment.targetSeconds) {
+      score -= 10;
+      reasons.push('take mais curto que o trecho: o fim congelaria');
+    }
   }
   if (video.origin === 'organic') score += .7;
   if (video.downloads > 0) score += Math.min(2.2, Math.log10(video.downloads + 1) * .8);
@@ -1010,30 +1242,77 @@ export function rankStockFrameVideos(segment: SmartStockSegment, videos: StockFr
     .slice(0, Math.max(1, limit));
 }
 
+/** Mesma cena na tela: mesmo id, mesmo grupo de duplicata do StockFrame ou a
+ * mesma série de título (o mesmo take subido duas vezes, ou "(1)…(9)"). */
+export function stockFrameSameVisual(a: StockFrameVideo, b: StockFrameVideo): boolean {
+  if (a.id === b.id) return true;
+  const dupA = a.duplicateGroupId || a.smartMetadata?.duplicateGroupId;
+  const dupB = b.duplicateGroupId || b.smartMetadata?.duplicateGroupId;
+  if (dupA && dupA === dupB) return true;
+  return stockFrameSeriesKey(a) === stockFrameSeriesKey(b);
+}
+
+/** Agrupa takes que são a mesma cena (union-find por id, duplicata e série). */
+function visualGroups(videos: StockFrameVideo[]): Map<string, string> {
+  const parent = new Map<string, string>();
+  const find = (key: string): string => {
+    let root = key;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    parent.set(key, root);
+    return root;
+  };
+  const link = (a: string, b: string) => {
+    for (const key of [a, b]) if (!parent.has(key)) parent.set(key, key);
+    const ra = find(a); const rb = find(b);
+    if (ra !== rb) parent.set(ra < rb ? rb : ra, ra < rb ? ra : rb);
+  };
+  for (const video of videos) {
+    link(`id:${video.id}`, `serie:${stockFrameSeriesKey(video)}`);
+    const dup = video.duplicateGroupId || video.smartMetadata?.duplicateGroupId;
+    if (dup) link(`id:${video.id}`, `dup:${dup}`);
+  }
+  return new Map(videos.map((video) => [video.id, find(`id:${video.id}`)]));
+}
+
 /** Global bipartite assignment: maximize reliable unique choices first, then
  * their existing evidence scores. A chronological greedy choice can steal the
- * only exact take from a later, much more specific sentence. */
+ * only exact take from a later, much more specific sentence.
+ *
+ * Silas, 03.10: take repetido "não deve acontecer". Cada CENA (não só cada id)
+ * entra no máximo uma vez no plano: o mesmo take subido duas vezes ou duas
+ * variações da mesma série contam como repetição. Trecho sem cena única fica
+ * com o avatar e mantém as alternativas para a revisão. */
 export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullCoverage = false): SmartStockSegment[] {
   if (!segments.length) return [];
   const eligible = segments.map((segment) => segment.candidates.filter((candidate) => Number.isFinite(candidate.score) && candidate.score >= (fullCoverage ? 1 : 3)));
-  const videoIds = [...new Set(eligible.flatMap((candidates) => candidates.map((candidate) => candidate.video.id)))].sort();
-  const columns = new Map(videoIds.map((id, index) => [id, index + 1]));
+  const groupOf = visualGroups(eligible.flat().map((candidate) => candidate.video));
+  const groups = [...new Set(eligible.flatMap((candidates) => candidates.map((candidate) => groupOf.get(candidate.video.id)!)))].sort();
+  const columns = new Map(groups.map((group, index) => [group, index + 1]));
   const rows = segments.length;
   // One private dummy column per segment guarantees that "no safe take" is
   // always feasible. Forbidden pairs can never force an unrelated selection.
-  const width = videoIds.length + rows;
+  const width = groups.length + rows;
   const maxScore = eligible.reduce((max, candidates) => candidates.reduce((best, candidate) => Math.max(best, candidate.score), max), 0);
   const uniqueBonus = maxScore * rows + 1;
   const forbidden = uniqueBonus * (rows + 1) + maxScore;
-  const evidence = eligible.map((candidates) => new Map(candidates.map((candidate) => [columns.get(candidate.video.id)!, candidate.score])));
+  // The best variant of each visual group per segment; the others add nothing.
+  const evidence = eligible.map((candidates) => {
+    const best = new Map<number, SmartStockCandidate>();
+    for (const candidate of candidates) {
+      const column = columns.get(groupOf.get(candidate.video.id)!)!;
+      const prior = best.get(column);
+      if (!prior || candidate.score > prior.score) best.set(column, candidate);
+    }
+    return best;
+  });
   const cost = (row: number, column: number) => {
-    if (column > videoIds.length) return 0;
-    const score = evidence[row - 1].get(column);
-    return score === undefined ? forbidden : -(uniqueBonus + score);
+    if (column > groups.length) return 0;
+    const candidate = evidence[row - 1].get(column);
+    return candidate === undefined ? forbidden : -(uniqueBonus + candidate.score);
   };
 
   // Rectangular Hungarian algorithm. The catalog pool is sparse and bounded
-  // upstream (ten candidates/segment); no remote model or inference cost.
+  // upstream (tens of candidates/segment); no remote model or inference cost.
   const rowPotential = new Float64Array(rows + 1);
   const colPotential = new Float64Array(width + 1);
   const matchedRow = new Int32Array(width + 1);
@@ -1076,39 +1355,10 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
   }
 
   const result = segments.map((segment) => ({ ...segment, selectedVideoId: undefined as string | undefined }));
-  const occurrences = new Map<string, number[]>();
-  for (let column = 1; column <= videoIds.length; column++) {
+  for (let column = 1; column <= groups.length; column++) {
     const row = matchedRow[column];
-    if (!row || !evidence[row - 1].has(column)) continue;
-    const id = videoIds[column - 1];
-    result[row - 1].selectedVideoId = id;
-    occurrences.set(id, [row - 1]);
-  }
-  // A distant reuse is preferable to an empty slot only when the take already
-  // passed local evidence. Never replay the same scene in adjacent segments.
-  for (let index = 0; index < result.length; index++) {
-    if (result[index].selectedVideoId) continue;
-    const reusable = eligible[index].map((candidate) => {
-      const usedAt = occurrences.get(candidate.video.id) || [];
-      return { candidate, distance: usedAt.length ? Math.min(...usedAt.map((position) => Math.abs(position - index))) : Infinity };
-    }).filter((item) => item.distance > 1)
-      .sort((a, b) => b.candidate.score - a.candidate.score || b.distance - a.distance || a.candidate.video.id.localeCompare(b.candidate.video.id));
-    const chosen = reusable[0]?.candidate;
-    if (!chosen) continue;
-    result[index].selectedVideoId = chosen.video.id;
-    result[index].candidates = result[index].candidates.map((candidate) => candidate.video.id === chosen.video.id
-      ? { ...candidate, reasons: [...candidate.reasons.filter((reason) => reason !== 'take reutilizado em trecho distante'), 'take reutilizado em trecho distante'] }
-      : candidate);
-    occurrences.set(chosen.video.id, [...(occurrences.get(chosen.video.id) || []), index]);
-  }
-  if (fullCoverage) {
-    // A cobertura total pode reutilizar um take seguro somente quando não há
-    // outra alternativa. Jamais transforma um conflito em correspondência.
-    for (let index = 0; index < result.length; index++) {
-      if (result[index].selectedVideoId) continue;
-      const candidate = eligible[index].sort((a, b) => b.score - a.score)[0];
-      if (candidate) result[index].selectedVideoId = candidate.video.id;
-    }
+    const candidate = row ? evidence[row - 1].get(column) : undefined;
+    if (candidate) result[row - 1].selectedVideoId = candidate.video.id;
   }
   // A mesma pasta visual três vezes em seguida deixa o anúncio monótono.
   // Só troca quando a alternativa é quase tão relevante e ainda não foi usada.
@@ -1120,11 +1370,35 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
     if (!selected || !previous || !earlier) continue;
     const group = (video: StockFrameVideo) => video.subcategoryId || video.subcategoryName || video.duplicateGroupId || '';
     if (!group(selected.video) || group(selected.video) !== group(previous.video) || group(selected.video) !== group(earlier.video)) continue;
-    const used = new Set(result.map((segment) => segment.selectedVideoId).filter(Boolean));
+    const used = result.flatMap((segment) => segment.candidates.filter((candidate) => candidate.video.id === segment.selectedVideoId).map((candidate) => candidate.video));
     const alternative = current.candidates.find((candidate) => candidate.score >= selected.score - 6
-      && candidate.video.id !== selected.video.id && !used.has(candidate.video.id)
-      && group(candidate.video) !== group(selected.video)
-      && (!candidate.video.duplicateGroupId || candidate.video.duplicateGroupId !== selected.video.duplicateGroupId));
+      && candidate.video.id !== selected.video.id && !used.some((video) => stockFrameSameVisual(video, candidate.video))
+      && group(candidate.video) !== group(selected.video));
+    if (alternative) current.selectedVideoId = alternative.video.id;
+  }
+  // Duas cenas quase iguais perto uma da outra ("MANGUEIRA JATO FRACO E
+  // FORTE" e "… DUPLO SENTIDO", "SEGURANDO PRÓSTATA INFLAMADA" e "… INCHADA")
+  // parecem take repetido. Troca a de depois por uma alternativa livre quase
+  // tão boa, diferente das vizinhas (até dois takes de distância).
+  const sceneTokens = (video: StockFrameVideo) => new Set(meaningful(video.title).filter((token) => !/^\d+$/.test(token) && !['animacao', '3d', 'video', 'take'].includes(token)));
+  const similar = (a: StockFrameVideo, b: StockFrameVideo) => {
+    const ta = sceneTokens(a); const tb = sceneTokens(b);
+    const shared = [...ta].filter((token) => tb.has(token)).length;
+    return shared >= 2 && shared / Math.max(1, new Set([...ta, ...tb]).size) >= .5;
+  };
+  const chosenVideo = (segment: SmartStockSegment | undefined) => segment ? selectedSmartCandidate(segment)?.video : undefined;
+  for (let index = 1; index < result.length; index++) {
+    const current = result[index];
+    const selected = selectedSmartCandidate(current);
+    if (!selected) continue;
+    const earlier = [chosenVideo(result[index - 1]), chosenVideo(result[index - 2])].filter((video): video is StockFrameVideo => !!video);
+    if (!earlier.some((video) => similar(video, selected.video))) continue;
+    const neighbors = [index - 2, index - 1, index + 1, index + 2].map((position) => chosenVideo(result[position])).filter((video): video is StockFrameVideo => !!video);
+    const used = result.flatMap((segment) => segment.candidates.filter((candidate) => candidate.video.id === segment.selectedVideoId).map((candidate) => candidate.video));
+    const alternative = current.candidates.find((candidate) => candidate.score >= selected.score - 5
+      && candidate.score >= (fullCoverage ? 1 : 3)
+      && !used.some((video) => stockFrameSameVisual(video, candidate.video))
+      && !neighbors.some((video) => similar(candidate.video, video)));
     if (alternative) current.selectedVideoId = alternative.video.id;
   }
   return result;
@@ -1134,7 +1408,7 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
  * specific and broad catalog searches. Normal ranking never invokes this. */
 export function rankStockFrameGenericFallback(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8): SmartStockCandidate[] {
   const ranking = prepareRanking(segment);
-  return videos.map((video) => scoreVideo(segment, video, ranking, true))
+  return videos.map((video) => scoreVideo(segment, video, ranking, 'generic'))
     .filter((candidate) => candidate.score >= 1)
     .sort((a, b) => b.score - a.score || a.video.id.localeCompare(b.video.id))
     .slice(0, Math.max(1, limit))
@@ -1143,6 +1417,126 @@ export function rankStockFrameGenericFallback(segment: SmartStockSegment, videos
         : ['alternativa genérica após esgotar a busca específica', ...candidate.reasons] }));
 }
 
+/** Alternativas do PACK do nicho da campanha (ex.: Prostata) para um trecho
+ * sem cena específica suficiente. Só cenas do próprio pack, e todas as travas
+ * de contexto continuam valendo (anatomia, sentido, receita, sexo, CTA). */
+export function rankStockFramePackAlternatives(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 12): SmartStockCandidate[] {
+  if (!segment.campaignNicheId) return [];
+  const ranking = prepareRanking(segment);
+  return videos.filter((video) => video.nicheId === segment.campaignNicheId)
+    .map((video) => scoreVideo(segment, video, ranking, 'pack'))
+    .filter((candidate) => candidate.score >= 1)
+    .sort((a, b) => b.score - a.score || a.video.id.localeCompare(b.video.id))
+    .slice(0, Math.max(1, limit))
+    .map((candidate) => ({ ...candidate, genericFallback: true }));
+}
+
+/** Nunca deixa um trecho sem alternativas: mantém as específicas (uma por
+ * cena), completa com as genéricas seguras e depois com o pack do nicho até
+ * existirem `minimum` opções livres — fora do take escolhido e de qualquer
+ * cena já usada em outro trecho ou inserida à mão (`exclude`). */
+export function fillSmartStockAlternatives<T extends SmartStockSegment>(segments: T[], options: {
+  pool: StockFrameVideo[]; pack?: StockFrameVideo[]; minimum?: number; exclude?: StockFrameVideo[]; limit?: number;
+}): T[] {
+  const minimum = options.minimum ?? 6;
+  const limit = options.limit ?? 30;
+  const exclude = options.exclude || [];
+  return segments.map((segment) => {
+    const usedElsewhere = [...exclude, ...segments.filter((other) => other.id !== segment.id)
+      .flatMap((other) => other.candidates.filter((candidate) => candidate.video.id === other.selectedVideoId).map((candidate) => candidate.video))];
+    const list: SmartStockCandidate[] = [];
+    const add = (candidate: SmartStockCandidate) => {
+      if (list.length >= limit || list.some((current) => stockFrameSameVisual(current.video, candidate.video))) return;
+      if (candidate.video.id !== segment.selectedVideoId && exclude.some((video) => stockFrameSameVisual(video, candidate.video))) return;
+      list.push(candidate);
+    };
+    const selected = selectedSmartCandidate(segment);
+    if (selected) add(selected);
+    for (const candidate of segment.candidates) add(candidate);
+    const free = () => list.filter((candidate) => candidate.video.id !== segment.selectedVideoId
+      && !usedElsewhere.some((video) => stockFrameSameVisual(video, candidate.video))).length;
+    const sources = [
+      () => rankStockFrameGenericFallback(segment, options.pool, 40),
+      () => rankStockFramePackAlternatives(segment, options.pack || options.pool, 60),
+    ];
+    for (const source of sources) {
+      if (free() >= minimum) break;
+      for (const candidate of source()) {
+        if (free() >= minimum) break;
+        add(candidate);
+      }
+    }
+    return { ...segment, candidates: list };
+  });
+}
+
+/** Cobertura 100% sem repetir cena: um trecho que ficou sem take único é
+ * absorvido pelo vizinho contíguo que já tem take (o take dele segue até o
+ * fim do trecho), preferindo o vizinho cujo take dura o suficiente. */
+export function absorbUnfilledSmartSegments(parts: StockFrameCopyPart[], segments: SmartStockSegment[]): SmartStockSegment[] {
+  let current = segments.map((segment) => ({ ...segment }));
+  const touching = (a: SmartStockSegment, b: SmartStockSegment) => a.anchor === b.anchor
+    && (a.wordTo + 1 === b.wordFrom || b.wordTo + 1 === a.wordFrom);
+  for (let guard = 0; guard < segments.length; guard++) {
+    const index = current.findIndex((segment, position) => !segment.selectedVideoId
+      && [current[position - 1], current[position + 1]].some((neighbor) => neighbor?.selectedVideoId && touching(neighbor, segment)));
+    if (index < 0) break;
+    const empty = current[index];
+    const words = parts.find((part) => part.label === empty.anchor)?.text.match(/\S+/g) || [];
+    const best = [index - 1, index + 1].filter((position) => current[position]?.selectedVideoId && touching(current[position], empty))
+      .map((position) => {
+        const neighbor = current[position];
+        const from = Math.min(neighbor.wordFrom, empty.wordFrom);
+        const to = Math.max(neighbor.wordTo, empty.wordTo);
+        const targetSeconds = Math.round(Math.max(2.5, Math.min(10, (to - from + 1) / 2.35)) * 10) / 10;
+        const video = selectedSmartCandidate(neighbor)?.video;
+        const usable = video ? stockFrameUsableSeconds(video) : 0;
+        return { position, from, to, targetSeconds, usable, fits: usable / .75 + .2 >= targetSeconds };
+      })
+      .sort((a, b) => Number(b.fits) - Number(a.fits) || b.usable - a.usable)[0];
+    const neighbor = current[best.position];
+    current[best.position] = { ...neighbor, wordFrom: best.from, wordTo: best.to,
+      text: words.slice(best.from, best.to + 1).join(' '), targetSeconds: best.targetSeconds };
+    current = current.filter((_, position) => position !== index);
+  }
+  return current;
+}
+
 export function selectedSmartCandidate(segment: SmartStockSegment): SmartStockCandidate | undefined {
   return segment.candidates.find((candidate) => candidate.video.id === segment.selectedVideoId);
+}
+
+/** Um trecho avulso da copy (ex.: bloco que ficou com o avatar) lido do mesmo
+ * jeito que o plano lê, para sugerir takes ali sem abrir a biblioteca. Bloco
+ * longo vira uma janela do tamanho de um take (até a primeira pausa). */
+export function smartSegmentForRange(parts: StockFrameCopyPart[], anchor: string, from: number, to: number,
+  campaign: Pick<SmartStockSegment, 'campaignText' | 'campaignNicheId' | 'campaignIngredients'> = {}): SmartStockSegment | undefined {
+  const part = parts.find((item) => item.label === anchor);
+  const words = part ? wordsOf(part.text) : [];
+  if (!part || from < 0 || to < from || to >= words.length) return undefined;
+  let end = to;
+  if (to - from + 1 > 14) {
+    const pause = words.slice(from + 4, from + 12).find((word) => /[.!?;:,]["')\]]*$/.test(word.text));
+    end = pause ? pause.index : from + 9;
+  }
+  const text = words.slice(from, end + 1).map((word) => word.text).join(' ');
+  let sentenceFrom = from;
+  while (sentenceFrom > 0 && !words[sentenceFrom - 1].endSentence) sentenceFrom--;
+  let sentenceTo = end;
+  while (sentenceTo < words.length - 1 && !words[sentenceTo].endSentence) sentenceTo++;
+  const contextText = words.slice(sentenceFrom, sentenceTo + 1).map((word) => word.text).join(' ');
+  const semantics = semanticFields(text, contextText);
+  return {
+    id: `faixa:${anchor}:${from}-${end}`, anchor, wordFrom: from, wordTo: end, text, ...semantics, contextText,
+    contextConcepts: conceptsOf(part.text).filter((concept) => !concept.startsWith('emocao-')),
+    visualBeat: visualBeat(text, semantics.narrativeDirection), visualScore: 0,
+    targetSeconds: Math.round(Math.max(2.2, (end - from + 1) / 2.35) * 10) / 10,
+    ...campaign, candidates: [],
+  };
+}
+
+/** Diagnóstico: o placar e os motivos de UM take para UM trecho, inclusive
+ * quando ele é recusado (score -100). Usado pelos testes e pela auditoria. */
+export function explainSmartStockScore(segment: SmartStockSegment, video: StockFrameVideo, fallback: false | 'generic' | 'pack' = false): SmartStockCandidate {
+  return scoreVideo(segment, video, prepareRanking(segment), fallback);
 }
