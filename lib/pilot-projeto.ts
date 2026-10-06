@@ -464,12 +464,17 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
 
 /* ═══════════════════════════ Premiere (Final Cut Pro 7 XML) ══════════════ */
 
-const DURACAO_IMAGEM_QUADROS = 108_000;
+// Imagem parada do jeito que o próprio Premiere exporta: mídia de 12h com o
+// "in" em 1h (dá folga pros dois lados se o editor esticar o clipe).
+const IMAGEM_HORAS = 12;
+const IMAGEM_IN_HORAS = 1;
 const xmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /** Geometria do item no Premiere: a mídia entra no tamanho NATIVO (100%) com
  *  o centro no centro da sequência; Crop corta em % das bordas, Scale e
- *  Center (fração da sequência, 0 = centro) levam o recorte ao destino. */
+ *  Center levam o recorte ao destino. O Center do Basic Motion é o deslocamento
+ *  a partir do centro da sequência em frações da MÍDIA (pixels ÷ largura/altura
+ *  nativa da fonte), não da sequência — conferido contra exports do Premiere. */
 export function geometriaPremiere(item: ItemTimeline, arquivo: ArquivoProjeto, W: number, H: number) {
   const mw = arquivo.w || W;
   const mh = arquivo.h || H;
@@ -481,8 +486,8 @@ export function geometriaPremiere(item: ItemTimeline, arquivo: ArquivoProjeto, W
   const cy = item.destino.y + item.destino.h / 2 - offY;
   return {
     escalaPct: Math.round(escala * 100 * 1000) / 1000,
-    centroX: r6((cx - W / 2) / W),
-    centroY: r6((cy - H / 2) / H),
+    centroX: r6((cx - W / 2) / mw),
+    centroY: r6((cy - H / 2) / mh),
     crop: { esquerda: r6(item.recorte.x0 * 100), direita: r6((1 - item.recorte.x1) * 100), topo: r6(item.recorte.y0 * 100), base: r6((1 - item.recorte.y1) * 100) },
   };
 }
@@ -499,13 +504,54 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
   const fileIds = new Map<string, string>();
   let fileSeq = 0;
   let clipSeq = 0;
+  const imagemDur = fps * 3600 * IMAGEM_HORAS;
+  const imagemIn = fps * 3600 * IMAGEM_IN_HORAS;
+  /** Onde o clipe começa/termina na mídia e quanto ela dura, no espaço que o
+   *  Premiere usa: clipe com velocidade conta in/out/duração em quadros
+   *  "retimed" (quadro da mídia = quadro retimed × velocidade) e sempre
+   *  out − in = end − start. Keyframes (`when`) vivem nesse mesmo espaço. */
+  const tempoNoClipe = (item: ItemTimeline, a: ArquivoProjeto) => {
+    const ini = f(item.start);
+    const fim = Math.max(ini + 1, f(item.end));
+    if (a.tipo === 'imagem') return { ini, fim, dentro: imagemIn, fora: imagemIn + (fim - ini), dur: imagemDur, vel: 1, midiaDentro: 0, midiaDur: imagemDur };
+    const vel = item.velocidade > 0 ? item.velocidade : 1;
+    const midiaDur = f(a.durSec);
+    const midiaDentro = f(item.fonteDe);
+    const dentro = Math.round(midiaDentro / vel);
+    return { ini, fim, dentro, fora: dentro + (fim - ini), dur: Math.round(midiaDur / vel), vel, midiaDentro, midiaDur };
+  };
+  /** Time Remap como o Premiere grava velocidade constante: speed em % e as
+   *  chaves virtuais do graphdict (retimed → quadro da mídia). */
+  const timeRemap = (tc: ReturnType<typeof tempoNoClipe>, video: boolean) => {
+    const simples = (id: string, valor: string, faixa?: [number, number]) =>
+      `<parameter authoringApp="PremierePro"><parameterid>${id}</parameterid><name>${id}</name>`
+      + (faixa ? `<valuemin>${faixa[0]}</valuemin><valuemax>${faixa[1]}</valuemax>` : '') + `<value>${valor}</value></parameter>`;
+    let corpo = simples('variablespeed', '0', [0, 1]) + simples('speed', String(Math.round(tc.vel * 100 * 100) / 100), [-100000, 100000])
+      + simples('reverse', 'FALSE') + simples('frameblending', 'FALSE');
+    if (video) {
+      const chaves = new Map<number, { valor: number; flag: string }>();
+      const poe = (quando: number, valor: number, flag: string) => {
+        if (!chaves.has(quando) || flag === 'speedkfin' || flag === 'speedkfout') chaves.set(quando, { valor, flag });
+      };
+      poe(0, 0, 'speedkfstart');
+      poe(tc.dur, tc.midiaDur, 'speedkfend');
+      poe(tc.dentro, tc.midiaDentro, 'speedkfin');
+      poe(tc.fora, Math.min(tc.midiaDur, tc.midiaDentro + Math.round((tc.fora - tc.dentro) * tc.vel)), 'speedkfout');
+      corpo += `<parameter authoringApp="PremierePro"><parameterid>graphdict</parameterid><name>graphdict</name><valuemin>0</valuemin><valuemax>${tc.midiaDur}</valuemax><value>0</value>`
+        + [...chaves.entries()].sort((x, y) => x[0] - y[0])
+          .map(([quando, k]) => `<keyframe><when>${quando}</when><value>${k.valor}</value><speedvirtualkf>TRUE</speedvirtualkf><${k.flag}>TRUE</${k.flag}></keyframe>`).join('')
+        + `<interpolation><name>FCPCurve</name></interpolation></parameter>`;
+    }
+    const cabeca = video ? '<effectcategory>motion</effectcategory><effecttype>motion</effecttype><mediatype>video</mediatype>' : '';
+    return `<filter><effect><name>Time Remap</name><effectid>timeremap</effectid>${cabeca}${corpo}</effect></filter>`;
+  };
   const arquivoXml = (a: ArquivoProjeto) => {
     const existente = fileIds.get(a.nome);
     if (existente) return `<file id="${existente}"/>`;
     const id = `file-${++fileSeq}`;
     fileIds.set(a.nome, id);
     // Imagem parada não tem fim: a duração "longa" deixa o clipe durar o que precisar.
-    const dur = a.tipo === 'imagem' ? DURACAO_IMAGEM_QUADROS : f(a.durSec);
+    const dur = a.tipo === 'imagem' ? imagemDur : f(a.durSec);
     const audio = a.temAudio ? `<audio><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics><channelcount>2</channelcount></audio>` : '';
     return `<file id="${id}"><name>${xmlEsc(a.nome)}</name><pathurl>${xmlEsc(url(a.nome))}</pathurl>${rate}<duration>${dur}</duration>`
       + `<media><video><samplecharacteristics>${rate}<width>${a.w}</width><height>${a.h}</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></video>${audio}</media></file>`;
@@ -523,12 +569,10 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
     const clips = itens.map((item) => {
       const a = porNome.get(item.arquivo)!;
       const foto = a.tipo === 'imagem';
-      const ini = f(item.start);
-      const fim = Math.max(ini + 1, f(item.end));
-      const dentro = foto ? 0 : f(item.fonteDe);
-      const fora = foto ? fim - ini : dentro + Math.max(1, Math.round((fim - ini) * item.velocidade));
+      const tc = tempoNoClipe(item, a);
+      const { ini, fim, dentro, fora } = tc;
       const g = geometriaPremiere(item, a, tl.W, tl.H);
-      const escalaKeys = item.escala?.map((k) => ({ quadro: dentro + Math.round(k.t * fps * item.velocidade), valor: String(Math.round(g.escalaPct * k.v * 1000) / 1000) }));
+      const escalaKeys = item.escala?.map((k) => ({ quadro: dentro + Math.round(k.t * fps), valor: String(Math.round(g.escalaPct * k.v * 1000) / 1000) }));
       let filtros = efeito('Basic Motion', 'basic', 'motion', 'motion',
         param('scale', 'Scale', String(g.escalaPct), escalaKeys)
         + `<parameter authoringApp="PremierePro"><parameterid>center</parameterid><name>Center</name><value><horiz>${g.centroX}</horiz><vert>${g.centroY}</vert></value></parameter>`);
@@ -537,18 +581,16 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
           param('left', 'left', String(g.crop.esquerda)) + param('right', 'right', String(g.crop.direita))
           + param('top', 'top', String(g.crop.topo)) + param('bottom', 'bottom', String(g.crop.base)));
       }
-      if (!foto && Math.abs(item.velocidade - 1) > 1e-3) {
-        filtros += efeito('Time Remap', 'timeremap', 'motion', 'motion',
-          param('variablespeed', 'variablespeed', '0') + param('speed', 'speed', String(Math.round(item.velocidade * 100 * 100) / 100))
-          + param('reverse', 'reverse', 'FALSE') + param('frameblending', 'frameblending', 'FALSE'));
-      }
+      if (!foto && Math.abs(tc.vel - 1) > 1e-3) filtros += timeRemap(tc, true);
       if (item.opacidade?.length) {
         filtros += efeito('Opacity', 'opacity', 'motion', 'motion',
           param('opacity', 'opacity', '100', item.opacidade.map((k) => ({ quadro: dentro + Math.round(k.t * fps), valor: String(Math.round(k.v * 100)) }))));
       }
       const id = `clipitem-${++clipSeq}`;
-      return `<clipitem id="${id}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${foto ? DURACAO_IMAGEM_QUADROS : f(a.durSec)}</duration>${rate}`
-        + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${arquivoXml(a)}${filtros}</clipitem>`;
+      // PNG com transparência (legenda, headline): alpha "straight", como o Premiere grava.
+      const alfa = foto ? '<alphatype>straight</alphatype>' : '';
+      return `<clipitem id="${id}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
+        + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${alfa}${arquivoXml(a)}${filtros}</clipitem>`;
     });
     return `<track>${clips.join('')}<enabled>TRUE</enabled><locked>FALSE</locked></track>`;
   };
@@ -559,14 +601,13 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
     if (!itens.length) return '';
     return `<track>${itens.map((item) => {
       const a = porNome.get(item.arquivo)!;
-      const ini = f(item.start);
-      const fim = Math.max(ini + 1, f(item.end));
-      const dentro = f(item.fonteDe);
-      const fora = dentro + Math.max(1, Math.round((fim - ini) * item.velocidade));
+      const tc = tempoNoClipe(item, a);
+      const { ini, fim, dentro, fora } = tc;
       const nivel = `<filter><effect><name>Audio Levels</name><effectid>audiolevels</effectid><effectcategory>audiolevels</effectcategory><effecttype>audiolevels</effecttype><mediatype>audio</mediatype>`
         + `<parameter><parameterid>level</parameterid><name>Level</name><valuemin>0</valuemin><valuemax>3.98109</valuemax><value>${Math.round(item.volume * 1000) / 1000}</value></parameter></effect></filter>`;
-      return `<clipitem id="clipitem-${++clipSeq}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${f(a.durSec)}</duration>${rate}`
-        + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${arquivoXml(a)}<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>${nivel}</clipitem>`;
+      const remap = Math.abs(tc.vel - 1) > 1e-3 ? timeRemap(tc, false) : '';
+      return `<clipitem id="clipitem-${++clipSeq}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
+        + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${arquivoXml(a)}<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>${remap}${nivel}</clipitem>`;
     }).join('')}<enabled>TRUE</enabled><locked>FALSE</locked></track>`;
   };
 

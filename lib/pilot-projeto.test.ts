@@ -135,6 +135,38 @@ ok(nomesNoAudio.includes('avatar.mp4') && nomesNoAudio.includes('broll_02.mp4') 
 const gp = geometriaPremiere(br[0], broll169, W, H);
 ok(perto(gp.escalaPct, 177.778, 0.01) && perto(gp.centroX, 0) && perto(gp.crop.esquerda, 34.18, 0.01),
   'Premiere: cover de 16:9 = 177,8% com crop lateral, centralizado');
+// Center do Basic Motion = deslocamento em frações da MÍDIA (como o Premiere
+// exporta), não da sequência: b-roll 720x1280 na metade de baixo desce 480px
+// = 480/1280 da fonte, não 480/1920 da sequência.
+const broll720: ArquivoProjeto = { nome: 'broll_720.mp4', tipo: 'video', w: 720, h: 1280, durSec: 8, temAudio: false };
+const gp720 = geometriaPremiere(br[2], broll720, W, H);
+ok(perto(gp720.escalaPct, 150, 0.01) && perto(gp720.centroX, 0) && perto(gp720.centroY, 480 / 1280) && perto(gp720.crop.topo, 25, 0.01),
+  'Premiere: center do split medido na mídia (720x1280 → vert 0,375), escala 150%');
+const gpAv = geometriaPremiere(av[1], avatar, W, H);
+// o Center é onde cai o centro da FONTE; o centro do recorte (rosto) tem que cair no meio da metade de cima
+const centroRecorteY = gpAv.centroY * H + H / 2 + ((av[1].recorte.y0 + av[1].recorte.y1) / 2 - 0.5) * H * (gpAv.escalaPct / 100);
+ok(perto(gpAv.escalaPct, 100, 0.01) && perto(centroRecorteY, 480, 0.5) && gpAv.crop.topo > 0,
+  'Premiere: recorte do avatar (foco no rosto) centrado na metade de cima');
+type ClipXml = { nome: string; dur: number; ini: number; fim: number; dentro: number; fora: number; corpo: string };
+const clipsXml = (trecho: string): ClipXml[] => [...trecho.matchAll(/<clipitem id="[^"]+"><name>([^<]+)<\/name><enabled>TRUE<\/enabled><duration>(\d+)<\/duration>.*?<start>(\d+)<\/start><end>(\d+)<\/end><in>(\d+)<\/in><out>(\d+)<\/out>(.*?)<\/clipitem>/g)]
+  .map((m) => ({ nome: m[1], dur: +m[2], ini: +m[3], fim: +m[4], dentro: +m[5], fora: +m[6], corpo: m[7] }));
+const secaoVideo = xml.split('</video><audio><numOutputChannels>')[0];
+const cv = clipsXml(secaoVideo);
+ok(cv.length === tl.itens.length && cv.every((c) => c.fora - c.dentro === c.fim - c.ini),
+  'Premiere: todo clipe com out − in = end − start (a regra do xmeml)');
+const lento = cv.find((c) => c.nome === 'broll_01.mp4')!;
+ok(lento.dur === 120 && lento.dentro === 0 && lento.fora === 120
+  && /<parameterid>graphdict<\/parameterid>.*<when>0<\/when><value>0<\/value>.*<speedkfin>TRUE.*<when>120<\/when><value>90<\/value>.*<speedkfout>TRUE/.test(lento.corpo),
+  'Premiere: 0,75x em quadros "retimed" (3s de mídia = 120 quadros) + graphdict como o Premiere grava');
+const leg = cv.find((c) => c.nome === 'legenda_0001.png')!;
+ok(leg.dentro === 30 * 3600 && leg.dur === 30 * 3600 * 12 && leg.corpo.startsWith('<alphatype>straight</alphatype>'),
+  'Premiere: imagem parada com in em 1h e mídia de 12h (como o Premiere exporta) e alpha straight');
+const trXml = cv.find((c) => c.nome === 'transicao_preto.png')!;
+const whens = [...trXml.corpo.matchAll(/<when>(\d+)<\/when>/g)].map((m) => +m[1]);
+ok(whens.length === 3 && whens[0] === trXml.dentro && whens[2] <= trXml.fora, 'Premiere: keyframes da transição no espaço in/out do clipe');
+const zoomXml = cv.find((c) => c.nome === 'avatar.mp4')!;
+const whensZoom = [...zoomXml.corpo.matchAll(/<when>(\d+)<\/when>/g)].map((m) => +m[1]);
+ok(whensZoom[0] === zoomXml.dentro && whensZoom.at(-1)! <= zoomXml.fora, 'Premiere: keyframes do zoom dentro do in/out do avatar');
 
 const leia = leiaMeDoProjeto(tl, { pasta: 'AD47G1VN - PILOT', temSrt: true });
 ok(leia.includes('CAPCUT') && leia.includes('PREMIERE') && leia.includes('.srt'), 'LEIA-ME explica CapCut, Premiere e o SRT');
