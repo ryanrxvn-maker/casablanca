@@ -240,7 +240,20 @@ async function arquivosDoProjeto(
       const style = roteiro.legenda.style as import('./typography/engine').StyleState;
       const preset = presets.getPreset(style.presetId);
       srt = srtDaLegenda(roteiro.legenda.blocks, roteiro.durSec > 0 ? roteiro.durSec * 1000 : Infinity);
-      const intervalos = intervalosDaLegenda(roteiro.legenda.blocks);
+      // Quando cada bloco está PARADO na tela — a mesma conta do drawCaptions
+      // (modelo do bloco + animação escolhida no editor + escalonamento).
+      const assentada = (b: (typeof blocks)[number]) => {
+        const ov = style.perBlock?.[b.id];
+        const st = ov ? { ...style, ...ov } : style;
+        const pr = st.presetId && st.presetId !== preset.id ? presets.getPreset(st.presetId) : preset;
+        const entrada = st.animIn != null && st.animIn !== pr.in.kind ? engine.IN_SPEC_BY_KIND[st.animIn] : pr.in;
+        const saida = st.animOut != null && st.animOut !== pr.out.kind ? engine.OUT_SPEC_BY_KIND[st.animOut] : pr.out;
+        const unidades = pr.unit === 'char' ? b.words.reduce((n, w) => n + w.text.length, 0) : pr.unit === 'word' ? b.words.length : 1;
+        const de = b.start + Math.max(0, entrada.dur) + Math.max(0, unidades - 1) * (entrada.stagger || 0);
+        const oDur = saida.kind !== 'none' && saida.dur > 0 ? Math.min(saida.dur, (b.end - b.start) * 0.45) : 0;
+        return { de, ate: b.end - oDur };
+      };
+      const intervalos = intervalosDaLegenda(roteiro.legenda.blocks, (b) => assentada(b as (typeof blocks)[number]));
       let anterior: { assinatura: string; item: (typeof legendas)[number] } | null = null;
       let k = 0;
       for (let i = 0; i < intervalos.length; i++) {

@@ -31,6 +31,11 @@ ok(srt.startsWith('1\r\n00:00:00,000 --> 00:00:01,200\r\nSe você levanta') && s
 const intervalos = intervalosDaLegenda(blocks);
 ok(intervalos.length === 4 && intervalos[0].start === 0 && intervalos[0].end === 250 && intervalos[2].end === 1200
   && intervalos.every((i) => i.t > i.start && i.t < i.end), 'legenda vira um intervalo por palavra (karaokê), desenhado depois da entrada');
+// bloco 0–1200: entrada assenta em 300ms, fade de saída começa em 700ms
+const assentados = intervalosDaLegenda([blocks[0]], () => ({ de: 300, ate: 700 }));
+ok(assentados.length === 3 && assentados.map((i) => [i.start, i.end].join('-')).join(',') === intervalos.slice(0, 3).map((i) => [i.start, i.end].join('-')).join(',')
+  && assentados[0].t === 249 && assentados[1].t === 470 && assentados[2].t === 699,
+  'PNG desenhado com o bloco PARADO: espera a entrada (1ª palavra no fim do intervalo) e nunca dentro do fade de saída — os tempos das trocas não mudam');
 
 const W = 1080;
 const H = 1920;

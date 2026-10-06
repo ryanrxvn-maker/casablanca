@@ -114,18 +114,34 @@ export function srtDaLegenda(blocks: LegendaDoRoteiro['blocks'], durMs = Infinit
  * cada intervalo uma vez e junta os vizinhos que saíram idênticos — a
  * legenda vira uma sequência de PNGs que troca exatamente quando o render
  * troca. `t` é onde desenhar: depois da animação de entrada assentar.
+ *
+ * `assentada(bloco)` diz quando o bloco está PARADO na tela: `de` = fim da
+ * entrada (com o escalonamento por palavra/letra), `ate` = começo do fade de
+ * saída. Sem isso o PNG da ÚLTIMA palavra saía desenhado no meio da saída e
+ * ficava apagado o intervalo inteiro (no vídeo ela fica cheia até sumir).
  */
-export function intervalosDaLegenda(blocks: LegendaDoRoteiro['blocks']): Array<{ start: number; end: number; t: number }> {
+export type JanelaAssentada = { de: number; ate: number };
+export function intervalosDaLegenda(
+  blocks: LegendaDoRoteiro['blocks'],
+  assentada?: (b: LegendaDoRoteiro['blocks'][number]) => JanelaAssentada | null,
+): Array<{ start: number; end: number; t: number }> {
   const out: Array<{ start: number; end: number; t: number }> = [];
   for (const b of blocks) {
     if (!(b.end > b.start) || !b.words.length) continue;
     const marcas = [b.start, ...b.words.slice(1).map((w) => w.start), b.end]
       .map((ms) => Math.min(b.end, Math.max(b.start, ms)));
+    const j = assentada?.(b) || null;
     for (let i = 0; i < marcas.length - 1; i++) {
       const a = marcas[i];
       const z = marcas[i + 1];
       if (!(z - a >= 1)) continue;
-      out.push({ start: a, end: z, t: a + Math.min(220, (z - a) * 0.6) });
+      // o karaokê da palavra assenta em ~160ms: desenha um pouco depois dela entrar
+      let t = a + Math.min(220, (z - a) * 0.6);
+      if (j) {
+        t = Math.max(t, Math.min(j.de, z - 1)); // espera a entrada do bloco, se couber no intervalo
+        t = Math.min(t, Math.max(a + 1, j.ate - 1)); // e nunca desenha dentro da saída, se der
+      }
+      out.push({ start: a, end: z, t: Math.min(z - 1, Math.max(a, t)) });
     }
   }
   return out;
