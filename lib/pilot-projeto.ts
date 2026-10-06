@@ -94,14 +94,16 @@ function srtTempo(ms: number): string {
 }
 
 /** SRT dos blocos da legenda (tempos do engine em ms). */
-export function srtDaLegenda(blocks: LegendaDoRoteiro['blocks']): string {
+export function srtDaLegenda(blocks: LegendaDoRoteiro['blocks'], durMs = Infinity): string {
   const linhas: string[] = [];
   let n = 0;
   for (const b of blocks) {
     const texto = b.words.map((w) => w.text).join(' ').replace(/\s+/g, ' ').trim();
-    if (!texto || !(b.end > b.start)) continue;
+    // como no render: o bloco não passa do fim do vídeo
+    const fim = Math.min(b.end, durMs);
+    if (!texto || !(fim > b.start)) continue;
     n++;
-    linhas.push(String(n), `${srtTempo(b.start)} --> ${srtTempo(b.end)}`, texto, '');
+    linhas.push(String(n), `${srtTempo(b.start)} --> ${srtTempo(fim)}`, texto, '');
   }
   return linhas.join('\r\n');
 }
@@ -313,12 +315,28 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
     itens.push({ trilha: 'headline', arquivo: h.arquivo.nome, start: h.start, end: h.end, fonteDe: 0, velocidade: 1, volume: 0, destino: canvas, recorte: RECORTE_INTEIRO });
   }
 
+  // NADA PASSA DO FIM DO VÍDEO. No render o quadro acaba junto com o avatar,
+  // então a legenda que segura a última palavra (ou a headline "até o fim")
+  // some sozinha. No editor, um item além do fim alongava a timeline com um
+  // rabo preto só com a legenda — o AD exportado saía mais comprido.
+  const recortados = itens.flatMap((it) => {
+    const start = Math.max(0, it.start);
+    const end = Math.min(dur, it.end);
+    if (!(end - start > 1e-3)) return [];
+    if (start === it.start && end === it.end) return [it];
+    const dentroDoItem = <K extends { t: number }>(ks?: K[]) => ks?.map((k) => ({ ...k, t: k.t - (start - it.start) })).filter((k) => k.t >= -1e-6 && k.t <= end - start + 1e-6);
+    return [{ ...it, start, end, fonteDe: it.fonteDe + (start - it.start) * it.velocidade, escala: dentroDoItem(it.escala), opacidade: dentroDoItem(it.opacidade) }];
+  });
+  for (const it of recortados) {
+    if (!it.escala?.length) delete it.escala;
+    if (!it.opacidade?.length) delete it.opacidade;
+  }
+  const usados = new Set(recortados.map((i) => i.arquivo));
   const arquivos = [midia.avatar, ...[...midia.inserts.values()].flatMap((m) => [m.arquivo, ...(m.congelado ? [m.congelado] : [])]),
     ...midia.legendas.map((l) => l.arquivo), ...midia.headlines.map((h) => h.arquivo),
-    ...(itens.some((i) => i.arquivo === midia.preto?.nome) ? [midia.preto!] : []),
-    ...(itens.some((i) => i.arquivo === midia.branco?.nome) ? [midia.branco!] : [])];
+    ...(midia.preto ? [midia.preto] : []), ...(midia.branco ? [midia.branco] : [])].filter((a) => usados.has(a.nome));
   const unicos = [...new Map(arquivos.map((a) => [a.nome, a])).values()];
-  return { nome, W, H, fps, durSec: dur, arquivos: unicos, itens, avisos };
+  return { nome, W, H, fps, durSec: dur, arquivos: unicos, itens: recortados, avisos };
 }
 
 /* ═══════════════════════════ CapCut (draft da versão 9.x) ═══════════════ */
@@ -634,6 +652,7 @@ export function leiaMeDoProjeto(tl: ProjetoTimeline, opts: { pasta: string; temS
     '  2. B-ROLL    — os b-rolls no tempo exato do Pilot (recorte, velocidade e tela dividida)',
     '  3. TRANSICAO — escurecer/luz nas bordas dos b-rolls (opacidade animada)',
     '  4. LEGENDA   — a legenda do Auto Edit em imagens PNG transparentes, uma por mudança',
+    '                 (a palavra já entra pronta: a animação de entrada/saída do bloco fica só no vídeo do Pilot)',
     ...(tl.itens.some((i) => i.trilha === 'headline') ? ['  5. HEADLINE  — o texto fixo por cima, em PNG'] : []),
     '',
     'CAPCUT',

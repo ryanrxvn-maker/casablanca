@@ -11,11 +11,24 @@ import { notFound } from 'next/navigation';
 import { useState } from 'react';
 
 const TASK = 'dev-projeto-editavel';
+const TASK_REAL = 'dev-projeto-real';
+
+function baixar(blob: Blob, nome: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 export default function ProjetoEditavelDev() {
   if (process.env.NODE_ENV === 'production') notFound();
   const [avatar, setAvatar] = useState<File | null>(null);
   const [broll, setBroll] = useState<File | null>(null);
+  const [broll169, setBroll169] = useState<File | null>(null);
+  const [palavras, setPalavras] = useState<File | null>(null);
   const [estado, setEstado] = useState('aguardando arquivos');
 
   async function rodar() {
@@ -60,12 +73,83 @@ export default function ProjetoEditavelDev() {
     }
   }
 
+  /** PÓS-PRODUÇÃO REAL: roda `montarPosProducao` (o mesmo do Pilot) com
+   *  legenda + zoom + headline + 3 inserts, deixa o `guardarProjeto` gravar o
+   *  projeto e baixa o RENDER e o PROJETO — pra comparar quadro a quadro o que
+   *  foi queimado com o que o CapCut monta. O ASR vem de um JSON (sem login). */
+  async function rodarReal() {
+    if (!avatar || !broll || !broll169 || !palavras) return;
+    setEstado('preparando pós-produção real');
+    const fetchOriginal = window.fetch;
+    try {
+      const words = JSON.parse(await palavras.text()) as Array<{ text: string; start: number; end: number }>;
+      window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/api/tipografia/transcribe')) {
+          return new Response(JSON.stringify({ words }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return fetchOriginal(input, init);
+      }) as typeof fetch;
+      const [{ saveBlob, loadBlob, deletePrefix }, projeto, run, pos, ins, caption] = await Promise.all([
+        import('@/lib/zip-store'), import('@/lib/pilot-projeto'), import('@/lib/pilot-projeto-run'),
+        import('@/lib/pilot-pos-producao-run'), import('@/lib/pilot-inserts'),
+        import('@/lib/typography/caption-script'),
+      ]);
+      await deletePrefix(projeto.prefixoDoProjeto(TASK_REAL));
+      await saveBlob('dev-real:brollv', broll, broll.type || 'video/mp4');
+      await saveBlob('dev-real:broll169', broll169, broll169.type || 'video/mp4');
+      const hook = words.slice(0, 23).map((w) => w.text).join(' ');
+      const body = words.slice(23).map((w) => w.text).join(' ');
+      const comum = { focoAvatarY: 0.34, midiaTipo: 'video' as const };
+      const inserts: import('@/lib/pilot-inserts').Insert[] = [
+        { ...comum, id: 'r1', ancora: 'HOOK 1', palavraDe: 4, palavraAte: 22, layout: { tipo: 'cheia' }, transicao: 'escurecer',
+          midiaKey: 'dev-real:broll169', midiaNome: 'BARRAS 16x9', midiaW: 1920, midiaH: 1080 },
+        { ...comum, id: 'r2', ancora: 'BODY 1', palavraDe: 2, palavraAte: 8, layout: { tipo: 'cards', avatar: 'baixo' }, transicao: 'luz',
+          midiaKey: 'dev-real:brollv', midiaNome: 'PROSTATA 3D', midiaW: 720, midiaH: 1280, recorteDe: 1, audio: true, volume: 0.3 },
+        { ...comum, id: 'r3', ancora: 'BODY 1', palavraDe: 14, palavraAte: 19, layout: { tipo: 'faixas', avatar: 'cima' }, transicao: 'misto',
+          midiaKey: 'dev-real:brollv', midiaNome: 'PROSTATA 3D B', midiaW: 720, midiaH: 1280, recorteDe: 4 },
+      ];
+      const filename = 'AD98G1VN - REAL.mp4';
+      const r = await pos.montarPosProducao(avatar, { filename, partesSec: [6.05, 7.95] }, {
+        legenda: { on: true, templateId: caption.BUILTIN_TEMPLATES[0].id },
+        zoom: { on: true, modo: 'inout', forca: 'medio' },
+        partes: [{ label: 'HOOK 1', text: hook }, { label: 'BODY 1', text: body }],
+        idioma: 'pt',
+        templates: caption.BUILTIN_TEMPLATES,
+        ffmpegJaExclusivo: false,
+        inserts,
+        headline: { ...ins.HEADLINE_CFG_DEFAULT, on: true, texto: 'PRÓSTATA: O ERRO QUE TODO HOMEM COMETE', ancoraDe: '', ancoraAte: 'BODY 1' },
+        lerMidia: (key) => loadBlob(key),
+        guardarProjeto: async (roteiro, avatarLimpo) => {
+          const ch = projeto.chavesDoProjeto(TASK_REAL, filename);
+          await saveBlob(ch.base, avatarLimpo, avatarLimpo.type || 'video/mp4');
+          await saveBlob(ch.roteiro, new Blob([JSON.stringify({ ...roteiro, genId: 'dev' })], { type: 'application/json' }), 'application/json');
+        },
+        onEtapa: setEstado,
+      });
+      if (!r.blob) throw new Error(`render não saiu: ${r.avisos.join(' | ')}`);
+      baixar(r.blob, 'RENDER - AD98G1VN - REAL.mp4');
+      const projetos = await run.projetosDaTask(TASK_REAL, 'dev');
+      const p = await run.exportarProjetosEditaveis({ projetos, nomeBase: 'AD98 REAL', destino: null, onEtapa: setEstado });
+      if (!p.zip) throw new Error('sem zip do projeto');
+      baixar(p.zip.blob, p.zip.nome);
+      setEstado(`pronto-real: render ${(r.blob.size / 1e6).toFixed(1)}MB · ${p.pastas.join(', ')} · avisos render: ${r.avisos.join(' | ') || 'nenhum'} · avisos projeto: ${p.avisos.join(' | ') || 'nenhum'}`);
+    } catch (e) {
+      setEstado(`erro-real: ${(e as Error)?.message || e}`);
+    } finally {
+      window.fetch = fetchOriginal;
+    }
+  }
+
   return (
     <main style={{ padding: 24, fontFamily: 'sans-serif', color: '#eee', background: '#111', minHeight: '100vh' }}>
       <h1>Projeto editável — bancada</h1>
       <p><label>avatar <input data-testid="avatar" type="file" accept="video/*" onChange={(e) => setAvatar(e.target.files?.[0] || null)} /></label></p>
       <p><label>b-roll <input data-testid="broll" type="file" accept="video/*" onChange={(e) => setBroll(e.target.files?.[0] || null)} /></label></p>
-      <button type="button" data-testid="rodar" onClick={() => void rodar()} disabled={!avatar || !broll}>Exportar projeto de teste</button>
+      <p><label>b-roll 16:9 <input data-testid="broll169" type="file" accept="video/*" onChange={(e) => setBroll169(e.target.files?.[0] || null)} /></label></p>
+      <p><label>palavras do ASR (.json) <input data-testid="palavras" type="file" accept="application/json" onChange={(e) => setPalavras(e.target.files?.[0] || null)} /></label></p>
+      <button type="button" data-testid="rodar" onClick={() => void rodar()} disabled={!avatar || !broll}>Exportar projeto de teste</button>{' '}
+      <button type="button" data-testid="rodar-real" onClick={() => void rodarReal()} disabled={!avatar || !broll || !broll169 || !palavras}>Pós-produção real + projeto</button>
       <p data-testid="estado">{estado}</p>
     </main>
   );

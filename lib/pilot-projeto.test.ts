@@ -168,6 +168,23 @@ const zoomXml = cv.find((c) => c.nome === 'avatar.mp4')!;
 const whensZoom = [...zoomXml.corpo.matchAll(/<when>(\d+)<\/when>/g)].map((m) => +m[1]);
 ok(whensZoom[0] === zoomXml.dentro && whensZoom.at(-1)! <= zoomXml.fora, 'Premiere: keyframes do zoom dentro do in/out do avatar');
 
+// FIM DO VÍDEO: a legenda que segura a última palavra e a headline "até o fim"
+// passavam do avatar — no CapCut a timeline ficava mais comprida, com rabo preto.
+const png = (nome: string): ArquivoProjeto => ({ nome, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false });
+const tlFim = montarTimeline('AD47G1VN', roteiro, {
+  ...midia,
+  legendas: [{ arquivo: png('legenda_0001.png'), start: 19.5, end: 20.7 }, { arquivo: png('legenda_0002.png'), start: 20.2, end: 21 }],
+  headlines: [{ arquivo: png('headline_1.png'), start: 0, end: 25 }],
+}, W, H);
+const legFim = tlFim.itens.filter((i) => i.trilha === 'legenda');
+ok(legFim.length === 1 && perto(legFim[0].end, 20) && perto(tlFim.itens.find((i) => i.trilha === 'headline')!.end, 20)
+  && !tlFim.arquivos.some((a) => a.nome === 'legenda_0002.png') && tlFim.itens.every((i) => i.end <= 20 + 1e-9),
+  'nada passa do fim do vídeo: legenda/headline cortadas no fim, item todo depois do fim sai (e o PNG dele também)');
+const ccFim = JSON.parse(montarDraftCapCut(tlFim, { pasta: 'X', agoraUs: 1, novoId: ids }).conteudo);
+ok(ccFim.duration === 20_000_000, 'CapCut: duração do projeto = duração do vídeo (sem rabo preto)');
+ok(srtDaLegenda([{ id: 'z', start: 19500, end: 20700, words: [{ text: 'fim', start: 19500, end: 20700 }] }], 20000).includes('00:00:20,000'),
+  'SRT: último bloco termina no fim do vídeo');
+
 const leia = leiaMeDoProjeto(tl, { pasta: 'AD47G1VN - PILOT', temSrt: true });
 ok(leia.includes('CAPCUT') && leia.includes('PREMIERE') && leia.includes('.srt'), 'LEIA-ME explica CapCut, Premiere e o SRT');
 

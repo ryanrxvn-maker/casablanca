@@ -239,7 +239,7 @@ async function arquivosDoProjeto(
       const blocks = roteiro.legenda.blocks as import('./typography/engine').Block[];
       const style = roteiro.legenda.style as import('./typography/engine').StyleState;
       const preset = presets.getPreset(style.presetId);
-      srt = srtDaLegenda(roteiro.legenda.blocks);
+      srt = srtDaLegenda(roteiro.legenda.blocks, roteiro.durSec > 0 ? roteiro.durSec * 1000 : Infinity);
       const intervalos = intervalosDaLegenda(roteiro.legenda.blocks);
       let anterior: { assinatura: string; item: (typeof legendas)[number] } | null = null;
       let k = 0;
