@@ -29,7 +29,7 @@ import {
   VideoUpload,
   FONT_STACK,
   EMOJI_RE,
-  toUnified,
+  emojiSrcs,
   type FakeModel,
 } from './shared';
 import { CommentBuilder } from './builder';
@@ -90,9 +90,17 @@ const emojiImgs = new Map<string, HTMLImageElement>();
 function emojiImg(e: string): HTMLImageElement | null {
   let img = emojiImgs.get(e);
   if (!img) {
-    img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = `https://cdn.jsdelivr.net/npm/emoji-datasource-apple/img/apple/64/${toUnified(e)}.png`;
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    // arquivo que não existe (forma sem/com VS16) → próxima URL candidata
+    const srcs = emojiSrcs(e, 'apple');
+    let i = 0;
+    im.onerror = () => {
+      i += 1;
+      if (i < srcs.length) im.src = srcs[i];
+    };
+    im.src = srcs[0];
+    img = im;
     emojiImgs.set(e, img);
   }
   return img.complete && img.naturalWidth > 0 ? img : null;

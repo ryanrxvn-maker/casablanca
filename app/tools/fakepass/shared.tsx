@@ -110,13 +110,66 @@ export type FakeModel<S = any> = {
 // quando o celular está em Android. Assim o print sai com o emoji CERTO em
 // qualquer máquina, e o html2canvas rasteriza as imagens (CORS liberado no
 // jsdelivr). O nome do arquivo é o codepoint em hex (com hífen p/ sequências).
+//
+// O padrão pega o emoji INTEIRO (cliente 06.10: "🙏🏻" saía 🙏 + um quadrado de
+// pele solto — o modificador de tom não é Extended_Pictographic):
+//  • bandeira (par de regional indicators) e keycap (1️⃣ #️⃣);
+//  • pictograma + VS16/tom de pele/tags (🏴 da Inglaterra), encadeado por ZWJ
+//    (👩🏾‍💻, 🙋🏻‍♀️, 🫱🏻‍🫲🏿);
+//  • © ® ™ SEM VS16 ficam como TEXTO (rodapé "© 2025" — no celular também é texto).
+// Um grupo de captura só: o motor da live usa o mesmo padrão em exec.
 export const EMOJI_RE =
-  /(\p{Regional_Indicator}\p{Regional_Indicator}|\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic})*)/gu;
+  /(\p{Regional_Indicator}\p{Regional_Indicator}|[#*0-9]️?⃣|(?![©®™](?!️))\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])*(?:‍(?:\p{Extended_Pictographic}|\p{Emoji_Component})(?:️|\p{Emoji_Modifier})*)*)/gu;
 
 export type EmojiSet = 'apple' | 'google';
 
-export function toUnified(emoji: string) {
-  return [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join('-');
+const emojiUrl = (set: EmojiSet, unified: string) =>
+  `https://cdn.jsdelivr.net/npm/emoji-datasource-${set}/img/${set}/64/${unified}.png`;
+
+/**
+ * URLs candidatas, em ordem. O datasource só tem o arquivo da forma "qualificada"
+ * (às vezes sem VS16, às vezes com) e nem todo emoji existe nos dois sets — "♥"
+ * sem VS16 não existe no Google, "♀️" sozinho não existe no Apple. Tenta a forma
+ * digitada, sem VS16, com VS16 e, por último, o outro set.
+ */
+export function emojiSrcs(emoji: string, set: EmojiSet = 'apple'): string[] {
+  // nome do arquivo = codepoints em hex com 4 dígitos no mínimo ("0031-fe0f-20e3")
+  const cps = [...emoji].map((c) => c.codePointAt(0)!);
+  const hex = (a: number[]) => a.map((n) => n.toString(16).padStart(4, '0')).join('-');
+  const noVs = cps.filter((n) => n !== 0xfe0f);
+  const forms = [hex(cps), hex(noVs)];
+  if (noVs.length === cps.length && cps.length > 0) forms.push(hex([cps[0], 0xfe0f, ...cps.slice(1)]));
+  const uniq = Array.from(new Set(forms));
+  const other: EmojiSet = set === 'apple' ? 'google' : 'apple';
+  return [...uniq.map((u) => emojiUrl(set, u)), emojiUrl(other, uniq[0])];
+}
+
+const EMOJI_IMG_STYLE: CSSProperties = {
+  width: '1.15em',
+  height: '1.15em',
+  display: 'inline-block',
+  verticalAlign: '-0.22em',
+  objectFit: 'contain',
+  margin: '0 0.02em',
+};
+
+/** <img> do emoji que cai pra próxima URL candidata se o arquivo não existir;
+ *  sem nenhuma, mostra o caractere (melhor que um buraco no print). */
+function EmojiImg({ emoji, set }: { emoji: string; set: EmojiSet }) {
+  const [i, setI] = useState(0);
+  const srcs = emojiSrcs(emoji, set);
+  if (i >= srcs.length) return <>{emoji}</>;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- PNG do CDN de emoji, rasterizado pelo html2canvas
+    <img
+      src={srcs[i]}
+      alt={emoji}
+      crossOrigin="anonymous"
+      draggable={false}
+      onError={() => setI((v) => v + 1)}
+      style={EMOJI_IMG_STYLE}
+    />
+  );
 }
 
 /** String → nodes, trocando cada emoji por <img> Apple/Google. */
@@ -131,16 +184,8 @@ export function emojify(text: string, set: EmojiSet = 'apple'): ReactNode {
     if (m.index === re.lastIndex) re.lastIndex += 1;
     if (m.index > last) out.push(text.slice(last, m.index));
     const emoji = m[0];
-    out.push(
-      <img
-        key={`e${k}`}
-        src={`https://cdn.jsdelivr.net/npm/emoji-datasource-${set}/img/${set}/64/${toUnified(emoji)}.png`}
-        alt={emoji}
-        crossOrigin="anonymous"
-        draggable={false}
-        style={{ width: '1.15em', height: '1.15em', display: 'inline-block', verticalAlign: '-0.22em', objectFit: 'contain', margin: '0 0.02em' }}
-      />,
-    );
+    // key com o emoji: trocar o emoji remonta o <img> (zera a cadeia de fallback)
+    out.push(<EmojiImg key={`e${k}-${set}-${emoji}`} emoji={emoji} set={set} />);
     k += 1;
     last = m.index + emoji.length;
   }
@@ -199,6 +244,9 @@ export function FitText({
 
 /* ───────────────────────── Export (PNG) ───────────────────────── */
 
+/** GIF 1×1 que o html2canvas 1.4.1 usa na sonda de linha de base (SMALL_IMAGE). */
+const H2C_PROBE_GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 /**
  * Rasteriza um nó do DOM em PNG NÍTIDO e fiel à prévia.
  *
@@ -206,8 +254,8 @@ export function FitText({
  * CARREGADA na página, então a MESMA fonte da prévia (Inter) sai no download. Os
  * motores foreignObject (snapdom/modern-screenshot) sairiam pixel-a-pixel porque
  * quem desenha é o próprio navegador, mas no CACHE FRIO (o 1º export do usuário)
- * levam 40-77s — inviável. O html2canvas tem um pequeno drift vertical sub-pixel,
- * mitigado pelo crop-guard (abaixo) e por line-heights explícitos nos textos-chave.
+ * levam 40-77s — inviável. O "texto baixo" que o html2canvas tinha era a sonda de
+ * linha de base quebrada pelo reset do Tailwind — corrigida na raiz (h2cFix).
  *
  * `targetW` = largura final do PNG; scale = targetW/refW (stageW). Download por
  * Object URL (data URL trunca arquivo grande).
@@ -216,8 +264,8 @@ export async function renderNodeToCanvas(
   node: HTMLElement,
   targetW: number,
   refW?: number,
-  /** Ajuste extra aplicado a CADA clone (todos os renders, sondas e final) —
-   *  usado pelo export de vídeo pra assar a base com a tinta animada oculta. */
+  /** Ajuste extra aplicado ao clone que o html2canvas desenha — usado pelo
+   *  export de vídeo pra assar a base com a tinta animada oculta. */
   onCloneExtra?: (root: HTMLElement) => void,
 ): Promise<HTMLCanvasElement> {
   // Fontes prontas ANTES de capturar: se a Inter não terminou de carregar, o
@@ -232,125 +280,77 @@ export async function renderNodeToCanvas(
   const prevZoom = zoomEl ? zoomEl.style.zoom : '';
   if (zoomEl) zoomEl.style.zoom = '1';
 
-  // ── Crop-guard do html2canvas ──
-  // O html2canvas erra a posição vertical do texto por ~1-2px na hora de desenhar;
-  // em texto com `overflow:hidden`/`clip` isso corta as letras no PNG (topo do nome
-  // do header/@usuário/chyron; base da última linha do line-clamp). A correção mais
-  // ROBUSTA: pro texto que CABE (não estoura a caixa), simplesmente REMOVEMOS o clip
-  // (`overflow: visible`) durante a captura — como não há nada pra cortar, o
-  // resultado é IDÊNTICO à prévia, só que sem o corte-fantasma do html2canvas. Pro
-  // texto que REALMENTE estoura (nome enorme etc.), deixamos o clip (mantém o "…";
-  // caso raro). NÃO mexemos em padding/margin — o html2canvas não honra margem
-  // negativa direito e isso desalinhava o texto. Restauramos no finally.
-  const cropGuards: Array<() => void> = [];
-  // ── Gap-shim do html2canvas ──
-  // O html2canvas 1.4.1 IGNORA `gap`/`column-gap`/`row-gap` de flex → os filhos saem
-  // GRUDADOS no PNG (ex.: os itens do menu dos sites viram "g1GloboPolítica…"), enquanto
-  // na prévia o navegador respeita o gap. Correção: em cada flex COM gap, ZERAMOS o gap e
-  // passamos o MESMO espaçamento pra MARGEM dos filhos (margin-right em linha,
-  // margin-bottom em coluna) — que o html2canvas honra. O navegador renderiza igualzinho
-  // (margem = gap), então prévia e download batem. Desfazemos tudo no finally.
-  const gapShims: Array<() => void> = [];
-  const applyGapShims = () => {
-    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
-      const cs = getComputedStyle(el);
-      if (cs.display !== 'flex' && cs.display !== 'inline-flex') return;
-      // space-between/around DISTRIBUI a folga: aí a margem duplicaria o espaçamento.
-      // -reverse inverteria o lado da margem — casos raros aqui, então pulamos.
-      if (cs.justifyContent.startsWith('space-')) return;
-      if (cs.flexDirection.endsWith('reverse')) return;
-      const col = cs.flexDirection === 'column';
-      const gap = parseFloat(col ? cs.rowGap : cs.columnGap) || 0;
-      if (gap <= 0) return;
-      const kids = Array.from(el.children).filter(
-        (k) => getComputedStyle(k as HTMLElement).display !== 'none',
-      ) as HTMLElement[];
-      if (kids.length < 2) return;
-      const est = el.style;
-      const prevG = { g: est.gap, cg: est.columnGap, rg: est.rowGap };
-      if (col) est.rowGap = '0px';
-      else est.columnGap = '0px';
-      gapShims.push(() => { est.gap = prevG.g; est.columnGap = prevG.cg; est.rowGap = prevG.rg; });
-      const prop = col ? 'marginBottom' : 'marginRight';
-      kids.forEach((kid, i) => {
-        if (i === kids.length - 1) return; // último não recebe (não altera a largura total)
-        const cur = parseFloat(getComputedStyle(kid)[prop as any]) || 0;
-        const prev = kid.style[prop as any];
-        (kid.style as any)[prop] = `${cur + gap}px`;
-        gapShims.push(() => { (kid.style as any)[prop] = prev; });
-      });
-    });
-  };
-  // Text-nodes SOLTOS de containers MISTOS (elemento + texto, ex.: "● LIVE") não são
-  // folhas puras, então a coleta de alvos os pularia. Aqui os envolvemos num <span>
-  // inline (layout-neutro) pra virarem folhas compensáveis; desfazemos no finally.
-  const textUnwrap: Array<() => void> = [];
-  const wrapMixedText = () => {
-    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
-      const kids = Array.from(el.childNodes);
-      if (!kids.some((n) => n.nodeType === 1)) return; // folha pura: já é tratada
-      if (getComputedStyle(el).writingMode !== 'horizontal-tb') return;
-      for (const n of kids) {
-        if (n.nodeType !== 3 || !(n.textContent || '').trim()) continue;
-        // Texto que ATRAVESSA linhas não vira chip: o html2canvas EMBARALHA
-        // <span> inline multi-linha (linhas desenhadas umas sobre as outras).
-        // O chip compensável ("● LIVE") é de 1 linha por natureza; fluxo que
-        // quebra é tratado pelo flow-block (alvo no PAI, sem wrap).
-        const rg = el.ownerDocument.createRange();
-        rg.selectNodeContents(n);
-        if (rg.getClientRects().length > 1) continue;
-        const span = el.ownerDocument.createElement('span');
-        el.replaceChild(span, n);
-        span.appendChild(n);
-        textUnwrap.push(() => {
-          if (span.parentNode === el) el.replaceChild(n, span);
-        });
-      }
-    });
-  };
   // ── Ellipsis-shim do html2canvas ──
   // O html2canvas NÃO desenha o "…" do `text-overflow: ellipsis`: texto de 1
   // linha que ESTOURA a caixa sai FATIADO no limite (letra cortada ao meio) no
   // PNG, enquanto a prévia termina em reticências — "texto comido" no download.
-  // Correção: pro texto PURO (sem filhos-elemento) com nowrap+ellipsis que
-  // realmente estoura, calculamos AQUI a substring que cabe com "…" (medida com
-  // a MESMA fonte via canvas) e trocamos o texto SÓ NO CLONE de cada render —
-  // o PNG sai com as mesmas reticências da prévia e nenhuma letra fatiada.
+  // Correção: pro texto PURO (só nós de texto) com nowrap+ellipsis que realmente
+  // estoura, achamos AQUI o maior pedaço que cabe com "…" e trocamos o texto SÓ
+  // NO CLONE do render. As larguras vêm do PRÓPRIO navegador (Range sobre o texto
+  // assentado: já com text-transform, letter-spacing e o arredondamento dele) —
+  // a medida por canvas errava a letra do corte (nomes MAIÚSCULOS da CBS NY e da
+  // figurinha de localização) e scroll/clientWidth, inteiros, deixavam passar
+  // texto que estoura por fração de px (124,92 numa caixa de 124,63).
   const ellipEls: HTMLElement[] = [];
   const computeEllipsisShims = () => {
-    const meas = document.createElement('canvas').getContext('2d');
-    if (!meas) return;
     node.querySelectorAll<HTMLElement>('*').forEach((el) => {
       const kids = Array.from(el.childNodes);
-      if (kids.some((n) => n.nodeType === 1)) return; // misto (emoji <img> etc.): fora
+      if (!kids.length || kids.some((n) => n.nodeType !== 3)) return; // misto (emoji <img> etc.): fora
       const text = el.textContent || '';
       if (!text.trim()) return;
       const cs = getComputedStyle(el);
       if (cs.whiteSpace !== 'nowrap' || cs.textOverflow !== 'ellipsis') return;
       if (cs.overflowX !== 'hidden' && cs.overflowX !== 'clip') return;
-      if (el.scrollWidth <= el.clientWidth + 1) return;
-      meas.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-      if (cs.letterSpacing !== 'normal') (meas as any).letterSpacing = cs.letterSpacing;
       const avail =
-        el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-      const chars = Array.from(text); // por code point (não fatia emoji/acento)
-      let lo = 0;
-      let hi = chars.length;
+        el.getBoundingClientRect().width -
+        (parseFloat(cs.paddingLeft) || 0) -
+        (parseFloat(cs.paddingRight) || 0) -
+        (parseFloat(cs.borderLeftWidth) || 0) -
+        (parseFloat(cs.borderRightWidth) || 0);
+      // fronteiras por code point (não fatia emoji/acento), atravessando os nós
+      const ends: Array<[Text, number]> = [];
+      for (const tn of kids as Text[]) {
+        let o = 0;
+        for (const ch of Array.from(tn.data)) {
+          o += ch.length;
+          ends.push([tn, o]);
+        }
+      }
+      const rg = document.createRange();
+      const widthTo = (i: number) => {
+        rg.setStart(kids[0], 0);
+        rg.setEnd(ends[i][0], ends[i][1]);
+        return rg.getBoundingClientRect().width;
+      };
+      if (!(widthTo(ends.length - 1) > avail + 0.01)) return; // cabe: o Chrome não põe "…"
+      // largura do "…" na fonte do elemento, SEM letter-spacing (o Chrome não soma
+      // espaçamento depois do "…": com ele, "ALLEN DE…" da prévia virava "ALLEN D…")
+      const probe = document.createElement('span');
+      probe.textContent = '…';
+      probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;letter-spacing:0';
+      el.appendChild(probe);
+      const ell = probe.getBoundingClientRect().width;
+      el.removeChild(probe);
+      let lo = 0; // quantos code points cabem antes do "…"
+      let hi = ends.length;
       while (lo < hi) {
         const mid = Math.ceil((lo + hi) / 2);
-        const w = meas.measureText(chars.slice(0, mid).join('').replace(/\s+$/, '') + '…').width;
-        if (w <= avail) lo = mid;
+        if (widthTo(mid - 1) + ell <= avail + 0.01) lo = mid;
         else hi = mid - 1;
       }
-      if (lo <= 0 || lo >= chars.length) return;
-      el.dataset.fpEllip = chars.slice(0, lo).join('').replace(/\s+$/, '') + '…';
+      if (lo <= 0 || lo >= ends.length) return;
+      // o Chrome NÃO apara o espaço antes do "…" ("aumentando …") — igual aqui
+      el.dataset.fpEllip = Array.from(text).slice(0, lo).join('') + '…';
+      // largura TRAVADA no clone: caixa que se ajusta ao conteúdo (a pílula da
+      // localização) encolhia com o texto mais curto e saía mais estreita
+      el.dataset.fpEllipW = String(el.getBoundingClientRect().width);
       ellipEls.push(el);
     });
   };
   // ── Vídeo → snapshot ──
   // O html2canvas NÃO desenha <video> (a área sairia vazia no PNG). Antes de
   // capturar, cada vídeo visível vira um SNAPSHOT do frame atual, já recortado
-  // em COVER na proporção da caixa; no clone de cada render o <video> é trocado
+  // em COVER na proporção da caixa; no clone do render o <video> é trocado
   // por um <img> desse snapshot — o PNG sai idêntico à prévia. Exceção: vídeo
   // marcado com data-fp-vidhole="1" (export de .webm/.mp4) fica como BURACO
   // transparente — o motor de vídeo compõe o frame REAL por baixo da base.
@@ -392,10 +392,41 @@ export async function renderNodeToCanvas(
     });
   };
 
-  const applyEllipsisInClone = (root: HTMLElement) => {
+  // Ajustes aplicados SÓ no clone que o html2canvas desenha (a prévia não muda):
+  // vídeo→snapshot, reticências, caixa inline atômica e line-clamp.
+  const applyCloneShims = (root: HTMLElement) => {
     applyVideoShimsInClone(root);
     root.querySelectorAll<HTMLElement>('[data-fp-ellip]').forEach((el) => {
       el.textContent = el.dataset.fpEllip || el.textContent;
+      const w = parseFloat(el.dataset.fpEllipW || '');
+      if (w > 0) {
+        el.style.boxSizing = 'border-box';
+        el.style.width = `${w}px`;
+        el.style.minWidth = `${w}px`;
+        el.style.maxWidth = `${w}px`;
+        el.style.flex = '0 0 auto';
+      }
+    });
+    // ── Caixa inline ATÔMICA pintada como unidade ──
+    // O html2canvas não pinta inline-block/inline-flex como unidade (o navegador
+    // pinta): os filhos-bloco dela (itens do flex) caem na fase de blocos do
+    // contexto e o FUNDO da caixa vem DEPOIS, por cima — o logo "BandNEWS" (caixa
+    // azul inline-flex com 2 spans) sumia inteiro no PNG. `position: relative`
+    // sem deslocamento (layout idêntico) faz o html2canvas abrir um contexto pra
+    // ela: fundo primeiro, conteúdo por cima, como no navegador.
+    const cloneWin = root.ownerDocument.defaultView || window;
+    root.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      if (!el.firstElementChild) return;
+      const cs = cloneWin.getComputedStyle(el);
+      if (!/^inline-(block|flex|grid|table)$/.test(cs.display) || cs.position !== 'static') return;
+      const bgm = cs.backgroundColor.match(/rgba?\(([^)]+)\)/);
+      const bgAlpha = bgm ? (bgm[1].split(',').length < 4 ? 1 : parseFloat(bgm[1].split(',')[3])) : 0;
+      const paints =
+        bgAlpha > 0.01 ||
+        cs.backgroundImage !== 'none' ||
+        cs.boxShadow !== 'none' ||
+        ['Top', 'Right', 'Bottom', 'Left'].some((s) => parseFloat((cs as any)[`border${s}Width`]) > 0);
+      if (paints) el.style.position = 'relative';
     });
     // ── Line-clamp → caixa dura ──
     // O html2canvas NÃO entende `display:-webkit-box` + `-webkit-line-clamp`
@@ -422,714 +453,71 @@ export async function renderNodeToCanvas(
     });
   };
 
-  const applyCropGuards = () => {
-    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
-      const cs = getComputedStyle(el);
-      const clips =
-        cs.overflowX === 'hidden' ||
-        cs.overflowX === 'clip' ||
-        cs.overflowY === 'hidden' ||
-        cs.overflowY === 'clip';
-      if (!clips) return;
-      // O conteúdo CABE no layout? (scroll<=client) → o clip não corta NADA de layout.
-      // Mesmo assim o html2canvas pode comer TINTA: a compensação vertical empurra o
-      // glifo pra CIMA e, num container overflow:hidden de line-box justa (ex.: a faixa
-      // de itens do menu dos sites), o TOPO das letras/acentos sai da caixa e é CORTADO
-      // no PNG — "palavra comida" que não existe na prévia (que não tem a compensação).
-      // Como cabe, overflow:visible é visualmente idêntico à prévia, só que sem o corte
-      // do topo do glifo. Se ESTOURA de verdade (line-clamp/"…"/nome enorme), mantém o
-      // clip. Vale pra QUALQUER container (texto direto OU filhos), não só folhas.
-      const fits =
-        el.scrollWidth <= el.clientWidth + 1 &&
-        el.scrollHeight <= el.clientHeight + 1;
-      if (!fits) return;
-      // Máscara DELIBERADA de forma (avatar redondo, pílula, thumb arredondado) usa
-      // border-radius grande pra recortar as QUINAS de uma mídia/fundo — desfazer o clip
-      // revelaria os cantos. border-radius desprezível (≤2px) = clip incidental → seguro.
-      const br = Math.max(
-        parseFloat(cs.borderTopLeftRadius) || 0,
-        parseFloat(cs.borderTopRightRadius) || 0,
-        parseFloat(cs.borderBottomLeftRadius) || 0,
-        parseFloat(cs.borderBottomRightRadius) || 0,
-      );
-      if (br > 2) return;
-      const st = el.style;
-      const prev = { o: st.overflow, ox: st.overflowX, oy: st.overflowY };
-      st.overflow = 'visible';
-      st.overflowX = 'visible';
-      st.overflowY = 'visible';
-      cropGuards.push(() => {
-        st.overflow = prev.o;
-        st.overflowX = prev.ox;
-        st.overflowY = prev.oy;
-      });
-    });
-  };
-
   let canvas: HTMLCanvasElement | null = null;
-  let vcompCleanup: (() => void) | null = null;
-  // render CRU da sondagem: se NENHUM alvo precisou de correção, ele já é
-  // idêntico ao render final (mesmos shims, sem transform) → reaproveitamos e
-  // economizamos um html2canvas inteiro (export mais rápido).
-  let probeRaw: HTMLCanvasElement | null = null;
+  // ── RAIZ do "texto BAIXO no PNG" (06.10) ──
+  // O html2canvas acha a linha de base de cada fonte com uma sonda escondida no
+  // <body>: um texto + um GIF de 1px `vertical-align: baseline`. O reset do
+  // Tailwind (`img { display: block }`) jogava esse GIF pra LINHA DE BAIXO e a
+  // linha de base saía ~0,4em+2px abaixo da real (medido: Inter 13px → 8px,
+  // Georgia 36px → 17px) — todo texto do print descia no download. A calibração
+  // por sonda que morava aqui (07.07→06.10: 4-5 renders, medição de tinta por
+  // fonte) só compensava isso, com viés de alguns px por fonte. Esta regra vale só
+  // pro GIF da sonda (pelo src exato) e só durante o export: inline de novo e
+  // margin-bottom 1px, que anula o "+2" da conta dele → base EXATA do navegador.
+  const h2cFix = document.createElement('style');
+  h2cFix.setAttribute('data-fp-h2c-baseline', '');
+  h2cFix.textContent = `img[src="${H2C_PROBE_GIF}"]{display:inline!important;margin-bottom:1px!important}`;
+  document.head.appendChild(h2cFix);
   try {
     // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
-    // em branco no canvas.
-    await Promise.all(
-      Array.from(node.querySelectorAll('img')).map((img) =>
-        img.complete && img.naturalWidth > 0
-          ? Promise.resolve()
-          : new Promise<void>((res) => {
-              img.addEventListener('load', () => res(), { once: true });
-              img.addEventListener('error', () => res(), { once: true });
-            }),
-      ),
-    );
+    // em branco no canvas. Só as que AINDA carregam: uma que já falhou está
+    // `complete` e esperar o evento dela travava o download pra sempre. Em
+    // rodadas porque o emoji que falha troca de URL (EmojiImg) no próximo render
+    // e volta a carregar; teto por rodada pra rede pendurada não travar.
+    for (let round = 0; round < 5; round++) {
+      const loading = Array.from(node.querySelectorAll('img')).filter((img) => !img.complete);
+      if (!loading.length) break;
+      await Promise.race([
+        Promise.all(
+          loading.map(
+            (img) =>
+              new Promise<void>((res) => {
+                img.addEventListener('load', () => res(), { once: true });
+                img.addEventListener('error', () => res(), { once: true });
+              }),
+          ),
+        ),
+        new Promise((r) => setTimeout(r, 15000)),
+      ]);
+      await new Promise((r) => setTimeout(r, 60));
+    }
     await new Promise((r) => setTimeout(r, 60));
 
     computeVideoShims();
     computeEllipsisShims();
     computeClampShims();
-    applyCropGuards();
-    applyGapShims();
-    wrapMixedText();
 
-    // ── Compensação do bug de CENTRALIZAÇÃO VERTICAL do html2canvas ──
-    // O html2canvas desenha TEXTO verticalmente centralizado BAIXO demais (ancora o
-    // glifo perto do fundo da caixa): chip de 1 linha centralizado por flex
-    // `align-items:center` OU manchete multi-linha (FitText) sai deslocado pra baixo
-    // no PNG — no navegador fica no centro. (Bolha de chat NÃO sofre: flui do topo.)
-    // O erro é grande (medido: +6 a +13px) e cresce com a fonte, então NÃO dá pra
-    // acertar por fórmula.
-    //
-    // Correção por CALIBRAÇÃO MEDIDA (zero número mágico): 2 renders de sondagem —
-    // A (cru) e B (mesma árvore com a TINTA escondida, `color:transparent`). O DIFF
-    // A−B ISOLA a tinta de cada alvo e CANCELA os fundos, inclusive uma banda de MESMA
-    // cor que o texto (ex.: ticker preto embaixo de manchete preta — que enganava o
-    // scan antigo). Medimos onde a tinta de CADA alvo caiu vs onde o navegador a
-    // centraliza, gravamos o erro exato em data-fp-vcal, e o render FINAL sobe o glifo
-    // por translateY(−erro), só no clone (a prévia não muda). Texto que o html2canvas
-    // já acerta mede ~0 → não é tocado (auto-limitado). Em fonte maiúscula o
-    // centro-da-tinta ≈ centro-do-range (δ≈0 pela métrica da Inter), então alvejar o
-    // centro do range casa com a prévia.
-    const baseW = refW ?? node.getBoundingClientRect().width;
-    const scale = targetW / baseW;
-    const nodeRect = node.getBoundingClientRect();
-
-    // ALVOS = folhas de texto horizontais e não-transformadas. `stops` = contextos
-    // onde o translateY vertical não vale (writing-mode VERTICAL ou TRANSFORM — eixo
-    // errado). Coluna flex NÃO é stop: o wrap num <span> inline-block move só o glifo,
-    // não colapsa a coluna. `mode` decide como o render final sobe o glifo:
-    //  • 'fit'    → manchete FitText: translateY DIRETO (sem fundo, não re-quebra);
-    //  • 'block'  → multi-linha comum: <span> display:block (preserva a quebra);
-    //  • 'inline' → chip de 1 linha: <span> inline-block (fundo/pílula fica no lugar).
-    // `suspicious` (multi-linha, banda align-center, ou line-box folgado) decide se
-    // vale a pena pagar a sondagem; medimos TODOS os alvos, mas texto que o html2canvas
-    // já acerta mede ~0 e não é tocado.
-    type VMode = 'fit' | 'block' | 'inline';
-    type VTarget = { el: HTMLElement; cx0: number; cx1: number; cy: number; half: number; up: number; down: number; multi: boolean; mode: VMode };
-    const targets: VTarget[] = [];
-    // pais de FLUXO INLINE MISTO multi-linha — compensados como BLOCO (ver abaixo)
-    const flowParents = new Set<HTMLElement>();
-    const flowTargets: VTarget[] = [];
-    let anySuspicious = false;
-    const allEls = Array.from(node.querySelectorAll<HTMLElement>('*'));
-    const bands = new Set<HTMLElement>();
-    const stops = new Set<HTMLElement>();
-    // Um transform SÓ atrapalha a compensação vertical se mexe no eixo Y do glifo —
-    // rotação, skewY ou flip (matriz com b≠0 ou d≠1). skewX/translate/scaleX preservam
-    // o eixo vertical: o translateY(−erro) continua subindo reto (num par
-    // skewX(-θ)/skewX(θ) — banner paralelogramo — os cisalhamentos ainda se cancelam).
-    const axisUnsafeTf = (tf: string): boolean => {
-      if (!tf || tf === 'none') return false;
-      const mm = /matrix\(([^)]+)\)/.exec(tf);
-      if (!mm) return true; // matrix3d/desconhecido → não arrisca
-      const p = mm[1].split(',').map((v) => parseFloat(v));
-      return Math.abs(p[1]) > 0.02 || Math.abs(p[3] - 1) > 0.02;
-    };
-    for (const a of allEls) {
-      const cs = getComputedStyle(a);
-      const isFlex = cs.display.includes('flex');
-      const isCol = isFlex && (cs.flexDirection === 'column' || cs.flexDirection === 'column-reverse');
-      const vertical = cs.writingMode !== 'horizontal-tb';
-      if (vertical || axisUnsafeTf(cs.transform)) stops.add(a);
-      if (vertical) continue;
-      if ((isFlex || cs.display.includes('grid')) && !isCol && cs.alignItems === 'center') bands.add(a);
-    }
-    for (const el of allEls) {
-      const kids = Array.from(el.childNodes);
-      if (kids.some((n) => n.nodeType === 1)) continue; // só FOLHAS
-      if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) continue;
-      const cs = getComputedStyle(el);
-      if (cs.writingMode !== 'horizontal-tb') continue;
-      if (axisUnsafeTf(cs.transform)) continue;
-      // dentro de um stop (vertical/rotação/skewY)? → eixo errado, pula.
-      let inStop = false;
-      for (let a: HTMLElement | null = el.parentElement; a && a !== node.parentElement; a = a.parentElement) {
-        if (stops.has(a)) { inStop = true; break; }
-      }
-      if (inStop) continue;
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const gr = range.getBoundingClientRect();
-      if (!gr.height || gr.width < 3) continue;
-      // Texto CORTADO pela borda do palco (ex.: parágrafo no fold do quadro
-      // 16:9): a tinta visível é parcial — a sonda mediria o centro da parte
-      // que sobrou e "corrigiria" pro lugar errado. Fica como está: o corte é
-      // o MESMO da prévia. (Mesma guarda que os flow-blocks já tinham.)
-      if (gr.bottom > nodeRect.bottom - 2 || gr.top < nodeRect.top + 2) continue;
-      const fs = parseFloat(cs.fontSize) || 14;
-      // FLUXO INLINE MISTO que quebra em VÁRIAS linhas (comentário do IG com @menção/
-      // #hashtag/emoji no meio; legenda de post): o pai tem 2+ pedaços de texto inline
-      // FLUINDO e quebrando de linha. Deslocar cada pedaço por conta própria (cada um com
-      // erro medido diferente) EMBARALHA o texto no PNG. A peça NÃO vira alvo — em vez
-      // disso o PAI vira um alvo de BLOCO (flow-block, abaixo): o html2canvas desenha o
-      // fluxo inteiro ~8px BAIXO como unidade (medido no bloco de Comentários — o corpo
-      // descia e "colava" na linha do Responder), então medimos a tinta do BLOCO inteiro
-      // com um render de sonda DEDICADO (sem paridade compartilhada — foi a poluição que
-      // inviabilizou compensar por peça) e subimos o PAI inteiro: nada embaralha.
-      const par = el.parentElement;
-      if (par) {
-        let inlinePieces = 0;
-        for (const n of Array.from(par.childNodes)) {
-          if (n.nodeType === 3) { if ((n.textContent || '').trim()) inlinePieces++; }
-          else if (n.nodeType === 1) {
-            const dd = getComputedStyle(n as HTMLElement).display;
-            if (dd.startsWith('inline') && (n.textContent || '').trim()) inlinePieces++;
-          }
-        }
-        if (inlinePieces >= 2) {
-          const plh = parseFloat(getComputedStyle(par).lineHeight) || fs * 1.35;
-          if (par.getBoundingClientRect().height > plh * 1.6) { flowParents.add(par); continue; }
-        }
-      }
-      const multi = gr.height > fs * 1.6;
-      // MULTI-LINHA: medir o ENVELOPE do bloco falha quando a ÚLTIMA linha é
-      // CURTA ("… MAS NÃO\nSÃO!"): a tinta dela não vence o threshold por linha
-      // (5% da largura do bloco) e a sonda só enxerga a linha 1 — cujo centro
-      // DESLOCADO cai em cima do centro do bloco → erro medido ≈ 0 e a manchete
-      // sai ~8-10px BAIXA no PNG (cortada pelo ticker; bug real da CNN 16.07).
-      // Correção: mirar a LINHA MAIS LARGA do bloco (rects do range) e medi-la
-      // como um chip (banda de tinta mais próxima). O h2c desloca o bloco
-      // INTEIRO por igual (medido: linha 1 +28px, linha 2 +27px de export),
-      // então o erro de UMA linha vale pro bloco todo.
-      let mr = gr;
-      if (multi) {
-        const lrs = Array.from(range.getClientRects()).filter((r) => r.height > 2 && r.width > 3);
-        if (lrs.length) mr = lrs.reduce((a, b) => (b.width > a.width ? b : a));
-      }
-      const fit = el.hasAttribute('data-fp-fit');
-      let band = false;
-      for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
-        if (bands.has(a) && a.getBoundingClientRect().height - gr.height > 3) { band = true; break; }
-      }
-      const slack = gr.height > fs * 1.2; // line-box mais alto que o glifo → centraliza
-      const suspicious = multi || band || slack;
-      if (suspicious) anySuspicious = true;
-      const mode: VMode = fit ? 'fit' : multi ? 'block' : 'inline';
-      // Janela de medição ASSIMÉTRICA: o erro do html2canvas é sempre pra BAIXO, então
-      // sobra pouca margem pra cima (evita capturar a tinta do alvo de cima) e mais
-      // pra baixo (cobre o deslocamento). Multi-linha mira a LINHA-ALVO (mr);
-      // chip de 1 linha usa ±22 (não alcança vizinho empilhado ~24px).
-      const half = mr.height / 2;
-      targets.push({
-        el,
-        cx0: (mr.left - nodeRect.left) * scale,
-        cx1: (mr.right - nodeRect.left) * scale,
-        cy: ((mr.top + mr.bottom) / 2 - nodeRect.top) * scale,
-        half: half * scale,
-        up: Math.round((multi ? half + 6 : 22) * scale),
-        down: Math.round((multi ? half + 22 : 22) * scale),
-        multi,
-        mode,
-      });
-    }
-
-    // FLUXO COM EMOJI (cliente 06.10): texto que QUEBRA de linha + emoji <img> no
-    // mesmo pai ("…papinho de coach 😅", "…ler mensagens como essa 🙏") não é
-    // folha (tem <img>), o wrapMixedText não embrulha (multi-linha) e a regra de
-    // cima conta só pedaços com TEXTO (img não tem) → ninguém compensava: o texto
-    // saía ~8px BAIXO e o emoji, que o html2canvas acerta, ficava "subido" em cima
-    // da linha de cima. Esse pai também vira flow-block.
-    for (const el of allEls) {
-      if (flowParents.has(el)) continue;
-      let gfx = false;
-      let wraps = false;
-      for (const n of Array.from(el.childNodes)) {
-        if (n.nodeType === 1) {
-          const tag = (n as Element).tagName.toLowerCase();
-          if (tag === 'img' || tag === 'svg') gfx = true;
-        } else if (n.nodeType === 3 && (n.textContent || '').trim() && !wraps) {
-          const rg = document.createRange();
-          rg.selectNodeContents(n);
-          const tops = new Set(Array.from(rg.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top)));
-          wraps = tops.size > 1;
-        }
-      }
-      if (gfx && wraps) flowParents.add(el);
-    }
-
-    // ALVOS DE BLOCO (flow-block): o pai do fluxo misto vira UM alvo — a tinta do
-    // bloco inteiro é medida contra um render que esconde SÓ os flow-blocks (tudo o
-    // mais aparece nos dois renders e se CANCELA no diff, inclusive a linha do
-    // username logo acima — a poluição que estragava a medição por peça). O erro vale
-    // pro bloco todo, então subir o PAI preserva quebra, espaçamento e emojis.
-    for (const par of flowParents) {
-      // ANINHADO: se um pai de fluxo está DENTRO de outro (legenda inteira +
-      // span interno da legenda), só o MAIS EXTERNO vira alvo — dois translateY
-      // COMPÕEM no clone e o texto interno deslocaria 2× (sobreposição).
-      let nested = false;
-      for (const other of flowParents) {
-        if (other !== par && other.contains(par)) { nested = true; break; }
-      }
-      if (nested) continue;
-      const csP = getComputedStyle(par);
-      if (csP.writingMode !== 'horizontal-tb' || axisUnsafeTf(csP.transform)) continue;
-      let inStop = false;
-      for (let a: HTMLElement | null = par.parentElement; a && a !== node.parentElement; a = a.parentElement) {
-        if (stops.has(a)) { inStop = true; break; }
-      }
-      if (inStop) continue;
-      const range = document.createRange();
-      range.selectNodeContents(par);
-      const gr = range.getBoundingClientRect();
-      if (!gr.height || gr.width < 3) continue;
-      // conteúdo CLIPADO (o texto estoura o palco OU QUALQUER ancestral com
-      // overflow que corte): a tinta visível não representa o range inteiro →
-      // a medição sairia errada e o deslocamento embaralharia (foi o caso da
-      // legenda do IG Post estressada, clipada pelo card interno). Fica como
-      // está — o clip é o MESMO da prévia.
-      let clipped = gr.bottom > nodeRect.bottom - 2 || gr.top < nodeRect.top + 2;
-      if (!clipped) {
-        for (let a: HTMLElement | null = par; a && a !== node.parentElement; a = a.parentElement) {
-          const csA = getComputedStyle(a);
-          if (/hidden|clip|auto|scroll/.test(csA.overflowY) || /hidden|clip|auto|scroll/.test(csA.overflowX)) {
-            const ar = a.getBoundingClientRect();
-            if (gr.bottom > ar.bottom + 1 || gr.top < ar.top - 1) { clipped = true; break; }
-          }
-        }
-      }
-      if (clipped) continue;
-      par.dataset.fpFlow = '1';
-      const half = gr.height / 2;
-      flowTargets.push({
-        el: par,
-        cx0: (gr.left - nodeRect.left) * scale,
-        cx1: (gr.right - nodeRect.left) * scale,
-        cy: ((gr.top + gr.bottom) / 2 - nodeRect.top) * scale,
-        half: half * scale,
-        up: Math.round((half + 6) * scale),
-        down: Math.round((half + 22) * scale),
-        multi: true,
-        mode: 'fit',
-      });
-    }
-
-    // Aperta a janela de cada alvo nos VIZINHOS que sobrepõem em X (empilhados):
-    // a tinta de um não pode invadir a caixa do outro (ex.: sub-linha logo abaixo da
-    // manchete; "bem"/"estar" empilhados de um logo). Como o erro é pra baixo, deixo
-    // pouca folga pra CIMA (perto do vizinho de cima) e cubro o deslocamento pra baixo.
-    const allTargets = [...targets, ...flowTargets];
-    for (const t of allTargets) {
-      let above = -Infinity;
-      let below = Infinity;
-      for (const o of allTargets) {
-        if (o === t) continue;
-        if (o.cx1 <= t.cx0 + 2 || o.cx0 >= t.cx1 - 2) continue; // sem sobreposição em X
-        if (o.cy < t.cy) above = Math.max(above, o.cy + o.half * 0.5);
-        else if (o.cy > t.cy) below = Math.min(below, o.cy - o.half * 0.5);
-      }
-      const m = 3 * scale;
-      if (above > -Infinity) t.up = Math.min(t.up, Math.max(4 * scale, t.cy - above - m));
-      if (below < Infinity) t.down = Math.min(t.down, Math.max(t.half + 4 * scale, below - t.cy - m));
-    }
-
-    vcompCleanup = () => [...targets, ...flowTargets].forEach((t) => {
-      delete t.el.dataset.fpVcal;
-      delete t.el.dataset.fpVmode;
-      delete t.el.dataset.fpCal0;
-      delete t.el.dataset.fpCal1;
-      delete t.el.dataset.fpBg;
-      delete t.el.dataset.fpPt;
-      delete t.el.dataset.fpPb;
-      delete t.el.dataset.fpFlow;
-      delete t.el.dataset.fpFlowtxt;
-    });
-
-    // MOTOR: html2canvas — RÁPIDO e usa a fonte JÁ CARREGADA na página, então a fonte
-    // bate com a prévia. Os motores foreignObject (snapdom) sairiam pixel-a-pixel mas
-    // no cache frio levam 40-77s — inviável. O erro de centralização é corrigido pela
-    // calibração medida abaixo.
+    // UM render só: com a linha de base certa (h2cFix) o html2canvas já desenha
+    // cada texto onde o navegador desenha — a sondagem/compensação vertical que
+    // existia aqui (4-5 renders por export) só corrigia a sonda quebrada.
     const { default: html2canvas } = await import('html2canvas');
-    const h2cOpts = {
-      scale,
-      backgroundColor: null as string | null,
+    canvas = await html2canvas(node, {
+      scale: targetW / (refW ?? node.getBoundingClientRect().width),
+      backgroundColor: null,
       useCORS: true,
       logging: false,
       imageTimeout: 20000,
-    };
-
-    // SONDAGEM (só se há alvo SUSPEITO). XADREZ por cy: ordenamos os alvos pela altura
-    // e damos PARIDADE alternada (0,1,0,1…). Renders:
-    //  • rawCanvas = tudo visível (posição CRUA do html2canvas);
-    //  • hid0/hid1 = escondem a tinta dos alvos de paridade 0 / 1.
-    // Cada alvo é medido contra o render que esconde a SUA paridade → ele aparece no
-    // diff, mas os VIZINHOS verticais (paridade oposta) ficam visíveis e CANCELAM. Isola
-    // até alvos empilhados e de tinta contígua (ex.: "bem"/"estar" de um logo; sub-linha
-    // colada na manchete) que uma janela não separaria. Sequencial (o html2canvas clona
-    // o nó num iframe — evita corrida entre clones simultâneos).
-    const needLeafProbe = targets.length > 0 && anySuspicious;
-    if (needLeafProbe || flowTargets.length) {
-      const byCy = [...targets].sort((a, b) => a.cy - b.cy);
-      const par = new Map<VTarget, number>();
-      byCy.forEach((t, i) => par.set(t, i % 2));
-      targets.forEach((t) => { t.el.dataset[par.get(t) === 0 ? 'fpCal0' : 'fpCal1'] = '1'; });
-      const hideSel = (sel: string) => (_doc: Document, root: HTMLElement) => {
-        root.querySelectorAll<HTMLElement>(sel).forEach((el) => {
-          el.style.color = 'transparent';
-          el.style.textShadow = 'none';
-          el.style.setProperty('-webkit-text-fill-color', 'transparent');
-        });
-      };
-      const rawCanvas = await html2canvas(node, {
-        ...h2cOpts,
-        onclone: (_d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); },
-      });
-      const hid0Canvas = needLeafProbe ? await html2canvas(node, {
-        ...h2cOpts,
-        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-cal0]')(d, root); },
-      }) : null;
-      const hid1Canvas = needLeafProbe ? await html2canvas(node, {
-        ...h2cOpts,
-        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-cal1]')(d, root); },
-      }) : null;
-      // render dedicado dos FLOW-BLOCKS: esconde só eles (e seus pedaços coloridos);
-      // todo o resto aparece igual nos dois renders e se cancela no diff.
-      const hidFlowCanvas = flowTargets.length ? await html2canvas(node, {
-        ...h2cOpts,
-        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-flow], [data-fp-flow] *')(d, root); },
-      }) : null;
-      targets.forEach((t) => { delete t.el.dataset.fpCal0; delete t.el.dataset.fpCal1; });
-      probeRaw = rawCanvas;
-      const ra = rawCanvas.getContext('2d');
-      const c0 = hid0Canvas ? hid0Canvas.getContext('2d') : null;
-      const c1 = hid1Canvas ? hid1Canvas.getContext('2d') : null;
-      const cf = hidFlowCanvas ? hidFlowCanvas.getContext('2d') : null;
-      // erro MEDIDO de cada alvo (antes de threshold): o nivelamento por linha
-      // (abaixo) precisa ver os valores crus pra igualar irmãos da mesma linha.
-      const errOf = new Map<VTarget, number>();
-      if (ra && c0 && c1) {
-        const CW = rawCanvas.width;
-        const CH = rawCanvas.height;
-        for (const t of targets) {
-          const hb = par.get(t) === 0 ? c0 : c1;
-          const x0 = Math.max(0, Math.round(t.cx0 + 1));
-          const x1 = Math.min(CW, Math.round(t.cx1 - 1));
-          if (x1 - x0 < 3) continue;
-          const y0 = Math.max(0, Math.round(t.cy - t.up));
-          const y1 = Math.min(CH, Math.round(t.cy + t.down));
-          if (y1 - y0 < 3) continue;
-          const cols = x1 - x0;
-          const rows = y1 - y0;
-          const A = ra.getImageData(x0, y0, cols, rows).data;
-          const B = hb.getImageData(x0, y0, cols, rows).data;
-          const thr = Math.max(2, cols * 0.05);
-          // hit[y] = a linha y tem tinta (A difere de B = fundo)?
-          const on: boolean[] = new Array(rows);
-          for (let y = 0; y < rows; y++) {
-            let cnt = 0;
-            for (let x = 0; x < cols; x++) {
-              const i = (y * cols + x) * 4;
-              const d = Math.max(
-                Math.abs(A[i] - B[i]),
-                Math.abs(A[i + 1] - B[i + 1]),
-                Math.abs(A[i + 2] - B[i + 2]),
-              );
-              if (d > 40) cnt++;
-            }
-            on[y] = cnt >= thr;
-          }
-          // BANDA contígua de tinta mais PERTO do centro esperado (a própria tinta
-          // do alvo — todos deslocam pra baixo de forma parecida, então a própria
-          // fica mais perto que qualquer vizinha). Vale pro CHIP de 1 linha E pra
-          // LINHA-ALVO do multi-linha (a linha mais larga do bloco): as OUTRAS
-          // linhas do mesmo bloco viram bandas separadas (têm vão de tinta entre
-          // linhas) e mais distantes do centro esperado — não poluem.
-          let mid: number | null = null;
-          {
-            // 1) coleta as bandas contíguas de tinta
-            const bandList: Array<[number, number]> = [];
-            let s = -1;
-            for (let y = 0; y <= rows; y++) {
-              const hit = y < rows && on[y];
-              if (hit && s < 0) s = y;
-              if (!hit && s >= 0) { bandList.push([y0 + s, y0 + y - 1]); s = -1; }
-            }
-            // 2) FUNDE bandas separadas por vão MINÚSCULO (≤2px CSS): anti-aliasing
-            //    parte a tinta de um glifo em lasquinhas ("Economia" media [139,141]+
-            //    [143,157]) e a lasquinha de cima ganhava por proximidade → correção
-            //    saía pela METADE e o item afundava vs os vizinhos (bug da Folha).
-            //    Linhas de texto DISTINTAS têm vão real ≥5px CSS — não fundem.
-            const gapMax = Math.max(2, Math.round(2 * scale));
-            const merged: Array<[number, number]> = [];
-            for (const b of bandList) {
-              const last = merged[merged.length - 1];
-              if (last && b[0] - last[1] - 1 <= gapMax) last[1] = b[1];
-              else merged.push([b[0], b[1]]);
-            }
-            // 3) banda mais próxima do centro esperado, com viés pra BAIXO:
-            //    o erro do h2c é SEMPRE pra baixo, então banda bem ACIMA do centro
-            //    é vizinho/linha-de-cima deslocada — nunca o alvo (aceitá-la
-            //    inverteria a correção e afundaria o texto).
-            let best: { mid: number; dist: number } | null = null;
-            for (const [b0, b1] of merged) {
-              const m = (b0 + b1) / 2;
-              const dist = Math.abs(m - t.cy);
-              if (m >= t.cy - 5 * scale && (!best || dist < best.dist)) best = { mid: m, dist };
-            }
-            if (best) mid = best.mid;
-          }
-          if (mid == null) continue;
-          const err = (mid - t.cy) / scale; // + = html2canvas baixo demais
-          // Cap de 16px (blindagem anti-embaralho): TODOS os erros REAIS já
-          // medidos ficam em 6-13px; acima de 16px é janela poluída (com texto
-          // fora do limite da UI, p.ex.) e a correção deslocaria ~1 linha.
-          if (Math.abs(err) <= 16) errOf.set(t, err);
-        }
-
-        // (chave de diagnóstico da auditoria dev: desliga o nivelamento pra
-        //  comparar A/B — nunca setada em produção)
-        const noRowUnify = (window as any).__fpNoRowUnify === true;
-        // ── NIVELAMENTO POR LINHA ──
-        // Alvos IRMÃOS na MESMA linha (itens do menu dos sites, byline
-        // "Autor — hora", colunas de um rodapé): cada um mede o próprio erro e
-        // 1-2px de diferença entre medições já deixa a linha SERRILHADA no PNG
-        // (um item do menu sai mais alto que os vizinhos — bug real do G1).
-        // Grupo = mesmo PAI + mesmo centro vertical (±4px). O grupo inteiro
-        // recebe a MEDIANA dos erros medidos: a linha desloca por IGUAL e fica
-        // reta como na prévia — inclusive os itens cuja medição falhou.
-        if (!noRowUnify) {
-          const byParent = new Map<HTMLElement, VTarget[]>();
-          for (const t of targets) {
-            if (t.multi) continue;
-            const p = t.el.parentElement;
-            if (!p) continue;
-            const arr = byParent.get(p);
-            if (arr) arr.push(t);
-            else byParent.set(p, [t]);
-          }
-          for (const group of byParent.values()) {
-            if (group.length < 2) continue;
-            group.sort((a, b) => a.cy - b.cy);
-            let cluster: VTarget[] = [];
-            const flush = () => {
-              if (cluster.length >= 2) {
-                const errs = cluster
-                  .map((t) => errOf.get(t))
-                  .filter((e): e is number => e !== undefined)
-                  .sort((a, b) => a - b);
-                if (errs.length) {
-                  const med = errs[Math.floor(errs.length / 2)];
-                  for (const t of cluster) errOf.set(t, med);
-                }
-              }
-              cluster = [];
-            };
-            for (const t of group) {
-              if (cluster.length && Math.abs(t.cy - cluster[cluster.length - 1].cy) > 4 * scale) flush();
-              cluster.push(t);
-            }
-            flush();
-          }
-        }
-
-        for (const t of targets) {
-          const err = errOf.get(t);
-          if (err === undefined || Math.abs(err) <= 0.3) continue;
-          t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
-          t.el.dataset.fpVmode = t.mode;
-          // Elemento com FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta", balão
-          // multi-linha)? Guardamos o padding: no render final subimos o TEXTO
-          // redistribuindo o padding (caixa+fundo ficam), em vez de mover o elemento
-          // inteiro (que deslocaria o fundo e, num overflow:hidden, encurtaria a caixa).
-          const csb = getComputedStyle(t.el);
-          const bgc = csb.backgroundColor;
-          const bm = bgc.match(/rgba?\(([^)]+)\)/);
-          const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
-          const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
-          if (bgOpaque || bgImg) {
-            t.el.dataset.fpBg = '1';
-            t.el.dataset.fpPt = String(parseFloat(csb.paddingTop) || 0);
-            t.el.dataset.fpPb = String(parseFloat(csb.paddingBottom) || 0);
-          }
-        }
-      }
-
-      // FLOW-BLOCKS: mede a caixa de tinta do bloco INTEIRO (1ª→última linha) contra
-      // o render que esconde só os flow-blocks; o erro sobe o PAI como unidade.
-      if (ra && cf) {
-        const CW = rawCanvas.width;
-        const CH = rawCanvas.height;
-        for (const t of flowTargets) {
-          const x0 = Math.max(0, Math.round(t.cx0 + 1));
-          const x1 = Math.min(CW, Math.round(t.cx1 - 1));
-          if (x1 - x0 < 3) continue;
-          const y0 = Math.max(0, Math.round(t.cy - t.up));
-          const y1 = Math.min(CH, Math.round(t.cy + t.down));
-          if (y1 - y0 < 3) continue;
-          const cols = x1 - x0;
-          const rows = y1 - y0;
-          const A = ra.getImageData(x0, y0, cols, rows).data;
-          const B = cf.getImageData(x0, y0, cols, rows).data;
-          // 3% (não 5%): a última linha do fluxo costuma ser curta em relação à
-          // largura do bloco e ainda precisa contar como tinta.
-          const thr = Math.max(2, cols * 0.03);
-          let minY = -1;
-          let maxY = -1;
-          for (let y = 0; y < rows; y++) {
-            let cnt = 0;
-            for (let x = 0; x < cols; x++) {
-              const i = (y * cols + x) * 4;
-              const d = Math.max(
-                Math.abs(A[i] - B[i]),
-                Math.abs(A[i + 1] - B[i + 1]),
-                Math.abs(A[i + 2] - B[i + 2]),
-              );
-              if (d > 40) cnt++;
-            }
-            if (cnt >= thr) {
-              if (minY < 0) minY = y;
-              maxY = y;
-            }
-          }
-          if (minY < 0) continue;
-          // SANIDADE da medição (blindagem anti-embaralho): a caixa de tinta
-          // medida tem que ter ~a altura do range do bloco — muito menor/maior
-          // significa tinta parcial (clip/vizinho poluindo) e a correção sairia
-          // errada. E o erro REAL do html2canvas em fluxo é ~0,6em; acima do teto
-          // (abaixo) é medição podre (deslocaria ~1 linha e EMBARALHARIA) → pula.
-          const inkH = maxY - minY;
-          const rangeH = t.half * 2;
-          if (inkH < rangeH * 0.55 || inkH > rangeH * 1.3) continue;
-          const err = (y0 + (minY + maxY) / 2 - t.cy) / scale; // + = fluxo baixo demais
-          // Piso de 2.5px: a assimetria natural ascendente/descendente da tinta multi-
-          // linha (~1-2px) não é erro do html2canvas — só o desvio GRANDE do fluxo
-          // (medido ~8px no bloco de Comentários) merece correção. O teto ACOMPANHA
-          // a fonte: o erro do fluxo é ~0,6em (14px → 7-9px; a caixinha do story em
-          // 21px mede 12,6px e um teto fixo de 12 a deixava sem correção). 0,8em
-          // ainda fica longe de 1 linha (~1,3em) — a blindagem anti-embaralho segue.
-          const flowCap = Math.max(12, (parseFloat(getComputedStyle(t.el).fontSize) || 14) * 0.8);
-          if (Math.abs(err) > 2.5 && Math.abs(err) <= flowCap) {
-            // FUNDO próprio no bloco de fluxo (balão de chat, caixinha do story) ou
-            // pai INLINE (o <span> do texto no balão do WhatsApp — transform não vale
-            // em inline): mover o pai deslocaria o fundo / não teria efeito. Nesses
-            // casos o render final sobe SÓ O TEXTO (ver data-fp-flowtxt) e fundo e
-            // emojis ficam onde o html2canvas já acerta.
-            const csb = getComputedStyle(t.el);
-            const bgc = csb.backgroundColor;
-            const bm = bgc.match(/rgba?\(([^)]+)\)/);
-            const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
-            const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
-            if (bgOpaque || bgImg || csb.display === 'inline') t.el.dataset.fpFlowtxt = '1';
-            t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
-            t.el.dataset.fpVmode = 'fit';
-          }
-        }
-      }
-    }
-
-    // Sondagem rodou e NENHUMA correção ficou marcada? O render cru da sonda é
-    // pixel-idêntico ao final (mesmos shims, zero transform) → reusa e poupa
-    // um render inteiro.
-    if (probeRaw && !node.querySelector('[data-fp-vcal]')) {
-      canvas = probeRaw;
-      return canvas;
-    }
-
-    // RENDER FINAL — sobe o glifo de cada alvo por translateY(−erro), só no clone
-    // (a prévia não muda). Por modo:
-    //  • 'fit'    → translateY DIRETO no FitText (sem fundo próprio, não re-quebra);
-    //  • 'block'  → <span> display:block com translateY (multi-linha comum: preserva
-    //               a quebra e mantém o fundo do pai);
-    //  • 'inline' → <span> inline-block com translateY (chip 1 linha: pílula/fundo
-    //               próprio fica onde o html2canvas já acerta, sobe só o glifo).
-    canvas = await html2canvas(node, {
-      ...h2cOpts,
-      onclone: (doc: Document, root: HTMLElement) => {
-        applyEllipsisInClone(root);
+      onclone: (_d: Document, root: HTMLElement) => {
+        applyCloneShims(root);
         onCloneExtra?.(root);
-        root.querySelectorAll<HTMLElement>('[data-fp-vcal]').forEach((el) => {
-          const dy = parseFloat(el.dataset.fpVcal || '');
-          if (!Number.isFinite(dy) || dy === 0) return;
-          const mode = el.dataset.fpVmode || 'inline';
-          // FLOW-BLOCK (fluxo inline misto multi-linha): o TEXTO do fluxo é que sai
-          // baixo — as IMAGENS (emojis) o html2canvas já posiciona certo. Sobe o PAI
-          // inteiro (texto+quebra preservados) e CONTRA-DESLOCA as imagens de volta.
-          if (el.dataset.fpFlow === '1') {
-            if (el.dataset.fpFlowtxt === '1') {
-              // sobe só a TINTA: cada pedaço de texto num <span> relativo (neutro no
-              // layout, e o html2canvas lê a posição do próprio layout do clone —
-              // nada de transform em inline). Fundo e <img> ficam no lugar.
-              const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-              const texts: Text[] = [];
-              while (walker.nextNode()) texts.push(walker.currentNode as Text);
-              for (const tn of texts) {
-                if (!(tn.textContent || '').trim() || tn.parentElement?.closest('svg')) continue;
-                const span = doc.createElement('span');
-                span.style.position = 'relative';
-                span.style.top = `${-dy}px`;
-                tn.parentNode!.replaceChild(span, tn);
-                span.appendChild(tn);
-              }
-              return;
-            }
-            el.style.transform = `translateY(${-dy}px)`;
-            el.querySelectorAll<HTMLElement>('img, svg').forEach((im) => {
-              im.style.transform = `translateY(${dy}px)`;
-            });
-            return;
-          }
-          if (mode === 'fit' || mode === 'block') {
-            // ELEMENTO COM FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta"/caixa
-            // branca, balão multi-linha): NÃO move o elemento (deslocaria o fundo — que o
-            // html2canvas já desenha certo — e num overflow:hidden o corte ENCURTA a
-            // caixa; foi o bug da Caixinha). REDISTRIBUI o padding vertical: sobe o TEXTO
-            // `dy` mantendo a MESMA altura de caixa e o fundo no lugar. Sem re-quebra
-            // (padding não muda a largura). Só quando dy>0 (subir) e o paddingTop absorve.
-            if (el.dataset.fpBg === '1' && dy > 0) {
-              const pt = parseFloat(el.dataset.fpPt || '0');
-              const pb = parseFloat(el.dataset.fpPb || '0');
-              const shift = Math.min(pt, dy);
-              el.style.paddingTop = `${pt - shift}px`;
-              el.style.paddingBottom = `${pb + shift}px`;
-              // resto raríssimo (dy > paddingTop) → o pouco que sobra via translateY
-              if (dy - shift > 0.3) el.style.transform = `translateY(${-(dy - shift)}px)`;
-              return;
-            }
-            // sem fundo próprio (manchete de telejornal etc.) → translateY DIRETO no
-            // elemento: não re-quebra o texto e não há fundo pra deslocar.
-            el.style.transform = `translateY(${-dy}px)`;
-            return;
-          }
-          // chip de 1 linha (tag/LIVE/hora) → envolve só o TEXTO num <span> inline-block
-          // e sobe o glifo; a pílula/fundo do elemento fica onde o html2canvas já acerta.
-          const span = doc.createElement('span');
-          span.style.display = 'inline-block';
-          span.style.transform = `translateY(${-dy}px)`;
-          while (el.firstChild) span.appendChild(el.firstChild);
-          el.appendChild(span);
-        });
       },
     });
   } finally {
-    cropGuards.forEach((restore) => restore());
-    gapShims.forEach((restore) => restore());
-    if (vcompCleanup) vcompCleanup();
-    textUnwrap.forEach((restore) => restore());
-    ellipEls.forEach((el) => { delete el.dataset.fpEllip; });
+    ellipEls.forEach((el) => { delete el.dataset.fpEllip; delete el.dataset.fpEllipW; });
     clampEls.forEach((el) => { delete el.dataset.fpClamp; });
     vidShims.forEach((el) => { delete el.dataset.fpVidsnap; });
     if (zoomEl) zoomEl.style.zoom = prevZoom;
+    h2cFix.remove();
   }
 
   if (!canvas) throw new Error('export vazio');
