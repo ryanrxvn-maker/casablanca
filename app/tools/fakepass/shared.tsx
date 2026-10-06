@@ -645,6 +645,30 @@ export async function renderNodeToCanvas(
       });
     }
 
+    // FLUXO COM EMOJI (cliente 06.10): texto que QUEBRA de linha + emoji <img> no
+    // mesmo pai ("…papinho de coach 😅", "…ler mensagens como essa 🙏") não é
+    // folha (tem <img>), o wrapMixedText não embrulha (multi-linha) e a regra de
+    // cima conta só pedaços com TEXTO (img não tem) → ninguém compensava: o texto
+    // saía ~8px BAIXO e o emoji, que o html2canvas acerta, ficava "subido" em cima
+    // da linha de cima. Esse pai também vira flow-block.
+    for (const el of allEls) {
+      if (flowParents.has(el)) continue;
+      let gfx = false;
+      let wraps = false;
+      for (const n of Array.from(el.childNodes)) {
+        if (n.nodeType === 1) {
+          const tag = (n as Element).tagName.toLowerCase();
+          if (tag === 'img' || tag === 'svg') gfx = true;
+        } else if (n.nodeType === 3 && (n.textContent || '').trim() && !wraps) {
+          const rg = document.createRange();
+          rg.selectNodeContents(n);
+          const tops = new Set(Array.from(rg.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+          wraps = tops.size > 1;
+        }
+      }
+      if (gfx && wraps) flowParents.add(el);
+    }
+
     // ALVOS DE BLOCO (flow-block): o pai do fluxo misto vira UM alvo — a tinta do
     // bloco inteiro é medida contra um render que esconde SÓ os flow-blocks (tudo o
     // mais aparece nos dois renders e se CANCELA no diff, inclusive a linha do
@@ -729,6 +753,7 @@ export async function renderNodeToCanvas(
       delete t.el.dataset.fpPt;
       delete t.el.dataset.fpPb;
       delete t.el.dataset.fpFlow;
+      delete t.el.dataset.fpFlowtxt;
     });
 
     // MOTOR: html2canvas — RÁPIDO e usa a fonte JÁ CARREGADA na página, então a fonte
@@ -981,24 +1006,31 @@ export async function renderNodeToCanvas(
           // SANIDADE da medição (blindagem anti-embaralho): a caixa de tinta
           // medida tem que ter ~a altura do range do bloco — muito menor/maior
           // significa tinta parcial (clip/vizinho poluindo) e a correção sairia
-          // errada. E o erro REAL do html2canvas em fluxo é ~7-9px; acima de
-          // 12px é medição podre (deslocaria ~1 linha e EMBARALHARIA) → pula.
+          // errada. E o erro REAL do html2canvas em fluxo é ~0,6em; acima do teto
+          // (abaixo) é medição podre (deslocaria ~1 linha e EMBARALHARIA) → pula.
           const inkH = maxY - minY;
           const rangeH = t.half * 2;
           if (inkH < rangeH * 0.55 || inkH > rangeH * 1.3) continue;
           const err = (y0 + (minY + maxY) / 2 - t.cy) / scale; // + = fluxo baixo demais
           // Piso de 2.5px: a assimetria natural ascendente/descendente da tinta multi-
           // linha (~1-2px) não é erro do html2canvas — só o desvio GRANDE do fluxo
-          // (medido ~8px no bloco de Comentários) merece correção.
-          if (Math.abs(err) > 2.5 && Math.abs(err) <= 12) {
-            // FUNDO próprio no bloco de fluxo: mover o pai deslocaria o fundo (e o
-            // contra-shift das imagens não cobre isso) — caso raro, fica como está.
+          // (medido ~8px no bloco de Comentários) merece correção. O teto ACOMPANHA
+          // a fonte: o erro do fluxo é ~0,6em (14px → 7-9px; a caixinha do story em
+          // 21px mede 12,6px e um teto fixo de 12 a deixava sem correção). 0,8em
+          // ainda fica longe de 1 linha (~1,3em) — a blindagem anti-embaralho segue.
+          const flowCap = Math.max(12, (parseFloat(getComputedStyle(t.el).fontSize) || 14) * 0.8);
+          if (Math.abs(err) > 2.5 && Math.abs(err) <= flowCap) {
+            // FUNDO próprio no bloco de fluxo (balão de chat, caixinha do story) ou
+            // pai INLINE (o <span> do texto no balão do WhatsApp — transform não vale
+            // em inline): mover o pai deslocaria o fundo / não teria efeito. Nesses
+            // casos o render final sobe SÓ O TEXTO (ver data-fp-flowtxt) e fundo e
+            // emojis ficam onde o html2canvas já acerta.
             const csb = getComputedStyle(t.el);
             const bgc = csb.backgroundColor;
             const bm = bgc.match(/rgba?\(([^)]+)\)/);
             const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
             const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
-            if (bgOpaque || bgImg) continue;
+            if (bgOpaque || bgImg || csb.display === 'inline') t.el.dataset.fpFlowtxt = '1';
             t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
             t.el.dataset.fpVmode = 'fit';
           }
@@ -1034,6 +1066,23 @@ export async function renderNodeToCanvas(
           // baixo — as IMAGENS (emojis) o html2canvas já posiciona certo. Sobe o PAI
           // inteiro (texto+quebra preservados) e CONTRA-DESLOCA as imagens de volta.
           if (el.dataset.fpFlow === '1') {
+            if (el.dataset.fpFlowtxt === '1') {
+              // sobe só a TINTA: cada pedaço de texto num <span> relativo (neutro no
+              // layout, e o html2canvas lê a posição do próprio layout do clone —
+              // nada de transform em inline). Fundo e <img> ficam no lugar.
+              const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+              const texts: Text[] = [];
+              while (walker.nextNode()) texts.push(walker.currentNode as Text);
+              for (const tn of texts) {
+                if (!(tn.textContent || '').trim() || tn.parentElement?.closest('svg')) continue;
+                const span = doc.createElement('span');
+                span.style.position = 'relative';
+                span.style.top = `${-dy}px`;
+                tn.parentNode!.replaceChild(span, tn);
+                span.appendChild(tn);
+              }
+              return;
+            }
             el.style.transform = `translateY(${-dy}px)`;
             el.querySelectorAll<HTMLElement>('img, svg').forEach((im) => {
               im.style.transform = `translateY(${dy}px)`;
