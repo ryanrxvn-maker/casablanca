@@ -29,6 +29,8 @@ const ETAPAS = [
   { run: ["scripts/test-perf-guards.mjs"] },
   // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo
   { tsx: ["lib/pilot-formato.test.ts"] },
+  // projeto editável: roteiro da pós → CapCut (draft 9.x) + Premiere (xmeml) + SRT
+  { tsx: ["lib/pilot-projeto.test.ts"] },
   { run: ["scripts/test-pilot-formato-runtime.mjs"] },
   { run: ["scripts/test-pilot-biblioteca-avatares.mjs"] },
   { run: ["scripts/test-pilot-post-scope.mjs"] },

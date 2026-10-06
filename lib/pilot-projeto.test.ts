@@ -1,0 +1,143 @@
+import {
+  CAPCUT_PASTA_DO_DRAFT, chavesDoProjeto, geometriaCapCut, geometriaPremiere, intervalosDaLegenda, leiaMeDoProjeto,
+  montarDraftCapCut, montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda,
+  type ArquivoProjeto, type MidiaDoProjeto, type ProjetoInsert, type RoteiroEdicao,
+} from './pilot-projeto';
+import { zipGroupId } from './zip-store-prune';
+
+let passed = 0;
+let failed = 0;
+function ok(condition: unknown, message: string) {
+  if (condition) { passed++; console.log(`  ok   ${message}`); }
+  else { failed++; console.error(`  FAIL ${message}`); }
+}
+const perto = (a: number, b: number, tol = 1e-3) => Math.abs(a - b) <= tol;
+
+console.log('PROJETO EDITÁVEL — CapCut + Premiere a partir do roteiro da pós-produção:');
+
+const chaves = chavesDoProjeto('86abc:v2', 'AD47G1VN - PRPB09.mp4');
+ok(chaves.base.startsWith(prefixoDoProjeto('86abc:v2')) && chaves.roteiro.endsWith(':roteiro') && !/ /.test(chaves.base),
+  'chaves do projeto ficam sob batch:<task>:projeto:, sem espaço');
+ok(zipGroupId(chaves.base) === '86abc:v2' && zipGroupId(chaves.roteiro) === '86abc:v2',
+  'faxina trata avatar + roteiro do projeto como parte do disparo (sai junto, nunca sozinho)');
+
+const blocks = [
+  { id: 'b1', start: 0, end: 1200, words: [{ text: 'Se', start: 0, end: 200 }, { text: 'você', start: 250, end: 600 }, { text: 'levanta', start: 650, end: 1200 }] },
+  { id: 'b2', start: 1500, end: 2400, words: [{ text: 'de madrugada', start: 1500, end: 2400 }] },
+];
+const srt = srtDaLegenda(blocks);
+ok(srt.startsWith('1\r\n00:00:00,000 --> 00:00:01,200\r\nSe você levanta') && srt.includes('2\r\n00:00:01,500 --> 00:00:02,400\r\nde madrugada'),
+  'SRT com numeração, tempo hh:mm:ss,mmm e o texto do bloco');
+const intervalos = intervalosDaLegenda(blocks);
+ok(intervalos.length === 4 && intervalos[0].start === 0 && intervalos[0].end === 250 && intervalos[2].end === 1200
+  && intervalos.every((i) => i.t > i.start && i.t < i.end), 'legenda vira um intervalo por palavra (karaokê), desenhado depois da entrada');
+
+const W = 1080;
+const H = 1920;
+const avatar: ArquivoProjeto = { nome: 'avatar.mp4', tipo: 'video', w: W, h: H, durSec: 20, temAudio: true };
+const broll169: ArquivoProjeto = { nome: 'broll_01.mp4', tipo: 'video', w: 1920, h: 1080, durSec: 3, temAudio: false };
+const broll916: ArquivoProjeto = { nome: 'broll_02.mp4', tipo: 'video', w: 1080, h: 1920, durSec: 8, temAudio: true };
+const congelado: ArquivoProjeto = { nome: 'broll_01_ultimo_quadro.png', tipo: 'imagem', w: 1920, h: 1080, durSec: 0, temAudio: false };
+const preto: ArquivoProjeto = { nome: 'transicao_preto.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
+const branco: ArquivoProjeto = { nome: 'transicao_branco.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
+const base: Omit<ProjetoInsert, 'id' | 'nome' | 'midiaKey' | 'start' | 'end'> = {
+  tipo: 'video', deSec: 0, naturalSec: 3, velocidade: 1, congelaApos: 0, layout: { tipo: 'cheia' }, transicao: 'escurecer',
+  audio: false, volume: 0.5, focoAvatarY: 0.34, w: 1920, h: 1080,
+};
+const roteiro: RoteiroEdicao = {
+  versao: 1, filename: 'AD47G1VN.mp4', criadoEm: 0, durSec: 20,
+  inserts: [
+    // 3s de mídia numa janela de 5s: desacelera a 0,75x e congela no resto
+    { ...base, id: 'i1', nome: 'PRÓSTATA 3D', midiaKey: 'k1', start: 2, end: 7, velocidade: 0.75, congelaApos: 4 },
+    // split: avatar em cima, b-roll embaixo, com som ligado
+    { ...base, id: 'i2', nome: 'MANGUEIRA', midiaKey: 'k2', start: 10, end: 13, deSec: 1.5, naturalSec: 6.5, w: 1080, h: 1920,
+      layout: { tipo: 'faixas', avatar: 'cima' }, transicao: 'misto', audio: true, volume: 0.4 },
+  ],
+  legenda: { blocks, style: {} },
+  zoom: [{ start: 0, end: 2, from: 1, to: 1.12 }, { start: 13, end: 20, from: 1.08, to: 1, rampaAte: 15 }],
+  headlines: null,
+};
+const midia: MidiaDoProjeto = {
+  avatar,
+  inserts: new Map([['i1', { arquivo: broll169, congelado }], ['i2', { arquivo: broll916 }]]),
+  legendas: [{ arquivo: { nome: 'legenda_0001.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }, start: 0, end: 1.2 }],
+  headlines: [],
+  preto, branco,
+};
+const tl = montarTimeline('AD47G1VN', roteiro, midia, W, H);
+const av = tl.itens.filter((i) => i.trilha === 'avatar');
+ok(av.length === 3 && perto(av[0].start, 0) && perto(av[0].end, 10) && perto(av[1].start, 10) && perto(av[1].end, 13) && perto(av[2].end, 20)
+  && av.every((i) => perto(i.fonteDe, i.start)), 'avatar contínuo, partido só na tela dividida (fonte = tempo do vídeo)');
+ok(av[1].destino.h === 960 && av[1].destino.y === 0 && perto(av[1].recorte.y0, 0.32 * 0 + av[1].recorte.y0) && !av[1].escala,
+  'no split o avatar vai pro retângulo de cima, sem zoom (igual ao render)');
+ok(!!av[0].escala && perto(av[0].escala![0].v, 1) && av[0].escala!.some((k) => perto(k.v, 1.12, 0.002)),
+  'zoom do avatar vira keyframes da mesma curva do render (1 → 1,12)');
+ok(!!av[2].escala && perto(av[2].escala!.at(-1)!.v, 1, 0.002) && av[2].escala!.some((k) => k.t > 1.9 && k.t < 2.1 && perto(k.v, 1, 0.002)),
+  'zoom com respiro: a rampa termina em rampaAte e a escala fica parada até o corte');
+
+const br = tl.itens.filter((i) => i.trilha === 'broll');
+ok(br.length === 3 && perto(br[0].end, 6) && br[0].velocidade === 0.75 && br[1].arquivo === congelado.nome && perto(br[1].start, 6) && perto(br[1].end, 7),
+  'b-roll curto: anda a 0,75x e o último quadro fica parado até o fim da janela');
+ok(perto(br[0].recorte.x0, (1920 - 1080 * 1080 / 1920) / 2 / 1920, 1e-4) && perto(br[0].recorte.y0, 0) && perto(br[0].recorte.y1, 1),
+  'b-roll 16:9 em tela 9:16 entra em COVER centralizado (como o render)');
+ok(br[2].destino.y === 960 && br[2].destino.h === 960 && br[2].volume === 0.4 && perto(br[2].fonteDe, 1.5),
+  'split: b-roll no retângulo de baixo, recorte da mídia e som ligado no volume do editor');
+ok(br[0].volume === 0, 'b-roll sem som ligado entra mudo');
+
+const tr = tl.itens.filter((i) => i.trilha === 'transicao');
+ok(tr.length === 4 && tr[0].arquivo === preto.nome && perto(tr[0].start, 1.86) && perto(tr[0].end, 2.14)
+  && tr[0].opacidade!.map((k) => k.v).join(',') === '0,1,0', 'escurecer = V de 0,28s centrado na borda (0 → 1 → 0)');
+ok(tr[2].arquivo === preto.nome && tr[3].arquivo === branco.nome, 'misto alterna preto/branco pela ordem das bordas, como no render');
+
+// CapCut
+const ids = (() => { let n = 0; return () => `id${(++n).toString(16).padStart(8, '0')}`; })();
+const capcut = montarDraftCapCut(tl, { pasta: 'AD47G1VN - PILOT', raiz: 'D:/capcut2/drafts/CapCut Drafts', agoraUs: 1, novoId: ids });
+ok(!capcut.conteudo.startsWith('\uFEFF') && !capcut.meta.startsWith('\uFEFF'), 'draft sem BOM (o CapCut recusa BOM)');
+const conteudo = JSON.parse(capcut.conteudo);
+const meta = JSON.parse(capcut.meta);
+ok(conteudo.tracks.map((t: { name: string }) => t.name).join(',') === 'AVATAR,B-ROLL,TRANSICAO,LEGENDA',
+  'CapCut: trilhas em camadas — avatar embaixo, b-roll, transição e legenda por cima');
+ok(conteudo.materials.videos.every((v: { path: string }) => v.path.startsWith(`${CAPCUT_PASTA_DO_DRAFT}/Resources/pilot/`)),
+  'CapCut: mídia referenciada pela pasta do próprio projeto (portátil)');
+const segLento = conteudo.tracks[1].segments[0];
+ok(segLento.speed === 0.75 && segLento.target_timerange.duration === 4_000_000 && segLento.source_timerange.duration === 3_000_000,
+  'CapCut: velocidade 0,75x — 3s de mídia preenchem 4s da janela');
+ok(perto(segLento.clip.scale.x, 1) && perto(segLento.clip.transform.x, 0) && perto(segLento.clip.transform.y, 0)
+  && perto(conteudo.materials.videos[3].crop.upper_left_x, (1920 - 607.5) / 2 / 1920, 1e-4),
+  'CapCut: cover = recorte no material + escala 1 centralizada');
+const g = geometriaCapCut(br[2], broll916, W, H);
+ok(perto(g.escala, 1) && perto(g.x, 0) && perto(g.y, -0.5), 'CapCut: split — metade de baixo (y = -0,5 meio-canvas)');
+const avSplit = conteudo.tracks[0].segments[1];
+ok(perto(avSplit.clip.transform.y, 0.5) && avSplit.common_keyframes.length === 0, 'CapCut: avatar do split na metade de cima, sem zoom');
+const zoomKf = conteudo.tracks[0].segments[0].common_keyframes[0];
+ok(zoomKf.property_type === 'KFTypeScaleX' && zoomKf.keyframe_list.length >= 3, 'CapCut: zoom como keyframes de escala do avatar');
+const alfa = conteudo.tracks[2].segments[0].common_keyframes[0];
+ok(alfa.property_type === 'KFTypeAlpha' && alfa.keyframe_list.map((k: { values: number[] }) => k.values[0]).join(',') === '0,1,0',
+  'CapCut: transição como keyframes de opacidade');
+ok(meta.draft_name === 'AD47G1VN - PILOT' && meta.draft_fold_path === 'D:/capcut2/drafts/CapCut Drafts/AD47G1VN - PILOT'
+  && meta.draft_materials[0].value.length === tl.arquivos.length, 'CapCut: meta com nome, pasta e mídias no painel Importados');
+ok(conteudo.duration === 20_000_000 && conteudo.canvas_config.width === W && conteudo.fps === 30, 'CapCut: duração, canvas 9:16 e 30fps');
+
+// Premiere
+const xml = montarXmlPremiere(tl, { pastaMidia: 'D:/capcut2/drafts/CapCut Drafts/AD47G1VN - PILOT/Resources/pilot' });
+const abre = (xml.match(/<clipitem /g) || []).length;
+const fecha = (xml.match(/<\/clipitem>/g) || []).length;
+ok(xml.startsWith('<?xml') && xml.includes('<xmeml version="4">') && abre === fecha && abre > 0, 'Premiere: xmeml v4 bem formado');
+ok(xml.includes('file://localhost/D%3a/capcut2/drafts/CapCut%20Drafts/AD47G1VN%20-%20PILOT/Resources/pilot/avatar.mp4'),
+  'Premiere: caminho Windows no formato que o próprio Premiere grava');
+ok(xml.includes('<effectid>timeremap</effectid>') && xml.includes('<value>75</value>'), 'Premiere: câmera lenta como Time Remap 75%');
+ok(xml.includes('<effectid>crop</effectid>'), 'Premiere: recorte do cover/split como Crop');
+ok((xml.match(/<file id="file-1">/g) || []).length === 1 && xml.includes('<file id="file-1"/>'), 'Premiere: arquivo declarado uma vez e reaproveitado');
+const secaoAudio = xml.split('</video><audio><numOutputChannels>')[1] || '';
+const nomesNoAudio = [...secaoAudio.matchAll(/<clipitem id="[^"]+"><name>([^<]+)<\/name>/g)].map((m) => m[1]);
+ok(nomesNoAudio.includes('avatar.mp4') && nomesNoAudio.includes('broll_02.mp4') && !nomesNoAudio.includes('broll_01.mp4'),
+  'Premiere: áudio do avatar + só o b-roll com som ligado');
+const gp = geometriaPremiere(br[0], broll169, W, H);
+ok(perto(gp.escalaPct, 177.778, 0.01) && perto(gp.centroX, 0) && perto(gp.crop.esquerda, 34.18, 0.01),
+  'Premiere: cover de 16:9 = 177,8% com crop lateral, centralizado');
+
+const leia = leiaMeDoProjeto(tl, { pasta: 'AD47G1VN - PILOT', temSrt: true });
+ok(leia.includes('CAPCUT') && leia.includes('PREMIERE') && leia.includes('.srt'), 'LEIA-ME explica CapCut, Premiere e o SRT');
+
+console.log(`\n${passed} passaram, ${failed} falharam.`);
+if (failed > 0) process.exit(1);

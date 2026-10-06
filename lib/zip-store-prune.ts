@@ -43,6 +43,9 @@ export function zipGroupId(key: string): string {
   // " misc " e podia ser evictada SEPARADA do montado que assina (achado 31.08).
   m = /^batch:(.+):(?:montado(?::sig)?|takes|camo)$/.exec(key);
   if (m) return m[1];
+  // PROJETO EDITÁVEL (05.10): avatar limpo + roteiro de cada montado.
+  m = /^batch:(.+):projeto:[^:]+:(?:base|roteiro)$/.exec(key);
+  if (m) return m[1];
   // ZIP de b-rolls Magnific do disparo (`magnific:<taskId>:takes`): agrupa com
   // a task dona — como " misc " solto, a faxina varria o pack de b-roll
   // enquanto o disparo seguia vivo (mesmo padrão do bug dos frames de 16/08).

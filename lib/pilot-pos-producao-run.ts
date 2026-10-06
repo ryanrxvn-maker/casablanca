@@ -36,6 +36,7 @@ import {
   type Insert,
   type HeadlineCfg,
 } from './pilot-inserts';
+import type { ProjetoInsert, RoteiroEdicao } from './pilot-projeto';
 
 /* ═══════════════════════════ orquestrador (browser) ══════════════════════ */
 
@@ -57,6 +58,10 @@ export type PosProducaoCfg = {
   headline?: HeadlineCfg;
   /** lê os bytes de uma mídia de insert (IndexedDB) */
   lerMidia?: (key: string) => Promise<Blob | null>;
+  /** PROJETO EDITÁVEL (05.10): recebe o avatar limpo + o roteiro do que o
+   *  render queimou (b-rolls, legenda, zoom, headline) depois de um render
+   *  bom. Falhar aqui nunca afeta a montagem. */
+  guardarProjeto?: (roteiro: RoteiroEdicao, avatarLimpo: Blob) => Promise<void>;
   onEtapa?: (msg: string) => void;
 };
 
@@ -242,6 +247,8 @@ export async function montarPosProducao(
     // 2-5s — então o custo é baixo e não precisa decodificar tudo na memória).
     // Imagem vira um <img> desenhado direto.
     let planoInserts: PlanoInsertLocal | undefined;
+    /** o que o render compõe, no formato do projeto editável */
+    let insertsDoProjeto: ProjetoInsert[] = [];
     const fechaveis: Array<() => void> = [];
     if (temInserts) {
       try {
@@ -464,6 +471,26 @@ export async function montarPosProducao(
             }
           }
           const porId = new Map(usaveis.map((i) => [i.id, i]));
+          // PROJETO EDITÁVEL: exatamente o que o render vai compor — janela,
+          // recorte, velocidade e congelamento de cada b-roll.
+          insertsDoProjeto = janelas.flatMap((j) => {
+            const ins = porId.get(j.id);
+            const fonte = fontes.get(j.id);
+            if (!ins || !fonte) return [];
+            const pv = velocidadePorId.get(j.id);
+            return [{
+              id: ins.id, nome: ins.midiaNome, tipo: ins.midiaTipo, midiaKey: ins.midiaKey,
+              start: j.start, end: j.end,
+              deSec: recortePorId.get(j.id) || 0,
+              naturalSec: durNatural.get(j.id) || 0,
+              velocidade: pv?.velocidade ?? 1,
+              congelaApos: pv?.congelaApos ?? 0,
+              layout: ins.layout, transicao: ins.transicao || 'nenhuma',
+              audio: !!ins.audio && ins.midiaTipo === 'video',
+              volume: typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO,
+              focoAvatarY: ins.focoAvatarY, w: fonte.w, h: fonte.h,
+            }];
+          });
           /* CAMINHO RÁPIDO TAMBÉM COM INSERT DE VÍDEO (04.09).
            *
            * Por algumas horas isto ficou restrito a imagem, porque o render
@@ -822,6 +849,22 @@ export async function montarPosProducao(
     if (!r.blob || r.blob.size < 50_000) {
       avisos.push(`o render saiu vazio — o AD foi entregue ${sem}. Clica RETOMAR; se repetir, fecha as outras abas pesadas.`);
       return { blob: null, avisos, insertsOrfaos: orfaos };
+    }
+    // PROJETO EDITÁVEL: guarda o avatar LIMPO (o que entrou no render) e o
+    // roteiro do que foi queimado nele. Só depois de um render bom, e nunca
+    // derruba a entrega — o projeto é um extra.
+    if (cfg.guardarProjeto) {
+      try {
+        await cfg.guardarProjeto({
+          versao: 1, filename: info.filename, criadoEm: Date.now(), durSec,
+          inserts: planoInserts ? insertsDoProjeto : [],
+          legenda: blocks.length ? { blocks, style } : null,
+          zoom: plano,
+          headlines: headlines?.length ? headlines : null,
+        }, blob);
+      } catch (e) {
+        console.warn('[pos-producao] projeto editável não foi guardado (a entrega segue normal):', e);
+      }
     }
     if (!r.audioOk) avisos.push('o vídeo saiu SEM ÁUDIO — confere antes de entregar e, se estiver mudo, clica RETOMAR.');
     if (r.somInsertOk === false) {

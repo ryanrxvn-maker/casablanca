@@ -2450,6 +2450,72 @@ function ClickUpPilotInner() {
    * os `avisos`. O card lê isto pra riscar o selo e mostrar o porquê.
    */
   const [posResultado, setPosResultado] = useState<Record<string, { aplicou: boolean; avisos: string[] }>>({});
+  /** PROJETO EDITÁVEL (05.10): etapa do export em andamento, por task. */
+  const [exportandoProjeto, setExportandoProjeto] = useState<Record<string, string>>({});
+
+  /**
+   * Exporta o montado como PROJETO do CapCut (com XML do Premiere e .srt
+   * dentro): avatar limpo, b-rolls no tempo exato, transições, legenda e
+   * headline em PNG por cima. Com seletor de pasta (Chrome/Edge) grava direto
+   * na pasta de projetos do CapCut; sem ele, baixa um .zip com as pastas.
+   */
+  async function exportarProjetoEditavel(taskId: string, nomeAd: string, genId?: string) {
+    if (exportandoProjeto[taskId]) return;
+    const etapa = (msg: string) => setExportandoProjeto((prev) => ({ ...prev, [taskId]: msg }));
+    etapa('procurando o projeto');
+    try {
+      const { projetosDaTask, exportarProjetosEditaveis } = await import('@/lib/pilot-projeto-run');
+      const { CAPCUT_RAIZ_PADRAO } = await import('@/lib/pilot-projeto');
+      const projetos = await projetosDaTask(taskId, genId);
+      if (!projetos.length) {
+        alert('Este AD ainda não tem projeto editável.\n\nEle é guardado quando a montagem passa pela pós-produção (legenda, zoom, b-roll ou headline). Clique em "Atualizar montagem" e depois exporte de novo.');
+        return;
+      }
+      // O seletor precisa do clique ainda "vivo": nada demorado antes dele.
+      let destino: FileSystemDirectoryHandle | null = null;
+      const podeGravar = typeof window !== 'undefined' && typeof (window as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
+      if (podeGravar) {
+        try {
+          destino = await (window as unknown as { showDirectoryPicker: (o: object) => Promise<FileSystemDirectoryHandle> })
+            .showDirectoryPicker({ id: 'pilot-capcut-drafts', mode: 'readwrite' });
+        } catch {
+          return; // fechou o seletor = desistiu
+        }
+      }
+      // A pasta absoluta não chega ao navegador: se o nome bate com a pasta de
+      // projetos lembrada, o Premiere acha a mídia sozinho; senão ele pede pra
+      // apontar um arquivo e acha o resto.
+      let raizSalva = CAPCUT_RAIZ_PADRAO;
+      try { raizSalva = localStorage.getItem('pilot:capcut-raiz') || CAPCUT_RAIZ_PADRAO; } catch { /* modo privado */ }
+      const nomeDaRaiz = raizSalva.replace(/[\\/]+$/, '').split(/[\\/]/).pop()?.toLowerCase();
+      const raiz = destino ? (nomeDaRaiz === destino.name.toLowerCase() ? raizSalva : destino.name) : raizSalva;
+      const r = await exportarProjetosEditaveis({ projetos, nomeBase: nomeAd, destino, raizCapCut: raiz, onEtapa: etapa });
+      if (r.zip) {
+        const url = URL.createObjectURL(r.zip.blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = r.zip.nome;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 120_000);
+      }
+      const onde = destino
+        ? `na pasta "${destino.name}":\n${r.pastas.map((p) => `   • ${p}`).join('\n')}\n\nSe essa é a pasta de projetos do CapCut, feche e abra o CapCut: ${r.pastas.length > 1 ? 'eles aparecem' : 'ele aparece'} na lista.`
+        : `no arquivo "${r.zip?.nome}" (pasta de downloads).\n\nDescompacte DENTRO da pasta de projetos do CapCut (ex.: ${CAPCUT_RAIZ_PADRAO.replace(/\//g, '\\')}).`;
+      alert(`✓ Projeto editável pronto — ${r.pastas.length} ${r.pastas.length === 1 ? 'vídeo' : 'vídeos'} ${onde}\n\nPremiere: Arquivo > Importar > o XML "PREMIERE - …" que está dentro de cada pasta.`
+        + (r.avisos.length ? `\n\nAtenção:\n${r.avisos.map((a) => `• ${a}`).join('\n')}` : ''));
+    } catch (e) {
+      console.warn('[clickup-pilot] projeto editável falhou:', e);
+      alert(`Não consegui exportar o projeto editável: ${(e as Error)?.message || e}`);
+    } finally {
+      setExportandoProjeto((prev) => {
+        const n = { ...prev };
+        delete n[taskId];
+        return n;
+      });
+    }
+  }
   /* Partes que entraram SEM nivelar (o pipeline registra em `errors.nivelamento`).
    * Antes isso só aparecia no txt de diagnóstico dentro do zip: o card mostrava
    * o selo verde de "Volume normalizado" mesmo quando o nivelamento tinha
@@ -2818,6 +2884,17 @@ function ClickUpPilotInner() {
             console.warn(`[clickup-pilot] insert ${key} não voltou do IDB:`, e);
             return null;
           }
+        },
+        // PROJETO EDITÁVEL (05.10): avatar limpo + roteiro de cada montado,
+        // pro botão "Projeto CapCut + Premiere" do card. Um por vídeo (hook).
+        guardarProjeto: async (roteiro, avatarLimpo) => {
+          // VA (CutFeeling) não tem o botão: não ocupa o armazenamento à toa.
+          if (batchStatesRef.current?.[taskId]?.isVA) return;
+          const [{ saveBlob }, { chavesDoProjeto }] = await Promise.all([import('@/lib/zip-store'), import('@/lib/pilot-projeto')]);
+          const ch = chavesDoProjeto(taskId, info.filename);
+          await saveBlob(ch.base, avatarLimpo, avatarLimpo.type || 'video/mp4');
+          const comGeracao = { ...roteiro, genId: batchStatesRef.current?.[taskId]?.genId };
+          await saveBlob(ch.roteiro, new Blob([JSON.stringify(comGeracao)], { type: 'application/json' }), 'application/json');
         },
         onEtapa: (msg) => {
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `${info.filename} · ${msg}` } }));
@@ -16419,8 +16496,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     <span className="relative text-[13px]">🎬</span>
                                   </a>
                                 ) : null;
-                                if (!botaoVersoes && !botaoVA) return undefined;
-                                return (<>{botaoVersoes}{botaoVA}</>);
+                                // PROJETO EDITÁVEL: só com a montagem pronta.
+                                const etapaProjeto = exportandoProjeto[b.taskId];
+                                const botaoProjeto = b.phase === 'done' && !b.isVA && montagemContentOk ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void exportarProjetoEditavel(b.taskId, b.taskName || b.taskId, b.genId)}
+                                    disabled={!!etapaProjeto}
+                                    title={etapaProjeto
+                                      ? `Exportando projeto… ${etapaProjeto}`
+                                      : 'Projeto editável — CapCut + Premiere: avatar completo, b-rolls no tempo certo, transições e legenda em camadas (PNG + .srt). Escolha a pasta de projetos do CapCut.'}
+                                    aria-label="Exportar projeto editável para CapCut e Premiere"
+                                    data-pilot-projeto-editavel="true"
+                                    className={`group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-violet-400/55 bg-gradient-to-b from-violet-400/25 via-violet-400/10 to-violet-400/[0.02] text-violet-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(167,139,250,0.45)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-violet-300/80 active:translate-y-0 active:scale-95 transition-[transform,box-shadow] disabled:cursor-wait ${etapaProjeto ? 'animate-pulse' : ''}`}
+                                  >
+                                    <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                                    <svg className="relative" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                      <path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /><path d="m3 17.5 9 5 9-5" />
+                                    </svg>
+                                  </button>
+                                ) : null;
+                                if (!botaoVersoes && !botaoVA && !botaoProjeto) return undefined;
+                                return (<>{botaoVersoes}{botaoVA}{botaoProjeto}</>);
                               })()}
                             >
                               {previewsNode}
