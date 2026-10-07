@@ -12,11 +12,17 @@ export type StockFrameVisualAudit = {
 let entries: Record<string, StockFrameVisualAudit> = {};
 let loadPromise: Promise<void> | undefined;
 let searchSeeds: StockFrameVideo[] | undefined;
+let version = 0;
+
+/** Muda sempre que as fichas carregam ou são trocadas: invalida placares em cache. */
+export function stockFrameVisualAuditVersion(): number {
+  return version;
+}
 
 /** Loaded only when the user actually runs Smart Stocks, not on Pilot entry. */
 export function loadStockFrameVisualAudit(): Promise<void> {
   if (!loadPromise) loadPromise = import('../data/stockframe-visual-audit')
-    .then((module) => { entries = module.visualAuditEntries; searchSeeds = undefined; })
+    .then((module) => { entries = module.visualAuditEntries; searchSeeds = undefined; version++; })
     .catch((error) => { loadPromise = undefined; throw error; });
   return loadPromise;
 }
@@ -25,6 +31,7 @@ export function loadStockFrameVisualAudit(): Promise<void> {
 export function installStockFrameVisualAuditForTest(value: Record<string, StockFrameVisualAudit>): void {
   entries = value;
   searchSeeds = undefined;
+  version++;
 }
 
 /** Only ID-matched scenes that were checked against contact sheets are used. */

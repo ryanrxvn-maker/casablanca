@@ -16,8 +16,9 @@ import {
   chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives,
   inferStockFrameNiche, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback,
   rankStockFrameVideos, selectedSmartCandidate, stockFrameSameVisual, stockFrameUsableSeconds,
-  absorbUnfilledSmartSegments, type SmartCoverage, type SmartPace, type StockFrameCopyPart,
+  absorbUnfilledSmartSegments, rebalanceSmartPlan, stockFrameEffectiveOrigin, type SmartCoverage, type SmartPace, type StockFrameCopyPart,
 } from '../lib/stockframe-smart';
+import { sceneProfileOf } from '../lib/stockframe-director';
 import { installStockFrameVisualAuditForTest, stockFrameVisualAudit } from '../lib/stockframe-visual-audit';
 import { visualAuditEntries } from '../data/stockframe-visual-audit';
 import { installStockFrameFeelingForTest } from '../lib/stockframe-feeling';
@@ -59,6 +60,15 @@ segments = segments.map((segment) => segment.candidates.length ? segment : { ...
 segments = fillSmartStockAlternatives(segments, { pool: catalog, pack, minimum: 8 });
 let chosen = chooseSmartStockAssignments(segments, true);
 if (coverage === 100) chosen = absorbUnfilledSmartSegments(parts, chosen);
+else {
+  // Mesmo passo do Pilot: trecho que só achou reserva cede a vez a um trecho forte.
+  const rebalanced = rebalanceSmartPlan(parts, chosen, { coverage, pace, pool: catalog,
+    campaign: { campaignText, campaignNicheId: niche?.id, campaignIngredients: theme.length ? theme : undefined } });
+  if (rebalanced !== chosen) {
+    const refilled = rebalanced.map((segment) => segment.candidates.length ? segment : { ...segment, candidates: rankStockFrameGenericFallback(segment, catalog, 12) });
+    chosen = chooseSmartStockAssignments(fillSmartStockAlternatives(refilled, { pool: catalog, pack, minimum: 8 }), true);
+  }
+}
 chosen = fillSmartStockAlternatives(chosen, { pool: catalog, pack, minimum: 6 });
 
 let repeats = 0; let frozen = 0; let fewAlternatives = 0; let empty = 0;
@@ -83,12 +93,21 @@ for (const [index, segment] of chosen.entries()) {
   }
   const audit = candidate ? stockFrameVisualAudit(candidate.video.id) : undefined;
   console.log(`${String(index + 1).padStart(2)} ${segment.anchor} ~${segment.targetSeconds}s [${segment.visualBeat}] "${segment.text}"`);
-  console.log(`    -> ${candidate ? `${candidate.video.title} (${candidate.video.nicheName}, ${candidate.video.durationSec.toFixed(1)}s, ${candidate.score})${candidate.genericFallback ? ' ·reserva' : ''}` : '(avatar)'}${flags}`);
+  const profile = candidate ? sceneProfileOf(candidate.video, stockFrameVisualAudit(candidate.video.id)) : undefined;
+  console.log(`    -> ${candidate ? `${candidate.video.title} (${candidate.video.nicheName}, ${candidate.video.durationSec.toFixed(1)}s, ${candidate.score}) [${profile?.family}${profile?.live ? '' : ' · 3D'}${stockFrameEffectiveOrigin(candidate.video) === 'ai' ? ' · I.A' : ''}]${candidate.genericFallback ? ' ·reserva' : ''}` : '(avatar)'}${flags}`);
   if (audit) console.log(`       ficha: ${audit.title}`);
   if (candidate) console.log(`       porque: ${candidate.reasons.slice(0, 5).join(' · ')}`);
   console.log(`       alternativas (${alternatives.length}): ${alternatives.slice(0, 5).map((item) => item.video.title).join(' | ')}`);
 }
-console.log(`\nRESUMO repetidos=${repeats} congela=${frozen} poucas_alternativas=${fewAlternatives} sem_take=${empty} takes=${chosen.filter((segment) => segment.selectedVideoId).length}`);
+const families = new Map<string, number>();
+for (const segment of chosen) {
+  const candidate = selectedSmartCandidate(segment);
+  if (!candidate) continue;
+  const family = sceneProfileOf(candidate.video, stockFrameVisualAudit(candidate.video.id)).family;
+  families.set(family, (families.get(family) || 0) + 1);
+}
+console.log(`\nSITUAÇÕES ${[...families].sort((a, b) => b[1] - a[1]).map(([family, count]) => `${family}=${count}`).join(' ')}`);
+console.log(`RESUMO repetidos=${repeats} congela=${frozen} poucas_alternativas=${fewAlternatives} sem_take=${empty} takes=${chosen.filter((segment) => segment.selectedVideoId).length}`);
 
 for (const number of (process.env.DEBUG_SEG || '').split(',').filter(Boolean).map(Number)) {
   const segment = chosen[number - 1];

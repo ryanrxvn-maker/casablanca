@@ -1,7 +1,7 @@
 'use client';
 
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   stockFrameConfigure,
   stockFrameDisconnect,
@@ -24,9 +24,11 @@ import {
   planSmartStockSegments,
   rankStockFrameVideos,
   rankStockFrameGenericFallback,
+  rebalanceSmartPlan,
   smartSegmentForRange,
   smartStockMechanismQueries,
   selectedSmartCandidate,
+  stockFrameEffectiveOrigin,
   stockFrameSameVisual,
   type SmartStockCandidate,
   type SmartCoverage,
@@ -45,6 +47,45 @@ import s from './PilotStockFrame.module.css';
 type InsertMedia = { key: string; nome: string; tipo: 'video' | 'imagem'; w: number; h: number; durSec?: number };
 type Change = Insert[] | ((current: Insert[]) => Insert[]);
 type StockPlacement = { anchor: string; from: number; to: number; smart?: boolean; score?: number; coverage?: SmartCoverage };
+/** De onde o Smart Stocks tira os takes: a biblioteca inteira do plano ou só
+ * os favoritados (♥) na conta StockFrame do usuário. */
+type SmartSource = 'all' | 'favorites';
+const SMART_SOURCE_KEY = 'pilot.stockframe.smart-source.v1';
+
+/** Devolve a ação para a UI respirar entre blocos de ranking. A análise
+ * pontua milhares de pares trecho × take; em um bloco só, a tela congelava. */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+    if (scheduler?.yield) { scheduler.yield().then(resolve, () => setTimeout(resolve, 0)); return; }
+    setTimeout(resolve, 0);
+  });
+}
+
+/** Todos os takes favoritados (♥) da conta. A API filtra por `favorites=true`;
+ * se a conta não expuser favoritos e devolver o catálogo inteiro, a análise
+ * PARA com aviso claro em vez de usar a biblioteca toda calada. */
+async function loadStockFrameFavorites(niches: StockFrameNiche[], onProgress: (message: string) => void): Promise<StockFrameVideo[]> {
+  onProgress('Carregando os seus favoritos do StockFrame…');
+  const first = await stockFrameList({ page: 1, perPage: 48, favorites: true, sort: 'recent' });
+  if (!first.videos.length) return [];
+  if (!first.videos.every((video) => video.favorite)) {
+    const catalog = await stockFrameList({ page: 1, perPage: 1, sort: 'recent' }).catch(() => null);
+    if (!catalog || first.total >= catalog.total) {
+      throw new Error('O StockFrame desta conta ainda não informa os favoritos pela API. Use "Biblioteca toda" ou atualize a conta StockFrame — nada foi baixado.');
+    }
+  }
+  const pages = Math.min(40, first.totalPages || 1);
+  const videos = [...first.videos];
+  for (let page = 2; page <= pages; page += 4) {
+    onProgress(`Carregando os seus favoritos do StockFrame… ${Math.min(pages, page + 3)}/${pages}`);
+    const batch = await Promise.all(Array.from({ length: Math.min(4, pages - page + 1) }, (_, offset) =>
+      stockFrameList({ page: page + offset, perPage: 48, favorites: true, sort: 'recent' }).catch(() => null)));
+    for (const result of batch) if (result) videos.push(...result.videos);
+  }
+  // O filtro do servidor é a verdade: tudo que voltou é favorito da conta.
+  return enrichStockFrameVideos([...new Map(videos.map((video) => [video.id, { ...video, favorite: true }])).values()], niches);
+}
 
 /** Ids dos takes StockFrame inseridos à mão (fora do plano Smart). */
 function manualStockFrameIds(inserts: Insert[]): Set<string> {
@@ -202,26 +243,38 @@ function LazyVideo({ video, active = false, focused = false, suspended = false, 
   </div>;
 }
 
-function TakeCard({ video, selected, onOpen, onMediaError, action, compact = false }: {
-  video: StockFrameVideo; selected?: boolean; onOpen: () => void; onMediaError?: (id: string) => void; action?: { label: string; onClick: () => void; disabled?: boolean }; compact?: boolean;
+/** Selo de origem: o rótulo do StockFrame (source_tags) e, sem ele, a ficha
+ * visual conferida. "STOCK" só quando ninguém sabe. */
+function OriginBadge({ video }: { video: StockFrameVideo }) {
+  const origin = stockFrameEffectiveOrigin(video);
+  return <span className={origin === 'ai' ? s.ai : origin === 'organic' ? s.organic : s.stockOrigin}>{origin === 'ai' ? 'I.A' : origin === 'organic' ? 'ORGÂNICO' : 'STOCK'}</span>;
+}
+
+/** Card da biblioteca. Memorizado: digitar na busca ou trocar de trecho não
+ * re-renderiza os 48 cards. As ações chegam por funções ESTÁVEIS que leem o
+ * estado atual do modal na hora do clique (nunca o trecho de antes). */
+const TakeCard = memo(function TakeCard({ video, selected, onOpen, onMediaError, onAction, actionLabel, actionDisabled, compact = false }: {
+  video: StockFrameVideo; selected?: boolean; onOpen: (video: StockFrameVideo) => void; onMediaError?: (id: string) => void;
+  onAction?: (video: StockFrameVideo) => void; actionLabel?: string; actionDisabled?: boolean; compact?: boolean;
 }) {
   const [previewFocused, setPreviewFocused] = useState(false);
   return <article className={`${s.takeCard} ${selected ? s.takeSelected : ''} ${compact ? s.takeCompact : ''}`}>
-    <button type="button" className={s.takePreview} onClick={onOpen} onFocus={() => setPreviewFocused(true)} onBlur={() => setPreviewFocused(false)} aria-label={`Ver ${video.title}`}><LazyVideo video={video} focused={previewFocused} suspended={selected} onMediaError={onMediaError}/></button>
+    <button type="button" className={s.takePreview} onClick={() => onOpen(video)} onFocus={() => setPreviewFocused(true)} onBlur={() => setPreviewFocused(false)} aria-label={`Ver ${video.title}`}><LazyVideo video={video} focused={previewFocused} suspended={selected} onMediaError={onMediaError}/></button>
     <div className={s.takeBody}>
       <div className={s.takeMeta}>
-        <span className={video.origin === 'ai' ? s.ai : s.organic}>{video.origin === 'ai' ? 'I.A' : video.origin === 'organic' ? 'ORGÂNICO' : 'STOCK'}</span>
+        <OriginBadge video={video}/>
+        {video.favorite && <span className={s.favoriteBadge} title="Favorito na sua conta StockFrame">♥</span>}
         {video.code && <code>#{video.code}</code>}
       </div>
-      <button type="button" className={s.takeTitle} onClick={onOpen}>{video.title}</button>
+      <button type="button" className={s.takeTitle} onClick={() => onOpen(video)}>{video.title}</button>
       {!compact && <p>{video.description || video.tags.slice(0, 4).join(' · ') || video.subcategoryName || 'Take StockFrame'}</p>}
       <div className={s.takeFooter}>
         <span>{video.downloads ? `${video.downloads} downloads` : video.nicheName || 'StockFrame'}</span>
-        {action && <button type="button" className={s.cardAction} onClick={action.onClick} disabled={action.disabled}><Icon name={selected ? 'check' : 'download'} size={15}/>{action.label}</button>}
+        {onAction && actionLabel && <button type="button" className={s.cardAction} onClick={() => onAction(video)} disabled={actionDisabled}><Icon name={selected ? 'check' : 'download'} size={15}/>{actionLabel}</button>}
       </div>
     </div>
   </article>;
-}
+});
 
 function CopyRange({ parts, anchor, from, to, onAnchor, onRange }: {
   parts: StockFrameCopyPart[]; anchor: string; from: number; to: number;
@@ -259,13 +312,22 @@ export function PilotStockFrameButton({ enabled, count, onClick }: { enabled: bo
 
 const EMPTY_PAGE: StockFramePage = { videos: [], niches: [], page: 1, perPage: 24, total: 0, totalPages: 1 };
 
-export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnabledChange, onClose, onChange, onImportMedia, onEditInserts, onUpdateMontage, updatingMontage = false }: {
+export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: incomingInserts, enabled, onEnabledChange, onClose, onChange, onImportMedia, onEditInserts, onUpdateMontage, updatingMontage = false }: {
   taskId: string; parts: StockFrameCopyPart[]; inserts: Insert[]; enabled: boolean;
   onEnabledChange: (value: boolean) => void; onClose: () => void; onChange: (value: Change) => void;
   onImportMedia: (file: File, anchor: string) => Promise<InsertMedia | null>; onEditInserts: () => void;
   onUpdateMontage?: () => Promise<boolean>; updatingMontage?: boolean;
 }) {
   const uid = useId();
+  // A página do Pilot recria `parts` e `inserts` a cada render (map/filter
+  // inline). Sem estabilizar pelo CONTEÚDO, toda atualização dela refazia a
+  // timeline e as sugestões (ranking do catálogo) — o "pesado pra mexer".
+  const partsKey = JSON.stringify(incomingParts);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const parts = useMemo(() => incomingParts, [partsKey]);
+  const insertsKey = incomingInserts.map((insert) => `${insert.id}|${insert.source}|${insert.stockFrame?.videoId || ''}|${insert.stockFrame?.smart ? 1 : 0}|${insert.stockFrame?.title || ''}`).join('\n');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const inserts = useMemo(() => incomingInserts, [insertsKey]);
   const dialog = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState<'manual' | 'smart'>('manual');
@@ -288,6 +350,13 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const [busyTake, setBusyTake] = useState('');
   const [coverage, setCoverage] = useState<SmartCoverage>(60);
   const [pace, setPace] = useState<SmartPace>('adaptive');
+  // Preferência do próprio navegador (conveniência): quem trabalha só com os
+  // favoritos não precisa religar a cada task. Falha de storage = biblioteca.
+  const [smartSource, setSmartSource] = useState<SmartSource>(() => {
+    try { return localStorage.getItem(SMART_SOURCE_KEY) === 'favorites' ? 'favorites' : 'all'; } catch { return 'all'; }
+  });
+  const [favoritesCount, setFavoritesCount] = useState<number | null>(null);
+  useEffect(() => { try { localStorage.setItem(SMART_SOURCE_KEY, smartSource); } catch { /* sem storage: vale só nesta janela */ } }, [smartSource]);
   const [smart, setSmart] = useState<SmartStockSegment[]>([]);
   const [smartBusy, setSmartBusy] = useState(false);
   const [smartProgress, setSmartProgress] = useState('');
@@ -305,7 +374,7 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
   const [suggestionMedia, setSuggestionMedia] = useState(new Map<string, StockFrameVideo>());
   // Catalog browsing while replacing a take must never erase a reviewed plan.
   // Only changes to the copy or Smart settings invalidate its word coverage.
-  const planContext = JSON.stringify({ parts, coverage, pace });
+  const planContext = `${partsKey}|${coverage}|${pace}|${smartSource}`;
   const planIsCurrent = plannedContext === planContext;
 
   useEffect(() => {
@@ -370,6 +439,17 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     setError('');
     stockFrameList(filters).then(async (result) => {
       if (!live) return;
+      if (filters.favorites && result.videos.length && !result.videos.some((video) => video.favorite)) {
+        // Sem marca de favorito: confirma que o servidor filtrou de verdade
+        // (total menor que o catálogo) antes de mostrar a lista como favoritos.
+        const catalog = await stockFrameList({ ...filters, favorites: undefined, page: 1, perPage: 1 }).catch(() => null);
+        if (!live) return;
+        if (!catalog || result.total >= catalog.total) {
+          setPage(EMPTY_PAGE);
+          setError('O StockFrame desta conta ainda não informa os favoritos pela API. A aba Favoritos e o Smart "Só favoritos" ficam indisponíveis até a conta liberar.');
+          return;
+        }
+      }
       const videos = enrichStockFrameVideos(result.videos, mergeStockFrameNiches(account?.niches || [], result.niches));
       setPage({ ...result, videos });
       setNiches((current) => mergeStockFrameNiches(current, result.niches));
@@ -503,212 +583,253 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       const nicheId = inferredNiche?.id || filters.nicheId;
       const campaignText = (translation.translated ? `${translation.texts.join(' ')} ${parts.map((part) => part.text).join(' ')}` : parts.map((part) => part.text).join(' ')).slice(0, 15_000);
       const segments = balanceMechanismPresence(localized).map((segment) => ({ ...segment, campaignText, campaignNicheId: nicheId }));
+      const favoritesOnly = smartSource === 'favorites';
       const bySegment = new Map<string, StockFrameVideo[]>();
-      if (account?.capabilities.smartSearch) {
-        for (let index = 0; index < segments.length; index += 12) {
-          const batch = segments.slice(index, index + 12);
-          const queries: StockFrameSmartQuery[] = batch.map((segment, offset) => ({
-            id: segment.id,
-            text: segment.semanticText || segment.text,
-            context_before: segments[index + offset - 1]?.anchor === segment.anchor ? segments[index + offset - 1].semanticText || segments[index + offset - 1].text : '',
-            context_after: segments[index + offset + 1]?.anchor === segment.anchor ? segments[index + offset + 1].semanticText || segments[index + offset + 1].text : '',
-            full_copy_summary: campaignText.slice(0, 1000),
-            desired_duration: segment.targetSeconds,
-            niche_id: nicheId || null,
-            subcategory_id: filters.subcategoryId || null,
-            aspect_ratio: filters.aspectRatio || '9:16',
-            origin: filters.origin,
-          }));
-          const results = await stockFrameSmartSearch(queries);
-          for (const segment of batch) bySegment.set(segment.id, results.get(segment.id) || []);
-          setSmartProgress(`Busca contextual no StockFrame… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
+      // Catálogo da análise. Os placares são memorizados por take: o mesmo
+      // objeto de vídeo nunca é pontuado duas vezes para o mesmo trecho.
+      const globalPool = new Map<string, StockFrameVideo>();
+      const addToPool = (videos: StockFrameVideo[]) => {
+        for (const video of enrichStockFrameVideos(videos, niches)) {
+          if (!globalPool.has(video.id)) globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
         }
-      } else {
-        for (let index = 0; index < segments.length; index += 3) {
-          const batch = segments.slice(index, index + 3);
-          const results = await Promise.all(batch.map(async (segment) => stockFrameList({
-            page: 1, perPage: 48, search: segment.query || segment.text.slice(0, 120),
-            nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
-          })));
-          batch.forEach((segment, offset) => bySegment.set(segment.id, results[offset].videos));
-          setSmartProgress(`Comparando takes do catálogo… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
-        }
-      }
-      // The health niche and the recipe pack are different libraries. Search
-      // named mechanisms globally, then let the ingredient/anatomy gates decide.
-      // Queries are deduplicated, bounded and never download originals.
-      const mechanismVideos: StockFrameVideo[] = [];
-      const storyText = segments.map((segment) => segment.semanticText || segment.text).join(' ').toLowerCase();
-      const sceneQueries: string[] = [];
-      if (/\b(?:lipedema|lipoedema)\b/.test(campaignText.toLowerCase())) {
-        // The provider indexes lipedema shots under Emagrecimento, not under
-        // a same-named niche. Retrieve the condition and its key beats even
-        // when a split segment only says "she", "legs" or "inflammation".
-        sceneQueries.push('pernas inchadas', 'mulher na academia');
-      }
-      if (/\b(?:energia|vigor|jovem|disposi[cç][aã]o)\b/.test(storyText)) sceneQueries.push('homem ativo', 'homem sorrindo');
-      if (/\b(?:testosterona|circula[cç][aã]o|fluxo sangu[ií]neo)\b/.test(storyText)) sceneQueries.push('fluxo sanguineo', 'sistema reprodutor masculino');
-      if (/\b(?:mulher(?:es)?|casal|marido|esposa|relacionamento|satisfazer)\b/.test(storyText)) sceneQueries.push('casal conversando', 'homem preocupado');
-      if (/\b(?:disfuncao eretil|erecao|desempenho sexual|erectile|erekcja|ereccion)\b/.test(campaignText.toLowerCase())
-        && /\b(?:casal|intimidade|desejo|esposa|parceira|relacionamento|couple|intimacy|desire|partner|wife|pareja|intimidad|partnerk)\b/.test(storyText)) {
-        sceneQueries.push('casal sensual', 'casal intimidade');
-      }
-      if (/\b(?:especialista|urologista|m[eé]dic[ao]|doctor|physician|expert|dr)\b/.test(storyText)) sceneQueries.push('urologista explicando');
-      if (/\b(?:likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?)\b/.test(storyText)) {
-        sceneQueries.push('celular comentarios', 'video no celular', 'celular');
-      }
-      if (/\b(?:durar|aguentar|resistir)\b.{0,45}\b(?:mais|tempo|minutos|horas)\b/.test(storyText)) sceneQueries.push('casal sorrindo');
-      const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])].slice(0, 12);
-      for (let index = 0; index < globalQueries.length; index += 3) {
-        setSmartProgress('Buscando cenas congruentes em toda a biblioteca…');
-        const results = await Promise.all(globalQueries.slice(index, index + 3).map(search => stockFrameList({
-          page: 1, perPage: 48, search, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
-        })));
-        mechanismVideos.push(...results.flatMap(result => result.videos));
-      }
-      // O pack do nicho da campanha (ex.: Prostata) vem inteiro: é dele que
-      // saem as alternativas quando a fala não tem cena específica — nenhum
-      // trecho fica sem opção. Só listagem: nenhum download, nenhuma cota.
-      const packListing: StockFrameVideo[] = [];
+      };
+      const listFilters = { aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' as const };
+      let packIds = new Set<string>();
       let packComplete = false;
-      if (nicheId) {
-        let packPages = 6;
-        for (let pageNo = 1; pageNo <= packPages; pageNo++) {
-          setSmartProgress(`Carregando o pack ${inferredNiche?.name || 'do nicho'} para as alternativas… ${pageNo}/${packPages}`);
-          const result = await stockFrameList({ page: pageNo, perPage: 48, nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' }).catch(() => null);
-          if (!result) break;
-          packListing.push(...result.videos);
-          packPages = Math.min(6, result.totalPages || 1);
-          packComplete = pageNo >= (result.totalPages || 1);
-        }
-      }
-      for (const [id, videos] of bySegment) bySegment.set(id, enrichStockFrameVideos(videos, niches));
-      const globalPool = new Map<string, StockFrameVideo>(enrichStockFrameVideos([...page.videos, ...mechanismVideos, ...packListing, ...[...bySegment.values()].flat()], niches)
-        .map((video) => [video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] }]));
-      const packIds = new Set(packListing.map((video) => video.id));
-      const rankSegments = (current: typeof segments, onlyMissing = false) => current.map((segment) => {
-        if (onlyMissing && segment.candidates.length) return segment;
-        const pool = new Map(globalPool);
-        for (const video of bySegment.get(segment.id) || []) pool.set(video.id, video);
-        // 24 antes de juntar variações da mesma série: sobram opções distintas.
-        return { ...segment, candidates: rankStockFrameVideos(segment, [...pool.values()], 24, coverage === 100) };
-      });
-      let completed = rankSegments(segments);
-      // The provider cannot search our richer private labels directly. When
-      // its first pass is weak, use visually verified IDs only to derive a
-      // few original-title searches. Live API results still enforce the paid
-      // account's access, quota and real media identity.
-      const weak = completed.filter((segment) => !segment.candidates.length || segment.candidates[0].score < 12);
-      if (weak.length) {
-        const audited = stockFrameAuditedSearchSeeds();
-        const searches: string[] = [];
-        for (const segment of weak) {
-          const matches = rankStockFrameVideos(segment, audited, 2, coverage === 100);
-          const seed = matches.find((candidate) => !globalPool.has(candidate.video.id)
-            && candidate.video.title.trim().length > 5
-            && !searches.includes(candidate.video.title));
-          if (seed) searches.push(seed.video.title);
-          if (searches.length >= 6) break;
-        }
-        for (let index = 0; index < searches.length; index += 3) {
-          setSmartProgress('Conferindo cenas do catálogo com as fichas visuais…');
-          const results = await Promise.all(searches.slice(index, index + 3).map((search) => stockFrameList({
-            page: 1, perPage: 48, search, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
-          })));
-          for (const video of enrichStockFrameVideos(results.flatMap((result) => result.videos), niches)) {
-            globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
+      if (favoritesOnly) {
+        // Só os favoritos (♥) da conta: nenhuma busca no catálogo inteiro.
+        const favorites = await loadStockFrameFavorites(niches, setSmartProgress);
+        setFavoritesCount(favorites.length);
+        if (!favorites.length) throw new Error('Nenhum take favoritado (♥) na sua conta StockFrame. Favorite takes no site do StockFrame ou use "Biblioteca toda" — nada foi baixado.');
+        addToPool(favorites);
+        packIds = new Set(favorites.filter((video) => !!nicheId && video.nicheId === nicheId).map((video) => video.id));
+        packComplete = true;
+      } else {
+        // O pack do nicho da campanha (ex.: Prostata) vem inteiro: é dele que
+        // saem as alternativas quando a fala não tem cena específica — nenhum
+        // trecho fica sem opção. Só listagem: nenhum download, nenhuma cota.
+        // Corre em paralelo com a busca contextual (a extensão respeita o
+        // limite por minuto do StockFrame).
+        const packListing: StockFrameVideo[] = [];
+        const packReady = (async () => {
+          if (!nicheId) return;
+          const first = await stockFrameList({ page: 1, perPage: 48, nicheId, ...listFilters }).catch(() => null);
+          if (!first) return;
+          packListing.push(...first.videos);
+          const pages = Math.min(6, first.totalPages || 1);
+          const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, offset) =>
+            stockFrameList({ page: offset + 2, perPage: 48, nicheId, ...listFilters }).catch(() => null)));
+          for (const result of rest) if (result) packListing.push(...result.videos);
+          packComplete = rest.every(Boolean) && pages >= (first.totalPages || 1);
+        })();
+        if (account?.capabilities.smartSearch) {
+          for (let index = 0; index < segments.length; index += 12) {
+            const batch = segments.slice(index, index + 12);
+            const queries: StockFrameSmartQuery[] = batch.map((segment, offset) => ({
+              id: segment.id,
+              text: segment.semanticText || segment.text,
+              context_before: segments[index + offset - 1]?.anchor === segment.anchor ? segments[index + offset - 1].semanticText || segments[index + offset - 1].text : '',
+              context_after: segments[index + offset + 1]?.anchor === segment.anchor ? segments[index + offset + 1].semanticText || segments[index + offset + 1].text : '',
+              full_copy_summary: campaignText.slice(0, 1000),
+              desired_duration: segment.targetSeconds,
+              niche_id: nicheId || null,
+              subcategory_id: filters.subcategoryId || null,
+              aspect_ratio: filters.aspectRatio || '9:16',
+              origin: filters.origin,
+            }));
+            const results = await stockFrameSmartSearch(queries);
+            for (const segment of batch) bySegment.set(segment.id, results.get(segment.id) || []);
+            setSmartProgress(`Busca contextual no StockFrame… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
+          }
+        } else {
+          for (let index = 0; index < segments.length; index += 6) {
+            const batch = segments.slice(index, index + 6);
+            const results = await Promise.all(batch.map(async (segment) => stockFrameList({
+              page: 1, perPage: 48, search: segment.query || segment.text.slice(0, 120), nicheId, ...listFilters,
+            })));
+            batch.forEach((segment, offset) => bySegment.set(segment.id, results[offset].videos));
+            setSmartProgress(`Comparando takes do catálogo… ${Math.min(segments.length, index + batch.length)}/${segments.length}`);
           }
         }
-        if (searches.length) completed = rankSegments(segments);
+        // The health niche and the recipe pack are different libraries. Search
+        // named mechanisms globally, then let the ingredient/anatomy gates decide.
+        // Queries are deduplicated, bounded and never download originals.
+        const storyText = segments.map((segment) => segment.semanticText || segment.text).join(' ').toLowerCase();
+        const sceneQueries: string[] = [];
+        if (/\b(?:lipedema|lipoedema)\b/.test(campaignText.toLowerCase())) {
+          // The provider indexes lipedema shots under Emagrecimento, not under
+          // a same-named niche. Retrieve the condition and its key beats even
+          // when a split segment only says "she", "legs" or "inflammation".
+          sceneQueries.push('pernas inchadas', 'mulher na academia');
+        }
+        if (/\b(?:energia|vigor|jovem|disposi[cç][aã]o)\b/.test(storyText)) sceneQueries.push('homem ativo', 'homem sorrindo');
+        if (/\b(?:testosterona|circula[cç][aã]o|fluxo sangu[ií]neo)\b/.test(storyText)) sceneQueries.push('fluxo sanguineo', 'sistema reprodutor masculino');
+        if (/\b(?:mulher(?:es)?|casal|marido|esposa|relacionamento|satisfazer)\b/.test(storyText)) sceneQueries.push('casal conversando', 'homem preocupado');
+        if (/\b(?:disfuncao eretil|erecao|desempenho sexual|erectile|erekcja|ereccion)\b/.test(campaignText.toLowerCase())
+          && /\b(?:casal|intimidade|desejo|esposa|parceira|relacionamento|couple|intimacy|desire|partner|wife|pareja|intimidad|partnerk)\b/.test(storyText)) {
+          sceneQueries.push('casal sensual', 'casal intimidade');
+        }
+        if (/\b(?:especialista|urologista|neurologista|cientista|pesquisador|m[eé]dic[ao]|doctor|physician|expert|dr)\b/.test(storyText)) sceneQueries.push('urologista explicando', 'medico atendendo idoso');
+        if (/\b(?:ind[uú]stria|farmac[eê]utic\w*|lucros?)\b/.test(storyText)) sceneQueries.push('industria farmaceutica');
+        if (/\b(?:likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?)\b/.test(storyText)) {
+          sceneQueries.push('celular comentarios', 'video no celular', 'celular');
+        }
+        if (/\b(?:link|bot[aã]o|clique|clica|tela|mat[eé]ria)\b/.test(storyText)) sceneQueries.push('idoso usando celular', 'pessoas usando celular');
+        if (/\b(?:durar|aguentar|resistir)\b.{0,45}\b(?:mais|tempo|minutos|horas)\b/.test(storyText)) sceneQueries.push('casal sorrindo');
+        const globalQueries = [...new Set([...smartStockMechanismQueries(segments), ...sceneQueries])].slice(0, 14);
+        setSmartProgress('Buscando cenas congruentes em toda a biblioteca…');
+        const globalResults = await Promise.all(globalQueries.map((search) => stockFrameList({ page: 1, perPage: 48, search, ...listFilters }).catch(() => null)));
+        const mechanismVideos = globalResults.flatMap((result) => result?.videos || []);
+        setSmartProgress(`Carregando o pack ${inferredNiche?.name || 'do nicho'} para as alternativas…`);
+        await packReady;
+        for (const [id, videos] of bySegment) bySegment.set(id, enrichStockFrameVideos(videos, niches));
+        addToPool([...page.videos, ...mechanismVideos, ...packListing, ...[...bySegment.values()].flat()]);
+        packIds = new Set(packListing.map((video) => video.id));
       }
-      if (completed.some((segment) => !segment.candidates.length) && !packComplete) {
-        let maxPages = 10;
-        for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
-          setSmartProgress(`Ampliando o catálogo para cobrir os trechos escolhidos… página ${pageNo}/${maxPages}`);
-          const more = await stockFrameList({ page: pageNo, perPage: 48, nicheId, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance' });
-          maxPages = Math.min(10, more.totalPages || 1);
-          for (const video of enrichStockFrameVideos(more.videos, niches)) globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
-          completed = rankSegments(completed, true);
-          if (completed.every((segment) => segment.candidates.length)) break;
+      // O resultado da busca contextual do trecho entra com o placar remoto
+      // dele (finalScore, melhor recorte); o resto do catálogo, sem.
+      const poolFor = (segment: SmartStockSegment) => {
+        const own = favoritesOnly ? [] : bySegment.get(segment.id) || [];
+        if (!own.length) return [...globalPool.values()];
+        const ownIds = new Set(own.map((video) => video.id));
+        return [...own, ...[...globalPool.values()].filter((video) => !ownIds.has(video.id))];
+      };
+      // Pontua em blocos e devolve a tela para a UI entre eles: a análise não
+      // congela o Pilot (antes eram segundos de tela travada).
+      const rankSegments = async (current: SmartStockSegment[], onlyMissing = false) => {
+        const ranked: SmartStockSegment[] = [];
+        for (const [index, segment] of current.entries()) {
+          if (index % 2 === 1) await yieldToUi();
+          if (onlyMissing && segment.candidates.length) { ranked.push(segment); continue; }
+          // 24 antes de juntar variações da mesma série: sobram opções distintas.
+          ranked.push({ ...segment, candidates: rankStockFrameVideos(segment, poolFor(segment), 24, coverage === 100) });
         }
-      }
-      // O nicho médico não costuma catalogar cenas neutras de relacionamento,
-      // dinheiro ou consulta. Se ainda houver lacuna no plano, buscar
-      // essas cenas na biblioteca inteira antes do fallback final, sem baixar.
-      if (completed.some((segment) => !segment.candidates.length)) {
-        const missingText = completed.filter(segment => !segment.candidates.length)
-          .map(segment => (segment.semanticText || segment.text).toLowerCase()).join(' ');
-        // Provider search is relevance-paged; a verified neutral take can be
-        // pushed off the first "celular" page. It is fetched only for gaps.
-        const broadQueries = new Set<string>(['PESSOAS USANDO CELULAR']);
-        if (inferredNiche?.name) broadQueries.add(inferredNiche.name);
-        if (/prosta|urin|mij|bexiga|banheiro/.test(missingText)) {
-          broadQueries.add('homem urinando'); broadQueries.add('bexiga');
+        return ranked;
+      };
+      setSmartProgress(favoritesOnly ? 'Lendo a copy e escolhendo entre os seus favoritos…' : 'Lendo a copy como editor e cruzando com as cenas…');
+      let completed = await rankSegments(segments);
+      if (!favoritesOnly) {
+        // The provider cannot search our richer private labels directly. When
+        // its first pass is weak, use visually verified IDs only to derive a
+        // few original-title searches. Live API results still enforce the paid
+        // account's access, quota and real media identity.
+        const weak = completed.filter((segment) => !segment.candidates.length || segment.candidates[0].score < 12);
+        if (weak.length) {
+          const audited = stockFrameAuditedSearchSeeds();
+          const searches: string[] = [];
+          for (const segment of weak) {
+            const matches = rankStockFrameVideos(segment, audited, 2, coverage === 100);
+            const seed = matches.find((candidate) => !globalPool.has(candidate.video.id)
+              && candidate.video.title.trim().length > 5
+              && !searches.includes(candidate.video.title));
+            if (seed) searches.push(seed.video.title);
+            if (searches.length >= 6) break;
+          }
+          if (searches.length) {
+            setSmartProgress('Conferindo cenas do catálogo com as fichas visuais…');
+            const results = await Promise.all(searches.map((search) => stockFrameList({ page: 1, perPage: 48, search, ...listFilters }).catch(() => null)));
+            addToPool(results.flatMap((result) => result?.videos || []));
+            completed = await rankSegments(segments);
+          }
         }
-        if (/dinheiro|grana|preço|preco|pagar|pagamento/.test(missingText)) {
-          broadQueries.add('dinheiro'); broadQueries.add('casal discutindo dinheiro');
+        if (completed.some((segment) => !segment.candidates.length) && !packComplete) {
+          let maxPages = 10;
+          for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+            setSmartProgress(`Ampliando o catálogo para cobrir os trechos escolhidos… página ${pageNo}/${maxPages}`);
+            const more = await stockFrameList({ page: pageNo, perPage: 48, nicheId, ...listFilters });
+            maxPages = Math.min(10, more.totalPages || 1);
+            addToPool(more.videos);
+            completed = await rankSegments(completed, true);
+            if (completed.every((segment) => segment.candidates.length)) break;
+          }
         }
-        if (/casal|mulher|marido|esposa|relacionamento|companheir/.test(missingText)) {
-          broadQueries.add('casal conversando'); broadQueries.add('casal preocupado');
-        }
-        if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
-        if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais|likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?/.test(missingText)) {
-          // A busca da API pode tratar duas palavras como AND. A biblioteca
-          // real tem takes neutros como "PESSOAS USANDO CELULAR". A busca
-          // ampla por "celular" pode relegá-los à página seguinte; o título
-          // exato traz a cena à revisão e o ranking ainda valida o contexto.
-          broadQueries.add('celular'); broadQueries.add('celular clicando');
-        }
-        broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
-        const searches = [...broadQueries].slice(0, 12);
-        for (let index = 0; index < searches.length; index += 3) {
+        // O nicho médico não costuma catalogar cenas neutras de relacionamento,
+        // dinheiro ou consulta. Se ainda houver lacuna no plano, buscar
+        // essas cenas na biblioteca inteira antes do fallback final, sem baixar.
+        if (completed.some((segment) => !segment.candidates.length)) {
+          const missingText = completed.filter(segment => !segment.candidates.length)
+            .map(segment => (segment.semanticText || segment.text).toLowerCase()).join(' ');
+          // Provider search is relevance-paged; a verified neutral take can be
+          // pushed off the first "celular" page. It is fetched only for gaps.
+          const broadQueries = new Set<string>(['PESSOAS USANDO CELULAR']);
+          if (inferredNiche?.name) broadQueries.add(inferredNiche.name);
+          if (/prosta|urin|mij|bexiga|banheiro/.test(missingText)) {
+            broadQueries.add('homem urinando'); broadQueries.add('bexiga');
+          }
+          if (/dinheiro|grana|preço|preco|pagar|pagamento/.test(missingText)) {
+            broadQueries.add('dinheiro'); broadQueries.add('casal discutindo dinheiro');
+          }
+          if (/casal|mulher|marido|esposa|relacionamento|companheir/.test(missingText)) {
+            broadQueries.add('casal conversando'); broadQueries.add('casal preocupado');
+          }
+          if (/medic|especialista|urologista|consulta/.test(missingText)) broadQueries.add('medico conversando');
+          if (/clic|bot[aã]o|assist|ver v[ií]deo|saiba mais|likes?|coment[aá]rios?|comments?|viral|plataforma|platform|views?/.test(missingText)) {
+            // A busca da API pode tratar duas palavras como AND. A biblioteca
+            // real tem takes neutros como "PESSOAS USANDO CELULAR". A busca
+            // ampla por "celular" pode relegá-los à página seguinte; o título
+            // exato traz a cena à revisão e o ranking ainda valida o contexto.
+            broadQueries.add('celular'); broadQueries.add('celular clicando');
+          }
+          broadQueries.add('casal conversando'); broadQueries.add('homem preocupado');
           setSmartProgress('Procurando alternativas visuais neutras para as lacunas…');
-          const results = await Promise.all(searches.slice(index, index + 3).map(search => stockFrameList({
-            page: 1, perPage: 48, search, aspectRatio: filters.aspectRatio, origin: filters.origin, sort: 'relevance',
-          })));
-          for (const video of enrichStockFrameVideos(results.flatMap(result => result.videos), niches)) {
-            globalPool.set(video.id, { ...video, finalScore: undefined, matchReason: undefined, matchedConcepts: [], conflictingConcepts: [] });
-          }
+          const results = await Promise.all([...broadQueries].slice(0, 12).map((search) => stockFrameList({ page: 1, perPage: 48, search, ...listFilters }).catch(() => null)));
+          addToPool(results.flatMap((result) => result?.videos || []));
+          completed = await rankSegments(completed, true);
         }
-        completed = rankSegments(completed, true);
       }
       const recipeTheme = chooseCampaignRecipeTheme(completed);
-      if (recipeTheme.length) completed = completed.map((segment) => ({
-        ...segment,
-        campaignIngredients: recipeTheme,
-        candidates: rankStockFrameVideos({ ...segment, campaignIngredients: recipeTheme },
-          [...new Map([...globalPool, ...(bySegment.get(segment.id) || []).map((video): [string, StockFrameVideo] => [video.id, video])]).values()], 24, coverage === 100),
-      }));
+      if (recipeTheme.length) completed = await rankSegments(completed.map((segment) => ({ ...segment, campaignIngredients: recipeTheme })));
       // Generic scenes are a LAST resort for every requested coverage level,
       // never competitors against an exact match. A 60% plan cannot silently
       // become 20% just because only the recipe shots matched the first query.
       // All ingredient, anatomy and visual-safety gates stay active.
+      const fullPool = [...globalPool.values()];
       completed = completed.map(segment => segment.candidates.length ? segment : {
-        ...segment, candidates: rankStockFrameGenericFallback(segment, [...globalPool.values()], 12),
+        ...segment, candidates: rankStockFrameGenericFallback(segment, fullPool, 12),
       });
       // Takes StockFrame inseridos à mão continuam na montagem ao aplicar o
       // plano: o Smart não pode escolhê-los de novo nem oferecê-los como
       // alternativa (a montagem repetiria o mesmo take) — nem outra variação
       // da mesma série.
       const manualScenes = manualStockFrameScenes(inserts);
-      if (manualScenes.length) completed = completed.map((segment) => ({ ...segment, candidates: segment.candidates.filter((candidate) => !manualScenes.some((scene) => stockFrameSameVisual(scene, candidate.video))) }));
-      const fullPool = [...globalPool.values()];
+      const withoutManual = (list: SmartStockSegment[]) => manualScenes.length
+        ? list.map((segment) => ({ ...segment, candidates: segment.candidates.filter((candidate) => !manualScenes.some((scene) => stockFrameSameVisual(scene, candidate.video))) }))
+        : list;
+      completed = withoutManual(completed);
       const packPool = fullPool.filter((video) => packIds.has(video.id) || (!!nicheId && video.nicheId === nicheId));
+      await yieldToUi();
+      setSmartProgress('Montando um plano variado, sem repetir cena…');
       // Uma cena por série e opções de sobra (específicas → genéricas seguras
       // → pack do nicho) ANTES da atribuição, que nunca repete cena.
-      completed = fillSmartStockAlternatives(completed, { pool: fullPool, pack: packPool, minimum: 8, exclude: manualScenes });
+      completed = fillSmartStockAlternatives(completed, { pool: fullPool, pack: packPool, minimum: 12, exclude: manualScenes });
+      await yieldToUi();
       // planSmartStockSegments already selected precisely the requested word
       // budget for 30/60. Fill each of those slots whenever a safe candidate
       // exists; the strict coverage check before download remains unchanged.
       let chosen = chooseSmartStockAssignments(completed, true);
       // 100% sem repetir: trecho sem cena única é absorvido pelo vizinho.
       if (coverage === 100) chosen = absorbUnfilledSmartSegments(parts, chosen);
+      else {
+        // O editor não força b-roll onde o catálogo não tem a cena: trecho que
+        // só achou reserva cede a vez a um trecho forte (mesma cobertura).
+        await yieldToUi();
+        const rebalanced = rebalanceSmartPlan(parts, chosen, {
+          coverage, pace, pool: fullPool, exclude: manualScenes,
+          campaign: { campaignText, campaignNicheId: nicheId, campaignIngredients: recipeTheme.length ? recipeTheme : undefined },
+        });
+        if (rebalanced !== chosen) {
+          const refilled = withoutManual(rebalanced).map((segment) => segment.candidates.length ? segment
+            : { ...segment, candidates: rankStockFrameGenericFallback(segment, fullPool, 12) });
+          chosen = chooseSmartStockAssignments(fillSmartStockAlternatives(refilled, { pool: fullPool, pack: packPool, minimum: 12, exclude: manualScenes }), true);
+        }
+      }
+      await yieldToUi();
       // Depois da escolha, cada trecho ainda precisa de alternativas LIVRES
       // (fora das cenas usadas nos outros trechos) para a revisão.
-      chosen = fillSmartStockAlternatives(chosen, { pool: fullPool, pack: packPool, minimum: 6, exclude: manualScenes });
+      chosen = fillSmartStockAlternatives(chosen, { pool: fullPool, pack: packPool, minimum: 10, exclude: manualScenes });
       smartPools.current = { pool: fullPool, pack: packPool, campaignText, nicheId, campaignIngredients: recipeTheme };
       if (account?.capabilities.mediaUrls) {
-        const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 5).map((candidate) => [candidate.video.id, candidate.video]))).values()];
+        const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 6).map((candidate) => [candidate.video.id, candidate.video]))).values()];
         const refreshed = await renewMedia(previewVideos);
         const media = new Map(refreshed.map((video) => [video.id, video]));
         chosen = chosen.map((segment) => ({ ...segment, candidates: segment.candidates.map((candidate) => ({ ...candidate, video: media.get(candidate.video.id) || candidate.video })) }));
@@ -719,8 +840,11 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
       if (first) setActiveSegment(first.id);
       const missing = chosen.filter((segment) => !segment.selectedVideoId).length;
       const generic = chosen.filter(segment => selectedSmartCandidate(segment)?.genericFallback).length;
+      const organic = chosen.filter((segment) => { const candidate = selectedSmartCandidate(segment); return candidate && stockFrameEffectiveOrigin(candidate.video) === 'organic'; }).length;
       const languageNote = translation.translated ? `Copy ${translation.language.toUpperCase()} interpretada no dispositivo. ` : translation.note ? `${translation.note} ` : '';
-      setNotice(languageNote + (missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram sem alternativa segura no catálogo acessível. Nenhum download foi consumido.` : `${chosen.length} trechos prontos para revisão. Nenhum download foi consumido ainda.`) + (generic ? ` ${generic} alternativa(s) genérica(s), usadas somente após a busca específica.` : ''));
+      const sourceNote = favoritesOnly ? `Só favoritos: ${globalPool.size} take(s) da sua conta. ` : '';
+      const organicNote = organic ? ` ${organic} orgânico(s).` : '';
+      setNotice(languageNote + sourceNote + (missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram sem alternativa segura ${favoritesOnly ? 'entre os seus favoritos' : 'no catálogo acessível'}. Nenhum download foi consumido.` : `${chosen.length} trechos prontos para revisão.${organicNote} Nenhum download foi consumido ainda.`) + (generic ? ` ${generic} alternativa(s) genérica(s), usadas somente após a busca específica.` : ''));
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setSmartBusy(false); setSmartProgress(''); operationLocked.current = false; }
   }
@@ -817,6 +941,8 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     setWordFrom(block.wordFrom);
     setWordTo(block.wordTo);
     setSelected(null);
+    // Plano feito só com favoritos: a troca também abre nos favoritos.
+    if (smartSource === 'favorites') setFilters((current) => current.favorites ? current : { ...current, favorites: true, sort: 'relevance', page: 1 });
     setMode('manual');
   }
 
@@ -908,13 +1034,45 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
     setError('');
     setNotice(`${video.title} entrou em ${segment.anchor} (palavras ${segment.wordFrom + 1}–${segment.wordTo + 1}). Ajuste início/fim se quiser; o download só acontece ao aplicar.`);
   }
-  const availableVideos = useMemo(() => page.videos.filter((video) => {
-    if (filters.aspectRatio && video.aspectRatio !== 'unknown' && video.aspectRatio !== filters.aspectRatio) return false;
-    if (filters.audio !== undefined && video.hasAudio !== null && video.hasAudio !== filters.audio) return false;
-    if (filters.origin && video.origin !== 'unknown' && video.origin !== filters.origin) return false;
-    if (filters.favorites && !video.favorite) return false;
-    return true;
-  }), [page.videos, filters.aspectRatio, filters.audio, filters.origin, filters.favorites]);
+  const availableVideos = useMemo(() => {
+    // O servidor filtra os favoritos; quando ele também marca cada take, a
+    // marca confirma. Sem marca nenhuma, a lista que ele devolveu é a verdade
+    // (antes um servidor que não marcava esvaziava a aba Favoritos).
+    const flagged = page.videos.some((video) => video.favorite);
+    return page.videos.filter((video) => {
+      if (filters.aspectRatio && video.aspectRatio !== 'unknown' && video.aspectRatio !== filters.aspectRatio) return false;
+      if (filters.audio !== undefined && video.hasAudio !== null && video.hasAudio !== filters.audio) return false;
+      const origin = stockFrameEffectiveOrigin(video);
+      if (filters.origin && origin !== 'unknown' && origin !== filters.origin) return false;
+      if (filters.favorites && flagged && !video.favorite) return false;
+      return true;
+    });
+  }, [page.videos, filters.aspectRatio, filters.audio, filters.origin, filters.favorites]);
+  // Ações dos cards por referência ESTÁVEL que lê o estado atual na hora do
+  // clique: os cards memorizados não re-renderizam e nunca usam o trecho velho.
+  const cardActions = useRef({ open: (_video: StockFrameVideo) => {}, act: (_video: StockFrameVideo) => {}, mediaError: (_id: string) => {} });
+  cardActions.current = {
+    open: (video) => setSelected(video),
+    act: (video) => { if (smartEditTarget) chooseForPlan(video); else void importVideo(video, { anchor, from: wordFrom, to: wordTo }); },
+    mediaError: (id) => { void repairMedia(id); },
+  };
+  const openCard = useCallback((video: StockFrameVideo) => cardActions.current.open(video), []);
+  const actOnCard = useCallback((video: StockFrameVideo) => cardActions.current.act(video), []);
+  const cardMediaError = useCallback((id: string) => cardActions.current.mediaError(id), []);
+  // "Trocar take": o trecho da copy em edição, o take atual e as alternativas
+  // do Smart para ele, sem precisar procurar na biblioteca.
+  const editPart = smartEditTarget ? parts.find((part) => part.label === smartEditTarget.anchor) : undefined;
+  const editWords = editPart?.text.match(/\S+/g) || [];
+  const editExcerpt = smartEditTarget ? {
+    before: editWords.slice(Math.max(0, smartEditTarget.from - 7), smartEditTarget.from).join(' '),
+    text: editWords.slice(smartEditTarget.from, smartEditTarget.to + 1).join(' '),
+    after: editWords.slice(smartEditTarget.to + 1, smartEditTarget.to + 8).join(' '),
+  } : undefined;
+  const editSegment = smartEditTarget?.segmentId ? smart.find((segment) => segment.id === smartEditTarget.segmentId) : undefined;
+  const editCurrent = editSegment ? selectedSmartCandidate(editSegment) : undefined;
+  const editSuggestions = !smartEditTarget ? [] : editSegment
+    ? (activeSmart?.id === editSegment.id ? alternatives : []).slice(0, 12)
+    : (avatarSuggestions?.candidates || []).slice(0, 12);
 
   if (!mounted) return null;
   return createPortal(<div className={s.backdrop} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeStockFrame(); }}>
@@ -968,16 +1126,25 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
               <div><button type="button" className={!filters.favorites && filters.sort === 'relevance' ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, favorites: undefined, sort: 'relevance', page: 1 }))}>Todos</button><button type="button" className={filters.favorites ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, favorites: !current.favorites, page: 1 }))}>Favoritos</button><button type="button" className={filters.sort === 'downloads' ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, sort: 'downloads', favorites: undefined, page: 1 }))}>Mais baixados</button><button type="button" className={filters.sort === 'recent' ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, sort: 'recent', favorites: undefined, page: 1 }))}>Recentes</button></div>
               <div>{([undefined, 'organic', 'ai'] as const).map((value) => <button type="button" key={value || 'all'} className={filters.origin === value ? s.filterActive : ''} onClick={() => setFilters((current) => ({ ...current, origin: value, page: 1 }))}>{value === 'organic' ? 'Orgânico' : value === 'ai' ? 'I.A' : 'Origem'}</button>)}</div>
             </div>
-            {smartEditTarget ? <div className={s.editBanner}><span><b>{smartEditTarget.segmentId ? 'TROCAR TAKE' : 'ADICIONAR B-ROLL'}</b><small>{smartEditTarget.anchor} · palavras {smartEditTarget.from + 1}–{smartEditTarget.to + 1} · escolha um take abaixo, sem download</small></span><button type="button" onClick={() => { setSmartEditTarget(null); setMode('smart'); }}>Voltar ao plano</button></div> : <CopyRange parts={parts} anchor={anchor} from={wordFrom} to={wordTo} onAnchor={(value) => { setAnchor(value); setWordFrom(0); setWordTo(Math.min(8, Math.max(0, (parts.find((item) => item.label === value)?.text.match(/\S+/g)?.length || 1) - 1))); }} onRange={(from, to) => { setWordFrom(from); setWordTo(to); }}/>}
-            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={() => setSelected(video)} onMediaError={(id) => void repairMedia(id)} action={smartEditTarget ? { label: usedElsewhere(video) ? 'Já no plano' : 'Usar no plano', disabled: usedElsewhere(video), onClick: () => chooseForPlan(video) } : { label: busyTake === video.id ? 'Baixando…' : 'Inserir', disabled: !!busyTake, onClick: () => void importVideo(video, { anchor, from: wordFrom, to: wordTo }) }}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
+            {smartEditTarget && editExcerpt ? <section className={s.editPanel} aria-label="Trecho em edição">
+              <div className={s.editBanner}><span><b>{smartEditTarget.segmentId ? 'TROCAR TAKE' : 'ADICIONAR B-ROLL'}</b><small>{smartEditTarget.anchor} · palavras {smartEditTarget.from + 1}–{smartEditTarget.to + 1} · escolha um take abaixo, sem download</small></span><button type="button" onClick={() => { setSmartEditTarget(null); setMode('smart'); }}>Voltar ao plano</button></div>
+              <blockquote className={s.editQuote} data-edit-excerpt="true">{editExcerpt.before && <i>…{editExcerpt.before} </i>}<mark>{editExcerpt.text}</mark>{editExcerpt.after && <i> {editExcerpt.after}…</i>}</blockquote>
+              {editCurrent ? <p className={s.editCurrent}>{editCurrent.video.posterUrl ? <img src={editCurrent.video.posterUrl} alt=""/> : <Icon name="play" size={15}/>}<span>Take atual</span><b>{editCurrent.video.title}</b><OriginBadge video={editCurrent.video}/></p> : null}
+              {editSuggestions.length ? <div className={s.alternatives} data-edit-suggestions="true"><small>SUGESTÕES DO SMART PARA ESTE TRECHO · CLIQUE PARA USAR</small><div>{editSuggestions.map((candidate) => <button type="button" key={candidate.video.id} data-video-id={candidate.video.id} title={candidate.reasons.join(' · ')} onClick={() => chooseForPlan(suggestionMedia.get(candidate.video.id) || candidate.video)}>{(suggestionMedia.get(candidate.video.id) || candidate.video).posterUrl ? <img src={(suggestionMedia.get(candidate.video.id) || candidate.video).posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b><em className={stockFrameEffectiveOrigin(candidate.video) === 'organic' ? s.altOrganic : stockFrameEffectiveOrigin(candidate.video) === 'ai' ? s.altAi : s.altUnknown}>{stockFrameEffectiveOrigin(candidate.video) === 'organic' ? 'ORG' : stockFrameEffectiveOrigin(candidate.video) === 'ai' ? 'I.A' : ''}</em></button>)}</div></div> : null}
+            </section> : <CopyRange parts={parts} anchor={anchor} from={wordFrom} to={wordTo} onAnchor={(value) => { setAnchor(value); setWordFrom(0); setWordTo(Math.min(8, Math.max(0, (parts.find((item) => item.label === value)?.text.match(/\S+/g)?.length || 1) - 1))); }} onRange={(from, to) => { setWordFrom(from); setWordTo(to); }}/>}
+            {loading ? <div className={s.grid}>{Array.from({ length: 10 }, (_, index) => <div className={s.skeleton} key={index}/>)}</div> : availableVideos.length ? <div className={s.grid}>{availableVideos.map((video) => <TakeCard key={video.id} video={video} selected={selected?.id === video.id} onOpen={openCard} onMediaError={cardMediaError} onAction={actOnCard} actionLabel={smartEditTarget ? usedElsewhere(video) ? 'Já no plano' : 'Usar no plano' : busyTake === video.id ? 'Baixando…' : 'Inserir'} actionDisabled={smartEditTarget ? usedElsewhere(video) : !!busyTake}/>)}</div> : <div className={s.empty}><Icon name="search" size={27}/><h3>Nenhum take neste filtro</h3><p>Altere a busca ou remova um filtro para ampliar o catálogo.</p></div>}
             <nav className={s.pagination} aria-label="Páginas"><button type="button" disabled={page.page <= 1 || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.max(1, (current.page || 1) - 1) }))}><Icon name="back"/>Anterior</button><span>{page.page} <i>/</i> {page.totalPages}</span><button type="button" disabled={page.page >= page.totalPages || loading} onClick={() => setFilters((current) => ({ ...current, page: Math.min(page.totalPages, (current.page || 1) + 1) }))}>Próxima <Icon name="back"/></button></nav>
           </section>
         </main> : <main className={s.smartWorkspace}>
           <section className={s.smartControl}>
-            <div className={s.smartHero}><button type="button" className={s.smartOrb} onClick={() => void runSmart()} disabled={smartBusy} aria-label="Executar Smart Stocks" title="Executar Smart Stocks"><span/><Icon name="spark" size={31}/></button><div><small>INTELIGÊNCIA LOCAL · SEM CUSTO</small><h1 id={`${uid}-title`}>Smart Stocks</h1><p>Interpreta a copy, escolhe onde o b-roll melhora a narrativa e cruza cada trecho com título, descrição, tags, nicho, duração e incompatibilidades de contexto.</p></div></div>
+            <div className={s.smartHero}><button type="button" className={s.smartOrb} onClick={() => void runSmart()} disabled={smartBusy} aria-label="Executar Smart Stocks" title="Executar Smart Stocks"><span/><Icon name="spark" size={31}/></button><div><small>INTELIGÊNCIA LOCAL · SEM CUSTO</small><h1 id={`${uid}-title`}>Smart Stocks</h1><p>Lê a copy como um editor: escolhe a situação que cada fala pede (gente com o problema, médico, mecanismo, melhora, CTA…), prioriza takes orgânicos, varia as cenas sem repetir e confere tudo contra as travas de contexto.</p></div></div>
             <div className={s.smartSettings}>
               <fieldset disabled={smartBusy || !!busyTake}><legend>Cobertura · {coverage}%</legend><div>{([30, 60, 100] as SmartCoverage[]).map((value) => <button type="button" key={value} className={coverage === value ? s.smartChoice : ''} onClick={() => setCoverage(value)} aria-label={`${value}% de cobertura`} title={`${value}% de cobertura`}><CoverageIcon level={value}/></button>)}</div></fieldset>
               <fieldset disabled={smartBusy || !!busyTake}><legend>Ritmo · {pace === 'fast' ? 'Cortes rápidos' : pace === 'long' ? 'Takes mais longos' : 'Divisão inteligente'}</legend><div>{([['fast', 'Cortes rápidos'], ['long', 'Takes mais longos'], ['adaptive', 'Divisão inteligente']] as [SmartPace, string][]).map(([value, label]) => <button type="button" key={value} className={pace === value ? s.smartChoice : ''} onClick={() => setPace(value)} aria-label={label} title={label}><PaceIcon pace={value}/></button>)}</div></fieldset>
+              <fieldset disabled={smartBusy || !!busyTake} className={s.sourceChoice}><legend>Fonte dos takes · {smartSource === 'favorites' ? 'Só favoritos' : 'Biblioteca toda'}</legend><div>
+                <button type="button" className={smartSource === 'all' ? s.smartChoice : ''} onClick={() => setSmartSource('all')} aria-pressed={smartSource === 'all'} title="Escolher entre todos os takes do seu plano StockFrame"><Icon name="grid" size={19}/><span>Biblioteca toda</span></button>
+                <button type="button" className={smartSource === 'favorites' ? s.smartChoice : ''} onClick={() => setSmartSource('favorites')} aria-pressed={smartSource === 'favorites'} title="Escolher só entre os takes favoritados (♥) na sua conta StockFrame"><span className={s.heartIcon} aria-hidden="true">♥</span><span>Só favoritos{smartSource === 'favorites' && favoritesCount !== null ? ` · ${favoritesCount}` : ''}</span></button>
+              </div></fieldset>
             </div>
             <button type="button" className={s.runSmart} onClick={() => void runSmart()} disabled={smartBusy}><Icon name="wand"/>{smartBusy ? smartProgress || 'Analisando…' : 'Analisar copy e montar plano'}</button>
             <div className={s.smartProof}><span><Icon name="check"/>Sem custo de IA</span><span><Icon name="check"/>Sem download durante análise</span><span><Icon name="check"/>Revisão antes de aplicar</span></div>
@@ -998,9 +1165,9 @@ export function PilotStockFrameModal({ taskId, parts, inserts, enabled, onEnable
               <div className={s.segmentDetail}>{activeSmart ? <>
                 {activeSmart.semanticText && activeSmart.semanticText !== activeSmart.text && <details className={s.reasons}><summary>Interpretação usada na busca</summary><p>{activeSmart.semanticText}</p></details>}
                 <div className={s.detailCopy}><small>{activeSmart.anchor} · PALAVRAS {activeSmart.wordFrom + 1}–{activeSmart.wordTo + 1} · ~{activeSmart.targetSeconds.toFixed(1)}s</small><p>“{activeSmart.text}”</p><div className={s.rangeEdit}><span>Início</span><button type="button" onClick={() => adjustActiveRange('from', -1)} aria-label="Adiantar início">−</button><button type="button" onClick={() => adjustActiveRange('from', 1)} aria-label="Atrasar início">+</button><i/><span>Fim</span><button type="button" onClick={() => adjustActiveRange('to', -1)} aria-label="Adiantar fim">−</button><button type="button" onClick={() => adjustActiveRange('to', 1)} aria-label="Atrasar fim">+</button></div></div>
-                {activeCandidate ? <><LazyVideo video={activeCandidate.video} active suspended={!!selected} onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><span>{activeCandidate.video.origin === 'ai' ? 'I.A' : 'ORGÂNICO'}</span><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
+                {activeCandidate ? <><LazyVideo video={activeCandidate.video} active suspended={!!selected} onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><OriginBadge video={activeCandidate.video}/><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
                 <div className={s.detailActions}><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="refresh" size={16}/>Buscar outro take</button><button type="button" onClick={() => { setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: undefined } : segment)); setActiveSegment(`avatar:${parts.findIndex((part) => part.label === activeSmart.anchor)}:${activeSmart.wordFrom}-${activeSmart.wordTo}`); }}><Icon name="close" size={16}/>Deixar com avatar</button></div>
-                {alternatives.length > 0 && <div className={s.alternatives}><small>ALTERNATIVAS · FORA DO PLANO ATUAL</small><div>{alternatives.map((candidate) => <button type="button" key={candidate.video.id} data-video-id={candidate.video.id} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b></button>)}</div></div>}
+                {alternatives.length > 0 && <div className={s.alternatives}><small>ALTERNATIVAS · FORA DO PLANO ATUAL</small><div>{alternatives.map((candidate) => <button type="button" key={candidate.video.id} data-video-id={candidate.video.id} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b><em className={stockFrameEffectiveOrigin(candidate.video) === 'organic' ? s.altOrganic : stockFrameEffectiveOrigin(candidate.video) === 'ai' ? s.altAi : s.altUnknown}>{stockFrameEffectiveOrigin(candidate.video) === 'organic' ? 'ORG' : stockFrameEffectiveOrigin(candidate.video) === 'ai' ? 'I.A' : ''}</em></button>)}</div></div>}
               </> : activeBlock ? <div className={s.avatarDetail}><span className={s.avatarBadge}>AVATAR · SEM B-ROLL</span><h3>{activeBlock.anchor} · palavras {activeBlock.wordFrom + 1}–{activeBlock.wordTo + 1}</h3><p>“{activeBlock.text}”</p><small>O avatar permanece visível neste trecho. Você pode cobri-lo com um take da biblioteca e revisar a cobertura antes de aplicar.</small><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="spark" size={17}/>Adicionar b-roll aqui</button></div> : null}
                 {!activeSmart && avatarSuggestions ? <div className={s.alternatives} data-avatar-suggestions="true"><small>SUGESTÕES PARA ESTE TRECHO · PALAVRAS {avatarSuggestions.segment.wordFrom + 1}–{avatarSuggestions.segment.wordTo + 1} · SEM DOWNLOAD</small><div>{avatarSuggestions.candidates.map((candidate) => {
                   const video = suggestionMedia.get(candidate.video.id) || candidate.video;

@@ -60,3 +60,28 @@ test('landing: animações do herói só com transform/opacity (clip-path/left/b
     assert.doesNotMatch(m[1], /clip-path|\bleft\s*:|box-shadow/, `@keyframes ${nome} voltou a animar propriedade de repintura`);
   }
 });
+
+test('StockFrame: modal sem blur de fundo em tela cheia/rodapé/selos e sem pulso que repinta box-shadow', () => {
+  const css = ler('components/PilotStockFrame.module.css');
+  // O modal cobre quase a tela inteira; o blur do fundo (e o do rodapé por
+  // cima da lista rolando, e um por selo de cada card sobre vídeo) era
+  // recalculado a cada quadro em que algo mexia atrás — "pesado pra mexer".
+  for (const sel of ['.backdrop', '.footer', '.duration,.ratio', '.header']) {
+    assert.doesNotMatch(blocoCss(css.replace(/\}/g, '}\n'), sel), /backdrop-filter/, `${sel} voltou a usar backdrop-filter`);
+  }
+  assert.doesNotMatch(css, /@keyframes stockframeOnPulse/, 'o pulso do ON anima opacidade de um brilho fixo, não box-shadow');
+  assert.match(css, /@keyframes stockframeOnGlow\{50%\{opacity:1\}\}/);
+  assert.doesNotMatch(blocoCss(css.replace(/\}/g, '}\n'), '.logoGlyph b'), /animation/, 'anel do logo girando pra sempre = 60 redesenhos/s');
+});
+
+test('Smart Stocks: placar não normaliza a copy inteira por take (dezenas de milhares de vezes por análise)', () => {
+  const src = ler('lib/stockframe-smart.ts');
+  const body = src.slice(src.indexOf('function scoreVideo('), src.indexOf('export function rankStockFrameVideos('));
+  assert.ok(body.length > 1000, 'scoreVideo não encontrado');
+  assert.doesNotMatch(body, /normalize\(segment\.campaignText/, 'a leitura da campanha é feita uma vez (readCampaign), não por take');
+  assert.match(src, /function memoScore\(/, 'o mesmo take no mesmo trecho não é pontuado duas vezes');
+  const component = ler('components/PilotStockFrame.tsx');
+  assert.match(component, /await yieldToUi\(\)/, 'o ranking devolve a tela para a UI entre blocos');
+  assert.match(component, /const TakeCard = memo\(/, 'cards da biblioteca memorizados (digitar na busca não re-renderiza 48 cards)');
+  assert.match(component, /useMemo\(\(\) => incomingParts, \[partsKey\]\)/, 'parts estabilizado pelo conteúdo (a página recria o array a cada render)');
+});

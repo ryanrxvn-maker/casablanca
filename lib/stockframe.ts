@@ -14,6 +14,8 @@ export type StockFrameVideo = {
   title: string;
   description: string;
   tags: string[];
+  /** Sinônimos de busca que o StockFrame escreve para o take ("idoso esquecido, avô confuso…"). */
+  searchVariations?: string;
   previewUrl?: string;
   posterUrl?: string;
   durationSec: number;
@@ -199,8 +201,15 @@ function inferAspect(width: number, height: number, value: unknown): StockFrameV
 }
 
 function inferOrigin(source: Record<string, unknown>): StockFrameOrigin {
-  const explicit = text(first(source, ['origin', 'source_type', 'sourceType', 'production_type', 'productionType'])).toLowerCase();
-  const ai = bool(first(source, ['is_ai', 'isAi', 'ai_generated', 'aiGenerated']));
+  const explicit = text(first(source, ['origin', 'source_type', 'sourceType', 'production_type', 'productionType', 'content_origin', 'contentOrigin'])).toLowerCase();
+  const ai = bool(first(source, ['is_ai', 'isAi', 'ai_generated', 'aiGenerated', 'generated_by_ai', 'generatedByAi']));
+  // O StockFrame marca a origem em `source_tags` ("Orgânico" ou "I.A") — é o
+  // mesmo campo que o site usa no selo do card e no "Definir origem".
+  const sourceTags = tagsOf(first(source, ['source_tags', 'sourceTags', 'origin_tags', 'originTags']))
+    .map((tag) => tag.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim());
+  const tagAi = sourceTags.some((tag) => /^(?:i\.?\s?a\.?|ai|inteligencia artificial|(?:gerado|criado) (?:por|com) i\.?\s?a\.?)$/.test(tag));
+  const tagOrganic = sourceTags.some((tag) => /^(?:organico|organic|real|ugc)$/.test(tag));
+  if (tagAi !== tagOrganic) return tagAi ? 'ai' : 'organic';
   if (ai === true || /\b(?:i\.?a\.?|ia|ai|artificial|generated)\b/i.test(explicit)) return 'ai';
   if (/organic|organico|orgânico|real|ugc|camera/.test(explicit) || ai === false) return 'organic';
   return 'unknown';
@@ -222,6 +231,7 @@ export function normalizeStockFrameVideo(value: unknown): StockFrameVideo | null
   const title = text(first(source, ['title', 'name', 'nome', 'headline'])) || `Stock ${id.slice(0, 8)}`;
   const description = text(first(source, ['description', 'descricao', 'caption', 'summary', 'prompt']));
   const tags = tagsOf(first(source, ['tags', 'keywords', 'palavras_chave', 'palavrasChave']));
+  const searchVariations = text(first(source, ['search_variations', 'searchVariations'])).slice(0, 2000) || undefined;
   const media = record(first(source, ['media', 'assets', 'files', 'urls']));
   const preview = record(first(source, ['preview', 'video_preview', 'videoPreview']));
   const thumbnail = record(first(source, ['thumbnail', 'poster', 'cover']));
@@ -247,6 +257,7 @@ export function normalizeStockFrameVideo(value: unknown): StockFrameVideo | null
     title,
     description,
     tags,
+    searchVariations,
     previewUrl,
     posterUrl,
     durationSec: Math.max(0, finite(first(source, ['duration', 'duration_sec', 'duration_seconds', 'durationSec', 'seconds']))),
@@ -451,7 +462,7 @@ export function normalizeStockFrameAccount(value: unknown): StockFrameAccount {
 
 export function stockFrameSearchText(video: StockFrameVideo): string {
   const smart = video.smartMetadata;
-  return [video.title, video.description, video.tags.join(' '), video.nicheName, video.subcategoryName,
+  return [video.title, video.description, video.tags.join(' '), video.searchVariations, video.nicheName, video.subcategoryName,
     smart?.summary, smart?.concepts.join(' '), smart?.subjects.join(' '), smart?.actions.join(' '), smart?.objects.join(' '), smart?.bodyParts.join(' '), smart?.positiveKeywords.join(' ')]
     .filter(Boolean).join(' ');
 }

@@ -1,5 +1,6 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
-import { absorbUnfilledSmartSegments, balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, smartStockMechanismQueries, stockFrameSeriesKey, stockFrameUsableSeconds } from './stockframe-smart';
+import { absorbUnfilledSmartSegments, balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, rebalanceSmartPlan, selectedSmartCandidate, smartStockMechanismQueries, stockFrameDistinctSiblings, stockFrameEffectiveOrigin, stockFrameSameVisual, stockFrameSeriesKey, stockFrameUsableSeconds } from './stockframe-smart';
+import { sceneProfileOf, segmentVisualIntent } from './stockframe-director';
 import { installStockFrameVisualAuditForTest, stockFrameAuditedSearchSeeds, stockFrameVisualAudit } from './stockframe-visual-audit';
 import { installStockFrameFeelingForTest } from './stockframe-feeling';
 import { visualAuditEntries } from '../data/stockframe-visual-audit';
@@ -941,6 +942,106 @@ ok(withFeeling.score > withoutFeeling && withFeeling.reasons.some((reason) => re
   'feeling do Silas puxa a cena que ele usa nessa fala e explica o porquê');
 ok(explainSmartStockScore(kitchen, coffeeForGirlfriend, 'generic').score < 0, 'feeling nunca passa por cima das travas de contexto');
 installStockFrameFeelingForTest({});
+
+// ── Editor sênior (07.10): situação da fala, orgânico, variedade, favoritos ──
+installStockFrameVisualAuditForTest({});
+ok(normalizeStockFrameVideo({ id: 'org', name: 'Idoso', source_tags: ['Orgânico'] })?.origin === 'organic'
+  && normalizeStockFrameVideo({ id: 'ia', name: 'Idoso', source_tags: ['I.A'] })?.origin === 'ai'
+  && normalizeStockFrameVideo({ id: 'nada', name: 'Idoso', source_tags: [] })?.origin === 'unknown',
+  'origem vem de source_tags ("Orgânico"/"I.A"), o mesmo campo do selo no site do StockFrame');
+ok(normalizeStockFrameVideo({ id: 'var', name: 'Idoso', search_variations: 'avô esquecido, idoso confuso' })?.searchVariations === 'avô esquecido, idoso confuso',
+  'sinônimos de busca do StockFrame (search_variations) entram no take');
+
+const memoryCopy = 'Durante a conversa, ele mencionou que mais de 75% das pessoas com mais de 60 anos já têm perda de memória avançada. '
+  + 'Segundo ele, isso são toxinas são microplásticos invisíveis que devoram os neurônios. '
+  + 'Eu voltei a lembrar onde tinha deixado minhas chaves, meus óculos, meu celular. E você não perde apenas nomes e lembranças.';
+const memorySegment = (text: string) => ({ ...planSmartStockSegments([{ label: 'BODY 3', text }], { coverage: 100, pace: 'long' })[0],
+  campaignText: memoryCopy, campaignNicheId: 'memoria' });
+const memoryVideo = (id: string, title: string, patch: Partial<StockFrameVideo> = {}) =>
+  video({ id, title, nicheId: 'memoria', nicheName: 'Memória', origin: 'unknown', ...patch });
+const brain3d = memoryVideo('cerebro-3d', 'CEREBRO 3D DANIFICADO');
+const alzheimerPerson = memoryVideo('velha-alzheimer', 'VELHA COM ALZHEIMER');
+const symptom = memorySegment('pessoas com mais de 60 anos já têm perda de memória avançada,');
+const symptomRank = rankStockFrameVideos(symptom, [brain3d, alzheimerPerson], 10, true);
+ok(symptomRank[0]?.video.id === 'velha-alzheimer',
+  'sintoma de memória pede GENTE com o problema antes de cérebro 3D (Silas: "só vejo take 3D de cérebro")');
+const mechanism = memorySegment('Segundo ele, isso são toxinas são microplásticos invisíveis que devoram os neurônios.');
+const microplastic = memoryVideo('microplastico', 'CEREBRO COM MICROPLASTICOS');
+ok(rankStockFrameVideos(mechanism, [alzheimerPerson, microplastic], 10, true)[0]?.video.id === 'microplastico',
+  'explicação do mecanismo continua pedindo o órgão');
+ok(segmentVisualIntent({ spoken: 'e um amigo meu que é neurologista.', context: 'jantar com minha esposa e um amigo meu que é neurologista.', direction: 'neutral', callToAction: false, localIngredients: 0 }).weights.medico === 1,
+  'autoridade ("neurologista") pede cena de médico');
+
+const siblingA = memoryVideo('vd-15', 'VELHO DEBILITADO (15)', { durationSec: 179.6 });
+const siblingB = memoryVideo('vd-28', 'VELHO DEBILITADO (28)', { durationSec: 10.96 });
+const siblingTwin = memoryVideo('vd-04', 'VELHO DEBILITADO (4)', { durationSec: 179.62 });
+ok(stockFrameDistinctSiblings(siblingA, siblingB) && !stockFrameSameVisual(siblingA, siblingB),
+  'filmagem real numerada com durações diferentes são cenas diferentes (43 velhinhos, não um)');
+ok(stockFrameSameVisual(siblingA, siblingTwin), 'mesma série com a mesma duração continua sendo o mesmo take subido de novo');
+ok(stockFrameSameVisual(memoryVideo('3d-a', 'CEREBRO 3D (3)', { durationSec: 8 }), memoryVideo('3d-b', 'CEREBRO 3D (9)', { durationSec: 12 })),
+  'animação 3D da mesma série continua uma cena só por AD, mesmo com durações diferentes');
+installStockFrameVisualAuditForTest({
+  'dup-alz': { title: 'IDOSA CONFUSA NA CAMA COM A MÃO NA CABEÇA', beats: ['idoso', 'confusao'], appeal: 0, flags: [], stockTitle: 'VELHA COM ALZHEIMER (2)', niche: 'Memória' },
+  'dup-deb': { title: 'IDOSA CONFUSA NA CAMA COM A MÃO NA CABEÇA', beats: ['idoso', 'confusao'], appeal: 0, flags: [], stockTitle: 'VELHA DEBILITADA', niche: 'Memória' },
+  'ia-ficha': { title: 'IDOSO COCHILANDO NA POLTRONA', beats: ['idoso', 'sono'], appeal: 0, flags: ['IA'], stockTitle: 'IDOSO DORMINDO', niche: 'Memória' },
+  'feliz-ficha': { title: 'IDOSA BEM VELHINHA RINDO FELIZ PARA A CÂMERA', beats: ['idoso', 'alegria'], appeal: 0, flags: [], stockTitle: 'VELHO DEBILITADO (10)', niche: 'Memória' },
+});
+ok(stockFrameSameVisual(memoryVideo('dup-alz', 'VELHA COM ALZHEIMER (2)', { durationSec: 28.6 }), memoryVideo('dup-deb', 'VELHA DEBILITADA', { durationSec: 28.61 })),
+  'o mesmo vídeo subido com títulos diferentes é pego pela ficha visual + duração');
+ok(stockFrameEffectiveOrigin(memoryVideo('ia-ficha', 'IDOSO DORMINDO')) === 'ai',
+  'sem source_tags, a flag IA da ficha conferida vale como origem I.A');
+const happyByFicha = memoryVideo('feliz-ficha', 'VELHO DEBILITADO (10)');
+ok(sceneProfileOf(happyByFicha, stockFrameVisualAudit('feliz-ficha')).family === 'pessoa-bem',
+  'com ficha, a situação vem da cena ("rindo feliz"), não do título do catálogo ("debilitado")');
+installStockFrameVisualAuditForTest({});
+
+const organicTake = memoryVideo('org-velha', 'VELHA COM ALZHEIMER CONFUSA', { origin: 'organic' });
+const aiTake = memoryVideo('ia-velha', 'VELHA COM ALZHEIMER CONFUSA IA', { origin: 'ai' });
+ok(rankStockFrameVideos(symptom, [aiTake, organicTake], 10, true)[0]?.video.id === 'org-velha',
+  'com sentido equivalente, o orgânico vem antes do gerado por I.A');
+ok(rankStockFrameVideos(symptom, [memoryVideo('org-generico', 'IDOSO NA PRAÇA', { origin: 'organic' }), memoryVideo('ia-exato', 'VELHA COM ALZHEIMER', { origin: 'ai' })], 10, true)[0]?.video.id === 'ia-exato',
+  'mas o sentido manda: a cena exata de I.A vence a orgânica genérica');
+
+const phoneRelief = memorySegment('Eu voltei a lembrar onde tinha deixado minhas chaves, meus óculos, meu celular.');
+const neuronTaggedCellular = memoryVideo('neuronio', 'CONEXÃO DE NEURONIOS 3D', { tags: ['neurônios', 'sinapse', 'celular'] });
+ok(!rankStockFrameVideos(phoneRelief, [neuronTaggedCellular], 10, true).some((candidate) => candidate.score > 20),
+  '"meu celular" (telefone) não casa com a tag "celular" (célula) de um neurônio 3D');
+const loss = memorySegment('E você não perde apenas nomes e lembranças.');
+const dancing = memoryVideo('dancando', 'IDOSOS FELIZES E DANCANDO');
+ok(explainSmartStockScore(loss, dancing, 'generic').reasons.includes('clima oposto ao da fala') || explainSmartStockScore(loss, dancing, 'generic').score < 0,
+  '"não perde apenas nomes e lembranças" não recebe idosos dançando felizes');
+
+const edAge = { ...planSmartStockSegments([{ label: 'BODY 1', text: 'Se você tem mais de 50 anos e anda triste,' }], { coverage: 100, pace: 'long' })[0],
+  campaignText: 'Se você tem mais de 50 anos e está falhando na cama com sua mulher. Eu brochava e voltei a ter ereções firmes.', campaignNicheId: 'ed' };
+const youngWoman = video({ id: 'mulher-triste', title: 'MULHER TRISTE NO SOFA', nicheId: 'ed', nicheName: 'ED' });
+const olderMan = video({ id: 'homem-preocupado', title: 'IDOSO TRISTE', nicheId: 'ed', nicheName: 'ED' });
+ok(rankStockFrameVideos(edAge, [youngWoman, olderMan], 10, true)[0]?.video.id === 'homem-preocupado',
+  'persona: "mais de 50 anos" num AD de ED é o homem 50+, não uma moça na academia');
+
+const variedSegments = [0, 1, 2, 3].map((index) => ({ ...memorySegment(`trecho ${index} sobre perda de memória`), id: `var-${index}`,
+  anchor: 'BODY 9', wordFrom: index * 6, wordTo: index * 6 + 5, candidates: [
+    { video: memoryVideo(`brain-${index}`, `CEREBRO ${['PODRE', 'RAIO X', 'NEVOA', 'FERRUGEM'][index]} 3D`), score: 40, reasons: [] },
+    { video: memoryVideo(`person-${index}`, `${['IDOSA CONFUSA', 'IDOSO SOZINHO TRISTE', 'IDOSA NA CAMA DEBILITADA', 'IDOSO PERDIDO NA SALA'][index]}`), score: 33, reasons: [] },
+  ] }));
+const variedPlan = chooseSmartStockAssignments(variedSegments, true);
+const variedVideos = variedPlan.map((segment) => selectedSmartCandidate(segment)!.video);
+const variedFamilies = variedVideos.map((item) => sceneProfileOf(item).family);
+ok(variedFamilies.filter((family) => family === 'anatomia').length <= 2 && variedFamilies.some((family) => family !== 'anatomia'),
+  'dinamismo visual: o plano não vira cérebro atrás de cérebro quando há gente quase tão boa');
+ok(new Set(variedVideos.map((item) => item.id)).size === variedVideos.length, 'variedade nunca repete take');
+
+const rebalanceParts = [{ label: 'BODY 1', text: 'Tudo por causa dessa simples receita com quiabo. Os médicos consultam os idosos no hospital. Depois eles voltam pra casa e descansam bem tranquilos o dia todo.' }];
+const weakPlan = [{ ...planSmartStockSegments(rebalanceParts, { coverage: 100, pace: 'long' })[0], wordFrom: 0, wordTo: 7,
+  text: 'Tudo por causa dessa simples receita com quiabo.', campaignText: rebalanceParts[0].text, campaignNicheId: 'memoria',
+  selectedVideoId: 'generico', candidates: [{ video: memoryVideo('generico', 'CEREBRO 3D'), score: 15, reasons: [], genericFallback: true }] }];
+const rebalancedPlan = rebalanceSmartPlan(rebalanceParts, weakPlan, {
+  coverage: 30, pace: 'fast', pool: [memoryVideo('medico-idoso', 'MÉDICO ATENDENDO IDOSO NO HOSPITAL', { nicheId: 'vsl', nicheName: 'VSL' })],
+  campaign: { campaignText: rebalanceParts[0].text, campaignNicheId: 'memoria' },
+});
+const rebalanceTotal = rebalanceParts[0].text.split(/\s+/).length;
+ok(rebalancedPlan !== weakPlan && !rebalancedPlan.some((segment) => segment.wordFrom === 0)
+  && Math.abs(measureSmartStockCoverage(rebalanceParts, rebalancedPlan.map((segment) => ({ ...segment, selectedVideoId: 'x' }))).coveredWords - Math.round(rebalanceTotal * .3)) <= Math.max(1, Math.ceil(rebalanceTotal * .03)),
+  'editor não força b-roll: trecho que só achou reserva cede a vez a um trecho com cena forte');
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

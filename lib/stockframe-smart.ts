@@ -1,6 +1,10 @@
-import { stockFrameSearchText, type StockFrameNiche, type StockFrameVideo } from './stockframe';
-import { stockFrameVisualAudit, type StockFrameVisualAudit } from './stockframe-visual-audit';
-import { stockFrameFeelingNiche, type StockFrameFeelingNiche } from './stockframe-feeling';
+import { stockFrameSearchText, type StockFrameNiche, type StockFrameOrigin, type StockFrameVideo } from './stockframe';
+import { stockFrameVisualAudit, stockFrameVisualAuditVersion, type StockFrameVisualAudit } from './stockframe-visual-audit';
+import { stockFrameFeelingNiche, stockFrameFeelingVersion, type StockFrameFeelingNiche } from './stockframe-feeling';
+import {
+  campaignPersonaOf, isPeopleFamily, NEUTRAL_SCENE_FAMILIES, personaMatch, personasNamedIn, SCENE_FAMILY_LABEL, sceneIntentFit, sceneProfileOf,
+  segmentVisualIntent, type SceneFamily, type SceneProfile, type ScenePersona, type VisualIntent,
+} from './stockframe-director';
 
 export type SmartCoverage = 30 | 60 | 100;
 export type SmartPace = 'fast' | 'long' | 'adaptive';
@@ -87,7 +91,10 @@ const CONCEPTS: Record<string, string[]> = {
   'lipedema': ['lipedema', 'lipoedema', 'pernas inchadas', 'perna inflamada', 'sistema linfatico'],
   'celulite': ['celulite', 'cellulite', 'furinhos nas pernas'],
   'intestino': ['intestino', 'digestao', 'barriga inchada', 'constipacao', 'diarreia', 'microbiota', 'estomago'],
-  'memoria': ['memoria', 'esquecimento', 'alzheimer', 'demencia', 'cerebro', 'concentracao', 'lembranca'],
+  // Memória é o SINTOMA (gente esquecendo); cérebro é o ÓRGÃO. Juntos, toda
+  // frase de memória casava qualquer cérebro 3D e o AD virava só cérebro.
+  'memoria': ['memoria', 'esquecimento', 'esquecendo', 'esquecido', 'esquecida', 'esquecer', 'alzheimer', 'demencia', 'concentracao', 'lembranca', 'confusao mental', 'lapsos de memoria', 'nevoa mental'],
+  'cerebro': ['cerebro', 'cerebral', 'neuronio', 'neuronios', 'neural', 'sistema nervoso'],
   'gravidez': ['gravida', 'gravidez', 'gestante', 'bebe', 'feto', 'ultrassom', 'maternidade'],
   'saude-homem': ['prostata', 'prosta', 'erecao', 'erétil', 'disfuncao eretil', 'impotencia', 'desempenho sexual', 'potencia', 'testosterona', 'libido masculina'],
   'urinario': ['urina', 'urinar', 'mijar', 'mijando', 'bexiga', 'jato urinario', 'jato fraco', 'miccao', 'nocturia', 'ir ao banheiro', 'fralda', 'fraldas', 'sonda', 'incontinencia', 'vazando', 'xixi'],
@@ -146,6 +153,8 @@ const INGREDIENTS: [string, RegExp][] = [
   ['abacaxi', /\b(?:abacaxi|pineapple|pina|ananas)\b/], ['pepino', /\b(?:pepino|cucumber|ogorek|gurke)\b/],
   ['beterraba', /\b(?:beterraba|beetroot|beet|remolacha|burak)\b/], ['chia', /\bchia\b/],
   ['cerveja', /\b(?:cerveja|beer|cerveza|piwo|bier)\b/], ['ginkgo', /\b(?:ginkgo|ginko|gingko)\b/],
+  // Suplementos com nome também são "outro ingrediente" numa receita de quiabo.
+  ['omega 3', /\bomega\s?3\b/], ['colageno', /\bcolageno\b/], ['magnesio', /\bmagnesio\b/],
   // Bases como azeite e iogurte ficam de fora de propósito: "azeite de
   // alecrim" é o mesmo ritual do alecrim, não uma oferta diferente.
 ];
@@ -210,6 +219,12 @@ const WEALTH_PACK = /\b(?:renda extra|prosperidade|religios\w*)\b/;
 const WEALTH_COPY = /\b(?:rico|ricos|riqueza|luxo|milion\w*|milhoes|ostent\w*|lucr\w*|faturamento|faturar|vendas|renda|enriquec\w*|fortuna|dinheiro|grana|pagar|pagamento|gast\w*|conta bancaria|salario|aposentadoria|divida\w*|endivid\w*)\b/;
 const LUXURY_SCENE = /\b(?:luxo|luxuos\w*|ostent\w*|grife|mansao|iate|jatinho|diamante|louis vuitton|dashboard|lucro|notificacao de vendas)\b/;
 const LUXURY_COPY = /\b(?:rico|ricos|riqueza|luxo|milion\w*|milhoes|ostent\w*|lucr\w*|faturamento|faturar|vendas|enriquec\w*|fortuna)\b/;
+const SALES_PANEL_SCENE = /\b(?:dashboard|utmify|notificac\w* de vendas?|vendas aprovadas|painel de vendas|venda aprovada)\b/;
+const SALES_PANEL_COPY = /\b(?:renda extra|faturar|faturamento|faturei|vend\w* (?:online|na internet|pelo celular)|minhas vendas|comiss\w*|afiliad\w*|negocio proprio|empreend\w*|infoproduto|trafego pago|dashboard)\b/;
+const PAYMENT_SCENE = /\b(?:pagament\w*|pagando|pagar com|maquininha|cartao|cartoes|boleto)\b/;
+// O vilão da copy de saúde é a indústria de remédios, não dinheiro qualquer.
+const PHARMA_INDUSTRY_SCENE = /\b(?:industria\w* farmaceutic\w*|industria farmaceutica|farmaceutic\w*|fabrica de remedios|big pharma|medicos? corrupt\w*|empresari\w* .{0,20}farmac\w*)\b/;
+const PAYMENT_COPY = /\b(?:pag\w*|compr\w*|cartao|preco|custa|custo|pix|parcel\w*|dinheiro|reais|barato|caro)\b/;
 const RELIGIOUS_SCENE = /\b(?:anjo\w*|serafim|deus|jesus|biblia|biblic\w*|igreja|templo|monge\w*|oracao|rezand\w*|judeu|santo|santa|milagre|ritual com)\b/;
 const RELIGIOUS_COPY = /\b(?:deus|jesus|biblia|biblic\w*|igreja|templo|monge\w*|oracao|orar|reza\w*|milagre\w*|anjo\w*|espiritual\w*|bencao|abencoad\w*|senhor jesus|fe em)\b/;
 const FEMALE_ONLY_SCENE =/\b(?:mulher(?:es)?|idosas?|senhoras?|esposa|namorada|menina|garota|loira|morena|ruiva|gravida|gestante)\b/;
@@ -337,27 +352,38 @@ export function inferStockFrameNiche(parts: StockFrameCopyPart[], niches: StockF
   return ranked[0]?.niche;
 }
 
+// Prefixo que é OUTRA palavra: "meu celular" não é "célula" (neurônio 3D numa
+// fala de melhora), "contar" não é "conta", "mamãe" não é "mama".
+const FALSE_PREFIX_FRIENDS: [string, string][] = [['celula', 'celular'], ['conta', 'contar'], ['mama', 'mamae'], ['pena', 'penal'], ['cara', 'carac']];
+function falsePrefixFriends(a: string, b: string): boolean {
+  return FALSE_PREFIX_FRIENDS.some(([short, long]) => (a === short && b.startsWith(long)) || (b === short && a.startsWith(long)));
+}
+
 function stem(value: string): string {
   const word = normalize(value);
   if (word.length < 5) return word;
-  return word
-    .replace(/(amentos|imentos|adoras|adores|acoes|icoes|mente)$/i, '')
-    .replace(/(ando|endo|indo|ados|adas|idos|idas|oso|osa|osos|osas)$/i, '')
-    .replace(/(es|s)$/i, '');
+  // Um radical de 2–3 letras casa com tudo por prefixo: "caindo" virava "ca"
+  // e "IDOSO CAINDO" entrava em "por CAusa dessa receita" (Silas, 07.10).
+  const strip = (current: string, suffix: RegExp) => {
+    const next = current.replace(suffix, '');
+    return next.length >= 4 ? next : current;
+  };
+  return strip(strip(strip(word, /(amentos|imentos|adoras|adores|acoes|icoes|mente)$/i),
+    /(ando|endo|indo|ados|adas|idos|idas|oso|osa|osos|osas)$/i), /(es|s)$/i);
 }
 
 function meaningful(value: string): string[] {
   return normalize(value).split(/\s+/).filter((word) => word.length > 2 && !STOP.has(word)).map(stem).filter(Boolean);
 }
 
+// Termos já normalizados uma vez: conceptsOf roda milhares de vezes por análise.
+let normalizedConcepts: [string, string[]][] | undefined;
 function conceptsOf(value: string): string[] {
   const haystack = ` ${normalize(value)} `;
   const found: string[] = [];
-  for (const [concept, terms] of Object.entries(CONCEPTS)) {
-    if (terms.some((term) => {
-      const normalized = normalize(term);
-      return haystack.includes(` ${normalized} `) || (normalized.length > 7 && haystack.includes(normalized));
-    })) found.push(concept);
+  normalizedConcepts ||= Object.entries(CONCEPTS).map(([concept, terms]) => [concept, terms.map(normalize)]);
+  for (const [concept, terms] of normalizedConcepts) {
+    if (terms.some((normalized) => haystack.includes(` ${normalized} `) || (normalized.length > 7 && haystack.includes(normalized)))) found.push(concept);
   }
   return found;
 }
@@ -370,6 +396,9 @@ function narrativeDirection(value: string): NonNullable<SmartStockSegment['narra
   if (/\b(?:dor(?:es)? (?:ainda )?(?:continua\w*|persist\w*|pior\w*)|ainda (?:sinto|sente|sentia|sofr\w*)|nao (?:consigo|consegue|conseguia) (?:mais )?(?:andar|caminhar|subir|dormir)|sem alivio|nao (?:houve |senti |sentiu )?melhora)\b/.test(text)) return 'distress';
   if (/\b(?:nao (?:sinto|sente|sentimos|tem|tenho|sente\w*) mais (?:a |as |nenhuma )?(?:dor|dores|desconforto)|sem (?:sentir |nenhuma )?(?:dor|dores|desconforto)|livre d[ae] (?:dor|dores)|dor(?:es)? (?:desaparec\w*|sumiu|passou)|alivio|recuperad\w*|volte?i? a (?:andar|caminhar)|voltou a (?:andar|caminhar)|melhora\w*|feliz|alegria|apaixonad\w*|satisfeit\w*)\b/.test(text)) return 'recovery';
   if (/\b(?:recuper\w*|volt\w*)\b.{0,35}\b(?:energia|vigor|disposicao|potencia)\b/.test(text)) return 'recovery';
+  // "Tenho 78 anos, mas minha memória está mais afiada do que quando eu tinha
+  // 20" é o RESULTADO, não o sintoma: idoso bem, nunca idoso debilitado.
+  if (/\b(?:mais afiad\w*|afiad\w*|lucid\w*|clareza mental|cabeca boa|memoria (?:de elefante|perfeita|boa)|melhor do que (?:nunca|antes|quando)|como (?:quando|se) (?:eu )?(?:tivesse|tinha) \d+)\b/.test(text)) return 'recovery';
   // Melhora urinária/prostática: "voltar a mijar forte", "dormir a noite
   // inteira", "reduzir de tamanho", "desinchar". Sem isso o trecho ficava
   // neutro e aceitava "homem acordando à noite" — o sintoma, não a cura.
@@ -390,6 +419,9 @@ const ANATOMY: [string, RegExp][] = [
   ['figado', /\b(?:figado|hepatic[ao]s?)\b/], ['rim', /\b(?:rim|rins|renal|renais)\b/],
   ['bexiga', /\bbexigas?\b/], ['utero', /\b(?:utero|uterin[ao]s?)\b/], ['ovario', /\b(?:ovarios?|ovarian[ao]s?)\b/],
   ['pulmao', /\b(?:pulmao|pulmoes|pulmonar|pulmonares)\b/], ['olho', /\b(?:olhos?|ocular|oculares)\b/],
+  // Testículo não é próstata: "age na inflamação da glândula" pedia a próstata
+  // e recebia ANIMAÇÃO 3D TESTICULOS.
+  ['testiculo', /\btesticul\w*\b/],
 ];
 
 function anatomyOf(value: string): string[] {
@@ -551,7 +583,10 @@ function splitIntoBursts(segment: SmartStockSegment, words: Word[]): SmartStockS
     // Pedaço sem imagem própria ("presta atenção nesse vídeo até o final")
     // continua a rajada do assunto do trecho: busca pelo texto inteiro e a
     // atribuição dá a ele OUTRA cena do mesmo tema, nunca a mesma.
-    const weak = !semantics.concepts.length && !anatomyOf(text).length && !ingredientsOf(text).length
+    const ownIntent = segmentVisualIntent({ spoken: text, context: text, direction: semantics.narrativeDirection,
+      callToAction: CTA_COPY.test(normalize(text)), localIngredients: ingredientsOf(text).length });
+    const strongOwnScene = Object.values(ownIntent.weights).some((weight) => (weight || 0) >= .8);
+    const weak = !semantics.concepts.length && !anatomyOf(text).length && !ingredientsOf(text).length && !strongOwnScene
       && meaningful(text).filter((token) => token.length > 5).length < 2;
     if (weak) {
       return { ...segment, id: `${segment.id}~${index + 1}`, wordFrom: pieceFrom, wordTo: to, text,
@@ -677,9 +712,27 @@ type PreparedVideo = {
   recipe: boolean;
   fields: { tokens: string[]; weight: number; visual: boolean }[];
   audit?: StockFrameVisualAudit;
+  /** Título original do catálogo + título conferido, normalizados (travas). */
+  sceneTitle: string;
+  /** Situação que a cena mostra (família visual, persona, real × 3D). */
+  profile: SceneProfile;
+  /** Orgânico × I.A: o rótulo do StockFrame e, sem ele, a ficha conferida. */
+  origin: StockFrameOrigin;
+  auditVersion: number;
 };
 
 const preparedVideos = new WeakMap<StockFrameVideo, PreparedVideo>();
+const COLOR_TOKEN = /^(?:azu|vermelh|verde|amarel|rosa|rox|laranj|pret|branc|cinz|marrom|dourad|pratead|bege|lilas|salmao|colorid|estampad|listrad)/;
+
+/** Origem efetiva do take. O StockFrame marca "Orgânico"/"I.A" em source_tags;
+ * quando a API não manda, a ficha visual conferida (flag IA) e o pack de
+ * avatares de I.A ainda dizem que é gerado. */
+export function stockFrameEffectiveOrigin(video: Pick<StockFrameVideo, 'id' | 'origin' | 'nicheName'>): StockFrameOrigin {
+  if (video.origin !== 'unknown') return video.origin;
+  const audit = stockFrameVisualAudit(video.id);
+  if (audit?.flags.includes('IA') || /\bi\.?a\b/i.test(video.nicheName || '')) return 'ai';
+  return 'unknown';
+}
 const AUDITED_BEAT_WORDS: Record<string, string> = {
   broxa: 'falha eretil impotencia disfuncao erecao mole frustracao',
   potencia: 'erecao potencia firme desempenho sexual vigor',
@@ -694,7 +747,8 @@ const AUDITED_BEAT_WORDS: Record<string, string> = {
 
 function prepareVideo(video: StockFrameVideo): PreparedVideo {
   const cached = preparedVideos.get(video);
-  if (cached) return cached;
+  const auditVersion = stockFrameVisualAuditVersion();
+  if (cached && cached.auditVersion === auditVersion) return cached;
   const audit = stockFrameVisualAudit(video.id);
   const auditedBeats = audit?.beats.map((beat) => AUDITED_BEAT_WORDS[beat] || beat.replace(/^ing:/, '')).join(' ') || '';
   // A checked scene description outranks sometimes misleading catalog tags.
@@ -724,7 +778,22 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
   let concepts = conceptsOf(contentText);
   if (direction === 'recovery') concepts = [...new Set([...concepts.filter((concept) => concept !== 'emocao-negativa'), 'emocao-positiva'])];
   if (direction === 'distress') concepts = concepts.filter((concept) => concept !== 'emocao-positiva');
-  const prepared = {
+  const recipeScene = audit ? audit.beats.includes('receita') || audit.beats.some((beat) => beat.startsWith('ing:'))
+    : /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0;
+  const profile = sceneProfileOf(video, audit, recipeScene);
+  // Em neurônio/órgão/animação, "celular" é CÉLULA ("metabolismo celular"),
+  // nunca o telefone de "deixei meu celular" — a tag do catálogo engana.
+  const cellular = profile.subject === 'orgao' || profile.family === 'abstrato';
+  if (cellular) concepts = concepts.filter((concept) => concept !== 'celular');
+  // Cor da roupa/fundo na ficha ("sinapse 3D AZUL") não é evidência: casava com
+  // o "ingrediente azul" da copy.
+  const lexical = (value: string, ficha = false) => meaningful(value)
+    .filter((token) => !(cellular && token.startsWith('celular')) && !(ficha && COLOR_TOKEN.test(token)));
+  const prepared: PreparedVideo = {
+    auditVersion,
+    sceneTitle: `${normalize(video.title)} ${title}`,
+    profile,
+    origin: stockFrameEffectiveOrigin(video),
     title, taxonomy, visualText, visualSearchText, contentText,
     explicitSexualScene: /\bed\s*18\b/.test(taxonomy) || EXPLICIT_STOCK_TITLE.test(normalize(video.title))
       || (audit ? audit.appeal === 3 : EXPLICIT_SEXUAL_SCENE.test(contentText)),
@@ -734,14 +803,16 @@ function prepareVideo(video: StockFrameVideo): PreparedVideo {
       : ingredientsOf([video.title, video.description, video.tags.join(' '), smart?.summary, smart?.objects.join(' '), smart?.concepts.join(' ')].filter(Boolean).join(' ')),
     shownAnatomy: titleAnatomy.length ? titleAnatomy : descriptionAnatomy.length ? descriptionAnatomy : audit ? [] : anatomyOf(video.tags.join(' ')),
     concepts, direction,
-    recipe: audit ? audit.beats.includes('receita') || audit.beats.some((beat) => beat.startsWith('ing:'))
-      : /\b(?:receita|preparo|mistura|cozinha|ingrediente|caseiro)\b/.test(taxonomy) || ingredientsOf(video.title).length > 0,
+    recipe: recipeScene,
     fields: [
-      { tokens: meaningful(title), weight: audit ? 5.2 : 4.4, visual: true },
-      { tokens: meaningful(tags), weight: audit ? 4.4 : 3.5, visual: true },
+      { tokens: lexical(title, !!audit), weight: audit ? 5.2 : 4.4, visual: true },
+      { tokens: lexical(tags), weight: audit ? 4.4 : 3.5, visual: true },
       { tokens: meaningful(taxonomy), weight: 2.8, visual: false },
-      { tokens: meaningful(description), weight: 1.4, visual: true },
-      { tokens: meaningful(visualText), weight: audit ? 4.6 : 3.8, visual: true },
+      { tokens: lexical(description, !!audit), weight: 1.4, visual: true },
+      { tokens: lexical(visualText, !!audit), weight: audit ? 4.6 : 3.8, visual: true },
+      // Sinônimos que o próprio StockFrame escreve para a cena: ajudam a
+      // achar, mas pesam menos que título e ficha conferida.
+      ...(video.searchVariations ? [{ tokens: lexical(video.searchVariations), weight: 2.4, visual: true }] : []),
     ],
     audit,
   };
@@ -820,19 +891,54 @@ function feelingMatch(ranking: { feeling: { keys: string[]; niche?: string } }, 
 /** Prepare a segment once per ranking, not once for every catalog candidate.
  * Deliberately not cached by identity: the editor can change its context or
  * recipe lock between rankings, and those edits must take effect immediately. */
-function prepareRanking(segment: SmartStockSegment) {
+/** Leitura da CAMPANHA (a copy inteira, até 15 mil caracteres), feita uma vez
+ * por copy. Antes, scoreVideo normalizava a copy inteira ~7 vezes POR TAKE —
+ * dezenas de milhares de vezes numa análise: era isso que travava a tela. */
+type CampaignReading = {
+  normalized: string; concepts: string[]; anatomy: string[]; ingredients: string[]; herbal: boolean; isHealth: boolean;
+  ed: boolean; lipedema: boolean; persona?: ScenePersona;
+};
+const campaignReadings = new Map<string, CampaignReading>();
+function readCampaign(text: string): CampaignReading {
+  const cached = campaignReadings.get(text);
+  if (cached) return cached;
+  const normalized = normalize(text);
+  const reading: CampaignReading = {
+    normalized,
+    concepts: conceptsOf(text),
+    anatomy: anatomyOf(text),
+    ingredients: ingredientsOf(text),
+    herbal: BOTANICAL.test(normalized),
+    isHealth: MEDICAL_NICHE.test(normalized) || /\b(?:saude|erecao|potencia|testosterona|glicose|joelho|artrite|olhos|health|erection|potency)\b/.test(normalized),
+    ed: ED_CAMPAIGN.test(normalized),
+    lipedema: LIPEDEMA_CAMPAIGN.test(normalized),
+    persona: campaignPersonaOf(text),
+  };
+  if (campaignReadings.size > 24) campaignReadings.delete(campaignReadings.keys().next().value!);
+  campaignReadings.set(text, reading);
+  return reading;
+}
+
+type Ranking = ReturnType<typeof buildRanking>;
+function buildRanking(segment: SmartStockSegment) {
   const spokenText = segment.semanticText || segment.text;
   const spokenContext = segment.semanticContextText || segment.contextText || spokenText;
   const spokenHere = anatomyOf(spokenText);
   const localIngredients = [...new Set([...ingredientsOf(spokenText), ...ingredientsOf(segment.text)])];
   const contextIngredients = [...new Set([...ingredientsOf(spokenContext), ...ingredientsOf(segment.contextText || '')])];
-  const campaignIngredients = segment.campaignIngredients?.length ? segment.campaignIngredients : ingredientsOf(segment.campaignText || '');
+  const campaign = readCampaign(segment.campaignText || spokenContext);
+  const campaignIngredients = segment.campaignIngredients?.length ? segment.campaignIngredients : segment.campaignText ? campaign.ingredients : ingredientsOf('');
   const direction = segment.narrativeDirection || narrativeDirection(spokenContext);
+  const spokenNormalized = normalize(spokenText);
+  const callToAction = CTA_COPY.test(spokenNormalized);
   return {
-    spokenNormalized: normalize(spokenText),
+    spokenNormalized,
     contextNormalized: normalize(spokenContext),
+    campaignNormalized: segment.campaignText ? campaign.normalized : '',
+    edCampaign: !!segment.campaignText && campaign.ed,
+    lipedemaCampaign: !!segment.campaignText && campaign.lipedema,
     campaignIngredients: campaignIngredients.length ? campaignIngredients : contextIngredients,
-    herbalCampaign: BOTANICAL.test(normalize(segment.campaignText || '')),
+    herbalCampaign: !!segment.campaignText && campaign.herbal,
     queryTokens: [...new Set(meaningful(`${spokenText} ${segment.query}`))],
     localTokens: new Set(meaningful(spokenText)),
     contextTokens: new Set(meaningful(spokenContext)),
@@ -840,19 +946,67 @@ function prepareRanking(segment: SmartStockSegment) {
     localIngredients,
     contextIngredients,
     localBotanical: BOTANICAL.test(normalize(`${spokenText} ${spokenContext}`)),
-    campaignConcepts: conceptsOf(segment.campaignText || spokenContext),
-    campaignAnatomy: anatomyOf(segment.campaignText || spokenContext),
-    campaignIsHealth: MEDICAL_NICHE.test(normalize(segment.campaignText || spokenContext)) || /\b(?:saude|erecao|potencia|testosterona|glicose|joelho|artrite|olhos|health|erection|potency)\b/.test(normalize(segment.campaignText || spokenContext)),
+    campaignConcepts: campaign.concepts,
+    campaignAnatomy: campaign.anatomy,
+    campaignIsHealth: campaign.isHealth,
     spokenAnatomy: spokenHere.length ? spokenHere : anatomyOf(spokenContext),
     contextHasIngredients: contextIngredients.length > 0,
     direction,
     beat: segment.visualBeat || visualBeat(spokenText, direction),
-    callToAction: CTA_COPY.test(normalize(spokenText)),
+    callToAction,
     feeling: feelingKeysOf(spokenText, segment.campaignText || spokenContext),
+    /** A situação que a fala pede na tela (direção de cena), lida nas palavras
+     * que ficam EMBAIXO do take. Pedaço de rajada herda o texto da frase
+     * inteira em semanticText para a busca; a intenção não pode herdar
+     * ("amigo neurologista" virava a "família" do jantar da frase). Copy
+     * traduzida (semanticContextText presente) usa a tradução. */
+    intent: segmentVisualIntent({
+      spoken: segment.semanticContextText ? spokenText : segment.text, context: spokenContext, direction,
+      callToAction: CTA_COPY.test(normalize(segment.semanticContextText ? spokenText : segment.text)) || callToAction,
+      localIngredients: localIngredients.length,
+    }),
+    persona: campaign.persona,
+    // Só as palavras embaixo do take: "Se você tem mais de 50 anos" não chama a
+    // "sua mulher" que aparece depois na mesma frase.
+    namedPersonas: personasNamedIn(segment.semanticContextText ? spokenText : segment.text),
+    hook: /^hook\b/i.test(segment.anchor),
+    /** Placar de cada take para ESTA leitura (por modo de fallback). */
+    memo: new WeakMap<StockFrameVideo, Partial<Record<'specific' | 'generic' | 'pack', SmartStockCandidate>>>(),
   };
 }
 
-function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking: ReturnType<typeof prepareRanking>, fallback: false | 'generic' | 'pack' = false): SmartStockCandidate {
+function hashText(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193);
+  return (hash >>> 0).toString(36) + value.length.toString(36);
+}
+
+/** Uma leitura por trecho, reaproveitada entre as várias passadas da análise
+ * (busca, ampliação, alternativas, sugestões): o mesmo take no mesmo trecho
+ * não é pontuado duas vezes. A assinatura cobre tudo que o placar lê, e as
+ * versões da ficha visual e do feeling invalidam quando eles carregam. */
+const rankingCache = new Map<string, Ranking>();
+function prepareRanking(segment: SmartStockSegment): Ranking {
+  const signature = JSON.stringify([segment.id, segment.anchor, segment.text, segment.semanticText, segment.contextText,
+    segment.semanticContextText, segment.query, segment.concepts, segment.contextConcepts, segment.narrativeDirection,
+    segment.visualBeat, segment.targetSeconds, segment.campaignNicheId, segment.campaignIngredients,
+    segment.campaignText ? hashText(segment.campaignText) : '', stockFrameVisualAuditVersion(), stockFrameFeelingVersion()]);
+  const cached = rankingCache.get(signature);
+  if (cached) return cached;
+  const ranking = buildRanking(segment);
+  if (rankingCache.size > 400) rankingCache.delete(rankingCache.keys().next().value!);
+  rankingCache.set(signature, ranking);
+  return ranking;
+}
+
+function memoScore(segment: SmartStockSegment, video: StockFrameVideo, ranking: Ranking, fallback: false | 'generic' | 'pack'): SmartStockCandidate {
+  const mode = fallback || 'specific';
+  let entry = ranking.memo.get(video);
+  if (!entry) { entry = {}; ranking.memo.set(video, entry); }
+  return entry[mode] ||= scoreVideo(segment, video, ranking, fallback);
+}
+
+function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking: Ranking, fallback: false | 'generic' | 'pack' = false): SmartStockCandidate {
   const allowGenericFallback = fallback !== false;
   if (!video.available || video.conflictingConcepts.length) return { video, score: -100, reasons: ['indisponível ou conflito informado pelo StockFrame'] };
   const prepared = prepareVideo(video);
@@ -862,12 +1016,12 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   const { title, visualSearchText, ingredients: videoIngredients, shownAnatomy, recipe } = prepared;
   // The visual audit can use a shorter scene label. Keep the provider's
   // original title for safety checks: "mijando sangue" must not disappear.
-  const sceneTitle = `${normalize(video.title)} ${title}`;
+  const sceneTitle = prepared.sceneTitle;
   const audit = prepared.audit;
   const smart = video.smartMetadata;
   const { campaignIngredients, herbalCampaign, queryTokens, spokenAnatomy, direction, beat } = ranking;
   const videoVisualText = visualSearchText;
-  const lipedemaCampaign = LIPEDEMA_CAMPAIGN.test(normalize(segment.campaignText || ''));
+  const lipedemaCampaign = ranking.lipedemaCampaign;
   const lipedemaVisual = lipedemaCampaign && LIPEDEMA_VISUAL.test(sceneTitle);
   if (allowGenericFallback && ranking.callToAction && CTA_PHONE.test(prepared.title)
       && (!CTA_NEUTRAL_ACTION.test(prepared.title) || CTA_CONFLICT_SCENE.test(prepared.title))) {
@@ -876,11 +1030,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (prepared.explicitSexualScene) {
     return { video, score: -100, reasons: ['cena sexual explícita não entra na seleção automática de anúncios'] };
   }
-  if (audit?.flags.includes('CRIANCA') && ED_CAMPAIGN.test(normalize(segment.campaignText || ''))) {
+  if (audit?.flags.includes('CRIANCA') && ranking.edCampaign) {
     return { video, score: -100, reasons: ['criança não entra em criativo de desempenho sexual'] };
   }
   if (audit ? audit.appeal >= 2 : SUGGESTIVE_SCENE.test(prepared.title)) {
-    const edContext = ED_CAMPAIGN.test(normalize(segment.campaignText || ''));
+    const edContext = ranking.edCampaign;
     const intimateMoment = ED_INTIMATE_MOMENT.test(ranking.spokenNormalized);
     const unsuitable = /\b(?:pelad\w*|nudez|nude|naked|genitais|lingerie|calcinha|apos relac\w*|depois da relac\w*|no ato|tamanho ideal|medindo o tamanho)\b/.test(prepared.title);
     if (!edContext || !intimateMoment || ranking.callToAction || ranking.localIngredients.length || unsuitable || recipe) {
@@ -917,6 +1071,15 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
   if (LUXURY_SCENE.test(sceneTitle) && !LUXURY_COPY.test(spokenWithContext)) {
     return { video, score: -100, reasons: ['luxo, ostentação ou lucro não é o que a fala diz'] };
   }
+  // "Os lucros exorbitantes da venda de remédios" é a indústria, não um
+  // painel de vendas de infoproduto (DASHBOARD UTMIFY, notificação de venda).
+  if (SALES_PANEL_SCENE.test(sceneTitle) && !SALES_PANEL_COPY.test(spokenWithContext)) {
+    return { video, score: -100, reasons: ['painel de vendas só cabe em fala sobre vender/faturar'] };
+  }
+  // Pagar no celular não é "clique no botão que está na sua tela".
+  if (PAYMENT_SCENE.test(sceneTitle) && !PAYMENT_COPY.test(spokenWithContext)) {
+    return { video, score: -100, reasons: ['pagamento não é a ação narrada'] };
+  }
   if (WEALTH_PACK.test(prepared.taxonomy) && !(segment.campaignNicheId && video.nicheId === segment.campaignNicheId)
       && !WEALTH_COPY.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['pack de renda/prosperidade fora de uma fala sobre dinheiro'] };
@@ -926,13 +1089,13 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     : /\b(?:anatomia|sangue|medic\w*|consult\w*|celula|fluxo|doutor|urologista)\b/.test(sceneTitle);
   const romanticScene = !clinicalScene && (ROMANCE_SCENE.test(sceneTitle) || RELATIONSHIP_PACK.test(prepared.taxonomy)
     || !!audit?.beats.some((beat) => ['romance', 'desejo', 'intimidade', 'satisfacao'].includes(beat)));
-  if (romanticScene && !ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+  if (romanticScene && !ranking.edCampaign
       && !(segment.campaignNicheId && video.nicheId === segment.campaignNicheId)
       && !PARTNER_OR_INTIMACY_COPY.test(`${ranking.spokenNormalized} ${ranking.contextNormalized}`)) {
     return { video, score: -100, reasons: ['cena de casal ou romance sem parceira, desejo ou relacionamento na fala'] };
   }
   if ((ERECTILE_SCENE.test(sceneTitle) || audit?.beats.includes('broxa'))
-      && (!ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+      && (!ranking.edCampaign
         || (!ERECTILE_MOMENT.test(ranking.spokenNormalized)
           && !(INVASIVE_PROCEDURE_SCENE.test(prepared.title) && INVASIVE_PROCEDURE_COPY.test(ranking.spokenNormalized))))) {
     return { video, score: -100, reasons: ['metáfora de disfunção erétil fora do momento ED da copy'] };
@@ -967,7 +1130,7 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     return { video, score: -100, reasons: ['exame de próstata não representa este trecho'] };
   }
   if (ERECTILE_ANATOMY_SCENE.test(sceneTitle)
-      && !ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+      && !ranking.edCampaign
       && !ERECTILE_MOMENT.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['ereção ou ejaculação não representa este momento da copy'] };
   }
@@ -990,8 +1153,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       && !/\b(?:radiografia|raio x|raiox|exame|diagnostico|imagem medica)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['radiografia não foi narrada'] };
   }
-  if (/\b(?:dormind\w*|sleep\w*|adormec\w*)\b/.test(sceneTitle)
-      && !/\b(?:dorm\w*|sono|insomnia|sleep\w*|adormec\w*)\b/.test(ranking.spokenNormalized)) {
+  if (/\b(?:dormind\w*|dormir|dorme|sono|insonia|sleep\w*|adormec\w*)\b/.test(sceneTitle)
+      && !/\b(?:dorm\w*|sono|insomnia|insonia|sleep\w*|adormec\w*|noite|madrugada|cama|cansad\w*|cansaco)\b/.test(ranking.spokenNormalized)) {
     return { video, score: -100, reasons: ['sono não é a ação narrada'] };
   }
   if (/\b(?:mangueira|hose)\b/.test(sceneTitle)
@@ -1098,8 +1261,18 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     && /\b(?:homem|casal|pessoa|idos[ao])\b/.test(prepared.title)
     && /\b(?:sorrind\w*|feliz|caminh\w*|ativo|abrac\w*)\b/.test(prepared.title)
     && prepared.direction !== 'distress';
+  // Direção de cena: a SITUAÇÃO que a fala pede (sintoma → gente com o
+  // problema, autoridade → médico, vilão → dinheiro da indústria…). Uma cena
+  // neutra de outro pack (VSL, Mecanismos Gerais) que mostra exatamente essa
+  // situação atravessa nicho; gente de outro pack só com a persona certa.
+  const profile = prepared.profile;
+  const sameNiche = !!segment.campaignNicheId && video.nicheId === segment.campaignNicheId;
+  const situation = sceneIntentFit(ranking.intent, profile, ranking.persona, sameNiche, ranking.namedPersonas);
+  const crossPackSituation = situation.weight >= .8 && !MEDICAL_NICHE.test(prepared.taxonomy)
+    && (NEUTRAL_SCENE_FAMILIES.has(profile.family) || (isPeopleFamily(profile.family) && situation.personaFit >= .85));
   if (segment.campaignNicheId && video.nicheId && video.nicheId !== segment.campaignNicheId
-      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback && !recoveryCrossPackFallback && !neutralDigitalAction) {
+      && !(compatibleMechanism && !MEDICAL_NICHE.test(prepared.taxonomy)) && !compatibleGeneralScene && !neutralCrossPackFallback && !recoveryCrossPackFallback && !neutralDigitalAction
+      && !crossPackSituation) {
     return { video, score: -100, reasons: ['nicho incompatível com a campanha'] };
   }
   if (recipe && !localRecipeReference && !ranking.localIngredients.length) {
@@ -1134,7 +1307,9 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     for (const field of prepared.fields) {
       const tokens = field.tokens;
       const exact = tokens.includes(token);
-      const partial = token.length >= 5 && tokens.some((candidate) => candidate.startsWith(token) || token.startsWith(candidate));
+      // Prefixo curto só vale como flexão ("dor" × "dores"), nunca como acaso.
+      const partial = token.length >= 5 && tokens.some((candidate) => (candidate.length >= 4 || (candidate.length === 3 && token.length - candidate.length <= 2))
+        && (candidate.startsWith(token) || token.startsWith(candidate)) && !falsePrefixFriends(token, candidate));
       if (exact || partial) {
         best = Math.max(best, field.weight * (exact ? 1 : .68));
         if (field.visual) visualMatch = true;
@@ -1145,12 +1320,20 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       score += best * (1 + Math.min(.8, token.length / 20));
     }
   }
-  const sharedConcepts = segment.concepts.filter((concept) => videoConcepts.includes(concept));
+  // Emoção (alívio, sofrimento) é expressão de GENTE: uma animação de sangue
+  // "normal" não é a cena de "livre dos riscos do Alzheimer".
+  const emotionless = profile.subject !== 'pessoa';
+  const sharedConcepts = segment.concepts.filter((concept) => videoConcepts.includes(concept) && !(emotionless && concept.startsWith('emocao-')));
   // A split sentence can inherit its own subject, but the campaign's niche,
   // aspect ratio and remote numeric score cannot stand in for scene evidence.
-  const contextualConcepts = ranking.contextConcepts.filter((concept) => videoConcepts.includes(concept));
+  const contextualConcepts = ranking.contextConcepts.filter((concept) => videoConcepts.includes(concept) && !(emotionless && concept.startsWith('emocao-')));
   const contextLexicalEvidence = prepared.fields.some((field) => field.visual && field.tokens.some((token) => token.length >= 4 && ranking.contextTokens.has(token)));
-  if (!lexicalEvidence && !sharedConcepts.length && !ingredientEvidence && !botanicalEvidence && !feeling.strong) {
+  // A cena mostra a situação que a fala pede ("perda de memória avançada" →
+  // idoso esquecido do pack de Memória), mesmo sem palavra em comum: é
+  // evidência de cena — é assim que o editor escolhe, pela situação.
+  const situationEvidence = situation.weight >= .8 && situation.personaOk
+    && profile.family !== 'outro' && profile.family !== 'abstrato' && (sameNiche || crossPackSituation);
+  if (!lexicalEvidence && !sharedConcepts.length && !ingredientEvidence && !botanicalEvidence && !feeling.strong && !situationEvidence) {
     // Invoked only by the explicit last-resort helper, after broad retrieval.
     // Same pack alone is insufficient: require a neutral identifiable scene
     // plus a real thematic connection in its own title/description/metadata.
@@ -1204,9 +1387,47 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     reasons.push(`contexto: ${sharedConcepts.slice(0, 2).join(', ')}`);
   }
   if (lipedemaVisual) { score += 16; reasons.push('condição da campanha visível no take'); }
+  if (situation.weight > 0) {
+    score += 11 * situation.weight;
+    if (situation.weight >= .6) reasons.push(`situação: ${SCENE_FAMILY_LABEL[profile.family]} (${ranking.intent.label})`);
+  }
+  // Cena neutra de outro pack que mostra exatamente a situação (médico da VSL
+  // na fala do neurologista) compete de igual com o pack da campanha.
+  if (crossPackSituation && !sameNiche) score += 4;
+  // "Lucros exorbitantes com a venda de medicamentos": a indústria de remédio
+  // contando dinheiro, antes de uma pilha de notas de renda extra.
+  if ((ranking.intent.weights.dinheiro || 0) >= .8 && ranking.campaignIsHealth && PHARMA_INDUSTRY_SCENE.test(sceneTitle)) {
+    score += 5;
+    reasons.push('vilão da copy: indústria de remédios');
+  }
+  // O público se vê na tela: idoso em AD de idoso; jovem num AD de memória
+  // de 78 anos destoa, mesmo segurando o celular do CTA.
+  if (profile.persona && ranking.persona) {
+    const matched = personaMatch(ranking.persona, profile.persona);
+    const fit = ranking.namedPersonas.has(profile.persona) ? Math.max(matched, .85) : matched;
+    // Bônus só para a cena que a fala pede; o desencontro pesa sempre.
+    if (fit === 1 && situation.weight >= .6) { score += 3; reasons.push('persona da campanha'); }
+    else if (fit <= .35) { score -= 4; reasons.push('fora da persona da campanha'); }
+  }
+  // Sintoma, história, família e melhora pedem GENTE. Cérebro/órgão ali só
+  // quando a fala nomeia o órgão — senão o AD vira uma aula de anatomia.
+  const spokenOrgan = anatomyOf(ranking.spokenNormalized);
+  if (ranking.intent.humanFirst && profile.subject === 'orgao' && !spokenOrgan.length) {
+    score -= 8;
+    reasons.push('órgão/animação onde a fala pede gente');
+  }
+  // Clima oposto: "você não perde apenas nomes e lembranças" nunca é idosos
+  // dançando felizes; "voltei a lembrar" nunca é idoso acamado.
+  if ((ranking.intent.mood === 'distress' && prepared.direction === 'recovery')
+    || (ranking.intent.mood === 'recovery' && prepared.direction === 'distress')) {
+    score -= 10;
+    reasons.push('clima oposto ao da fala');
+  }
+  // O gancho precisa prender: rosto real com emoção na tela.
+  if (ranking.hook && profile.live && (isPeopleFamily(profile.family) || profile.family === 'medico')) score += 2.5;
   // Fala que nomeia o órgão pede a cena que MOSTRA o órgão (o beat de ciência
   // do Silas), antes de uma metáfora genérica do mesmo assunto.
-  if (anatomyOf(ranking.spokenNormalized).some((part) => shownAnatomy.includes(part))) {
+  if (spokenOrgan.some((part) => shownAnatomy.includes(part))) {
     score += 6;
     reasons.push('mostra o órgão citado na fala');
   }
@@ -1237,8 +1458,8 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
     if (audit.flags.includes('Q')) score -= 14;
     if (audit.flags.includes('T')) score -= 6;
     if (audit.flags.includes('E')) score -= 3;
-    if (audit.flags.includes('IA')) score -= 1.5;
-    if (audit.appeal === 2 && ED_CAMPAIGN.test(normalize(segment.campaignText || ''))
+    // A flag IA da ficha já vale como origem I.A (stockFrameEffectiveOrigin).
+    if (audit.appeal === 2 && ranking.edCampaign
       && ED_INTIMATE_MOMENT.test(ranking.spokenNormalized)) score += 5;
     reasons.push('cena conferida visualmente');
   }
@@ -1303,7 +1524,11 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
       reasons.push('take mais curto que o trecho: o fim congelaria');
     }
   }
-  if (video.origin === 'organic') score += .7;
+  // Silas, 07.10: "sempre priorizar takes orgânicos… mas a prioridade é fazer
+  // sentido". Orgânico é critério forte de desempate, nunca passa por cima de
+  // sentido: uma cena exata de I.A ainda vence uma orgânica genérica.
+  if (prepared.origin === 'organic') { score += 4; reasons.push('orgânico'); }
+  else if (prepared.origin === 'ai') score -= 2;
   if (video.downloads > 0) score += Math.min(2.2, Math.log10(video.downloads + 1) * .8);
   if (title && ranking.spokenNormalized.includes(title) && title.length > 7) score += 6;
   // Format, popularity and remote scores are tie-breaks only: the hard scene
@@ -1318,23 +1543,98 @@ function scoreVideo(segment: SmartStockSegment, video: StockFrameVideo, ranking:
  */
 export function rankStockFrameVideos(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8, fullCoverage = false): SmartStockCandidate[] {
   const ranking = prepareRanking(segment);
-  return videos.map((video) => scoreVideo(segment, video, ranking))
+  const sorted = videos.map((video) => memoScore(segment, video, ranking, false))
     .filter((candidate) => candidate.score >= (fullCoverage ? 1 : segment.concepts.length ? 5 : 3.5))
-    .sort((a, b) => b.score - a.score || b.video.downloads - a.video.downloads || a.video.id.localeCompare(b.video.id))
-    .slice(0, Math.max(1, limit));
+    .sort((a, b) => b.score - a.score || b.video.downloads - a.video.downloads || a.video.id.localeCompare(b.video.id));
+  const top = sorted.slice(0, Math.max(1, limit));
+  if (limit < 12 || sorted.length <= top.length) return top;
+  // O top-N por placar costuma ser todo da mesma situação (24 idosos felizes):
+  // a variedade do plano e das alternativas precisa das melhores opções de
+  // CADA situação válida, não só das primeiras do ranking.
+  const perFamily = new Map<SceneFamily, number>();
+  for (const candidate of top) {
+    const family = prepareVideo(candidate.video).profile.family;
+    perFamily.set(family, (perFamily.get(family) || 0) + 1);
+  }
+  const extra: SmartStockCandidate[] = [];
+  for (const candidate of sorted.slice(top.length)) {
+    if (extra.length >= 12) break;
+    const family = prepareVideo(candidate.video).profile.family;
+    if ((perFamily.get(family) || 0) >= 2) continue;
+    perFamily.set(family, (perFamily.get(family) || 0) + 1);
+    extra.push(candidate);
+  }
+  return [...top, ...extra];
 }
 
 /** Mesma cena na tela: mesmo id, mesmo grupo de duplicata do StockFrame ou a
  * mesma série de título (o mesmo take subido duas vezes, ou "(1)…(9)"). */
+const seriesKeys = new WeakMap<object, string>();
+function seriesKeyOf(video: Pick<StockFrameVideo, 'title'>): string {
+  let key = seriesKeys.get(video);
+  if (key === undefined) { key = stockFrameSeriesKey(video); seriesKeys.set(video, key); }
+  return key;
+}
+
+const titleTokenCache = new Map<string, Set<string>>();
+function titleTokens(title: string): Set<string> {
+  let tokens = titleTokenCache.get(title);
+  if (!tokens) {
+    tokens = new Set(meaningful(title));
+    if (titleTokenCache.size > 5000) titleTokenCache.clear();
+    titleTokenCache.set(title, tokens);
+  }
+  return tokens;
+}
+
+function tokenSimilarity(a: string, b: string): number {
+  const ta = titleTokens(a); const tb = titleTokens(b);
+  if (!ta.size || !tb.size) return 0;
+  const shared = [...ta].filter((token) => tb.has(token)).length;
+  return shared / new Set([...ta, ...tb]).size;
+}
+
+const CG_TITLE = /\b(?:3d|animac\w*|raio x|raiox|ressonancia|tomografia|anatomi\w*|ilustrac\w*|render\w*|hologra\w*)\b/;
+
+/** Mesma SÉRIE de título, mas cenas diferentes de verdade. O catálogo sobe
+ * filmagem real como "VELHO DEBILITADO (1)…(46)": são 43 pessoas e situações
+ * diferentes (10s a 223s), não o mesmo take — tratá-las como um só deixava
+ * entrar UM velhinho por AD e o resto virava cérebro 3D (Silas, 07.10).
+ * Animação/3D da mesma série continua sendo a mesma cena (Silas nunca usa
+ * "PROSTATA INFLAMADA 3D (3)" e "(8)" no mesmo AD); com ficha visual dos
+ * dois lados, a ficha decide. */
+export function stockFrameDistinctSiblings(a: StockFrameVideo, b: StockFrameVideo): boolean {
+  if (a.id === b.id || seriesKeyOf(a) !== seriesKeyOf(b)) return false;
+  const auditA = stockFrameVisualAudit(a.id);
+  const auditB = stockFrameVisualAudit(b.id);
+  if (auditA && auditB) return tokenSimilarity(auditA.title, auditB.title) < .6;
+  if (CG_TITLE.test(normalize(a.title)) || CG_TITLE.test(normalize(b.title))
+    || auditA?.flags.includes('3D') || auditB?.flags.includes('3D')) return false;
+  const da = a.durationSec; const db = b.durationSec;
+  if (!(da > 0 && db > 0)) return false;
+  return Math.abs(da - db) > Math.max(.35, Math.min(da, db) * .03);
+}
+
+/** O mesmo vídeo subido com títulos diferentes ("VELHA COM ALZHEIMER (2)" e
+ * "VELHA DEBILITADA", os dois com 28,6s) tem a MESMA ficha visual e a mesma
+ * duração — a série do título não pega, a ficha pega. */
+function sameFichaKey(video: StockFrameVideo): string | undefined {
+  const audit = stockFrameVisualAudit(video.id);
+  return audit && video.durationSec > 0 ? `${normalize(audit.title)}|${Math.round(video.durationSec)}` : undefined;
+}
+
 export function stockFrameSameVisual(a: StockFrameVideo, b: StockFrameVideo): boolean {
   if (a.id === b.id) return true;
   const dupA = a.duplicateGroupId || a.smartMetadata?.duplicateGroupId;
   const dupB = b.duplicateGroupId || b.smartMetadata?.duplicateGroupId;
   if (dupA && dupA === dupB) return true;
-  return stockFrameSeriesKey(a) === stockFrameSeriesKey(b);
+  const fichaA = sameFichaKey(a);
+  if (fichaA && fichaA === sameFichaKey(b)) return true;
+  return seriesKeyOf(a) === seriesKeyOf(b) && !stockFrameDistinctSiblings(a, b);
 }
 
-/** Agrupa takes que são a mesma cena (union-find por id, duplicata e série). */
+/** Agrupa takes que são a mesma cena (union-find por id, duplicata e série,
+ * separando dentro da série as filmagens que são cenas diferentes). */
 function visualGroups(videos: StockFrameVideo[]): Map<string, string> {
   const parent = new Map<string, string>();
   const find = (key: string): string => {
@@ -1348,12 +1648,101 @@ function visualGroups(videos: StockFrameVideo[]): Map<string, string> {
     const ra = find(a); const rb = find(b);
     if (ra !== rb) parent.set(ra < rb ? rb : ra, ra < rb ? ra : rb);
   };
-  for (const video of videos) {
-    link(`id:${video.id}`, `serie:${stockFrameSeriesKey(video)}`);
+  const unique = [...new Map(videos.map((video) => [video.id, video])).values()];
+  const bySeries = new Map<string, StockFrameVideo[]>();
+  for (const video of unique) {
+    link(`id:${video.id}`, `id:${video.id}`);
     const dup = video.duplicateGroupId || video.smartMetadata?.duplicateGroupId;
     if (dup) link(`id:${video.id}`, `dup:${dup}`);
+    const ficha = sameFichaKey(video);
+    if (ficha) link(`id:${video.id}`, `ficha:${ficha}`);
+    const series = seriesKeyOf(video);
+    bySeries.set(series, [...(bySeries.get(series) || []), video]);
+  }
+  for (const members of bySeries.values()) {
+    for (let i = 0; i < members.length; i++) for (let j = i + 1; j < members.length; j++) {
+      if (!stockFrameDistinctSiblings(members[i], members[j])) link(`id:${members[i].id}`, `id:${members[j].id}`);
+    }
   }
   return new Map(videos.map((video) => [video.id, find(`id:${video.id}`)]));
+}
+
+/** Penalidade editorial de um plano (ordem da timeline): a mesma situação em
+ * takes colados, a mesma série de novo, animação demais em sequência ou uma
+ * família dominando o AD. É o "dinamismo visual" do Silas, medido. */
+function planMonotony(picks: { segment: SmartStockSegment; video: StockFrameVideo }[]): number {
+  const n = picks.length;
+  if (n < 2) return 0;
+  const familyCap = Math.max(2, Math.ceil(n * .34));
+  const organCap = Math.max(2, Math.ceil(n * .4));
+  const families = new Map<SceneFamily, number>();
+  let organ = 0;
+  let cgRun = 0;
+  let penalty = 0;
+  const profiles = picks.map((pick) => prepareVideo(pick.video).profile);
+  for (let index = 0; index < n; index++) {
+    const profile = profiles[index];
+    families.set(profile.family, (families.get(profile.family) || 0) + 1);
+    if (profile.subject === 'orgao') organ++;
+    cgRun = profile.live ? 0 : cgRun + 1;
+    if (cgRun > 2) penalty += 5;
+    if (index) {
+      const previous = picks[index - 1].segment;
+      const current = picks[index].segment;
+      const touching = previous.anchor === current.anchor && previous.wordTo + 1 === current.wordFrom;
+      if (profiles[index - 1].family === profile.family) penalty += touching ? 7 : 3;
+    }
+    for (let earlier = 0; earlier < index; earlier++) {
+      const auditA = stockFrameVisualAudit(picks[earlier].video.id);
+      const auditB = stockFrameVisualAudit(picks[index].video.id);
+      const near = index - earlier <= 3;
+      // Com as duas fichas, o que se repete é o MOTIVO visual (duas idosas
+      // ninando boneca); sem ficha, a série do título é a melhor pista.
+      if (auditA && auditB) {
+        if (tokenSimilarity(auditA.title, auditB.title) >= .45) penalty += near ? 10 : 8;
+      } else if (seriesKeyOf(picks[earlier].video) === seriesKeyOf(picks[index].video)) penalty += near ? 14 : 9;
+    }
+  }
+  for (const count of families.values()) if (count > familyCap) penalty += (count - familyCap) * 8;
+  if (organ > organCap) penalty += (organ - organCap) * 8;
+  return penalty;
+}
+
+/** Busca local sobre a atribuição sem repetição: troca o take de um trecho por
+ * uma alternativa QUASE tão relevante quando isso tira o plano da monotonia
+ * (sempre a mesma situação, cérebro atrás de cérebro). Nunca repete cena e
+ * nunca sacrifica mais que 14 pontos de sentido num trecho. */
+function diversifySmartPlan(result: SmartStockSegment[], threshold: number): void {
+  const chosen = result.map((segment) => selectedSmartCandidate(segment));
+  const value = () => {
+    const picks = chosen.flatMap((candidate, index) => candidate ? [{ segment: result[index], video: candidate.video }] : []);
+    return chosen.reduce((sum, candidate) => sum + (candidate?.score || 0), 0) - planMonotony(picks);
+  };
+  const intents = result.map((segment) => prepareRanking(segment).intent);
+  for (let pass = 0; pass < 4; pass++) {
+    let improved = false;
+    for (let index = 0; index < result.length; index++) {
+      const current = chosen[index];
+      if (!current) continue;
+      let best = current;
+      let bestValue = value();
+      for (const candidate of result[index].candidates) {
+        // Variar, sim; trocar por cena que a fala não pede, não: só uma
+        // alternativa da situação certa pode custar até 14 pontos de sentido.
+        const rightSituation = (intents[index].weights[prepareVideo(candidate.video).profile.family] || 0) >= .6;
+        if (candidate === current || !Number.isFinite(candidate.score) || candidate.score < threshold
+          || candidate.score < current.score - (rightSituation ? 14 : 6)) continue;
+        if (chosen.some((other, position) => position !== index && other && stockFrameSameVisual(other.video, candidate.video))) continue;
+        chosen[index] = candidate;
+        const next = value();
+        if (next > bestValue + .5) { best = candidate; bestValue = next; }
+      }
+      chosen[index] = best;
+      if (best !== current) improved = true;
+    }
+    if (!improved) break;
+  }
+  chosen.forEach((candidate, index) => { result[index].selectedVideoId = candidate?.video.id; });
 }
 
 /** Global bipartite assignment: maximize reliable unique choices first, then
@@ -1462,7 +1851,9 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
   // FORTE" e "… DUPLO SENTIDO", "SEGURANDO PRÓSTATA INFLAMADA" e "… INCHADA")
   // parecem take repetido. Troca a de depois por uma alternativa livre quase
   // tão boa, diferente das vizinhas (até dois takes de distância).
-  const sceneTokens = (video: StockFrameVideo) => new Set(meaningful(video.title).filter((token) => !/^\d+$/.test(token) && !['animacao', '3d', 'video', 'take'].includes(token)));
+  // Com ficha, a semelhança é da CENA ("idosa ninando boneca" × "idosa com
+  // boneca no colo"), não do título genérico do catálogo.
+  const sceneTokens = (video: StockFrameVideo) => new Set(meaningful(stockFrameVisualAudit(video.id)?.title || video.title).filter((token) => !/^\d+$/.test(token) && !['animacao', '3d', 'video', 'take'].includes(token)));
   const similar = (a: StockFrameVideo, b: StockFrameVideo) => {
     const ta = sceneTokens(a); const tb = sceneTokens(b);
     const shared = [...ta].filter((token) => tb.has(token)).length;
@@ -1483,6 +1874,10 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
       && !neighbors.some((video) => similar(candidate.video, video)));
     if (alternative) current.selectedVideoId = alternative.video.id;
   }
+  // Dinamismo visual (Silas, 07.10): "não pode ser o mesmo formato de stock o
+  // tempo todo". Com o plano sem repetição pronto, troca o que deixa o AD
+  // monótono por alternativas quase tão boas de outras situações.
+  diversifySmartPlan(result, fullCoverage ? 1 : 3);
   return result;
 }
 
@@ -1490,7 +1885,7 @@ export function chooseSmartStockAssignments(segments: SmartStockSegment[], fullC
  * specific and broad catalog searches. Normal ranking never invokes this. */
 export function rankStockFrameGenericFallback(segment: SmartStockSegment, videos: StockFrameVideo[], limit = 8): SmartStockCandidate[] {
   const ranking = prepareRanking(segment);
-  return videos.map((video) => scoreVideo(segment, video, ranking, 'generic'))
+  return videos.map((video) => memoScore(segment, video, ranking, 'generic'))
     .filter((candidate) => candidate.score >= 1)
     .sort((a, b) => b.score - a.score || a.video.id.localeCompare(b.video.id))
     .slice(0, Math.max(1, limit))
@@ -1506,7 +1901,7 @@ export function rankStockFramePackAlternatives(segment: SmartStockSegment, video
   if (!segment.campaignNicheId) return [];
   const ranking = prepareRanking(segment);
   return videos.filter((video) => video.nicheId === segment.campaignNicheId)
-    .map((video) => scoreVideo(segment, video, ranking, 'pack'))
+    .map((video) => memoScore(segment, video, ranking, 'pack'))
     .filter((candidate) => candidate.score >= 1)
     .sort((a, b) => b.score - a.score || a.video.id.localeCompare(b.video.id))
     .slice(0, Math.max(1, limit))
@@ -1548,8 +1943,41 @@ export function fillSmartStockAlternatives<T extends SmartStockSegment>(segments
         add(candidate);
       }
     }
-    return { ...segment, candidates: list };
+    return { ...segment, candidates: diverseOrder(list, segment.selectedVideoId) };
   });
+}
+
+/** Ordem das alternativas por relevância COM variedade: cada situação nova
+ * (gente, médico, órgão, receita, tela…) sobe antes da 3ª variação da mesma.
+ * O take escolhido fica primeiro; nada é descartado, só reordenado. */
+function diverseOrder(list: SmartStockCandidate[], selectedId?: string): SmartStockCandidate[] {
+  const ordered: SmartStockCandidate[] = [];
+  const rest = [...list];
+  const selectedIndex = rest.findIndex((candidate) => candidate.video.id === selectedId);
+  if (selectedIndex >= 0) ordered.push(...rest.splice(selectedIndex, 1));
+  const families = new Map<SceneFamily, number>();
+  const series = new Map<string, number>();
+  for (const candidate of ordered) {
+    const family = prepareVideo(candidate.video).profile.family;
+    families.set(family, (families.get(family) || 0) + 1);
+    series.set(seriesKeyOf(candidate.video), (series.get(seriesKeyOf(candidate.video)) || 0) + 1);
+  }
+  while (rest.length) {
+    let bestIndex = 0;
+    let bestValue = -Infinity;
+    for (let index = 0; index < rest.length; index++) {
+      const candidate = rest[index];
+      const family = prepareVideo(candidate.video).profile.family;
+      const value = candidate.score - (families.get(family) || 0) * 6 - (series.get(seriesKeyOf(candidate.video)) || 0) * 9;
+      if (value > bestValue) { bestValue = value; bestIndex = index; }
+    }
+    const [next] = rest.splice(bestIndex, 1);
+    const family = prepareVideo(next.video).profile.family;
+    families.set(family, (families.get(family) || 0) + 1);
+    series.set(seriesKeyOf(next.video), (series.get(seriesKeyOf(next.video)) || 0) + 1);
+    ordered.push(next);
+  }
+  return ordered;
 }
 
 /** Cobertura 100% sem repetir cena: um trecho que ficou sem take único é
@@ -1582,6 +2010,60 @@ export function absorbUnfilledSmartSegments(parts: StockFrameCopyPart[], segment
     current = current.filter((_, position) => position !== index);
   }
   return current;
+}
+
+/** O editor não força b-roll onde o catálogo não tem a cena. O plano de 30/60%
+ * escolhe os trechos pela copy, antes de ver o catálogo; depois do ranking, um
+ * trecho que só ganhou reserva genérica ("receita com quiabo" sem take de
+ * quiabo → cérebro 3D qualquer) cede a vez a um trecho que ficou com o avatar
+ * e tem cena forte — mantendo a cobertura pedida dentro da tolerância de 3%
+ * que a aplicação confere. Os trechos de reposição vêm do mesmo fatiamento
+ * (cobertura 100% no mesmo ritmo) e são ranqueados contra o mesmo catálogo. */
+export function rebalanceSmartPlan(parts: StockFrameCopyPart[], planned: SmartStockSegment[], options: {
+  coverage: SmartCoverage; pace: SmartPace; pool: StockFrameVideo[];
+  campaign: Pick<SmartStockSegment, 'campaignText' | 'campaignNicheId' | 'campaignIngredients'>;
+  exclude?: StockFrameVideo[];
+}): SmartStockSegment[] {
+  if (options.coverage === 100 || !planned.length || !options.pool.length) return planned;
+  const total = parts.reduce((sum, part) => sum + (part.text.match(/\S+/g)?.length || 0), 0);
+  const target = Math.round(total * options.coverage / 100);
+  const tolerance = Math.max(1, Math.ceil(total * .03));
+  const order = new Map(parts.map((part, index) => [part.label, index]));
+  const length = (segment: SmartStockSegment) => segment.wordTo - segment.wordFrom + 1;
+  const overlaps = (a: SmartStockSegment, b: SmartStockSegment) => a.anchor === b.anchor && a.wordFrom <= b.wordTo && b.wordFrom <= a.wordTo;
+  const weakScore = (segment: SmartStockSegment) => {
+    const selected = selectedSmartCandidate(segment);
+    return !selected ? 0 : selected.genericFallback ? Math.min(selected.score, 10) : selected.score;
+  };
+  const weak = planned.filter((segment) => weakScore(segment) < 16).sort((a, b) => weakScore(a) - weakScore(b));
+  if (!weak.length) return planned;
+  let plan = [...planned];
+  const spare = planSmartStockSegments(parts, { coverage: 100, pace: options.pace })
+    .filter((segment) => !plan.some((item) => overlaps(item, segment)))
+    .map((segment) => {
+      const full = { ...segment, ...options.campaign };
+      return { ...full, candidates: rankStockFrameVideos(full, options.pool, 12, false) };
+    });
+  let covered = plan.reduce((sum, segment) => sum + length(segment), 0);
+  let changed = false;
+  for (const slot of weak) {
+    const taken = [...(options.exclude || []), ...plan.filter((segment) => segment !== slot)
+      .flatMap((segment) => { const selected = selectedSmartCandidate(segment); return selected ? [selected.video] : []; })];
+    const strength = (segment: SmartStockSegment) => Math.max(0, ...segment.candidates
+      .filter((candidate) => !candidate.genericFallback && !taken.some((video) => stockFrameSameVisual(video, candidate.video)))
+      .map((candidate) => candidate.score));
+    const replacement = spare
+      .filter((segment) => !plan.some((item) => item !== slot && overlaps(item, segment)) && strength(segment) >= 24
+        && Math.abs(covered - length(slot) + length(segment) - target) <= tolerance)
+      .sort((a, b) => strength(b) - strength(a))[0];
+    if (!replacement || strength(replacement) <= weakScore(slot) + 8) continue;
+    plan = [...plan.filter((segment) => segment !== slot), { ...replacement, selectedVideoId: undefined }];
+    spare.splice(spare.indexOf(replacement), 1);
+    covered += length(replacement) - length(slot);
+    changed = true;
+  }
+  if (!changed) return planned;
+  return plan.sort((a, b) => (order.get(a.anchor) ?? 0) - (order.get(b.anchor) ?? 0) || a.wordFrom - b.wordFrom);
 }
 
 export function selectedSmartCandidate(segment: SmartStockSegment): SmartStockCandidate | undefined {
