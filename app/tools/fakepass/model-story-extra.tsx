@@ -46,7 +46,7 @@ function CountdownSticker({ titulo, horas, minutos, segundos }: { titulo: string
     <div style={{ width: STORY_W * 0.92, borderRadius: 22, background: '#ffffff', boxShadow: '0 8px 26px rgba(0,0,0,0.18)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '18px 18px 20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
         <div style={{ fontSize: 23, fontWeight: 800, color: '#1a1a1a', lineHeight: 1.35, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7 }}>
-          {emojify(titulo, 'apple')}
+          {emojify(titulo)}
         </div>
         <div style={{ width: 34, height: 34, borderRadius: '50%', border: '1.5px solid #c7c7c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>

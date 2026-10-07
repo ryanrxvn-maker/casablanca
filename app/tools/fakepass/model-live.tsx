@@ -33,6 +33,7 @@ import {
   type FakeModel,
 } from './shared';
 import { CommentBuilder } from './builder';
+import { getEmojiSet } from './emoji-style';
 
 /* ─────────────────────────── Tipos / estado ─────────────────────────── */
 
@@ -88,12 +89,16 @@ function hexRgb(hex: string): [number, number, number] {
 const emojiImgs = new Map<string, HTMLImageElement>();
 
 function emojiImg(e: string): HTMLImageElement | null {
-  let img = emojiImgs.get(e);
+  // estilo escolhido (iPhone/Android): o loop de desenho relê a cada quadro, então
+  // trocar o estilo troca os emojis da live no próximo frame
+  const set = getEmojiSet();
+  const key = `${set}|${e}`;
+  let img = emojiImgs.get(key);
   if (!img) {
     const im = new Image();
     im.crossOrigin = 'anonymous';
     // arquivo que não existe (forma sem/com VS16) → próxima URL candidata
-    const srcs = emojiSrcs(e, 'apple');
+    const srcs = emojiSrcs(e, set);
     let i = 0;
     im.onerror = () => {
       i += 1;
@@ -101,7 +106,7 @@ function emojiImg(e: string): HTMLImageElement | null {
     };
     im.src = srcs[0];
     img = im;
-    emojiImgs.set(e, img);
+    emojiImgs.set(key, img);
   }
   return img.complete && img.naturalWidth > 0 ? img : null;
 }

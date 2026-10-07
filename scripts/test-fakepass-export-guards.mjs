@@ -56,6 +56,16 @@ for (const [t, esperado, msg] of casos) {
   ok(JSON.stringify(got) === JSON.stringify(esperado), `${msg} — ${JSON.stringify(t)} → ${JSON.stringify(got)}`);
 }
 
+console.log('\n-- estilo do emoji (iPhone/Android) vale pra todos os modelos --');
+// o seletor troca o estilo do print inteiro (emoji-style.ts); um modelo que
+// fixe set="apple"/'google' ignoraria o botão calado
+const dir = path.join(root, 'app/tools/fakepass');
+const forcam = fs
+  .readdirSync(dir)
+  .filter((f) => /^model-.*\.tsx$/.test(f))
+  .filter((f) => /emojify\([^)]*,\s*['"](apple|google)['"]\)|<Emo\b[^>]*\bset=["'{]/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+ok(forcam.length === 0, `nenhum modelo força o estilo${forcam.length ? ' — forçam: ' + forcam.join(', ') : ''}`);
+
 if (falhas) {
   console.error(`\nFALHOU fakepass-export-guards: ${falhas} guarda(s)`);
   process.exit(1);

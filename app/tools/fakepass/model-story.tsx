@@ -10,7 +10,6 @@ import { FitText, Field, TextField, TextArea, Segmented, RangeField, emojify, FO
 import { STORY_W, STORY_RATIO, STORY_BGS, StoryStage, BgControls } from './story-kit';
 import { EmojiPickerButton } from './emoji-picker';
 
-const AP = 'apple' as const; // stickers de story = sempre emoji do iPhone
 
 /* ═══════════════════ Caixinha de Pergunta ═══════════════════ */
 
@@ -20,10 +19,10 @@ function QuestionSticker({ header, pergunta }: { header: string; pergunta: strin
   return (
     <div style={{ width: STORY_W * 0.8, borderRadius: 11, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
       <FitText maxPx={15} minPx={11} maxHeight={STORY_W * 0.2} style={{ background: '#262626', color: '#fff', padding: '13px 20px', textAlign: 'center', fontWeight: 400, lineHeight: 1.3, letterSpacing: '-0.01em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {emojify(header, AP)}
+        {emojify(header)}
       </FitText>
       <FitText maxPx={21} minPx={13} maxHeight={STORY_W * 0.5} style={{ background: '#fff', color: '#454545', padding: '24px 22px', textAlign: 'center', fontWeight: 400, lineHeight: 1.32, letterSpacing: '-0.015em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {emojify(pergunta, AP)}
+        {emojify(pergunta)}
       </FitText>
     </div>
   );
@@ -50,7 +49,7 @@ type PollState = { pergunta: string; opA: string; opB: string; bg: string };
 function PollOption({ text }: { text: string }) {
   return (
     <div style={{ background: '#efefef', borderRadius: 10, padding: '13px 15px', fontSize: 15, fontWeight: 500, color: '#262626', lineHeight: 1.25, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-      {emojify(text || ' ', AP)}
+      {emojify(text || ' ')}
     </div>
   );
 }
@@ -60,7 +59,7 @@ function PollSticker({ pergunta, opA, opB }: { pergunta: string; opA: string; op
     <div style={{ width: STORY_W * 0.82, borderRadius: 16, overflow: 'hidden', background: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
       <div style={{ background: '#1c1c1c', padding: '13px 16px' }}>
         <FitText maxPx={14} minPx={11} maxHeight={STORY_W * 0.24} style={{ color: '#fff', textAlign: 'center', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.25, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {emojify(pergunta, AP)}
+          {emojify(pergunta)}
         </FitText>
       </div>
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -97,14 +96,14 @@ function QuizSticker({ pergunta, ops, correta }: { pergunta: string; ops: string
   return (
     <div style={{ width: STORY_W * 0.82, borderRadius: 16, background: 'rgba(255,255,255,0.96)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '16px 14px' }}>
       <FitText maxPx={18} minPx={13} maxHeight={STORY_W * 0.3} style={{ color: '#262626', padding: '2px 6px 12px', textAlign: 'center', fontWeight: 600, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {emojify(pergunta, AP)}
+        {emojify(pergunta)}
       </FitText>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.map(({ o, i }) => {
           const ok = i === correta;
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '11px 12px', borderRadius: 11, fontSize: 15, fontWeight: 600, background: ok ? '#e6f8ef' : '#f2f2f2', color: ok ? '#12885a' : '#333333', border: ok ? '1.5px solid #37c98a' : '1.5px solid transparent' }}>
-              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>{emojify(o, AP)}</span>
+              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>{emojify(o)}</span>
               {ok ? <span style={{ fontSize: 15 }}>✓</span> : null}
             </div>
           );
@@ -148,12 +147,12 @@ function SliderSticker({ pergunta, emoji, valor }: { pergunta: string; emoji: st
   return (
     <div style={{ width: STORY_W * 0.82, borderRadius: 16, background: 'rgba(255,255,255,0.96)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '18px 22px 30px' }}>
       <FitText maxPx={18} minPx={13} maxHeight={STORY_W * 0.3} style={{ color: '#262626', padding: '0 0 20px', textAlign: 'center', fontWeight: 500, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {emojify(pergunta, AP)}
+        {emojify(pergunta)}
       </FitText>
       <div style={{ position: 'relative', height: 12, borderRadius: 6, background: '#ededed' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${v}%`, borderRadius: 6, background: 'linear-gradient(90deg,#ffd54a,#ff5e8a)' }} />
         <div style={{ position: 'absolute', left: `${v}%`, top: '50%', transform: 'translate(-50%,-50%)', fontSize: 28, lineHeight: 1 }}>
-          {emojify(emoji || '😍', AP)}
+          {emojify(emoji || '😍')}
         </div>
       </div>
     </div>
@@ -170,9 +169,9 @@ const IG_SLIDER: FakeModel<SliderState> = {
       <Field label="Emoji">
         <div className="flex flex-wrap items-center gap-2">
           {EMOJIS.map((e) => (
-            <button key={e} type="button" onClick={() => set({ emoji: e })} className={'flex h-9 w-9 items-center justify-center rounded-full border transition ' + (s.emoji === e ? 'border-violet/70 bg-violet/15' : 'border-line-strong hover:border-violet/50')} style={{ fontSize: 20, lineHeight: 1 }}>{emojify(e, 'apple')}</button>
+            <button key={e} type="button" onClick={() => set({ emoji: e })} className={'flex h-9 w-9 items-center justify-center rounded-full border transition ' + (s.emoji === e ? 'border-violet/70 bg-violet/15' : 'border-line-strong hover:border-violet/50')} style={{ fontSize: 20, lineHeight: 1 }}>{emojify(e)}</button>
           ))}
-          <EmojiPickerButton onPick={(e) => set({ emoji: e })} className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[12px] font-semibold text-text-muted transition hover:border-violet/50 hover:text-white">
+          <EmojiPickerButton closeOnPick onPick={(e) => set({ emoji: e })} className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[12px] font-semibold text-text-muted transition hover:border-violet/50 hover:text-white">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
             Todos
           </EmojiPickerButton>

@@ -263,19 +263,39 @@ function MicIcon() {
   );
 }
 
+/** ▶ do áudio — triângulo de pontas arredondadas (o "play.fill" do iOS). */
 function PlayTriangle({ color }: { color: string }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill={color} aria-hidden>
-      <path d="M2.5 1.4 10 6l-7.5 4.6z" />
+    <svg width="15" height="16" viewBox="0 0 15 16" aria-hidden style={{ display: 'block' }}>
+      <path d="M2 2.3c0-1 1.1-1.6 1.9-1.1l10 5.7c.8.5.8 1.7 0 2.2l-10 5.7C3.1 15.3 2 14.7 2 13.7z" fill={color} />
     </svg>
   );
 }
 
-function AudioMicSmall({ color }: { color: string }) {
+/** Microfone do áudio de voz, encostado na foto — contorno da cor do balão pra
+ *  destacar da foto, como no app. */
+function VoiceMic({ color, ring }: { color: string; ring: string }) {
+  const shape = (stroke: string, w: number, fill: string) => (
+    <g stroke={stroke} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.2" y="0.9" width="5.6" height="9.6" rx="2.8" fill={fill} />
+      <path d="M1.2 8a4.8 4.8 0 0 0 9.6 0M6 12.8v3.3M3.7 16.3h4.6" fill="none" />
+    </g>
+  );
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill={color} aria-hidden>
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M6 11a6 6 0 0 0 12 0M12 17v3.5M9 20.5h6" stroke={color} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+    <svg width="12" height="18" viewBox="0 0 12 18" aria-hidden style={{ display: 'block', overflow: 'visible' }}>
+      {shape(ring, 3.4, ring)}
+      {shape(color, 1.5, color)}
+    </svg>
+  );
+}
+
+/** Foto padrão do WhatsApp (silhueta) — "você" não tem foto no modelo. */
+function DefaultAvatar({ size, dark }: { size: number; dark: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden style={{ display: 'block', borderRadius: '50%' }}>
+      <rect width="40" height="40" fill={dark ? '#3b4a54' : '#ced5d9'} />
+      <circle cx="20" cy="15.5" r="7.2" fill={dark ? '#8696a0' : '#ffffff'} />
+      <path d="M6.5 37.5c1.6-7.6 7-11.6 13.5-11.6s11.9 4 13.5 11.6" fill={dark ? '#8696a0' : '#ffffff'} />
     </svg>
   );
 }
@@ -329,92 +349,125 @@ function Tail({ me, color }: { me: boolean; color: string }) {
   );
 }
 
-/* ─────────────────────────── Waveform (áudio) ─────────────────────────── */
+/* ─────────────────────────── Áudio de voz ─────────────────────────── */
+// Medido num print real do WhatsApp (iPhone): linha de cima = ▶ + ondas com a
+// bolinha do progresso, CENTRALIZADOS na foto; linha de baixo = duração alinhada
+// ao início das ondas e hora (+ ✓✓) no fim. Foto à direita no recebido e à
+// esquerda no enviado, com o microfone encostado. Antes o ▶ centralizava no
+// bloco inteiro (ondas + duração) e ficava caído, abaixo das ondas.
 
-const WAVE_HEIGHTS = [
-  5, 8, 4, 11, 7, 14, 9, 6, 12, 16, 10, 7, 5, 13, 9, 15, 8, 6, 11, 7, 4, 10, 13, 6, 9, 5,
+const WA_BARS = [
+  2, 2, 2, 5, 9, 7, 12, 15, 10, 6, 13, 16, 11, 8, 14, 9, 5, 3, 7, 12, 16, 13, 9, 11, 15, 12, 7, 4, 9, 13, 10, 6, 12,
+  15, 11, 8, 5, 9, 6, 3, 2, 2,
 ];
+const WA_AVATAR = 36;
 
-function Waveform({ played, dim }: { played: string; dim: string }) {
-  // played = cor das barras já ouvidas (progresso); dim = cor das restantes.
-  const total = WAVE_HEIGHTS.length;
-  const progressUpto = Math.round(total * 0.32); // ~1/3 ouvido
+function VoiceWave({ bars, knob }: { bars: string; knob: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 20, flex: 1, minWidth: 0 }}>
-      {WAVE_HEIGHTS.map((h, i) => (
-        <span
-          key={i}
-          style={{
-            width: 2.5,
-            height: h,
-            borderRadius: 2,
-            background: i < progressUpto ? played : dim,
-            flexShrink: 0,
-          }}
-        />
+    <div
+      style={{
+        position: 'relative',
+        flex: 1,
+        minWidth: 0,
+        height: 20,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}
+    >
+      {WA_BARS.map((h, i) => (
+        <span key={i} style={{ width: 2, height: h, borderRadius: 1, background: bars, flexShrink: 0 }} />
       ))}
+      {/* bolinha do progresso, no início (áudio parado) */}
+      <span
+        style={{
+          position: 'absolute',
+          left: -3,
+          top: '50%',
+          width: 11,
+          height: 11,
+          marginTop: -5.5,
+          borderRadius: '50%',
+          background: knob,
+        }}
+      />
     </div>
   );
 }
 
-/* ─────────────────────────── Balão de áudio ─────────────────────────── */
-
-function AudioBubble({ m, hora, dark, tail }: { m: ChatMsg; hora: string; dark: boolean; tail: boolean }) {
-  const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
+function AudioBubble({
+  m,
+  hora,
+  dark,
+  tail,
+  avatar,
+  nome,
+}: {
+  m: ChatMsg;
+  hora: string;
+  dark: boolean;
+  tail: boolean;
+  avatar: string;
+  nome: string;
+}) {
+  const me = m.me;
+  const bg = me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
   const metaColor = dark ? '#8696a0' : '#667781';
-  const waveDim = dark ? '#54656f' : '#c9d0d3';
-  const wavePlayed = dark ? '#e9edef' : '#8696a0';
-  const playColor = dark ? '#8696a0' : '#8696a0';
-  // microfone azul no recebido, verde no enviado
-  const micColor = m.me ? '#25d366' : '#53bdeb';
-
+  // cores medidas no print de referência (claro); escuro segue a paleta do app
+  const play = me ? (dark ? '#c3e4dc' : '#5f775c') : dark ? '#aebac1' : '#757a7d';
+  const bars = me ? (dark ? 'rgba(233,237,239,0.42)' : '#acc89f') : dark ? '#6b7a83' : '#a3aaae';
+  const knob = me ? (dark ? '#d1f4cc' : '#627b65') : '#3eaaf1';
+  const mic = me ? (dark ? '#a3d4c8' : '#6c8074') : '#44b6f4';
+  const gap = 12;
+  const playW = 15;
+  const photo = (
+    <div style={{ position: 'relative', flexShrink: 0, width: WA_AVATAR, height: WA_AVATAR }}>
+      {me ? <DefaultAvatar size={WA_AVATAR} dark={dark} /> : <Avatar src={avatar} size={WA_AVATAR} nome={nome} />}
+      <div style={{ position: 'absolute', top: 19, ...(me ? { left: 27 } : { left: -6 }) }}>
+        <VoiceMic color={mic} ring={bg} />
+      </div>
+    </div>
+  );
   return (
-    <div style={{ display: 'flex', justifyContent: m.me ? 'flex-end' : 'flex-start', marginTop: tail ? 4 : 0 }}>
+    <div style={{ display: 'flex', justifyContent: me ? 'flex-end' : 'flex-start', marginTop: tail ? 4 : 0 }}>
       <div
         style={{
           position: 'relative',
-          maxWidth: '78%',
+          width: 242,
+          maxWidth: '85%',
           background: bg,
           borderRadius: 7.5,
-          borderTopLeftRadius: tail && !m.me ? 0 : 7.5,
-          borderTopRightRadius: tail && m.me ? 0 : 7.5,
-          padding: '8px 10px 8px 8px',
+          borderTopLeftRadius: tail && !me ? 0 : 7.5,
+          borderTopRightRadius: tail && me ? 0 : 7.5,
+          padding: me ? '7px 9px 5px 6px' : '7px 6px 5px 12px',
           boxShadow: dark ? '0 1px 0.5px rgba(0,0,0,0.28)' : '0 1px 0.5px rgba(0,0,0,0.13)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 7,
-          width: 200,
         }}
       >
-        {tail ? <Tail me={m.me} color={bg} /> : null}
-        {/* botão play */}
+        {tail ? <Tail me={me} color={bg} /> : null}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {me ? <div style={{ marginRight: gap }}>{photo}</div> : null}
+          <div style={{ flexShrink: 0, marginRight: gap }}>
+            <PlayTriangle color={play} />
+          </div>
+          <VoiceWave bars={bars} knob={knob} />
+          {!me ? <div style={{ marginLeft: 14 }}>{photo}</div> : null}
+        </div>
+        {/* duração no início das ondas, hora no fim — sobe pra dentro da altura da foto */}
         <div
           style={{
-            width: 28,
-            height: 28,
-            borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
+            justifyContent: 'space-between',
+            marginTop: -9,
+            marginLeft: me ? WA_AVATAR + gap + playW + gap : playW + gap,
+            marginRight: me ? 0 : 14 + WA_AVATAR,
           }}
         >
-          <PlayTriangle color={playColor} />
-        </div>
-        {/* waveform + tempo */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <Waveform played={wavePlayed} dim={waveDim} />
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 1 }}>
-            <span style={{ fontSize: 11, color: metaColor, lineHeight: 1 }}>{m.dur}</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: 11, color: metaColor, lineHeight: 1 }}>{hora}</span>
-              {m.me ? <DoubleCheck /> : null}
-            </span>
-          </div>
-        </div>
-        {/* microfone */}
-        <div style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
-          <AudioMicSmall color={micColor} />
+          <span style={{ fontSize: 11, lineHeight: 1, color: metaColor }}>{m.dur}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 11, lineHeight: 1, color: metaColor }}>{hora}</span>
+            {me ? <DoubleCheck /> : null}
+          </span>
         </div>
       </div>
     </div>
@@ -480,13 +533,11 @@ function TextBubble({
   m,
   hora,
   dark,
-  emojiSet,
   tail,
 }: {
   m: ChatMsg;
   hora: string;
   dark: boolean;
-  emojiSet: 'apple' | 'google';
   tail: boolean;
 }) {
   const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
@@ -517,7 +568,7 @@ function TextBubble({
       >
         {tail ? <Tail me={m.me} color={bg} /> : null}
         <span>
-          <Emo t={m.text} set={emojiSet} />
+          <Emo t={m.text} />
         </span>
         <MetaSpacer hora={hora} me={m.me} />
         <MetaStamp hora={hora} me={m.me} color={metaColor} />
@@ -570,13 +621,11 @@ function MediaBubble({
   m,
   hora,
   dark,
-  emojiSet,
   tail,
 }: {
   m: ChatMsg;
   hora: string;
   dark: boolean;
-  emojiSet: 'apple' | 'google';
   tail: boolean;
 }) {
   const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
@@ -678,7 +727,7 @@ function MediaBubble({
             }}
           >
             <span>
-              <Emo t={m.text} set={emojiSet} />
+              <Emo t={m.text} />
             </span>
             <MetaSpacer hora={hora} me={m.me} />
             <span
@@ -722,7 +771,6 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const inputIcon = dark ? '#8696a0' : '#54656f';
   const unreadColor = dark ? '#e9edef' : '#54656f';
 
-  const emojiSet = status.os === 'android' ? 'google' : 'apple';
   const msgs = toMsgs(s.conversa);
   const doodlePng = useDoodlePng(dark);
 
@@ -843,10 +891,10 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
         >
           {msgs.map((m, i) => {
             const tail = i === 0 || msgs[i - 1].me !== m.me;
-            if (m.kind === 'audio') return <AudioBubble key={m.id || i} m={m} hora={s.hora} dark={dark} tail={tail} />;
+            if (m.kind === 'audio') return <AudioBubble key={m.id || i} m={m} hora={s.hora} dark={dark} tail={tail} avatar={s.avatar} nome={s.nome} />;
             if (m.kind === 'image' || m.kind === 'video')
-              return <MediaBubble key={m.id || i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />;
-            return <TextBubble key={m.id || i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />;
+              return <MediaBubble key={m.id || i} m={m} hora={s.hora} dark={dark} tail={tail} />;
+            return <TextBubble key={m.id || i} m={m} hora={s.hora} dark={dark} tail={tail} />;
           })}
         </div>
       </div>

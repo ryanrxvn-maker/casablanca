@@ -84,6 +84,7 @@ async function main() {
   }
   const p0 = await pageFor(1);
   const models = await p0.evaluate(() => window.__fpModels);
+  const byId = Object.fromEntries(models.map((m) => [m.id, m]));
 
   const cases = [];
   for (const m of models) {
@@ -95,13 +96,26 @@ async function main() {
     cases.push({ name: `chat__ig-dm__${dark ? 'escuro' : 'claro'}`, id: 'ig-dm', s: { dark, conversa: conversa(), visto: true } });
     cases.push({ name: `chat__whatsapp__${dark ? 'escuro' : 'claro'}`, id: 'whatsapp', s: { dark, conversa: conversa() } });
   }
-  cases.push({ name: 'chat__whatsapp__android', id: 'whatsapp', s: { dark: false, conversa: conversa() }, status: { os: 'android' } });
-  cases.push({ name: 'chat__ig-dm__android', id: 'ig-dm', s: { dark: true, conversa: conversa() }, status: { os: 'android' } });
+  // celular Android = emoji do Android (o seletor troca o estilo pro print todo)
+  cases.push({ name: 'chat__whatsapp__android', id: 'whatsapp', s: { dark: false, conversa: conversa() }, status: { os: 'android' }, emoji: 'google' });
+  cases.push({ name: 'chat__ig-dm__android', id: 'ig-dm', s: { dark: true, conversa: conversa() }, status: { os: 'android' }, emoji: 'google' });
+  for (const id of ['ig-question', 'tweet', 'comments', 'notif']) cases.push({ name: `android__${id}`, id, s: sufixar(byId[id].defaultState, TONS, TONS), emoji: 'google' });
   const midia = [
     { id: 'm1', kind: 'image', me: false, text: 'olha o resultado 😍 depois de 30 dias seguindo o método direitinho 🙏🏻', dur: '', src: '' },
     { id: 'm2', kind: 'video', me: true, text: 'vídeo do depoimento 👇🏽', dur: '0:31', src: '' },
     { id: 'm3', kind: 'audio', me: false, text: '', dur: '0:16', src: '' },
   ];
+  // áudio de voz recebido + enviado (alinhamento do ▶ com as ondas, foto, microfone)
+  const audios = [
+    { id: 'a0', kind: 'text', me: false, text: 'oi! te mandei um áudio explicando', dur: '', src: '' },
+    { id: 'a1', kind: 'audio', me: false, text: '', dur: '0:07', src: '' },
+    { id: 'a2', kind: 'audio', me: true, text: '', dur: '1:24', src: '' },
+    { id: 'a3', kind: 'text', me: true, text: 'ouvi tudo, obrigada 🙏🏻', dur: '', src: '' },
+  ];
+  for (const dark of [false, true]) {
+    cases.push({ name: `audio__whatsapp__${dark ? 'escuro' : 'claro'}`, id: 'whatsapp', s: { dark, conversa: audios } });
+    cases.push({ name: `audio__ig-dm__${dark ? 'escuro' : 'claro'}`, id: 'ig-dm', s: { dark, conversa: audios, visto: false } });
+  }
   cases.push({ name: 'chat__whatsapp__midia', id: 'whatsapp', s: { conversa: conversa(midia).slice(5) } });
   cases.push({ name: 'chat__ig-dm__midia', id: 'ig-dm', s: { conversa: conversa(midia).slice(5) } });
   cases.push({ name: 'notif__android', id: 'notif', s: { os: 'android', texto: '🙏🏻 Filho, chegou aquele dinheiro que te falei? Me avisa quando puder 🙏', titulo: 'Mãe ❤️' } });
@@ -128,10 +142,12 @@ async function main() {
     const rec = { name: c.name, id: c.id };
     try {
       // dims do caso (o modelo pode mudar o palco pelo estado)
+      await p0.evaluate((v) => window.__fpEmojiSet(v), c.emoji || 'apple');
       await p0.evaluate(({ id, s, st }) => window.__fpSet(id, s, st), { id: c.id, s: c.s, st: c.status || null });
       const d = await p0.evaluate(() => window.__fpDims());
       const dpr = d.exportW / d.stageW;
       const page = await pageFor(dpr);
+      await page.evaluate((v) => window.__fpEmojiSet(v), c.emoji || 'apple');
       await page.evaluate(({ id, s, st }) => window.__fpSet(id, s, st), { id: c.id, s: c.s, st: c.status || null });
       const dir = path.join(OUT, c.name);
       fs.mkdirSync(dir, { recursive: true });
