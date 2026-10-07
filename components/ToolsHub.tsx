@@ -1950,16 +1950,19 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
             >
               <IconFakePass size={28} />
             </span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
               {newsPremium ? (
                 <span
-                  className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/55 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-white/90 backdrop-blur-md"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/20 bg-black/55 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-white/90 backdrop-blur-md"
                   style={{ fontFamily: 'var(--font-tech)' }}
                 >
-                  <LockIcon size={10} /> Premium
+                  <LockIcon size={10} />
+                  {/* Card estreito (3 colunas até 1280px, celular pequeno): só o
+                      cadeado — o aviso por extenso está no painel do hover. */}
+                  <span className="lg:max-xl:sr-only max-[400px]:sr-only">Premium</span>
                 </span>
               ) : null}
-              <span className="flex items-stretch overflow-hidden rounded-[5px] shadow-[0_4px_16px_-4px_rgba(204,0,0,0.75)]">
+              <span className="flex shrink-0 items-stretch overflow-hidden rounded-[5px] shadow-[0_4px_16px_-4px_rgba(204,0,0,0.75)]">
                 <span className="flex items-center gap-1.5 bg-[#cc0000] px-1.5 py-[3px]">
                   <span className="relative flex h-1.5 w-1.5">
                     <span className="ae-ambient absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-80" />
@@ -1995,7 +1998,7 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
               <span aria-hidden className="fpf-sheen pointer-events-none absolute inset-0" />
             </div>
             <div className="truncate rounded-b-[4px] bg-[#0b1a3a]/95 px-2.5 py-[3px] text-[10px] font-semibold leading-tight text-white/90">
-              Telejornal pronto em segundos
+              Prints de redes sociais e TV
             </div>
           </div>
 
@@ -2016,8 +2019,9 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
                     className="px-3 text-[9px] font-bold uppercase tracking-[0.14em] text-white/80"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    Você escreve a notícia e o FakePrint monta o print · 16:9 e
-                    9:16 · Fundo verde pra chroma key · Pronto pra postar ·
+                    WhatsApp e Direct · Post e tweet · Comentários · Stickers de
+                    story · Live do TikTok e do Instagram · Chamada de vídeo e
+                    Zoom · Telejornal · Site de notícia · PNG ou vídeo ·
                   </span>
                 ))}
               </div>
@@ -2027,21 +2031,29 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
 
         {/* PAINEL — abre ABAIXO da tela no hover (copy + botão) */}
         <div
-          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[440px] group-hover:opacity-100"
           style={{ background: '#0b0b0f' }}
         >
           <div className="px-4 pb-4 pt-3.5">
             <p className="text-[12.5px] leading-relaxed text-white/80">
-              Manchete de telejornal, GC e letreiro com a cara das grandes
-              emissoras, em 16:9 ou 9:16 e com fundo verde pra chroma. Também
-              faz prints de redes sociais.
+              Prints fiéis aos originais, prontos em PNG ou vídeo.
+            </p>
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/70">
+              <span className="font-semibold text-white">Redes sociais:</span>{' '}
+              conversa de WhatsApp e Direct, post, tweet, comentários,
+              notificação, stickers de story, live e chamada de vídeo.
+            </p>
+            <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/70">
+              <span className="font-semibold text-white">Notícias e TV:</span>{' '}
+              manchete de telejornal e matéria de site de notícia, com tela
+              verde pra chroma.
             </p>
             {newsPremium ? (
               <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-white/60">
                 <span className="mt-[4px] shrink-0"><LockIcon size={11} /></span>
                 <span>
-                  No seu plano, os prints de redes sociais estão liberados.
-                  Telejornal é Premium.
+                  No seu plano, as redes sociais estão liberadas. Notícias e
+                  TV são Premium.
                 </span>
               </p>
             ) : null}
@@ -2074,7 +2086,7 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
       <style jsx>{`
         /* Letreiro: só transform (GPU) e pausa no modo descanso (ae-ambient). */
         .fpf-ticker {
-          animation: fpf-ticker-run 26s linear infinite;
+          animation: fpf-ticker-run 42s linear infinite;
         }
         @keyframes fpf-ticker-run {
           from { transform: translateX(0); }
