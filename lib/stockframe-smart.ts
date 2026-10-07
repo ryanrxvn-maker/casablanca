@@ -2038,8 +2038,12 @@ export function rebalanceSmartPlan(parts: StockFrameCopyPart[], planned: SmartSt
   const weak = planned.filter((segment) => weakScore(segment) < 16).sort((a, b) => weakScore(a) - weakScore(b));
   if (!weak.length) return planned;
   let plan = [...planned];
+  const plannedWords = plan.reduce((sum, segment) => sum + length(segment), 0);
+  // Só vale pontuar a reserva que cabe na tolerância trocando por algum trecho
+  // fraco: o resto nunca seria escolhido (e pontuar custa o catálogo inteiro).
+  const fits = (segment: SmartStockSegment) => weak.some((slot) => Math.abs(plannedWords - length(slot) + length(segment) - target) <= tolerance + weak.length * 2);
   const spare = planSmartStockSegments(parts, { coverage: 100, pace: options.pace })
-    .filter((segment) => !plan.some((item) => overlaps(item, segment)))
+    .filter((segment) => !plan.some((item) => overlaps(item, segment)) && fits(segment))
     .map((segment) => {
       const full = { ...segment, ...options.campaign };
       return { ...full, candidates: rankStockFrameVideos(full, options.pool, 12, false) };
