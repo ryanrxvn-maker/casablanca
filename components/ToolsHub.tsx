@@ -555,24 +555,31 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
       onPointerUp={() => setPausado(false)}
       onPointerCancel={() => setPausado(false)}
     >
-      <div
-        ref={scrollerRef}
-        onScroll={onScroll}
-        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[26px]"
-        // A JANELA tem o mesmo raio dos slides: no meio da troca, o pedaço do
-        // slide que está saindo/entrando é cortado por essa borda — reta, ela
-        // deixava o canto QUADRADO. `isolation` garante o recorte redondo também
-        // sobre camadas de GPU (vídeo, tilt 3D do Famous Hey).
-        style={{ scrollbarWidth: 'none', isolation: 'isolate' }}
-      >
-        {slides.map((s, i) => (
-          <div
-            key={i}
-            className={`w-full shrink-0 snap-center [&>*]:h-full ${HERO_BOX}`}
-          >
-            {s}
-          </div>
-        ))}
+      {/* MOLDURA PARADA com recorte redondo (clip-path): segunda camada,
+          independente do recorte da própria janela que rola. Se um navegador
+          largar o raio do scroller no meio da rolagem animada (Safari com
+          vídeo, GPU teimosa), esta moldura — que não rola — continua cortando
+          redondo. Nenhum quadro fica com canto quadrado. */}
+      <div className="rounded-[26px]" style={{ clipPath: 'inset(0 round 26px)' }}>
+        <div
+          ref={scrollerRef}
+          onScroll={onScroll}
+          className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[26px]"
+          // A JANELA tem o mesmo raio dos slides: no meio da troca, o pedaço do
+          // slide que está saindo/entrando é cortado por essa borda — reta, ela
+          // deixava o canto QUADRADO. `isolation` garante o recorte redondo também
+          // sobre camadas de GPU (vídeo, tilt 3D do Famous Hey).
+          style={{ scrollbarWidth: 'none', isolation: 'isolate' }}
+        >
+          {slides.map((s, i) => (
+            <div
+              key={i}
+              className={`w-full shrink-0 snap-center [&>*]:h-full ${HERO_BOX}`}
+            >
+              {s}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Arrows */}
