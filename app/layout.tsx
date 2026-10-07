@@ -5,7 +5,7 @@ import { MouseGlow } from '@/components/MouseGlow';
 import { AmbientCalm } from '@/components/AmbientCalm';
 import { RippleRoot } from '@/components/RippleRoot';
 import { FloatingOrbs } from '@/components/FloatingOrbs';
-import { WhatsAppFab } from '@/components/WhatsAppFab';
+import { HelpChat } from '@/components/HelpChat';
 import { ThemeManager } from '@/components/ThemeManager';
 import { ChunkGuard } from '@/components/ChunkGuard';
 import './globals.css';
@@ -193,7 +193,7 @@ export default function RootLayout({
         <MouseGlow />
         <RippleRoot />
         {children}
-        <WhatsAppFab />
+        <HelpChat />
       </body>
     </html>
   );

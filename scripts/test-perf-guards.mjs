@@ -41,7 +41,8 @@ test('modo descanso: enfeites pausam sem foco/ociosos, e o layout monta o Ambien
   assert.match(ler('app/layout.tsx'), /<AmbientCalm\s*\/>/);
   const css = ler('app/globals.css');
   assert.match(css, /html\.ae-calm \.ae-ambient[\s\S]*?animation-play-state:\s*paused !important/);
-  assert.match(ler('components/WhatsAppFab.tsx'), /wa-pulse ae-ambient/);
+  // o pulso do botão de ajuda (substituiu o do WhatsApp em 07.10) é enfeite infinito
+  assert.match(ler('components/HelpChat.tsx'), /\$\{s\.pulse\} ae-ambient/);
 });
 
 test('Pilot não re-renderiza a PÁGINA inteira a cada segundo (relógio vive no card)', () => {
