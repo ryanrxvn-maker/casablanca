@@ -369,7 +369,6 @@ export function HelpChat() {
       topic: c.topic,
       description: c.description,
       pathname: c.path ?? pathRef.current,
-      host: window.location.host,
     });
     const lines = update
       ? ['Acrescentei isso na mensagem. Ela ficou assim:']
@@ -566,10 +565,6 @@ export function HelpChat() {
                 <h2 id={titleId} className={s.title}>
                   Suporte Auto Edit
                 </h2>
-                <p className={s.subtitle} style={{ margin: 0 }}>
-                  <WhatsGlyph size={13} />
-                  <span>Atendimento pelo WhatsApp</span>
-                </p>
               </div>
               <button
                 type="button"

@@ -8,6 +8,7 @@ import { FloatingOrbs } from '@/components/FloatingOrbs';
 import { HelpChat } from '@/components/HelpChat';
 import { ThemeManager } from '@/components/ThemeManager';
 import { ChunkGuard } from '@/components/ChunkGuard';
+import { FAKEPRINT_MODELOS } from '@/lib/numeros-do-site';
 import './globals.css';
 import './button-refinements.css';
 
@@ -20,7 +21,7 @@ const label = localFont({ src: '../public/fonts/site-inter.woff2', variable: '--
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
-  'Remover Silêncios, camuflagem de áudio com selo por plataforma, 41 modelos de print de notícia, lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.';
+  `Remover Silêncios, camuflagem de áudio com selo por plataforma, ${FAKEPRINT_MODELOS} modelos de print (redes sociais, telejornais e sites de notícia), lipsync e legenda alinhada à copy — ferramentas de edição de vídeo direto no navegador.`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

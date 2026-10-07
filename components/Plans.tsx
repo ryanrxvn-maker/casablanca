@@ -935,7 +935,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Downloader',
     cat: 'Web',
     hue: 'rgba(96,165,250,0.5)',
-    desc: 'Baixa vídeos e áudios do YouTube, Instagram, TikTok, Pinterest e sites +18 compatíveis direto no seu computador.',
+    desc: 'Baixa vídeos e áudios do YouTube, Instagram, TikTok, Pinterest e sites +18 compatíveis direto no seu computador. Pede a extensão do navegador e o Motor (Windows; Mac em teste).',
     win: 'Cola o link, recebe o arquivo. Sem código, sem servidor.',
   },
   {
@@ -951,7 +951,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Gerador de SRT',
     cat: 'IA',
     hue: 'rgba(196,181,253,0.55)',
-    desc: 'Gera arquivo .srt no tempo exato do seu áudio a partir da sua copy.',
+    desc: 'Gera arquivo .srt no tempo exato do seu áudio a partir da sua copy. Usa a sua chave Groq ou AssemblyAI.',
     win: 'O texto exato que você quer, nos tempos exatos do áudio. Importa no editor e pronto.',
   },
   {
@@ -983,7 +983,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Legendas Automáticas',
     cat: 'Vídeo',
     hue: 'rgba(251,191,36,0.5)',
-    desc: 'Legendas animadas no tempo do áudio, com centenas de modelos prontos.',
+    desc: 'Legendas animadas no tempo do áudio, com centenas de modelos prontos. Usa a sua chave Groq ou AssemblyAI.',
     win: 'Você escolhe o estilo, ele acerta a palavra certa no tempo certo.',
   },
   {

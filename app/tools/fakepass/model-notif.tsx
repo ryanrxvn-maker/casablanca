@@ -18,6 +18,7 @@ import {
   type StatusCfg,
   emojify,
 } from './shared';
+import { setEmojiSet } from './emoji-style';
 
 type S = {
   os: string; // 'ios' | 'android'
@@ -89,7 +90,7 @@ function AppIcon({
         overflow: 'hidden',
       }}
     >
-      {emojify(glyph, 'apple')}
+      {emojify(glyph)}
     </div>
   );
 }
@@ -159,7 +160,7 @@ function IosCard({ s }: { s: S }) {
             wordBreak: 'break-word',
           }}
         >
-          {emojify(s.texto, s.os === 'android' ? 'google' : 'apple')}
+          {emojify(s.texto)}
         </div>
       ) : null}
     </div>
@@ -227,7 +228,7 @@ function AndroidCard({ s }: { s: S }) {
             wordBreak: 'break-word',
           }}
         >
-          {emojify(s.texto, s.os === 'android' ? 'google' : 'apple')}
+          {emojify(s.texto)}
         </div>
       ) : null}
     </div>
@@ -376,7 +377,10 @@ const MODEL: FakeModel<S> = {
             { value: 'ios', label: 'iPhone' },
             { value: 'android', label: 'Android' },
           ]}
-          onChange={(v) => set({ os: v })}
+          onChange={(v) => {
+            set({ os: v });
+            setEmojiSet(v === 'android' ? 'google' : 'apple');
+          }}
         />
       </Field>
 

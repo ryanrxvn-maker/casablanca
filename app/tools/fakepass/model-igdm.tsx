@@ -30,9 +30,6 @@ type S = {
   visto: boolean;
 };
 
-// Mensagens enviadas do Instagram DM = gradiente ROXO→AZUL (não o colorido).
-const IG_GRADIENT = 'linear-gradient(155deg,#bd3be0 0%,#8a45f0 48%,#5b6ef0 100%)';
-
 // O Instagram aplica UM gradiente global (rosa/magenta no topo → azul/roxo na base)
 // ao longo de toda a conversa: cada bolha enviada mostra a fatia da cor correspondente
 // à sua posição vertical. Interpolamos por posição pra reproduzir esse efeito.
@@ -47,25 +44,41 @@ function meBubbleBg(t: number): string {
   return `linear-gradient(160deg,${lighter} 0%,${c} 100%)`;
 }
 
+// Medido num print real do Direct (2025): ▶ cheio + ondas SIMÉTRICAS (crescem
+// pra cima e pra baixo a partir do centro, com pontinhos nas pontas) + duração,
+// tudo centralizado na mesma linha; "Ver transcrição" pequeno embaixo, alinhado
+// ao ▶. Recebido = ondas pretas (brancas no escuro); enviado = brancas no
+// degradê. Antes as ondas eram cinza-claro e baixas e o texto de baixo grande.
+const IG_BARS = [2, 2, 6, 15, 26, 13, 22, 9, 20, 7, 2, 16, 30, 22, 4, 9, 18, 28, 11, 24, 15, 7, 2, 13, 22, 33, 18, 26, 9, 4, 2, 2];
+
 /** Balão de áudio do Instagram DM: play + waveform + tempo + "Ver transcrição". */
-function IgAudioBubble({ dur, me, dark, radius }: { dur: string; me: boolean; dark: boolean; radius: string }) {
-  const bg = me ? IG_GRADIENT : dark ? '#262626' : '#efefef';
-  const fg = me ? '#ffffff' : dark ? '#ffffff' : '#000000';
-  const wave = me ? 'rgba(255,255,255,0.7)' : dark ? '#6e6e6e' : '#b0b0b0';
-  const meta = me ? 'rgba(255,255,255,0.85)' : '#8e8e8e';
-  const bars = [7, 13, 20, 11, 24, 15, 9, 22, 13, 18, 10, 26, 14, 8, 21, 12, 17, 9, 23, 14, 10, 19, 8, 16, 21, 11, 15];
+function IgAudioBubble({ dur, me, dark, radius, bg }: { dur: string; me: boolean; dark: boolean; radius: string; bg: string }) {
+  const fg = me || dark ? '#ffffff' : '#000000';
+  const meta = me ? 'rgba(255,255,255,0.82)' : dark ? '#a8a8a8' : '#737373';
   return (
-    <div style={{ maxWidth: '80%', padding: '10px 12px', borderRadius: radius, background: bg }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-        <svg width="13" height="15" viewBox="0 0 16 18" fill={fg} aria-hidden><path d="M2 1l13 8-13 8z" /></svg>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 26, flex: 1 }}>
-          {bars.map((h, i) => (
-            <span key={i} style={{ width: 2, height: h, borderRadius: 2, background: wave, flexShrink: 0 }} />
+    <div style={{ width: 226, maxWidth: '80%', padding: '9px 11px 8px 14px', borderRadius: radius, background: bg }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: 38 }}>
+        <svg width="11" height="13" viewBox="0 0 11 13" aria-hidden style={{ display: 'block', flexShrink: 0 }}>
+          <path d="M1 1.8C1 1 1.9.5 2.6.9l7.6 4.7c.7.4.7 1.4 0 1.8l-7.6 4.7C1.9 12.5 1 12 1 11.2z" fill={fg} />
+        </svg>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            height: 38,
+            margin: '0 14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          {IG_BARS.map((h, i) => (
+            <span key={i} style={{ width: 1.8, height: h, borderRadius: 1, background: fg, flexShrink: 0 }} />
           ))}
         </div>
-        <span style={{ fontSize: 11, color: meta }}>{dur}</span>
+        <span style={{ fontSize: 12, lineHeight: 1, color: meta, flexShrink: 0 }}>{dur}</span>
       </div>
-      <div style={{ fontSize: 12, color: meta, marginTop: 5 }}>Ver transcrição</div>
+      <div style={{ fontSize: 11.5, lineHeight: 1.25, color: meta, marginTop: 2 }}>Ver transcrição</div>
     </div>
   );
 }
@@ -364,7 +377,6 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const pillBorder = s.dark ? '#363636' : '#dbdbdb';
   const pillBg = s.dark ? '#000000' : '#ffffff';
   const rodapeCircleBg = '#8a45f0';
-  const emojiSet = status.os === 'android' ? 'google' : 'apple';
 
   const msgs = toMsgs(s.conversa);
   // índice da última mensagem enviada (pra âncora do "Visto")
@@ -468,7 +480,13 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                 }}
               >
                 {m.kind === 'audio' ? (
-                  <IgAudioBubble dur={m.dur} me={m.me} dark={s.dark} radius={bubbleRadius(m.me, firstOfRun, lastOfRun)} />
+                  <IgAudioBubble
+                    dur={m.dur}
+                    me={m.me}
+                    dark={s.dark}
+                    radius={bubbleRadius(m.me, firstOfRun, lastOfRun)}
+                    bg={m.me ? meBubbleBg(msgs.length > 1 ? i / (msgs.length - 1) : 0.5) : recvBg}
+                  />
                 ) : m.kind === 'image' || m.kind === 'video' ? (
                   <IgMediaBubble m={m} dark={s.dark} radius={bubbleRadius(m.me, firstOfRun, lastOfRun)} />
                 ) : (
@@ -486,7 +504,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                       color: m.me ? '#ffffff' : recvFg,
                     }}
                   >
-                    {emojify(m.text, emojiSet)}
+                    {emojify(m.text)}
                   </div>
                 )}
               </div>

@@ -37,6 +37,7 @@
  */
 
 import { accessTokenDoRefresh, lerCredencial } from '@/lib/heygen-image-video';
+import { avisoChaveNaoAceita } from '@/lib/key-errors';
 
 const API_BASE = 'https://api.heygen.com';
 
@@ -134,7 +135,7 @@ export async function identidadeApiKey(apiKey: string | null): Promise<LadoDiagn
       configurada: true,
       valida: false,
       conta: null,
-      erro: 'A API key do HeyGen não foi aceita. Gere outra e cole em /configuracoes/api.',
+      erro: avisoChaveNaoAceita('heygen'),
     };
   }
   return { configurada: true, valida: true, conta, erro: null };
@@ -255,7 +256,7 @@ export function montarDiagnostico(
         `Os avatares e vozes vêm de ${emailKey} (API key), mas o modo imagem gera em ` +
         `${emailOAuth} (OAuth). Escolher um avatar de uma conta e disparar na outra ` +
         `devolve "Avatar group not accessible". Deixe as duas na mesma conta em ` +
-        `/configuracoes/api antes de disparar.`,
+        `Configurações › Chaves de IA antes de disparar.`,
     };
   } else if (!oauth.configurada) {
     aviso = {
@@ -275,8 +276,8 @@ export function montarDiagnostico(
   } else if (apiKey.configurada && !apiKey.valida && !apiKeyOpcional) {
     aviso = {
       nivel: 'atencao',
-      titulo: 'A API key do HeyGen não foi aceita',
-      texto: apiKey.erro ?? 'Gere outra key e cole em /configuracoes/api.',
+      titulo: 'O HeyGen não aceitou a sua chave',
+      texto: apiKey.erro ?? avisoChaveNaoAceita('heygen'),
     };
   }
 

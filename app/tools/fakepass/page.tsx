@@ -17,6 +17,7 @@ import {
 } from './shared';
 import { MODELS, CATEGORIES } from './models';
 import { BrandMark, brandForModel } from './brand-logos';
+import { setEmojiSet } from './emoji-style';
 
 const HUE = 'rgba(167,139,250,0.42)';
 
@@ -270,7 +271,11 @@ export default function FakePassPage() {
                 <Segmented
                   value={status.os}
                   options={[{ value: 'ios', label: 'iPhone' }, { value: 'android', label: 'Android' }]}
-                  onChange={(v) => setStatusCfg({ os: v })}
+                  onChange={(v) => {
+                    setStatusCfg({ os: v });
+                    // celular Android → emoji do Android (o seletor de emoji ainda deixa trocar)
+                    setEmojiSet(v === 'android' ? 'google' : 'apple');
+                  }}
                 />
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Hora">

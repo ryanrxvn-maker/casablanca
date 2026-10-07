@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { FAKEPRINT_TELEJORNAIS, LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 import { TipoShowcase } from '../../TipoShowcase';
 import { useClock, useInView, useReduced, useTypewriter, waveBars } from './kit';
 
@@ -43,7 +44,7 @@ const CHROMA = '#00b140';
 const CHYRON = [
   'VOCÊ ESCREVE A MANCHETE DO DIA',
   'SÓ O GRÁFICO FICA DE PÉ NO CHROMA',
-  'PNG EM ALTA OU .WEBM ANIMADO',
+  'PNG EM ALTA OU VÍDEO ANIMADO',
 ];
 
 export function BreakingCard({ className = '' }: { className?: string }) {
@@ -261,7 +262,7 @@ export function BreakingCard({ className = '' }: { className?: string }) {
 
       {/* legenda do card */}
       <div className="mt-3.5 flex flex-wrap items-center gap-1.5 px-0.5">
-        {['PNG em alta', '.webm animado', '16:9 e 9:16', '14 emissoras'].map((c) => (
+        {['PNG em alta', 'Vídeo animado', '16:9 e 9:16', `${FAKEPRINT_TELEJORNAIS} telejornais`].map((c) => (
           <span
             key={c}
             className="rounded-[4px] border border-white/12 bg-white/[0.03] px-2 py-1 text-[9.5px] uppercase tracking-[0.14em] text-white/50"
@@ -273,10 +274,10 @@ export function BreakingCard({ className = '' }: { className?: string }) {
       </div>
       <p className="mt-2.5 px-0.5 text-[12.5px] leading-relaxed text-white/45">
         <span className="font-semibold" style={{ color: RED }}>
-          FakePrint · telejornal
+          FakePrint · telejornal · Premium
         </span>{' '}
         — o gráfico sai em tela verde; na ilha, você solta o seu vídeo por trás e o
-        plantão é seu.
+        plantão é seu. No Free, os telejornais ficam em prévia.
       </p>
 
       <style jsx>{`
@@ -353,13 +354,13 @@ export function BreakingCard({ className = '' }: { className?: string }) {
 const TJ_HEADLINES = [
   'VOCÊ ESCREVE A MANCHETE DO JORNAL',
   'O CENÁRIO INTEIRO SAI EM TELA VERDE',
-  'EXPORTA PNG EM ALTA OU .WEBM ANIMADO',
+  'EXPORTA PNG EM ALTA OU VÍDEO ANIMADO',
 ];
 
 const TJ_TICKER = [
   'Manchete, tag, hora e local editáveis',
-  '14 emissoras',
-  'Relógio andando no .webm',
+  `${FAKEPRINT_TELEJORNAIS} telejornais`,
+  'Relógio andando no vídeo',
   '16:9 e 9:16',
   'Pronto pro chroma key',
   'O que você vê é o que baixa',
@@ -681,7 +682,7 @@ export function LegendasScene({ className = '' }: { className?: string }) {
         className="absolute bottom-3 left-3 rounded-[5px] bg-black/60 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/80 backdrop-blur-sm"
         style={{ fontFamily: 'var(--font-label)' }}
       >
-        Motor real · 491 modelos
+        Motor real · {LEGENDAS_MODELOS} modelos
       </span>
     </div>
   );
@@ -1203,7 +1204,7 @@ function MiniPost() {
 
 function MiniLive() {
   return (
-    <MiniShell label="Live · .webm" bg="linear-gradient(180deg,#1b1524,#0a070f)">
+    <MiniShell label="Live · vídeo" bg="linear-gradient(180deg,#1b1524,#0a070f)">
       <div className="flex h-full flex-col justify-between p-2">
         <div className="flex items-center gap-1">
           <span

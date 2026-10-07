@@ -36,7 +36,7 @@ export type PresetGalleryProps = {
   favs: string[];
   onToggleFav: (id: string) => void;
   disabled?: boolean;
-  /** Subconjunto de modelos (default: os 491 da Tipografia). */
+  /** Subconjunto de modelos (default: todos os da Tipografia). */
   presets?: TypoPreset[];
   /** Texto desenhado na demo de cada card. */
   demoText?: string;

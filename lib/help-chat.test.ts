@@ -1,6 +1,7 @@
 /**
  * CHAT DE AJUDA — a mensagem que chega no WhatsApp do suporte tem que dizer
- * QUEM é, O QUE houve e ONDE estava, sem perder nada do que a pessoa escreveu.
+ * QUEM é, QUAL o assunto e O QUE houve, num texto que dá gosto de ler, sem
+ * perder nada do que a pessoa escreveu (e sem ruído tipo "Página: ...").
  */
 import {
   HELP_TOPICS,
@@ -10,9 +11,9 @@ import {
   followUpFor,
   looksLikeEmail,
   MAX_DESCRICAO,
-  pageLabelFor,
   SUPPORT_WHATSAPP,
   toolFromPath,
+  toolMentioned,
   whatsappUrl,
 } from './help-chat';
 
@@ -35,60 +36,89 @@ console.log('help-chat: mensagem do WhatsApp');
 
 eq(
   buildSupportMessage({
+    name: 'Silas',
+    email: 'cliente@exemplo.com',
+    topic: 'conta',
+    description: 'Não recebi o e-mail de confirmação',
+    pathname: '/tools',
+  }),
+  'Olá, suporte do Auto Edit! Meu nome é Silas.\n\n' +
+    'Conta: cliente@exemplo.com\n' +
+    'Assunto: Problema na conta\n' +
+    'O que aconteceu: Não recebi o e-mail de confirmação.\n\n' +
+    'Podem me ajudar?',
+  'logado + conta: o caso do print do Silas, sem "Página"',
+);
+
+eq(
+  buildSupportMessage({
     name: 'Ana Souza',
     email: 'ana@exemplo.com',
     topic: 'ferramenta',
-    description: 'Travou no processamento',
+    description: 'travou no processamento',
     pathname: '/tools/tipografia',
-    host: 'www.darkoautoedit.com',
   }),
-  'Olá! Meu nome é Ana Souza e uso o Auto Edit (conta: ana@exemplo.com).\n\n' +
-    'Estou com um erro na ferramenta Legendas Automáticas: travou no processamento.\n\n' +
-    'Página: Legendas Automáticas (darkoautoedit.com/tools/tipografia)',
-  'logado + erro numa ferramenta: nome, conta, ferramenta da página e relato',
+  'Olá, suporte do Auto Edit! Meu nome é Ana Souza.\n\n' +
+    'Conta: ana@exemplo.com\n' +
+    'Assunto: Erro na ferramenta Legendas Automáticas\n' +
+    'O que aconteceu: Travou no processamento.\n\n' +
+    'Podem me ajudar?',
+  'erro numa ferramenta: a ferramenta da página entra no assunto; relato com maiúscula e ponto',
 );
 
 eq(
   buildSupportMessage({ topic: 'conta', description: 'Não consigo entrar', pathname: '/login' }),
-  'Olá! Vim pelo site do Auto Edit.\n\n' +
-    'Estou com um problema na minha conta: não consigo entrar.\n\n' +
-    'Página: Login (darkoautoedit.com/login)',
-  'deslogado sem e-mail: abre sem nome e ainda diz a página',
+  'Olá, suporte do Auto Edit!\n\n' + 'Assunto: Problema na conta\n' + 'O que aconteceu: Não consigo entrar.\n\n' + 'Podem me ajudar?',
+  'deslogado sem e-mail: sem nome e sem linha de conta',
+);
+
+ok(
+  buildSupportMessage({ topic: 'ferramenta', description: 'Não, foi no downloader. O link não baixa', pathname: '/tools/tipografia' }).includes(
+    'Assunto: Erro na ferramenta Downloader\n',
+  ),
+  'ferramenta citada no relato vence a da página',
+);
+ok(
+  buildSupportMessage({ topic: 'ferramenta', description: 'não, foi em outra', pathname: '/tools/tipografia' }).includes(
+    'Assunto: Erro em uma ferramenta\n',
+  ),
+  '"não" ao "Foi na ferramenta X?" tira a ferramenta da página do assunto',
+);
+ok(
+  buildSupportMessage({ topic: 'ferramenta', description: 'Travou', pathname: '/' }).includes('Assunto: Erro em uma ferramenta\n'),
+  'fora de ferramenta: assunto genérico',
 );
 
 eq(
-  buildSupportMessage({ email: 'x@y.com', topic: 'pagamento', description: 'PIX não caiu!', pathname: '/planos?upgrade=1' }),
-  'Olá! Uso o Auto Edit (conta: x@y.com).\n\n' +
-    'Preciso de ajuda com plano ou pagamento: PIX não caiu!\n\n' +
-    'Página: Planos (darkoautoedit.com/planos)',
-  'só e-mail; sigla no começo fica maiúscula; pontuação final respeitada; query some da página',
+  buildSupportMessage({ email: 'x@y.com', topic: 'duvida', description: 'como faço legenda em lote?', pathname: '/' }),
+  'Olá, suporte do Auto Edit!\n\n' + 'Conta: x@y.com\n' + 'Assunto: Dúvida de como usar\n' + 'Minha dúvida: Como faço legenda em lote?\n\n' + 'Podem me ajudar?',
+  'dúvida: rótulo "Minha dúvida", pontuação da pessoa respeitada',
 );
 
-ok(
-  buildSupportMessage({ topic: 'ferramenta', description: 'O download não funcionou', pathname: '/' }).includes(
-    'Estou com um erro em uma ferramenta: o download não funcionou.',
-  ),
-  'fora de ferramenta: frase genérica; artigo de 1 letra vira minúsculo',
+eq(
+  buildSupportMessage({ name: 'Bia', topic: null, description: 'HeyGen recusou meu avatar', pathname: '/' }),
+  'Olá, suporte do Auto Edit! Meu nome é Bia.\n\n' + 'O que aconteceu: HeyGen recusou meu avatar.\n\n' + 'Podem me ajudar?',
+  'sem assunto reconhecido: sem linha de assunto (nada de chute)',
 );
 
-ok(
-  buildSupportMessage({ topic: null, description: 'HeyGen recusou meu avatar', pathname: '/' }).includes(
-    'Preciso de ajuda: HeyGen recusou meu avatar.',
-  ),
-  'sem assunto: "Preciso de ajuda"; nome próprio com 2 maiúsculas preservado',
+eq(
+  buildSupportMessage({ topic: 'pagamento', description: 'paguei no pix\n\n\n\ne   não liberou', pathname: '/planos' }),
+  'Olá, suporte do Auto Edit!\n\n' + 'Assunto: Plano e pagamento\n' + 'O que aconteceu:\nPaguei no pix\n\ne não liberou.\n\n' + 'Podem me ajudar?',
+  'relato de várias linhas vai na linha de baixo, sem espaço/linha em excesso',
 );
 
-ok(
-  buildSupportMessage({ topic: 'duvida', description: 'linha 1\n\n\n\nlinha 2   com   espaços', pathname: '/' }).includes(
-    'linha 1\n\nlinha 2 com espaços.',
-  ),
-  'relato com várias linhas é preservado, sem espaço/linha em excesso',
+eq(
+  buildSupportMessage({ topic: 'duvida', description: '', pathname: '/' }),
+  'Olá, suporte do Auto Edit!\n\nAssunto: Dúvida de como usar\n\nPodem me ajudar?',
+  'relato vazio não deixa rótulo pendurado',
 );
 
-ok(
-  buildSupportMessage({ topic: 'duvida', description: '', pathname: '/' }).includes('Tenho uma dúvida de como usar o site.\n\n'),
-  'relato vazio não deixa ":" pendurado',
-);
+for (const t of HELP_TOPICS) {
+  for (const r of t.rapidas) {
+    const m = buildSupportMessage({ name: 'Ana', email: 'a@b.co', topic: t.id, description: r, pathname: '/tools/lipsync' });
+    ok(!/Página|localhost|darkoautoedit|undefined|null/.test(m) && m.endsWith('Podem me ajudar?'), `resposta rápida "${r}" sai limpa`, m);
+  }
+}
 
 eq(cleanText('x'.repeat(5000)).length, MAX_DESCRICAO, 'relato gigante é cortado no teto');
 
@@ -103,16 +133,16 @@ ok(
   'pior caso cabe com folga no limite prático de URL',
 );
 
-console.log('help-chat: páginas e ferramentas');
+console.log('help-chat: ferramentas');
 eq(toolFromPath('/tools/clickup-pilot'), 'Pilot', 'Pilot pelo nome que o dono usa');
 eq(toolFromPath('/tools/caixinha-pergunta'), 'FakePrint', 'apelido cai na ferramenta dona');
 eq(toolFromPath('/tools/historico'), null, 'histórico não é ferramenta');
 eq(toolFromPath('/tools'), null, 'hub não é ferramenta');
 eq(toolFromPath('/configuracoes'), null, 'fora de /tools não é ferramenta');
-eq(pageLabelFor('/'), 'Página inicial', 'landing');
-eq(pageLabelFor('/tools/'), 'Início das ferramentas', 'barra final ignorada');
-eq(pageLabelFor('/configuracoes/api'), 'Configurações', 'subpágina de configurações');
-eq(pageLabelFor('/algo-novo'), '/algo-novo', 'página sem nome: mostra o caminho');
+eq(toolMentioned('o lipsync não gera'), 'Lipsync', 'cita ferramenta sem acento/maiúscula');
+eq(toolMentioned('no remover silencios por copy travou'), 'Remover Silêncios por Copy', 'nome mais longo vence');
+eq(toolMentioned('remover silêncios travou'), 'Remover Silêncios', 'nome curto quando é ele');
+eq(toolMentioned('meu piloto automático'), null, 'pedaço de palavra não conta ("piloto" não é Pilot)');
 ok(followUpFor('ferramenta', 'Pilot').startsWith('Foi na ferramenta Pilot?'), 'pergunta de erro cita a ferramenta da página');
 ok(!followUpFor('ferramenta', null).includes('null'), 'sem ferramenta: pergunta genérica');
 
@@ -123,6 +153,7 @@ eq(detectTopic('esqueci minha senha'), 'conta', 'senha');
 eq(detectTopic('Não consigo entrar'), 'conta', 'entrar');
 eq(detectTopic('a legenda travou em 80%'), 'ferramenta', 'travou');
 eq(detectTopic('deu erro no lipsync'), 'ferramenta', 'erro');
+eq(detectTopic('não consigo acessar o lipsync'), 'ferramenta', 'acessar ferramenta não é conta');
 eq(detectTopic('como faço pra usar o downloader?'), 'duvida', 'como usar');
 eq(detectTopic('oi'), null, 'nada reconhecível');
 
@@ -134,8 +165,12 @@ ok(!looksLikeEmail('ana exemplo.com'), 'sem arroba');
 eq(HELP_TOPICS.length, 4, '4 assuntos');
 ok(HELP_TOPICS.every((t) => t.rapidas.length >= 2), 'todo assunto tem respostas rápidas');
 ok(
-  HELP_TOPICS.every((t) => !/[—–]/.test(t.label + t.frase + t.rapidas.join(''))),
+  HELP_TOPICS.every((t) => !/[—–]/.test(t.label + t.rapidas.join(''))),
   'nenhum travessão em texto visível',
+);
+ok(
+  !/[—–]/.test(buildSupportMessage({ name: 'A', email: 'a@b.co', topic: 'ferramenta', description: 'x', pathname: '/tools/lipsync' })),
+  'nenhum travessão na mensagem',
 );
 
 console.log(`\n${passed} ok, ${failed} falhas`);

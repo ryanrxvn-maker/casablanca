@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { EmojiPickerButton } from './emoji-picker';
+import { EmojiPickerButton, useCaretInsert } from './emoji-picker';
 
 /* ────────────────────────────── Tipos ────────────────────────────── */
 
@@ -126,10 +126,12 @@ function GrowArea({
   value,
   onChange,
   placeholder,
+  onSelect,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  onSelect?: (el: HTMLTextAreaElement) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
@@ -161,6 +163,7 @@ function GrowArea({
       value={value}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
+      onSelect={(e) => onSelect?.(e.currentTarget)}
       className="input-field !min-h-0 resize-none overflow-hidden !py-2 !pr-9 text-[13px] leading-snug"
     />
   );
@@ -176,13 +179,14 @@ function TextWithEmoji({
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
+  const { track, insert } = useCaretInsert(value, onChange);
   return (
     <div className="relative">
-      <GrowArea value={value} onChange={onChange} placeholder={placeholder} />
+      <GrowArea value={value} onChange={onChange} placeholder={placeholder} onSelect={track} />
       <span className="absolute right-1.5 top-1.5">
         <EmojiPickerButton
           align="right"
-          onPick={(e) => onChange(value + e)}
+          onPick={insert}
           className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
@@ -413,6 +417,44 @@ function newLine(t = ''): LineItem {
   return { id: `l${lseq}`, t };
 }
 
+/** Campo de uma linha da LineBuilder: emoji entra onde está o cursor. */
+function LineInput({
+  value,
+  onChange,
+  placeholder,
+  withEmoji,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  withEmoji?: boolean;
+}) {
+  const { track, insert } = useCaretInsert(value, onChange);
+  return (
+    <div className="relative flex-1">
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        onSelect={(e) => track(e.currentTarget)}
+        className={'input-field !py-2 text-[13px]' + (withEmoji ? ' !pr-9' : '')}
+      />
+      {withEmoji ? (
+        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+          <EmojiPickerButton
+            align="right"
+            onPick={insert}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
+          </EmojiPickerButton>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Lista de LINHAS soltas (manchete do ticker, participante da reunião…).
  * Guarda a mesma string "uma por linha" que os modelos já leem — só a edição
@@ -502,26 +544,12 @@ export function LineBuilder({
           >
             {i + 1}
           </span>
-          <div className="relative flex-1">
-            <input
-              type="text"
-              value={chips ? baseOf(it.t) : it.t}
-              placeholder={placeholder}
-              onChange={(e) => (chips ? patchBase(i, e.target.value) : patch(i, e.target.value))}
-              className={'input-field !py-2 text-[13px]' + (withEmoji ? ' !pr-9' : '')}
-            />
-            {withEmoji ? (
-              <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
-                <EmojiPickerButton
-                  align="right"
-                  onPick={(e) => (chips ? patchBase(i, baseOf(it.t) + e) : patch(i, it.t + e))}
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
-                </EmojiPickerButton>
-              </span>
-            ) : null}
-          </div>
+          <LineInput
+            value={chips ? baseOf(it.t) : it.t}
+            onChange={(v) => (chips ? patchBase(i, v) : patch(i, v))}
+            placeholder={placeholder}
+            withEmoji={withEmoji}
+          />
           {chips?.map((c) => {
             const on = hasMark(it.t, c.mark);
             return (

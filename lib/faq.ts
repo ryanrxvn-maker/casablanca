@@ -36,7 +36,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'Como o Auto Edit gera legendas (SRT) alinhadas à copy?',
-    a: 'Você cola a copy e sobe o áudio ou vídeo. O Gerador de SRT alinha o texto palavra por palavra com a fala e devolve o arquivo .srt pronto pra importar no CapCut — com os modelos e animações de legenda funcionando normalmente em cima dele.',
+    a: 'Você cola a copy e sobe o áudio ou vídeo. O Gerador de SRT alinha o texto palavra por palavra com a fala e devolve o arquivo .srt pronto pra importar no CapCut — com os modelos e animações de legenda funcionando normalmente em cima dele. Disponível no Premium; a transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações.',
   },
   {
     q: 'Dá pra fazer lipsync de avatar (video to video)?',
@@ -47,7 +47,11 @@ export const FAQ: FaqItem[] = [
     a: 'Tem plano grátis sem cartão com Remover Silêncios em áudio, Compressor, Downloader e modelos sociais do FakePrint. O Premium (R$ 57/mês) libera as demais ferramentas e exportação de vídeo em Remover Silêncios. A assinatura mensal é recorrente e o plano anual pode ser parcelado em até 12×.',
   },
   {
+    q: 'Preciso instalar alguma coisa ou ter chave de API?',
+    a: 'Na maioria das ferramentas, não: é abrir no navegador e usar. São três exceções. Legendas Automáticas e Gerador de SRT transcrevem com a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações. E o Downloader pede a extensão do navegador e o Motor instalado no computador (Windows; no Mac, o Motor ainda está em teste).',
+  },
+  {
     q: 'Serve pra agência e produção em escala?',
-    a: 'Serve. O Auto Edit foi feito pra volume: fila de processamento e lote em todas as ferramentas — vários arquivos de uma vez, rodando em segundo plano. É pensado pra editores e agências que produzem muito vídeo por dia.',
+    a: 'Serve. O Auto Edit foi feito pra volume: Remover Silêncios, Compressor, Camuflagem, Normalizador e Mixer de Velocidade processam vários arquivos na mesma fila, e o Downloader aceita vários links de uma vez. É pensado pra editores e agências que produzem muito vídeo por dia.',
   },
 ];

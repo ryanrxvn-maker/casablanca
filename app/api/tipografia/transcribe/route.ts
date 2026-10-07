@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireTier } from '@/lib/require-tier';
 import { transcribeAudio } from '@/lib/transcribe';
+import { explicarFalhaTranscricao } from '@/lib/key-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -46,13 +47,12 @@ export async function POST(req: Request) {
   });
 
   if (words.length === 0) {
-    // O primeiro erro costuma ser o de key ausente (400 do getUserKey) — o
-    // MissingKeyBanner do client já orienta; aqui devolve o motivo cru.
+    // O cliente lê o motivo em português (chave faltando, não aceita, sem
+    // crédito, áudio sem fala); o erro cru vai só no `detail`, pro diagnóstico.
     return NextResponse.json(
       {
-        error:
-          'Não consegui transcrever o áudio agora. ' +
-          (errors[0] ? `(${errors[0].slice(0, 140)})` : 'Tenta de novo em instantes.'),
+        error: explicarFalhaTranscricao(errors, ['groq', 'assemblyai']),
+        detail: errors.join(' | ').slice(0, 500),
       },
       { status: 502 },
     );

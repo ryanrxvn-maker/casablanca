@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
+import { FAKEPRINT_MODELOS } from '@/lib/numeros-do-site';
 import { reducedMotion } from './landing/v3/kit';
 import {
   CamuflagemScene,
@@ -37,7 +38,7 @@ const SLIDES: Slide[] = [
     tag: 'Legendas Automáticas',
     tone: '#ffd60a',
     copy:
-      'A fala do seu vídeo vira legenda animada, palavra por palavra — e esse card é o motor real da ferramenta rodando, não um vídeo.',
+      'A fala do seu vídeo vira legenda animada, palavra por palavra — e esse card é o motor real da ferramenta rodando, não um vídeo. No Premium.',
     scene: <LegendasScene />,
   },
   {
@@ -45,7 +46,7 @@ const SLIDES: Slide[] = [
     tag: 'Remover Silêncios',
     tone: '#c8d684',
     copy:
-      'Sobe o vídeo e recebe de volta sem os silêncios, com a voz nivelada — em lote, direto no navegador.',
+      'Sobe o áudio ou o vídeo e recebe de volta sem os silêncios, com a voz nivelada — em lote, direto no navegador. Vídeo no Premium.',
     scene: <DecupagemScene />,
   },
   {
@@ -53,7 +54,7 @@ const SLIDES: Slide[] = [
     tag: 'FakePrint',
     tone: '#e0483f',
     copy:
-      'Manchete de telejornal, portal de notícia e print de conversa do jeito que a sua história pede — 41 modelos com tela verde.',
+      `Manchete de telejornal, portal de notícia e print de conversa do jeito que a sua história pede — ${FAKEPRINT_MODELOS} modelos, notícias no Premium.`,
     scene: <TelejornalCard />,
   },
   {
@@ -61,7 +62,7 @@ const SLIDES: Slide[] = [
     tag: 'Camuflagem',
     tone: '#3ec7bb',
     copy:
-      'Quem assiste ouve o seu áudio. A transcrição das plataformas lê a trilha que você deixou por baixo.',
+      'Quem assiste ouve o seu áudio. A transcrição das plataformas lê a trilha que você deixou por baixo. No Premium.',
     scene: <CamuflagemScene />,
   },
 ];

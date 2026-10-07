@@ -23,7 +23,8 @@ import {
   type CSSProperties,
 } from 'react';
 import { Inter } from 'next/font/google';
-import { EmojiPickerButton } from './emoji-picker';
+import { EmojiPickerButton, useCaretInsert } from './emoji-picker';
+import { useEmojiSet, type EmojiSet } from './emoji-style';
 
 // Fonte base dos prints — Inter (réplica fiel do SF Pro do iOS/Instagram),
 // carregada local. Em Apple o sistema entrega SF Pro nativo pela stack abaixo.
@@ -119,9 +120,9 @@ export type FakeModel<S = any> = {
 //  • © ® ™ SEM VS16 ficam como TEXTO (rodapé "© 2025" — no celular também é texto).
 // Um grupo de captura só: o motor da live usa o mesmo padrão em exec.
 export const EMOJI_RE =
-  /(\p{Regional_Indicator}\p{Regional_Indicator}|[#*0-9]️?⃣|(?![©®™](?!️))\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])*(?:‍(?:\p{Extended_Pictographic}|\p{Emoji_Component})(?:️|\p{Emoji_Modifier})*)*)/gu;
+  /(\p{Regional_Indicator}\p{Regional_Indicator}|[#*0-9]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])*(?:\u200D(?:\p{Extended_Pictographic}|\p{Emoji_Component})(?:\uFE0F|\p{Emoji_Modifier})*)*)/gu;
 
-export type EmojiSet = 'apple' | 'google';
+export type { EmojiSet };
 
 const emojiUrl = (set: EmojiSet, unified: string) =>
   `https://cdn.jsdelivr.net/npm/emoji-datasource-${set}/img/${set}/64/${unified}.png`;
@@ -154,10 +155,15 @@ const EMOJI_IMG_STYLE: CSSProperties = {
 };
 
 /** <img> do emoji que cai pra próxima URL candidata se o arquivo não existir;
- *  sem nenhuma, mostra o caractere (melhor que um buraco no print). */
-function EmojiImg({ emoji, set }: { emoji: string; set: EmojiSet }) {
-  const [i, setI] = useState(0);
-  const srcs = emojiSrcs(emoji, set);
+ *  sem nenhuma, mostra o caractere (melhor que um buraco no print). Sem `set`,
+ *  segue o estilo escolhido pelo usuário (iPhone/Android — emoji-style.ts). */
+function EmojiImg({ emoji, set }: { emoji: string; set?: EmojiSet }) {
+  const escolhido = useEmojiSet();
+  const eff = set ?? escolhido;
+  // a cadeia de fallback recomeça quando o estilo muda
+  const [st, setSt] = useState({ set: eff, i: 0 });
+  const i = st.set === eff ? st.i : 0;
+  const srcs = emojiSrcs(emoji, eff);
   if (i >= srcs.length) return <>{emoji}</>;
   return (
     // eslint-disable-next-line @next/next/no-img-element -- PNG do CDN de emoji, rasterizado pelo html2canvas
@@ -166,14 +172,14 @@ function EmojiImg({ emoji, set }: { emoji: string; set: EmojiSet }) {
       alt={emoji}
       crossOrigin="anonymous"
       draggable={false}
-      onError={() => setI((v) => v + 1)}
+      onError={() => setSt((p) => ({ set: eff, i: (p.set === eff ? p.i : 0) + 1 }))}
       style={EMOJI_IMG_STYLE}
     />
   );
 }
 
-/** String → nodes, trocando cada emoji por <img> Apple/Google. */
-export function emojify(text: string, set: EmojiSet = 'apple'): ReactNode {
+/** String → nodes, trocando cada emoji por <img> do estilo escolhido (ou `set`). */
+export function emojify(text: string, set?: EmojiSet): ReactNode {
   if (!text) return text;
   const re = new RegExp(EMOJI_RE);
   const out: ReactNode[] = [];
@@ -185,7 +191,7 @@ export function emojify(text: string, set: EmojiSet = 'apple'): ReactNode {
     if (m.index > last) out.push(text.slice(last, m.index));
     const emoji = m[0];
     // key com o emoji: trocar o emoji remonta o <img> (zera a cadeia de fallback)
-    out.push(<EmojiImg key={`e${k}-${set}-${emoji}`} emoji={emoji} set={set} />);
+    out.push(<EmojiImg key={`e${k}-${emoji}`} emoji={emoji} set={set} />);
     k += 1;
     last = m.index + emoji.length;
   }
@@ -194,8 +200,8 @@ export function emojify(text: string, set: EmojiSet = 'apple'): ReactNode {
   return out;
 }
 
-/** Texto com emojis renderizados (Apple padrão; Google se set='google'). */
-export function Emo({ t, set = 'apple' }: { t: string; set?: EmojiSet }) {
+/** Texto com emojis renderizados no estilo escolhido (ou `set`, se passado). */
+export function Emo({ t, set }: { t: string; set?: EmojiSet }) {
   return <>{emojify(t, set)}</>;
 }
 
@@ -743,10 +749,10 @@ export function Field({
 }
 
 /** Botãozinho 😊 que abre o seletor de emoji e insere no fim do valor. */
-function EmojiInsert({ value, onChange, top }: { value: string; onChange: (v: string) => void; top?: boolean }) {
+function EmojiInsert({ onPick, top }: { onPick: (e: string) => void; top?: boolean }) {
   return (
     <span className={'absolute right-1.5 ' + (top ? 'top-1.5' : 'top-1/2 -translate-y-1/2')}>
-      <EmojiPickerButton align="right" onPick={(e) => onChange(value + e)} className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white">
+      <EmojiPickerButton align="right" onPick={onPick} className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
       </EmojiPickerButton>
     </span>
@@ -766,6 +772,7 @@ export function TextField({
   maxLength?: number;
   withEmoji?: boolean;
 }) {
+  const { track, insert } = useCaretInsert(value, onChange, maxLength);
   const input = (
     <input
       type="text"
@@ -774,13 +781,14 @@ export function TextField({
       placeholder={placeholder}
       maxLength={maxLength}
       onChange={(e) => onChange(e.target.value)}
+      onSelect={(e) => track(e.currentTarget)}
     />
   );
   if (!withEmoji) return input;
   return (
     <div className="relative">
       {input}
-      <EmojiInsert value={value} onChange={onChange} />
+      <EmojiInsert onPick={insert} />
     </div>
   );
 }
@@ -800,6 +808,7 @@ export function TextArea({
   rows?: number;
   withEmoji?: boolean;
 }) {
+  const { track, insert } = useCaretInsert(value, onChange, maxLength);
   const area = (
     <textarea
       className={'input-field resize-y leading-relaxed' + (withEmoji ? ' !pr-9' : '')}
@@ -808,13 +817,14 @@ export function TextArea({
       maxLength={maxLength}
       rows={rows}
       onChange={(e) => onChange(e.target.value)}
+      onSelect={(e) => track(e.currentTarget)}
     />
   );
   if (!withEmoji) return area;
   return (
     <div className="relative">
       {area}
-      <EmojiInsert value={value} onChange={onChange} top />
+      <EmojiInsert onPick={insert} top />
     </div>
   );
 }

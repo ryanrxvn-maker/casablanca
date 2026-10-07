@@ -136,7 +136,11 @@ async function transcribeViaAssemblyAI(
     },
     body: audioBytes,
   });
-  if (!uploadRes.ok) throw new Error(`AAI upload ${uploadRes.status}`);
+  // O corpo vai junto: é por ele que o aviso sabe se foi chave ou saldo.
+  if (!uploadRes.ok) {
+    const t = await uploadRes.text().catch(() => '');
+    throw new Error(`AAI upload ${uploadRes.status} ${t.slice(0, 200)}`);
+  }
   const { upload_url } = (await uploadRes.json()) as { upload_url: string };
 
   const trRes = await fetch(`${AAI_BASE}/transcript`, {
@@ -158,7 +162,10 @@ async function transcribeViaAssemblyAI(
         : {}),
     }),
   });
-  if (!trRes.ok) throw new Error(`AAI transcript ${trRes.status}`);
+  if (!trRes.ok) {
+    const t = await trRes.text().catch(() => '');
+    throw new Error(`AAI transcript ${trRes.status} ${t.slice(0, 200)}`);
+  }
   const { id } = (await trRes.json()) as { id: string };
 
   const deadline = Date.now() + 4 * 60 * 1000;

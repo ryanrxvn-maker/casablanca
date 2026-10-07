@@ -66,7 +66,7 @@ function renderTexto(texto: string): ReactNode {
   let m: RegExpExecArray | null;
   let k = 0;
   while ((m = re.exec(texto)) !== null) {
-    if (m.index > last) out.push(<Emo key={`t${k}`} t={texto.slice(last, m.index)} set="apple" />);
+    if (m.index > last) out.push(<Emo key={`t${k}`} t={texto.slice(last, m.index)} />);
     out.push(
       <span key={`m${k}`} style={{ color: AZUL }}>
         {m[0]}
@@ -75,8 +75,8 @@ function renderTexto(texto: string): ReactNode {
     k += 1;
     last = m.index + m[0].length;
   }
-  if (last < texto.length) out.push(<Emo key={`t${k}`} t={texto.slice(last)} set="apple" />);
-  return out.length ? out : <Emo t={texto} set="apple" />;
+  if (last < texto.length) out.push(<Emo key={`t${k}`} t={texto.slice(last)} />);
+  return out.length ? out : <Emo t={texto} />;
 }
 
 /* ─────────────────────────── Ícones ─────────────────────────── */
@@ -357,7 +357,7 @@ function CommentsCard({ s }: { s: S }) {
       >
         {REACOES.map((e, i) => (
           <span key={i} style={{ display: 'inline-flex' }}>
-            <Emo t={e} set="apple" />
+            <Emo t={e} />
           </span>
         ))}
       </div>

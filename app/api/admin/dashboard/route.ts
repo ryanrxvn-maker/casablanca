@@ -192,8 +192,106 @@ export async function GET() {
     0,
   );
 
+  // ─── Crescimento e atividade (SÓ clientes) ───
+  // Ativo em N dias = último sinal de vida (heartbeat) dentro da janela.
+  // É exato: quem usou há 3 dias e não voltou tem last_seen de 3 dias atrás.
+  const customers = profiles.filter((p) => !p.is_admin);
+  const DAY = 86_400_000;
+  const seenWithin = (ms: number) =>
+    customers.filter((p) => p.last_seen_at && nowMs - new Date(p.last_seen_at).getTime() <= ms).length;
+  const createdWithin = (ms: number) =>
+    customers.filter((p) => p.created_at && nowMs - new Date(p.created_at).getTime() <= ms).length;
+  const spDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const signupDays: Array<{ day: string; count: number }> = [];
+  const signupIndex = new Map<string, { day: string; count: number }>();
+  for (let i = 29; i >= 0; i--) {
+    const key = spDay.format(new Date(nowMs - i * DAY));
+    if (signupIndex.has(key)) continue;
+    const d = { day: key, count: 0 };
+    signupIndex.set(key, d);
+    signupDays.push(d);
+  }
+  for (const p of customers) {
+    if (!p.created_at) continue;
+    const d = signupIndex.get(spDay.format(new Date(p.created_at)));
+    if (d) d.count += 1;
+  }
+  const todayKey = spDay.format(new Date(nowMs));
+  const growth = {
+    newToday: signupIndex.get(todayKey)?.count ?? 0,
+    new7d: createdWithin(7 * DAY),
+    new30d: createdWithin(30 * DAY),
+    active24h: seenWithin(DAY),
+    active7d: seenWithin(7 * DAY),
+    active30d: seenWithin(30 * DAY),
+    customers: customers.length,
+    signupDays,
+  };
+
+  // ─── Acesso simultâneo (migration 037) — últimos 7 dias ───
+  let concurrency: {
+    enabled: boolean;
+    accounts7d: number;
+    events7d: number;
+    recent: Array<{
+      id: number;
+      user_id: string;
+      name: string | null;
+      email: string | null;
+      started_at: string;
+      ended_at: string;
+      label_a: string | null;
+      label_b: string | null;
+      place_a: string | null;
+      place_b: string | null;
+      same_network: boolean;
+    }>;
+  } = { enabled: false, accounts7d: 0, events7d: 0, recent: [] };
+  try {
+    const { data: evs, error: evErr } = await svc
+      .from('access_concurrency')
+      .select('id, user_id, started_at, ended_at, label_a, label_b, place_a, place_b, same_network')
+      .eq('same_machine', false)
+      .gte('ended_at', new Date(nowMs - 7 * DAY).toISOString())
+      .order('started_at', { ascending: false })
+      .limit(1000);
+    if (!evErr) {
+      const byId = new Map(profiles.map((p) => [p.id, p]));
+      const rows = ((evs ?? []) as Array<{
+        id: number;
+        user_id: string;
+        started_at: string;
+        ended_at: string;
+        label_a: string | null;
+        label_b: string | null;
+        place_a: string | null;
+        place_b: string | null;
+        same_network: boolean;
+      }>).filter((e) => !adminIds.has(e.user_id));
+      concurrency = {
+        enabled: true,
+        accounts7d: new Set(rows.map((e) => e.user_id)).size,
+        events7d: rows.length,
+        recent: rows.slice(0, 8).map((e) => ({
+          ...e,
+          name: byId.get(e.user_id)?.name ?? null,
+          email: byId.get(e.user_id)?.email ?? null,
+        })),
+      };
+    }
+  } catch {
+    /* migration 037 pendente */
+  }
+
   return NextResponse.json({
     now: new Date(nowMs).toISOString(),
+    growth,
+    concurrency,
     totals: {
       users: total,
       online: onlineUsers.length,

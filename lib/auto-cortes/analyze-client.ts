@@ -286,7 +286,7 @@ export async function analyzeTranscript(
 
   if (warnings.length === total) {
     throw new FriendlyError(
-      'Nenhum trecho do vídeo pôde ser analisado pela IA de texto. Confira sua chave em /configuracoes/api e clique em Retomar.',
+      'Nenhum trecho do vídeo pôde ser analisado pela IA de texto. Confira sua chave em Configurações › Chaves de IA e clique em Retomar.',
     );
   }
 

@@ -12,12 +12,14 @@
  *   await __fpSet(id, state, status?) → monta o caso e espera fontes+imagens
  *   __fpDims()                        → {stageW, exportW, ratio}
  *   await __fpExport()                → dataURL do PNG (motor real)
+ *   __fpEmojiSet('apple' | 'google')  → estilo dos emojis (iPhone / Android)
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { notFound } from 'next/navigation';
 import { MODELS } from '../../tools/fakepass/models';
 import { uiFont, defaultStatus, renderNodeToCanvas, type FakeModel } from '../../tools/fakepass/shared';
+import { setEmojiSet, type EmojiSet } from '../../tools/fakepass/emoji-style';
 
 type Case = { id: string; s: any; status: any };
 
@@ -51,6 +53,7 @@ export default function DevFakepassFidelity() {
       defaultState: m.defaultState,
     }));
     w.__fpDefaultStatus = defaultStatus;
+    w.__fpEmojiSet = (v: EmojiSet) => setEmojiSet(v);
     w.__fpSet = (id: string, s: any, status?: any) =>
       new Promise<void>((res) => {
         const m = byId(id);

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
-import { isPaidExpired } from '@/lib/plan-prices';
+import { bestPhone, classifyAccess } from '../_classify';
 import { staticUnlocksForEmail } from '@/lib/tool-unlocks';
 
 /**
@@ -19,6 +19,10 @@ import { staticUnlocksForEmail } from '@/lib/tool-unlocks';
  *   • tool_unlocks: ferramentas BETA PRO liberadas via painel (banco)
  *   • static_unlocks: desbloqueios fixos por email (código/env — não
  *     removíveis pelo painel)
+ *   • phone: o melhor telefone que a pessoa deixou (verificado ou do cadastro)
+ *   • concurrent_30d / concurrent_last_at: episódios de ACESSO SIMULTÂNEO
+ *     (dois aparelhos em uso ao mesmo tempo, migration 037) nos últimos 30
+ *     dias. "Mesmo computador" (janela anônima/outro navegador) não conta.
  */
 
 export const runtime = 'nodejs';
@@ -44,25 +48,6 @@ const MID_SELECT =
 const BASIC_SELECT =
   'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at';
 
-function classify(p: Row): {
-  plan: 'premium' | 'free';
-  access: 'paid' | 'granted' | 'pending' | 'anomaly' | 'free';
-} {
-  const tier = (p.tier ?? '').toString();
-  const isPaidTier = tier === 'basic' || tier === 'pro' || tier === 'beta';
-  const expired = isPaidExpired(p.subscription_status, p.current_period_end);
-  if (!isPaidTier || expired) return { plan: 'free', access: 'free' };
-  const s = p.subscription_status ?? '';
-  if (s === 'active' || s === 'trialing' || s === 'paid')
-    return { plan: 'premium', access: 'paid' };
-  if (s === 'admin_grant') return { plan: 'premium', access: 'granted' };
-  // Renovação tentada e NÃO paga → acesso SUSPENSO pelos gates (política
-  // 13.08). Assinatura segue viva no Stripe; o cliente resolve na tela de
-  // assinatura (retry/troca de cartão). Plano EFETIVO agora é free.
-  if (s === 'past_due' || s === 'unpaid') return { plan: 'free', access: 'pending' };
-  return { plan: 'premium', access: 'anomaly' };
-}
-
 export async function GET() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
@@ -71,8 +56,19 @@ export async function GET() {
     const svc = serviceClient();
 
     // Cascata de selects: completo → sem tool_unlocks → legado.
+    // ⚠ NUNCA pôr coluna nova aqui sem ter certeza de que existe em produção:
+    // uma coluna ausente derruba o select inteiro e a lista cai pro legado,
+    // SEM plano nem assinatura (07.10: `whatsapp` fez os 457 aparecerem Free).
+    // Coluna opcional vai numa consulta à parte (ver whatsapp abaixo). E se
+    // cair de nível, o painel recebe `schema` e avisa em vez de mentir.
     let profiles: Row[] | null = null;
-    for (const sel of [FULL_SELECT, MID_SELECT, BASIC_SELECT]) {
+    let schema: 'full' | 'mid' | 'basic' = 'full';
+    const levels: Array<['full' | 'mid' | 'basic', string]> = [
+      ['full', FULL_SELECT],
+      ['mid', MID_SELECT],
+      ['basic', BASIC_SELECT],
+    ];
+    for (const [level, sel] of levels) {
       const res = await svc
         .from('profiles')
         .select(sel)
@@ -80,11 +76,31 @@ export async function GET() {
         .order('created_at', { ascending: false });
       if (!res.error) {
         profiles = (res.data ?? []) as unknown as Row[];
+        schema = level;
         break;
       }
-      if (sel === BASIC_SELECT) {
+      console.error(`[admin list-users] select ${level} falhou:`, res.error.message);
+      if (level === 'basic') {
         return jsonError('Falha ao listar usuarios.', 500, res.error.message);
       }
+    }
+
+    // Número do cadastro (coluna `whatsapp`, migration 004): pode não existir
+    // em produção, então vem à parte e só complementa o `phone`.
+    const whatsappByUser: Record<string, string> = {};
+    try {
+      const { data: wa, error: waErr } = await svc
+        .from('profiles')
+        .select('id, whatsapp')
+        .eq('is_admin', false)
+        .not('whatsapp', 'is', null);
+      if (!waErr) {
+        for (const r of (wa ?? []) as Array<{ id: string; whatsapp: string | null }>) {
+          if (r.whatsapp) whatsappByUser[r.id] = r.whatsapp;
+        }
+      }
+    } catch {
+      /* coluna ausente: segue só com `phone` */
     }
 
     // Último comprovante (Stripe receipt) por usuário — botão direto no card.
@@ -109,21 +125,46 @@ export async function GET() {
       /* tabela payments ausente (schema antigo) — segue sem comprovantes */
     }
 
+    // Acesso simultâneo (037) — 30 dias. Sem a migration, segue sem o selo.
+    const concurrentByUser: Record<string, { n: number; last: string }> = {};
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: evs, error: evErr } = await svc
+        .from('access_concurrency')
+        .select('user_id, ended_at')
+        .eq('same_machine', false)
+        .gte('ended_at', since)
+        .order('ended_at', { ascending: false })
+        .limit(5000);
+      if (!evErr) {
+        for (const ev of (evs ?? []) as Array<{ user_id: string; ended_at: string }>) {
+          const cur = concurrentByUser[ev.user_id];
+          if (cur) cur.n += 1;
+          else concurrentByUser[ev.user_id] = { n: 1, last: ev.ended_at };
+        }
+      }
+    } catch {
+      /* tabela ainda não existe */
+    }
+
     const enriched = (profiles ?? []).map((p) => {
-      const { plan, access } = classify(p);
+      const { plan, access } = classifyAccess(p);
       return {
         ...p,
         email: p.email ?? null,
+        phone: bestPhone({ phone: p.phone, whatsapp: whatsappByUser[p.id] }),
         plan,
         access,
         tool_unlocks: Array.isArray(p.tool_unlocks) ? p.tool_unlocks : [],
         static_unlocks: staticUnlocksForEmail(p.email),
         receipt_url: receiptByUser[p.id]?.url ?? null,
         last_payment_at: receiptByUser[p.id]?.at ?? null,
+        concurrent_30d: concurrentByUser[p.id]?.n ?? 0,
+        concurrent_last_at: concurrentByUser[p.id]?.last ?? null,
       };
     });
 
-    return NextResponse.json({ users: enriched });
+    return NextResponse.json({ users: enriched, schema });
   } catch (e) {
     console.error('[admin list-users]', e);
     return jsonError(

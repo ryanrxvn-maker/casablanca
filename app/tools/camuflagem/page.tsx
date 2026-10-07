@@ -652,7 +652,11 @@ export default function CamuflagemPage() {
       icon={<IconCamuflagem size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <MissingKeyBanner services={['assemblyai']} />
+        <MissingKeyBanner
+          services={['assemblyai']}
+          uso="conferir o que uma IA ouviria no áudio camuflado"
+          semChave="A camuflagem funciona sem ela, só essa conferência fica desligada. A chave do Groq não serve pra conferir."
+        />
 
         {/* Modo: camuflar (esconder) ou descamuflar (recuperar de um arquivo
             já camuflado). */}

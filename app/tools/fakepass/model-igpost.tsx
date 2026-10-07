@@ -24,7 +24,6 @@ import {
   FONT_STACK,
   type FakeModel,
   type StatusCfg,
-  type EmojiSet,
 } from './shared';
 
 type S = {
@@ -193,7 +192,6 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const placeBg = s.dark ? '#121212' : '#efefef';
 
   const username = s.username || 'usuario';
-  const emojiSet: EmojiSet = status.os === 'android' ? 'google' : 'apple';
 
   const slidesN = Math.max(1, Math.round(Number(s.totalSlides) || 1));
 
@@ -453,7 +451,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
         <div style={{ fontSize: 13, color: fg, lineHeight: 1.35, wordBreak: 'break-word' }}>
           <span style={{ fontWeight: 600 }}>{username}</span>
           {s.legenda ? (
-            <span style={{ fontWeight: 400 }}> <Emo t={s.legenda} set={emojiSet} /></span>
+            <span style={{ fontWeight: 400 }}> <Emo t={s.legenda} /></span>
           ) : null}
         </div>
 

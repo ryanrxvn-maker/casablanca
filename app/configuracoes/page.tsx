@@ -154,7 +154,7 @@ export default function ConfiguracoesPage() {
   // Magnific (Auto B-roll) e ClickUp (Pilot) são de uso interno — só admin vê.
   const sections: Array<{ id: string; label: string; href?: string }> = [
     { id: 'assinatura', label: 'Assinatura', href: '/configuracoes/assinatura' },
-    { id: 'apis', label: 'Chaves IA', href: '/configuracoes/api' },
+    { id: 'apis', label: 'Chaves de IA', href: '/configuracoes/api' },
     ...(isAdmin
       ? [{ id: 'magnific', label: 'Magnific', href: '/configuracoes/magnific' }]
       : []),

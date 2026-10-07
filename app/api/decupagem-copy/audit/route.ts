@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireTier } from '@/lib/require-tier';
 import { auditResult, findRepeatedSpans } from '@/lib/decupagem-matcher';
 import { transcribeAudio } from '@/lib/transcribe';
+import { explicarFalhaTranscricao } from '@/lib/key-errors';
 
 /**
  * POST /api/decupagem-copy/audit
@@ -66,7 +67,11 @@ export async function POST(req: Request) {
 
     if (words.length === 0) {
       return jsonError(
-        'Falha na transcricao da auditoria.',
+        explicarFalhaTranscricao(
+          errors,
+          ['assemblyai', 'groq'],
+          'Não consegui conferir o vídeo pronto agora. Tente de novo em instantes.',
+        ),
         502,
         errors.join(' | '),
       );

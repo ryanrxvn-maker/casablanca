@@ -29,10 +29,15 @@ const ETAPAS = [
   { run: ["scripts/test-perf-guards.mjs"] },
   // chat de ajuda (07.10): mensagem pronta pro WhatsApp do suporte diz quem, o quê e onde
   { tsc: "lib/history-tools.ts lib/help-chat.ts lib/help-chat.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/help-chat.test.js"] },
+  // painel admin (07.10): coluna ausente em produção derrubou o plano de todos pra Free, calado
+  { run: ["scripts/test-admin-guards.mjs"] },
+  // painel admin (07.10): aparelho/UA do histórico de acesso + resumo do perfil (IPs, aparelhos, dias, uso)
+  { tsc: "lib/access-device.ts lib/access-device.test.ts lib/admin-access-summary.ts lib/admin-access-summary.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/access-device.test.js", ".test-tmp/admin-access-summary.test.js"] },
   // export do FakePass (06.10): sonda de linha de base do html2canvas + emoji inteiro
   { run: ["scripts/test-fakepass-export-guards.mjs"] },
   // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo
   { tsx: ["lib/pilot-formato.test.ts"] },
+  { tsx: ["lib/key-errors.test.ts"] },
   // lipsync video to video (07.10): todo trecho cabe nos dois tetos do motor (tempo e tamanho)
   { tsc: "lib/lipsync-chunk-plan.ts lib/lipsync-chunk-plan.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/lipsync-chunk-plan.test.js"] },
   // projeto editável: roteiro da pós → CapCut (draft 9.x) + Premiere (xmeml) + SRT
@@ -110,6 +115,8 @@ const ETAPAS = [
   { tsc: "lib/typography/engine.ts lib/typography/anchor.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/typography/anchor.test.js"] },
   { tsc: "lib/typography/engine.ts lib/typography/presets.ts lib/typography/fonts.ts lib/typography/emphasis.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/typography/emphasis.test.js"] },
   { tsc: "lib/typography/engine.ts lib/typography/presets.ts lib/typography/fonts.ts lib/typography/rot-box.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/typography/rot-box.test.js"] },
+  // números do site (07.10): landing/hub/cadastro não anunciam catálogo que não existe
+  { tsc: "lib/typography/engine.ts lib/typography/presets.ts lib/typography/fonts.ts lib/numeros-do-site.ts lib/numeros-do-site.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/numeros-do-site.test.js"] },
   { tsc: "lib/typography/asr-tempo.ts lib/typography/asr-gaps.ts lib/typography/asr-tempo.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/typography/asr-tempo.test.js"] },
   { tsc: "lib/typography/asr-gaps.ts lib/typography/asr-gaps.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/typography/asr-gaps.test.js"] },
   { tsc: "lib/typography/headline.ts lib/typography/headline.test.ts --outDir .test-tmp --rootDir lib --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom,dom.iterable", run: [".test-tmp/typography/headline.test.js"] },

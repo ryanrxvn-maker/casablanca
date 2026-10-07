@@ -25,6 +25,7 @@ export default async function DesignView({params}:{params:{view:string}}) {
     'audio-split': async () => (await import('@/app/tools/audio-split/page')).default,
     'copy-srt': async () => (await import('@/app/tools/copy-srt/page')).default,
     lipsync: async () => (await import('@/components/tools/LipSyncTool')).default,
+    chaves: async () => (await import('@/app/configuracoes/api/page')).default,
   };
   if (!Object.hasOwn(views, params.view)) notFound();
   const Component = await views[params.view as keyof typeof views]();

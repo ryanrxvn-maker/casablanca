@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
+import { explicarFalhaTranscricao } from '@/lib/key-errors';
 
 /**
  * POST /api/camuflagem/transcribe
@@ -27,6 +28,15 @@ type TranscriptPoll = {
   error?: string;
 };
 
+/** Motivo em português pra falha da AssemblyAI (chave, saldo, limite, sem fala). */
+function falhaAai(cru: string): string {
+  return explicarFalhaTranscricao(
+    [`assemblyai: ${cru}`],
+    ['assemblyai'],
+    'Não consegui transcrever o áudio agora. Tente de novo em instantes.',
+  );
+}
+
 function jsonError(message: string, status = 500, detail?: string) {
   return NextResponse.json(
     detail ? { error: message, detail: detail.slice(0, 500) } : { error: message },
@@ -47,7 +57,7 @@ export async function POST(req: Request) {
       form = await req.formData();
     } catch (e) {
       return jsonError(
-        'Falha ao ler upload. O arquivo pode ser maior que o limite (4.5MB no Vercel).',
+        'O áudio passou do limite de envio (4,5 MB). Use um trecho mais curto e tente de novo.',
         413,
         e instanceof Error ? e.message : String(e),
       );
@@ -56,7 +66,7 @@ export async function POST(req: Request) {
     const file = form.get('audio');
     const languageCode = String(form.get('languageCode') ?? 'pt');
     if (!(file instanceof File)) {
-      return jsonError('Envie o arquivo de audio no campo "audio".', 400);
+      return jsonError('Não recebi o áudio. Gere a camuflagem de novo e tente outra vez.', 400);
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -70,13 +80,13 @@ export async function POST(req: Request) {
     });
     if (!uploadRes.ok) {
       const t = await uploadRes.text().catch(() => '');
-      return jsonError('Falha no upload AssemblyAI.', 502, t);
+      return jsonError(falhaAai(`${uploadRes.status} ${t}`), 502, t);
     }
     const uploadJson = (await uploadRes.json().catch(() => null)) as
       | { upload_url: string }
       | null;
     if (!uploadJson?.upload_url) {
-      return jsonError('AssemblyAI retornou upload sem URL.', 502);
+      return jsonError('Não consegui enviar o áudio pra transcrição agora. Tente de novo em instantes.', 502);
     }
 
     const trRes = await fetch(`${AAI_BASE}/transcript`, {
@@ -94,13 +104,13 @@ export async function POST(req: Request) {
     });
     if (!trRes.ok) {
       const t = await trRes.text().catch(() => '');
-      return jsonError('Falha ao criar transcricao.', 502, t);
+      return jsonError(falhaAai(`${trRes.status} ${t}`), 502, t);
     }
     const created = (await trRes.json().catch(() => null)) as
       | { id: string }
       | null;
     if (!created?.id) {
-      return jsonError('AssemblyAI nao retornou transcript id.', 502);
+      return jsonError('Não consegui iniciar a transcrição agora. Tente de novo em instantes.', 502);
     }
 
     const deadline = Date.now() + 4 * 60 * 1000;
@@ -116,15 +126,18 @@ export async function POST(req: Request) {
         return NextResponse.json({ text: (body.text ?? '').trim() });
       }
       if (body.status === 'error') {
-        return jsonError(body.error ?? 'Erro desconhecido na transcricao.', 502);
+        return jsonError(falhaAai(body.error ?? ''), 502, body.error ?? undefined);
       }
     }
 
-    return jsonError('Timeout aguardando transcricao (4 min).', 504);
+    return jsonError(
+      'A transcrição passou de 4 minutos sem terminar e foi interrompida. Tente de novo; se repetir, use um trecho mais curto.',
+      504,
+    );
   } catch (e) {
     console.error('[camuflagem transcribe route]', e);
     return jsonError(
-      'Erro inesperado no servidor.',
+      'Não consegui transcrever o áudio agora. Tente de novo em instantes.',
       500,
       e instanceof Error ? e.message : String(e),
     );

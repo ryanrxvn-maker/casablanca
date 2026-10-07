@@ -208,7 +208,7 @@ async function uploadChunk(
         const body = await res.text().catch(() => '');
         fatal = new FriendlyError(
           pickServerMessage(body) ??
-            'Sua conta não tem acesso ao Auto Cortes agora. Confira o plano em /planos e tente de novo.',
+            'Sua conta não tem acesso ao Auto Cortes agora. Confira o seu plano e tente de novo.',
         );
         throw fatal;
       }

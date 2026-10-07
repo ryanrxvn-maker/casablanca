@@ -120,7 +120,7 @@ export const PILLARS: Pillar[] = [
           'Remover Silêncios — remove silêncios e cortes mortos',
           'Lipsync Video to Video — o avatar falando exatamente a sua copy',
           'Compressão e ajuste de velocidade em lote',
-          'Legendas automáticas alinhadas à copy',
+          'Legendas animadas a partir da fala e SRT alinhado à copy',
         ],
       },
       {
@@ -184,7 +184,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Automatize a remoção de silêncios para ganhar tempo',
         body: [
-          'Cortar silêncio na mão leva de 40 minutos a mais de uma hora por vídeo. A remoção automática de silêncios faz isso em segundos, removendo as pausas e unindo os cortes sozinha. É o maior ganho de velocidade isolado.',
+          'Cortar silêncio na mão leva de 40 minutos a mais de uma hora por vídeo. A remoção automática de silêncios faz isso sozinha, numa fração desse tempo, removendo as pausas e unindo os cortes. É o maior ganho de velocidade isolado.',
         ],
       },
       {
@@ -222,14 +222,14 @@ export const PILLARS: Pillar[] = [
   {
     slug: 'gerar-legenda-automatica',
     keyword: 'legenda automática',
-    title: 'Gerar legenda automática em vídeo (e exportar SRT) no automático',
+    title: 'Gerar legenda automática em vídeo (e SRT alinhado à copy)',
     description:
-      'Gere legenda automática a partir da fala do vídeo e exporte em SRT, sem digitar. Ferramenta Premium no navegador.',
+      'Gere legenda animada a partir da fala do vídeo, sem digitar, e SRT alinhado à sua copy. Ferramentas Premium no navegador.',
     kicker: 'Legendas',
     h1: 'Gerar legenda automática',
     intro: [
       'Legenda automática é transformar a fala do vídeo em legendas sincronizadas sem digitar nada. A ferramenta transcreve o áudio, marca o tempo de cada trecho e gera a legenda pronta — você só revisa e exporta.',
-      'No Auto Edit isso roda no navegador e em lote, então dá pra legendar vários vídeos de uma vez em vez de um por um.',
+      'No Auto Edit isso roda no navegador: as Legendas Automáticas recebem até 10 vídeos na mesma fila e cada um guarda a própria edição.',
     ],
     blocks: [
       {
@@ -241,19 +241,19 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Dá para exportar a legenda em SRT?',
         body: [
-          'Sim. Além de queimar a legenda no vídeo, dá pra exportar o arquivo de legenda em formato SRT pra usar no YouTube, em outro editor ou pra traduzir. O SRT é o padrão universal de legenda.',
+          'Sim, pelo Gerador de SRT: você cola a copy, sobe o áudio ou vídeo e ele alinha o texto palavra por palavra com a fala, devolvendo o arquivo .srt pra usar no CapCut, no YouTube ou em outro editor. As Legendas Automáticas entregam o MP4 com a legenda animada já aplicada.',
         ],
       },
       {
-        h2: 'Legendar vários vídeos de uma vez',
+        h2: 'Legendar vários vídeos no mesmo dia',
         body: [
-          'Como o resto do Auto Edit, a legenda roda em lote: você sobe vários vídeos e a fila processa todos. Ideal pra quem precisa legendar uma série de cortes ou criativos no mesmo dia.',
+          'Você sobe até 10 vídeos na fila das Legendas Automáticas e legenda um de cada vez, sem perder a edição dos outros ao trocar. Ideal pra quem precisa legendar uma série de cortes ou criativos no mesmo dia.',
         ],
       },
       {
         h2: 'Precisa instalar algo para legendar?',
         body: [
-          'Não. A legenda automática funciona no navegador, sem download. O acesso à ferramenta faz parte do Premium (R$ 57/mês).',
+          'Não. A legenda automática funciona no navegador, sem download. A transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações. O acesso à ferramenta faz parte do Premium (R$ 57/mês).',
         ],
       },
     ],
@@ -268,7 +268,7 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'Consigo o arquivo SRT separado?',
-        a: 'Sim, dá pra exportar a legenda em SRT pra usar no YouTube, em outro editor ou pra traduzir.',
+        a: 'Sim, pelo Gerador de SRT, que alinha a sua copy com a fala e devolve o .srt pra usar no YouTube, em outro editor ou pra traduzir.',
       },
     ],
     related: [
@@ -315,7 +315,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar programa pesado?',
         body: [
-          'Não. Tudo roda no navegador, sem download nem máquina parruda. Você começa no plano grátis e libera todas as ferramentas no plano Premium (R$ 57/mês).',
+          'Não. Tudo roda no navegador, sem instalar editor pesado. Você começa no plano grátis e libera todas as ferramentas no plano Premium (R$ 57/mês).',
         ],
       },
     ],
@@ -330,7 +330,7 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'Preciso de um PC potente?',
-        a: 'Não. Como roda no navegador, o processamento não depende da sua máquina. Funciona em qualquer computador.',
+        a: 'Não precisa de máquina de edição. O processamento acontece no navegador, no seu próprio computador: máquina mais forte termina mais rápido, e arquivo muito grande é dividido em partes pra não travar.',
       },
     ],
     related: [
@@ -371,13 +371,13 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Automação de UGC em lote, no navegador',
         body: [
-          'Em vez de operar uma ferramenta por vez, você empilha o trabalho do dia numa fila única. Tudo roda no navegador, sem download — você prepara, dispara e colhe os criativos prontos.',
+          'As ferramentas de arquivo têm fila própria: você sobe vários takes de uma vez no Remover Silêncios, no Compressor ou no Normalizador e baixa todos prontos. Tudo roda no navegador, sem download.',
         ],
       },
       {
         h2: 'Dá para começar de graça?',
         body: [
-          'Dá. O Auto Edit tem plano grátis sem cartão. O plano Premium (R$ 57/mês) libera todas as ferramentas e mais volume.',
+          'Dá. O Auto Edit tem plano grátis sem cartão. O plano Premium (R$ 57/mês) libera as demais ferramentas e a exportação em vídeo do Remover Silêncios.',
         ],
       },
     ],
@@ -392,7 +392,7 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'Funciona para volume de agência?',
-        a: 'Sim. Todas as ferramentas rodam em lote, justamente pra suportar o volume de uma operação de UGC.',
+        a: 'Sim. Remover Silêncios, Compressor, Camuflagem, Normalizador e Mixer de Velocidade processam vários arquivos na mesma fila, justamente pra suportar o volume de uma operação de UGC.',
       },
     ],
     related: [
@@ -438,7 +438,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para comprimir?',
         body: [
-          'Não. O compressor roda 100% no navegador, sem download. Você pode usar no plano grátis e ampliar o volume no plano Premium (R$ 57/mês).',
+          'Não. O compressor roda 100% no navegador, sem download, e está no plano grátis — com até 20 vídeos por vez.',
         ],
       },
     ],

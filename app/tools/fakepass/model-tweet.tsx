@@ -232,7 +232,7 @@ function TweetCard({ s }: { s: S }) {
           wordBreak: 'break-word',
         }}
       >
-        {emojify(s.texto, 'apple')}
+        {emojify(s.texto)}
       </div>
 
       {/* Data + hora */}

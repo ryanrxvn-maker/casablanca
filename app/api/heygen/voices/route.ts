@@ -1,6 +1,7 @@
 import { famousHeyGratis } from '@/lib/famous-hey-trial';
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { avisoChaveFaltando } from '@/lib/key-errors';
 import { requireTier } from '@/lib/require-tier';
 import { accessTokenDoRefresh } from '@/lib/heygen-image-video';
 
@@ -56,7 +57,7 @@ export async function GET(req: Request) {
     if (!auth) {
       return 'response' in keyResult
         ? keyResult.response
-        : jsonError('Configure a chave do HeyGen em /configuracoes/api.', 400);
+        : jsonError(avisoChaveFaltando('heygen'), 400);
     }
 
     const { searchParams } = new URL(req.url);

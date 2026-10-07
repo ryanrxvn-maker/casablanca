@@ -34,7 +34,7 @@ function TikTokReplyBubble({ s }: { s: S }) {
         Responder ao comentário de {s.nome}
       </div>
       <div style={{ color: textColor, fontWeight: 600, fontSize: fs, lineHeight: 1.32, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-        <Emo t={s.comentario} set="apple" />
+        <Emo t={s.comentario} />
       </div>
     </div>
   );

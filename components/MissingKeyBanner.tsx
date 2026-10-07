@@ -1,15 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { DA_CHAVE, type KeyService } from '@/lib/key-errors';
 
-type Service =
-  | 'anthropic'
-  | 'assemblyai'
-  | 'elevenlabs'
-  | 'heygen'
-  | 'replicate'
-  | 'groq';
+/**
+ * Só os serviços que TÊM card em Configurações › Chaves de IA. Pedir uma chave
+ * que o cliente não tem onde colar seria um aviso sem saída — o tipo barra.
+ */
+type Service = Extract<KeyService, 'assemblyai' | 'groq' | 'heygen'>;
 
 /**
  * Um requisito da ferramenta. Um Service sozinho = obrigatorio. Um ARRAY =
@@ -18,116 +17,190 @@ type Service =
  */
 type Requirement = Service | Service[];
 
-// Rótulos por CAPACIDADE (nunca o fornecedor) — o cliente vê "Transcrição",
-// não "AssemblyAI". Exceção: HeyGen, que pode ser citado.
-const LABEL: Record<Service, string> = {
-  anthropic: 'IA de texto',
+/** O que a chave faz, quando a ferramenta não diz (`uso`). */
+const USO_PADRAO: Record<Service, string> = {
+  assemblyai: 'transcrever a fala do vídeo',
+  groq: 'transcrever a fala do vídeo',
+  heygen: 'listar seus avatares e vozes do HeyGen',
+};
+
+/** Nome curto da capacidade, pra lista quando falta mais de uma chave. */
+const CAPACIDADE: Record<Service, string> = {
   assemblyai: 'Transcrição',
-  elevenlabs: 'Clonagem de voz',
-  heygen: 'HeyGen',
-  replicate: 'Geração de vídeo',
   groq: 'Transcrição',
+  heygen: 'Avatares e vozes',
 };
 
-// Nome do CARD em /configuracoes/api. A capacidade diz PRA QUE serve; o card
-// diz ONDE colar — sem isso o cliente lê "Transcrição" e não sabe qual dos
-// campos da tela preencher (foi exatamente o que aconteceu no beta).
-const CARD: Record<Service, string> = {
-  anthropic: 'Anthropic',
-  assemblyai: 'AssemblyAI',
-  elevenlabs: 'ElevenLabs',
-  heygen: 'HeyGen',
-  replicate: 'Replicate',
-  groq: 'Groq',
-};
-
-/** "AssemblyAI ou Groq" / "AssemblyAI" */
-function cardsOf(req: Service[]): string {
-  const names = req.map((s) => CARD[s]);
-  if (names.length === 1) return names[0];
-  return `${names.slice(0, -1).join(', ')} ou ${names[names.length - 1]}`;
+/** "a do Groq ou a da AssemblyAI" */
+function alternativas(g: Service[]): string {
+  const partes = g.map((s) => `a ${DA_CHAVE[s]}`);
+  if (partes.length === 1) return partes[0];
+  return `${partes.slice(0, -1).join(', ')} ou ${partes[partes.length - 1]}`;
 }
 
 /**
- * Banner amarelo no topo das tool pages: detecta quais chaves o user
- * NAO configurou e linka pra /configuracoes/api. Evita que o usuario
- * use a ferramenta e leve um 400 no meio do processamento.
+ * Aviso de CHAVE PENDENTE no topo das ferramentas. Só aparece quando o
+ * servidor CONFIRMA que a chave não está salva (falha de rede = sem aviso,
+ * nunca alarme falso) e some sozinho quando o cliente volta pra aba depois
+ * de colar a chave.
  *
  * Ferramenta com FALLBACK declara o grupo: services={[['groq','assemblyai']]}.
- * Assim quem tem SO' a AssemblyAI (que funciona) nao leva mais alarme falso.
+ * `uso` diz, em português, pra que a chave serve NESTA ferramenta; `semChave`
+ * diz o que continua funcionando sem ela (quando a chave é só de uma etapa).
+ * Nada aqui pode afirmar que a ferramenta inteira quebra se não quebra.
  */
-export function MissingKeyBanner({ services }: { services: Requirement[] }) {
+export function MissingKeyBanner({
+  services,
+  uso,
+  semChave,
+}: {
+  services: Requirement[];
+  uso?: string;
+  semChave?: string;
+}) {
   const [missing, setMissing] = useState<Service[][] | null>(null);
+  const chave = JSON.stringify(services);
+
+  const checar = useCallback(async (sinal?: { cancelado: boolean }) => {
+    try {
+      const res = await fetch('/api/user/secrets', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (sinal?.cancelado) return;
+      const groups = (JSON.parse(chave) as Requirement[]).map((s) => (Array.isArray(s) ? s : [s]));
+      // Grupo pendente = NENHUMA das alternativas configurada.
+      setMissing(groups.filter((g) => g.every((s) => !data?.[s]?.configured)));
+    } catch {
+      /* sem resposta confiável: não acusa nada */
+    }
+  }, [chave]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/user/secrets');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        const groups = services.map((s) => (Array.isArray(s) ? s : [s]));
-        // Grupo pendente = NENHUMA das alternativas configurada.
-        const m = groups.filter((g) => g.every((s) => !data?.[s]?.configured));
-        setMissing(m);
-      } catch {
-        if (!cancelled) setMissing([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
+    const sinal = { cancelado: false };
+    void checar(sinal);
+    // Voltou pra aba (provavelmente depois de colar a chave): confere de novo
+    // e o aviso some sozinho, sem precisar recarregar.
+    const aoVoltar = () => {
+      if (document.visibilityState === 'visible') void checar(sinal);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(services)]);
+    window.addEventListener('focus', aoVoltar);
+    document.addEventListener('visibilitychange', aoVoltar);
+    return () => {
+      sinal.cancelado = true;
+      window.removeEventListener('focus', aoVoltar);
+      document.removeEventListener('visibilitychange', aoVoltar);
+    };
+  }, [checar]);
 
   if (!missing || missing.length === 0) return null;
 
-  const plural = missing.length > 1;
-  // Uma linha por capacidade faltando, ja' dizendo o card exato.
-  const linhas = missing.map((g) => ({
-    capacidade: LABEL[g[0]],
-    cards: cardsOf(g),
-    alternativa: g.length > 1,
-  }));
+  const primeiro = missing[0];
+  const destino = `/configuracoes/api#chave-${primeiro[0]}`;
+  const varias = missing.length > 1;
+
+  let titulo: string;
+  let corpo: React.ReactNode;
+  if (varias) {
+    titulo = `Faltam ${missing.length} chaves pra usar tudo aqui`;
+    corpo = (
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {missing.map((g) => (
+          <li key={g.join('|')} className="flex gap-2">
+            <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-amber" />
+            <span>
+              <span className="font-semibold text-text">{CAPACIDADE[g[0]]}:</span>{' '}
+              {g.length > 1 ? `serve ${alternativas(g)} (basta uma).` : `a sua chave ${DA_CHAVE[g[0]]}.`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  } else if (primeiro.length > 1) {
+    titulo = 'Falta uma chave de transcrição';
+    corpo = (
+      <>
+        Pra {uso ?? USO_PADRAO[primeiro[0]]}, esta ferramenta usa a sua própria
+        chave. Serve {alternativas(primeiro)} (basta uma), e ela fica salva pra
+        próxima vez.
+      </>
+    );
+  } else {
+    const s = primeiro[0];
+    titulo = `Falta a sua chave ${DA_CHAVE[s]}`;
+    corpo = (
+      <>
+        Pra {uso ?? USO_PADRAO[s]}, esta ferramenta usa a sua própria chave{' '}
+        {DA_CHAVE[s]}. Você cola uma vez e ela fica salva.
+      </>
+    );
+  }
 
   return (
     <div
       role="status"
-      className="fade-in-up rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 shadow-[0_0_22px_-8px_rgba(250,204,21,0.45)]"
+      className="fade-in-up rounded-[22px] p-1.5"
+      style={{
+        background: 'rgb(var(--amber) / 0.07)',
+        boxShadow:
+          'inset 0 0 0 1px rgb(var(--amber) / 0.24), 0 22px 44px -30px rgb(var(--amber) / 0.55)',
+      }}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-yellow-300">
-            {plural ? '⚠ Chaves pendentes' : '⚠ Chave pendente'}
-          </div>
-          <div className="mt-0.5 text-[11px] leading-relaxed text-yellow-300/80">
-            {plural
-              ? 'Esta ferramenta ainda não tem as chaves de:'
-              : 'Esta ferramenta ainda não tem a chave de:'}
-            <ul className="mt-1 flex flex-col gap-0.5">
-              {linhas.map((l) => (
-                <li key={l.cards}>
-                  <span className="font-semibold text-white">{l.capacidade}</span>
-                  {' — cole em '}
-                  <span className="font-semibold text-white">{l.cards}</span>
-                  {l.alternativa
-                    ? ', em Configurações → API. Basta UMA das duas.'
-                    : ', em Configurações → API.'}
-                </li>
-              ))}
-            </ul>
-            <span className="mt-1 block">
-              Sem isso a chamada falha no meio do processamento.
+      <div
+        className="rounded-[16px] px-4 py-4 sm:px-5"
+        style={{
+          background: 'linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+          boxShadow:
+            'inset 0 1px 0 rgb(255 255 255 / 0.05), inset 0 0 0 1px rgb(var(--amber) / 0.10)',
+        }}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-5">
+          <div className="flex min-w-0 flex-1 items-start gap-3.5">
+            {/* Ícone no próprio círculo, com halo âmbar discreto */}
+            <span
+              aria-hidden
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-amber"
+              style={{
+                background: 'rgb(var(--amber) / 0.12)',
+                boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.32), 0 0 22px -6px rgb(var(--amber) / 0.55)',
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="7.5" cy="15.5" r="4.5" />
+                <path d="M10.7 12.3 20 3" />
+                <path d="m16 7 3 3" />
+                <path d="m14 9 2 2" />
+              </svg>
             </span>
+            <div className="min-w-0 pt-0.5">
+              <p className="text-[14px] font-semibold leading-snug text-text">{titulo}</p>
+              <div className="mt-1 max-w-[68ch] text-[12.5px] leading-relaxed text-text-muted">
+                {corpo}
+              </div>
+              {semChave ? (
+                <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-text-muted">
+                  {semChave}
+                </p>
+              ) : null}
+            </div>
           </div>
+
+          {/* CTA com a seta no próprio círculo, colado na borda interna */}
+          <Link
+            href={destino}
+            className="btn-primary group w-full shrink-0 !justify-between !gap-3 !py-1.5 !pl-4 !pr-1.5 text-[13px] sm:w-auto sm:self-center"
+          >
+            Adicionar chave
+            <span
+              aria-hidden
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:-translate-y-px group-hover:translate-x-0.5 group-hover:scale-105"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14" />
+                <path d="m13 6 6 6-6 6" />
+              </svg>
+            </span>
+          </Link>
         </div>
-        <Link
-          href="/configuracoes/api"
-          className="btn-primary shrink-0 !py-1.5 text-xs"
-        >
-          Configurar →
-        </Link>
       </div>
     </div>
   );

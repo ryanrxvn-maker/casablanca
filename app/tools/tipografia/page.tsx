@@ -1480,7 +1480,10 @@ function TipografiaInner() {
         {/* Transcrição tem FALLBACK no servidor (Groq primeiro, AssemblyAI
             se ela falhar/faltar): quem tem só uma das duas está pronto —
             declarar o grupo evita o alarme falso que perdeu cliente. */}
-        <MissingKeyBanner services={[['groq', 'assemblyai']]} />
+        <MissingKeyBanner
+          services={[['groq', 'assemblyai']]}
+          uso="transcrever a fala do vídeo e gerar a legenda"
+        />
 
         {/* ── Passos 1 e 2 lado a lado (economia vertical) ── */}
         <div className="grid gap-5 lg:grid-cols-2">

@@ -26,6 +26,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { avisoChaveNaoAceita } from '../key-errors';
 
 /** Erro já traduzido pro cliente (status HTTP + dicas de UI). */
 export class LlmError extends Error {
@@ -227,7 +228,7 @@ export async function structuredMessage<T>(
 
       if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
         throw new LlmError(
-          'Sua chave de IA de texto não foi aceita. Confira a chave Anthropic (Claude) em /configuracoes/api e tente de novo.',
+          avisoChaveNaoAceita('anthropic'),
           { status: 401, showConfig: true, cause: err },
         );
       }

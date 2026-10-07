@@ -11,6 +11,7 @@ import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 import { HeroSlideBg } from './HeroSlideBg';
 import { TipoShowcase } from './TipoShowcase';
+import { LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 
 /** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
 type MaintMode = 'blocked' | 'admin' | undefined;
@@ -69,7 +70,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Lipsync Video to Video',
-    description: 'Suba o rosto, suba o áudio e o lipsync sai pronto — o avatar falando exatamente a copy que você quiser, em minutos.',
+    description: 'Suba o rosto, suba o áudio e o lipsync sai pronto: o avatar falando exatamente a copy que você quiser, em minutos.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
@@ -364,7 +365,7 @@ export function ToolsHub() {
         <SectionTitle
           eyebrow="ESTÚDIO"
           title="Ferramentas"
-          sub="Cortes, ajustes, arquivos e IA — sem espera."
+          sub="Todas as ferramentas que você precisa, em um só lugar."
           delay={300}
         />
         {/* Sem busca nem filtro aqui: a busca global (Pesquisar, no topo) já
@@ -557,8 +558,12 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
       <div
         ref={scrollerRef}
         onScroll={onScroll}
-        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth"
-        style={{ scrollbarWidth: 'none' }}
+        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[26px]"
+        // A JANELA tem o mesmo raio dos slides: no meio da troca, o pedaço do
+        // slide que está saindo/entrando é cortado por essa borda — reta, ela
+        // deixava o canto QUADRADO. `isolation` garante o recorte redondo também
+        // sobre camadas de GPU (vídeo, tilt 3D do Famous Hey).
+        style={{ scrollbarWidth: 'none', isolation: 'isolate' }}
       >
         {slides.map((s, i) => (
           <div
@@ -703,7 +708,8 @@ function TipografiaSlide() {
           }}
         />
 
-        {/* Topo: NOVO + nome + liberada pra todos */}
+        {/* Topo: NOVO + nome. Legendas é Premium desde 30.09 — nada de selo
+            "liberada pra todos" aqui. */}
         <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4 md:p-5">
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1.5 rounded-[5px] bg-[#6d4ee8] px-2 py-1 shadow-[0_4px_18px_-4px_rgba(109,78,232,0.9)]">
@@ -722,15 +728,9 @@ function TipografiaSlide() {
               className="hidden rounded-[5px] bg-black/60 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur-sm sm:inline-flex"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              Legendas Automáticas · 491 modelos
+              Legendas Automáticas · {LEGENDAS_MODELOS} modelos
             </span>
           </div>
-          <span
-            className="rounded-full border border-violet/40 bg-black/55 px-2.5 py-1 text-[9.5px] font-bold uppercase tracking-[0.2em] text-violet backdrop-blur-sm"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            Liberada pra todos
-          </span>
         </div>
 
         {/* Só o CTA — os letterings falam por si */}
@@ -1837,8 +1837,8 @@ function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; lock
         >
           <div className="px-4 pb-4 pt-3.5">
             <p className="text-[12.5px] leading-relaxed text-white/80">
-              A fala do vídeo vira legenda animada — transcrição palavra por
-              palavra, 491 modelos, editor estilo CapCut e o MP4 renderizado
+              A fala do vídeo vira legenda animada: transcrição palavra por
+              palavra, {LEGENDAS_MODELOS} modelos, editor estilo CapCut e o MP4 renderizado
               no seu navegador.
             </p>
             <span
@@ -2318,7 +2318,7 @@ function FeaturedVideoCard({
     >
       <Link
         href={locked ? `/planos?upgrade=premium&from=${entry.href}` : entry.href}
-        className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
+        className="group relative block overflow-hidden rounded-[20px] border border-line/70 bg-[#0b0b0f] transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
       >
         {inner}
       </Link>

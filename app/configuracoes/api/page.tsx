@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenConectar } from '@/components/HeyGenConectar';
+import { FriendlyError, toFriendlyMessage } from '@/lib/friendly-error';
+import { DA_CHAVE } from '@/lib/key-errors';
 
 /**
  * /configuracoes/api — gerenciamento das chaves de IA do proprio usuario.
@@ -58,18 +60,18 @@ const META: Array<{
     id: 'assemblyai',
     label: 'AssemblyAI',
     helper:
-      'Chave alfanumerica longa. Pega em assemblyai.com (dashboard, sidebar).',
+      'Chave longa, de letras e números. Fica no painel da sua conta na AssemblyAI, no menu lateral.',
     link: 'https://www.assemblyai.com/app/account',
     usedBy:
       'Legendas Automáticas · Remover Silêncios por Copy · Gerador de SRT · Camuflagem · Diarização de vozes (VA)',
     note:
-      'TRANSCRIÇÃO: esta chave e a do Groq fazem a mesma coisa — basta UMA das duas pra Legendas Automáticas, Remover Silêncios por Copy e Gerador de SRT. Só a Camuflagem e a Diarização exigem esta aqui.',
+      'Transcrição: nas Legendas Automáticas, no Remover Silêncios por Copy e no Gerador de SRT, esta chave e a do Groq fazem a mesma coisa, então basta uma das duas. A conferência da Camuflagem e a Diarização de vozes só funcionam com esta.',
   },
   {
     id: 'heygen',
     label: 'HeyGen',
     helper:
-      'E a chave que liga a SUA biblioteca de avatares e vozes ao AutoEdit. Criar e de graça e leva 1 minuto — você NÃO precisa comprar saldo de API.',
+      'É a chave que liga a SUA biblioteca de avatares e vozes ao Auto Edit. Criar é de graça e leva um minuto, e você NÃO precisa comprar saldo de API.',
     link: 'https://app.heygen.com/developers/api',
     linkLabel: 'Abrir a tela da chave ↗',
     steps: [
@@ -95,14 +97,14 @@ const META: Array<{
       },
     ],
     warn:
-      'Saldo não entra nessa história: o Balance da tela só é debitado por quem GERA VÍDEO pela API, e aqui a chave só LÊ sua biblioteca — funciona com US$ 0,00. Já tinha criado uma chave e não anotou? O HeyGen não mostra de novo: clique em “Regenerate” na linha dela (a antiga para de funcionar na hora).',
+      'Saldo não entra nessa história: o Balance da tela só é debitado por quem GERA VÍDEO pela API, e aqui a chave só LÊ sua biblioteca, então funciona com US$ 0,00. Já tinha criado uma chave e não anotou? O HeyGen não mostra de novo: clique em “Regenerate” na linha dela (a antiga para de funcionar na hora).',
     usedBy: 'Seletor de avatares e vozes · Clonagem de voz (HeyGen)',
   },
   {
     id: 'heygen_oauth',
     label: 'HeyGen OAuth (modo imagem)',
     helper:
-      'NÃO é a API key acima. A diferença é de COBRANÇA: a key cai no tier de API (saldo USD à parte) e o OAuth sai do crédito do plano, que você já paga. Use o botão "Conectar HeyGen agora" — ele tira um login PRÓPRIO do app e renova sozinho todo dia. Colar o token do CLI aqui também funciona, mas aí o CLI e o app disputam a MESMA corrente (o refresh é de uso único): quem renovar primeiro derruba o outro, e é por isso que o login vivia expirando.',
+      'Não é a chave de cima. Aqui você conecta a sua conta do HeyGen pelo botão "Conectar HeyGen agora", e o que for gerado por essa conexão sai do crédito do seu plano do HeyGen, não do saldo de API. A conexão se renova sozinha. Se você também usa o CLI do HeyGen, prefira o botão: colar o token do CLI aqui faz os dois disputarem a mesma conexão, e um derruba o outro.',
     link: 'https://developers.heygen.com/docs/cli',
     usedBy: 'Pilot · MODO IMAGEM (animar imagem sem avatar da biblioteca)',
   },
@@ -110,11 +112,11 @@ const META: Array<{
     id: 'groq',
     label: 'Groq (Whisper barato)',
     helper:
-      'Token gsk_... — Whisper-large-v3 a ~$0.04/h (vs $0.45 AssemblyAI). Crie em console.groq.com → API Keys.',
+      'Chave que começa com gsk_. Crie em console.groq.com, na área API Keys. O Groq tem plano gratuito e costuma sair mais barato que a AssemblyAI.',
     link: 'https://console.groq.com/keys',
     usedBy: 'Legendas Automáticas · Remover Silêncios por Copy · Gerador de SRT',
     note:
-      'TRANSCRIÇÃO: esta chave e a do AssemblyAI fazem a mesma coisa — basta UMA das duas. Se você já configurou o AssemblyAI, estas ferramentas JÁ funcionam e este card é opcional: com as duas salvas, o AutoEdit usa a Groq (mais barata) e cai pro AssemblyAI se ela falhar.',
+      'Transcrição: nessas ferramentas, esta chave e a da AssemblyAI fazem a mesma coisa, então basta uma das duas. Se você já salvou a da AssemblyAI, elas JÁ funcionam e este card é opcional. Com as duas salvas, se uma falhar, a ferramenta tenta a outra sozinha.',
   },
 ];
 
@@ -149,6 +151,9 @@ export default function ApiKeysPage() {
   // Inputs locais por service
   const [drafts, setDrafts] = useState<Record<Service, string>>(INIT_DRAFTS);
   const [busy, setBusy] = useState<Record<Service, boolean>>(INIT_BUSY);
+  // Card em destaque quando o cliente chega pelo aviso de chave pendente
+  // (/configuracoes/api#chave-groq): rola até ele e acende a borda por 2,6 s.
+  const [foco, setFoco] = useState<Service | null>(null);
 
   function flash(kind: 'ok' | 'err', msg: string) {
     setToast({ kind, msg });
@@ -161,10 +166,10 @@ export default function ApiKeysPage() {
     try {
       const res = await fetch('/api/user/secrets');
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Falha.');
+      if (!res.ok) throw new FriendlyError(json.error || 'Não consegui carregar suas chaves agora. Recarregue a página.');
       setStatus(json);
     } catch (e) {
-      setError((e as Error).message);
+      setError(toFriendlyMessage(e, 'Não consegui carregar suas chaves agora. Recarregue a página.'));
     } finally {
       setLoading(false);
     }
@@ -174,10 +179,31 @@ export default function ApiKeysPage() {
     load();
   }, []);
 
+  useEffect(() => {
+    let limpar: ReturnType<typeof setTimeout> | undefined;
+    const aplicar = () => {
+      const m = /^#chave-([a-z_]+)$/.exec(window.location.hash);
+      const id = m?.[1] as Service | undefined;
+      if (!id || !META.some((x) => x.id === id)) return;
+      setFoco(id);
+      requestAnimationFrame(() =>
+        document.getElementById(`chave-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+      );
+      clearTimeout(limpar);
+      limpar = setTimeout(() => setFoco(null), 2600);
+    };
+    aplicar();
+    window.addEventListener('hashchange', aplicar);
+    return () => {
+      clearTimeout(limpar);
+      window.removeEventListener('hashchange', aplicar);
+    };
+  }, []);
+
   async function save(service: Service) {
     const key = drafts[service].trim();
     if (key.length < 10) {
-      flash('err', 'Chave muito curta.');
+      flash('err', 'Essa chave parece curta demais. Confira se você copiou ela inteira.');
       return;
     }
     setBusy((b) => ({ ...b, [service]: true }));
@@ -188,19 +214,24 @@ export default function ApiKeysPage() {
         body: JSON.stringify({ service, key }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Falha ao salvar.');
-      flash('ok', `Chave ${service} salva.`);
+      if (!res.ok) throw new FriendlyError(json.error || 'Não consegui salvar a chave agora. Tente de novo em instantes.');
+      flash('ok', `Chave ${DA_CHAVE[service]} salva. Já pode usar nas ferramentas.`);
       setDrafts((d) => ({ ...d, [service]: '' }));
       await load();
     } catch (e) {
-      flash('err', (e as Error).message);
+      flash('err', toFriendlyMessage(e, 'Não consegui salvar a chave agora. Tente de novo em instantes.'));
     } finally {
       setBusy((b) => ({ ...b, [service]: false }));
     }
   }
 
   async function clear(service: Service) {
-    if (!window.confirm(`Remover chave ${service}?`)) return;
+    if (
+      !window.confirm(
+        `Remover a chave ${DA_CHAVE[service]}? O que depende dela para de funcionar até você colar outra.`,
+      )
+    )
+      return;
     setBusy((b) => ({ ...b, [service]: true }));
     try {
       const res = await fetch('/api/user/secrets', {
@@ -209,11 +240,11 @@ export default function ApiKeysPage() {
         body: JSON.stringify({ service }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Falha.');
-      flash('ok', `Chave ${service} removida.`);
+      if (!res.ok) throw new FriendlyError(json.error || 'Não consegui remover a chave agora. Tente de novo em instantes.');
+      flash('ok', `Chave ${DA_CHAVE[service]} removida.`);
       await load();
     } catch (e) {
-      flash('err', (e as Error).message);
+      flash('err', toFriendlyMessage(e, 'Não consegui remover a chave agora. Tente de novo em instantes.'));
     } finally {
       setBusy((b) => ({ ...b, [service]: false }));
     }
@@ -224,8 +255,8 @@ export default function ApiKeysPage() {
       <Header />
       <main className="container-app flex-1 py-10">
         <ToolShell
-          title="API Keys"
-          description="Cada usuario do DARKO LAB paga as proprias chamadas de IA. Configure suas chaves abaixo — elas sao cifradas no servidor e nunca compartilhadas. Sem chave configurada, a ferramenta correspondente nao funciona."
+          title="Chaves de IA"
+          description="Aqui você cola as chaves das suas contas de IA. Cada ferramenta usa a sua própria chave, e o uso é cobrado direto pelo serviço. As chaves ficam cifradas no servidor: depois de salvas, só aparecem os 4 últimos dígitos."
         >
           <div className="mb-4 flex items-center gap-3">
             <Link href="/configuracoes" className="btn-ghost text-xs">
@@ -250,7 +281,13 @@ export default function ApiKeysPage() {
               return (
                 <div
                   key={m.id}
-                  className="rounded-[12px] border border-line bg-bg p-4"
+                  id={`chave-${m.id}`}
+                  className={
+                    'scroll-mt-24 rounded-[12px] border bg-bg p-4 transition-[border-color,box-shadow] duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ' +
+                    (foco === m.id
+                      ? 'border-amber/60 shadow-[0_0_0_3px_rgb(var(--amber)/0.18)]'
+                      : 'border-line')
+                  }
                 >
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -264,7 +301,7 @@ export default function ApiKeysPage() {
                           </span>
                         ) : (
                           <span className="label-tech rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
-                            NAO CONFIGURADA
+                            NÃO CONFIGURADA
                           </span>
                         )}
                       </div>
@@ -397,13 +434,13 @@ export default function ApiKeysPage() {
               </span>
               <div>
                 <div className="text-sm font-semibold text-lime">
-                  Suas chaves estao protegidas
+                  Suas chaves estão protegidas
                 </div>
                 <p className="mt-1 text-xs text-text-muted">
-                  Ninguem ve suas chaves alem de voce — nem o administrador,
-                  nem outros usuarios. Os creditos que cada ferramenta
-                  consome saem direto da sua conta na API
-                  correspondente.
+                  Elas ficam cifradas no servidor e não aparecem pra ninguém
+                  no app, nem pra outros usuários: depois de salvas, até pra
+                  você só aparecem os 4 últimos dígitos. O que cada ferramenta
+                  consome sai direto da sua conta no serviço da chave.
                 </p>
               </div>
             </div>

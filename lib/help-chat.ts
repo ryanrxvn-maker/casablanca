@@ -2,12 +2,12 @@
  * CHAT DE AJUDA (07.10) — lógica pura do mini chat do canto da tela.
  *
  * O chat NÃO responde nada sozinho: ele só organiza o pedido da pessoa
- * (assunto + o que aconteceu + quem é + onde estava) numa mensagem pronta e
+ * (quem é + assunto + o que aconteceu) numa mensagem pronta e
  * entrega um link do WhatsApp do suporte com ela já escrita. Quem atende é
  * gente, no WhatsApp. Tudo aqui é sem DOM pra poder ser testado em node
  * (lib/help-chat.test.ts).
  */
-import { historyToolLabel } from './history-tools';
+import { HISTORY_TOOLS, historyToolLabel } from './history-tools';
 
 /** Número do suporte (o mesmo do antigo botão verde do WhatsApp). */
 export const SUPPORT_WHATSAPP = '5534991262437';
@@ -21,8 +21,6 @@ export type HelpTopic = {
   id: HelpTopicId;
   /** texto do botão de sugestão */
   label: string;
-  /** como o assunto entra na frase da mensagem (completa "Estou ..."/"Tenho ...") */
-  frase: string;
   /** respostas rápidas depois de escolher o assunto */
   rapidas: string[];
 };
@@ -31,25 +29,21 @@ export const HELP_TOPICS: HelpTopic[] = [
   {
     id: 'conta',
     label: 'Problemas com a conta',
-    frase: 'Estou com um problema na minha conta',
     rapidas: ['Não consigo entrar', 'Não recebi o e-mail de confirmação', 'Quero trocar meu e-mail'],
   },
   {
     id: 'ferramenta',
     label: 'Erro em alguma ferramenta',
-    frase: 'Estou com um erro em uma ferramenta',
     rapidas: ['Travou no processamento', 'Deu erro ao enviar o arquivo', 'O download não funcionou'],
   },
   {
     id: 'duvida',
     label: 'Dúvidas de como usar',
-    frase: 'Tenho uma dúvida de como usar o site',
     rapidas: ['Por onde eu começo?', 'Qual ferramenta serve pro meu caso?'],
   },
   {
     id: 'pagamento',
     label: 'Planos e pagamento',
-    frase: 'Preciso de ajuda com plano ou pagamento',
     rapidas: ['Paguei e não liberou', 'Quero mudar de plano', 'Quero cancelar'],
   },
 ];
@@ -66,22 +60,6 @@ export function toolFromPath(pathname: string | null | undefined): string | null
   const label = historyToolLabel(slug);
   // slug sem nome cadastrado (ex.: /tools/historico) não vira "ferramenta"
   return label && label !== slug ? label : null;
-}
-
-const PAGINAS: Record<string, string> = {
-  '/': 'Página inicial',
-  '/tools': 'Início das ferramentas',
-  '/login': 'Login',
-  '/register': 'Cadastro',
-  '/planos': 'Planos',
-  '/configuracoes': 'Configurações',
-  '/tools/historico': 'Histórico',
-};
-
-/** Nome legível da página onde a pessoa estava quando pediu ajuda. */
-export function pageLabelFor(pathname: string | null | undefined): string {
-  const p = (pathname || '/').replace(/[?#].*$/, '').replace(/\/+$/, '') || '/';
-  return toolFromPath(p) ?? PAGINAS[p] ?? (p.startsWith('/configuracoes') ? 'Configurações' : p);
 }
 
 /** Pergunta que o chat faz depois que a pessoa escolhe o assunto. */
@@ -109,8 +87,9 @@ const sem = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCas
 export function detectTopic(texto: string): HelpTopicId | null {
   const t = sem(texto);
   if (/\b(pag(o|ou|uei|ar|amento)|plano|assinatura|cobr|cartao|pix|boleto|reembols|cancel|fatura|premium|upgrade)/.test(t)) return 'pagamento';
-  if (/\b(senha|login|logar|entrar|acess(o|ar)|conta|cadastr|e-?mail|confirma)/.test(t)) return 'conta';
-  if (/\b(erro|bug|trav|falh|nao (funciona|carrega|baixa|abre|gera|processa)|parou|quebr|deu ruim|crash)/.test(t)) return 'ferramenta';
+  // "acesso" sozinho fica de fora: "não consigo acessar o lipsync" é ferramenta
+  if (/\b(senha|login|logar|entrar|conta\b|cadastr|e-?mail|confirma)/.test(t)) return 'conta';
+  if (/\b(erro|bug|trav|falh|nao (funciona|carrega|baixa|abre|gera|processa|consigo)|acess|parou|quebr|deu ruim|crash)/.test(t)) return 'ferramenta';
   if (/\b(como|duvida|usar|uso|tutorial|onde|qual|serve)/.test(t)) return 'duvida';
   return null;
 }
@@ -131,61 +110,81 @@ export function cleanText(s: string): string {
     .slice(0, MAX_DESCRICAO);
 }
 
-/** "Não consigo entrar" → "não consigo entrar." para caber depois dos dois-pontos. */
-function comoContinuacao(desc: string): string {
+/** Relato depois de um rótulo: "travou no processamento" → "Travou no processamento." */
+function comoRelato(desc: string): string {
   let d = desc.trim();
-  // só abaixa a 1ª letra de palavra comum ("Travou" → "travou", "O download" →
-  // "o download"); sigla e nome próprio com 2 maiúsculas ficam ("PIX", "HeyGen")
-  if (/^\p{Lu}(\p{Ll}|\s|$)/u.test(d) && !/^\S*\p{Lu}\S*\p{Lu}/u.test(d.split(/\s/)[0] ?? '')) {
-    d = d[0].toLowerCase() + d.slice(1);
-  }
-  if (!/[.!?…)]$/.test(d)) d += '.';
+  if (/^\p{Ll}/u.test(d)) d = d[0].toUpperCase() + d.slice(1);
+  if (!/[.!?…)"]$/.test(d)) d += '.';
   return d;
 }
+
+/** Ferramenta citada no relato, pelo nome que a pessoa vê (o nome mais longo vence). */
+export function toolMentioned(texto: string): string | null {
+  const t = ` ${sem(texto).replace(/[^a-z0-9]+/g, ' ')} `;
+  const labels = HISTORY_TOOLS.map((x) => x.label).sort((a, b) => b.length - a.length);
+  for (const label of labels) {
+    if (t.includes(` ${sem(label).replace(/[^a-z0-9]+/g, ' ').trim()} `)) return label;
+  }
+  return null;
+}
+
+const ASSUNTO: Record<HelpTopicId, string> = {
+  conta: 'Problema na conta',
+  ferramenta: 'Erro em uma ferramenta',
+  duvida: 'Dúvida de como usar',
+  pagamento: 'Plano e pagamento',
+};
 
 export type SupportMessageInput = {
   name?: string | null;
   email?: string | null;
   topic?: HelpTopicId | null;
   description: string;
+  /** página onde a pessoa estava: só serve pra saber a FERRAMENTA, não vai na mensagem */
   pathname?: string | null;
-  host?: string | null;
 };
 
 /**
- * A mensagem que a pessoa manda pro suporte no WhatsApp:
+ * A mensagem que a pessoa manda pro suporte no WhatsApp. Curta, educada e com
+ * tudo que o atendimento precisa pra agir sem perguntar de volta:
  *
- *   Olá! Meu nome é Ana e uso o Auto Edit (conta: ana@x.com).
+ *   Olá, suporte do Auto Edit! Meu nome é Ana.
  *
- *   Estou com um erro na ferramenta Legendas Automáticas: travou no processamento.
+ *   Conta: ana@x.com
+ *   Assunto: Erro na ferramenta Legendas Automáticas
+ *   O que aconteceu: Travou no processamento.
  *
- *   Página: Legendas Automáticas (darkoautoedit.com/tools/tipografia)
+ *   Podem me ajudar?
+ *
+ * Texto puro de propósito: o *negrito* do WhatsApp aparece com os asteriscos
+ * na caixa de texto antes de a pessoa enviar.
  */
 export function buildSupportMessage(i: SupportMessageInput): string {
   const name = (i.name || '').trim();
   const email = (i.email || '').trim();
-  const conta = email ? ` (conta: ${email})` : '';
-  const abertura = name
-    ? `Olá! Meu nome é ${name} e uso o Auto Edit${conta}.`
-    : email
-      ? `Olá! Uso o Auto Edit${conta}.`
-      : 'Olá! Vim pelo site do Auto Edit.';
-
-  const tool = toolFromPath(i.pathname);
-  const topic = topicById(i.topic);
-  let frase: string;
-  if (topic?.id === 'ferramenta' && tool) frase = `Estou com um erro na ferramenta ${tool}`;
-  else if (topic) frase = topic.frase;
-  else frase = 'Preciso de ajuda';
-
   const desc = cleanText(i.description);
-  const corpo = desc ? `${frase}: ${comoContinuacao(desc)}` : `${frase}.`;
+  const topic = topicById(i.topic);
 
-  const path = (i.pathname || '/').replace(/[?#].*$/, '');
-  const host = (i.host || 'darkoautoedit.com').replace(/^www\./, '');
-  const pagina = `Página: ${pageLabelFor(path)} (${host}${path === '/' ? '' : path})`;
+  let assunto = topic ? ASSUNTO[topic.id] : null;
+  if (topic?.id === 'ferramenta') {
+    // a ferramenta citada no relato manda; senão, a da página, a menos que a
+    // pessoa tenha respondido "não" ao "Foi na ferramenta X?"
+    const negou = /^n(a|ã)o\b/i.test(desc);
+    const tool = toolMentioned(desc) ?? (negou ? null : toolFromPath(i.pathname));
+    if (tool) assunto = `Erro na ferramenta ${tool}`;
+  }
 
-  return [abertura, corpo, pagina].join('\n\n');
+  const dados: string[] = [];
+  if (email) dados.push(`Conta: ${email}`);
+  if (assunto) dados.push(`Assunto: ${assunto}`);
+  if (desc) {
+    const rotulo = topic?.id === 'duvida' ? 'Minha dúvida' : 'O que aconteceu';
+    const relato = comoRelato(desc);
+    dados.push(relato.includes('\n') ? `${rotulo}:\n${relato}` : `${rotulo}: ${relato}`);
+  }
+
+  const abertura = name ? `Olá, suporte do Auto Edit! Meu nome é ${name}.` : 'Olá, suporte do Auto Edit!';
+  return [abertura, dados.join('\n'), 'Podem me ajudar?'].filter(Boolean).join('\n\n');
 }
 
 /** Link do WhatsApp do suporte com a mensagem já escrita. */
