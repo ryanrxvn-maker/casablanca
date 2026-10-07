@@ -132,15 +132,20 @@ async function gateError(res: Response): Promise<NextResponse> {
   let error = 'Não consegui liberar essa ferramenta agora.';
   let showConfig = false;
   try {
-    const j = (await res.clone().json()) as { error?: string; missingKey?: string };
+    const j = (await res.clone().json()) as {
+      error?: string;
+      missingKey?: string;
+      unreadableKey?: string;
+    };
     if (typeof j?.error === 'string' && j.error.trim()) error = j.error;
-    if (j?.missingKey) showConfig = true;
+    if (j?.missingKey || j?.unreadableKey) showConfig = true;
   } catch {
     /* corpo não-JSON: fica a mensagem padrão */
   }
-  // Chave ausente (400 com missingKey) e chave corrompida (500) mandam o
-  // cliente pra /configuracoes/api — nos dois casos o banner de chave resolve.
-  if (!showConfig && /configuracoes/i.test(error)) showConfig = true;
+  // Chave ausente (missingKey) e chave ilegível (unreadableKey) mandam o
+  // cliente pra Chaves IA — nos dois casos o banner de chave resolve. O texto
+  // é o reserva pra resposta antiga ("…em /configuracoes/api…").
+  if (!showConfig && /configura[cç][oõ]es/i.test(error)) showConfig = true;
   return fail(showConfig ? { error, showConfig: true } : { error }, res.status);
 }
 

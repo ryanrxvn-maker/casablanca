@@ -21,6 +21,7 @@
  */
 
 import { LlmError } from './anthropic';
+import { avisoChaveNaoAceita } from '../key-errors';
 
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
@@ -324,8 +325,13 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
     readBudget(args.apiKey, model, res.headers);
 
     if (res.status === 401 || res.status === 403) {
+      // 401 prova chave ruim; 403 é o Groq barrando a CONTA (região/organização),
+      // e aí culpar a chave seria mentira. Status fica 401 nos dois: quem chama
+      // trata como fatal e mostra o atalho pra Chaves de IA.
       throw new LlmError(
-        'Sua chave de Transcrição (Groq) não foi aceita pela IA de texto. Confira em Configurações → API.',
+        res.status === 401
+          ? avisoChaveNaoAceita('groq')
+          : 'O Groq não liberou o acesso da sua conta a esse recurso. Confira a sua conta no site do Groq e tente de novo.',
         { status: 401, showConfig: true },
       );
     }
@@ -347,7 +353,8 @@ export async function groqStructuredMessage<T>(args: GroqStructuredArgs): Promis
         await sleep(espera * 1000, args.signal);
         continue;
       }
-      throw new LlmError('A IA gratuita está no limite por minuto. Espere um pouco e clique em Retomar.', {
+      // O limite do Groq pode ser por minuto, hora ou dia: o aviso não promete prazo.
+      throw new LlmError('Sua conta no Groq atingiu o limite de uso do plano por enquanto. Espere um pouco e clique em Retomar.', {
         status: 429,
         retryAfterSec: espera,
       });

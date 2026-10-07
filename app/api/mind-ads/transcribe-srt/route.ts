@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { AVISO_SEM_FALA, explicarFalhaTranscricao } from '@/lib/key-errors';
 import { requireTier } from '@/lib/require-tier';
 import {
   buildSrtFromCopyAndWords,
@@ -65,6 +66,11 @@ export async function POST(req: Request) {
     if (!(audio instanceof File)) return jsonError('Audio ausente.', 400);
     if (!copyText) return jsonError('Copy ausente.', 400);
 
+    // Motivo de cada provedor que falhou ("groq: …"), pro aviso em português
+    // dizer a causa real (chave faltando, não aceita, sem crédito, sem fala).
+    const errors: string[] = [];
+    const msgDe = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
     // Tenta Groq primeiro se solicitado
     if (provider === 'groq') {
       try {
@@ -77,12 +83,29 @@ export async function POST(req: Request) {
         });
       } catch (e) {
         console.warn('[transcribe-srt] Groq falhou, tentando AssemblyAI:', e);
+        errors.push(`groq: ${msgDe(e)}`);
         // Fallback automatico
       }
     }
 
     // AssemblyAI (premium ou fallback)
-    const result = await transcribeViaAssemblyAI(audio);
+    let result: Word[];
+    try {
+      result = await transcribeViaAssemblyAI(audio);
+    } catch (e) {
+      console.warn('[transcribe-srt] AssemblyAI falhou:', e);
+      errors.push(`assemblyai: ${msgDe(e)}`);
+      return jsonError(
+        explicarFalhaTranscricao(
+          errors,
+          provider === 'groq' ? ['groq', 'assemblyai'] : ['assemblyai'],
+        ),
+        502,
+        errors.join(' | '),
+      );
+    }
+    // Transcrição certa e vazia = áudio sem voz (não devolve SRT em branco).
+    if (result.length === 0) return jsonError(AVISO_SEM_FALA, 422);
     const srt = buildSrtFromCopyAndWords(copyText, result, style);
     return NextResponse.json({
       srt,
@@ -92,7 +115,7 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error('[mind-ads transcribe-srt]', e);
     return jsonError(
-      'Erro inesperado.',
+      'Não consegui gerar o SRT agora. Tente de novo em instantes.',
       500,
       e instanceof Error ? e.message : String(e),
     );
@@ -160,7 +183,7 @@ async function transcribeViaAssemblyAI(audio: File): Promise<Word[]> {
   });
   if (!uploadRes.ok) {
     const t = await uploadRes.text().catch(() => '');
-    throw new Error(`AssemblyAI upload falhou: ${t.slice(0, 200)}`);
+    throw new Error(`AssemblyAI upload falhou: ${uploadRes.status} ${t.slice(0, 200)}`);
   }
   const { upload_url } = (await uploadRes.json()) as { upload_url: string };
 
@@ -180,7 +203,7 @@ async function transcribeViaAssemblyAI(audio: File): Promise<Word[]> {
   });
   if (!trRes.ok) {
     const t = await trRes.text().catch(() => '');
-    throw new Error(`AssemblyAI transcript falhou: ${t.slice(0, 200)}`);
+    throw new Error(`AssemblyAI transcript falhou: ${trRes.status} ${t.slice(0, 200)}`);
   }
   const { id: transcriptId } = (await trRes.json()) as { id: string };
 

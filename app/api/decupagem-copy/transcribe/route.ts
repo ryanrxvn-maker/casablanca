@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireTier } from '@/lib/require-tier';
 import { transcribeAudio } from '@/lib/transcribe';
+import { explicarFalhaTranscricao } from '@/lib/key-errors';
 
 /**
  * POST /api/decupagem-copy/transcribe
@@ -52,7 +53,11 @@ export async function POST(req: Request) {
     });
 
     if (words.length === 0) {
-      return jsonError('Falha na transcricao.', 502, errors.join(' | '));
+      return jsonError(
+        explicarFalhaTranscricao(errors, ['assemblyai', 'groq']),
+        502,
+        errors.join(' | '),
+      );
     }
 
     return NextResponse.json({

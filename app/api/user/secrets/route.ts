@@ -64,7 +64,7 @@ export async function GET() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return jsonError('Nao autenticado.', 401);
+    if (!user) return jsonError('Sua sessão expirou. Entre de novo e tente outra vez.', 401);
 
     const { data, error } = await supabase
       .from('user_api_keys')
@@ -74,7 +74,7 @@ export async function GET() {
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (error) return jsonError('Falha ao ler.', 500, error.message);
+    if (error) return jsonError('Não consegui carregar suas chaves agora. Recarregue a página.', 500, error.message);
 
     return NextResponse.json({
       anthropic: {
@@ -112,7 +112,7 @@ export async function GET() {
   } catch (e) {
     console.error('[user/secrets GET]', e);
     return jsonError(
-      'Erro inesperado.',
+      'Algo deu errado aqui. Tente de novo em instantes.',
       500,
       e instanceof Error ? e.message : String(e),
     );
@@ -125,25 +125,25 @@ export async function PUT(req: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return jsonError('Nao autenticado.', 401);
+    if (!user) return jsonError('Sua sessão expirou. Entre de novo e tente outra vez.', 401);
 
     let body: { service?: Service; key?: string };
     try {
       body = await req.json();
     } catch {
-      return jsonError('JSON invalido.', 400);
+      return jsonError('Não consegui ler o pedido. Recarregue a página e tente de novo.', 400);
     }
 
     const service = body.service;
     const key = String(body.key ?? '').trim();
     if (!service || !VALID_SERVICES.includes(service)) {
-      return jsonError('Service invalido.', 400);
+      return jsonError('Não consegui ler o pedido. Recarregue a página e tente de novo.', 400);
     }
     if (key.length < 10) {
-      return jsonError('Chave parece muito curta.', 400);
+      return jsonError('Essa chave parece curta demais. Confira se você copiou ela inteira.', 400);
     }
     if (key.length > 500) {
-      return jsonError('Chave parece grande demais.', 400);
+      return jsonError('Essa chave parece longa demais. Confira se colou só a chave, sem outro texto junto.', 400);
     }
 
     let cipher: string;
@@ -152,7 +152,7 @@ export async function PUT(req: Request) {
     } catch (e) {
       console.error('[user/secrets PUT encrypt]', e);
       return jsonError(
-        'Servidor sem SECRETS_ENCRYPTION_KEY configurada.',
+        'Não consegui guardar a chave com segurança agora. Tente de novo em instantes; se repetir, fale com o suporte.',
         500,
       );
     }
@@ -171,13 +171,13 @@ export async function PUT(req: Request) {
       .from('user_api_keys')
       .upsert(payload, { onConflict: 'user_id' });
 
-    if (error) return jsonError('Falha ao salvar.', 500, error.message);
+    if (error) return jsonError('Não consegui salvar a chave agora. Tente de novo em instantes.', 500, error.message);
 
     return NextResponse.json({ ok: true, service, last4 });
   } catch (e) {
     console.error('[user/secrets PUT]', e);
     return jsonError(
-      'Erro inesperado.',
+      'Algo deu errado aqui. Tente de novo em instantes.',
       500,
       e instanceof Error ? e.message : String(e),
     );
@@ -190,18 +190,18 @@ export async function DELETE(req: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return jsonError('Nao autenticado.', 401);
+    if (!user) return jsonError('Sua sessão expirou. Entre de novo e tente outra vez.', 401);
 
     let body: { service?: Service };
     try {
       body = await req.json();
     } catch {
-      return jsonError('JSON invalido.', 400);
+      return jsonError('Não consegui ler o pedido. Recarregue a página e tente de novo.', 400);
     }
 
     const service = body.service;
     if (!service || !VALID_SERVICES.includes(service)) {
-      return jsonError('Service invalido.', 400);
+      return jsonError('Não consegui ler o pedido. Recarregue a página e tente de novo.', 400);
     }
 
     const colKey = COL_KEY[service];
@@ -212,12 +212,12 @@ export async function DELETE(req: Request) {
       .update({ [colKey]: null, [colLast4]: null })
       .eq('user_id', user.id);
 
-    if (error) return jsonError('Falha ao limpar.', 500, error.message);
+    if (error) return jsonError('Não consegui remover a chave agora. Tente de novo em instantes.', 500, error.message);
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error('[user/secrets DELETE]', e);
     return jsonError(
-      'Erro inesperado.',
+      'Algo deu errado aqui. Tente de novo em instantes.',
       500,
       e instanceof Error ? e.message : String(e),
     );

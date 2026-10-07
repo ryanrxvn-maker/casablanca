@@ -2899,7 +2899,7 @@ function HeyGenAutoInner() {
             )
           ) : null}
 
-          <MissingKeyBanner services={['heygen']} />
+          <MissingKeyBanner services={['heygen']} uso="listar seus avatares e vozes do HeyGen" />
 
           <div className="mt-6 flex flex-col gap-6">
             {/* Identidade */}

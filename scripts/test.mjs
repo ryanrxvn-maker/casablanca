@@ -35,6 +35,7 @@ const ETAPAS = [
   { run: ["scripts/test-fakepass-export-guards.mjs"] },
   // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo
   { tsx: ["lib/pilot-formato.test.ts"] },
+  { tsx: ["lib/key-errors.test.ts"] },
   // lipsync video to video (07.10): todo trecho cabe nos dois tetos do motor (tempo e tamanho)
   { tsc: "lib/lipsync-chunk-plan.ts lib/lipsync-chunk-plan.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/lipsync-chunk-plan.test.js"] },
   // projeto editável: roteiro da pós → CapCut (draft 9.x) + Premiere (xmeml) + SRT

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createClient as createServiceClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecret } from '@/lib/secrets';
 import { cliMachineIdentity } from '@/lib/cli-auth';
+import { avisoChaveFaltando, avisoChaveIlegivel } from '@/lib/key-errors';
 
 /**
  * Resolve a chave de IA do usuario CHAMADOR pra um servico especifico.
@@ -34,16 +35,6 @@ const COLUMN_BY_SERVICE: Record<Service, string> = {
   heygen_oauth: 'heygen_oauth_refresh',
   replicate: 'replicate_key',
   groq: 'groq_key',
-};
-
-const LABEL_BY_SERVICE: Record<Service, string> = {
-  anthropic: 'Anthropic (Claude)',
-  assemblyai: 'AssemblyAI',
-  elevenlabs: 'ElevenLabs',
-  heygen: 'HeyGen',
-  heygen_oauth: 'HeyGen OAuth (refresh token)',
-  replicate: 'Replicate',
-  groq: 'Groq (Whisper)',
 };
 
 /**
@@ -86,7 +77,7 @@ export async function getUserKey(
       } = await supabase.auth.getUser();
       if (!user) {
         return {
-          response: NextResponse.json({ error: 'Nao autenticado.' }, { status: 401 }),
+          response: NextResponse.json({ error: 'Sua sessão expirou. Entre de novo e tente outra vez.' }, { status: 401 }),
         };
       }
       userId = user.id;
@@ -103,7 +94,7 @@ export async function getUserKey(
     if (error) {
       return {
         response: NextResponse.json(
-          { error: 'Falha ao ler suas chaves.', detail: error.message },
+          { error: 'Não consegui ler suas chaves agora. Tente de novo em instantes.', detail: error.message },
           { status: 500 },
         ),
       };
@@ -114,7 +105,7 @@ export async function getUserKey(
       return {
         response: NextResponse.json(
           {
-            error: `Configure sua chave ${LABEL_BY_SERVICE[service]} em /configuracoes/api antes de usar essa ferramenta.`,
+            error: avisoChaveFaltando(service),
             missingKey: service,
           },
           { status: 400 },
@@ -130,8 +121,9 @@ export async function getUserKey(
       return {
         response: NextResponse.json(
           {
-            error:
-              'Sua chave esta corrompida ou foi cifrada com outra senha. Reconfigure em /configuracoes/api.',
+            error: avisoChaveIlegivel(service),
+            // Mesmo destino do missingKey: a tela leva o cliente pra Chaves de IA.
+            unreadableKey: service,
           },
           { status: 500 },
         ),
@@ -144,7 +136,7 @@ export async function getUserKey(
     return {
       response: NextResponse.json(
         {
-          error: 'Erro inesperado ao recuperar sua chave.',
+          error: 'Não consegui ler suas chaves agora. Tente de novo em instantes.',
           detail: e instanceof Error ? e.message : String(e),
         },
         { status: 500 },

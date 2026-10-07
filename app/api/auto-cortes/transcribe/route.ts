@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireToolAccess } from '@/lib/require-tier';
 import { transcribeAudio } from '@/lib/transcribe';
+import { explicarFalhaTranscricao } from '@/lib/key-errors';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -58,13 +59,16 @@ export async function POST(req: Request) {
   });
 
   if (words.length === 0) {
-    // O primeiro erro costuma ser o de chave ausente (o MissingKeyBanner do
-    // client já orienta); devolvemos o motivo curto pra não ficar cego.
+    // Motivo em português pro cliente (chave faltando, não aceita, sem
+    // crédito, trecho sem fala); o erro cru vai só no `detail`.
     return NextResponse.json(
       {
-        error:
-          'Não consegui transcrever esse pedaço agora. ' +
-          (errors[0] ? `(${errors[0].slice(0, 140)})` : 'Tenta de novo em instantes.'),
+        error: explicarFalhaTranscricao(
+          errors,
+          ['groq', 'assemblyai'],
+          'Não consegui transcrever esse pedaço agora. Tente de novo em instantes.',
+        ),
+        detail: errors.join(' | ').slice(0, 500),
       },
       { status: 502 },
     );

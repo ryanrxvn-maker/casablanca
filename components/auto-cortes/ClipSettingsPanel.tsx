@@ -195,7 +195,10 @@ export function ClipSettingsPanel({
 
   return (
     <div className="space-y-5">
-      <MissingKeyBanner services={['groq']} />
+      <MissingKeyBanner
+        services={['groq']}
+        uso="transcrever o vídeo e escolher os melhores cortes"
+      />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Row label="Proporção">

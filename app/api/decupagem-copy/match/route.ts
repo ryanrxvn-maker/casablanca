@@ -5,6 +5,7 @@ import {
   extractVocabHints,
 } from '@/lib/decupagem-matcher';
 import { transcribeAudio, type TranscribeProvider } from '@/lib/transcribe';
+import { explicarFalhaTranscricao } from '@/lib/key-errors';
 
 /**
  * POST /api/decupagem-copy/match
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
 
     if (words.length === 0) {
       return jsonError(
-        'Falha na transcricao. Configure Groq ou AssemblyAI em /configuracoes/api.',
+        explicarFalhaTranscricao(errors, ['assemblyai', 'groq']),
         502,
         errors.join(' | '),
       );
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
     const cuts = matchCopyWindowed(copyText, words);
     if (cuts.length === 0) {
       return jsonError(
-        'Nao consegui alinhar nenhuma frase. Confira se a copy bate com o video.',
+        'Não achei no vídeo nenhuma frase da copy. Confira se a copy colada é a mesma que foi falada no vídeo.',
         422,
       );
     }

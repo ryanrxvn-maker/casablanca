@@ -570,7 +570,10 @@ function DecupagemCopyInner() {
       <div className="flex flex-col gap-5">
         {/* provider 'auto': AssemblyAI primeiro, Groq de fallback — uma das
             duas basta. */}
-        <MissingKeyBanner services={[['assemblyai', 'groq']]} />
+        <MissingKeyBanner
+          services={[['assemblyai', 'groq']]}
+          uso="transcrever o vídeo e achar cada frase da copy"
+        />
 
         <ToolStep n={1} icon={<IconStepUpload size={18} />} title="Vídeo bruto" hint="MP4, MOV, WEBM, MKV — até 800MB e 40min" hue={HUE}>
           <FileUpload
