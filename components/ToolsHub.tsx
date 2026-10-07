@@ -2,7 +2,7 @@
 import { famousHeyGratis, famousHeyDiasRestantes } from '@/lib/famous-hey-trial';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
@@ -61,8 +61,9 @@ type ToolEntry = {
   poster?: string;
 };
 
-// DESTAQUES — 3 carros-chefe em cards de VÍDEO (estilo HeyGen): o vídeo só
-// roda quando o mouse passa em cima, e aí revela a copy da ferramenta.
+// DESTAQUES — cards de VÍDEO (estilo HeyGen): o vídeo só roda quando o mouse
+// passa em cima, e aí revela a copy da ferramenta. Legendas Automáticas e
+// FakePrint têm card próprio (TipografiaFeaturedCard / FakePrintFeaturedCard).
 // ⚠ Só ferramentas acessíveis a CLIENTE aqui — nada de uso interno.
 const FEATURED: ToolEntry[] = [
   {
@@ -74,16 +75,6 @@ const FEATURED: ToolEntry[] = [
     badge: 'IA',
     video: '/cards/criar-avatar.mp4',
     poster: '/cards/criar-avatar.jpg',
-  },
-  {
-    href: '/tools/copy-srt',
-    label: 'Gerador de SRT',
-    description: 'Cole a copy, suba o áudio e a legenda sai alinhada palavra por palavra — pronta pra importar no editor.',
-    icon: <IconCopySRT size={28} />,
-    hue: 'rgba(196, 181, 253, 0.45)',
-    badge: 'IA',
-    video: '/cards/gerador-srt.mp4',
-    poster: '/cards/gerador-srt.jpg',
   },
 ];
 
@@ -245,8 +236,6 @@ export function ToolsHub() {
   const lockedFrom = params.get('from') || '';
   const lockedNeed = (params.get('need') as 'basic' | 'pro' | 'admin' | null) || null;
   const [isAdmin, setIsAdmin] = useState(false);
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('Todas');
   const [firstName, setFirstName] = useState<string>('');
   const [maintBypass, setMaintBypass] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -296,9 +285,6 @@ export function ToolsHub() {
     if (maintBypass) return undefined;
     return 'blocked';
   };
-
-  const categories: Record<string, string> = { fakepass:'Criar', tipografia:'Criar', lipsync:'Criar', 'copy-srt':'Criar', 'famous-hey':'Criar', 'auto-broll':'Criar', 'heygen-auto':'Criar', 'auto-cortes':'Editar', decupagem:'Editar', 'decupagem-copy':'Editar', camuflagem:'Editar', normalizador:'Editar', acelerador:'Editar', 'remover-elementos':'Editar', compressor:'Preparar', downloader:'Preparar', 'audio-split':'Preparar', 'separador-audio':'Preparar' };
-  const visibleTools = tools.filter(tool => (category === 'Todas' || (categories[tool.href.split('/').pop() || ''] || 'Automatizar') === category) && (tool.label+' '+tool.description).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(query.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()));
 
   const greeting = greetingFor(new Date(), firstName);
 
@@ -369,6 +355,7 @@ export function ToolsHub() {
               />
             ),
           )}
+          <FakePrintFeaturedCard delay={200} newsPremium={tier === 'free'} />
         </div>
       </section>
 
@@ -380,23 +367,13 @@ export function ToolsHub() {
           sub="Cortes, ajustes, arquivos e IA — sem espera."
           delay={300}
         />
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <label className="w-full sm:ml-auto sm:w-[280px]">
-            <span className="sr-only">Encontrar ferramenta</span>
-            <input type="search" className="input-field" placeholder="Encontrar ferramenta…" value={query} onChange={event => setQuery(event.target.value)} />
-          </label>
-          <div className="flex w-full flex-wrap gap-2" role="group" aria-label="Filtrar por etapa">
-            {['Todas', 'Criar', 'Editar', 'Preparar', ...(tools.some(tool => !categories[tool.href.split('/').pop() || '']) ? ['Automatizar'] : [])].map(item => (
-              <button key={item} type="button" className="ae-filter-button" aria-pressed={category === item} onClick={() => setCategory(item)}>{item}</button>
-            ))}
-          </div>
-        </div>
-        {visibleTools.length === 0 && <div className="mt-6 text-sm text-text-muted" role="status">Nenhuma ferramenta encontrada. <button type="button" className="btn-ghost" onClick={() => { setQuery(''); setCategory('Todas'); }}>Limpar filtros</button></div>}
+        {/* Sem busca nem filtro aqui: a busca global (Pesquisar, no topo) já
+            acha qualquer ferramenta. */}
         <div
           className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 fade-in-up"
           style={{ animationDelay: '340ms' }}
         >
-          {visibleTools.map((it, i) => (
+          {tools.map((it, i) => (
             <ToolCard
               key={it.href}
               entry={it}
@@ -1257,8 +1234,9 @@ function FakePrintSlide({ newsPremium }: { newsPremium: boolean }) {
   );
 }
 
-/** Relógio real da transmissão (HH:MM:SS ao vivo). */
-function BroadcastClock() {
+/** Relógio real da transmissão (HH:MM:SS ao vivo). `className` troca a pele
+ *  (o card de destaque usa uma versão menor, colada no selo AO VIVO). */
+function BroadcastClock({ className }: { className?: string } = {}) {
   const [now, setNow] = useState<string>('');
   useEffect(() => {
     const tick = () =>
@@ -1275,7 +1253,10 @@ function BroadcastClock() {
   }, []);
   return (
     <span
-      className="num rounded-[5px] bg-black/60 px-2 py-1 text-[11px] font-bold tabular-nums text-white/90 backdrop-blur-sm"
+      className={
+        'num tabular-nums ' +
+        (className ?? 'rounded-[5px] bg-black/60 px-2 py-1 text-[11px] font-bold text-white/90 backdrop-blur-sm')
+      }
       style={{ fontFamily: 'var(--font-mono)' }}
     >
       {now || '--:--:--'}
@@ -1884,6 +1865,296 @@ function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; lock
         />
       </Link>
     </div>
+  );
+}
+
+/**
+ * Card de DESTAQUE do FakePrint: uma vinheta de PLANTÃO desenhada em código
+ * (telão de LED + globo + GC + letreiro), no lugar de vídeo gravado. Não usa a
+ * foto do repórter porque ela já é o herói do carrossel logo acima.
+ * Mesma casca dos outros destaques: GC no lugar do título, painel no hover,
+ * borda conic acesa.
+ *
+ * `newsPremium`: no Free o FakePrint abre (prints de rede social), mas os
+ * modelos de telejornal e de site de notícia são Premium — o card avisa.
+ */
+function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPremium: boolean }) {
+  return (
+    <div
+      className="dark-island featured-card-wrap fade-in-up relative z-0 hover:z-20"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <Link
+        href="/tools/fakepass"
+        className="group relative block overflow-hidden rounded-[20px] border border-line/70 bg-[#05070d] transition-all duration-300 hover:border-[rgba(255,59,59,0.45)] hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
+      >
+        <div className="relative aspect-video w-full overflow-hidden">
+          {/* CENÁRIO — estúdio azul-noite com flare vermelho; zoom lento no hover */}
+          <div
+            aria-hidden
+            className="absolute inset-0 transition-transform duration-[1600ms] ease-out group-hover:scale-[1.06]"
+            style={{ transform: 'translateZ(0)', willChange: 'transform' }}
+          >
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  'radial-gradient(70% 95% at 76% 36%, rgba(37,99,235,0.42), transparent 62%), radial-gradient(60% 75% at 0% 100%, rgba(204,0,0,0.32), transparent 62%), linear-gradient(165deg, #0a1430 0%, #060a18 50%, #040408 100%)',
+              }}
+            />
+            {/* Telão de LED: matriz de pontos, acesa atrás do globo */}
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundImage: 'radial-gradient(rgba(191,219,254,0.30) 0.7px, transparent 1.2px)',
+                backgroundSize: '5px 5px',
+                WebkitMaskImage: 'radial-gradient(58% 78% at 74% 40%, #000 0%, transparent 78%)',
+                maskImage: 'radial-gradient(58% 78% at 74% 40%, #000 0%, transparent 78%)',
+              }}
+            />
+            {/* Faixas de luz do cenário */}
+            <div
+              className="absolute inset-x-0 top-[40%] h-px"
+              style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(147,197,253,0.4) 36%, rgba(255,255,255,0.8) 64%, rgba(147,197,253,0.3) 84%, transparent 100%)' }}
+            />
+            <div
+              className="absolute inset-x-0 top-[43%] h-px"
+              style={{ background: 'linear-gradient(90deg, transparent 12%, rgba(255,59,59,0.4) 56%, transparent 92%)' }}
+            />
+            <FakePrintGlobe />
+          </div>
+
+          {/* Scanlines de transmissão + vinhetas de legibilidade */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[0.06] mix-blend-overlay"
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(to bottom, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0.5) 1px, transparent 1px, transparent 3px)',
+            }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(to top, rgba(2,2,6,0.78) 0%, rgba(2,2,6,0.22) 38%, transparent 60%), linear-gradient(to bottom, rgba(2,2,6,0.45) 0%, transparent 30%)',
+            }}
+          />
+
+          {/* Topo: ícone + selo AO VIVO com relógio real */}
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3.5">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-110"
+              style={{ boxShadow: '0 0 26px -4px rgba(255,59,59,0.5)' }}
+            >
+              <IconFakePass size={28} />
+            </span>
+            <div className="flex items-center gap-1.5">
+              {newsPremium ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/55 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-white/90 backdrop-blur-md"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  <LockIcon size={10} /> Premium
+                </span>
+              ) : null}
+              <span className="flex items-stretch overflow-hidden rounded-[5px] shadow-[0_4px_16px_-4px_rgba(204,0,0,0.75)]">
+                <span className="flex items-center gap-1.5 bg-[#cc0000] px-1.5 py-[3px]">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="ae-ambient absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-80" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                  </span>
+                  <span
+                    className="text-[9px] font-black uppercase tracking-[0.16em] text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Ao vivo
+                  </span>
+                </span>
+                <BroadcastClock className="flex items-center bg-black/75 px-1.5 text-[9.5px] font-bold text-white/90" />
+              </span>
+            </div>
+          </div>
+
+          {/* GC — a tarja de identificação do telejornal É o título do card */}
+          <div className="absolute bottom-[27px] left-3.5 z-10 w-[74%] transition-transform duration-300 group-hover:-translate-y-0.5">
+            <span
+              className="inline-flex items-center rounded-t-[3px] bg-[#cc0000] px-1.5 py-[2px] text-[8.5px] font-black uppercase leading-none tracking-[0.2em] text-white"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Plantão
+            </span>
+            <div className="relative overflow-hidden rounded-tr-[4px] bg-white shadow-[0_14px_34px_-10px_rgba(0,0,0,0.9)]">
+              <h3
+                className="relative px-2.5 py-[5px] text-[18px] font-black leading-[1.05] text-[#0b0b0f]"
+                style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+              >
+                FakePrint
+              </h3>
+              <span aria-hidden className="fpf-sheen pointer-events-none absolute inset-0" />
+            </div>
+            <div className="truncate rounded-b-[4px] bg-[#0b1a3a]/95 px-2.5 py-[3px] text-[10px] font-semibold leading-tight text-white/90">
+              Telejornal pronto em segundos
+            </div>
+          </div>
+
+          {/* Letreiro rolando, colado no rodapé da tela */}
+          <div className="absolute inset-x-0 bottom-0 z-10 flex h-[19px] items-stretch overflow-hidden">
+            <span
+              className="flex shrink-0 items-center bg-[#cc0000] pl-3 pr-2 text-[8.5px] font-black uppercase tracking-[0.16em] text-white"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Urgente
+            </span>
+            <div className="relative flex-1 overflow-hidden bg-[#05070d]/90">
+              <div className="fpf-ticker ae-ambient flex h-full w-max items-center whitespace-nowrap">
+                {[0, 1].map((i) => (
+                  <span
+                    key={i}
+                    aria-hidden={i === 1}
+                    className="px-3 text-[9px] font-bold uppercase tracking-[0.14em] text-white/80"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Você escreve a notícia e o FakePrint monta o print · 16:9 e
+                    9:16 · Fundo verde pra chroma key · Pronto pra postar ·
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* PAINEL — abre ABAIXO da tela no hover (copy + botão) */}
+        <div
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
+          style={{ background: '#0b0b0f' }}
+        >
+          <div className="px-4 pb-4 pt-3.5">
+            <p className="text-[12.5px] leading-relaxed text-white/80">
+              Manchete de telejornal, GC e letreiro com a cara das grandes
+              emissoras, em 16:9 ou 9:16 e com fundo verde pra chroma. Também
+              faz prints de redes sociais.
+            </p>
+            {newsPremium ? (
+              <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-white/60">
+                <span className="mt-[4px] shrink-0"><LockIcon size={11} /></span>
+                <span>
+                  No seu plano, os prints de redes sociais estão liberados.
+                  Telejornal é Premium.
+                </span>
+              </p>
+            ) : null}
+            <span
+              className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Abrir ferramenta
+              <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Borda conic acende no hover — vermelho de plantão + azul do estúdio */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            padding: '1px',
+            background:
+              'conic-gradient(from var(--angle, 0deg), transparent 0%, rgba(255,59,59,0.55) 22%, transparent 50%, rgba(96,165,250,0.55) 78%, transparent 100%)',
+            WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+            WebkitMaskComposite: 'xor',
+            maskComposite: 'exclude',
+            animation: 'card-border-spin 6s linear infinite',
+          }}
+        />
+      </Link>
+
+      <style jsx>{`
+        /* Letreiro: só transform (GPU) e pausa no modo descanso (ae-ambient). */
+        .fpf-ticker {
+          animation: fpf-ticker-run 26s linear infinite;
+        }
+        @keyframes fpf-ticker-run {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        /* Brilho que cruza o GC uma vez a cada hover. */
+        .fpf-sheen {
+          background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.75) 50%, transparent 70%);
+          transform: translateX(-120%);
+        }
+        :global(.group:hover) .fpf-sheen {
+          transform: translateX(120%);
+          transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .fpf-ticker { animation: none !important; }
+          :global(.group:hover) .fpf-sheen { transition: none; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/** Globo wireframe do telão (vetor estático: o movimento fica no letreiro). */
+function FakePrintGlobe() {
+  const uid = useId().replace(/:/g, '');
+  const halo = `fpg-halo-${uid}`;
+  const sphere = `fpg-sphere-${uid}`;
+  const ring = `fpg-ring-${uid}`;
+  const clip = `fpg-clip-${uid}`;
+  return (
+    <svg
+      viewBox="0 0 200 200"
+      className="absolute right-[1%] top-[-8%]"
+      style={{ height: '112%', width: 'auto', aspectRatio: '1 / 1' }}
+      fill="none"
+    >
+      <defs>
+        <radialGradient id={halo} cx="50%" cy="50%" r="50%">
+          <stop offset="0.5" stopColor="#3b82f6" stopOpacity="0.32" />
+          <stop offset="1" stopColor="#3b82f6" stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id={sphere} cx="36%" cy="30%" r="78%">
+          <stop offset="0" stopColor="#60a5fa" stopOpacity="0.55" />
+          <stop offset="0.5" stopColor="#1d4ed8" stopOpacity="0.38" />
+          <stop offset="1" stopColor="#0b1430" stopOpacity="0.15" />
+        </radialGradient>
+        <linearGradient id={ring} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#ff3b3b" stopOpacity="0" />
+          <stop offset="0.55" stopColor="#ff3b3b" stopOpacity="0.9" />
+          <stop offset="1" stopColor="#ff3b3b" stopOpacity="0" />
+        </linearGradient>
+        <clipPath id={clip}>
+          <circle cx="100" cy="100" r="58" />
+        </clipPath>
+      </defs>
+      <circle cx="100" cy="100" r="96" fill={`url(#${halo})`} />
+      <circle cx="100" cy="100" r="58" fill={`url(#${sphere})`} />
+      <g clipPath={`url(#${clip})`} stroke="rgba(191,219,254,0.42)" strokeWidth="0.7">
+        <line x1="100" y1="40" x2="100" y2="160" />
+        <ellipse cx="100" cy="100" rx="16" ry="58" />
+        <ellipse cx="100" cy="100" rx="34" ry="58" />
+        <ellipse cx="100" cy="100" rx="49" ry="58" />
+        <line x1="40" y1="100" x2="160" y2="100" />
+        <line x1="40" y1="80" x2="160" y2="80" />
+        <line x1="40" y1="120" x2="160" y2="120" />
+        <line x1="40" y1="62" x2="160" y2="62" />
+        <line x1="40" y1="138" x2="160" y2="138" />
+      </g>
+      <circle cx="100" cy="100" r="58" stroke="rgba(147,197,253,0.65)" strokeWidth="1" />
+      <ellipse
+        cx="100"
+        cy="100"
+        rx="86"
+        ry="20"
+        transform="rotate(-16 100 100)"
+        stroke={`url(#${ring})`}
+        strokeWidth="1.4"
+      />
+    </svg>
   );
 }
 
