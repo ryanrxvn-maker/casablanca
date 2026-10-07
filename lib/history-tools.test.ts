@@ -18,6 +18,7 @@ import {
   buildChains,
   canonicalTool,
   chainState,
+  chipsDoHistorico,
   countByTool,
   filterHistory,
   historyToolForPath,
@@ -147,6 +148,37 @@ console.log('\nGARANTIA — histórico por ferramenta:');
   );
   const c = countByTool(events);
   ok(c.get('fakepass') === 2 && c.get('famous-hey') === 1, 'contagem do selo dobra os apelidos');
+}
+
+// (I) chips do histórico geral: o mapa do que EXISTE, não só do que foi usado
+{
+  const vazio = new Map<string, number>();
+  const cliente = chipsDoHistorico(vazio, { podeVerInterna: () => false });
+  const ids = cliente.map((c) => c.id);
+  ok(ids.includes('tipografia') && ids.includes('compressor'), 'ferramenta de cliente aparece zerada');
+  ok(cliente.every((c) => c.count === 0), 'zerada mostra 0, não some');
+  ok(!ids.includes('clickup-pilot'), 'Pilot não aparece pra cliente sem registro');
+  ok(!ids.includes('ltx-video') && !ids.includes('heygen-auto'), 'rota sem card no hub não vira chip vazio');
+  const admin = chipsDoHistorico(vazio, { podeVerInterna: () => true }).map((c) => c.id);
+  ok(admin.includes('clickup-pilot') && admin.includes('auto-broll'), 'admin vê as internas zeradas');
+  const liberado = chipsDoHistorico(vazio, { podeVerInterna: (id) => id === 'clickup-pilot' }).map((c) => c.id);
+  ok(
+    liberado.includes('clickup-pilot') && !liberado.includes('auto-broll'),
+    'desbloqueio pontual libera só a ferramenta dele',
+  );
+  const comRegistro = chipsDoHistorico(new Map([['ltx-video', 2]]), { podeVerInterna: () => false });
+  ok(comRegistro.some((c) => c.id === 'ltx-video' && c.count === 2), 'registro nunca fica sem chip');
+  // Todo card de ferramenta do hub tem vitrine no histórico — card novo sem
+  // registro aqui nasceria sem chip.
+  const hub = fs.readFileSync(path.join(process.cwd(), 'components', 'ToolsHub.tsx'), 'utf8');
+  const hrefs = Array.from(new Set(Array.from(hub.matchAll(/href: '\/tools\/([a-z0-9-]+)'/g), (m) => m[1])));
+  const semVitrine = hrefs.filter(
+    (h) => !HISTORY_TOOLS.some((t) => t.id === canonicalTool(h) && t.vitrine),
+  );
+  ok(
+    hrefs.length > 5 && semVitrine.length === 0,
+    'todo card do hub tem vitrine no histórico' + (semVitrine.length ? ' — faltam: ' + semVitrine.join(', ') : ''),
+  );
 }
 
 console.log(`\n${passed} ok, ${failed} falhas`);

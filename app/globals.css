@@ -2818,6 +2818,10 @@ html[data-theme='light'] .hist-chip {
   border-color: rgba(16, 16, 24, 0.1);
   background: rgba(16, 16, 24, 0.03);
 }
+/* Ferramenta sem nada nos 7 dias: continua no mapa, mas recua. */
+.hist-chip--vazio:not(.hist-chip--on):not(:hover) {
+  opacity: 0.75;
+}
 
 /* Enquanto o pedaco da gaveta esta' a caminho: pulso curto pra o clique ter
    resposta na hora, mesmo no primeiro (quando nada foi pre-carregado). */

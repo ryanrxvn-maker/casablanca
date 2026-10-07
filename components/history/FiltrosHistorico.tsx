@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   filtrarPorOrigemEData,
@@ -24,6 +24,10 @@ import type { HistoryEvent } from '@/lib/history';
  * Os chips de origem só aparecem quando há MAIS DE UMA origem na lista. Numa
  * ferramenta que não é o Pilot (compressor, legenda) eles seriam três botões
  * mortos, e botão morto é pior que botão ausente.
+ *
+ * `semOrigem` desliga a origem por inteiro (o histórico geral fora do chip
+ * Pilot): some o grupo E zera a escolha — filtro escondido que continua
+ * filtrando é pior que os dois.
  */
 export type FiltroOrigemData = {
   origem: OrigemDoDisparo | null;
@@ -38,9 +42,18 @@ export type FiltroOrigemData = {
   limpar: () => void;
 };
 
-export function useFiltroDeOrigemEData(base: HistoryEvent[]): FiltroOrigemData {
-  const [origem, setOrigem] = useState<OrigemDoDisparo | null>(null);
+export function useFiltroDeOrigemEData(
+  base: HistoryEvent[],
+  opts?: { semOrigem?: boolean },
+): FiltroOrigemData {
+  const semOrigem = opts?.semOrigem === true;
+  const [escolhida, setOrigem] = useState<OrigemDoDisparo | null>(null);
   const [dias, setDias] = useState<JanelaDeDias | null>(null);
+  const origem = semOrigem ? null : escolhida;
+
+  useEffect(() => {
+    if (semOrigem) setOrigem(null);
+  }, [semOrigem]);
 
   const eventos = useMemo(
     () => filtrarPorOrigemEData(base, { origem, dias }),
@@ -69,8 +82,9 @@ export function useFiltroDeOrigemEData(base: HistoryEvent[]): FiltroOrigemData {
   // Basta haver um disparo: os três modos ficam sempre no mesmo lugar. Além de
   // mais previsível, isto deixa explícito quando um modo está zerado.
   const mostrarOrigem = useMemo(() => {
+    if (semOrigem) return false;
     return base.some((e) => origemDoEvento(e) !== null);
-  }, [base]);
+  }, [base, semOrigem]);
 
   const escolherOrigem = useCallback((o: OrigemDoDisparo) => {
     // Clicar de novo no chip aceso tira o filtro: não precisa de um "Tudo".

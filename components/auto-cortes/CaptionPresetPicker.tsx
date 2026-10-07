@@ -3,7 +3,7 @@
 /**
  * AUTO CORTES — galeria de LEGENDA.
  *
- * É a mesma galeria das Legendas Automáticas (os 491 modelos, mesmos
+ * É a mesma galeria das Legendas Automáticas (todos os modelos, mesmos
  * favoritos por conta) com um card "Sem legenda" na frente. `null` = corte
  * sem legenda nenhuma.
  */

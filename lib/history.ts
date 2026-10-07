@@ -25,6 +25,7 @@ export {
   buildChains,
   canonicalTool,
   chainState,
+  chipsDoHistorico,
   countByTool,
   eventMatchesQuery,
   filterHistory,

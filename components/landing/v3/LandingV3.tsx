@@ -20,11 +20,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { FAKEPRINT_MODELOS } from '@/lib/numeros-do-site';
 import { DarkoLogo } from '../../DarkoLogo';
 import { Kicker, Reveal, Ticker, useClock, useToday } from './kit';
 import { BreakingCard } from './scenes';
 import {
   FaqSection,
+  FERRAMENTAS_NO_AR,
   FinalCta,
   HighlightsSection,
   HowSection,
@@ -60,7 +62,7 @@ export function LandingV3() {
         items={[
           'Remover Silêncios — o silêncio sai sozinho',
           'Camuflagem — duas trilhas no mesmo arquivo',
-          'FakePrint — 41 modelos de print',
+          `FakePrint — ${FAKEPRINT_MODELOS} modelos de print`,
           'Legendas Automáticas — sua fala vira legenda animada',
           'Gerador de SRT — legenda palavra por palavra',
           'FakePrint — tela verde pronta pro chroma',
@@ -204,9 +206,11 @@ function Masthead() {
 
 /* ────────────────────── herói ────────────────────── */
 
+// Contagens vêm da lista da suíte e do catálogo — nunca à mão (ver
+// lib/numeros-do-site.ts).
 const STATS = [
-  { n: '13', label: 'ferramentas no ar' },
-  { n: '41', label: 'modelos de print' },
+  { n: String(FERRAMENTAS_NO_AR), label: 'ferramentas no ar' },
+  { n: String(FAKEPRINT_MODELOS), label: 'modelos de print' },
   { n: 'R$ 0', label: 'pra começar' },
 ];
 
@@ -234,7 +238,8 @@ function Hero() {
             <p className="mt-6 max-w-[54ch] text-[16px] leading-relaxed text-text-muted">
               Corte de silêncio, legenda animada, print de notícia, compressão,
               download — cada etapa chata do dia do editor tem uma ferramenta aqui.
-              Tudo roda no navegador, sem instalar nada.
+              Abre no navegador e usa: só o Downloader pede a extensão e o Motor
+              no computador.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">

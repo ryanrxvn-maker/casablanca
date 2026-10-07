@@ -16,11 +16,13 @@ import {
   useFiltroDeOrigemEData,
 } from '@/components/history/FiltrosHistorico';
 import {
+  chipsDoHistorico,
   clearHistory,
   countByTool,
   filterHistory,
   HISTORY_TOOLS,
 } from '@/lib/history';
+import { tierAllowsTool, useTier } from '@/lib/use-tier';
 
 /**
  * /tools/historico — Histórico geral RECUPERÁVEL.
@@ -40,31 +42,11 @@ export default function HistoricoPage() {
   const [tool, setTool] = useState<string>('all');
   const [query, setQuery] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const events = useHistoryEvents();
-
-  // Atalhos internos (Pilot/Hey Auto) — só admin vê.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { createClient } = await import('@/lib/supabase/client');
-        const supabase = createClient();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) return;
-        const { data } = await supabase
-          .from('profiles')
-          .select('is_admin')
-          .eq('id', uid)
-          .maybeSingle();
-        if (!cancelled) setIsAdmin(!!data?.is_admin);
-      } catch {}
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Tier com cache de sessão: diz se é admin (atalhos internos) e carrega os
+  // desbloqueios pontuais que decidem quais ferramentas internas viram chip.
+  const tier = useTier();
+  const isAdmin = tier === 'admin';
 
   // Link direto por ferramenta (/tools/historico?tool=decupagem). Lido do
   // window em vez de useSearchParams pra não exigir Suspense nesta página.
@@ -80,13 +62,15 @@ export default function HistoricoPage() {
     void import('@/lib/history-vault').then((v) => v.scheduleVaultPrune()).catch(() => {});
   }, []);
 
-  // Contagem por ferramenta (pros chips) — só ferramentas com eventos.
+  // Contagem por ferramenta (pros chips).
   const counts = useMemo(() => countByTool(events), [events]);
 
   const porFerramenta = useMemo(() => filterHistory(events, { tool }), [events, tool]);
   // Data e origem entram entre a ferramenta e a busca: os contadores dos chips
   // de origem falam da ferramenta escolhida, que e' o que esta' na tela.
-  const filtro = useFiltroDeOrigemEData(porFerramenta);
+  // Creator / Docs / ClickUp é a origem de um DISPARO: só existe no Pilot. Em
+  // "Tudo" e nas outras ferramentas o grupo some (e a escolha zera).
+  const filtro = useFiltroDeOrigemEData(porFerramenta, { semOrigem: tool !== 'clickup-pilot' });
   const filtered = useMemo(
     () => filterHistory(filtro.eventos, { query }),
     [filtro.eventos, query],
@@ -94,7 +78,11 @@ export default function HistoricoPage() {
   const chavesZip = useMemo(() => chavesZipDosEventos(filtered), [filtered]);
   const disponibilidade = useDisponibilidade(true, chavesZip);
 
-  const toolChips = HISTORY_TOOLS.filter((t) => (counts.get(t.id) ?? 0) > 0);
+  // Toda ferramenta que a conta enxerga no hub vira chip, mesmo zerada.
+  const toolChips = useMemo(
+    () => chipsDoHistorico(counts, { podeVerInterna: (id) => tierAllowsTool(tier, `/tools/${id}`) }),
+    [counts, tier],
+  );
   const vaultInfo = disponibilidade.vaultInfo;
 
   return (
@@ -154,8 +142,9 @@ export default function HistoricoPage() {
             <FilterChip
               key={t.id}
               active={tool === t.id}
+              vazio={t.count === 0}
               onClick={() => setTool(tool === t.id ? 'all' : t.id)}
-              label={`${t.label} ${counts.get(t.id)}`}
+              label={`${t.label} ${t.count}`}
             />
           ))}
         </div>
@@ -270,10 +259,12 @@ function Stat({
 
 function FilterChip({
   active,
+  vazio,
   onClick,
   label,
 }: {
   active: boolean;
+  vazio?: boolean;
   onClick: () => void;
   label: string;
 }) {
@@ -281,7 +272,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={'hist-chip' + (active ? ' hist-chip--on' : '')}
+      className={'hist-chip' + (active ? ' hist-chip--on' : '') + (vazio ? ' hist-chip--vazio' : '')}
     >
       {label}
     </button>

@@ -18,6 +18,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { FAQ } from '@/lib/faq';
+import { FAKEPRINT_MODELOS, LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 import { DarkoLogo } from '../../DarkoLogo';
 import {
   IconAcelerador,
@@ -65,11 +66,12 @@ const HIGHLIGHTS: Highlight[] = [
     lead:
       'Sobe o vídeo, a transcrição sai palavra por palavra e cada frase vira uma legenda animada — fumaça, ouro 3D, neon, karaokê. Você ajusta tudo no preview, como no CapCut, e o MP4 renderiza no seu navegador.',
     bullets: [
-      '491 modelos de legenda animada, com destaque automático da palavra forte',
+      `${LEGENDAS_MODELOS} modelos de legenda animada, com destaque automático da palavra forte`,
       'Editor no preview: arrasta, redimensiona, edita o texto e marca trechos',
       'O que você vê é o que sai — preview e MP4 usam o mesmo motor',
     ],
-    note: 'Disponível no Premium — a animação aqui do lado é o motor real rodando, não um vídeo.',
+    note:
+      'Disponível no Premium. A transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações. A animação aqui do lado é o motor real rodando, não um vídeo.',
     scene: <LegendasScene />,
   },
   {
@@ -88,7 +90,7 @@ const HIGHLIGHTS: Highlight[] = [
       'Descamuflar devolve qualquer camada — e dá pra trocar o escondido sem regravar',
     ],
     note:
-      'No fim, a ferramenta escuta o arquivo pronto do mesmo jeito que a plataforma escuta e mostra o selo por plataforma. Sem selo verde, não publique.',
+      'Disponível no Premium. No fim, a ferramenta escuta o arquivo pronto do mesmo jeito que a plataforma escuta e mostra o selo por plataforma. Sem selo verde, não publique.',
     scene: <CamuflagemScene />,
   },
   {
@@ -120,11 +122,11 @@ const HIGHLIGHTS: Highlight[] = [
       </>
     ),
     lead:
-      'São 41 modelos: conversas, posts, stories, telejornais e sites de notícia. Modelos sociais são grátis. Nos telejornais e sites, o Free vê a prévia; edição e exportação ficam no Premium.',
+      `São ${FAKEPRINT_MODELOS} modelos: stories, conversas, posts, notificação, lives, reunião, telejornais e sites de notícia. Tudo que não é notícia é grátis; nos telejornais e sites, o Free vê a prévia e a edição e a exportação ficam no Premium.`,
     bullets: [
       'Prévia ao vivo: o print muda a cada tecla, e o que você vê é o PNG que baixa',
       'Tela verde em tudo que é cena — telejornal, site e live prontos pro chroma key',
-      'No Premium, telejornais exportam .webm animado: relógio andando, reações subindo',
+      'Exporta vídeo animado: reações subindo na live e, no Premium, relógio andando no telejornal',
     ],
     note:
       'A barra de status do celular é editável até a bateria: 63% às 21:47 conta uma história, 100% às 9:00 conta outra.',
@@ -269,7 +271,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'Downloader',
-    desc: 'Baixa vídeo, áudio e imagem de YouTube, TikTok, Instagram, Pinterest e sites +18 compatíveis.',
+    desc: 'Baixa vídeo e áudio de YouTube, TikTok, Instagram, Pinterest e sites +18 compatíveis. Pede a extensão do navegador e o Motor no computador (Windows; Mac em teste).',
     plan: 'free',
     icon: <IconDownloader size={20} />,
   },
@@ -281,7 +283,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'Legendas Automáticas',
-    desc: 'Legendas animadas no tempo do áudio, com centenas de modelos prontos.',
+    desc: 'Legendas animadas no tempo do áudio, com centenas de modelos. A transcrição usa a sua chave Groq ou AssemblyAI.',
     plan: 'premium',
     icon: <IconTipografia size={20} />,
   },
@@ -299,7 +301,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'Gerador de SRT',
-    desc: 'Áudio + copy entram; a legenda sai alinhada palavra por palavra.',
+    desc: 'Áudio + copy entram; a legenda sai alinhada palavra por palavra. Usa a sua chave Groq ou AssemblyAI.',
     plan: 'premium',
     icon: <IconCopySRT size={20} />,
   },
@@ -317,11 +319,14 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'Calculadora',
-    desc: 'Faz a conta de duração, peso e entrega antes de você começar.',
+    desc: 'Monta o orçamento do cliente e gera o relatório pronto pra mandar.',
     plan: 'premium',
     icon: <IconCalculadora size={20} />,
   },
 ];
+
+/** Quantas ferramentas o cliente tem hoje — o número do herói sai desta lista. */
+export const FERRAMENTAS_NO_AR = TOOLS.length;
 
 export function SuiteSection() {
   return (
@@ -438,14 +443,14 @@ const STEPS = [
   {
     n: '03',
     title: 'Baixa pronto e publica',
-    desc: 'Arquivo cortado, legenda alinhada, ZIP nomeado, PNG em alta ou .webm animado. Você revisa e publica.',
+    desc: 'Arquivo cortado, legenda alinhada, ZIP nomeado, PNG em alta ou vídeo animado. Você revisa e publica.',
   },
 ];
 
 const CHECKS = [
   'Remover Silêncios, compressão e camuflagem rodam no navegador — o arquivo nem sobe.',
-  'A fila continua em segundo plano enquanto você faz outra coisa.',
-  'Lote em todas as ferramentas de arquivo: vários itens na mesma fila.',
+  'No Remover Silêncios, a fila segue rodando com a aba em segundo plano.',
+  'Lote em Remover Silêncios, Compressor, Camuflagem, Normalizador, Mixer e Downloader.',
   'Assinatura no cartão, cancelamento na própria conta. Sem letra miúda.',
 ];
 
@@ -616,8 +621,8 @@ export function PricingSection() {
 
       <Reveal delay={120}>
         <p className="mt-6 text-center text-[12.5px] text-text-dim">
-          Assinatura recorrente no cartão · você gerencia e cancela direto na sua conta,
-          sem falar com ninguém.
+          Mensal: assinatura recorrente no cartão, que você cancela direto na sua conta,
+          sem falar com ninguém · Anual: pagamento único no cartão, em até 12×.
         </p>
       </Reveal>
     </section>
@@ -791,7 +796,7 @@ export function LandingFooter() {
         items={[
           'Remover Silêncios',
           'Camuflagem de áudio',
-          'FakePrint · 41 modelos',
+          `FakePrint · ${FAKEPRINT_MODELOS} modelos`,
           'Gerador de SRT',
           'Lipsync Video to Video',
           'Compressor',

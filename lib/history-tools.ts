@@ -92,31 +92,60 @@ export type HistoryEvent = {
 /** Retenção do histórico: 7 dias (mesma do cofre — lib/history-vault.ts). */
 export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Onde a ferramenta mora no hub (/tools):
+ *  - 'cliente' → card de qualquer conta (Free vê como Premium bloqueado);
+ *  - 'interna' → card adminOnly: só admin ou conta com desbloqueio pontual.
+ * Sem vitrine = rota que não tem card no hub (motor interno ou aposentada):
+ * só ganha chip no histórico geral quando tem registro.
+ */
+export type VitrineDaFerramenta = 'cliente' | 'interna';
+
 /** Nomes exibidos por ferramenta (e ordem dos filtros). */
-export const HISTORY_TOOLS: { id: string; label: string }[] = [
+export const HISTORY_TOOLS: { id: string; label: string; vitrine?: VitrineDaFerramenta }[] = [
   // O dono chama de PILOT. 'ClickUp Pilot' é o nome da rota, não o que ele diz.
-  { id: 'clickup-pilot', label: 'Pilot' },
+  { id: 'clickup-pilot', label: 'Pilot', vitrine: 'interna' },
+  // Hey Auto saiu do hub em 06.09 (todo disparo é pelo Pilot).
   { id: 'heygen-auto', label: 'Hey Auto' },
-  { id: 'auto-broll', label: 'Auto B-roll' },
-  { id: 'lipsync', label: 'Lipsync' },
-  { id: 'decupagem', label: 'Remover Silêncios' },
-  { id: 'decupagem-copy', label: 'Remover Silêncios por Copy' },
-  { id: 'copy-srt', label: 'Gerador de SRT' },
-  { id: 'tipografia', label: 'Legendas Automáticas' },
-  { id: 'auto-cortes', label: 'Auto Cortes' },
-  { id: 'camuflagem', label: 'Camuflagem de Áudio' },
-  { id: 'compressor', label: 'Compressor' },
-  { id: 'acelerador', label: 'Mixer de Velocidade' },
-  { id: 'audio-split', label: 'Dividir Voz' },
-  { id: 'downloader', label: 'Downloader' },
-  { id: 'fakepass', label: 'FakePrint' },
-  { id: 'famous-hey', label: 'Famous Hey' },
+  { id: 'auto-broll', label: 'Auto B-roll', vitrine: 'interna' },
+  { id: 'lipsync', label: 'Lipsync', vitrine: 'cliente' },
+  { id: 'decupagem', label: 'Remover Silêncios', vitrine: 'cliente' },
+  { id: 'decupagem-copy', label: 'Remover Silêncios por Copy', vitrine: 'interna' },
+  { id: 'copy-srt', label: 'Gerador de SRT', vitrine: 'cliente' },
+  { id: 'tipografia', label: 'Legendas Automáticas', vitrine: 'cliente' },
+  { id: 'auto-cortes', label: 'Auto Cortes', vitrine: 'interna' },
+  { id: 'camuflagem', label: 'Camuflagem de Áudio', vitrine: 'cliente' },
+  { id: 'compressor', label: 'Compressor', vitrine: 'cliente' },
+  { id: 'acelerador', label: 'Mixer de Velocidade', vitrine: 'cliente' },
+  { id: 'audio-split', label: 'Dividir Voz', vitrine: 'cliente' },
+  { id: 'downloader', label: 'Downloader', vitrine: 'cliente' },
+  { id: 'fakepass', label: 'FakePrint', vitrine: 'cliente' },
+  // Na janela grátis vira card de cliente — quem decide é podeVerInterna.
+  { id: 'famous-hey', label: 'Famous Hey', vitrine: 'interna' },
   { id: 'ltx-video', label: 'Vídeo do zero' },
-  { id: 'normalizador', label: 'Normalizador de Áudio' },
-  { id: 'remover-elementos', label: 'Removedor de Legenda' },
-  { id: 'separador-audio', label: 'Separador de Áudio' },
+  { id: 'normalizador', label: 'Normalizador de Áudio', vitrine: 'cliente' },
+  { id: 'remover-elementos', label: 'Removedor de Legenda', vitrine: 'interna' },
+  { id: 'separador-audio', label: 'Separador de Áudio', vitrine: 'interna' },
   { id: 'voice-test', label: 'Isolar voz' },
 ];
+
+/**
+ * Chips de ferramenta do histórico geral: TODA ferramenta que a conta enxerga
+ * no hub aparece, mesmo zerada — a lista de filtros é o mapa do que existe,
+ * não só do que já foi usado. Ferramenta sem card no hub (ou interna que a
+ * conta não vê) só entra se tiver registro: histórico nunca esconde trabalho.
+ */
+export function chipsDoHistorico(
+  counts: Map<string, number>,
+  opts: { podeVerInterna: (toolId: string) => boolean },
+): { id: string; label: string; count: number }[] {
+  return HISTORY_TOOLS.filter((t) => {
+    if ((counts.get(t.id) ?? 0) > 0) return true;
+    if (t.vitrine === 'cliente') return true;
+    if (t.vitrine === 'interna') return opts.podeVerInterna(t.id);
+    return false;
+  }).map((t) => ({ id: t.id, label: t.label, count: counts.get(t.id) ?? 0 }));
+}
 
 /**
  * Ferramentas que o usuário enxerga como UMA só.
