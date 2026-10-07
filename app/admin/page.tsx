@@ -1,214 +1,93 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
+import { BarSeries, RankList } from './_ui/charts';
+import { Btn, Dot, I, Modal, Panel, Segmented, Shell, Skeleton, Stat, Tag } from './_ui/kit';
+import {
+  CATALOG_PATHS,
+  accent,
+  betaProTools,
+  brl,
+  dayLabel,
+  fmtDate,
+  fmtDateShort,
+  fmtTime,
+  isOnline,
+  isUsingTool,
+  toolLabel,
+  type Accent,
+  type AdminUser,
+  type Dash,
+  type Payment,
+} from './_ui/model';
+import { ProfileSheet, type ProfileTab } from './_ui/ProfileSheet';
+import { UserRow, type RowActions } from './_ui/UserRow';
 
 /**
  * /admin — O painel do dono. ÚNICO dashboard (o /admin/dashboard redireciona
  * pra cá).
  *
- * • Stats ao vivo (poll 15s): online agora, totais, pagantes (Stripe),
- *   liberados na mão, MRR.
- * • Financeiro: arrecadado por período (hoje / 7 dias / mês / total) +
- *   pagamentos com comprovante.
- * • Usuários: filtros pagante×liberado×free×beta-pro×online×inativos,
- *   busca, ordenação; ações com confirmação em 2 ETAPAS (modal) pra
- *   rebaixar plano e deletar.
- * • BETA PRO: ferramentas admin-only liberadas POR CONTA sem dar admin.
- * • Métricas de comportamento (ferramentas mais usadas, origem) contam SÓ
- *   clientes — uso da conta admin fica de fora (filtrado na API).
+ * • Números ao vivo (lista a cada 15 s, métricas a cada 60 s; pausa com a aba
+ *   escondida): online, clientes, pagantes, liberados, MRR, acesso simultâneo.
+ * • Financeiro por período com comprovante; crescimento e engajamento.
+ * • Clientes: filtros, busca (nome, email, telefone, IP, ferramenta), 40 por
+ *   vez. Cada linha abre o PERFIL COMPLETO (contato, plano, pagamentos,
+ *   uso, histórico de IPs com aviso de acesso simultâneo).
+ * • Ações destrutivas SEMPRE em 2 etapas (janela própria).
+ * • Métricas de comportamento contam SÓ clientes (filtrado na API).
  *
- * Tema: 100% tokens (bg/line/text/lime/violet/cyan/amber via CSS vars) —
- * legível no escuro E no claro, sem hex fixo.
+ * Desenho: kit em ./_ui (casca dupla, hairline, rótulo em sentença, cor só por
+ * token, legível no claro e no escuro). Nada animando em loop.
  */
 
-type AdminUser = {
-  id: string;
-  email: string | null;
-  name: string | null;
-  is_admin: boolean;
-  is_active: boolean;
-  must_change_password: boolean;
-  created_at: string;
-  last_seen_at: string | null;
-  last_ip: string | null;
-  last_tool: string | null;
-  last_tool_at: string | null;
-  tier?: string | null;
-  phone?: string | null;
-  phone_verified?: boolean | null;
-  subscription_status?: string | null;
-  subscription_plan?: string | null;
-  current_period_end?: string | null;
-  traffic_source?: string | null;
-  plan: 'premium' | 'free';
-  access: 'paid' | 'granted' | 'pending' | 'anomaly' | 'free';
-  tool_unlocks: string[];
-  static_unlocks: string[];
-  receipt_url: string | null;
-  last_payment_at: string | null;
-};
-
-type Payment = {
-  id: number;
-  email: string | null;
-  amount: number;
-  currency: string;
-  plan: string | null;
-  billing: string | null;
-  status: string;
-  receipt_url: string | null;
-  created_at: string | null;
-};
-
-type Dash = {
-  totals: { users: number; online: number; paying: number; mrr: number };
-  toolRanking: Array<{ tool: string; count: number }>;
-  trafficSources: Array<{ source: string; count: number }>;
-  payments: Payment[];
-  revenueTotal: number;
-};
-
-const TOOL_LABELS: Record<string, string> = {
-  decupagem: 'Remover Silêncios',
-  'decupagem-copy': 'Remover Silêncios por Copy',
-  downloader: 'Downloader',
-  camuflagem: 'Camuflagem de Áudio',
-  compressor: 'Compressor',
-  'audio-split': 'Dividir Voz',
-  acelerador: 'Mixer de Velocidade',
-  normalizador: 'Normalizador de Áudio',
-  calculadora: 'Calculadora',
-  'copy-srt': 'Gerador de SRT',
-  'auto-cortes': 'Auto Cortes',
-  'auto-broll': 'Auto B-roll',
-  'heygen-auto': 'Hey Auto',
-  'clickup-pilot': 'Pilot',
-  'remover-elementos': 'Remover Legenda',
-  'separador-audio': 'Separador de Áudio',
-  'ltx-video': 'LTX Video',
-  fakepass: 'FakePrint',
-  'caixinha-pergunta': 'Caixinha de Pergunta',
-  lipsync: 'Lipsync',
-  historico: 'Histórico',
-};
-const toolLabel = (s: string | null) => (s ? (TOOL_LABELS[s] ?? s) : null);
-
-const CATALOG_PATHS = new Set(UNLOCKABLE_TOOLS.map((t) => t.path));
-const CATALOG_LABEL = new Map(UNLOCKABLE_TOOLS.map((t) => [t.path, t.label]));
-
-function betaProTools(u: AdminUser): string[] {
-  const set = new Set<string>();
-  for (const p of u.tool_unlocks) if (CATALOG_PATHS.has(p)) set.add(p);
-  for (const p of u.static_unlocks) if (CATALOG_PATHS.has(p)) set.add(p);
-  return Array.from(set);
-}
-
-function isOnline(u: AdminUser): boolean {
-  if (!u.last_seen_at) return false;
-  return (Date.now() - new Date(u.last_seen_at).getTime()) / 1000 <= 60;
-}
-
-function isUsingTool(u: AdminUser): boolean {
-  if (!u.last_tool_at) return false;
-  return (Date.now() - new Date(u.last_tool_at).getTime()) / 1000 <= 90;
-}
-
-function timeAgo(iso: string | null): string | null {
-  if (!iso) return null;
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 0) return null;
-  if (s < 60) return 'agora';
-  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
-  if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
-  if (s < 7 * 86400) return `há ${Math.floor(s / 86400)} d`;
-  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-}
-
-function brl(centavos: number): string {
-  return (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-/* Acesso → cor por TOKEN (adapta no modo claro sozinho). */
-type Accent = 'lime' | 'cyan' | 'violet' | 'amber' | 'neutral' | 'danger';
-const ACCENT_VAR: Record<Accent, string> = {
-  lime: 'var(--lime)',
-  cyan: 'var(--cyan)',
-  violet: 'var(--violet)',
-  amber: 'var(--amber)',
-  neutral: 'var(--text-dim)',
-  danger: '220 68 80',
-};
-const accent = (a: Accent, alpha?: number) =>
-  alpha == null ? `rgb(${ACCENT_VAR[a]})` : `rgb(${ACCENT_VAR[a]} / ${alpha})`;
-
-const ACCESS_META: Record<
-  AdminUser['access'],
-  { label: string; accent: Accent }
-> = {
-  paid: { label: 'PREMIUM · PAGO', accent: 'lime' },
-  granted: { label: 'PREMIUM · LIBERADO', accent: 'cyan' },
-  // Renovação falhou → acesso SUSPENSO até o pagamento entrar (assinatura
-  // continua viva no Stripe; o cliente resolve na tela de assinatura).
-  pending: { label: 'PAGAMENTO PENDENTE', accent: 'amber' },
-  anomaly: { label: 'PREMIUM · SEM ORIGEM', accent: 'danger' },
-  free: { label: 'FREE', accent: 'neutral' },
-};
-
-type FilterKey =
-  | 'all'
-  | 'online'
-  | 'paid'
-  | 'pending'
-  | 'granted'
-  | 'free'
-  | 'beta'
-  | 'inactive'
-  | 'anomaly';
-
+type FilterKey = 'all' | 'online' | 'paid' | 'pending' | 'granted' | 'free' | 'beta' | 'inactive' | 'anomaly' | 'concurrent';
 type Period = 'today' | 'week' | 'month' | 'all';
-const PERIOD_LABEL: Record<Period, string> = {
-  today: 'Hoje',
-  week: '7 dias',
-  month: 'Este mês',
-  all: 'Total',
-};
+type SortKey = 'recent' | 'seen' | 'name';
+
+const PERIOD_LABEL: Record<Period, string> = { today: 'Hoje', week: '7 dias', month: 'Este mês', all: 'Total' };
+const PAGE = 40;
 
 function periodStart(p: Period): number {
   const now = new Date();
   if (p === 'today') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  if (p === 'week') return Date.now() - 7 * 24 * 60 * 60 * 1000;
+  if (p === 'week') return Date.now() - 7 * 86_400_000;
   if (p === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   return 0;
 }
+
+const isPaidPay = (p: Payment) => p.status === 'paid' || p.status === 'succeeded';
+const isRefundPay = (p: Payment) => p.status === 'refunded' || p.status === 'disputed';
 
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [dash, setDash] = useState<Dash | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const [filter, setFilter] = useState<FilterKey>('all');
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState<'recent' | 'seen' | 'name'>('recent');
+  const [sort, setSort] = useState<SortKey>('recent');
   const [period, setPeriod] = useState<Period>('month');
+  const [limit, setLimit] = useState(PAGE);
 
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
-  const flash = (kind: 'ok' | 'err', msg: string, ms = 3500) => {
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flash = useCallback((kind: 'ok' | 'err', msg: string, ms = 3800) => {
     setToast({ kind, msg });
-    setTimeout(() => setToast(null), ms);
-  };
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), ms);
+  }, []);
 
-  // ─── Data ───
-  async function load(silent = false) {
-    if (!silent) setLoading(true);
+  // ─── Dados ───
+  const load = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/list-users', { cache: 'no-store' });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || 'Falha ao listar.');
+        setError(json.error || 'Falha ao listar os clientes.');
         setErrorDetail(json.detail || null);
         return;
       }
@@ -216,14 +95,13 @@ export default function AdminPage() {
       setErrorDetail(null);
       setUsers(json.users ?? []);
       setUpdatedAt(new Date());
+      setNow(Date.now());
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      if (!silent) setLoading(false);
+      setError((e as Error).message || 'Falha de conexão.');
     }
-  }
+  }, []);
 
-  async function loadDash() {
+  const loadDash = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/dashboard', { cache: 'no-store' });
       if (!res.ok) return;
@@ -231,25 +109,35 @@ export default function AdminPage() {
     } catch {
       /* métrica secundária */
     }
-  }
+  }, []);
 
   useEffect(() => {
     load();
     loadDash();
-    const a = setInterval(() => load(true), 15_000);
-    const b = setInterval(loadDash, 60_000);
+    const visible = () => document.visibilityState === 'visible';
+    const a = setInterval(() => visible() && load(), 15_000);
+    const b = setInterval(() => visible() && loadDash(), 60_000);
+    const onVis = () => {
+      if (visible()) {
+        load();
+        loadDash();
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       clearInterval(a);
       clearInterval(b);
+      document.removeEventListener('visibilitychange', onVis);
     };
-  }, []);
+  }, [load, loadDash]);
 
-  // ─── Stats ───
+  // ─── Números ───
   const stats = useMemo(() => {
     const list = users ?? [];
     return {
       total: list.length,
-      online: list.filter(isOnline).length,
+      online: list.filter((u) => isOnline(u, now)).length,
+      usingTool: list.filter((u) => isOnline(u, now) && isUsingTool(u, now)).length,
       paid: list.filter((u) => u.access === 'paid').length,
       granted: list.filter((u) => u.access === 'granted').length,
       pending: list.filter((u) => u.access === 'pending').length,
@@ -257,74 +145,59 @@ export default function AdminPage() {
       free: list.filter((u) => u.plan === 'free').length,
       beta: list.filter((u) => betaProTools(u).length > 0).length,
       inactive: list.filter((u) => !u.is_active).length,
+      concurrent: list.filter((u) => (u.concurrent_30d ?? 0) > 0).length,
+      withPhone: list.filter((u) => !!u.phone).length,
     };
+  }, [users, now]);
+
+  const byEmail = useMemo(() => {
+    const m = new Map<string, AdminUser>();
+    for (const u of users ?? []) if (u.email) m.set(u.email.toLowerCase(), u);
+    return m;
   }, [users]);
 
-  // ─── Financeiro (período) ───
-  // Linhas 'refunded'/'disputed' são pagamentos DEVOLVIDOS: aparecem na
-  // tabela (marcadas), mas ficam FORA do arrecadado — o número grande é
-  // sempre líquido. (O reembolso conta no período do pagamento original.)
+  // ─── Financeiro do período ───
+  // 'refunded'/'disputed' aparecem na tabela (marcados), mas ficam FORA do
+  // arrecadado: o número grande é sempre líquido.
   const finance = useMemo(() => {
     const start = periodStart(period);
-    const inPeriod = (dash?.payments ?? []).filter((p) =>
-      p.created_at ? new Date(p.created_at).getTime() >= start : false,
-    );
-    const isPaid = (p: Payment) => p.status === 'paid' || p.status === 'succeeded';
-    const isRefund = (p: Payment) => p.status === 'refunded' || p.status === 'disputed';
-    const paid = inPeriod.filter(isPaid);
-    const refunded = inPeriod.filter(isRefund);
+    const pays = dash?.payments ?? [];
+    const inPeriod = pays.filter((p) => (p.created_at ? new Date(p.created_at).getTime() >= start : false));
+    const paid = inPeriod.filter(isPaidPay);
+    const refunded = inPeriod.filter(isRefundPay);
     const total = paid.reduce((s, p) => s + (p.amount || 0), 0);
-    const refundTotal = refunded.reduce((s, p) => s + (p.amount || 0), 0);
 
-    // Série diária (últimos 30 dias, independente do período dos chips).
-    const DAYS = 30;
-    const dayKey = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const byDay = new Map<string, { paid: number; refunded: number }>();
-    const today = new Date();
-    const days: Array<{ key: string; label: string; paid: number; refunded: number }> = [];
-    for (let i = DAYS - 1; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-      const key = dayKey(d);
-      byDay.set(key, { paid: 0, refunded: 0 });
-      days.push({
-        key,
-        label: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-        paid: 0,
-        refunded: 0,
-      });
+    const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const days: Array<{ key: string; label: string; value: number }> = [];
+    const index = new Map<string, { key: string; label: string; value: number }>();
+    for (let i = 29; i >= 0; i--) {
+      const key = dayFmt.format(new Date(Date.now() - i * 86_400_000));
+      if (index.has(key)) continue;
+      const d = { key, label: dayLabel(key), value: 0 };
+      index.set(key, d);
+      days.push(d);
     }
-    for (const p of dash?.payments ?? []) {
-      if (!p.created_at) continue;
-      const key = dayKey(new Date(p.created_at));
-      const slot = byDay.get(key);
-      if (!slot) continue;
-      if (isPaid(p)) slot.paid += p.amount || 0;
-      else if (isRefund(p)) slot.refunded += p.amount || 0;
+    for (const p of pays) {
+      if (!p.created_at || !isPaidPay(p)) continue;
+      const d = index.get(dayFmt.format(new Date(p.created_at)));
+      if (d) d.value += p.amount || 0;
     }
-    for (const d of days) {
-      const slot = byDay.get(d.key)!;
-      d.paid = slot.paid;
-      d.refunded = slot.refunded;
-    }
-
     return {
       list: inPeriod,
       total,
       count: paid.length,
       avg: paid.length ? Math.round(total / paid.length) : 0,
-      refundTotal,
+      refundTotal: refunded.reduce((s, p) => s + (p.amount || 0), 0),
       refundCount: refunded.length,
       days,
-      dayMax: Math.max(...days.map((d) => Math.max(d.paid, d.refunded)), 1),
     };
   }, [dash, period]);
 
-  // ─── Filtro + busca + ordenação ───
+  // ─── Filtro + busca + ordem ───
   const visible = useMemo(() => {
     let list = users ?? [];
     switch (filter) {
-      case 'online': list = list.filter(isOnline); break;
+      case 'online': list = list.filter((u) => isOnline(u, now)); break;
       case 'paid': list = list.filter((u) => u.access === 'paid'); break;
       case 'granted': list = list.filter((u) => u.access === 'granted'); break;
       case 'free': list = list.filter((u) => u.plan === 'free'); break;
@@ -332,34 +205,44 @@ export default function AdminPage() {
       case 'inactive': list = list.filter((u) => !u.is_active); break;
       case 'pending': list = list.filter((u) => u.access === 'pending'); break;
       case 'anomaly': list = list.filter((u) => u.access === 'anomaly'); break;
+      case 'concurrent': list = list.filter((u) => (u.concurrent_30d ?? 0) > 0); break;
     }
     const query = q.trim().toLowerCase();
     if (query) {
+      const digits = query.replace(/\D/g, '');
       list = list.filter(
         (u) =>
           (u.name ?? '').toLowerCase().includes(query) ||
           (u.email ?? '').toLowerCase().includes(query) ||
           (u.last_ip ?? '').toLowerCase().includes(query) ||
-          (toolLabel(u.last_tool) ?? '').toLowerCase().includes(query),
+          (toolLabel(u.last_tool) ?? '').toLowerCase().includes(query) ||
+          (digits.length >= 4 && (u.phone ?? '').replace(/\D/g, '').includes(digits)),
       );
     }
-    const byDate = (v: string | null | undefined) => (v ? new Date(v).getTime() : 0);
+    const at = (v: string | null | undefined) => (v ? new Date(v).getTime() : 0);
     list = [...list];
-    if (sort === 'recent') list.sort((a, b) => byDate(b.created_at) - byDate(a.created_at));
-    else if (sort === 'seen') list.sort((a, b) => byDate(b.last_seen_at) - byDate(a.last_seen_at));
+    if (sort === 'recent') list.sort((a, b) => at(b.created_at) - at(a.created_at));
+    else if (sort === 'seen') list.sort((a, b) => at(b.last_seen_at) - at(a.last_seen_at));
     else list.sort((a, b) => (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? '', 'pt-BR'));
     return list;
-  }, [users, filter, q, sort]);
+  }, [users, filter, q, sort, now]);
+
+  useEffect(() => setLimit(PAGE), [filter, q, sort]);
 
   // ─── Ações ───
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [profileNonce, setProfileNonce] = useState(0);
+  const afterAction = useCallback(async () => {
+    await load();
+    setProfileNonce((n) => n + 1);
+  }, [load]);
 
-  /** Confirmação em 2 ETAPAS — nada destrutivo acontece em 1 clique. */
+  /** Confirmação em 2 ETAPAS: nada destrutivo acontece em 1 clique. */
   const [confirmBox, setConfirmBox] = useState<{
     title: string;
     body: React.ReactNode;
     confirmLabel: string;
-    accent: Accent;
+    tone: Accent;
     run: () => Promise<void>;
     running?: boolean;
   } | null>(null);
@@ -372,18 +255,13 @@ export default function AdminPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ userId: u.id, tier: plan === 'premium' ? 'basic' : 'free' }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) {
-        flash('err', json.error || json.detail || 'Falha ao trocar plano.');
+        flash('err', json.error || json.detail || 'Falha ao trocar o plano.');
         return;
       }
-      flash(
-        'ok',
-        plan === 'premium'
-          ? `${u.email || u.name} agora é PREMIUM (liberado por você).`
-          : `${u.email || u.name} voltou pra FREE.`,
-      );
-      await load(true);
+      flash('ok', plan === 'premium' ? `${u.email || u.name} agora é Premium (liberado por você).` : `${u.email || u.name} voltou pro Free.`);
+      await afterAction();
     } catch (e) {
       flash('err', (e as Error).message || 'Erro inesperado.');
     } finally {
@@ -394,30 +272,22 @@ export default function AdminPage() {
   function changePlan(u: AdminUser, plan: 'free' | 'premium') {
     if (u.plan === plan) return;
     if (plan === 'premium') {
-      // Liberar é seguro e reversível — direto.
-      void doSetPlan(u, 'premium');
+      void doSetPlan(u, 'premium'); // liberar é seguro e reversível
       return;
     }
-    // Rebaixar pra FREE → SEMPRE 2 etapas.
     setConfirmBox({
-      title: 'Rebaixar pra FREE?',
-      accent: 'danger',
-      confirmLabel: 'Sim, rebaixar pra FREE',
+      title: 'Rebaixar pro Free?',
+      tone: 'danger',
+      confirmLabel: 'Sim, rebaixar pro Free',
       body:
         u.access === 'paid' ? (
           <>
-            <span className="font-bold text-text">{u.email || u.name}</span> é{' '}
-            <span className="font-bold" style={{ color: accent('lime') }}>
-              PAGANTE (Stripe)
-            </span>
-            . Rebaixar corta o acesso Premium agora, mas{' '}
-            <span className="font-bold text-text">não cancela a assinatura no Stripe</span> — ele
-            pode continuar sendo cobrado.
+            <b className="text-text">{u.email || u.name}</b> é <b style={{ color: accent('lime') }}>pagante no Stripe</b>. Rebaixar corta o Premium agora, mas{' '}
+            <b className="text-text">não cancela a assinatura no Stripe</b>: a pessoa pode continuar sendo cobrada.
           </>
         ) : (
           <>
-            <span className="font-bold text-text">{u.email || u.name}</span> vai perder o acesso
-            Premium que você liberou. Dá pra liberar de novo depois.
+            <b className="text-text">{u.email || u.name}</b> perde o Premium que você liberou. Dá pra liberar de novo depois.
           </>
         ),
       run: () => doSetPlan(u, 'free'),
@@ -432,20 +302,14 @@ export default function AdminPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ userId: u.id, action }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         flash('err', json.error || 'Falha.');
         return;
       }
-      flash(
-        'ok',
-        action === 'delete'
-          ? 'Usuário deletado.'
-          : action === 'activate'
-            ? 'Conta ativada.'
-            : 'Conta desativada.',
-      );
-      await load(true);
+      flash('ok', action === 'delete' ? 'Usuário deletado.' : action === 'activate' ? 'Conta reativada.' : 'Conta desativada.');
+      if (action === 'delete') setProfile((p) => (p?.id === u.id ? null : p));
+      await afterAction();
     } catch (e) {
       flash('err', (e as Error).message);
     } finally {
@@ -453,16 +317,32 @@ export default function AdminPage() {
     }
   }
 
+  function toggleActive(u: AdminUser) {
+    if (!u.is_active) {
+      void doToggle(u, 'activate');
+      return;
+    }
+    setConfirmBox({
+      title: 'Desativar a conta?',
+      tone: 'amber',
+      confirmLabel: 'Desativar',
+      body: (
+        <>
+          <b className="text-text">{u.email || u.name}</b> perde o acesso ao app na hora. Nada é apagado: dá pra reativar depois.
+        </>
+      ),
+      run: () => doToggle(u, 'deactivate'),
+    });
+  }
+
   function askDelete(u: AdminUser) {
     setConfirmBox({
       title: 'Deletar usuário?',
-      accent: 'danger',
+      tone: 'danger',
       confirmLabel: 'Sim, deletar de vez',
       body: (
         <>
-          <span className="font-bold text-text">{u.email || u.name}</span> será removido{' '}
-          <span className="font-bold text-text">permanentemente</span> — conta, acesso e histórico.
-          Essa ação não tem volta.
+          <b className="text-text">{u.email || u.name}</b> será removido <b className="text-text">permanentemente</b>: conta, acesso e histórico. Essa ação não tem volta.
         </>
       ),
       run: () => doToggle(u, 'delete'),
@@ -474,12 +354,11 @@ export default function AdminPage() {
   function askResetPassword(u: AdminUser) {
     setConfirmBox({
       title: 'Gerar nova senha provisória?',
-      accent: 'amber',
+      tone: 'amber',
       confirmLabel: 'Gerar senha',
       body: (
         <>
-          <span className="font-bold text-text">{u.email}</span> será forçado a trocar a senha no
-          próximo login. A senha atual dele deixa de valer.
+          <b className="text-text">{u.email}</b> vai ter que trocar a senha no próximo login. A senha atual deixa de valer.
         </>
       ),
       run: async () => {
@@ -490,13 +369,13 @@ export default function AdminPage() {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ userId: u.id }),
           });
-          const json = await res.json();
+          const json = await res.json().catch(() => ({}));
           if (!res.ok || !json.ok) {
-            flash('err', json.error || 'Falha ao gerar senha.');
+            flash('err', json.error || 'Falha ao gerar a senha.');
             return;
           }
           setResetModal({ email: u.email || '', password: json.password });
-          await load(true);
+          await afterAction();
         } catch (e) {
           flash('err', (e as Error).message || 'Erro inesperado.');
         } finally {
@@ -519,25 +398,19 @@ export default function AdminPage() {
         flash('err', j.error || 'Falha ao sincronizar com o Stripe.');
         return;
       }
-      flash(
-        j.applied ? 'ok' : 'err',
-        j.applied
-          ? `Aplicado: ${String(j.tier).toUpperCase()} — ${j.reason}`
-          : `Nada a aplicar: ${j.reason}`,
-        5000,
-      );
-      await load(true);
+      flash(j.applied ? 'ok' : 'err', j.applied ? `Aplicado: ${String(j.tier).toUpperCase()}. ${j.reason}` : `Nada a aplicar: ${j.reason}`, 5200);
+      await afterAction();
     } finally {
       setBusyId(null);
     }
   }
 
-  // ─── BETA PRO ───
-  const [betaModal, setBetaModal] = useState<{
-    user: AdminUser;
-    sel: Set<string>;
-    saving: boolean;
-  } | null>(null);
+  // ─── Beta Pro ───
+  const [betaModal, setBetaModal] = useState<{ user: AdminUser; sel: Set<string>; saving: boolean } | null>(null);
+
+  function openBeta(u: AdminUser) {
+    setBetaModal({ user: u, sel: new Set(u.tool_unlocks.filter((p) => CATALOG_PATHS.has(p))), saving: false });
+  }
 
   async function saveBetaModal() {
     if (!betaModal) return;
@@ -548,28 +421,90 @@ export default function AdminPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ userId: betaModal.user.id, tools: Array.from(betaModal.sel) }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) {
-        flash('err', json.error || 'Falha ao salvar desbloqueios.', 6000);
+        flash('err', json.error || 'Falha ao salvar os desbloqueios.', 6000);
         setBetaModal((m) => (m ? { ...m, saving: false } : m));
         return;
       }
       flash(
         'ok',
         betaModal.sel.size
-          ? `Beta Pro: ${betaModal.sel.size} ferramenta${betaModal.sel.size > 1 ? 's' : ''} pra ${betaModal.user.email}.`
+          ? `Beta Pro: ${betaModal.sel.size} ${betaModal.sel.size > 1 ? 'ferramentas' : 'ferramenta'} pra ${betaModal.user.email}.`
           : `Beta Pro removido de ${betaModal.user.email}.`,
       );
       setBetaModal(null);
-      await load(true);
+      await afterAction();
     } catch (e) {
       flash('err', (e as Error).message || 'Erro inesperado.');
       setBetaModal((m) => (m ? { ...m, saving: false } : m));
     }
   }
 
-  // ─── Detalhe expandido ───
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // ─── Perfil (painel lateral, com link direto ?u=<id>&aba=<aba>) ───
+  const [profile, setProfile] = useState<{ id: string; tab: ProfileTab } | null>(null);
+  const deepLinkRead = useRef(false);
+
+  useEffect(() => {
+    if (deepLinkRead.current || !users) return;
+    deepLinkRead.current = true;
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const id = sp.get('u');
+      const aba = sp.get('aba') as ProfileTab | null;
+      if (id && users.some((u) => u.id === id)) {
+        setProfile({ id, tab: aba && ['geral', 'acessos', 'uso', 'pagamentos'].includes(aba) ? aba : 'geral' });
+      }
+    } catch {
+      /* URL sem parâmetros */
+    }
+  }, [users]);
+
+  useEffect(() => {
+    if (!deepLinkRead.current) return;
+    try {
+      const url = new URL(window.location.href);
+      if (profile) {
+        url.searchParams.set('u', profile.id);
+        if (profile.tab === 'geral') url.searchParams.delete('aba');
+        else url.searchParams.set('aba', profile.tab);
+      } else {
+        url.searchParams.delete('u');
+        url.searchParams.delete('aba');
+      }
+      window.history.replaceState(window.history.state, '', url.toString());
+    } catch {
+      /* sem history */
+    }
+  }, [profile]);
+
+  const openProfile = useCallback((u: AdminUser, tab: ProfileTab = 'geral') => setProfile({ id: u.id, tab }), []);
+  const profileUser = profile ? (users ?? []).find((u) => u.id === profile.id) ?? null : null;
+
+  // Ações estáveis pras linhas memoizadas (a linha não re-renderiza quando a
+  // página muda por outro motivo: busca, toast, gráfico).
+  const impl = useRef<RowActions>(null as unknown as RowActions);
+  impl.current = {
+    open: openProfile,
+    plan: changePlan,
+    beta: openBeta,
+    reset: askResetPassword,
+    toggle: toggleActive,
+    remove: askDelete,
+    reconcile,
+  };
+  const actions = useMemo<RowActions>(
+    () => ({
+      open: (u, t) => impl.current.open(u, t),
+      plan: (u, p) => impl.current.plan(u, p),
+      beta: (u) => impl.current.beta(u),
+      reset: (u) => impl.current.reset(u),
+      toggle: (u) => impl.current.toggle(u),
+      remove: (u) => impl.current.remove(u),
+      reconcile: (u) => impl.current.reconcile(u),
+    }),
+    [],
+  );
 
   // ─── Criar usuário ───
   const [createOpen, setCreateOpen] = useState(false);
@@ -587,7 +522,7 @@ export default function AdminPage() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: newEmail, password: newPassword, name: newName }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         flash('err', json.error || 'Falha ao criar.', 6000);
         return;
@@ -597,7 +532,7 @@ export default function AdminPage() {
       setNewPassword('');
       setNewName('');
       setCreateOpen(false);
-      await load(true);
+      await load();
     } catch (e2) {
       flash('err', (e2 as Error).message);
     } finally {
@@ -605,243 +540,168 @@ export default function AdminPage() {
     }
   }
 
-  const chips: Array<{ key: FilterKey; label: string; count: number; accent: Accent; hide?: boolean }> = [
-    { key: 'all', label: 'Todos', count: stats.total, accent: 'neutral' },
-    { key: 'online', label: 'Online', count: stats.online, accent: 'lime' },
-    { key: 'paid', label: 'Pagantes', count: stats.paid, accent: 'lime' },
-    { key: 'granted', label: 'Liberados', count: stats.granted, accent: 'cyan' },
-    { key: 'free', label: 'Free', count: stats.free, accent: 'neutral' },
-    { key: 'beta', label: 'Beta Pro', count: stats.beta, accent: 'violet' },
-    { key: 'inactive', label: 'Inativos', count: stats.inactive, accent: 'danger' },
-    { key: 'pending', label: 'Pgto pendente', count: stats.pending, accent: 'amber', hide: stats.pending === 0 },
-    { key: 'anomaly', label: 'Anomalia', count: stats.anomaly, accent: 'danger', hide: stats.anomaly === 0 },
+  const chips: Array<{ key: FilterKey; label: string; count: number; a: Accent; hide?: boolean }> = [
+    { key: 'all', label: 'Todos', count: stats.total, a: 'neutral' },
+    { key: 'online', label: 'Online', count: stats.online, a: 'lime' },
+    { key: 'paid', label: 'Pagantes', count: stats.paid, a: 'lime' },
+    { key: 'granted', label: 'Liberados', count: stats.granted, a: 'cyan' },
+    { key: 'free', label: 'Free', count: stats.free, a: 'neutral' },
+    { key: 'beta', label: 'Beta Pro', count: stats.beta, a: 'violet' },
+    { key: 'concurrent', label: 'Acesso simultâneo', count: stats.concurrent, a: 'danger', hide: stats.concurrent === 0 },
+    { key: 'inactive', label: 'Desativados', count: stats.inactive, a: 'danger', hide: stats.inactive === 0 },
+    { key: 'pending', label: 'Pagamento pendente', count: stats.pending, a: 'amber', hide: stats.pending === 0 },
+    { key: 'anomaly', label: 'Sem origem', count: stats.anomaly, a: 'danger', hide: stats.anomaly === 0 },
   ];
 
+  const g = dash?.growth;
+  const cc = dash?.concurrency;
+  const conversion = stats.total ? (stats.paid / stats.total) * 100 : 0;
+  const shown = visible.slice(0, limit);
+
   return (
-    <div className="mx-auto w-full max-w-[1240px] px-5 md:px-8">
-      {/* ═══════ Header ═══════ */}
-      <header className="flex flex-wrap items-end justify-between gap-4">
+    <div className="mx-auto w-full max-w-[1320px] px-4 md:px-8">
+      {/* ═══════ Cabeçalho ═══════ */}
+      <header className="flex flex-wrap items-end justify-between gap-5 pt-2">
         <div>
-          <div className="label-tech flex items-center gap-2 text-[10.5px] uppercase tracking-[0.22em] text-text-dim">
-            <LiveDot />
-            Admin · Central de controle
-          </div>
-          <h1 className="font-tech mt-2 text-[30px] font-extrabold tracking-[-0.03em] text-text md:text-[38px]">
-            Painel admin
-          </h1>
-          <p className="mt-1 text-[12.5px] text-text-muted">
-            {updatedAt
-              ? `Atualizado ${updatedAt.toLocaleTimeString('pt-BR')} · automático a cada 15s`
-              : 'Carregando…'}
+          <p className="field-label flex items-center gap-2 text-[13px] text-text-muted">
+            <Dot a={error ? 'danger' : 'lime'} ring size={7} />
+            {error ? 'Sem conexão com os dados' : updatedAt ? `Ao vivo · atualizado às ${updatedAt.toLocaleTimeString('pt-BR')}` : 'Conectando'}
+          </p>
+          <h1 className="font-tech mt-2 text-[34px] font-semibold leading-none tracking-[-0.035em] text-text md:text-[44px]">Painel admin</h1>
+          <p className="field-label mt-2.5 max-w-[60ch] text-[14px] text-text-muted">
+            Clientes, receita e acessos em tempo real. Clique em qualquer cliente pra ver o perfil completo.
           </p>
         </div>
-        <button
-          onClick={() => setCreateOpen((v) => !v)}
-          className="btn-primary !px-5 !py-2.5 text-[12.5px]"
-        >
+        <button type="button" onClick={() => setCreateOpen((v) => !v)} className="btn-primary !h-11 !px-5 text-[13.5px]">
+          {createOpen ? <I.close size={15} /> : <I.plus size={15} />}
           {createOpen ? 'Fechar' : 'Criar usuário'}
         </button>
       </header>
 
       {error ? (
-        <div
-          key={error}
-          role="alert"
-          className="error-shake mt-6 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300"
-        >
-          <div>{error}</div>
-          {errorDetail ? (
-            <div className="mono mt-2 text-[10px] opacity-70">detail: {errorDetail}</div>
-          ) : null}
+        <div key={error} role="alert" className="error-shake field-label mt-6 rounded-[16px] px-5 py-4 text-[13.5px]" style={{ color: accent('danger'), background: accent('danger', 0.08), boxShadow: `inset 0 0 0 1px ${accent('danger', 0.25)}` }}>
+          {error}
+          {errorDetail ? <div className="mono mt-1.5 text-[11.5px] opacity-80">{errorDetail}</div> : null}
         </div>
       ) : null}
 
       {/* ═══════ Criar usuário ═══════ */}
       {createOpen ? (
-        <section className="fade-in-up mt-6">
-          <form
-            onSubmit={createUser}
-            className="grid gap-3 rounded-[16px] border border-line bg-bg-soft p-4 sm:grid-cols-[1fr_1.2fr_1fr_auto]"
-          >
-            <input type="text" placeholder="Nome" value={newName} onChange={(e) => setNewName(e.target.value)} required className="input-field" disabled={creating} minLength={2} />
-            <input type="email" placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} required className="input-field" disabled={creating} />
-            <input type="text" placeholder="Senha provisória (mín. 8)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required className="input-field" disabled={creating} minLength={8} />
-            <button type="submit" className="btn-primary whitespace-nowrap" disabled={creating || !newEmail || !newPassword || !newName}>
-              {creating ? 'Criando…' : 'Criar e ativar'}
-            </button>
-            <p className="text-[11px] text-text-muted sm:col-span-4">
-              Senha provisória — no primeiro login o cliente troca por uma senha pessoal e você não tem mais acesso.
-            </p>
-          </form>
-        </section>
+        <div className="fade-in-up mt-6">
+          <Shell>
+            <form onSubmit={createUser} className="grid gap-3 p-4 sm:grid-cols-[1fr_1.2fr_1fr_auto] md:p-5">
+              <input type="text" placeholder="Nome" value={newName} onChange={(e) => setNewName(e.target.value)} required className="input-field" disabled={creating} minLength={2} />
+              <input type="email" placeholder="email@exemplo.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} required className="input-field" disabled={creating} />
+              <input type="text" placeholder="Senha provisória (mín. 8)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required className="input-field" disabled={creating} minLength={8} />
+              <button type="submit" className="btn-primary whitespace-nowrap" disabled={creating || !newEmail || !newPassword || !newName}>
+                {creating ? 'Criando' : 'Criar e ativar'}
+              </button>
+              <p className="field-label text-[12.5px] text-text-muted sm:col-span-4">
+                Senha provisória: no primeiro login o cliente troca por uma pessoal e você deixa de ter acesso a ela.
+              </p>
+            </form>
+          </Shell>
+        </div>
       ) : null}
 
-      {/* ═══════ Stats ═══════ */}
-      <section className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-5">
-        <StatCard label="Online agora" value={users ? stats.online : '—'} a="lime" live />
-        <StatCard label="Usuários" value={users ? stats.total : '—'} a="violet" />
-        <StatCard label="Pagantes · Stripe" value={users ? stats.paid : '—'} a="lime" onClick={() => setFilter('paid')} />
-        <StatCard label="Liberados por você" value={users ? stats.granted : '—'} a="cyan" onClick={() => setFilter('granted')} />
-        <StatCard label="MRR estimado" value={dash ? `R$ ${dash.totals.mrr.toLocaleString('pt-BR')}` : '—'} a="amber" />
+      {/* ═══════ Números ═══════ */}
+      <section className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Online agora" a="lime" live value={users ? stats.online : '·'} hint={users ? `${stats.usingTool} usando ferramenta` : undefined} onClick={() => setFilter('online')} />
+        <Stat label="Clientes" a="violet" value={users ? stats.total : '·'} hint={g ? `+${g.new7d} nos últimos 7 dias` : undefined} onClick={() => setFilter('all')} />
+        <Stat label="Pagantes no Stripe" a="lime" value={users ? stats.paid : '·'} hint={users ? `Conversão de ${conversion.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : undefined} onClick={() => setFilter('paid')} />
+        <Stat label="Liberados por você" a="cyan" value={users ? stats.granted : '·'} hint="Premium sem cobrança" onClick={() => setFilter('granted')} />
+        <Stat label="MRR estimado" a="amber" value={dash ? `R$ ${dash.totals.mrr.toLocaleString('pt-BR')}` : '·'} hint="Receita recorrente por mês" />
+        <Stat
+          label="Acesso simultâneo"
+          a="danger"
+          alert={!!cc?.accounts7d}
+          value={cc?.enabled ? cc.accounts7d : '·'}
+          hint={cc?.enabled ? (cc.accounts7d ? `${cc.accounts7d === 1 ? 'conta' : 'contas'} em 7 dias` : 'Nenhuma conta em 7 dias') : 'Aguardando o banco'}
+          onClick={stats.concurrent ? () => setFilter('concurrent') : undefined}
+        />
       </section>
 
       {/* ═══════ Financeiro ═══════ */}
-      <section className="mt-6">
+      <div className="mt-6">
         <Panel
           title="Financeiro"
-          right={
-            <div className="flex overflow-hidden rounded-full border border-line">
-              {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={
-                    'font-tech px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] transition ' +
-                    (period === p ? 'text-text' : 'text-text-dim hover:text-text-muted')
-                  }
-                  style={period === p ? { background: accent('lime', 0.16) } : undefined}
-                >
-                  {PERIOD_LABEL[p]}
-                </button>
-              ))}
-            </div>
-          }
+          hint="Valores líquidos: reembolso e contestação ficam fora do arrecadado"
+          right={<Segmented size="sm" value={period} onChange={setPeriod} activeTone="lime" options={(Object.keys(PERIOD_LABEL) as Period[]).map((p) => ({ value: p, label: PERIOD_LABEL[p] }))} />}
         >
           {dash ? (
-            <div className="flex flex-col gap-4">
-              <div className="grid gap-4 lg:grid-cols-[250px_1fr]">
-                {/* Resumo do período */}
-                <div className="flex flex-col justify-center gap-3.5 rounded-[14px] border border-line bg-bg p-4">
+            <div className="flex flex-col gap-5">
+              <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
+                <div className="flex flex-col justify-between gap-5 rounded-[16px] p-5" style={{ background: 'rgb(var(--text) / 0.03)', boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
                   <div>
-                    <div className="label-tech text-[10px] uppercase tracking-[0.16em] text-text-dim">
-                      Arrecadado · {PERIOD_LABEL[period]}
-                    </div>
-                    <div
-                      className="font-tech mt-1 text-[28px] font-extrabold tracking-tight"
-                      style={{ color: accent('lime'), fontVariantNumeric: 'tabular-nums' }}
-                    >
+                    <div className="field-label text-[13px] text-text-muted">Arrecadado · {PERIOD_LABEL[period].toLowerCase()}</div>
+                    <div className="font-tech mt-1.5 text-[36px] font-semibold leading-none tracking-[-0.035em]" style={{ color: accent('lime'), fontVariantNumeric: 'tabular-nums' }}>
                       {brl(finance.total)}
                     </div>
                     {finance.refundCount > 0 ? (
-                      <div className="mt-0.5 text-[11.5px] font-semibold" style={{ color: accent('danger') }}>
-                        −{brl(finance.refundTotal)} reembolsado ({finance.refundCount})
+                      <div className="field-label mt-2 text-[12.5px] font-semibold" style={{ color: accent('danger') }}>
+                        {brl(finance.refundTotal)} devolvido em {finance.refundCount} {finance.refundCount === 1 ? 'pagamento' : 'pagamentos'}
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex gap-6">
-                    <div>
-                      <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Pagamentos</div>
-                      <div className="font-tech mt-0.5 text-[17px] font-bold text-text">{finance.count}</div>
-                    </div>
-                    <div>
-                      <div className="label-tech text-[10px] uppercase tracking-[0.14em] text-text-dim">Ticket médio</div>
-                      <div className="font-tech mt-0.5 text-[17px] font-bold text-text" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {finance.count ? brl(finance.avg) : '—'}
-                      </div>
-                    </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <MiniNumber label="Pagamentos" value={String(finance.count)} />
+                    <MiniNumber label="Ticket médio" value={finance.count ? brl(finance.avg) : 'Sem dado'} />
+                    <MiniNumber label="Desde o início" value={brl(dash.revenueTotal)} />
+                    <MiniNumber label="Reembolsado (total)" value={brl(dash.refundedTotal ?? 0)} />
                   </div>
                 </div>
-
-                {/* Receita diária — últimos 30 dias */}
-                <div className="rounded-[14px] border border-line bg-bg p-4">
-                  <div className="label-tech mb-3 flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-text-dim">
-                    <span>Receita por dia · últimos 30 dias</span>
-                    <span className="flex items-center gap-3 normal-case tracking-normal">
-                      <span className="flex items-center gap-1">
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: accent('lime', 0.85) }} />
-                        pago
-                      </span>
-                      {finance.days.some((d) => d.refunded > 0) ? (
-                        <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-1.5 rounded-full" style={{ background: accent('danger', 0.8) }} />
-                          reembolso
-                        </span>
-                      ) : null}
-                    </span>
-                  </div>
-                  <div className="flex h-[92px] items-end gap-[3px]">
-                    {finance.days.map((d) => {
-                      const hPaid = d.paid ? Math.max((d.paid / finance.dayMax) * 100, 6) : 0;
-                      const hRef = d.refunded ? Math.max((d.refunded / finance.dayMax) * 100, 6) : 0;
-                      return (
-                        <div
-                          key={d.key}
-                          className="group relative flex h-full flex-1 flex-col items-stretch justify-end gap-[2px]"
-                          title={`${d.label} · pago ${brl(d.paid)}${d.refunded ? ` · reembolso ${brl(d.refunded)}` : ''}`}
-                        >
-                          {hRef > 0 ? (
-                            <div className="w-full rounded-[2px]" style={{ height: `${hRef}%`, background: accent('danger', 0.7) }} />
-                          ) : null}
-                          {hPaid > 0 ? (
-                            <div className="w-full rounded-[2px]" style={{ height: `${hPaid}%`, background: accent('lime', 0.8) }} />
-                          ) : (
-                            <div className="w-full rounded-[2px] bg-line/60" style={{ height: 2 }} />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-1.5 flex justify-between text-[9.5px] text-text-dim">
-                    <span>{finance.days[0]?.label}</span>
-                    <span>{finance.days[Math.floor(finance.days.length / 2)]?.label}</span>
-                    <span>hoje</span>
-                  </div>
+                <div className="rounded-[16px] p-5" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+                  <div className="field-label mb-1 text-[13px] text-text-muted">Receita por dia, últimos 30 dias</div>
+                  <BarSeries points={finance.days} a="lime" height={150} ariaLabel="Receita por dia nos últimos 30 dias" format={brl} emptyText="Nenhum pagamento nos últimos 30 dias." />
                 </div>
               </div>
 
-              {/* Pagamentos do período */}
               {finance.list.length ? (
-                <div className="max-h-[250px] overflow-y-auto rounded-[14px] border border-line bg-bg">
-                  <table className="w-full text-left text-[12.5px]">
-                    <thead className="sticky top-0 bg-bg">
-                      <tr className="label-tech text-[9.5px] uppercase tracking-[0.14em] text-text-dim">
-                        <th className="px-3 py-2.5 font-bold">Cliente</th>
-                        <th className="px-3 py-2.5 font-bold">Plano</th>
-                        <th className="px-3 py-2.5 font-bold">Valor</th>
-                        <th className="px-3 py-2.5 font-bold">Status</th>
-                        <th className="px-3 py-2.5 font-bold">Data</th>
-                        <th className="px-3 py-2.5 font-bold">Comprovante</th>
+                <div className="max-h-[320px] overflow-auto rounded-[16px]" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+                  <table className="w-full min-w-[680px] text-left">
+                    <thead className="sticky top-0 z-[1] bg-bg-soft">
+                      <tr className="field-label text-[12px] text-text-muted">
+                        <th className="px-4 py-3 font-medium">Cliente</th>
+                        <th className="px-4 py-3 font-medium">Plano</th>
+                        <th className="px-4 py-3 font-medium">Valor</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium">Data</th>
+                        <th className="px-4 py-3 text-right font-medium">Comprovante</th>
                       </tr>
                     </thead>
                     <tbody>
                       {finance.list.map((p) => {
-                        const refunded = p.status === 'refunded' || p.status === 'disputed';
+                        const refunded = isRefundPay(p);
+                        const owner = p.email ? byEmail.get(p.email.toLowerCase()) : undefined;
                         return (
-                          <tr key={p.id} className="border-t border-line/60 transition hover:bg-line/15">
-                            <td className="max-w-[220px] truncate px-3 py-2 text-text">{p.email || '—'}</td>
-                            <td className="px-3 py-2 text-text-muted">
-                              {p.plan === 'basic' ? 'Premium' : (p.plan ?? '—')}
-                              {p.billing ? (p.billing === 'annual' ? ' · anual' : ' · mensal') : ''}
-                            </td>
-                            <td
-                              className={'px-3 py-2 font-bold ' + (refunded ? 'line-through opacity-60' : '')}
-                              style={{ color: refunded ? 'rgb(var(--text-muted))' : accent('lime'), fontVariantNumeric: 'tabular-nums' }}
-                            >
-                              {brl(p.amount)}
-                            </td>
-                            <td className="px-3 py-2">
-                              {refunded ? (
-                                <Badge a="danger">{p.status === 'disputed' ? 'Chargeback' : 'Reembolsado'}</Badge>
+                          <tr key={p.id} className="border-t border-[rgb(var(--text)/0.06)] text-[13.5px] transition-colors hover:bg-[rgb(var(--text)/0.025)]">
+                            <td className="max-w-[260px] px-4 py-3">
+                              {owner ? (
+                                <button type="button" onClick={() => openProfile(owner, 'pagamentos')} className="block max-w-full truncate text-left font-medium text-text underline-offset-4 hover:underline" title="Abrir perfil">
+                                  {p.email}
+                                </button>
                               ) : (
-                                <Badge a="lime">Pago</Badge>
+                                <span className="block truncate text-text">{p.email || 'Sem email'}</span>
                               )}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-text-muted">
-                              {p.created_at ? new Date(p.created_at).toLocaleDateString('pt-BR') : '—'}
+                            <td className="field-label px-4 py-3 text-text-muted">
+                              {p.plan === 'basic' ? 'Premium' : (p.plan ?? 'Plano')}
+                              {p.billing ? (p.billing === 'annual' ? ' anual' : ' mensal') : ''}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className={'font-tech px-4 py-3 font-semibold ' + (refunded ? 'line-through opacity-60' : '')} style={{ color: refunded ? 'rgb(var(--text-muted))' : accent('lime'), fontVariantNumeric: 'tabular-nums' }}>
+                              {brl(p.amount)}
+                            </td>
+                            <td className="px-4 py-3">
+                              {refunded ? <Tag a="danger">{p.status === 'disputed' ? 'Contestado' : 'Reembolsado'}</Tag> : <Tag a="lime">Pago</Tag>}
+                            </td>
+                            <td className="field-label whitespace-nowrap px-4 py-3 text-text-muted">{fmtDate(p.created_at) ?? 'Sem data'}</td>
+                            <td className="px-4 py-3 text-right">
                               {p.receipt_url ? (
-                                <a
-                                  href={p.receipt_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
-                                  style={{ color: accent('violet') }}
-                                >
-                                  <IconReceipt /> abrir
+                                <a href={p.receipt_url} target="_blank" rel="noopener noreferrer" className="field-label inline-flex items-center gap-1.5 text-[13px] font-semibold underline-offset-4 hover:underline" style={{ color: accent('violet') }}>
+                                  <I.receipt size={13} /> Abrir
                                 </a>
                               ) : (
-                                <span className="text-text-dim">—</span>
+                                <span className="field-label text-[12.5px] text-text-muted">Sem link</span>
                               )}
                             </td>
                           </tr>
@@ -851,432 +711,334 @@ export default function AdminPage() {
                   </table>
                 </div>
               ) : (
-                <div className="flex items-center justify-center rounded-[14px] border border-dashed border-line py-6 text-[12.5px] text-text-dim">
-                  Nenhum pagamento em “{PERIOD_LABEL[period]}”.
+                <div className="field-label rounded-[16px] py-7 text-center text-[13.5px] text-text-muted" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+                  Nenhum pagamento em &ldquo;{PERIOD_LABEL[period]}&rdquo;.
                 </div>
               )}
             </div>
           ) : (
-            <div className="h-40 animate-pulse rounded-[12px] bg-line/30" />
+            <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
+              <Skeleton className="h-[230px]" />
+              <Skeleton className="h-[230px]" />
+            </div>
           )}
         </Panel>
-      </section>
+      </div>
 
-      {/* ═══════ Usuários + lateral ═══════ */}
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_296px]">
-        <section>
-          {/* Filtros */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {chips
-              .filter((c) => !c.hide)
-              .map((c) => {
-                const active = filter === c.key;
-                return (
-                  <button
-                    key={c.key}
-                    onClick={() => setFilter(c.key)}
-                    className={
-                      'font-tech rounded-full border px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] transition ' +
-                      (active ? '' : 'border-line text-text-dim hover:border-line-strong hover:text-text-muted')
-                    }
-                    style={
-                      active
-                        ? {
-                            borderColor: accent(c.accent, 0.55),
-                            background: accent(c.accent, 0.13),
-                            color: c.accent === 'neutral' ? 'rgb(var(--text))' : accent(c.accent),
-                          }
-                        : undefined
-                    }
-                  >
-                    {c.key === 'online' ? <LiveDot className="mr-1.5 inline-block align-middle" /> : null}
-                    {c.label}
-                    <span className="ml-1.5 opacity-60">{c.count}</span>
-                  </button>
-                );
-              })}
-          </div>
-
-          {/* Busca + ordenação */}
-          <div className="mt-3 flex gap-2">
-            <div className="relative flex-1">
-              <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-dim">
-                <IconSearch />
-              </span>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar por nome, email, IP ou ferramenta…"
-                className="input-field w-full !pl-10"
+      {/* ═══════ Crescimento + engajamento ═══════ */}
+      <div className="mt-6 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
+        <Panel title="Novos cadastros" hint="Por dia, últimos 30 dias (só clientes)">
+          {g ? (
+            <>
+              <BarSeries
+                points={g.signupDays.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.count }))}
+                a="violet"
+                height={130}
+                ariaLabel="Novos cadastros por dia"
+                format={(v) => `${v} ${v === 1 ? 'cadastro' : 'cadastros'}`}
               />
-            </div>
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as typeof sort)}
-              className="font-tech rounded-[12px] border border-line bg-bg-soft px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-text-muted"
-              title="Ordenar"
-            >
-              <option value="recent">Recentes</option>
-              <option value="seen">Último acesso</option>
-              <option value="name">Nome A–Z</option>
-            </select>
-          </div>
-
-          {/* Lista */}
-          <div className="mt-4 flex flex-col gap-2">
-            {users && visible.length > 0 ? (
-              visible.map((u) => {
-                const online = isOnline(u);
-                const meta = ACCESS_META[u.access];
-                const beta = betaProTools(u);
-                const usingNow = isUsingTool(u);
-                const tLabel = toolLabel(u.last_tool);
-                const isOpen = expanded === u.id;
+              <div className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-[14px]" style={{ background: 'rgb(var(--text) / 0.07)', boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+                <Cell label="Hoje" value={g.newToday} />
+                <Cell label="7 dias" value={g.new7d} />
+                <Cell label="30 dias" value={g.new30d} />
+              </div>
+            </>
+          ) : (
+            <Skeleton className="h-[230px]" />
+          )}
+        </Panel>
+        <Panel title="Engajamento" hint="Clientes que abriram o app na janela">
+          {g ? (
+            <div className="flex flex-col gap-4">
+              {[
+                { label: 'Últimas 24 horas', n: g.active24h },
+                { label: 'Últimos 7 dias', n: g.active7d },
+                { label: 'Últimos 30 dias', n: g.active30d },
+              ].map((r) => {
+                const pct = g.customers ? Math.min(100, (r.n / g.customers) * 100) : 0;
                 return (
-                  <div
-                    key={u.id}
-                    className={'rounded-[14px] border bg-bg-soft transition ' + (u.is_active ? 'border-line' : 'border-line opacity-55')}
-                    style={online ? { borderColor: accent('lime', 0.35) } : undefined}
-                  >
-                    <div className="flex flex-wrap items-center gap-3 p-3">
-                      {/* Identidade (clica → detalhes) */}
-                      <button
-                        onClick={() => setExpanded(isOpen ? null : u.id)}
-                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        title={isOpen ? 'Fechar detalhes' : 'Ver detalhes'}
-                      >
-                        <span
-                          className="font-tech relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-[13px] font-extrabold uppercase"
-                          style={{
-                            color: accent(meta.accent),
-                            borderColor: accent(meta.accent, 0.4),
-                            background: accent(meta.accent, 0.1),
-                          }}
-                        >
-                          {(u.name || u.email || '?').slice(0, 1)}
-                          {online ? (
-                            <span
-                              className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg-soft"
-                              style={{ background: accent('lime') }}
-                            />
-                          ) : null}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="flex flex-wrap items-center gap-1.5">
-                            <span className="truncate text-[13.5px] font-bold text-text">{u.name || '(sem nome)'}</span>
-                            <Badge a={meta.accent}>{meta.label}</Badge>
-                            {beta.length > 0 ? (
-                              <Badge a="violet" title={beta.map((p) => CATALOG_LABEL.get(p) ?? p).join(' · ')}>
-                                <IconBolt /> BETA PRO {beta.length}
-                              </Badge>
-                            ) : null}
-                            {!u.is_active ? <Badge a="danger">INATIVO</Badge> : null}
-                            {u.must_change_password ? <Badge a="amber">SENHA PROVISÓRIA</Badge> : null}
-                          </span>
-                          <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
-                            <span className="mono truncate">{u.email || '(sem email)'}</span>
-                            {usingNow && tLabel ? (
-                              <span className="whitespace-nowrap">
-                                usando <span className="font-semibold" style={{ color: accent('lime') }}>{tLabel}</span>
-                              </span>
-                            ) : tLabel ? (
-                              <span className="whitespace-nowrap text-text-dim">{tLabel}</span>
-                            ) : null}
-                            {u.last_seen_at ? (
-                              <span className="whitespace-nowrap text-text-dim">visto {timeAgo(u.last_seen_at)}</span>
-                            ) : null}
-                            {u.last_ip ? <span className="mono whitespace-nowrap text-text-dim">{u.last_ip}</span> : null}
-                          </span>
-                        </span>
-                      </button>
-
-                      {/* Ações */}
-                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                        {u.access === 'paid' && u.receipt_url ? (
-                          <a
-                            href={u.receipt_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-tech inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition hover:opacity-80"
-                            style={{ borderColor: accent('lime', 0.45), color: accent('lime') }}
-                            title={`Comprovante Stripe${u.last_payment_at ? ` · ${new Date(u.last_payment_at).toLocaleDateString('pt-BR')}` : ''}`}
-                          >
-                            <IconReceipt /> Comprovante
-                          </a>
-                        ) : null}
-                        <div className="font-tech flex overflow-hidden rounded-full border border-line">
-                          {(['free', 'premium'] as const).map((p) => (
-                            <button
-                              key={p}
-                              onClick={() => changePlan(u, p)}
-                              disabled={busyId === u.id || u.plan === p}
-                              className={
-                                'px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition disabled:cursor-default ' +
-                                (u.plan === p ? '' : 'text-text-dim hover:text-text-muted')
-                              }
-                              style={
-                                u.plan === p
-                                  ? {
-                                      background: accent(u.plan === 'premium' ? (u.access === 'paid' ? 'lime' : 'cyan') : 'neutral', 0.16),
-                                      color: p === 'premium' ? accent(u.access === 'paid' ? 'lime' : 'cyan') : 'rgb(var(--text))',
-                                    }
-                                  : undefined
-                              }
-                              title={p === 'premium' ? 'Liberar Premium na mão (não expira)' : 'Rebaixar pra Free (pede confirmação)'}
-                            >
-                              {p === 'free' ? 'Free' : 'Premium'}
-                            </button>
-                          ))}
-                        </div>
-                        <IconBtn a="violet" onClick={() => setBetaModal({ user: u, sel: new Set(u.tool_unlocks.filter((p) => CATALOG_PATHS.has(p))), saving: false })} disabled={busyId === u.id} title="Beta Pro — liberar ferramentas internas só pra esta conta" solid={beta.length > 0}>
-                          <IconBolt /> Beta Pro
-                        </IconBtn>
-                        <IconBtn a="amber" onClick={() => askResetPassword(u)} disabled={busyId === u.id} title="Gerar nova senha provisória">
-                          <IconKey /> Senha
-                        </IconBtn>
-                        <IconBtn a="neutral" onClick={() => doToggle(u, u.is_active ? 'deactivate' : 'activate')} disabled={busyId === u.id} title={u.is_active ? 'Desativar (reversível)' : 'Reativar'}>
-                          {u.is_active ? 'Desativar' : 'Ativar'}
-                        </IconBtn>
-                        <IconBtn a="danger" onClick={() => askDelete(u)} disabled={busyId === u.id} title="Deletar (pede confirmação)">
-                          <IconTrash />
-                        </IconBtn>
-                      </div>
+                  <div key={r.label}>
+                    <div className="field-label flex items-baseline justify-between text-[13px]">
+                      <span className="text-text-muted">{r.label}</span>
+                      <span>
+                        <span className="font-tech text-[17px] font-semibold text-text" style={{ fontVariantNumeric: 'tabular-nums' }}>{r.n}</span>
+                        <span className="ml-1.5 text-[12px] text-text-muted">{pct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</span>
+                      </span>
                     </div>
-
-                    {/* Detalhes */}
-                    {isOpen ? (
-                      <div className="fade-in-up border-t border-line/70 px-4 py-3">
-                        <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-[12px] text-text-muted">
-                          <span>
-                            Cadastro: <span className="text-text">{new Date(u.created_at).toLocaleDateString('pt-BR')}</span>
-                          </span>
-                          {u.traffic_source ? (
-                            <span>
-                              Origem: <span className="text-text">{u.traffic_source}</span>
-                            </span>
-                          ) : null}
-                          {u.phone ? (
-                            <span>
-                              Tel: <span className="mono text-text">{u.phone}</span>
-                              {u.phone_verified ? ' ✓' : ' (não verificado)'}
-                            </span>
-                          ) : null}
-                          {u.subscription_status ? (
-                            <span>
-                              Stripe: <span className="mono text-text">{u.subscription_status}</span>
-                            </span>
-                          ) : null}
-                          {u.current_period_end ? (
-                            <span>
-                              Acesso pago até: <span className="text-text">{new Date(u.current_period_end).toLocaleDateString('pt-BR')}</span>
-                            </span>
-                          ) : null}
-                          {u.last_payment_at ? (
-                            <span>
-                              Último pagamento: <span className="text-text">{new Date(u.last_payment_at).toLocaleDateString('pt-BR')}</span>
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {beta.length > 0 ? (
-                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px]">
-                            <span className="label-tech uppercase tracking-[0.14em] text-text-dim">Beta Pro:</span>
-                            {beta.map((p) => (
-                              <Badge key={p} a="violet">
-                                {CATALOG_LABEL.get(p) ?? p}
-                                {u.static_unlocks.includes(p) && !u.tool_unlocks.includes(p) ? ' · fixo' : ''}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : null}
-
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          {u.access === 'granted' ? (
-                            <span className="text-[12px]" style={{ color: accent('cyan') }}>
-                              Premium liberado por você (não expira, não passa pelo Stripe).
-                            </span>
-                          ) : u.access === 'anomaly' ? (
-                            <span className="text-[12px] text-red-300">
-                              Premium sem comprovante e sem concessão sua — use “Sincronizar c/ Stripe”.
-                            </span>
-                          ) : null}
-                          <button
-                            onClick={() => reconcile(u)}
-                            disabled={busyId === u.id}
-                            className="font-tech ml-auto rounded-full border px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.08em] transition hover:opacity-80 disabled:opacity-40"
-                            style={{ borderColor: accent('cyan', 0.5), color: accent('cyan') }}
-                            title="Lê o estado REAL do Stripe e aplica o plano pago (conserta 'pagou e continuou free')"
-                          >
-                            Sincronizar c/ Stripe
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
+                    <div className="mt-1.5 h-[6px] overflow-hidden rounded-full bg-[rgb(var(--text)/0.06)]">
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(pct, 1.5)}%`, background: accent('lime', 0.75) }} />
+                    </div>
                   </div>
                 );
-              })
-            ) : loading && !users ? (
-              <div className="rounded-[14px] border border-line bg-bg-soft p-8 text-center text-xs text-text-muted">Carregando usuários…</div>
-            ) : (
-              <div className="rounded-[14px] border border-line bg-bg-soft p-8 text-center text-xs text-text-muted">
-                {q || filter !== 'all' ? 'Nenhum usuário bate com esse filtro.' : 'Nenhum usuário ainda.'}
+              })}
+              <div className="mt-1 grid grid-cols-2 gap-px overflow-hidden rounded-[14px]" style={{ background: 'rgb(var(--text) / 0.07)', boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+                <Cell label="Com celular cadastrado" value={stats.withPhone} />
+                <Cell label="Com Beta Pro" value={stats.beta} />
               </div>
-            )}
-          </div>
-        </section>
+            </div>
+          ) : (
+            <Skeleton className="h-[230px]" />
+          )}
+        </Panel>
+      </div>
+
+      {/* ═══════ Clientes + lateral ═══════ */}
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[1fr_330px]">
+        <Shell>
+          <section>
+            <div className="flex flex-col gap-4 p-5 pb-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="font-tech text-[15.5px] font-semibold tracking-[-0.01em] text-text">Clientes</h2>
+                  <p className="field-label mt-0.5 text-[12.5px] text-text-muted">
+                    {users ? `${visible.length} ${visible.length === 1 ? 'cliente' : 'clientes'}${filter !== 'all' || q ? ' no filtro' : ''}` : 'Carregando'}
+                  </p>
+                </div>
+                <Segmented
+                  size="sm"
+                  value={sort}
+                  onChange={setSort}
+                  options={[
+                    { value: 'recent', label: 'Mais novos' },
+                    { value: 'seen', label: 'Último acesso' },
+                    { value: 'name', label: 'Nome' },
+                  ]}
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {chips
+                  .filter((c) => !c.hide)
+                  .map((c) => {
+                    const on = filter === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => setFilter(c.key)}
+                        className={'field-label inline-flex h-8 items-center gap-2 rounded-full px-3.5 text-[12.5px] font-semibold transition-[background-color,color,box-shadow] duration-300 ' + (on ? '' : 'text-text-muted hover:text-text')}
+                        style={
+                          on
+                            ? {
+                                color: c.a === 'neutral' ? 'rgb(var(--text))' : accent(c.a),
+                                background: c.a === 'neutral' ? 'rgb(var(--text) / 0.1)' : accent(c.a, 0.13),
+                                boxShadow: `inset 0 0 0 1px ${c.a === 'neutral' ? 'rgb(var(--text) / 0.14)' : accent(c.a, 0.32)}`,
+                              }
+                            : { boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.09)' }
+                        }
+                      >
+                        {c.key !== 'all' && c.key !== 'free' ? <Dot a={c.a} size={6} /> : null}
+                        {c.label}
+                        <span className="opacity-70" style={{ fontVariantNumeric: 'tabular-nums' }}>{c.count}</span>
+                      </button>
+                    );
+                  })}
+              </div>
+              <label className="relative block">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-text-muted">
+                  <I.search size={16} />
+                </span>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Buscar por nome, email, celular, IP ou ferramenta"
+                  className="input-field !h-11 !rounded-full !py-0 !pl-11 text-[14px]"
+                  aria-label="Buscar clientes"
+                />
+              </label>
+            </div>
+
+            <ul className="border-t border-[rgb(var(--text)/0.07)] [&>li+li]:border-t [&>li+li]:border-[rgb(var(--text)/0.06)]">
+              {users && shown.length > 0 ? (
+                shown.map((u) => <UserRow key={u.id} u={u} now={now} busy={busyId === u.id} actions={actions} />)
+              ) : !users ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <li key={i} className="flex items-center gap-4 px-5 py-4">
+                    <Skeleton className="h-10 w-10" />
+                    <div className="flex-1">
+                      <Skeleton className="h-3.5 w-48" />
+                      <Skeleton className="mt-2 h-3 w-72" />
+                    </div>
+                  </li>
+                ))
+              ) : (
+                <li className="field-label px-5 py-12 text-center text-[13.5px] text-text-muted">
+                  {q || filter !== 'all' ? 'Nenhum cliente bate com esse filtro.' : 'Nenhum cliente ainda.'}
+                </li>
+              )}
+            </ul>
+
+            {users && visible.length > shown.length ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[rgb(var(--text)/0.07)] px-5 py-4">
+                <span className="field-label text-[12.5px] text-text-muted">
+                  Mostrando {shown.length} de {visible.length}
+                </span>
+                <div className="flex gap-2">
+                  <Btn size="sm" onClick={() => setLimit((n) => n + PAGE)}>Mostrar mais {Math.min(PAGE, visible.length - shown.length)}</Btn>
+                  <Btn size="sm" onClick={() => setLimit(visible.length)}>Mostrar todos</Btn>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </Shell>
 
         {/* ═══════ Lateral ═══════ */}
-        <aside className="flex flex-col gap-4">
-          <Panel title="Distribuição" compact>
+        <aside className="flex flex-col gap-5">
+          <Panel title="Distribuição" hint={users ? `${stats.total} contas de clientes` : undefined}>
             {users ? (
               <>
-                <div className="flex h-3.5 w-full overflow-hidden rounded-full border border-line">
+                <div className="flex h-2.5 w-full gap-[2px] overflow-hidden rounded-full">
                   {(
                     [
                       ['lime', stats.paid],
                       ['cyan', stats.granted],
+                      ['amber', stats.pending],
                       ['danger', stats.anomaly],
-                      ['neutral', stats.free],
+                      ['neutral', stats.free - stats.pending],
                     ] as Array<[Accent, number]>
                   ).map(([a, n], i) =>
-                    n > 0 ? (
-                      <div key={i} style={{ width: `${(n / Math.max(stats.total, 1)) * 100}%`, background: accent(a, a === 'neutral' ? 0.45 : 0.8) }} />
-                    ) : null,
+                    n > 0 ? <div key={i} style={{ width: `${(n / Math.max(stats.total, 1)) * 100}%`, minWidth: 3, background: a === 'neutral' ? 'rgb(var(--text) / 0.16)' : accent(a, 0.85) }} /> : null,
                   )}
                 </div>
-                <ul className="mt-3 flex flex-col gap-1.5 text-[12px]">
-                  <LegendRow a="lime" label="Premium pagante" n={stats.paid} />
-                  <LegendRow a="cyan" label="Premium liberado" n={stats.granted} />
-                  {stats.anomaly > 0 ? <LegendRow a="danger" label="Sem origem" n={stats.anomaly} /> : null}
-                  <LegendRow a="neutral" label="Free" n={stats.free} />
-                  <LegendRow a="violet" label="Beta Pro" n={stats.beta} />
+                <ul className="mt-4 flex flex-col gap-2.5">
+                  <Legend a="lime" label="Premium pago" n={stats.paid} total={stats.total} onClick={() => setFilter('paid')} />
+                  <Legend a="cyan" label="Premium liberado" n={stats.granted} total={stats.total} onClick={() => setFilter('granted')} />
+                  {stats.pending ? <Legend a="amber" label="Pagamento pendente" n={stats.pending} total={stats.total} onClick={() => setFilter('pending')} /> : null}
+                  {stats.anomaly ? <Legend a="danger" label="Sem origem" n={stats.anomaly} total={stats.total} onClick={() => setFilter('anomaly')} /> : null}
+                  <Legend a="neutral" label="Free" n={stats.free} total={stats.total} onClick={() => setFilter('free')} />
+                  <Legend a="violet" label="Beta Pro" n={stats.beta} total={stats.total} onClick={() => setFilter('beta')} />
                 </ul>
               </>
             ) : (
-              <div className="h-16 animate-pulse rounded-[10px] bg-line/30" />
+              <Skeleton className="h-28" />
             )}
           </Panel>
 
-          <Panel title="Ferramentas mais usadas" hint="30 dias · só clientes" compact>
-            {dash ? (
-              dash.toolRanking.length ? (
-                <ul className="flex flex-col gap-2">
-                  {dash.toolRanking.slice(0, 8).map((t, i) => {
-                    const max = dash.toolRanking[0]?.count ?? 1;
+          {cc?.enabled ? (
+            <Panel title="Acesso simultâneo" hint="Últimos 7 dias" tone={cc.recent.length ? 'danger' : undefined}>
+              {cc.recent.length ? (
+                <ul className="-mx-2 flex flex-col">
+                  {cc.recent.map((e) => {
+                    const owner = (users ?? []).find((u) => u.id === e.user_id);
                     return (
-                      <li key={t.tool} className="flex items-center gap-2">
-                        <span className="w-4 shrink-0 text-right text-[10px] font-bold text-text-dim">{i + 1}</span>
-                        <span className="w-[44%] truncate text-[12px] text-text">{toolLabel(t.tool)}</span>
-                        <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-line/50">
-                          <span
-                            className="absolute inset-y-0 left-0 rounded-full"
-                            style={{ width: `${Math.max((t.count / max) * 100, 5)}%`, background: accent('violet', 0.75) }}
-                          />
-                        </span>
-                        <span className="w-8 shrink-0 text-right text-[11px] font-bold text-text-muted">{t.count}</span>
+                      <li key={e.id}>
+                        <button
+                          type="button"
+                          disabled={!owner}
+                          onClick={() => owner && openProfile(owner, 'acessos')}
+                          className="w-full rounded-[12px] px-2 py-2.5 text-left transition-colors hover:bg-[rgb(var(--text)/0.04)]"
+                        >
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="truncate text-[13.5px] font-medium text-text">{e.name || e.email || 'Cliente'}</span>
+                            <span className="field-label shrink-0 text-[12px]" style={{ color: accent('danger') }}>
+                              {fmtDateShort(e.started_at)} {fmtTime(e.started_at)}
+                            </span>
+                          </span>
+                          <span className="field-label mt-0.5 block truncate text-[12px] text-text-muted">
+                            {e.label_a || 'aparelho'} + {e.label_b || 'aparelho'}
+                            {e.same_network ? ' · mesma rede' : e.place_a && e.place_b && e.place_a !== e.place_b ? ` · ${e.place_a.split(',')[0]} e ${e.place_b.split(',')[0]}` : ''}
+                          </span>
+                        </button>
                       </li>
                     );
                   })}
                 </ul>
               ) : (
-                <div className="py-3 text-center text-[12px] text-text-dim">Sem uso registrado.</div>
-              )
-            ) : (
-              <div className="h-24 animate-pulse rounded-[10px] bg-line/30" />
-            )}
-          </Panel>
+                <p className="field-label text-[13px] text-text-muted">Nenhuma conta usada em dois aparelhos ao mesmo tempo.</p>
+              )}
+            </Panel>
+          ) : null}
 
-          <Panel title="Por onde chegaram" hint="só clientes" compact>
-            {dash ? (
-              dash.trafficSources.length ? (
-                <ul className="flex flex-col gap-2">
-                  {dash.trafficSources.slice(0, 6).map((s) => {
-                    const max = dash.trafficSources[0]?.count ?? 1;
-                    return (
-                      <li key={s.source} className="flex items-center gap-2">
-                        <span className="w-[44%] truncate text-[12px] text-text">{s.source}</span>
-                        <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-line/50">
-                          <span
-                            className="absolute inset-y-0 left-0 rounded-full"
-                            style={{ width: `${Math.max((s.count / max) * 100, 5)}%`, background: accent('cyan', 0.75) }}
-                          />
-                        </span>
-                        <span className="w-8 shrink-0 text-right text-[11px] font-bold text-text-muted">{s.count}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <div className="py-3 text-center text-[12px] text-text-dim">Sem dados de origem.</div>
-              )
-            ) : (
-              <div className="h-20 animate-pulse rounded-[10px] bg-line/30" />
-            )}
-          </Panel>
-
-          <Panel title="Online agora" compact>
+          <Panel title="Online agora" hint={users ? `${stats.online} ${stats.online === 1 ? 'pessoa' : 'pessoas'}` : undefined}>
             {users ? (
               stats.online > 0 ? (
-                <ul className="flex flex-col gap-2">
+                <ul className="-mx-2 flex flex-col">
                   {(users ?? [])
-                    .filter(isOnline)
-                    .slice(0, 10)
+                    .filter((u) => isOnline(u, now))
+                    .slice(0, 12)
                     .map((u) => (
-                      <li key={u.id} className="flex items-center gap-2 text-[12px]">
-                        <LiveDot />
-                        <span className="truncate text-text">{u.name || u.email}</span>
-                        {isUsingTool(u) && u.last_tool ? (
-                          <span className="ml-auto shrink-0 text-[11px]" style={{ color: accent('lime') }}>
-                            {toolLabel(u.last_tool)}
-                          </span>
-                        ) : null}
+                      <li key={u.id}>
+                        <button type="button" onClick={() => openProfile(u)} className="flex w-full items-center gap-2.5 rounded-[12px] px-2 py-2 text-left transition-colors hover:bg-[rgb(var(--text)/0.04)]">
+                          <Dot a="lime" size={7} />
+                          <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{u.name || u.email}</span>
+                          {isUsingTool(u, now) && u.last_tool ? (
+                            <span className="field-label shrink-0 text-[12px] font-semibold" style={{ color: accent('lime') }}>
+                              {toolLabel(u.last_tool)}
+                            </span>
+                          ) : null}
+                        </button>
                       </li>
                     ))}
                 </ul>
               ) : (
-                <div className="py-3 text-center text-[12px] text-text-dim">Ninguém online no momento.</div>
+                <p className="field-label text-[13px] text-text-muted">Ninguém online no momento.</p>
               )
             ) : (
-              <div className="h-16 animate-pulse rounded-[10px] bg-line/30" />
+              <Skeleton className="h-20" />
+            )}
+          </Panel>
+
+          <Panel title="Ferramentas mais usadas" hint="30 dias, só clientes">
+            {dash ? (
+              <RankList a="violet" numbered limit={8} emptyText="Sem uso registrado." items={dash.toolRanking.map((t) => ({ key: t.tool, label: toolLabel(t.tool) ?? t.tool, value: t.count }))} />
+            ) : (
+              <Skeleton className="h-40" />
+            )}
+          </Panel>
+
+          <Panel title="Por onde chegaram" hint="Primeira visita, só clientes">
+            {dash ? (
+              <RankList a="cyan" limit={6} emptyText="Sem dados de origem." items={dash.trafficSources.map((s) => ({ key: s.source, label: s.source === 'direct' ? 'Direto' : s.source, value: s.count }))} />
+            ) : (
+              <Skeleton className="h-32" />
             )}
           </Panel>
         </aside>
       </div>
 
-      <div className="h-16" />
+      <div className="h-20" />
 
-      {/* ═══════ Toast ═══════ */}
+      {/* ═══════ Perfil ═══════ */}
+      {profile && profileUser ? (
+        <ProfileSheet
+          key={profile.id}
+          user={profileUser}
+          tab={profile.tab}
+          onTab={(t) => setProfile((p) => (p ? { ...p, tab: t } : p))}
+          now={now}
+          busy={busyId === profileUser.id}
+          nonce={profileNonce}
+          actions={actions}
+          blockEsc={!!confirmBox || !!betaModal || !!resetModal}
+          onClose={() => setProfile(null)}
+        />
+      ) : null}
+
+      {/* ═══════ Aviso ═══════ */}
       {toast ? (
         <div
           role="status"
-          className="toast-pop font-tech fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border bg-bg-elev px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] shadow-2xl"
-          style={
-            toast.kind === 'ok'
-              ? { borderColor: accent('lime', 0.5), color: accent('lime') }
-              : { borderColor: accent('danger', 0.5), color: accent('danger') }
-          }
+          className="toast-pop field-label fixed bottom-6 left-1/2 z-[90] flex max-w-[92vw] -translate-x-1/2 items-center gap-2.5 rounded-full bg-bg-elev px-5 py-3 text-[13.5px] font-semibold"
+          style={{
+            color: toast.kind === 'ok' ? 'rgb(var(--text))' : accent('danger'),
+            boxShadow: `inset 0 0 0 1px ${toast.kind === 'ok' ? accent('lime', 0.35) : accent('danger', 0.4)}, 0 24px 48px -16px rgb(0 0 0 / 0.6)`,
+          }}
         >
+          <span style={{ color: toast.kind === 'ok' ? accent('lime') : accent('danger') }}>{toast.kind === 'ok' ? <I.check size={15} /> : <I.alert size={15} />}</span>
           {toast.msg}
         </div>
       ) : null}
 
-      {/* ═══════ Modal de CONFIRMAÇÃO (2ª etapa) ═══════ */}
+      {/* ═══════ Confirmação (2ª etapa) ═══════ */}
       {confirmBox ? (
-        <Modal onClose={() => (confirmBox.running ? null : setConfirmBox(null))} accent={confirmBox.accent}>
-          <div className="label-tech text-[10.5px] uppercase tracking-[0.2em]" style={{ color: accent(confirmBox.accent) }}>
-            Confirmação
-          </div>
-          <h3 className="font-tech mt-2 text-[20px] font-extrabold tracking-tight text-text">{confirmBox.title}</h3>
-          <p className="mt-2 text-[13px] leading-relaxed text-text-muted">{confirmBox.body}</p>
-          <div className="mt-5 flex items-center justify-end gap-2">
-            <button
-              onClick={() => setConfirmBox(null)}
+        <Modal onClose={() => (confirmBox.running ? undefined : setConfirmBox(null))} tone={confirmBox.tone}>
+          <h3 className="font-tech text-[21px] font-semibold tracking-[-0.02em] text-text">{confirmBox.title}</h3>
+          <p className="field-label mt-2.5 text-[14px] leading-relaxed text-text-muted">{confirmBox.body}</p>
+          <div className="mt-6 flex items-center justify-end gap-2">
+            <Btn onClick={() => setConfirmBox(null)} disabled={confirmBox.running}>Cancelar</Btn>
+            <Btn
+              tone={confirmBox.tone}
+              solid
               disabled={confirmBox.running}
-              className="rounded-full border border-line bg-bg px-5 py-2 text-[12.5px] font-bold text-text transition hover:bg-bg-soft"
-            >
-              Cancelar
-            </button>
-            <button
               onClick={async () => {
                 setConfirmBox((c) => (c ? { ...c, running: true } : c));
                 try {
@@ -1285,32 +1047,23 @@ export default function AdminPage() {
                   setConfirmBox(null);
                 }
               }}
-              disabled={confirmBox.running}
-              className="rounded-full border px-5 py-2 text-[12.5px] font-bold transition hover:opacity-85 disabled:opacity-50"
-              style={{
-                borderColor: accent(confirmBox.accent, 0.55),
-                background: accent(confirmBox.accent, 0.14),
-                color: accent(confirmBox.accent),
-              }}
             >
-              {confirmBox.running ? 'Executando…' : confirmBox.confirmLabel}
-            </button>
+              {confirmBox.running ? 'Executando' : confirmBox.confirmLabel}
+            </Btn>
           </div>
         </Modal>
       ) : null}
 
-      {/* ═══════ Modal BETA PRO ═══════ */}
+      {/* ═══════ Beta Pro ═══════ */}
       {betaModal ? (
-        <Modal onClose={() => (betaModal.saving ? null : setBetaModal(null))} accent="violet" wide>
-          <div className="label-tech flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.2em]" style={{ color: accent('violet') }}>
-            <IconBolt /> Beta Pro
+        <Modal onClose={() => (betaModal.saving ? undefined : setBetaModal(null))} tone="violet" wide>
+          <div className="flex items-center gap-2 text-[13px] font-semibold" style={{ color: accent('violet') }}>
+            <I.bolt size={14} /> <span className="field-label">Beta Pro</span>
           </div>
-          <h3 className="font-tech mt-2 text-[20px] font-extrabold tracking-tight text-text">Ferramentas internas liberadas</h3>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-text-muted">
-            Pra <span className="font-semibold text-text">{betaModal.user.email}</span> — libera só o que estiver marcado. A conta{' '}
-            <span className="font-semibold text-text">não vira admin</span> e continua {betaModal.user.plan === 'premium' ? 'Premium' : 'Free'}.
+          <h3 className="font-tech mt-2 text-[21px] font-semibold tracking-[-0.02em] text-text">Ferramentas internas liberadas</h3>
+          <p className="field-label mt-2 text-[13.5px] leading-relaxed text-text-muted">
+            Pra <b className="text-text">{betaModal.user.email}</b>. Libera só o que estiver marcado. A conta <b className="text-text">não vira admin</b> e continua {betaModal.user.plan === 'premium' ? 'Premium' : 'Free'}.
           </p>
-
           <div className="mt-4 flex max-h-[46vh] flex-col gap-1.5 overflow-y-auto pr-1">
             {UNLOCKABLE_TOOLS.map((t) => {
               const fixed = betaModal.user.static_unlocks.includes(t.path);
@@ -1318,6 +1071,7 @@ export default function AdminPage() {
               return (
                 <button
                   key={t.path}
+                  type="button"
                   disabled={fixed || betaModal.saving}
                   onClick={() => {
                     const sel = new Set(betaModal.sel);
@@ -1325,103 +1079,69 @@ export default function AdminPage() {
                     else sel.add(t.path);
                     setBetaModal({ ...betaModal, sel });
                   }}
-                  className={
-                    'flex items-start gap-3 rounded-[12px] border p-3 text-left transition ' +
-                    (on ? '' : 'border-line hover:border-line-strong') +
-                    (fixed ? ' cursor-not-allowed opacity-75' : '')
-                  }
-                  style={on ? { borderColor: accent('violet', 0.5), background: accent('violet', 0.08) } : undefined}
+                  className={'flex items-start gap-3 rounded-[14px] p-3 text-left transition-[background-color,box-shadow] duration-200 ' + (fixed ? 'cursor-not-allowed opacity-75' : 'hover:bg-[rgb(var(--text)/0.03)]')}
+                  style={{ boxShadow: `inset 0 0 0 1px ${on ? accent('violet', 0.45) : 'rgb(var(--text) / 0.08)'}`, background: on ? accent('violet', 0.07) : undefined }}
                 >
                   <span
-                    className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border text-[11px] font-bold"
-                    style={
-                      on
-                        ? { borderColor: accent('violet'), background: accent('violet'), color: 'rgb(var(--bg))' }
-                        : { borderColor: 'rgb(var(--line-strong))', color: 'transparent' }
-                    }
+                    className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px]"
+                    style={on ? { background: accent('violet'), color: 'rgb(var(--bg))' } : { boxShadow: 'inset 0 0 0 1.5px rgb(var(--text) / 0.25)', color: 'transparent' }}
                   >
-                    ✓
+                    <I.check size={12} />
                   </span>
                   <span className="min-w-0">
-                    <span className="flex items-center gap-2 text-[13px] font-bold text-text">
+                    <span className="flex items-center gap-2 text-[14px] font-semibold text-text">
                       {t.label}
-                      {fixed ? (
-                        <span
-                          className="font-tech rounded-full border border-line px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.1em] text-text-dim"
-                          title="Fixo por email no código/env — não dá pra remover pelo painel"
-                        >
-                          Fixo
-                        </span>
-                      ) : null}
+                      {fixed ? <Tag a="neutral" title="Fixo por email no código/env: não dá pra remover pelo painel">Fixo</Tag> : null}
                     </span>
-                    <span className="mt-0.5 block text-[11.5px] leading-snug text-text-muted">{t.desc}</span>
+                    <span className="field-label mt-0.5 block text-[12.5px] leading-snug text-text-muted">{t.desc}</span>
                   </span>
                 </button>
               );
             })}
           </div>
-
           <div className="mt-5 flex items-center justify-between gap-2">
-            <span className="text-[11px] text-text-dim">
-              {betaModal.sel.size} selecionada{betaModal.sel.size === 1 ? '' : 's'}
+            <span className="field-label text-[12.5px] text-text-muted">
+              {betaModal.sel.size} {betaModal.sel.size === 1 ? 'selecionada' : 'selecionadas'}
             </span>
             <div className="flex gap-2">
-              <button
-                onClick={() => setBetaModal(null)}
-                disabled={betaModal.saving}
-                className="rounded-full border border-line bg-bg px-5 py-2 text-[12.5px] font-bold text-text transition hover:bg-bg-soft"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={saveBetaModal}
-                disabled={betaModal.saving}
-                className="rounded-full border px-5 py-2 text-[12.5px] font-bold transition hover:opacity-85 disabled:opacity-50"
-                style={{ borderColor: accent('violet', 0.55), background: accent('violet', 0.14), color: accent('violet') }}
-              >
-                {betaModal.saving ? 'Salvando…' : 'Salvar desbloqueios'}
-              </button>
+              <Btn onClick={() => setBetaModal(null)} disabled={betaModal.saving}>Cancelar</Btn>
+              <Btn tone="violet" solid onClick={saveBetaModal} disabled={betaModal.saving}>
+                {betaModal.saving ? 'Salvando' : 'Salvar desbloqueios'}
+              </Btn>
             </div>
           </div>
         </Modal>
       ) : null}
 
-      {/* ═══════ Modal senha provisória ═══════ */}
+      {/* ═══════ Senha provisória ═══════ */}
       {resetModal ? (
-        <Modal onClose={() => setResetModal(null)} accent="amber">
-          <div className="label-tech text-[10.5px] uppercase tracking-[0.2em]" style={{ color: accent('amber') }}>
-            Senha provisória
-          </div>
-          <h3 className="font-tech mt-2 text-[20px] font-extrabold tracking-tight text-text">Nova senha gerada</h3>
-          <p className="mt-1 text-[12.5px] text-text-muted">
-            Pra <span className="font-medium text-text">{resetModal.email}</span>
+        <Modal onClose={() => setResetModal(null)} tone="amber">
+          <h3 className="font-tech text-[21px] font-semibold tracking-[-0.02em] text-text">Nova senha gerada</h3>
+          <p className="field-label mt-1.5 text-[13.5px] text-text-muted">
+            Pra <b className="text-text">{resetModal.email}</b>
           </p>
-          <div className="mt-4 rounded-[14px] border border-line bg-bg p-4">
-            <div className="label-tech text-[10px] uppercase tracking-[0.18em] text-text-dim">Senha</div>
-            <div className="mono mt-1 select-all text-center text-[24px] font-bold tracking-[0.06em]" style={{ color: accent('amber') }}>
+          <div className="mt-4 rounded-[16px] p-5 text-center" style={{ background: accent('amber', 0.06), boxShadow: `inset 0 0 0 1px ${accent('amber', 0.25)}` }}>
+            <div className="mono select-all text-[24px] font-bold tracking-[0.06em]" style={{ color: accent('amber') }}>
               {resetModal.password}
             </div>
           </div>
-          <p className="mt-3 text-[12px] leading-relaxed text-text-muted">
-            O usuário será forçado a trocar no próximo login. Copie agora — depois de fechar, essa senha não pode ser recuperada.
+          <p className="field-label mt-3 text-[13px] leading-relaxed text-text-muted">
+            A pessoa troca no próximo login. Copie agora: depois de fechar, essa senha não aparece mais.
           </p>
           <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-            <button
+            <Btn
+              tone="amber"
+              solid
               onClick={() => {
-                navigator.clipboard.writeText(resetModal.password);
-                flash('ok', 'Senha copiada.', 2500);
+                navigator.clipboard?.writeText(resetModal.password).then(
+                  () => flash('ok', 'Senha copiada.', 2500),
+                  () => flash('err', 'Não deu pra copiar. Selecione e copie na mão.'),
+                );
               }}
-              className="rounded-full border px-5 py-2 text-[12.5px] font-bold transition hover:opacity-85"
-              style={{ borderColor: accent('amber', 0.5), background: accent('amber', 0.12), color: accent('amber') }}
             >
-              Copiar senha
-            </button>
-            <button
-              onClick={() => setResetModal(null)}
-              className="rounded-full border border-line bg-bg px-5 py-2 text-[12.5px] font-bold text-text transition hover:bg-bg-soft"
-            >
-              Fechar
-            </button>
+              <I.copy size={13} /> Copiar senha
+            </Btn>
+            <Btn onClick={() => setResetModal(null)}>Fechar</Btn>
           </div>
         </Modal>
       ) : null}
@@ -1429,202 +1149,43 @@ export default function AdminPage() {
   );
 }
 
-/* ───────────────────── Subcomponentes ───────────────────── */
+/* ───────────── pedacinhos locais ───────────── */
 
-function LiveDot({ className = '' }: { className?: string }) {
+function MiniNumber({ label, value }: { label: string; value: string }) {
   return (
-    <span className={'relative flex h-1.5 w-1.5 shrink-0 ' + className}>
-      <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-50" style={{ background: accent('lime') }} />
-      <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: accent('lime') }} />
-    </span>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  a,
-  live,
-  onClick,
-}: {
-  label: string;
-  value: string | number;
-  a: Accent;
-  live?: boolean;
-  onClick?: () => void;
-}) {
-  const Comp = onClick ? 'button' : 'div';
-  return (
-    <Comp
-      onClick={onClick}
-      className={
-        'relative overflow-hidden rounded-[16px] border border-line bg-bg-soft p-4 text-left transition ' +
-        (onClick ? 'cursor-pointer hover:-translate-y-[1px] hover:border-line-strong' : '')
-      }
-    >
-      <span aria-hidden className="absolute inset-x-0 top-0 h-[2px]" style={{ background: accent(a, 0.55) }} />
-      <div className="label-tech flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-text-dim">
-        {live ? <LiveDot /> : null}
-        {label}
+    <div className="min-w-0">
+      <div className="field-label text-[12px] text-text-muted">{label}</div>
+      <div className="font-tech mt-0.5 truncate text-[16px] font-semibold text-text" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {value}
       </div>
-      <div className="font-tech mt-1.5 text-[26px] font-extrabold tracking-[-0.02em] text-text">{value}</div>
-    </Comp>
-  );
-}
-
-function Panel({
-  title,
-  hint,
-  right,
-  compact,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  right?: React.ReactNode;
-  compact?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={'rounded-[16px] border border-line bg-bg-soft ' + (compact ? 'p-4' : 'p-4 md:p-5')}>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="label-tech text-[11px] font-bold uppercase tracking-[0.18em] text-text-muted">
-          {title}
-          {hint ? <span className="ml-2 font-normal normal-case tracking-normal text-text-dim">{hint}</span> : null}
-        </h2>
-        {right}
-      </div>
-      {children}
     </div>
   );
 }
 
-function Badge({ a, title, children }: { a: Accent; title?: string; children: React.ReactNode }) {
+function Cell({ label, value }: { label: string; value: number }) {
   return (
-    <span
-      className="font-tech inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em]"
-      style={{ color: accent(a === 'neutral' ? 'neutral' : a), borderColor: accent(a, 0.45), background: accent(a, 0.09) }}
-      title={title}
-    >
-      {children}
-    </span>
+    <div className="bg-bg-soft px-4 py-3">
+      <div className="field-label text-[12px] text-text-muted">{label}</div>
+      <div className="font-tech mt-0.5 text-[20px] font-semibold text-text" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+    </div>
   );
 }
 
-function IconBtn({
-  a,
-  onClick,
-  disabled,
-  title,
-  solid,
-  children,
-}: {
-  a: Accent;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  solid?: boolean;
-  children: React.ReactNode;
-}) {
+function Legend({ a, label, n, total, onClick }: { a: Accent; label: string; n: number; total: number; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="font-tech inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] transition hover:opacity-80 disabled:opacity-40"
-      style={
-        a === 'neutral'
-          ? { borderColor: 'rgb(var(--line-strong))', color: 'rgb(var(--text-muted))' }
-          : {
-              borderColor: accent(a, 0.45),
-              color: accent(a),
-              background: solid ? accent(a, 0.12) : undefined,
-            }
-      }
-    >
-      {children}
-    </button>
-  );
-}
-
-function LegendRow({ a, label, n }: { a: Accent; label: string; n: number }) {
-  return (
-    <li className="flex items-center gap-2">
-      <span className="inline-block h-2 w-2 rounded-full" style={{ background: accent(a, a === 'neutral' ? 0.5 : 0.85) }} />
-      <span className="text-text-muted">{label}</span>
-      <span className="ml-auto font-bold text-text">{n}</span>
+    <li>
+      <button type="button" onClick={onClick} className="field-label flex w-full items-center gap-2.5 text-left text-[13px] transition-opacity hover:opacity-80">
+        <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: a === 'neutral' ? 'rgb(var(--text) / 0.3)' : accent(a, 0.9) }} />
+        <span className="text-text-muted">{label}</span>
+        <span className="ml-auto text-[12px] text-text-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {total ? Math.round((n / total) * 100) : 0}%
+        </span>
+        <span className="font-tech w-9 text-right font-semibold text-text" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {n}
+        </span>
+      </button>
     </li>
-  );
-}
-
-function Modal({
-  onClose,
-  accent: a,
-  wide,
-  children,
-}: {
-  onClose: () => void;
-  accent: Accent;
-  wide?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className={'dropdown-pop relative w-full overflow-hidden rounded-[20px] border bg-bg-elev p-6 ' + (wide ? 'max-w-lg' : 'max-w-md')}
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          borderColor: accent(a, 0.4),
-          boxShadow: '0 32px 64px -20px rgba(0,0,0,0.55), inset 0 1px 0 rgb(var(--line) / 0.6)',
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/* ───────────────────── Ícones (SVG, herdam a cor) ───────────────────── */
-
-function IconSearch() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </svg>
-  );
-}
-
-function IconBolt() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M13 2 4.5 13.5H11L9.5 22 19 10.5h-6.5L13 2Z" />
-    </svg>
-  );
-}
-
-function IconReceipt() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21V3Z" />
-      <path d="M9 8h6M9 12h6" />
-    </svg>
-  );
-}
-
-function IconKey() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="15" r="4.5" />
-      <path d="m11.5 11.5 8-8M16 7l3 3" />
-    </svg>
-  );
-}
-
-function IconTrash() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" />
-    </svg>
   );
 }

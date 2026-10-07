@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
-import { isPaidExpired } from '@/lib/plan-prices';
+import { bestPhone, classifyAccess } from '../_classify';
 import { staticUnlocksForEmail } from '@/lib/tool-unlocks';
 
 /**
@@ -19,6 +19,10 @@ import { staticUnlocksForEmail } from '@/lib/tool-unlocks';
  *   • tool_unlocks: ferramentas BETA PRO liberadas via painel (banco)
  *   • static_unlocks: desbloqueios fixos por email (código/env — não
  *     removíveis pelo painel)
+ *   • phone: o melhor telefone que a pessoa deixou (verificado ou do cadastro)
+ *   • concurrent_30d / concurrent_last_at: episódios de ACESSO SIMULTÂNEO
+ *     (dois aparelhos em uso ao mesmo tempo, migration 037) nos últimos 30
+ *     dias. "Mesmo computador" (janela anônima/outro navegador) não conta.
  */
 
 export const runtime = 'nodejs';
@@ -35,33 +39,14 @@ type Row = Record<string, unknown> & {
 };
 
 const FULL_SELECT =
-  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end, traffic_source, tool_unlocks';
+  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, whatsapp, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end, traffic_source, tool_unlocks';
 
 // Sem tool_unlocks (migration 028 pendente) e sem billing (schemas antigos).
 const MID_SELECT =
-  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end';
+  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, whatsapp, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end';
 
 const BASIC_SELECT =
   'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at';
-
-function classify(p: Row): {
-  plan: 'premium' | 'free';
-  access: 'paid' | 'granted' | 'pending' | 'anomaly' | 'free';
-} {
-  const tier = (p.tier ?? '').toString();
-  const isPaidTier = tier === 'basic' || tier === 'pro' || tier === 'beta';
-  const expired = isPaidExpired(p.subscription_status, p.current_period_end);
-  if (!isPaidTier || expired) return { plan: 'free', access: 'free' };
-  const s = p.subscription_status ?? '';
-  if (s === 'active' || s === 'trialing' || s === 'paid')
-    return { plan: 'premium', access: 'paid' };
-  if (s === 'admin_grant') return { plan: 'premium', access: 'granted' };
-  // Renovação tentada e NÃO paga → acesso SUSPENSO pelos gates (política
-  // 13.08). Assinatura segue viva no Stripe; o cliente resolve na tela de
-  // assinatura (retry/troca de cartão). Plano EFETIVO agora é free.
-  if (s === 'past_due' || s === 'unpaid') return { plan: 'free', access: 'pending' };
-  return { plan: 'premium', access: 'anomaly' };
-}
 
 export async function GET() {
   const guard = await requireAdmin();
@@ -109,17 +94,44 @@ export async function GET() {
       /* tabela payments ausente (schema antigo) — segue sem comprovantes */
     }
 
+    // Acesso simultâneo (037) — 30 dias. Sem a migration, segue sem o selo.
+    const concurrentByUser: Record<string, { n: number; last: string }> = {};
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: evs, error: evErr } = await svc
+        .from('access_concurrency')
+        .select('user_id, ended_at')
+        .eq('same_machine', false)
+        .gte('ended_at', since)
+        .order('ended_at', { ascending: false })
+        .limit(5000);
+      if (!evErr) {
+        for (const ev of (evs ?? []) as Array<{ user_id: string; ended_at: string }>) {
+          const cur = concurrentByUser[ev.user_id];
+          if (cur) cur.n += 1;
+          else concurrentByUser[ev.user_id] = { n: 1, last: ev.ended_at };
+        }
+      }
+    } catch {
+      /* tabela ainda não existe */
+    }
+
     const enriched = (profiles ?? []).map((p) => {
-      const { plan, access } = classify(p);
+      const { plan, access } = classifyAccess(p);
+      const rest: Row = { ...p };
+      delete rest.whatsapp; // vira `phone` (o melhor número que a pessoa deixou)
       return {
-        ...p,
+        ...rest,
         email: p.email ?? null,
+        phone: bestPhone({ phone: p.phone, whatsapp: p.whatsapp }),
         plan,
         access,
         tool_unlocks: Array.isArray(p.tool_unlocks) ? p.tool_unlocks : [],
         static_unlocks: staticUnlocksForEmail(p.email),
         receipt_url: receiptByUser[p.id]?.url ?? null,
         last_payment_at: receiptByUser[p.id]?.at ?? null,
+        concurrent_30d: concurrentByUser[p.id]?.n ?? 0,
+        concurrent_last_at: concurrentByUser[p.id]?.last ?? null,
       };
     });
 

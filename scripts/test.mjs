@@ -29,6 +29,8 @@ const ETAPAS = [
   { run: ["scripts/test-perf-guards.mjs"] },
   // chat de ajuda (07.10): mensagem pronta pro WhatsApp do suporte diz quem, o quê e onde
   { tsc: "lib/history-tools.ts lib/help-chat.ts lib/help-chat.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/help-chat.test.js"] },
+  // painel admin (07.10): aparelho/UA do histórico de acesso + resumo do perfil (IPs, aparelhos, dias, uso)
+  { tsc: "lib/access-device.ts lib/access-device.test.ts lib/admin-access-summary.ts lib/admin-access-summary.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --esModuleInterop --lib es2021,dom", run: [".test-tmp/access-device.test.js", ".test-tmp/admin-access-summary.test.js"] },
   // export do FakePass (06.10): sonda de linha de base do html2canvas + emoji inteiro
   { run: ["scripts/test-fakepass-export-guards.mjs"] },
   // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo
