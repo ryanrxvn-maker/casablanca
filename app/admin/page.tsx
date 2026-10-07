@@ -61,6 +61,9 @@ const isRefundPay = (p: Payment) => p.status === 'refunded' || p.status === 'dis
 
 export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
+  // Nível da consulta no servidor: fora do 'full' falta dado (plano ou Beta
+  // Pro) e o painel AVISA em vez de mostrar zeros que parecem verdade.
+  const [schema, setSchema] = useState<'full' | 'mid' | 'basic'>('full');
   const [dash, setDash] = useState<Dash | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -94,6 +97,7 @@ export default function AdminPage() {
       setError(null);
       setErrorDetail(null);
       setUsers(json.users ?? []);
+      setSchema(json.schema === 'mid' || json.schema === 'basic' ? json.schema : 'full');
       setUpdatedAt(new Date());
       setNow(Date.now());
     } catch (e) {
@@ -578,6 +582,17 @@ export default function AdminPage() {
         </button>
       </header>
 
+      {users && schema !== 'full' ? (
+        <div role="alert" className="field-label mt-6 flex items-start gap-3 rounded-[16px] px-5 py-4 text-[13.5px] leading-relaxed" style={{ color: accent(schema === 'basic' ? 'danger' : 'amber'), background: accent(schema === 'basic' ? 'danger' : 'amber', 0.08), boxShadow: `inset 0 0 0 1px ${accent(schema === 'basic' ? 'danger' : 'amber', 0.25)}` }}>
+          <span className="mt-0.5 shrink-0"><I.alert size={16} /></span>
+          <span>
+            {schema === 'basic'
+              ? 'O plano e a assinatura dos clientes não carregaram desta vez. Pagantes, liberados e Free abaixo NÃO estão confiáveis. Recarregue a página; se continuar, o banco recusou a consulta completa.'
+              : 'O Beta Pro dos clientes não carregou desta vez (o resto está certo). Recarregue a página.'}
+          </span>
+        </div>
+      ) : null}
+
       {error ? (
         <div key={error} role="alert" className="error-shake field-label mt-6 rounded-[16px] px-5 py-4 text-[13.5px]" style={{ color: accent('danger'), background: accent('danger', 0.08), boxShadow: `inset 0 0 0 1px ${accent('danger', 0.25)}` }}>
           {error}
@@ -608,8 +623,8 @@ export default function AdminPage() {
       <section className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Online agora" a="lime" live value={users ? stats.online : '·'} hint={users ? `${stats.usingTool} usando ferramenta` : undefined} onClick={() => setFilter('online')} />
         <Stat label="Clientes" a="violet" value={users ? stats.total : '·'} hint={g ? `+${g.new7d} nos últimos 7 dias` : undefined} onClick={() => setFilter('all')} />
-        <Stat label="Pagantes no Stripe" a="lime" value={users ? stats.paid : '·'} hint={users ? `Conversão de ${conversion.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : undefined} onClick={() => setFilter('paid')} />
-        <Stat label="Liberados por você" a="cyan" value={users ? stats.granted : '·'} hint="Premium sem cobrança" onClick={() => setFilter('granted')} />
+        <Stat label="Pagantes no Stripe" a="lime" value={users && schema !== 'basic' ? stats.paid : '·'} hint={users && schema !== 'basic' ? `Conversão de ${conversion.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : undefined} onClick={() => setFilter('paid')} />
+        <Stat label="Liberados por você" a="cyan" value={users && schema !== 'basic' ? stats.granted : '·'} hint="Premium sem cobrança" onClick={() => setFilter('granted')} />
         <Stat label="MRR estimado" a="amber" value={dash ? `R$ ${dash.totals.mrr.toLocaleString('pt-BR')}` : '·'} hint="Receita recorrente por mês" />
         <Stat
           label="Acesso simultâneo"

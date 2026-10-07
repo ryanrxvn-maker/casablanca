@@ -39,11 +39,11 @@ type Row = Record<string, unknown> & {
 };
 
 const FULL_SELECT =
-  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, whatsapp, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end, traffic_source, tool_unlocks';
+  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end, traffic_source, tool_unlocks';
 
 // Sem tool_unlocks (migration 028 pendente) e sem billing (schemas antigos).
 const MID_SELECT =
-  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, whatsapp, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end';
+  'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone, subscription_status, subscription_plan, current_period_end';
 
 const BASIC_SELECT =
   'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at';
@@ -56,8 +56,19 @@ export async function GET() {
     const svc = serviceClient();
 
     // Cascata de selects: completo → sem tool_unlocks → legado.
+    // ⚠ NUNCA pôr coluna nova aqui sem ter certeza de que existe em produção:
+    // uma coluna ausente derruba o select inteiro e a lista cai pro legado,
+    // SEM plano nem assinatura (07.10: `whatsapp` fez os 457 aparecerem Free).
+    // Coluna opcional vai numa consulta à parte (ver whatsapp abaixo). E se
+    // cair de nível, o painel recebe `schema` e avisa em vez de mentir.
     let profiles: Row[] | null = null;
-    for (const sel of [FULL_SELECT, MID_SELECT, BASIC_SELECT]) {
+    let schema: 'full' | 'mid' | 'basic' = 'full';
+    const levels: Array<['full' | 'mid' | 'basic', string]> = [
+      ['full', FULL_SELECT],
+      ['mid', MID_SELECT],
+      ['basic', BASIC_SELECT],
+    ];
+    for (const [level, sel] of levels) {
       const res = await svc
         .from('profiles')
         .select(sel)
@@ -65,11 +76,31 @@ export async function GET() {
         .order('created_at', { ascending: false });
       if (!res.error) {
         profiles = (res.data ?? []) as unknown as Row[];
+        schema = level;
         break;
       }
-      if (sel === BASIC_SELECT) {
+      console.error(`[admin list-users] select ${level} falhou:`, res.error.message);
+      if (level === 'basic') {
         return jsonError('Falha ao listar usuarios.', 500, res.error.message);
       }
+    }
+
+    // Número do cadastro (coluna `whatsapp`, migration 004): pode não existir
+    // em produção, então vem à parte e só complementa o `phone`.
+    const whatsappByUser: Record<string, string> = {};
+    try {
+      const { data: wa, error: waErr } = await svc
+        .from('profiles')
+        .select('id, whatsapp')
+        .eq('is_admin', false)
+        .not('whatsapp', 'is', null);
+      if (!waErr) {
+        for (const r of (wa ?? []) as Array<{ id: string; whatsapp: string | null }>) {
+          if (r.whatsapp) whatsappByUser[r.id] = r.whatsapp;
+        }
+      }
+    } catch {
+      /* coluna ausente: segue só com `phone` */
     }
 
     // Último comprovante (Stripe receipt) por usuário — botão direto no card.
@@ -118,12 +149,10 @@ export async function GET() {
 
     const enriched = (profiles ?? []).map((p) => {
       const { plan, access } = classifyAccess(p);
-      const rest: Row = { ...p };
-      delete rest.whatsapp; // vira `phone` (o melhor número que a pessoa deixou)
       return {
-        ...rest,
+        ...p,
         email: p.email ?? null,
-        phone: bestPhone({ phone: p.phone, whatsapp: p.whatsapp }),
+        phone: bestPhone({ phone: p.phone, whatsapp: whatsappByUser[p.id] }),
         plan,
         access,
         tool_unlocks: Array.isArray(p.tool_unlocks) ? p.tool_unlocks : [],
@@ -135,7 +164,7 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ users: enriched });
+    return NextResponse.json({ users: enriched, schema });
   } catch (e) {
     console.error('[admin list-users]', e);
     return jsonError(
