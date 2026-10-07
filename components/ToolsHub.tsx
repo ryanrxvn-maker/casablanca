@@ -70,7 +70,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Lipsync Video to Video',
-    description: 'Suba o rosto, suba o áudio e o lipsync sai pronto — o avatar falando exatamente a copy que você quiser, em minutos.',
+    description: 'Suba o rosto, suba o áudio e o lipsync sai pronto: o avatar falando exatamente a copy que você quiser, em minutos.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
@@ -365,7 +365,7 @@ export function ToolsHub() {
         <SectionTitle
           eyebrow="ESTÚDIO"
           title="Ferramentas"
-          sub="Cortes, ajustes, arquivos e IA — sem espera."
+          sub="Todas as ferramentas que você precisa, em um só lugar."
           delay={300}
         />
         {/* Sem busca nem filtro aqui: a busca global (Pesquisar, no topo) já
@@ -558,8 +558,12 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
       <div
         ref={scrollerRef}
         onScroll={onScroll}
-        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth"
-        style={{ scrollbarWidth: 'none' }}
+        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[26px]"
+        // A JANELA tem o mesmo raio dos slides: no meio da troca, o pedaço do
+        // slide que está saindo/entrando é cortado por essa borda — reta, ela
+        // deixava o canto QUADRADO. `isolation` garante o recorte redondo também
+        // sobre camadas de GPU (vídeo, tilt 3D do Famous Hey).
+        style={{ scrollbarWidth: 'none', isolation: 'isolate' }}
       >
         {slides.map((s, i) => (
           <div
@@ -1833,7 +1837,7 @@ function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; lock
         >
           <div className="px-4 pb-4 pt-3.5">
             <p className="text-[12.5px] leading-relaxed text-white/80">
-              A fala do vídeo vira legenda animada — transcrição palavra por
+              A fala do vídeo vira legenda animada: transcrição palavra por
               palavra, {LEGENDAS_MODELOS} modelos, editor estilo CapCut e o MP4 renderizado
               no seu navegador.
             </p>
@@ -2314,7 +2318,7 @@ function FeaturedVideoCard({
     >
       <Link
         href={locked ? `/planos?upgrade=premium&from=${entry.href}` : entry.href}
-        className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
+        className="group relative block overflow-hidden rounded-[20px] border border-line/70 bg-[#0b0b0f] transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
       >
         {inner}
       </Link>
