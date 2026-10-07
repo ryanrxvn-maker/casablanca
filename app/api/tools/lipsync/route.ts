@@ -150,7 +150,8 @@ export async function POST(req: Request) {
   }
   if (audioMs > MAX_AUDIO_MS) {
     return NextResponse.json(
-      { error: `Áudio acima de ${Math.round(MAX_AUDIO_MS / 1000)}s. O DreamFace limita ~180s por geração.` },
+      // Sem nome de motor: esta mensagem chega no card do cliente.
+      { error: `Trecho de áudio acima de ${Math.round(MAX_AUDIO_MS / 1000)}s. Tenta de novo.` },
       { status: 422 },
     );
   }

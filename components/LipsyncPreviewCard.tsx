@@ -52,6 +52,7 @@ export function LipsyncPreviewCard({
   isRegenerating = false,
   recuperarVideo,
   formato = '9:16',
+  motorNeutro = false,
 }: {
   take: LipsyncTake;
   position: number;
@@ -83,6 +84,12 @@ export function LipsyncPreviewCard({
    *  deitado — senão o `object-cover` cortaria o preview e o take pareceria
    *  errado sem estar. */
   formato?: '9:16' | '16:9';
+  /** Ferramenta que NÃO pode citar motor nenhum (Lipsync Video to Video):
+   *  o erro aparece como a ferramenta escreveu (já em PT-BR e sem marca) e o
+   *  aviso de download não fala de HeyGen. Sem isto, todo erro desse card
+   *  virava "O HeyGen não renderizou essa parte" — numa ferramenta que nem
+   *  usa HeyGen (07.10). */
+  motorNeutro?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -131,6 +138,7 @@ export function LipsyncPreviewCard({
    *  daily limit", "avatar look not found ... space_id") — o cliente vê copy
    *  clara em PT-BR; o texto cru fica no console pra diagnóstico. */
   function friendlyTakeError(raw: string): string {
+    if (motorNeutro) return raw;
     const m = raw.toLowerCase();
     if (/quota|daily|usage has exceeded|limit reached|insufficient|credit/.test(m)) {
       return 'HeyGen no limite diário da conta — renova em até 24h. Não é erro do app.';
@@ -166,7 +174,11 @@ export function LipsyncPreviewCard({
       await downloadBlob(blob, `${fileBase}_${safeLabel}.mp4`);
     } catch (e) {
       console.warn('Download falhou', e);
-      alert('Não consegui baixar esse take agora — o link do HeyGen pode ter vencido. Clique Retomar no card pra renovar e tente de novo.');
+      alert(
+        motorNeutro
+          ? 'Não consegui baixar esse vídeo agora. Tenta de novo em instantes.'
+          : 'Não consegui baixar esse take agora — o link do HeyGen pode ter vencido. Clique Retomar no card pra renovar e tente de novo.',
+      );
     } finally {
       setDownloading(false);
     }

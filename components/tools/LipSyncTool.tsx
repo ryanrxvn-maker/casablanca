@@ -76,6 +76,18 @@ function errMsg(e: unknown): string {
   return String(e);
 }
 
+/**
+ * Esta ferramenta NUNCA cita o motor por trás dela (nem HeyGen, nem o de
+ * lipsync) — em aviso nenhum. As mensagens daqui e da rota já nascem sem marca;
+ * isto é a trava final pra qualquer texto cru que escape (lib de terceiro,
+ * erro de rede com URL do provedor etc.).
+ */
+function semMarca(msg: string): string {
+  return /heygen|dreamface|newportai/i.test(msg)
+    ? 'A geração falhou nessa tentativa. Clica em Tentar de novo.'
+    : msg;
+}
+
 /** true = erro de REDE (fetch rejeitou / conexão caiu), seguro pra re-tentar. */
 function isNetworkError(e: unknown): boolean {
   const m = errMsg(e).toLowerCase();
@@ -197,7 +209,7 @@ function estimateJobMs(audioSec: number, faceNeedsCompress: boolean, clean: bool
   const compress = faceNeedsCompress ? 60_000 : 0; // compressão (veryfast 1080p)
   const cleanMs = clean ? 5_000 + audioSec * 180 : 0; // limpar áudio (se ligado)
   const upload = 8_000; // subir o rosto
-  const gen = Math.max(26_000, audioSec * 1_800); // render no motor (trechos em série)
+  const gen = Math.max(26_000, audioSec * 2_100); // render no motor (trechos em série; medido 07.10: ~2,1s por s de fala)
   const concat = audioSec > 108 ? 6_000 : 0; // costura (só áudio longo)
   return compress + cleanMs + upload + gen + concat;
 }
@@ -479,7 +491,7 @@ export default function LipSyncTool() {
   ) {
     try {
       const {
-        prepareFaceVideo, cleanAudioMp3, extractAudioMp3, splitAudioChunks, concatLipVideos,
+        prepareFaceForAudio, splitVideoToVideo, cleanAudioMp3, extractAudioMp3, splitAudioChunks, concatLipVideos,
         CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
       } = await import('@/lib/lipsync-pipeline');
 
@@ -508,27 +520,59 @@ export default function LipSyncTool() {
           }
         }
       })();
-      const [face, cleanAudio] = await Promise.all([prepareFaceVideo(faceFile), audioPrep]);
-      bumpFloor(id, 14);
-
-      // 2. CHUNKING (invisível pro cliente): áudio longo vira trechos ≤100s.
+      // 2. DIVISÃO (invisível pro cliente). O motor tem teto de TEMPO por
+      //    geração (~180s) e o upload tem teto de TAMANHO — rosto E áudio
+      //    respeitam os dois, sempre:
+      //    • áudio curto → UMA geração; o rosto sobe nativo, ou só o pedaço
+      //      que a fala usa, ou comprimido (prepareFaceForAudio);
+      //    • áudio longo + rosto do mesmo tamanho (video to video) → rosto E
+      //      áudio divididos nos MESMOS pontos, trecho i com trecho i;
+      //    • áudio longo + rosto curto (clipe de loop) → o mesmo rosto em
+      //      todo trecho, como sempre foi.
       const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
-      const audioChunks = needChunk ? await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC) : [cleanAudio];
-      const n = audioChunks.length;
+      let pairs: { face: File; audio: File; ms: number }[];
+      if (!needChunk) {
+        const [face, cleanAudio] = await Promise.all([prepareFaceForAudio(faceFile, audioMs / 1000), audioPrep]);
+        pairs = [{ face, audio: cleanAudio, ms: audioMs }];
+      } else {
+        const cleanAudio = await audioPrep;
+        const v2v = await splitVideoToVideo(faceFile, cleanAudio, audioMs / 1000);
+        if (v2v) {
+          pairs = v2v;
+        } else {
+          const audioChunks = await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC);
+          const msList: number[] = [];
+          for (const chunk of audioChunks) {
+            msList.push(
+              Math.round((await measureMediaDuration(chunk)) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs),
+            );
+          }
+          const face = await prepareFaceForAudio(faceFile, Math.max(...msList) / 1000);
+          pairs = audioChunks.map((audio, i) => ({ face, audio, ms: msList[i] }));
+        }
+      }
+      bumpFloor(id, 14);
+      const n = pairs.length;
 
-      // 3. Sobe o ROSTO uma vez só (reusado em todos os trechos).
+      // 3. Sobe o ROSTO (1x quando é o mesmo em todo trecho).
       patchJob(id, { status: 'uploading' });
-      const faceUrl = await uploadPublic(face, 'video');
+      const faceUrls = new Map<File, string>();
+      const faceUrlOf = async (face: File): Promise<string> => {
+        const known = faceUrls.get(face);
+        if (known) return known;
+        const url = await uploadPublic(face, 'video');
+        faceUrls.set(face, url);
+        return url;
+      };
+      await faceUrlOf(pairs[0].face);
       bumpFloor(id, 24);
 
       // 4. Gera trecho a trecho, em SÉRIE (anti-throttle + 1 render por vez).
       patchJob(id, { status: 'generating' });
       const outBlobs: Blob[] = new Array(n);
       for (let i = 0; i < n; i++) {
-        const chunkMs = n > 1
-          ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
-          : audioMs;
-        outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
+        const faceUrl = await faceUrlOf(pairs[i].face);
+        outBlobs[i] = await generateOne(faceUrl, pairs[i].audio, pairs[i].ms, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
         bumpFloor(id, 26 + Math.round(((i + 1) / n) * 62)); // marco REAL por trecho → até ~88
       }
 
@@ -554,7 +598,7 @@ export default function LipSyncTool() {
         await new Promise((r) => setTimeout(r, 1500));
         return runJob(id, faceFile, audioSrc, audioMs, cleanOn, attempt + 1);
       }
-      patchJob(id, { status: 'error', error: errMsg(err) || 'Algo deu errado.' });
+      patchJob(id, { status: 'error', error: semMarca(errMsg(err) || 'Algo deu errado.') });
     }
   }
 
@@ -604,7 +648,9 @@ export default function LipSyncTool() {
     const label = `LipSync ${String(num).padStart(2, '0')}`;
     // Estimativa de tempo total → barra de progresso previsível (preenche
     // de acordo com o processo inteiro, sem saltos nem congelamento).
-    const faceCompress = faceFile.size > 44 * 1024 * 1024;
+    // Só a geração ÚNICA (fala ≤178s) pode comprimir o rosto; a longa corta
+    // o rosto em trechos sem re-encode.
+    const faceCompress = faceFile.size > 44 * 1024 * 1024 && ms <= 178_000;
     const estMs = estimateJobMs(ms / 1000, faceCompress, doClean);
 
     // Card aparece embaixo JÁ carregando; o form continua livre na mesma tela.
@@ -972,6 +1018,7 @@ export default function LipSyncTool() {
                 total={totalNum}
                 percent={job.percent}
                 fileBase="lipsync"
+                motorNeutro
                 onRetry={job.status === 'error' ? () => retryJob(job.id) : undefined}
               />
             ))}
