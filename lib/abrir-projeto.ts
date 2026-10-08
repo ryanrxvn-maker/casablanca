@@ -24,13 +24,19 @@
 export type AlvoDoEditor = 'capcut' | 'premiere';
 
 /** Versão do app que o site entrega (public/downloads/auto-edit-abrir.zip). */
-export const ABRIR_VERSAO = '1.0.0';
+export const ABRIR_VERSAO = '1.0.1';
 export const ABRIR_DOWNLOAD = '/downloads/auto-edit-abrir.zip';
 export const ABRIR_DOWNLOAD_NOME = 'Auto Edit Abrir - instalador.zip';
 export const ABRIR_PROTOCOLO = 'autoedit-abrir';
-const CHAVE = 'darkolab:abrir-projeto';
+/** A chave no localStorage — a janela escuta o evento `storage` dela pra virar
+ *  sozinha quando o instalador termina (a página /abrir-projeto marca). */
+export const CHAVE_DA_MARCA = 'darkolab:abrir-projeto';
+const CHAVE = CHAVE_DA_MARCA;
 
-export type MarcaDoApp = { instalado: boolean; versao: string; em: number };
+/** `abrirDireto` = o liga/desliga da janela: ligado abre no editor, desligado
+ *  só baixa a pasta (o app continua instalado). Ausente = ligado. */
+export type MarcaDoApp = { instalado: boolean; versao: string; em: number; abrirDireto?: boolean };
+
 
 /** Nome de pasta aceito pelo Windows e pelo CapCut (o mesmo do exportador). */
 export function nomeDePasta(s: string): string {
@@ -58,13 +64,26 @@ export function novoJob(): string {
 export function lerMarca(): MarcaDoApp | null {
   try {
     const v = JSON.parse(localStorage.getItem(CHAVE) || 'null');
-    if (v && v.instalado === true && typeof v.versao === 'string') return v as MarcaDoApp;
+    if (v && v.instalado === true && typeof v.versao === 'string') return { ...v, abrirDireto: v.abrirDireto !== false } as MarcaDoApp;
   } catch { /* modo privado */ }
   return null;
 }
 
+/** O app está instalado E o liga/desliga está ligado: o clique abre no editor. */
+export function abrirDiretoLigado(m: MarcaDoApp | null): boolean {
+  return !!m?.instalado && m.abrirDireto !== false;
+}
+
 export function marcarInstalado(versao: string = ABRIR_VERSAO): void {
-  try { localStorage.setItem(CHAVE, JSON.stringify({ instalado: true, versao: (versao || ABRIR_VERSAO).slice(0, 20), em: Date.now() } satisfies MarcaDoApp)); } catch { /* modo privado */ }
+  // reinstalar/atualizar religa o abrir direto (é pra isso que a pessoa instalou)
+  try { localStorage.setItem(CHAVE, JSON.stringify({ instalado: true, versao: (versao || ABRIR_VERSAO).slice(0, 20), em: Date.now(), abrirDireto: true } satisfies MarcaDoApp)); } catch { /* modo privado */ }
+}
+
+/** O liga/desliga da janela (o app continua marcado como instalado). */
+export function ligarAbrirDireto(ligado: boolean): void {
+  const m = lerMarca();
+  if (!m) return;
+  try { localStorage.setItem(CHAVE, JSON.stringify({ ...m, abrirDireto: ligado } satisfies MarcaDoApp)); } catch { /* modo privado */ }
 }
 
 export function desmarcarInstalado(): void {

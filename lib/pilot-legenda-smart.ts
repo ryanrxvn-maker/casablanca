@@ -75,16 +75,66 @@ type EstiloLike = {
 /** Pedaço mais curto que isto não é mostrado sozinho (um piscar de texto). */
 export const PEDACO_MIN_MS = 160;
 
+/** Bloco mais curto que isto, depois de desencavalar, não fica (some num piscar). */
+export const BLOCO_MIN_MS = 120;
+
+/**
+ * DESENCAVALA os blocos (08.10). O ASR às vezes devolve a última palavra de
+ * um bloco terminando DEPOIS de a primeira do seguinte começar ("rapidamente"
+ * até 48,20 s com "para casos" já em 47,74 s — medido no AD01 CREATOR: 5
+ * sobreposições num AD de 54 s). O motor desenha o PRIMEIRO bloco que contém
+ * o instante, então o velho ficava no ar por cima do novo — e, perto de um
+ * corte, por cima do take seguinte.
+ *
+ * Regra de editor: a fronteira vai pro MEIO da sobreposição (nenhum lado
+ * confia mais no ASR que o outro), respeitando um mínimo de tela pros dois.
+ * Palavra que passava da nova borda é aparada nela. Blocos em ms; nada do que
+ * entrou é mutado; a ordem é a de início.
+ */
+export function semSobreposicao<B extends BlocoLike>(blocks: B[]): { blocks: B[]; ajustes: number } {
+  const out = [...blocks].sort((a, b) => a.start - b.start).map((b) => ({ ...b, words: b.words.map((w) => ({ ...w })) }));
+  let ajustes = 0;
+  for (let i = 0; i < out.length - 1; i++) {
+    const a = out[i];
+    const b = out[i + 1];
+    if (!(a.end > b.start)) continue;
+    ajustes++;
+    let borda = (a.end + b.start) / 2;
+    // os dois blocos continuam visíveis pelo menos BLOCO_MIN_MS
+    borda = Math.max(borda, a.start + BLOCO_MIN_MS);
+    borda = Math.min(borda, b.end - BLOCO_MIN_MS);
+    if (!(borda > a.start) || !(borda < b.end)) borda = Math.max(a.start + 1, Math.min(b.end - 1, (a.start + b.end) / 2));
+    a.end = borda;
+    b.start = borda;
+    for (const w of a.words) {
+      if (w.end > borda) w.end = borda;
+      if (w.start > w.end) w.start = w.end;
+    }
+    for (const w of b.words) {
+      if (w.start < borda) w.start = borda;
+      if (w.end < w.start) w.end = w.start;
+    }
+  }
+  return { blocks: out as B[], ajustes };
+}
+
 /**
  * Corta os blocos nas bordas das regiões e põe cada pedaço no lugar dele.
  * Blocos em ms (como o motor), regiões em s. Devolve blocos e estilo NOVOS —
  * nada do que entrou é mutado. Sem região, devolve o que entrou.
+ *
+ * `posicionar: false` (08.10) = SÓ corta nas bordas, sem mudar a posição:
+ * é o que roda com o Smart Position DESLIGADO. A legenda fica onde o editor
+ * pôs, mas o bloco da tela dividida nunca atravessa o corte pro take
+ * seguinte (o Silas viu "cérebro." da dividida continuar no take de baixo).
  */
 export function aplicarSmartPosition<B extends BlocoLike, S extends EstiloLike>(
   blocks: B[],
   style: S,
   regioes: RegiaoDeLegenda[],
+  opts: { posicionar?: boolean } = {},
 ): { blocks: B[]; style: S; cortes: number; posicionados: number } {
+  const posicionar = opts.posicionar !== false;
   if (!regioes.length || !blocks.length) return { blocks, style, cortes: 0, posicionados: 0 };
   // SEM arredondar: o render compara o MESMO instante (t*1000 contra start*1000)
   // — um quadro exatamente no corte tem que cair do mesmo lado nos dois.
@@ -155,9 +205,13 @@ export function aplicarSmartPosition<B extends BlocoLike, S extends EstiloLike>(
     });
   }
 
+  // o motor para de procurar no 1º bloco que começa depois do instante: os
+  // pedaços cortados têm de ficar em ordem de início
+  out.sort((a, b) => a.start - b.start);
+
   // cada bloco dentro de uma região vai pro lugar dela
   let posicionados = 0;
-  for (const b of out) {
+  for (const b of posicionar ? out : []) {
     const meioMs = (b.start + b.end) / 2;
     const r = regioes.find((x) => meioMs >= x.start * 1000 && meioMs < x.end * 1000);
     if (!r) continue;

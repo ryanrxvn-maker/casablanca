@@ -66,15 +66,18 @@ namespace AutoEditAbrir
                 }
                 if (alvo == "capcut")
                 {
-                    using (var b = new SolidBrush(Color.FromArgb(10, 10, 10))) g.FillPath(b, path);
+                    // o símbolo OFICIAL (medido no Resources/logo_cc.png do próprio
+                    // CapCut, espaço 240x240 — o MESMO desenho do LogoCapCut do site)
+                    using (var b = new SolidBrush(Color.Black)) g.FillPath(b, path);
                     using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255), 1f)) g.DrawPath(pen, path);
-                    float s = r.Width / 64f;
-                    using (var pen = new Pen(Color.White, 5.4f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                    float s = r.Width / 240f;
+                    Func<float, float, PointF> P = (x, y) => new PointF(r.Left + x * s, r.Top + y * s);
+                    using (var b = new SolidBrush(Color.White))
                     {
-                        Func<float, float, PointF> P = (x, y) => new PointF(r.Left + x * s, r.Top + y * s);
-                        g.DrawLines(pen, new[] { P(15, 22.5f), P(43, 15.5f), P(45.5f, 21), P(22.6f, 29.4f) });
-                        g.DrawLines(pen, new[] { P(15, 22.5f), P(15, 40), P(19.6f, 44.5f), P(46.4f, 44.5f) });
-                        g.DrawLine(pen, P(29.5f, 33.6f), P(46.4f, 44.5f));
+                        using (var barra = Arredondado(new RectangleF(r.Left + 43 * s, r.Top + 57 * s, 129 * s, 23.5f * s), 11.75f * s)) g.FillPath(b, barra);
+                        using (var barra = Arredondado(new RectangleF(r.Left + 43 * s, r.Top + 159.5f * s, 129 * s, 23.5f * s), 11.75f * s)) g.FillPath(b, barra);
+                        g.FillPolygon(b, new[] { P(43, 73.25f), P(202.5f, 156.05f), P(202.5f, 181.15f), P(43, 98.35f) });
+                        g.FillPolygon(b, new[] { P(43, 166.75f), P(202.5f, 83.95f), P(202.5f, 58.85f), P(43, 141.65f) });
                     }
                     return;
                 }

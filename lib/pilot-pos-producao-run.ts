@@ -45,7 +45,7 @@ import {
   type LayoutInsert,
   type TransicaoNoVideo,
 } from './pilot-inserts';
-import { aplicarSmartPosition, regioesDaLegenda } from './pilot-legenda-smart';
+import { aplicarSmartPosition, regioesDaLegenda, semSobreposicao } from './pilot-legenda-smart';
 import {
   planejarSfx,
   velocidadeEfetiva,
@@ -325,7 +325,11 @@ export async function montarPosProducao(
         }
         const segs = montarRoteiro(tpl, hook, body, fronteira);
         const aplicado = roteiro.applyCaptionScript(bls, segs, emptyIdentity());
-        blocks = aplicado.blocks;
+        // DESENCAVALA (08.10): bloco que o ASR deixou terminando depois do
+        // começo do seguinte ficava no ar POR CIMA do novo (5x num AD de 54 s)
+        const desencavalado = semSobreposicao(aplicado.blocks);
+        if (desencavalado.ajustes) console.log(`[pos-producao] legenda: ${desencavalado.ajustes} bloco(s) desencavalado(s)`);
+        blocks = desencavalado.blocks;
         style = {
           ...DEFAULT_STYLE,
           presetId: (segs[segs.length - 1]?.style?.presetId as string) || 'keynote',
@@ -914,19 +918,27 @@ export async function montarPosProducao(
      * pro meio exato no React, trocando de lugar NO corte (o bloco que
      * atravessa a borda é cortado nela). Só mexe no `perBlock` — o mesmo
      * override do editor de legendas —, então render e projeto saem iguais. */
-    if (cfg.legenda.smartPosition && blocks.length && planoInserts?.janelas.length) {
+    /* CORTE NA BORDA SEMPRE (08.10): com o Smart Position DESLIGADO a legenda
+     * da tela dividida atravessava o corte e seguia por cima do take seguinte
+     * (AD01 09:39: "cérebro.", "avançada,", "Alzheimer."). O bloco agora é
+     * cortado na borda de toda tela dividida/React com o botão ligado OU
+     * desligado — o botão decide só a POSIÇÃO (dobra/meio). */
+    if (blocks.length && planoInserts?.janelas.length) {
+      const posicionar = !!cfg.legenda.smartPosition;
       try {
         const dims = await dimensoesDoVideo(blob);
         const regioes = regioesDaLegenda(planoInserts.janelas, (id) => layoutPorId.get(id), dims.w, dims.h);
         if (regioes.length) {
-          const sp = aplicarSmartPosition(blocks, style, regioes);
+          const sp = aplicarSmartPosition(blocks, style, regioes, { posicionar });
           blocks = sp.blocks as typeof blocks;
           style = sp.style as typeof style;
-          console.log(`[pos-producao] smart position: ${sp.posicionados} bloco(s) na dobra/meio · ${sp.cortes} cortado(s) na borda · ${regioes.length} região(ões) ${dims.w}x${dims.h}`);
+          console.log(`[pos-producao] ${posicionar ? 'smart position' : 'corte nas bordas'}: ${sp.posicionados} bloco(s) na dobra/meio · ${sp.cortes} cortado(s) na borda · ${regioes.length} região(ões) ${dims.w}x${dims.h}`);
         }
       } catch (e) {
-        console.warn('[pos-producao] smart position falhou (a legenda fica na posição do modelo):', e);
-        avisos.push('o Smart Position não entrou nesta montagem — a legenda ficou na posição do modelo. Clica RETOMAR pra tentar de novo.');
+        console.warn('[pos-producao] corte da legenda nas bordas falhou:', e);
+        avisos.push(posicionar
+          ? 'o Smart Position não entrou nesta montagem — a legenda ficou na posição do modelo. Clica RETOMAR pra tentar de novo.'
+          : 'a legenda não foi cortada nas bordas da tela dividida nesta montagem — clica RETOMAR pra tentar de novo.');
       }
     }
 

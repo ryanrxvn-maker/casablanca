@@ -1,4 +1,4 @@
-import { alvoDaLegendaNoLayout, regioesDaLegenda, aplicarSmartPosition, PEDACO_MIN_MS } from './pilot-legenda-smart';
+import { alvoDaLegendaNoLayout, regioesDaLegenda, aplicarSmartPosition, semSobreposicao, BLOCO_MIN_MS, PEDACO_MIN_MS } from './pilot-legenda-smart';
 import { palcoDoLayout, type LayoutInsert } from './pilot-inserts';
 
 let passed = 0;
@@ -104,5 +104,56 @@ console.log('\nSMART POSITION — a legenda troca de lugar NO corte, nem antes n
   ok(aplicarSmartPosition(blocks, style, []).blocks === blocks, 'sem tela dividida/React no AD: nada muda');
 }
 
+
+console.log('\nLEGENDA NUNCA INVADE O TAKE SEGUINTE (08.10) — casos REAIS do AD01 CREATOR:');
+{
+  type B = { id: string; start: number; end: number; words: Array<{ text: string; start: number; end: number }> };
+  const bl = (id: string, de: number, ate: number, texto: string): B => {
+    const ws = texto.split(' ');
+    const passo = (ate - de) / ws.length;
+    return { id, start: de, end: ate, words: ws.map((t, i) => ({ text: t, start: de + i * passo, end: de + (i + 1) * passo })) };
+  };
+  // as 5 sobreposições medidas no SRT do AD01 CREATOR (ms)
+  const reais: Array<[B, B]> = [
+    [bl('a1', 8000, 8640, 'tinha 20.'), bl('b1', 8500, 9260, 'E o segredo')],
+    [bl('a2', 13860, 14880, 'neurologista.'), bl('b2', 14460, 14940, 'Durante a')],
+    [bl('a3', 27920, 28880, 'receita simples'), bl('b3', 28660, 29220, 'feita com')],
+    [bl('a4', 38380, 38880, 'chamam de'), bl('b4', 38800, 39420, 'ferrugem')],
+    [bl('a5', 47600, 48200, 'rapidamente'), bl('b5', 47740, 48720, 'para casos')],
+  ];
+  const todos = reais.flat();
+  const { blocks: limpos, ajustes } = semSobreposicao(todos);
+  ok(ajustes === 5, `as 5 sobreposições reais foram desencavaladas (${ajustes})`);
+  ok(limpos.every((b, i) => i === 0 || limpos[i - 1].end <= b.start), 'nenhum bloco termina depois do seguinte começar');
+  ok(limpos.every((b) => b.end - b.start >= BLOCO_MIN_MS), `todo bloco segue visível pelo menos ${BLOCO_MIN_MS} ms`);
+  ok(limpos.every((b) => b.words.every((w) => w.start >= b.start - 1e-9 && w.end <= b.end + 1e-9 && w.end >= w.start)),
+    'toda palavra fica dentro do bloco dela (aparada na borda nova)');
+  const a5 = limpos.find((b) => b.id === 'a5')!;
+  const b5 = limpos.find((b) => b.id === 'b5')!;
+  ok(perto(a5.end, (48200 + 47740) / 2) && a5.end === b5.start, '"rapidamente" × "para casos": a borda vai pro MEIO da sobreposição (47,97 s)');
+  ok(todos[8].end === 48200 && todos[8].words[0].end === 48200 && todos[9].start === 47740, 'nada do que entrou foi mutado');
+  const sem = [bl('x', 0, 500, 'oi'), bl('y', 500, 900, 'tudo bem')];
+  ok(semSobreposicao(sem).ajustes === 0 && semSobreposicao(sem).blocks[0].end === 500, 'blocos encostados (sem sobrepor) ficam iguais');
+  // sobreposição enorme num bloco curto: os dois ficam com o mínimo de tela
+  const curto = semSobreposicao([bl('c', 1000, 1300, 'já'), bl('d', 1050, 2000, 'agora vai')]).blocks;
+  ok(curto[0].end - curto[0].start >= BLOCO_MIN_MS && curto[1].end - curto[1].start >= BLOCO_MIN_MS && curto[0].end === curto[1].start,
+    'sobreposição grande num bloco curto: os dois continuam com o mínimo de tela, sem encavalar');
+
+  // SMART POSITION DESLIGADO: corta na borda, NÃO mexe na posição
+  const reg = [{ start: 29.427, end: 32.538, posX: 0.5, posY: 0.5 }];
+  const cerebro = bl('k', 32000, 33100, 'do seu cérebro. Mas');
+  const r = aplicarSmartPosition([cerebro], { perBlock: { k: { posY: 0.47 } } as Record<string, Record<string, unknown>> }, reg, { posicionar: false });
+  const borda = 32538;
+  ok(r.blocks.every((b) => !(b.start < borda - 1e-6 && b.end > borda + 1e-6)), 'botão DESLIGADO: nenhum bloco atravessa o fim da tela dividida (o "cérebro." da 09:39)');
+  ok(r.blocks.some((b) => perto(b.end, borda)) && r.blocks.some((b) => perto(b.start, borda)) && r.blocks.length === 2, 'o pedaço da dividida termina NO corte e o do take seguinte nasce NO corte');
+  ok(r.posicionados === 0 && r.blocks.every((b) => (r.style.perBlock?.[b.id] as { posY?: number } | undefined)?.posY === 0.47),
+    'botão DESLIGADO: a legenda fica onde o editor pôs (posY do modelo nos dois pedaços)');
+  const rOn = aplicarSmartPosition([cerebro], { perBlock: {} }, reg);
+  ok(rOn.posicionados >= 1 && rOn.blocks.every((b) => !(b.start < borda - 1e-6 && b.end > borda + 1e-6)), 'botão LIGADO: corta igual e põe o pedaço da dividida na dobra');
+  // pedaços em ordem de início (o motor para de procurar no 1º bloco que começa depois)
+  const varios = aplicarSmartPosition([bl('m', 1000, 3000, 'um dois tres quatro'), bl('n', 3000, 5000, 'cinco seis sete oito')],
+    { perBlock: {} }, [{ start: 2, end: 4, posX: 0.5, posY: 0.5 }], { posicionar: false });
+  ok(varios.blocks.every((b, i) => i === 0 || varios.blocks[i - 1].start <= b.start), 'pedaços cortados saem em ordem de início');
+}
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-legenda-smart: ${passed} ok, ${failed} fail\n`);
 if (failed > 0) process.exit(1);

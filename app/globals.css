@@ -8710,34 +8710,62 @@ html[data-theme='light'] .pe-passo-n { background: rgba(16,16,24,0.05); box-shad
 @media (max-width: 560px) { .pe-escolhas { grid-template-columns: 1fr; } }
 /* abrir direto no editor (app Auto Edit Abrir) */
 .pe-app {
-  display: flex; align-items: center; gap: 12px; margin: 12px 20px 2px; padding: 12px 14px;
-  border-radius: 18px; background: linear-gradient(120deg, rgba(167, 139, 250, 0.1), rgba(217, 70, 239, 0.07));
-  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.28);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px;
+  margin: 12px 20px 2px; padding: 12px 14px 12px 12px; border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  transition: background 0.25s, box-shadow 0.25s;
 }
-html[data-theme='light'] .pe-app { background: linear-gradient(120deg, rgba(124, 92, 246, 0.07), rgba(217, 70, 239, 0.05)); box-shadow: inset 0 0 0 1px rgba(124, 92, 246, 0.25); }
-.pe-app.is-on { background: rgba(52, 211, 153, 0.07); box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.32); }
-.pe-app-logo { display: block; flex-shrink: 0; border-radius: 9px; filter: drop-shadow(0 8px 14px rgba(124, 58, 237, 0.35)); }
-.pe-app-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.pe-app-txt b { font-size: 13px; color: rgb(var(--text)); }
-.pe-app-txt small { font-size: 11.8px; line-height: 1.45; color: rgb(var(--text-muted)); }
-.pe-app-acoes { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+html[data-theme='light'] .pe-app { background: rgba(16,16,24,0.03); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.pe-app.is-baixar { background: linear-gradient(120deg, rgba(167, 139, 250, 0.11), rgba(217, 70, 239, 0.06)); box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.3); }
+html[data-theme='light'] .pe-app.is-baixar { background: linear-gradient(120deg, rgba(124, 92, 246, 0.08), rgba(217, 70, 239, 0.04)); box-shadow: inset 0 0 0 1px rgba(124, 92, 246, 0.28); }
+.pe-app.is-instalado.is-on { background: rgba(52, 211, 153, 0.07); box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.34); }
+html[data-theme='light'] .pe-app.is-instalado.is-on { background: rgba(16, 185, 129, 0.07); box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.35); }
+.pe-app-logo { display: block; border-radius: 10px; filter: drop-shadow(0 8px 14px rgba(124, 58, 237, 0.35)); }
+.pe-app-txt { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; }
+.pe-app-txt b { font-size: 13.5px; line-height: 1.25; font-weight: 800; letter-spacing: -0.005em; color: rgb(var(--text)); }
+.pe-app-txt small { font-size: 12px; line-height: 1.4; color: rgb(var(--text-muted)); text-wrap: pretty; }
+.pe-app-acoes { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .pe-app-btn {
-  padding: 8px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 800; color: #fff; white-space: nowrap;
-  background: linear-gradient(135deg, #a78bfa, #d946ef); box-shadow: 0 10px 22px -12px rgba(217, 70, 239, 0.8);
+  min-width: 132px; padding: 9px 16px; border-radius: 999px; font-size: 12.5px; font-weight: 800; line-height: 1; color: #fff; white-space: nowrap;
+  background: linear-gradient(135deg, #a78bfa, #d946ef); box-shadow: 0 10px 22px -12px rgba(217, 70, 239, 0.85), inset 0 1px 0 rgba(255,255,255,0.25);
   transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), filter 0.2s;
 }
 .pe-app-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
 .pe-app-btn:active { transform: translateY(0) scale(0.97); }
 .pe-app-link {
-  padding: 0; border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer;
-  color: rgb(var(--text-muted)); text-decoration: underline; text-underline-offset: 3px;
+  padding: 0; border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 700; line-height: 1.2; cursor: pointer;
+  color: rgb(var(--text-muted)); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgb(var(--text-muted) / 0.5);
 }
 .pe-app-link:hover { color: rgb(var(--text)); }
+/* o liga/desliga do abrir direto */
+.pe-chave {
+  position: relative; width: 48px; height: 28px; flex-shrink: 0; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: background 0.25s, box-shadow 0.25s;
+}
+html[data-theme='light'] .pe-chave { background: rgba(16,16,24,0.14); box-shadow: inset 0 0 0 1px rgba(16,16,24,0.1); }
+.pe-chave i {
+  position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 999px; background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.pe-chave.is-on { background: linear-gradient(135deg, #34d399, #10b981); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18), 0 8px 18px -10px rgba(16, 185, 129, 0.9); }
+.pe-chave.is-on i { transform: translateX(20px); }
+html[data-theme='light'] .pe-chave.is-on { background: linear-gradient(135deg, #34d399, #10b981); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3), 0 8px 18px -10px rgba(16, 185, 129, 0.75); }
+.pe-chave:focus-visible { outline: 2px solid rgba(52, 211, 153, 0.8); outline-offset: 3px; }
+/* a dica do Chrome: UMA linha */
+.pe-dica { display: flex; align-items: center; gap: 8px; margin: 12px 20px 0; font-size: 12.3px; line-height: 1.4; color: rgb(var(--text-muted)); }
+.pe-dica svg { flex-shrink: 0; color: rgb(var(--text-muted)); }
+.pe-dica span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pe-dica b { color: rgb(var(--text)); font-weight: 700; }
 .pe-nota { margin: 12px 20px 0; font-size: 12.3px; line-height: 1.55; color: rgb(var(--text-muted)); }
 .pe-nota b { color: rgb(var(--text)); font-weight: 700; }
 .pe-plano-b summary { color: rgb(var(--text-muted)); }
 .pe-plano-b .pe-passos, .pe-plano-b .pe-nota { margin-left: 0; margin-right: 0; }
-@media (max-width: 560px) { .pe-app { flex-wrap: wrap; } .pe-app-acoes { flex-direction: row; align-items: center; gap: 12px; } }
+@media (max-width: 560px) {
+  .pe-app.is-baixar { grid-template-columns: auto minmax(0, 1fr); row-gap: 10px; }
+  .pe-app.is-baixar .pe-app-acoes { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; }
+  .pe-dica span { white-space: normal; }
+}
 
 /* selos do card: velocidade e sonoplastia */
 .selo-aplicado.is-velocidade {

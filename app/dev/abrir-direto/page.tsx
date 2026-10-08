@@ -24,6 +24,11 @@ export default function BancadaAbrirDireto() {
   const [pronto, setPronto] = useState(false);
   const [janela, setJanela] = useState(false);
   const [ultimo, setUltimo] = useState('');
+  const [render, setRender] = useState<Blob | null>(null);
+  const [resumo, setResumo] = useState('');
+  /** só pra fotografar a janela: o "exportar" finge um pacote */
+  const [janelaVisual, setJanelaVisual] = useState(false);
+  const smart = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('smart') !== '0';
 
   const titulos = new Map([
     ['a1', 'CEREBRO REAL SAUDAVEL (2)'],
@@ -67,7 +72,7 @@ export default function BancadaAbrirDireto() {
           stockFrame: { videoId: 'v3', code: 'EMA-X1', title: titulos.get('a3')! } },
       ];
       const r = await pos.montarPosProducao(avatar, { filename: FILENAME, partesSec: [6.05, 7.95], partLabels: ['HOOK 1', 'BODY 1'] }, {
-        legenda: { on: true, templateId: caption.BUILTIN_TEMPLATES[0].id, smartPosition: true },
+        legenda: { on: true, templateId: caption.BUILTIN_TEMPLATES[0].id, smartPosition: smart },
         zoom: { on: false, modo: 'in', forca: 'medio' },
         partes: [{ label: 'HOOK 1', text: hook }, { label: 'BODY 1', text: body }],
         idioma: 'pt',
@@ -90,6 +95,16 @@ export default function BancadaAbrirDireto() {
         onEtapa: setEstado,
       });
       if (!r.blob) throw new Error(`render não saiu: ${r.avisos.join(' | ')}`);
+      setRender(r.blob);
+      // RESUMO pro teste: cada janela dividida × blocos de legenda que atravessam a borda
+      const ch = projeto.chavesDoProjeto(TASK, FILENAME);
+      const rot = JSON.parse(await (await loadBlob(ch.roteiro, 'application/json'))!.text()) as import('@/lib/pilot-projeto').RoteiroEdicao;
+      const bl = rot.legenda?.blocks || [];
+      const divididas = rot.inserts.filter((i) => i.layout.tipo !== 'cheia');
+      const atravessa = divididas.flatMap((j) => [j.start, j.end]).flatMap((borda) => bl.filter((b) => b.start < borda * 1000 - 1e-6 && b.end > borda * 1000 + 1e-6).map((b) => `${b.words.map((w) => w.text).join(' ')}@${borda.toFixed(3)}`));
+      const encavalados = bl.filter((b, i) => i > 0 && bl[i - 1].end > b.start + 1e-6).length;
+      setResumo(JSON.stringify({ smart, divididas: divididas.map((j) => [j.start, j.end, j.layout.tipo]), blocos: bl.length, atravessa, encavalados,
+        blocosPerto: divididas.flatMap((j) => bl.filter((b) => Math.abs(b.end / 1000 - j.end) < 1.2 || Math.abs(b.start / 1000 - j.end) < 1.2).map((b) => [b.start, b.end, b.words.map((w) => w.text).join(' ')])) }));
       setPronto(true);
       setEstado(`montado: ${(r.blob.size / 1e6).toFixed(1)}MB · sfx ${r.sonoplastia?.sfx} · trilha ${r.sonoplastia?.trilha}`);
     } catch (e) {
@@ -128,10 +143,20 @@ export default function BancadaAbrirDireto() {
       <p><label>palavras <input data-testid="palavras" type="file" accept="application/json" onChange={(e) => setPalavras(e.target.files?.[0] || null)} /></label></p>
       <p><label>trilha <input data-testid="trilha" type="file" accept="audio/*" onChange={(e) => setTrilhaArq(e.target.files?.[0] || null)} /></label></p>
       <button type="button" data-testid="montar" onClick={() => void montar()} disabled={!avatar || !broll || !broll169 || !palavras || !trilhaArq}>Montar AD real</button>{' '}
-      <button type="button" data-testid="projeto" onClick={() => setJanela(true)} disabled={!pronto}>Projeto editável</button>
+      <button type="button" data-testid="projeto" onClick={() => setJanela(true)} disabled={!pronto}>Projeto editável</button>{' '}
+      <button type="button" data-testid="baixar-render" disabled={!render} onClick={() => {
+        if (!render) return;
+        const a = document.createElement('a'); a.href = URL.createObjectURL(render); a.download = `RENDER - ZZ ABRIR DIRETO${smart ? '' : ' - SMART OFF'}.mp4`; a.click();
+      }}>Baixar render</button>{' '}
+      <button type="button" data-testid="janela-visual" onClick={() => setJanelaVisual(true)}>Janela (visual)</button>
+      <p data-testid="resumo" style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>{resumo}</p>
       <p data-testid="estado">{estado}</p>
       <p data-testid="ultimo">{ultimo}</p>
       {janela ? <PilotProjetoExportModal nomeAd="ZZ ABRIR DIRETO" onFechar={() => setJanela(false)} exportar={exportar} /> : null}
+      {janelaVisual ? (
+        <PilotProjetoExportModal nomeAd="AD01 - CREATOR" onFechar={() => setJanelaVisual(false)}
+          exportar={async (_alvo, onEtapa) => { onEtapa('desenhando a legenda'); await new Promise((r) => setTimeout(r, 900)); return { arquivo: 'AD01 - CREATOR - CAPCUT.zip', avisos: ['o b-roll usa cards com cantos arredondados — no editor os cantos ficam retos.'] }; }} />
+      ) : null}
     </main>
   );
 }
