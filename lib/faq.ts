@@ -28,19 +28,23 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'O que é a Camuflagem de áudio?',
-    a: 'A Camuflagem junta duas trilhas num arquivo só: o áudio original, que o público ouve normalmente, e um áudio escondido, que é o que a transcrição automática das plataformas lê no lugar. Existe também o modo mudo, em que a IA escuta silêncio. Depois de processar, a ferramenta escuta o arquivo pronto do mesmo jeito que a plataforma escuta e mostra um selo por plataforma (TikTok, Kwai, YouTube e Meta) — a recomendação é só publicar com o selo verde. O Descamuflar devolve qualquer uma das camadas depois.',
+    a: 'A Camuflagem junta duas trilhas num arquivo só: o áudio original, que o público ouve normalmente, e um áudio escondido, que é o que a transcrição automática das plataformas lê no lugar. Existe também o modo mudo, em que a IA escuta silêncio. Depois de processar, a ferramenta escuta o arquivo pronto do mesmo jeito que a plataforma escuta e mostra um selo por plataforma (TikTok, Kwai, YouTube e Meta). A recomendação é só publicar com o selo verde. O Descamuflar devolve qualquer uma das camadas depois.',
   },
   {
     q: 'O que dá pra criar no FakePrint?',
     a: 'O FakePrint tem modelos de redes sociais, telejornais e sites de notícias. No Free, você edita e baixa os modelos sociais; os telejornais e sites ficam visíveis para prévia, com edição e exportação disponíveis no Premium. A prévia atualiza enquanto você digita e os modelos liberados saem em PNG de alta resolução.',
   },
   {
+    q: 'As Legendas Automáticas corrigem erro da transcrição?',
+    a: 'Corrigem pela copy. Depois de gerar a legenda, você cola o texto da copy e a ferramenta compara as duas palavra por palavra: troca grafia, acento e pontuação pela da copy e devolve a palavra que a transcrição engoliu, sem mexer nos blocos nem nos tempos. Se a copy não for daquele vídeo, ela avisa em vez de aplicar. Disponível no Premium; a transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações.',
+  },
+  {
     q: 'Como o Auto Edit gera legendas (SRT) alinhadas à copy?',
-    a: 'Você cola a copy e sobe o áudio ou vídeo. O Gerador de SRT alinha o texto palavra por palavra com a fala e devolve o arquivo .srt pronto pra importar no CapCut — com os modelos e animações de legenda funcionando normalmente em cima dele. Disponível no Premium; a transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações.',
+    a: 'Você cola a copy e sobe o áudio ou vídeo. O Gerador de SRT alinha o texto palavra por palavra com a fala e devolve o arquivo .srt pronto pra importar no CapCut, com os modelos e animações de legenda funcionando normalmente em cima dele. Disponível no Premium; a transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em Configurações.',
   },
   {
     q: 'Dá pra fazer lipsync de avatar (video to video)?',
-    a: 'Dá. No Lipsync Video to Video você sobe o vídeo com o rosto e o áudio novo, e a boca sai encaixada fala por fala — o avatar dizendo exatamente a copy que você quiser. Disponível no plano Premium.',
+    a: 'Dá. No Lipsync Video to Video você sobe o vídeo com o rosto e o áudio novo, e a boca sai encaixada fala por fala: o avatar dizendo exatamente a copy que você quiser. Disponível no plano Premium.',
   },
   {
     q: 'Tem plano grátis? Quanto custa?',

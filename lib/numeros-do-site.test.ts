@@ -52,8 +52,13 @@ ok(
 
 // Nenhuma página pública pode voltar a escrever estes números à mão.
 const publicas = [
-  'components/landing/v3/LandingV3.tsx',
-  'components/landing/v3/sections.tsx',
+  'components/landing/v4/LandingV4.tsx',
+  'components/landing/v4/Hero.tsx',
+  'components/landing/v4/Legendas.tsx',
+  'components/landing/v4/FakePrint.tsx',
+  'components/landing/v4/Audio.tsx',
+  'components/landing/v4/Rest.tsx',
+  'components/landing/v4/Numbers.tsx',
   'components/landing/v3/scenes.tsx',
   'components/AuthShowcase.tsx',
   'components/ToolsHub.tsx',

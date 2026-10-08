@@ -11,7 +11,7 @@ import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 import { HeroSlideBg } from './HeroSlideBg';
 import { TipoShowcase } from './TipoShowcase';
-import { LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
+import { FAKEPRINT_TELEJORNAIS, LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 
 /** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
 type MaintMode = 'blocked' | 'admin' | undefined;
@@ -60,6 +60,18 @@ type ToolEntry = {
   video?: string;
   /** Imagem 4K que fica como THUMB até o hover. Em /public/cards/. */
   poster?: string;
+  /** Painel do hover dos DESTAQUES no formato vantagens (ver DetalhesDestaque). */
+  detalhes?: Detalhes;
+};
+
+/**
+ * Copy do painel de hover dos destaques: uma frase de abertura + as vantagens
+ * por tema ("Modelos:", "Edição:"…). Tudo aqui precisa existir de verdade na
+ * ferramenta: conferido no código em 07.10 (limites, formatos, o que roda).
+ */
+type Detalhes = {
+  lead: string;
+  grupos: Array<{ rotulo: string; texto: string }>;
 };
 
 // DESTAQUES — cards de VÍDEO (estilo HeyGen): o vídeo só roda quando o mouse
@@ -71,6 +83,27 @@ const FEATURED: ToolEntry[] = [
     href: '/tools/lipsync',
     label: 'Lipsync Video to Video',
     description: 'Suba o rosto, suba o áudio e o lipsync sai pronto: o avatar falando exatamente a copy que você quiser, em minutos.',
+    detalhes: {
+      lead: 'O rosto do seu vídeo falando um áudio novo, com a boca encaixada na fala.',
+      grupos: [
+        {
+          rotulo: 'Arquivos',
+          texto:
+            'aceita até 300 MB: o vídeo com o rosto de frente ou levemente de lado e o áudio em MP3, WAV, M4A ou até MP4.',
+        },
+        {
+          rotulo: 'Duração',
+          // Teto de produto em LipSyncTool (MAX_AUDIO_MS): o áudio define o vídeo.
+          texto:
+            'gera até 6 minutos de vídeo por vez. Áudio mais longo é avisado na hora, pra você dividir em partes.',
+        },
+        {
+          rotulo: 'Fila',
+          texto:
+            'dispare vários em sequência e siga usando o site: cada um vira um card com o progresso ao vivo e sai em MP4.',
+        },
+      ],
+    },
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
@@ -555,24 +588,31 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
       onPointerUp={() => setPausado(false)}
       onPointerCancel={() => setPausado(false)}
     >
-      <div
-        ref={scrollerRef}
-        onScroll={onScroll}
-        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[26px]"
-        // A JANELA tem o mesmo raio dos slides: no meio da troca, o pedaço do
-        // slide que está saindo/entrando é cortado por essa borda — reta, ela
-        // deixava o canto QUADRADO. `isolation` garante o recorte redondo também
-        // sobre camadas de GPU (vídeo, tilt 3D do Famous Hey).
-        style={{ scrollbarWidth: 'none', isolation: 'isolate' }}
-      >
-        {slides.map((s, i) => (
-          <div
-            key={i}
-            className={`w-full shrink-0 snap-center [&>*]:h-full ${HERO_BOX}`}
-          >
-            {s}
-          </div>
-        ))}
+      {/* MOLDURA PARADA com recorte redondo (clip-path): segunda camada,
+          independente do recorte da própria janela que rola. Se um navegador
+          largar o raio do scroller no meio da rolagem animada (Safari com
+          vídeo, GPU teimosa), esta moldura — que não rola — continua cortando
+          redondo. Nenhum quadro fica com canto quadrado. */}
+      <div className="rounded-[26px]" style={{ clipPath: 'inset(0 round 26px)' }}>
+        <div
+          ref={scrollerRef}
+          onScroll={onScroll}
+          className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth rounded-[26px]"
+          // A JANELA tem o mesmo raio dos slides: no meio da troca, o pedaço do
+          // slide que está saindo/entrando é cortado por essa borda — reta, ela
+          // deixava o canto QUADRADO. `isolation` garante o recorte redondo também
+          // sobre camadas de GPU (vídeo, tilt 3D do Famous Hey).
+          style={{ scrollbarWidth: 'none', isolation: 'isolate' }}
+        >
+          {slides.map((s, i) => (
+            <div
+              key={i}
+              className={`w-full shrink-0 snap-center [&>*]:h-full ${HERO_BOX}`}
+            >
+              {s}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Arrows */}
@@ -1832,15 +1872,15 @@ function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; lock
           </h3>
         </div>
         <div
-          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[640px] group-hover:opacity-100"
           style={{ background: '#0b0b0f' }}
         >
           <div className="px-4 pb-4 pt-3.5">
-            <p className="text-[12.5px] leading-relaxed text-white/80">
-              A fala do vídeo vira legenda animada: transcrição palavra por
-              palavra, {LEGENDAS_MODELOS} modelos, editor estilo CapCut e o MP4 renderizado
-              no seu navegador.
-            </p>
+            <DetalhesDestaque
+              d={DETALHES_LEGENDAS}
+              nota="A transcrição usa a sua chave do Groq ou da AssemblyAI."
+              notaIcone={<KeyIconMini size={11} />}
+            />
             <span
               className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
               style={{ fontFamily: 'var(--font-tech)' }}
@@ -1867,6 +1907,96 @@ function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; lock
     </div>
   );
 }
+
+/**
+ * Painel de hover dos DESTAQUES — mesmo formato nos três cards: frase de
+ * abertura, vantagens com rótulo em negrito e uma nota opcional (cadeado do
+ * plano, chave de transcrição…) com ícone alinhado à primeira linha.
+ */
+function DetalhesDestaque({
+  d,
+  nota,
+  notaIcone,
+}: {
+  d: Detalhes;
+  nota?: React.ReactNode;
+  notaIcone?: React.ReactNode;
+}) {
+  return (
+    <>
+      <p className="text-[12.5px] leading-relaxed text-white/80">{d.lead}</p>
+      {d.grupos.map((g) => (
+        <p key={g.rotulo} className="mt-1.5 text-[12.5px] leading-relaxed text-white/70">
+          <span className="font-semibold text-white">{g.rotulo}:</span> {g.texto}
+        </p>
+      ))}
+      {nota ? (
+        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-white/60">
+          {notaIcone ? <span className="mt-[4px] shrink-0">{notaIcone}</span> : null}
+          <span>{nota}</span>
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** Chave fina (nota "usa a sua chave"), no mesmo tamanho e cor do cadeado. */
+function KeyIconMini({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="M10.7 12.3 20 3" />
+      <path d="m16 7 3 3" />
+    </svg>
+  );
+}
+
+const DETALHES_FAKEPRINT: Detalhes = {
+  lead: 'Prints fiéis aos originais, prontos em PNG ou vídeo.',
+  grupos: [
+    {
+      // Quase todos os telejornais têm `anim: true` (BBC e Bem Estar são parados):
+      // por isso "quase todos", que continua verdade se o catálogo crescer.
+      rotulo: 'Headlines de telejornal',
+      texto: `${FAKEPRINT_TELEJORNAIS} modelos com a manchete pronta pra postar, quase todos animados em vídeo: letreiro correndo, AO VIVO piscando e relógio rodando. Em 16:9 ou 9:16, com tela verde pra chroma.`,
+    },
+    {
+      rotulo: 'Redes sociais',
+      texto:
+        'conversa de WhatsApp e Direct, post, tweet, comentários, notificação, stickers de story, live e chamada de vídeo.',
+    },
+    {
+      rotulo: 'Sites de notícia',
+      texto: 'matéria com a cara dos grandes portais, em desktop, feed, story ou 16:9.',
+    },
+  ],
+};
+
+const DETALHES_LEGENDAS: Detalhes = {
+  lead: 'A fala do vídeo vira legenda animada, no tempo exato de cada palavra.',
+  grupos: [
+    {
+      // "Bem menos risco", não "sem risco": a correção troca grafia/pontuação e
+      // devolve palavra comida, mas palavra que o ASR INVENTOU continua lá
+      // (lib/typography/copy-fix.ts). Prometer zero erro seria mentira.
+      rotulo: 'Corrigida pela copy',
+      texto:
+        'cole o roteiro e a legenda inteira é corrigida por ele: grafia, pontuação e as palavras que o áudio comeu, com os tempos intactos. Bem menos risco de entregar vídeo com legenda errada.',
+    },
+    {
+      rotulo: 'Modelos',
+      texto: `${LEGENDAS_MODELOS} legendas animadas (karaokê, neon, glitch e mais), com a palavra forte destacada sozinha.`,
+    },
+    {
+      rotulo: 'Edição',
+      texto: 'divida e junte blocos, ajuste o tempo e pinte qualquer palavra direto no preview, como no CapCut.',
+    },
+    {
+      rotulo: 'Resultado',
+      texto: 'o que você vê no preview é o que sai no MP4, renderizado no seu navegador.',
+    },
+  ],
+};
 
 /**
  * Card de DESTAQUE do FakePrint: uma vinheta de PLANTÃO desenhada em código
@@ -2019,9 +2149,10 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
                     className="px-3 text-[9px] font-bold uppercase tracking-[0.14em] text-white/80"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    WhatsApp e Direct · Post e tweet · Comentários · Stickers de
-                    story · Live do TikTok e do Instagram · Chamada de vídeo e
-                    Zoom · Telejornal · Site de notícia · PNG ou vídeo ·
+                    Headline de telejornal animada · WhatsApp e Direct · Post e
+                    tweet · Comentários · Stickers de story · Live do TikTok e
+                    do Instagram · Chamada de vídeo e Zoom · Site de notícia ·
+                    PNG ou vídeo ·
                   </span>
                 ))}
               </div>
@@ -2031,32 +2162,19 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
 
         {/* PAINEL — abre ABAIXO da tela no hover (copy + botão) */}
         <div
-          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[440px] group-hover:opacity-100"
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[640px] group-hover:opacity-100"
           style={{ background: '#0b0b0f' }}
         >
           <div className="px-4 pb-4 pt-3.5">
-            <p className="text-[12.5px] leading-relaxed text-white/80">
-              Prints fiéis aos originais, prontos em PNG ou vídeo.
-            </p>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/70">
-              <span className="font-semibold text-white">Redes sociais:</span>{' '}
-              conversa de WhatsApp e Direct, post, tweet, comentários,
-              notificação, stickers de story, live e chamada de vídeo.
-            </p>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-white/70">
-              <span className="font-semibold text-white">Notícias e TV:</span>{' '}
-              manchete de telejornal e matéria de site de notícia, com tela
-              verde pra chroma.
-            </p>
-            {newsPremium ? (
-              <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-white/60">
-                <span className="mt-[4px] shrink-0"><LockIcon size={11} /></span>
-                <span>
-                  No seu plano, as redes sociais estão liberadas. Notícias e
-                  TV são Premium.
-                </span>
-              </p>
-            ) : null}
+            <DetalhesDestaque
+              d={DETALHES_FAKEPRINT}
+              nota={
+                newsPremium
+                  ? 'No seu plano, as redes sociais estão liberadas. Notícias e TV são Premium.'
+                  : undefined
+              }
+              notaIcone={<LockIcon size={11} />}
+            />
             <span
               className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
               style={{ fontFamily: 'var(--font-tech)' }}
@@ -2086,7 +2204,7 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
       <style jsx>{`
         /* Letreiro: só transform (GPU) e pausa no modo descanso (ae-ambient). */
         .fpf-ticker {
-          animation: fpf-ticker-run 42s linear infinite;
+          animation: fpf-ticker-run 47s linear infinite;
         }
         @keyframes fpf-ticker-run {
           from { transform: translateX(0); }
@@ -2276,13 +2394,17 @@ function FeaturedVideoCard({
           Fundo SEMPRE escuro (igual HeyGen) pra o texto branco ser legível
           nos dois temas — no light o texto preto sumia. */}
       <div
-        className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
+        className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[640px] group-hover:opacity-100"
         style={{ background: '#0b0b0f' }}
       >
         <div className="px-4 pb-4 pt-3.5">
-          <p className="text-[12.5px] leading-relaxed text-white/80">
-            {entry.description}
-          </p>
+          {entry.detalhes ? (
+            <DetalhesDestaque d={entry.detalhes} />
+          ) : (
+            <p className="text-[12.5px] leading-relaxed text-white/80">
+              {entry.description}
+            </p>
+          )}
           <span
             className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
             style={{ fontFamily: 'var(--font-tech)' }}

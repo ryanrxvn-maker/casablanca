@@ -45,31 +45,38 @@ export function DecupAuditBadge({ audit }: { audit: DecupAudit }) {
     );
   }
 
+  const stats: Array<{ v: string; label: string }> = [
+    { v: prova, label: 'de fala dentro do que saiu' },
+    { v: seg(audit.savedSec), label: 'de começo/fim de palavra que o corte devolveu' },
+    {
+      v: String(audit.cuts),
+      label:
+        (audit.cuts === 1 ? 'pausa encurtada' : 'pausas encurtadas') +
+        (audit.refusedCuts > 0 ? ` · ${audit.refusedCuts} mantida${audit.refusedCuts === 1 ? '' : 's'} por segurança` : ''),
+    },
+  ];
+
   return (
-    <div className="mb-4 rounded-[14px] border border-lime/25 bg-lime/[0.055] px-3.5 py-3">
-      <div className="flex items-center gap-2.5">
-        <svg viewBox="0 0 20 20" className="h-4 w-4 shrink-0 text-lime" fill="none" stroke="currentColor" strokeWidth="1.7">
-          <circle cx="10" cy="10" r="7.6" className="opacity-45" />
-          <path d="m6.6 10.2 2.3 2.3 4.6-4.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <div className="text-[13px] font-medium text-lime">Auditoria do corte: nenhuma palavra cortada</div>
+    <div className="mb-4 overflow-hidden rounded-[16px] border border-lime/25 bg-lime/[0.05]">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] bg-lime/15 text-lime ring-1 ring-lime/30">
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 3l7 3v5.5c0 4.4-3 8.1-7 9.5-4-1.4-7-5.1-7-9.5V6l7-3z" />
+            <path d="m8.8 12.2 2.2 2.2 4.3-4.6" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13.5px] font-semibold text-lime">Nenhuma palavra cortada</div>
+          <div className="mono text-[9.5px] uppercase tracking-[0.16em] text-text-muted">Auditoria do corte</div>
+        </div>
       </div>
-      <div className="mt-2.5 grid grid-cols-1 gap-2 border-t border-lime/12 pt-2.5 sm:grid-cols-3">
-        <div>
-          <div className="text-[15px] font-semibold tabular-nums text-fg">{prova}</div>
-          <div className="text-[10.5px] leading-tight text-fg/45">de fala dentro do que saiu</div>
-        </div>
-        <div>
-          <div className="text-[15px] font-semibold tabular-nums text-fg">{seg(audit.savedSec)}</div>
-          <div className="text-[10.5px] leading-tight text-fg/45">de começo/fim de palavra que o corte devolveu</div>
-        </div>
-        <div>
-          <div className="text-[15px] font-semibold tabular-nums text-fg">{audit.cuts}</div>
-          <div className="text-[10.5px] leading-tight text-fg/45">
-            {audit.cuts === 1 ? 'pausa encurtada' : 'pausas encurtadas'}
-            {audit.refusedCuts > 0 ? ` · ${audit.refusedCuts} mantida${audit.refusedCuts === 1 ? '' : 's'} por segurança` : ''}
+      <div className="grid grid-cols-1 divide-y divide-lime/10 border-t border-lime/15 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        {stats.map((st) => (
+          <div key={st.label} className="px-4 py-2.5">
+            <div className="text-[15px] font-bold tabular-nums text-text">{st.v}</div>
+            <div className="text-[10.5px] leading-tight text-text-muted">{st.label}</div>
           </div>
-        </div>
+        ))}
       </div>
     </div>
   );

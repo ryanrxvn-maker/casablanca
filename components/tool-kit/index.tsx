@@ -528,7 +528,8 @@ export function ToolChoice<T extends string>({
 }: {
   value: T;
   onChange: (v: T) => void;
-  options: { value: T; label: string; sub?: string; icon?: ReactNode }[];
+  /** `disabled` por opção: aparece apagada e não responde ao clique. */
+  options: { value: T; label: string; sub?: string; icon?: ReactNode; disabled?: boolean; title?: string }[];
   disabled?: boolean;
   hue?: string;
 }) {
@@ -536,18 +537,22 @@ export function ToolChoice<T extends string>({
     <div className="ae-choice-group grid gap-2.5" style={{ '--choice-columns': Math.min(options.length, 4), '--choice-columns-mobile': Math.min(options.length, 2) } as CSSProperties} role="group" aria-label="Opções">
       {options.map((opt) => {
         const active = opt.value === value;
+        const optOff = !!opt.disabled;
         return (
           <button
             key={opt.value}
             type="button"
             aria-pressed={active}
-            onClick={() => !disabled && onChange(opt.value)}
-            disabled={disabled}
+            onClick={() => !disabled && !optOff && onChange(opt.value)}
+            disabled={disabled || optOff}
+            title={opt.title}
             className={
-              'ae-choice group relative overflow-hidden rounded-[14px] border px-3.5 py-3 text-left transition-all duration-300 active:scale-[0.97] ' +
-              (active
-                ? 'border-violet/70'
-                : 'border-line-strong bg-bg-soft/60 hover:-translate-y-[1px] hover:border-violet/45')
+              'ae-choice group relative overflow-hidden rounded-[14px] border px-3.5 py-3 text-left transition-all duration-300 ' +
+              (optOff
+                ? 'cursor-not-allowed border-line-strong bg-bg-soft/60 opacity-40'
+                : active
+                  ? 'border-violet/70 active:scale-[0.97]'
+                  : 'border-line-strong bg-bg-soft/60 hover:-translate-y-[1px] hover:border-violet/45 active:scale-[0.97]')
             }
             style={
               active

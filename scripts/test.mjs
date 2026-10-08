@@ -27,6 +27,8 @@ const ETAPAS = [
   { run: ["scripts/test-pilot-economia-runtime.mjs"] },
   // guardas de performance (05.10): gargalos medidos e removidos não podem voltar calados
   { run: ["scripts/test-perf-guards.mjs"] },
+  // landing pública (07.10): sem ferramenta interna, sem travessão, suíte = planos reais, mouse sem :root
+  { run: ["scripts/test-landing-guards.mjs"] },
   // chat de ajuda (07.10): mensagem pronta pro WhatsApp do suporte diz quem, o quê e onde
   { tsc: "lib/history-tools.ts lib/help-chat.ts lib/help-chat.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/help-chat.test.js"] },
   // painel admin (07.10): coluna ausente em produção derrubou o plano de todos pra Free, calado
@@ -38,6 +40,7 @@ const ETAPAS = [
   // formato do disparo (9:16 × 16:9): padrão intocado, landscape no submit, montagem no formato certo
   { tsx: ["lib/pilot-formato.test.ts"] },
   { tsx: ["lib/key-errors.test.ts"] },
+  { tsx: ["lib/destaques-copy.test.ts"] },
   // lipsync video to video (07.10): todo trecho cabe nos dois tetos do motor (tempo e tamanho)
   { tsc: "lib/lipsync-chunk-plan.ts lib/lipsync-chunk-plan.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/lipsync-chunk-plan.test.js"] },
   // projeto editável: roteiro da pós → CapCut (draft 9.x) + Premiere (xmeml) + SRT
