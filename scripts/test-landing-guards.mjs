@@ -146,3 +146,9 @@ test('rodapé: fumaça curta rente à base e nada de blur por cima do canvas ani
   assert.doesNotMatch(foot, /backdrop-blur|backdrop-filter/, 'blur por cima de canvas animado redesenha a GPU a cada quadro');
   assert.match(ler(`${DIR}/Smoke.tsx`), /uniform float u_band;/);
 });
+
+test('mesa do FakePrint sem will-change nos prints (deixava cartão vazio com a imagem já baixada, 08.10)', () => {
+  const src = ler(`${DIR}/FakePrint.tsx`);
+  assert.doesNotMatch(src, /\.desk-item \{[^}]*will-change/, '6 camadas de GPU paradas + filtro = print sem pintar');
+  assert.match(src, /loading="eager"/, 'os prints baixam cedo: nada de cartão vazio no primeiro acesso');
+});

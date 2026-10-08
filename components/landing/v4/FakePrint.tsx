@@ -179,9 +179,9 @@ function Desk() {
         .desk {
           aspect-ratio: 16 / 7.4;
         }
-        .desk-item {
-          will-change: translate;
-        }
+        /* SEM will-change aqui (08.10): 6 camadas de GPU paradas + o filtro de
+           cor faziam o navegador deixar de pintar alguns prints (cartão vazio
+           com a imagem já baixada; 2 de 7 rodadas). O parallax continua igual. */
         .desk-card {
           overflow: hidden;
           border-radius: 12px;
