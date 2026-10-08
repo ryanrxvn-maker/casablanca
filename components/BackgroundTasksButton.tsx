@@ -16,7 +16,7 @@ export function BackgroundTasksButton() {
   useEffect(() => {
     const compute = () => {
       try {
-        const map = readDurableRecords<{ phase?: string }>('background');
+        const map = readDurableRecords<{ phase?: string }>('background', { skipArchived: true });
         const running = Object.values(map).filter(
           (b) => b.phase && !['done', 'failed'].includes(b.phase),
         ).length;

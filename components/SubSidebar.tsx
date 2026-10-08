@@ -2,11 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { isToolInMaintenance } from '@/lib/maintenance';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
-import { tierAllowsTool, useTier } from '@/lib/use-tier';
+import { tierAllowsTool, useTier, useUserEmail } from '@/lib/use-tier';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -79,30 +77,11 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
   const tier = useTier();
   const actualPath = usePathname();
   const pathname = currentPath ?? actualPath;
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const supabase = createClient();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) return;
-        if (!cancelled) setUserEmail(u.user?.email ?? null);
-        const { data } = await supabase
-          .from('profiles')
-          .select('is_admin')
-          .eq('id', uid)
-          .maybeSingle();
-        if (!cancelled) setIsAdmin(!!data?.is_admin);
-      } catch {}
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Admin e email vêm do cache de sessão do useTier (tier 'admin' ⇔ is_admin).
+  // Antes: getUser() de rede + query de profiles a cada montagem — os itens
+  // internos "pulavam" na lista ~0,5 s depois. A trava real é do middleware.
+  const isAdmin = tier === 'admin';
+  const userEmail = useUserEmail() ?? null;
 
   const inTools = TOOL_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + '/'),

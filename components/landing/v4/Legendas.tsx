@@ -51,6 +51,7 @@ const SHELF: Record<Mode, string[]> = {
   simples: ['keynote', 'fade-limpo', 'papo-amarelo', 'empilhado', 'g-caixa-chip', 'palavra-box', 'solo-box'],
 };
 const ALL_IDS = [...SHELF.virais, ...SHELF.simples];
+// (a demo da Linha única usa um modelo que já está na vitrine)
 
 /** O que o vídeo "fala" em cada família. */
 const SCRIPT: Record<Mode, Block[]> = {
@@ -139,7 +140,116 @@ export function LegendasSection() {
           </div>
         </Reveal>
       </div>
+
+      <SingleLineDemo />
     </section>
+  );
+}
+
+/* ── Linha única: a mesma legenda com a opção desligada e ligada ── */
+
+const SL_PRESET = 'vermelho-sangue';
+/** desligada: a fala inteira num bloco só, que desce em várias linhas */
+const SL_OFF = makeBlocks(['TUDO NUMA LINHA SÓ'], { start: 0, per: 3300 });
+/** ligada + ritmo rápido: a mesma fala em blocos curtos, cada um numa linha */
+const SL_ON = makeBlocks(['TUDO NUMA', 'LINHA SÓ'], { start: 0, per: 1650 });
+
+function SingleLineDemo() {
+  return (
+    <Reveal>
+      <div className="sl mt-16 grid grid-cols-1 items-center gap-10 rounded-[18px] p-6 md:mt-20 md:p-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-14">
+        <div>
+          <span
+            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[12.5px] font-semibold"
+            style={{ fontFamily: 'var(--font-label)', color: GOLD, borderColor: `${GOLD}4d`, background: `${GOLD}12` }}
+          >
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: GOLD }} />
+            Linha única
+          </span>
+          <p className="mt-5 text-[24px] italic leading-[1.15] text-white/70 md:text-[30px]" style={{ fontFamily: 'var(--font-serif)' }}>
+            Cansou de legenda descendo pra segunda linha?
+          </p>
+          <h3
+            className="mt-2 text-[32px] font-extrabold leading-[1.04] tracking-[-0.03em] text-white md:text-[44px]"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Liga a Linha única e ela{' '}
+            <span className="sl-mark relative inline-block px-[0.14em]" style={{ color: '#17120a' }}>
+              <span aria-hidden className="sl-mark-box" />
+              <span className="relative">nunca quebra.</span>
+            </span>
+          </h3>
+          <p className="mt-5 max-w-[52ch] text-[16px] leading-[1.7] text-white/[0.66]">
+            Cada legenda fica numa linha só, do jeito que anúncio pede. Ela se ajusta pra
+            caber na tela em vez de descer pra baixo. E você escolhe o ritmo: uma palavra
+            por vez, poucas palavras ou a frase inteira.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <SlFrame single={false} blocks={SL_OFF} label="Desligada" />
+          <SlFrame single blocks={SL_ON} label="Ligada, ritmo rápido" />
+        </div>
+      </div>
+      <style jsx>{`
+        .sl {
+          background: radial-gradient(90% 80% at 100% 0%, rgba(255, 214, 10, 0.08), transparent 60%),
+            linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)));
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+        }
+        .sl-mark-box {
+          position: absolute;
+          inset: 0.08em -0.02em 0.04em;
+          border-radius: 0.12em;
+          background: ${GOLD};
+          transform: rotate(-1.5deg);
+          box-shadow: 0 0.12em 0 rgba(0, 0, 0, 0.35);
+        }
+      `}</style>
+    </Reveal>
+  );
+}
+
+function SlFrame({ single, blocks, label }: { single: boolean; blocks: Block[]; label: string }) {
+  const { ref, inView } = useInView<HTMLDivElement>(0.3);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const progRef = useRef<LegendaProgram>({
+    presetId: SL_PRESET,
+    blocks,
+    fontScale: 2,
+    posY: 0.6,
+    singleLine: single,
+  });
+  useLegendaCanvas(canvasRef, progRef, { playing: inView, stillAt: 2600, fontIds: [SL_PRESET] });
+  return (
+    <div ref={ref}>
+      <div className="slf relative aspect-[3/4] overflow-hidden rounded-[14px]" style={{ filter: 'saturate(1.39)' }}>
+        <span aria-hidden className="slf-bg absolute inset-0" />
+        <canvas ref={canvasRef} aria-hidden className="absolute inset-0 h-full w-full" />
+        {single && (
+          <span
+            className="absolute right-2.5 top-2.5 rounded-full px-2.5 py-1 text-[11px] font-bold"
+            style={{ fontFamily: 'var(--font-label)', color: '#17120a', background: GOLD }}
+          >
+            1 linha
+          </span>
+        )}
+      </div>
+      <p className="mt-2.5 text-center text-[13px] font-semibold" style={{ fontFamily: 'var(--font-label)', color: single ? GOLD : 'rgba(255,255,255,0.5)' }}>
+        {label}
+      </p>
+      <style jsx>{`
+        .slf {
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 30px 60px -30px rgba(0, 0, 0, 0.9);
+        }
+        .slf-bg {
+          background-image: url('/landing/legendas-ugc.jpg');
+          background-size: cover;
+          background-position: 50% 30%;
+          filter: brightness(0.62);
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -476,6 +586,10 @@ export function CopyFixSection() {
   const [lit, setLit] = useState<Set<number>>(() => new Set());
   const [pressed, setPressed] = useState(false);
   const [run, setRun] = useState(0);
+  /** a lista some por um instante na hora de recomeçar (nada de "desfazer" a correção na frente da pessoa) */
+  const [fade, setFade] = useState(false);
+  /** reposição sem transição: as palavras voltam pro estado errado já invisíveis */
+  const [snap, setSnap] = useState(false);
 
   const zoneRef = useRef<HTMLDivElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
@@ -512,6 +626,13 @@ export function CopyFixSection() {
     setFixed(new Set());
     setLit(new Set());
     setPressed(false);
+    if (run > 0) {
+      setSnap(true);
+      at(60, () => {
+        setSnap(false);
+        setFade(false);
+      });
+    }
 
     const START = 1800;
     const GAP = 560;
@@ -530,11 +651,21 @@ export function CopyFixSection() {
     });
     const end = START + 250 + data.fixes.length * GAP + 800;
     at(end, () => setPhase('done'));
-    // segura o resultado e recomeça (só se a pessoa ainda estiver olhando)
-    at(end + 5600, () => {
-      if (!alive || isCalm()) return;
-      setRun((r) => r + 1);
-    });
+    // Segura o resultado 8 s e recomeça sozinho, sem botão (pedido de 08.10).
+    // Fora da tela ou em modo descanso ele espera e tenta de novo a cada 1 s,
+    // em vez de morrer (antes, um descanso parava o loop pra sempre).
+    const restart = () => {
+      if (!alive) return;
+      const r = zoneRef.current?.getBoundingClientRect();
+      const onScreen = !!r && r.bottom > 0 && r.top < window.innerHeight;
+      if (isCalm() || !onScreen) {
+        at(1000, restart);
+        return;
+      }
+      setFade(true);
+      at(320, () => setRun((x) => x + 1));
+    };
+    at(end + 8000, restart);
 
     function fly(i: number, f: Fix) {
       const layer = flyRef.current;
@@ -653,7 +784,7 @@ export function CopyFixSection() {
                 </span>
               </div>
 
-              <ol className="flex flex-col">
+              <ol className={'cf-list flex flex-col' + (fade ? ' is-fade' : '') + (snap ? ' is-snap' : '')}>
                 {data.blocks.map((blk, bi) => (
                   <li key={blk.id} className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5 last:border-b-0 md:gap-5 md:px-6">
                     <span className="w-[66px] shrink-0 text-[11px] text-white/40 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
@@ -711,16 +842,6 @@ export function CopyFixSection() {
                   {data.corrected} {data.corrected === 1 ? 'palavra corrigida' : 'palavras corrigidas'} e {data.added}{' '}
                   {data.added === 1 ? 'devolvida' : 'devolvidas'}. Blocos e tempos intactos.
                 </span>
-                {phase === 'done' && !reduced && (
-                  <button
-                    type="button"
-                    onClick={() => setRun((r) => r + 1)}
-                    className="rounded-[9px] px-2.5 py-1.5 text-[12px] font-semibold text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
-                    style={{ fontFamily: 'var(--font-label)' }}
-                  >
-                    Ver de novo
-                  </button>
-                )}
               </div>
             </div>
           </div>
@@ -785,6 +906,19 @@ export function CopyFixSection() {
           box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 70px 120px -40px rgba(0, 0, 0, 0.95),
             0 0 90px -30px rgba(255, 176, 32, 0.28);
           will-change: translate;
+        }
+        .cf-list {
+          transition: opacity 0.3s ease;
+        }
+        .cf-list.is-fade {
+          opacity: 0;
+        }
+        .cf-list.is-snap .cf-from,
+        .cf-list.is-snap .cf-to {
+          transition: none !important;
+        }
+        .cf-list.is-snap .cf-tile {
+          animation: none !important;
         }
         .cf-pw {
           border-radius: 3px;

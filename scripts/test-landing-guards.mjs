@@ -115,3 +115,40 @@ test('card do telejornal no herói não reage ao mouse; só a tela verde saindo 
   assert.match(src, /@keyframes mw-wipe \{/, 'a transição da tela verde continua lá');
   assert.doesNotMatch(src, /repeating-linear-gradient/, 'sem linhas de varredura por cima do vídeo (deixavam o vídeo com cara de baixa qualidade)');
 });
+
+test('tela verde do herói vai e volta devagar e nunca cobre tudo (08.10: "não pode ir até o final")', () => {
+  const src = ler(`${DIR}/Hero.tsx`);
+  const m = /@keyframes mw-wipe \{([\s\S]*?)\n\s{8}\}/.exec(src);
+  assert.ok(m, '@keyframes mw-wipe não encontrado');
+  const pcts = [...m[1].matchAll(/translateX\((-?[\d.]+)%\)/g)].map((x) => Number(x[1]));
+  assert.ok(pcts.length >= 2 && pcts.every((v) => v >= 15 && v <= 90), `a borda da tela verde tem que ficar entre 15% e 90% (achou ${pcts.join(', ')})`);
+  assert.match(src, /\.mw-auto \{\s*animation: mw-wipe 9s [^;]*infinite alternate;/, 'vai e volta (alternate), na velocidade de antes (9 s)');
+});
+
+test('demo da Linha única usa a opção real do motor (singleLine)', () => {
+  const src = ler(`${DIR}/Legendas.tsx`);
+  assert.match(src, /singleLine: single/);
+  assert.match(ler(`${DIR}/legenda.ts`), /styleFor\(preset, prog\.fontScale, prog\.posY, prog\.singleLine\)/);
+});
+
+test('correção pela copy roda sozinha a cada 8 s, sem botão "Ver de novo" (08.10)', () => {
+  const src = ler(`${DIR}/Legendas.tsx`);
+  const cf = src.slice(src.indexOf('export function CopyFixSection'));
+  assert.doesNotMatch(cf, /Ver de novo/, 'nada de botão pra repetir: o loop é automático');
+  assert.match(cf, /at\(end \+ 8000, restart\)/, 'segura o resultado 8 s e recomeça');
+  assert.match(cf, /at\(1000, restart\)/, 'fora da tela/descanso ele espera e tenta de novo (não morre)');
+});
+
+test('rodapé: fumaça curta rente à base e nada de blur por cima do canvas animado (08.10)', () => {
+  const src = ler(`${DIR}/Rest.tsx`);
+  const foot = src.slice(src.indexOf('export function LandingFooter'));
+  assert.match(foot, /<Smoke band /, 'o rodapé usa a fumaça no modo rente à base');
+  assert.doesNotMatch(foot, /backdrop-blur|backdrop-filter/, 'blur por cima de canvas animado redesenha a GPU a cada quadro');
+  assert.match(ler(`${DIR}/Smoke.tsx`), /uniform float u_band;/);
+});
+
+test('mesa do FakePrint sem will-change nos prints (deixava cartão vazio com a imagem já baixada, 08.10)', () => {
+  const src = ler(`${DIR}/FakePrint.tsx`);
+  assert.doesNotMatch(src, /\.desk-item \{[^}]*will-change/, '6 camadas de GPU paradas + filtro = print sem pintar');
+  assert.match(src, /loading="eager"/, 'os prints baixam cedo: nada de cartão vazio no primeiro acesso');
+});

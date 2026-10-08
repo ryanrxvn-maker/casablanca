@@ -85,3 +85,41 @@ test('Smart Stocks: placar não normaliza a copy inteira por take (dezenas de mi
   assert.match(component, /const TakeCard = memo\(/, 'cards da biblioteca memorizados (digitar na busca não re-renderiza 48 cards)');
   assert.match(component, /useMemo\(\(\) => incomingParts, \[partsKey\]\)/, 'parts estabilizado pelo conteúdo (a página recria o array a cada render)');
 });
+
+test('registros da conta: F5 baixa só o que mudou (antes 11 páginas em fila, ~7 s com a ferramenta em "Recuperando…")', () => {
+  const rec = ler('lib/durable-records.ts');
+  assert.match(rec, /function pullPlan\(/, 'a busca incremental (cursor por conta) sumiu');
+  assert.match(rec, /'x-records-owner'/, 'o cursor tem que ir com a conta dona dele');
+  assert.match(rec, /await pullWith\(null, onPage\)/, 'incremental que falha precisa cair na busca completa');
+  const route = ler('app/api/user/records/route.ts');
+  assert.match(route, /\.gt\('updated_at', since\)/, 'a rota deixou de filtrar por updated_at');
+  assert.match(route, /x-records-owner'\) === user\.id/, 'filtro só vale pra conta da sessão');
+});
+
+test('registros: varreduras internas não redecodificam ~3 MB a cada checkpoint do Pilot', () => {
+  const rec = ler('lib/durable-records.ts');
+  assert.match(rec, /function scanLocal\(\)/);
+  for (const fn of ['refreshStatus', 'compactLocalRows', 'reconcileLocalConflicts']) {
+    const ini = rec.indexOf(`function ${fn}(`);
+    assert.ok(ini >= 0, `${fn} não encontrado`);
+    assert.match(rec.slice(ini, ini + 200), /scanLocal\(\)/, `${fn} voltou a usar readLocal() (parse da conta inteira)`);
+  }
+  assert.match(rec, /scanLocal\(\)\.filter\(r => r\.pending/, 'a fila de envio usa a varredura com cache');
+});
+
+test('leitores em loop pulam execuções arquivadas e buscas por id leem um registro só', () => {
+  for (const f of ['components/history/HistoryTimeline.tsx', 'components/BackgroundTasksButton.tsx', 'components/ClickUpPilotButton.tsx']) {
+    assert.match(ler(f), /skipArchived: true/, `${f}: voltou a decodificar as execuções arquivadas a cada leitura`);
+  }
+  const page = ler('app/tools/clickup-pilot/page.tsx');
+  const fn = page.slice(page.indexOf('function loadPersistedReplan('), page.indexOf('function planoDoReplan('));
+  assert.match(fn, /readDurableRecord</, 'o plano salvo de UMA task não pode decodificar a fila inteira (roda no render do painel de montagem)');
+});
+
+test('menu de ferramentas e busca não perguntam ao servidor se a conta é admin (o useTier já sabe, em cache)', () => {
+  for (const f of ['components/SubSidebar.tsx', 'components/GlobalSearch.tsx']) {
+    const src = ler(f);
+    assert.doesNotMatch(src, /auth\.getUser\(\)/, `${f}: getUser() de rede a cada montagem — itens internos "pulavam" na lista`);
+    assert.match(src, /=== 'admin'/);
+  }
+});

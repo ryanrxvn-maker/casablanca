@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { logHistory, type FileRef } from '@/lib/history';
 import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, responderAcaoDeFila } from '@/lib/history-acoes';
-import { createRecordWriter, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
+import { createRecordWriter, readDurableRecord, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
@@ -859,8 +859,7 @@ function PainelDeMontagem({
  *  (quando taskAnalyses esta vazio e o estado React ainda nao reidratou). */
 function loadPersistedReplan(taskId: string): NonNullable<BatchTaskState['replan']> | null {
   try {
-    const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
-    return all?.[taskId]?.replan ?? null;
+    return readDurableRecord<{ replan?: any }>('background', taskId)?.replan ?? null;
   } catch {
     return null;
   }
@@ -10082,7 +10081,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // s pode estar ausente no estado React logo apos navegar pro motor
     // (restore ainda nao reidratou) — caimos no localStorage autoritativo.
     const s = batchStates[taskId];
-    const persisted = !s ? (loadPersistedBatchStates() as Record<string, BatchTaskState>)[taskId] : null;
+    const persisted = !s ? readDurableRecord<BatchTaskState>('background', taskId) ?? null : null;
     const eff = s || persisted;
     const replan = eff?.replan || loadPersistedReplan(taskId);
     const hasResumableParts = !!eff?.parts?.some((p) => p.videoId);
@@ -11059,7 +11058,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (noState?.replanManual && noState.replan?.parts?.length) return noState.replan;
     // Pós-F5 o state ainda pode não ter reidratado — o localStorage é a fonte.
     try {
-      const salvo = (loadPersistedBatchStates() as Record<string, BatchTaskState>)[taskId];
+      const salvo = readDurableRecord<BatchTaskState>('background', taskId);
       if (salvo?.replanManual && salvo.replan?.parts?.length) return salvo.replan;
     } catch { /* sem localStorage: segue o fluxo normal */ }
     return null;

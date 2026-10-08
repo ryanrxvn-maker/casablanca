@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { LipsyncPreviewCard } from '@/components/LipsyncPreviewCard';
-import { readDurableRecords } from '@/lib/durable-records';
+import { readDurableRecord } from '@/lib/durable-records';
 import { pedirAcaoEEsperar } from '@/lib/history-acoes';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
@@ -147,7 +147,7 @@ export function PreviewsDoDisparo({
     void (async () => {
       let rec: RegistroDoDisparo | null = null;
       try {
-        rec = (readDurableRecords<RegistroDoDisparo>('background')[taskId] as RegistroDoDisparo) ?? null;
+        rec = readDurableRecord<RegistroDoDisparo>('background', taskId) ?? null;
       } catch {}
       let ks: string[] = [];
       try {

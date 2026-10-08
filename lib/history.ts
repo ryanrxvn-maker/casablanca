@@ -1,5 +1,5 @@
 'use client';
-import { createRecordWriter, readDurableRecords, deleteDurableRecords } from './durable-records';
+import { createRecordWriter, readDurableRecord, readDurableRecords, deleteDurableRecords } from './durable-records';
 import { RETENTION_MS, type DownloaderSource, type FileRef, type HistoryEvent, type HistoryKind } from './history-tools';
 import { faseAtiva, podeVirarCard, preencherCanaisAusentes } from './history-acoes';
 
@@ -334,7 +334,7 @@ export async function removeHistoryEvent(id: string): Promise<void> {
 export function disparoNaFila(taskId: string): { existe: boolean; rodando: boolean } {
   try {
     if (!podeVirarCard(taskId)) return { existe: false, rodando: false };
-    const rec = readDurableRecords<{ phase?: string }>('background')[taskId];
+    const rec = readDurableRecord<{ phase?: string }>('background', taskId);
     if (!rec) return { existe: false, rodando: false };
     return { existe: true, rodando: faseAtiva(rec.phase) };
   } catch {

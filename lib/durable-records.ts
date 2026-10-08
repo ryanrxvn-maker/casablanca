@@ -5,7 +5,7 @@ import { checkpoint, encode, inRetention, isObject, mergeRecord, type RecordData
 export const RECORDS_EVENT = 'autoedit:durable-records';
 const ROOT = 'autoedit:records:v2:';
 const LEGACY = { background: 'darkolab:clickup-pilot:batches', history: 'autoedit:history:v1' };
-type CloudRow = { kind: RecordKind; record_id: string; payload: RecordData | null; deleted: boolean; revision: number };
+type CloudRow = { kind: RecordKind; record_id: string; payload: RecordData | null; deleted: boolean; revision: number; updated_at?: string };
 type LocalRow = { kind: RecordKind; id: string; data: RecordData | null; base: RecordData | null; revision: number; pending?: string; recovery?: RecordData | null; conflict?: boolean; revive?: boolean };
 export type DurabilityStatus = { ready: boolean; message: string; pending: number; conflicts: number; legacy: number; error: boolean };
 let owner: string | null = null;
@@ -20,6 +20,99 @@ let pulling: Promise<void> | null = null;
 let initError = '';
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
 const keyFor = (kind: RecordKind, id: string) => `${ROOT}${owner}:${kind}:${encodeURIComponent(id)}`;
+
+/**
+ * Incremental pull. Every reload used to download the WHOLE account (1,036
+ * records in 11 sequential pages, ~7 s measured) while the tools waited behind
+ * "Recuperando seus registros…", and the 2-minute refresh repeated it.
+ *
+ * After a pull that completed, the newest `updated_at` the account returned
+ * (database clock, never the browser's) is kept per account. The next pull
+ * asks only for rows changed since then, minus a 10-minute overlap for
+ * transactions committed out of order. Tombstones and archived executions are
+ * rows with a fresh `updated_at`, so they arrive through the same path.
+ *
+ * The server applies the filter only when the requested account is the
+ * session's (another account = full pull); no local row for the account = full
+ * pull; and the cursor advances only when every page came in the same mode and
+ * was absorbed.
+ */
+const CURSOR_KEY = `${ROOT}cursor`;
+const CURSOR_OVERLAP_MS = 10 * 60_000;
+type CursorBag = { last?: string; at: Record<string, number> };
+type PullPlan = { owner: string; since: string; at: number } | null;
+function readCursorBag(): CursorBag {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(CURSOR_KEY) ?? 'null');
+    if (isObject(raw) && isObject(raw.at)) return { last: typeof raw.last === 'string' ? raw.last : undefined, at: raw.at as Record<string, number> };
+  } catch { /* unreadable cursor = full pull */ }
+  return { at: {} };
+}
+function hasLocalRows(forOwner: string): boolean {
+  const prefix = `${ROOT}${forOwner}:`;
+  for (let n = 0; n < localStorage.length; n++) if (localStorage.key(n)?.startsWith(prefix)) return true;
+  return false;
+}
+function pullPlan(): PullPlan {
+  const bag = readCursorBag();
+  const who = owner ?? bag.last;
+  if (!who) return null;
+  const at = Number(bag.at[who]);
+  if (!Number.isFinite(at) || at <= 0 || !hasLocalRows(who)) return null;
+  return { owner: who, since: new Date(at - CURSOR_OVERLAP_MS).toISOString(), at };
+}
+function pullRequest(page: number, plan: PullPlan): [string, RequestInit | undefined] {
+  if (!plan) return [`/api/user/records?page=${page}`, undefined];
+  return [`/api/user/records?page=${page}&since=${encodeURIComponent(plan.since)}`, { headers: { 'x-records-owner': plan.owner } }];
+}
+function newestUpdate(rows: CloudRow[]): number {
+  let max = 0;
+  for (const r of rows) { const t = Date.parse(r.updated_at ?? ''); if (Number.isFinite(t) && t > max) max = t; }
+  return max;
+}
+/** A pull whose pages mixed modes (deploy mid-pull) never moves the cursor. */
+function rememberCursor(forOwner: string, mode: 'delta' | 'full' | 'mixed', plan: PullPlan, newest: number) {
+  if (mode === 'mixed') return;
+  try {
+    const bag = readCursorBag();
+    const at = Math.max(mode === 'delta' && plan?.owner === forOwner ? plan.at : 0, newest);
+    bag.last = forOwner;
+    if (at > 0) bag.at[forOwner] = at; else delete bag.at[forOwner];
+    localStorage.setItem(CURSOR_KEY, JSON.stringify(bag));
+  } catch { /* without a cursor the next pull is simply full */ }
+}
+type PullMode = 'delta' | 'full' | 'mixed' | null;
+const pageMode = (prev: PullMode, delta: boolean): PullMode => {
+  const m = delta ? 'delta' : 'full';
+  return prev === null || prev === m ? m : 'mixed';
+};
+type PullBody = { userId: string; records: CloudRow[]; more: boolean; delta?: boolean };
+async function pullWith(plan: PullPlan, onPage: (body: PullBody, page: number) => Promise<void>): Promise<void> {
+  let mode: PullMode = null;
+  let newest = 0;
+  let who = '';
+  for (let page = 0, more = true; more; page++) {
+    const { body } = await fetchJSON(...pullRequest(page, plan)) as { body: PullBody };
+    await onPage(body, page);
+    who = body.userId;
+    mode = pageMode(mode, body.delta === true && plan?.owner === body.userId);
+    newest = Math.max(newest, newestUpdate(body.records));
+    more = body.more;
+  }
+  if (who) rememberCursor(who, mode ?? 'mixed', plan, newest);
+}
+/** An incremental attempt that fails for ANY reason is redone once as the full
+ * listing, so the worst case of this optimisation is the previous behaviour. */
+async function pullPages(onPage: (body: PullBody, page: number) => Promise<void>): Promise<void> {
+  const plan = pullPlan();
+  if (!plan) return pullWith(null, onPage);
+  try {
+    await pullWith(plan, onPage);
+  } catch (e) {
+    console.warn('[records] incremental pull failed; doing the full pull', e);
+    await pullWith(null, onPage);
+  }
+}
 
 /**
  * A tombstone blocks delayed checkpoints, but it must not make a ClickUp task
@@ -37,19 +130,55 @@ function notify(message?: string, error = false) {
   window.dispatchEvent(new CustomEvent(RECORDS_EVENT));
   window.dispatchEvent(new CustomEvent('autoedit:history'));
 }
-function readLocal(): LocalRow[] {
+/** `only` narrows by the key (`…:<kind>:<id>`) BEFORE parsing: reading the 160
+ * history events no longer decodes the ~3 MB of background rows beside them.
+ * `skipIdPrefix` does the same for ids a reader never shows (archived
+ * executions were 354 of 876 background rows, 2.5 of 2.9 MB). */
+function readLocal(only?: RecordKind, skipIdPrefix?: string): LocalRow[] {
   if (!owner) return [];
-  const prefix = `${ROOT}${owner}:`;
+  const prefix = only ? `${ROOT}${owner}:${only}:` : `${ROOT}${owner}:`;
+  const skip = only && skipIdPrefix ? prefix + encodeURIComponent(skipIdPrefix) : null;
   const rows: LocalRow[] = [];
   for (let n = 0; n < localStorage.length; n++) {
     const key = localStorage.key(n);
-    if (!key?.startsWith(prefix)) continue;
+    if (!key?.startsWith(prefix) || (skip && key.startsWith(skip))) continue;
     const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
     if (!isObject(parsed) || !['background', 'history'].includes(String(parsed.kind)) || typeof parsed.id !== 'string') {
       throw new Error('Uma cópia local está danificada. Ela foi preservada; o salvamento não vai sobrescrevê-la.');
     }
     rows.push(parsed as LocalRow);
   }
+  return rows;
+}
+/**
+ * Full scan for the module's own READ-ONLY passes (status counts, outbox,
+ * compaction, TTL). Each Pilot checkpoint ran three of them — ~30 ms apiece
+ * over ~3 MB measured — and the 15-second sync timer two more on every tool
+ * page. A row is decoded again only when its stored text changed; any write,
+ * from this tab or another, changes the text, so the result is the same as
+ * readLocal(). The objects are shared between calls: callers must not mutate
+ * them, which is why readDurableRecords() keeps parsing its own copies.
+ */
+let scanCache = new Map<string, { raw: string; row: LocalRow }>();
+function scanLocal(): LocalRow[] {
+  if (!owner) return [];
+  const prefix = `${ROOT}${owner}:`;
+  const next = new Map<string, { raw: string; row: LocalRow }>();
+  const rows: LocalRow[] = [];
+  for (let n = 0; n < localStorage.length; n++) {
+    const key = localStorage.key(n);
+    if (!key?.startsWith(prefix)) continue;
+    const raw = localStorage.getItem(key) ?? 'null';
+    const hit = scanCache.get(key);
+    if (hit && hit.raw === raw) { next.set(key, hit); rows.push(hit.row); continue; }
+    const parsed: unknown = JSON.parse(raw);
+    if (!isObject(parsed) || !['background', 'history'].includes(String(parsed.kind)) || typeof parsed.id !== 'string') {
+      throw new Error('Uma cópia local está danificada. Ela foi preservada; o salvamento não vai sobrescrevê-la.');
+    }
+    next.set(key, { raw, row: parsed as LocalRow });
+    rows.push(parsed as LocalRow);
+  }
+  scanCache = next;
   return rows;
 }
 function saveLocal(row: LocalRow) {
@@ -60,13 +189,13 @@ function saveLocal(row: LocalRow) {
  * localStorage doubles the queue's size and can block every later checkpoint.
  * A base snapshot is needed only while an edit is pending. */
 function compactLocalRows() {
-  for (const row of readLocal()) {
+  for (const row of scanLocal()) {
     if (!row.pending && row.base !== null) saveLocal({ ...row, base: null });
   }
 }
 /** Fold legacy strict-conflict snapshots into a normal pending checkpoint. */
 function reconcileLocalConflicts() {
-  for (const row of readLocal()) {
+  for (const row of scanLocal()) {
     if (!row.conflict) continue;
     const data = mergeRecord(row.base, row.recovery ?? row.data, row.data);
     saveLocal({ ...row, data, base: row.data,
@@ -85,7 +214,7 @@ async function locked<T>(work: () => Promise<T> | T): Promise<T> {
   return navigator.locks.request(`${ROOT}${owner}`, { signal: AbortSignal.timeout(12000) }, work);
 }
 function refreshStatus() {
-  const rows = readLocal();
+  const rows = scanLocal();
   status.pending = rows.filter(r => !!r.pending).length;
   status.conflicts = rows.filter(r => r.conflict).length;
   // Existing records from the short-lived strict-conflict implementation are
@@ -105,18 +234,14 @@ export function refreshDurableRecords(): Promise<void> {
   pulling = (async () => {
     try {
       await locked(compactLocalRows);
-      let page = 0;
-      let more = true;
-      while (more) {
-        const { body } = await fetchJSON(`/api/user/records?page=${page++}`);
+      await pullPages(async (body) => {
         if (body.userId !== expectedOwner) throw new Error('A conta mudou. Recarregue para recuperar a lista correta.');
         await locked(async () => { for (const remote of body.records) await absorb(remote); });
-        more = body.more;
-      }
+      });
       await locked(() => {
         // TTL applies only to history. Never prune background.
         initError = '';
-        for (const row of readLocal()) {
+        for (const row of scanLocal()) {
           const event = row.data ?? row.base;
           if (row.kind === 'history' && event && !inRetention('history', event)) localStorage.removeItem(keyFor(row.kind, row.id));
         }
@@ -127,11 +252,13 @@ export function refreshDurableRecords(): Promise<void> {
   })().finally(() => { pulling = null; });
   return pulling;
 }
-export function readDurableRecords<T = RecordData>(kind: RecordKind): Record<string, T> {
+/** `skipArchived`: for readers that never display `archive:` rows (cards,
+ * counters, the live queue) — those rows are then not even parsed. */
+export function readDurableRecords<T = RecordData>(kind: RecordKind, opts?: { skipArchived?: boolean }): Record<string, T> {
   if (typeof window === 'undefined') return {};
   try {
     const out: Record<string, T> = {};
-    for (const row of readLocal()) {
+    for (const row of readLocal(kind, opts?.skipArchived ? 'archive:' : undefined)) {
       if (row.kind === kind && row.data && inRetention(kind, row.data)) out[row.id] = row.data as T;
     }
     return out;
@@ -139,6 +266,26 @@ export function readDurableRecords<T = RecordData>(kind: RecordKind): Record<str
     const message = (e as Error).message;
     if (status.message !== message || !status.error) notify(message, true);
     return {};
+  }
+}
+
+/** One record by id — the same answer as `readDurableRecords(kind)[id]`, but
+ * it reads and decodes that single row instead of the whole account. */
+export function readDurableRecord<T = RecordData>(kind: RecordKind, id: string): T | undefined {
+  if (typeof window === 'undefined' || !owner) return undefined;
+  try {
+    const raw = localStorage.getItem(keyFor(kind, id));
+    if (!raw) return undefined;
+    const row: unknown = JSON.parse(raw);
+    if (!isObject(row) || row.kind !== kind || row.id !== id) {
+      throw new Error('Uma cópia local está danificada. Ela foi preservada; o salvamento não vai sobrescrevê-la.');
+    }
+    const data = (row as LocalRow).data;
+    return data && inRetention(kind, data) ? (data as T) : undefined;
+  } catch (e) {
+    const message = (e as Error).message;
+    if (status.message !== message || !status.error) notify(message, true);
+    return undefined;
   }
 }
 
@@ -283,7 +430,7 @@ export async function syncDurableRecords(): Promise<void> {
   const expectedOwner = owner;
   syncing = (async () => {
     try {
-      const pending = readLocal().filter(r => r.pending && !r.conflict);
+      const pending = scanLocal().filter(r => r.pending && !r.conflict);
       for (const candidate of pending) {
         // Network is outside the local lock: another tab can keep working offline.
         const { body, conflict } = await fetchJSON('/api/user/records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -332,16 +479,12 @@ export function initializeDurableRecords(): Promise<void> {
   if (initialization) return initialization;
   initialization = (async () => {
     try {
-      let page = 0;
-      let more = true;
-      while (more) {
-        const { body } = await fetchJSON(`/api/user/records?page=${page++}`);
+      await pullPages(async (body, page) => {
         if (owner && owner !== body.userId) throw new Error('A conta mudou. Recarregue para usar o armazenamento da conta correta.');
         owner = body.userId;
-        if (page === 1) await locked(compactLocalRows);
+        if (page === 0) await locked(compactLocalRows);
         await locked(async () => { for (const remote of body.records) await absorb(remote); });
-        more = body.more;
-      }
+      });
       const legacy = legacyRecords();
       const imported = localStorage.getItem(`${ROOT}legacy-owner`);
       status.legacy = !imported ? Object.keys(legacy.background).length + Object.keys(legacy.history).length : 0;
@@ -356,7 +499,7 @@ export function initializeDurableRecords(): Promise<void> {
       // and let the normal retry repair cloud sync instead of trapping the
       // Pilot behind a permanently unready provider.
       if (owner) {
-        try { readLocal(); status.ready = true; } catch { /* preserve the error */ }
+        try { scanLocal(); status.ready = true; } catch { /* preserve the error */ }
       }
       notify(initError, true);
       initialization = null;

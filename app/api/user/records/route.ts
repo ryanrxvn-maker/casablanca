@@ -11,10 +11,24 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const page = Number(url.searchParams.get('page') ?? 0);
   if (!Number.isInteger(page) || page < 0 || page > 10000) return NextResponse.json({ error: 'Página inválida.' }, { status: 400 });
-  const { data, error } = await db.from('durable_records').select('*').eq('user_id', user.id)
-    .order('kind').order('record_id').range(page * 100, page * 100 + 99);
-  if (error) return NextResponse.json({ error: 'O armazenamento da conta está indisponível. Os registros locais foram preservados.' }, { status: 503 });
-  return NextResponse.json({ userId: user.id, records: data, more: data.length === 100 }, { headers: { 'Cache-Control': 'no-store' } });
+  // Incremental pull (lib/durable-records.ts): only rows changed since the
+  // client's cursor, and only when that cursor belongs to THIS account. Any
+  // other case — or a filter error — falls back to the full listing,
+  // flagged `delta: false`.
+  const sinceMs = Date.parse(url.searchParams.get('since') ?? '');
+  let delta = Number.isFinite(sinceMs) && req.headers.get('x-records-owner') === user.id;
+  const list = (since: string | null) => {
+    const query = db.from('durable_records').select('*').eq('user_id', user.id);
+    return (since ? query.gt('updated_at', since) : query)
+      .order('kind').order('record_id').range(page * 100, page * 100 + 99);
+  };
+  let { data, error } = await list(delta ? new Date(sinceMs).toISOString() : null);
+  if (error && delta) {
+    delta = false;
+    ({ data, error } = await list(null));
+  }
+  if (error || !data) return NextResponse.json({ error: 'O armazenamento da conta está indisponível. Os registros locais foram preservados.' }, { status: 503 });
+  return NextResponse.json({ userId: user.id, records: data, more: data.length === 100, delta }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 export async function POST(req: Request) {

@@ -9,7 +9,7 @@ const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
 function readActiveBatchCount(): number {
   if (typeof window === 'undefined') return 0;
   try {
-    const states = readDurableRecords<{ phase?: string }>('background');
+    const states = readDurableRecords<{ phase?: string }>('background', { skipArchived: true });
     let n = 0;
     for (const s of Object.values(states)) {
       if (s.phase && s.phase !== 'done' && s.phase !== 'failed') n++;

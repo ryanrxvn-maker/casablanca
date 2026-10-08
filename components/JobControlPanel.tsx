@@ -63,7 +63,7 @@ export function JobControlPanel({
 
   useEffect(() => {
     const refresh = () => {
-      setBatches(Object.fromEntries(Object.entries(readDurableRecords<BatchState>('background')).filter(([id]) => !id.startsWith('archive:'))));
+      setBatches(Object.fromEntries(Object.entries(readDurableRecords<BatchState>('background', { skipArchived: true })).filter(([id]) => !id.startsWith('archive:'))));
       setMagnific(readJson<Record<string, MagnificJob>>(MAGNIFIC_KEY) || {});
     };
     refresh();
