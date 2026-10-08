@@ -14,6 +14,7 @@ import {
   montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda,
   type ArquivoProjeto, type MidiaDoProjeto, type RoteiroEdicao,
 } from './pilot-projeto';
+import { palcoDoLayout } from './pilot-inserts';
 
 export type ProjetoDisponivel = { filename: string; chaveBase: string; chaveRoteiro: string; roteiro: RoteiroEdicao };
 
@@ -117,6 +118,36 @@ function pngSolido(W: number, H: number, cor: string): Promise<Blob | null> {
   const ctx = c.getContext('2d')!;
   ctx.fillStyle = cor;
   ctx.fillRect(0, 0, W, H);
+  return new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
+}
+
+/** O clarão da LUZ VERMELHA — o mesmo degradê radial do render (export.ts). */
+function pngClaraoVermelho(W: number, H: number): Promise<Blob | null> {
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(W * 0.5, H * 0.42, 0, W * 0.5, H * 0.42, Math.hypot(W, H) * 0.62);
+  g.addColorStop(0, 'rgb(255, 222, 200)');
+  g.addColorStop(0.38, 'rgb(255, 92, 54)');
+  g.addColorStop(0.72, 'rgb(214, 18, 34)');
+  g.addColorStop(1, 'rgb(120, 0, 14)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  return new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
+}
+
+/** A LINHA da divisão num PNG transparente do quadro inteiro (a camada de
+ *  cima põe ela na emenda, como o render). */
+function pngLinha(W: number, H: number, r: { x: number; y: number; w: number; h: number }, cor: string): Promise<Blob | null> {
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d')!;
+  ctx.shadowColor = cor;
+  ctx.shadowBlur = Math.max(4, (10 * W) / 1080);
+  ctx.fillStyle = cor;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
   return new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
 }
 
@@ -306,9 +337,27 @@ async function arquivosDoProjeto(
     const b = await pngSolido(W, H, '#fff');
     if (b) { branco = { nome: 'transicao_branco.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(branco.nome, b); }
   }
+  let vermelho: ArquivoProjeto | undefined;
+  if (roteiro.inserts.some((i) => i.transicao === 'luz-vermelha')) {
+    const b = await pngClaraoVermelho(W, H);
+    if (b) { vermelho = { nome: 'transicao_vermelho.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(vermelho.nome, b); }
+  }
+  // LINHA da tela dividida: um PNG por cor usada
+  const linhas = new Map<string, ArquivoProjeto>();
+  for (const ins of roteiro.inserts) {
+    const linha = palcoDoLayout(ins.layout, W, H).linha;
+    if (!linha) continue;
+    const cor = linha.cor.toLowerCase();
+    if (linhas.has(cor)) continue;
+    const b = await pngLinha(W, H, linha, cor);
+    if (!b) continue;
+    const arquivo: ArquivoProjeto = { nome: `linha_${cor.replace('#', '')}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
+    add(arquivo.nome, b);
+    linhas.set(cor, arquivo);
+  }
 
   const nome = p.filename.replace(/\.[^.]+$/, '');
-  const tl = montarTimeline(nome, roteiro, { avatar, inserts, legendas, headlines, preto, branco }, W, H);
+  const tl = montarTimeline(nome, roteiro, { avatar, inserts, legendas, headlines, preto, branco, vermelho, linhas }, W, H);
   avisos.push(...tl.avisos);
   // só vai pro pacote a mídia que a timeline usa (PNG idêntico já foi fundido)
   const usados = new Set(tl.arquivos.map((a) => a.nome));

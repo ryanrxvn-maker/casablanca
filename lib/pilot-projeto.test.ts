@@ -193,5 +193,57 @@ ok(srtDaLegenda([{ id: 'z', start: 19500, end: 20700, words: [{ text: 'fim', sta
 const leia = leiaMeDoProjeto(tl, { pasta: 'AD47G1VN - PILOT', temSrt: true });
 ok(leia.includes('CAPCUT') && leia.includes('PREMIERE') && leia.includes('.srt'), 'LEIA-ME explica CapCut, Premiere e o SRT');
 
+// ── FORMATOS 07.10: React sobe pra camada de cima; linha vira PNG; luz vermelha; avatar pelo rosto
+{
+  const vermelho: ArquivoProjeto = { nome: 'transicao_vermelho.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
+  const linhaVerde: ArquivoProjeto = { nome: 'linha_22e06b.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
+  const rf: RoteiroEdicao = {
+    ...roteiro,
+    inserts: [
+      { ...base, id: 'r1', nome: 'DINHEIRO', midiaKey: 'k1', start: 2, end: 5, layout: { tipo: 'react', lado: 'direita' }, transicao: 'luz-vermelha',
+        rosto: { x: 0.5, y: 0.3, h: 0.15 } },
+      { ...base, id: 'l1', nome: 'CEREBRO', midiaKey: 'k2', start: 8, end: 11, layout: { tipo: 'linha', avatar: 'cima', cor: '#22e06b' }, transicao: 'escurecer',
+        rosto: { x: 0.6, y: 0.5, h: 0.15 } },
+      { ...base, id: 'm1', nome: 'NEURONIO', midiaKey: 'k3', start: 14, end: 16, layout: { tipo: 'mescla', avatar: 'cima' }, transicao: 'nenhuma' },
+    ],
+  };
+  const mf: MidiaDoProjeto = {
+    avatar,
+    inserts: new Map([['r1', { arquivo: broll916 }], ['l1', { arquivo: broll916 }], ['m1', { arquivo: broll916 }]]),
+    legendas: [], headlines: [], preto, branco, vermelho, linhas: new Map([['#22e06b', linhaVerde]]),
+  };
+  const t2 = montarTimeline('FORMATOS', rf, mf, W, H);
+  const topo = t2.itens.filter((i) => i.trilha === 'topo');
+  const avatarBase = t2.itens.filter((i) => i.trilha === 'avatar');
+  const reactAv = topo.find((i) => i.arquivo === avatar.nome);
+  ok(!!reactAv && perto(reactAv.start, 2) && perto(reactAv.end, 5) && reactAv.volume === 1 && reactAv.destino.x + reactAv.destino.w <= W && reactAv.destino.y + reactAv.destino.h <= H
+    && reactAv.destino.x > W / 2, 'React: avatar sobe pra camada de CIMA do b-roll, no canto direito de baixo, com a fala');
+  ok(!avatarBase.some((i) => i.start < 5 - 1e-6 && i.end > 2 + 1e-6), 'React: a camada de baixo não repete o avatar (sem fala dobrada)');
+  const cobertura = [...avatarBase, ...topo.filter((i) => i.arquivo === avatar.nome)].sort((a, b) => a.start - b.start);
+  ok(perto(cobertura[0].start, 0) && cobertura.every((it, k) => k === 0 || perto(it.start, cobertura[k - 1].end)) && perto(cobertura.at(-1)!.end, 20),
+    'a fala do avatar continua inteira de 0 a 20s, sem buraco, somando as duas camadas');
+  const linhaItem = topo.find((i) => i.arquivo === linhaVerde.nome);
+  ok(!!linhaItem && perto(linhaItem.start, 8) && perto(linhaItem.end, 11), 'linha: o PNG da cor certa entra na camada de cima durante a divisão');
+  const tr2 = t2.itens.filter((i) => i.trilha === 'transicao');
+  ok(tr2.some((i) => i.arquivo === vermelho.nome && perto(i.start, 2 - 0.14)), 'luz vermelha: clarão vermelho nas bordas do b-roll');
+  const avLinha = avatarBase.find((i) => perto(i.start, 8))!;
+  const rostoNoCard = (0.5 * H - avLinha.recorte.y0 * H) / ((avLinha.recorte.y1 - avLinha.recorte.y0) * H);
+  ok(perto(rostoNoCard, 0.42, 0.01), 'dividida no projeto: avatar enquadrado pelo ROSTO medido (igual ao render)');
+  ok(t2.avisos.some((a) => /REACT/.test(a) && /Remover fundo/.test(a)) && t2.avisos.some((a) => /MESCLA/.test(a)),
+    'avisos dizem o que o editor externo não faz sozinho (fundo do React, degradê da mescla)');
+  ok(!t2.avisos.some((a) => /linha colorida/.test(a)), 'linha com PNG pronto não gera aviso');
+  ok(t2.arquivos.some((a) => a.nome === vermelho.nome) && t2.arquivos.some((a) => a.nome === linhaVerde.nome), 'PNGs da luz vermelha e da linha vão pro pacote');
+  const cc2 = JSON.parse(montarDraftCapCut(t2, { pasta: 'X', agoraUs: 1, novoId: ids }).conteudo);
+  ok(cc2.tracks.map((t: { name: string }) => t.name).join(',') === 'AVATAR,B-ROLL,AVATAR REACT / LINHA,TRANSICAO',
+    'CapCut: camada do React/linha entre o b-roll e a transição');
+  const xml2 = montarXmlPremiere(t2);
+  const audioAvatar = ((xml2.split('<audio><numOutputChannels>')[1] || '').split('<track>')[1] || '').split('</track>')[0];
+  ok((audioAvatar.match(/<clipitem/g) || []).length === cobertura.length && cobertura.length === avatarBase.length + 1, 'Premiere: a fala do avatar soma as duas camadas (pedaços de baixo + o React)');
+  ok(leiaMeDoProjeto(t2, { pasta: 'X', temSrt: false }).includes('AVATAR REACT / LINHA'), 'LEIA-ME explica a camada nova');
+  // sem PNG da linha: aviso honesto
+  const semPng = montarTimeline('FORMATOS', rf, { ...mf, linhas: undefined }, W, H);
+  ok(semPng.avisos.some((a) => /linha colorida/.test(a) && a.includes('#22e06b')), 'linha sem PNG: aviso com a cor pra pôr à mão');
+}
+
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

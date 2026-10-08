@@ -276,23 +276,20 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
       while (!falhou && voltas < 400) {
         const ultimo = prontos[prontos.length - 1];
         if (ultimo && ultimo.timestamp > alvoUs) break;
-        if (proxAmostra >= amostras.length) {
-          if (decoder && decoder.state === 'configured') {
-            try {
-              await decoder.flush();
-            } catch {
-              /* fim do fluxo */
-            }
-          }
-          break;
-        }
         /* ⚠⚠ PODAR ENQUANTO BUSCA (03.09). O VideoDecoder PARA de produzir
          * quando o app segura quadros de saída demais — e este laço acumulava
          * `prontos` sem soltar nada até o fim da chamada. Com fila funda dava
          * impasse: o decoder parava, ninguém era avisado, e a busca queimava
          * as 400 voltas. O render travava perto do fim (visto em 96%).
          * Aqui só interessam o quadro <= alvo e os DEPOIS dele; tudo que
-         * ficou pra trás é solto na hora, e o decoder nunca fica sem buffer. */
+         * ficou pra trás é solto na hora, e o decoder nunca fica sem buffer.
+         *
+         * ⚠ ANTES do fim do arquivo (07.10): a poda ficava DEPOIS do teste de
+         * fim — no último trecho do take (insert curto em janela longa, que
+         * desacelera e congela no fim) o flush rodava com até 8 quadros
+         * presos, o decoder de hardware não tinha onde pôr a saída e o flush
+         * só voltava quando o coletor de lixo fechava quadros: 209s parado
+         * num render real de bancada. */
         let corte = -1;
         for (let i = 0; i < prontos.length; i++) {
           if (prontos[i].timestamp <= alvoUs) corte = i;
@@ -307,6 +304,17 @@ export async function abrirLeitorDeQuadros(blob: Blob): Promise<LeitorDeQuadros 
             }
           }
           prontos = prontos.slice(corte);
+        }
+        if (proxAmostra >= amostras.length) {
+          if (decoder && decoder.state === 'configured') {
+            // teto: um flush que não volta nunca pendura o render — segue
+            // com o quadro mais perto que já saiu
+            await Promise.race([
+              decoder.flush().catch(() => { /* fim do fluxo */ }),
+              new Promise<void>((res) => setTimeout(res, 4000)),
+            ]);
+          }
+          break;
         }
         // mantém o decoder abastecido sem afogá-lo em quadros de saída
         if (decoder && decoder.decodeQueueSize < 8) alimentar(6);

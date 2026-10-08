@@ -32,9 +32,54 @@ export type LayoutInsert =
   /** duas faixas coladas, avatar em cima ou embaixo */
   | { tipo: 'faixas'; avatar: 'cima' | 'baixo' }
   /** dois cards com respiro e cantos — o "split premium" */
-  | { tipo: 'cards'; avatar: 'cima' | 'baixo' };
+  | { tipo: 'cards'; avatar: 'cima' | 'baixo' }
+  /** duas faixas com uma LINHA colorida no meio (a faixa verde dos ADs de
+   *  depoimento). `cor` ausente = verde. */
+  | { tipo: 'linha'; avatar: 'cima' | 'baixo'; cor?: string }
+  /** o take SOME EM DEGRADÊ sobre o avatar — parece um vídeo só (o "efeito de
+   *  opacidade" do Silas, 07.10) */
+  | { tipo: 'mescla'; avatar: 'cima' | 'baixo' }
+  /** REACT: o take em tela cheia e o avatar SEM FUNDO, menor, no canto de
+   *  baixo — esquerdo ou direito */
+  | { tipo: 'react'; lado: 'esquerda' | 'direita' };
 
-export type TipoTransicao = 'nenhuma' | 'escurecer' | 'luz' | 'misto';
+/** Cores da linha do layout `linha` (a primeira é a padrão). */
+export const LINHA_CORES = ['#22e06b', '#ffffff', '#ff2d3d', '#ffd60a'] as const;
+export const LINHA_COR_PADRAO = LINHA_CORES[0];
+
+/** `luz-vermelha` = clarão quente (vermelho/laranja), não só branco. */
+export type TipoTransicao = 'nenhuma' | 'escurecer' | 'luz' | 'luz-vermelha' | 'misto';
+
+/** Nome do layout pro editor (cards, timeline do Smart, avisos). */
+export function rotuloDoLayout(layout: LayoutInsert): string {
+  switch (layout.tipo) {
+    case 'cheia': return 'Tela cheia';
+    case 'faixas': return `Dividida · avatar ${layout.avatar === 'cima' ? 'em cima' : 'embaixo'}`;
+    case 'cards': return `Dividida arredondada · avatar ${layout.avatar === 'cima' ? 'em cima' : 'embaixo'}`;
+    case 'linha': return `Dividida com linha · avatar ${layout.avatar === 'cima' ? 'em cima' : 'embaixo'}`;
+    case 'mescla': return `Mescla · avatar ${layout.avatar === 'cima' ? 'em cima' : 'embaixo'}`;
+    case 'react': return `React · avatar à ${layout.lado}`;
+  }
+}
+
+/** Layout vindo do storage (ou de versão antiga/futura) sempre desenhável. */
+export function normalizarLayout(layout: unknown): LayoutInsert {
+  const l = (layout && typeof layout === 'object' ? layout : {}) as Record<string, unknown>;
+  const avatar = l.avatar === 'baixo' ? 'baixo' : 'cima';
+  switch (l.tipo) {
+    case 'faixas': return { tipo: 'faixas', avatar };
+    case 'cards': return { tipo: 'cards', avatar };
+    case 'linha': return { tipo: 'linha', avatar, cor: typeof l.cor === 'string' && /^#[0-9a-f]{6}$/i.test(l.cor) ? l.cor : LINHA_COR_PADRAO };
+    case 'mescla': return { tipo: 'mescla', avatar };
+    case 'react': return { tipo: 'react', lado: l.lado === 'esquerda' ? 'esquerda' : 'direita' };
+    default: return { tipo: 'cheia' };
+  }
+}
+
+/** O avatar aparece na tela (dividida, mescla ou react)? */
+export function layoutMostraAvatar(layout: LayoutInsert): boolean {
+  return layout.tipo !== 'cheia';
+}
 
 export type MidiaTipo = 'video' | 'imagem';
 
@@ -85,6 +130,12 @@ export type Insert = {
    * terço superior. É o que impede o split de cortar a testa.
    */
   focoAvatarY: number;
+  /**
+   * O editor MEXEU no enquadramento (07.10)? Sem isto o render acha o rosto
+   * sozinho em cada janela (detector de rosto) e só usa `focoAvatarY` como
+   * reserva. Insert antigo com foco diferente do padrão conta como manual.
+   */
+  focoManual?: boolean;
 
   /* ── RECORTE DA MÍDIA (02.09) ────────────────────────────────────────
    * Qual PEDAÇO do arquivo importado vira o insert, em segundos dentro do
@@ -202,9 +253,82 @@ export function normalizarInsert(x: Insert & { palavra?: number; duracaoSec?: nu
     ...x,
     palavraDe: Math.max(0, Math.min(de, ate)),
     palavraAte: Math.max(0, Math.max(de, ate)),
+    // layout/transição de versão antiga ou futura nunca derrubam o render
+    layout: normalizarLayout(x.layout),
+    transicao: (['nenhuma', 'escurecer', 'luz', 'luz-vermelha', 'misto'] as const).includes(x.transicao) ? x.transicao : 'escurecer',
     audio: !!x.audio,
     volume: vol,
   };
+}
+
+/* ── TRECHO OCUPADO (07.10) ─────────────────────────────────────────────
+ * Silas: *"quando um stock estiver plugado em algum trecho também deve
+ * aparecer na janela de inserts do PC, assim a pessoa não coloca insert por
+ * cima de insert"*. Manual, Flow e StockFrame disputam a MESMA fala; estas
+ * regras dizem quem já está num trecho, de qualquer origem. */
+
+type TrechoDeInsert = Pick<Insert, 'id' | 'ancora' | 'palavraDe' | 'palavraAte'>;
+
+function faixaDoTrecho(x: Pick<Insert, 'palavraDe' | 'palavraAte'>): { de: number; ate: number } {
+  const de = Number.isFinite(x.palavraDe) ? x.palavraDe : 0;
+  const ate = Number.isFinite(x.palavraAte) ? x.palavraAte : de;
+  return { de: Math.max(0, Math.min(de, ate)), ate: Math.max(0, Math.max(de, ate)) };
+}
+
+/** Dois inserts cobrem a mesma fala (mesma parte, trechos que se cruzam)? */
+export function trechosSeCruzam(a: TrechoDeInsert, b: TrechoDeInsert): boolean {
+  if (a.ancora !== b.ancora) return false;
+  const fa = faixaDoTrecho(a);
+  const fb = faixaDoTrecho(b);
+  return fa.de <= fb.ate && fb.de <= fa.ate;
+}
+
+/** Quem (de outra id) já ocupa alguma palavra de `de..ate` na parte. */
+export function quemOcupaOTrecho<T extends TrechoDeInsert>(
+  todos: T[],
+  ancora: string,
+  de: number,
+  ate: number,
+  ignorarId?: string,
+): T | null {
+  const alvo = { id: ignorarId || '', ancora, palavraDe: de, palavraAte: ate };
+  return todos.find((x) => x.id !== ignorarId && trechosSeCruzam(x, alvo)) || null;
+}
+
+/** O MAIOR pedaço contínuo de `de..ate` que ninguém cobre (null = tudo
+ *  ocupado). É o que "Adicionar take" mira num trecho do avatar que já tem
+ *  um insert do PC/Flow numa ponta. */
+export function maiorTrechoLivre(
+  todos: TrechoDeInsert[],
+  ancora: string,
+  de: number,
+  ate: number,
+): { de: number; ate: number } | null {
+  let melhor: { de: number; ate: number } | null = null;
+  let inicio = -1;
+  for (let i = de; i <= ate + 1; i++) {
+    const livre = i <= ate && !quemOcupaOTrecho(todos, ancora, i, i);
+    if (livre && inicio < 0) inicio = i;
+    if (!livre && inicio >= 0) {
+      if (!melhor || i - 1 - inicio > melhor.ate - melhor.de) melhor = { de: inicio, ate: i - 1 };
+      inicio = -1;
+    }
+  }
+  return melhor;
+}
+
+/** Primeira palavra da parte que NINGUÉM cobre (null = parte toda ocupada). */
+export function primeiraPalavraLivre(todos: TrechoDeInsert[], ancora: string, totalPalavras: number): number | null {
+  for (let i = 0; i < Math.max(1, totalPalavras); i++) {
+    if (!quemOcupaOTrecho(todos, ancora, i, i)) return i;
+  }
+  return null;
+}
+
+/** O editor escolheu o enquadramento à mão? (senão o render acha o rosto) */
+export function focoEhManual(ins: Pick<Insert, 'focoManual' | 'focoAvatarY'>): boolean {
+  if (typeof ins.focoManual === 'boolean') return ins.focoManual;
+  return Number.isFinite(ins.focoAvatarY) && Math.abs(ins.focoAvatarY - INSERT_FOCO_PADRAO) > 1e-3;
 }
 
 /* ═══════════════════ 1. ancoragem: texto → tempo ════════════════════════ */
@@ -388,7 +512,9 @@ export function planoSmartStockFrameCompleto(
   if (new Set(inserts.map((ins) => ins.id)).size !== inserts.length) return false;
   if (!inserts.every((ins) =>
     ins.source === 'stockframe' && ins.stockFrame?.smart === true && ins.stockFrame.coverage === 100 &&
-    ins.layout.tipo === 'cheia' && partes.some((p) => p.label === ins.ancora) &&
+    // React mantém o take em tela cheia (o avatar é só um recorte no canto):
+    // continua sendo b-roll do começo ao fim. Divisões mostram o avatar.
+    (ins.layout.tipo === 'cheia' || ins.layout.tipo === 'react') && partes.some((p) => p.label === ins.ancora) &&
     Number.isInteger(ins.palavraDe) && Number.isInteger(ins.palavraAte) &&
     ins.palavraDe >= 0 && ins.palavraAte >= ins.palavraDe,
   )) return false;
@@ -934,19 +1060,77 @@ export type Palco = {
   insert: Retangulo;
   /** raio dos cantos (0 = quadrado) */
   raio: number;
+  /** onde o ROSTO deve cair DENTRO do retângulo do avatar (fração 0..1) —
+   *  usado quando o detector achou o rosto; sem ele vale `focoAvatarY` */
+  rostoAlvo: { x: number; y: number };
+  /** `linha`: a faixa colorida entre o avatar e o take */
+  linha?: Retangulo & { cor: string };
+  /** `mescla`: o take é opaco em y=`opaco` e some até y=`some` (px do frame) */
+  degrade?: { opaco: number; some: number };
+  /** `react`: o avatar é desenhado SEM FUNDO, por cima do take. `rosto` é onde
+   *  o rosto dele cai no frame e `altura` a altura do quadro do avatar. */
+  react?: { lado: 'esquerda' | 'direita'; rosto: { x: number; y: number }; altura: number };
 };
 
-export function palcoDoLayout(layout: LayoutInsert, W: number, H: number): Palco {
+/** React: o rosto do avatar cai aqui (fração do frame) e o quadro inteiro dele
+ *  ocupa esta fração da altura — "tamanho reduzido, no canto de baixo". */
+export const REACT_ROSTO_X = 0.75;
+export const REACT_ROSTO_Y = 0.7;
+export const REACT_ALTURA = 0.56;
+
+export function palcoDoLayout(layoutBruto: LayoutInsert, W: number, H: number): Palco {
+  const layout = normalizarLayout(layoutBruto);
+  const rostoSplit = { x: 0.5, y: 0.42 };
   if (layout.tipo === 'cheia') {
-    return { avatar: null, insert: { x: 0, y: 0, w: W, h: H }, raio: 0 };
+    return { avatar: null, insert: { x: 0, y: 0, w: W, h: H }, raio: 0, rostoAlvo: rostoSplit };
   }
-  if (layout.tipo === 'faixas') {
+  if (layout.tipo === 'faixas' || layout.tipo === 'linha') {
     const meio = Math.round(H / 2);
     const cima = { x: 0, y: 0, w: W, h: meio };
     const baixo = { x: 0, y: meio, w: W, h: H - meio };
-    return layout.avatar === 'cima'
-      ? { avatar: cima, insert: baixo, raio: 0 }
-      : { avatar: baixo, insert: cima, raio: 0 };
+    const palco: Palco = layout.avatar === 'cima'
+      ? { avatar: cima, insert: baixo, raio: 0, rostoAlvo: rostoSplit }
+      : { avatar: baixo, insert: cima, raio: 0, rostoAlvo: rostoSplit };
+    if (layout.tipo === 'linha') {
+      const espessura = Math.max(4, Math.round(H * 0.007));
+      palco.linha = { x: 0, y: meio - Math.round(espessura / 2), w: W, h: espessura, cor: layout.cor || LINHA_COR_PADRAO };
+    }
+    return palco;
+  }
+  if (layout.tipo === 'mescla') {
+    // O avatar fica INTEIRO na tela, só que deslocado: o rosto vai pra perto do
+    // meio e o take ocupa o lado livre, sumindo em degradê sobre o fundo do
+    // avatar — é o que dá a sensação de um vídeo só.
+    if (layout.avatar === 'baixo') {
+      const topo = Math.round(H * 0.22);
+      return {
+        avatar: { x: 0, y: topo, w: W, h: H - topo },
+        insert: { x: 0, y: 0, w: W, h: Math.round(H * 0.5) },
+        raio: 0, rostoAlvo: { x: 0.5, y: 0.4 },
+        degrade: { opaco: Math.round(H * 0.27), some: Math.round(H * 0.5) },
+      };
+    }
+    const altura = Math.round(H * 0.78);
+    return {
+      avatar: { x: 0, y: 0, w: W, h: altura },
+      insert: { x: 0, y: Math.round(H * 0.5), w: W, h: H - Math.round(H * 0.5) },
+      raio: 0, rostoAlvo: { x: 0.5, y: 0.36 },
+      degrade: { opaco: Math.round(H * 0.73), some: Math.round(H * 0.5) },
+    };
+  }
+  if (layout.tipo === 'react') {
+    // Take em tela cheia; o avatar recortado entra por cima, no canto de baixo.
+    // O retângulo do avatar aqui é aproximado (export/maquete): o render
+    // posiciona pelo ROSTO detectado.
+    const rostoX = layout.lado === 'direita' ? REACT_ROSTO_X : 1 - REACT_ROSTO_X;
+    const w = Math.round(W * 0.5);
+    const y = Math.round(H * 0.55);
+    return {
+      avatar: { x: layout.lado === 'direita' ? W - w : 0, y, w, h: H - y },
+      insert: { x: 0, y: 0, w: W, h: H },
+      raio: 0, rostoAlvo: { x: 0.5, y: 0.3 },
+      react: { lado: layout.lado, rosto: { x: W * rostoX, y: H * REACT_ROSTO_Y }, altura: H * REACT_ALTURA },
+    };
   }
   // cards: margem por fora, respiro no meio, cantos arredondados
   const m = Math.round(W * CARD_MARGEM_REL);
@@ -957,8 +1141,96 @@ export function palcoDoLayout(layout: LayoutInsert, W: number, H: number): Palco
   const cima = { x: m, y: m, w: W - m * 2, h };
   const baixo = { x: m, y: m + h + gap, w: W - m * 2, h: alturaUtil - h };
   return layout.avatar === 'cima'
-    ? { avatar: cima, insert: baixo, raio }
-    : { avatar: baixo, insert: cima, raio };
+    ? { avatar: cima, insert: baixo, raio, rostoAlvo: rostoSplit }
+    : { avatar: baixo, insert: cima, raio, rostoAlvo: rostoSplit };
+}
+
+/**
+ * COVER que põe o ROSTO detectado (fração da fonte) no ponto `alvo` (fração do
+ * destino) — o enquadramento automático da tela dividida. Sem rosto, cai no
+ * `coverComFoco` de sempre. Nunca sai da fonte (sem borda preta).
+ */
+export function coverNoRosto(
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+  rosto: RostoAvatar | null | undefined,
+  alvo: { x: number; y: number },
+  focoY = INSERT_FOCO_PADRAO,
+): Recorte {
+  if (!rosto || !Number.isFinite(rosto.x) || !Number.isFinite(rosto.y)) return coverComFoco(srcW, srcH, dstW, dstH, focoY);
+  if (!(srcW > 0) || !(srcH > 0) || !(dstW > 0) || !(dstH > 0)) {
+    return { sx: 0, sy: 0, sw: Math.max(1, srcW), sh: Math.max(1, srcH) };
+  }
+  const escala = Math.max(dstW / srcW, dstH / srcH);
+  const sw = Math.min(srcW, dstW / escala);
+  const sh = Math.min(srcH, dstH / escala);
+  const sx = Math.min(srcW - sw, Math.max(0, rosto.x * srcW - alvo.x * sw));
+  const sy = Math.min(srcH - sh, Math.max(0, rosto.y * srcH - alvo.y * sh));
+  return { sx, sy, sw, sh };
+}
+
+/** Rosto do avatar detectado numa janela: CENTRO e altura do rosto, em
+ *  fração do quadro do avatar (0..1). */
+export type RostoAvatar = { x: number; y: number; h?: number };
+
+/**
+ * O rosto de uma janela a partir das caixas do detector (normalizadas):
+ * MEDIANA do centro e da altura — um quadro com o rosto virado ou piscando
+ * não desloca o enquadramento. Sem caixa válida, `null`.
+ */
+export function rostoDasAmostras(
+  caixas: Array<{ x: number; y: number; w: number; h: number } | null | undefined>,
+): RostoAvatar | null {
+  const ok = caixas.filter((b): b is { x: number; y: number; w: number; h: number } =>
+    !!b && [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w > 0.01 && b.h > 0.01 && b.w < 1.2 && b.h < 1.2);
+  if (!ok.length) return null;
+  const mediana = (xs: number[]) => {
+    const o = [...xs].sort((a, b) => a - b);
+    const m = Math.floor(o.length / 2);
+    return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+  };
+  const lim = (v: number) => Math.min(1, Math.max(0, v));
+  return {
+    x: lim(mediana(ok.map((b) => b.x + b.w / 2))),
+    y: lim(mediana(ok.map((b) => b.y + b.h / 2))),
+    h: lim(mediana(ok.map((b) => b.h))),
+  };
+}
+
+/** React: altura do ROSTO no frame final. Avatares vêm enquadrados de jeitos
+ *  diferentes (close, plano médio) — normalizar pelo rosto deixa todos do
+ *  mesmo tamanho no canto. */
+export const REACT_ROSTO_ALTURA = 0.085;
+
+/**
+ * Onde desenhar o quadro INTEIRO do avatar (já sem fundo) no React: escala
+ * pelo tamanho do rosto (ou `altura` sem rosto), o rosto no ponto do canto, e
+ * o corpo sempre encostado na base (nunca flutuando). Devolve o retângulo de
+ * destino em px do frame.
+ */
+export function quadroDoReact(
+  srcW: number,
+  srcH: number,
+  W: number,
+  H: number,
+  react: NonNullable<Palco['react']>,
+  rosto: RostoAvatar | null | undefined,
+): Retangulo {
+  const valido = !!rosto && Number.isFinite(rosto.x) && Number.isFinite(rosto.y);
+  const r = valido ? rosto! : { x: 0.5, y: INSERT_FOCO_PADRAO };
+  let altura = react.altura;
+  if (valido && rosto!.h && rosto!.h > 0.02) {
+    altura = Math.min(H * 0.78, Math.max(H * 0.4, (H * REACT_ROSTO_ALTURA) / rosto!.h));
+  }
+  const escala = altura / Math.max(1, srcH);
+  const w = srcW * escala;
+  const h = srcH * escala;
+  const x = react.rosto.x - r.x * w;
+  let y = react.rosto.y - r.y * h;
+  if (y + h < H) y = H - h; // o corpo encosta na base
+  return { x, y, w, h };
 }
 
 /* ═══════════════════════════ 3. transição ═══════════════════════════════ */
@@ -973,7 +1245,8 @@ export function palcoDoLayout(layout: LayoutInsert, W: number, H: number): Palco
  * `misto` alterna escurecer/luz por ocorrência (o índice), pra o AD não ficar
  * com seis flashes iguais.
  */
-export type Cobertura = { cor: 'preto' | 'branco'; alpha: number } | null;
+export type CorCobertura = 'preto' | 'branco' | 'vermelho';
+export type Cobertura = { cor: CorCobertura; alpha: number } | null;
 
 export const TRANSICAO_DUR_SEC = 0.28;
 
@@ -988,8 +1261,11 @@ export function coberturaDaTransicao(
   const d = Math.abs(t - borda);
   if (d > meia) return null;
   const alpha = 1 - d / meia; // pico exatamente na borda
-  const cor: 'preto' | 'branco' =
-    tipo === 'escurecer' ? 'preto' : tipo === 'luz' ? 'branco' : ocorrencia % 2 === 0 ? 'preto' : 'branco';
+  const cor: CorCobertura =
+    tipo === 'escurecer' ? 'preto'
+      : tipo === 'luz' ? 'branco'
+        : tipo === 'luz-vermelha' ? 'vermelho'
+          : ocorrencia % 2 === 0 ? 'preto' : 'branco';
   return { cor, alpha: Math.min(1, Math.max(0, alpha)) };
 }
 

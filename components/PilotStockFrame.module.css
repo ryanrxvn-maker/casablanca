@@ -157,3 +157,21 @@
 @media(min-width:1800px){.editQuote{font-size:16px}.editCurrent{font-size:14px}.alternatives button em{font-size:9px}}
 .detailTitle>div>span.ai{color:#c897ff;background:rgba(137,72,222,.17)}
 .detailTitle>div>span.stockOrigin{color:#9a93a5;background:rgba(255,255,255,.06)}
+/* FORMATO por linha da timeline (07.10): tela cheia, divididas e React */
+.rowActions{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:0 0 10px 59px}
+.rowActions .rowAction{margin:0}
+.formatButton{color:#e6d6ff}
+.formatButton :global(.fi-maquete){width:13px;height:23px}
+.formatButtonOn{color:#fff;background:#573080;border-color:#8b5cf6}
+.formatPanel{display:flex;flex-direction:column;gap:9px;margin:0 12px 12px 59px;padding:12px;background:#120e1c;border:1px solid rgba(155,92,239,.3);border-radius:10px}
+.formatPanel>small{font-size:11px;font-weight:900;letter-spacing:.14em;color:#8d7fa0}
+.occupiedTag{padding:4px 8px;font-size:10.5px;font-weight:900;letter-spacing:.06em;color:#d9c9ff;background:rgba(139,92,246,.18);border:1px solid rgba(139,92,246,.4);border-radius:6px}
+.detailFormat{display:flex;align-items:center;gap:12px;margin:12px 0 4px;padding:10px 12px;background:#120e1c;border:1px solid rgba(155,92,239,.22);border-radius:10px}
+.detailFormat>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.detailFormat small{font-size:11px;font-weight:900;letter-spacing:.14em;color:#8d7fa0}
+.detailFormat b{font-size:14.5px;color:#f2ecf5}
+.detailFormat span{font-size:12.5px;color:#a79baa}
+.detailFormat button{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;color:#e3caff;font-size:12.5px;font-weight:800;background:#28163b;border:1px solid #533371;border-radius:8px}
+.detailFormat button:hover{color:#fff;background:#603492}
+.detailFormat :global(.fi-maquete){width:30px;height:53px}
+@media(max-width:720px){.rowActions{margin-left:40px}.formatPanel{margin-left:12px}}

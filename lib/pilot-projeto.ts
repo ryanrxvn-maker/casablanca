@@ -19,7 +19,15 @@
  *  - zoom do avatar = a mesma curva (escalaNoInstante), amostrada em keyframes.
  */
 
-import { coverComFoco, palcoDoLayout, TRANSICAO_DUR_SEC, type LayoutInsert, type TipoTransicao } from './pilot-inserts';
+import {
+  coverComFoco,
+  coverNoRosto,
+  palcoDoLayout,
+  TRANSICAO_DUR_SEC,
+  type LayoutInsert,
+  type RostoAvatar,
+  type TipoTransicao,
+} from './pilot-inserts';
 import { escalaNoInstante, type ZoomSeg } from './pilot-pos-producao';
 
 /* ═══════════════════════════ roteiro (o que a pós guarda) ═══════════════ */
@@ -45,6 +53,8 @@ export type ProjetoInsert = {
   audio: boolean;
   volume: number;
   focoAvatarY: number;
+  /** rosto do avatar medido na janela (o render enquadrou por ele) */
+  rosto?: RostoAvatar | null;
   /** tamanho da mídia como o render a viu (já rotacionada) */
   w: number;
   h: number;
@@ -163,7 +173,8 @@ export type ArquivoProjeto = {
 export type Retangulo = { x: number; y: number; w: number; h: number };
 
 export type ItemTimeline = {
-  trilha: 'avatar' | 'broll' | 'transicao' | 'legenda' | 'headline';
+  /** `topo` = por cima do b-roll: o avatar do React e a linha da divisão */
+  trilha: 'avatar' | 'broll' | 'topo' | 'transicao' | 'legenda' | 'headline';
   arquivo: string;
   /** no vídeo final (s) */
   start: number;
@@ -202,7 +213,20 @@ export type MidiaDoProjeto = {
   headlines: Array<{ arquivo: ArquivoProjeto; start: number; end: number }>;
   preto?: ArquivoProjeto;
   branco?: ArquivoProjeto;
+  /** clarão da transição luz vermelha */
+  vermelho?: ArquivoProjeto;
+  /** a LINHA colorida da divisão, por cor (#rrggbb): PNG transparente do quadro inteiro */
+  linhas?: Map<string, ArquivoProjeto>;
 };
+
+/** O card do React no editor (lá não dá pra tirar o fundo sozinho): 4:5, no
+ *  canto de baixo do lado escolhido — o MESMO card de reserva do render. */
+export function cardDoReact(lado: 'esquerda' | 'direita', W: number, H: number): Retangulo {
+  const cw = Math.round(W * 0.4);
+  const ch = Math.round(cw * 1.25);
+  const m = Math.round(W * 0.04);
+  return { x: lado === 'direita' ? W - m - cw : m, y: H - Math.round(H * 0.05) - ch, w: cw, h: ch };
+}
 
 const RECORTE_INTEIRO = { x0: 0, y0: 0, x1: 1, y1: 1 };
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -210,6 +234,13 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 function recorteCover(srcW: number, srcH: number, ret: Retangulo, focoY = 0.5) {
   if (!(srcW > 0) || !(srcH > 0)) return RECORTE_INTEIRO;
   const c = coverComFoco(srcW, srcH, ret.w, ret.h, focoY);
+  return { x0: r6(c.sx / srcW), y0: r6(c.sy / srcH), x1: r6((c.sx + c.sw) / srcW), y1: r6((c.sy + c.sh) / srcH) };
+}
+
+/** O recorte do AVATAR como o render fez: pelo rosto medido, ou pelo foco. */
+function recorteDoAvatar(srcW: number, srcH: number, ret: Retangulo, ins: ProjetoInsert, alvo: { x: number; y: number }) {
+  if (!(srcW > 0) || !(srcH > 0)) return RECORTE_INTEIRO;
+  const c = coverNoRosto(srcW, srcH, ret.w, ret.h, ins.rosto, alvo, ins.focoAvatarY);
   return { x0: r6(c.sx / srcW), y0: r6(c.sy / srcH), x1: r6((c.sx + c.sw) / srcW), y1: r6((c.sy + c.sh) / srcH) };
 }
 
@@ -253,11 +284,21 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
   const pedacoAvatar = (de: number, ate: number, ins?: ProjetoInsert) => {
     if (!(ate - de > 1e-3)) return;
     const palco = ins ? palcoDoLayout(ins.layout, W, H) : null;
+    if (ins && palco?.react) {
+      // REACT: o avatar vai pra camada de CIMA do b-roll (senão o take em tela
+      // cheia esconde ele), num card no canto. O som segue nele.
+      const destino = cardDoReact(palco.react.lado, W, H);
+      itens.push({
+        trilha: 'topo', arquivo: midia.avatar.nome, start: de, end: ate, fonteDe: de, velocidade: 1, volume: 1,
+        destino, recorte: recorteDoAvatar(midia.avatar.w, midia.avatar.h, destino, ins, { x: 0.5, y: 0.4 }),
+      });
+      return;
+    }
     const destino = palco?.avatar || canvas;
     itens.push({
       trilha: 'avatar', arquivo: midia.avatar.nome, start: de, end: ate, fonteDe: de, velocidade: 1, volume: 1,
       destino,
-      recorte: palco?.avatar ? recorteCover(midia.avatar.w, midia.avatar.h, destino, ins!.focoAvatarY) : RECORTE_INTEIRO,
+      recorte: palco?.avatar ? recorteDoAvatar(midia.avatar.w, midia.avatar.h, destino, ins!, palco.rostoAlvo) : RECORTE_INTEIRO,
       // No split o render redesenha o avatar sem zoom (a escala é do quadro cheio).
       escala: palco?.avatar ? undefined : keyframesDeZoom(roteiro.zoom, de, ate, fps),
     });
@@ -294,6 +335,16 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
       }
     }
     if (ins.layout.tipo === 'cards') avisos.push(`o b-roll "${ins.nome}" usa cards com cantos arredondados — no editor os cantos ficam retos.`);
+    if (ins.layout.tipo === 'mescla') avisos.push(`o b-roll "${ins.nome}" está em MESCLA — no editor a emenda fica reta; pra mesclar como no Pilot, ponha uma máscara linear com esmaecimento no b-roll.`);
+    if (palco.react) avisos.push(`o b-roll "${ins.nome}" está em REACT — no editor o avatar vai num quadro no canto (camada AVATAR REACT / LINHA); pra tirar o fundo como no Pilot, use "Remover fundo" nesse clipe.`);
+    if (palco.linha) {
+      const png = midia.linhas?.get(palco.linha.cor.toLowerCase());
+      if (png) {
+        itens.push({ trilha: 'topo', arquivo: png.nome, start: ins.start, end: ins.end, fonteDe: 0, velocidade: 1, volume: 0, destino: canvas, recorte: RECORTE_INTEIRO });
+      } else {
+        avisos.push(`a linha colorida da divisão do b-roll "${ins.nome}" não foi pro projeto — ponha uma faixa ${palco.linha.cor} na emenda.`);
+      }
+    }
   }
 
   // TRANSIÇÃO: a mesma ordem de ocorrências do coberturaNoInstante (cada
@@ -307,8 +358,11 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
       const ocorrencia = n++;
       if (ins.transicao === 'nenhuma') continue;
       if (borda - ultimaBorda < TRANSICAO_DUR_SEC - 1e-6) continue;
-      const cor = ins.transicao === 'escurecer' ? 'preto' : ins.transicao === 'luz' ? 'branco' : ocorrencia % 2 === 0 ? 'preto' : 'branco';
-      const arquivo = cor === 'preto' ? midia.preto : midia.branco;
+      const cor = ins.transicao === 'escurecer' ? 'preto'
+        : ins.transicao === 'luz' ? 'branco'
+          : ins.transicao === 'luz-vermelha' ? 'vermelho'
+            : ocorrencia % 2 === 0 ? 'preto' : 'branco';
+      const arquivo = cor === 'preto' ? midia.preto : cor === 'branco' ? midia.branco : midia.vermelho;
       if (!arquivo) continue;
       const de = Math.max(0, borda - meia);
       const ate = Math.min(dur, borda + meia);
@@ -350,7 +404,8 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
   const usados = new Set(recortados.map((i) => i.arquivo));
   const arquivos = [midia.avatar, ...[...midia.inserts.values()].flatMap((m) => [m.arquivo, ...(m.congelado ? [m.congelado] : [])]),
     ...midia.legendas.map((l) => l.arquivo), ...midia.headlines.map((h) => h.arquivo),
-    ...(midia.preto ? [midia.preto] : []), ...(midia.branco ? [midia.branco] : [])].filter((a) => usados.has(a.nome));
+    ...(midia.preto ? [midia.preto] : []), ...(midia.branco ? [midia.branco] : []), ...(midia.vermelho ? [midia.vermelho] : []),
+    ...(midia.linhas ? [...midia.linhas.values()] : [])].filter((a) => usados.has(a.nome));
   const unicos = [...new Map(arquivos.map((a) => [a.nome, a])).values()];
   return { nome, W, H, fps, durSec: dur, arquivos: unicos, itens: recortados, avisos };
 }
@@ -393,8 +448,8 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
   const caminho = (nome: string) => `${CAPCUT_PASTA_DO_DRAFT}/${CAPCUT_SUBPASTA_MIDIA}/${nome}`;
   const videos: Record<string, unknown>[] = [];
   const speeds: Record<string, unknown>[] = [];
-  const ordem: ItemTimeline['trilha'][] = ['avatar', 'broll', 'transicao', 'legenda', 'headline'];
-  const nomesTrilha: Record<ItemTimeline['trilha'], string> = { avatar: 'AVATAR', broll: 'B-ROLL', transicao: 'TRANSICAO', legenda: 'LEGENDA', headline: 'HEADLINE' };
+  const ordem: ItemTimeline['trilha'][] = ['avatar', 'broll', 'topo', 'transicao', 'legenda', 'headline'];
+  const nomesTrilha: Record<ItemTimeline['trilha'], string> = { avatar: 'AVATAR', broll: 'B-ROLL', topo: 'AVATAR REACT / LINHA', transicao: 'TRANSICAO', legenda: 'LEGENDA', headline: 'HEADLINE' };
   const tracks: Record<string, unknown>[] = [];
   let duracao = 0;
   ordem.forEach((trilha, indice) => {
@@ -649,9 +704,10 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
   return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n'
     + `<xmeml version="4"><sequence id="sequence-1"><name>${xmlEsc(tl.nome)}</name><duration>${duracao}</duration>${rate}`
     + `<media><video><format><samplecharacteristics>${rate}<width>${tl.W}</width><height>${tl.H}</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>`
-    + (['avatar', 'broll', 'transicao', 'legenda', 'headline'] as const).map(trilhaVideo).join('')
+    + (['avatar', 'broll', 'topo', 'transicao', 'legenda', 'headline'] as const).map(trilhaVideo).join('')
     + `</video><audio><numOutputChannels>2</numOutputChannels><format><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics></format>`
-    + trilhaAudio((i) => i.trilha === 'avatar' && !!porNome.get(i.arquivo)?.temAudio)
+    // a fala do avatar mora nas DUAS camadas (o React sobe pra de cima)
+    + trilhaAudio((i) => (i.trilha === 'avatar' || i.trilha === 'topo') && !!porNome.get(i.arquivo)?.temAudio)
     + trilhaAudio((i) => i.trilha === 'broll' && i.volume > 0 && !!porNome.get(i.arquivo)?.temAudio)
     + `</audio></media></sequence></xmeml>\n`;
 }
@@ -666,7 +722,8 @@ export function leiaMeDoProjeto(tl: ProjetoTimeline, opts: { pasta: string; temS
     'CAMADAS',
     '  1. AVATAR    — o avatar completo, com a fala (e o zoom, como keyframes de escala)',
     '  2. B-ROLL    — os b-rolls no tempo exato do Pilot (recorte, velocidade e tela dividida)',
-    '  3. TRANSICAO — escurecer/luz nas bordas dos b-rolls (opacidade animada)',
+    ...(tl.itens.some((i) => i.trilha === 'topo') ? ['  2b. AVATAR REACT / LINHA — o avatar do React (quadro no canto) e a linha colorida da tela dividida'] : []),
+    '  3. TRANSICAO — escurecer/luz/luz vermelha nas bordas dos b-rolls (opacidade animada)',
     '  4. LEGENDA   — a legenda do Auto Edit em imagens PNG transparentes, uma por mudança',
     '                 (a palavra já entra pronta: a animação de entrada/saída do bloco fica só no vídeo do Pilot)',
     ...(tl.itens.some((i) => i.trilha === 'headline') ? ['  5. HEADLINE  — o texto fixo por cima, em PNG'] : []),

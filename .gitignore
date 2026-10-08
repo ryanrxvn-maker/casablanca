@@ -64,3 +64,6 @@ public/dev-tiny.mp4
 
 # prints de conferencia do preview (dev-only)
 .preview-shots/
+
+# midias da bancada /dev/formatos-insert (avatar + takes reais, grandes)
+public/dev-formatos-*.mp4

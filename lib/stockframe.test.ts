@@ -1,6 +1,8 @@
 import { mergeStockFrameMediaUrls, mergeStockFrameNiches, normalizeStockFrameAccount, normalizeStockFramePage, normalizeStockFrameSmartResults, normalizeStockFrameVideo, type StockFrameVideo } from './stockframe';
-import { absorbUnfilledSmartSegments, balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, rebalanceSmartPlan, selectedSmartCandidate, smartStockMechanismQueries, stockFrameDistinctSiblings, stockFrameEffectiveOrigin, stockFrameSameVisual, stockFrameSeriesKey, stockFrameUsableSeconds } from './stockframe-smart';
+import { absorbUnfilledSmartSegments, balanceMechanismPresence, buildSmartStockTimeline, chooseCampaignRecipeTheme, chooseSmartStockAssignments, explainSmartStockScore, fillSmartStockAlternatives, inferStockFrameNiche, localizeSmartSegments, measureSmartStockCoverage, planSmartStockSegments, rankStockFrameGenericFallback, rankStockFrameVideos, rebalanceSmartPlan, selectedSmartCandidate, smartStockMechanismQueries, stockFrameDistinctSiblings, stockFrameEffectiveOrigin, stockFrameSameVisual, stockFrameSeriesKey, stockFrameUsableSeconds, type SmartStockSegment } from './stockframe-smart';
 import { sceneProfileOf, segmentVisualIntent } from './stockframe-director';
+import { reconciliarPlanoComMontagem, variarFormatosDoPlano } from './stockframe-formatos';
+import { insertPadrao, type Insert } from './pilot-inserts';
 import { installStockFrameVisualAuditForTest, stockFrameAuditedSearchSeeds, stockFrameVisualAudit } from './stockframe-visual-audit';
 import { installStockFrameFeelingForTest } from './stockframe-feeling';
 import { visualAuditEntries } from '../data/stockframe-visual-audit';
@@ -1042,6 +1044,104 @@ const rebalanceTotal = rebalanceParts[0].text.split(/\s+/).length;
 ok(rebalancedPlan !== weakPlan && !rebalancedPlan.some((segment) => segment.wordFrom === 0)
   && Math.abs(measureSmartStockCoverage(rebalanceParts, rebalancedPlan.map((segment) => ({ ...segment, selectedVideoId: 'x' }))).coveredWords - Math.round(rebalanceTotal * .3)) <= Math.max(1, Math.ceil(rebalanceTotal * .03)),
   'editor não força b-roll: trecho que só achou reserva cede a vez a um trecho com cena forte');
+
+// ── FORMATOS AUTOMÁTICOS (07.10): maioria tela cheia, variação no hook, React/divididas pelo take, luz vermelha às vezes
+{
+  const familias: Record<string, ReturnType<typeof sceneProfileOf>['family']> = {};
+  const seg = (id: string, anchor: string, wordFrom: number, text: string, familia: ReturnType<typeof sceneProfileOf>['family'], extra: Partial<SmartStockSegment> = {}): SmartStockSegment => {
+    familias[`v-${id}`] = familia;
+    return {
+      id, anchor, wordFrom, wordTo: wordFrom + 6, text, query: text, concepts: [], visualScore: 1, targetSeconds: 3,
+      candidates: [{ video: video({ id: `v-${id}`, title: id }), score: 20, reasons: [] }], selectedVideoId: `v-${id}`, ...extra,
+    };
+  };
+  const formatParts = [
+    { label: 'HOOK 1', text: 'a b c d e f g h i j k l m n o p q r s t u v w x y z' },
+    { label: 'BODY 1', text: 'a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p' },
+    { label: 'BODY 2', text: 'a b c d e f g h i j k l m n o p q r s t u v w x y z' },
+  ];
+  const plan: SmartStockSegment[] = [
+    seg('h1', 'HOOK 1', 0, 'o perigo que ninguém conta sobre a memória', 'pessoa-problema', { narrativeDirection: 'distress' }),
+    seg('h2', 'HOOK 1', 8, 'o médico explicou o que acontece no cérebro', 'medico'),
+    seg('h3', 'HOOK 1', 16, 'e o dinheiro que a indústria ganha com isso', 'dinheiro'),
+    seg('b1', 'BODY 1', 0, 'os neurônios se apagam um por um', 'anatomia'),
+    seg('b2', 'BODY 1', 8, 'ela esquecia o nome dos netos', 'pessoa-problema', { narrativeDirection: 'distress' }),
+    seg('b3', 'BODY 1', 16, 'em poucas semanas voltou a sorrir', 'pessoa-bem', { narrativeDirection: 'recovery' }),
+    seg('b4', 'BODY 1', 24, 'a receita leva um ingrediente azul', 'receita'),
+    seg('b5', 'BODY 1', 32, 'o laboratório confirmou o resultado', 'ciencia', { visualBeat: 'proof' }),
+    seg('c1', 'BODY 2', 0, 'toque no botão abaixo e assista', 'tela'),
+    { ...seg('x1', 'BODY 2', 8, 'trecho sem take', 'outro'), selectedVideoId: undefined },
+  ];
+  const familiaDe = (v: StockFrameVideo) => familias[v.id] || 'outro';
+  const varied = variarFormatosDoPlano(plan, formatParts, { coverage: 60, familiaDe });
+  const chosen = varied.filter((segment) => segment.selectedVideoId);
+  const nonFull = chosen.filter((segment) => segment.formato && segment.formato.tipo !== 'cheia');
+  ok(chosen.every((segment) => !!segment.formato && !!segment.transicao), 'formatos: todo take escolhido sai com formato e transição');
+  ok(!varied.find((segment) => segment.id === 'x1')!.formato, 'formatos: trecho sem take não ganha formato');
+  ok(nonFull.length >= 2 && nonFull.length <= Math.ceil(chosen.length * 0.4), `formatos: maioria em tela cheia, algumas variações (${nonFull.length}/${chosen.length})`);
+  ok(varied[0].formato?.tipo !== 'cheia', 'formatos: o HOOK abre com variação');
+  ok(nonFull.some((segment) => segment.formato!.tipo === 'react') && nonFull.some((segment) => ['faixas', 'cards', 'linha', 'mescla'].includes(segment.formato!.tipo)),
+    'formatos: o plano mistura React e tela dividida');
+  const cta = varied.find((segment) => segment.id === 'c1')!;
+  ok(cta.formato?.tipo !== 'cheia' ? cta.formato?.tipo === 'react' : true, 'formatos: CTA que varia vira React (o avatar aponta pra tela)');
+  const ordered = chosen;
+  let run = 0; let maxRun = 0; let sameAdjacent = false;
+  ordered.forEach((segment, index) => {
+    const isVaried = segment.formato!.tipo !== 'cheia';
+    run = isVaried ? run + 1 : 0; maxRun = Math.max(maxRun, run);
+    const previous = ordered[index - 1]?.formato;
+    if (isVaried && previous && previous.tipo === segment.formato!.tipo) sameAdjacent = true;
+  });
+  ok(maxRun <= 2 && !sameAdjacent, 'formatos: nunca 3 variações seguidas nem o mesmo formato colado');
+  const reds = chosen.filter((segment) => segment.transicao === 'luz-vermelha');
+  ok(reds.length >= 1 && reds.length <= Math.ceil(chosen.length * 0.25), `transição: luz vermelha às vezes (${reds.length}/${chosen.length})`);
+  ok(!chosen.some((segment, index) => segment.transicao === 'luz-vermelha' && chosen[index + 1]?.transicao === 'luz-vermelha'), 'transição: nunca duas vermelhas seguidas');
+  ok(reds.some((segment) => /perigo/.test(segment.text)), 'transição: a vermelha vai primeiro na fala de impacto');
+  ok(varied.find((segment) => segment.id === 'b3')!.transicao !== 'escurecer', 'transição: melhora não escurece');
+  // 100%: só React varia (as divididas mostrariam o avatar)
+  const full = variarFormatosDoPlano(plan, formatParts, { coverage: 100, familiaDe });
+  ok(full.filter((segment) => segment.selectedVideoId).every((segment) => segment.formato!.tipo === 'cheia' || segment.formato!.tipo === 'react')
+    && full.some((segment) => segment.formato?.tipo === 'react'), 'formatos 100%: só React como variação');
+  const reactSides = full.filter((segment) => segment.formato?.tipo === 'react').map((segment) => (segment.formato as { lado: string }).lado);
+  ok(reactSides.length < 2 || reactSides[0] !== reactSides[1], 'formatos: React alterna o lado');
+  // a escolha do editor nunca é sobrescrita
+  const manual = variarFormatosDoPlano(plan.map((segment) => segment.id === 'h1' ? { ...segment, formato: { tipo: 'cheia' as const }, transicao: 'nenhuma' as const, formatoManual: true } : segment), formatParts, { coverage: 60, familiaDe });
+  const keptManual = manual.find((segment) => segment.id === 'h1')!;
+  ok(keptManual.formato?.tipo === 'cheia' && keptManual.transicao === 'nenhuma', 'formatos: o que o editor escolheu à mão fica');
+  // take curtinho não vira tela dividida (nem assenta)
+  const shortPlan = plan.map((segment) => ({ ...segment, targetSeconds: 1.2 }));
+  ok(variarFormatosDoPlano(shortPlan, formatParts, { coverage: 60, familiaDe }).every((segment) => !segment.formato || segment.formato.tipo === 'cheia'),
+    'formatos: flash curto (<1,6s) fica em tela cheia');
+  ok(variarFormatosDoPlano([plan[0]], formatParts, { coverage: 60, familiaDe })[0].formato?.tipo === 'cheia', 'formatos: plano de um take só fica em tela cheia');
+  ok(variarFormatosDoPlano(plan, formatParts, { coverage: 60, familiaDe }).map((s) => JSON.stringify([s.formato, s.transicao])).join()
+    === varied.map((s) => JSON.stringify([s.formato, s.transicao])).join(), 'formatos: determinístico (mesma copy, mesmo plano)');
+}
+
+// ── RASCUNHO × MONTAGEM (07.10): o que mudou por fora vale sobre o rascunho
+{
+  const rParts = [{ label: 'BODY 1', text: 'um dois tres quatro cinco seis sete oito nove dez' }];
+  const seg = (id: string, from: number, to: number, videoId: string, extra: Partial<SmartStockSegment> = {}): SmartStockSegment => ({
+    id, anchor: 'BODY 1', wordFrom: from, wordTo: to, text: '', query: '', concepts: [], visualScore: 1, targetSeconds: 2,
+    candidates: [], selectedVideoId: videoId, formato: { tipo: 'cheia' }, transicao: 'escurecer', ...extra,
+  });
+  const ins = (videoId: string, from: number, to: number, extra: Partial<Insert> = {}): Insert => ({
+    ...insertPadrao(`sf:${videoId}`, 'BODY 1', { key: `k-${videoId}`, nome: videoId, tipo: 'video', w: 1080, h: 1920 }),
+    source: 'stockframe', stockFrame: { videoId, title: videoId, smart: true }, palavraDe: from, palavraAte: to, ...extra,
+  });
+  const draft = [seg('a', 0, 2, 'va'), seg('b', 4, 6, 'vb'), seg('c', 8, 9, 'vc')];
+  const iguais = reconciliarPlanoComMontagem(draft, [ins('va', 0, 2), ins('vb', 4, 6), ins('vc', 8, 9)], ['a', 'b', 'c'], rParts);
+  ok(iguais === draft, 'rascunho igual à montagem: nada muda (mesma referência)');
+  const mudou = reconciliarPlanoComMontagem(draft, [
+    ins('va', 0, 2, { layout: { tipo: 'react', lado: 'esquerda' }, transicao: 'luz-vermelha' }),
+    ins('vb', 3, 6),
+  ], ['a', 'b', 'c'], rParts);
+  ok(mudou[0].formato?.tipo === 'react' && mudou[0].transicao === 'luz-vermelha' && mudou[0].formatoManual === true,
+    'formato trocado na janela de Inserts do PC vale no rascunho (e não é re-sorteado)');
+  ok(mudou[1].wordFrom === 3 && mudou[1].text === 'quatro cinco seis sete', 'trecho ajustado no editor de takes vale no rascunho');
+  ok(mudou[2].selectedVideoId === undefined, 'take tirado por fora volta pro avatar (não é re-baixado no Concluir)');
+  const pendente = reconciliarPlanoComMontagem(draft, [], [], rParts);
+  ok(pendente === draft, 'plano nunca aplicado continua como escolha pendente');
+}
 
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

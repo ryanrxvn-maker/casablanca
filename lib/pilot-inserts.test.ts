@@ -35,9 +35,23 @@ import {
   INSERT_VEL_MIN,
   INSERT_FOCO_PADRAO,
   TRANSICAO_DUR_SEC,
+  LINHA_COR_PADRAO,
+  REACT_ALTURA,
+  REACT_ROSTO_ALTURA,
+  coverNoRosto,
+  quadroDoReact,
+  rostoDasAmostras,
+  focoEhManual,
+  normalizarLayout,
+  rotuloDoLayout,
+  trechosSeCruzam,
+  quemOcupaOTrecho,
+  primeiraPalavraLivre,
+  maiorTrechoLivre,
   type Insert,
   type PalavraTempo,
 } from './pilot-inserts';
+import { mascaraInvertida, probabilidadeDePessoa } from './avatar-recorte';
 
 let passed = 0;
 let failed = 0;
@@ -640,6 +654,144 @@ const DUR = PARTES.flatMap((p) => p.text.split(' ')).length * 0.5;
     ok(JSON.stringify(misturado) === JSON.stringify(normal),
       `full100 coexistindo com ${source ?? 'manual'} preserva exatamente a prioridade anterior`);
   }
+}
+
+/* ═══════════ 07.10 — formatos novos, rosto, React, luz vermelha, trecho ocupado ═══════════ */
+console.log('\nFORMATOS 07.10 — divididas novas, React, enquadramento pelo rosto, trecho ocupado:');
+{
+  const W = 1080;
+  const H = 1920;
+  const dentro = (r: { x: number; y: number; w: number; h: number }) => r.x >= 0 && r.y >= 0 && r.x + r.w <= W + 0.5 && r.y + r.h <= H + 0.5;
+
+  // LINHA: é a dividida reta + a faixa colorida exatamente na emenda
+  const linha = palcoDoLayout({ tipo: 'linha', avatar: 'cima', cor: '#ff2d3d' }, W, H);
+  const faixas = palcoDoLayout({ tipo: 'faixas', avatar: 'cima' }, W, H);
+  ok(JSON.stringify(linha.avatar) === JSON.stringify(faixas.avatar) && JSON.stringify(linha.insert) === JSON.stringify(faixas.insert),
+    'linha: mesma geometria da dividida reta');
+  ok(!!linha.linha && linha.linha.cor === '#ff2d3d' && linha.linha.w === W && linha.linha.h >= 4
+    && linha.linha.y < H / 2 && linha.linha.y + linha.linha.h > H / 2, 'linha: faixa da cor escolhida cobrindo a emenda, largura inteira');
+  ok(palcoDoLayout({ tipo: 'linha', avatar: 'baixo', cor: 'vermelho-invalido' } as never, W, H).linha!.cor === LINHA_COR_PADRAO,
+    'linha: cor inválida vira a cor padrão (nunca quebra o render)');
+
+  // MESCLA: o take some em degradê por cima do fundo do avatar; nada fica sem imagem
+  for (const avatar of ['cima', 'baixo'] as const) {
+    const m = palcoDoLayout({ tipo: 'mescla', avatar }, W, H);
+    ok(!!m.degrade && !!m.avatar && dentro(m.avatar) && dentro(m.insert), `mescla ${avatar}: retângulos dentro do quadro`);
+    // toda linha do quadro tem avatar OU take opaco
+    let semImagem = 0;
+    for (let y = 0; y < H; y += 8) {
+      const noAvatar = y >= m.avatar!.y && y < m.avatar!.y + m.avatar!.h;
+      const noTake = y >= m.insert.y && y < m.insert.y + m.insert.h;
+      const opaco = noTake && (avatar === 'baixo' ? y <= m.degrade!.opaco : y >= m.degrade!.opaco);
+      if (!noAvatar && !opaco) semImagem++;
+    }
+    ok(semImagem === 0, `mescla ${avatar}: nenhuma faixa do quadro fica preta`);
+    ok(avatar === 'baixo' ? m.degrade!.opaco < m.degrade!.some : m.degrade!.opaco > m.degrade!.some,
+      `mescla ${avatar}: o degradê vai do lado do take pro lado do avatar`);
+  }
+
+  // REACT: take em tela cheia; avatar no canto de baixo, do lado escolhido
+  const rd = palcoDoLayout({ tipo: 'react', lado: 'direita' }, W, H);
+  const re = palcoDoLayout({ tipo: 'react', lado: 'esquerda' }, W, H);
+  ok(rd.insert.x === 0 && rd.insert.y === 0 && rd.insert.w === W && rd.insert.h === H, 'react: o take fica em TELA CHEIA');
+  ok(!!rd.react && rd.react.rosto.x > W / 2 && !!re.react && re.react.rosto.x < W / 2 && rd.react.rosto.y > H * 0.6,
+    'react: rosto no canto de BAIXO, direita ou esquerda');
+  const quadroD = quadroDoReact(1080, 1920, W, H, rd.react!, { x: 0.5, y: 0.33, h: 0.16 });
+  ok(aprox(quadroD.x + 0.5 * quadroD.w, rd.react!.rosto.x, 1) && quadroD.y + quadroD.h >= H - 0.5,
+    'react: o rosto cai no ponto do canto e o corpo encosta na base (nunca flutua)');
+  ok(aprox(quadroD.h * 0.16, H * REACT_ROSTO_ALTURA, 1), 'react: tamanho pelo ROSTO — rosto com a mesma altura em qualquer enquadramento');
+  const close = quadroDoReact(1080, 1920, W, H, rd.react!, { x: 0.5, y: 0.4, h: 0.4 });
+  const longe = quadroDoReact(1080, 1920, W, H, rd.react!, { x: 0.5, y: 0.3, h: 0.03 });
+  ok(close.h >= H * 0.4 - 0.5 && longe.h <= H * 0.78 + 0.5, 'react: escala com teto e piso (close e plano aberto não estouram)');
+  const semRosto = quadroDoReact(1080, 1920, W, H, rd.react!, null);
+  ok(aprox(semRosto.h, H * REACT_ALTURA, 1), 'react: sem rosto detectado usa a altura padrão');
+
+  // ENQUADRAMENTO PELO ROSTO: o rosto detectado vai pro alvo do retângulo
+  const ra = faixas.avatar!;
+  const rostoBaixo = { x: 0.62, y: 0.55, h: 0.15 };
+  const rec = coverNoRosto(1080, 1920, ra.w, ra.h, rostoBaixo, faixas.rostoAlvo);
+  const ondeCai = (rostoBaixo.y * 1920 - rec.sy) / rec.sh;
+  ok(aprox(ondeCai, faixas.rostoAlvo.y, 0.01), 'dividida: rosto baixo no quadro sobe pro ponto certo do card');
+  ok(rec.sx >= 0 && rec.sy >= 0 && rec.sx + rec.sw <= 1080 + 1e-6 && rec.sy + rec.sh <= 1920 + 1e-6, 'dividida: recorte pelo rosto nunca sai da fonte (sem borda)');
+  const topo = coverNoRosto(1080, 1920, ra.w, ra.h, { x: 0.5, y: 0.02 }, faixas.rostoAlvo);
+  ok(topo.sy === 0, 'dividida: rosto colado no topo prende o recorte na borda, sem borda preta');
+  const semDet = coverNoRosto(1080, 1920, ra.w, ra.h, null, faixas.rostoAlvo, 0.3);
+  const foco = coverComFoco(1080, 1920, ra.w, ra.h, 0.3);
+  ok(JSON.stringify(semDet) === JSON.stringify(foco), 'dividida: sem rosto detectado vale o foco manual de sempre');
+  const r = rostoDasAmostras([{ x: 0.4, y: 0.2, w: 0.2, h: 0.12 }, null, { x: 0.42, y: 0.22, w: 0.2, h: 0.12 }, { x: 0.9, y: 0.9, w: 0.05, h: 0.05 }]);
+  ok(!!r && aprox(r.x, 0.52, 0.011) && aprox(r.y, 0.28, 0.011), 'rosto da janela = mediana (um quadro errado não desloca)');
+  ok(rostoDasAmostras([null, undefined, { x: NaN, y: 0, w: 0.1, h: 0.1 }]) === null, 'sem caixa válida, sem rosto');
+
+  // foco manual × automático
+  ok(!focoEhManual({ focoAvatarY: INSERT_FOCO_PADRAO }) && focoEhManual({ focoAvatarY: 0.5 })
+    && !focoEhManual({ focoAvatarY: 0.5, focoManual: false }) && focoEhManual({ focoAvatarY: INSERT_FOCO_PADRAO, focoManual: true }),
+    'foco: padrão = automático; slider mexido (ou marcado) = manual');
+
+  // normalização: formato desconhecido nunca derruba o render
+  ok(normalizarLayout({ tipo: 'holograma' }).tipo === 'cheia' && normalizarLayout({ tipo: 'react' }).tipo === 'react'
+    && (normalizarLayout({ tipo: 'react', lado: 'x' }) as { lado: string }).lado === 'direita', 'layout desconhecido = tela cheia; react sem lado = direita');
+  const velho = normalizarInsert({ ...insertPadrao('v', 'HOOK 1', { key: 'k', nome: 'a', tipo: 'video', w: 1, h: 1 }), layout: { tipo: 'zzz' } as never, transicao: 'flash' as never });
+  ok(velho.layout.tipo === 'cheia' && velho.transicao === 'escurecer', 'insert de versão futura: formato/transição desconhecidos viram padrão');
+  ok(rotuloDoLayout({ tipo: 'react', lado: 'esquerda' }).includes('React') && rotuloDoLayout({ tipo: 'mescla', avatar: 'baixo' }).includes('Mescla'),
+    'rótulo legível de cada formato');
+
+  // LUZ VERMELHA
+  const v = coberturaDaTransicao('luz-vermelha', 5, 5);
+  ok(!!v && v.cor === 'vermelho' && aprox(v.alpha, 1), 'luz vermelha: clarão vermelho com pico na borda');
+  ok(coberturaDaTransicao('luz-vermelha', 5 + TRANSICAO_DUR_SEC, 5) === null, 'luz vermelha: some fora da janela da transição');
+  ok(normalizarInsert({ ...insertPadrao('x', 'HOOK 1', { key: 'k', nome: 'a', tipo: 'video', w: 1, h: 1 }), transicao: 'luz-vermelha' }).transicao === 'luz-vermelha',
+    'luz vermelha sobrevive à normalização');
+
+  // 100% StockFrame: React continua sendo b-roll do começo ao fim; divididas não
+  const partes = [{ label: 'HOOK 1', text: 'um dois tres quatro' }];
+  const base: Insert = {
+    ...insertPadrao('f', 'HOOK 1', { key: 'k', nome: 's.mp4', tipo: 'video', w: 1080, h: 1920 }),
+    source: 'stockframe', stockFrame: { videoId: 'v', title: 'S', smart: true, coverage: 100 }, palavraDe: 0, palavraAte: 3,
+  };
+  ok(planoSmartStockFrameCompleto([{ ...base, layout: { tipo: 'react', lado: 'direita' } }], partes), '100%: React conta como cobertura total');
+  ok(!planoSmartStockFrameCompleto([{ ...base, layout: { tipo: 'linha', avatar: 'cima' } }], partes), '100%: tela dividida mostra o avatar — não é 100% b-roll');
+
+  // TRECHO OCUPADO: nunca insert por cima de insert (qualquer origem)
+  const ocupado: Insert[] = [
+    { ...base, id: 'sf', palavraDe: 2, palavraAte: 5, ancora: 'BODY 1' },
+    { ...base, id: 'pc', source: undefined, palavraDe: 9, palavraAte: 9, ancora: 'BODY 1' },
+  ];
+  ok(trechosSeCruzam(ocupado[0], { id: 'n', ancora: 'BODY 1', palavraDe: 5, palavraAte: 7 }), 'cruza quando divide uma palavra');
+  ok(!trechosSeCruzam(ocupado[0], { id: 'n', ancora: 'BODY 1', palavraDe: 6, palavraAte: 8 }), 'colado sem dividir palavra não cruza');
+  ok(!trechosSeCruzam(ocupado[0], { id: 'n', ancora: 'BODY 2', palavraDe: 2, palavraAte: 5 }), 'outra parte da copy nunca cruza');
+  ok(quemOcupaOTrecho(ocupado, 'BODY 1', 0, 20)?.id === 'sf' && quemOcupaOTrecho(ocupado, 'BODY 1', 6, 8) === null,
+    'quem ocupa o trecho: acha o dono, livre devolve null');
+  ok(quemOcupaOTrecho(ocupado, 'BODY 1', 2, 3, 'sf') === null, 'o próprio insert não bloqueia a edição dele');
+  ok(primeiraPalavraLivre(ocupado, 'BODY 1', 12) === 0 && primeiraPalavraLivre([{ ...ocupado[0], palavraDe: 0, palavraAte: 3 }], 'BODY 1', 4) === null
+    && primeiraPalavraLivre([{ ...ocupado[0], palavraDe: 0, palavraAte: 1 }], 'BODY 1', 4) === 2,
+    'insert novo nasce na primeira palavra livre; parte lotada não aceita');
+  ok(JSON.stringify(maiorTrechoLivre(ocupado, 'BODY 1', 0, 12)) === JSON.stringify({ de: 6, ate: 8 }) && JSON.stringify(maiorTrechoLivre(ocupado, 'BODY 1', 6, 14)) === JSON.stringify({ de: 10, ate: 14 })
+    && JSON.stringify(maiorTrechoLivre(ocupado, 'BODY 1', 0, 8)) === JSON.stringify({ de: 6, ate: 8 })
+    && maiorTrechoLivre(ocupado, 'BODY 1', 2, 5) === null
+    && JSON.stringify(maiorTrechoLivre(ocupado, 'BODY 2', 0, 3)) === JSON.stringify({ de: 0, ate: 3 }),
+    'adicionar take num trecho com insert numa ponta mira só o maior pedaço LIVRE');
+}
+
+/* ═══════════ 07.10 — recorte do avatar (React): máscara de pessoa ═══════════ */
+console.log('\nRECORTE DO AVATAR — máscara de pessoa e polaridade:');
+{
+  const w = 40;
+  const h = 72;
+  // pessoa no miolo (1), fundo nos cantos (0)
+  const pessoa = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = (x - w / 2) / (w * 0.3);
+    const dy = (y - h * 0.5) / (h * 0.4);
+    pessoa[y * w + x] = dx * dx + dy * dy < 1 ? 1 : 0;
+  }
+  const invertida = pessoa.map((v) => 1 - v);
+  ok(mascaraInvertida(pessoa, w, h) === false, 'máscara certa: não inverte');
+  ok(mascaraInvertida(invertida, w, h) === true, 'máscara de cabeça pra baixo (fundo=1): detecta e inverte — nunca apaga a pessoa');
+  ok(mascaraInvertida(new Float32Array(w * h).fill(0.5), w, h) === null, 'quadro ambíguo não decide (espera o próximo)');
+  const fundo = new Float32Array([0.9, 0.2, 0.0]);
+  const p2 = probabilidadeDePessoa([fundo, new Float32Array([0.1, 0.8, 1])], 'multiclasse')!;
+  ok(aprox(p2[0], 0.1) && aprox(p2[1], 0.8) && aprox(p2[2], 1), 'várias classes: pessoa = 1 - fundo (classe 0)');
+  ok(probabilidadeDePessoa([], 'selfie') === null, 'sem máscara: null (o render usa o card de reserva)');
 }
 
 console.log(`\n${failed === 0 ? '✓' : '✗'} pilot-inserts: ${passed} ok, ${failed} fail\n`);
