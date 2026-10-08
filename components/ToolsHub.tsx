@@ -98,10 +98,6 @@ const FEATURED: ToolEntry[] = [
             'gera até 6 minutos de vídeo por vez. Áudio mais longo é avisado na hora, pra você dividir em partes.',
         },
         {
-          rotulo: 'Conferência',
-          texto: 'antes de gerar, a tela avisa quando o take está curto demais ou com resolução baixa.',
-        },
-        {
           rotulo: 'Fila',
           texto:
             'dispare vários em sequência e siga usando o site: cada um vira um card com o progresso ao vivo e sai em MP4.',
@@ -1985,7 +1981,7 @@ const DETALHES_LEGENDAS: Detalhes = {
       // (lib/typography/copy-fix.ts). Prometer zero erro seria mentira.
       rotulo: 'Corrigida pela copy',
       texto:
-        'cole o roteiro e a legenda inteira é corrigida por ele: grafia, pontuação e as palavras que o áudio comeu, com os tempos intactos. Bem menos risco de subir AD com legenda errada.',
+        'cole o roteiro e a legenda inteira é corrigida por ele: grafia, pontuação e as palavras que o áudio comeu, com os tempos intactos. Bem menos risco de entregar vídeo com legenda errada.',
     },
     {
       rotulo: 'Modelos',

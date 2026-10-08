@@ -34,9 +34,41 @@ function minutosLegiveis(ms: number): string {
   return seg ? `${min} min ${seg} s` : `${min} min`;
 }
 
-/** Aviso único do teto, igual no momento de escolher o áudio e no Gerar. */
-function avisoAudioLongo(ms: number): string {
-  return `O áudio tem ${minutosLegiveis(ms)} e cada lipsync gera até 6 minutos de vídeo. Corte o áudio em partes de até 6 minutos e gere uma de cada vez.`;
+/**
+ * Aviso do teto de duração — o MESMO no momento de escolher o áudio e no
+ * Gerar. Curto e com visual próprio (âmbar, cronômetro): título com a
+ * duração do áudio + uma linha dizendo o limite e o que fazer.
+ */
+function AvisoAudioLongo({ ms }: { ms: number }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-3 rounded-[14px] px-3 py-2.5"
+      style={{
+        background: 'rgb(var(--amber) / 0.08)',
+        boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.28)',
+      }}
+    >
+      <span
+        aria-hidden
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-amber"
+        style={{
+          background: 'rgb(var(--amber) / 0.12)',
+          boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.30)',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="13.5" r="7.5" />
+          <path d="M12 9.5v4l2.5 1.5" />
+          <path d="M10 2.5h4" />
+        </svg>
+      </span>
+      <div className="min-w-0 leading-tight">
+        <p className="text-[12px] font-semibold text-text">Áudio de {minutosLegiveis(ms)}</p>
+        <p className="mt-0.5 text-[11px] text-text-muted">O limite é 6 min por lipsync. Divida em partes.</p>
+      </div>
+    </div>
+  );
 }
 
 /** Ícone de import profissional (sem cor chamativa — herda currentColor cinza). */
@@ -263,6 +295,8 @@ export default function LipSyncTool() {
   // Fila de disparos (cada um vira um card embaixo)
   const [jobs, setJobs] = useState<Job[]>([]);
   const [formError, setFormError] = useState<string>('');
+  /** Duração (ms) do áudio que passou do teto de 6 min; null = dentro do teto. */
+  const [audioLongoMs, setAudioLongoMs] = useState<number | null>(null);
   const [flash, setFlash] = useState<boolean>(false); // toast "enviado ↓"
 
   // Limpar áudio (pré-produção do áudio: highpass + normalização de volume).
@@ -347,10 +381,12 @@ export default function LipSyncTool() {
       setAudioFile(null);
       setAudioPreview('');
       setAudioDur(0);
+      setAudioLongoMs(null);
       return;
     }
     setAudioFile(file);
     setFormError('');
+    setAudioLongoMs(null);
     const url = URL.createObjectURL(file);
     setAudioPreview(url);
     try {
@@ -363,7 +399,7 @@ export default function LipSyncTool() {
       });
       setAudioDur(a.duration);
       // Avisa o teto JÁ na escolha do áudio (o Gerar também barra).
-      if (audioPassaDoTeto(a.duration * 1000)) setFormError(avisoAudioLongo(a.duration * 1000));
+      if (audioPassaDoTeto(a.duration * 1000)) setAudioLongoMs(a.duration * 1000);
     } catch {
       setAudioDur(0);
     }
@@ -663,7 +699,7 @@ export default function LipSyncTool() {
       return;
     }
     if (audioPassaDoTeto(audioMs)) {
-      setFormError(avisoAudioLongo(audioMs));
+      setAudioLongoMs(audioMs);
       return;
     }
 
@@ -724,6 +760,7 @@ export default function LipSyncTool() {
     setAudioPreview('');
     setAudioDur(0);
     setFormError('');
+    setAudioLongoMs(null);
   }
 
   /* ─── Ticker da barra: progresso por TEMPO do processo inteiro ─────────
@@ -945,6 +982,9 @@ export default function LipSyncTool() {
               })}
             </div>
           )}
+
+          {/* Áudio acima do teto de 6 min (aviso próprio, curto) */}
+          {audioLongoMs !== null ? <AvisoAudioLongo ms={audioLongoMs} /> : null}
 
           {/* Erro de formulário (validação) */}
           {formError && (
