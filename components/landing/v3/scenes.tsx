@@ -1,13 +1,11 @@
 'use client';
 
 /**
- * scenes — as peças visuais da landing v3.
+ * scenes — as peças visuais da landing (v4 e login).
  *
  * Cada cena tem IDENTIDADE PRÓPRIA (paleta, tipografia e movimento) e mostra a
  * ferramenta trabalhando, não um ícone bonito:
  *
- *   BreakingCard    — gerador de caracteres de telejornal (FakePrint), com
- *                     relógio ao vivo, chyron digitando e modo TELA VERDE.
  *   TelejornalCard  — plantão estilo CNN sem vídeo: lower third digitando,
  *                     ticker rolando e o campo chroma esperando o vídeo do
  *                     cliente. Usada na seção FakePrint e no login.
@@ -15,7 +13,6 @@
  *                     modelos num canvas. Usada no destaque e no login.
  *   CamuflagemScene — duas trilhas no mesmo arquivo + leitura da transcrição.
  *   DecupagemScene  — o silêncio saindo da timeline, em loop.
- *   MiniPrints      — chamada de vídeo, post e live, os outros modelos.
  *
  * Nota de implementação: o app inteiro roda com `main { filter: saturate(.72) }`
  * (site propositalmente menos colorido). As peças de "imprensa" reaplicam
@@ -23,7 +20,7 @@
  * plantão e o verde de chroma existirem.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FAKEPRINT_TELEJORNAIS, LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 import { TipoShowcase } from '../../TipoShowcase';
 import { useClock, useInView, useReduced, useTypewriter, waveBars } from './kit';
@@ -34,316 +31,6 @@ const RED = '#e0483f';
 const PAPER = '#f2efe6';
 const INK = '#14140f';
 const CHROMA = '#00b140';
-
-/* ══════════════════════════ 1. BREAKING (telejornal) ══════════════════════════ */
-
-/**
- * Chyron do gerador — copy SÓ de FakePrint (o card É um FakePrint).
- * Frases curtas de propósito: precisam caber no gerador sem truncar.
- */
-const CHYRON = [
-  'VOCÊ ESCREVE A MANCHETE DO DIA',
-  'SÓ O GRÁFICO FICA DE PÉ NO CHROMA',
-  'PNG EM ALTA OU VÍDEO ANIMADO',
-];
-
-export function BreakingCard({ className = '' }: { className?: string }) {
-  const { ref, inView } = useInView<HTMLDivElement>(0.2);
-  const reduced = useReduced();
-  const clock = useClock();
-  const { text } = useTypewriter(CHYRON, { active: inView });
-  const wiping = inView && !reduced;
-  const vidRef = useRef<HTMLVideoElement | null>(null);
-
-  // O vídeo do repórter só roda quando o card está na tela (e sem
-  // reduced-motion). Fora disso fica no poster — 4 MB não descem à toa.
-  useEffect(() => {
-    const v = vidRef.current;
-    if (!v) return;
-    if (inView && !reduced) {
-      const p = v.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    } else {
-      v.pause();
-    }
-  }, [inView, reduced]);
-
-  return (
-    <div
-      ref={ref}
-      className={'relative isolate ' + className}
-      style={{ filter: UNSATURATE_FIX }}
-    >
-      {/* luz por trás — tira o card do preto chapado */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -inset-10 -z-10 opacity-70 blur-3xl"
-        style={{
-          background:
-            'radial-gradient(45% 45% at 25% 20%, rgba(224,72,63,0.20), transparent 70%),' +
-            'radial-gradient(45% 45% at 80% 80%, rgba(167,139,250,0.18), transparent 70%)',
-        }}
-      />
-
-      <div
-        className="bc-frame relative aspect-[16/10] w-full overflow-hidden rounded-[14px] border border-white/12"
-        style={{
-          background: '#0b0d10',
-          boxShadow:
-            '0 40px 90px -32px rgba(0,0,0,0.95), 0 0 0 1px rgba(255,255,255,0.04) inset',
-        }}
-      >
-        {/* a transmissão — o repórter de verdade, com o gráfico por cima */}
-        {/* vídeo próprio da landing — o repórter na chuva ficou na home logada */}
-        <video
-          ref={vidRef}
-          src="/hero/fakeprint-landing.mp4"
-          poster="/hero/fakeprint-landing.jpg"
-          muted
-          loop
-          playsInline
-          preload="none"
-          aria-hidden
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ objectPosition: '50% 30%' }}
-        />
-        {/* vinheta broadcast — legibilidade do gerador de caracteres */}
-        <div
-          aria-hidden
-          className="absolute inset-0"
-          style={{
-            background:
-              'linear-gradient(to top, rgba(2,2,6,0.82) 0%, rgba(2,2,6,0.28) 24%, transparent 46%),' +
-              'linear-gradient(to bottom, rgba(2,2,6,0.5) 0%, transparent 20%)',
-          }}
-        />
-        {/* tela verde entrando por cima, com o divisor deslizando.
-            PERFORMANCE (05.10): era clip-path + `left` animados — os dois
-            rodam na thread principal e repintavam o card a cada quadro (a
-            landing parada ocupava ~23% da CPU). Agora é só transform, que a
-            GPU anima sozinha: a janela (overflow-hidden) anda pra direita e
-            o verde anda o mesmo tanto pra esquerda — fica parado no lugar e
-            só a borda da janela desliza, igual ao inset() de antes. */}
-        <div
-          aria-hidden
-          className={'absolute inset-0 overflow-hidden ' + (wiping ? 'bc-wipe' : '')}
-          style={{ transform: 'translateX(58%)' }}
-        >
-          <div
-            className={'absolute inset-0 ' + (wiping ? 'bc-wipe-in' : '')}
-            style={{
-              transform: 'translateX(-58%)',
-              background: `radial-gradient(75% 70% at 50% 40%, #14c559 0%, ${CHROMA} 62%, #009439 100%)`,
-            }}
-          />
-        </div>
-        <div
-          aria-hidden
-          className={'pointer-events-none absolute inset-0 ' + (wiping ? 'bc-line' : '')}
-          style={{ transform: 'translateX(58%)' }}
-        >
-          <span
-            className="absolute inset-y-0 left-0 w-px"
-            style={{
-              background: 'rgba(255,255,255,0.75)',
-              boxShadow: '0 0 12px rgba(255,255,255,0.5)',
-            }}
-          />
-        </div>
-        {/* linhas de varredura */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.14]"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(0deg, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0.5) 1px, transparent 1px, transparent 3px)',
-          }}
-        />
-        {/* marcas de enquadramento */}
-        {[
-          'left-3 top-3 border-l border-t',
-          'right-3 top-3 border-r border-t',
-          'left-3 bottom-3 border-l border-b',
-          'right-3 bottom-3 border-r border-b',
-        ].map((pos) => (
-          <span
-            key={pos}
-            aria-hidden
-            className={'pointer-events-none absolute h-3.5 w-3.5 border-white/25 ' + pos}
-          />
-        ))}
-
-        {/* topo */}
-        <div className="absolute inset-x-0 top-0 flex items-start justify-between p-3.5 md:p-4">
-          <span
-            className="inline-flex items-center gap-2 rounded-[4px] px-2 py-1 text-[10.5px] font-extrabold uppercase tracking-[0.2em] text-white"
-            style={{ background: RED, fontFamily: 'var(--font-tech)' }}
-          >
-            AE NEWS
-          </span>
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-flex items-center gap-1.5 rounded-[4px] border border-white/20 bg-black/45 px-2 py-1 text-[9.5px] font-bold uppercase tracking-[0.2em] text-white backdrop-blur-sm"
-              style={{ fontFamily: 'var(--font-label)' }}
-            >
-              <i
-                className="bc-dot inline-block h-[6px] w-[6px] rounded-full"
-                style={{ background: RED }}
-              />
-              Ao vivo
-            </span>
-            <span
-              className="num rounded-[4px] border border-white/15 bg-black/45 px-2 py-1 text-[10.5px] text-white/85 backdrop-blur-sm"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              {clock}
-            </span>
-          </div>
-        </div>
-
-        {/* etiquetas dos dois lados do divisor */}
-        <div className="absolute inset-x-3.5 top-14 flex items-center justify-between md:inset-x-4 md:top-16">
-          <span
-            className="rounded-[4px] border border-white/15 bg-black/45 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/70 backdrop-blur-sm"
-            style={{ fontFamily: 'var(--font-label)' }}
-          >
-            Seu vídeo por trás
-          </span>
-          <span
-            className="rounded-[4px] border border-white/50 bg-black/35 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white backdrop-blur-sm"
-            style={{ fontFamily: 'var(--font-label)' }}
-          >
-            Como sai · tela verde
-          </span>
-        </div>
-
-        {/* gerador de caracteres */}
-        <div className="absolute inset-x-0 bottom-0">
-          <div className="flex items-stretch px-3.5 md:px-4">
-            <span
-              className="flex shrink-0 items-center px-2.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-white md:px-3 md:text-[12.5px]"
-              style={{ background: RED, fontFamily: 'var(--font-tech)' }}
-            >
-              Plantão
-            </span>
-            <div
-              className="min-w-0 flex-1 px-3 py-2 md:px-3.5 md:py-2.5"
-              style={{ background: PAPER }}
-            >
-              <div
-                className="truncate text-[13px] font-extrabold uppercase leading-tight tracking-[-0.01em] md:text-[16.5px]"
-                style={{ color: INK, fontFamily: 'var(--font-tech)' }}
-              >
-                {text}
-                <span className="bc-caret" style={{ background: RED }} />
-              </div>
-            </div>
-          </div>
-          <div
-            className="flex items-center gap-2 px-3.5 py-1.5 md:px-4"
-            style={{ background: 'rgba(10,12,15,0.9)' }}
-          >
-            <span
-              className="text-[9px] font-bold uppercase tracking-[0.22em] text-white/45"
-              style={{ fontFamily: 'var(--font-label)' }}
-            >
-              Manchete, hora, local e ticker editáveis
-            </span>
-            <span className="h-px flex-1 bg-white/10" />
-            <span
-              className="num text-[9px] tracking-[0.2em] text-white/35"
-              style={{ fontFamily: 'var(--font-mono)' }}
-            >
-              16:9 · 9:16
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* legenda do card */}
-      <div className="mt-3.5 flex flex-wrap items-center gap-1.5 px-0.5">
-        {['PNG em alta', 'Vídeo animado', '16:9 e 9:16', `${FAKEPRINT_TELEJORNAIS} telejornais`].map((c) => (
-          <span
-            key={c}
-            className="rounded-[4px] border border-white/12 bg-white/[0.03] px-2 py-1 text-[9.5px] uppercase tracking-[0.14em] text-white/50"
-            style={{ fontFamily: 'var(--font-label)', fontWeight: 600 }}
-          >
-            {c}
-          </span>
-        ))}
-      </div>
-      <p className="mt-2.5 px-0.5 text-[12.5px] leading-relaxed text-white/45">
-        <span className="font-semibold" style={{ color: RED }}>
-          FakePrint · telejornal · Premium
-        </span>{' '}
-        — o gráfico sai em tela verde; na ilha, você solta o seu vídeo por trás e o
-        plantão é seu. No Free, os telejornais ficam em prévia.
-      </p>
-
-      <style jsx>{`
-        .bc-wipe,
-        .bc-line {
-          animation: bc-wipe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
-        }
-        .bc-wipe-in {
-          animation: bc-wipe-in 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
-        }
-        @keyframes bc-wipe {
-          from {
-            transform: translateX(26%);
-          }
-          to {
-            transform: translateX(82%);
-          }
-        }
-        @keyframes bc-wipe-in {
-          from {
-            transform: translateX(-26%);
-          }
-          to {
-            transform: translateX(-82%);
-          }
-        }
-        .bc-dot {
-          animation: bc-pulse 1.6s ease-in-out infinite;
-        }
-        .bc-caret {
-          display: inline-block;
-          width: 2px;
-          height: 0.86em;
-          margin-left: 3px;
-          vertical-align: -0.08em;
-          animation: bc-blink 1s steps(2, end) infinite;
-        }
-        @keyframes bc-pulse {
-          0%,
-          100% {
-            opacity: 1;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.35;
-            transform: scale(0.8);
-          }
-        }
-        @keyframes bc-blink {
-          50% {
-            opacity: 0;
-          }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .bc-dot,
-          .bc-caret,
-          .bc-wipe,
-          .bc-wipe-in,
-          .bc-line {
-            animation: none;
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
 
 /* ══════════════════════════ 2. TELEJORNAL (plantão CNN) ══════════════════════════ */
 
@@ -397,7 +84,7 @@ export function TelejornalCard({ className = '' }: { className?: string }) {
       />
 
       <div
-        className="relative aspect-[16/10] w-full overflow-hidden rounded-[14px] border border-white/12"
+        className="relative aspect-[16/10] w-full overflow-hidden rounded-[14px] border border-white/[0.12]"
         style={{
           background:
             'radial-gradient(90% 70% at 30% 10%, #101725 0%, #0a0f1a 55%, #060911 100%)',
@@ -692,7 +379,7 @@ export function LegendasScene({ className = '' }: { className?: string }) {
 
 const TEAL = '#3ec7bb';
 const HIDDEN_TEXT =
-  'receita de bolo de cenoura com cobertura de chocolate — bata os ovos, a cenoura e o óleo…';
+  'receita de bolo de cenoura com cobertura de chocolate: bata os ovos, a cenoura e o óleo…';
 
 export function CamuflagemScene() {
   const { ref, inView } = useInView<HTMLDivElement>(0.25);
@@ -862,7 +549,7 @@ function Lane({
           {tag}
         </span>
       </div>
-      <div className="lane relative flex h-[52px] items-center gap-[2px] overflow-hidden rounded-[8px] border border-white/8 bg-black/30 px-2">
+      <div className="lane relative flex h-[52px] items-center gap-[2px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-black/30 px-2">
         {bars.map((h, i) => (
           <span
             key={i}
@@ -982,7 +669,7 @@ export function DecupagemScene() {
         </div>
 
         {/* timeline */}
-        <div className="flex h-[64px] items-stretch gap-[3px] overflow-hidden rounded-[8px] border border-white/8 bg-black/30 p-2">
+        <div className="flex h-[64px] items-stretch gap-[3px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-black/30 p-2">
           {TRACK.map((b, i) =>
             b.speech ? (
               <span
@@ -1053,7 +740,7 @@ export function DecupagemScene() {
             {QUEUE.map((q) => (
               <div
                 key={q.name}
-                className="flex items-center gap-2.5 rounded-[8px] border border-white/8 bg-black/25 px-2.5 py-1.5"
+                className="flex items-center gap-2.5 rounded-[8px] border border-white/[0.08] bg-black/25 px-2.5 py-1.5"
               >
                 <span
                   className="num shrink-0 text-[9.5px] text-white/60"
@@ -1061,7 +748,7 @@ export function DecupagemScene() {
                 >
                   {q.name}
                 </span>
-                <span className="relative h-[3px] flex-1 overflow-hidden rounded-full bg-white/8">
+                <span className="relative h-[3px] flex-1 overflow-hidden rounded-full bg-white/[0.08]">
                   <span
                     className="absolute inset-y-0 left-0 rounded-full"
                     style={{
@@ -1107,129 +794,5 @@ function MiniWave({ seed }: { seed: number }) {
         />
       ))}
     </span>
-  );
-}
-
-/* ══════════════════════════ 5. MINI PRINTS ══════════════════════════ */
-
-/** Os outros modelos do FakePrint, em miniatura fiel. */
-export function MiniPrints({ className = '' }: { className?: string }) {
-  return (
-    <div className={'grid grid-cols-3 gap-3 ' + className} style={{ filter: UNSATURATE_FIX }}>
-      <MiniCall />
-      <MiniPost />
-      <MiniLive />
-    </div>
-  );
-}
-
-function MiniShell({
-  children,
-  label,
-  bg,
-}: {
-  children: React.ReactNode;
-  label: string;
-  bg: string;
-}) {
-  return (
-    <div>
-      <div
-        className="relative aspect-[9/13] overflow-hidden rounded-[10px] border border-white/12"
-        style={{ background: bg, boxShadow: '0 18px 34px -20px rgba(0,0,0,0.9)' }}
-      >
-        {children}
-      </div>
-      <div
-        className="mt-1.5 text-center text-[8.5px] uppercase tracking-[0.16em] text-white/35"
-        style={{ fontFamily: 'var(--font-label)' }}
-      >
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function MiniCall() {
-  return (
-    <MiniShell label="Chamada de vídeo" bg="linear-gradient(180deg,#0f2a21,#07130f)">
-      <div className="flex h-full flex-col items-center justify-between py-3">
-        <span
-          className="num text-[7px] tracking-[0.1em] text-white/60"
-          style={{ fontFamily: 'var(--font-mono)' }}
-        >
-          00:12
-        </span>
-        <div className="flex flex-col items-center gap-1.5">
-          <span className="grid h-9 w-9 place-items-center rounded-full bg-white/12 text-[11px] text-white/80">
-            H
-          </span>
-          <span className="text-[8px] font-semibold text-white/85">Dra. Helena</span>
-          <span className="text-[6.5px] uppercase tracking-[0.14em] text-white/40">
-            chamando…
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="h-5 w-5 rounded-full bg-white/12" />
-          <span className="h-5 w-5 rounded-full bg-white/12" />
-          <span className="h-5 w-5 rounded-full" style={{ background: '#e0483f' }} />
-        </div>
-      </div>
-    </MiniShell>
-  );
-}
-
-function MiniPost() {
-  return (
-    <MiniShell label="Post do Instagram" bg="#fff">
-      <div className="flex h-full flex-col">
-        <div className="flex items-center gap-1.5 px-2 py-1.5">
-          <span className="h-4 w-4 rounded-full bg-neutral-300" />
-          <span className="h-[4px] w-9 rounded-full bg-neutral-300" />
-        </div>
-        <div className="flex-1" style={{ background: 'linear-gradient(160deg,#dcd6ea,#c7d6e4)' }} />
-        <div className="flex flex-col gap-[4px] px-2 py-2">
-          <div className="flex gap-1.5">
-            <span className="h-[7px] w-[7px] rounded-full" style={{ background: '#e0483f' }} />
-            <span className="h-[7px] w-[7px] rounded-full bg-neutral-300" />
-            <span className="h-[7px] w-[7px] rounded-full bg-neutral-300" />
-          </div>
-          <span className="h-[4px] w-full rounded-full bg-neutral-200" />
-          <span className="h-[4px] w-3/4 rounded-full bg-neutral-200" />
-        </div>
-      </div>
-    </MiniShell>
-  );
-}
-
-function MiniLive() {
-  return (
-    <MiniShell label="Live · vídeo" bg="linear-gradient(180deg,#1b1524,#0a070f)">
-      <div className="flex h-full flex-col justify-between p-2">
-        <div className="flex items-center gap-1">
-          <span
-            className="rounded-[3px] px-1 py-[1px] text-[6px] font-bold uppercase tracking-[0.12em] text-white"
-            style={{ background: '#e0483f' }}
-          >
-            Ao vivo
-          </span>
-          <span className="rounded-[3px] bg-black/50 px-1 py-[1px] text-[6px] text-white/70">
-            2,4 mil
-          </span>
-        </div>
-        <div className="flex flex-col gap-[3px]">
-          <span className="h-[4px] w-4/5 rounded-full bg-white/25" />
-          <span className="h-[4px] w-3/5 rounded-full bg-white/18" />
-          <span className="h-[4px] w-2/3 rounded-full bg-white/12" />
-        </div>
-        <span
-          aria-hidden
-          className="absolute bottom-6 right-2 text-[10px]"
-          style={{ color: '#ff5d8f' }}
-        >
-          ♥
-        </span>
-      </div>
-    </MiniShell>
   );
 }

@@ -27,6 +27,8 @@ const ETAPAS = [
   { run: ["scripts/test-pilot-economia-runtime.mjs"] },
   // guardas de performance (05.10): gargalos medidos e removidos não podem voltar calados
   { run: ["scripts/test-perf-guards.mjs"] },
+  // landing pública (07.10): sem ferramenta interna, sem travessão, suíte = planos reais, mouse sem :root
+  { run: ["scripts/test-landing-guards.mjs"] },
   // chat de ajuda (07.10): mensagem pronta pro WhatsApp do suporte diz quem, o quê e onde
   { tsc: "lib/history-tools.ts lib/help-chat.ts lib/help-chat.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/help-chat.test.js"] },
   // painel admin (07.10): coluna ausente em produção derrubou o plano de todos pra Free, calado
