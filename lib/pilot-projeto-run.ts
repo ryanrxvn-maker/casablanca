@@ -15,7 +15,7 @@ import {
   type ArquivoProjeto, type MidiaDoProjeto, type RoteiroEdicao,
 } from './pilot-projeto';
 import { aberturaDoOlho, palcoDoLayout, PISCAR_ANTES_SEC, PISCAR_DEPOIS_SEC } from './pilot-inserts';
-import { SFX_CATALOGO, type SfxId } from './pilot-sonoplastia';
+import { SFX_CATALOGO, SFX_IDS } from './pilot-sonoplastia';
 
 /** Pra onde vai o pacote: o CapCut (pasta do rascunho) ou o Premiere (XML + mídia). */
 export type AlvoDoPacote = 'capcut' | 'premiere';
@@ -411,19 +411,26 @@ async function arquivosDoProjeto(
     });
   }
 
-  // SMART SFX (08.10): cada som usado, em WAV — os MESMOS samples da mixagem
+  // SMART SFX (08.10): os 6 sons em WAV — os MESMOS samples da mixagem. Os
+  // usados vão pra timeline; TODOS vão pro painel de mídia, pra o editor
+  // trocar de som dentro do CapCut sem sair caçando arquivo.
   const sfx = new Map<string, ArquivoProjeto>();
-  const idsSfx = [...new Set((roteiro.sfx || []).map((x) => x.sfx))] as SfxId[];
-  if (idsSfx.length) {
+  const extrasDoPainel: ArquivoProjeto[] = [];
+  const idsUsados = new Set((roteiro.sfx || []).map((x) => x.sfx));
+  if (idsUsados.size) {
     onEtapa?.(`${p.filename}: SFX`);
     const { carregarSfx, wavDoSfx } = await import('./pilot-sonoplastia-run');
-    for (const id of idsSfx) {
+    for (const id of SFX_IDS) {
       const buf = await carregarSfx(id);
       const wav = buf ? await wavDoSfx(id) : null;
-      if (!buf || !wav) { avisos.push(`não consegui baixar o SFX "${SFX_CATALOGO[id]?.nome || id}" pro projeto — confira a internet e exporte de novo.`); continue; }
+      if (!buf || !wav) {
+        if (idsUsados.has(id)) avisos.push(`não consegui baixar o SFX "${SFX_CATALOGO[id]?.nome || id}" pro projeto — confira a internet e exporte de novo.`);
+        continue;
+      }
       const arquivo: ArquivoProjeto = { nome: SFX_CATALOGO[id].arquivoProjeto, tipo: 'audio', w: 0, h: 0, durSec: buf.duration, temAudio: true, taxa: buf.sampleRate };
       add(arquivo.nome, wav);
-      sfx.set(id, arquivo);
+      if (idsUsados.has(id)) sfx.set(id, arquivo);
+      else extrasDoPainel.push(arquivo);
     }
   }
 
@@ -440,7 +447,7 @@ async function arquivosDoProjeto(
   }
 
   const nome = p.filename.replace(/\.[^.]+$/, '');
-  const tl = montarTimeline(nome, roteiro, { avatar, inserts, legendas, headlines, preto, branco, vermelho, linhas, olho, sfx, trilha }, W, H);
+  const tl = montarTimeline(nome, roteiro, { avatar, inserts, legendas, headlines, preto, branco, vermelho, linhas, olho, sfx, trilha, extrasDoPainel }, W, H);
   avisos.push(...tl.avisos);
   // só vai pro pacote a mídia que a timeline usa (PNG idêntico já foi fundido)
   const usados = new Set(tl.arquivos.map((a) => a.nome));

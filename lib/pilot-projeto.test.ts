@@ -298,8 +298,13 @@ console.log('\nSONOPLASTIA E PISCAR NO PROJETO (08.10):');
   const clique = faixas[0].segments.find((sg: { volume: number }) => Math.abs(sg.volume - 0.35) < 1e-9);
   ok(clique && clique.target_timerange.start === 3953000 && clique.source_timerange.start === 0, 'clique do mouse no instante exato do plano (µs)');
   const meta = JSON.parse(cc.meta);
-  const importados = meta.draft_materials[0].value as Array<{ metetype: string; extra_info: string }>;
+  const importados = meta.draft_materials[0].value as Array<{ metetype: string; extra_info: string; file_Path: string }>;
   ok(importados.some((x) => x.metetype === 'music' && x.extra_info.startsWith('SFX - ')), 'SFX e trilha entram no painel de mídia como áudio');
+  ok(importados.every((x) => x.file_Path.startsWith('##_draftpath_placeholder')),
+    'painel de mídia com caminho PORTÁTIL (abre em qualquer máquina sem "Vincular mídia" — testado no CapCut 9.5)');
+  const comExtras = montarTimeline('AD50', rs, { ...ms, extrasDoPainel: [sfxArq('SFX - Plim 1.wav', 4.6)] }, W, H);
+  ok(comExtras.arquivos.some((a) => a.nome === 'SFX - Plim 1.wav') && !comExtras.itens.some((i) => i.arquivo === 'SFX - Plim 1.wav'),
+    'SFX não usado vai pro painel (pra trocar de som no editor), sem entrar na timeline');
 
   const xml = montarXmlPremiere(ts, { pastaMidia: 'C:/AUTOEDIT/AD50 - PILOT/MIDIA' });
   const faixasXml = xml.split('<audio><numOutputChannels>')[1] || '';

@@ -266,6 +266,9 @@ export type MidiaDoProjeto = {
   sfx?: Map<string, ArquivoProjeto>;
   /** TRILHA (08.10) */
   trilha?: ArquivoProjeto;
+  /** arquivos que vão pro PAINEL DE MÍDIA mesmo sem estar na timeline — os
+   *  SFX que o Smart não usou, pro editor trocar de som dentro do editor */
+  extrasDoPainel?: ArquivoProjeto[];
 };
 
 /** O card do React no editor (lá não dá pra tirar o fundo sozinho): 4:5, no
@@ -491,7 +494,8 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
     ...midia.legendas.map((l) => l.arquivo), ...midia.headlines.map((h) => h.arquivo),
     ...(midia.preto ? [midia.preto] : []), ...(midia.branco ? [midia.branco] : []), ...(midia.vermelho ? [midia.vermelho] : []),
     ...(midia.linhas ? [...midia.linhas.values()] : []), ...(midia.olho ? midia.olho.map((q) => q.arquivo) : []),
-    ...(midia.sfx ? [...midia.sfx.values()] : []), ...(midia.trilha ? [midia.trilha] : [])].filter((a) => usados.has(a.nome));
+    ...(midia.sfx ? [...midia.sfx.values()] : []), ...(midia.trilha ? [midia.trilha] : [])].filter((a) => usados.has(a.nome))
+    .concat(midia.extrasDoPainel || []);
   const unicos = [...new Map(arquivos.map((a) => [a.nome, a])).values()];
   return { nome, W, H, fps, durSec: dur, arquivos: unicos, itens: recortados, avisos };
 }
@@ -686,7 +690,11 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
   const agora = opts.agoraUs ?? Date.now() * 1000;
   const itensImportados = tl.arquivos.map((a) => ({
     ai_group_type: '', create_time: 0, duration: a.tipo === 'imagem' ? 5_000_000 : us(a.durSec), enter_from: 0, extra_info: a.nome,
-    file_Path: `${raiz}/${opts.pasta}/${CAPCUT_SUBPASTA_MIDIA}/${a.nome}`, height: a.tipo === 'audio' ? 0 : a.h, id: novoId(), import_time: 0, import_time_ms: 0,
+    // ⚠ CAMINHO PORTÁTIL também no painel de mídia (08.10, testado no CapCut
+    // 9.5): com o caminho absoluto, o projeto aberto em OUTRA máquina (pasta de
+    // rascunhos diferente) mostrava "Vincular mídia" e as PNGs como "Mídia
+    // perdida". Com o marcador, o CapCut resolve pela pasta real do rascunho.
+    file_Path: `${CAPCUT_PASTA_DO_DRAFT}/${CAPCUT_SUBPASTA_MIDIA}/${a.nome}`, height: a.tipo === 'audio' ? 0 : a.h, id: novoId(), import_time: 0, import_time_ms: 0,
     item_source: 1, md5: '', metetype: a.tipo === 'imagem' ? 'photo' : a.tipo === 'audio' ? 'music' : 'video', roughcut_time_range: { duration: a.tipo === 'imagem' ? 5_000_000 : us(a.durSec), start: 0 },
     sub_time_range: { duration: -1, start: -1 }, type: 0, width: a.tipo === 'audio' ? 0 : a.w,
   }));
