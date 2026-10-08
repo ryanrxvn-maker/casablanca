@@ -333,6 +333,58 @@ export async function speedUpVideo(
   }
 }
 
+/**
+ * MIXER DE VELOCIDADE NA MONTAGEM DO PILOT (08.10) — o mesmo motor do
+ * /tools/acelerador (setpts no vídeo + cadeia de atempo no áudio, que muda a
+ * velocidade SEM mudar o tom da voz), com duas diferenças que a montagem
+ * exige:
+ *  - sai em 30 fps CRAVADOS (`fps=30` depois do setpts): o vídeo acelerado
+ *    segue pra legenda, zoom e inserts, que trabalham na grade de 30 quadros;
+ *  - qualidade de entrega (CRF 18, áudio 192k): o acelerador aceita perda
+ *    porque o arquivo é final pra ele; aqui ainda vem outra etapa por cima.
+ */
+export async function mudarVelocidadeDaMontagem(
+  file: Blob,
+  speed: number,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const inputName = 'velin.' + guessExt(file, 'mp4');
+  const outputName = 'velout.mp4';
+  const s = Math.max(0.5, Math.min(3, speed));
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+    const args = (withAudio: boolean) => [
+      '-i', inputName,
+      '-filter:v', `setpts=PTS/${s.toFixed(4)},fps=30`,
+      ...(withAudio ? ['-filter:a', atempoChain(s), '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      outputName,
+    ];
+    try {
+      await execOrThrow(ff, args(true), 'velocidade da montagem');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/terminat|abort|cancel|travad|travou/i.test(msg)) throw e;
+      // montado sem trilha de áudio: o -filter:a derruba o exec inteiro
+      await safeDelete(ff, outputName);
+      await execOrThrow(ff, args(false), 'velocidade da montagem (sem áudio)');
+    }
+    const data = await ff.readFile(outputName);
+    assertValidMp4(data as Uint8Array, 'vídeo na velocidade nova');
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 export async function compressVideo(
   file: Blob,
   params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },

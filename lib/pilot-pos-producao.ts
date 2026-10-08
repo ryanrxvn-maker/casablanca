@@ -40,6 +40,9 @@ export type LegendaCfg = {
   templateId: string;
   /** MAX QUALITY no render (mais lento). Ausente = render RÁPIDO. */
   qualidadeMax?: boolean;
+  /** SMART POSITION (08.10): legenda na DOBRA da tela dividida e no meio
+   *  exato do React, trocando de lugar no corte. Ausente = desligado. */
+  smartPosition?: boolean;
 };
 
 export type ZoomModo = 'in' | 'out' | 'inout';

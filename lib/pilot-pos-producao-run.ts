@@ -40,6 +40,22 @@ import {
   type RostoAvatar,
 } from './pilot-inserts';
 import type { ProjetoInsert, RoteiroEdicao } from './pilot-projeto';
+import {
+  transicoesDasJanelas,
+  type LayoutInsert,
+  type TransicaoNoVideo,
+} from './pilot-inserts';
+import { aplicarSmartPosition, regioesDaLegenda } from './pilot-legenda-smart';
+import {
+  planejarSfx,
+  velocidadeEfetiva,
+  escalarTempos,
+  fimDoGanchoNoVideo,
+  type SfxCfg,
+  type SfxColocado,
+  type TrilhaCfg,
+  type VelocidadeCfg,
+} from './pilot-sonoplastia';
 
 /* ═══════════════════════════ orquestrador (browser) ══════════════════════ */
 
@@ -65,12 +81,23 @@ export type PosProducaoCfg = {
    *  render queimou (b-rolls, legenda, zoom, headline) depois de um render
    *  bom. Falhar aqui nunca afeta a montagem. */
   guardarProjeto?: (roteiro: RoteiroEdicao, avatarLimpo: Blob) => Promise<void>;
+  /** MIXER DE VELOCIDADE (08.10): o montado acelera/desacelera ANTES de tudo
+   *  (ASR, legenda, inserts e SFX já nascem no tempo novo) */
+  velocidade?: VelocidadeCfg;
+  /** SMART SFX (08.10): som nas transições + boom na virada do gancho */
+  sfx?: SfxCfg;
+  /** TRILHA SONORA (08.10) */
+  trilha?: TrilhaCfg;
+  /** lê a trilha da biblioteca do navegador (bytes + LUFS medido no upload) */
+  lerTrilha?: (id: string) => Promise<{ blob: Blob; nome: string; lufs: number | null } | null>;
   onEtapa?: (msg: string) => void;
 };
 
 export type PosProducaoInfo = {
   filename: string;
   partesSec: number[] | null;
+  /** label de cada parte na ordem (HOOK 1, BODY 1…) — acha a virada do gancho */
+  partLabels?: string[];
   /** durações dos pedaços de cada parte depois da decupagem (jump cuts) */
   cortesInternosSec?: number[][] | null;
 };
@@ -112,10 +139,22 @@ type PlanoInsertLocal = {
  * `avisos`. Nunca lança.
  */
 export async function montarPosProducao(
-  blob: Blob,
-  info: PosProducaoInfo,
+  blobDoMontado: Blob,
+  infoDoMontado: PosProducaoInfo,
   cfg: PosProducaoCfg,
-): Promise<{ blob: Blob | null; avisos: string[]; insertsOrfaos?: string[] }> {
+): Promise<{
+  blob: Blob | null;
+  avisos: string[];
+  insertsOrfaos?: string[];
+  /** o render de legenda/zoom/inserts/headline entrou? (o blob pode existir
+   *  só pela velocidade/sonoplastia) — é isto que o selo do card lê */
+  aplicouVisual?: boolean;
+  /** o que a sonoplastia de fato pôs no vídeo */
+  sonoplastia?: { sfx: number; trilha: boolean };
+  velocidade?: number;
+}> {
+  let blob = blobDoMontado;
+  let info = infoDoMontado;
   const avisos: string[] = [];
   /** ids de insert cuja MÍDIA sumiu do cache — o Pilot limpa a config. */
   const orfaos: string[] = [];
@@ -127,7 +166,17 @@ export async function montarPosProducao(
   const querZoom = cfg.zoom.on;
   const temInserts = (cfg.inserts?.length || 0) > 0 && !!cfg.lerMidia;
   const querHeadline = !!cfg.headline?.on;
-  if (!querLegenda && !querZoom && !temInserts && !querHeadline) return { blob: null, avisos, insertsOrfaos: orfaos };
+  let velocidade = velocidadeEfetiva(cfg.velocidade);
+  const querSfx = !!cfg.sfx?.on;
+  const querTrilha = !!(cfg.trilha?.on && cfg.trilha.trilhaId && cfg.lerTrilha);
+  const querVisual = querLegenda || querZoom || temInserts || querHeadline;
+  if (!querVisual && velocidade === 1 && !querSfx && !querTrilha) return { blob: null, avisos, insertsOrfaos: orfaos };
+  /** o mux da velocidade/sonoplastia pede o lock do ffmpeg só se o caller não o segura */
+  const comFfmpeg = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    if (cfg.ffmpegJaExclusivo) return fn();
+    const { runFfmpegExclusive } = await import('./ffmpeg-serial');
+    return runFfmpegExclusive(fn);
+  };
   // O que o editor LIGOU — toda mensagem de falha fala só disso (bug AD44VN:
   // só zoom ligado e o card acusava "legenda/zoom").
   const pedido = { legenda: querLegenda, zoom: querZoom, headline: querHeadline, inserts: temInserts };
@@ -150,6 +199,34 @@ export async function montarPosProducao(
     // de reserva, e a soma das partes — que o pipeline já mediu — é a última
     // linha. Antes disto, uma aba em segundo plano zerava a duração e a
     // pós-produção abortava sem dizer nada a ninguém.
+    // ── MIXER DE VELOCIDADE: antes de TUDO. A fala acelerada é a que vai pro
+    // ASR, então legenda, âncora dos inserts, zoom e SFX já nascem no tempo
+    // novo — nada precisa ser reescalado depois. Mesmo motor do /tools/acelerador
+    // (setpts + atempo: muda a velocidade sem mudar o tom da voz).
+    if (velocidade !== 1) {
+      try {
+        cfg.onEtapa?.(`mixer de velocidade: ${velocidade.toFixed(2)}x`);
+        const { mudarVelocidadeDaMontagem } = await import('./ffmpeg-worker');
+        const acelerado = await comFfmpeg(() => mudarVelocidadeDaMontagem(blob, velocidade, {
+          onProgress: (pr) => cfg.onEtapa?.(`mixer de velocidade: ${velocidade.toFixed(2)}x · ${Math.round((pr.ratio || 0) * 100)}%`),
+        }));
+        if (!acelerado || acelerado.size < 50_000) throw new Error('saída vazia');
+        blob = acelerado;
+        info = {
+          ...info,
+          partesSec: escalarTempos(info.partesSec, velocidade),
+          cortesInternosSec: escalarTempos(info.cortesInternosSec, velocidade),
+        };
+        console.log(`[pos-producao] ${info.filename}: velocidade ${velocidade}x aplicada (${(acelerado.size / 1e6).toFixed(1)}MB)`);
+      } catch (e) {
+        console.warn('[pos-producao] mixer de velocidade falhou:', e);
+        avisos.push(`o mixer de velocidade não entrou nesta montagem — o AD saiu na velocidade original (${motivoCurto(e)}). Clica RETOMAR.`);
+        velocidade = 1;
+        blob = blobDoMontado;
+        info = infoDoMontado;
+      }
+    }
+
     const somaPartes = (info.partesSec || []).reduce((a, b) => a + (b > 0 ? b : 0), 0);
     const durSec = await duracaoDeVideo(blob, somaPartes > 0.5 ? somaPartes : null);
     if (!durSec) {
@@ -255,6 +332,10 @@ export async function montarPosProducao(
     /** o que o render compõe, no formato do projeto editável */
     let insertsDoProjeto: ProjetoInsert[] = [];
     const fechaveis: Array<() => void> = [];
+    /** formato de cada insert que ENTROU (Smart Position lê a dobra dele) */
+    const layoutPorId = new Map<string, LayoutInsert>();
+    /** as trocas que o render desenha — o Smart SFX bate nelas */
+    let transicoesDoVideo: TransicaoNoVideo[] = [];
     if (temInserts) {
       try {
         cfg.onEtapa?.('preparando inserts');
@@ -476,6 +557,9 @@ export async function montarPosProducao(
             }
           }
           const porId = new Map(usaveis.map((i) => [i.id, i]));
+          for (const i of usaveis) layoutPorId.set(i.id, i.layout);
+          // a MESMA lista de trocas que o `cobertura` abaixo pinta
+          transicoesDoVideo = transicoesDasJanelas(janelas, (id) => porId.get(id)?.transicao || 'nenhuma');
           // ENQUADRAMENTO PELO ROSTO: nas janelas que mostram o avatar
           // (dividida, mescla, react) o rosto é medido no próprio montado e o
           // render põe ele no lugar certo — a não ser que o editor tenha
@@ -801,117 +885,202 @@ export async function montarPosProducao(
       }
     }
 
-    if (blocks.length === 0 && plano.length === 0 && !planoInserts && !headlines) {
-      for (const f of fechaveis) f();
-      return { blob: null, avisos, insertsOrfaos: orfaos };
+    /* ── SMART POSITION (08.10): a legenda vai pra DOBRA da tela dividida e
+     * pro meio exato no React, trocando de lugar NO corte (o bloco que
+     * atravessa a borda é cortado nela). Só mexe no `perBlock` — o mesmo
+     * override do editor de legendas —, então render e projeto saem iguais. */
+    if (cfg.legenda.smartPosition && blocks.length && planoInserts?.janelas.length) {
+      try {
+        const dims = await dimensoesDoVideo(blob);
+        const regioes = regioesDaLegenda(planoInserts.janelas, (id) => layoutPorId.get(id), dims.w, dims.h);
+        if (regioes.length) {
+          const sp = aplicarSmartPosition(blocks, style, regioes);
+          blocks = sp.blocks as typeof blocks;
+          style = sp.style as typeof style;
+          console.log(`[pos-producao] smart position: ${sp.posicionados} bloco(s) na dobra/meio · ${sp.cortes} cortado(s) na borda · ${regioes.length} região(ões) ${dims.w}x${dims.h}`);
+        }
+      } catch (e) {
+        console.warn('[pos-producao] smart position falhou (a legenda fica na posição do modelo):', e);
+        avisos.push('o Smart Position não entrou nesta montagem — a legenda ficou na posição do modelo. Clica RETOMAR pra tentar de novo.');
+      }
     }
 
-    // ── RENDER com PROGRESSO REAL e TETO DE TEMPO ──
-    // O render de um AD de 90s são ~2.700 frames com legenda desenhada em cada
-    // um: leva minutos. Sem o ratio na tela isso PARECIA travado (era só uma
-    // string parada). E sem teto, um decoder que engasga ficava pra sempre —
-    // agora aborta e entrega o montado original, que é a regra da casa.
-    const verbo = blocks.length ? 'legendando' : 'aplicando zoom';
-    cfg.onEtapa?.(`${verbo}: preparando`);
-    const t0 = Date.now();
-    const ctrl = new AbortController();
-    // WATCHDOG DE PROGRESSO (03.09) — o teto fixo de tempo matou um AD REAL.
-    //
-    // A régua antiga (~6s de render por segundo de vídeo, teto 25min) foi
-    // medida no caminho RÁPIDO. Com INSERTS o render vai pelo caminho de
-    // seek — e em aba de segundo plano o Chrome estrangula os seeks a ponto
-    // de 12s de vídeo levarem 11min (medido). O AD do Silas estava ANDANDO e
-    // o relógio o matou: "pós-produção: o render estourou o tempo".
-    //
-    // A regra certa: um render LENTO nunca é abortado; um render PARADO é.
-    // Aborta só quando o progresso não anda por 4min (fase de frames viva
-    // manda sinal a cada ~3 ticks), com um teto absoluto de 35min — ABAIXO
-    // dos 40min de ESPERA_MAX_MS da fila do ffmpeg, senão quem espera o lock
-    // morreria antes de este render soltar.
-    const PARADO_MS = 4 * 60_000;
-    const TETO_ABSOLUTO_MS = 35 * 60_000;
-    let ultimoSinal = Date.now();
-    let ultimoFrame = -1;
-    const inicioRender = Date.now();
-    const vigia = setInterval(() => {
-      const agora = Date.now();
-      if (agora - inicioRender > TETO_ABSOLUTO_MS) {
-        console.warn('[pos-producao] teto absoluto de 35min — abortando');
-        motivoAborto = 'teto';
-        ctrl.abort();
-        return;
-      }
-      if (agora - ultimoSinal > PARADO_MS) {
-        console.warn(`[pos-producao] render sem progresso há ${Math.round((agora - ultimoSinal) / 1000)}s — abortando (parado, não lento)`);
-        motivoAborto = 'parado';
-        ctrl.abort();
-      }
-    }, 15_000);
-    let r: Awaited<ReturnType<typeof renderTypographyVideo>>;
-    try {
-      r = await renderTypographyVideo({
-        file: blob,
-        blocks,
-        preset: getPreset(style.presetId),
-        style,
-        zoom: plano,
-        ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
-        // MAX QUALITY é escolha do editor; o padrão é o render rápido.
-        qualidadeMax: !!cfg.legenda.qualidadeMax,
-        inserts: planoInserts as never,
-        headlines,
-        signal: ctrl.signal,
-        onProgress: (pr) => {
-          // qualquer avanço de fase/frame alimenta o watchdog
-          if (pr.phase !== 'frames' || (pr.frame ?? 0) !== ultimoFrame) {
-            ultimoFrame = pr.frame ?? ultimoFrame;
-            ultimoSinal = Date.now();
-          }
-          // 'frames' é a fase longa — é dela que sai a porcentagem honesta.
-          const pct = Math.round((pr.ratio || 0) * 100);
-          cfg.onEtapa?.(
-            pr.phase === 'frames'
-              ? `${verbo}: ${pct}% (${pr.frame ?? 0}/${pr.totalFrames ?? 0} frames)`
-              : `${verbo}: ${pr.phase}`,
-          );
-        },
-      });
-    } finally {
-      clearInterval(vigia);
+    const temVisual = !(blocks.length === 0 && plano.length === 0 && !planoInserts && !headlines);
+    if (!temVisual && velocidade === 1 && !querSfx && !querTrilha) {
       for (const f of fechaveis) f();
-    }
-    const seg = ((Date.now() - t0) / 1000).toFixed(0);
-    console.log(
-      `[pos-producao] ${info.filename}: render ${r.mode || '?'}/${r.hw ? 'hardware' : 'software'} em ${seg}s · ` +
-        `${r.width}x${r.height}@${r.fps} · ${(r.blob.size / 1e6).toFixed(1)}MB · audioOk=${r.audioOk}`,
-    );
-    if (!r.blob || r.blob.size < 50_000) {
-      avisos.push(`o render saiu vazio — o AD foi entregue ${sem}. Clica RETOMAR; se repetir, fecha as outras abas pesadas.`);
       return { blob: null, avisos, insertsOrfaos: orfaos };
     }
-    // PROJETO EDITÁVEL: guarda o avatar LIMPO (o que entrou no render) e o
-    // roteiro do que foi queimado nele. Só depois de um render bom, e nunca
-    // derruba a entrega — o projeto é um extra.
-    if (cfg.guardarProjeto) {
+    /** o vídeo que entra no render (avatar limpo, já na velocidade nova) */
+    const base = blob;
+    let renderizado: Blob | null = null;
+    let renderInfo = '';
+    if (temVisual) {
+      // ── RENDER com PROGRESSO REAL e TETO DE TEMPO ──
+      // O render de um AD de 90s são ~2.700 frames com legenda desenhada em cada
+      // um: leva minutos. Sem o ratio na tela isso PARECIA travado (era só uma
+      // string parada). E sem teto, um decoder que engasga ficava pra sempre —
+      // agora aborta e entrega o montado original, que é a regra da casa.
+      const verbo = blocks.length ? 'legendando' : 'aplicando zoom';
+      cfg.onEtapa?.(`${verbo}: preparando`);
+      const t0 = Date.now();
+      const ctrl = new AbortController();
+      // WATCHDOG DE PROGRESSO (03.09) — o teto fixo de tempo matou um AD REAL.
+      //
+      // A régua antiga (~6s de render por segundo de vídeo, teto 25min) foi
+      // medida no caminho RÁPIDO. Com INSERTS o render vai pelo caminho de
+      // seek — e em aba de segundo plano o Chrome estrangula os seeks a ponto
+      // de 12s de vídeo levarem 11min (medido). O AD do Silas estava ANDANDO e
+      // o relógio o matou: "pós-produção: o render estourou o tempo".
+      //
+      // A regra certa: um render LENTO nunca é abortado; um render PARADO é.
+      // Aborta só quando o progresso não anda por 4min (fase de frames viva
+      // manda sinal a cada ~3 ticks), com um teto absoluto de 35min — ABAIXO
+      // dos 40min de ESPERA_MAX_MS da fila do ffmpeg, senão quem espera o lock
+      // morreria antes de este render soltar.
+      const PARADO_MS = 4 * 60_000;
+      const TETO_ABSOLUTO_MS = 35 * 60_000;
+      let ultimoSinal = Date.now();
+      let ultimoFrame = -1;
+      const inicioRender = Date.now();
+      const vigia = setInterval(() => {
+        const agora = Date.now();
+        if (agora - inicioRender > TETO_ABSOLUTO_MS) {
+          console.warn('[pos-producao] teto absoluto de 35min — abortando');
+          motivoAborto = 'teto';
+          ctrl.abort();
+          return;
+        }
+        if (agora - ultimoSinal > PARADO_MS) {
+          console.warn(`[pos-producao] render sem progresso há ${Math.round((agora - ultimoSinal) / 1000)}s — abortando (parado, não lento)`);
+          motivoAborto = 'parado';
+          ctrl.abort();
+        }
+      }, 15_000);
+      let r: Awaited<ReturnType<typeof renderTypographyVideo>>;
+      try {
+        r = await renderTypographyVideo({
+          file: blob,
+          blocks,
+          preset: getPreset(style.presetId),
+          style,
+          zoom: plano,
+          ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
+          // MAX QUALITY é escolha do editor; o padrão é o render rápido.
+          qualidadeMax: !!cfg.legenda.qualidadeMax,
+          inserts: planoInserts as never,
+          headlines,
+          signal: ctrl.signal,
+          onProgress: (pr) => {
+            // qualquer avanço de fase/frame alimenta o watchdog
+            if (pr.phase !== 'frames' || (pr.frame ?? 0) !== ultimoFrame) {
+              ultimoFrame = pr.frame ?? ultimoFrame;
+              ultimoSinal = Date.now();
+            }
+            // 'frames' é a fase longa — é dela que sai a porcentagem honesta.
+            const pct = Math.round((pr.ratio || 0) * 100);
+            cfg.onEtapa?.(
+              pr.phase === 'frames'
+                ? `${verbo}: ${pct}% (${pr.frame ?? 0}/${pr.totalFrames ?? 0} frames)`
+                : `${verbo}: ${pr.phase}`,
+            );
+          },
+        });
+      } finally {
+        clearInterval(vigia);
+        for (const f of fechaveis) f();
+      }
+      const seg = ((Date.now() - t0) / 1000).toFixed(0);
+      console.log(
+        `[pos-producao] ${info.filename}: render ${r.mode || '?'}/${r.hw ? 'hardware' : 'software'} em ${seg}s · ` +
+          `${r.width}x${r.height}@${r.fps} · ${(r.blob.size / 1e6).toFixed(1)}MB · audioOk=${r.audioOk}`,
+      );
+      if (!r.blob || r.blob.size < 50_000) {
+        avisos.push(`o render saiu vazio — o AD foi entregue ${sem}. Clica RETOMAR; se repetir, fecha as outras abas pesadas.`);
+      } else {
+        renderizado = r.blob;
+        renderInfo = `${r.width}x${r.height}`;
+        if (!r.audioOk) avisos.push('o vídeo saiu SEM ÁUDIO — confere antes de entregar e, se estiver mudo, clica RETOMAR.');
+        if (r.somInsertOk === false) {
+          avisos.push(
+            'não consegui misturar o som dos inserts nesta montagem — o AD saiu só com o áudio do avatar. Clica RETOMAR pra tentar de novo.',
+          );
+        }
+      }
+    } else {
+      for (const f of fechaveis) f();
+    }
+
+    // ── SONOPLASTIA (08.10): SFX nas transições + trilha, DEPOIS do render —
+    // a imagem já está pronta e os instantes das trocas são os do quadro.
+    // Nunca derruba a entrega: falhou, o vídeo segue sem ela (com aviso).
+    let final: Blob | null = renderizado;
+    let sfxEntraram: SfxColocado[] = [];
+    let trilhaDoProjeto: RoteiroEdicao['trilha'] = null;
+    if (querSfx || querTrilha) {
+      const alvo = renderizado ?? base;
+      const fimDoGancho = fimDoGanchoNoVideo(info.partesSec, info.partLabels);
+      const sfxPlano = querSfx && cfg.sfx
+        ? planejarSfx(cfg.sfx, { transicoes: renderizado ? transicoesDoVideo : [], durSec, fimDoGancho })
+        : [];
+      if (querSfx && !sfxPlano.length) {
+        avisos.push('Smart SFX ligado, mas este AD não tem transição (nem virada de gancho) pra bater — nenhum SFX foi colocado. As transições vêm dos inserts.');
+      }
+      let trilha: Parameters<typeof import('./pilot-sonoplastia-run').mixarSonoplastia>[1]['trilha'] = null;
+      if (querTrilha && cfg.trilha?.trilhaId) {
+        const lida = await cfg.lerTrilha!(cfg.trilha.trilhaId).catch(() => null);
+        if (!lida) {
+          avisos.push(`a trilha "${cfg.trilha.nome || 'escolhida'}" não está mais salva neste navegador — o AD saiu sem trilha. Suba ela de novo na janela de SFX e trilha.`);
+        } else {
+          trilha = { blob: lida.blob, nome: lida.nome, volume: cfg.trilha.volume, lufs: lida.lufs };
+        }
+      }
+      if (sfxPlano.length || trilha) {
+        const { mixarSonoplastia } = await import('./pilot-sonoplastia-run');
+        const mix = await mixarSonoplastia(alvo, { sfx: sfxPlano, trilha }, { comFfmpeg, onEtapa: cfg.onEtapa });
+        avisos.push(...mix.avisos);
+        if (mix.blob) {
+          final = mix.blob;
+          sfxEntraram = mix.sfx;
+          if (mix.trilha && trilha && cfg.trilha?.trilhaId) {
+            trilhaDoProjeto = {
+              trilhaId: cfg.trilha.trilhaId, nome: trilha.nome, ganho: mix.trilha.ganho,
+              durTrilha: mix.trilha.durTrilha, pedacos: mix.trilha.pedacos,
+            };
+          }
+        }
+      }
+    }
+    // só velocidade (ou o render falhou com a velocidade aplicada): entrega o acelerado
+    if (!final && velocidade !== 1) final = base;
+
+    // PROJETO EDITÁVEL: guarda o avatar LIMPO (o que entrou no render, já na
+    // velocidade nova) e o roteiro do que foi queimado + os SFX e a trilha.
+    // Nunca derruba a entrega — o projeto é um extra.
+    if (final && cfg.guardarProjeto) {
       try {
         await cfg.guardarProjeto({
           versao: 1, filename: info.filename, criadoEm: Date.now(), durSec,
-          inserts: planoInserts ? insertsDoProjeto : [],
-          legenda: blocks.length ? { blocks, style } : null,
-          zoom: plano,
-          headlines: headlines?.length ? headlines : null,
-        }, blob);
+          inserts: renderizado && planoInserts ? insertsDoProjeto : [],
+          legenda: renderizado && blocks.length ? { blocks, style } : null,
+          zoom: renderizado ? plano : [],
+          headlines: renderizado && headlines?.length ? headlines : null,
+          sfx: sfxEntraram,
+          trilha: trilhaDoProjeto,
+          velocidade,
+        }, base);
       } catch (e) {
         console.warn('[pos-producao] projeto editável não foi guardado (a entrega segue normal):', e);
       }
     }
-    if (!r.audioOk) avisos.push('o vídeo saiu SEM ÁUDIO — confere antes de entregar e, se estiver mudo, clica RETOMAR.');
-    if (r.somInsertOk === false) {
-      avisos.push(
-        'não consegui misturar o som dos inserts nesta montagem — o AD saiu só com o áudio do avatar. Clica RETOMAR pra tentar de novo.',
-      );
-    }
-    return { blob: r.blob, avisos, insertsOrfaos: orfaos };
+    if (renderInfo) console.log(`[pos-producao] ${info.filename}: entregue ${renderInfo}${sfxEntraram.length ? ` + ${sfxEntraram.length} SFX` : ''}${trilhaDoProjeto ? ' + trilha' : ''}${velocidade !== 1 ? ` @${velocidade}x` : ''}`);
+    return {
+      blob: final,
+      avisos,
+      insertsOrfaos: orfaos,
+      aplicouVisual: !!renderizado,
+      sonoplastia: querSfx || querTrilha ? { sfx: sfxEntraram.length, trilha: !!trilhaDoProjeto } : undefined,
+      velocidade,
+    };
   } catch (e) {
     const msg = (e as Error)?.message || String(e);
     console.warn('[pos-producao] falhou:', e);
@@ -1036,4 +1205,29 @@ async function transcreverMontado(
     throw new Error(json?.error || `ASR respondeu ${res.status}`);
   }
   return json.words;
+}
+
+/** Largura × altura do vídeo (metadata do <video>); 1080×1920 quando não dá. */
+async function dimensoesDoVideo(blob: Blob): Promise<{ w: number; h: number }> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.preload = 'metadata';
+    const ok = await new Promise<boolean>((res) => {
+      const t = setTimeout(() => res(false), 10_000);
+      v.onloadedmetadata = () => { clearTimeout(t); res(true); };
+      v.onerror = () => { clearTimeout(t); res(false); };
+      v.src = url;
+    });
+    const w = ok ? v.videoWidth : 0;
+    const h = ok ? v.videoHeight : 0;
+    v.removeAttribute('src');
+    v.load();
+    return w > 0 && h > 0 ? { w, h } : { w: 1080, h: 1920 };
+  } catch {
+    return { w: 1080, h: 1920 };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

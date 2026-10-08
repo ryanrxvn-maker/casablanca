@@ -39,6 +39,7 @@ export const TRANSICOES_INSERT: Array<{ v: TipoTransicao; nome: string; dica: st
   { v: 'escurecer', nome: 'Escurecer', dica: 'Mergulho rápido no preto na troca.' },
   { v: 'luz', nome: 'Luz', dica: 'Clarão branco na troca.' },
   { v: 'luz-vermelha', nome: 'Luz vermelha', dica: 'Clarão quente avermelhado na troca.' },
+  { v: 'piscar', nome: 'Piscar', dica: 'Um olho piscando: fecha no corte e abre no take novo. Casa com o clique do mouse do Smart SFX.' },
   { v: 'misto', nome: 'Misto', dica: 'Alterna escurecer e luz ao longo do AD.' },
 ];
 

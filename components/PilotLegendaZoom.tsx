@@ -429,6 +429,48 @@ export function LegendaZoomPopover({
           </button>
         ) : null}
 
+        {/* SMART POSITION (08.10) — a legenda vai pra DOBRA da tela dividida e
+          * pro meio exato no React, trocando de lugar no corte. A miniatura
+          * mostra a diferença: desligado a legenda fica embaixo (onde o modelo
+          * põe); ligado ela desliza pra emenda dos dois vídeos. */}
+        {tipo === 'legenda' ? (
+          <button
+            type="button"
+            onClick={() => onLegenda({ ...legenda, smartPosition: !legenda.smartPosition })}
+            className={'lz-smartpos' + (legenda.smartPosition ? ' is-on' : '')}
+            aria-pressed={!!legenda.smartPosition}
+            title="Smart Position: na tela dividida a legenda fica na dobra entre os dois vídeos; no React, no meio exato"
+          >
+            <span className="lz-sp-casca">
+              <svg className="lz-sp-mini" viewBox="0 0 92 64" aria-hidden>
+                {/* tela dividida: avatar em cima, take embaixo */}
+                <g>
+                  <rect x="2" y="2" width="34" height="60" rx="5" className="lz-sp-quadro" />
+                  <rect x="2" y="2" width="34" height="30" rx="5" className="lz-sp-avatar" />
+                  <circle cx="19" cy="15" r="5" className="lz-sp-pessoa" />
+                  <path d="M10 32c0-6 4-9 9-9s9 3 9 9z" className="lz-sp-pessoa" />
+                  <rect x="2" y="32" width="34" height="30" className="lz-sp-take" />
+                  <path d="M2 62 L14 44 L22 54 L29 47 L36 56 L36 62 Z" className="lz-sp-morro" />
+                  <g className="lz-sp-leg is-a"><rect x="8" y="49" width="22" height="6" rx="3" /></g>
+                </g>
+                {/* React: take cheio e o avatar no canto */}
+                <g>
+                  <rect x="54" y="2" width="34" height="60" rx="5" className="lz-sp-take" />
+                  <path d="M54 50 L66 32 L74 42 L81 35 L88 44 L88 62 L54 62 Z" className="lz-sp-morro" />
+                  <circle cx="80" cy="47" r="4.2" className="lz-sp-pessoa is-react" />
+                  <path d="M73 62c0-6 3-9 7-9s7 3 7 9z" className="lz-sp-pessoa is-react" />
+                  <g className="lz-sp-leg is-b"><rect x="60" y="49" width="22" height="6" rx="3" /></g>
+                </g>
+              </svg>
+            </span>
+            <span className="lz-sp-txt">
+              <span className="lz-sp-nome">Smart Position</span>
+              <span className="lz-sp-dica">Na tela dividida a legenda vai pra dobra entre os dois vídeos; no React, pro meio exato. Troca de lugar no corte, sem invadir o take vizinho.</span>
+            </span>
+            <span className="lz-sp-pill">{legenda.smartPosition ? 'ON' : 'OFF'}</span>
+          </button>
+        ) : null}
+
         {/* ── rodapé ── */}
         <div className="lz-rodape">
           <button

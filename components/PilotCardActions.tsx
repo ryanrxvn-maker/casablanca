@@ -14,7 +14,7 @@ import React from 'react';
  *  - Color tinted por intent (lime, cyan, amber, fuchsia, rose, violet, neutral)
  */
 
-export type PilotBtnColor = 'lime' | 'cyan' | 'amber' | 'fuchsia' | 'rose' | 'violet' | 'neutral';
+export type PilotBtnColor = 'lime' | 'cyan' | 'amber' | 'fuchsia' | 'rose' | 'violet' | 'orange' | 'emerald' | 'neutral';
 
 const PALETTE: Record<PilotBtnColor, { ring: string; bg: string; text: string; glow: string }> = {
   lime: {
@@ -52,6 +52,18 @@ const PALETTE: Record<PilotBtnColor, { ring: string; bg: string; text: string; g
     bg: 'from-violet-400/22 via-violet-400/10 to-violet-400/[0.02]',
     text: 'text-violet-300',
     glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(167,139,250,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(167,139,250,0.65)]',
+  },
+  orange: {
+    ring: 'border-orange-400/60',
+    bg: 'from-orange-400/22 via-orange-400/10 to-orange-400/[0.02]',
+    text: 'text-orange-300',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(251,146,60,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(251,146,60,0.65)]',
+  },
+  emerald: {
+    ring: 'border-emerald-400/55',
+    bg: 'from-emerald-400/22 via-emerald-400/10 to-emerald-400/[0.02]',
+    text: 'text-emerald-300',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(52,211,153,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(52,211,153,0.65)]',
   },
   neutral: {
     ring: 'border-white/12',
@@ -187,6 +199,24 @@ export const IconNivelar = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 6h18" opacity="0.4" />
     <path d="M6 10v8M10 10v8M14 10v8M18 10v8" />
+  </svg>
+);
+export const IconVelocidade = ({ size = 16 }: { size?: number }) => (
+  // Mixer de velocidade: o velocímetro com a agulha passando do meio.
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4.2 17.5a9 9 0 1 1 15.6 0" />
+    <path d="M12 13.2 16.4 8.6" />
+    <circle cx="12" cy="13.6" r="1.6" fill="currentColor" stroke="none" />
+    <path d="M7.2 9.4l.9.8M12 6.2v1.2" opacity="0.55" />
+  </svg>
+);
+export const IconSonoplastia = ({ size = 16 }: { size?: number }) => (
+  // SFX e trilha: a nota da trilha e a onda do efeito batendo ao lado.
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 17.5V5.5l8-2v11.2" />
+    <circle cx="6.6" cy="17.6" r="2.4" fill="currentColor" stroke="none" />
+    <circle cx="14.6" cy="15.4" r="2.4" fill="currentColor" stroke="none" />
+    <path d="M20.5 8.2c.9.9.9 3.1 0 4M22.4 6.6c1.8 1.8 1.8 5.4 0 7.2" opacity="0.6" />
   </svg>
 );
 export const IconMotor = ({ size = 16 }: { size?: number }) => (

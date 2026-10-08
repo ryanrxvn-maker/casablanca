@@ -45,6 +45,10 @@ const ETAPAS = [
   { tsc: "lib/lipsync-chunk-plan.ts lib/lipsync-chunk-plan.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/lipsync-chunk-plan.test.js"] },
   // projeto editável: roteiro da pós → CapCut (draft 9.x) + Premiere (xmeml) + SRT
   { tsx: ["lib/pilot-projeto.test.ts"] },
+  // sonoplastia (08.10): Smart SFX no pico da transição, piscar, trilha no tamanho do vídeo, velocidade, LUFS
+  { tsx: ["lib/pilot-sonoplastia.test.ts"] },
+  // Smart Position (08.10): legenda na dobra da tela dividida / meio do React, trocando no corte
+  { tsx: ["lib/pilot-legenda-smart.test.ts"] },
   { run: ["scripts/test-pilot-formato-runtime.mjs"] },
   { run: ["scripts/test-pilot-biblioteca-avatares.mjs"] },
   { run: ["scripts/test-pilot-post-scope.mjs"] },

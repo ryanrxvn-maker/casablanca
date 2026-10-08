@@ -56,6 +56,7 @@ import { drawHeadlines, type Headline } from './headline';
 import { ensureTypoFonts } from './fonts';
 import { aacDeAudio, type TrilhaAac } from './audio-aac';
 import { coverNoRosto, quadroDoReact, type Cobertura, type Palco, type RostoAvatar } from '../pilot-inserts';
+import { desenharPalpebras } from '../transicao-olho';
 import type { RecortadorAvatar } from '../avatar-recorte';
 
 export type RenderPhase = 'fontes' | 'frames' | 'audio' | 'finalizando';
@@ -1327,7 +1328,10 @@ function desenharInsert(
   }
   // TRANSIÇÃO por último: o flash cobre avatar E insert (é a troca inteira)
   const cob = plano.cobertura(t);
-  if (cob && cob.alpha > 0.001) {
+  if (cob && cob.forma === 'olho') {
+    // PISCAR: pálpebras em amêndoa, o corte acontece com o olho fechado
+    desenharPalpebras(ctx, W, H, cob.abertura ?? 1);
+  } else if (cob && cob.alpha > 0.001) {
     ctx.save();
     ctx.globalAlpha = cob.alpha;
     if (cob.cor === 'vermelho') {

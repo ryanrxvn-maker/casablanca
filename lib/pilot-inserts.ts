@@ -47,8 +47,14 @@ export type LayoutInsert =
 export const LINHA_CORES = ['#22e06b', '#ffffff', '#ff2d3d', '#ffd60a'] as const;
 export const LINHA_COR_PADRAO = LINHA_CORES[0];
 
-/** `luz-vermelha` = clarão quente (vermelho/laranja), não só branco. */
-export type TipoTransicao = 'nenhuma' | 'escurecer' | 'luz' | 'luz-vermelha' | 'misto';
+/** `luz-vermelha` = clarão quente (vermelho/laranja), não só branco.
+ *  `piscar` (08.10) = um OLHO PISCANDO: as pálpebras fecham em amêndoa, a
+ *  imagem troca com o olho fechado e ele abre no take novo. Casa com o
+ *  clique do mouse do Smart SFX. */
+export type TipoTransicao = 'nenhuma' | 'escurecer' | 'luz' | 'luz-vermelha' | 'piscar' | 'misto';
+
+/** Todas as transições que existem — a normalização aceita só estas. */
+export const TIPOS_DE_TRANSICAO: readonly TipoTransicao[] = ['nenhuma', 'escurecer', 'luz', 'luz-vermelha', 'piscar', 'misto'];
 
 /** Nome do layout pro editor (cards, timeline do Smart, avisos). */
 export function rotuloDoLayout(layout: LayoutInsert): string {
@@ -255,7 +261,7 @@ export function normalizarInsert(x: Insert & { palavra?: number; duracaoSec?: nu
     palavraAte: Math.max(0, Math.max(de, ate)),
     // layout/transição de versão antiga ou futura nunca derrubam o render
     layout: normalizarLayout(x.layout),
-    transicao: (['nenhuma', 'escurecer', 'luz', 'luz-vermelha', 'misto'] as const).includes(x.transicao) ? x.transicao : 'escurecer',
+    transicao: TIPOS_DE_TRANSICAO.includes(x.transicao) ? x.transicao : 'escurecer',
     audio: !!x.audio,
     volume: vol,
   };
@@ -1244,11 +1250,48 @@ export function quadroDoReact(
  *
  * `misto` alterna escurecer/luz por ocorrência (o índice), pra o AD não ficar
  * com seis flashes iguais.
+ *
+ * `piscar` não é um véu de cor: são PÁLPEBRAS. `forma: 'olho'` e `abertura`
+ * (1 = olho aberto, 0 = fechado) dizem ao render quanto do quadro elas tapam.
  */
 export type CorCobertura = 'preto' | 'branco' | 'vermelho';
-export type Cobertura = { cor: CorCobertura; alpha: number } | null;
+export type Cobertura = { cor: CorCobertura; alpha: number; forma?: 'olho'; abertura?: number } | null;
 
 export const TRANSICAO_DUR_SEC = 0.28;
+
+/**
+ * A PISCADA (08.10), medida como um piscar de verdade: as pálpebras fecham
+ * RÁPIDO (130ms, acelerando), o olho fica fechado ~1 quadro em volta do corte
+ * e abre um pouco mais devagar (170ms). O corte cai com o olho fechado — é
+ * isso que esconde a troca de imagem, como o pico do escurecer.
+ */
+export const PISCAR_FECHA_SEC = 0.13;
+export const PISCAR_FECHADO_SEC = 0.02;
+export const PISCAR_ABRE_SEC = 0.17;
+/** Quanto antes da borda a piscada começa a fechar e quanto depois ela termina de abrir. */
+export const PISCAR_ANTES_SEC = PISCAR_FECHA_SEC + PISCAR_FECHADO_SEC;
+export const PISCAR_DEPOIS_SEC = PISCAR_FECHADO_SEC + PISCAR_ABRE_SEC;
+
+/** Quanto do olho está aberto `d` segundos depois da borda (1 = aberto). */
+export function aberturaDoOlho(d: number): number {
+  if (d <= -PISCAR_ANTES_SEC || d >= PISCAR_DEPOIS_SEC) return 1;
+  if (d < -PISCAR_FECHADO_SEC) {
+    // fechando: começa devagar e acelera, como a pálpebra caindo
+    const x = (d + PISCAR_ANTES_SEC) / PISCAR_FECHA_SEC;
+    return Math.max(0, Math.min(1, 1 - x * x));
+  }
+  if (d <= PISCAR_FECHADO_SEC) return 0;
+  // abrindo: curva suave nas duas pontas
+  const y = (d - PISCAR_FECHADO_SEC) / PISCAR_ABRE_SEC;
+  return Math.max(0, Math.min(1, y * y * (3 - 2 * y)));
+}
+
+/** Até onde a transição alcança em volta da borda: [antes, depois] em segundos. */
+export function alcanceDaTransicao(tipo: TipoTransicao): { antes: number; depois: number } {
+  if (tipo === 'nenhuma') return { antes: 0, depois: 0 };
+  if (tipo === 'piscar') return { antes: PISCAR_ANTES_SEC, depois: PISCAR_DEPOIS_SEC };
+  return { antes: TRANSICAO_DUR_SEC / 2, depois: TRANSICAO_DUR_SEC / 2 };
+}
 
 export function coberturaDaTransicao(
   tipo: TipoTransicao,
@@ -1257,6 +1300,13 @@ export function coberturaDaTransicao(
   ocorrencia = 0,
 ): Cobertura {
   if (tipo === 'nenhuma') return null;
+  if (tipo === 'piscar') {
+    const d = t - borda;
+    if (d <= -PISCAR_ANTES_SEC || d >= PISCAR_DEPOIS_SEC) return null;
+    const abertura = aberturaDoOlho(d);
+    if (abertura >= 0.999) return null;
+    return { cor: 'preto', alpha: 1, forma: 'olho', abertura };
+  }
   const meia = TRANSICAO_DUR_SEC / 2;
   const d = Math.abs(t - borda);
   if (d > meia) return null;
@@ -1288,4 +1338,50 @@ export function coberturaNoInstante(
     }
   }
   return null;
+}
+
+/* ═════════════ as transições do vídeo, uma por borda (08.10) ═════════════ */
+
+/** O que de fato aparece em cada borda: `misto` já resolvido pela ocorrência. */
+export type TransicaoEfetiva = 'escurecer' | 'luz' | 'luz-vermelha' | 'piscar';
+
+export type TransicaoNoVideo = {
+  /** o instante do PICO (a borda): é onde a imagem troca */
+  t: number;
+  tipo: TransicaoEfetiva;
+  /** o insert dono da borda e qual borda é — chave estável pra edição do SFX */
+  insertId: string;
+  borda: 'entrada' | 'saida';
+  /** `${insertId}@entrada|saida` */
+  chave: string;
+};
+
+/**
+ * As transições que o RENDER desenha, uma por borda, na mesma ordem e com a
+ * mesma regra do `coberturaNoInstante`: cada borda conta como ocorrência (o
+ * `misto` alterna), e duas bordas coladas (insert emendado no outro) viram UMA
+ * troca — vale a primeira que desenha alguma coisa, como no quadro.
+ *
+ * É daqui que o Smart SFX tira onde bater e o projeto editável onde pôr o
+ * véu: os três leem a mesma lista, então som e imagem não descolam.
+ */
+export function transicoesDasJanelas(
+  janelas: JanelaInsert[],
+  tipoPorId: (id: string) => TipoTransicao,
+): TransicaoNoVideo[] {
+  const out: TransicaoNoVideo[] = [];
+  let n = 0;
+  for (const j of janelas) {
+    for (const [borda, qual] of [[j.start, 'entrada'], [j.end, 'saida']] as const) {
+      const ocorrencia = n++;
+      const tipo = tipoPorId(j.id);
+      if (tipo === 'nenhuma' || !Number.isFinite(borda)) continue;
+      const efetiva: TransicaoEfetiva = tipo === 'misto' ? (ocorrencia % 2 === 0 ? 'escurecer' : 'luz') : tipo;
+      // borda colada numa troca que JÁ entrou: o quadro mostra a primeira
+      const ja = out.find((x) => Math.abs(x.t - borda) < 1e-3);
+      if (ja) continue;
+      out.push({ t: borda, tipo: efetiva, insertId: j.id, borda: qual, chave: `${j.id}@${qual}` });
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
 }

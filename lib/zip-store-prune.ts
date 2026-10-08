@@ -81,6 +81,11 @@ export function zipGroupId(key: string): string {
   // caem no mesmo grupo pra serem mantidos/removidos como unidade.
   m = /^(famousHey:[^:]+):/.exec(key);
   if (m) return m[1];
+  // TRILHAS do Pilot (08.10): a biblioteca do cliente (`pilotTrilha:<id>`).
+  // Cada trilha é um grupo próprio de ciclo de vida PRÓPRIO — ver
+  // grupoAutogerido: lib/pilot-trilhas-store.ts guarda no máximo 12 e apaga
+  // as que saem da lista.
+  if (key.startsWith('pilotTrilha:')) return key;
   // desconhecida → grupo próprio (só é tocada sob as MESMAS regras: velho + fora da janela)
   return ` misc ${key}`;
 }
@@ -101,7 +106,7 @@ export function zipGroupId(key: string): string {
  * ⚠ Os bytes continuam contando no total — só a REMOÇÃO é que não os alcança.
  */
 export function grupoAutogerido(groupId: string): boolean {
-  return groupId.startsWith('famousHey:');
+  return groupId.startsWith('famousHey:') || groupId.startsWith('pilotTrilha:');
 }
 
 export interface ZipMeta {

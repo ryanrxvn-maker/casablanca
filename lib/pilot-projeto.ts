@@ -20,15 +20,19 @@
  */
 
 import {
+  alcanceDaTransicao,
   coverComFoco,
   coverNoRosto,
   palcoDoLayout,
+  transicoesDasJanelas,
   TRANSICAO_DUR_SEC,
   type LayoutInsert,
   type RostoAvatar,
   type TipoTransicao,
+  type TransicaoNoVideo,
 } from './pilot-inserts';
 import { escalaNoInstante, type ZoomSeg } from './pilot-pos-producao';
+import type { PedacoDaTrilha, SfxColocado } from './pilot-sonoplastia';
 
 /* ═══════════════════════════ roteiro (o que a pós guarda) ═══════════════ */
 
@@ -75,6 +79,23 @@ export type RoteiroEdicao = {
   zoom: ZoomSeg[];
   /** headlines no formato do engine (opaco aqui) */
   headlines: unknown[] | null;
+  /** SMART SFX (08.10): os sons que entraram no áudio, no tempo do vídeo final */
+  sfx?: SfxColocado[];
+  /** TRILHA (08.10): a música da biblioteca, cortada/repetida no tamanho do vídeo */
+  trilha?: {
+    trilhaId: string;
+    nome: string;
+    /** ganho linear aplicado (já nivelado na voz) */
+    ganho: number;
+    durTrilha: number;
+    pedacos: PedacoDaTrilha[];
+  } | null;
+  /** MIXER DE VELOCIDADE (08.10): o avatar limpo JÁ está nesta velocidade */
+  velocidade?: number;
+  /** as trocas que o render desenhou (08.10) — a janela de SFX edita em cima delas */
+  transicoes?: TransicaoNoVideo[];
+  /** onde o gancho acaba no vídeo (s) — o boom de suspense bate aqui */
+  fimDoGancho?: number | null;
 };
 
 const SLUG = /[^A-Za-z0-9_-]+/g;
@@ -162,19 +183,37 @@ export function intervalosDaLegenda(
 export type ArquivoProjeto = {
   /** nome do arquivo dentro da pasta de mídia do projeto */
   nome: string;
-  tipo: 'video' | 'imagem';
+  tipo: 'video' | 'imagem' | 'audio';
   w: number;
   h: number;
   /** duração do arquivo (s); imagem = 0 */
   durSec: number;
   temAudio: boolean;
+  /** taxa de amostragem (áudio) — o Premiere conta a duração por ela */
+  taxa?: number;
 };
+
+/**
+ * RAIAS de áudio: dois sons que se sobrepõem no tempo não cabem na mesma
+ * camada de nenhum editor. Guloso por início — cada item vai pra primeira raia
+ * em que não encosta no anterior (o mesmo `_sfx_lanes` das edições do CapCut).
+ */
+export function raiasDeAudio<T extends { start: number; end: number }>(itens: T[]): T[][] {
+  const raias: T[][] = [];
+  for (const it of [...itens].sort((a, b) => a.start - b.start)) {
+    const r = raias.find((x) => x[x.length - 1].end <= it.start + 1e-6);
+    if (r) r.push(it);
+    else raias.push([it]);
+  }
+  return raias;
+}
 
 export type Retangulo = { x: number; y: number; w: number; h: number };
 
 export type ItemTimeline = {
-  /** `topo` = por cima do b-roll: o avatar do React e a linha da divisão */
-  trilha: 'avatar' | 'broll' | 'topo' | 'transicao' | 'legenda' | 'headline';
+  /** `topo` = por cima do b-roll: o avatar do React e a linha da divisão.
+   *  `sfx` e `musica` (08.10) são SÓ áudio: viram camadas de áudio. */
+  trilha: 'avatar' | 'broll' | 'topo' | 'transicao' | 'legenda' | 'headline' | 'sfx' | 'musica';
   arquivo: string;
   /** no vídeo final (s) */
   start: number;
@@ -192,6 +231,9 @@ export type ItemTimeline = {
   escala?: Array<{ t: number; v: number }>;
   /** opacidade 0..1 em instantes relativos ao início do item (s) */
   opacidade?: Array<{ t: number; v: number }>;
+  /** fade de áudio nas pontas (s) — SFX e trilha */
+  fadeIn?: number;
+  fadeOut?: number;
 };
 
 export type ProjetoTimeline = {
@@ -217,6 +259,13 @@ export type MidiaDoProjeto = {
   vermelho?: ArquivoProjeto;
   /** a LINHA colorida da divisão, por cor (#rrggbb): PNG transparente do quadro inteiro */
   linhas?: Map<string, ArquivoProjeto>;
+  /** PISCAR (08.10): as pálpebras quadro a quadro, com o intervalo de cada
+   *  PNG relativo à borda (s) — o mesmo desenho do render */
+  olho?: Array<{ arquivo: ArquivoProjeto; de: number; ate: number }>;
+  /** SMART SFX (08.10): o WAV de cada som usado */
+  sfx?: Map<string, ArquivoProjeto>;
+  /** TRILHA (08.10) */
+  trilha?: ArquivoProjeto;
 };
 
 /** O card do React no editor (lá não dá pra tirar o fundo sozinho): 4:5, no
@@ -347,34 +396,68 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
     }
   }
 
-  // TRANSIÇÃO: a mesma ordem de ocorrências do coberturaNoInstante (cada
-  // borda conta, o `misto` alterna). Bordas coladas: vale a primeira, como no
-  // render.
-  const meia = TRANSICAO_DUR_SEC / 2;
-  let n = 0;
-  let ultimaBorda = -Infinity;
-  for (const ins of inserts) {
-    for (const borda of [ins.start, ins.end]) {
-      const ocorrencia = n++;
-      if (ins.transicao === 'nenhuma') continue;
-      if (borda - ultimaBorda < TRANSICAO_DUR_SEC - 1e-6) continue;
-      const cor = ins.transicao === 'escurecer' ? 'preto'
-        : ins.transicao === 'luz' ? 'branco'
-          : ins.transicao === 'luz-vermelha' ? 'vermelho'
-            : ocorrencia % 2 === 0 ? 'preto' : 'branco';
-      const arquivo = cor === 'preto' ? midia.preto : cor === 'branco' ? midia.branco : midia.vermelho;
-      if (!arquivo) continue;
-      const de = Math.max(0, borda - meia);
-      const ate = Math.min(dur, borda + meia);
-      if (!(ate - de > 0.02)) continue;
-      ultimaBorda = borda;
-      const alfa = (t: number) => Math.round(Math.max(0, 1 - Math.abs(t - borda) / meia) * 1000) / 1000;
-      const pontos = [de, borda, ate].filter((t, i, a) => i === 0 || t - a[i - 1] > 1e-3);
-      itens.push({
-        trilha: 'transicao', arquivo: arquivo.nome, start: de, end: ate, fonteDe: 0, velocidade: 1, volume: 0,
-        destino: canvas, recorte: RECORTE_INTEIRO,
-        opacidade: pontos.map((t) => ({ t: Math.round((t - de) * 1e6) / 1e6, v: alfa(t) })),
-      });
+  // TRANSIÇÃO: a MESMA lista de trocas que o render desenha (transicoesDasJanelas:
+  // cada borda conta, o `misto` alterna, bordas coladas viram uma). Duas trocas
+  // perto demais não podem se sobrepor na mesma camada: vale a primeira.
+  let ultimaFim = -Infinity;
+  for (const tr of transicoesDasJanelas(inserts, (id) => inserts.find((i) => i.id === id)?.transicao || 'nenhuma')) {
+    const borda = tr.t;
+    const alc = alcanceDaTransicao(tr.tipo);
+    if (borda - alc.antes < ultimaFim - 1e-6) continue;
+    if (tr.tipo === 'piscar') {
+      // PISCAR: as pálpebras quadro a quadro (o render desenha a mesma curva)
+      if (!midia.olho?.length) continue;
+      let algum = false;
+      for (const q of midia.olho) {
+        const de = Math.max(0, borda + q.de);
+        const ate = Math.min(dur, borda + q.ate);
+        if (!(ate - de > 1e-3)) continue;
+        itens.push({ trilha: 'transicao', arquivo: q.arquivo.nome, start: de, end: ate, fonteDe: 0, velocidade: 1, volume: 0, destino: canvas, recorte: RECORTE_INTEIRO });
+        algum = true;
+      }
+      if (algum) ultimaFim = borda + alc.depois;
+      continue;
+    }
+    const meia = TRANSICAO_DUR_SEC / 2;
+    const cor = tr.tipo === 'escurecer' ? 'preto' : tr.tipo === 'luz' ? 'branco' : 'vermelho';
+    const arquivo = cor === 'preto' ? midia.preto : cor === 'branco' ? midia.branco : midia.vermelho;
+    if (!arquivo) continue;
+    const de = Math.max(0, borda - meia);
+    const ate = Math.min(dur, borda + meia);
+    if (!(ate - de > 0.02)) continue;
+    ultimaFim = borda + meia;
+    const alfa = (t: number) => Math.round(Math.max(0, 1 - Math.abs(t - borda) / meia) * 1000) / 1000;
+    const pontos = [de, borda, ate].filter((t, i, a) => i === 0 || t - a[i - 1] > 1e-3);
+    itens.push({
+      trilha: 'transicao', arquivo: arquivo.nome, start: de, end: ate, fonteDe: 0, velocidade: 1, volume: 0,
+      destino: canvas, recorte: RECORTE_INTEIRO,
+      opacidade: pontos.map((t) => ({ t: Math.round((t - de) * 1e6) / 1e6, v: alfa(t) })),
+    });
+  }
+
+  // SMART SFX (08.10): cada som no MESMO lugar da mixagem do Pilot — o
+  // começo do arquivo em `inicio`, a batida caindo no pico da transição.
+  for (const sx of roteiro.sfx || []) {
+    const arq = midia.sfx?.get(sx.sfx);
+    if (!arq) { avisos.push(`o SFX "${sx.sfx}" não foi pro projeto — ele está no vídeo do Pilot, mas aqui ficou de fora.`); continue; }
+    itens.push({
+      trilha: 'sfx', arquivo: arq.nome, start: sx.inicio, end: sx.inicio + sx.dur, fonteDe: sx.deSec, velocidade: 1,
+      volume: Math.round(sx.ganho * 10000) / 10000, destino: canvas, recorte: RECORTE_INTEIRO,
+      fadeIn: sx.deSec > 0 ? 0.003 : 0, fadeOut: sx.fadeOutSec,
+    });
+  }
+  // TRILHA (08.10): os pedaços cortados/repetidos no tamanho do vídeo
+  if (roteiro.trilha && roteiro.trilha.pedacos.length) {
+    if (!midia.trilha) {
+      avisos.push(`a trilha "${roteiro.trilha.nome}" não está mais salva neste navegador — ela ficou fora do projeto (o vídeo do Pilot tem).`);
+    } else {
+      for (const pd of roteiro.trilha.pedacos) {
+        itens.push({
+          trilha: 'musica', arquivo: midia.trilha.nome, start: pd.inicio, end: pd.inicio + pd.dur, fonteDe: pd.deSec, velocidade: 1,
+          volume: Math.round(roteiro.trilha.ganho * 10000) / 10000, destino: canvas, recorte: RECORTE_INTEIRO,
+          fadeIn: pd.fadeIn, fadeOut: pd.fadeOut,
+        });
+      }
     }
   }
 
@@ -395,7 +478,9 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
     if (!(end - start > 1e-3)) return [];
     if (start === it.start && end === it.end) return [it];
     const dentroDoItem = <K extends { t: number }>(ks?: K[]) => ks?.map((k) => ({ ...k, t: k.t - (start - it.start) })).filter((k) => k.t >= -1e-6 && k.t <= end - start + 1e-6);
-    return [{ ...it, start, end, fonteDe: it.fonteDe + (start - it.start) * it.velocidade, escala: dentroDoItem(it.escala), opacidade: dentroDoItem(it.opacidade) }];
+    // som cortado no fim do vídeo: o fade de saída vem junto, encurtado
+    const fadeOut = it.fadeOut != null && end < it.end ? Math.min(it.fadeOut, Math.max(0, end - start) / 2) : it.fadeOut;
+    return [{ ...it, start, end, fonteDe: it.fonteDe + (start - it.start) * it.velocidade, escala: dentroDoItem(it.escala), opacidade: dentroDoItem(it.opacidade), ...(fadeOut != null ? { fadeOut } : {}) }];
   });
   for (const it of recortados) {
     if (!it.escala?.length) delete it.escala;
@@ -405,7 +490,8 @@ export function montarTimeline(nome: string, roteiro: RoteiroEdicao, midia: Midi
   const arquivos = [midia.avatar, ...[...midia.inserts.values()].flatMap((m) => [m.arquivo, ...(m.congelado ? [m.congelado] : [])]),
     ...midia.legendas.map((l) => l.arquivo), ...midia.headlines.map((h) => h.arquivo),
     ...(midia.preto ? [midia.preto] : []), ...(midia.branco ? [midia.branco] : []), ...(midia.vermelho ? [midia.vermelho] : []),
-    ...(midia.linhas ? [...midia.linhas.values()] : [])].filter((a) => usados.has(a.nome));
+    ...(midia.linhas ? [...midia.linhas.values()] : []), ...(midia.olho ? midia.olho.map((q) => q.arquivo) : []),
+    ...(midia.sfx ? [...midia.sfx.values()] : []), ...(midia.trilha ? [midia.trilha] : [])].filter((a) => usados.has(a.nome));
   const unicos = [...new Map(arquivos.map((a) => [a.nome, a])).values()];
   return { nome, W, H, fps, durSec: dur, arquivos: unicos, itens: recortados, avisos };
 }
@@ -449,7 +535,7 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
   const videos: Record<string, unknown>[] = [];
   const speeds: Record<string, unknown>[] = [];
   const ordem: ItemTimeline['trilha'][] = ['avatar', 'broll', 'topo', 'transicao', 'legenda', 'headline'];
-  const nomesTrilha: Record<ItemTimeline['trilha'], string> = { avatar: 'AVATAR', broll: 'B-ROLL', topo: 'AVATAR REACT / LINHA', transicao: 'TRANSICAO', legenda: 'LEGENDA', headline: 'HEADLINE' };
+  const nomesTrilha: Record<ItemTimeline['trilha'], string> = { avatar: 'AVATAR', broll: 'B-ROLL', topo: 'AVATAR REACT / LINHA', transicao: 'TRANSICAO', legenda: 'LEGENDA', headline: 'HEADLINE', sfx: 'SFX', musica: 'TRILHA' };
   const tracks: Record<string, unknown>[] = [];
   let duracao = 0;
   ordem.forEach((trilha, indice) => {
@@ -502,6 +588,72 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
     tracks.push({ attribute: 0, flag: 0, id: novoId(), is_default_name: false, name: nomesTrilha[trilha], segments, type: 'video' });
   });
 
+  // ÁUDIO (08.10): SFX e trilha em camadas de áudio próprias, em raias que
+  // nunca se sobrepõem. O formato é o que o próprio CapCut grava (material
+  // `extract_music`, fade `audio_fade`), copiado de um rascunho real.
+  const audios: Record<string, unknown>[] = [];
+  const fades: Record<string, unknown>[] = [];
+  const canais: Record<string, unknown>[] = [];
+  const vocais: Record<string, unknown>[] = [];
+  const marcadores: Record<string, unknown>[] = [];
+  const materialDeAudio = new Map<string, string>();
+  let indiceAudio = 0;
+  for (const [tipo, nomeBase] of [['sfx', 'SFX'], ['musica', 'TRILHA']] as const) {
+    const raias = raiasDeAudio(tl.itens.filter((i) => i.trilha === tipo));
+    raias.forEach((raia, r) => {
+      const segments = raia.map((item) => {
+        const arquivo = porNome.get(item.arquivo)!;
+        let materialId = materialDeAudio.get(arquivo.nome);
+        if (!materialId) {
+          materialId = novoId();
+          materialDeAudio.set(arquivo.nome, materialId);
+          audios.push({
+            id: materialId, unique_id: '', type: 'extract_music', name: arquivo.nome, duration: us(arquivo.durSec),
+            path: caminho(arquivo.nome), category_name: 'local', wave_points: [], music_id: materialId, app_id: 0, text_id: '',
+            tone_type: '', source_platform: 0, video_id: '', effect_id: '', resource_id: '', third_resource_id: '', category_id: '',
+            intensifies_path: '', formula_id: '', check_flag: 1, team_id: '', local_material_id: materialId, tone_speaker: '',
+            mock_tone_speaker: '', tone_effect_id: '', tone_effect_name: '', tone_platform: '', cloned_model_type: '',
+            tone_category_id: '', tone_category_name: '', tone_second_category_id: '', tone_second_category_name: '',
+            request_id: '', query: '', search_id: '', sound_separate_type: '', is_text_edit_overdub: false, is_ugc: false,
+            is_ai_clone_tone: false, source_from: '', copyright_limit_type: 'none', music_source: '',
+          });
+        }
+        const speedId = novoId();
+        speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: 1.0, type: 'speed' });
+        const marcadorId = novoId();
+        marcadores.push({ id: marcadorId, type: 'placeholder_info', meta_type: 'none', res_path: '', res_text: '', error_path: '', error_text: '' });
+        const canalId = novoId();
+        canais.push({ id: canalId, type: '', audio_channel_mapping: 0, is_config_open: false });
+        const vocalId = novoId();
+        vocais.push({ id: vocalId, type: 'vocal_separation', choice: 0, removed_sounds: [], time_range: null, production_path: '', final_algorithm: '', enter_from: '' });
+        const refs = [speedId, marcadorId];
+        const fi = Math.max(0, item.fadeIn || 0);
+        const fo = Math.max(0, item.fadeOut || 0);
+        if (fi > 0.0005 || fo > 0.0005) {
+          const fadeId = novoId();
+          fades.push({ id: fadeId, type: 'audio_fade', fade_type: 0, fade_in_duration: us(fi), fade_out_duration: us(fo) });
+          refs.push(fadeId);
+        }
+        refs.push(canalId, vocalId);
+        const alvo = { start: us(item.start), duration: Math.max(1, us(item.end) - us(item.start)) };
+        duracao = Math.max(duracao, alvo.start + alvo.duration);
+        return {
+          id: novoId(), source_timerange: { start: us(item.fonteDe), duration: alvo.duration }, target_timerange: alvo,
+          render_timerange: { start: 0, duration: 0 }, desc: '', state: 0, speed: 1.0, is_loop: false, is_tone_modify: false,
+          reverse: false, intensifies_audio: false, cartoon: false, volume: item.volume, last_nonzero_volume: item.volume || 1,
+          clip: null, uniform_scale: null, material_id: materialId, extra_material_refs: refs, render_index: 0, keyframe_refs: [],
+          enable_lut: false, enable_adjust: false, enable_hsl: false, visible: true, group_id: '', enable_color_curves: true,
+          enable_hsl_curves: true, track_render_index: indiceAudio, hdr_settings: null, enable_color_wheels: true, track_attribute: 0,
+          is_placeholder: false, template_id: '', enable_smart_color_adjust: false, template_scene: 'default', common_keyframes: [],
+          caption_info: null, enable_color_match_adjust: false, enable_color_correct_adjust: false, enable_adjust_mask: false,
+          raw_segment_id: '', lyric_keyframes: null, enable_video_mask: true, source: 'segmentsourcenormal',
+        };
+      });
+      tracks.push({ attribute: 0, flag: 0, id: novoId(), is_default_name: false, name: r === 0 ? nomeBase : `${nomeBase} ${r + 1}`, segments, type: 'audio' });
+      indiceAudio++;
+    });
+  }
+
   const materiaisVazios = ['ai_translates', 'audio_balances', 'audio_effects', 'audio_fades', 'audio_track_indexes', 'audios', 'beats', 'canvases', 'chromas', 'color_curves',
     'digital_humans', 'drafts', 'effects', 'flowers', 'green_screens', 'handwrites', 'hsl', 'images', 'log_color_wheels', 'loudnesses', 'manual_deformations', 'masks',
     'material_animations', 'material_colors', 'multi_language_refs', 'placeholders', 'plugin_effects', 'primary_color_wheels', 'realtime_denoises', 'shapes', 'smart_crops',
@@ -510,6 +662,11 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
   const materials: Record<string, unknown[]> = Object.fromEntries(materiaisVazios.map((k) => [k, []]));
   materials.videos = videos;
   materials.speeds = speeds;
+  materials.audios = audios;
+  materials.audio_fades = fades;
+  materials.sound_channel_mappings = canais;
+  materials.vocal_separations = vocais;
+  materials.placeholder_infos = marcadores;
 
   const conteudo = {
     canvas_config: { width: tl.W, height: tl.H, ratio: 'original' }, color_space: 0,
@@ -529,9 +686,9 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
   const agora = opts.agoraUs ?? Date.now() * 1000;
   const itensImportados = tl.arquivos.map((a) => ({
     ai_group_type: '', create_time: 0, duration: a.tipo === 'imagem' ? 5_000_000 : us(a.durSec), enter_from: 0, extra_info: a.nome,
-    file_Path: `${raiz}/${opts.pasta}/${CAPCUT_SUBPASTA_MIDIA}/${a.nome}`, height: a.h, id: novoId(), import_time: 0, import_time_ms: 0,
-    item_source: 1, md5: '', metetype: a.tipo === 'imagem' ? 'photo' : 'video', roughcut_time_range: { duration: a.tipo === 'imagem' ? 5_000_000 : us(a.durSec), start: 0 },
-    sub_time_range: { duration: -1, start: -1 }, type: 0, width: a.w,
+    file_Path: `${raiz}/${opts.pasta}/${CAPCUT_SUBPASTA_MIDIA}/${a.nome}`, height: a.tipo === 'audio' ? 0 : a.h, id: novoId(), import_time: 0, import_time_ms: 0,
+    item_source: 1, md5: '', metetype: a.tipo === 'imagem' ? 'photo' : a.tipo === 'audio' ? 'music' : 'video', roughcut_time_range: { duration: a.tipo === 'imagem' ? 5_000_000 : us(a.durSec), start: 0 },
+    sub_time_range: { duration: -1, start: -1 }, type: 0, width: a.tipo === 'audio' ? 0 : a.w,
   }));
   const meta = {
     cloud_draft_cover: false, cloud_draft_sync: false, cloud_package_completed_time: '', draft_cloud_capcut_purchase_info: '', draft_cloud_last_action_download: false,
@@ -641,9 +798,11 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
     fileIds.set(a.nome, id);
     // Imagem parada não tem fim: a duração "longa" deixa o clipe durar o que precisar.
     const dur = a.tipo === 'imagem' ? imagemDur : f(a.durSec);
-    const audio = a.temAudio ? `<audio><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics><channelcount>2</channelcount></audio>` : '';
+    const audio = a.temAudio ? `<audio><samplecharacteristics><depth>16</depth><samplerate>${a.taxa || 48000}</samplerate></samplecharacteristics><channelcount>2</channelcount></audio>` : '';
+    // SFX e trilha: arquivo só de áudio (sem <video>, senão o Premiere procura imagem nele)
+    const video = a.tipo === 'audio' ? '' : `<video><samplecharacteristics>${rate}<width>${a.w}</width><height>${a.h}</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></video>`;
     return `<file id="${id}"><name>${xmlEsc(a.nome)}</name><pathurl>${xmlEsc(url(a.nome))}</pathurl>${rate}<duration>${dur}</duration>`
-      + `<media><video><samplecharacteristics>${rate}<width>${a.w}</width><height>${a.h}</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></video>${audio}</media></file>`;
+      + `<media>${video}${audio}</media></file>`;
   };
   const param = (id: string, nome: string, valor: string, keys?: Array<{ quadro: number; valor: string }>) =>
     `<parameter authoringApp="PremierePro"><parameterid>${id}</parameterid><name>${nome}</name>`
@@ -692,8 +851,19 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
       const a = porNome.get(item.arquivo)!;
       const tc = tempoNoClipe(item, a);
       const { ini, fim, dentro, fora } = tc;
+      // nível do clipe; com fade (SFX/trilha) vira rampa de keyframes nas pontas
+      const vol = Math.round(Math.min(3.98109, item.volume) * 10000) / 10000;
+      const fi = Math.round(Math.max(0, item.fadeIn || 0) * fps);
+      const fo = Math.round(Math.max(0, item.fadeOut || 0) * fps);
+      const durQ = fora - dentro;
+      const chaves: Array<{ q: number; v: number }> = [];
+      if (fi > 0 && fi < durQ) chaves.push({ q: dentro, v: 0 }, { q: dentro + fi, v: vol });
+      if (fo > 0 && fo < durQ) chaves.push({ q: Math.max(dentro + fi, fora - fo), v: vol }, { q: fora, v: 0 });
+      const valorNivel = chaves.length
+        ? chaves.map((k) => `<keyframe><when>${k.q}</when><value>${k.v}</value></keyframe>`).join('')
+        : `<value>${vol}</value>`;
       const nivel = `<filter><effect><name>Audio Levels</name><effectid>audiolevels</effectid><effectcategory>audiolevels</effectcategory><effecttype>audiolevels</effecttype><mediatype>audio</mediatype>`
-        + `<parameter><parameterid>level</parameterid><name>Level</name><valuemin>0</valuemin><valuemax>3.98109</valuemax><value>${Math.round(item.volume * 1000) / 1000}</value></parameter></effect></filter>`;
+        + `<parameter><parameterid>level</parameterid><name>Level</name><valuemin>0</valuemin><valuemax>3.98109</valuemax>${valorNivel}</parameter></effect></filter>`;
       const remap = Math.abs(tc.vel - 1) > 1e-3 ? timeRemap(tc, false) : '';
       return `<clipitem id="clipitem-${++clipSeq}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
         + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${arquivoXml(a)}<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>${remap}${nivel}</clipitem>`;
@@ -709,6 +879,9 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
     // a fala do avatar mora nas DUAS camadas (o React sobe pra de cima)
     + trilhaAudio((i) => (i.trilha === 'avatar' || i.trilha === 'topo') && !!porNome.get(i.arquivo)?.temAudio)
     + trilhaAudio((i) => i.trilha === 'broll' && i.volume > 0 && !!porNome.get(i.arquivo)?.temAudio)
+    // SFX e trilha (08.10): uma faixa por raia — nada se sobrepõe na mesma faixa
+    + raiasDeAudio(tl.itens.filter((i) => i.trilha === 'sfx')).map((raia) => trilhaAudio((i) => raia.includes(i))).join('')
+    + raiasDeAudio(tl.itens.filter((i) => i.trilha === 'musica')).map((raia) => trilhaAudio((i) => raia.includes(i))).join('')
     + `</audio></media></sequence></xmeml>\n`;
 }
 
