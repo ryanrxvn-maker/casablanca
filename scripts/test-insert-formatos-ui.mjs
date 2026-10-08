@@ -94,10 +94,16 @@ try {
   }
   assert.ok(comLinha, 'o formato escolhido no StockFrame foi pra montagem (aparece no PC)');
   await comLinha.locator('.pi-card-topo').click();
-  await comLinha.locator('[data-formato]').first().waitFor();
-  assert.equal(await comLinha.locator('[data-formato]').count(), 6, 'os mesmos 6 formatos no PC');
+  // 08.10: o insert escolhido abre no PAINEL da direita (lista + painel)
+  const insp = pc.locator('.pi-inspetor');
+  await insp.locator('[data-formato]').first().waitFor();
+  assert.equal(await insp.locator('[data-formato]').count(), 6, 'os mesmos 6 formatos no PC');
+  const nomeDaLinha = (await comLinha.locator('.pi-card-nome').innerText()).replace(/^STOCKFRAME/i, '').trim().toLowerCase();
+  const nomeDoPainel = (await insp.locator('.pi-insp-nome').innerText()).trim().toLowerCase();
+  assert.ok(nomeDaLinha.includes(nomeDoPainel) || nomeDoPainel.includes(nomeDaLinha), `o painel mostra o take clicado (${nomeDoPainel} × ${nomeDaLinha})`);
+  await page.waitForTimeout(350);
   await page.screenshot({ path: resolve(out, 'pc-inserts-take-stockframe.png') });
-  await comLinha.locator('[data-formato="mescla"]').click();
+  await insp.locator('[data-formato="mescla"]').click();
   assert.match(await comLinha.locator('.pi-card-meta').innerText(), /Mescla/, 'formato do take do StockFrame trocado pelo PC');
 
   // ── nunca insert por cima de insert ──

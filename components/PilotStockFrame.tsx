@@ -646,7 +646,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
     // nunca por cima de um insert do PC/Flow (takes StockFrame à mão podem
     // se empilhar, como sempre — a montagem empurra um pro lado do outro)
     const occupant = quemOcupaOTrecho(otherInserts, placement.anchor, placement.from, placement.to);
-    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Marque uma fala livre — nunca insert por cima de insert.`); return false; }
+    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Marque uma fala livre. Nunca insert por cima de insert.`); return false; }
     operationLocked.current = true;
     setBusyTake(video.id); setError(''); setNotice('');
     try {
@@ -980,7 +980,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
     }
     const clash = planned.map(({ segment }) => ({ segment, occupant: occupiedBy(segment.anchor, segment.wordFrom, segment.wordTo) })).find((item) => item.occupant);
     if (clash) {
-      setError(`O trecho ${clash.segment.anchor} (palavras ${clash.segment.wordFrom + 1}–${clash.segment.wordTo + 1}) cruza ${describeOccupant(clash.occupant!)}. Ajuste o trecho ou deixe com o avatar — nunca insert por cima de insert.`); return false;
+      setError(`O trecho ${clash.segment.anchor} (palavras ${clash.segment.wordFrom + 1} a ${clash.segment.wordTo + 1}) cruza ${describeOccupant(clash.occupant!)}. Ajuste o trecho ou deixe com o avatar. Nunca insert por cima de insert.`); return false;
     }
     if (coverage !== 100) {
       const expected = Math.round(measured.totalWords * coverage / 100);
@@ -1061,7 +1061,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
       : activeSmart.wordTo;
     // nunca estica o trecho por cima de um insert do PC/Flow
     const occupant = occupiedBy(activeSmart.anchor, nextFrom, nextTo);
-    if (occupant) { setError(`Esse limite cruza ${describeOccupant(occupant)} — nunca insert por cima de insert.`); return; }
+    if (occupant) { setError(`Esse limite cruza ${describeOccupant(occupant)}. Nunca insert por cima de insert.`); return; }
     const length = nextTo - nextFrom + 1;
     setSmart((current) => current.map((segment) => segment.id !== activeSmart.id ? segment : {
       ...segment,
@@ -1081,7 +1081,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
       const free = maiorTrechoLivre(occupied, block.anchor, from, to);
       if (!free) {
         const occupant = occupiedBy(block.anchor, from, to);
-        setError(`Esse trecho inteiro já tem ${occupant ? describeOccupant(occupant) : 'insert'} — nunca insert por cima de insert.`);
+        setError(`Esse trecho inteiro já tem ${occupant ? describeOccupant(occupant) : 'insert'}. Nunca insert por cima de insert.`);
         return;
       }
       from = free.de;
@@ -1111,7 +1111,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
     }
     const { anchor: targetAnchor, from, to, segmentId } = smartEditTarget;
     const occupant = !segmentId ? occupiedBy(targetAnchor, from, to) : null;
-    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Escolha uma fala livre — nunca insert por cima de insert.`); return; }
+    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Escolha uma fala livre. Nunca insert por cima de insert.`); return; }
     const part = parts.find((item) => item.label === targetAnchor);
     const words = part?.text.match(/\S+/g) || [];
     const text = words.slice(from, to + 1).join(' ');
@@ -1193,7 +1193,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
     if (!enabled || !avatarSuggestions) return;
     const { segment, candidates } = avatarSuggestions;
     const occupant = occupiedBy(segment.anchor, segment.wordFrom, segment.wordTo);
-    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Escolha uma fala livre — nunca insert por cima de insert.`); return; }
+    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Escolha uma fala livre. Nunca insert por cima de insert.`); return; }
     const video = suggestionMedia.get(candidate.video.id) || candidate.video;
     const id = `sugestao:${crypto.randomUUID()}`;
     const ordered = [{ ...candidate, video }, ...candidates.filter((item) => item.video.id !== candidate.video.id)

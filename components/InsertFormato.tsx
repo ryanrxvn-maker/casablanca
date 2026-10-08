@@ -30,7 +30,7 @@ export const FORMATOS: Array<{ id: FormatoId; nome: string; dica: string }> = [
   { id: 'faixas', nome: 'Dividida', dica: 'Meio a meio, emenda reta: avatar numa metade, take na outra.' },
   { id: 'cards', nome: 'Arredondada', dica: 'Dois cards com cantos arredondados e respiro entre eles.' },
   { id: 'linha', nome: 'Com linha', dica: 'Meio a meio com uma linha colorida marcando a emenda.' },
-  { id: 'mescla', nome: 'Mescla', dica: 'O take some em degradê por cima do fundo do avatar — parece um vídeo só.' },
+  { id: 'mescla', nome: 'Mescla', dica: 'O take some em degradê por cima do fundo do avatar e parece um vídeo só.' },
   { id: 'react', nome: 'React', dica: 'Take em tela cheia e o avatar SEM FUNDO pequeno no canto de baixo.' },
 ];
 
