@@ -28,6 +28,8 @@ import {
 } from '../../ToolIcons';
 import { Reveal } from '../v3/kit';
 import { useMagnetic, useSpotlight } from './fx';
+import { Smoke } from './Smoke';
+import { SectionHead } from './ui';
 
 const RED = '#e0483f';
 const VIOLET = '#c4b5fd';
@@ -134,15 +136,13 @@ export const FERRAMENTAS_NO_AR = GROUPS.reduce((n, g) => n + g.tools.length, 0);
 export function SuiteSection() {
   return (
     <section id="suite" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
-      <Reveal>
-        <h2 className="section-title text-[40px] leading-[1.02] md:text-[58px]">
-          {FERRAMENTAS_NO_AR} ferramentas.{' '}
-          <span className="text-editorial italic text-white/70">Uma pra cada gargalo.</span>
-        </h2>
-        <p className="mt-4 max-w-[60ch] text-[15.5px] leading-[1.7] text-white/[0.58]">
-          Cada linha mostra o plano de hoje. Se está aqui, está no ar.
-        </p>
-      </Reveal>
+      <div aria-hidden className="sec-glow" style={{ ['--g' as string]: 'rgba(167,139,250,0.09)' }} />
+      <SectionHead
+        tone={VIOLET}
+        ask="E o resto do trabalho?"
+        answer={['Uma ferramenta pra', { mark: 'cada etapa' }, 'da edição.']}
+        lead="Do download da referência ao orçamento do cliente. Cada uma mostra o plano de hoje: se está aqui, está no ar."
+      />
 
       <div className="mt-12 grid grid-cols-1 gap-x-10 gap-y-12 lg:grid-cols-3">
         {GROUPS.map((g, gi) => (
@@ -240,12 +240,11 @@ const CHECKS = [
 export function HowSection() {
   return (
     <section id="como" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
-      <Reveal>
-        <h2 className="section-title text-[40px] leading-[1.02] md:text-[58px]">
-          Do bruto ao pronto.{' '}
-          <span className="text-editorial italic text-white/70">Em três passos.</span>
-        </h2>
-      </Reveal>
+      <SectionHead
+        tone={LIME}
+        ask="Como eu começo?"
+        answer={[{ mark: 'Três passos' }, 'e você já está editando.']}
+      />
 
       <div className="relative mt-12">
         <span aria-hidden className="absolute left-0 right-0 top-[34px] hidden h-px bg-gradient-to-r from-white/25 via-white/10 to-transparent md:block" />
@@ -315,14 +314,13 @@ export function PricingSection() {
 
   return (
     <section id="planos" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
-      <Reveal>
-        <div className="text-center">
-          <h2 className="section-title text-[40px] leading-[1.02] md:text-[58px]">
-            Começa grátis.{' '}
-            <span className="text-editorial italic text-white/70">Assina quando fizer sentido.</span>
-          </h2>
-        </div>
-      </Reveal>
+      <div aria-hidden className="sec-glow" style={{ ['--g' as string]: 'rgba(167,139,250,0.10)' }} />
+      <SectionHead
+        tone={VIOLET}
+        align="center"
+        ask="Quanto custa?"
+        answer={['Começa', { mark: 'grátis.' }, 'Assina quando fizer sentido.']}
+      />
 
       <div className="mx-auto mt-12 grid max-w-[960px] grid-cols-1 items-stretch gap-4 md:grid-cols-2">
         <Reveal>
@@ -426,18 +424,14 @@ export function FaqSection() {
   return (
     <section id="faq" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:gap-16">
-        <Reveal>
-          <div className="lg:sticky lg:top-28">
-            <h2 className="section-title text-[40px] leading-[1.02] md:text-[54px]">
-              Tira a dúvida.{' '}
-              <span className="text-editorial italic text-white/70">Depois é só usar.</span>
-            </h2>
-            <p className="mt-5 max-w-[38ch] text-[15px] leading-relaxed text-white/55">
-              Não achou o que procurava? O botão de ajuda, no canto da tela, fala direto com o
-              suporte.
-            </p>
-          </div>
-        </Reveal>
+        <div className="lg:sticky lg:top-28 lg:self-start">
+            <SectionHead
+              tone="#ebc860"
+              ask="Ficou alguma dúvida?"
+              answer={['Respostas', { mark: 'rápidas' }, 'pras perguntas de sempre.']}
+              lead="Não achou o que procurava? O botão de ajuda, no canto da tela, fala direto com o suporte."
+            />
+        </div>
 
         <div className="border-t border-white/10">
           {FAQ.map((item, i) => (
@@ -472,19 +466,17 @@ export function FinalCta() {
       <Reveal>
         <div className="mx-auto max-w-[1360px] px-5 md:px-8">
           <div className="fc relative overflow-hidden rounded-[20px] px-6 py-16 md:px-16 md:py-24">
+            <Smoke className="absolute inset-0 h-full w-full opacity-90" />
             <div aria-hidden className="fc-grid pointer-events-none absolute inset-0" />
             <div className="relative grid grid-cols-1 items-center gap-10 lg:grid-cols-[1.4fr_0.6fr]">
               <div>
-                <h2 className="section-title text-[44px] leading-[1] md:text-[76px]">
-                  Cria a conta grátis.
-                  <span className="mt-1 block text-editorial italic text-white/70" style={{ paddingBottom: '0.08em' }}>
-                    O resto do dia agradece.
-                  </span>
-                </h2>
-                <p className="mt-6 max-w-[52ch] text-[16px] leading-[1.7] text-white/60">
-                  Leva menos tempo do que exportar um vídeo. Você começa pelo plano grátis e
-                  decide o resto depois.
-                </p>
+                <SectionHead
+                  tone={RED}
+                  size="xl"
+                  ask="Bora parar de editar no braço?"
+                  answer={['Cria a sua conta', { mark: 'grátis' }, 'agora.']}
+                  lead="Não pede cartão. Você começa pelo plano grátis e decide o resto depois."
+                />
                 <div className="mt-9 flex flex-wrap items-center gap-3">
                   <Link ref={ctaRef} href="/register" className="btn-primary !rounded-[12px] !px-7 !text-[15px]">
                     Criar conta grátis →

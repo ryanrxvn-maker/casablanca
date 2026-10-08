@@ -27,7 +27,6 @@ import { Ticker, useClock, useToday } from '../v3/kit';
 import { AudioSection } from './Audio';
 import { FakePrintSection } from './FakePrint';
 import { Hero } from './Hero';
-import { NumbersBand } from './Numbers';
 import { CopyFixSection, LegendasSection, preloadLegendaFonts } from './Legendas';
 import { FaqSection, FinalCta, HowSection, LandingFooter, PricingSection, SuiteSection } from './Rest';
 
@@ -70,7 +69,6 @@ export function LandingV4() {
         ]}
       />
 
-      <NumbersBand />
       <LegendasSection />
       <CopyFixSection />
       <FakePrintSection />
@@ -85,6 +83,17 @@ export function LandingV4() {
       <style jsx global>{`
         .landing-v4 section[id] {
           scroll-margin-top: 88px;
+        }
+        /* luz ambiente de cada seção, na cor da ferramenta (gradiente parado, sem blur) */
+        .landing-v4 .sec-glow {
+          position: absolute;
+          left: -12%;
+          right: -12%;
+          top: -180px;
+          height: 960px;
+          z-index: -1;
+          pointer-events: none;
+          background: radial-gradient(46% 42% at 50% 34%, var(--g), transparent 72%);
         }
       `}</style>
     </main>

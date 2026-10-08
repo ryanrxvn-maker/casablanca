@@ -4,15 +4,18 @@
  * Legendas — a seção-estrela da landing v4.
  *
  *   LegendasSection → player com vídeo + o MOTOR REAL das Legendas
- *                     Automáticas por cima, e a vitrine curada em duas
- *                     famílias: Dinâmicas (anúncio) e Simples (acompanhar a
- *                     fala). Clicar num modelo troca a legenda do vídeo na
- *                     hora, como na ferramenta.
- *   CopyFixSection  → "Corrigir legenda pela copy" em cena 3D: a lauda (a
- *                     copy) atrás, a legenda gerada na frente, e cada palavra
- *                     errada virando a da copy. O resultado NÃO é encenado:
- *                     vem de `correctBlocksByCopy`, a mesma função que a
- *                     ferramenta roda — contagens incluídas.
+ *                     Automáticas por cima, e a vitrine que o Silas escolheu
+ *                     (07.10) em duas famílias: Virais e Simples. Clicar num
+ *                     modelo troca a legenda do vídeo na hora.
+ *   CopyFixSection  → "Corrigir legenda pela copy": a copy (lauda) atrás, a
+ *                     legenda gerada na frente, e cada palavra errada vira a
+ *                     da copy. O resultado NÃO é encenado: vem de
+ *                     `correctBlocksByCopy`, a mesma função da ferramenta.
+ *
+ * Regra da correção (cobrança de 07.10): o texto fica NÍTIDO o tempo todo.
+ * Nada de virar a palavra em 3D nem inclinar o painel; a troca é a palavra
+ * velha saindo e a nova entrando por deslize, e a profundidade vem de
+ * camadas, sombra e do voo da palavra.
  */
 
 import Link from 'next/link';
@@ -20,58 +23,44 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Block } from '@/lib/typography/engine';
 import { correctBlocksByCopy } from '@/lib/typography/copy-fix';
 import { getPreset } from '@/lib/typography/presets';
-import { LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 import { Reveal, useInView, useReduced } from '../v3/kit';
 import { isCalm, useCalm, usePointerField } from './fx';
 import { loadPresetFonts, makeBlocks, useLegendaCanvas, type LegendaProgram } from './legenda';
+import { SectionHead } from './ui';
 
 const AMBER = '#ffb020';
 const GOLD = '#ffd60a';
 const RED = '#e0483f';
 const OK = '#7ee0a1';
 
-/* ══════════════════════ vitrine curada ══════════════════════ */
+/* ══════════════════════ vitrine ══════════════════════ */
 
-type Mode = 'dinamicas' | 'simples';
+type Mode = 'virais' | 'simples';
 
-/**
- * A curadoria da landing: modelos escolhidos olhando o motor renderizar
- * (folha de contato, 07.10). Dinâmicas = o que segura o olho em anúncio.
- * Simples = o que acompanha a fala sem roubar a cena.
- */
+/** A seleção do Silas (07.10). Keynote e Fade Limpo ficaram; Papo Amarelo é simples. */
 const SHELF: Record<Mode, string[]> = {
-  dinamicas: [
-    'vermelho-sangue',
+  virais: [
     'titulo-ouro',
-    'glitch-viral',
-    'verde-dinheiro',
-    'ouro-fumaca',
-    'presets-3d',
+    'vermelho-sangue',
     'extensao-script',
-    'neon-tube',
+    'automatico-arcoiris',
+    'g-fumaca-anton',
+    'manuscrito',
+    'poster-stack',
   ],
-  simples: [
-    'keynote',
-    'oswald-clean',
-    'fade-limpo',
-    'editorial-destaque',
-    'karaoke-fill',
-    'palavra-box',
-    'caixa-branca',
-    'marca-texto',
-  ],
+  simples: ['keynote', 'fade-limpo', 'papo-amarelo', 'empilhado', 'g-caixa-chip', 'palavra-box', 'solo-box'],
 };
-const ALL_IDS = [...SHELF.dinamicas, ...SHELF.simples];
+const ALL_IDS = [...SHELF.virais, ...SHELF.simples];
 
-/** O roteiro que o vídeo "fala" em cada família. */
+/** O que o vídeo "fala" em cada família. */
 const SCRIPT: Record<Mode, Block[]> = {
-  dinamicas: makeBlocks(['OLHA SÓ ISSO', 'A PALAVRA FORTE', 'GANHA DESTAQUE', 'SOZINHA', 'NO TEMPO DA FALA'], { per: 1650 }),
+  virais: makeBlocks(['OLHA SÓ ISSO', 'A PALAVRA FORTE', 'GANHA DESTAQUE', 'SOZINHA', 'NO TEMPO DA FALA'], { per: 1650 }),
   simples: makeBlocks(['E foi aí que eu entendi', 'legenda boa é a que', 'acompanha a fala', 'sem roubar a cena.'], { per: 1900 }),
 };
 
 export function LegendasSection() {
-  const [mode, setMode] = useState<Mode>('dinamicas');
-  const [pick, setPick] = useState<string>(SHELF.dinamicas[0]);
+  const [mode, setMode] = useState<Mode>('virais');
+  const [pick, setPick] = useState<string>(SHELF.virais[0]);
   const userPicked = useRef(false);
 
   const choose = (id: string) => {
@@ -88,89 +77,75 @@ export function LegendasSection() {
   const advance = useCallback(() => {
     if (userPicked.current) return;
     setPick((cur) => {
-      const list = SHELF[SHELF.dinamicas.includes(cur) ? 'dinamicas' : 'simples'];
+      const list = SHELF[SHELF.virais.includes(cur) ? 'virais' : 'simples'];
       return list[(list.indexOf(cur) + 1) % list.length];
     });
   }, []);
 
   return (
     <section id="legendas" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
-      <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-16">
-        {/* player */}
-        <Reveal className="order-2 lg:order-1">
+      <div aria-hidden className="sec-glow" style={{ ['--g' as string]: 'rgba(255,214,10,0.10)' }} />
+      <SectionHead
+        tone={GOLD}
+        tag="Legendas Automáticas"
+        ask="Sua legenda ainda tem cara de amadora?"
+        answer={['Legendas de', { mark: 'editor profissional,' }, 'escolhidas a dedo.']}
+        lead="Sobe o vídeo e a sua fala vira legenda animada, palavra por palavra. Você só escolhe o estilo: as virais seguram o olho no anúncio, as simples acompanham a fala sem roubar a cena."
+      />
+
+      <div className="mt-12 grid grid-cols-1 items-start gap-10 lg:mt-16 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-14">
+        <Reveal>
           <Player mode={mode} presetId={pick} onLoop={advance} />
         </Reveal>
 
-        {/* texto + vitrine */}
-        <div className="order-1 lg:order-2">
-          <Reveal>
-            <ToolTag tone={GOLD} label="Legendas Automáticas" />
-            <h2 className="section-title mt-5 text-[40px] leading-[1.02] md:text-[58px]">
-              Legenda de editor profissional.
-              <span className="mt-1 block text-editorial italic text-white/70" style={{ paddingBottom: '0.08em' }}>
-                Escolhida a dedo.
-              </span>
-            </h2>
-            <p className="mt-5 max-w-[56ch] text-[16px] leading-[1.7] text-white/[0.62]">
-              São {LEGENDAS_MODELOS} modelos e nenhum é o mesmo com outra cor: cada um muda
-              na fonte, na composição ou no efeito. Os dinâmicos seguram o olho no anúncio.
-              Os simples acompanham a fala sem roubar a cena.
+        <Reveal delay={80}>
+          <div>
+            <ModeSwitch mode={mode} onChange={switchMode} />
+            <Shelf mode={mode} pick={pick} onPick={choose} />
+            <p className="mt-4 text-[13.5px] text-white/50">
+              Clica num modelo e veja ele no vídeo na hora. A cor de cada um você troca no painel.
             </p>
-          </Reveal>
 
-          <Reveal delay={80}>
-            <div className="mt-8">
-              <ModeSwitch mode={mode} onChange={switchMode} />
-              <Shelf mode={mode} pick={pick} onPick={choose} />
-              <p className="mt-4 text-[13px] text-white/45">
-                Clica num modelo e ele entra no vídeo. A cor de cada um você troca no painel.
-              </p>
-            </div>
-          </Reveal>
-        </div>
+            <ul className="mt-9 flex flex-col gap-5 border-t border-white/10 pt-7">
+              {[
+                ['A palavra forte se destaca sozinha', 'A ferramenta escolhe a palavra que pesa em cada frase e destaca do jeito do modelo. Sem clicar em nada.'],
+                ['Você ajusta direto no vídeo', 'Arrasta, muda o tamanho, edita o texto e pinta uma palavra só, igual no CapCut.'],
+                ['Sai em MP4, igual ao preview', 'O vídeo renderiza no seu navegador com a legenda queimada, do jeitinho que você viu.'],
+              ].map(([t, d]) => (
+                <li key={t} className="flex gap-4">
+                  <span
+                    aria-hidden
+                    className="mt-[3px] grid h-7 w-7 shrink-0 place-items-center rounded-full"
+                    style={{ background: `${GOLD}1f`, boxShadow: `inset 0 0 0 1px ${GOLD}55` }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <path d="M2.5 6.4l2.4 2.4L9.6 3.4" stroke={GOLD} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <span>
+                    <span className="block text-[16.5px] font-bold tracking-[-0.01em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                      {t}
+                    </span>
+                    <span className="mt-1 block text-[14.5px] leading-relaxed text-white/60">{d}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-8 border-l-2 pl-4 text-[13px] leading-relaxed text-white/50" style={{ borderColor: `${GOLD}66` }}>
+              No Premium. A transcrição usa a sua chave da Groq ou da AssemblyAI, que você cadastra
+              uma vez em Configurações. Prefere legendar no CapCut? O Gerador de SRT devolve o .srt
+              alinhado à copy, palavra por palavra.
+            </p>
+          </div>
+        </Reveal>
       </div>
-
-      {/* o que a ferramenta faz, em três linhas */}
-      <Reveal>
-        <div className="mt-16 grid grid-cols-1 gap-x-10 gap-y-7 border-t border-white/10 pt-9 md:grid-cols-3">
-          {[
-            ['A palavra forte se destaca sozinha', 'O motor escolhe a palavra que pesa em cada frase e aplica o destaque do modelo, sem clique.'],
-            ['Você ajusta no preview', 'Arrasta, redimensiona, edita o texto e muda a cor de uma palavra só. Tudo direto no vídeo, como no CapCut.'],
-            ['O MP4 sai igual ao preview', 'Preview e exportação usam o mesmo motor, e o vídeo renderiza no seu navegador.'],
-          ].map(([t, d]) => (
-            <div key={t}>
-              <h3 className="text-[16.5px] font-bold tracking-[-0.01em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
-                {t}
-              </h3>
-              <p className="mt-2 text-[14px] leading-relaxed text-white/[0.58]">{d}</p>
-            </div>
-          ))}
-        </div>
-        <p className="mt-8 max-w-[90ch] border-l-2 pl-4 text-[13px] leading-relaxed text-white/50" style={{ borderColor: `${GOLD}66` }}>
-          No Premium. A transcrição usa a sua chave da Groq ou da AssemblyAI, cadastrada em
-          Configurações. Prefere legendar no CapCut? O Gerador de SRT devolve o .srt alinhado à
-          copy, palavra por palavra.
-        </p>
-      </Reveal>
     </section>
-  );
-}
-
-function ToolTag({ tone, label }: { tone: string; label: string }) {
-  return (
-    <span
-      className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[12.5px] font-semibold"
-      style={{ fontFamily: 'var(--font-label)', color: tone, borderColor: `${tone}4d`, background: `${tone}12` }}
-    >
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: tone }} />
-      {label}
-    </span>
   );
 }
 
 function ModeSwitch({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
   const opts: Array<[Mode, string]> = [
-    ['dinamicas', 'Dinâmicas'],
+    ['virais', 'Virais'],
     ['simples', 'Simples'],
   ];
   return (
@@ -182,7 +157,10 @@ function ModeSwitch({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
           role="tab"
           aria-selected={mode === m}
           onClick={() => onChange(m)}
-          className={'relative z-10 rounded-[9px] px-6 py-2.5 text-[14px] font-bold transition-colors duration-300 ' + (mode === m ? 'text-[#1b1206]' : 'text-white/60 hover:text-white')}
+          className={
+            'relative z-10 rounded-[9px] px-7 py-2.5 text-[14.5px] font-bold transition-colors duration-300 ' +
+            (mode === m ? 'text-[#1b1206]' : 'text-white/60 hover:text-white')
+          }
           style={{ fontFamily: 'var(--font-label)' }}
         >
           {label}
@@ -215,6 +193,48 @@ function Shelf({ mode, pick, onPick }: { mode: Mode; pick: string; onPick: (id: 
       {SHELF[mode].map((id, i) => (
         <Chip key={id} id={id} index={i} active={pick === id} onPick={onPick} />
       ))}
+      <Link
+        href="/register"
+        className="more group relative grid aspect-[16/10] place-items-center rounded-[12px] text-center"
+        style={{ ['--i' as string]: SHELF[mode].length }}
+      >
+        <span>
+          <span className="block text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+            Ver todos
+          </span>
+          <span className="mt-0.5 block text-[12px] text-white/50 transition-colors group-hover:text-white/80">
+            dentro da ferramenta →
+          </span>
+        </span>
+        <style jsx>{`
+          :global(.more) {
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+            background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0 8px, transparent 8px 16px);
+            transition: box-shadow 0.3s ease, transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+            animation: more-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: calc(var(--i) * 45ms);
+          }
+          :global(.more):hover {
+            transform: translateY(-3px);
+            box-shadow: inset 0 0 0 1px rgba(255, 214, 10, 0.55);
+          }
+          @keyframes more-in {
+            from {
+              opacity: 0;
+              transform: translateY(10px) scale(0.97);
+            }
+            to {
+              opacity: 1;
+              transform: none;
+            }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            :global(.more) {
+              animation: none;
+            }
+          }
+        `}</style>
+      </Link>
     </div>
   );
 }
@@ -226,7 +246,7 @@ function Chip({ id, index, active, onPick }: { id: string; index: number; active
   const [hover, setHover] = useState(false);
   const progRef = useRef<LegendaProgram>({
     presetId: id,
-    blocks: makeBlocks([preset.name], { start: 80, per: 2300 }),
+    blocks: makeBlocks([preset.name.replace(' · ', ' ')], { start: 80, per: 2300 }),
     fontScale: 2.1,
     posY: 0.52,
   });
@@ -297,6 +317,7 @@ function Chip({ id, index, active, onPick }: { id: string; index: number; active
 function Player({ mode, presetId, onLoop }: { mode: Mode; presetId: string; onLoop: () => void }) {
   const { ref, inView } = useInView<HTMLDivElement>(0.2);
   const reduced = useReduced();
+  const calm = useCalm();
   const vidRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const progRef = useRef<LegendaProgram>({ presetId, blocks: SCRIPT[mode], fontScale: 1.3, posY: 0.7 });
@@ -313,7 +334,6 @@ function Player({ mode, presetId, onLoop }: { mode: Mode; presetId: string; onLo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetId, mode]);
 
-  const calm = useCalm();
   useEffect(() => {
     const v = vidRef.current;
     if (!v) return;
@@ -376,20 +396,19 @@ function Player({ mode, presetId, onLoop }: { mode: Mode; presetId: string; onLo
   );
 }
 
-/* ══════════════════════ CORRIGIR PELA COPY (cena 3D) ══════════════════════ */
+/* ══════════════════════ CORRIGIR PELA COPY ══════════════════════ */
 
-/** A copy do anúncio — a "lauda". */
+/** A copy do anúncio (a "lauda"). */
 const COPY =
-  'Ninguém te conta isso, mas a Mariana vendeu o primeiro bolo de pote pelo WhatsApp sem gastar um real com anúncio. Olha só como ela fez.';
+  'Se você edita anúncio todo dia, presta atenção: uma palavra errada na legenda já faz o cliente devolver o vídeo.';
 
-/** O que a transcrição devolveu: acento, nome, pontuação e uma palavra comida. */
+/** O que a transcrição devolveu: sem acento, sem pontuação e uma palavra comida. */
 const ASR: Array<[number, number, string]> = [
-  [400, 1900, 'Ninguem te conta isso'],
-  [1900, 3600, 'mas a Mariane vendeu'],
-  [3600, 5200, 'o primeiro bolo de pote'],
-  [5200, 6800, 'pelo whatsapp sem gastar'],
-  [6800, 8100, 'real com anuncio'],
-  [8100, 9400, 'olha so como ela fez'],
+  [300, 1700, 'se voce edita anuncio'],
+  [1700, 3200, 'todo dia presta atencao'],
+  [3200, 4800, 'uma palavra errada na legenda'],
+  [4800, 6200, 'ja faz cliente devolver'],
+  [6200, 7400, 'o video'],
 ];
 
 type Fix = { b: number; w: number; from: string; to: string; copyIdx: number[]; added: boolean };
@@ -452,14 +471,19 @@ export function CopyFixSection() {
   const [run, setRun] = useState(0);
 
   const zoneRef = useRef<HTMLDivElement | null>(null);
-  const rigRef = useRef<HTMLDivElement | null>(null);
+  const paperRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const flyRef = useRef<HTMLDivElement | null>(null);
   const paperWordRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const tileRefs = useRef<(HTMLSpanElement | null)[]>([]);
 
+  // Profundidade sem distorcer texto: as camadas só DESLIZAM com o mouse (a
+  // lauda, mais longe, anda menos e pro lado oposto do painel).
   const onFrame = useCallback((x: number, y: number) => {
-    const rig = rigRef.current;
-    if (rig) rig.style.transform = `rotateX(${(10 - y * 4).toFixed(3)}deg) rotateY(${(-8 + x * 6).toFixed(3)}deg)`;
+    const a = paperRef.current;
+    const b = panelRef.current;
+    if (a) a.style.translate = `${(-x * 10).toFixed(2)}px ${(-y * 8).toFixed(2)}px`;
+    if (b) b.style.translate = `${(x * 14).toFixed(2)}px ${(y * 10).toFixed(2)}px`;
   }, []);
   usePointerField(zoneRef, onFrame, { ease: 0.08 });
 
@@ -470,7 +494,7 @@ export function CopyFixSection() {
     setFixed(new Set(data.fixes.map((_, i) => i)));
   }, [reduced, data]);
 
-  // a sequência: transcrito → clique → cada palavra voa da lauda e vira → pronto
+  // a sequência: transcrito → clique → cada palavra voa da lauda e troca → pronto
   useEffect(() => {
     if (reduced || !inView) return;
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -482,9 +506,9 @@ export function CopyFixSection() {
     setLit(new Set());
     setPressed(false);
 
-    const START = 1700;
-    const GAP = 430;
-    at(START - 350, () => setPressed(true));
+    const START = 1800;
+    const GAP = 560;
+    at(START - 380, () => setPressed(true));
     at(START, () => {
       setPressed(false);
       setPhase('fixing');
@@ -495,14 +519,13 @@ export function CopyFixSection() {
         setLit((s) => new Set(s).add(i));
         fly(i, f);
       });
-      at(t + 520, () => setFixed((s) => new Set(s).add(i)));
+      at(t + 600, () => setFixed((s) => new Set(s).add(i)));
     });
-    const end = START + 250 + data.fixes.length * GAP + 700;
+    const end = START + 250 + data.fixes.length * GAP + 800;
     at(end, () => setPhase('done'));
     // segura o resultado e recomeça (só se a pessoa ainda estiver olhando)
-    at(end + 5200, () => {
-      if (!alive) return;
-      if (isCalm()) return;
+    at(end + 5600, () => {
+      if (!alive || isCalm()) return;
       setRun((r) => r + 1);
     });
 
@@ -523,16 +546,21 @@ export function CopyFixSection() {
       g.textContent = f.copyIdx.map((k) => data.copyTokens[k]).join(' ') || f.to;
       layer.appendChild(g);
       const mx = (x0 + x1) / 2;
-      const my = Math.min(y0, y1) - 46;
+      const my = Math.min(y0, y1) - 70;
       const anim = g.animate(
         [
-          { transform: `translate(${x0}px, ${y0}px) translate(-50%, -50%) scale(0.9)`, opacity: 0 },
-          { transform: `translate(${x0}px, ${y0 - 8}px) translate(-50%, -50%) scale(1)`, opacity: 1, offset: 0.14 },
-          { transform: `translate(${mx}px, ${my}px) translate(-50%, -50%) scale(1.08)`, opacity: 1, offset: 0.55 },
-          { transform: `translate(${x1}px, ${y1}px) translate(-50%, -50%) scale(1)`, opacity: 0.9, offset: 0.92 },
-          { transform: `translate(${x1}px, ${y1}px) translate(-50%, -50%) scale(0.96)`, opacity: 0 },
+          { transform: `translate(${x0}px, ${y0}px) translate(-50%, -50%)`, opacity: 0, boxShadow: '0 4px 10px -4px rgba(255,176,32,0.4)' },
+          { transform: `translate(${x0}px, ${y0 - 10}px) translate(-50%, -50%)`, opacity: 1, offset: 0.15 },
+          {
+            transform: `translate(${mx}px, ${my}px) translate(-50%, -50%)`,
+            opacity: 1,
+            boxShadow: '0 30px 40px -14px rgba(255,176,32,0.55)',
+            offset: 0.55,
+          },
+          { transform: `translate(${x1}px, ${y1}px) translate(-50%, -50%)`, opacity: 1, offset: 0.9 },
+          { transform: `translate(${x1}px, ${y1}px) translate(-50%, -50%)`, opacity: 0 },
         ],
-        { duration: 620, easing: 'cubic-bezier(.45,0,.25,1)', fill: 'forwards' },
+        { duration: 680, easing: 'cubic-bezier(.45,0,.25,1)', fill: 'forwards' },
       );
       anim.onfinish = () => g.remove();
       anim.oncancel = () => g.remove();
@@ -559,132 +587,133 @@ export function CopyFixSection() {
 
   return (
     <section id="corrigir" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
-      <Reveal>
-        <div className="mx-auto max-w-[860px] text-center">
-          <ToolTag tone={AMBER} label="Corrigir legenda pela copy" />
-          <h2 className="section-title mt-5 text-[44px] leading-[1] md:text-[76px]">
-            A copy manda.
-            <span className="mt-1 block text-editorial italic text-white/70" style={{ paddingBottom: '0.08em' }}>
-              A legenda obedece.
-            </span>
-          </h2>
-          <p className="mx-auto mt-6 max-w-[60ch] text-[16.5px] leading-[1.7] text-white/[0.62]">
-            A transcrição erra acento, nome e pontuação, e às vezes engole uma palavra. Você
-            cola a copy e a legenda inteira é corrigida por ela, palavra por palavra, sem
-            mexer em bloco nem em tempo. Você confere em segundos, em vez de caçar erro bloco por bloco.
-          </p>
-        </div>
-      </Reveal>
+      <div aria-hidden className="sec-glow" style={{ ['--g' as string]: 'rgba(255,176,32,0.09)' }} />
+      <SectionHead
+        tone={AMBER}
+        tag="Corrigir legenda pela copy"
+        align="center"
+        size="xl"
+        ask="Já entregou vídeo com legenda errada pro cliente?"
+        answer={['Cola a copy. A legenda', { mark: 'se corrige sozinha.' }]}
+        lead="A transcrição erra acento, nome e pontuação, e às vezes engole uma palavra. Com a copy colada, a ferramenta confere a legenda inteira, palavra por palavra, e troca o que estiver diferente. Sem mexer no tempo de nada."
+      />
 
       <div ref={ref}>
         <div ref={zoneRef} className="cf-zone relative mt-14 md:mt-20">
-          <div className="cf-persp">
-            <div ref={rigRef} className="cf-rig grid grid-cols-1 items-center gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-10">
-              {/* a lauda (copy) */}
-              <div className="cf-paper relative overflow-hidden rounded-[14px] p-6 md:p-8">
-                <div className="flex items-baseline justify-between border-b border-black/15 pb-3">
-                  <span className="text-[22px] italic leading-none" style={{ fontFamily: 'var(--font-serif)', color: RED }}>
-                    Lauda
+          <div aria-hidden className="cf-floor" />
+          <div className="relative grid grid-cols-1 items-center gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-10">
+            {/* a lauda (copy) */}
+            <div ref={paperRef} className="cf-paper relative overflow-hidden rounded-[14px] p-6 md:p-8">
+              <div className="flex items-baseline justify-between border-b border-black/15 pb-3">
+                <span className="text-[24px] italic leading-none" style={{ fontFamily: 'var(--font-serif)', color: RED }}>
+                  Lauda
+                </span>
+                <span className="text-[11px] font-semibold text-black/45" style={{ fontFamily: 'var(--font-mono)' }}>
+                  COPY DO ANÚNCIO
+                </span>
+              </div>
+              <p className="mt-5 text-[16px] leading-[2.1] text-[#1d1b16] md:text-[19px]" style={{ fontFamily: 'var(--font-mono)' }}>
+                {data.copyTokens.map((tok, k) => (
+                  <span key={k}>
+                    <span
+                      ref={(el) => {
+                        paperWordRefs.current[k] = el;
+                      }}
+                      className={'cf-pw ' + (litCopy.has(k) ? 'is-lit' : '')}
+                    >
+                      {tok}
+                    </span>{' '}
                   </span>
-                  <span className="text-[11px] font-semibold text-black/45" style={{ fontFamily: 'var(--font-mono)' }}>
-                    COPY DO ANÚNCIO
-                  </span>
-                </div>
-                <p className="cf-copy mt-5 text-[16px] leading-[2.1] text-[#1d1b16] md:text-[19px]" style={{ fontFamily: 'var(--font-mono)' }}>
-                  {data.copyTokens.map((tok, k) => (
-                    <span key={k}>
-                      <span ref={(el) => { paperWordRefs.current[k] = el; }} className={'cf-pw ' + (litCopy.has(k) ? 'is-lit' : '')}>
-                        {tok}
-                      </span>{' '}
-                    </span>
-                  ))}
-                </p>
-                <div className="mt-6 flex items-center justify-between border-t border-black/15 pt-3 text-[11px] text-black/45" style={{ fontFamily: 'var(--font-mono)' }}>
-                  <span>{data.copyTokens.length} palavras</span>
-                  <span>texto colado pelo editor</span>
-                </div>
-                {phase === 'fixing' && <span aria-hidden className="cf-beam" />}
+                ))}
+              </p>
+              {phase === 'fixing' && <span aria-hidden className="cf-beam" />}
+            </div>
+
+            {/* a legenda gerada */}
+            <div ref={panelRef} className="cf-panel relative overflow-hidden rounded-[14px]">
+              <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5 md:px-6">
+                <span className="text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                  Legenda gerada
+                </span>
+                <span
+                  className="cf-status inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
+                  data-phase={phase}
+                  style={{ fontFamily: 'var(--font-label)' }}
+                >
+                  {phase === 'asr' && `Transcrição: ${data.fixes.length} palavras pra arrumar`}
+                  {phase === 'fixing' && (errorsLeft > 0 ? `Corrigindo pela copy, faltam ${errorsLeft}` : 'Corrigindo pela copy')}
+                  {phase === 'done' && 'Igual à copy'}
+                </span>
               </div>
 
-              {/* a legenda gerada */}
-              <div className="cf-panel relative overflow-hidden rounded-[14px]">
-                <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5 md:px-6">
-                  <span className="text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
-                    Legenda gerada
-                  </span>
-                  <span
-                    className="cf-status inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold"
-                    data-phase={phase}
-                    style={{ fontFamily: 'var(--font-label)' }}
-                  >
-                    {phase === 'asr' && `Transcrição: ${data.fixes.length} palavras pra arrumar`}
-                    {phase === 'fixing' && (errorsLeft > 0 ? `Corrigindo pela copy… faltam ${errorsLeft}` : 'Corrigindo pela copy…')}
-                    {phase === 'done' && 'Igual à copy'}
-                  </span>
-                </div>
-
-                <ol className="flex flex-col">
-                  {data.blocks.map((blk, bi) => (
-                    <li key={blk.id} className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3 last:border-b-0 md:gap-4 md:px-6">
-                      <span className="w-[96px] shrink-0 text-[11px] text-white/[0.38] tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
-                        {fmt(blk.start)}
-                      </span>
-                      <span className="flex min-w-0 flex-wrap gap-x-1.5 gap-y-1">
-                        {blk.words.map((wd, wi) => {
-                          const fi = fixIndex.get(`${bi}:${wi}`);
-                          if (fi === undefined)
-                            return (
-                              <span key={wi} className="cf-word text-white/[0.88]">
-                                {wd.text}
-                              </span>
-                            );
-                          const f = data.fixes[fi];
-                          const isFixed = fixed.has(fi);
+              <ol className="flex flex-col">
+                {data.blocks.map((blk, bi) => (
+                  <li key={blk.id} className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5 last:border-b-0 md:gap-5 md:px-6">
+                    <span className="w-[66px] shrink-0 text-[11px] text-white/40 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
+                      {fmt(blk.start)}
+                    </span>
+                    <span className="flex min-w-0 flex-wrap gap-x-[0.32em] gap-y-1">
+                      {blk.words.map((wd, wi) => {
+                        const fi = fixIndex.get(`${bi}:${wi}`);
+                        if (fi === undefined)
                           return (
-                            <span key={wi} ref={(el) => { tileRefs.current[fi] = el; }} className={'cf-tile ' + (isFixed ? 'is-fixed' : '')}>
-                              <span className="cf-face cf-front">{f.from}</span>
-                              <span className="cf-face cf-back">
-                                {f.added ? (
-                                  <>
-                                    {f.to.split(' ')[0]} <em className="cf-added">{f.to.split(' ').slice(1).join(' ')}</em>
-                                  </>
-                                ) : (
-                                  f.to
-                                )}
-                              </span>
+                            <span key={wi} className="cf-word text-white/90">
+                              {wd.text}
                             </span>
                           );
-                        })}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
+                        const f = data.fixes[fi];
+                        const isFixed = fixed.has(fi);
+                        const longest = f.from.length >= f.to.length ? f.from : f.to;
+                        return (
+                          <span
+                            key={wi}
+                            ref={(el) => {
+                              tileRefs.current[fi] = el;
+                            }}
+                            className={'cf-tile ' + (isFixed ? 'is-fixed' : '')}
+                          >
+                            <span aria-hidden className="cf-sizer">
+                              {longest}
+                            </span>
+                            <span className="cf-from">{f.from}</span>
+                            <span className="cf-to">
+                              {f.added ? (
+                                <>
+                                  {f.to.split(' ')[0]} <em className="cf-added">{f.to.split(' ').slice(1).join(' ')}</em>
+                                </>
+                              ) : (
+                                f.to
+                              )}
+                            </span>
+                          </span>
+                        );
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ol>
 
-                <div className="flex flex-wrap items-center gap-3 border-t border-white/10 px-5 py-4 md:px-6">
-                  <span
-                    className={'cf-btn rounded-[11px] px-4 py-2.5 text-[12.5px] font-bold ' + (pressed ? 'is-pressed' : '')}
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Corrigir pela copy →
-                  </span>
-                  <span
-                    className={'cf-result text-[12.5px] font-semibold ' + (phase === 'done' ? 'is-on' : '')}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/10 px-5 py-4 md:px-6">
+                <span
+                  className={'cf-btn rounded-[11px] px-4 py-2.5 text-[12.5px] font-bold ' + (pressed ? 'is-pressed' : '')}
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  Corrigir pela copy →
+                </span>
+                <span className={'cf-result text-[12.5px] font-semibold ' + (phase === 'done' ? 'is-on' : '')} style={{ fontFamily: 'var(--font-label)' }}>
+                  {data.corrected} {data.corrected === 1 ? 'palavra corrigida' : 'palavras corrigidas'} e {data.added}{' '}
+                  {data.added === 1 ? 'devolvida' : 'devolvidas'}. Blocos e tempos intactos.
+                </span>
+                {phase === 'done' && !reduced && (
+                  <button
+                    type="button"
+                    onClick={() => setRun((r) => r + 1)}
+                    className="rounded-[9px] px-2.5 py-1.5 text-[12px] font-semibold text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
                     style={{ fontFamily: 'var(--font-label)' }}
                   >
-                    {data.corrected} {data.corrected === 1 ? 'palavra corrigida' : 'palavras corrigidas'} e {data.added}{' '}
-                    {data.added === 1 ? 'devolvida' : 'devolvidas'}. Blocos e tempos intactos.
-                  </span>
-                  {phase === 'done' && !reduced && (
-                    <button
-                      type="button"
-                      onClick={() => setRun((r) => r + 1)}
-                      className="ml-auto rounded-[9px] px-2.5 py-1.5 text-[12px] font-semibold text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
-                      style={{ fontFamily: 'var(--font-label)' }}
-                    >
-                      Ver de novo
-                    </button>
-                  )}
-                </div>
+                    Ver de novo
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -695,19 +724,16 @@ export function CopyFixSection() {
       <Reveal>
         <div className="mt-14 grid grid-cols-1 gap-x-8 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['Grafia, acento e pontuação', 'Palavra escrita errado volta com a grafia da copy, vírgula e ponto inclusos.'],
-            ['Palavra engolida volta', 'O que a transcrição comeu entra de novo, no bloco certo.'],
-            ['Tempo intocado', 'Blocos, tempos e estilos ficam onde estavam. E o Ctrl+Z desfaz.'],
-            ['Copy errada não passa', 'Se a copy colada não for desse vídeo, ele avisa em vez de aplicar.'],
-          ].map(([t, d], i) => (
+            ['Acento, nome e pontuação', 'Tudo volta escrito do jeito que está na copy.'],
+            ['Palavra comida volta', 'O que a transcrição engoliu entra de novo, no lugar certo.'],
+            ['Tempo intacto', 'Blocos, tempos e estilos não mudam. E o Ctrl+Z desfaz.'],
+            ['Copy errada não passa', 'Se a copy não for desse vídeo, a ferramenta avisa antes de aplicar.'],
+          ].map(([t, d]) => (
             <div key={t} className="border-t border-white/[0.12] pt-5">
-              <span className="text-[12px] text-white/35 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
-                {String(i + 1).padStart(2, '0')}
-              </span>
-              <h3 className="mt-2 text-[16.5px] font-bold tracking-[-0.01em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+              <h3 className="text-[16.5px] font-bold tracking-[-0.01em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
                 {t}
               </h3>
-              <p className="mt-1.5 text-[14px] leading-relaxed text-white/[0.58]">{d}</p>
+              <p className="mt-1.5 text-[14px] leading-relaxed text-white/60">{d}</p>
             </div>
           ))}
         </div>
@@ -720,38 +746,42 @@ export function CopyFixSection() {
       </Reveal>
 
       <style jsx>{`
-        .cf-persp {
-          perspective: 1800px;
-          perspective-origin: 50% 30%;
-        }
-        .cf-rig {
-          transform-style: preserve-3d;
-          transform: rotateX(10deg) rotateY(-8deg);
-          will-change: transform;
+        .cf-floor {
+          position: absolute;
+          left: -4%;
+          right: -4%;
+          bottom: -60px;
+          height: 70%;
+          background-image: linear-gradient(rgba(255, 176, 32, 0.12) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 176, 32, 0.12) 1px, transparent 1px);
+          background-size: 56px 56px;
+          transform: perspective(900px) rotateX(64deg);
+          transform-origin: 50% 100%;
+          -webkit-mask-image: radial-gradient(60% 70% at 50% 100%, #000, transparent);
+          mask-image: radial-gradient(60% 70% at 50% 100%, #000, transparent);
+          pointer-events: none;
         }
         .cf-paper {
-          background: linear-gradient(180deg, #f6f3ea, #ece7da);
-          transform: translateZ(-70px) rotateY(6deg);
-          box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 50px 90px -40px rgba(0, 0, 0, 0.95),
-            0 0 0 1px rgba(0, 0, 0, 0.06);
           background-image: repeating-linear-gradient(
               180deg,
               transparent 0,
-              transparent 31px,
-              rgba(20, 20, 15, 0.05) 31px,
-              rgba(20, 20, 15, 0.05) 32px
+              transparent 39px,
+              rgba(20, 20, 15, 0.05) 39px,
+              rgba(20, 20, 15, 0.05) 40px
             ),
             linear-gradient(180deg, #f6f3ea, #ece7da);
+          box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 40px 80px -36px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(0, 0, 0, 0.06);
+          will-change: translate;
         }
         .cf-panel {
-          transform: translateZ(60px);
-          background: linear-gradient(180deg, rgba(28, 26, 34, 0.96), rgba(14, 13, 18, 0.98));
-          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 1px 0 rgba(255, 255, 255, 0.08) inset,
-            0 60px 110px -40px rgba(0, 0, 0, 0.95), 0 0 80px -30px rgba(255, 176, 32, 0.25);
+          background: linear-gradient(180deg, rgba(28, 26, 34, 0.97), rgba(14, 13, 18, 0.99));
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 70px 120px -40px rgba(0, 0, 0, 0.95),
+            0 0 90px -30px rgba(255, 176, 32, 0.28);
+          will-change: translate;
         }
         .cf-pw {
           border-radius: 3px;
-          transition: background-color 0.35s ease, color 0.35s ease, box-shadow 0.35s ease;
+          transition: background-color 0.35s ease, box-shadow 0.35s ease;
         }
         .cf-pw.is-lit {
           background: rgba(255, 196, 0, 0.42);
@@ -763,60 +793,92 @@ export function CopyFixSection() {
           right: 0;
           top: 0;
           height: 70px;
-          background: linear-gradient(180deg, transparent, rgba(255, 176, 32, 0.14) 70%, rgba(214, 120, 0, 0.55) 98%, transparent);
-          animation: cf-beam ${(data.fixes.length * 430 + 500) / 1000}s linear forwards;
+          background: linear-gradient(180deg, transparent, rgba(255, 176, 32, 0.12) 70%, rgba(214, 120, 0, 0.5) 98%, transparent);
+          animation: cf-beam ${(data.fixes.length * 560 + 600) / 1000}s linear forwards;
         }
         @keyframes cf-beam {
           from {
             transform: translateY(-70px);
           }
           to {
-            transform: translateY(620px);
+            transform: translateY(420px);
           }
         }
         .cf-word,
         .cf-tile {
           font-family: var(--font-tech);
           font-weight: 700;
-          font-size: 16px;
-          line-height: 1.5;
+          font-size: 17px;
+          line-height: 1.55;
           letter-spacing: -0.01em;
         }
         @media (min-width: 768px) {
           .cf-word,
           .cf-tile {
-            font-size: 20px;
+            font-size: 21px;
           }
         }
+        /* a palavra errada e a certa ocupam a MESMA célula (largura da maior):
+           a linha não pula quando uma troca pela outra */
         .cf-tile {
+          position: relative;
           display: inline-grid;
-          transform-style: preserve-3d;
-          transition: transform 0.7s cubic-bezier(0.32, 0.72, 0, 1);
+          white-space: nowrap;
+          /* a troca acontece DENTRO da caixa da palavra: nada vaza nem sobrepõe */
+          overflow: hidden;
+          border-radius: 6px;
+          margin: 0 -5px;
+          padding: 0 5px;
         }
-        .cf-tile.is-fixed {
-          transform: rotateX(180deg);
-        }
-        .cf-face {
+        .cf-sizer,
+        .cf-from,
+        .cf-to {
           grid-area: 1 / 1;
-          backface-visibility: hidden;
-          -webkit-backface-visibility: hidden;
-          border-radius: 5px;
-          padding: 0 4px;
-          margin: 0 -4px;
+          padding: 0 5px;
+          margin: 0 -5px;
           white-space: nowrap;
         }
-        .cf-front {
+        .cf-sizer {
+          visibility: hidden;
+        }
+        .cf-from {
           color: #fff;
           text-decoration: underline wavy ${RED};
           text-decoration-thickness: 1.5px;
           text-underline-offset: 5px;
-          background: rgba(224, 72, 63, 0.12);
+          background: rgba(224, 72, 63, 0.14);
+          transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.5, 0, 0.75, 0);
         }
-        .cf-back {
-          transform: rotateX(180deg);
+        .cf-to {
           color: #fff;
-          background: rgba(126, 224, 161, 0.14);
-          box-shadow: inset 0 0 0 1px rgba(126, 224, 161, 0.35);
+          background: rgba(126, 224, 161, 0.15);
+          box-shadow: inset 0 0 0 1px rgba(126, 224, 161, 0.4);
+          opacity: 0;
+          transform: translate3d(0, 100%, 0);
+          /* só começa depois que a palavra errada saiu inteira (0,18 s) */
+          transition: opacity 0.2s ease 0.18s, transform 0.34s cubic-bezier(0.32, 0.72, 0, 1) 0.18s;
+        }
+        .cf-tile.is-fixed .cf-from {
+          opacity: 0;
+          transform: translate3d(0, -100%, 0);
+        }
+        .cf-tile.is-fixed .cf-to {
+          opacity: 1;
+          transform: none;
+        }
+        .cf-tile.is-fixed {
+          animation: cf-flash 0.9s ease-out 0.2s;
+        }
+        @keyframes cf-flash {
+          0% {
+            box-shadow: 0 0 0 0 rgba(126, 224, 161, 0);
+          }
+          30% {
+            box-shadow: 0 0 0 2px rgba(126, 224, 161, 0.75), 0 0 22px rgba(126, 224, 161, 0.45);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(126, 224, 161, 0);
+          }
         }
         .cf-added {
           font-style: normal;
@@ -865,32 +927,23 @@ export function CopyFixSection() {
           position: absolute;
           left: 0;
           top: 0;
-          padding: 2px 8px;
-          border-radius: 6px;
+          padding: 3px 10px;
+          border-radius: 7px;
           font-family: var(--font-mono);
-          font-size: 14px;
+          font-size: 15px;
           font-weight: 700;
           color: #1b1206;
           background: linear-gradient(180deg, #ffe08a, #ffbe3d);
-          box-shadow: 0 10px 24px -8px rgba(255, 176, 32, 0.7);
           white-space: nowrap;
           will-change: transform, opacity;
         }
-        @media (max-width: 1023px) {
-          .cf-rig,
-          .cf-paper,
-          .cf-panel {
-            transform: none;
-          }
-        }
         @media (prefers-reduced-motion: reduce) {
-          .cf-rig,
-          .cf-paper,
-          .cf-panel {
-            transform: none;
-          }
-          .cf-tile {
+          .cf-from,
+          .cf-to {
             transition: none;
+          }
+          .cf-tile.is-fixed {
+            animation: none;
           }
         }
       `}</style>

@@ -58,7 +58,6 @@ const publicas = [
   'components/landing/v4/FakePrint.tsx',
   'components/landing/v4/Audio.tsx',
   'components/landing/v4/Rest.tsx',
-  'components/landing/v4/Numbers.tsx',
   'components/landing/v3/scenes.tsx',
   'components/AuthShowcase.tsx',
   'components/ToolsHub.tsx',

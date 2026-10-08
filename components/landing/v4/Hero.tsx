@@ -1,27 +1,25 @@
 'use client';
 
 /**
- * Herói da landing v4 — "a capa da edição".
+ * Herói da landing v4 — a capa.
  *
- * Esquerda: a manchete do site. Direita: o estúdio — um monitor de telejornal
- * do FakePrint (vídeo de verdade + gerador de caracteres + tela verde) e, na
- * frente dele, um celular com a versão 9:16 rodando legenda no MOTOR REAL das
- * Legendas Automáticas. Os dois formatos que o editor entrega, lado a lado.
+ * Lettering no estilo das legendas virais que a ferramenta faz (a pergunta que
+ * dá o gatilho, a palavra-chave numa tarja), a resposta logo embaixo e o
+ * monitor de telejornal do FakePrint grande, em perspectiva, endireitando
+ * conforme a pessoa rola. Por trás de tudo, fumaça de estúdio em WebGL que
+ * reage ao mouse (Smoke.tsx).
  *
- * Interação (só com mouse; toque e reduced-motion ficam na pose de repouso):
- *   • o estúdio inteiro gira alguns graus seguindo o mouse (profundidade real:
- *     o celular está mais perto da câmera que o monitor);
- *   • passando o mouse no monitor, o divisor da tela verde segue o cursor;
- *   • clicando na tarja, a pessoa escreve a própria manchete — é exatamente o
- *     que o FakePrint faz.
+ * No monitor (só com mouse; toque e reduced-motion ficam parados e legíveis):
+ *   • o divisor da tela verde segue o cursor;
+ *   • clicando na tarja, a pessoa escreve a própria manchete, que é o que o
+ *     FakePrint faz.
  */
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useClock, useInView, useReduced, useTypewriter } from '../v3/kit';
 import { useCalm, useMagnetic, usePointerField } from './fx';
-import { makeBlocks, useLegendaCanvas, type LegendaProgram } from './legenda';
-import { getPreset } from '@/lib/typography/presets';
+import { Smoke } from './Smoke';
 
 const RED = '#e0483f';
 const PAPER = '#f2efe6';
@@ -35,87 +33,120 @@ export function Hero() {
   useMagnetic(ctaRef, 0.18);
 
   return (
-    <section className="hero relative">
-      {/* chão do estúdio: grade em perspectiva sumindo no fundo. Parada. */}
-      <div aria-hidden className="hero-floor pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-[46%]" />
+    <section className="hero relative isolate">
+      <Smoke className="hero-smoke absolute inset-x-0 top-[-94px] -z-10 h-[calc(100%+94px)] w-full" />
 
-      <div className="mx-auto grid min-h-[calc(100dvh-94px)] max-w-[1360px] grid-cols-1 items-center gap-12 px-5 pb-16 pt-10 md:px-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-6 lg:pb-20 lg:pt-6">
-        {/* manchete */}
-        <div className="relative z-10 max-w-[640px]">
+      <div className="mx-auto max-w-[1360px] px-5 pt-12 md:px-8 md:pt-16">
+        <div className="mx-auto max-w-[1180px] text-center">
           <h1 className="hero-h1 text-white">
-            <span className="hero-l1 block" style={{ fontFamily: 'var(--font-tech)' }}>
-              {['Você', 'edita.'].map((w, i) => (
-                <span key={w} className="hw" style={{ ['--i' as string]: i }}>
+            <span className="hero-ask block" style={{ fontFamily: 'var(--font-serif)' }}>
+              <span className="hw" style={{ ['--i' as string]: 0 }}>
+                Já imaginou
+              </span>
+            </span>
+            <span className="hero-big inline md:block" style={{ fontFamily: 'var(--font-tech)' }}>
+              {['entregar', 'o', 'criativo'].map((w, i) => (
+                <span key={w} className="hw" style={{ ['--i' as string]: i + 1 }}>
                   {w}
-                  {i === 0 ? ' ' : ''}
+                  {i < 2 ? ' ' : ''}
                 </span>
               ))}
             </span>
-            <span className="hero-l2 block text-white/[0.72]" style={{ fontFamily: 'var(--font-serif)' }}>
-              {[['A', 'gente', 'adianta'], ['o', 'resto.']].map((line, li) => (
-                <span key={li} className="block">
-                  {line.map((w, i) => (
-                    <span key={w} className="hw" style={{ ['--i' as string]: 2 + li * 3 + i }}>
-                      {w}
-                      {i < line.length - 1 ? ' ' : ''}
-                    </span>
-                  ))}
+            {/* espaço entre as linhas quando elas fluem juntas (celular), no tamanho da manchete */}
+            <span className="hero-big md:hidden" style={{ fontFamily: 'var(--font-tech)' }}>
+              {' '}
+            </span>
+            <span className="hero-big inline md:block" style={{ fontFamily: 'var(--font-tech)' }}>
+              {['antes', 'do', 'cliente'].map((w, i) => (
+                <span key={w} className="hw" style={{ ['--i' as string]: i + 4 }}>
+                  {w + ' '}
                 </span>
               ))}
+              <span className="hero-mark hw" style={{ ['--i' as string]: 7 }}>
+                <span aria-hidden className="hero-mark-box" />
+                <span className="relative">cobrar?</span>
+              </span>
             </span>
           </h1>
 
-          <p className="hero-sub mt-7 max-w-[46ch] text-[16.5px] leading-[1.65] text-white/[0.62] md:text-[17.5px]">
-            Legenda corrigida pela copy, silêncio cortado e manchete de telejornal
-            pronta pro chroma. Ferramentas de edição que abrem no navegador.
+          <p className="hero-sub mx-auto mt-7 max-w-[60ch] text-[17px] leading-[1.65] text-white/[0.68] md:text-[19px]">
+            O Auto Edit faz a parte chata por você: corta o silêncio, cria legenda
+            animada corrigida pela copy e deixa a manchete de telejornal pronta pro chroma.
           </p>
 
-          <div className="hero-cta mt-9 flex flex-wrap items-center gap-3">
-            <Link ref={ctaRef} href="/register" className="btn-primary hero-btn !rounded-[12px] !py-0 !pl-6 !pr-2 !text-[15px]">
+          <div className="hero-cta mt-9 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              ref={ctaRef}
+              href="/register"
+              className="btn-primary hero-btn !rounded-[12px] !py-0 !pl-6 !pr-2 !text-[15.5px]"
+            >
               Criar conta grátis
               <span aria-hidden className="hero-btn-ico">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M3 7h8m0 0L7.5 3.5M11 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path
+                    d="M3 7h8m0 0L7.5 3.5M11 7l-3.5 3.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
               </span>
             </Link>
-            <a href="#legendas" className="btn-secondary !rounded-[12px] !px-6 !text-[14.5px]">
+            <a href="#legendas" className="btn-secondary !rounded-[12px] !px-6 !text-[15px]">
               Ver as ferramentas
             </a>
           </div>
-
-          <p className="hero-note mt-5 text-[13px] text-white/45">
-            Grátis pra começar. Não pede cartão.
-          </p>
+          <p className="hero-note mt-5 text-[13.5px] text-white/50">Grátis pra começar. Não pede cartão.</p>
         </div>
 
-        {/* estúdio */}
-        <div className="hero-stage-wrap relative z-0">
-          <Studio />
-        </div>
+        <Screen />
       </div>
 
       <style jsx>{`
         .hero-h1 {
-          font-size: clamp(46px, 6.1vw, 96px);
-          line-height: 0.98;
           letter-spacing: -0.035em;
         }
-        .hero-l1 {
-          font-weight: 800;
-        }
-        .hero-l2 {
+        .hero-ask {
           font-style: italic;
           font-weight: 400;
-          letter-spacing: -0.015em;
-          line-height: 1.04;
-          padding-bottom: 0.08em;
+          font-size: clamp(30px, 3.6vw, 54px);
+          line-height: 1.1;
+          letter-spacing: -0.01em;
+          color: rgba(255, 255, 255, 0.72);
+          padding-bottom: 0.1em;
+        }
+        .hero-big {
+          font-weight: 800;
+          font-size: clamp(40px, 6.4vw, 100px);
+          line-height: 1;
         }
         .hw {
           display: inline-block;
           white-space: pre;
           animation: hw-in 1s cubic-bezier(0.16, 1, 0.3, 1) both;
-          animation-delay: calc(80ms + var(--i) * 75ms);
+          animation-delay: calc(80ms + var(--i) * 80ms);
+        }
+        .hero-mark {
+          position: relative;
+          padding: 0 0.16em;
+          margin-left: 0.04em;
+          color: #fff;
+        }
+        .hero-mark-box {
+          position: absolute;
+          inset: 0.06em -0.02em 0.02em;
+          border-radius: 0.12em;
+          background: linear-gradient(180deg, #ef5a4f, ${RED} 60%, #c9372f);
+          box-shadow: 0 0.16em 0 rgba(120, 18, 12, 0.55), 0 18px 50px -12px rgba(224, 72, 63, 0.75);
+          transform-origin: 0 50%;
+          transform: rotate(-2deg) scaleX(0);
+          animation: mark-in 0.7s 1.05s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+        }
+        @keyframes mark-in {
+          to {
+            transform: rotate(-2deg) scaleX(1);
+          }
         }
         .hero-sub,
         .hero-cta,
@@ -123,18 +154,18 @@ export function Hero() {
           animation: hw-fade 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
         .hero-sub {
-          animation-delay: 0.55s;
+          animation-delay: 0.75s;
         }
         .hero-cta {
-          animation-delay: 0.68s;
+          animation-delay: 0.88s;
         }
         .hero-note {
-          animation-delay: 0.8s;
+          animation-delay: 1s;
         }
         @keyframes hw-in {
           from {
             opacity: 0;
-            transform: translate3d(0, 0.55em, 0) rotate(2deg);
+            transform: translate3d(0, 0.5em, 0) rotate(2deg);
             filter: blur(6px);
           }
           to {
@@ -154,14 +185,14 @@ export function Hero() {
           }
         }
         .hero-btn {
-          min-height: 54px;
+          min-height: 56px;
           gap: 14px;
         }
         .hero-btn-ico {
           display: grid;
           place-items: center;
-          width: 38px;
-          height: 38px;
+          width: 40px;
+          height: 40px;
           border-radius: 9px;
           background: rgba(33, 20, 51, 0.12);
           box-shadow: inset 0 0 0 1px rgba(33, 20, 51, 0.16);
@@ -170,15 +201,9 @@ export function Hero() {
         :global(.hero-btn:hover) .hero-btn-ico {
           transform: translateX(3px);
         }
-        .hero-floor {
-          background-image: linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px);
-          background-size: 64px 64px;
-          transform: perspective(700px) rotateX(62deg);
-          transform-origin: 50% 100%;
-          -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 78%);
-          mask-image: linear-gradient(to top, #000 0%, transparent 78%);
-          opacity: 0.55;
+        :global(.hero-smoke) {
+          -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%);
+          mask-image: linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%);
         }
         @media (prefers-reduced-motion: reduce) {
           .hw,
@@ -187,94 +212,88 @@ export function Hero() {
           .hero-note {
             animation: none;
           }
+          .hero-mark-box {
+            animation: none;
+            transform: rotate(-2deg);
+          }
         }
       `}</style>
     </section>
   );
 }
 
-/* ══════════════════════ ESTÚDIO (monitor + celular) ══════════════════════ */
+/* ══════════════════════ a tela (monitor em perspectiva) ══════════════════════ */
 
-function Studio() {
+function Screen() {
   const zoneRef = useRef<HTMLDivElement | null>(null);
   const rigRef = useRef<HTMLDivElement | null>(null);
 
-  // O estúdio gira com o mouse em QUALQUER ponto da janela (centrado nele):
-  // a pessoa sente a profundidade antes mesmo de chegar no monitor.
+  // gira alguns graus seguindo o mouse em qualquer ponto da janela
   const onFrame = useCallback((x: number, y: number) => {
     const rig = rigRef.current;
     if (!rig) return;
-    rig.style.transform = `rotateY(${(-7 + x * 5).toFixed(3)}deg) rotateX(${(3 - y * 3.2).toFixed(3)}deg)`;
+    rig.style.transform = `rotateY(${(x * 4).toFixed(3)}deg) rotateX(${(-y * 3).toFixed(3)}deg)`;
   }, []);
   usePointerField(zoneRef, onFrame, { global: true, ease: 0.07 });
 
   return (
-    <div ref={zoneRef} className="studio relative">
-      <div className="studio-persp">
-        <div ref={rigRef} className="studio-rig">
-          <Monitor />
-          <div className="studio-phone">
-            <LegendaPhone />
+    <div ref={zoneRef} className="screen-wrap relative mx-auto mt-14 max-w-[1120px] md:mt-20">
+      <div className="screen-scroll">
+        <div className="screen-tilt">
+          <div ref={rigRef} className="screen-rig">
+            <Monitor />
           </div>
         </div>
       </div>
-
-      <p className="studio-cap mt-6 max-w-[62%] text-[12.5px] leading-relaxed text-white/[0.42]">
-        Na tela: telejornal do FakePrint e Legendas Automáticas, os dois no Premium.
+      <p className="mt-5 text-center text-[12.5px] text-white/45">
+        Telejornal do FakePrint, no Premium. Passa o mouse na tela e clica na tarja pra testar.
       </p>
-
       <style jsx>{`
-        .studio-persp {
-          perspective: 1700px;
-          perspective-origin: 30% 40%;
-          animation: studio-in 1.4s 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+        /* entrada: sobe e aparece (uma vez) */
+        .screen-tilt {
+          animation: screen-in 1.4s 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
-        @keyframes studio-in {
+        @keyframes screen-in {
           from {
             opacity: 0;
-            transform: perspective(1400px) translate3d(0, 46px, 0) rotateX(14deg) scale(0.96);
+            transform: translate3d(0, 70px, 0) scale(0.96);
           }
           to {
             opacity: 1;
             transform: none;
           }
         }
-        @media (prefers-reduced-motion: reduce) {
-          .studio-persp {
-            animation: none;
+        /* inclinada pra trás; endireita conforme a pessoa rola (onde o
+           navegador tem animação ligada à rolagem; nos outros fica levemente
+           inclinada, parada) */
+        .screen-scroll {
+          transform-origin: 50% 0%;
+          transform: perspective(1800px) rotateX(7deg);
+        }
+        @supports (animation-timeline: view()) {
+          .screen-scroll {
+            animation: screen-flat linear both;
+            animation-timeline: view();
+            animation-range: entry 5% cover 40%;
           }
         }
-        .studio-rig {
-          position: relative;
+        @keyframes screen-flat {
+          from {
+            transform: perspective(1800px) rotateX(16deg) scale(0.95);
+          }
+          to {
+            transform: perspective(1800px) rotateX(0deg) scale(1);
+          }
+        }
+        .screen-rig {
           transform-style: preserve-3d;
-          transform: rotateY(-7deg) rotateX(3deg);
           will-change: transform;
         }
-        .studio-phone {
-          position: absolute;
-          right: 13%;
-          bottom: -19%;
-          width: 25%;
-          transform: translateZ(120px) rotateY(-6deg) rotateZ(2deg);
-          transform-style: preserve-3d;
-        }
-        @media (min-width: 1024px) {
-          .studio {
-            margin-right: -9%;
-          }
-        }
-        @media (max-width: 1023px) {
-          .studio-rig {
+        @media (prefers-reduced-motion: reduce) {
+          .screen-tilt,
+          .screen-scroll {
+            animation: none;
             transform: none;
-          }
-          .studio-phone {
-            right: 3%;
-            bottom: -22%;
-            width: 31%;
-            transform: none;
-          }
-          .studio-cap {
-            margin-top: 22%;
           }
         }
       `}</style>
@@ -286,8 +305,8 @@ function Studio() {
 
 /** Tarja — só FakePrint: o monitor É um FakePrint. Curtas pra caber sem truncar. */
 const CHYRON = [
-  'VOCÊ ESCREVE A MANCHETE DO DIA',
-  'SÓ O GRÁFICO FICA DE PÉ NO CHROMA',
+  'SUA MANCHETE PRONTA EM SEGUNDOS',
+  'O GRÁFICO SAI EM TELA VERDE',
   'PNG EM ALTA OU VÍDEO ANIMADO',
 ];
 
@@ -686,92 +705,4 @@ function LiveClock() {
 function TypedChyron({ active }: { active: boolean }) {
   const { text } = useTypewriter(CHYRON, { active });
   return <>{text || ' '}</>;
-}
-
-/* ────────────── celular 9:16 com o motor de legenda ────────────── */
-
-/** Os favoritos do Silas (21.08), um por volta do roteiro. */
-const PHONE_PRESETS = ['vermelho-sangue', 'titulo-ouro', 'verde-dinheiro', 'glitch-viral', 'extensao-script', 'empilhado'];
-const PHONE_BLOCKS = makeBlocks(['SUA FALA', 'VIRA LEGENDA', 'PALAVRA POR PALAVRA', 'NO TEMPO DO ÁUDIO'], { per: 1500 });
-
-function LegendaPhone() {
-  const { ref, inView } = useInView<HTMLDivElement>(0.1);
-  const reduced = useReduced();
-  const calm = useCalm();
-  const vidRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [idx, setIdx] = useState(0);
-  const progRef = useRef<LegendaProgram>({
-    presetId: PHONE_PRESETS[0],
-    blocks: PHONE_BLOCKS,
-    fontScale: 1.5,
-    posY: 0.7,
-  });
-
-  useLegendaCanvas(canvasRef, progRef, {
-    playing: inView,
-    stillAt: 160 + 1500 + 1200,
-    fontIds: PHONE_PRESETS,
-    onLoop: () => {
-      setIdx((i) => {
-        const n = (i + 1) % PHONE_PRESETS.length;
-        progRef.current = { ...progRef.current, presetId: PHONE_PRESETS[n] };
-        return n;
-      });
-    },
-  });
-
-  useEffect(() => {
-    const v = vidRef.current;
-    if (!v) return;
-    if (inView && !reduced && !calm) {
-      const p = v.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    } else v.pause();
-  }, [inView, reduced, calm]);
-
-  return (
-    <div ref={ref} className="phone relative">
-      <div className="phone-body relative overflow-hidden" style={{ filter: 'saturate(1.39)' }}>
-        <div className="phone-screen relative overflow-hidden">
-          <video
-            ref={vidRef}
-            src="/landing/hero-phone.mp4"
-            poster="/landing/hero-phone.jpg"
-            muted
-            loop
-            playsInline
-            preload="none"
-            aria-hidden
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-          <div aria-hidden className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.35), transparent 45%)' }} />
-          <canvas ref={canvasRef} aria-hidden className="absolute inset-0 h-full w-full" />
-          <span aria-hidden className="phone-island absolute left-1/2 top-[2.2%] h-[3.4%] w-[30%] -translate-x-1/2 rounded-full bg-black" />
-        </div>
-      </div>
-      <div
-        className="phone-tag absolute -bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-[#121216]/95 px-2.5 py-1 text-[10.5px] font-semibold text-white/85 shadow-[0_10px_24px_-10px_rgba(0,0,0,0.9)]"
-        style={{ fontFamily: 'var(--font-label)' }}
-      >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#ffd60a' }} />
-        {getPreset(PHONE_PRESETS[idx]).name}
-      </div>
-
-      <style jsx>{`
-        .phone-body {
-          padding: 5%;
-          border-radius: 18% / 8.5%;
-          background: linear-gradient(160deg, #2a2a30, #0d0d10 40%, #1a1a1f);
-          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.16),
-            0 40px 80px -30px rgba(0, 0, 0, 0.95), 0 0 60px -20px rgba(255, 214, 10, 0.18);
-        }
-        .phone-screen {
-          aspect-ratio: 9 / 16;
-          border-radius: 13% / 7.2%;
-          background: #000;
-        }
-      `}</style>
-    </div>
-  );
 }

@@ -83,3 +83,28 @@ test('o "Corrigir pela copy" da landing roda a função de verdade, não um resu
   assert.match(src, /\{data\.corrected\} \{data\.corrected === 1 \?/, 'a contagem de corrigidas vem do retorno da função');
   assert.match(src, /\{data\.added\}\{' '\}/, 'a contagem de devolvidas vem do retorno da função');
 });
+
+test('correção pela copy: o texto nunca gira nem inclina (cobrança de 07.10: "distorcendo os textos")', () => {
+  const src = ler(`${DIR}/Legendas.tsx`);
+  const css = src.slice(src.indexOf('export function CopyFixSection'));
+  // só as regras que tocam TEXTO (o chão em grade decorativo pode ter perspectiva)
+  const regras = [...css.matchAll(/\.(cf-(?:tile|from|to|sizer|word|panel|paper|zone)[^{]*)\{([^}]*)\}/g)];
+  assert.ok(regras.length >= 6, 'regras do painel não encontradas');
+  for (const [, sel, body] of regras) {
+    assert.doesNotMatch(body, /rotateX|rotateY|backface-visibility|preserve-3d|perspective/, `${sel.trim()}: a troca é por deslize dentro da caixa, nunca giro 3D`);
+  }
+  assert.doesNotMatch(css, /className="cf-rig/, 'nada de inclinar o painel inteiro (o texto distorce)');
+  assert.match(css, /\.cf-tile \{[^}]*overflow: hidden/, 'a palavra velha e a nova não podem vazar uma por cima da outra');
+});
+
+test('vitrine de legendas = a seleção do Silas (07.10)', () => {
+  const src = ler(`${DIR}/Legendas.tsx`);
+  const shelf = src.slice(src.indexOf('const SHELF'), src.indexOf('const ALL_IDS'));
+  const virais = ['titulo-ouro', 'vermelho-sangue', 'extensao-script', 'automatico-arcoiris', 'g-fumaca-anton', 'manuscrito', 'poster-stack'];
+  const simples = ['keynote', 'fade-limpo', 'papo-amarelo', 'empilhado', 'g-caixa-chip', 'palavra-box', 'solo-box'];
+  for (const id of [...virais, ...simples]) assert.match(shelf, new RegExp(`'${id}'`), `falta o modelo ${id} na vitrine`);
+  const presets = ler('lib/typography/presets.ts') + ler('lib/typography/presets-gen.ts');
+  for (const id of [...virais, ...simples].filter((i) => !i.startsWith('g-'))) {
+    assert.match(presets, new RegExp(`id: '${id}'`), `o modelo ${id} não existe mais no catálogo`);
+  }
+});

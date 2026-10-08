@@ -10,6 +10,7 @@ import { useRef } from 'react';
 import { Reveal } from '../v3/kit';
 import { CamuflagemScene, DecupagemScene } from '../v3/scenes';
 import { useSpotlight } from './fx';
+import { SectionHead } from './ui';
 
 const LIME = '#c8d684';
 const TEAL = '#3ec7bb';
@@ -17,22 +18,23 @@ const TEAL = '#3ec7bb';
 export function AudioSection() {
   return (
     <section id="audio" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
-      <Reveal>
-        <h2 className="section-title max-w-[18ch] text-[40px] leading-[1.02] md:text-[58px]">
-          O áudio resolvido{' '}
-          <span className="text-editorial italic text-white/70">enquanto você cuida do resto.</span>
-        </h2>
-      </Reveal>
+      <div aria-hidden className="sec-glow" style={{ ['--g' as string]: 'rgba(200,214,132,0.08)' }} />
+      <SectionHead
+        tone={LIME}
+        ask="Ainda corta silêncio na mão, um por um?"
+        answer={['O silêncio sai', { mark: 'sozinho.' }, 'A fala fica.']}
+        lead="Sobe o áudio ou o vídeo e recebe de volta só a fala, com o volume nivelado. E se precisar que a plataforma não leia o seu áudio original, a Camuflagem resolve."
+      />
 
       <div className="mt-12 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)]">
         <Reveal>
           <Cell
             tone={LIME}
             tag="Remover Silêncios"
-            title="O silêncio sai. A fala fica."
-            lead="Sobe o áudio ou o vídeo e recebe de volta sem tempo morto e sem respiro esticado no meio da frase, com a voz já nivelada."
-            bullets={['Vários arquivos na mesma fila', 'Dois locutores no mesmo volume', 'Nenhuma sílaba comida na entrada da frase']}
-            note="Áudio no Free, vídeo no Premium. Roda no seu navegador, e arquivo grande é dividido e remontado num arquivo só."
+            title="Sem tempo morto, sem respiro esticado."
+            lead="A pausa sai e a frase fica inteira: nenhuma sílaba comida na entrada da palavra, e dois locutores saem no mesmo volume."
+            bullets={['Vários arquivos na mesma fila', 'Voz nivelada antes do corte', 'Sai em MP3, WAV ou MP4']}
+            note="MP3 e WAV no Free. MP4 (vídeo) no Premium. Roda no seu navegador."
             scene={<DecupagemScene />}
           />
         </Reveal>
@@ -41,7 +43,7 @@ export function AudioSection() {
             tone={TEAL}
             tag="Camuflagem de Áudio"
             title="Duas trilhas no mesmo arquivo."
-            lead="Quem assiste ouve o seu áudio. A transcrição automática das plataformas lê a trilha que você deixou por baixo, ou silêncio, no modo mudo."
+            lead="Quem assiste ouve o seu áudio. A transcrição automática das plataformas lê a trilha que você escolheu por baixo, ou silêncio, no modo mudo."
             bullets={['Até 10 pares por vez', 'Sai em MP4, MP3 ou WAV', 'Descamuflar devolve qualquer camada']}
             note="No Premium. No fim, a ferramenta escuta o arquivo pronto do jeito que a plataforma escuta e mostra um selo por plataforma. Sem selo verde, não publique."
             scene={<CamuflagemScene />}

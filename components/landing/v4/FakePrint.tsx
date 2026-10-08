@@ -3,21 +3,20 @@
 /**
  * FakePrint — a redação da landing v4.
  *
- * Em cima: a copy e o plantão (TelejornalCard, a peça que o Silas aprovou),
- * agora girando de leve com o mouse. Embaixo: a MESA — prints de verdade,
- * exportados pelo próprio FakePrint (PNG baixado da ferramenta, não desenho),
- * espalhados em profundidade. O mouse mexe a mesa; passar em cima de um print
- * traz ele pra frente.
+ * Em cima: pergunta + resposta e o plantão (TelejornalCard, a peça que o
+ * Silas aprovou), girando de leve com o mouse. Embaixo: a MESA, com prints de
+ * verdade exportados pelo próprio FakePrint (PNG baixado da ferramenta, não
+ * desenho), espalhados em profundidade. O mouse mexe a mesa; passar em cima
+ * de um print traz ele pra frente.
  *
- * Regra de copy da landing v3 continua: o que tem cara de notícia fala SÓ de
- * FakePrint.
+ * Regra de copy da v3 continua: o que tem cara de notícia fala SÓ de FakePrint.
  */
 
 import { useCallback, useRef } from 'react';
-import { FAKEPRINT_MODELOS } from '@/lib/numeros-do-site';
 import { Reveal } from '../v3/kit';
 import { TelejornalCard } from '../v3/scenes';
 import { usePointerField } from './fx';
+import { SectionHead } from './ui';
 
 const RED = '#e0483f';
 
@@ -33,60 +32,55 @@ type Print = {
   ratio: string;
 };
 
-/** Composição da mesa (desktop). No celular vira uma fileira que rola. */
+/** Composição da mesa (desktop). No celular vira uma fileira que rola de lado. */
 const PRINTS: Print[] = [
-  { src: '/landing/fp-zoom.webp', alt: 'Reunião do Zoom com os quadros em tela verde', x: 1, y: 22, w: 34, rot: -5, z: 0.35, ratio: '16/9' },
-  { src: '/landing/fp-whatsapp.webp', alt: 'Conversa de WhatsApp', x: 28, y: 3, w: 15, rot: 4, z: 1, ratio: '540/1090' },
-  { src: '/landing/fp-caixinha.webp', alt: 'Caixinha de pergunta do story', x: 40.5, y: 36, w: 13.5, rot: -4, z: 0.55, ratio: '540/959' },
-  { src: '/landing/fp-tweet.webp', alt: 'Post no X', x: 51, y: 5, w: 27, rot: 3, z: 0.8, ratio: '720/515' },
-  { src: '/landing/fp-live-tiktok.webp', alt: 'Live do TikTok', x: 63, y: 44, w: 13, rot: 3, z: 0.65, ratio: '540/960' },
-  { src: '/landing/fp-notificacao.webp', alt: 'Notificação na tela de bloqueio', x: 80, y: 14, w: 15, rot: -5, z: 0.45, ratio: '540/1090' },
+  { src: '/landing/fp-comentarios.webp', alt: 'Comentários de um post do Instagram', x: 2, y: 8, w: 17, rot: -5, z: 0.45, ratio: '540/893' },
+  { src: '/landing/fp-whatsapp.webp', alt: 'Conversa de WhatsApp', x: 20, y: 2, w: 15, rot: 3, z: 1, ratio: '540/1090' },
+  { src: '/landing/fp-caixinha.webp', alt: 'Caixinha de pergunta do story', x: 35, y: 30, w: 13.5, rot: -4, z: 0.6, ratio: '540/959' },
+  { src: '/landing/fp-tweet.webp', alt: 'Post no X', x: 47, y: 4, w: 27, rot: 3, z: 0.8, ratio: '720/515' },
+  { src: '/landing/fp-live-tiktok.webp', alt: 'Live do TikTok', x: 61, y: 42, w: 13, rot: 4, z: 0.65, ratio: '540/960' },
+  { src: '/landing/fp-notificacao.webp', alt: 'Notificação do WhatsApp na tela de bloqueio', x: 80, y: 10, w: 15, rot: -5, z: 0.5, ratio: '540/1090' },
 ];
 
 export function FakePrintSection() {
   return (
     <section id="fakeprint" className="relative mx-auto mt-28 max-w-[1360px] px-5 md:mt-40 md:px-8">
+      <div aria-hidden className="sec-glow" style={{ ['--g' as string]: 'rgba(224,72,63,0.11)' }} />
       <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-14">
-        <Reveal>
-          <span
-            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[12.5px] font-semibold"
-            style={{ fontFamily: 'var(--font-label)', color: '#ff8a80', borderColor: `${RED}55`, background: `${RED}14` }}
-          >
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: RED }} />
-            FakePrint
-          </span>
-          <h2 className="section-title mt-5 text-[40px] leading-[1.02] md:text-[58px]">
-            A manchete do seu criativo,{' '}
-            <span className="text-editorial italic text-white/70">pronta pra ilha.</span>
-          </h2>
-          <p className="mt-5 max-w-[56ch] text-[16px] leading-[1.7] text-white/[0.62]">
-            São {FAKEPRINT_MODELOS} modelos: stories, conversas, posts, notificação, lives,
-            reunião, telejornais e sites de notícia. Tudo que não é notícia é grátis. Nos
-            telejornais e sites, o Free vê a prévia, e a edição e a exportação ficam no Premium.
-          </p>
-          <ul className="mt-7 flex flex-col gap-3.5">
-            {[
-              'Prévia ao vivo: o print muda a cada tecla, e o que você vê é o PNG que baixa',
-              'Tela verde no que é cena: telejornal, site e live prontos pro chroma key',
-              'Vídeo animado: reações subindo na live e, no Premium, relógio andando no telejornal',
-            ].map((b) => (
-              <li key={b} className="flex items-start gap-3">
-                <span aria-hidden className="mt-[9px] block h-[5px] w-[5px] shrink-0 rounded-full" style={{ background: RED }} />
-                <span className="text-[15px] leading-relaxed text-white/[0.82]">{b}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-7 border-l-2 pl-4 text-[13.5px] leading-relaxed text-white/50" style={{ borderColor: `${RED}66` }}>
-            A barra de status do celular é editável até a bateria: 63% às 21:47 conta uma
-            história, 100% às 9:00 conta outra.
-          </p>
-        </Reveal>
+        <div>
+          <SectionHead
+            tone={RED}
+            tag="FakePrint"
+            size="md"
+            ask="Precisa de uma notícia pro seu criativo ficar crível?"
+            answer={['Manchete de', { mark: 'telejornal' }, 'profissional, pronta em segundos.']}
+            lead="Você escreve a manchete e o FakePrint monta o telejornal em tela verde, pra você jogar o seu vídeo por trás na edição. E não é só notícia: tem conversa de WhatsApp, comentários, story, post, notificação, live e site de notícia."
+          />
+          <Reveal delay={120}>
+            <ul className="mt-8 flex flex-col gap-3.5">
+              {[
+                'O print muda enquanto você digita, e o que você vê é o PNG que baixa',
+                'Telejornal, site e live saem prontos pro chroma key',
+                'Também sai em vídeo: reações subindo na live e, no Premium, relógio andando no telejornal',
+              ].map((b) => (
+                <li key={b} className="flex items-start gap-3">
+                  <span aria-hidden className="mt-[9px] block h-[6px] w-[6px] shrink-0 rounded-full" style={{ background: RED }} />
+                  <span className="text-[15.5px] leading-relaxed text-white/80">{b}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-7 border-l-2 pl-4 text-[13.5px] leading-relaxed text-white/50" style={{ borderColor: `${RED}66` }}>
+              Prints de rede social são grátis. Telejornais e sites de notícia ficam no Premium: no
+              Free você vê a prévia.
+            </p>
+          </Reveal>
+        </div>
 
         <Reveal delay={100}>
           <TiltCard>
             <TelejornalCard />
           </TiltCard>
-          <p className="mt-4 text-[12.5px] text-white/[0.42]">
+          <p className="mt-4 text-[12.5px] text-white/45">
             Telejornal do FakePrint, no Premium: o gráfico sai em tela verde e o seu vídeo entra por trás.
           </p>
         </Reveal>
@@ -130,22 +124,23 @@ function Desk() {
   usePointerField(zoneRef, onFrame, { ease: 0.08, global: true });
 
   return (
-    <Reveal>
-      <div className="mt-20 md:mt-24" style={{ filter: 'saturate(1.39)' }}>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <h3 className="max-w-[24ch] text-[26px] font-extrabold leading-[1.1] tracking-[-0.02em] text-white md:text-[34px]" style={{ fontFamily: 'var(--font-tech)' }}>
-            A mesa de quem faz criativo.
-            <span className="block text-editorial font-normal italic text-white/65">Tudo isso saiu do FakePrint.</span>
-          </h3>
-          <p className="max-w-[40ch] text-[13.5px] leading-relaxed text-white/50">
-            Prints exportados pela ferramenta, sem retoque.{' '}
+    <div className="mt-24 md:mt-32">
+      <SectionHead
+        tone={RED}
+        ask="Quer ver como fica de verdade?"
+        answer={['Tudo isso', { mark: 'saiu do FakePrint.' }]}
+        lead={
+          <>
+            Prints exportados direto da ferramenta, sem retoque.{' '}
             <span className="hidden md:inline">Passa o mouse pra ver de perto.</span>
             <span className="md:hidden">Arrasta pro lado pra ver todos.</span>
-          </p>
-        </div>
+          </>
+        }
+      />
 
+      <div style={{ filter: 'saturate(1.39)' }}>
         {/* desktop: mesa em profundidade */}
-        <div ref={zoneRef} className="desk relative mt-10 hidden md:block">
+        <div ref={zoneRef} className="desk relative mt-12 hidden md:block">
           {PRINTS.map((p, i) => (
             <div
               key={p.src}
@@ -166,7 +161,7 @@ function Desk() {
         {/* celular: fileira que rola de lado */}
         <div className="desk-row -mx-5 mt-8 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-4 md:hidden">
           {PRINTS.map((p) => (
-            <div key={p.src} className="shrink-0 snap-center" style={{ height: 300, aspectRatio: p.ratio }}>
+            <div key={p.src} className="shrink-0 snap-center" style={{ height: 320, aspectRatio: p.ratio }}>
               <div className="desk-card h-full" style={{ ['--rot' as string]: '0deg' }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.src} alt={p.alt} loading="lazy" decoding="async" className="h-full w-full object-cover" />
@@ -212,6 +207,6 @@ function Desk() {
           }
         }
       `}</style>
-    </Reveal>
+    </div>
   );
 }
