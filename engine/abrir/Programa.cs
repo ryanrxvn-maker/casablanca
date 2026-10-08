@@ -65,6 +65,7 @@ namespace AutoEditAbrir
             sb.AppendLine("capcut_exe=" + (Capcut.Executavel() ?? ""));
             sb.AppendLine("capcut_rascunhos=" + Capcut.PastaDosRascunhos());
             sb.AppendLine("premiere_exe=" + (Premiere.Executavel() ?? ""));
+            sb.AppendLine("navegador_pilot=" + (Instalador.NavegadorDoPilot() ?? ""));
             foreach (var d in Pacote.PastasDeDownload()) sb.AppendLine("downloads=" + d);
             File.WriteAllText(arquivo, sb.ToString(), new UTF8Encoding(false));
         }

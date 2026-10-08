@@ -24,7 +24,7 @@
 export type AlvoDoEditor = 'capcut' | 'premiere';
 
 /** Versão do app que o site entrega (public/downloads/auto-edit-abrir.zip). */
-export const ABRIR_VERSAO = '1.0.1';
+export const ABRIR_VERSAO = '1.0.2';
 export const ABRIR_DOWNLOAD = '/downloads/auto-edit-abrir.zip';
 export const ABRIR_DOWNLOAD_NOME = 'Auto Edit Abrir - instalador.zip';
 export const ABRIR_PROTOCOLO = 'autoedit-abrir';

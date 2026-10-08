@@ -175,7 +175,7 @@ export function PilotProjetoExportModal({
         <div className="lz-cab">
           <span className="lz-cab-textos">
             <span className="lz-titulo">Projeto editável</span>
-            <span className="lz-sub">{nomeAd}: avatar, b-rolls, transições, legenda, SFX e trilha, cada um na sua camada e em pastas.</span>
+            <span className="lz-sub">{nomeAd}: avatar, b‑rolls, transições, legenda, SFX e trilha, cada um na sua camada.</span>
           </span>
           <button type="button" className="lz-x" onClick={onFechar} aria-label="Fechar" disabled={ocupado}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
@@ -193,11 +193,11 @@ export function PilotProjetoExportModal({
                     <span className="pe-op-dica">
                       {direto
                         ? (a === 'capcut'
-                          ? 'Põe o projeto na pasta do CapCut e abre ele direto no editor.'
-                          : 'Põe a mídia no lugar e abre o projeto direto no Premiere.')
+                          ? 'Abra o projeto no CapCut com 1 clique.'
+                          : 'Abra o projeto no Premiere com 1 clique.')
                         : (a === 'capcut'
-                          ? 'A pasta do projeto pronta pra rodar, com um PDF de como abrir.'
-                          : 'O arquivo do projeto (XML) com a mídia junto e um PDF de como abrir.')}
+                          ? 'Baixe o projeto pronto pro CapCut, com o passo a passo pra abrir.'
+                          : 'Baixe o projeto pronto pro Premiere, com o passo a passo pra abrir.')}
                     </span>
                     <span className="pe-op-cta">
                       {direto ? `Abrir no ${nomeCurto(a)}` : 'Baixar'}
@@ -217,14 +217,14 @@ export function PilotProjetoExportModal({
               <div className={`pe-app is-instalado${direto ? ' is-on' : ''}`}>
                 <LogoApp />
                 <span className="pe-app-txt">
-                  <b>Abrir direto no editor</b>
-                  <small>{direto ? 'Ligado: o projeto entra sozinho no CapCut ou no Premiere.' : 'Desligado: só baixa a pasta do projeto, com o PDF.'}</small>
+                  <b>Abrir no editor com 1&nbsp;clique</b>
+                  <small>{direto ? 'Ligado: o projeto abre sozinho no CapCut ou no Premiere.' : 'Desligado: só baixa o projeto, com o passo a passo.'}</small>
                 </span>
                 <button
                   type="button"
                   role="switch"
                   aria-checked={direto}
-                  aria-label="Abrir direto no editor"
+                  aria-label="Abrir no editor com 1 clique"
                   className={`pe-chave${direto ? ' is-on' : ''}`}
                   onClick={alternar}
                 >
@@ -235,8 +235,8 @@ export function PilotProjetoExportModal({
               <div className="pe-app is-baixar">
                 <LogoApp />
                 <span className="pe-app-txt">
-                  <b>Abra direto no editor, sem extrair nada</b>
-                  <small>{baixouApp ? 'Abra o .zip baixado e instale: esta janela liga sozinha quando terminar.' : 'Instale o Auto Edit Abrir: 1 minuto, sem administrador.'}</small>
+                  <b>Abra direto no editor com 1&nbsp;clique</b>
+                  <small>{baixouApp ? 'Abra o .zip baixado e instale: esta janela liga sozinha quando terminar.' : 'Instale o Auto Edit Abrir e o projeto abre no seu editor, sem extrair nada.'}</small>
                 </span>
                 <span className="pe-app-acoes">
                   <button type="button" className="pe-app-btn" onClick={() => { baixarInstalador(); setBaixouApp(true); }}>

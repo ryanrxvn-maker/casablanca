@@ -171,15 +171,62 @@ namespace AutoEditAbrir
             catch (Exception ex) { Log.Escrever("limpeza da pasta não agendada: " + ex.Message); }
         }
 
+        /// <summary>
+        /// Abre a página que LIGA o "abrir direto" no navegador onde a pessoa
+        /// usa o Pilot. Não pode ser o navegador PADRÃO: no PC do Silas o padrão
+        /// é o Firefox, a marca caía lá e o Chrome (onde o Pilot roda, com a
+        /// extensão Hey Auto) nunca sabia que o app estava instalado. Ordem:
+        /// Chrome → Edge → o padrão do Windows.
+        /// </summary>
         public static void AbrirNoNavegador(string url)
         {
+            string nav = NavegadorDoPilot();
             try
             {
-                var psi = new ProcessStartInfo(url);
+                var psi = nav != null ? new ProcessStartInfo(nav, "\"" + url + "\"") : new ProcessStartInfo(url);
                 psi.UseShellExecute = true;
                 Process.Start(psi);
+                Log.Escrever("página do app aberta em " + (nav ?? "navegador padrão"));
             }
-            catch (Exception ex) { Log.Escrever("navegador não abriu: " + ex.Message); }
+            catch (Exception ex)
+            {
+                Log.Escrever("navegador não abriu (" + (nav ?? "padrão") + "): " + ex.Message);
+                if (nav == null) return;
+                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+            }
+        }
+
+        /// <summary>chrome.exe (ou msedge.exe) instalado neste PC, ou null.</summary>
+        public static string NavegadorDoPilot()
+        {
+            foreach (var exe in new[] { "chrome.exe", "msedge.exe" })
+            {
+                foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+                {
+                    try
+                    {
+                        using (var k = hive.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exe))
+                        {
+                            string p = k == null ? null : (k.GetValue("") as string ?? "").Trim('"');
+                            if (!string.IsNullOrEmpty(p) && File.Exists(p)) return p;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            foreach (var p in new[]
+            {
+                @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                Path.Combine(local, @"Google\Chrome\Application\chrome.exe"),
+                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            })
+            {
+                if (File.Exists(p)) return p;
+            }
+            return null;
         }
     }
 }
