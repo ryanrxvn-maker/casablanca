@@ -103,12 +103,15 @@ export function useLegendaCanvas(
     stillAt,
     fontIds,
     onLoop,
+    once = false,
   }: {
     playing: boolean;
     stillAt: number;
     fontIds: string[];
     /** chamado quando o roteiro termina uma volta (pra trocar de modelo) */
     onLoop?: () => void;
+    /** toca a entrada UMA vez e para em `stillAt` (cards: sem quadro vazio entre voltas) */
+    once?: boolean;
   },
 ) {
   const playingRef = useRef(playing);
@@ -173,6 +176,10 @@ export function useLegendaCanvas(
         const prog = programRef.current;
         const len = prog ? blocksLength(prog.blocks) : 2000;
         const el = now - t0Ref.current;
+        if (once && el >= stillRef.current) {
+          paint(stillRef.current);
+          return;
+        }
         const loop = Math.floor(el / len);
         if (lastLoop >= 0 && loop !== lastLoop) onLoopRef.current?.();
         lastLoop = loop;

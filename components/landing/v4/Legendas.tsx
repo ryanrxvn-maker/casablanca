@@ -250,7 +250,7 @@ function Chip({ id, index, active, onPick }: { id: string; index: number; active
     fontScale: 2.1,
     posY: 0.52,
   });
-  useLegendaCanvas(canvasRef, progRef, { playing: hover || active, stillAt: 1900, fontIds: ALL_IDS });
+  useLegendaCanvas(canvasRef, progRef, { playing: hover || active, stillAt: 1900, fontIds: ALL_IDS, once: true });
 
   return (
     <button
