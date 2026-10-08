@@ -27,6 +27,7 @@ uniform float u_time;
 uniform vec2 u_mouse;
 uniform vec2 u_trail;
 uniform float u_energy;
+uniform float u_band;
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 p){
@@ -65,7 +66,10 @@ void main(){
 
   float smoke = smoothstep(0.26, 0.82, f);
   // mais fumaça embaixo e nas laterais, respiro no topo (onde fica o menu)
-  float shape = (1.0 - smoothstep(0.35, 1.08, uv.y)) * (0.72 + 0.28 * smoothstep(0.0, 0.45, abs(uv.x - 0.5)));
+  float shapeHero = (1.0 - smoothstep(0.35, 1.08, uv.y)) * (0.72 + 0.28 * smoothstep(0.0, 0.45, abs(uv.x - 0.5)));
+  // rodapé: fumaça curta, rente à base, subindo até ~metade da altura
+  float shapeBand = (1.0 - smoothstep(0.02, 0.62, uv.y)) * (0.8 + 0.2 * smoothstep(0.0, 0.5, abs(uv.x - 0.5)));
+  float shape = mix(shapeHero, shapeBand, u_band);
   smoke *= shape;
   float wisp = pow(smoke, 2.4);
 
@@ -76,12 +80,19 @@ void main(){
   col += vec3(1.0, 0.94, 1.0) * wisp * (0.35 + 0.9 * infl);
 
   // alpha pré-multiplicado VÁLIDO: rgb nunca passa do alpha (senão estoura em branco)
-  float a = clamp(smoke * 0.54 + wisp * 0.22 + infl * smoke * 0.6, 0.0, 0.85);
+  float a = clamp((smoke * 0.54 + wisp * 0.22 + infl * smoke * 0.6) * (1.0 + 0.55 * u_band), 0.0, 0.85);
   gl_FragColor = vec4(clamp(col, 0.0, 1.0) * a, a);
 }
 `;
 
-export function Smoke({ className = '' }: { className?: string }) {
+export function Smoke({
+  className = '',
+  band = false,
+}: {
+  className?: string;
+  /** fumaça curta rente à base (rodapé) em vez da do herói */
+  band?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -129,6 +140,7 @@ export function Smoke({ className = '' }: { className?: string }) {
     const uMouse = gl.getUniformLocation(prog, 'u_mouse');
     const uTrail = gl.getUniformLocation(prog, 'u_trail');
     const uEnergy = gl.getUniformLocation(prog, 'u_energy');
+    const uBand = gl.getUniformLocation(prog, 'u_band');
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     const mouseOn = pointerFxAllowed();
@@ -165,6 +177,7 @@ export function Smoke({ className = '' }: { className?: string }) {
       gl.uniform2f(uMouse, mx, my);
       gl.uniform2f(uTrail, trx, try_);
       gl.uniform1f(uEnergy, energy);
+      gl.uniform1f(uBand, band ? 1 : 0);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -226,7 +239,8 @@ export function Smoke({ className = '' }: { className?: string }) {
       // NÃO descarta o contexto aqui: no dev o React monta o efeito duas
       // vezes, e um contexto perdido deixava o canvas pintando branco.
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [band]);
 
   return (
     <canvas
