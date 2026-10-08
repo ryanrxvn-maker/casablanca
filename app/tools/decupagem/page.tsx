@@ -11,8 +11,6 @@ import {
   ToolChoice,
   ToolSlider,
   ToolAction,
-  ToolResultCard,
-  ToolMetric,
 } from '@/components/tool-kit';
 import {
   IconDecupagem,
@@ -45,6 +43,7 @@ import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 
 type OutputKind = 'video' | 'audio';
 type AudioFmt = 'wav' | 'mp3';
+type OutFormat = 'mp4' | AudioFmt;
 
 function toAudit(plan: { cuts: number; audit: { savedSec: number; speechRemovedSec: number; refusedCuts: number; ok: boolean } }): DecupAudit {
   return {
@@ -147,6 +146,310 @@ function baseName(name?: string | null) {
   return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
 }
 
+/* ─────────────── Item da fila ───────────────
+ * Componente de MÓDULO (nunca dentro da página: a página re-renderiza a cada
+ * tique de progresso e um componente inline remontaria a miniatura toda vez).
+ * Miniatura: vídeo mostra o 1º quadro do próprio arquivo (preload=metadata,
+ * o navegador lê só o cabeçalho); áudio mostra uma onda. Por cima, o estado:
+ * número na fila, anel de progresso, ✓ pronto ou ✕ erro.
+ */
+const WAVE_BARS = [0.35, 0.7, 0.5, 0.95, 0.6, 0.8, 0.4, 0.65, 0.3];
+const RING = 2 * Math.PI * 15;
+
+function QueueRow({
+  item,
+  idx,
+  locked,
+  onDownload,
+  onRemove,
+}: {
+  item: QueueItem;
+  idx: number;
+  locked: boolean;
+  onDownload: () => void;
+  onRemove: () => void;
+}) {
+  const isVideo = isVideoFile(item.file);
+  const failed = item.status === 'error';
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [srcDur, setSrcDur] = useState<number | null>(null);
+
+  // Object URL só pra miniatura/duração — revogado quando o item sai da fila.
+  // Arquivo recusado (formato/tamanho) nem chega a abrir.
+  useEffect(() => {
+    if (failed && !item.result) return;
+    const url = URL.createObjectURL(item.file);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [item.file, failed, item.result]);
+
+  const r = item.result;
+  const reduced = r && r.originalDur > 0 ? Math.max(0, Math.round((1 - r.newDur / r.originalDur) * 100)) : 0;
+  const pct = item.progress != null ? Math.round(item.progress * 100) : null;
+  const done = item.status === 'done';
+  const running = item.status === 'processing';
+  const origDur = r ? r.originalDur : srcDur;
+  const sizeMb = (item.file.size / (1024 * 1024)).toFixed(1);
+  const readDur = (d: number) => {
+    if (Number.isFinite(d) && d > 0) setSrcDur(d);
+  };
+
+  return (
+    <div
+      className={
+        'relative overflow-hidden rounded-[16px] border p-2.5 pr-3 transition-all duration-300 ' +
+        (done
+          ? 'border-lime/45 bg-lime/[0.05] shadow-[0_0_26px_-14px_rgb(var(--lime))]'
+          : failed
+            ? 'border-red-500/45 bg-red-500/[0.06]'
+            : running
+              ? 'scan-line border-lime/55 bg-lime/[0.035]'
+              : 'border-line-strong bg-bg-soft/50 hover:border-violet/40')
+      }
+    >
+      <div className="flex items-center gap-3.5">
+        {/* MINIATURA + ESTADO */}
+        <div className="relative h-[58px] w-[58px] shrink-0 overflow-hidden rounded-[12px] border border-line-strong bg-black">
+          {isVideo && thumbUrl ? (
+            <video
+              src={`${thumbUrl}#t=0.1`}
+              muted
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(e) => readDur(e.currentTarget.duration)}
+              className="pointer-events-none h-full w-full object-cover"
+            />
+          ) : (
+            <div
+              className="flex h-full w-full items-center justify-center gap-[3px]"
+              style={{ background: 'linear-gradient(150deg, rgb(var(--violet) / 0.45), rgb(12 12 16) 78%)' }}
+            >
+              {WAVE_BARS.map((h, i) => (
+                <span key={i} className="w-[3px] rounded-full bg-violet" style={{ height: `${Math.round(h * 30)}px` }} />
+              ))}
+              {thumbUrl && !isVideo ? (
+                <audio src={thumbUrl} preload="metadata" className="hidden" onLoadedMetadata={(e) => readDur(e.currentTarget.duration)} />
+              ) : null}
+            </div>
+          )}
+
+          {running ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+              <svg width="42" height="42" viewBox="0 0 40 40" className={'-rotate-90 ' + (pct == null ? 'animate-spin' : '')}>
+                <circle cx="20" cy="20" r="15" fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth="3" />
+                <circle
+                  cx="20"
+                  cy="20"
+                  r="15"
+                  fill="none"
+                  stroke="rgb(var(--lime))"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray={RING}
+                  strokeDashoffset={pct == null ? RING * 0.72 : RING * (1 - pct / 100)}
+                  style={{ transition: 'stroke-dashoffset 300ms ease' }}
+                />
+              </svg>
+              {pct != null ? <span className="mono absolute text-[10px] font-bold text-white">{pct}%</span> : null}
+            </div>
+          ) : done ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-lime shadow-[0_0_16px_rgb(var(--lime))]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--bg))" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
+              </span>
+            </div>
+          ) : failed ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-red-950/75">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgb(252 165 165)" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </div>
+          ) : (
+            <span className="mono absolute bottom-1 left-1 rounded-[6px] bg-black/75 px-1.5 py-[1px] text-[9.5px] font-bold text-white">
+              {String(idx + 1).padStart(2, '0')}
+            </span>
+          )}
+        </div>
+
+        {/* NOME + DADOS */}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13.5px] font-semibold tracking-tight text-text">{item.file.name}</div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span
+              className={
+                'mono rounded-full border px-2 py-[2px] text-[9.5px] font-bold uppercase tracking-[0.14em] ' +
+                (isVideo ? 'border-violet/45 bg-violet/10 text-violet' : 'border-cyan-400/45 bg-cyan-400/10 text-cyan-500')
+              }
+            >
+              {isVideo ? 'Vídeo' : 'Áudio'}
+            </span>
+            <span className="mono rounded-full border border-text-muted/30 px-2 py-[2px] text-[10px] text-text-muted">{sizeMb} MB</span>
+            {origDur != null ? (
+              <span className="mono rounded-full border border-text-muted/30 px-2 py-[2px] text-[10px] text-text-muted">
+                {formatTime(origDur)}
+                {done && r ? <span className="font-bold text-text"> → {formatTime(r.newDur)}</span> : null}
+              </span>
+            ) : null}
+            {done ? <span className="mono rounded-full bg-lime px-2 py-[2px] text-[10px] font-black text-bg">−{reduced}%</span> : null}
+            {item.status === 'pending' ? <span className="mono text-[10px] text-text-muted">na fila</span> : null}
+          </div>
+          {running ? (
+            <div className="mt-2">
+              <div className="mono flex items-center justify-between gap-3 text-[10px] text-text">
+                <span className="truncate">{item.stage ?? 'Iniciando...'}</span>
+                {pct != null ? <span className="shrink-0 font-bold">{pct}%</span> : null}
+              </div>
+              <div className="mt-1 h-[5px] w-full overflow-hidden rounded-full bg-line">
+                <div
+                  className={'h-full rounded-full bg-lime transition-all duration-300 ' + (pct == null ? 'w-1/3 animate-pulse' : '')}
+                  style={pct != null ? { width: `${pct}%`, boxShadow: '0 0 10px rgb(var(--lime))' } : undefined}
+                />
+              </div>
+            </div>
+          ) : null}
+          {failed && item.error ? <div className="mt-1.5 text-[11px] leading-snug text-red-400">{item.error}</div> : null}
+        </div>
+
+        {/* AÇÕES — só ícone */}
+        {done ? (
+          <button
+            type="button"
+            onClick={onDownload}
+            title="Baixar"
+            aria-label={`Baixar ${item.file.name}`}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-lime/60 bg-lime/15 text-lime transition hover:scale-105 hover:bg-lime hover:text-bg"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M12 4v11" />
+              <path d="M7 11l5 5 5-5" />
+              <path d="M5 20h14" />
+            </svg>
+          </button>
+        ) : null}
+        {!locked ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            title="Remover da fila"
+            aria-label={`Remover ${item.file.name} da fila`}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-text-muted/30 text-text-muted transition hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-400"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────── Card do arquivo pronto ───────────────
+ * Antes × depois em barra PROPORCIONAL (a barra "depois" tem exatamente
+ * newDur/originalDur da largura; o tracejado é o tempo de silêncio que saiu),
+ * selo de auditoria, preview num palco com altura contida (vídeo em pé não
+ * vira um cartaz de 1.200px) e o nome exato do arquivo que vai baixar.
+ */
+function ResultCard({ item, onDownload }: { item: QueueItem & { result: Result }; onDownload: () => void }) {
+  const r = item.result;
+  const reduced = r.originalDur > 0 ? Math.max(0, Math.round((1 - r.newDur / r.originalDur) * 100)) : 0;
+  const keptPct = r.originalDur > 0 ? Math.min(100, Math.max(2, (r.newDur / r.originalDur) * 100)) : 100;
+  const removed = Math.max(0, r.originalDur - r.newDur);
+  const ext = r.kind === 'video' ? 'mp4' : r.format;
+  const outName = `${baseName(item.file.name)}_decupado.${ext}`;
+
+  return (
+    <section
+      className="relative overflow-hidden rounded-[22px] border border-lime/30 p-5 shadow-depth-1 md:p-6"
+      style={{
+        background:
+          'radial-gradient(120% 90% at 100% 0%, rgb(var(--lime) / 0.10), transparent 55%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+      }}
+    >
+      {/* CABEÇALHO */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="mono inline-flex items-center gap-1.5 rounded-full border border-lime/40 bg-lime/10 px-2.5 py-[3px] text-[9.5px] font-bold uppercase tracking-[0.18em] text-lime">
+              <span className="h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgb(var(--lime))]" />
+              Pronto
+            </span>
+            <span className="mono rounded-full border border-line-strong px-2.5 py-[3px] text-[9.5px] font-bold uppercase tracking-[0.18em] text-text-muted">
+              {ext}
+            </span>
+          </div>
+          <h3 className="mt-2.5 truncate text-[19px] font-bold tracking-tight text-text md:text-[21px]">{item.file.name}</h3>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-[34px] font-black leading-none tracking-tight text-lime md:text-[40px]">−{reduced}%</div>
+          <div className="mono mt-1 text-[9.5px] uppercase tracking-[0.18em] text-text-muted">mais curto</div>
+        </div>
+      </div>
+
+      {/* ANTES × DEPOIS */}
+      <div className="mt-5 grid gap-2.5 rounded-[16px] border border-line-strong bg-bg/40 p-4">
+        <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+          <div>
+            <div className="mono text-[9.5px] uppercase tracking-[0.16em] text-text-muted">Original</div>
+            <div className="text-[17px] font-bold tabular-nums text-text">{formatTime(r.originalDur)}</div>
+          </div>
+          <div className="h-3 w-full rounded-full bg-text-muted/25" />
+        </div>
+        <div className="grid grid-cols-[92px_1fr] items-center gap-3">
+          <div>
+            <div className="mono text-[9.5px] uppercase tracking-[0.16em] text-lime">Sem silêncio</div>
+            <div className="text-[17px] font-bold tabular-nums text-lime">{formatTime(r.newDur)}</div>
+          </div>
+          <div className="relative h-3 w-full">
+            <div
+              className="absolute inset-0 rounded-full border border-dashed border-text-muted/40"
+              style={{
+                backgroundImage:
+                  'repeating-linear-gradient(135deg, rgb(var(--text-muted) / 0.16) 0 5px, transparent 5px 10px)',
+              }}
+            />
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-lime shadow-[0_0_14px_rgb(var(--lime)/0.55)]"
+              style={{ width: `${keptPct}%` }}
+            />
+          </div>
+        </div>
+        <div className="mono pl-[104px] text-[10.5px] text-text-muted">
+          −{formatTime(removed)} de silêncio removido
+        </div>
+      </div>
+
+      {r.audit ? <div className="mt-3"><DecupAuditBadge audit={r.audit} /></div> : null}
+
+      {/* PREVIEW */}
+      {r.kind === 'video' ? (
+        <div className="mt-1 flex justify-center overflow-hidden rounded-[16px] border border-line-strong bg-black">
+          <video src={r.url} controls preload="metadata" playsInline className="max-h-[440px] w-auto max-w-full" />
+        </div>
+      ) : (
+        <AudioPlayer src={r.url} label="Preview" />
+      )}
+
+      {/* RODAPÉ — o nome exato do que vai baixar */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="mono min-w-0 truncate text-[11px] text-text-muted" title={outName}>
+          {outName}
+        </div>
+        <button type="button" onClick={onDownload} className="btn-lime inline-flex items-center gap-2 !py-2.5 text-xs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 4v11" />
+            <path d="M7 11l5 5 5-5" />
+            <path d="M5 20h14" />
+          </svg>
+          Baixar {ext.toUpperCase()}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export default function DecupagemPage() {
   const tier = useTier();
   const isFree = tier === 'free';
@@ -194,7 +497,21 @@ export default function DecupagemPage() {
   }, [processing]);
 
   // Free é forçado a 'audio'. Vídeo só pra pagos.
-  const queueHasVideo = queue.some((q) => isVideoFile(q.file));
+  const queueHasAudio = queue.some((q) => !isVideoFile(q.file));
+  // O card "Formato de saída" mostra MP4 · MP3 · WAV juntos. MP4 = vídeo
+  // cortado — só conta paga e só com fila SEM arquivo de áudio (áudio não vira
+  // vídeo). Fora disso a saída é áudio no formato escolhido (MP3/WAV).
+  const mp4Allowed = !isFree && !queueHasAudio;
+  const outFormat: OutFormat = mp4Allowed && outputKind === 'video' ? 'mp4' : audioFormat;
+  function pickOutFormat(v: OutFormat) {
+    if (v === 'mp4') {
+      if (!mp4Allowed) return;
+      setOutputKind('video');
+      return;
+    }
+    setOutputKind('audio');
+    setAudioFormat(v);
+  }
 
   function patchItem(id: string, patch: Partial<QueueItem>) {
     setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)));
@@ -373,7 +690,8 @@ export default function DecupagemPage() {
   ): Promise<Result> {
     const file = item.file;
     const fileIsVideo = isVideoFile(file);
-    const effectiveKind: OutputKind = isFree ? 'audio' : fileIsVideo ? outputKind : 'audio';
+    // Segue EXATAMENTE o que o card mostra: MP4 só quando está liberado e escolhido.
+    const effectiveKind: OutputKind = fileIsVideo && outFormat === 'mp4' ? 'video' : 'audio';
 
     // Arquivo grande → dividir/decupar/juntar no próprio navegador.
     if (file.size > CHUNK_THRESHOLD_BYTES) {
@@ -513,9 +831,20 @@ export default function DecupagemPage() {
 
   const doneCount = queue.filter((q) => q.status === 'done').length;
   const zippableCount = queue.filter((q) => q.result).length;
-  const audioOptions = [
-    { value: 'mp3' as const, label: 'MP3' },
-    { value: 'wav' as const, label: 'WAV' },
+  const outOptions = [
+    {
+      value: 'mp4' as const,
+      label: 'MP4',
+      sub: isFree ? '🔒 Planos pagos' : queueHasAudio ? 'Só com vídeos na fila' : 'Vídeo já cortado',
+      disabled: !mp4Allowed,
+      title: isFree
+        ? 'Receber o vídeo em MP4 é recurso dos planos pagos.'
+        : queueHasAudio
+          ? 'Com arquivo de áudio na fila, a saída é em áudio (MP3 ou WAV).'
+          : undefined,
+    },
+    { value: 'mp3' as const, label: 'MP3', sub: 'Áudio leve' },
+    { value: 'wav' as const, label: 'WAV', sub: 'Áudio sem perda' },
   ];
 
   return (
@@ -550,128 +879,37 @@ export default function DecupagemPage() {
 
           {/* LISTA DA FILA */}
           {queue.length > 0 ? (
-            <div className="mt-3 grid gap-2">
-              {queue.map((item, idx) => {
-                const itemIsVideo = isVideoFile(item.file);
-                const reduced =
-                  item.result && item.result.originalDur > 0
-                    ? Math.max(0, Math.round((1 - item.result.newDur / item.result.originalDur) * 100))
-                    : 0;
-                return (
-                  <div
-                    key={item.id}
-                    className={
-                      'rounded-[12px] border px-3.5 py-2.5 transition ' +
-                      (item.status === 'done'
-                        ? 'border-lime/40 bg-lime/[0.06]'
-                        : item.status === 'error'
-                          ? 'border-red-500/40 bg-red-500/[0.06]'
-                          : item.status === 'processing'
-                            ? 'border-lime/50 bg-lime/[0.04] scan-line'
-                            : 'border-line bg-bg-soft/40')
-                    }
-                  >
-                    <div className="flex items-center gap-3">
-                      {/* índice / status badge */}
-                      <span
-                        className={
-                          'mono flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ' +
-                          (item.status === 'done'
-                            ? 'bg-lime/20 text-lime'
-                            : item.status === 'error'
-                              ? 'bg-red-500/20 text-red-300'
-                              : item.status === 'processing'
-                                ? 'bg-lime/15 text-lime'
-                                : 'bg-line text-text-muted')
-                        }
-                      >
-                        {item.status === 'done' ? '✓' : item.status === 'error' ? '✕' : idx + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[12.5px] font-semibold text-white">
-                          {item.file.name}
-                        </div>
-                        <div className="mono text-[10px] text-text-muted">
-                          {(item.file.size / (1024 * 1024)).toFixed(1)} MB · {itemIsVideo ? 'vídeo' : 'áudio'}
-                          {item.status === 'processing' && item.stage ? ` · ${item.stage}` : ''}
-                          {item.status === 'done' && item.result ? ` · −${reduced}% · ${formatTime(item.result.newDur)}` : ''}
-                          {item.status === 'error' ? ` · ${item.error}` : ''}
-                          {item.status === 'pending' ? ' · na fila' : ''}
-                        </div>
-                        {item.status === 'processing' && item.progress != null ? (
-                          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-line">
-                            <div className="h-full bg-lime transition-all" style={{ width: `${Math.round(item.progress * 100)}%` }} />
-                          </div>
-                        ) : null}
-                      </div>
-                      {/* ações por item */}
-                      {item.status === 'done' ? (
-                        <button
-                          type="button"
-                          onClick={() => downloadOne(item)}
-                          className="shrink-0 rounded-full border border-lime/50 bg-lime/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20"
-                        >
-                          ↓ Baixar
-                        </button>
-                      ) : null}
-                      {!processing ? (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.id)}
-                          className="shrink-0 rounded-full border border-text-muted/30 px-2 py-1 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300"
-                          title="Remover da fila"
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="mt-3 grid gap-2.5">
+              {queue.map((item, idx) => (
+                <QueueRow
+                  key={item.id}
+                  item={item}
+                  idx={idx}
+                  locked={processing}
+                  onDownload={() => downloadOne(item)}
+                  onRemove={() => removeItem(item.id)}
+                />
+              ))}
             </div>
           ) : null}
         </ToolStep>
 
-        {/* PASSO 2 — SAÍDA (só se a fila tem vídeo) */}
-        {queueHasVideo ? (
-          <ToolStep
-            n={2}
-            icon={<IconStepFormat size={18} />}
-            title="Como receber os vídeos?"
-            hint={isFree ? 'O plano Free permite exportar o áudio.' : 'A escolha será aplicada a todos os vídeos da fila.'}
-            hue="rgba(167,139,250,0.4)"
-          >
-            <ToolChoice
-              value={isFree ? 'audio' : outputKind}
-              onChange={(v) => {
-                if (v === 'video' && isFree) return;
-                setOutputKind(v);
-              }}
-              options={[
-                { value: 'video' as const, label: 'Vídeo' },
-                { value: 'audio' as const, label: 'Áudio' },
-              ]}
-              disabled={processing}
-            />
-            {isFree ? <p className="mt-2 text-[11.5px] text-violet">🔒 Vídeo bloqueado no plano grátis.</p> : null}
-          </ToolStep>
-        ) : null}
-
-        {/* PASSO 3 — FORMATO DE ÁUDIO */}
-        {(isFree || outputKind === 'audio' || !queueHasVideo) ? (
-          <ToolStep
-            n={queueHasVideo ? 3 : 2}
-            icon={<IconStepFormat size={18} />}
-            title="Formato do áudio"
-            hue="rgba(34,211,238,0.4)"
-          >
-            <ToolChoice value={audioFormat} onChange={setAudioFormat} options={audioOptions} disabled={processing} />
-          </ToolStep>
-        ) : null}
-
-        {/* PASSO 4 — TOLERÂNCIA */}
+        {/* PASSO 2 — FORMATO DE SAÍDA: MP4 · MP3 · WAV numa linha só, sempre à
+            mostra, pra ficar claro que existe o modo vídeo. MP4 fica apagado
+            (bloqueado) no plano grátis e quando a fila tem arquivo de áudio. */}
         <ToolStep
-          n={queueHasVideo ? 4 : 3}
+          n={2}
+          icon={<IconStepFormat size={18} />}
+          title="Formato de saída"
+          hint="MP4 devolve o vídeo já cortado. MP3 e WAV devolvem só o áudio."
+          hue="rgba(167,139,250,0.4)"
+        >
+          <ToolChoice value={outFormat} onChange={pickOutFormat} options={outOptions} disabled={processing} />
+        </ToolStep>
+
+        {/* PASSO 3 — TOLERÂNCIA */}
+        <ToolStep
+          n={3}
           icon={<IconStepSliders size={18} />}
           title="Quanto de silêncio manter?"
           hint="Valores menores deixam o corte mais curto. Valores maiores preservam mais pausa entre as falas."
@@ -719,36 +957,10 @@ export default function DecupagemPage() {
               {doneCount} pronto{doneCount === 1 ? '' : 's'} — preview + download de cada
             </div>
             {queue
-              .filter((q) => q.status === 'done' && q.result)
-              .map((item) => {
-                const r = item.result!;
-                const reduced = r.originalDur > 0 ? Math.max(0, Math.round((1 - r.newDur / r.originalDur) * 100)) : 0;
-                return (
-                  <ToolResultCard key={item.id} title={item.file.name} meta={`${reduced}% menor`}>
-                    <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
-                      <ToolMetric value={formatTime(r.originalDur)} label="Original" />
-                      <ToolMetric value={formatTime(r.newDur)} label="Após remover silêncios" accent="lime" />
-                      <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
-                    </div>
-                    {r.audit ? <DecupAuditBadge audit={r.audit} /> : null}
-                    {r.kind === 'video' ? (
-                      <video
-                        src={r.url}
-                        controls
-                        preload="metadata"
-                        className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
-                      />
-                    ) : (
-                      <AudioPlayer src={r.url} label="Preview" />
-                    )}
-                    <div className="mt-4 flex justify-end">
-                      <button onClick={() => downloadOne(item)} className="btn-lime !py-2.5 text-xs">
-                        Baixar {r.kind === 'video' ? 'MP4' : r.format.toUpperCase()}
-                      </button>
-                    </div>
-                  </ToolResultCard>
-                );
-              })}
+              .filter((q): q is QueueItem & { result: Result } => q.status === 'done' && !!q.result)
+              .map((item) => (
+                <ResultCard key={item.id} item={item} onDownload={() => downloadOne(item)} />
+              ))}
           </div>
         ) : null}
       </div>

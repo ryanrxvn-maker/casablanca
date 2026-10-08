@@ -68,24 +68,13 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Escolha como receber os vídeos',
-        text: 'Se a fila tiver vídeo, aparece o card "Como receber os vídeos?" com duas opções: "Vídeo" (o arquivo volta em MP4, já cortado) ou "Áudio" (só a trilha de voz limpa — útil quando o vídeo era apenas o meio de transporte da fala). A escolha vale pra fila inteira. No plano grátis a saída é sempre o áudio; receber o vídeo em MP4 é recurso das contas pagas — a própria tela sinaliza com "🔒 Vídeo bloqueado no plano grátis."',
+        title: 'Escolha o formato de saída',
+        text: 'No card "Formato de saída", as três opções ficam lado a lado: "MP4" (o vídeo volta já cortado), "MP3" (só o áudio, leve — serve pra quase tudo) e "WAV" (só o áudio, sem compressão — ideal se ainda vai passar por outra etapa de edição). A escolha vale pra fila inteira; com MP3 ou WAV, dos vídeos sai só a trilha de voz limpa. O MP4 só fica liberado quando a fila tem apenas vídeos: entrou um arquivo de áudio, ele aparece apagado ("Só com vídeos na fila") e a saída é em MP3 ou WAV. No plano grátis a saída é sempre em áudio — o MP4 aparece com cadeado, é recurso das contas pagas.',
         visual: (
-          <Shot label="Remover Silêncios · como receber">
+          <Shot label="Remover Silêncios · formato de saída">
             <MRow>
-              <MBtn tone="primary">Vídeo</MBtn>
-              <MBtn tone="dark">Áudio</MBtn>
-            </MRow>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Defina o formato do áudio',
-        text: 'Quando a saída for áudio (ou a fila só tiver áudio), o card "Formato do áudio" deixa você escolher entre "MP3" (leve, serve pra quase tudo) e "WAV" (sem compressão, ideal se o arquivo ainda vai passar por outra etapa de edição). O padrão é MP3.',
-        visual: (
-          <Shot label="Remover Silêncios · formato">
-            <MRow>
-              <MChip tone="violet">MP3</MChip>
+              <MChip tone="violet">MP4</MChip>
+              <MChip tone="dim">MP3</MChip>
               <MChip tone="dim">WAV</MChip>
             </MRow>
           </Shot>
