@@ -269,6 +269,26 @@ export function readDurableRecords<T = RecordData>(kind: RecordKind, opts?: { sk
   }
 }
 
+/** One record by id — the same answer as `readDurableRecords(kind)[id]`, but
+ * it reads and decodes that single row instead of the whole account. */
+export function readDurableRecord<T = RecordData>(kind: RecordKind, id: string): T | undefined {
+  if (typeof window === 'undefined' || !owner) return undefined;
+  try {
+    const raw = localStorage.getItem(keyFor(kind, id));
+    if (!raw) return undefined;
+    const row: unknown = JSON.parse(raw);
+    if (!isObject(row) || row.kind !== kind || row.id !== id) {
+      throw new Error('Uma cópia local está danificada. Ela foi preservada; o salvamento não vai sobrescrevê-la.');
+    }
+    const data = (row as LocalRow).data;
+    return data && inRetention(kind, data) ? (data as T) : undefined;
+  } catch (e) {
+    const message = (e as Error).message;
+    if (status.message !== message || !status.error) notify(message, true);
+    return undefined;
+  }
+}
+
 /** Each component owns its baseline. An unrelated read cannot make a stale writer current. */
 export function createRecordWriter(kind: RecordKind) {
   let seen: Record<string, RecordData> = {};
