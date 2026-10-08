@@ -108,3 +108,10 @@ test('vitrine de legendas = a seleção do Silas (07.10)', () => {
     assert.match(presets, new RegExp(`id: '${id}'`), `o modelo ${id} não existe mais no catálogo`);
   }
 });
+
+test('card do telejornal no herói não reage ao mouse; só a tela verde saindo pro vídeo (08.10)', () => {
+  const src = ler(`${DIR}/Hero.tsx`);
+  assert.doesNotMatch(src, /usePointerField|onMouseMove|pointermove/, 'o monitor do herói não segue o mouse');
+  assert.match(src, /@keyframes mw-wipe \{/, 'a transição da tela verde continua lá');
+  assert.doesNotMatch(src, /repeating-linear-gradient/, 'sem linhas de varredura por cima do vídeo (deixavam o vídeo com cara de baixa qualidade)');
+});

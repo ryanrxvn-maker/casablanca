@@ -400,15 +400,22 @@ function Player({ mode, presetId, onLoop }: { mode: Mode; presetId: string; onLo
 
 /** A copy do anúncio (a "lauda"). */
 const COPY =
-  'Se você edita anúncio todo dia, presta atenção: uma palavra errada na legenda já faz o cliente devolver o vídeo.';
+  'A Thaís aprendeu a consertar celular em casa e hoje atende mais de trinta clientes por semana. Na aula gratuita, ela mostra o que traz cliente sem gastar com anúncio.';
 
-/** O que a transcrição devolveu: sem acento, sem pontuação e uma palavra comida. */
+/**
+ * O que a transcrição devolveu. O foco é PALAVRA ERRADA (pedido de 08.10):
+ * nome (Taís), palavra trocada pelo som (concertar, mas, trás), grafia
+ * (gratuíta, anuncio). Tem também pontuação/maiúscula e uma palavra comida
+ * ("mostra que"). Conferido na função real: 6 palavras + 2 de pontuação + 1
+ * devolvida.
+ */
 const ASR: Array<[number, number, string]> = [
-  [300, 1700, 'se voce edita anuncio'],
-  [1700, 3200, 'todo dia presta atencao'],
-  [3200, 4800, 'uma palavra errada na legenda'],
-  [4800, 6200, 'ja faz cliente devolver'],
-  [6200, 7400, 'o video'],
+  [300, 1800, 'A Taís aprendeu a concertar'],
+  [1800, 3300, 'celular em casa e hoje'],
+  [3300, 4900, 'atende mas de trinta clientes'],
+  [4900, 6400, 'por semana na aula gratuíta'],
+  [6400, 8000, 'ela mostra que trás cliente'],
+  [8000, 9400, 'sem gastar com anuncio'],
 ];
 
 type Fix = { b: number; w: number; from: string; to: string; copyIdx: number[]; added: boolean };
@@ -595,7 +602,7 @@ export function CopyFixSection() {
         size="xl"
         ask="Já entregou vídeo com legenda errada pro cliente?"
         answer={['Cola a copy. A legenda', { mark: 'se corrige sozinha.' }]}
-        lead="A transcrição erra acento, nome e pontuação, e às vezes engole uma palavra. Com a copy colada, a ferramenta confere a legenda inteira, palavra por palavra, e troca o que estiver diferente. Sem mexer no tempo de nada."
+        lead="A transcrição escreve nome errado, troca palavra pelo som (concerto no lugar de conserto, mas no lugar de mais), erra acento e às vezes engole uma palavra. Com a copy colada, a ferramenta confere a legenda inteira, palavra por palavra, e corrige tudo pela copy. Sem mexer no tempo de nada."
       />
 
       <div ref={ref}>
@@ -724,7 +731,7 @@ export function CopyFixSection() {
       <Reveal>
         <div className="mt-14 grid grid-cols-1 gap-x-8 gap-y-7 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['Acento, nome e pontuação', 'Tudo volta escrito do jeito que está na copy.'],
+            ['Palavra errada vira a certa', 'Nome, palavra trocada pelo som, acento e pontuação: tudo volta do jeito que está na copy.'],
             ['Palavra comida volta', 'O que a transcrição engoliu entra de novo, no lugar certo.'],
             ['Tempo intacto', 'Blocos, tempos e estilos não mudam. E o Ctrl+Z desfaz.'],
             ['Copy errada não passa', 'Se a copy não for desse vídeo, a ferramenta avisa antes de aplicar.'],
@@ -847,23 +854,23 @@ export function CopyFixSection() {
           text-decoration-thickness: 1.5px;
           text-underline-offset: 5px;
           background: rgba(224, 72, 63, 0.14);
-          transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.5, 0, 0.75, 0);
+          transition: transform 0.46s cubic-bezier(0.65, 0, 0.35, 1);
         }
         .cf-to {
           color: #fff;
           background: rgba(126, 224, 161, 0.15);
           box-shadow: inset 0 0 0 1px rgba(126, 224, 161, 0.4);
-          opacity: 0;
+          /* rolo de placar: a certa vem colada embaixo da errada e as duas sobem
+             JUNTAS, com a mesma curva. A caixa nunca fica vazia e as duas nunca
+             se sobrepõem (overflow da caixa corta o que sai). */
           transform: translate3d(0, 100%, 0);
-          /* só começa depois que a palavra errada saiu inteira (0,18 s) */
-          transition: opacity 0.2s ease 0.18s, transform 0.34s cubic-bezier(0.32, 0.72, 0, 1) 0.18s;
+          transition: transform 0.46s cubic-bezier(0.65, 0, 0.35, 1);
         }
         .cf-tile.is-fixed .cf-from {
-          opacity: 0;
-          transform: translate3d(0, -100%, 0);
+          /* + 12px: o sublinhado ondulado fica abaixo da palavra e precisa sair junto */
+          transform: translate3d(0, calc(-100% - 12px), 0);
         }
         .cf-tile.is-fixed .cf-to {
-          opacity: 1;
           transform: none;
         }
         .cf-tile.is-fixed {

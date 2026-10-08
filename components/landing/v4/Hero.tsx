@@ -3,22 +3,21 @@
 /**
  * Herói da landing v4 — a capa.
  *
- * Lettering no estilo das legendas virais que a ferramenta faz (a pergunta que
- * dá o gatilho, a palavra-chave numa tarja), a resposta logo embaixo e o
- * monitor de telejornal do FakePrint grande, em perspectiva, endireitando
- * conforme a pessoa rola. Por trás de tudo, fumaça de estúdio em WebGL que
- * reage ao mouse (Smoke.tsx).
+ * Lettering no estilo das legendas virais que a ferramenta faz ("Já imaginou
+ * editar 10x mais com muito menos esforço?", com a promessa numa tarja), a
+ * resposta logo embaixo e o monitor de telejornal do FakePrint grande, em
+ * perspectiva, endireitando conforme a pessoa rola. Por trás de tudo, fumaça
+ * de estúdio em WebGL que reage ao mouse (Smoke.tsx).
  *
- * No monitor (só com mouse; toque e reduced-motion ficam parados e legíveis):
- *   • o divisor da tela verde segue o cursor;
- *   • clicando na tarja, a pessoa escreve a própria manchete, que é o que o
- *     FakePrint faz.
+ * O monitor NÃO reage ao mouse (pedido de 08.10): a única animação dele é a
+ * tela verde saindo pra mostrar o vídeo por trás. Clicando na tarja a pessoa
+ * ainda pode escrever a própria manchete, que é o que o FakePrint faz.
  */
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useClock, useInView, useReduced, useTypewriter } from '../v3/kit';
-import { useCalm, useMagnetic, usePointerField } from './fx';
+import { useCalm, useMagnetic } from './fx';
 import { Smoke } from './Smoke';
 
 const RED = '#e0483f';
@@ -37,7 +36,7 @@ export function Hero() {
       <Smoke className="hero-smoke absolute inset-x-0 top-[-94px] -z-10 h-[calc(100%+94px)] w-full" />
 
       <div className="mx-auto max-w-[1360px] px-5 pt-12 md:px-8 md:pt-16">
-        <div className="mx-auto max-w-[1180px] text-center">
+        <div className="mx-auto max-w-[1280px] text-center">
           <h1 className="hero-h1 text-white">
             <span className="hero-ask block" style={{ fontFamily: 'var(--font-serif)' }}>
               <span className="hw" style={{ ['--i' as string]: 0 }}>
@@ -45,33 +44,30 @@ export function Hero() {
               </span>
             </span>
             <span className="hero-big inline md:block" style={{ fontFamily: 'var(--font-tech)' }}>
-              {['entregar', 'o', 'criativo'].map((w, i) => (
-                <span key={w} className="hw" style={{ ['--i' as string]: i + 1 }}>
-                  {w}
-                  {i < 2 ? ' ' : ''}
-                </span>
-              ))}
+              <span className="hw" style={{ ['--i' as string]: 1 }}>
+                {'editar '}
+              </span>
+              <span className="hero-mark hw" style={{ ['--i' as string]: 2 }}>
+                <span aria-hidden className="hero-mark-box" />
+                <span className="relative">10x mais</span>
+              </span>
             </span>
             {/* espaço entre as linhas quando elas fluem juntas (celular), no tamanho da manchete */}
             <span className="hero-big md:hidden" style={{ fontFamily: 'var(--font-tech)' }}>
               {' '}
             </span>
             <span className="hero-big inline md:block" style={{ fontFamily: 'var(--font-tech)' }}>
-              {['antes', 'do', 'cliente'].map((w, i) => (
-                <span key={w} className="hw" style={{ ['--i' as string]: i + 4 }}>
-                  {w + ' '}
+              {['com', 'muito', 'menos', 'esforço?'].map((w, i, arr) => (
+                <span key={w} className="hw" style={{ ['--i' as string]: i + 3 }}>
+                  {w + (i < arr.length - 1 ? ' ' : '')}
                 </span>
               ))}
-              <span className="hero-mark hw" style={{ ['--i' as string]: 7 }}>
-                <span aria-hidden className="hero-mark-box" />
-                <span className="relative">cobrar?</span>
-              </span>
             </span>
           </h1>
 
           <p className="hero-sub mx-auto mt-7 max-w-[60ch] text-[17px] leading-[1.65] text-white/[0.68] md:text-[19px]">
-            O Auto Edit faz a parte chata por você: corta o silêncio, cria legenda
-            animada corrigida pela copy e deixa a manchete de telejornal pronta pro chroma.
+            Legenda animada corrigida pela copy, silêncio cortado sozinho e manchete de
+            telejornal pronta pro chroma. Você só revisa e entrega.
           </p>
 
           <div className="hero-cta mt-9 flex flex-wrap items-center justify-center gap-3">
@@ -118,8 +114,8 @@ export function Hero() {
         }
         .hero-big {
           font-weight: 800;
-          font-size: clamp(40px, 6.4vw, 100px);
-          line-height: 1;
+          font-size: clamp(40px, 5.6vw, 88px);
+          line-height: 1.02;
         }
         .hw {
           display: inline-block;
@@ -141,7 +137,7 @@ export function Hero() {
           box-shadow: 0 0.16em 0 rgba(120, 18, 12, 0.55), 0 18px 50px -12px rgba(224, 72, 63, 0.75);
           transform-origin: 0 50%;
           transform: rotate(-2deg) scaleX(0);
-          animation: mark-in 0.7s 1.05s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+          animation: mark-in 0.7s 0.55s cubic-bezier(0.32, 0.72, 0, 1) forwards;
         }
         @keyframes mark-in {
           to {
@@ -225,28 +221,15 @@ export function Hero() {
 /* ══════════════════════ a tela (monitor em perspectiva) ══════════════════════ */
 
 function Screen() {
-  const zoneRef = useRef<HTMLDivElement | null>(null);
-  const rigRef = useRef<HTMLDivElement | null>(null);
-
-  // gira alguns graus seguindo o mouse em qualquer ponto da janela
-  const onFrame = useCallback((x: number, y: number) => {
-    const rig = rigRef.current;
-    if (!rig) return;
-    rig.style.transform = `rotateY(${(x * 4).toFixed(3)}deg) rotateX(${(-y * 3).toFixed(3)}deg)`;
-  }, []);
-  usePointerField(zoneRef, onFrame, { global: true, ease: 0.07 });
-
   return (
-    <div ref={zoneRef} className="screen-wrap relative mx-auto mt-14 max-w-[1120px] md:mt-20">
+    <div className="screen-wrap relative mx-auto mt-14 max-w-[1120px] md:mt-20">
       <div className="screen-scroll">
         <div className="screen-tilt">
-          <div ref={rigRef} className="screen-rig">
-            <Monitor />
-          </div>
+          <Monitor />
         </div>
       </div>
       <p className="mt-5 text-center text-[12.5px] text-white/45">
-        Telejornal do FakePrint, no Premium. Passa o mouse na tela e clica na tarja pra testar.
+        Telejornal do FakePrint, no Premium: o gráfico sai em tela verde e, na edição, o seu vídeo entra por trás.
       </p>
       <style jsx>{`
         /* entrada: sobe e aparece (uma vez) */
@@ -268,7 +251,7 @@ function Screen() {
            inclinada, parada) */
         .screen-scroll {
           transform-origin: 50% 0%;
-          transform: perspective(1800px) rotateX(7deg);
+          transform: perspective(1800px) rotateX(5deg);
         }
         @supports (animation-timeline: view()) {
           .screen-scroll {
@@ -279,15 +262,11 @@ function Screen() {
         }
         @keyframes screen-flat {
           from {
-            transform: perspective(1800px) rotateX(16deg) scale(0.95);
+            transform: perspective(1800px) rotateX(10deg) scale(0.96);
           }
           to {
             transform: perspective(1800px) rotateX(0deg) scale(1);
           }
-        }
-        .screen-rig {
-          transform-style: preserve-3d;
-          will-change: transform;
         }
         @media (prefers-reduced-motion: reduce) {
           .screen-tilt,
@@ -315,12 +294,9 @@ function Monitor() {
   const reduced = useReduced();
   const calm = useCalm();
   const vidRef = useRef<HTMLVideoElement | null>(null);
-  const winRef = useRef<HTMLDivElement | null>(null);
-  const greenRef = useRef<HTMLDivElement | null>(null);
-  const lineRef = useRef<HTMLDivElement | null>(null);
-  const glareRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const live = inView && !reduced;
   const [custom, setCustom] = useState('');
   const [editing, setEditing] = useState(false);
   const [touched, setTouched] = useState(false);
@@ -334,56 +310,6 @@ function Monitor() {
       if (p && typeof p.catch === 'function') p.catch(() => {});
     } else v.pause();
   }, [inView, reduced, calm]);
-
-  // Divisor da tela verde: anda sozinho (CSS, só transform) e, com o mouse
-  // em cima do monitor, segue o cursor. Ao sair, volta pro ponto de partida
-  // da animação e só então ela é religada — sem pulo.
-  const autoRef = useRef(true);
-  const setWipe = (pct: number) => {
-    const p = pct.toFixed(2) + '%';
-    if (winRef.current) winRef.current.style.transform = `translateX(${p})`;
-    if (lineRef.current) lineRef.current.style.transform = `translateX(${p})`;
-    if (greenRef.current) greenRef.current.style.transform = `translateX(-${p})`;
-  };
-  const setAuto = (on: boolean) => {
-    if (autoRef.current === on) return;
-    autoRef.current = on;
-    for (const el of [winRef.current, lineRef.current, greenRef.current]) {
-      if (!el) continue;
-      el.classList.toggle('mw-auto', on);
-      if (on) el.style.transform = '';
-    }
-  };
-  const monRef = useRef<HTMLDivElement | null>(null);
-  const leaveRef = useRef<{ x: number; p: number } | null>(null);
-  const lastPRef = useRef(58);
-  const onMonFrame = useCallback((x: number, y: number, inside: boolean) => {
-    const g = glareRef.current;
-    if (g) {
-      g.style.transform = `translate3d(${(x * 34).toFixed(1)}%, ${(y * 30).toFixed(1)}%, 0)`;
-      g.style.opacity = inside ? '1' : '0';
-    }
-    if (inside) {
-      leaveRef.current = null;
-      setAuto(false);
-      const p = Math.max(6, Math.min(94, ((x + 1) / 2) * 100));
-      lastPRef.current = p;
-      setWipe(p);
-    } else if (!autoRef.current) {
-      // Saiu: o campo volta pro centro (x → 0); a gente usa essa mesma curva
-      // pra levar o divisor até 26%, onde a animação automática começa.
-      if (!leaveRef.current) leaveRef.current = { x, p: lastPRef.current };
-      const { x: x0, p: p0 } = leaveRef.current;
-      const k = Math.abs(x0) > 0.001 ? Math.max(0, Math.min(1, x / x0)) : 0;
-      setWipe(26 + (p0 - 26) * k);
-      if (k < 0.02) {
-        leaveRef.current = null;
-        setAuto(true);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  usePointerField(monRef, onMonFrame, { ease: 0.16 });
 
   const commit = () => {
     setEditing(false);
@@ -404,14 +330,13 @@ function Monitor() {
       />
 
       <div
-        ref={monRef}
         className="mon relative aspect-[16/10] w-full overflow-hidden rounded-[16px]"
         style={{ background: '#0b0d10' }}
       >
         <video
           ref={vidRef}
-          src="/hero/fakeprint-landing.mp4"
-          poster="/hero/fakeprint-landing.jpg"
+          src="/landing/hero-tv.mp4"
+          poster="/landing/hero-tv.jpg"
           muted
           loop
           playsInline
@@ -425,22 +350,22 @@ function Monitor() {
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(to top, rgba(2,2,6,0.82) 0%, rgba(2,2,6,0.25) 25%, transparent 46%),' +
-              'linear-gradient(to bottom, rgba(2,2,6,0.5) 0%, transparent 20%)',
+              'linear-gradient(to top, rgba(2,2,6,0.78) 0%, rgba(2,2,6,0.18) 22%, transparent 40%),' +
+              'linear-gradient(to bottom, rgba(2,2,6,0.42) 0%, transparent 18%)',
           }}
         />
 
-        {/* tela verde: a janela anda pra direita e o verde o mesmo tanto pra
-            esquerda (fica parado; só a borda desliza). Só transform. */}
+        {/* A única animação do card (pedido de 08.10, sem mouse): a tela
+            verde sai e mostra o vídeo por trás, segura, e volta. A janela anda
+            pra direita e o verde o mesmo tanto pra esquerda (fica parado; só a
+            borda desliza). Só transform. */}
         <div
-          ref={winRef}
           aria-hidden
-          className={'ae-ambient absolute inset-0 overflow-hidden ' + (inView && !reduced ? 'mw-auto' : '')}
+          className={'ae-ambient absolute inset-0 overflow-hidden ' + (live ? 'mw-auto' : '')}
           style={{ transform: 'translateX(58%)' }}
         >
           <div
-            ref={greenRef}
-            className={'ae-ambient absolute inset-0 ' + (inView && !reduced ? 'mw-auto mw-in' : '')}
+            className={'ae-ambient absolute inset-0 ' + (live ? 'mw-auto mw-in' : '')}
             style={{
               transform: 'translateX(-58%)',
               background: `radial-gradient(75% 70% at 50% 40%, #14c559 0%, ${CHROMA} 62%, #009439 100%)`,
@@ -448,30 +373,12 @@ function Monitor() {
           />
         </div>
         <div
-          ref={lineRef}
           aria-hidden
-          className={'ae-ambient pointer-events-none absolute inset-0 ' + (inView && !reduced ? 'mw-auto' : '')}
+          className={'ae-ambient pointer-events-none absolute inset-0 ' + (live ? 'mw-auto' : '')}
           style={{ transform: 'translateX(58%)' }}
         >
-          <span className="mw-handle">
-            <span className="mw-knob">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M4.2 3L1.5 6l2.7 3M7.8 3l2.7 3-2.7 3" stroke="#0b0d10" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-          </span>
+          <span className="mw-line" />
         </div>
-
-        {/* varredura + reflexo que segue o mouse */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.13]"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(0deg, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0.5) 1px, transparent 1px, transparent 3px)',
-          }}
-        />
-        <div ref={glareRef} aria-hidden className="mon-glare pointer-events-none absolute -inset-[30%]" />
 
         {[
           'left-3 top-3 border-l border-t',
@@ -507,20 +414,25 @@ function Monitor() {
           </div>
         </div>
 
-        <div className="absolute inset-x-3.5 top-14 hidden items-center justify-between sm:flex md:inset-x-4 md:top-16">
-          <span
-            className="rounded-[4px] border border-white/15 bg-black/45 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/70"
-            style={{ fontFamily: 'var(--font-label)' }}
-          >
-            Seu vídeo por trás
-          </span>
-          <span
-            className="rounded-[4px] border border-white/50 bg-black/35 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white"
-            style={{ fontFamily: 'var(--font-label)' }}
-          >
-            Como sai: tela verde
-          </span>
-        </div>
+        {live ? (
+          <div className="absolute left-3.5 top-14 hidden sm:block md:left-4 md:top-16">
+            <span className="mw-lab mw-lab-green ae-ambient" style={{ fontFamily: 'var(--font-label)' }}>
+              Como sai do FakePrint: tela verde
+            </span>
+            <span className="mw-lab mw-lab-video ae-ambient" style={{ fontFamily: 'var(--font-label)' }}>
+              Na edição: o seu vídeo por trás
+            </span>
+          </div>
+        ) : (
+          <div className="absolute inset-x-3.5 top-14 hidden items-center justify-between sm:flex md:inset-x-4 md:top-16">
+            <span className="mw-lab-static" style={{ fontFamily: 'var(--font-label)' }}>
+              Seu vídeo por trás
+            </span>
+            <span className="mw-lab-static" style={{ fontFamily: 'var(--font-label)' }}>
+              Como sai: tela verde
+            </span>
+          </div>
+        )}
 
         {/* gerador de caracteres — editável de verdade */}
         <div className="absolute inset-x-0 bottom-0">
@@ -591,54 +503,108 @@ function Monitor() {
           box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 1px 0 rgba(255, 255, 255, 0.1) inset,
             0 50px 110px -40px rgba(0, 0, 0, 0.95), 0 30px 60px -30px rgba(224, 72, 63, 0.18);
         }
-        .mw-handle {
+        .mw-line {
           position: absolute;
           top: 0;
           bottom: 0;
           left: 0;
-          width: 1px;
-          background: rgba(255, 255, 255, 0.8);
-          box-shadow: 0 0 14px rgba(255, 255, 255, 0.55);
+          width: 2px;
+          margin-left: -1px;
+          background: rgba(255, 255, 255, 0.9);
+          box-shadow: 0 0 16px rgba(255, 255, 255, 0.6);
         }
-        .mw-knob {
-          position: absolute;
-          top: 44%;
-          left: 0;
-          display: grid;
-          place-items: center;
-          width: 26px;
-          height: 26px;
-          margin-left: -13px;
-          border-radius: 999px;
-          background: #fff;
-          box-shadow: 0 6px 16px -4px rgba(0, 0, 0, 0.6);
-        }
+        /* verde cobre tudo → sai revelando o vídeo → segura → volta */
         .mw-auto {
-          animation: mw-wipe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+          animation: mw-wipe 11s infinite;
         }
         .mw-in.mw-auto {
           animation-name: mw-wipe-in;
         }
         @keyframes mw-wipe {
-          from {
-            transform: translateX(26%);
+          0%,
+          14% {
+            transform: translateX(0%);
+            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
           }
-          to {
-            transform: translateX(82%);
+          40%,
+          82% {
+            transform: translateX(101%);
+            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          100% {
+            transform: translateX(0%);
           }
         }
         @keyframes mw-wipe-in {
-          from {
-            transform: translateX(-26%);
+          0%,
+          14% {
+            transform: translateX(0%);
+            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
           }
-          to {
-            transform: translateX(-82%);
+          40%,
+          82% {
+            transform: translateX(-101%);
+            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          100% {
+            transform: translateX(0%);
           }
         }
-        .mon-glare {
+        .mw-lab,
+        .mw-lab-static {
+          display: inline-block;
+          border-radius: 4px;
+          padding: 4px 8px;
+          font-size: 9.5px;
+          font-weight: 700;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: #fff;
+          background: rgba(0, 0, 0, 0.45);
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          white-space: nowrap;
+        }
+        .mw-lab {
+          position: absolute;
+          left: 0;
+          top: 0;
+          animation-duration: 11s;
+          animation-iteration-count: infinite;
+        }
+        .mw-lab-green {
+          animation-name: mw-lab-green;
+        }
+        .mw-lab-video {
+          animation-name: mw-lab-video;
           opacity: 0;
-          transition: opacity 0.5s ease;
-          background: radial-gradient(28% 28% at 50% 50%, rgba(255, 255, 255, 0.14), transparent 70%);
+        }
+        @keyframes mw-lab-green {
+          0%,
+          25% {
+            opacity: 1;
+          }
+          29%,
+          89% {
+            opacity: 0;
+          }
+          93%,
+          100% {
+            opacity: 1;
+          }
+        }
+        @keyframes mw-lab-video {
+          0%,
+          25% {
+            opacity: 0;
+          }
+          29%,
+          89% {
+            opacity: 1;
+          }
+          93%,
+          100% {
+            opacity: 0;
+          }
         }
         .mon-dot {
           animation: mon-pulse 1.6s ease-in-out infinite;
@@ -685,6 +651,7 @@ function Monitor() {
         }
         @media (prefers-reduced-motion: reduce) {
           .mw-auto,
+          .mw-lab,
           .mon-dot,
           .mon-caret,
           .mon-hint {

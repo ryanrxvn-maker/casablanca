@@ -109,7 +109,7 @@ function EditionBar() {
     <div className="border-b border-white/[0.08] bg-black/30">
       <div className="mx-auto flex h-8 max-w-[1360px] items-center justify-between px-5 text-[11px] text-white/40 md:px-8" style={{ fontFamily: 'var(--font-label)', fontWeight: 500 }}>
         <span className="truncate first-letter:uppercase">{today || 'Edição digital'}</span>
-        <span className="hidden md:inline">Edição de hoje, feita pra quem entrega criativo</span>
+        <span className="hidden md:inline">Feito pra quem entrega 10x mais.</span>
         <span className="num tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
           {clock}
         </span>
