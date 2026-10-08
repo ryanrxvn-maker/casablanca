@@ -156,7 +156,7 @@ function Desk() {
             >
               <div className="desk-card" style={{ ['--rot' as string]: `${p.rot}deg`, aspectRatio: p.ratio }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.src} alt={p.alt} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                <img src={p.src} alt={p.alt} loading="eager" decoding="async" className="h-full w-full object-cover" />
               </div>
             </div>
           ))}
@@ -168,7 +168,7 @@ function Desk() {
             <div key={p.src} className="shrink-0 snap-center" style={{ height: 320, aspectRatio: p.ratio }}>
               <div className="desk-card h-full" style={{ ['--rot' as string]: '0deg' }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.src} alt={p.alt} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                <img src={p.src} alt={p.alt} loading="eager" decoding="async" className="h-full w-full object-cover" />
               </div>
             </div>
           ))}

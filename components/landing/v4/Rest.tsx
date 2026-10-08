@@ -537,26 +537,60 @@ export function FinalCta() {
 /* ══════════════════════ RODAPÉ ══════════════════════ */
 
 export function LandingFooter() {
+  const litRef = useRef<HTMLSpanElement | null>(null);
+  useSpotlight(litRef);
+  const toTop = () => {
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  };
+
   return (
-    <footer className="mt-24 border-t border-white/10 md:mt-32">
-      <div className="mx-auto max-w-[1360px] px-5 pb-10 pt-14 md:px-8">
-        <div className="grid grid-cols-1 gap-10 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
-          <div>
+    <footer className="lf relative isolate mt-24 overflow-hidden md:mt-32">
+      {/* fio de luz no topo, nas cores da página */}
+      <span aria-hidden className="lf-line absolute inset-x-0 top-0 h-px" />
+      {/* fumaça curta subindo da base, atrás do nome gigante */}
+      <Smoke band className="lf-smoke absolute inset-x-0 bottom-0 -z-10 h-[86%] w-full" />
+
+      <div className="relative mx-auto max-w-[1360px] px-5 pt-16 md:px-8 md:pt-20">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 md:grid-cols-[1.6fr_1fr_1fr_1fr] md:gap-12">
+          <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-3">
-              <DarkoLogo size={30} />
-              <span className="text-[21px] leading-none text-white" style={{ fontFamily: 'var(--font-serif)' }}>
+              <DarkoLogo size={34} />
+              <span className="text-[24px] leading-none text-white" style={{ fontFamily: 'var(--font-serif)' }}>
                 Auto Edit
               </span>
             </div>
-            <p className="mt-4 max-w-[34ch] text-[14px] leading-relaxed text-white/55">
-              Ferramentas de edição de vídeo que abrem no navegador. Feitas pra editores e
-              agências que entregam criativo todo dia.
+            <p className="mt-5 max-w-[36ch] text-[15px] leading-relaxed text-white/60">
+              Legenda, corte de silêncio e manchete de telejornal num lugar só, abrindo no
+              navegador. Feito pra editores e agências que entregam criativo todo dia.
             </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Link href="/register" className="btn-primary !min-h-[44px] !rounded-[11px] !px-5 !text-[14px]">
+                Criar conta grátis
+              </Link>
+              <a
+                href="https://www.instagram.com/darkoautoedit/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lf-ig group inline-flex min-h-[44px] items-center gap-2.5 rounded-[11px] px-4 text-[14px] font-semibold text-white/80 transition-colors hover:text-white"
+                style={{ fontFamily: 'var(--font-label)' }}
+              >
+                <span aria-hidden className="lf-ig-ico grid h-6 w-6 place-items-center rounded-[7px]">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2">
+                    <rect x="3.5" y="3.5" width="17" height="17" rx="5" />
+                    <circle cx="12" cy="12" r="4" />
+                    <circle cx="17.4" cy="6.6" r="1.1" fill="#fff" stroke="none" />
+                  </svg>
+                </span>
+                @darkoautoedit
+              </a>
+            </div>
           </div>
           <FooterCol
             title="Produto"
             links={[
               { label: 'Legendas', href: '#legendas' },
+              { label: 'Corrigir pela copy', href: '#corrigir' },
               { label: 'FakePrint', href: '#fakeprint' },
               { label: 'Ferramentas', href: '#suite' },
               { label: 'Planos', href: '#planos' },
@@ -579,11 +613,92 @@ export function LandingFooter() {
             ]}
           />
         </div>
-        <div className="mt-12 flex flex-col items-start justify-between gap-3 border-t border-white/10 pt-6 md:flex-row md:items-center">
-          <p className="text-[12.5px] text-white/40">Auto Edit © {new Date().getFullYear()}</p>
-          <p className="text-[12.5px] text-white/40">Feito pra quem entrega todo dia.</p>
+      </div>
+
+      {/* o nome gigante, cortado pela borda de baixo; acende onde o mouse passa */}
+      <div aria-hidden className="lf-mark relative mt-14 select-none md:mt-20">
+        <span className="lf-word lf-word-base">Auto Edit</span>
+        <span ref={litRef} className="lf-word lf-word-lit">Auto Edit</span>
+      </div>
+
+      <div className="relative border-t border-white/10 bg-[#08080a]/80">
+        <div className="mx-auto flex max-w-[1360px] flex-col items-start justify-between gap-3 px-5 py-5 pr-24 md:flex-row md:items-center md:px-8 md:pr-28">
+          <p className="text-[12.5px] text-white/45">Auto Edit © {new Date().getFullYear()}. Feito pra quem entrega 10x mais.</p>
+          <button
+            type="button"
+            onClick={toTop}
+            className="group inline-flex items-center gap-2 text-[12.5px] font-semibold text-white/55 transition-colors hover:text-white"
+            style={{ fontFamily: 'var(--font-label)' }}
+          >
+            Voltar ao topo
+            <span
+              aria-hidden
+              className="grid h-6 w-6 place-items-center rounded-full border border-white/15 transition-transform duration-300 group-hover:-translate-y-0.5"
+            >
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                <path d="M6 10V2m0 0L2.5 5.5M6 2l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          </button>
         </div>
       </div>
+
+      <style jsx>{`
+        .lf {
+          background: radial-gradient(70% 60% at 50% 110%, rgba(167, 139, 250, 0.1), transparent 70%), #09090b;
+        }
+        .lf-line {
+          background: linear-gradient(90deg, transparent, rgba(224, 72, 63, 0.7) 25%, rgba(196, 181, 253, 0.8) 60%, transparent);
+          box-shadow: 0 0 22px 1px rgba(196, 181, 253, 0.25);
+        }
+        :global(.lf-smoke) {
+          -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 45%);
+          mask-image: linear-gradient(to bottom, transparent 0%, #000 45%);
+        }
+        .lf-ig {
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+          background: rgba(255, 255, 255, 0.03);
+        }
+        .lf-ig:hover {
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+        }
+        .lf-ig-ico {
+          background: linear-gradient(45deg, #feda75, #fa7e1e 30%, #d62976 55%, #962fbf 80%, #4f5bd5);
+        }
+        .lf-mark {
+          height: clamp(86px, 15.5vw, 236px);
+          overflow: hidden;
+        }
+        .lf-word {
+          position: absolute;
+          left: 50%;
+          top: 0;
+          transform: translateX(-50%);
+          white-space: nowrap;
+          font-family: var(--font-serif);
+          font-size: clamp(120px, 22vw, 340px);
+          line-height: 0.86;
+          letter-spacing: -0.03em;
+        }
+        /* o nome em vidro: quase apagado, some pra baixo */
+        .lf-word-base {
+          color: rgba(255, 255, 255, 0.1);
+          -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent 92%);
+          mask-image: linear-gradient(to bottom, #000 30%, transparent 92%);
+        }
+        /* a cópia acesa só aparece num círculo em volta do mouse (variável no PRÓPRIO elemento) */
+        .lf-word-lit {
+          color: #f4edff;
+          text-shadow: 0 0 40px rgba(196, 181, 253, 0.55), 0 0 90px rgba(224, 72, 63, 0.35);
+          -webkit-mask-image: radial-gradient(280px circle at var(--sx, -40%) var(--sy, -40%), #000 0%, rgba(0, 0, 0, 0.35) 45%, transparent 72%);
+          mask-image: radial-gradient(280px circle at var(--sx, -40%) var(--sy, -40%), #000 0%, rgba(0, 0, 0, 0.35) 45%, transparent 72%);
+          opacity: 0;
+          transition: opacity 0.45s ease;
+        }
+        .lf-mark:hover .lf-word-lit {
+          opacity: 1;
+        }
+      `}</style>
     </footer>
   );
 }

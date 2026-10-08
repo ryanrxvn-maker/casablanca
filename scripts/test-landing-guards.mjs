@@ -138,3 +138,11 @@ test('correção pela copy roda sozinha a cada 8 s, sem botão "Ver de novo" (08
   assert.match(cf, /at\(end \+ 8000, restart\)/, 'segura o resultado 8 s e recomeça');
   assert.match(cf, /at\(1000, restart\)/, 'fora da tela/descanso ele espera e tenta de novo (não morre)');
 });
+
+test('rodapé: fumaça curta rente à base e nada de blur por cima do canvas animado (08.10)', () => {
+  const src = ler(`${DIR}/Rest.tsx`);
+  const foot = src.slice(src.indexOf('export function LandingFooter'));
+  assert.match(foot, /<Smoke band /, 'o rodapé usa a fumaça no modo rente à base');
+  assert.doesNotMatch(foot, /backdrop-blur|backdrop-filter/, 'blur por cima de canvas animado redesenha a GPU a cada quadro');
+  assert.match(ler(`${DIR}/Smoke.tsx`), /uniform float u_band;/);
+});
