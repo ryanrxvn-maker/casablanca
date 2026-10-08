@@ -69,8 +69,9 @@ export function loadPresetFonts(ids: string[]): Promise<void> {
   return p;
 }
 
-export function styleFor(preset: TypoPreset, fontScale: number, posY: number): StyleState {
+export function styleFor(preset: TypoPreset, fontScale: number, posY: number, singleLine = false): StyleState {
   return {
+    singleLine,
     presetId: preset.id,
     fontScale,
     posY,
@@ -87,6 +88,8 @@ export type LegendaProgram = {
   blocks: Block[];
   fontScale: number;
   posY: number;
+  /** a mesma "Linha única" do painel da ferramenta */
+  singleLine?: boolean;
 };
 
 /**
@@ -154,7 +157,7 @@ export function useLegendaCanvas(
       ctx.clearRect(0, 0, W, H);
       const preset = getPreset(prog.presetId);
       try {
-        drawCaptions(ctx, prog.blocks, preset, styleFor(preset, prog.fontScale, prog.posY), t, W, H);
+        drawCaptions(ctx, prog.blocks, preset, styleFor(preset, prog.fontScale, prog.posY, prog.singleLine), t, W, H);
       } catch {
         /* um quadro que estoure não pode matar o loop */
       }

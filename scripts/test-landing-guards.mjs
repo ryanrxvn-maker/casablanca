@@ -115,3 +115,18 @@ test('card do telejornal no herói não reage ao mouse; só a tela verde saindo 
   assert.match(src, /@keyframes mw-wipe \{/, 'a transição da tela verde continua lá');
   assert.doesNotMatch(src, /repeating-linear-gradient/, 'sem linhas de varredura por cima do vídeo (deixavam o vídeo com cara de baixa qualidade)');
 });
+
+test('tela verde do herói vai e volta devagar e nunca cobre tudo (08.10: "não pode ir até o final")', () => {
+  const src = ler(`${DIR}/Hero.tsx`);
+  const m = /@keyframes mw-wipe \{([\s\S]*?)\n\s{8}\}/.exec(src);
+  assert.ok(m, '@keyframes mw-wipe não encontrado');
+  const pcts = [...m[1].matchAll(/translateX\((-?[\d.]+)%\)/g)].map((x) => Number(x[1]));
+  assert.ok(pcts.length >= 2 && pcts.every((v) => v >= 15 && v <= 90), `a borda da tela verde tem que ficar entre 15% e 90% (achou ${pcts.join(', ')})`);
+  assert.match(src, /\.mw-auto \{\s*animation: mw-wipe 9s [^;]*infinite alternate;/, 'vai e volta (alternate), na velocidade de antes (9 s)');
+});
+
+test('demo da Linha única usa a opção real do motor (singleLine)', () => {
+  const src = ler(`${DIR}/Legendas.tsx`);
+  assert.match(src, /singleLine: single/);
+  assert.match(ler(`${DIR}/legenda.ts`), /styleFor\(preset, prog\.fontScale, prog\.posY, prog\.singleLine\)/);
+});

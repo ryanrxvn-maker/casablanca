@@ -10,7 +10,7 @@
  * de estúdio em WebGL que reage ao mouse (Smoke.tsx).
  *
  * O monitor NÃO reage ao mouse (pedido de 08.10): a única animação dele é a
- * tela verde saindo pra mostrar o vídeo por trás. Clicando na tarja a pessoa
+ * tela verde indo e voltando devagar por cima do vídeo (sem chegar no fim). Clicando na tarja a pessoa
  * ainda pode escrever a própria manchete, que é o que o FakePrint faz.
  */
 
@@ -356,8 +356,8 @@ function Monitor() {
         />
 
         {/* A única animação do card (pedido de 08.10, sem mouse): a tela
-            verde sai e mostra o vídeo por trás, segura, e volta. A janela anda
-            pra direita e o verde o mesmo tanto pra esquerda (fica parado; só a
+            verde vai e volta devagar por cima do vídeo. A janela anda pra
+            direita e o verde o mesmo tanto pra esquerda (fica parado; só a
             borda desliza). Só transform. */}
         <div
           aria-hidden
@@ -414,25 +414,14 @@ function Monitor() {
           </div>
         </div>
 
-        {live ? (
-          <div className="absolute left-3.5 top-14 hidden sm:block md:left-4 md:top-16">
-            <span className="mw-lab mw-lab-green ae-ambient" style={{ fontFamily: 'var(--font-label)' }}>
-              Como sai do FakePrint: tela verde
-            </span>
-            <span className="mw-lab mw-lab-video ae-ambient" style={{ fontFamily: 'var(--font-label)' }}>
-              Na edição: o seu vídeo por trás
-            </span>
-          </div>
-        ) : (
-          <div className="absolute inset-x-3.5 top-14 hidden items-center justify-between sm:flex md:inset-x-4 md:top-16">
-            <span className="mw-lab-static" style={{ fontFamily: 'var(--font-label)' }}>
-              Seu vídeo por trás
-            </span>
-            <span className="mw-lab-static" style={{ fontFamily: 'var(--font-label)' }}>
-              Como sai: tela verde
-            </span>
-          </div>
-        )}
+        <div className="absolute inset-x-3.5 top-14 hidden items-center justify-between sm:flex md:inset-x-4 md:top-16">
+          <span className="mw-lab-static" style={{ fontFamily: 'var(--font-label)' }}>
+            Seu vídeo por trás
+          </span>
+          <span className="mw-lab-static" style={{ fontFamily: 'var(--font-label)' }}>
+            Como sai: tela verde
+          </span>
+        </div>
 
         {/* gerador de caracteres — editável de verdade */}
         <div className="absolute inset-x-0 bottom-0">
@@ -513,44 +502,30 @@ function Monitor() {
           background: rgba(255, 255, 255, 0.9);
           box-shadow: 0 0 16px rgba(255, 255, 255, 0.6);
         }
-        /* verde cobre tudo → sai revelando o vídeo → segura → volta */
+        /* Vai e volta devagar, como era (pedido de 08.10): a tela verde entra
+           aos poucos, sem nunca cobrir tudo nem sumir de vez (26% a 82%). */
         .mw-auto {
-          animation: mw-wipe 11s infinite;
+          animation: mw-wipe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
         }
         .mw-in.mw-auto {
           animation-name: mw-wipe-in;
         }
         @keyframes mw-wipe {
-          0%,
-          14% {
-            transform: translateX(0%);
-            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+          from {
+            transform: translateX(26%);
           }
-          40%,
-          82% {
-            transform: translateX(101%);
-            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
-          }
-          100% {
-            transform: translateX(0%);
+          to {
+            transform: translateX(82%);
           }
         }
         @keyframes mw-wipe-in {
-          0%,
-          14% {
-            transform: translateX(0%);
-            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+          from {
+            transform: translateX(-26%);
           }
-          40%,
-          82% {
-            transform: translateX(-101%);
-            animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
-          }
-          100% {
-            transform: translateX(0%);
+          to {
+            transform: translateX(-82%);
           }
         }
-        .mw-lab,
         .mw-lab-static {
           display: inline-block;
           border-radius: 4px;
@@ -563,48 +538,6 @@ function Monitor() {
           background: rgba(0, 0, 0, 0.45);
           border: 1px solid rgba(255, 255, 255, 0.3);
           white-space: nowrap;
-        }
-        .mw-lab {
-          position: absolute;
-          left: 0;
-          top: 0;
-          animation-duration: 11s;
-          animation-iteration-count: infinite;
-        }
-        .mw-lab-green {
-          animation-name: mw-lab-green;
-        }
-        .mw-lab-video {
-          animation-name: mw-lab-video;
-          opacity: 0;
-        }
-        @keyframes mw-lab-green {
-          0%,
-          25% {
-            opacity: 1;
-          }
-          29%,
-          89% {
-            opacity: 0;
-          }
-          93%,
-          100% {
-            opacity: 1;
-          }
-        }
-        @keyframes mw-lab-video {
-          0%,
-          25% {
-            opacity: 0;
-          }
-          29%,
-          89% {
-            opacity: 1;
-          }
-          93%,
-          100% {
-            opacity: 0;
-          }
         }
         .mon-dot {
           animation: mon-pulse 1.6s ease-in-out infinite;
@@ -651,7 +584,6 @@ function Monitor() {
         }
         @media (prefers-reduced-motion: reduce) {
           .mw-auto,
-          .mw-lab,
           .mon-dot,
           .mon-caret,
           .mon-hint {
