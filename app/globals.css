@@ -8708,6 +8708,36 @@ html[data-theme='light'] .pe-passo-n { background: rgba(16,16,24,0.05); box-shad
 .pe-avisos summary { cursor: pointer; font-weight: 700; color: #fbbf24; }
 .pe-avisos ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
 @media (max-width: 560px) { .pe-escolhas { grid-template-columns: 1fr; } }
+/* abrir direto no editor (app Auto Edit Abrir) */
+.pe-app {
+  display: flex; align-items: center; gap: 12px; margin: 12px 20px 2px; padding: 12px 14px;
+  border-radius: 18px; background: linear-gradient(120deg, rgba(167, 139, 250, 0.1), rgba(217, 70, 239, 0.07));
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.28);
+}
+html[data-theme='light'] .pe-app { background: linear-gradient(120deg, rgba(124, 92, 246, 0.07), rgba(217, 70, 239, 0.05)); box-shadow: inset 0 0 0 1px rgba(124, 92, 246, 0.25); }
+.pe-app.is-on { background: rgba(52, 211, 153, 0.07); box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.32); }
+.pe-app-logo { display: block; flex-shrink: 0; border-radius: 9px; filter: drop-shadow(0 8px 14px rgba(124, 58, 237, 0.35)); }
+.pe-app-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pe-app-txt b { font-size: 13px; color: rgb(var(--text)); }
+.pe-app-txt small { font-size: 11.8px; line-height: 1.45; color: rgb(var(--text-muted)); }
+.pe-app-acoes { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.pe-app-btn {
+  padding: 8px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 800; color: #fff; white-space: nowrap;
+  background: linear-gradient(135deg, #a78bfa, #d946ef); box-shadow: 0 10px 22px -12px rgba(217, 70, 239, 0.8);
+  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1), filter 0.2s;
+}
+.pe-app-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.pe-app-btn:active { transform: translateY(0) scale(0.97); }
+.pe-app-link {
+  padding: 0; border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  color: rgb(var(--text-muted)); text-decoration: underline; text-underline-offset: 3px;
+}
+.pe-app-link:hover { color: rgb(var(--text)); }
+.pe-nota { margin: 12px 20px 0; font-size: 12.3px; line-height: 1.55; color: rgb(var(--text-muted)); }
+.pe-nota b { color: rgb(var(--text)); font-weight: 700; }
+.pe-plano-b summary { color: rgb(var(--text-muted)); }
+.pe-plano-b .pe-passos, .pe-plano-b .pe-nota { margin-left: 0; margin-right: 0; }
+@media (max-width: 560px) { .pe-app { flex-wrap: wrap; } .pe-app-acoes { flex-direction: row; align-items: center; gap: 12px; } }
 
 /* selos do card: velocidade e sonoplastia */
 .selo-aplicado.is-velocidade {

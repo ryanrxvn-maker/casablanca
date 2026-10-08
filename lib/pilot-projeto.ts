@@ -32,6 +32,7 @@ import {
   type TransicaoNoVideo,
 } from './pilot-inserts';
 import { escalaNoInstante, type ZoomSeg } from './pilot-pos-producao';
+import { arvoreDePastas, CAPA_ARQUIVO, pastaEmDisco, pastaPadraoDoArquivo, virtualStoreDoCapCut } from './pilot-projeto-pastas';
 import type { PedacoDaTrilha, SfxColocado } from './pilot-sonoplastia';
 
 /* ═══════════════════════════ roteiro (o que a pós guarda) ═══════════════ */
@@ -191,7 +192,21 @@ export type ArquivoProjeto = {
   temAudio: boolean;
   /** taxa de amostragem (áudio) — o Premiere conta a duração por ela */
   taxa?: number;
+  /** PASTA no painel de mídia / bin do Premiere (08.10), ex.: ['02 · TAKES',
+   *  'IDOSOS']. Ausente = a pasta padrão pelo nome (pilot-projeto-pastas). */
+  pasta?: string[];
 };
+
+/** A pasta do arquivo no painel do editor (a dita ou a padrão pelo nome). */
+export function pastaDoArquivo(a: ArquivoProjeto): string[] {
+  return a.pasta?.length ? a.pasta : pastaPadraoDoArquivo(a);
+}
+
+/** Caminho do arquivo DENTRO da pasta de mídia do Premiere: em subpastas que
+ *  repetem os bins (01 - AVATAR/, 02 - TAKES/IDOSOS/…). */
+export function caminhoNaMidiaPremiere(a: ArquivoProjeto): string {
+  return `${pastaEmDisco(pastaDoArquivo(a))}/${a.nome}`;
+}
 
 /**
  * RAIAS de áudio: dois sons que se sobrepõem no tempo não cabem na mesma
@@ -532,7 +547,7 @@ export function geometriaCapCut(item: ItemTimeline, arquivo: ArquivoProjeto, W: 
   return { escala: r6(escala), x: r6((cx - W / 2) / (W / 2)), y: r6(-(cy - H / 2) / (H / 2)) };
 }
 
-export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pasta: string; agoraUs?: number; novoId?: Gerador }) {
+export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pasta: string; agoraUs?: number; novoId?: Gerador; capa?: boolean }) {
   const novoId = opts.novoId || geradorPadrao();
   const porNome = new Map(tl.arquivos.map((a) => [a.nome, a]));
   const caminho = (nome: string) => `${CAPCUT_PASTA_DO_DRAFT}/${CAPCUT_SUBPASTA_MIDIA}/${nome}`;
@@ -701,7 +716,8 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
   const meta = {
     cloud_draft_cover: false, cloud_draft_sync: false, cloud_package_completed_time: '', draft_cloud_capcut_purchase_info: '', draft_cloud_last_action_download: false,
     draft_cloud_package_type: '', draft_cloud_purchase_info: '', draft_cloud_template_id: '', draft_cloud_tutorial_info: '', draft_cloud_videocut_purchase_info: '',
-    draft_cover: '', draft_deeplink_url: '', draft_enterprise_info: { draft_enterprise_extra: '', draft_enterprise_id: '', draft_enterprise_name: '', enterprise_material: [] },
+    // CAPA (08.10): o pacote leva draft_cover.jpg — a lista do CapCut mostra ela
+    draft_cover: opts.capa ? CAPA_ARQUIVO : '', draft_deeplink_url: '', draft_enterprise_info: { draft_enterprise_extra: '', draft_enterprise_id: '', draft_enterprise_name: '', enterprise_material: [] },
     draft_fold_path: `${raiz}/${opts.pasta}`, draft_id: novoId().toUpperCase(), draft_is_ae_produce: false, draft_is_ai_packaging_used: false, draft_is_ai_shorts: false,
     draft_is_ai_translate: false, draft_is_article_video_draft: false, draft_is_cloud_temp_draft: false, draft_is_from_deeplink: 'false', draft_is_invisible: false,
     draft_is_pippit_draft: false, draft_is_web_article_video: false,
@@ -712,8 +728,14 @@ export function montarDraftCapCut(tl: ProjetoTimeline, opts: { raiz?: string; pa
     tm_draft_cloud_parent_entry_id: -1, tm_draft_cloud_space_id: -1, tm_draft_cloud_user_id: -1, tm_draft_create: agora, tm_draft_modified: agora,
     tm_draft_removed: 0, tm_duration: duracao, draft_cover_hd: '',
   };
+  // PASTAS do painel de mídia (08.10): cada arquivo importado na sua pasta
+  // (AVATAR, TAKES › assunto, SFX…) — o `id` do item do painel é o nó da árvore.
+  const pastas = virtualStoreDoCapCut(
+    itensImportados.map((it, i) => ({ id: it.id, pasta: pastaDoArquivo(tl.arquivos[i]) })),
+    Math.floor(agora / US), novoId,
+  );
   // UTF-8 SEM BOM: o CapCut recusa o projeto inteiro com BOM ("caminho desconhecido").
-  return { conteudo: JSON.stringify(conteudo), meta: JSON.stringify(meta) };
+  return { conteudo: JSON.stringify(conteudo), meta: JSON.stringify(meta), pastas: JSON.stringify(pastas) };
 }
 
 /* ═══════════════════════════ Premiere (Final Cut Pro 7 XML) ══════════════ */
@@ -746,7 +768,10 @@ export function geometriaPremiere(item: ItemTimeline, arquivo: ArquivoProjeto, W
   };
 }
 
-export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: string } = {}): string {
+export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: string; pastas?: boolean } = {}): string {
+  /** BINS (08.10): a mídia em subpastas no disco e em bins no projeto, como no
+   *  CapCut. `pastas: false` = o XML plano de antes (só a sequência). */
+  const comPastas = opts.pastas !== false;
   const fps = tl.fps;
   const f = (s: number) => Math.round(s * fps);
   const rate = `<rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>`;
@@ -754,8 +779,12 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
   const base = (opts.pastaMidia || `PILOT/${CAPCUT_SUBPASTA_MIDIA}`).replace(/\\/g, '/').replace(/\/+$/, '');
   // Formato que o próprio Premiere grava no Windows: file://localhost/D%3a/...
   // Sem pasta conhecida, o caminho não existe e o Premiere abre o "Link Media".
-  const url = (nome: string) => `file://localhost/${encodeURI(`${base}/${nome}`).replace(/#/g, '%23').replace(/^([A-Za-z]):/, '$1%3a')}`;
+  const relativo = (a: ArquivoProjeto) => (comPastas ? caminhoNaMidiaPremiere(a) : a.nome);
+  const url = (a: ArquivoProjeto) => `file://localhost/${encodeURI(`${base}/${relativo(a)}`).replace(/#/g, '%23').replace(/^([A-Za-z]):/, '$1%3a')}`;
   const fileIds = new Map<string, string>();
+  /** nome do arquivo → id do master clip do bin (só com pastas) */
+  const masterIds = new Map<string, string>();
+  const mestre = (a: ArquivoProjeto) => (masterIds.has(a.nome) ? `<masterclipid>${masterIds.get(a.nome)}</masterclipid>` : '');
   let fileSeq = 0;
   let clipSeq = 0;
   const imagemDur = fps * 3600 * IMAGEM_HORAS;
@@ -809,7 +838,7 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
     const audio = a.temAudio ? `<audio><samplecharacteristics><depth>16</depth><samplerate>${a.taxa || 48000}</samplerate></samplecharacteristics><channelcount>2</channelcount></audio>` : '';
     // SFX e trilha: arquivo só de áudio (sem <video>, senão o Premiere procura imagem nele)
     const video = a.tipo === 'audio' ? '' : `<video><samplecharacteristics>${rate}<width>${a.w}</width><height>${a.h}</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></video>`;
-    return `<file id="${id}"><name>${xmlEsc(a.nome)}</name><pathurl>${xmlEsc(url(a.nome))}</pathurl>${rate}<duration>${dur}</duration>`
+    return `<file id="${id}"><name>${xmlEsc(a.nome)}</name><pathurl>${xmlEsc(url(a))}</pathurl>${rate}<duration>${dur}</duration>`
       + `<media>${video}${audio}</media></file>`;
   };
   const param = (id: string, nome: string, valor: string, keys?: Array<{ quadro: number; valor: string }>) =>
@@ -845,7 +874,7 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
       const id = `clipitem-${++clipSeq}`;
       // PNG com transparência (legenda, headline): alpha "straight", como o Premiere grava.
       const alfa = foto ? '<alphatype>straight</alphatype>' : '';
-      return `<clipitem id="${id}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
+      return `<clipitem id="${id}">${mestre(a)}<name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
         + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${alfa}${arquivoXml(a)}${filtros}</clipitem>`;
     });
     return `<track>${clips.join('')}<enabled>TRUE</enabled><locked>FALSE</locked></track>`;
@@ -873,14 +902,38 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
       const nivel = `<filter><effect><name>Audio Levels</name><effectid>audiolevels</effectid><effectcategory>audiolevels</effectcategory><effecttype>audiolevels</effecttype><mediatype>audio</mediatype>`
         + `<parameter><parameterid>level</parameterid><name>Level</name><valuemin>0</valuemin><valuemax>3.98109</valuemax>${valorNivel}</parameter></effect></filter>`;
       const remap = Math.abs(tc.vel - 1) > 1e-3 ? timeRemap(tc, false) : '';
-      return `<clipitem id="clipitem-${++clipSeq}"><name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
+      return `<clipitem id="clipitem-${++clipSeq}">${mestre(a)}<name>${xmlEsc(a.nome)}</name><enabled>TRUE</enabled><duration>${tc.dur}</duration>${rate}`
         + `<start>${ini}</start><end>${fim}</end><in>${dentro}</in><out>${fora}</out>${arquivoXml(a)}<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>${remap}${nivel}</clipitem>`;
     }).join('')}<enabled>TRUE</enabled><locked>FALSE</locked></track>`;
   };
 
+  // BINS: um MASTER CLIP por arquivo, dentro do bin da pasta dele (a forma do
+  // FCP 7 que o Premiere importa: <project><children><bin>…). O <file> completo
+  // nasce aqui (1ª aparição no documento); a sequência só aponta pro id.
+  const binsXml = comPastas ? (() => {
+    tl.arquivos.forEach((a, i) => masterIds.set(a.nome, `masterclip-${i + 1}`));
+    const masterClip = (a: ArquivoProjeto) => {
+      const id = masterIds.get(a.nome)!;
+      const nomeX = xmlEsc(a.nome);
+      const dur = a.tipo === 'imagem' ? imagemDur : f(a.durSec);
+      const v = a.tipo === 'audio' ? '' : `<video><track><clipitem id="${id}-v"><masterclipid>${id}</masterclipid><name>${nomeX}</name>`
+        + `${a.tipo === 'imagem' ? '<alphatype>straight</alphatype>' : ''}${arquivoXml(a)}<sourcetrack><mediatype>video</mediatype></sourcetrack></clipitem></track></video>`;
+      const au = a.temAudio ? `<audio><track><clipitem id="${id}-a"><masterclipid>${id}</masterclipid><name>${nomeX}</name>${arquivoXml(a)}`
+        + `<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack></clipitem></track></audio>` : '';
+      return `<clip id="${id}"><masterclipid>${id}</masterclipid><ismasterclip>TRUE</ismasterclip><name>${nomeX}</name><duration>${dur}</duration>${rate}<media>${v}${au}</media></clip>`;
+    };
+    const chave = (c: string[]) => c.join('\u0000');
+    const arvore = arvoreDePastas(tl.arquivos.map(pastaDoArquivo));
+    const bin = (caminho: string[]): string => {
+      const filhos = arvore.filter((c) => c.length === caminho.length + 1 && chave(c.slice(0, -1)) === chave(caminho));
+      const clips = tl.arquivos.filter((a) => chave(pastaDoArquivo(a)) === chave(caminho));
+      return `<bin><name>${xmlEsc(caminho[caminho.length - 1])}</name><children>${filhos.map(bin).join('')}${clips.map(masterClip).join('')}</children></bin>`;
+    };
+    return arvore.filter((c) => c.length === 1).map(bin).join('');
+  })() : '';
+
   const duracao = f(tl.durSec);
-  return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n'
-    + `<xmeml version="4"><sequence id="sequence-1"><name>${xmlEsc(tl.nome)}</name><duration>${duracao}</duration>${rate}`
+  const sequencia = `<sequence id="sequence-1"><name>${xmlEsc(tl.nome)}</name><duration>${duracao}</duration>${rate}`
     + `<media><video><format><samplecharacteristics>${rate}<width>${tl.W}</width><height>${tl.H}</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>`
     + (['avatar', 'broll', 'topo', 'transicao', 'legenda', 'headline'] as const).map(trilhaVideo).join('')
     + `</video><audio><numOutputChannels>2</numOutputChannels><format><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics></format>`
@@ -890,7 +943,11 @@ export function montarXmlPremiere(tl: ProjetoTimeline, opts: { pastaMidia?: stri
     // SFX e trilha (08.10): uma faixa por raia — nada se sobrepõe na mesma faixa
     + raiasDeAudio(tl.itens.filter((i) => i.trilha === 'sfx')).map((raia) => trilhaAudio((i) => raia.includes(i))).join('')
     + raiasDeAudio(tl.itens.filter((i) => i.trilha === 'musica')).map((raia) => trilhaAudio((i) => raia.includes(i))).join('')
-    + `</audio></media></sequence></xmeml>\n`;
+    + `</audio></media></sequence>`;
+  const corpo = comPastas
+    ? `<project><name>${xmlEsc(tl.nome)}</name><children>${binsXml}${sequencia}</children></project>`
+    : sequencia;
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n' + `<xmeml version="4">${corpo}</xmeml>\n`;
 }
 
 /* ═══════════════════════════ LEIA-ME ════════════════════════════════════ */

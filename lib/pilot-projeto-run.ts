@@ -10,10 +10,12 @@
  */
 
 import {
-  CAPCUT_RAIZ_PADRAO, CAPCUT_SUBPASTA_MIDIA, chavesDoProjeto, intervalosDaLegenda, leiaMeDoProjeto, montarDraftCapCut,
+  CAPCUT_RAIZ_PADRAO, CAPCUT_SUBPASTA_MIDIA, caminhoNaMidiaPremiere, chavesDoProjeto, intervalosDaLegenda, leiaMeDoProjeto, montarDraftCapCut,
   montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda,
   type ArquivoProjeto, type MidiaDoProjeto, type RoteiroEdicao,
 } from './pilot-projeto';
+import { assuntoDoTake, CAPA_ARQUIVO, CAPA_COR, nomeDoTake, PASTA } from './pilot-projeto-pastas';
+import { nomeDePasta as nomeDePastaComum, nomeDoZip } from './abrir-projeto';
 import { aberturaDoOlho, palcoDoLayout, PISCAR_ANTES_SEC, PISCAR_DEPOIS_SEC } from './pilot-inserts';
 import { SFX_CATALOGO, SFX_IDS } from './pilot-sonoplastia';
 
@@ -23,6 +25,14 @@ export type AlvoDoPacote = 'capcut' | 'premiere';
 export const PREMIERE_RAIZ_SUGERIDA = 'C:/AUTOEDIT';
 /** Subpasta da mídia no pacote do Premiere (o XML aponta pra ela). */
 export const PREMIERE_SUBPASTA_MIDIA = 'MIDIA';
+/** O marcador que o Auto Edit Abrir (app do PC) procura dentro do .zip. */
+export const ARQUIVO_DO_JOB = 'autoedit-job.json';
+/** A capa REAL (1º quadro do vídeo) que o app põe no lugar da capa-assinatura
+ *  depois que o CapCut abre o projeto. */
+export const CAPA_FINAL_ARQUIVO = 'autoedit-capa-final.jpg';
+
+/** O que a página sabe de cada take (pelo id do insert): o título do catálogo. */
+export type InfoDoTake = { titulo?: string | null };
 
 /** Extensão de um áudio pelos bytes (a biblioteca guarda sem extensão). */
 async function extensaoDoAudio(blob: Blob): Promise<string> {
@@ -192,6 +202,53 @@ function pngLinha(W: number, H: number, r: { x: number; y: number; w: number; h:
   return new Promise((res) => c.toBlob((b) => res(b), 'image/png'));
 }
 
+/** Um quadro do avatar em JPEG (a capa real do projeto no CapCut). */
+async function capaReal(base: Blob, W: number, H: number): Promise<Blob | null> {
+  const png = await ultimoQuadro(base, 0.6).catch(() => null);
+  if (!png) return null;
+  try {
+    const bmp = await createImageBitmap(png);
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    c.getContext('2d')!.drawImage(bmp, 0, 0, W, H);
+    bmp.close();
+    return await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.9));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CAPA-ASSINATURA (08.10): rosa-choque com o nome do AD no meio. É por essa
+ * cor que o Auto Edit Abrir acha o projeto na tela inicial do CapCut e clica
+ * nele (pilot-projeto-pastas → CAPA_COR; o app usa a MESMA cor). O texto fica
+ * no quadrado central, que é o pedaço que a miniatura do CapCut mostra.
+ */
+function capaAssinatura(W: number, H: number, nome: string): Promise<Blob | null> {
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = `rgb(${CAPA_COR.r}, ${CAPA_COR.g}, ${CAPA_COR.b})`;
+  ctx.fillRect(0, 0, W, H);
+  const lado = Math.min(W, H);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const titulo = (nome.split(/\s+-\s+/)[0] || nome).slice(0, 14);
+  let tam = Math.round(lado * 0.16);
+  ctx.font = `800 ${tam}px "Segoe UI", Arial, sans-serif`;
+  while (tam > 24 && ctx.measureText(titulo).width > lado * 0.74) {
+    tam -= 4;
+    ctx.font = `800 ${tam}px "Segoe UI", Arial, sans-serif`;
+  }
+  ctx.fillText(titulo, W / 2, H / 2 - lado * 0.04);
+  ctx.font = `700 ${Math.round(lado * 0.05)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText('AUTO EDIT', W / 2, H / 2 + lado * 0.1);
+  return new Promise((res) => c.toBlob((b) => res(b), 'image/jpeg', 0.95));
+}
+
 /** Assinatura barata de um quadro: amostra reduzida dos pixels. Quadros
  *  idênticos (palavra que não muda nada na tela) viram UM PNG só. */
 function assinatura(c: HTMLCanvasElement): string {
@@ -210,7 +267,7 @@ function assinatura(c: HTMLCanvasElement): string {
   return `${(h1 >>> 0).toString(16)}:${h2.toString(16)}`;
 }
 
-type Arquivo = { caminho: string; blob: Blob };
+type Arquivo = { caminho: string; blob: Blob; nome?: string };
 
 const extensao = (blob: Blob, nome: string, tipo: 'video' | 'imagem') => {
   const doNome = /\.([a-z0-9]{2,4})$/i.exec(nome)?.[1]?.toLowerCase();
@@ -224,9 +281,9 @@ const extensao = (blob: Blob, nome: string, tipo: 'video' | 'imagem') => {
 };
 const slug = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'midia';
 
-/** Nome de pasta aceito pelo Windows e pelo CapCut. */
+/** Nome de pasta aceito pelo Windows e pelo CapCut (a regra mora em abrir-projeto). */
 export function nomeDePasta(s: string): string {
-  return s.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 120) || 'PROJETO PILOT';
+  return nomeDePastaComum(s);
 }
 
 /** Monta os arquivos de UM vídeo montado (caminhos relativos à pasta dele). */
@@ -237,13 +294,18 @@ async function arquivosDoProjeto(
   onEtapa?: (msg: string) => void,
   alvo: AlvoDoPacote = 'capcut',
   lerTrilha?: (id: string) => Promise<Blob | null>,
+  extras: { infoDosTakes?: (insertId: string) => InfoDoTake | undefined; capaAssinatura?: boolean } = {},
 ): Promise<{ arquivos: Arquivo[]; avisos: string[]; camadas: string[] }> {
   const { loadBlob } = await import('./zip-store');
   const roteiro = p.roteiro;
   const avisos: string[] = [];
   const arquivos: Arquivo[] = [];
   const midiaDir = alvo === 'premiere' ? PREMIERE_SUBPASTA_MIDIA : CAPCUT_SUBPASTA_MIDIA;
-  const add = (nome: string, blob: Blob) => arquivos.push({ caminho: `${midiaDir}/${nome}`, blob });
+  // CapCut: tudo junto em Resources/pilot (as pastas são do PAINEL, no
+  // draft_virtual_store). Premiere: subpastas no disco que repetem os bins.
+  const add = (arquivo: ArquivoProjeto, blob: Blob) => arquivos.push({
+    caminho: `${midiaDir}/${alvo === 'premiere' ? caminhoNaMidiaPremiere(arquivo) : arquivo.nome}`, blob, nome: arquivo.nome,
+  });
 
   onEtapa?.(`${p.filename}: lendo o avatar`);
   const base = await loadBlob(p.chaveBase);
@@ -252,8 +314,8 @@ async function arquivosDoProjeto(
   if (!(med.w > 0 && med.h > 0)) throw new Error(`não consegui abrir o avatar de ${p.filename} neste navegador.`);
   const W = med.w;
   const H = med.h;
-  const avatar: ArquivoProjeto = { nome: 'avatar.mp4', tipo: 'video', w: W, h: H, durSec: med.dur || roteiro.durSec, temAudio: true };
-  add(avatar.nome, base);
+  const avatar: ArquivoProjeto = { nome: 'avatar.mp4', tipo: 'video', w: W, h: H, durSec: med.dur || roteiro.durSec, temAudio: true, pasta: [PASTA.avatar] };
+  add(avatar, base);
 
   // B-ROLLS
   const inserts: MidiaDoProjeto['inserts'] = new Map();
@@ -267,16 +329,19 @@ async function arquivosDoProjeto(
       const blob = await loadBlob(ins.midiaKey, ins.tipo === 'imagem' ? 'image/png' : 'video/mp4');
       if (!blob || blob.size === 0) continue; // a timeline avisa o editor
       n++;
-      const nome = `broll_${String(n).padStart(2, '0')}_${slug(ins.nome)}.${extensao(blob, ins.nome, ins.tipo)}`;
+      // TAKE NN - <título do catálogo>, na pasta do ASSUNTO dele (08.10)
+      const titulo = extras.infoDosTakes?.(ins.id)?.titulo || '';
+      const nome = nomeDoTake(n, titulo || ins.nome, extensao(blob, ins.nome, ins.tipo));
+      const pasta = [PASTA.takes, assuntoDoTake(titulo, ins.nome)];
       let novo: ArquivoProjeto;
       if (ins.tipo === 'imagem') {
         const m = await medirImagem(blob);
-        novo = { nome, tipo: 'imagem', w: m.w || ins.w, h: m.h || ins.h, durSec: 0, temAudio: false };
+        novo = { nome, tipo: 'imagem', w: m.w || ins.w, h: m.h || ins.h, durSec: 0, temAudio: false, pasta };
       } else {
         const m = await medirVideo(blob);
-        novo = { nome, tipo: 'video', w: ins.w || m.w, h: ins.h || m.h, durSec: m.dur || ins.deSec + ins.naturalSec, temAudio: false };
+        novo = { nome, tipo: 'video', w: ins.w || m.w, h: ins.h || m.h, durSec: m.dur || ins.deSec + ins.naturalSec, temAudio: false, pasta };
       }
-      add(nome, blob);
+      add(novo, blob);
       ja = { arquivo: novo, blob };
       porMidia.set(ins.midiaKey, ja);
     }
@@ -289,8 +354,8 @@ async function arquivosDoProjeto(
       const png = await ultimoQuadro(blob, ins.deSec + Math.max(0, ins.naturalSec - 0.05));
       if (png) {
         // um PNG por TRECHO: a mesma mídia pode congelar em pontos diferentes
-        congelado = { nome: nome.replace(/\.[^.]+$/, `_ultimo_quadro_${String(inserts.size + 1).padStart(2, '0')}.png`), tipo: 'imagem', w: arquivo.w, h: arquivo.h, durSec: 0, temAudio: false };
-        add(congelado.nome, png);
+        congelado = { nome: nome.replace(/\.[^.]+$/, ` - ultimo quadro ${String(inserts.size + 1).padStart(2, '0')}.png`), tipo: 'imagem', w: arquivo.w, h: arquivo.h, durSec: 0, temAudio: false, pasta: arquivo.pasta };
+        add(congelado, png);
       }
     }
     inserts.set(ins.id, { arquivo, congelado });
@@ -345,7 +410,7 @@ async function arquivosDoProjeto(
         if (!png) continue;
         k++;
         const arquivo: ArquivoProjeto = { nome: `legenda_${String(k).padStart(4, '0')}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
-        add(arquivo.nome, png);
+        add(arquivo, png);
         const item = { arquivo, start: it.start / 1000, end: it.end / 1000 };
         legendas.push(item);
         anterior = { assinatura: sig, item };
@@ -361,7 +426,7 @@ async function arquivosDoProjeto(
         const png = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/png'));
         if (!png) continue;
         const arquivo: ArquivoProjeto = { nome: `headline_${i + 1}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
-        add(arquivo.nome, png);
+        add(arquivo, png);
         headlines.push({ arquivo, start: h.start / 1000, end: h.end / 1000 });
       }
     }
@@ -374,16 +439,16 @@ async function arquivosDoProjeto(
   let branco: ArquivoProjeto | undefined;
   if (precisaPreto) {
     const b = await pngSolido(W, H, '#000');
-    if (b) { preto = { nome: 'transicao_preto.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(preto.nome, b); }
+    if (b) { preto = { nome: 'transicao_preto.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(preto, b); }
   }
   if (precisaBranco) {
     const b = await pngSolido(W, H, '#fff');
-    if (b) { branco = { nome: 'transicao_branco.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(branco.nome, b); }
+    if (b) { branco = { nome: 'transicao_branco.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(branco, b); }
   }
   let vermelho: ArquivoProjeto | undefined;
   if (roteiro.inserts.some((i) => i.transicao === 'luz-vermelha')) {
     const b = await pngClaraoVermelho(W, H);
-    if (b) { vermelho = { nome: 'transicao_vermelho.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(vermelho.nome, b); }
+    if (b) { vermelho = { nome: 'transicao_vermelho.png', tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false }; add(vermelho, b); }
   }
   // LINHA da tela dividida: um PNG por cor usada
   const linhas = new Map<string, ArquivoProjeto>();
@@ -395,7 +460,7 @@ async function arquivosDoProjeto(
     const b = await pngLinha(W, H, linha, cor);
     if (!b) continue;
     const arquivo: ArquivoProjeto = { nome: `linha_${cor.replace('#', '')}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
-    add(arquivo.nome, b);
+    add(arquivo, b);
     linhas.set(cor, arquivo);
   }
 
@@ -406,7 +471,7 @@ async function arquivosDoProjeto(
     const frames = await framesDoOlho(W, H, 30);
     olho = frames.map((f, i) => {
       const arquivo: ArquivoProjeto = { nome: `transicao_piscar_${String(i + 1).padStart(2, '0')}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
-      add(arquivo.nome, f.blob);
+      add(arquivo, f.blob);
       return { arquivo, de: f.de, ate: f.ate };
     });
   }
@@ -428,7 +493,7 @@ async function arquivosDoProjeto(
         continue;
       }
       const arquivo: ArquivoProjeto = { nome: SFX_CATALOGO[id].arquivoProjeto, tipo: 'audio', w: 0, h: 0, durSec: buf.duration, temAudio: true, taxa: buf.sampleRate };
-      add(arquivo.nome, wav);
+      add(arquivo, wav);
       if (idsUsados.has(id)) sfx.set(id, arquivo);
       else extrasDoPainel.push(arquivo);
     }
@@ -442,7 +507,7 @@ async function arquivosDoProjeto(
     if (blob && blob.size > 0) {
       const ext = await extensaoDoAudio(blob);
       trilha = { nome: `TRILHA - ${slug(roteiro.trilha.nome)}.${ext}`, tipo: 'audio', w: 0, h: 0, durSec: roteiro.trilha.durTrilha, temAudio: true };
-      add(trilha.nome, blob);
+      add(trilha, blob);
     }
   }
 
@@ -451,13 +516,24 @@ async function arquivosDoProjeto(
   avisos.push(...tl.avisos);
   // só vai pro pacote a mídia que a timeline usa (PNG idêntico já foi fundido)
   const usados = new Set(tl.arquivos.map((a) => a.nome));
-  const finais = arquivos.filter((a) => usados.has(a.caminho.slice(midiaDir.length + 1)));
+  const finais = arquivos.filter((a) => usados.has(a.nome || ''));
 
   const enc = (s: string, tipo: string) => new Blob([s], { type: tipo });
   if (alvo === 'capcut') {
-    const cc = montarDraftCapCut(tl, { raiz: raizCapCut, pasta });
+    // CAPA (08.10): a real (1º quadro) — ou, quando o Auto Edit Abrir vai
+    // abrir o projeto sozinho, a capa-assinatura rosa + a real guardada pro
+    // app trocar assim que o projeto abrir.
+    onEtapa?.(`${p.filename}: capa`);
+    const real = await capaReal(base, W, H);
+    const assinatura = extras.capaAssinatura ? await capaAssinatura(W, H, pasta) : null;
+    const capa = assinatura || real;
+    if (assinatura && real) finais.push({ caminho: CAPA_FINAL_ARQUIVO, blob: real });
+    if (capa) finais.push({ caminho: CAPA_ARQUIVO, blob: capa });
+    const cc = montarDraftCapCut(tl, { raiz: raizCapCut, pasta, capa: !!capa });
     finais.push({ caminho: 'draft_content.json', blob: enc(cc.conteudo, 'application/json') });
     finais.push({ caminho: 'draft_meta_info.json', blob: enc(cc.meta, 'application/json') });
+    // PASTAS do painel de mídia: AVATAR, TAKES › assunto, SFX, TRILHA…
+    finais.push({ caminho: 'draft_virtual_store.json', blob: enc(cc.pastas, 'application/json') });
   } else {
     // o XML aponta pra raiz sugerida: extraiu lá, o Premiere acha tudo sozinho;
     // extraiu em outro lugar, ele pede UM arquivo e acha o resto
@@ -502,6 +578,11 @@ export async function exportarProjetosEditaveis(opts: {
   alvo?: AlvoDoPacote;
   /** lê a trilha da biblioteca (bytes) pro projeto levar o arquivo */
   lerTrilha?: (id: string) => Promise<Blob | null>;
+  /** título de cada take (pelo id do insert) — nomeia o arquivo e escolhe a pasta */
+  infoDosTakes?: (insertId: string) => InfoDoTake | undefined;
+  /** ABRIR DIRETO (08.10): o id do pedido pro Auto Edit Abrir — vai num
+   *  autoedit-job.json na raiz do .zip, e a capa vira a capa-assinatura */
+  job?: string;
 }): Promise<ResultadoExport> {
   const alvo: AlvoDoPacote = opts.alvo || 'capcut';
   const raiz = (opts.raizCapCut || CAPCUT_RAIZ_PADRAO).replace(/\\/g, '/').replace(/\/+$/, '');
@@ -516,7 +597,7 @@ export async function exportarProjetosEditaveis(opts: {
     let pasta = base;
     for (let i = 2; usados.has(pasta.toLowerCase()) || (opts.destino && await existePasta(opts.destino, pasta)); i++) pasta = `${base} (${i})`;
     usados.add(pasta.toLowerCase());
-    const r = await arquivosDoProjeto(p, pasta, raiz, opts.onEtapa, alvo, opts.lerTrilha);
+    const r = await arquivosDoProjeto(p, pasta, raiz, opts.onEtapa, alvo, opts.lerTrilha, { infoDosTakes: opts.infoDosTakes, capaAssinatura: !!opts.job && alvo === 'capcut' });
     avisos.push(...r.avisos.map((a) => `${p.filename}: ${a}`));
     camadas = camadas.length >= r.camadas.length ? camadas : r.camadas;
     if (opts.destino) {
@@ -529,7 +610,8 @@ export async function exportarProjetosEditaveis(opts: {
     pastas.push(pasta);
   }
   if (zip) {
-    const nomeZip = `${nomeDePasta(opts.nomeBase)} - ${alvo === 'premiere' ? 'PREMIERE' : 'CAPCUT'}.zip`;
+    // o MESMO nome que o link do Auto Edit Abrir anuncia (lib/abrir-projeto)
+    const nomeZip = nomeDoZip(opts.nomeBase, alvo);
     // o PDF de COMO ABRIR vai na raiz do .zip, do lado das pastas
     opts.onEtapa?.('escrevendo o PDF de como abrir');
     try {
@@ -541,6 +623,13 @@ export async function exportarProjetosEditaveis(opts: {
       zip.file(alvo === 'premiere' ? 'COMO ABRIR NO PREMIERE.pdf' : 'COMO ABRIR NO CAPCUT.pdf', pdf);
     } catch (e) {
       console.warn('[projeto] PDF de instruções falhou (o LEIA-ME.txt continua na pasta):', e);
+    }
+    if (opts.job) {
+      // o pedido que o app do PC confere antes de mexer em qualquer coisa
+      zip.file(ARQUIVO_DO_JOB, JSON.stringify({
+        app: 'autoedit-abrir', versao: 1, job: opts.job, alvo, pastas, criadoEm: Date.now(),
+        premiereRaiz: alvo === 'premiere' ? PREMIERE_RAIZ_SUGERIDA : undefined,
+      }, null, 2));
     }
     opts.onEtapa?.('compactando o pacote');
     const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });

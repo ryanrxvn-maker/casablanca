@@ -143,6 +143,9 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/termos') ||
     pathname.startsWith('/politica') ||
     pathname.startsWith('/recursos') ||
+    // app Auto Edit Abrir: o instalador abre esta página no navegador padrão,
+    // que pode nem estar logado (é ela que liga o "abrir direto" no Pilot)
+    pathname.startsWith('/abrir-projeto') ||
     // Arquivos de SEO — devem ser servidos pra crawlers anônimos.
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||

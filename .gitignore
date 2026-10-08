@@ -67,3 +67,6 @@ public/dev-tiny.mp4
 
 # midias da bancada /dev/formatos-insert (avatar + takes reais, grandes)
 public/dev-formatos-*.mp4
+
+# Auto Edit Abrir: o exe sai de engine/abrir/build.mjs (o site entrega o .zip em public/downloads)
+/engine/abrir/dist/

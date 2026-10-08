@@ -2564,6 +2564,7 @@ function ClickUpPilotInner() {
     genId: string | undefined,
     alvo: AlvoDoProjeto,
     onEtapa: (msg: string) => void,
+    opts: { job?: string } = {},
   ): Promise<{ arquivo: string; avisos: string[] }> {
     if (exportandoProjeto[taskId]) throw new Error('Já tem um projeto deste AD sendo montado. Espere ele terminar.');
     const etapa = (msg: string) => {
@@ -2581,7 +2582,15 @@ function ClickUpPilotInner() {
       let raiz = CAPCUT_RAIZ_PADRAO;
       try { raiz = localStorage.getItem('pilot:capcut-raiz') || CAPCUT_RAIZ_PADRAO; } catch { /* modo privado */ }
       const { lerTrilha } = await import('@/lib/pilot-trilhas-store');
-      const r = await exportarProjetosEditaveis({ projetos, nomeBase: nomeAd, destino: null, raizCapCut: raiz, alvo, lerTrilha, onEtapa: etapa });
+      // PASTAS (08.10): o título do catálogo de cada take nomeia o arquivo e
+      // escolhe a pasta do assunto (TAKES › IDOSOS, CÉREBRO E MEMÓRIA…)
+      const titulos = new Map(getInserts(taskId).map((ins) => [ins.id, ins.stockFrame?.title || ''] as const));
+      const r = await exportarProjetosEditaveis({
+        projetos, nomeBase: nomeAd, destino: null, raizCapCut: raiz, alvo, lerTrilha, onEtapa: etapa,
+        infoDosTakes: (id) => ({ titulo: titulos.get(id) || null }),
+        // ABRIR DIRETO: o id do pedido que o Auto Edit Abrir está esperando
+        job: opts.job,
+      });
       if (!r.zip) throw new Error('O pacote não saiu. Tente de novo.');
       const url = URL.createObjectURL(r.zip.blob);
       const a = document.createElement('a');
@@ -16740,7 +16749,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <PilotProjetoExportModal
                                     nomeAd={projetoEscolha.nomeAd}
                                     onFechar={() => setProjetoEscolha(null)}
-                                    exportar={(alvo, onEtapa) => exportarProjetoEditavel(projetoEscolha.taskId, projetoEscolha.nomeAd, projetoEscolha.genId, alvo, onEtapa)}
+                                    exportar={(alvo, onEtapa, opts) => exportarProjetoEditavel(projetoEscolha.taskId, projetoEscolha.nomeAd, projetoEscolha.genId, alvo, onEtapa, opts)}
                                   />
                                 ) : null;
                                 if (!botaoVersoes && !botaoVA && !botaoProjeto) return undefined;

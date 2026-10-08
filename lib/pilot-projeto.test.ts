@@ -1,6 +1,6 @@
 import {
   CAPCUT_PASTA_DO_DRAFT, chavesDoProjeto, geometriaCapCut, geometriaPremiere, intervalosDaLegenda, leiaMeDoProjeto,
-  montarDraftCapCut, montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda, raiasDeAudio,
+  montarDraftCapCut, montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda, raiasDeAudio, pastaDoArquivo, caminhoNaMidiaPremiere,
   type ArquivoProjeto, type MidiaDoProjeto, type ProjetoInsert, type RoteiroEdicao,
 } from './pilot-projeto';
 import { zipGroupId } from './zip-store-prune';
@@ -128,13 +128,13 @@ const xml = montarXmlPremiere(tl, { pastaMidia: 'D:/capcut2/drafts/CapCut Drafts
 const abre = (xml.match(/<clipitem /g) || []).length;
 const fecha = (xml.match(/<\/clipitem>/g) || []).length;
 ok(xml.startsWith('<?xml') && xml.includes('<xmeml version="4">') && abre === fecha && abre > 0, 'Premiere: xmeml v4 bem formado');
-ok(xml.includes('file://localhost/D%3a/capcut2/drafts/CapCut%20Drafts/AD47G1VN%20-%20PILOT/Resources/pilot/avatar.mp4'),
+ok(xml.includes('file://localhost/D%3a/capcut2/drafts/CapCut%20Drafts/AD47G1VN%20-%20PILOT/Resources/pilot/01%20-%20AVATAR/avatar.mp4'),
   'Premiere: caminho Windows no formato que o próprio Premiere grava');
 ok(xml.includes('<effectid>timeremap</effectid>') && xml.includes('<value>75</value>'), 'Premiere: câmera lenta como Time Remap 75%');
 ok(xml.includes('<effectid>crop</effectid>'), 'Premiere: recorte do cover/split como Crop');
 ok((xml.match(/<file id="file-1">/g) || []).length === 1 && xml.includes('<file id="file-1"/>'), 'Premiere: arquivo declarado uma vez e reaproveitado');
 const secaoAudio = xml.split('</video><audio><numOutputChannels>')[1] || '';
-const nomesNoAudio = [...secaoAudio.matchAll(/<clipitem id="[^"]+"><name>([^<]+)<\/name>/g)].map((m) => m[1]);
+const nomesNoAudio = [...secaoAudio.matchAll(/<clipitem id="[^"]+">(?:<masterclipid>[^<]*<\/masterclipid>)?<name>([^<]+)<\/name>/g)].map((m) => m[1]);
 ok(nomesNoAudio.includes('avatar.mp4') && nomesNoAudio.includes('broll_02.mp4') && !nomesNoAudio.includes('broll_01.mp4'),
   'Premiere: áudio do avatar + só o b-roll com som ligado');
 const gp = geometriaPremiere(br[0], broll169, W, H);
@@ -153,9 +153,9 @@ const centroRecorteY = gpAv.centroY * H + H / 2 + ((av[1].recorte.y0 + av[1].rec
 ok(perto(gpAv.escalaPct, 100, 0.01) && perto(centroRecorteY, 480, 0.5) && gpAv.crop.topo > 0,
   'Premiere: recorte do avatar (foco no rosto) centrado na metade de cima');
 type ClipXml = { nome: string; dur: number; ini: number; fim: number; dentro: number; fora: number; corpo: string };
-const clipsXml = (trecho: string): ClipXml[] => [...trecho.matchAll(/<clipitem id="[^"]+"><name>([^<]+)<\/name><enabled>TRUE<\/enabled><duration>(\d+)<\/duration>.*?<start>(\d+)<\/start><end>(\d+)<\/end><in>(\d+)<\/in><out>(\d+)<\/out>(.*?)<\/clipitem>/g)]
+const clipsXml = (trecho: string): ClipXml[] => [...trecho.matchAll(/<clipitem id="[^"]+">(?:<masterclipid>[^<]*<\/masterclipid>)?<name>([^<]+)<\/name><enabled>TRUE<\/enabled><duration>(\d+)<\/duration>.*?<start>(\d+)<\/start><end>(\d+)<\/end><in>(\d+)<\/in><out>(\d+)<\/out>(.*?)<\/clipitem>/g)]
   .map((m) => ({ nome: m[1], dur: +m[2], ini: +m[3], fim: +m[4], dentro: +m[5], fora: +m[6], corpo: m[7] }));
-const secaoVideo = xml.split('</video><audio><numOutputChannels>')[0];
+const secaoVideo = xml.slice(xml.indexOf('<sequence')).split('</video><audio><numOutputChannels>')[0];
 const cv = clipsXml(secaoVideo);
 ok(cv.length === tl.itens.length && cv.every((c) => c.fora - c.dentro === c.fim - c.ini),
   'Premiere: todo clipe com out − in = end − start (a regra do xmeml)');
@@ -311,6 +311,50 @@ console.log('\nSONOPLASTIA E PISCAR NO PROJETO (08.10):');
   ok((faixasXml.match(/SFX - Click do Mouse\.wav<\/name>/g) || []).length >= 2 && faixasXml.includes('TRILHA - Lo-Fi.mp3'), 'Premiere: SFX e trilha nas faixas de áudio');
   ok(/<file id="file-\d+"><name>SFX - Boom\.wav<\/name>[^]*?<media><audio>/.test(xml), 'arquivo de SFX no XML é só áudio (sem <video>, o Premiere não procura imagem nele)');
   ok(/<parameterid>level<\/parameterid>[^]*?<keyframe><when>\d+<\/when><value>0<\/value><\/keyframe>/.test(xml), 'fades viram keyframes de nível no Premiere');
+}
+
+console.log('\nPASTAS NO PROJETO (08.10): painel do CapCut e bins do Premiere organizados:');
+{
+  const arqs = tl.arquivos;
+  ok(pastaDoArquivo(arqs.find((a) => a.nome === 'avatar.mp4')!)[0] === '01 · AVATAR'
+    && pastaDoArquivo(arqs.find((a) => a.nome.startsWith('legenda_'))!)[0] === '05 · LEGENDAS',
+    'cada arquivo cai na pasta do tipo dele');
+  const comAssunto: ArquivoProjeto = { nome: 'TAKE 01 - VELHA SAUDAVEL.mp4', tipo: 'video', w: 1080, h: 1920, durSec: 5, temAudio: false, pasta: ['02 · TAKES', 'IDOSOS'] };
+  ok(caminhoNaMidiaPremiere(comAssunto) === '02 - TAKES/IDOSOS/TAKE 01 - VELHA SAUDAVEL.mp4', 'Premiere: a mídia em subpastas que repetem os bins');
+
+  // CapCut: draft_virtual_store com um nó por item do painel
+  const ccp = montarDraftCapCut(tl, { pasta: 'AD47G1VN - PILOT', agoraUs: 1_791_000_000_000_000, novoId: ids, capa: true });
+  const metaP = JSON.parse(ccp.meta);
+  const vs = JSON.parse(ccp.pastas);
+  const pastasCC = vs.draft_virtual_store[0].value as Array<{ id: string; display_name: string }>;
+  const relCC = vs.draft_virtual_store[1].value as Array<{ child_id: string; parent_id: string }>;
+  const idsPainel = (metaP.draft_materials[0].value as Array<{ id: string }>).map((x) => x.id);
+  ok(idsPainel.length > 0 && idsPainel.every((id) => relCC.some((r) => r.child_id === id && r.parent_id !== '')),
+    'CapCut: TODO arquivo do painel está dentro de uma pasta (nada solto na raiz)');
+  const nomesPastas = pastasCC.map((x) => x.display_name).filter(Boolean);
+  ok(nomesPastas[0] === '01 · AVATAR' && nomesPastas.includes('02 · TAKES') && nomesPastas.includes('05 · LEGENDAS') && nomesPastas.includes('07 · TRANSIÇÕES E EFEITOS'),
+    `CapCut: pastas do projeto (${nomesPastas.join(', ')})`);
+  ok(metaP.draft_cover === 'draft_cover.jpg' && JSON.parse(capcut.meta).draft_cover === '', 'CapCut: capa só quando o pacote leva o arquivo');
+
+  // Premiere: <project> com bins, cada arquivo definido UMA vez, sequência apontando pro master clip
+  const x = montarXmlPremiere(tl, { pastaMidia: 'C:/AUTOEDIT/AD47G1VN - PILOT/MIDIA' });
+  ok(x.includes('<xmeml version="4"><project><name>') && x.trim().endsWith('</children></project></xmeml>'), 'Premiere: <project> com bins e a sequência');
+  ok(x.includes('<bin><name>01 · AVATAR</name>') && x.includes('<bin><name>02 · TAKES</name><children><bin><name>OUTROS TAKES</name>'),
+    'Premiere: bins de cima e bin de assunto DENTRO de TAKES');
+  const definidos = [...x.matchAll(/<file id="(file-\d+)"><name>/g)].map((m) => m[1]);
+  ok(definidos.length === arqs.length && new Set(definidos).size === definidos.length, 'Premiere: cada arquivo com <file> completo exatamente 1 vez');
+  const iniSeq = x.indexOf('<sequence');
+  ok(definidos.every((id) => x.indexOf(`<file id="${id}">`) < iniSeq), 'Premiere: o arquivo nasce no bin (antes da sequência) — a sequência só referencia');
+  const mestres = new Set([...x.matchAll(/<clip id="(masterclip-\d+)">/g)].map((m) => m[1]));
+  const naSequencia = [...x.slice(iniSeq).matchAll(/<clipitem id="clipitem-\d+"><masterclipid>(masterclip-\d+)<\/masterclipid>/g)].map((m) => m[1]);
+  ok(mestres.size === arqs.length && naSequencia.length === (x.slice(iniSeq).match(/<clipitem /g) || []).length && naSequencia.every((m) => mestres.has(m)),
+    'Premiere: todo clipe da sequência aponta pro master clip do bin');
+  const abreBin = (x.match(/<bin>/g) || []).length;
+  ok(abreBin === (x.match(/<\/bin>/g) || []).length && (x.match(/<clip /g) || []).length === (x.match(/<\/clip>/g) || []).length
+    && (x.match(/<children>/g) || []).length === (x.match(/<\/children>/g) || []).length, 'Premiere: bins/clips/children bem fechados');
+  ok(x.includes('MIDIA/01%20-%20AVATAR/avatar.mp4') && x.includes('MIDIA/05%20-%20LEGENDAS/legenda_0001.png'), 'Premiere: caminhos nas subpastas da MIDIA');
+  const plano = montarXmlPremiere(tl, { pastaMidia: 'C:/X', pastas: false });
+  ok(!plano.includes('<project>') && !plano.includes('<masterclipid>') && plano.includes('C:/X'.replace(':', '%3a') + '/avatar.mp4'), 'pastas: false = o XML plano de antes');
 }
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

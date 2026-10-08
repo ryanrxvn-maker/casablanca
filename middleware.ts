@@ -44,7 +44,9 @@ export const config = {
      *   nao precisam de auth; sem woff2 aqui, o canvas das Legendas Automáticas
      *   renderizava em sans-serif genérica pra visitante deslogado, porque o
      *   FontFace recebia o HTML do login no lugar da fonte)
+     * - .zip de public/ (o instalador do Auto Edit Abrir em /downloads — a
+     *   página /abrir-projeto é pública e o download também tem de ser)
      */
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|llms.txt|opengraph-image|.*\\.txt$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|mov|webm|mp3|wav|m4a|ogg|woff2|woff|ttf|otf)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|llms.txt|opengraph-image|.*\\.txt$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|mov|webm|mp3|wav|m4a|ogg|woff2|woff|ttf|otf|zip)$).*)',
   ],
 };

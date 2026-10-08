@@ -45,6 +45,10 @@ const ETAPAS = [
   { tsc: "lib/lipsync-chunk-plan.ts lib/lipsync-chunk-plan.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021", run: [".test-tmp/lipsync-chunk-plan.test.js"] },
   // projeto editável: roteiro da pós → CapCut (draft 9.x) + Premiere (xmeml) + SRT
   { tsx: ["lib/pilot-projeto.test.ts"] },
+  // pastas do projeto editável (08.10): assunto dos takes + painel do CapCut / bins do Premiere
+  { tsx: ["lib/pilot-projeto-pastas.test.ts"] },
+  // abrir direto no editor (08.10): site x app do PC (Auto Edit Abrir) na mesma lingua
+  { tsx: ["lib/abrir-projeto.test.ts"] },
   // sonoplastia (08.10): Smart SFX no pico da transição, piscar, trilha no tamanho do vídeo, velocidade, LUFS
   { tsx: ["lib/pilot-sonoplastia.test.ts"] },
   // Smart Position (08.10): legenda na dobra da tela dividida / meio do React, trocando no corte
