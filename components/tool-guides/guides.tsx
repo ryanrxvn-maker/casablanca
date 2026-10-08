@@ -1007,7 +1007,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Suba o áudio novo',
-        text: 'No painel "Configure e gera", o campo "Áudio" recebe a fala que o rosto vai passar a dizer — MP3, WAV, M4A ou até um MP4 (a ferramenta extrai o áudio sozinha). Limite: 10 minutos. O botão "Limpar áudio" vem LIGADO e tira ruído e sujeira antes do lipsync — desligue só se o seu áudio já for tratado. Voz limpa, sem música por cima, rende a sincronia mais precisa.',
+        text: 'No painel "Configure e gera", o campo "Áudio" recebe a fala que o rosto vai passar a dizer — MP3, WAV, M4A ou até um MP4 (a ferramenta extrai o áudio sozinha). Limite: 6 minutos de áudio por lipsync, que é o tamanho do vídeo gerado (áudio maior? corte em partes e gere uma de cada vez). O botão "Limpar áudio" vem LIGADO e tira ruído e sujeira antes do lipsync — desligue só se o seu áudio já for tratado. Voz limpa, sem música por cima, rende a sincronia mais precisa.',
         visual: (
           <Shot label="Lipsync · configuração">
             <MStack>

@@ -11,7 +11,7 @@ import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 import { HeroSlideBg } from './HeroSlideBg';
 import { TipoShowcase } from './TipoShowcase';
-import { LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
+import { FAKEPRINT_TELEJORNAIS, LEGENDAS_MODELOS } from '@/lib/numeros-do-site';
 
 /** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
 type MaintMode = 'blocked' | 'admin' | undefined;
@@ -87,14 +87,19 @@ const FEATURED: ToolEntry[] = [
       lead: 'O rosto do seu vídeo falando um áudio novo, com a boca encaixada na fala.',
       grupos: [
         {
-          rotulo: 'Entrada',
+          rotulo: 'Arquivos',
           texto:
-            'um take com o rosto de frente ou levemente de lado e o áudio em MP3, WAV, M4A ou até MP4, com até 10 minutos de fala.',
+            'aceita até 300 MB: o vídeo com o rosto de frente ou levemente de lado e o áudio em MP3, WAV, M4A ou até MP4.',
         },
         {
-          rotulo: 'Qualidade',
+          rotulo: 'Duração',
+          // Teto de produto em LipSyncTool (MAX_AUDIO_MS): o áudio define o vídeo.
           texto:
-            'o áudio passa por uma limpeza de ruído antes do lipsync, e a tela já avisa quando o take está curto demais ou com resolução baixa.',
+            'gera até 6 minutos de vídeo por vez. Áudio mais longo é avisado na hora, pra você dividir em partes.',
+        },
+        {
+          rotulo: 'Conferência',
+          texto: 'antes de gerar, a tela avisa quando o take está curto demais ou com resolução baixa.',
         },
         {
           rotulo: 'Fila',
@@ -1871,7 +1876,7 @@ function TipografiaFeaturedCard({ delay, locked = false }: { delay: number; lock
           </h3>
         </div>
         <div
-          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[520px] group-hover:opacity-100"
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[640px] group-hover:opacity-100"
           style={{ background: '#0b0b0f' }}
         >
           <div className="px-4 pb-4 pt-3.5">
@@ -1954,13 +1959,19 @@ const DETALHES_FAKEPRINT: Detalhes = {
   lead: 'Prints fiéis aos originais, prontos em PNG ou vídeo.',
   grupos: [
     {
+      // Quase todos os telejornais têm `anim: true` (BBC e Bem Estar são parados):
+      // por isso "quase todos", que continua verdade se o catálogo crescer.
+      rotulo: 'Headlines de telejornal',
+      texto: `${FAKEPRINT_TELEJORNAIS} modelos com a manchete pronta pra postar, quase todos animados em vídeo: letreiro correndo, AO VIVO piscando e relógio rodando. Em 16:9 ou 9:16, com tela verde pra chroma.`,
+    },
+    {
       rotulo: 'Redes sociais',
       texto:
         'conversa de WhatsApp e Direct, post, tweet, comentários, notificação, stickers de story, live e chamada de vídeo.',
     },
     {
-      rotulo: 'Notícias e TV',
-      texto: 'manchete de telejornal e matéria de site de notícia, com tela verde pra chroma.',
+      rotulo: 'Sites de notícia',
+      texto: 'matéria com a cara dos grandes portais, em desktop, feed, story ou 16:9.',
     },
   ],
 };
@@ -1969,17 +1980,24 @@ const DETALHES_LEGENDAS: Detalhes = {
   lead: 'A fala do vídeo vira legenda animada, no tempo exato de cada palavra.',
   grupos: [
     {
+      // "Bem menos risco", não "sem risco": a correção troca grafia/pontuação e
+      // devolve palavra comida, mas palavra que o ASR INVENTOU continua lá
+      // (lib/typography/copy-fix.ts). Prometer zero erro seria mentira.
+      rotulo: 'Corrigida pela copy',
+      texto:
+        'cole o roteiro e a legenda inteira é corrigida por ele: grafia, pontuação e as palavras que o áudio comeu, com os tempos intactos. Bem menos risco de subir AD com legenda errada.',
+    },
+    {
       rotulo: 'Modelos',
-      texto: `${LEGENDAS_MODELOS} legendas animadas (karaokê, neon, glitch, máquina de escrever e mais), com a palavra forte destacada sozinha.`,
+      texto: `${LEGENDAS_MODELOS} legendas animadas (karaokê, neon, glitch e mais), com a palavra forte destacada sozinha.`,
     },
     {
       rotulo: 'Edição',
-      texto:
-        'corrija o texto, divida e junte blocos, ajuste o tempo e pinte qualquer palavra, direto no preview, como no CapCut.',
+      texto: 'divida e junte blocos, ajuste o tempo e pinte qualquer palavra direto no preview, como no CapCut.',
     },
     {
       rotulo: 'Resultado',
-      texto: 'o que você vê no preview é o que sai no MP4, renderizado no seu navegador e baixado sozinho.',
+      texto: 'o que você vê no preview é o que sai no MP4, renderizado no seu navegador.',
     },
   ],
 };
@@ -2135,9 +2153,10 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
                     className="px-3 text-[9px] font-bold uppercase tracking-[0.14em] text-white/80"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    WhatsApp e Direct · Post e tweet · Comentários · Stickers de
-                    story · Live do TikTok e do Instagram · Chamada de vídeo e
-                    Zoom · Telejornal · Site de notícia · PNG ou vídeo ·
+                    Headline de telejornal animada · WhatsApp e Direct · Post e
+                    tweet · Comentários · Stickers de story · Live do TikTok e
+                    do Instagram · Chamada de vídeo e Zoom · Site de notícia ·
+                    PNG ou vídeo ·
                   </span>
                 ))}
               </div>
@@ -2147,7 +2166,7 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
 
         {/* PAINEL — abre ABAIXO da tela no hover (copy + botão) */}
         <div
-          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[520px] group-hover:opacity-100"
+          className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[640px] group-hover:opacity-100"
           style={{ background: '#0b0b0f' }}
         >
           <div className="px-4 pb-4 pt-3.5">
@@ -2189,7 +2208,7 @@ function FakePrintFeaturedCard({ delay, newsPremium }: { delay: number; newsPrem
       <style jsx>{`
         /* Letreiro: só transform (GPU) e pausa no modo descanso (ae-ambient). */
         .fpf-ticker {
-          animation: fpf-ticker-run 42s linear infinite;
+          animation: fpf-ticker-run 47s linear infinite;
         }
         @keyframes fpf-ticker-run {
           from { transform: translateX(0); }
@@ -2379,7 +2398,7 @@ function FeaturedVideoCard({
           Fundo SEMPRE escuro (igual HeyGen) pra o texto branco ser legível
           nos dois temas — no light o texto preto sumia. */}
       <div
-        className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[520px] group-hover:opacity-100"
+        className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[640px] group-hover:opacity-100"
         style={{ background: '#0b0b0f' }}
       >
         <div className="px-4 pb-4 pt-3.5">

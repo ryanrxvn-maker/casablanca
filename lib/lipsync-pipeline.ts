@@ -13,7 +13,7 @@
  *  - cleanAudioMp3: extrai+limpa o áudio (highpass+compress+loudnorm) → mp3
  *    pequeno (lip melhor + extrai áudio de mp4 também).
  *  - splitAudioChunks: divide áudio longo em trechos ≤~170s (motor processa
- *    até ~180s por vez → suportamos até 10min costurando os trechos).
+ *    até ~180s por vez → o pipeline aguenta até 10min costurando os trechos; a UI limita a 6min por disparo).
  *  - enhanceLipVideo: realça o resultado (denoise+sharpen+grading).
  *  - concatLipVideos: costura os trechos (stream-copy de vídeo = leve).
  */
