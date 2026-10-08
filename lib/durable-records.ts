@@ -86,6 +86,33 @@ const pageMode = (prev: PullMode, delta: boolean): PullMode => {
   const m = delta ? 'delta' : 'full';
   return prev === null || prev === m ? m : 'mixed';
 };
+type PullBody = { userId: string; records: CloudRow[]; more: boolean; delta?: boolean };
+async function pullWith(plan: PullPlan, onPage: (body: PullBody, page: number) => Promise<void>): Promise<void> {
+  let mode: PullMode = null;
+  let newest = 0;
+  let who = '';
+  for (let page = 0, more = true; more; page++) {
+    const { body } = await fetchJSON(...pullRequest(page, plan)) as { body: PullBody };
+    await onPage(body, page);
+    who = body.userId;
+    mode = pageMode(mode, body.delta === true && plan?.owner === body.userId);
+    newest = Math.max(newest, newestUpdate(body.records));
+    more = body.more;
+  }
+  if (who) rememberCursor(who, mode ?? 'mixed', plan, newest);
+}
+/** An incremental attempt that fails for ANY reason is redone once as the full
+ * listing, so the worst case of this optimisation is the previous behaviour. */
+async function pullPages(onPage: (body: PullBody, page: number) => Promise<void>): Promise<void> {
+  const plan = pullPlan();
+  if (!plan) return pullWith(null, onPage);
+  try {
+    await pullWith(plan, onPage);
+  } catch (e) {
+    console.warn('[records] incremental pull failed; doing the full pull', e);
+    await pullWith(null, onPage);
+  }
+}
 
 /**
  * A tombstone blocks delayed checkpoints, but it must not make a ClickUp task
@@ -207,20 +234,10 @@ export function refreshDurableRecords(): Promise<void> {
   pulling = (async () => {
     try {
       await locked(compactLocalRows);
-      const plan = pullPlan();
-      let mode: PullMode = null;
-      let newest = 0;
-      let page = 0;
-      let more = true;
-      while (more) {
-        const { body } = await fetchJSON(...pullRequest(page++, plan));
+      await pullPages(async (body) => {
         if (body.userId !== expectedOwner) throw new Error('A conta mudou. Recarregue para recuperar a lista correta.');
         await locked(async () => { for (const remote of body.records) await absorb(remote); });
-        mode = pageMode(mode, body.delta === true && plan?.owner === body.userId);
-        newest = Math.max(newest, newestUpdate(body.records));
-        more = body.more;
-      }
-      rememberCursor(expectedOwner, mode ?? 'mixed', plan, newest);
+      });
       await locked(() => {
         // TTL applies only to history. Never prune background.
         initError = '';
@@ -442,22 +459,12 @@ export function initializeDurableRecords(): Promise<void> {
   if (initialization) return initialization;
   initialization = (async () => {
     try {
-      const plan = pullPlan();
-      let mode: PullMode = null;
-      let newest = 0;
-      let page = 0;
-      let more = true;
-      while (more) {
-        const { body } = await fetchJSON(...pullRequest(page++, plan));
+      await pullPages(async (body, page) => {
         if (owner && owner !== body.userId) throw new Error('A conta mudou. Recarregue para usar o armazenamento da conta correta.');
         owner = body.userId;
-        if (page === 1) await locked(compactLocalRows);
+        if (page === 0) await locked(compactLocalRows);
         await locked(async () => { for (const remote of body.records) await absorb(remote); });
-        mode = pageMode(mode, body.delta === true && plan?.owner === body.userId);
-        newest = Math.max(newest, newestUpdate(body.records));
-        more = body.more;
-      }
-      rememberCursor(owner!, mode ?? 'mixed', plan, newest);
+      });
       const legacy = legacyRecords();
       const imported = localStorage.getItem(`${ROOT}legacy-owner`);
       status.legacy = !imported ? Object.keys(legacy.background).length + Object.keys(legacy.history).length : 0;

@@ -31,6 +31,7 @@ let posts = 0;
 let clock = Date.parse('2026-10-01T00:00:00Z');
 const tick = () => new Date(clock += 1000).toISOString();
 let lastGet: { since: string | null; owner: string | null; delta: boolean; count: number } | null = null;
+let failDelta = false;
 Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url: string, options?: RequestInit) => {
   if (!online) throw new Error('Offline');
   if (!options?.method) {
@@ -38,6 +39,7 @@ Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (u
     const since = params.get('since');
     const owner = new Headers(options?.headers).get('x-records-owner');
     const delta = since !== null && Number.isFinite(Date.parse(since)) && owner === account;
+    if (delta && failDelta) return Response.json({ error: 'filter unavailable' }, { status: 503 });
     const records = [...cloud.values()].filter(r => r.user_id === account && (r.kind === 'background' || r.occurred_at > Date.now() - HISTORY_RETENTION_MS))
       .filter(r => !delta || Date.parse(r.updated_at) > Date.parse(since!));
     const page = Number(params.get('page') ?? 0);
@@ -215,6 +217,12 @@ async function main() {
   assert(back.readDurableRecords('background').F && back.readDurableRecords('background').A);
   await client();
   assert(lastGet && lastGet.delta, 'and the next reload is incremental again');
+  failDelta = true;
+  const degraded = await client();
+  failDelta = false;
+  assert(lastGet && lastGet.since === null, 'a failed incremental pull is redone as the full pull');
+  assert(degraded.durabilityStatus().ready && !degraded.durabilityStatus().error, 'the fallback leaves the tools ready, without an error');
+  assert(degraded.readDurableRecords('background').A && degraded.readDurableRecords('background').F);
   local.bag.set('autoedit:records:v2:cursor', '{broken');
   const broken = await client();
   assert(lastGet && lastGet.since === null && broken.durabilityStatus().ready, 'an unreadable cursor falls back to a full pull');
