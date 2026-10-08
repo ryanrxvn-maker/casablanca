@@ -158,7 +158,10 @@ export function Sidebar({ currentPath }: { currentPath?: string } = {}) {
 
     // Recarrega quando o auth muda (login, refresh de token expirado).
     const supabase = createClient();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+    // INITIAL_SESSION chega logo ao assinar, com a mesma sessão que o
+    // fetchProfile() acima já está lendo — repetir era a 2ª/3ª query igual.
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'INITIAL_SESSION') return;
       if (!cancelled) fetchProfile();
     });
 

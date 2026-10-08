@@ -358,6 +358,8 @@ export function useTier(): Tier | null {
         apply('free');
         return;
       }
+      // INITIAL_SESSION repete a sessão que o loadTier(true) acima já lê.
+      if (event === 'INITIAL_SESSION') return;
       loadTier(true)
         .then(apply)
         .catch(() => {});

@@ -465,7 +465,7 @@ export function useFilaAoVivo(ativo: boolean): FilaAoVivo {
             taskUrl?: string;
             channels?: Array<{ label: string; color: string }>;
           }
-        >('background');
+        >('background', { skipArchived: true });
         const status: Record<string, StatusDisparo | null> = {};
         const inicio: Record<string, number> = {};
         const url: Record<string, string> = {};

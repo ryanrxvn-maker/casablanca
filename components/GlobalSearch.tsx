@@ -46,8 +46,8 @@ import {
   IconSearch,
   IconStepGear,
 } from './ToolIcons';
-import { createClient } from '@/lib/supabase/client';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
+import { useTier, useUserEmail } from '@/lib/use-tier';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 type Entry = {
@@ -473,8 +473,10 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  // Admin/email do cache de sessão (useTier): sem getUser() + query a cada
+  // abertura da busca, os itens internos já aparecem na primeira tecla.
+  const isAdmin = useTier() === 'admin';
+  const userEmail = useUserEmail() ?? null;
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Foca o input ao abrir
@@ -485,27 +487,6 @@ function SearchModal({ onClose }: { onClose: () => void }) {
 
   // Ferramentas adminOnly (uso interno) só aparecem pra admin — ou pra
   // email com desbloqueio pontual (lib/tool-unlocks.ts), que vê só as dele.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const supabase = createClient();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) return;
-        if (!cancelled) setUserEmail(u.user?.email ?? null);
-        const { data } = await supabase
-          .from('profiles')
-          .select('is_admin')
-          .eq('id', uid)
-          .maybeSingle();
-        if (!cancelled) setIsAdmin(!!data?.is_admin);
-      } catch {}
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const visibleEntries = useMemo(
     () =>

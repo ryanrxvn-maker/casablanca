@@ -27,13 +27,25 @@ let account = 'account-a';
 let online = true;
 let loseResponse = false;
 let posts = 0;
+// Database clock for updated_at (the incremental pull never reads the browser's).
+let clock = Date.parse('2026-10-01T00:00:00Z');
+const tick = () => new Date(clock += 1000).toISOString();
+let lastGet: { since: string | null; owner: string | null; delta: boolean; count: number } | null = null;
+let failDelta = false;
 Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url: string, options?: RequestInit) => {
   if (!online) throw new Error('Offline');
   if (!options?.method) {
-    const records = [...cloud.values()].filter(r => r.user_id === account && (r.kind === 'background' || r.occurred_at > Date.now() - HISTORY_RETENTION_MS));
-    const page = Number(new URL(url, 'https://test.invalid').searchParams.get('page') ?? 0);
+    const params = new URL(url, 'https://test.invalid').searchParams;
+    const since = params.get('since');
+    const owner = new Headers(options?.headers).get('x-records-owner');
+    const delta = since !== null && Number.isFinite(Date.parse(since)) && owner === account;
+    if (delta && failDelta) return Response.json({ error: 'filter unavailable' }, { status: 503 });
+    const records = [...cloud.values()].filter(r => r.user_id === account && (r.kind === 'background' || r.occurred_at > Date.now() - HISTORY_RETENTION_MS))
+      .filter(r => !delta || Date.parse(r.updated_at) > Date.parse(since!));
+    const page = Number(params.get('page') ?? 0);
     const chunk = records.slice(page * 100, page * 100 + 100);
-    return Response.json({ userId: account, records: chunk, more: chunk.length === 100 });
+    lastGet = { since, owner, delta, count: chunk.length };
+    return Response.json({ userId: account, records: chunk, more: chunk.length === 100, delta });
   }
   const b = JSON.parse(String(options.body));
   posts++;
@@ -48,7 +60,7 @@ Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (u
     return Response.json({ conflict: true, record: current }, { status: 409 });
   }
   const record = { user_id: account, kind: b.kind, record_id: b.id, payload: b.data, deleted: b.data === null,
-    revision: b.revision + 1, occurred_at: current?.occurred_at ?? (b.kind === 'history' ? b.data?.t : Date.now()) };
+    revision: b.revision + 1, occurred_at: current?.occurred_at ?? (b.kind === 'history' ? b.data?.t : Date.now()), updated_at: tick() };
   cloud.set(key, record);
   const result = { conflict: false, record };
   receipts.set(opKey, result);
@@ -61,6 +73,12 @@ async function client(): Promise<typeof Registry> {
   const c: typeof Registry = require('./durable-records');
   await c.initializeDurableRecords();
   return c;
+}
+function createArchivedRow(c: typeof Registry): string {
+  const id = 'archive:0123456789abcdef';
+  const owner = c.durabilityStatus().ready ? account : '';
+  local.bag.set(`autoedit:records:v2:${owner}:background:${encodeURIComponent(id)}`, JSON.stringify({ kind: 'background', id, data: { taskId: id, archivedExecution: true, startedAt: 1, phase: 'done', parts: [] }, base: null, revision: 1 }));
+  return id;
 }
 async function settled(c: typeof Registry) { await c.syncDurableRecords(); await c.syncDurableRecords(); }
 
@@ -160,6 +178,59 @@ async function main() {
   assert.deepEqual(mergeRecord({ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 2 }), { x: 2, y: 2 });
   assert.deepEqual(mergeRecord({ x: 1 }, { x: 2 }, { x: 3 }), { x: 2 });
   assert.equal(mergeRecord({ x: 1 }, { x: 2 }, null), null, 'explicit remote deletion wins over stale progress');
-  console.log('PASS: empty reload, stale tab reconciliation, distinct writers, explicit deletion, protected tombstone revival, browser wipe recovery, offline queue, lost response, account isolation, quota, retention and sanitization.');
+
+  // Incremental pull: a reload downloads only what changed since the last complete pull.
+  account = 'account-a';
+  local.bag.clear();
+  clock += 3_600_000; // everything above happened an hour ago
+  const fresh1 = await client();
+  assert(lastGet && lastGet.since === null, 'a browser with no local copy pulls the whole account');
+  const wf = fresh1.createRecordWriter('background'); const wfData = wf.hydrate<any>();
+  await wf.save({ ...wfData, E: job('E') }); await settled(fresh1); // E + its dispatch event
+  await fresh1.refreshDurableRecords(); // cursor moves to E
+  clock += 3_600_000; // another hour, beyond the 10-minute overlap
+  const remoteA = cloud.get('account-a:background:A');
+  cloud.set('account-a:background:A', { ...remoteA, payload: { ...remoteA.payload, message: 'from another device' }, revision: remoteA.revision + 1, updated_at: tick() });
+  const inc = await client();
+  assert(lastGet && lastGet.since && lastGet.owner === 'account-a' && lastGet.delta, 'reload asks only for changes of the same account');
+  const accountRows = [...cloud.values()].filter(r => r.user_id === 'account-a').length;
+  assert.equal(lastGet!.count, 3, `only A plus the overlap (E and its event) come back, not all ${accountRows}`);
+  assert(accountRows > 10);
+  assert.equal(inc.readDurableRecords<any>('background').A.message, 'from another device', 'a change from another device arrives');
+  assert(inc.readDurableRecords('background').E, 'rows outside the window stay in the local copy');
+  assert(inc.readDurableRecords('background')[draft.taskId], 'prepared Pilot task survives incremental pulls');
+  const remoteE = cloud.get('account-a:background:E');
+  cloud.set('account-a:background:E', { ...remoteE, payload: null, deleted: true, revision: remoteE.revision + 1, updated_at: tick() });
+  await inc.refreshDurableRecords();
+  assert(lastGet && lastGet.delta, 'the periodic refresh is incremental too');
+  assert(!inc.readDurableRecords('background').E, 'a tombstone arrives through the incremental pull');
+  const wInc = inc.createRecordWriter('background'); const incData = wInc.hydrate<any>();
+  await wInc.save({ ...incData, F: job('F') }); await settled(inc);
+  assert(cloud.get('account-a:background:F'), 'writes keep working after incremental pulls');
+  account = 'account-b';
+  const switched = await client();
+  assert(lastGet && lastGet.owner === 'account-a' && !lastGet.delta, 'another account on the same browser gets a full pull');
+  assert.deepEqual(switched.readDurableRecords('background'), {}, 'incremental cursor never leaks between accounts');
+  account = 'account-a';
+  const back = await client();
+  assert(lastGet && !lastGet.delta, 'coming back from another account pulls everything once');
+  assert(back.readDurableRecords('background').F && back.readDurableRecords('background').A);
+  await client();
+  assert(lastGet && lastGet.delta, 'and the next reload is incremental again');
+  failDelta = true;
+  const degraded = await client();
+  failDelta = false;
+  assert(lastGet && lastGet.since === null, 'a failed incremental pull is redone as the full pull');
+  assert(degraded.durabilityStatus().ready && !degraded.durabilityStatus().error, 'the fallback leaves the tools ready, without an error');
+  assert(degraded.readDurableRecords('background').A && degraded.readDurableRecords('background').F);
+  local.bag.set('autoedit:records:v2:cursor', '{broken');
+  const broken = await client();
+  assert(lastGet && lastGet.since === null && broken.durabilityStatus().ready, 'an unreadable cursor falls back to a full pull');
+  // Readers that never show archived executions skip them without parsing.
+  const arch = createArchivedRow(broken);
+  assert(broken.readDurableRecords('background')[arch], 'archived executions are still readable');
+  assert(!broken.readDurableRecords('background', { skipArchived: true })[arch], 'skipArchived leaves archive rows out');
+  assert(broken.readDurableRecords('background', { skipArchived: true }).A, 'skipArchived keeps ordinary rows');
+  console.log('PASS: empty reload, stale tab reconciliation, distinct writers, explicit deletion, protected tombstone revival, browser wipe recovery, offline queue, lost response, account isolation, quota, retention, sanitization and incremental pull.');
 }
 void main().catch(e => { console.error(e); process.exitCode = 1; });
