@@ -173,17 +173,30 @@ export async function mixarSonoplastia(
         const lufsTrilha = plano.trilha.lufs ?? lufsIntegrado(canaisDe(tbuf), tbuf.sampleRate);
         const ganho = ganhoDaTrilha(plano.trilha.volume, lufsVoz, lufsTrilha);
         const pedacos = planoDaTrilha(durSec, tbuf.duration);
+        // fades de POTÊNCIA CONSTANTE (seno/cosseno): na emenda de uma trilha
+        // repetida o volume não afunda no meio do crossfade como no linear
+        const curva = (subindo: boolean) => {
+          const n = 64;
+          const c = new Float32Array(n);
+          for (let i = 0; i < n; i++) {
+            const x = i / (n - 1);
+            c[i] = ganho * (subindo ? Math.sin((x * Math.PI) / 2) : Math.cos((x * Math.PI) / 2));
+          }
+          return c;
+        };
         for (const p of pedacos) {
+          if (!(p.dur > 0.05)) continue; // pedaço-relâmpago não tem onde fazer fade
           const src = offline.createBufferSource();
           src.buffer = tbuf;
           const g = offline.createGain();
           const fim = p.inicio + p.dur;
-          const fi = Math.min(p.fadeIn, p.dur / 2);
-          const fo = Math.min(p.fadeOut, p.dur / 2);
+          const fi = Math.max(0.005, Math.min(p.fadeIn, p.dur / 2 - 0.01));
+          const fo = Math.max(0.005, Math.min(p.fadeOut, p.dur / 2 - 0.01));
           g.gain.setValueAtTime(0, p.inicio);
-          g.gain.linearRampToValueAtTime(ganho, p.inicio + fi);
-          g.gain.setValueAtTime(ganho, Math.max(p.inicio + fi, fim - fo));
-          g.gain.linearRampToValueAtTime(0, fim);
+          g.gain.setValueCurveAtTime(curva(true), p.inicio, fi);
+          g.gain.setValueAtTime(ganho, p.inicio + fi + 1e-4);
+          g.gain.setValueAtTime(ganho, fim - fo - 1e-4);
+          g.gain.setValueCurveAtTime(curva(false), fim - fo, fo);
           src.connect(g);
           g.connect(offline.destination);
           src.start(p.inicio, p.deSec, p.dur);

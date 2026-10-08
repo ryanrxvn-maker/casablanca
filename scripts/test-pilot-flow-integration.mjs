@@ -727,6 +727,9 @@ function postHarness(strict, result) {
     LEGENDA_CFG_DEFAULT: { on: false }, ZOOM_CFG_DEFAULT: { on: false }, HEADLINE_CFG_DEFAULT: { on: false },
     insertsDaMontagem: () => [{ id: 'flow' }], batchStatesRef: { current: { task: { replan: { parts: [{ label: 'BODY 1', text: 'copy' }] } } } },
     taskAnalysesRef: { current: {} }, captionTemplatesRef: { current: [] },
+    // 08.10: velocidade / SFX / trilha desligados (o caminho de sempre)
+    velocidadeCfgsRef: { current: {} }, sfxCfgsRef: { current: {} }, trilhaCfgsRef: { current: {} },
+    getVelocidadeCfg: () => ({ on: false, velocidade: 1.1 }), getSfxCfg: () => ({ on: false }), getTrilhaCfg: () => ({ on: false, volume: 0.12, nome: '' }),
     insertsRef: { current: { task: [{ id: 'flow' }] } }, setInserts: () => { removed++; },
     setBatchStates: () => {}, setPosResultado: () => {},
     require(id) {

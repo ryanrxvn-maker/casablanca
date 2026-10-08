@@ -359,9 +359,13 @@ async function renderFramesByDecode(opts: {
   qualidadeMax?: boolean;
   /** AAC pronto (WebCodecs): quando vem, o áudio é muxado JUNTO — sem ffmpeg */
   trilhaAac?: TrilhaAac | null;
+  /** MIXER DE VELOCIDADE (08.10): o tick de saída t usa o quadro da fonte em
+   *  t × velocidade (`durationSec` já é a duração de SAÍDA) */
+  velocidade?: number;
   onProgress?: (p: RenderProgress) => void;
   throwIfAborted: () => void;
 }): Promise<Blob | null> {
+  const velDecode = opts.velocidade && opts.velocidade > 0 ? opts.velocidade : 1;
   const {
     file,
     blocks,
@@ -470,7 +474,7 @@ async function renderFramesByDecode(opts: {
       const ptsUs = f.timestamp - basePtsUs;
       while (
         nextTick < totalFrames &&
-        Math.round((nextTick * 1_000_000) / FPS) < ptsUs
+        Math.round((nextTick * 1_000_000 * velDecode) / FPS) < ptsUs
       ) {
         if (prepararInsert) {
           const t = Math.min(nextTick / FPS + 0.0001, durationSec - 0.001);
@@ -1487,8 +1491,20 @@ export async function renderTypographyVideo(opts: {
    * roda DIRETO (a exclusividade já está garantida por quem chamou).
    */
   ffmpegJaExclusivo?: boolean;
+  /**
+   * MIXER DE VELOCIDADE (08.10): o vídeo sai `velocidade` vezes mais rápido
+   * (ou mais lento) pelo encoder de HARDWARE — o quadro do instante t de
+   * saída é o da fonte em t × velocidade. Só o caminho de decode sabe fazer
+   * isso: se ele não servir, o render FALHA (quem chama tem a reserva por
+   * ffmpeg). O áudio tem que vir pronto no ritmo novo em `audioSubstituto`.
+   */
+  velocidade?: number;
+  /** áudio que substitui o do arquivo (o da velocidade nova) */
+  audioSubstituto?: Blob;
 }): Promise<RenderResult> {
   const { file, blocks, preset, style, headlines, zoom, inserts, onProgress, signal, ffmpegJaExclusivo } = opts;
+  const velocidade = opts.velocidade && Math.abs(opts.velocidade - 1) > 1e-6 ? opts.velocidade : 1;
+  const audioDaFonte: Blob = opts.audioSubstituto || file;
 
   if (typeof VideoEncoder === 'undefined') {
     throw new FriendlyError(
@@ -1562,6 +1578,15 @@ export async function renderTypographyVideo(opts: {
       );
     }
 
+    /** duração da FONTE (o bitrate é medido nela); `durationSec` vira a da SAÍDA */
+    const durFonteSec = durationSec;
+    if (velocidade !== 1) {
+      if (inserts && inserts.janelas.length) {
+        throw new Error('velocidade com inserts no mesmo render não é suportada');
+      }
+      durationSec = durFonteSec / velocidade;
+    }
+
     // MODO DE RENDER (03.09). MAX QUALITY = a régua de sempre; padrão = rápido.
     // Silas: *"tem que ser rápido esse render... sacrificar um pouco de
     // qualidade (imperceptível) pra ganhar uma boa velocidade"*.
@@ -1593,7 +1618,7 @@ export async function renderTypographyVideo(opts: {
     const tetoFonte = qualidadeMax ? 26_000_000 : 10_000_000;
     const fatorFonte = qualidadeMax ? 1.5 : 1.0;
     const bppRate = W * H * FPS * bpp;
-    const srcRate = (file.size * 8) / durationSec;
+    const srcRate = (file.size * 8) / durFonteSec;
     const budgetRate = (RENDER_BYTES_BUDGET * 8) / durationSec;
     const bitrate = Math.round(
       Math.min(
@@ -1626,10 +1651,10 @@ export async function renderTypographyVideo(opts: {
     let trilhaAac: TrilhaAac | null = null;
     let somInsertOk = true;
     try {
-      let fonteDoAudio: Blob = file;
+      let fonteDoAudio: Blob = audioDaFonte;
       if (inserts?.sons?.length) {
         const { misturarSomDosInserts } = await import('../audio-mix-insert');
-        const mix = await misturarSomDosInserts(file, inserts.sons);
+        const mix = await misturarSomDosInserts(audioDaFonte, inserts.sons);
         if (mix) {
           fonteDoAudio = mix;
           console.log(`[tipografia] som de ${inserts.sons.length} insert(s) misturado na trilha`);
@@ -1705,6 +1730,7 @@ export async function renderTypographyVideo(opts: {
         hw: hwAtual,
         qualidadeMax,
         trilhaAac,
+        velocidade,
         onProgress,
         throwIfAborted,
       });
@@ -1726,6 +1752,10 @@ export async function renderTypographyVideo(opts: {
           console.warn('[tipografia] decode rápido falhou — caindo pro seek:', e);
         }
       }
+    }
+    if (!videoOnly && velocidade !== 1) {
+      // seek e reprodução não sabem remapear o tempo: quem chama usa a reserva
+      throw new Error('velocidade: o caminho rápido de decode não serviu pra este arquivo');
     }
     if (!videoOnly) {
       // O seek/playback pintam os frames DO <video>. Se ele nem abriu (aba em
@@ -1826,9 +1856,11 @@ export async function renderTypographyVideo(opts: {
         ffmpegJaExclusivo ? f() : runFfmpegExclusive(f);
       const tentarAudio = () =>
         comLock(async () => {
-          const wav = await extractAudio(file, {
-            onProgress: (p) => onProgress?.({ phase: 'audio', ratio: p.ratio * 0.5 }),
-          });
+          const wav = opts.audioSubstituto
+            ? opts.audioSubstituto
+            : await extractAudio(file, {
+              onProgress: (p) => onProgress?.({ phase: 'audio', ratio: p.ratio * 0.5 }),
+            });
           throwIfAborted();
           // SOM DOS INSERTS (03.09): misturado na trilha do AD antes do mux.
           // Falhar aqui NUNCA custa a entrega — devolve null e segue com a

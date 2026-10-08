@@ -118,7 +118,7 @@ export type BatchJob3DProps = {
     /** 'insert' = subido na mão. 'stockframe'/'flow' = veio da ferramenta, e
      *  cada uma carrega a marca dela (20.09): olhando o card pronto dá pra
      *  saber de onde veio o b-roll daquele AD. */
-    tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline';
+    tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline' | 'velocidade' | 'sonoplastia';
     title: string;
     /** LIGADO na config mas NÃO aplicado no vídeo entregue (02.09). O selo
      *  vira âmbar e riscado. Sem isto o card exibia o ícone de zoom sobre um
@@ -802,6 +802,17 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                           <path d="M20.6 15.4v3.4a1.8 1.8 0 0 1-1.8 1.8h-3.4" />
                           <circle className="selo-anel" cx="12" cy="12" r="6.1" strokeWidth="1.5" strokeDasharray="7 5.5" opacity="0.62" />
                           <path d="m10.3 9.1 4.9 2.9-4.9 2.9Z" fill="currentColor" stroke="none" />
+                        </svg>
+                      ) : sl.tipo === 'velocidade' ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M4.2 17.5a9 9 0 1 1 15.6 0" />
+                          <path d="M12 13.2 16.4 8.6" />
+                        </svg>
+                      ) : sl.tipo === 'sonoplastia' ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M9 17.5V5.5l8-2v11.2" />
+                          <circle cx="6.6" cy="17.6" r="2.4" fill="currentColor" stroke="none" />
+                          <circle cx="14.6" cy="15.4" r="2.4" fill="currentColor" stroke="none" />
                         </svg>
                       ) : sl.tipo === 'flow' ? (
                         /* O mesmo traço do botão do Flow (as duas "asas" que

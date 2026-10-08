@@ -68,7 +68,7 @@ test('copy da variante: replan própria → análise própria → replan mãe �
   }
 });
 
-function pageHarness({ taskCopy = copy, parentCopy, activeStocks = stocks, avisos = [], orfaos = [], exigirCompleta = false } = {}) {
+function pageHarness({ taskCopy = copy, parentCopy, activeStocks = stocks, avisos = [], orfaos = [], exigirCompleta = false, velocidade = { on: false, velocidade: 1.1 }, sfx = { on: false }, trilha = { on: false, volume: 0.12, nome: '' } } = {}) {
   const source = readFileSync('app/tools/clickup-pilot/page.tsx', 'utf8');
   const ast = ts.createSourceFile('page.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let functionSource;
@@ -92,6 +92,8 @@ function pageHarness({ taskCopy = copy, parentCopy, activeStocks = stocks, aviso
     legendaCfgsRef: ref({}), zoomCfgsRef: ref({}), headlineRef: ref({}), captionTemplatesRef: ref([]),
     CHAVE_PADRAO: 'default', LEGENDA_CFG_DEFAULT: { on: false }, ZOOM_CFG_DEFAULT: { on: false }, HEADLINE_CFG_DEFAULT: { on: false },
     insertsDaMontagem: () => activeStocks,
+    velocidadeCfgsRef: ref({}), sfxCfgsRef: ref({}), trilhaCfgsRef: ref({}),
+    getVelocidadeCfg: () => velocidade, getSfxCfg: () => sfx, getTrilhaCfg: () => trilha,
     batchStatesRef: ref({ task: { replan: { parts: taskCopy } }, mother: { replan: { parts: parentCopy } } }),
     taskAnalysesRef: ref({}),
     setBatchStates() {}, setPosResultado() {},
@@ -173,4 +175,26 @@ test('pós-produção opcional continua fallback; não regride comportamento sem
   const result = await pipeline()({ ...input, posProcessar: async () => { throw new Error('legenda indisponível'); } });
   assert.equal(result.items.length, 2);
   assert.ok(result.items.every(item => item.rawAssembled.size > 0 && item.errors?.posproducao));
+});
+
+// 08.10: mixer de velocidade, Smart SFX e trilha acordam a pós-produção sozinhos
+// e chegam inteiros no montarPosProducao (com quem lê a trilha da biblioteca).
+test('velocidade, SFX e trilha chegam no montarPosProducao mesmo sem legenda/zoom/insert', async () => {
+  const vel = { on: true, velocidade: 1.15 };
+  const sx = { on: true, densidade: 'equilibrado' };
+  const tr = { on: true, trilhaId: 't1', nome: 'Lo-Fi', volume: 0.12 };
+  const h = pageHarness({ activeStocks: [], velocidade: vel, sfx: sx, trilha: tr });
+  assert.ok(h.run, 'o estágio existe mesmo sem nada visual ligado');
+  await h.run(render(), { filename: 'AD.mp4', partesSec: [3, 6], partLabels: ['HOOK 1', 'BODY 1'] });
+  assert.equal(h.rendered.length, 1);
+  const cfg = h.rendered[0].cfg;
+  assert.equal(cfg.velocidade, vel);
+  assert.equal(cfg.sfx, sx);
+  assert.equal(cfg.trilha, tr);
+  assert.equal(typeof cfg.lerTrilha, 'function');
+  assert.deepEqual(h.rendered[0].info.partLabels, ['HOOK 1', 'BODY 1'], 'os labels chegam (o boom acha a virada do gancho)');
+});
+test('tudo desligado (inclusive os novos) = nenhum estágio de pós-produção', () => {
+  const h = pageHarness({ activeStocks: [] });
+  assert.equal(h.run, undefined);
 });

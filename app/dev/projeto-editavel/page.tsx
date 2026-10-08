@@ -29,6 +29,7 @@ export default function ProjetoEditavelDev() {
   const [broll, setBroll] = useState<File | null>(null);
   const [broll169, setBroll169] = useState<File | null>(null);
   const [palavras, setPalavras] = useState<File | null>(null);
+  const [trilhaArq, setTrilhaArq] = useState<File | null>(null);
   const [estado, setEstado] = useState('aguardando arquivos');
 
   async function rodar() {
@@ -141,6 +142,96 @@ export default function ProjetoEditavelDev() {
     }
   }
 
+  /** SONOPLASTIA REAL (08.10): velocidade 1,15x + Smart SFX + trilha + Smart
+   *  Position + luz vermelha / piscar / luz em tela dividida, pelo MESMO
+   *  montarPosProducao do Pilot. Baixa o render, o avatar limpo (pra isolar o
+   *  áudio novo), o roteiro e os pacotes do CapCut e do Premiere. */
+  async function rodarSom() {
+    if (!avatar || !broll || !broll169 || !palavras || !trilhaArq) return;
+    setEstado('preparando sonoplastia real');
+    const fetchOriginal = window.fetch;
+    const VEL = 1.15;
+    try {
+      const words = JSON.parse(await palavras.text()) as Array<{ text: string; start: number; end: number }>;
+      // o ASR real ouve o vídeo JÁ acelerado: o mock devolve as palavras no tempo novo
+      const acelerado = words.map((w) => ({ ...w, start: w.start / VEL, end: w.end / VEL }));
+      window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.includes('/api/tipografia/transcribe')) {
+          return new Response(JSON.stringify({ words: acelerado }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return fetchOriginal(input, init);
+      }) as typeof fetch;
+      const [{ saveBlob, loadBlob, deletePrefix }, projeto, run, pos, caption, trilhas] = await Promise.all([
+        import('@/lib/zip-store'), import('@/lib/pilot-projeto'), import('@/lib/pilot-projeto-run'),
+        import('@/lib/pilot-pos-producao-run'), import('@/lib/typography/caption-script'), import('@/lib/pilot-trilhas-store'),
+      ]);
+      const TASK_SOM = 'dev-projeto-som';
+      await deletePrefix(projeto.prefixoDoProjeto(TASK_SOM));
+      await saveBlob('dev-som:brollv', broll, broll.type || 'video/mp4');
+      await saveBlob('dev-som:broll169', broll169, broll169.type || 'video/mp4');
+      setEstado('medindo a trilha');
+      const tri = await trilhas.salvarTrilha(trilhaArq);
+      const hook = words.slice(0, 23).map((w) => w.text).join(' ');
+      const body = words.slice(23).map((w) => w.text).join(' ');
+      const comum = { focoAvatarY: 0.34, midiaTipo: 'video' as const };
+      const inserts: import('@/lib/pilot-inserts').Insert[] = [
+        { ...comum, id: 's1', ancora: 'HOOK 1', palavraDe: 4, palavraAte: 14, layout: { tipo: 'cheia' }, transicao: 'luz-vermelha',
+          midiaKey: 'dev-som:broll169', midiaNome: 'BARRAS 16x9', midiaW: 1920, midiaH: 1080 },
+        { ...comum, id: 's2', ancora: 'BODY 1', palavraDe: 2, palavraAte: 8, layout: { tipo: 'cards', avatar: 'baixo' }, transicao: 'piscar',
+          midiaKey: 'dev-som:brollv', midiaNome: 'PROSTATA 3D', midiaW: 720, midiaH: 1280, recorteDe: 1 },
+        { ...comum, id: 's3', ancora: 'BODY 1', palavraDe: 14, palavraAte: 19, layout: { tipo: 'faixas', avatar: 'cima' }, transicao: 'luz',
+          midiaKey: 'dev-som:brollv', midiaNome: 'PROSTATA 3D B', midiaW: 720, midiaH: 1280, recorteDe: 4 },
+      ];
+      const filename = 'AD97G1VN - SOM.mp4';
+      let roteiroGuardado: unknown = null;
+      const r = await pos.montarPosProducao(avatar, { filename, partesSec: [6.05, 7.95], partLabels: ['HOOK 1', 'BODY 1'] }, {
+        legenda: { on: true, templateId: caption.BUILTIN_TEMPLATES[0].id, smartPosition: true },
+        zoom: { on: false, modo: 'in', forca: 'medio' },
+        partes: [{ label: 'HOOK 1', text: hook }, { label: 'BODY 1', text: body }],
+        idioma: 'pt',
+        templates: caption.BUILTIN_TEMPLATES,
+        ffmpegJaExclusivo: false,
+        inserts,
+        lerMidia: (key) => loadBlob(key),
+        velocidade: { on: true, velocidade: VEL },
+        sfx: { on: true, porTransicao: { escurecer: 'plim-alternado', luz: 'camera-flash', 'luz-vermelha': 'riser-metalico', piscar: 'mouse-click' }, boomNoGancho: true, densidade: 'todas', volume: 1 },
+        trilha: { on: true, trilhaId: tri.id, nome: tri.nome, volume: 0.12 },
+        lerTrilha: async (id) => {
+          const b = await trilhas.lerTrilha(id);
+          const m = trilhas.trilhaPorId(id);
+          return b ? { blob: b, nome: m?.nome || 'trilha', lufs: m?.lufs ?? null } : null;
+        },
+        guardarProjeto: async (roteiro, avatarLimpo) => {
+          roteiroGuardado = roteiro;
+          const ch = projeto.chavesDoProjeto(TASK_SOM, filename);
+          await saveBlob(ch.base, avatarLimpo, avatarLimpo.type || 'video/mp4');
+          await saveBlob(ch.roteiro, new Blob([JSON.stringify({ ...roteiro, genId: 'dev' })], { type: 'application/json' }), 'application/json');
+        },
+        onEtapa: setEstado,
+      });
+      if (!r.blob) throw new Error(`render não saiu: ${r.avisos.join(' | ')}`);
+      baixar(r.blob, 'RENDER - AD97G1VN - SOM.mp4');
+      const ch = projeto.chavesDoProjeto(TASK_SOM, filename);
+      const base = await loadBlob(ch.base);
+      if (base) baixar(base, 'BASE - AD97G1VN - SOM.mp4');
+      baixar(new Blob([JSON.stringify({ roteiro: roteiroGuardado, avisos: r.avisos, sonoplastia: r.sonoplastia, velocidade: r.velocidade, aplicouVisual: r.aplicouVisual }, null, 1)], { type: 'application/json' }), 'ROTEIRO - AD97G1VN - SOM.json');
+      const projetos = await run.projetosDaTask(TASK_SOM, 'dev');
+      const avisosPacote: string[] = [];
+      for (const alvo of ['capcut', 'premiere'] as const) {
+        const p = await run.exportarProjetosEditaveis({ projetos, nomeBase: 'AD97 SOM', destino: null, alvo, lerTrilha: trilhas.lerTrilha, onEtapa: setEstado });
+        if (!p.zip) throw new Error(`sem zip ${alvo}`);
+        baixar(p.zip.blob, p.zip.nome);
+        avisosPacote.push(...p.avisos);
+      }
+      setEstado(`pronto-som: render ${(r.blob.size / 1e6).toFixed(1)}MB · sfx ${r.sonoplastia?.sfx} · trilha ${r.sonoplastia?.trilha} · vel ${r.velocidade} · avisos: ${r.avisos.join(' | ') || 'nenhum'} · pacote: ${avisosPacote.join(' | ') || 'nenhum'}`);
+    } catch (e) {
+      setEstado(`erro-som: ${(e as Error)?.message || e}`);
+    } finally {
+      window.fetch = fetchOriginal;
+    }
+  }
+
   return (
     <main style={{ padding: 24, fontFamily: 'sans-serif', color: '#eee', background: '#111', minHeight: '100vh' }}>
       <h1>Projeto editável — bancada</h1>
@@ -149,7 +240,9 @@ export default function ProjetoEditavelDev() {
       <p><label>b-roll 16:9 <input data-testid="broll169" type="file" accept="video/*" onChange={(e) => setBroll169(e.target.files?.[0] || null)} /></label></p>
       <p><label>palavras do ASR (.json) <input data-testid="palavras" type="file" accept="application/json" onChange={(e) => setPalavras(e.target.files?.[0] || null)} /></label></p>
       <button type="button" data-testid="rodar" onClick={() => void rodar()} disabled={!avatar || !broll}>Exportar projeto de teste</button>{' '}
-      <button type="button" data-testid="rodar-real" onClick={() => void rodarReal()} disabled={!avatar || !broll || !broll169 || !palavras}>Pós-produção real + projeto</button>
+      <p><label>trilha <input data-testid="trilha" type="file" accept="audio/*" onChange={(e) => setTrilhaArq(e.target.files?.[0] || null)} /></label></p>
+      <button type="button" data-testid="rodar-real" onClick={() => void rodarReal()} disabled={!avatar || !broll || !broll169 || !palavras}>Pós-produção real + projeto</button>{' '}
+      <button type="button" data-testid="rodar-som" onClick={() => void rodarSom()} disabled={!avatar || !broll || !broll169 || !palavras || !trilhaArq}>Sonoplastia real (SFX + trilha + velocidade + smart)</button>
       <p data-testid="estado">{estado}</p>
     </main>
   );

@@ -1,6 +1,6 @@
 import {
   CAPCUT_PASTA_DO_DRAFT, chavesDoProjeto, geometriaCapCut, geometriaPremiere, intervalosDaLegenda, leiaMeDoProjeto,
-  montarDraftCapCut, montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda,
+  montarDraftCapCut, montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda, raiasDeAudio,
   type ArquivoProjeto, type MidiaDoProjeto, type ProjetoInsert, type RoteiroEdicao,
 } from './pilot-projeto';
 import { zipGroupId } from './zip-store-prune';
@@ -245,5 +245,67 @@ ok(leia.includes('CAPCUT') && leia.includes('PREMIERE') && leia.includes('.srt')
   ok(semPng.avisos.some((a) => /linha colorida/.test(a) && a.includes('#22e06b')), 'linha sem PNG: aviso com a cor pra pôr à mão');
 }
 
+
+console.log('\nSONOPLASTIA E PISCAR NO PROJETO (08.10):');
+{
+  const sfxArq = (nome: string, dur: number): ArquivoProjeto => ({ nome, tipo: 'audio', w: 0, h: 0, durSec: dur, temAudio: true, taxa: 48000 });
+  const olhoArq = (i: number): ArquivoProjeto => ({ nome: `transicao_piscar_${i}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false });
+  const rs: RoteiroEdicao = {
+    versao: 1, filename: 'AD50.mp4', criadoEm: 0, durSec: 20, legenda: null, zoom: [], headlines: null,
+    inserts: [{ ...base, id: 'p1', nome: 'OLHO', midiaKey: 'k1', start: 5, end: 8, transicao: 'piscar' }],
+    sfx: [
+      { chave: 'p1@entrada', sfx: 'mouse-click', t: 5, inicio: 3.953, deSec: 0, dur: 1.4, ganho: 0.35, fadeOutSec: 0.08, motivo: 'piscar' },
+      { chave: 'gancho', sfx: 'boom', t: 4, inicio: 3.98, deSec: 0, dur: 4.5, ganho: 0.07, fadeOutSec: 2, motivo: 'gancho' },
+      { chave: 'p1@saida', sfx: 'mouse-click', t: 8, inicio: 6.953, deSec: 0, dur: 1.4, ganho: 0.35, fadeOutSec: 0.08, motivo: 'piscar' },
+      // o último som passa do fim do vídeo: tem que ser cortado (e o fade junto)
+      { chave: 'x', sfx: 'camera-flash', t: 19.5, inicio: 19.195, deSec: 0, dur: 2.6, ganho: 0.12, fadeOutSec: 0.6, motivo: 'luz' },
+    ],
+    trilha: { trilhaId: 't', nome: 'Lo-Fi', ganho: 0.1, durTrilha: 8, pedacos: [
+      { inicio: 0, deSec: 0, dur: 8, fadeIn: 0.04, fadeOut: 1.2 },
+      { inicio: 6.8, deSec: 0, dur: 8, fadeIn: 1.2, fadeOut: 1.2 },
+      { inicio: 13.6, deSec: 0, dur: 6.4, fadeIn: 1.2, fadeOut: 1.4 },
+    ] },
+  };
+  const ms: MidiaDoProjeto = {
+    avatar, inserts: new Map([['p1', { arquivo: broll169 }]]), legendas: [], headlines: [],
+    olho: [-0.1, -0.05, 0, 0.05, 0.1].map((d, i) => ({ arquivo: olhoArq(i), de: d - 1 / 60, ate: d + 1 / 60 })),
+    sfx: new Map([['mouse-click', sfxArq('SFX - Click do Mouse.wav', 3.06)], ['boom', sfxArq('SFX - Boom.wav', 5)], ['camera-flash', sfxArq('SFX - Camera Flash.wav', 6.48)]]),
+    trilha: sfxArq('TRILHA - Lo-Fi.mp3', 8),
+  };
+  const ts = montarTimeline('AD50', rs, ms, W, H);
+  const olhos = ts.itens.filter((i) => i.trilha === 'transicao');
+  ok(olhos.length === 10 && olhos.some((i) => Math.abs(i.start - (5 - 0.1 - 1 / 60)) < 1e-6) && olhos.some((i) => Math.abs(i.start - (8 - 1 / 60)) < 1e-6),
+    'piscar vira as pálpebras quadro a quadro nas DUAS bordas, no mesmo lugar do render');
+  const sfxIt = ts.itens.filter((i) => i.trilha === 'sfx');
+  ok(sfxIt.length === 4 && sfxIt.every((i) => i.end <= 20 + 1e-9), 'SFX no projeto, nenhum passando do fim do vídeo');
+  const flash = sfxIt.find((i) => i.arquivo.includes('Flash'))!;
+  ok(Math.abs(flash.end - 20) < 1e-6 && (flash.fadeOut ?? 0) <= (flash.end - flash.start) / 2 + 1e-9, 'som cortado no fim leva o fade junto, encurtado');
+  ok(ts.itens.filter((i) => i.trilha === 'musica').length === 3, 'trilha repetida = 3 pedaços (com crossfade)');
+  const raias = raiasDeAudio(sfxIt);
+  ok(raias.length === 2 && raias.every((r) => r.every((x, k) => k === 0 || r[k - 1].end <= x.start + 1e-9)), 'SFX em raias: nada se sobrepõe na mesma faixa (boom longo vai pra outra)');
+
+  const cc = montarDraftCapCut(ts, { pasta: 'AD50 - PILOT', agoraUs: 1, novoId: (() => { let n = 0; return () => `id${++n}`; })() });
+  const conteudo = JSON.parse(cc.conteudo);
+  const faixas = conteudo.tracks.filter((t: { type: string }) => t.type === 'audio');
+  ok(faixas.map((t: { name: string }) => t.name).join(',') === 'SFX,SFX 2,TRILHA,TRILHA 2', `faixas de áudio no CapCut: ${faixas.map((t: { name: string }) => t.name).join(',')}`);
+  const semSobrepor = faixas.every((t: { segments: Array<{ target_timerange: { start: number; duration: number } }> }) =>
+    t.segments.every((sg, k) => k === 0 || t.segments[k - 1].target_timerange.start + t.segments[k - 1].target_timerange.duration <= sg.target_timerange.start));
+  ok(semSobrepor, 'nenhum segmento de áudio se sobrepõe na mesma faixa do CapCut');
+  const audios = conteudo.materials.audios as Array<{ type: string; path: string; name: string }>;
+  ok(audios.length === 4 && audios.every((a) => a.type === 'extract_music' && a.path.includes('##_draftpath_placeholder')), 'material de áudio no formato do CapCut, com o caminho portátil da pasta do rascunho');
+  const fades = conteudo.materials.audio_fades as Array<{ fade_in_duration: number; fade_out_duration: number }>;
+  ok(fades.length > 0 && fades.every((f) => f.fade_out_duration >= 0), 'fades de áudio viram audio_fade do CapCut');
+  const clique = faixas[0].segments.find((sg: { volume: number }) => Math.abs(sg.volume - 0.35) < 1e-9);
+  ok(clique && clique.target_timerange.start === 3953000 && clique.source_timerange.start === 0, 'clique do mouse no instante exato do plano (µs)');
+  const meta = JSON.parse(cc.meta);
+  const importados = meta.draft_materials[0].value as Array<{ metetype: string; extra_info: string }>;
+  ok(importados.some((x) => x.metetype === 'music' && x.extra_info.startsWith('SFX - ')), 'SFX e trilha entram no painel de mídia como áudio');
+
+  const xml = montarXmlPremiere(ts, { pastaMidia: 'C:/AUTOEDIT/AD50 - PILOT/MIDIA' });
+  const faixasXml = xml.split('<audio><numOutputChannels>')[1] || '';
+  ok((faixasXml.match(/SFX - Click do Mouse\.wav<\/name>/g) || []).length >= 2 && faixasXml.includes('TRILHA - Lo-Fi.mp3'), 'Premiere: SFX e trilha nas faixas de áudio');
+  ok(/<file id="file-\d+"><name>SFX - Boom\.wav<\/name>[^]*?<media><audio>/.test(xml), 'arquivo de SFX no XML é só áudio (sem <video>, o Premiere não procura imagem nele)');
+  ok(/<parameterid>level<\/parameterid>[^]*?<keyframe><when>\d+<\/when><value>0<\/value><\/keyframe>/.test(xml), 'fades viram keyframes de nível no Premiere');
+}
 console.log(`\n${passed} passaram, ${failed} falharam.`);
 if (failed > 0) process.exit(1);

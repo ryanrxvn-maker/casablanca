@@ -334,14 +334,45 @@ export async function speedUpVideo(
 }
 
 /**
+ * O ÁUDIO de um vídeo na velocidade nova (08.10): só a trilha, pela cadeia de
+ * atempo do Mixer de Velocidade (muda o ritmo, mantém o tom), em WAV — sem
+ * perda nenhuma antes do AAC final. Só áudio = segundos, mesmo num AD longo.
+ */
+export async function audioNaVelocidade(file: Blob, speed: number, opts: RunOptions = {}): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const inputName = 'avelin.' + guessExt(file, 'mp4');
+  const outputName = 'avelout.wav';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+    await execOrThrow(ff, [
+      '-i', inputName,
+      '-vn',
+      '-filter:a', atempoChain(Math.max(0.5, Math.min(3, speed))),
+      '-ar', '48000',
+      '-ac', '2',
+      '-c:a', 'pcm_s16le',
+      outputName,
+    ], 'áudio na velocidade nova');
+    const data = await ff.readFile(outputName);
+    if (!(data instanceof Uint8Array) || data.byteLength < 1024) throw new Error('áudio na velocidade nova saiu vazio');
+    return toBlob(data, 'audio/wav');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+/**
  * MIXER DE VELOCIDADE NA MONTAGEM DO PILOT (08.10) — o mesmo motor do
  * /tools/acelerador (setpts no vídeo + cadeia de atempo no áudio, que muda a
  * velocidade SEM mudar o tom da voz), com duas diferenças que a montagem
  * exige:
  *  - sai em 30 fps CRAVADOS (`fps=30` depois do setpts): o vídeo acelerado
  *    segue pra legenda, zoom e inserts, que trabalham na grade de 30 quadros;
- *  - qualidade de entrega (CRF 18, áudio 192k): o acelerador aceita perda
- *    porque o arquivo é final pra ele; aqui ainda vem outra etapa por cima.
+ *  - áudio 192k e teto de 8 Mbps no vídeo: é a RESERVA do caminho por
+ *    hardware (pilot-pos-producao-run), tem que ser rápida e não inchar.
  */
 export async function mudarVelocidadeDaMontagem(
   file: Blob,
@@ -360,8 +391,14 @@ export async function mudarVelocidadeDaMontagem(
       '-filter:v', `setpts=PTS/${s.toFixed(4)},fps=30`,
       ...(withAudio ? ['-filter:a', atempoChain(s), '-c:a', 'aac', '-b:a', '192k'] : ['-an']),
       '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '18',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
+      // reserva do caminho de hardware: rápido, mas com teto de bitrate pra
+      // o AD não estourar os 100 MB da entrega
+      '-crf', '20',
+      '-maxrate', '8M',
+      '-bufsize', '16M',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
       outputName,

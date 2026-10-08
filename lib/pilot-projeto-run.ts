@@ -14,7 +14,48 @@ import {
   montarTimeline, montarXmlPremiere, prefixoDoProjeto, srtDaLegenda,
   type ArquivoProjeto, type MidiaDoProjeto, type RoteiroEdicao,
 } from './pilot-projeto';
-import { palcoDoLayout } from './pilot-inserts';
+import { aberturaDoOlho, palcoDoLayout, PISCAR_ANTES_SEC, PISCAR_DEPOIS_SEC } from './pilot-inserts';
+import { SFX_CATALOGO, type SfxId } from './pilot-sonoplastia';
+
+/** Pra onde vai o pacote: o CapCut (pasta do rascunho) ou o Premiere (XML + mídia). */
+export type AlvoDoPacote = 'capcut' | 'premiere';
+/** Onde o Premiere procura a mídia sozinho — a dica do PDF manda extrair aqui. */
+export const PREMIERE_RAIZ_SUGERIDA = 'C:/AUTOEDIT';
+/** Subpasta da mídia no pacote do Premiere (o XML aponta pra ela). */
+export const PREMIERE_SUBPASTA_MIDIA = 'MIDIA';
+
+/** Extensão de um áudio pelos bytes (a biblioteca guarda sem extensão). */
+async function extensaoDoAudio(blob: Blob): Promise<string> {
+  const b = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  const txt = (i: number, n: number) => String.fromCharCode(...b.slice(i, i + n));
+  if (txt(0, 4) === 'RIFF') return 'wav';
+  if (txt(0, 4) === 'OggS') return 'ogg';
+  if (txt(4, 4) === 'ftyp') return 'm4a';
+  if (txt(0, 4) === 'fLaC') return 'flac';
+  return 'mp3';
+}
+
+/** As pálpebras da piscada quadro a quadro, em PNG transparente: um por
+ *  quadro de 30fps, com o intervalo dele relativo à borda (s). */
+async function framesDoOlho(W: number, H: number, fps: number): Promise<Array<{ blob: Blob; de: number; ate: number }>> {
+  const { desenharPalpebras } = await import('./transicao-olho');
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d')!;
+  const out: Array<{ blob: Blob; de: number; ate: number }> = [];
+  const meio = 0.5 / fps;
+  for (let k = Math.ceil(-PISCAR_ANTES_SEC * fps); k <= Math.floor(PISCAR_DEPOIS_SEC * fps); k++) {
+    const d = k / fps;
+    const a = aberturaDoOlho(d);
+    if (a >= 0.999) continue;
+    ctx.clearRect(0, 0, W, H);
+    desenharPalpebras(ctx, W, H, a);
+    const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), 'image/png'));
+    if (blob) out.push({ blob, de: d - meio, ate: d + meio });
+  }
+  return out;
+}
 
 export type ProjetoDisponivel = { filename: string; chaveBase: string; chaveRoteiro: string; roteiro: RoteiroEdicao };
 
@@ -194,12 +235,14 @@ async function arquivosDoProjeto(
   pasta: string,
   raizCapCut: string,
   onEtapa?: (msg: string) => void,
-): Promise<{ arquivos: Arquivo[]; avisos: string[] }> {
+  alvo: AlvoDoPacote = 'capcut',
+  lerTrilha?: (id: string) => Promise<Blob | null>,
+): Promise<{ arquivos: Arquivo[]; avisos: string[]; camadas: string[] }> {
   const { loadBlob } = await import('./zip-store');
   const roteiro = p.roteiro;
   const avisos: string[] = [];
   const arquivos: Arquivo[] = [];
-  const midiaDir = CAPCUT_SUBPASTA_MIDIA;
+  const midiaDir = alvo === 'premiere' ? PREMIERE_SUBPASTA_MIDIA : CAPCUT_SUBPASTA_MIDIA;
   const add = (nome: string, blob: Blob) => arquivos.push({ caminho: `${midiaDir}/${nome}`, blob });
 
   onEtapa?.(`${p.filename}: lendo o avatar`);
@@ -356,21 +399,81 @@ async function arquivosDoProjeto(
     linhas.set(cor, arquivo);
   }
 
+  // PISCAR (08.10): as pálpebras quadro a quadro — o mesmo desenho do render
+  let olho: MidiaDoProjeto['olho'];
+  if (roteiro.inserts.some((i) => i.transicao === 'piscar')) {
+    onEtapa?.(`${p.filename}: desenhando a piscada`);
+    const frames = await framesDoOlho(W, H, 30);
+    olho = frames.map((f, i) => {
+      const arquivo: ArquivoProjeto = { nome: `transicao_piscar_${String(i + 1).padStart(2, '0')}.png`, tipo: 'imagem', w: W, h: H, durSec: 0, temAudio: false };
+      add(arquivo.nome, f.blob);
+      return { arquivo, de: f.de, ate: f.ate };
+    });
+  }
+
+  // SMART SFX (08.10): cada som usado, em WAV — os MESMOS samples da mixagem
+  const sfx = new Map<string, ArquivoProjeto>();
+  const idsSfx = [...new Set((roteiro.sfx || []).map((x) => x.sfx))] as SfxId[];
+  if (idsSfx.length) {
+    onEtapa?.(`${p.filename}: SFX`);
+    const { carregarSfx, wavDoSfx } = await import('./pilot-sonoplastia-run');
+    for (const id of idsSfx) {
+      const buf = await carregarSfx(id);
+      const wav = buf ? await wavDoSfx(id) : null;
+      if (!buf || !wav) { avisos.push(`não consegui baixar o SFX "${SFX_CATALOGO[id]?.nome || id}" pro projeto — confira a internet e exporte de novo.`); continue; }
+      const arquivo: ArquivoProjeto = { nome: SFX_CATALOGO[id].arquivoProjeto, tipo: 'audio', w: 0, h: 0, durSec: buf.duration, temAudio: true, taxa: buf.sampleRate };
+      add(arquivo.nome, wav);
+      sfx.set(id, arquivo);
+    }
+  }
+
+  // TRILHA (08.10): o arquivo original da biblioteca
+  let trilha: ArquivoProjeto | undefined;
+  if (roteiro.trilha?.trilhaId && lerTrilha) {
+    onEtapa?.(`${p.filename}: trilha`);
+    const blob = await lerTrilha(roteiro.trilha.trilhaId).catch(() => null);
+    if (blob && blob.size > 0) {
+      const ext = await extensaoDoAudio(blob);
+      trilha = { nome: `TRILHA - ${slug(roteiro.trilha.nome)}.${ext}`, tipo: 'audio', w: 0, h: 0, durSec: roteiro.trilha.durTrilha, temAudio: true };
+      add(trilha.nome, blob);
+    }
+  }
+
   const nome = p.filename.replace(/\.[^.]+$/, '');
-  const tl = montarTimeline(nome, roteiro, { avatar, inserts, legendas, headlines, preto, branco, vermelho, linhas }, W, H);
+  const tl = montarTimeline(nome, roteiro, { avatar, inserts, legendas, headlines, preto, branco, vermelho, linhas, olho, sfx, trilha }, W, H);
   avisos.push(...tl.avisos);
   // só vai pro pacote a mídia que a timeline usa (PNG idêntico já foi fundido)
   const usados = new Set(tl.arquivos.map((a) => a.nome));
   const finais = arquivos.filter((a) => usados.has(a.caminho.slice(midiaDir.length + 1)));
 
-  const cc = montarDraftCapCut(tl, { raiz: raizCapCut, pasta });
   const enc = (s: string, tipo: string) => new Blob([s], { type: tipo });
-  finais.push({ caminho: 'draft_content.json', blob: enc(cc.conteudo, 'application/json') });
-  finais.push({ caminho: 'draft_meta_info.json', blob: enc(cc.meta, 'application/json') });
-  finais.push({ caminho: `PREMIERE - ${nomeDePasta(nome)}.xml`, blob: enc(montarXmlPremiere(tl, { pastaMidia: `${raizCapCut}/${pasta}/${midiaDir}` }), 'application/xml') });
+  if (alvo === 'capcut') {
+    const cc = montarDraftCapCut(tl, { raiz: raizCapCut, pasta });
+    finais.push({ caminho: 'draft_content.json', blob: enc(cc.conteudo, 'application/json') });
+    finais.push({ caminho: 'draft_meta_info.json', blob: enc(cc.meta, 'application/json') });
+  } else {
+    // o XML aponta pra raiz sugerida: extraiu lá, o Premiere acha tudo sozinho;
+    // extraiu em outro lugar, ele pede UM arquivo e acha o resto
+    finais.push({ caminho: `PREMIERE - ${nomeDePasta(nome)}.xml`, blob: enc(montarXmlPremiere(tl, { pastaMidia: `${PREMIERE_RAIZ_SUGERIDA}/${pasta}/${midiaDir}` }), 'application/xml') });
+  }
   if (srt) finais.push({ caminho: `LEGENDA - ${nomeDePasta(nome)}.srt`, blob: enc(srt, 'application/x-subrip') });
-  finais.push({ caminho: 'LEIA-ME.txt', blob: enc(leiaMeDoProjeto(tl, { pasta, temSrt: !!srt }), 'text/plain') });
-  return { arquivos: finais, avisos };
+  // o LEIA-ME fala da pasta do CapCut: no pacote do Premiere quem explica é o PDF
+  if (alvo === 'capcut') finais.push({ caminho: 'LEIA-ME.txt', blob: enc(leiaMeDoProjeto(tl, { pasta, temSrt: !!srt }), 'text/plain') });
+  return { arquivos: finais, avisos, camadas: camadasDoProjeto(tl, !!srt) };
+}
+
+/** As camadas do projeto em linguagem de editor (o PDF lista). */
+function camadasDoProjeto(tl: ReturnType<typeof montarTimeline>, temSrt: boolean): string[] {
+  const tem = (t: string) => tl.itens.some((i) => i.trilha === t);
+  const out = ['AVATAR: o avatar completo, com a fala (e o zoom como keyframes de escala)'];
+  if (tem('broll')) out.push('B-ROLL: os b-rolls no tempo exato do Pilot, com recorte, velocidade e tela dividida');
+  if (tem('topo')) out.push('AVATAR REACT / LINHA: o avatar do React (num quadro no canto) e a linha da tela dividida');
+  if (tem('transicao')) out.push('TRANSIÇÃO: escurecer, luz, luz vermelha e piscar nas bordas dos b-rolls');
+  if (tem('legenda')) out.push(`LEGENDA: a legenda do Auto Edit em imagens PNG${temSrt ? ' (e o .srt com o texto editável)' : ''}`);
+  if (tem('headline')) out.push('HEADLINE: o texto fixo por cima, em PNG');
+  if (tem('sfx')) out.push('SFX: cada som no tempo certo da transição, em faixas de áudio (sem nada sobreposto na mesma faixa)');
+  if (tem('musica')) out.push('TRILHA: a música no tamanho do vídeo, já no volume e com fade');
+  return out;
 }
 
 /* ─────────────────────────── entrega ─────────────────────────── */
@@ -388,20 +491,27 @@ export async function exportarProjetosEditaveis(opts: {
   destino?: FileSystemDirectoryHandle | null;
   raizCapCut?: string;
   onEtapa?: (msg: string) => void;
+  /** CapCut (pasta do rascunho) ou Premiere (XML + mídia). Ausente = CapCut. */
+  alvo?: AlvoDoPacote;
+  /** lê a trilha da biblioteca (bytes) pro projeto levar o arquivo */
+  lerTrilha?: (id: string) => Promise<Blob | null>;
 }): Promise<ResultadoExport> {
+  const alvo: AlvoDoPacote = opts.alvo || 'capcut';
   const raiz = (opts.raizCapCut || CAPCUT_RAIZ_PADRAO).replace(/\\/g, '/').replace(/\/+$/, '');
   const pastas: string[] = [];
   const avisos: string[] = [];
   const JSZip = opts.destino ? null : (await import('jszip')).default;
   const zip = JSZip ? new JSZip() : null;
   const usados = new Set<string>();
+  let camadas: string[] = [];
   for (const p of opts.projetos) {
     const base = nomeDePasta(`${p.filename.replace(/\.[^.]+$/, '')} - PILOT`);
     let pasta = base;
     for (let i = 2; usados.has(pasta.toLowerCase()) || (opts.destino && await existePasta(opts.destino, pasta)); i++) pasta = `${base} (${i})`;
     usados.add(pasta.toLowerCase());
-    const r = await arquivosDoProjeto(p, pasta, raiz, opts.onEtapa);
+    const r = await arquivosDoProjeto(p, pasta, raiz, opts.onEtapa, alvo, opts.lerTrilha);
     avisos.push(...r.avisos.map((a) => `${p.filename}: ${a}`));
+    camadas = camadas.length >= r.camadas.length ? camadas : r.camadas;
     if (opts.destino) {
       opts.onEtapa?.(`${p.filename}: gravando na pasta`);
       const dir = await opts.destino.getDirectoryHandle(pasta, { create: true });
@@ -412,9 +522,22 @@ export async function exportarProjetosEditaveis(opts: {
     pastas.push(pasta);
   }
   if (zip) {
+    const nomeZip = `${nomeDePasta(opts.nomeBase)} - ${alvo === 'premiere' ? 'PREMIERE' : 'CAPCUT'}.zip`;
+    // o PDF de COMO ABRIR vai na raiz do .zip, do lado das pastas
+    opts.onEtapa?.('escrevendo o PDF de como abrir');
+    try {
+      const { pdfDeComoAbrir } = await import('./pilot-projeto-pdf');
+      const pdf = await pdfDeComoAbrir({
+        alvo, nomeAd: opts.nomeBase, pastas, zip: nomeZip, camadas, avisos,
+        pastaPremiere: alvo === 'premiere' ? PREMIERE_RAIZ_SUGERIDA : undefined,
+      });
+      zip.file(alvo === 'premiere' ? 'COMO ABRIR NO PREMIERE.pdf' : 'COMO ABRIR NO CAPCUT.pdf', pdf);
+    } catch (e) {
+      console.warn('[projeto] PDF de instruções falhou (o LEIA-ME.txt continua na pasta):', e);
+    }
     opts.onEtapa?.('compactando o pacote');
     const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-    return { pastas, avisos, zip: { blob, nome: `${nomeDePasta(opts.nomeBase)} - PROJETO EDITAVEL.zip` } };
+    return { pastas, avisos, zip: { blob, nome: nomeZip } };
   }
   return { pastas, avisos };
 }

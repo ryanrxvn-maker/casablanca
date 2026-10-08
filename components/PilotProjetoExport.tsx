@@ -185,9 +185,13 @@ export function PilotProjetoExportModal({
               baixar o outro
             </button>
           ) : <span />}
-          <button type="button" className="lz-ok" onClick={onFechar} disabled={ocupado}>
-            {estado.fase === 'pronto' ? 'Fechar' : 'Cancelar'}
-          </button>
+          {estado.fase === 'pronto' ? (
+            <button type="button" className="lz-ok" onClick={onFechar}>Fechar</button>
+          ) : (
+            <button type="button" className="lz-padrao" onClick={onFechar} disabled={ocupado}>
+              {estado.fase === 'erro' ? 'fechar' : 'cancelar'}
+            </button>
+          )}
         </div>
       </div>
     </div>,

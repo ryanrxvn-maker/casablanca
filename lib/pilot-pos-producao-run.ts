@@ -206,10 +206,35 @@ export async function montarPosProducao(
     if (velocidade !== 1) {
       try {
         cfg.onEtapa?.(`mixer de velocidade: ${velocidade.toFixed(2)}x`);
-        const { mudarVelocidadeDaMontagem } = await import('./ffmpeg-worker');
-        const acelerado = await comFfmpeg(() => mudarVelocidadeDaMontagem(blob, velocidade, {
-          onProgress: (pr) => cfg.onEtapa?.(`mixer de velocidade: ${velocidade.toFixed(2)}x · ${Math.round((pr.ratio || 0) * 100)}%`),
-        }));
+        const ffw = await import('./ffmpeg-worker');
+        let acelerado: Blob | null = null;
+        /* CAMINHO RÁPIDO: o áudio pelo atempo (só áudio, segundos) e o vídeo
+         * pelo encoder de HARDWARE do render (o quadro de saída em t é o da
+         * fonte em t × velocidade). O x264 do ffmpeg-wasm é single-thread:
+         * em 1080x1920 levava ~3x a duração do AD e inchava o arquivo. */
+        try {
+          const audioNovo = await comFfmpeg(() => ffw.audioNaVelocidade(blob, velocidade));
+          const [{ renderTypographyVideo }, engine, presets] = await Promise.all([
+            import('./typography/export'), import('./typography/engine'), import('./typography/presets'),
+          ]);
+          const estilo = { ...engine.DEFAULT_STYLE, presetId: 'keynote' };
+          const rv = await renderTypographyVideo({
+            file: blob, blocks: [], preset: presets.getPreset('keynote'), style: estilo, zoom: [],
+            velocidade, audioSubstituto: audioNovo, ffmpegJaExclusivo: cfg.ffmpegJaExclusivo,
+            onProgress: (pr) => {
+              if (pr.phase === 'frames') cfg.onEtapa?.(`mixer de velocidade: ${velocidade.toFixed(2)}x · ${Math.round((pr.ratio || 0) * 100)}%`);
+            },
+          });
+          if (!rv.audioOk) throw new Error('o vídeo acelerado saiu sem áudio');
+          acelerado = rv.blob;
+          console.log(`[pos-producao] velocidade pelo encoder de ${rv.hw ? 'hardware' : 'software'} (${rv.mode})`);
+        } catch (e) {
+          // RESERVA: o mesmo motor do /tools/acelerador, inteiro no ffmpeg
+          console.warn('[pos-producao] velocidade pelo render falhou — usando o ffmpeg:', e);
+          acelerado = await comFfmpeg(() => ffw.mudarVelocidadeDaMontagem(blob, velocidade, {
+            onProgress: (pr) => cfg.onEtapa?.(`mixer de velocidade: ${velocidade.toFixed(2)}x · ${Math.round((pr.ratio || 0) * 100)}%`),
+          }));
+        }
         if (!acelerado || acelerado.size < 50_000) throw new Error('saída vazia');
         blob = acelerado;
         info = {
@@ -1067,6 +1092,8 @@ export async function montarPosProducao(
           sfx: sfxEntraram,
           trilha: trilhaDoProjeto,
           velocidade,
+          transicoes: renderizado ? transicoesDoVideo : [],
+          fimDoGancho: fimDoGanchoNoVideo(info.partesSec, info.partLabels),
         }, base);
       } catch (e) {
         console.warn('[pos-producao] projeto editável não foi guardado (a entrega segue normal):', e);

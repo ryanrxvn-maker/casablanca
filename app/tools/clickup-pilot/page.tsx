@@ -104,6 +104,20 @@ import { PilotInsertsModal } from '@/components/PilotInserts';
 import { PilotFlowButton, PilotFlowInsertsModal } from '@/components/PilotFlowInserts';
 import { PilotStockFrameButton, PilotStockFrameModal } from '@/components/PilotStockFrame';
 import { PilotHeadlineModal } from '@/components/PilotHeadline';
+import { PilotVelocidadeModal } from '@/components/PilotVelocidade';
+import { PilotSonoplastiaModal, type RoteiroDeSom } from '@/components/PilotSonoplastia';
+import { PilotProjetoExportModal, type AlvoDoProjeto } from '@/components/PilotProjetoExport';
+import {
+  SFX_CFG_DEFAULT,
+  TRILHA_CFG_DEFAULT,
+  VELOCIDADE_CFG_DEFAULT,
+  normalizarSfxCfg,
+  normalizarTrilhaCfg,
+  normalizarVelocidadeCfg,
+  type SfxCfg,
+  type TrilhaCfg,
+  type VelocidadeCfg,
+} from '@/lib/pilot-sonoplastia';
 import { HEADLINE_CFG_DEFAULT, insertsAtivosNaMontagem, mesclarInsertsDaOrigem, planoSmartStockFrameCompleto, type Insert, type HeadlineCfg, type OrigemInsert } from '@/lib/pilot-inserts';
 import { copyDaPosProducao, escopoDaPosProducao } from '@/lib/pilot-post-scope';
 import { useCaptionTemplates } from '@/components/typography/useCaptionTemplates';
@@ -138,6 +152,8 @@ import {
   IconHeadline,
   IconLegenda,
   IconZoomDinamica,
+  IconVelocidade,
+  IconSonoplastia,
   IconDoc as PilotIconDoc,
   IconPlay as PilotIconPlay,
   IconX as PilotIconX,
@@ -2426,8 +2442,89 @@ function ClickUpPilotInner() {
     });
   };
 
+  /* ═══════════ MIXER DE VELOCIDADE · SMART SFX · TRILHA (08.10) ═══════════
+   *  Mesmo contrato da legenda/zoom: por task, a versão herda da mãe até ter
+   *  escolha própria, e o "usar sempre" grava o padrão da conta. Tudo
+   *  normalizado na leitura — config velha/estranha nunca derruba a montagem. */
+  const VELOCIDADE_KEY = 'darkolab:clickup-pilot:velocidade';
+  const SFX_KEY = 'darkolab:clickup-pilot:sfx';
+  const TRILHA_KEY = 'darkolab:clickup-pilot:trilha';
+  const lerMapaDeCfg = <T,>(chave: string): Record<string, T> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const v = JSON.parse(localStorage.getItem(chave) || '{}');
+      return v && typeof v === 'object' ? v : {};
+    } catch { return {}; }
+  };
+  const [velocidadeCfgs, setVelocidadeCfgs] = useState<Record<string, VelocidadeCfg>>(() => lerMapaDeCfg<VelocidadeCfg>(VELOCIDADE_KEY));
+  const [sfxCfgs, setSfxCfgs] = useState<Record<string, SfxCfg>>(() => lerMapaDeCfg<SfxCfg>(SFX_KEY));
+  const [trilhaCfgs, setTrilhaCfgs] = useState<Record<string, TrilhaCfg>>(() => lerMapaDeCfg<TrilhaCfg>(TRILHA_KEY));
+  const velocidadeCfgsRef = useRef(velocidadeCfgs);
+  velocidadeCfgsRef.current = velocidadeCfgs;
+  const sfxCfgsRef = useRef(sfxCfgs);
+  sfxCfgsRef.current = sfxCfgs;
+  const trilhaCfgsRef = useRef(trilhaCfgs);
+  trilhaCfgsRef.current = trilhaCfgs;
+  /** task > mãe da versão > padrão da conta > padrão do código */
+  const daTaskOuMae = <T,>(mapa: Record<string, T>, taskId: string): T | undefined =>
+    mapa[taskId] || mapa[taskIdBaseDaVersao(taskId)] || mapa[CHAVE_PADRAO];
+  const getVelocidadeCfg = (taskId: string, mapa = velocidadeCfgs): VelocidadeCfg =>
+    normalizarVelocidadeCfg(daTaskOuMae(mapa, taskId) || VELOCIDADE_CFG_DEFAULT);
+  const getSfxCfg = (taskId: string, mapa = sfxCfgs): SfxCfg =>
+    normalizarSfxCfg(daTaskOuMae(mapa, taskId) || SFX_CFG_DEFAULT);
+  const getTrilhaCfg = (taskId: string, mapa = trilhaCfgs): TrilhaCfg =>
+    normalizarTrilhaCfg(daTaskOuMae(mapa, taskId) || TRILHA_CFG_DEFAULT);
+  const gravarMapaDeCfg = <T,>(chave: string, set: React.Dispatch<React.SetStateAction<Record<string, T>>>) =>
+    (taskId: string, cfg: T, virarPadrao = false) => {
+      set((prev) => {
+        const next = { ...prev, [taskId]: cfg };
+        if (virarPadrao) next[CHAVE_PADRAO] = cfg;
+        try { localStorage.setItem(chave, JSON.stringify(next)); } catch {}
+        return next;
+      });
+    };
+  const setVelocidadeCfg = gravarMapaDeCfg<VelocidadeCfg>(VELOCIDADE_KEY, setVelocidadeCfgs);
+  const setSfxCfg = gravarMapaDeCfg<SfxCfg>(SFX_KEY, setSfxCfgs);
+  const setTrilhaCfg = gravarMapaDeCfg<TrilhaCfg>(TRILHA_KEY, setTrilhaCfgs);
+
+  /**
+   * O ÚLTIMO AD MONTADO da task, pras prévias das janelas novas: a voz (o
+   * avatar limpo que o projeto guardou) e o roteiro de som (as transições).
+   * Funções ESTÁVEIS por task (cache em ref): as janelas carregam uma vez,
+   * sem recarregar a cada render da página.
+   */
+  const fontesDoUltimoAdRef = useRef<Record<string, { voz: () => Promise<Blob | null>; roteiro: () => Promise<RoteiroDeSom | null> }>>({});
+  const fontesDoUltimoAd = (taskId: string) => {
+    const ja = fontesDoUltimoAdRef.current[taskId];
+    if (ja) return ja;
+    const projetos = async () => {
+      try {
+        const { projetosDaTask } = await import('@/lib/pilot-projeto-run');
+        return await projetosDaTask(taskId, batchStatesRef.current?.[taskId]?.genId);
+      } catch { return []; }
+    };
+    const novo = {
+      voz: async () => {
+        const lista = await projetos();
+        if (!lista.length) return null;
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          return await loadBlob(lista[0].chaveBase);
+        } catch { return null; }
+      },
+      roteiro: async (): Promise<RoteiroDeSom | null> => {
+        const lista = await projetos();
+        const r = lista[0]?.roteiro;
+        if (!r || !Array.isArray(r.transicoes)) return null;
+        return { transicoes: r.transicoes, durSec: r.durSec, fimDoGancho: r.fimDoGancho ?? null, filename: r.filename };
+      },
+    };
+    fontesDoUltimoAdRef.current[taskId] = novo;
+    return novo;
+  };
+
   /** Qual popover está aberto ('legenda' | 'zoom') por task. */
-  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | 'headline' | null>>({});
+  const [posPopover, setPosPopover] = useState<Record<string, 'legenda' | 'zoom' | 'inserts' | 'headline' | 'velocidade' | 'sonoplastia' | null>>({});
   const [flowDialog, setFlowDialog] = useState<{ analysis: TaskAnalysis; editor: boolean } | null>(null);
   const [stockFrameDialog, setStockFrameDialog] = useState<{ analysis: TaskAnalysis; editor: boolean } | null>(null);
   const legendaBtnRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -2449,65 +2546,56 @@ function ClickUpPilotInner() {
    * Aqui fica o resultado por task: `aplicou` (o render entrou no entregue) e
    * os `avisos`. O card lê isto pra riscar o selo e mostrar o porquê.
    */
-  const [posResultado, setPosResultado] = useState<Record<string, { aplicou: boolean; avisos: string[] }>>({});
+  const [posResultado, setPosResultado] = useState<Record<string, { aplicou: boolean; avisos: string[]; sonoplastia?: { sfx: number; trilha: boolean }; velocidade?: number }>>({});
   /** PROJETO EDITÁVEL (05.10): etapa do export em andamento, por task. */
   const [exportandoProjeto, setExportandoProjeto] = useState<Record<string, string>>({});
 
+  /** Janela de escolha do projeto editável (CapCut × Premiere) aberta, por task. */
+  const [projetoEscolha, setProjetoEscolha] = useState<{ taskId: string; nomeAd: string; genId?: string } | null>(null);
+
   /**
-   * Exporta o montado como PROJETO do CapCut (com XML do Premiere e .srt
-   * dentro): avatar limpo, b-rolls no tempo exato, transições, legenda e
-   * headline em PNG por cima. Com seletor de pasta (Chrome/Edge) grava direto
-   * na pasta de projetos do CapCut; sem ele, baixa um .zip com as pastas.
+   * PROJETO EDITÁVEL (08.10): monta o pacote do editor escolhido e BAIXA
+   * direto — sem perguntar onde salvar. CapCut = a pasta do rascunho pronta +
+   * PDF de como abrir; Premiere = o XML + a mídia + PDF. Lança erro em
+   * português (a janela mostra a frase como veio).
    */
-  async function exportarProjetoEditavel(taskId: string, nomeAd: string, genId?: string) {
-    if (exportandoProjeto[taskId]) return;
-    const etapa = (msg: string) => setExportandoProjeto((prev) => ({ ...prev, [taskId]: msg }));
+  async function exportarProjetoEditavel(
+    taskId: string,
+    nomeAd: string,
+    genId: string | undefined,
+    alvo: AlvoDoProjeto,
+    onEtapa: (msg: string) => void,
+  ): Promise<{ arquivo: string; avisos: string[] }> {
+    if (exportandoProjeto[taskId]) throw new Error('Já tem um projeto deste AD sendo montado. Espere ele terminar.');
+    const etapa = (msg: string) => {
+      setExportandoProjeto((prev) => ({ ...prev, [taskId]: msg }));
+      onEtapa(msg);
+    };
     etapa('procurando o projeto');
     try {
       const { projetosDaTask, exportarProjetosEditaveis } = await import('@/lib/pilot-projeto-run');
       const { CAPCUT_RAIZ_PADRAO } = await import('@/lib/pilot-projeto');
       const projetos = await projetosDaTask(taskId, genId);
       if (!projetos.length) {
-        alert('Este AD ainda não tem projeto editável.\n\nEle é guardado quando a montagem passa pela pós-produção (legenda, zoom, b-roll ou headline). Clique em "Atualizar montagem" e depois exporte de novo.');
-        return;
+        throw new Error('Este AD ainda não tem projeto editável. Ele é guardado quando a montagem passa pela pós-produção (legenda, zoom, b-roll, headline, SFX, trilha ou velocidade). Clique em "Atualizar montagem" e exporte de novo.');
       }
-      // O seletor precisa do clique ainda "vivo": nada demorado antes dele.
-      let destino: FileSystemDirectoryHandle | null = null;
-      const podeGravar = typeof window !== 'undefined' && typeof (window as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
-      if (podeGravar) {
-        try {
-          destino = await (window as unknown as { showDirectoryPicker: (o: object) => Promise<FileSystemDirectoryHandle> })
-            .showDirectoryPicker({ id: 'pilot-capcut-drafts', mode: 'readwrite' });
-        } catch {
-          return; // fechou o seletor = desistiu
-        }
-      }
-      // A pasta absoluta não chega ao navegador: se o nome bate com a pasta de
-      // projetos lembrada, o Premiere acha a mídia sozinho; senão ele pede pra
-      // apontar um arquivo e acha o resto.
-      let raizSalva = CAPCUT_RAIZ_PADRAO;
-      try { raizSalva = localStorage.getItem('pilot:capcut-raiz') || CAPCUT_RAIZ_PADRAO; } catch { /* modo privado */ }
-      const nomeDaRaiz = raizSalva.replace(/[\\/]+$/, '').split(/[\\/]/).pop()?.toLowerCase();
-      const raiz = destino ? (nomeDaRaiz === destino.name.toLowerCase() ? raizSalva : destino.name) : raizSalva;
-      const r = await exportarProjetosEditaveis({ projetos, nomeBase: nomeAd, destino, raizCapCut: raiz, onEtapa: etapa });
-      if (r.zip) {
-        const url = URL.createObjectURL(r.zip.blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = r.zip.nome;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 120_000);
-      }
-      const onde = destino
-        ? `na pasta "${destino.name}":\n${r.pastas.map((p) => `   • ${p}`).join('\n')}\n\nSe essa é a pasta de projetos do CapCut, feche e abra o CapCut: ${r.pastas.length > 1 ? 'eles aparecem' : 'ele aparece'} na lista.`
-        : `no arquivo "${r.zip?.nome}" (pasta de downloads).\n\nDescompacte DENTRO da pasta de projetos do CapCut (ex.: ${CAPCUT_RAIZ_PADRAO.replace(/\//g, '\\')}).`;
-      alert(`✓ Projeto editável pronto — ${r.pastas.length} ${r.pastas.length === 1 ? 'vídeo' : 'vídeos'} ${onde}\n\nPremiere: Arquivo > Importar > o XML "PREMIERE - …" que está dentro de cada pasta.`
-        + (r.avisos.length ? `\n\nAtenção:\n${r.avisos.map((a) => `• ${a}`).join('\n')}` : ''));
+      let raiz = CAPCUT_RAIZ_PADRAO;
+      try { raiz = localStorage.getItem('pilot:capcut-raiz') || CAPCUT_RAIZ_PADRAO; } catch { /* modo privado */ }
+      const { lerTrilha } = await import('@/lib/pilot-trilhas-store');
+      const r = await exportarProjetosEditaveis({ projetos, nomeBase: nomeAd, destino: null, raizCapCut: raiz, alvo, lerTrilha, onEtapa: etapa });
+      if (!r.zip) throw new Error('O pacote não saiu. Tente de novo.');
+      const url = URL.createObjectURL(r.zip.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = r.zip.nome;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 120_000);
+      return { arquivo: r.zip.nome, avisos: r.avisos };
     } catch (e) {
       console.warn('[clickup-pilot] projeto editável falhou:', e);
-      alert(`Não consegui exportar o projeto editável: ${(e as Error)?.message || e}`);
+      throw e instanceof Error ? e : new Error(String(e));
     } finally {
       setExportandoProjeto((prev) => {
         const n = { ...prev };
@@ -2555,6 +2643,34 @@ function ClickUpPilotInner() {
   function acoesDePosProducao(a: TaskAnalysis) {
     return (
       <>
+      {/* MIXER DE VELOCIDADE (08.10): o montado acelera/desacelera do jeito
+          que foi calibrado aqui, com o motor do /tools/acelerador. */}
+      {(() => {
+        const vcfg = getVelocidadeCfg(a.taskId);
+        const aberto = posPopover[a.taskId] === 'velocidade';
+        const fontes = fontesDoUltimoAd(a.taskId);
+        return (
+          <span className="relative inline-flex">
+            <PilotBtn3D
+              icon={<IconVelocidade size={16} />}
+              color={vcfg.on ? 'orange' : 'neutral'}
+              active={vcfg.on}
+              title={vcfg.on
+                ? `Mixer de velocidade ON · ${vcfg.velocidade.toFixed(2).replace('.', ',')}x. Clica pra ajustar`
+                : 'Mixer de velocidade: acelera ou desacelera o AD montado'}
+              onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'velocidade' }))}
+            />
+            {aberto ? (
+              <PilotVelocidadeModal
+                cfg={vcfg}
+                amostra={fontes.voz}
+                onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                onMudar={(c, padrao) => setVelocidadeCfg(a.taskId, c, padrao)}
+              />
+            ) : null}
+          </span>
+        );
+      })()}
       {/* LEGENDA AUTOMÁTICA (30.08). O clique abre a mini
           janela: liga/desliga + escolhe o MODELO das Legendas
           Automáticas. Aplica depois de montar e decupar, com
@@ -2719,6 +2835,38 @@ function ClickUpPilotInner() {
           </span>
         );
       })()}
+      {/* SFX E TRILHA (08.10): Smart SFX nas transições + trilha do PC, num
+          botão só (a trilha é uma janela dentro da janela). */}
+      {(() => {
+        const scfg = getSfxCfg(a.taskId);
+        const tcfg = getTrilhaCfg(a.taskId);
+        const ligado = scfg.on || tcfg.on;
+        const aberto = posPopover[a.taskId] === 'sonoplastia';
+        const fontes = fontesDoUltimoAd(a.taskId);
+        const partes = [scfg.on ? 'Smart SFX' : '', tcfg.on ? `trilha "${tcfg.nome}" ${Math.round(tcfg.volume * 100)}%` : ''].filter(Boolean).join(' + ');
+        return (
+          <span className="relative inline-flex">
+            <PilotBtn3D
+              icon={<IconSonoplastia size={16} />}
+              color={ligado ? 'emerald' : 'neutral'}
+              active={ligado}
+              title={ligado ? `${partes}. Clica pra ajustar` : 'SFX e trilha: som nas transições e música de fundo'}
+              onClick={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: aberto ? null : 'sonoplastia' }))}
+            />
+            {aberto ? (
+              <PilotSonoplastiaModal
+                sfx={scfg}
+                trilha={tcfg}
+                roteiro={fontes.roteiro}
+                vozDeReferencia={fontes.voz}
+                onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
+                onSfx={(c, padrao) => setSfxCfg(a.taskId, c, padrao)}
+                onTrilha={(c, padrao) => setTrilhaCfg(a.taskId, c, padrao)}
+              />
+            ) : null}
+          </span>
+        );
+      })()}
       </>
     );
   }
@@ -2731,7 +2879,7 @@ function ClickUpPilotInner() {
   function selosDoCard(
     taskId: string,
     economia = false,
-  ): Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline'; title: string; falhou?: boolean }> {
+  ): Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline' | 'velocidade' | 'sonoplastia'; title: string; falhou?: boolean }> {
     const cfgId = taskIdBaseDaVersao(taskId);
     // Legenda, zoom, inserts e headline saem TODOS do mesmo render. Se ele não
     // entrou no vídeo entregue, nenhum deles foi aplicado — o selo tem que
@@ -2739,7 +2887,7 @@ function ClickUpPilotInner() {
     const posFalhou = posResultado[taskId] ? !posResultado[taskId].aplicou : false;
     const leg = legendaCfgsRef.current[taskId] || legendaCfgsRef.current[cfgId] || legendaCfgsRef.current[CHAVE_PADRAO] || LEGENDA_CFG_DEFAULT;
     const zm = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
-    const out: Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline'; title: string; falhou?: boolean }> = [];
+    const out: Array<{ tipo: 'economia' | 'normalizador' | 'decupagem' | 'legenda' | 'zoom' | 'insert' | 'stockframe' | 'flow' | 'headline' | 'velocidade' | 'sonoplastia'; title: string; falhou?: boolean }> = [];
     // O selo lê o snapshot do próprio batch, não o toggle atual. Assim um AD
     // pronto continua identificado como Economia mesmo depois de a tela mudar.
     if (economia) {
@@ -2776,6 +2924,26 @@ function ClickUpPilotInner() {
     // duas. A lista já vem filtrada pelo que REALMENTE entra na montagem.
     for (const selo of selosDeInserts(insertsDaMontagem(taskId))) {
       out.push({ tipo: selo.tipo, title: tituloDoSeloDeInsert(selo), falhou: posFalhou });
+    }
+    // MIXER DE VELOCIDADE / SFX E TRILHA (08.10): o selo lê a config do disparo
+    // e acusa quando a montagem avisou que não entrou.
+    const res = posResultado[taskId];
+    const vel = getVelocidadeCfg(taskId, velocidadeCfgsRef.current);
+    if (vel.on) {
+      const falhou = !!res?.avisos?.some((a) => /mixer de velocidade não entrou/.test(a));
+      out.push({ tipo: 'velocidade', title: `Mixer de velocidade: ${vel.velocidade.toFixed(2).replace('.', ',')}x`, falhou });
+    }
+    const sx = getSfxCfg(taskId, sfxCfgsRef.current);
+    const tr = getTrilhaCfg(taskId, trilhaCfgsRef.current);
+    if (sx.on || tr.on) {
+      const feito = res?.sonoplastia;
+      const pedidoSom = [sx.on ? 'Smart SFX' : '', tr.on ? `trilha "${tr.nome}"` : ''].filter(Boolean).join(' + ');
+      const falhou = !!res && ((tr.on && feito && !feito.trilha) || !!res.avisos?.some((a) => /SFX e a trilha não entraram|não consegui ler o áudio do vídeo montado|trilha .* não (?:está mais salva|abriu)/.test(a)));
+      out.push({
+        tipo: 'sonoplastia',
+        title: feito ? `${pedidoSom}: ${feito.sfx} SFX${feito.trilha ? ' + trilha' : ''} no áudio` : `Com ${pedidoSom}`,
+        falhou,
+      });
     }
     if (zm.on) {
       const movimento = zm.modo === 'in' ? 'zoom in' : zm.modo === 'out' ? 'zoom out' : 'zoom in e out';
@@ -2823,7 +2991,12 @@ function ClickUpPilotInner() {
     const zoom = zoomCfgsRef.current[taskId] || zoomCfgsRef.current[cfgId] || zoomCfgsRef.current[CHAVE_PADRAO] || ZOOM_CFG_DEFAULT;
     const hl = headlineRef.current[taskId] || headlineRef.current[cfgId] || headlineRef.current[CHAVE_PADRAO] || HEADLINE_CFG_DEFAULT;
     const insDaTask = insertsDaMontagem(taskId);
-    if (!legenda.on && !zoom.on && !hl.on && insDaTask.length === 0) return undefined;
+    // 08.10: mixer de velocidade, Smart SFX e trilha também acordam o estágio
+    const velocidade = getVelocidadeCfg(taskId, velocidadeCfgsRef.current);
+    const sfx = getSfxCfg(taskId, sfxCfgsRef.current);
+    const trilha = getTrilhaCfg(taskId, trilhaCfgsRef.current);
+    const querSom = sfx.on || trilha.on;
+    if (!legenda.on && !zoom.on && !hl.on && insDaTask.length === 0 && !velocidade.on && !querSom) return undefined;
     return async (blob, info) => {
       const an = taskAnalysesRef.current?.[taskId] || taskAnalysesRef.current?.[cfgId];
       const copy = copyDaPosProducao([
@@ -2888,6 +3061,16 @@ function ClickUpPilotInner() {
             return null;
           }
         },
+        velocidade,
+        sfx,
+        trilha,
+        lerTrilha: async (id: string) => {
+          const { lerTrilha, trilhaPorId } = await import('@/lib/pilot-trilhas-store');
+          const b = await lerTrilha(id);
+          if (!b) return null;
+          const meta = trilhaPorId(id);
+          return { blob: b, nome: meta?.nome || trilha.nome || 'trilha', lufs: meta?.lufs ?? null };
+        },
         // PROJETO EDITÁVEL (05.10): avatar limpo + roteiro de cada montado,
         // pro botão "Projeto CapCut + Premiere" do card. Um por vídeo (hook).
         guardarProjeto: async (roteiro, avatarLimpo) => {
@@ -2940,12 +3123,15 @@ function ClickUpPilotInner() {
       }
       // O card precisa saber. Um AD entregue sem o zoom que foi pedido é
       // defeito, não detalhe — e antes disto só o console sabia.
-      const aplicou = !!r.blob;
-      setPosResultado((prev) => ({ ...prev, [taskId]: { aplicou, avisos: r.avisos } }));
-      if (!aplicou && r.avisos.length === 0) {
+      // `aplicou` = o RENDER (legenda/zoom/inserts/headline) entrou: o blob
+      // pode existir só pela velocidade/sonoplastia, e aí os selos visuais
+      // têm que acusar a falha do render.
+      const aplicou = r.aplicouVisual ?? !!r.blob;
+      setPosResultado((prev) => ({ ...prev, [taskId]: { aplicou, avisos: r.avisos, sonoplastia: r.sonoplastia, velocidade: r.velocidade } }));
+      if (!r.blob && r.avisos.length === 0) {
         setPosResultado((prev) => ({
           ...prev,
-          [taskId]: { aplicou: false, avisos: [`a pós-produção não gerou vídeo novo — o AD saiu ${semOQueFoiPedido({ legenda: legenda.on, zoom: zoom.on, headline: !!hl.on, inserts: insDaTask.length > 0 })}`] },
+          [taskId]: { aplicou: false, avisos: [`a pós-produção não gerou vídeo novo — o AD saiu ${semOQueFoiPedido({ legenda: legenda.on, zoom: zoom.on, headline: !!hl.on, inserts: insDaTask.length > 0 })}${velocidade.on ? ', sem o mixer de velocidade' : ''}${querSom ? ', sem SFX/trilha' : ''}`] },
         }));
       }
       return r.blob;
@@ -16536,11 +16722,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 const botaoProjeto = b.phase === 'done' && !b.isVA && montagemContentOk ? (
                                   <button
                                     type="button"
-                                    onClick={() => void exportarProjetoEditavel(b.taskId, b.taskName || b.taskId, b.genId)}
+                                    onClick={() => setProjetoEscolha({ taskId: b.taskId, nomeAd: b.taskName || b.taskId, genId: b.genId })}
                                     disabled={!!etapaProjeto}
                                     title={etapaProjeto
                                       ? `Exportando projeto… ${etapaProjeto}`
-                                      : 'Projeto editável — CapCut + Premiere: avatar completo, b-rolls no tempo certo, transições e legenda em camadas (PNG + .srt). Escolha a pasta de projetos do CapCut.'}
+                                      : 'Projeto editável: escolha CapCut ou Premiere e baixa na hora (avatar, b-rolls, transições, legenda, SFX e trilha em camadas)'}
                                     aria-label="Exportar projeto editável para CapCut e Premiere"
                                     data-pilot-projeto-editavel="true"
                                     className={`group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-violet-400/55 bg-gradient-to-b from-violet-400/25 via-violet-400/10 to-violet-400/[0.02] text-violet-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(167,139,250,0.45)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-violet-300/80 active:translate-y-0 active:scale-95 transition-[transform,box-shadow] disabled:cursor-wait ${etapaProjeto ? 'animate-pulse' : ''}`}
@@ -16551,8 +16737,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </svg>
                                   </button>
                                 ) : null;
+                                const janelaProjeto = projetoEscolha?.taskId === b.taskId ? (
+                                  <PilotProjetoExportModal
+                                    nomeAd={projetoEscolha.nomeAd}
+                                    onFechar={() => setProjetoEscolha(null)}
+                                    exportar={(alvo, onEtapa) => exportarProjetoEditavel(projetoEscolha.taskId, projetoEscolha.nomeAd, projetoEscolha.genId, alvo, onEtapa)}
+                                  />
+                                ) : null;
                                 if (!botaoVersoes && !botaoVA && !botaoProjeto) return undefined;
-                                return (<>{botaoVersoes}{botaoVA}{botaoProjeto}</>);
+                                return (<>{botaoVersoes}{botaoVA}{botaoProjeto}{janelaProjeto}</>);
                               })()}
                             >
                               {previewsNode}
