@@ -9,17 +9,31 @@ await mkdir(outputDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 
-async function openPreview(page) {
+async function openPreview(page, navegar = true) {
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(`console: ${message.text()}`);
   });
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+  if (navegar) await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
   await page.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByText('Conta Premium de Teste').waitFor({ state: 'visible', timeout: 10_000 });
   return dialog;
+}
+
+/** O preview tem um insert de demo do PC (BODY 1). Desde 07.10 o StockFrame
+ *  enxerga os inserts das outras origens e não cobre por cima deles — pra um
+ *  100% "limpo" ele sai pela própria janela de Inserts do PC. */
+async function removerInsertDoPc(page) {
+  await page.locator('#pi-abre').click();
+  const pcWin = page.locator('.pi-janela');
+  await pcWin.waitFor();
+  await pcWin.locator('.pi-partes .pi-parte').filter({ hasText: 'BODY 1' }).click();
+  await pcWin.locator('.pi-card:not(.is-alheio) .pi-card-topo').first().click();
+  await pcWin.getByRole('button', { name: 'remover insert' }).click();
+  await pcWin.getByRole('button', { name: 'Pronto' }).click();
+  await pcWin.waitFor({ state: 'detached' });
 }
 
 async function assertActiveFrame(page, selector) {
@@ -267,7 +281,9 @@ try {
       if (event.data?.source === 'pilot-stockframe' && event.data?.type === 'SF_REQUEST' && event.data?.action === 'download') window.__stockFrameTestDownloads++;
     });
   });
-  await openPreview(clean);
+  await clean.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+  await removerInsertDoPc(clean);
+  await openPreview(clean, false);
   await clean.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
   await clean.getByRole('button', { name: '100% de cobertura' }).click();
   await clean.getByRole('button', { name: 'Analisar copy e montar plano' }).click();

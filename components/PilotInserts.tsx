@@ -10,10 +10,13 @@
  * O que cada parte resolve:
  *   • lista de partes à esquerda, com o texto clicável palavra a palavra;
  *   • card do insert com PREVIEW REAL da mídia (thumb do vídeo/imagem);
- *   • escolha de layout com MAQUETE desenhada (não texto): tela cheia, faixas
- *     e cards, com o avatar em cima ou embaixo;
- *   • o foco do rosto do avatar num slider com prévia — é o que impede o split
- *     de decapitar o avatar.
+ *   • escolha do FORMATO com miniatura desenhada (não texto): tela cheia, as
+ *     divididas (reta, arredondada, com linha, mescla) e o React — o mesmo
+ *     seletor da integração StockFrame (components/InsertFormato);
+ *   • o rosto do avatar é enquadrado SOZINHO na montagem; o slider manual
+ *     continua pra quem quiser ajustar;
+ *   • os takes do StockFrame/Flow aparecem aqui também, e nenhum trecho
+ *     aceita dois inserts (07.10).
  *
  * Vive em portal (o card do Pilot tem transform 3D) e o CSS mora em
  * globals.css (`.pi-*`) — styled-jsx não atravessa portal.
@@ -28,14 +31,19 @@ import {
   coverComFoco,
   planoDeVelocidade,
   normalizarInsert,
+  normalizarLayout,
   recorteDaMidia,
+  rotuloDoLayout,
+  focoEhManual,
+  quemOcupaOTrecho,
+  primeiraPalavraLivre,
   INSERT_FOCO_PADRAO,
   INSERT_RECORTE_MIN_SEC,
   INSERT_VOLUME_PADRAO,
   type Insert,
   type LayoutInsert,
-  type TipoTransicao,
 } from '@/lib/pilot-inserts';
+import { MaqueteFormato, SeletorDeFormato, SeletorDeTransicao } from '@/components/InsertFormato';
 
 /* ═══════════════════ RECORTE: que pedaço do arquivo entra ═══════════════
  *
@@ -581,62 +589,18 @@ function RecortadorDeMidia({
   );
 }
 
-/* ═════════════════════ maquete de um layout (SVG) ═══════════════════════ */
-
-/** Desenho do palco — é o que substitui a explicação por texto. */
-function Maquete({ layout, ativo }: { layout: LayoutInsert; ativo: boolean }) {
-  const W = 54;
-  const H = 96;
-  const p = palcoDoLayout(layout, W, H);
-  const r = layout.tipo === 'cards' ? 4 : 0;
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className={'pi-maquete' + (ativo ? ' is-on' : '')} aria-hidden>
-      <rect x="0" y="0" width={W} height={H} rx="5" className="pi-mq-fundo" />
-      {p.avatar ? (
-        <>
-          <rect x={p.avatar.x} y={p.avatar.y} width={p.avatar.w} height={p.avatar.h} rx={r} className="pi-mq-avatar" />
-          {/* cabecinha: deixa claro QUAL metade é o avatar */}
-          <circle cx={p.avatar.x + p.avatar.w / 2} cy={p.avatar.y + p.avatar.h * 0.36} r="5.5" className="pi-mq-cabeca" />
-          <path
-            d={`M${p.avatar.x + p.avatar.w / 2 - 9} ${p.avatar.y + p.avatar.h * 0.95}
-                a9 9 0 0 1 18 0 z`}
-            className="pi-mq-cabeca"
-          />
-        </>
-      ) : null}
-      <rect x={p.insert.x} y={p.insert.y} width={p.insert.w} height={p.insert.h} rx={r} className="pi-mq-insert" />
-      {/* iconezinho de play no lado do insert */}
-      <path
-        d={`M${p.insert.x + p.insert.w / 2 - 4} ${p.insert.y + p.insert.h / 2 - 5}
-            l9 5 l-9 5 z`}
-        className="pi-mq-play"
-      />
-    </svg>
-  );
-}
-
-const LAYOUTS: Array<{ v: LayoutInsert; nome: string }> = [
-  { v: { tipo: 'cheia' }, nome: 'Tela cheia' },
-  { v: { tipo: 'faixas', avatar: 'cima' }, nome: 'Faixas' },
-  { v: { tipo: 'cards', avatar: 'cima' }, nome: 'Cards' },
-];
-
-const TRANSICOES: Array<{ v: TipoTransicao; nome: string }> = [
-  { v: 'nenhuma', nome: 'Seco' },
-  { v: 'escurecer', nome: 'Escurecer' },
-  { v: 'luz', nome: 'Luz' },
-  { v: 'misto', nome: 'Misto' },
-];
-
 /* ══════════════════ prévia do enquadramento do avatar ═══════════════════ */
 
 /**
- * Mostra o que o split faz com o avatar no foco escolhido. É a diferença entre
- * "avatar no card" e "avatar sem cabeça" — e o único jeito de o editor ver
- * isso sem renderizar o vídeo inteiro.
+ * Mostra o que a divisão faz com o avatar no foco escolhido. É a diferença
+ * entre "avatar no card" e "avatar sem cabeça" — e o único jeito de o editor
+ * ver isso sem renderizar o vídeo inteiro. A proporção é a do retângulo REAL
+ * do avatar no formato escolhido.
  */
-function PreviaDoFoco({ foco, thumb }: { foco: number; thumb: string | null }) {
-  const dst = { w: 92, h: 82 }; // proporção de meia tela 9:16
+function PreviaDoFoco({ foco, thumb, layout }: { foco: number; thumb: string | null; layout: LayoutInsert }) {
+  const ra = palcoDoLayout(layout, 1080, 1920).avatar || { x: 0, y: 0, w: 1080, h: 960 };
+  const k = Math.min(92 / ra.w, 82 / ra.h);
+  const dst = { w: Math.round(ra.w * k), h: Math.round(ra.h * k) };
   const rec = coverComFoco(1080, 1920, dst.w, dst.h, foco);
   const escala = dst.w / rec.sw;
   return (
@@ -673,9 +637,14 @@ function PreviaDoFoco({ foco, thumb }: { foco: number; thumb: string | null }) {
 
 export type ParteDaCopy = { label: string; text: string };
 
+const NOME_DA_ORIGEM: Record<string, string> = { stockframe: 'StockFrame', flow: 'Flow', manual: 'manual' };
+const origemDe = (ins: Insert) => ins.source || 'manual';
+
 export function PilotInsertsModal({
   partes,
   inserts,
+  outros = [],
+  onMudarOutros,
   onFechar,
   onMudar,
   onSubirMidia,
@@ -687,6 +656,14 @@ export function PilotInsertsModal({
   /** a copy JÁ dividida — exatamente o que foi pro HeyGen */
   partes: ParteDaCopy[];
   inserts: Insert[];
+  /**
+   * Os inserts das OUTRAS origens desta task (StockFrame, Flow, manual) —
+   * aparecem aqui pra ninguém pôr insert em cima de insert, e dá pra trocar
+   * o formato deles daqui mesmo.
+   */
+  outros?: Insert[];
+  /** grava a lista inteira de `outros` editada (formato, transição, remoção) */
+  onMudarOutros?: (proximos: Insert[]) => void;
   onFechar: () => void;
   onMudar: (proximos: Insert[]) => void;
   /** sobe o arquivo e devolve os metadados pra montar o insert */
@@ -717,6 +694,8 @@ export function PilotInsertsModal({
   /** Primeira ponta de um trecho em construção (clique 1 de 2). */
   const [ancorando, setAncorando] = useState<{ id: string; de: number } | null>(null);
   const [urlsDeMidia, setUrlsDeMidia] = useState<Record<string, string>>({});
+  /** "esse trecho já tem insert" — some sozinho */
+  const [aviso, setAviso] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => setMontado(true), []);
@@ -727,12 +706,30 @@ export function PilotInsertsModal({
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
   }, [onFechar]);
+  useEffect(() => {
+    if (!aviso) return;
+    const t = setTimeout(() => setAviso(null), 6000);
+    return () => clearTimeout(t);
+  }, [aviso]);
 
   const comTexto = useMemo(() => partes.filter((p) => (p.text || '').trim()), [partes]);
   const insertsDaParte = useCallback(
     (label: string) => inserts.filter((i) => i.ancora === label),
     [inserts],
   );
+  const outrosNorm = useMemo(() => outros.map((o) => normalizarInsert(o as never)), [outros]);
+  const outrosDaParte = useCallback(
+    (label: string) => outrosNorm.filter((i) => i.ancora === label),
+    [outrosNorm],
+  );
+  /** TODOS os inserts da task (desta janela e das outras) — a régua do "ocupado" */
+  const todos = useMemo(() => [...inserts.map((i) => normalizarInsert(i as never)), ...outrosNorm], [inserts, outrosNorm]);
+  const descreverDono = (x: Insert) =>
+    inserts.some((i) => i.id === x.id)
+      ? `o insert "${x.midiaNome}"`
+      : x.source
+        ? `o take do ${NOME_DA_ORIGEM[origemDe(x)]} "${x.stockFrame?.title || x.midiaNome}"`
+        : `o insert manual "${x.midiaNome}"`;
 
   /* ── URLs pro recortador ──────────────────────────────────────────────
    * O recorte precisa TOCAR o arquivo, não só ver a thumb. Os bytes vivem no
@@ -784,14 +781,26 @@ export function PilotInsertsModal({
   const atualizar = (id: string, mudanca: Partial<Insert>) =>
     onMudar(inserts.map((i) => (i.id === id ? { ...i, ...mudanca } : i)));
   const remover = (id: string) => onMudar(inserts.filter((i) => i.id !== id));
+  const atualizarOutro = (id: string, mudanca: Partial<Insert>) =>
+    onMudarOutros?.(outros.map((i) => (i.id === id ? { ...i, ...mudanca } : i)));
+  const removerOutro = (id: string) => onMudarOutros?.(outros.filter((i) => i.id !== id));
+
+  const palavrasDe = (label: string) =>
+    (partes.find((p) => p.label === label)?.text || '').split(/\s+/).filter(Boolean);
 
   async function subir(f: File) {
+    const livre = primeiraPalavraLivre(todos, parteAtiva, palavrasDe(parteAtiva).length);
+    if (livre === null) {
+      setAviso(`A fala inteira de ${parteAtiva} já tem insert — encurte ou remova um antes de pôr outro.`);
+      return;
+    }
     setSubindo(true);
     try {
       const meta = await onSubirMidia(f, parteAtiva);
       if (!meta) return;
       const id = `ins${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
-      const novo = insertPadrao(id, parteAtiva, meta);
+      // nasce na primeira palavra LIVRE — nunca por cima de outro insert
+      const novo = { ...insertPadrao(id, parteAtiva, meta), palavraDe: livre, palavraAte: livre };
       onMudar([...inserts, novo]);
       setSelecionado(id);
     } finally {
@@ -802,6 +811,252 @@ export function PilotInsertsModal({
   if (!montado) return null;
   const parte = comTexto.find((p) => p.label === parteAtiva) || comTexto[0];
   const palavras = (parte?.text || '').split(/\s+/).filter(Boolean);
+  const proprios = insertsDaParte(parteAtiva);
+  const alheios = outrosDaParte(parteAtiva);
+  const parteLotada = primeiraPalavraLivre(todos, parteAtiva, palavras.length) === null;
+  const totalOutros = outros.length;
+
+  /** O card de um insert. `alheio` = de outra origem (StockFrame/Flow…):
+   *  formato, transição e enquadramento editáveis; trecho e recorte ficam na
+   *  janela de origem. */
+  const cardDoInsert = (ins: Insert, alheio: boolean) => {
+    const thumb = thumbDaMidia(ins.midiaKey) || (alheio ? ins.stockFrame?.previewUrl || null : null);
+    const aberto = selecionado === ins.id;
+    const mudar = (m: Partial<Insert>) => (alheio ? atualizarOutro(ins.id, m) : atualizar(ins.id, m));
+    const editavel = !alheio || !!onMudarOutros;
+    const layout = normalizarLayout(ins.layout);
+    const comRetanguloDoAvatar = layout.tipo !== 'cheia' && layout.tipo !== 'react';
+    const manual = focoEhManual(ins);
+    return (
+      <div key={ins.id} className={'pi-card' + (aberto ? ' is-aberto' : '') + (alheio ? ' is-alheio' : '')} data-origem={origemDe(ins)}>
+        <button
+          type="button"
+          className="pi-card-topo"
+          onClick={() => setSelecionado(aberto ? null : ins.id)}
+        >
+          <span className="pi-card-thumb">
+            {thumb ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={thumb} alt="" />
+            ) : (
+              <span className="pi-card-thumb-vazia" aria-hidden>▶</span>
+            )}
+          </span>
+          <span className="pi-card-info">
+            <span className="pi-card-nome">
+              {alheio ? <span className={'pi-origem is-' + origemDe(ins)}>{NOME_DA_ORIGEM[origemDe(ins)]}</span> : null}
+              {ins.stockFrame?.title || ins.midiaNome}
+            </span>
+            <span className="pi-card-meta">
+              <MaqueteFormato layout={layout} tamanho="mini" />
+              {rotuloDoLayout(layout)}
+              {' · '}
+              {(() => {
+                const n = normalizarInsert(ins as never);
+                const q = n.palavraAte - n.palavraDe + 1;
+                return `${q} palavra${q === 1 ? '' : 's'} do texto`;
+              })()}
+            </span>
+          </span>
+          <span className="pi-card-chev" aria-hidden>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </span>
+        </button>
+
+        {aberto ? (
+          <div className="pi-card-corpo">
+            {alheio ? (
+              <p className="pi-alheio-nota">
+                Este take veio do {NOME_DA_ORIGEM[origemDe(ins)]}. O formato e a transição você troca aqui; o trecho e o take
+                se ajustam na janela do {NOME_DA_ORIGEM[origemDe(ins)]}.
+              </p>
+            ) : null}
+            {/* FORMATO com miniatura de cada tela */}
+            <div className="pi-rotulo">Formato da tela</div>
+            {editavel ? (
+              <SeletorDeFormato layout={layout} onMudar={(l) => mudar({ layout: l })} />
+            ) : (
+              <p className="pi-alheio-nota">{rotuloDoLayout(layout)}</p>
+            )}
+
+            {/* ENQUADRAMENTO DO ROSTO (divididas e mescla) */}
+            {comRetanguloDoAvatar && editavel ? (
+              <>
+                <div className="pi-rotulo mt">
+                  Enquadramento do rosto
+                  <span className="pi-rotulo-nota">
+                    {manual ? 'manual — vale o seu ajuste' : 'automático — o rosto é achado na montagem'}
+                  </span>
+                </div>
+                <div className="pi-avatar-linha">
+                  <div className="fi-seg">
+                    <button
+                      type="button"
+                      className={'fi-seg-item' + (!manual ? ' is-on' : '')}
+                      onClick={() => mudar({ focoManual: false, focoAvatarY: INSERT_FOCO_PADRAO })}
+                    >
+                      Automático
+                    </button>
+                    <button
+                      type="button"
+                      className={'fi-seg-item' + (manual ? ' is-on' : '')}
+                      onClick={() => mudar({ focoManual: true })}
+                    >
+                      Manual
+                    </button>
+                  </div>
+                  {manual ? (
+                    <div className="pi-foco">
+                      <PreviaDoFoco foco={ins.focoAvatarY} thumb={thumbAvatar || null} layout={layout} />
+                      <div className="pi-foco-ctrl">
+                        <span className="pi-foco-rot">Altura do rosto</span>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={0.7}
+                          step={0.02}
+                          value={ins.focoAvatarY}
+                          onChange={(e) => mudar({ focoManual: true, focoAvatarY: parseFloat(e.target.value) })}
+                          className="pi-slider"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+            {layout.tipo === 'react' ? (
+              <p className="pi-alheio-nota mt">
+                No React o fundo do avatar é removido na montagem e ele entra pequeno no canto, posicionado pelo rosto.
+              </p>
+            ) : null}
+
+            {/* TRANSIÇÃO */}
+            <div className="pi-rotulo mt">Transição</div>
+            {editavel ? (
+              <SeletorDeTransicao valor={ins.transicao} onMudar={(t) => mudar({ transicao: t })} />
+            ) : null}
+
+            {/* RECORTE — QUE PEDAÇO do arquivo vira o insert.
+              * Sem isto, importar um vídeo de 3 min pra usar 6s do
+              * meio era impossível: entrava o arquivo do começo. */}
+            {!alheio && ins.midiaTipo === 'video' ? (
+              <>
+                <div className="pi-rotulo mt">
+                  Recorte do arquivo
+                  <span className="pi-rotulo-nota">arrasta as pontas, ou marca com a agulha</span>
+                </div>
+                <RecortadorDeMidia
+                  url={urlsDeMidia[ins.midiaKey] ?? null}
+                  recorteDe={ins.recorteDe}
+                  recorteAte={ins.recorteAte}
+                  onMudar={(de, ate) => atualizar(ins.id, { recorteDe: de, recorteAte: ate })}
+                />
+              </>
+            ) : null}
+
+            {/* SOM DO INSERT (03.09): b-roll entra MUDO por padrão
+              * (a fala do avatar é que manda), mas tem insert que só
+              * funciona com o som dele. */}
+            {!alheio && ins.midiaTipo === 'video' ? (
+              <>
+                <div className="pi-rotulo mt">
+                  Som do insert
+                  <span className="pi-rotulo-nota">
+                    {ins.audio ? 'entra junto com a fala do avatar' : 'mudo — só a fala do avatar'}
+                  </span>
+                </div>
+                <div className="pi-som">
+                  <button
+                    type="button"
+                    className={'pi-som-btn' + (ins.audio ? ' is-on' : '')}
+                    onClick={() => atualizar(ins.id, { audio: !ins.audio })}
+                    title={ins.audio ? 'Desligar o som deste insert' : 'Ligar o som deste insert'}
+                    aria-label="Som do insert"
+                  >
+                    {ins.audio ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                        <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M11 5 6 9H2v6h4l5 4V5z" />
+                        <path d="m17 9 4 6M21 9l-4 6" />
+                      </svg>
+                    )}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO}
+                    onChange={(e) => atualizar(ins.id, { audio: true, volume: parseFloat(e.target.value) })}
+                    className={'pi-slider pi-som-vol' + (ins.audio ? '' : ' is-off')}
+                    title="Volume do som do insert"
+                  />
+                  <span className="pi-som-num mono">
+                    {Math.round((typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO) * 100)}%
+                  </span>
+                </div>
+              </>
+            ) : null}
+
+            {/* ENCAIXE — não é controle, é DIAGNÓSTICO.
+              * A duração vem do trecho marcado; o que resta é a
+              * mídia se ajustar. Aqui o editor vê o que o sistema
+              * vai fazer, em vez de ter que decidir. */}
+            {!alheio ? (
+              <>
+                <div className="pi-rotulo mt">Encaixe automático</div>
+                {(() => {
+                  const n = normalizarInsert(ins as never);
+                  // estimativa honesta: a parte inteira ≈ nº de palavras × ~0,42s
+                  const janela = Math.max(0.5, (n.palavraAte - n.palavraDe + 1) * 0.42);
+                  // o que conta é a duração do RECORTE, não a do arquivo
+                  const arquivo = duracaoDaMidia?.(ins.midiaKey) ?? 0;
+                  const natural = arquivo > 0 ? recorteDaMidia(ins, arquivo).dur : 0;
+                  const pv = planoDeVelocidade(natural, janela);
+                  const rotulo =
+                    ins.midiaTipo === 'imagem'
+                      ? 'Imagem — fica parada o trecho inteiro.'
+                      : pv.motivo === 'cortou'
+                        ? `Arquivo de ${natural.toFixed(1)}s num trecho de ~${janela.toFixed(1)}s: CORTA no fim da fala.`
+                        : pv.motivo === 'desacelerou'
+                          ? `Arquivo de ${natural.toFixed(1)}s num trecho de ~${janela.toFixed(1)}s: DESACELERA pra ${pv.velocidade.toFixed(2)}x.`
+                          : pv.motivo === 'desacelerou-e-congelou'
+                            ? `Curto demais: vai a ${pv.velocidade.toFixed(2)}x e o resto segura no último frame.`
+                            : natural > 0
+                              ? 'Cabe exato — sem ajuste.'
+                              : 'A duração do arquivo é medida na montagem.';
+                  return (
+                    <div className={'pi-encaixe' + (pv.motivo === 'desacelerou-e-congelou' ? ' is-alerta' : '')}>
+                      <span className="pi-encaixe-icone" aria-hidden>
+                        {pv.motivo === 'cortou' ? '✂' : pv.velocidade < 1 ? '◐' : '='}
+                      </span>
+                      <span>
+                        {rotulo}
+                        {pv.blur > 0 ? ' Com borrão leve pra o lento não parecer travado.' : ''}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </>
+            ) : null}
+
+            {editavel ? (
+              <button type="button" className="pi-remover" onClick={() => (alheio ? removerOutro(ins.id) : remover(ins.id))}>
+                {alheio ? 'tirar este take do AD' : 'remover insert'}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return createPortal(
     <div className="pi-camada" role="dialog" aria-modal="true" aria-label="Inserts">
@@ -822,7 +1077,7 @@ export function PilotInsertsModal({
               O b-roll entra na montagem, no ponto da copy que você escolher — sem mexer no que já foi pro HeyGen.
             </span>
           </span>
-          <span className="pi-conta">{inserts.length}</span>
+          <span className="pi-conta">{inserts.length + totalOutros}</span>
           <button type="button" className="pi-x" onClick={onFechar} aria-label="Fechar">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="m6 6 12 12M18 6 6 18" />
@@ -835,7 +1090,7 @@ export function PilotInsertsModal({
           <aside className="pi-partes">
             <div className="pi-rotulo">Onde entra</div>
             {comTexto.map((p) => {
-              const n = insertsDaParte(p.label).length;
+              const n = insertsDaParte(p.label).length + outrosDaParte(p.label).length;
               return (
                 <button
                   key={p.label}
@@ -866,21 +1121,25 @@ export function PilotInsertsModal({
             <div className="pi-copy">
               {palavras.map((w, i) => {
                 // De quem é esta palavra? (o trecho, não uma marca solta)
-                const dono = insertsDaParte(parteAtiva)
+                const dono = proprios
                   .map(normalizarInsert)
                   .find((x) => i >= x.palavraDe && i <= x.palavraAte);
+                const donoAlheio = dono ? null : alheios.find((x) => i >= x.palavraDe && i <= x.palavraAte) || null;
                 const emConstrucao =
-                  ancorando && insertsDaParte(parteAtiva).some((x) => x.id === ancorando.id)
+                  ancorando && proprios.some((x) => x.id === ancorando.id)
                     ? i >= Math.min(ancorando.de, i) && i === ancorando.de
                     : false;
                 const alvo =
                   (selecionado && inserts.find((x) => x.id === selecionado && x.ancora === parteAtiva)) ||
-                  insertsDaParte(parteAtiva)[0];
+                  proprios[0];
                 const cls =
                   'pi-palavra' +
                   (dono ? ' is-dentro' : '') +
                   (dono && i === dono.palavraDe ? ' is-inicio' : '') +
                   (dono && i === dono.palavraAte ? ' is-fim' : '') +
+                  (donoAlheio ? ' is-ocupada is-' + origemDe(donoAlheio) : '') +
+                  (donoAlheio && i === donoAlheio.palavraDe ? ' is-inicio' : '') +
+                  (donoAlheio && i === donoAlheio.palavraAte ? ' is-fim' : '') +
                   (emConstrucao ? ' is-ancora' : '');
                 return (
                   <button
@@ -889,6 +1148,14 @@ export function PilotInsertsModal({
                     className={cls}
                     onClick={() => {
                       if (!alvo) {
+                        if (donoAlheio) {
+                          setAviso(`Esse trecho já tem ${descreverDono(donoAlheio)} — escolha outra fala pro insert.`);
+                          return;
+                        }
+                        if (parteLotada) {
+                          setAviso(`A fala inteira de ${parteAtiva} já tem insert — encurte ou remova um antes de pôr outro.`);
+                          return;
+                        }
                         fileRef.current?.click();
                         return;
                       }
@@ -898,17 +1165,32 @@ export function PilotInsertsModal({
                       if (ancorando && ancorando.id === alvo.id) {
                         const de = Math.min(ancorando.de, i);
                         const ate = Math.max(ancorando.de, i);
+                        // NUNCA insert por cima de insert (de qualquer origem)
+                        const ocupante = quemOcupaOTrecho(todos, parteAtiva, de, ate, alvo.id);
+                        if (ocupante) {
+                          setAviso(`Esse trecho cruza ${descreverDono(ocupante)} — marque uma fala livre.`);
+                          setAncorando(null);
+                          return;
+                        }
                         atualizar(alvo.id, { palavraDe: de, palavraAte: ate });
                         setAncorando(null);
+                        setAviso(null);
                       } else {
+                        const ocupante = quemOcupaOTrecho(todos, parteAtiva, i, i, alvo.id);
+                        if (ocupante) {
+                          setAviso(`Essa palavra já tem ${descreverDono(ocupante)} — comece o trecho numa fala livre.`);
+                          return;
+                        }
                         setAncorando({ id: alvo.id, de: i });
                         setSelecionado(alvo.id);
                       }
                     }}
                     title={
-                      ancorando && alvo && ancorando.id === alvo.id
-                        ? 'Clique aqui pra FECHAR o trecho'
-                        : 'Clique pra começar o trecho do insert'
+                      donoAlheio
+                        ? `Ocupado por ${descreverDono(donoAlheio)}`
+                        : ancorando && alvo && ancorando.id === alvo.id
+                          ? 'Clique aqui pra FECHAR o trecho'
+                          : 'Clique pra começar o trecho do insert'
                     }
                   >
                     {w}
@@ -917,7 +1199,9 @@ export function PilotInsertsModal({
               })}
             </div>
             <div className="pi-copy-dica">
-              {ancorando ? (
+              {aviso ? (
+                <span className="pi-copy-aviso" role="status">{aviso}</span>
+              ) : ancorando ? (
                 <span className="pi-copy-dica-on">
                   Trecho aberto — clique na <b>última</b> palavra pra fechar.
                   <button type="button" className="pi-mini ml-2" onClick={() => setAncorando(null)}>
@@ -925,257 +1209,29 @@ export function PilotInsertsModal({
                   </button>
                 </span>
               ) : (
-                <>Clique na primeira palavra do trecho e depois na última. O insert cobre exatamente essa fala.</>
+                <>
+                  Clique na primeira palavra do trecho e depois na última. O insert cobre exatamente essa fala.
+                  {alheios.length > 0 ? <> As falas em <b className="pi-legenda-ocupada">roxo</b> já têm take de outra integração.</> : null}
+                </>
               )}
             </div>
             </div>
 
             {/* ── os inserts desta parte ── */}
             <div className="pi-lista">
-              {insertsDaParte(parteAtiva).map((ins) => {
-                const thumb = thumbDaMidia(ins.midiaKey);
-                const aberto = selecionado === ins.id;
-                return (
-                  <div key={ins.id} className={'pi-card' + (aberto ? ' is-aberto' : '')}>
-                    <button
-                      type="button"
-                      className="pi-card-topo"
-                      onClick={() => setSelecionado(aberto ? null : ins.id)}
-                    >
-                      <span className="pi-card-thumb">
-                        {thumb ? (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img src={thumb} alt="" />
-                        ) : (
-                          <span className="pi-card-thumb-vazia" aria-hidden>▶</span>
-                        )}
-                      </span>
-                      <span className="pi-card-info">
-                        <span className="pi-card-nome">{ins.midiaNome}</span>
-                        <span className="pi-card-meta">
-                          {ins.layout.tipo === 'cheia'
-                            ? 'tela cheia'
-                            : `${ins.layout.tipo === 'faixas' ? 'faixas' : 'cards'} · avatar ${ins.layout.avatar}`}
-                          {' · '}
-                          {(() => {
-                            const n = normalizarInsert(ins as never);
-                            const q = n.palavraAte - n.palavraDe + 1;
-                            return `${q} palavra${q === 1 ? '' : 's'} do texto`;
-                          })()}
-                        </span>
-                      </span>
-                      <span className="pi-card-chev" aria-hidden>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </span>
-                    </button>
-
-                    {aberto ? (
-                      <div className="pi-card-corpo">
-                        {/* LAYOUT com maquete */}
-                        <div className="pi-rotulo">Layout</div>
-                        <div className="pi-layouts">
-                          {LAYOUTS.map((L) => {
-                            const mesmo = L.v.tipo === ins.layout.tipo;
-                            const alvo: LayoutInsert =
-                              L.v.tipo === 'cheia'
-                                ? { tipo: 'cheia' }
-                                : { tipo: L.v.tipo, avatar: ins.layout.tipo !== 'cheia' ? ins.layout.avatar : 'cima' };
-                            return (
-                              <button
-                                key={L.nome}
-                                type="button"
-                                className={'pi-layout' + (mesmo ? ' is-on' : '')}
-                                onClick={() => atualizar(ins.id, { layout: alvo })}
-                              >
-                                <Maquete layout={alvo} ativo={mesmo} />
-                                <span className="pi-layout-nome">{L.nome}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {/* POSIÇÃO DO AVATAR + FOCO (só no split) */}
-                        {ins.layout.tipo !== 'cheia' ? (
-                          <>
-                            <div className="pi-rotulo mt">Avatar</div>
-                            <div className="pi-avatar-linha">
-                              <div className="pi-seg">
-                                {(['cima', 'baixo'] as const).map((pos) => (
-                                  <button
-                                    key={pos}
-                                    type="button"
-                                    className={'pi-seg-item' + (ins.layout.tipo !== 'cheia' && ins.layout.avatar === pos ? ' is-on' : '')}
-                                    onClick={() =>
-                                      atualizar(ins.id, {
-                                        layout: { tipo: ins.layout.tipo as 'faixas' | 'cards', avatar: pos },
-                                      })
-                                    }
-                                  >
-                                    {pos === 'cima' ? 'Em cima' : 'Embaixo'}
-                                  </button>
-                                ))}
-                              </div>
-                              <div className="pi-foco">
-                                <PreviaDoFoco foco={ins.focoAvatarY} thumb={thumbAvatar || null} />
-                                <div className="pi-foco-ctrl">
-                                  <span className="pi-foco-rot">Enquadramento do rosto</span>
-                                  <input
-                                    type="range"
-                                    min={0.1}
-                                    max={0.7}
-                                    step={0.02}
-                                    value={ins.focoAvatarY}
-                                    onChange={(e) => atualizar(ins.id, { focoAvatarY: parseFloat(e.target.value) })}
-                                    className="pi-slider"
-                                  />
-                                  <button
-                                    type="button"
-                                    className="pi-mini"
-                                    onClick={() => atualizar(ins.id, { focoAvatarY: INSERT_FOCO_PADRAO })}
-                                  >
-                                    padrão
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : null}
-
-                        {/* TRANSIÇÃO */}
-                        <div className="pi-rotulo mt">Transição</div>
-                        <div className="pi-seg">
-                          {TRANSICOES.map((t) => (
-                            <button
-                              key={t.v}
-                              type="button"
-                              className={'pi-seg-item' + (ins.transicao === t.v ? ' is-on' : '')}
-                              onClick={() => atualizar(ins.id, { transicao: t.v })}
-                            >
-                              {t.nome}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* RECORTE — QUE PEDAÇO do arquivo vira o insert.
-                          * Sem isto, importar um vídeo de 3 min pra usar 6s do
-                          * meio era impossível: entrava o arquivo do começo. */}
-                        {ins.midiaTipo === 'video' ? (
-                          <>
-                            <div className="pi-rotulo mt">
-                              Recorte do arquivo
-                              <span className="pi-rotulo-nota">arrasta as pontas, ou marca com a agulha</span>
-                            </div>
-                            <RecortadorDeMidia
-                              url={urlsDeMidia[ins.midiaKey] ?? null}
-                              recorteDe={ins.recorteDe}
-                              recorteAte={ins.recorteAte}
-                              onMudar={(de, ate) => atualizar(ins.id, { recorteDe: de, recorteAte: ate })}
-                            />
-                          </>
-                        ) : null}
-
-                        {/* SOM DO INSERT (03.09): b-roll entra MUDO por padrão
-                          * (a fala do avatar é que manda), mas tem insert que só
-                          * funciona com o som dele. */}
-                        {ins.midiaTipo === 'video' ? (
-                          <>
-                            <div className="pi-rotulo mt">
-                              Som do insert
-                              <span className="pi-rotulo-nota">
-                                {ins.audio ? 'entra junto com a fala do avatar' : 'mudo — só a fala do avatar'}
-                              </span>
-                            </div>
-                            <div className="pi-som">
-                              <button
-                                type="button"
-                                className={'pi-som-btn' + (ins.audio ? ' is-on' : '')}
-                                onClick={() => atualizar(ins.id, { audio: !ins.audio })}
-                                title={ins.audio ? 'Desligar o som deste insert' : 'Ligar o som deste insert'}
-                                aria-label="Som do insert"
-                              >
-                                {ins.audio ? (
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                    <path d="M11 5 6 9H2v6h4l5 4V5z" />
-                                    <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
-                                  </svg>
-                                ) : (
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                    <path d="M11 5 6 9H2v6h4l5 4V5z" />
-                                    <path d="m17 9 4 6M21 9l-4 6" />
-                                  </svg>
-                                )}
-                              </button>
-                              <input
-                                type="range"
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                value={typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO}
-                                onChange={(e) => atualizar(ins.id, { audio: true, volume: parseFloat(e.target.value) })}
-                                className={'pi-slider pi-som-vol' + (ins.audio ? '' : ' is-off')}
-                                title="Volume do som do insert"
-                              />
-                              <span className="pi-som-num mono">
-                                {Math.round((typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO) * 100)}%
-                              </span>
-                            </div>
-                          </>
-                        ) : null}
-
-                        {/* ENCAIXE — não é controle, é DIAGNÓSTICO.
-                          * A duração vem do trecho marcado; o que resta é a
-                          * mídia se ajustar. Aqui o editor vê o que o sistema
-                          * vai fazer, em vez de ter que decidir. */}
-                        <div className="pi-rotulo mt">Encaixe automático</div>
-                        {(() => {
-                          const n = normalizarInsert(ins as never);
-                          const palavrasDaParte = (partes.find((p) => p.label === ins.ancora)?.text || '')
-                            .split(/\s+/)
-                            .filter(Boolean).length || 1;
-                          // estimativa honesta: a parte inteira ≈ nº de palavras × ~0,42s
-                          const janela = Math.max(0.5, (n.palavraAte - n.palavraDe + 1) * 0.42);
-                          // o que conta é a duração do RECORTE, não a do arquivo
-                          const arquivo = duracaoDaMidia?.(ins.midiaKey) ?? 0;
-                          const natural = arquivo > 0 ? recorteDaMidia(ins, arquivo).dur : 0;
-                          const pv = planoDeVelocidade(natural, janela);
-                          const rotulo =
-                            ins.midiaTipo === 'imagem'
-                              ? 'Imagem — fica parada o trecho inteiro.'
-                              : pv.motivo === 'cortou'
-                                ? `Arquivo de ${natural.toFixed(1)}s num trecho de ~${janela.toFixed(1)}s: CORTA no fim da fala.`
-                                : pv.motivo === 'desacelerou'
-                                  ? `Arquivo de ${natural.toFixed(1)}s num trecho de ~${janela.toFixed(1)}s: DESACELERA pra ${pv.velocidade.toFixed(2)}x.`
-                                  : pv.motivo === 'desacelerou-e-congelou'
-                                    ? `Curto demais: vai a ${pv.velocidade.toFixed(2)}x e o resto segura no último frame.`
-                                    : natural > 0
-                                      ? 'Cabe exato — sem ajuste.'
-                                      : 'A duração do arquivo é medida na montagem.';
-                          return (
-                            <div className={'pi-encaixe' + (pv.motivo === 'desacelerou-e-congelou' ? ' is-alerta' : '')}>
-                              <span className="pi-encaixe-icone" aria-hidden>
-                                {pv.motivo === 'cortou' ? '✂' : pv.velocidade < 1 ? '◐' : '='}
-                              </span>
-                              <span>
-                                {rotulo}
-                                {pv.blur > 0 ? ' Com borrão leve pra o lento não parecer travado.' : ''}
-                              </span>
-                            </div>
-                          );
-                        })()}
-
-                        <button type="button" className="pi-remover" onClick={() => remover(ins.id)}>
-                          remover insert
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
+              {proprios.map((ins) => cardDoInsert(ins, false))}
+              {alheios.map((ins) => cardDoInsert(outros.find((o) => o.id === ins.id) || ins, true))}
 
               {/* ADICIONAR */}
-              <label className={'pi-add' + (subindo ? ' is-subindo' : '')}>
+              <label
+                className={'pi-add' + (subindo ? ' is-subindo' : '') + (parteLotada ? ' is-lotada' : '')}
+                onClick={(e) => {
+                  if (parteLotada) {
+                    e.preventDefault();
+                    setAviso(`A fala inteira de ${parteAtiva} já tem insert — encurte ou remova um antes de pôr outro.`);
+                  }
+                }}
+              >
                 <input
                   ref={fileRef}
                   type="file"
@@ -1188,7 +1244,7 @@ export function PilotInsertsModal({
                   }}
                 />
                 <span className="pi-add-mais" aria-hidden>+</span>
-                {subindo ? 'lendo o arquivo…' : `insert em ${parteAtiva}`}
+                {subindo ? 'lendo o arquivo…' : parteLotada ? `${parteAtiva} já está toda coberta` : `insert em ${parteAtiva}`}
               </label>
             </div>
           </section>
@@ -1196,9 +1252,15 @@ export function PilotInsertsModal({
 
         <div className="pi-rodape">
           <span className="pi-rodape-txt">
-            {inserts.length === 0
+            {inserts.length === 0 && totalOutros === 0
               ? 'Nenhum insert — o AD sai só com o avatar.'
-              : `${inserts.length} insert${inserts.length === 1 ? '' : 's'} · entram na montagem, depois da remoção de silêncios.`}
+              : [
+                  inserts.length > 0 ? `${inserts.length} insert${inserts.length === 1 ? '' : 's'} desta janela` : null,
+                  ...(['stockframe', 'flow', 'manual'] as const).map((o) => {
+                    const n = outros.filter((x) => origemDe(x) === o).length;
+                    return n > 0 ? `${n} do ${NOME_DA_ORIGEM[o]}` : null;
+                  }),
+                ].filter(Boolean).join(' · ') + ' · entram na montagem, depois da remoção de silêncios.'}
           </span>
           <button type="button" className="pi-ok" onClick={onFechar}>
             Pronto

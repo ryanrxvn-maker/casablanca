@@ -60,15 +60,55 @@ try {
   assert.equal(await timeline.locator('[data-video-id]').count(), initialTakeCount + 1);
   await dialog.getByRole('button', { name: 'Deixar com avatar' }).click();
   assert.equal(await timeline.locator('[data-video-id]').count(), initialTakeCount);
-  await dialog.getByRole('button', { name: 'Concluir' }).click();
+  // 07.10 — bug do Silas: "coloco os stocks, clico pra concluir e quando
+  // volto o StockFrame tá desligado e sem os stocks". Com plano revisado e
+  // ainda não aplicado, o Concluir APLICA (baixa os takes) e fecha.
+  const done = dialog.locator('[data-stockframe-done]');
+  assert.equal(await done.getAttribute('data-stockframe-done'), 'apply', 'plano pendente: o botão aplica');
+  assert.match(await done.innerText(), /Aplicar e concluir/);
+  await done.click();
+  await dialog.waitFor({ state: 'detached', timeout: 30_000 });
+  assert.ok(await page.evaluate(() => window.__stockFrameTestDownloads) > 0, 'Concluir com plano pendente baixa os takes');
   await open();
   dialog = page.getByRole('dialog');
-  assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), false, 'Plano ainda não aplicado não deve deixar StockFrame ON sem take salvo');
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'depois do Concluir o StockFrame fica ON');
+  await dialog.getByRole('button', { name: /Ajustar \d+ takes/ }).waitFor({ timeout: 10_000 });
+  await dialog.getByLabel('Dinâmica completa da copy').waitFor({ timeout: 10_000 });
+  assert.equal(await dialog.locator('[data-stockframe-done]').getAttribute('data-stockframe-done'), 'close', 'reabrir: plano restaurado e nada pendente');
+  const downloadsAntes = await page.evaluate(() => window.__stockFrameTestDownloads);
+  await dialog.locator('[data-stockframe-done]').click();
+  await dialog.waitFor({ state: 'detached', timeout: 10_000 });
+  assert.equal(await page.evaluate(() => window.__stockFrameTestDownloads), downloadsAntes, 'Concluir sem pendência não baixa nada');
 
   const full = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   await full.goto(process.env.STOCKFRAME_PREVIEW_URL || 'http://127.0.0.1:3100/dev/pilot-preview');
   await full.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
-  const fullDialog = full.getByRole('dialog');
+  let fullDialog = full.getByRole('dialog');
+  await fullDialog.getByText('Conta Premium de Teste').waitFor();
+  await fullDialog.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
+  await fullDialog.getByRole('button', { name: '100% de cobertura' }).click();
+  // 07.10: com insert do PC na montagem, 100% StockFrame cobriria por cima
+  // dele — o plano pula o trecho ocupado e o Aplicar recusa, sem baixar nada.
+  await fullDialog.getByRole('button', { name: 'Analisar copy e montar plano' }).click();
+  await fullDialog.getByRole('heading', { name: /takes · \d+(?:\.\d+)?% da copy/ }).waitFor({ timeout: 25_000 });
+  const downloadsFull = await full.evaluate(() => window.__stockFrameTestDownloads || 0);
+  await fullDialog.getByRole('button', { name: 'Aplicar na montagem' }).click();
+  await fullDialog.getByText(/Há inserts manuais ou do Flow nesta montagem/).waitFor({ timeout: 10_000 });
+  assert.equal(await full.evaluate(() => window.__stockFrameTestDownloads || 0), downloadsFull, '100% bloqueado não baixa nada');
+  await fullDialog.getByRole('button', { name: 'Fechar', exact: true }).click();
+  await fullDialog.waitFor({ state: 'detached', timeout: 10_000 });
+  // tira o insert do PC pela janela de Inserts e refaz o 100%
+  await full.locator('#pi-abre').click();
+  const pcWin = full.locator('.pi-janela');
+  await pcWin.waitFor();
+  await pcWin.locator('.pi-partes .pi-parte').filter({ hasText: 'BODY 1' }).click();
+  await pcWin.locator('.pi-card:not(.is-alheio) .pi-card-topo').first().click();
+  await pcWin.getByRole('button', { name: 'remover insert' }).click();
+  await pcWin.getByRole('button', { name: 'Pronto' }).click();
+  await full.getByRole('button', { name: 'Abrir integração StockFrame' }).click();
+  fullDialog = full.getByRole('dialog');
+  // o rascunho com takes manteve o StockFrame ON (07.10)
+  assert.equal(await fullDialog.getByRole('checkbox', { name: 'Ativar StockFrame' }).isChecked(), true, 'fechar com rascunho de takes mantém ON');
   await fullDialog.getByText('Conta Premium de Teste').waitFor();
   await fullDialog.getByRole('button', { name: 'Smart Stocks', exact: true }).click();
   await fullDialog.getByRole('button', { name: '100% de cobertura' }).click();

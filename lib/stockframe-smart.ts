@@ -1,3 +1,4 @@
+import type { LayoutInsert, TipoTransicao } from './pilot-inserts';
 import { stockFrameSearchText, type StockFrameNiche, type StockFrameOrigin, type StockFrameVideo } from './stockframe';
 import { stockFrameVisualAudit, stockFrameVisualAuditVersion, type StockFrameVisualAudit } from './stockframe-visual-audit';
 import { stockFrameFeelingNiche, stockFrameFeelingVersion, type StockFrameFeelingNiche } from './stockframe-feeling';
@@ -32,6 +33,12 @@ export type SmartStockSegment = {
   semanticContextText?: string;
   candidates: SmartStockCandidate[];
   selectedVideoId?: string;
+  /** Formato do take na tela (tela cheia, dividida, React) — o Smart varia
+   *  sozinho (stockframe-formatos) e o editor troca na timeline. */
+  formato?: LayoutInsert;
+  transicao?: TipoTransicao;
+  /** o editor escolheu o formato/transição à mão: a variação automática não mexe */
+  formatoManual?: boolean;
 };
 
 export type SmartStockTimelineBlock = {

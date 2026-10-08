@@ -38,7 +38,11 @@ import {
 } from '@/lib/stockframe-smart';
 import { loadStockFrameVisualAudit, stockFrameAuditedSearchSeeds } from '@/lib/stockframe-visual-audit';
 import { loadStockFrameFeeling } from '@/lib/stockframe-feeling';
-import { insertPadrao, type Insert } from '@/lib/pilot-inserts';
+import { insertPadrao, maiorTrechoLivre, normalizarLayout, quemOcupaOTrecho, rotuloDoLayout, type Insert, type LayoutInsert, type TipoTransicao } from '@/lib/pilot-inserts';
+import { reconciliarPlanoComMontagem, variarFormatosDoPlano } from '@/lib/stockframe-formatos';
+import { sceneProfileOf } from '@/lib/stockframe-director';
+import { stockFrameVisualAudit } from '@/lib/stockframe-visual-audit';
+import { MaqueteFormato, SeletorDeFormato, SeletorDeTransicao, TRANSICOES_INSERT } from '@/components/InsertFormato';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { enrichStockFrameVideos, mergeStockFrameMediaUrls, mergeStockFrameNiches, type StockFrameAccount, type StockFrameFilters, type StockFrameNiche, type StockFramePage, type StockFrameVideo, type StockFrameSmartQuery } from '@/lib/stockframe';
 import { translateStockFrameCopy } from '@/lib/stockframe-translate';
@@ -46,11 +50,56 @@ import s from './PilotStockFrame.module.css';
 
 type InsertMedia = { key: string; nome: string; tipo: 'video' | 'imagem'; w: number; h: number; durSec?: number };
 type Change = Insert[] | ((current: Insert[]) => Insert[]);
-type StockPlacement = { anchor: string; from: number; to: number; smart?: boolean; score?: number; coverage?: SmartCoverage };
+type StockPlacement = { anchor: string; from: number; to: number; smart?: boolean; score?: number; coverage?: SmartCoverage; layout?: LayoutInsert; transicao?: TipoTransicao };
 /** De onde o Smart Stocks tira os takes: a biblioteca inteira do plano ou só
  * os favoritados (♥) na conta StockFrame do usuário. */
 type SmartSource = 'all' | 'favorites';
 const SMART_SOURCE_KEY = 'pilot.stockframe.smart-source.v1';
+
+/* RASCUNHO DO PLANO (07.10). Silas: "coloco os stocks, clico pra concluir e
+ * quando volto o StockFrame tá desligado e sem os stocks escolhidos". O plano
+ * Smart vivia só no estado da janela: fechar sem aplicar apagava tudo. Agora
+ * o rascunho fica salvo por task na sessão do navegador (sobrevive a fechar
+ * a janela e a F5 na mesma aba) e o "Concluir" APLICA o que estiver pendente. */
+const SMART_DRAFT_KEY = (taskId: string) => `pilot.stockframe.smart-draft.v1.${taskId}`;
+type SmartDraft = {
+  v: 1; planContext: string; coverage: SmartCoverage; pace: SmartPace; smartSource: SmartSource;
+  active: string; smart: SmartStockSegment[];
+  /** trechos que já foram pra montagem (o take deles sumir = tirado por fora) */
+  applied?: string[];
+};
+function compactDraftVideo(video: StockFrameVideo): StockFrameVideo {
+  // sem `raw`/metadados longos: o rascunho cabe folgado no sessionStorage
+  const { raw: _raw, smartMetadata: _meta, ...rest } = video;
+  return { ...rest, description: (rest.description || '').slice(0, 240) };
+}
+function readSmartDraft(taskId: string): SmartDraft | null {
+  try {
+    const raw = sessionStorage.getItem(SMART_DRAFT_KEY(taskId));
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as SmartDraft;
+    if (draft?.v !== 1 || !Array.isArray(draft.smart) || typeof draft.planContext !== 'string') return null;
+    return draft;
+  } catch { return null; }
+}
+function writeSmartDraft(taskId: string, draft: SmartDraft | null) {
+  try {
+    if (!draft) { sessionStorage.removeItem(SMART_DRAFT_KEY(taskId)); return; }
+    const smart = draft.smart.map((segment) => ({
+      ...segment,
+      candidates: segment.candidates
+        .filter((candidate, index) => index < 14 || candidate.video.id === segment.selectedVideoId)
+        .map((candidate) => ({ ...candidate, video: compactDraftVideo(candidate.video) })),
+    }));
+    sessionStorage.setItem(SMART_DRAFT_KEY(taskId), JSON.stringify({ ...draft, smart }));
+  } catch { /* sem storage (aba privada, cota cheia): o plano vale só nesta janela */ }
+}
+
+/** Assinatura do que o plano manda pra montagem (trecho, take, formato,
+ *  transição) — igual à dos inserts Smart já aplicados = nada pendente. */
+function planSignature(items: Array<{ anchor: string; from: number; to: number; videoId: string; layout?: LayoutInsert; transicao?: TipoTransicao }>): string {
+  return items.map((item) => `${item.anchor}|${item.from}|${item.to}|${item.videoId}|${JSON.stringify(normalizarLayout(item.layout))}|${item.transicao || 'escurecer'}`).sort().join('\n');
+}
 
 /** Devolve a ação para a UI respirar entre blocos de ranking. A análise
  * pontua milhares de pares trecho × take; em um bloco só, a tela congelava. */
@@ -114,6 +163,8 @@ function stockFrameInsert(video: StockFrameVideo, media: InsertMedia, placement:
       : {}),
     palavraDe: Math.max(0, Math.min(placement.from, placement.to)),
     palavraAte: Math.max(0, Math.max(placement.from, placement.to)),
+    layout: placement.layout ? normalizarLayout(placement.layout) : { tipo: 'cheia' },
+    transicao: placement.transicao || 'escurecer',
     stockFrame: {
       videoId: video.id,
       code: video.code,
@@ -312,8 +363,11 @@ export function PilotStockFrameButton({ enabled, count, onClick }: { enabled: bo
 
 const EMPTY_PAGE: StockFramePage = { videos: [], niches: [], page: 1, perPage: 24, total: 0, totalPages: 1 };
 
-export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: incomingInserts, enabled, onEnabledChange, onClose, onChange, onImportMedia, onEditInserts, onUpdateMontage, updatingMontage = false }: {
+export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: incomingInserts, otherInserts: incomingOthers = [], enabled, onEnabledChange, onClose, onChange, onImportMedia, onEditInserts, onUpdateMontage, updatingMontage = false }: {
   taskId: string; parts: StockFrameCopyPart[]; inserts: Insert[]; enabled: boolean;
+  /** inserts de OUTRAS origens que entram na montagem (PC, Flow): o Smart não
+   *  põe take por cima deles e a timeline mostra onde estão. */
+  otherInserts?: Insert[];
   onEnabledChange: (value: boolean) => void; onClose: () => void; onChange: (value: Change) => void;
   onImportMedia: (file: File, anchor: string) => Promise<InsertMedia | null>; onEditInserts: () => void;
   onUpdateMontage?: () => Promise<boolean>; updatingMontage?: boolean;
@@ -325,12 +379,26 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   const partsKey = JSON.stringify(incomingParts);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const parts = useMemo(() => incomingParts, [partsKey]);
-  const insertsKey = incomingInserts.map((insert) => `${insert.id}|${insert.source}|${insert.stockFrame?.videoId || ''}|${insert.stockFrame?.smart ? 1 : 0}|${insert.stockFrame?.title || ''}`).join('\n');
+  const insertsKey = incomingInserts.map((insert) => `${insert.id}|${insert.source}|${insert.stockFrame?.videoId || ''}|${insert.stockFrame?.smart ? 1 : 0}|${insert.stockFrame?.title || ''}|${insert.ancora}|${insert.palavraDe}-${insert.palavraAte}|${JSON.stringify(insert.layout)}|${insert.transicao}`).join('\n');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const inserts = useMemo(() => incomingInserts, [insertsKey]);
+  const othersKey = incomingOthers.map((insert) => `${insert.id}|${insert.source || 'manual'}|${insert.ancora}|${insert.palavraDe}-${insert.palavraAte}|${insert.midiaNome}`).join('\n');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const otherInserts = useMemo(() => incomingOthers, [othersKey]);
+  /** Trechos que o Smart NÃO pode cobrir: inserts do PC/Flow e takes StockFrame
+   *  inseridos à mão (esses continuam na montagem quando o plano é aplicado). */
+  const occupied = useMemo(() => [...otherInserts, ...inserts.filter((insert) => !insert.stockFrame?.smart)], [otherInserts, inserts]);
+  const occupiedBy = (anchorLabel: string, from: number, to: number) => quemOcupaOTrecho(occupied, anchorLabel, from, to);
+  const describeOccupant = (insert: Insert) => insert.source === 'flow' ? `o insert do Flow "${insert.midiaNome}"`
+    : insert.source === 'stockframe' ? `o take StockFrame "${insert.stockFrame?.title || insert.midiaNome}" inserido à mão`
+      : `o insert do PC "${insert.midiaNome}"`;
+  // O rascunho salvo desta task (lido UMA vez, antes dos estados nascerem).
+  const draftRef = useRef<SmartDraft | null | undefined>(undefined);
+  if (draftRef.current === undefined) draftRef.current = typeof window === 'undefined' ? null : readSmartDraft(taskId);
+  const draft = draftRef.current;
   const dialog = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
-  const [mode, setMode] = useState<'manual' | 'smart'>('manual');
+  const [mode, setMode] = useState<'manual' | 'smart'>(() => (draftRef.current?.smart.length ? 'smart' : 'manual'));
   const [account, setAccount] = useState<StockFrameAccount | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [apiKey, setApiKey] = useState('');
@@ -348,21 +416,28 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   const [wordFrom, setWordFrom] = useState(0);
   const [wordTo, setWordTo] = useState(Math.min(8, Math.max(0, (parts[0]?.text.match(/\S+/g)?.length || 1) - 1)));
   const [busyTake, setBusyTake] = useState('');
-  const [coverage, setCoverage] = useState<SmartCoverage>(60);
-  const [pace, setPace] = useState<SmartPace>('adaptive');
+  const [coverage, setCoverage] = useState<SmartCoverage>(() => draft?.coverage || 60);
+  const [pace, setPace] = useState<SmartPace>(() => draft?.pace || 'adaptive');
   // Preferência do próprio navegador (conveniência): quem trabalha só com os
   // favoritos não precisa religar a cada task. Falha de storage = biblioteca.
   const [smartSource, setSmartSource] = useState<SmartSource>(() => {
+    if (draft?.smartSource) return draft.smartSource;
     try { return localStorage.getItem(SMART_SOURCE_KEY) === 'favorites' ? 'favorites' : 'all'; } catch { return 'all'; }
   });
   const [favoritesCount, setFavoritesCount] = useState<number | null>(null);
   useEffect(() => { try { localStorage.setItem(SMART_SOURCE_KEY, smartSource); } catch { /* sem storage: vale só nesta janela */ } }, [smartSource]);
-  const [smart, setSmart] = useState<SmartStockSegment[]>([]);
+  // O rascunho volta CONCILIADO com a montagem: formato/trecho mudados ou
+  // take tirado pela janela de Inserts do PC valem sobre o rascunho velho.
+  const [smart, setSmart] = useState<SmartStockSegment[]>(() => draft
+    ? reconciliarPlanoComMontagem(draft.smart, incomingInserts, draft.applied || [], incomingParts) : []);
+  const [appliedIds, setAppliedIds] = useState<string[]>(() => draft?.applied || []);
   const [smartBusy, setSmartBusy] = useState(false);
   const [smartProgress, setSmartProgress] = useState('');
-  const [activeSegment, setActiveSegment] = useState('');
+  const [activeSegment, setActiveSegment] = useState(() => draft?.active || '');
   const [smartEditTarget, setSmartEditTarget] = useState<{ anchor: string; from: number; to: number; segmentId?: string } | null>(null);
-  const [plannedContext, setPlannedContext] = useState('');
+  const [plannedContext, setPlannedContext] = useState(() => draft?.planContext || '');
+  /** linha da timeline com o seletor de FORMATO aberto */
+  const [formatOpen, setFormatOpen] = useState<string | null>(null);
   const importedMedia = useRef(new Map<string, InsertMedia>());
   const downloadedFiles = useRef(new Map<string, File>());
   const operationLocked = useRef(false);
@@ -386,6 +461,11 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
     setNotice('A copy ou as opções mudaram. Analise novamente para revisar o plano atualizado.');
   }, [planIsCurrent, plannedContext]);
 
+  useEffect(() => {
+    if (!smart.length || !plannedContext) { writeSmartDraft(taskId, null); return; }
+    writeSmartDraft(taskId, { v: 1, planContext: plannedContext, coverage, pace, smartSource, active: activeSegment, smart, applied: appliedIds });
+  }, [taskId, smart, plannedContext, activeSegment, coverage, pace, smartSource, appliedIds]);
+
   useEffect(() => { setMounted(true); return travarScrollDaPagina(); }, []);
   useEffect(() => {
     if (!mounted) return;
@@ -405,10 +485,20 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   }, [mounted, onClose, enabled, inserts, smart]);
 
   function closeStockFrame() {
-    // Smart selections live only in this dialog until applied. Closing an
-    // unapplied plan must not leave the task ON with no persisted stock take.
-    if (enabled && !inserts.some((insert) => insert.source === 'stockframe')) onEnabledChange(false);
+    // Sem take aplicado E sem rascunho com takes, a task não fica ON à toa.
+    // Com rascunho, fica ON: o plano está salvo e volta ao reabrir.
+    if (enabled && !inserts.some((insert) => insert.source === 'stockframe') && !draftHasSelections) onEnabledChange(false);
     onClose();
+  }
+
+  /** "Concluir": o plano revisado e ainda não aplicado VAI pra montagem antes
+   *  de fechar. Falhou (cota, download) = a janela fica aberta com o erro. */
+  async function finishStockFrame() {
+    if (planPending) {
+      const applied = await applySmart();
+      if (!applied) return;
+    }
+    closeStockFrame();
   }
 
   const refreshStatus = useCallback(async () => {
@@ -528,6 +618,14 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   async function prepareMedia(video: StockFrameVideo, anchor: string, onProgress: (message: string, percent?: number) => void): Promise<InsertMedia> {
     const reused = importedMedia.current.get(video.id);
     if (reused) return reused;
+    // Take que JÁ está na montagem (aplicado antes, inclusive em outra
+    // abertura da janela): reaproveita o arquivo, sem gastar download.
+    const existing = inserts.find((insert) => insert.source === 'stockframe' && insert.stockFrame?.videoId === video.id && insert.midiaKey);
+    if (existing) {
+      const media: InsertMedia = { key: existing.midiaKey, nome: existing.midiaNome, tipo: existing.midiaTipo, w: existing.midiaW, h: existing.midiaH };
+      importedMedia.current.set(video.id, media);
+      return media;
+    }
     let file = downloadedFiles.current.get(video.id);
     if (!file) {
       file = await stockFrameDownload(video, onProgress, taskId);
@@ -545,6 +643,10 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
 
   const importVideo = async (video: StockFrameVideo, placement: StockPlacement) => {
     if (!enabled || operationLocked.current) return false;
+    // nunca por cima de um insert do PC/Flow (takes StockFrame à mão podem
+    // se empilhar, como sempre — a montagem empurra um pro lado do outro)
+    const occupant = quemOcupaOTrecho(otherInserts, placement.anchor, placement.from, placement.to);
+    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Marque uma fala livre — nunca insert por cima de insert.`); return false; }
     operationLocked.current = true;
     setBusyTake(video.id); setError(''); setNotice('');
     try {
@@ -561,7 +663,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   async function runSmart() {
     if (!enabled || operationLocked.current) return;
     operationLocked.current = true;
-    setSmartBusy(true); setError(''); setNotice(''); setSmart([]);
+    setSmartBusy(true); setError(''); setNotice(''); setSmart([]); setAppliedIds([]);
     try {
       // Start the small local visual index in parallel with translation. A
       // chunk failure must never prevent the existing StockFrame search path.
@@ -569,8 +671,11 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
       // Feeling do Silas (fala → cena que ele usou nos drafts revisados).
       // Sem ele o ranking segue igual; só perde o desempate "do jeito dele".
       const feelingReady = loadStockFrameFeeling().catch(() => undefined);
-      const skeleton = planSmartStockSegments(parts, { coverage, pace });
-      if (!skeleton.length) throw new Error('A copy não tem palavras suficientes para planejar os inserts.');
+      // Trecho que já tem insert (PC, Flow, take manual) fica de fora: nunca
+      // insert por cima de insert.
+      const skeleton = planSmartStockSegments(parts, { coverage, pace })
+        .filter((segment) => !occupiedBy(segment.anchor, segment.wordFrom, segment.wordTo));
+      if (!skeleton.length) throw new Error(occupied.length ? 'Os trechos que o Smart escolheria já têm inserts do PC/Flow. Libere algum trecho ou use outra cobertura.' : 'A copy não tem palavras suficientes para planejar os inserts.');
       const translation = await translateStockFrameCopy(skeleton, setSmartProgress);
       await Promise.all([visualAuditReady, feelingReady]);
       const localized = translation.translated ? localizeSmartSegments(skeleton, translation.texts, translation.contexts) : skeleton;
@@ -824,9 +929,18 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
         }
       }
       await yieldToUi();
+      // O rebalanceamento pode mover um trecho pra perto de um insert do
+      // PC/Flow: o que cruzar fica de fora (nunca insert por cima de insert).
+      if (occupied.length) chosen = chosen.filter((segment) => !occupiedBy(segment.anchor, segment.wordFrom, segment.wordTo));
       // Depois da escolha, cada trecho ainda precisa de alternativas LIVRES
       // (fora das cenas usadas nos outros trechos) para a revisão.
       chosen = fillSmartStockAlternatives(chosen, { pool: fullPool, pack: packPool, minimum: 10, exclude: manualScenes });
+      // FORMATO de editor: maioria em tela cheia, React e telas divididas
+      // onde o take pede (principalmente no hook) e a luz vermelha às vezes.
+      chosen = variarFormatosDoPlano(chosen, parts, {
+        coverage,
+        familiaDe: (video) => sceneProfileOf(video, stockFrameVisualAudit(video.id)).family,
+      });
       smartPools.current = { pool: fullPool, pack: packPool, campaignText, nicheId, campaignIngredients: recipeTheme };
       if (account?.capabilities.mediaUrls) {
         const previewVideos = [...new Map(chosen.flatMap((segment) => segment.candidates.slice(0, 6).map((candidate) => [candidate.video.id, candidate.video]))).values()];
@@ -839,44 +953,57 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
       const first = chosen.find((segment) => segment.selectedVideoId);
       if (first) setActiveSegment(first.id);
       const missing = chosen.filter((segment) => !segment.selectedVideoId).length;
+      const varied = chosen.filter((segment) => segment.selectedVideoId && segment.formato && segment.formato.tipo !== 'cheia').length;
       const generic = chosen.filter(segment => selectedSmartCandidate(segment)?.genericFallback).length;
       const organic = chosen.filter((segment) => { const candidate = selectedSmartCandidate(segment); return candidate && stockFrameEffectiveOrigin(candidate.video) === 'organic'; }).length;
       const languageNote = translation.translated ? `Copy ${translation.language.toUpperCase()} interpretada no dispositivo. ` : translation.note ? `${translation.note} ` : '';
       const sourceNote = favoritesOnly ? `Só favoritos: ${globalPool.size} take(s) da sua conta. ` : '';
-      const organicNote = organic ? ` ${organic} orgânico(s).` : '';
+      const organicNote = (organic ? ` ${organic} orgânico(s).` : '') + (varied ? ` ${varied} com React/tela dividida.` : '');
       setNotice(languageNote + sourceNote + (missing ? `${chosen.length - missing} trechos receberam take; ${missing} ficaram sem alternativa segura ${favoritesOnly ? 'entre os seus favoritos' : 'no catálogo acessível'}. Nenhum download foi consumido.` : `${chosen.length} trechos prontos para revisão.${organicNote} Nenhum download foi consumido ainda.`) + (generic ? ` ${generic} alternativa(s) genérica(s), usadas somente após a busca específica.` : ''));
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setSmartBusy(false); setSmartProgress(''); operationLocked.current = false; }
   }
 
-  async function applySmart() {
-    if (!enabled || operationLocked.current) return;
-    if (!planIsCurrent) { setError('A copy ou as opções mudaram. Analise novamente antes de aplicar.'); return; }
+  async function applySmart(): Promise<boolean> {
+    if (!enabled || operationLocked.current) return false;
+    if (!planIsCurrent) { setError('A copy ou as opções mudaram. Analise novamente antes de aplicar.'); return false; }
     const planned = smart.map((segment) => ({ segment, candidate: selectedSmartCandidate(segment) })).filter((item) => !!item.candidate);
-    if (!planned.length) { setError('Escolha pelo menos um take no plano inteligente.'); return; }
+    if (!planned.length) { setError('Escolha pelo menos um take no plano inteligente.'); return false; }
     const measured = measureSmartStockCoverage(parts, planned.map(({ segment }) => segment));
-    if (coverage === 100 && !measured.complete) {
-      setError('A cobertura 100% precisa preencher todas as palavras da copy, sem lacunas nem sobreposição. Revise os limites editados antes de aplicar.'); return;
+    // A causa real primeiro: com insert manual/Flow na montagem o 100% tem
+    // buraco por definição (o Smart não cobre por cima deles).
+    if (coverage === 100 && (inserts.some((insert) => !insert.stockFrame?.smart) || otherInserts.length)) {
+      setError('Há inserts manuais ou do Flow nesta montagem. Para garantir 100% StockFrame sem alterar esses inserts, remova-os no editor ou use a cobertura de 60%/30%. Nada foi substituído.'); return false;
     }
-    if (coverage === 100 && inserts.some((insert) => !insert.stockFrame?.smart)) {
-      setError('Há inserts manuais ou do Flow nesta montagem. Para garantir 100% StockFrame sem alterar esses inserts, remova-os no editor ou use a cobertura de 60%/30%. Nada foi substituído.'); return;
+    if (coverage === 100 && !measured.complete) {
+      setError('A cobertura 100% precisa preencher todas as palavras da copy, sem lacunas nem sobreposição. Revise os limites editados antes de aplicar.'); return false;
+    }
+    const clash = planned.map(({ segment }) => ({ segment, occupant: occupiedBy(segment.anchor, segment.wordFrom, segment.wordTo) })).find((item) => item.occupant);
+    if (clash) {
+      setError(`O trecho ${clash.segment.anchor} (palavras ${clash.segment.wordFrom + 1}–${clash.segment.wordTo + 1}) cruza ${describeOccupant(clash.occupant!)}. Ajuste o trecho ou deixe com o avatar — nunca insert por cima de insert.`); return false;
     }
     if (coverage !== 100) {
       const expected = Math.round(measured.totalWords * coverage / 100);
       const tolerance = Math.max(1, Math.ceil(measured.totalWords * .03));
-      if (measured.overlaps || Math.abs(measured.coveredWords - expected) > tolerance) {
-        setError(`A cobertura atual é ${measured.percent}% e está fora da faixa de ${coverage}% após a edição dos trechos. Ajuste os limites ou analise novamente.`); return;
+      // Com inserts do PC/Flow ocupando parte da copy, o Smart preenche o que
+      // sobrou: vale não passar do pedido (o que eles cobrem já é b-roll).
+      const withinRange = occupied.length
+        ? measured.coveredWords <= expected + tolerance
+        : Math.abs(measured.coveredWords - expected) <= tolerance;
+      if (measured.overlaps || !withinRange) {
+        setError(`A cobertura atual é ${measured.percent}% e está fora da faixa de ${coverage}% após a edição dos trechos. Ajuste os limites ou analise novamente.`); return false;
       }
     }
     let freshAccount = account;
     try { freshAccount = (await stockFrameStatus()).account || account; if (freshAccount) setAccount(freshAccount); }
-    catch (reason) { setError(`Não foi possível conferir a cota StockFrame antes de baixar: ${reason instanceof Error ? reason.message : String(reason)}`); return; }
+    catch (reason) { setError(`Não foi possível conferir a cota StockFrame antes de baixar: ${reason instanceof Error ? reason.message : String(reason)}`); return false; }
     const remaining = freshAccount?.downloadsRemaining ?? (freshAccount?.downloadsLimit !== null && freshAccount?.downloadsLimit !== undefined && freshAccount.downloadsToday !== null
       ? freshAccount.downloadsLimit - freshAccount.downloadsToday : null);
-    const newVideos = [...new Map(planned.map((item) => item.candidate!.video).filter((video) => !importedMedia.current.has(video.id) && !downloadedFiles.current.has(video.id)).map((video) => [video.id, video])).values()];
+    const alreadyInMontage = new Set(inserts.filter((insert) => insert.source === 'stockframe' && insert.midiaKey).map((insert) => insert.stockFrame?.videoId));
+    const newVideos = [...new Map(planned.map((item) => item.candidate!.video).filter((video) => !importedMedia.current.has(video.id) && !downloadedFiles.current.has(video.id) && !alreadyInMontage.has(video.id)).map((video) => [video.id, video])).values()];
     const newDownloads = newVideos.reduce((sum, video) => sum + video.downloadCost, 0);
     if (remaining !== null && remaining !== undefined && remaining < newDownloads) {
-      setError(`O plano precisa de ${newDownloads} downloads da cota, mas esta conta StockFrame tem ${Math.max(0, remaining)} disponíveis hoje.`); return;
+      setError(`O plano precisa de ${newDownloads} downloads da cota, mas esta conta StockFrame tem ${Math.max(0, remaining)} disponíveis hoje.`); return false;
     }
     operationLocked.current = true;
     setSmartBusy(true); setError('');
@@ -899,15 +1026,26 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
           smart: true,
           score: item.candidate!.score,
           coverage,
+          layout: item.segment.formato,
+          transicao: item.segment.transicao,
         }));
       }
       // Substitui somente o plano Smart anterior; escolhas manuais permanecem.
       onChange((current) => [...current.filter((insert) => !insert.stockFrame?.smart), ...prepared]);
       onEnabledChange(true);
+      setAppliedIds(planned.map((item) => item.segment.id));
       setNotice(`${prepared.length} takes do Smart Stocks foram preparados para a montagem.`);
+      return true;
     } catch (reason) {
       setError(`${reason instanceof Error ? reason.message : String(reason)} O plano anterior foi mantido sem alterações. Os takes já preparados serão reutilizados ao tentar novamente nesta janela.`);
+      return false;
     } finally { setBusyTake(''); setSmartBusy(false); setSmartProgress(''); operationLocked.current = false; }
+  }
+
+  /** Muda o formato/transição de um trecho do plano (escolha do editor:
+   *  a variação automática não mexe mais nele). */
+  function setSegmentFormat(segmentId: string, change: { formato?: LayoutInsert; transicao?: TipoTransicao }) {
+    setSmart((current) => current.map((segment) => segment.id === segmentId ? { ...segment, ...change, formatoManual: true } : segment));
   }
 
   function adjustActiveRange(edge: 'from' | 'to', delta: number) {
@@ -915,31 +1053,45 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
     const part = parts.find((item) => item.label === activeSmart.anchor);
     const words = part?.text.match(/\S+/g) || [];
     if (!words.length) return;
-    setSmart((current) => current.map((segment) => {
-      if (segment.id !== activeSmart.id) return segment;
-      const nextFrom = edge === 'from'
-        ? Math.max(0, Math.min(segment.wordTo, segment.wordFrom + delta))
-        : segment.wordFrom;
-      const nextTo = edge === 'to'
-        ? Math.min(words.length - 1, Math.max(segment.wordFrom, segment.wordTo + delta))
-        : segment.wordTo;
-      const length = nextTo - nextFrom + 1;
-      return {
-        ...segment,
-        wordFrom: nextFrom,
-        wordTo: nextTo,
-        text: words.slice(nextFrom, nextTo + 1).join(' '),
-        targetSeconds: Math.round(Math.max(2.5, Math.min(10, length / 2.35)) * 10) / 10,
-      };
+    const nextFrom = edge === 'from'
+      ? Math.max(0, Math.min(activeSmart.wordTo, activeSmart.wordFrom + delta))
+      : activeSmart.wordFrom;
+    const nextTo = edge === 'to'
+      ? Math.min(words.length - 1, Math.max(activeSmart.wordFrom, activeSmart.wordTo + delta))
+      : activeSmart.wordTo;
+    // nunca estica o trecho por cima de um insert do PC/Flow
+    const occupant = occupiedBy(activeSmart.anchor, nextFrom, nextTo);
+    if (occupant) { setError(`Esse limite cruza ${describeOccupant(occupant)} — nunca insert por cima de insert.`); return; }
+    const length = nextTo - nextFrom + 1;
+    setSmart((current) => current.map((segment) => segment.id !== activeSmart.id ? segment : {
+      ...segment,
+      wordFrom: nextFrom,
+      wordTo: nextTo,
+      text: words.slice(nextFrom, nextTo + 1).join(' '),
+      targetSeconds: Math.round(Math.max(2.5, Math.min(10, length / 2.35)) * 10) / 10,
     }));
   }
 
   function editTimelineBlock(block: ReturnType<typeof buildSmartStockTimeline>[number]) {
+    // Trecho do avatar com insert do PC/Flow numa ponta: o take novo mira só
+    // a parte LIVRE (nunca insert por cima de insert).
+    let from = block.wordFrom;
+    let to = block.wordTo;
+    if (!block.segmentId) {
+      const free = maiorTrechoLivre(occupied, block.anchor, from, to);
+      if (!free) {
+        const occupant = occupiedBy(block.anchor, from, to);
+        setError(`Esse trecho inteiro já tem ${occupant ? describeOccupant(occupant) : 'insert'} — nunca insert por cima de insert.`);
+        return;
+      }
+      from = free.de;
+      to = free.ate;
+    }
     setActiveSegment(block.segmentId || block.id);
-    setSmartEditTarget({ anchor: block.anchor, from: block.wordFrom, to: block.wordTo, segmentId: block.segmentId });
+    setSmartEditTarget({ anchor: block.anchor, from, to, segmentId: block.segmentId });
     setAnchor(block.anchor);
-    setWordFrom(block.wordFrom);
-    setWordTo(block.wordTo);
+    setWordFrom(from);
+    setWordTo(to);
     setSelected(null);
     // Plano feito só com favoritos: a troca também abre nos favoritos.
     if (smartSource === 'favorites') setFilters((current) => current.favorites ? current : { ...current, favorites: true, sort: 'relevance', page: 1 });
@@ -958,6 +1110,8 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
       return;
     }
     const { anchor: targetAnchor, from, to, segmentId } = smartEditTarget;
+    const occupant = !segmentId ? occupiedBy(targetAnchor, from, to) : null;
+    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Escolha uma fala livre — nunca insert por cima de insert.`); return; }
     const part = parts.find((item) => item.label === targetAnchor);
     const words = part?.text.match(/\S+/g) || [];
     const text = words.slice(from, to + 1).join(' ');
@@ -979,6 +1133,16 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   }
 
   const timeline = useMemo(() => buildSmartStockTimeline(parts, smart), [parts, smart]);
+  /** Insert do PC/Flow (ou take manual) que já está num trecho do avatar. */
+  const rowOccupant = (block: { anchor: string; wordFrom: number; wordTo: number }) => occupiedBy(block.anchor, block.wordFrom, block.wordTo);
+  const draftHasSelections = planIsCurrent && smart.some((segment) => !!segment.selectedVideoId);
+  const plannedSignature = useMemo(() => planSignature(smart.flatMap((segment) => segment.selectedVideoId
+    ? [{ anchor: segment.anchor, from: segment.wordFrom, to: segment.wordTo, videoId: segment.selectedVideoId, layout: segment.formato, transicao: segment.transicao }] : [])), [smart]);
+  const appliedSignature = useMemo(() => planSignature(inserts.filter((insert) => insert.stockFrame?.smart).map((insert) => ({
+    anchor: insert.ancora, from: insert.palavraDe, to: insert.palavraAte, videoId: insert.stockFrame!.videoId, layout: insert.layout, transicao: insert.transicao,
+  }))), [inserts]);
+  /** Há takes revisados que ainda NÃO estão na montagem (ou mudaram). */
+  const planPending = enabled && draftHasSelections && plannedSignature !== appliedSignature;
   const activeBlock = timeline.find((block) => block.id === activeSegment || block.segmentId === activeSegment) || timeline[0];
   const activeSmart = smart.find((segment) => segment.id === activeBlock?.segmentId);
   const activeCandidate = activeSmart ? selectedSmartCandidate(activeSmart) : undefined;
@@ -999,7 +1163,10 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   const avatarSuggestions = useMemo(() => {
     const pools = smartPools.current;
     if (!pools || activeSmart || activeBlock?.kind !== 'avatar' || !planIsCurrent) return null;
-    const segment = smartSegmentForRange(parts, activeBlock.anchor, activeBlock.wordFrom, activeBlock.wordTo,
+    // sugestões só pra parte LIVRE do trecho (insert do PC/Flow fica de fora)
+    const free = maiorTrechoLivre(occupied, activeBlock.anchor, activeBlock.wordFrom, activeBlock.wordTo);
+    if (!free) return null;
+    const segment = smartSegmentForRange(parts, activeBlock.anchor, free.de, free.ate,
       { campaignText: pools.campaignText, campaignNicheId: pools.nicheId, campaignIngredients: pools.campaignIngredients });
     if (!segment) return null;
     const used = [...smart.flatMap((item) => {
@@ -1010,7 +1177,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
       { pool: pools.pool, pack: pools.pack, minimum: 6, exclude: used });
     const candidates = filled.candidates.filter((candidate) => !used.some((video) => stockFrameSameVisual(video, candidate.video))).slice(0, 8);
     return candidates.length ? { segment, candidates } : null;
-  }, [activeBlock?.id, activeBlock?.kind, activeSmart, smart, inserts, parts, planIsCurrent]);
+  }, [activeBlock?.id, activeBlock?.kind, activeSmart, smart, inserts, occupied, parts, planIsCurrent]);
   useEffect(() => {
     if (!avatarSuggestions || !account?.capabilities.mediaUrls) return;
     let live = true;
@@ -1025,6 +1192,8 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
   function addSuggestion(candidate: SmartStockCandidate) {
     if (!enabled || !avatarSuggestions) return;
     const { segment, candidates } = avatarSuggestions;
+    const occupant = occupiedBy(segment.anchor, segment.wordFrom, segment.wordTo);
+    if (occupant) { setError(`Esse trecho já tem ${describeOccupant(occupant)}. Escolha uma fala livre — nunca insert por cima de insert.`); return; }
     const video = suggestionMedia.get(candidate.video.id) || candidate.video;
     const id = `sugestao:${crypto.randomUUID()}`;
     const ordered = [{ ...candidate, video }, ...candidates.filter((item) => item.video.id !== candidate.video.id)
@@ -1159,13 +1328,26 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
                   <button type="button" className={s.segmentMain} data-video-id={candidate?.video.id} onClick={() => setActiveSegment(block.segmentId || block.id)} aria-label={`${block.anchor}, ${block.kind === 'avatar' ? 'avatar sem b-roll' : candidate?.video.title || 'b-roll'}, palavras ${block.wordFrom + 1} a ${block.wordTo + 1}`}>
                     <span>{String(index + 1).padStart(2, '0')}</span><div><small>{block.anchor} · ~{block.targetSeconds.toFixed(1)}s · {block.kind === 'avatar' ? 'AVATAR' : 'STOCKFRAME'}</small><p>{block.text}</p><b>{candidate ? candidate.video.title : 'Avatar · sem b-roll'}</b></div>{candidate?.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <i><Icon name={block.kind === 'avatar' ? 'play' : 'spark'}/></i>}
                   </button>
-                  <button type="button" className={s.rowAction} onClick={() => editTimelineBlock(block)}><Icon name="edit" size={14}/>{block.kind === 'avatar' ? 'Adicionar take' : 'Trocar take'}</button>
+                  <div className={s.rowActions}>
+                    <button type="button" className={s.rowAction} onClick={() => editTimelineBlock(block)}><Icon name="edit" size={14}/>{block.kind === 'avatar' ? 'Adicionar take' : 'Trocar take'}</button>
+                    {segment && candidate ? <button type="button" className={`${s.rowAction} ${s.formatButton} ${formatOpen === segment.id ? s.formatButtonOn : ''}`} onClick={() => { setActiveSegment(segment.id); setFormatOpen((current) => current === segment.id ? null : segment.id); }} aria-expanded={formatOpen === segment.id} title={`Formato: ${rotuloDoLayout(normalizarLayout(segment.formato))} · transição ${TRANSICOES_INSERT.find((item) => item.v === (segment.transicao || 'escurecer'))?.nome || ''}`} data-format-button={segment.id}>
+                      <MaqueteFormato layout={normalizarLayout(segment.formato)} tamanho="mini"/>{rotuloDoLayout(normalizarLayout(segment.formato)).split(' · ')[0]}
+                    </button> : null}
+                    {block.kind === 'avatar' && rowOccupant(block) ? <span className={s.occupiedTag}>{rowOccupant(block)!.source === 'flow' ? 'FLOW' : rowOccupant(block)!.source === 'stockframe' ? 'TAKE MANUAL' : 'INSERT DO PC'} NESTE TRECHO</span> : null}
+                  </div>
+                  {segment && candidate && formatOpen === segment.id ? <div className={`${s.formatPanel} fi-escuro`} data-format-panel={segment.id}>
+                    <small>FORMATO NA TELA</small>
+                    <SeletorDeFormato layout={normalizarLayout(segment.formato)} onMudar={(layout) => setSegmentFormat(segment.id, { formato: layout })} compacto/>
+                    <small>TRANSIÇÃO</small>
+                    <SeletorDeTransicao valor={segment.transicao || 'escurecer'} onMudar={(transicao) => setSegmentFormat(segment.id, { transicao })}/>
+                  </div> : null}
                 </div>;
               })}</div>
               <div className={s.segmentDetail}>{activeSmart ? <>
                 {activeSmart.semanticText && activeSmart.semanticText !== activeSmart.text && <details className={s.reasons}><summary>Interpretação usada na busca</summary><p>{activeSmart.semanticText}</p></details>}
                 <div className={s.detailCopy}><small>{activeSmart.anchor} · PALAVRAS {activeSmart.wordFrom + 1}–{activeSmart.wordTo + 1} · ~{activeSmart.targetSeconds.toFixed(1)}s</small><p>“{activeSmart.text}”</p><div className={s.rangeEdit}><span>Início</span><button type="button" onClick={() => adjustActiveRange('from', -1)} aria-label="Adiantar início">−</button><button type="button" onClick={() => adjustActiveRange('from', 1)} aria-label="Atrasar início">+</button><i/><span>Fim</span><button type="button" onClick={() => adjustActiveRange('to', -1)} aria-label="Adiantar fim">−</button><button type="button" onClick={() => adjustActiveRange('to', 1)} aria-label="Atrasar fim">+</button></div></div>
                 {activeCandidate ? <><LazyVideo video={activeCandidate.video} active suspended={!!selected} onMediaError={(id) => void repairMedia(id)}/><div className={s.detailTitle}><div><OriginBadge video={activeCandidate.video}/><h3>{activeCandidate.video.title}</h3></div><b>{activeCandidate.score.toFixed(1)}<small>match</small></b></div><p className={s.reasons}>{activeCandidate.reasons.join(' · ')}</p></> : <div className={s.noMatch}><Icon name="shield" size={26}/><h3>Sem correspondência segura</h3><p>O Smart Stocks preferiu deixar este trecho sem b-roll a escolher algo fora de contexto.</p></div>}
+                {activeCandidate ? <div className={s.detailFormat}><MaqueteFormato layout={normalizarLayout(activeSmart.formato)}/><div><small>FORMATO NA TELA</small><b>{rotuloDoLayout(normalizarLayout(activeSmart.formato))}</b><span>Transição: {TRANSICOES_INSERT.find((item) => item.v === (activeSmart.transicao || 'escurecer'))?.nome}</span></div><button type="button" onClick={() => { setFormatOpen(activeSmart.id); requestAnimationFrame(() => document.querySelector(`[data-format-panel="${CSS.escape(activeSmart.id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); }}><Icon name="tune" size={15}/>Trocar formato</button></div> : null}
                 <div className={s.detailActions}><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="refresh" size={16}/>Buscar outro take</button><button type="button" onClick={() => { setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: undefined } : segment)); setActiveSegment(`avatar:${parts.findIndex((part) => part.label === activeSmart.anchor)}:${activeSmart.wordFrom}-${activeSmart.wordTo}`); }}><Icon name="close" size={16}/>Deixar com avatar</button></div>
                 {alternatives.length > 0 && <div className={s.alternatives}><small>ALTERNATIVAS · FORA DO PLANO ATUAL</small><div>{alternatives.map((candidate) => <button type="button" key={candidate.video.id} data-video-id={candidate.video.id} onClick={() => setSmart((current) => current.map((segment) => segment.id === activeSmart.id ? { ...segment, selectedVideoId: candidate.video.id } : segment))}>{candidate.video.posterUrl ? <img src={candidate.video.posterUrl} alt=""/> : <Icon name="play"/>}<span>{candidate.video.title}</span><b>{candidate.score.toFixed(0)}</b><em className={stockFrameEffectiveOrigin(candidate.video) === 'organic' ? s.altOrganic : stockFrameEffectiveOrigin(candidate.video) === 'ai' ? s.altAi : s.altUnknown}>{stockFrameEffectiveOrigin(candidate.video) === 'organic' ? 'ORG' : stockFrameEffectiveOrigin(candidate.video) === 'ai' ? 'I.A' : ''}</em></button>)}</div></div>}
               </> : activeBlock ? <div className={s.avatarDetail}><span className={s.avatarBadge}>AVATAR · SEM B-ROLL</span><h3>{activeBlock.anchor} · palavras {activeBlock.wordFrom + 1}–{activeBlock.wordTo + 1}</h3><p>“{activeBlock.text}”</p><small>O avatar permanece visível neste trecho. Você pode cobri-lo com um take da biblioteca e revisar a cobertura antes de aplicar.</small><button type="button" onClick={() => editTimelineBlock(activeBlock)}><Icon name="spark" size={17}/>Adicionar b-roll aqui</button></div> : null}
@@ -1179,7 +1361,7 @@ export function PilotStockFrameModal({ taskId, parts: incomingParts, inserts: in
 
         <footer className={s.footer}>
           <div>{error ? <span className={s.error}>{error}</span> : notice ? <span className={s.notice}>{notice}</span> : <span><Icon name="shield" size={15}/>A chave fica somente na extensão. Downloads respeitam o plano StockFrame.</span>}</div>
-          <div><button type="button" className={s.secondary} onClick={onEditInserts} disabled={!inserts.length}><Icon name="edit"/>Ajustar {inserts.length || ''} takes</button>{onUpdateMontage && <button type="button" className={s.secondary} onClick={() => void onUpdateMontage()} disabled={updatingMontage}><Icon name="refresh"/>{updatingMontage ? 'Atualizando…' : 'Atualizar montagem'}</button>}<button type="button" className={s.done} onClick={closeStockFrame}><Icon name="check"/>Concluir</button></div>
+          <div><button type="button" className={s.secondary} onClick={onEditInserts} disabled={!inserts.length}><Icon name="edit"/>Ajustar {inserts.length || ''} takes</button>{onUpdateMontage && <button type="button" className={s.secondary} onClick={() => void onUpdateMontage()} disabled={updatingMontage}><Icon name="refresh"/>{updatingMontage ? 'Atualizando…' : 'Atualizar montagem'}</button>}<button type="button" className={s.done} onClick={() => void finishStockFrame()} disabled={smartBusy || !!busyTake} title={planPending ? 'Baixa os takes do plano que faltam, põe na montagem e fecha' : 'Fechar'} data-stockframe-done={planPending ? 'apply' : 'close'}><Icon name={planPending ? 'download' : 'check'}/>{planPending ? (smartBusy ? 'Aplicando…' : 'Aplicar e concluir') : 'Concluir'}</button></div>
         </footer>
       </>}
 

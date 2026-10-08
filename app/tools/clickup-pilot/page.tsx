@@ -2626,6 +2626,7 @@ function ClickUpPilotInner() {
           avatar. Nada disto toca o que foi pro HeyGen. */}
       {(() => {
         const lista = getInserts(a.taskId).filter((ins) => !ins.source);
+        const outrosDaTask = insertsAtivosNaMontagem(getInserts(a.taskId), isFlowEnabled(a.taskId), isStockFrameEnabled(a.taskId)).filter((ins) => !!ins.source);
         const aberto = posPopover[a.taskId] === 'inserts';
         const partesDaCopy = (
           batchStates[a.taskId]?.replan?.parts?.length
@@ -2647,6 +2648,8 @@ function ClickUpPilotInner() {
               <PilotInsertsModal
                 partes={partesDaCopy}
                 inserts={lista}
+                outros={outrosDaTask}
+                onMudarOutros={(prox) => editarInsertsDeOutrasOrigens(a.taskId, outrosDaTask, prox)}
                 onFechar={() => setPosPopover((prev) => ({ ...prev, [a.taskId]: null }))}
                 onMudar={(prox) => setInsertsDaOrigem(a.taskId, prox, 'manual')}
                 onSubirMidia={(f, ancora) => subirMidiaDeInsert(a.taskId, f, ancora)}
@@ -3117,6 +3120,31 @@ function ClickUpPilotInner() {
     });
   };
 
+  /** A janela de Inserts mostra também os takes das OUTRAS origens (07.10) e
+   * deixa trocar o formato deles / tirar do AD. Só a edição feita é
+   * reaplicada (remoções + alterados), em cima do estado mais novo — um
+   * download do Flow/StockFrame terminando em segundo plano não se perde, e
+   * a origem de cada insert nunca muda por aqui. */
+  const editarInsertsDeOutrasOrigens = (taskId: string, antes: Insert[], depois: Insert[]) => {
+    const ids = new Set(depois.map((ins) => ins.id));
+    const removidos = new Set(antes.filter((ins) => !ids.has(ins.id)).map((ins) => ins.id));
+    const alterados = new Map(depois.filter((ins) => !antes.includes(ins)).map((ins) => [ins.id, ins]));
+    if (!removidos.size && !alterados.size) return;
+    setInsertsPorTask((prev) => {
+      const atuais = prev[taskId] || prev[taskIdBaseDaVersao(taskId)] || [];
+      const lista = atuais
+        .filter((ins) => !removidos.has(ins.id))
+        .map((ins) => {
+          const novo = alterados.get(ins.id);
+          return novo ? { ...novo, source: ins.source } : ins;
+        });
+      const next = { ...prev, [taskId]: lista };
+      try { localStorage.setItem(INSERTS_KEY, JSON.stringify(next)); } catch {}
+      insertsRef.current = next;
+      return next;
+    });
+  };
+
   const FLOW_ENABLED_KEY = 'darkolab:clickup-pilot:flow-enabled';
   const [flowEnabled, setFlowEnabled] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return {};
@@ -3355,11 +3383,14 @@ function ClickUpPilotInner() {
     ).map((x: any) => ({ label: String(x.label || ''), text: String(x.text || '') }));
     const lista = getInserts(taskId).filter((ins) => ins.source === 'flow');
     if (flowDialog.editor) {
+      const outrosDoFlow = insertsAtivosNaMontagem(getInserts(taskId), true, isStockFrameEnabled(taskId)).filter((ins) => ins.source !== 'flow');
       return (
         <PilotInsertsModal
           key={`flow-editor:${taskId}`}
           partes={partes}
           inserts={lista}
+          outros={outrosDoFlow}
+          onMudarOutros={(prox) => editarInsertsDeOutrasOrigens(taskId, outrosDoFlow, prox)}
           onFechar={() => setFlowDialog((prev) => prev?.analysis.taskId === taskId ? { ...prev, editor: false } : prev)}
           onMudar={(prox) => {
             const ids = new Set(prox.map((ins) => ins.id));
@@ -3430,12 +3461,15 @@ function ClickUpPilotInner() {
         : analysis.partTemplates || []
     ).map((item: any) => ({ label: String(item.label || ''), text: String(item.text || '') }));
     const list = getInserts(taskId).filter((insert) => insert.source === 'stockframe');
+    const othersOfStockFrame = insertsAtivosNaMontagem(getInserts(taskId), isFlowEnabled(taskId), true).filter((insert) => insert.source !== 'stockframe');
     if (stockFrameDialog.editor) {
       return (
         <PilotInsertsModal
           key={`stockframe-editor:${taskId}`}
           partes={parts}
           inserts={list}
+          outros={othersOfStockFrame}
+          onMudarOutros={(next) => editarInsertsDeOutrasOrigens(taskId, othersOfStockFrame, next)}
           onFechar={() => setStockFrameDialog((previous) => previous?.analysis.taskId === taskId ? { ...previous, editor: false } : previous)}
           onMudar={(nextList) => {
             const ids = new Set(nextList.map((insert) => insert.id));
@@ -3475,6 +3509,7 @@ function ClickUpPilotInner() {
         taskId={taskId}
         parts={parts}
         inserts={list}
+        otherInserts={othersOfStockFrame}
         enabled={isStockFrameEnabled(taskId)}
         onEnabledChange={(value) => setStockFrameEnabledFor(taskId, value)}
         onClose={() => setStockFrameDialog(null)}

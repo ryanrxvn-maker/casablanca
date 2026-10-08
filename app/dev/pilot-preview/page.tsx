@@ -919,6 +919,7 @@ function Conteudo() {
         taskId="dev-stockframe-task"
         parts={PARTES.map((part) => ({ label: part.label, text: part.text }))}
         inserts={stockFrameInserts}
+        otherInserts={insLista}
         enabled={stockFrameEnabled}
         onEnabledChange={setStockFrameEnabled}
         onClose={() => setStockFrameAberto(false)}
@@ -1381,12 +1382,12 @@ function Conteudo() {
       </section>
       {insAberto ? (
         <PilotInsertsModal
-          partes={[
-            { label: 'HOOK 1', text: 'Como transformar um azeite de dez reais no seu proprio remedio de prostata em poucos minutos' },
-            { label: 'BODY 1', text: 'A maioria das pessoas usa o azeite do jeito errado e joga fora justamente a parte que importa' },
-            { label: 'BODY 2', text: 'O composto que interessa se chama oleocantal e ele e destruido pelo calor' },
-          ]}
+          partes={PARTES.map((part) => ({ label: part.label, text: part.text }))}
           inserts={insLista}
+          // espelho do Pilot (07.10): os takes do StockFrame aparecem aqui,
+          // com formato editável, e nenhum trecho aceita dois inserts
+          outros={stockFrameEnabled ? stockFrameInserts : []}
+          onMudarOutros={(proximos) => setStockFrameInserts(proximos)}
           onFechar={() => setInsAberto(false)}
           onMudar={setInsLista}
           onSubirMidia={async (f) => ({

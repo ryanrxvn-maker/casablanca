@@ -55,6 +55,8 @@ import { drawCaptions, type Block, type StyleState, type TypoPreset } from './en
 import { drawHeadlines, type Headline } from './headline';
 import { ensureTypoFonts } from './fonts';
 import { aacDeAudio, type TrilhaAac } from './audio-aac';
+import { coverNoRosto, quadroDoReact, type Cobertura, type Palco, type RostoAvatar } from '../pilot-inserts';
+import type { RecortadorAvatar } from '../avatar-recorte';
 
 export type RenderPhase = 'fontes' | 'frames' | 'audio' | 'finalizando';
 export type RenderProgress = {
@@ -1141,12 +1143,17 @@ export type PlanoInsert = {
    * vídeo 720×1280, o card do avatar caía fora da tela.
    */
   porId: (id: string, W: number, H: number) => {
-    palco: { avatar: Ret | null; insert: Ret; raio: number };
+    palco: Palco;
     focoAvatarY: number;
     /** borrão de movimento que mascara o slow motion (px na régua de 1080) */
     blur?: number;
+    /** ROSTO do avatar nesta janela (detectado) — enquadra a divisão e o
+     *  React pelo rosto. Ausente/null = foco manual (`focoAvatarY`). */
+    rosto?: RostoAvatar | null;
   } | null;
-  cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
+  cobertura: (t: number) => Cobertura;
+  /** recorta o avatar SEM FUNDO (React). Ausente/null = card no canto. */
+  recortador?: RecortadorAvatar | null;
   fontes: Map<string, FonteInsert>;
   /**
    * ESPERA o quadro do instante `t` ficar pronto (02.09).
@@ -1252,37 +1259,69 @@ function desenharInsert(
     if (cfg && fonte) {
       const img = fonte.quadro(t - jan.start);
       if (img) {
-        // SPLIT: o avatar sai do lugar dele e vai pro card, com foco no rosto
-        if (cfg.palco.avatar && fonteAvatar) {
-          ctx.save();
-          ctx.fillStyle = '#000';
-          ctx.fillRect(0, 0, W, H);
-          const ra = cfg.palco.avatar;
-          const rec = recorteCover(avatarW, avatarH, ra.w, ra.h, cfg.focoAvatarY);
-          if (cfg.palco.raio > 0) {
-            caminhoArredondado(ctx, ra, cfg.palco.raio);
-            ctx.clip();
-          }
-          ctx.drawImage(fonteAvatar, rec.sx, rec.sy, rec.sw, rec.sh, ra.x, ra.y, ra.w, ra.h);
-          ctx.restore();
-        }
-        // o insert no retângulo dele
-        ctx.save();
-        const ri = cfg.palco.insert;
-        if (cfg.palco.raio > 0) {
-          caminhoArredondado(ctx, ri, cfg.palco.raio);
-          ctx.clip();
-        }
+        const palco = cfg.palco;
+        const ri = palco.insert;
         // MÁSCARA DO SLOW MOTION: sem interpolação de frames, desacelerar
         // repete o mesmo frame e o olho lê travamento. O borrão leve cobre o
         // degrau — é o que separa "câmera lenta" de "vídeo travando".
-        if (cfg.blur && cfg.blur > 0.05) {
-          ctx.filter = `blur(${((cfg.blur * W) / 1080).toFixed(2)}px)`;
+        const blurPx = cfg.blur && cfg.blur > 0.05 ? ((cfg.blur * W) / 1080).toFixed(2) : null;
+        const recTake = recorteCover(fonte.w, fonte.h, ri.w, ri.h, 0.5);
+
+        if (palco.react) {
+          // REACT: o take em TELA CHEIA e o avatar sem fundo no canto de baixo
+          ctx.save();
+          if (blurPx) ctx.filter = `blur(${blurPx}px)`;
+          ctx.drawImage(img, recTake.sx, recTake.sy, recTake.sw, recTake.sh, ri.x, ri.y, ri.w, ri.h);
+          ctx.restore();
+          if (fonteAvatar) desenharAvatarReact(ctx, plano, cfg, palco.react, t, W, H, fonteAvatar, avatarW, avatarH);
+        } else if (palco.degrade && palco.avatar && fonteAvatar) {
+          // MESCLA: o avatar inteiro, deslocado, e o take sumindo em degradê
+          // por cima do fundo dele — parece um vídeo só.
+          ctx.save();
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, W, H);
+          const ra = palco.avatar;
+          const recA = coverNoRosto(avatarW, avatarH, ra.w, ra.h, cfg.rosto, palco.rostoAlvo, cfg.focoAvatarY);
+          ctx.drawImage(fonteAvatar, recA.sx, recA.sy, recA.sw, recA.sh, ra.x, ra.y, ra.w, ra.h);
+          ctx.restore();
+          desenharTakeEmDegrade(ctx, img, recTake, ri, palco.degrade, blurPx);
+        } else {
+          // DIVIDIDA (faixas, cards, linha): o avatar sai do lugar dele e vai
+          // pro retângulo dele, ENQUADRADO PELO ROSTO detectado.
+          if (palco.avatar && fonteAvatar) {
+            ctx.save();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, W, H);
+            const ra = palco.avatar;
+            const rec = coverNoRosto(avatarW, avatarH, ra.w, ra.h, cfg.rosto, palco.rostoAlvo, cfg.focoAvatarY);
+            if (palco.raio > 0) {
+              caminhoArredondado(ctx, ra, palco.raio);
+              ctx.clip();
+            }
+            ctx.drawImage(fonteAvatar, rec.sx, rec.sy, rec.sw, rec.sh, ra.x, ra.y, ra.w, ra.h);
+            ctx.restore();
+          }
+          // o insert no retângulo dele
+          ctx.save();
+          if (palco.raio > 0) {
+            caminhoArredondado(ctx, ri, palco.raio);
+            ctx.clip();
+          }
+          if (blurPx) ctx.filter = `blur(${blurPx}px)`;
+          ctx.drawImage(img, recTake.sx, recTake.sy, recTake.sw, recTake.sh, ri.x, ri.y, ri.w, ri.h);
+          ctx.filter = 'none';
+          ctx.restore();
+          // LINHA colorida na emenda, com um brilho curto da mesma cor
+          if (palco.linha) {
+            const l = palco.linha;
+            ctx.save();
+            ctx.shadowColor = l.cor;
+            ctx.shadowBlur = Math.max(4, (10 * W) / 1080);
+            ctx.fillStyle = l.cor;
+            ctx.fillRect(l.x, l.y, l.w, l.h);
+            ctx.restore();
+          }
         }
-        const rec = recorteCover(fonte.w, fonte.h, ri.w, ri.h, 0.5);
-        ctx.drawImage(img, rec.sx, rec.sy, rec.sw, rec.sh, ri.x, ri.y, ri.w, ri.h);
-        ctx.filter = 'none';
-        ctx.restore();
       }
     }
   }
@@ -1291,10 +1330,126 @@ function desenharInsert(
   if (cob && cob.alpha > 0.001) {
     ctx.save();
     ctx.globalAlpha = cob.alpha;
-    ctx.fillStyle = cob.cor === 'preto' ? '#000' : '#fff';
+    if (cob.cor === 'vermelho') {
+      // LUZ VERMELHA: um clarão quente — miolo claro, borda vermelha funda
+      const g = ctx.createRadialGradient(W * 0.5, H * 0.42, 0, W * 0.5, H * 0.42, Math.hypot(W, H) * 0.62);
+      g.addColorStop(0, 'rgb(255, 222, 200)');
+      g.addColorStop(0.38, 'rgb(255, 92, 54)');
+      g.addColorStop(0.72, 'rgb(214, 18, 34)');
+      g.addColorStop(1, 'rgb(120, 0, 14)');
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = cob.cor === 'preto' ? '#000' : '#fff';
+    }
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
+}
+
+/** Rascunho da MESCLA (o take com o degradê), reaproveitado entre quadros. */
+let rascunhoMescla: HTMLCanvasElement | null = null;
+
+/**
+ * O take num retângulo, opaco em `degrade.opaco` e sumindo até
+ * `degrade.some` (px do frame) numa curva suave — sem a "linha" que um
+ * degradê linear deixa no meio do rosto.
+ */
+function desenharTakeEmDegrade(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  rec: { sx: number; sy: number; sw: number; sh: number },
+  ri: Ret,
+  degrade: { opaco: number; some: number },
+  blurPx: string | null,
+) {
+  const w = Math.max(1, Math.round(ri.w));
+  const h = Math.max(1, Math.round(ri.h));
+  if (!rascunhoMescla) rascunhoMescla = document.createElement('canvas');
+  const c = rascunhoMescla;
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+  }
+  const r = c.getContext('2d');
+  if (!r) return;
+  r.save();
+  r.globalCompositeOperation = 'copy';
+  if (blurPx) r.filter = `blur(${blurPx}px)`;
+  r.drawImage(img, rec.sx, rec.sy, rec.sw, rec.sh, 0, 0, w, h);
+  r.filter = 'none';
+  r.globalCompositeOperation = 'destination-in';
+  const g = r.createLinearGradient(0, degrade.opaco - ri.y, 0, degrade.some - ri.y);
+  for (let k = 0; k <= 10; k++) {
+    const x = k / 10;
+    const suave = x * x * (3 - 2 * x);
+    g.addColorStop(x, `rgba(0,0,0,${(1 - suave).toFixed(3)})`);
+  }
+  r.fillStyle = g;
+  r.fillRect(0, 0, w, h);
+  r.restore();
+  ctx.drawImage(c, ri.x, ri.y, ri.w, ri.h);
+}
+
+/**
+ * REACT: o avatar SEM FUNDO no canto de baixo, posicionado e dimensionado
+ * pelo ROSTO. Sem recortador (modelo não abriu) ou num quadro que não
+ * segmentou, cai num card arredondado com borda branca no mesmo canto — o
+ * avatar nunca some do vídeo.
+ */
+function desenharAvatarReact(
+  ctx: CanvasRenderingContext2D,
+  plano: PlanoInsert,
+  cfg: NonNullable<ReturnType<PlanoInsert['porId']>>,
+  react: NonNullable<Palco['react']>,
+  t: number,
+  W: number,
+  H: number,
+  fonteAvatar: CanvasImageSource,
+  avatarW: number,
+  avatarH: number,
+) {
+  const q = quadroDoReact(avatarW, avatarH, W, H, react, cfg.rosto);
+  const recortado = plano.recortador
+    ? plano.recortador.recortar(fonteAvatar, avatarW, avatarH, t, Math.max(2, Math.round(q.w)), Math.max(2, Math.round(q.h)))
+    : null;
+  if (recortado) {
+    // sombra suave por baixo (silhueta borrada na régua pequena, ampliada):
+    // descola o avatar do take sem um shadowBlur caro em resolução cheia
+    const sombra = plano.recortador?.sombra();
+    if (sombra) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(sombra, q.x, q.y + (6 * W) / 1080, q.w, q.h);
+      ctx.restore();
+    }
+    ctx.drawImage(recortado, q.x, q.y, q.w, q.h);
+    return;
+  }
+  // card de reserva: 4:5, no canto de baixo do lado escolhido
+  const cw = Math.round(W * 0.4);
+  const ch = Math.round(cw * 1.25);
+  const m = Math.round(W * 0.04);
+  const card: Ret = {
+    x: react.lado === 'direita' ? W - m - cw : m,
+    y: H - Math.round(H * 0.05) - ch,
+    w: cw,
+    h: ch,
+  };
+  const raio = Math.round(W * 0.035);
+  const borda = Math.max(2, Math.round(W * 0.007));
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = (24 * W) / 1080;
+  ctx.fillStyle = '#fff';
+  caminhoArredondado(ctx, { x: card.x - borda, y: card.y - borda, w: card.w + borda * 2, h: card.h + borda * 2 }, raio + borda);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  caminhoArredondado(ctx, card, raio);
+  ctx.clip();
+  const rec = coverNoRosto(avatarW, avatarH, card.w, card.h, cfg.rosto, { x: 0.5, y: 0.4 }, cfg.focoAvatarY);
+  ctx.drawImage(fonteAvatar, rec.sx, rec.sy, rec.sw, rec.sh, card.x, card.y, card.w, card.h);
+  ctx.restore();
 }
 
 /* ───────────────────────────── orquestração ───────────────────────────── */

@@ -25,6 +25,8 @@ import {
   coberturaIntegralDeJanelas,
   palcoDoLayout,
   coberturaNoInstante,
+  focoEhManual,
+  rostoDasAmostras,
   planoDeVelocidade,
   tempoNaMidia,
   recorteDaMidia,
@@ -35,6 +37,7 @@ import {
   normalizarHeadlineCfg,
   type Insert,
   type HeadlineCfg,
+  type RostoAvatar,
 } from './pilot-inserts';
 import type { ProjetoInsert, RoteiroEdicao } from './pilot-projeto';
 
@@ -84,8 +87,10 @@ type FonteLocal = {
 };
 type PlanoInsertLocal = {
   janelas: Array<{ id: string; start: number; end: number }>;
-  porId: (id: string, W: number, H: number) => { palco: unknown; focoAvatarY: number; blur?: number } | null;
-  cobertura: (t: number) => { cor: 'preto' | 'branco'; alpha: number } | null;
+  porId: (id: string, W: number, H: number) => { palco: unknown; focoAvatarY: number; blur?: number; rosto?: RostoAvatar | null } | null;
+  cobertura: (t: number) => { cor: 'preto' | 'branco' | 'vermelho'; alpha: number } | null;
+  /** recorta o avatar sem fundo (React) */
+  recortador?: import('./avatar-recorte').RecortadorAvatar | null;
   fontes: Map<string, FonteLocal>;
   /** espera o quadro do instante `t` (seek do <video> do insert) */
   preparar?: (t: number) => Promise<void>;
@@ -471,6 +476,38 @@ export async function montarPosProducao(
             }
           }
           const porId = new Map(usaveis.map((i) => [i.id, i]));
+          // ENQUADRAMENTO PELO ROSTO: nas janelas que mostram o avatar
+          // (dividida, mescla, react) o rosto é medido no próprio montado e o
+          // render põe ele no lugar certo — a não ser que o editor tenha
+          // arrastado o foco na mão (aí vale o dele).
+          const precisaRosto = janelas.filter((j) => {
+            const ins = porId.get(j.id);
+            return !!ins && ins.layout.tipo !== 'cheia' && !focoEhManual(ins);
+          });
+          if (precisaRosto.length) cfg.onEtapa?.('enquadrando o rosto do avatar');
+          const rostoPorId = await rostosDasJanelas(blob, precisaRosto);
+          if (precisaRosto.length) {
+            console.log(`[pos-producao] rosto do avatar: ${rostoPorId.size}/${precisaRosto.length} janela(s) enquadradas pelo rosto`);
+          }
+          // REACT: o avatar sai SEM FUNDO — o segmentador só carrega se tiver
+          // React no AD. Sem ele o avatar entra num card no canto (nunca some).
+          let recortador: import('./avatar-recorte').RecortadorAvatar | null = null;
+          if (janelas.some((j) => porId.get(j.id)?.layout.tipo === 'react')) {
+            cfg.onEtapa?.('preparando o recorte do avatar (react)');
+            try {
+              const { criarRecortadorAvatar } = await import('./avatar-recorte');
+              recortador = await criarRecortadorAvatar();
+            } catch (e) {
+              console.warn('[pos-producao] recorte do avatar indisponível:', e);
+              recortador = null;
+            }
+            if (recortador) {
+              const r = recortador;
+              fechaveis.push(() => r.fechar());
+            } else {
+              avisos.push('o recorte do fundo do avatar (formato React) não carregou nesta máquina — o avatar entrou num quadro arredondado no canto. Clica RETOMAR pra tentar de novo.');
+            }
+          }
           // PROJETO EDITÁVEL: exatamente o que o render vai compor — janela,
           // recorte, velocidade e congelamento de cada b-roll.
           insertsDoProjeto = janelas.flatMap((j) => {
@@ -488,7 +525,7 @@ export async function montarPosProducao(
               layout: ins.layout, transicao: ins.transicao || 'nenhuma',
               audio: !!ins.audio && ins.midiaTipo === 'video',
               volume: typeof ins.volume === 'number' ? ins.volume : INSERT_VOLUME_PADRAO,
-              focoAvatarY: ins.focoAvatarY, w: fonte.w, h: fonte.h,
+              focoAvatarY: ins.focoAvatarY, rosto: rostoPorId.get(j.id) ?? null, w: fonte.w, h: fonte.h,
             }];
           });
           /* CAMINHO RÁPIDO TAMBÉM COM INSERT DE VÍDEO (04.09).
@@ -527,8 +564,10 @@ export async function montarPosProducao(
                 palco: palcoDoLayout(ins.layout, W, H),
                 focoAvatarY: ins.focoAvatarY,
                 blur: velocidadePorId.get(id)?.blur ?? 0,
+                rosto: rostoPorId.get(id) ?? null,
               };
             },
+            recortador,
             cobertura: (t: number) =>
               coberturaNoInstante(t, janelas, (id) => porId.get(id)?.transicao || 'nenhuma'),
             fontes,
@@ -908,6 +947,42 @@ export async function montarPosProducao(
     );
     return { blob: null, avisos, insertsOrfaos: orfaos };
   }
+}
+
+/**
+ * ROSTO do avatar em cada janela: 3 amostras dentro dela, mediana do centro e
+ * da altura (um piscar ou virar de rosto não desloca o enquadramento). Nunca
+ * lança — janela sem rosto, detector fora do ar ou demora demais ficam sem
+ * entrada, e o render usa o foco manual de sempre.
+ */
+async function rostosDasJanelas(
+  blob: Blob,
+  janelas: Array<{ id: string; start: number; end: number }>,
+): Promise<Map<string, RostoAvatar>> {
+  const out = new Map<string, RostoAvatar>();
+  if (!janelas.length) return out;
+  try {
+    const { detectFacePresence } = await import('./face-detector');
+    const res = await Promise.race([
+      detectFacePresence({
+        videoBlob: blob,
+        segments: janelas.map((j) => ({ start: j.start, end: j.end })),
+        samplesPerSegment: 3,
+      }),
+      new Promise<null>((r) => setTimeout(() => r(null), 30_000)),
+    ]);
+    if (!res) {
+      console.warn('[pos-producao] detector de rosto demorou demais — enquadramento pelo foco manual');
+      return out;
+    }
+    res.forEach((seg, i) => {
+      const rosto = rostoDasAmostras(seg.samples.map((s) => s.bbox));
+      if (rosto && janelas[i]) out.set(janelas[i].id, rosto);
+    });
+  } catch (e) {
+    console.warn('[pos-producao] detector de rosto indisponível — enquadramento pelo foco manual:', e);
+  }
+  return out;
 }
 
 /** Duração (s) de um blob de vídeo via metadata — 0 quando não dá pra ler. */
