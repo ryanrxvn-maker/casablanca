@@ -231,6 +231,11 @@ async function main() {
   assert(broken.readDurableRecords('background')[arch], 'archived executions are still readable');
   assert(!broken.readDurableRecords('background', { skipArchived: true })[arch], 'skipArchived leaves archive rows out');
   assert(broken.readDurableRecords('background', { skipArchived: true }).A, 'skipArchived keeps ordinary rows');
+  // Single-record read gives the same answer as the full read, without decoding the account.
+  assert.deepEqual(broken.readDurableRecord('background', 'A'), broken.readDurableRecords('background').A);
+  assert.equal(broken.readDurableRecord('background', 'E'), undefined, 'a tombstone reads as absent');
+  assert.equal(broken.readDurableRecord('background', 'nope'), undefined, 'a missing id reads as absent');
+  assert.deepEqual(broken.readDurableRecord('background', arch), broken.readDurableRecords('background')[arch]);
   console.log('PASS: empty reload, stale tab reconciliation, distinct writers, explicit deletion, protected tombstone revival, browser wipe recovery, offline queue, lost response, account isolation, quota, retention, sanitization and incremental pull.');
 }
 void main().catch(e => { console.error(e); process.exitCode = 1; });
