@@ -11,6 +11,66 @@ const UPLOAD_BUCKET = 'lipsync-uploads';
 /** Limite rígido de upload do vídeo: 300MB (exatos 300MB passam). */
 const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
 
+/**
+ * Teto de DURAÇÃO por lipsync: o áudio define o tamanho do vídeo gerado, então
+ * cada disparo gera no máximo 6 minutos (pedido do Silas, 07.10; antes era 10).
+ * O pipeline aguenta mais (costura trechos de ~3 min), o teto é de produto.
+ */
+const MAX_AUDIO_MS = 6 * 60 * 1000;
+
+/**
+ * Áudio passa do teto? Meio segundo de folga: um MP3 de exatamente 6:00 lê
+ * 6:00,05 (preenchimento do encoder) e seria barrado injustamente. 6:01 barra.
+ */
+function audioPassaDoTeto(ms: number): boolean {
+  return ms > MAX_AUDIO_MS + 500;
+}
+
+/** "6 min" / "6 min 30 s" — duração legível pro aviso do teto. */
+function minutosLegiveis(ms: number): string {
+  const totalSeg = Math.round(ms / 1000);
+  const min = Math.floor(totalSeg / 60);
+  const seg = totalSeg % 60;
+  return seg ? `${min} min ${seg} s` : `${min} min`;
+}
+
+/**
+ * Aviso do teto de duração — o MESMO no momento de escolher o áudio e no
+ * Gerar. Curto e com visual próprio (âmbar, cronômetro): título com a
+ * duração do áudio + uma linha dizendo o limite e o que fazer.
+ */
+function AvisoAudioLongo({ ms }: { ms: number }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-3 rounded-[14px] px-3 py-2.5"
+      style={{
+        background: 'rgb(var(--amber) / 0.08)',
+        boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.28)',
+      }}
+    >
+      <span
+        aria-hidden
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-amber"
+        style={{
+          background: 'rgb(var(--amber) / 0.12)',
+          boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.30)',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="13.5" r="7.5" />
+          <path d="M12 9.5v4l2.5 1.5" />
+          <path d="M10 2.5h4" />
+        </svg>
+      </span>
+      <div className="min-w-0 leading-tight">
+        <p className="text-[12px] font-semibold text-text">Áudio de {minutosLegiveis(ms)}</p>
+        <p className="mt-0.5 text-[11px] text-text-muted">O limite é 6 min por lipsync. Divida em partes.</p>
+      </div>
+    </div>
+  );
+}
+
 /** Ícone de import profissional (sem cor chamativa — herda currentColor cinza). */
 function ImportIcon({ size = 22 }: { size?: number }) {
   return (
@@ -235,6 +295,8 @@ export default function LipSyncTool() {
   // Fila de disparos (cada um vira um card embaixo)
   const [jobs, setJobs] = useState<Job[]>([]);
   const [formError, setFormError] = useState<string>('');
+  /** Duração (ms) do áudio que passou do teto de 6 min; null = dentro do teto. */
+  const [audioLongoMs, setAudioLongoMs] = useState<number | null>(null);
   const [flash, setFlash] = useState<boolean>(false); // toast "enviado ↓"
 
   // Limpar áudio (pré-produção do áudio: highpass + normalização de volume).
@@ -319,10 +381,12 @@ export default function LipSyncTool() {
       setAudioFile(null);
       setAudioPreview('');
       setAudioDur(0);
+      setAudioLongoMs(null);
       return;
     }
     setAudioFile(file);
     setFormError('');
+    setAudioLongoMs(null);
     const url = URL.createObjectURL(file);
     setAudioPreview(url);
     try {
@@ -334,6 +398,8 @@ export default function LipSyncTool() {
         a.onerror = () => reject();
       });
       setAudioDur(a.duration);
+      // Avisa o teto JÁ na escolha do áudio (o Gerar também barra).
+      if (audioPassaDoTeto(a.duration * 1000)) setAudioLongoMs(a.duration * 1000);
     } catch {
       setAudioDur(0);
     }
@@ -632,8 +698,8 @@ export default function LipSyncTool() {
       setFormError('Vídeo acima de 300MB. Usa um arquivo até 300MB.');
       return;
     }
-    if (audioMs > 600_000) {
-      setFormError('Áudio acima de 10 minutos. Usa um áudio até 10min.');
+    if (audioPassaDoTeto(audioMs)) {
+      setAudioLongoMs(audioMs);
       return;
     }
 
@@ -694,6 +760,7 @@ export default function LipSyncTool() {
     setAudioPreview('');
     setAudioDur(0);
     setFormError('');
+    setAudioLongoMs(null);
   }
 
   /* ─── Ticker da barra: progresso por TEMPO do processo inteiro ─────────
@@ -872,7 +939,7 @@ export default function LipSyncTool() {
                     >
                       Subir áudio ou vídeo
                     </div>
-                    <div className="mono text-[10px] text-text-muted">mp3, wav, m4a ou mp4 (extrai áudio)</div>
+                    <div className="mono text-[10px] text-text-muted">mp3, wav, m4a ou mp4 (extrai áudio) · até 6 min</div>
                   </div>
                 </div>
               </button>
@@ -915,6 +982,9 @@ export default function LipSyncTool() {
               })}
             </div>
           )}
+
+          {/* Áudio acima do teto de 6 min (aviso próprio, curto) */}
+          {audioLongoMs !== null ? <AvisoAudioLongo ms={audioLongoMs} /> : null}
 
           {/* Erro de formulário (validação) */}
           {formError && (
