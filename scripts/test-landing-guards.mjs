@@ -130,3 +130,11 @@ test('demo da Linha única usa a opção real do motor (singleLine)', () => {
   assert.match(src, /singleLine: single/);
   assert.match(ler(`${DIR}/legenda.ts`), /styleFor\(preset, prog\.fontScale, prog\.posY, prog\.singleLine\)/);
 });
+
+test('correção pela copy roda sozinha a cada 8 s, sem botão "Ver de novo" (08.10)', () => {
+  const src = ler(`${DIR}/Legendas.tsx`);
+  const cf = src.slice(src.indexOf('export function CopyFixSection'));
+  assert.doesNotMatch(cf, /Ver de novo/, 'nada de botão pra repetir: o loop é automático');
+  assert.match(cf, /at\(end \+ 8000, restart\)/, 'segura o resultado 8 s e recomeça');
+  assert.match(cf, /at\(1000, restart\)/, 'fora da tela/descanso ele espera e tenta de novo (não morre)');
+});

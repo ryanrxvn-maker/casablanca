@@ -586,6 +586,10 @@ export function CopyFixSection() {
   const [lit, setLit] = useState<Set<number>>(() => new Set());
   const [pressed, setPressed] = useState(false);
   const [run, setRun] = useState(0);
+  /** a lista some por um instante na hora de recomeçar (nada de "desfazer" a correção na frente da pessoa) */
+  const [fade, setFade] = useState(false);
+  /** reposição sem transição: as palavras voltam pro estado errado já invisíveis */
+  const [snap, setSnap] = useState(false);
 
   const zoneRef = useRef<HTMLDivElement | null>(null);
   const paperRef = useRef<HTMLDivElement | null>(null);
@@ -622,6 +626,13 @@ export function CopyFixSection() {
     setFixed(new Set());
     setLit(new Set());
     setPressed(false);
+    if (run > 0) {
+      setSnap(true);
+      at(60, () => {
+        setSnap(false);
+        setFade(false);
+      });
+    }
 
     const START = 1800;
     const GAP = 560;
@@ -640,11 +651,21 @@ export function CopyFixSection() {
     });
     const end = START + 250 + data.fixes.length * GAP + 800;
     at(end, () => setPhase('done'));
-    // segura o resultado e recomeça (só se a pessoa ainda estiver olhando)
-    at(end + 5600, () => {
-      if (!alive || isCalm()) return;
-      setRun((r) => r + 1);
-    });
+    // Segura o resultado 8 s e recomeça sozinho, sem botão (pedido de 08.10).
+    // Fora da tela ou em modo descanso ele espera e tenta de novo a cada 1 s,
+    // em vez de morrer (antes, um descanso parava o loop pra sempre).
+    const restart = () => {
+      if (!alive) return;
+      const r = zoneRef.current?.getBoundingClientRect();
+      const onScreen = !!r && r.bottom > 0 && r.top < window.innerHeight;
+      if (isCalm() || !onScreen) {
+        at(1000, restart);
+        return;
+      }
+      setFade(true);
+      at(320, () => setRun((x) => x + 1));
+    };
+    at(end + 8000, restart);
 
     function fly(i: number, f: Fix) {
       const layer = flyRef.current;
@@ -763,7 +784,7 @@ export function CopyFixSection() {
                 </span>
               </div>
 
-              <ol className="flex flex-col">
+              <ol className={'cf-list flex flex-col' + (fade ? ' is-fade' : '') + (snap ? ' is-snap' : '')}>
                 {data.blocks.map((blk, bi) => (
                   <li key={blk.id} className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5 last:border-b-0 md:gap-5 md:px-6">
                     <span className="w-[66px] shrink-0 text-[11px] text-white/40 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
@@ -821,16 +842,6 @@ export function CopyFixSection() {
                   {data.corrected} {data.corrected === 1 ? 'palavra corrigida' : 'palavras corrigidas'} e {data.added}{' '}
                   {data.added === 1 ? 'devolvida' : 'devolvidas'}. Blocos e tempos intactos.
                 </span>
-                {phase === 'done' && !reduced && (
-                  <button
-                    type="button"
-                    onClick={() => setRun((r) => r + 1)}
-                    className="rounded-[9px] px-2.5 py-1.5 text-[12px] font-semibold text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
-                    style={{ fontFamily: 'var(--font-label)' }}
-                  >
-                    Ver de novo
-                  </button>
-                )}
               </div>
             </div>
           </div>
@@ -895,6 +906,19 @@ export function CopyFixSection() {
           box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 1px 0 rgba(255, 255, 255, 0.08) inset, 0 70px 120px -40px rgba(0, 0, 0, 0.95),
             0 0 90px -30px rgba(255, 176, 32, 0.28);
           will-change: translate;
+        }
+        .cf-list {
+          transition: opacity 0.3s ease;
+        }
+        .cf-list.is-fade {
+          opacity: 0;
+        }
+        .cf-list.is-snap .cf-from,
+        .cf-list.is-snap .cf-to {
+          transition: none !important;
+        }
+        .cf-list.is-snap .cf-tile {
+          animation: none !important;
         }
         .cf-pw {
           border-radius: 3px;

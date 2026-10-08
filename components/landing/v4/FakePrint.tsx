@@ -6,7 +6,11 @@
  * Em cima: pergunta + resposta e o plantão (TelejornalCard, a peça que o
  * Silas aprovou), girando de leve com o mouse. Embaixo: a MESA, com prints de
  * verdade exportados pelo próprio FakePrint (PNG baixado da ferramenta, não
- * desenho), espalhados em profundidade. O mouse mexe a mesa; passar em cima
+ * desenho), espalhados em profundidade.
+ *
+ * O CONTEÚDO dos prints fala do próprio Auto Edit (pedido de 08.10: "dois
+ * marketings ao mesmo tempo"). Por isso o texto da seção diz que são prints DE
+ * EXEMPLO montados no FakePrint: ninguém pode ler isso como depoimento real. O mouse mexe a mesa; passar em cima
  * de um print traz ele pra frente.
  *
  * Regra de copy da v3 continua: o que tem cara de notícia fala SÓ de FakePrint.
@@ -34,12 +38,12 @@ type Print = {
 
 /** Composição da mesa (desktop). No celular vira uma fileira que rola de lado. */
 const PRINTS: Print[] = [
-  { src: '/landing/fp-comentarios.webp', alt: 'Comentários de um post do Instagram', x: 2, y: 8, w: 17, rot: -5, z: 0.45, ratio: '540/893' },
-  { src: '/landing/fp-whatsapp.webp', alt: 'Conversa de WhatsApp', x: 20, y: 2, w: 15, rot: 3, z: 1, ratio: '540/1090' },
-  { src: '/landing/fp-caixinha.webp', alt: 'Caixinha de pergunta do story', x: 35, y: 30, w: 13.5, rot: -4, z: 0.6, ratio: '540/959' },
-  { src: '/landing/fp-tweet.webp', alt: 'Post no X', x: 47, y: 4, w: 27, rot: 3, z: 0.8, ratio: '720/515' },
-  { src: '/landing/fp-live-tiktok.webp', alt: 'Live do TikTok', x: 61, y: 42, w: 13, rot: 4, z: 0.65, ratio: '540/960' },
-  { src: '/landing/fp-notificacao.webp', alt: 'Notificação do WhatsApp na tela de bloqueio', x: 80, y: 10, w: 15, rot: -5, z: 0.5, ratio: '540/1090' },
+  { src: '/landing/fp2-comentarios.webp', alt: 'Comentários de exemplo num post do Instagram elogiando o Auto Edit', x: 1, y: 6, w: 18, rot: -5, z: 0.45, ratio: '540/868' },
+  { src: '/landing/fp2-whatsapp.webp', alt: 'Conversa de exemplo no WhatsApp indicando o Auto Edit', x: 20, y: 1, w: 15, rot: 3, z: 1, ratio: '540/1090' },
+  { src: '/landing/fp2-caixinha.webp', alt: 'Caixinha de pergunta de exemplo perguntando qual ferramenta faz as legendas', x: 35, y: 34, w: 13.5, rot: -4, z: 0.6, ratio: '540/959' },
+  { src: '/landing/fp2-tweet.webp', alt: 'Post de exemplo no X sobre o Auto Edit', x: 47, y: 0, w: 27, rot: 3, z: 0.8, ratio: '720/606' },
+  { src: '/landing/fp2-live.webp', alt: 'Live de exemplo no TikTok com comentários sobre o Auto Edit', x: 62, y: 44, w: 13, rot: 4, z: 0.65, ratio: '540/960' },
+  { src: '/landing/fp2-notificacao.webp', alt: 'Notificação de exemplo do WhatsApp de uma cliente', x: 80, y: 8, w: 15, rot: -5, z: 0.5, ratio: '540/1090' },
 ];
 
 export function FakePrintSection() {
@@ -131,7 +135,7 @@ function Desk() {
         answer={['Tudo isso', { mark: 'saiu do FakePrint.' }]}
         lead={
           <>
-            Prints exportados direto da ferramenta, sem retoque.{' '}
+            Prints de exemplo, montados e exportados no FakePrint, sem retoque.{' '}
             <span className="hidden md:inline">Passa o mouse pra ver de perto.</span>
             <span className="md:hidden">Arrasta pro lado pra ver todos.</span>
           </>
