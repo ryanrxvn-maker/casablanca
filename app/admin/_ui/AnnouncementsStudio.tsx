@@ -53,6 +53,7 @@ import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { AnnIcon, AvisoCard, PromoBanner, ToneIcon } from '@/components/notifications/templates';
 import { Btn, I, IconOnly, Menu, MenuItem, MenuSep, Modal, Segmented, SPRING, Tag } from './kit';
 import { accent, betaProTools, fmtDateTime, type Accent, type AdminUser } from './model';
+import { AnnouncementSeen } from './AnnouncementSeen';
 
 /* ───────────────────────── Rascunho ───────────────────────── */
 
@@ -191,6 +192,7 @@ export function AnnouncementsStudio({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || subOpen.current) return;
       if (document.querySelector('[role="menu"]')) return; // menu aberto fecha primeiro
+      if (document.querySelector('[data-ann-seen]')) return; // "Quem viu" aberto: o Esc volta pra lista
       onClose();
     };
     document.addEventListener('keydown', onKey);
@@ -1530,6 +1532,12 @@ function SentList({
 }) {
   const [menu, setMenu] = useState<{ a: AdminAnnouncement; el: HTMLElement } | null>(null);
   const viewers = useMemo(() => (users ?? []).map(viewerOf), [users]);
+  // "Quem viu": guarda só o id e lê da lista (pausar/editar continua refletindo lá)
+  const [seenId, setSeenId] = useState<string | null>(null);
+  const seen = seenId ? (list?.find((x) => x.id === seenId) ?? null) : null;
+  const seenReach = useMemo(() => (seen && users ? users.filter((u) => matchesAudience(seen.audience, viewerOf(u))) : null), [seen, users]);
+  const closeSeen = useCallback(() => setSeenId(null), []);
+  if (seen) return <AnnouncementSeen a={seen} users={users} reach={seenReach} onBack={closeSeen} />;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-6">
@@ -1597,6 +1605,9 @@ function SentList({
                 </div>
 
                 <div className="col-span-2 flex items-center justify-end gap-2 md:col-span-1">
+                  <IconOnly title="Quem viu: hora e quantas vezes cada conta viu" onClick={() => setSeenId(a.id)}>
+                    <I.eye size={16} />
+                  </IconOnly>
                   <button
                     type="button"
                     role="switch"

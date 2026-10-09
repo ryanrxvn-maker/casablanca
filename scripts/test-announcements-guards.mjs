@@ -63,3 +63,11 @@ test('janela de aviso não sai da sessão por sessionStorage/localStorage (regra
   const store = ler('lib/notifications-client.ts');
   assert.doesNotMatch(store, /localStorage|sessionStorage/, 'janela por login é decidida no servidor (sessão do Supabase)');
 });
+
+test('"Quem viu": fechar grava a hora e o painel lê pela mesma regra, só do aviso pedido', () => {
+  assert.match(ler('app/api/user/notifications/route.ts'), /addDismissedKey\([^;]*Date\.parse\(stamp\)\)/, 'fechar a janela grava a hora (sem ela o "Quem viu" fica sem horário)');
+  const r = ler('app/api/admin/announcements/route.ts');
+  assert.match(r, /seenFromInbox\(/, '"Quem viu" usa a regra da lib (seenFromInbox)');
+  assert.match(r, /\.eq\('announcement_id', id\)[\s\S]{0,120}\.range\(/, 'lê só o aviso pedido, paginado (sem o teto de 1000 linhas)');
+  assert.match(ler('app/admin/_ui/AnnouncementsStudio.tsx'), /\[data-ann-seen\]/, 'Esc no "Quem viu" volta pra lista em vez de fechar a Central');
+});

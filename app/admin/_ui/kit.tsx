@@ -614,5 +614,7 @@ export const I = {
   plus: svg(<path d="M12 5v14M5 12h14" />),
   shield: svg(<path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.8 7 9 4.1-1.2 7-4.7 7-9V6l-7-2.5Z" />),
   chevron: svg(<path d="m9 6 6 6-6 6" />, 14),
+  back: svg(<path d="m15 6-6 6 6 6" />, 14),
+  eye: svg(<><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="2.8" /></>),
   spark: svg(<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" />),
 };

@@ -300,7 +300,8 @@ export async function POST(req: Request) {
         const ann = Array.isArray(row.announcements) ? row.announcements[0] : row.announcements;
         const patch: Record<string, unknown> = {
           dismissed_at: stamp,
-          dismissed_keys: addDismissedKey(row.dismissed_keys, popupKey(who.sk, ann?.activated_at ?? null)),
+          // com a hora: é ela que o "Quem viu" do painel mostra
+          dismissed_keys: addDismissedKey(row.dismissed_keys, popupKey(who.sk, ann?.activated_at ?? null), Date.parse(stamp)),
           read_at: row.read_at ?? stamp,
         };
         if (action === 'click') patch.clicked_at = stamp;

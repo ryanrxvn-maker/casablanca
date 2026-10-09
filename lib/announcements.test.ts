@@ -23,6 +23,7 @@ import {
   normalizeLink,
   popupKey,
   readContent,
+  seenFromInbox,
   sessionIdFromJwt,
   shouldPopup,
   sortPopups,
@@ -102,6 +103,52 @@ console.log('janela: login, fechar, reativar');
   let muitas: string[] = [];
   for (let i = 0; i < 40; i++) muitas = addDismissedKey(muitas, `S${i}:1`);
   ok(muitas.length === MAX_DISMISSED_KEYS && muitas[muitas.length - 1] === 'S39:1', 'lista de chaves tem teto (banco aceita até 24)');
+
+  // 09.10: a chave grava a HORA do fechamento (pro "Quem viu" do painel).
+  const h1 = Date.parse('2026-10-09T15:20:00Z');
+  const comHora = addDismissedKey([], popupKey('S1', t0), h1);
+  ok(comHora[0] === `${popupKey('S1', t0)}@${h1}`, 'fechar grava sessão:ativação@hora');
+  ok(!shouldPopup(ann, { dismissed_keys: comHora }, 'S1'), 'chave com hora segura a janela na mesma sessão');
+  ok(shouldPopup(ann, { dismissed_keys: comHora }, 'S2'), 'e reabre em login novo, igual antes');
+  ok(!shouldPopup(ann, { dismissed_keys: [popupKey('S1', t0)] }, 'S1'), 'chave ANTIGA sem hora continua valendo (ninguém vê a janela de novo por causa do deploy)');
+  const deNovo = addDismissedKey(comHora, popupKey('S1', t0), h1 + 60_000);
+  ok(deNovo.length === 1 && deNovo[0] === comHora[0], 'fechar de novo no MESMO login não duplica e guarda a hora do primeiro');
+  const mistura = addDismissedKey([popupKey('S1', t0)], popupKey('S1', t0), h1);
+  ok(mistura.length === 1 && mistura[0] === popupKey('S1', t0), 'chave antiga do mesmo login não vira duas');
+}
+
+console.log('quem viu (painel)');
+{
+  const act = '2026-10-09T15:13:49.870Z';
+  const actMs = Date.parse(act);
+  const t = (h: string) => `2026-10-09T${h}:00.000Z`;
+  const k = (s: string, iso: string, a = actMs) => `${s}:${a}@${Date.parse(iso)}`;
+  const base = { delivered_at: t('15:14'), read_at: t('15:15'), dismissed_at: t('21:40'), clicked_at: null, deleted_at: null };
+
+  const tres = seenFromInbox('u1', { ...base, dismissed_keys: [k('S1', t('15:15')), k('S2', t('18:02')), k('S3', t('21:40'))] }, act);
+  ok(tres.views.length === 3 && tres.views.every((v) => v.via === 'janela'), 'viu em 3 logins = 3 vezes, todas na janela');
+  ok(tres.firstAt === t('15:15') && tres.lastAt === t('21:40'), 'primeira e última vez saem das horas gravadas');
+  ok(tres.views.map((v) => v.at).join() === [t('15:15'), t('18:02'), t('21:40')].join(), 'cada vez com a sua hora, da mais antiga pra mais nova');
+
+  const antiga = seenFromInbox('u2', { ...base, dismissed_keys: [`S1:${actMs}`, `S2:${actMs}`, `S3:${actMs}`] }, act);
+  ok(antiga.views.length === 3, 'chaves antigas (sem hora) ainda contam as vezes');
+  ok(antiga.firstAt === base.read_at && antiga.lastAt === base.dismissed_at, 'sem hora: 1ª = primeira leitura, última = último fechamento');
+  ok(antiga.views.filter((v) => v.at === null).length === 1, 'a do meio fica "hora não registrada" (não inventa)');
+
+  const reexibido = seenFromInbox('u3', { ...base, dismissed_keys: [k('S1', t('15:15'), actMs - 3_600_000), k('S1', t('16:00'))] }, act);
+  ok(reexibido.views[0].earlier && !reexibido.views[1].earlier, 'visto antes do "mostrar de novo pra todos" fica marcado');
+
+  const sino = seenFromInbox('u4', { ...base, dismissed_at: null, dismissed_keys: [] }, act);
+  ok(sino.views.length === 1 && sino.views[0].via === 'sino' && sino.firstAt === base.read_at, 'sem janela fechada e com leitura = leu no sino');
+
+  const apagou = seenFromInbox('u5', { ...base, read_at: t('16:30'), deleted_at: t('16:30'), dismissed_at: null, dismissed_keys: [] }, act);
+  ok(apagou.views.length === 0, 'apagou do sino sem ler NÃO conta como visto');
+
+  const so = seenFromInbox('u6', { ...base, read_at: null, dismissed_at: null, dismissed_keys: [] }, act);
+  ok(so.views.length === 0 && so.firstAt === null && so.deliveredAt === base.delivered_at, 'recebeu e ainda não fechou: 0 vezes, só a hora que chegou');
+
+  const cheia = seenFromInbox('u7', { ...base, dismissed_keys: Array.from({ length: MAX_DISMISSED_KEYS }, (_, i) => k(`S${i}`, t('15:20'))) }, act);
+  ok(cheia.capped && cheia.views.length === MAX_DISMISSED_KEYS, 'bateu no teto de logins guardados: avisa que pode ter mais');
 }
 
 console.log('no ar e prazo');

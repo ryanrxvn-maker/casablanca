@@ -414,6 +414,16 @@ export function popupKey(session: string, activatedAt: string | null): string {
   return `${session}:${Number.isFinite(t) ? t : 0}`;
 }
 
+/**
+ * Como a chave fica GRAVADA (09.10): `<sessão>:<ativação>@<hora em que fechou>`.
+ * A hora alimenta o "Quem viu" do painel (um registro por login em que a
+ * pessoa viu e fechou a janela). Chave antiga, sem a hora, vale igual.
+ */
+export function keyBase(stored: string): string {
+  const at = stored.indexOf('@');
+  return at < 0 ? stored : stored.slice(0, at);
+}
+
 export function shouldPopup(
   a: LiveShape & { popup: boolean; activated_at: string | null },
   row: { dismissed_keys?: string[] | null } | null | undefined,
@@ -422,14 +432,100 @@ export function shouldPopup(
 ): boolean {
   if (!a.popup || !isLive(a, now)) return false;
   const keys = row?.dismissed_keys ?? [];
-  return !keys.includes(popupKey(session, a.activated_at));
+  const want = popupKey(session, a.activated_at);
+  return !keys.some((k) => keyBase(k) === want);
 }
 
-/** Acrescenta a chave sem repetir e mantém só as últimas. */
-export function addDismissedKey(keys: string[] | null | undefined, key: string): string[] {
-  const list = (keys ?? []).filter((k) => k !== key);
-  list.push(key);
-  return list.slice(-MAX_DISMISSED_KEYS);
+/**
+ * Acrescenta a chave sem repetir o login e mantém só as últimas. Com `atMs`,
+ * grava a hora do fechamento; fechar de novo no MESMO login guarda a hora do
+ * primeiro (é a mesma visualização).
+ */
+export function addDismissedKey(keys: string[] | null | undefined, key: string, atMs?: number): string[] {
+  const base = keyBase(key);
+  const list = keys ?? [];
+  const prev = list.find((k) => keyBase(k) === base);
+  const entry = prev ?? (atMs != null && Number.isFinite(atMs) ? `${base}@${Math.round(atMs)}` : base);
+  const next = list.filter((k) => keyBase(k) !== base);
+  next.push(entry);
+  return next.slice(-MAX_DISMISSED_KEYS);
+}
+
+/* ───────────────────────── Quem viu (painel) ───────────────────────── */
+
+/** Linha da caixa de uma conta, como vem do banco. */
+export type InboxSeenRow = {
+  delivered_at: string;
+  read_at: string | null;
+  dismissed_at: string | null;
+  dismissed_keys: string[] | null;
+  clicked_at: string | null;
+  deleted_at: string | null;
+};
+
+export type SeenView = {
+  /** hora em que viu (fechou a janela / abriu no sino); null = registro antigo sem hora */
+  at: string | null;
+  /** onde: na janela da tela (um login) ou abrindo no sino */
+  via: 'janela' | 'sino';
+  /** foi antes do admin "mostrar de novo pra todos" (outra ativação) */
+  earlier: boolean;
+};
+
+export type SeenRow = {
+  userId: string;
+  deliveredAt: string;
+  /** uma por login em que viu, da mais antiga pra mais nova */
+  views: SeenView[];
+  /** chegou no teto de logins guardados: pode ter visto mais vezes */
+  capped: boolean;
+  firstAt: string | null;
+  lastAt: string | null;
+  clickedAt: string | null;
+  deletedAt: string | null;
+};
+
+const msToIso = (ms: number) => new Date(ms).toISOString();
+
+/**
+ * O que o painel mostra de UMA conta: cada login em que ela viu o aviso (hora
+ * de cada um), primeira e última vez, clique e se apagou do sino.
+ * Sem chave e com leitura = leu no sino (aviso "só no sino" ou abriu pela
+ * lista). Apagar do sino sem ler marca leitura na mesma hora: não conta.
+ */
+export function seenFromInbox(userId: string, row: InboxSeenRow, activatedAt: string | null): SeenRow {
+  const keys = row.dismissed_keys ?? [];
+  const act = activatedAt ? Date.parse(activatedAt) : NaN;
+  const views: SeenView[] = keys.map((k, i) => {
+    const base = keyBase(k);
+    const atPart = k.length > base.length ? Number(k.slice(base.length + 1)) : NaN;
+    const actPart = Number(base.slice(base.lastIndexOf(':') + 1));
+    // chave antiga sem hora: a ÚLTIMA da lista é a do último fechamento e a
+    // PRIMEIRA é a da primeira leitura (o 1º fechamento grava read_at)
+    const at =
+      Number.isFinite(atPart) && atPart > 0
+        ? msToIso(atPart)
+        : i === keys.length - 1
+          ? row.dismissed_at
+          : i === 0
+            ? row.read_at
+            : null;
+    return { at, via: 'janela', earlier: Number.isFinite(act) && Number.isFinite(actPart) && actPart !== act };
+  });
+  const apagouSemLer = !!row.deleted_at && row.read_at === row.deleted_at;
+  if (!views.length && row.read_at && !apagouSemLer) views.push({ at: row.read_at, via: 'sino', earlier: false });
+  views.sort((a, b) => (a.at ? Date.parse(a.at) : 0) - (b.at ? Date.parse(b.at) : 0));
+  const times = views.map((v) => v.at).filter((t): t is string => !!t);
+  return {
+    userId,
+    deliveredAt: row.delivered_at,
+    views,
+    capped: keys.length >= MAX_DISMISSED_KEYS,
+    firstAt: times[0] ?? null,
+    lastAt: times[times.length - 1] ?? null,
+    clickedAt: row.clicked_at,
+    deletedAt: row.deleted_at,
+  };
 }
 
 /* ───────────────────────── Sessão de login ───────────────────────── */

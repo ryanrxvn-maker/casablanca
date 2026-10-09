@@ -28,11 +28,13 @@ import {
   matchesAudience,
   popupKey,
   readContent,
+  seenFromInbox,
   shouldPopup,
   sortPopups,
   type AdminAnnouncement,
   type AnnKind,
   type NotifItem,
+  type SeenRow,
   type Viewer,
 } from '@/lib/announcements';
 import { refreshNotifications, resetNotifications } from '@/lib/notifications-client';
@@ -211,7 +213,7 @@ function userAction(body: { action: string; id?: string }) {
       const a = d.anns.find((y) => y.id === body.id);
       if (r && a) {
         r.dismissed_at = stamp;
-        r.dismissed_keys = addDismissedKey(r.dismissed_keys, popupKey(d.session, a.activated_at));
+        r.dismissed_keys = addDismissedKey(r.dismissed_keys, popupKey(d.session, a.activated_at), Date.parse(stamp));
         r.read_at ||= stamp;
         if (body.action === 'click') r.clicked_at = stamp;
       }
@@ -305,13 +307,83 @@ function mockUsers() {
   });
 }
 
+/** As 4 contas de teste também entram na lista de contas do painel (pra o "Quem viu" mostrar nome e plano). */
+function viewerUsers(): ReturnType<typeof mockUsers> {
+  const base = mockUsers()[0];
+  return Object.values(VIEWERS).map((v) => ({
+    ...base,
+    id: v.id,
+    email: v.email ?? '',
+    name: v.isAdmin ? 'Silas (admin)' : v.id.startsWith('free') ? 'Ana (teste free)' : v.id.startsWith('pago') ? 'Bruno (teste pago)' : 'Carla (teste liberado)',
+    is_admin: v.isAdmin,
+    is_active: true,
+    plan: v.plan as (typeof base)['plan'],
+    access: v.access as (typeof base)['access'],
+  }));
+}
+
+/**
+ * "Quem viu" da bancada: a caixa de VERDADE das 4 contas de teste (o que você
+ * fez aqui) + caixas sintéticas das contas falsas cobrindo os casos (viu 1x, em
+ * vários logins, chave antiga sem hora, clique, apagou do sino, teto de 16,
+ * recebeu e não fechou, não entrou). Tudo passa pela MESMA regra do servidor.
+ */
+function fakeSeen(url: string, users: ReturnType<typeof mockUsers>) {
+  const id = new URL(url, 'http://bancada').searchParams.get('views') ?? '';
+  const d = db();
+  const a = d.anns.find((x) => x.id === id);
+  if (!a) return { status: 404, body: { error: 'Esse aviso não existe mais.' } };
+  const act = a.activated_at;
+  const rows: SeenRow[] = [];
+  for (const v of Object.values(VIEWERS)) {
+    const r = d.inbox[v.id]?.[a.id];
+    if (r) rows.push(seenFromInbox(v.id, r, act));
+  }
+  if (act) {
+    const now = Date.now();
+    const actMs = Date.parse(act);
+    const span = Math.max(now - actMs, 120_000);
+    const aud = cleanAudience(a.audience);
+    const iso = (ms: number) => new Date(Math.min(ms, now)).toISOString();
+    users.forEach((u, i) => {
+      if (!u.is_active || u.id in d.inbox) return;
+      if (!matchesAudience(aud, { id: u.id, email: u.email, isAdmin: false, isActive: true, plan: u.plan as 'premium' | 'free', access: u.access as Viewer['access'], beta: false })) return;
+      if (i % 5 === 4) return; // ainda não entrou desde a publicação
+      const delivered = actMs + span * 0.55 * ((i + 1) / (users.length + 1));
+      const keys: string[] = [];
+      if (i % 7 !== 3) {
+        const n = i === 16 ? 18 : 1 + (i % 3 === 0 ? 1 : 0) + (i % 8 === 0 ? 2 : 0);
+        for (let k = 0; k < n; k++) keys.push(`B${i}k${k}:${actMs}@${Math.round(Math.min(delivered + 90_000 + k * span * 0.09, now))}`);
+        if (i === 2) keys[0] = `B2k0:${actMs}`; // fechamento antigo, sem hora gravada
+      }
+      const kept = keys.slice(-16);
+      const lastMs = kept.length ? Number(kept[kept.length - 1].split('@')[1]) || delivered + 90_000 : null;
+      rows.push(
+        seenFromInbox(
+          u.id,
+          {
+            delivered_at: iso(delivered),
+            read_at: kept.length ? iso(delivered + 90_000) : null,
+            dismissed_at: lastMs ? iso(lastMs) : null,
+            dismissed_keys: kept,
+            clicked_at: kept.length && i % 11 === 0 ? iso(delivered + 120_000) : null,
+            deleted_at: kept.length && i % 13 === 1 ? iso(delivered + span * 0.3) : null,
+          },
+          act,
+        ),
+      );
+    });
+  }
+  return { status: 200, body: { enabled: true, activatedAt: act, popup: a.popup, rows } };
+}
+
 let installed = false;
 function install() {
   if (installed || typeof window === 'undefined') return;
   installed = true;
   const real = window.fetch.bind(window);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  const users = mockUsers();
+  const users = [...mockUsers(), ...viewerUsers()];
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -333,6 +405,10 @@ function install() {
     }
     if (url.startsWith('/api/admin/announcements')) {
       await new Promise((r) => setTimeout(r, 160));
+      if (method === 'GET' && url.includes('views=')) {
+        const r = fakeSeen(url, users);
+        return json(r.body, r.status);
+      }
       if (method === 'GET') return json({ enabled: true, items: db().anns.map(adminItem) });
       const r = adminWrite(method, url, method === 'DELETE' ? {} : parse());
       return json(r.body, r.status);

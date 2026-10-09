@@ -5,8 +5,11 @@ import {
   cleanAudience,
   cleanContent,
   cleanEndsAt,
+  seenFromInbox,
   type AnnKind,
   type AnnStats,
+  type InboxSeenRow,
+  type SeenRow,
 } from '@/lib/announcements';
 import {
   ANN_COLUMNS,
@@ -21,7 +24,9 @@ import {
  * /api/admin/announcements — central de avisos do painel.
  *
  * GET     lista (mais novos primeiro) com os números de cada um
- * POST    cria   { kind, content, audience, popup, active, endsAt }
+ *         ?views=<id>  "Quem viu": cada conta que recebeu, com a hora de cada
+ *                      login em que viu, primeira/última vez, clique e se apagou
+ * POST   cria   { kind, content, audience, popup, active, endsAt }
  * PATCH   muda   { id, action: 'update' | 'activate' | 'pause' | 'republish', ... }
  *           update aceita content/audience/popup/endsAt e `republish: true`
  *           (abre a janela de novo pra quem já tinha fechado)
@@ -47,11 +52,42 @@ async function readOne(svc: ReturnType<typeof serviceClient>, id: string) {
   return { row: (res.data ?? null) as AnnRow | null, error: res.error };
 }
 
-export async function GET() {
+const SEEN_COLUMNS = 'user_id, delivered_at, read_at, dismissed_at, dismissed_keys, clicked_at, deleted_at';
+const SEEN_PAGE = 1000; // teto de linhas por consulta da API do Supabase
+
+/** "Quem viu" de UM aviso: a caixa de cada conta, em páginas (sem o teto de 1000). */
+async function seenList(svc: ReturnType<typeof serviceClient>, id: string) {
+  if (!UUID_RE.test(id)) return jsonError('Aviso inválido.', 400);
+  const one = await readOne(svc, id);
+  if (isMissingSchema(one.error)) return NextResponse.json({ enabled: false, rows: [] });
+  if (one.error) return jsonError('Falha ao ler o aviso.', 500, one.error.message);
+  if (!one.row) return jsonError('Esse aviso não existe mais.', 404);
+  const rows: SeenRow[] = [];
+  for (let from = 0; from < 50 * SEEN_PAGE; from += SEEN_PAGE) {
+    const res = await svc
+      .from('announcement_inbox')
+      .select(SEEN_COLUMNS)
+      .eq('announcement_id', id)
+      .order('delivered_at', { ascending: true })
+      .range(from, from + SEEN_PAGE - 1);
+    if (res.error) return jsonError('Falha ao ler quem recebeu.', 500, res.error.message);
+    const page = (res.data ?? []) as unknown as Array<InboxSeenRow & { user_id: string }>;
+    for (const r of page) rows.push(seenFromInbox(r.user_id, r, one.row.activated_at));
+    if (page.length < SEEN_PAGE) break;
+  }
+  return NextResponse.json(
+    { enabled: true, activatedAt: one.row.activated_at, popup: one.row.popup !== false, rows },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
+}
+
+export async function GET(req: Request) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
   try {
     const svc = serviceClient();
+    const viewsId = new URL(req.url).searchParams.get('views');
+    if (viewsId !== null) return await seenList(svc, viewsId);
     const [list, stats] = await Promise.all([
       svc.from('announcements').select(ANN_COLUMNS).order('created_at', { ascending: false }).limit(200),
       svc.rpc('announcement_stats'),
