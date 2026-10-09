@@ -222,3 +222,39 @@ export function AvisoWindow({ item, onFinish, timeLabel }: { item: NotifItem; on
     </Overlay>
   );
 }
+
+/**
+ * Prévia do admin (botão na aba Enviados): a MESMA janela que o cliente vê —
+ * propaganda no meio da tela com a entrada animada, aviso pequeno entrando no
+ * canto — sem gravar leitura/clique e sem o botão navegar (o link sai da cópia).
+ */
+export function AnnouncementPreview({ item, onClose }: { item: NotifItem; onClose: () => void }) {
+  const safe = { ...item, content: { ...item.content, ctaUrl: '' } } as NotifItem;
+  return (
+    <div data-ann-preview hidden>
+      {item.kind === 'propaganda' ? <PromoWindow item={safe} onFinish={onClose} /> : <AvisoPreviewToast item={safe} onClose={onClose} />}
+    </div>
+  );
+}
+
+function AvisoPreviewToast({ item, onClose }: { item: NotifItem; onClose: () => void }) {
+  const content = item.content as AvisoContent;
+  const { leaving, close } = useLeave(onClose, '');
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      close(false);
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [close]);
+  return createPortal(
+    <div className="ann-root">
+      <div className="ann-stack" aria-label="Prévia do aviso">
+        <AvisoCard content={content} timeLabel="agora" className={leaving ? 'ann-leave-right' : 'ann-enter-right'} onClose={() => close(false)} />
+      </div>
+    </div>,
+    document.body,
+  );
+}

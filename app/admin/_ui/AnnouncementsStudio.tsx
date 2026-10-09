@@ -43,6 +43,7 @@ import {
   type AnnKind,
   type Audience,
   type AvisoContent,
+  type NotifItem,
   type PromoArt,
   type PromoContent,
   type Segment,
@@ -51,6 +52,7 @@ import {
 import { refreshNotifications, suppressPopups } from '@/lib/notifications-client';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { AnnIcon, AvisoCard, PromoBanner, ToneIcon } from '@/components/notifications/templates';
+import { AnnouncementPreview } from '@/components/notifications/AnnouncementHost';
 import { Btn, I, IconOnly, Menu, MenuItem, MenuSep, Modal, Segmented, SPRING, Tag } from './kit';
 import { accent, betaProTools, fmtDateTime, type Accent, type AdminUser } from './model';
 import { AnnouncementSeen } from './AnnouncementSeen';
@@ -1537,6 +1539,9 @@ function SentList({
   const seen = seenId ? (list?.find((x) => x.id === seenId) ?? null) : null;
   const seenReach = useMemo(() => (seen && users ? users.filter((u) => matchesAudience(seen.audience, viewerOf(u))) : null), [seen, users]);
   const closeSeen = useCallback(() => setSeenId(null), []);
+  // Prévia: a mesma janela que o cliente vê (não grava nada, o botão não navega)
+  const [preview, setPreview] = useState<NotifItem | null>(null);
+  const closePreview = useCallback(() => setPreview(null), []);
   if (seen) return <AnnouncementSeen a={seen} users={users} reach={seenReach} onBack={closeSeen} />;
 
   return (
@@ -1605,6 +1610,14 @@ function SentList({
                 </div>
 
                 <div className="col-span-2 flex items-center justify-end gap-2 md:col-span-1">
+                  <IconOnly
+                    title="Ver como aparece pro cliente"
+                    onClick={() =>
+                      setPreview({ id: a.id, kind: a.kind, content: a.content, deliveredAt: new Date().toISOString(), readAt: null, clickedAt: null, live: a.live, activatedAt: a.activatedAt, endsAt: a.endsAt })
+                    }
+                  >
+                    <I.monitor size={16} />
+                  </IconOnly>
                   <IconOnly title="Quem viu: hora e quantas vezes cada conta viu" onClick={() => setSeenId(a.id)}>
                     <I.eye size={16} />
                   </IconOnly>
@@ -1633,6 +1646,8 @@ function SentList({
           })}
         </ul>
       )}
+
+      {preview ? <AnnouncementPreview key={preview.id} item={preview} onClose={closePreview} /> : null}
 
       {menu ? (
         <Menu anchor={menu.el} onClose={() => setMenu(null)} width={260} layer={85}>

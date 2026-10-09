@@ -49,6 +49,11 @@ test('sem a migration 038 o app não quebra: rotas respondem "desligado"', () =>
   assert.match(ler('app/api/admin/announcements/route.ts'), /enabled: false/);
 });
 
+test('pilha de avisos não fica presa na camada z=2 do body > * (o X pega clique por cima da Central)', () => {
+  assert.match(ler('app/globals.css'), /body > \* \{\s*position: relative;\s*z-index: 2;/, 'se a regra global mudar, rever esta guarda');
+  assert.match(ler('components/notifications/notifications.css'), /\.ann-root:not\(\.ann-overlay\) \{\s*display: contents;/);
+});
+
 test('nada anima em loop e as janelas saem do <main> (filter no tema escuro prende fixed)', () => {
   const css = ler('components/notifications/notifications.css');
   assert.doesNotMatch(css, /infinite/, 'animação infinita = janela redesenhando sem parar');

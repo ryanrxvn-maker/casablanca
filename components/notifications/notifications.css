@@ -11,6 +11,15 @@
 .ann-root {
   --ann-spring: cubic-bezier(0.32, 0.72, 0, 1);
 }
+/* O globals.css dá `position: relative; z-index: 2` a todo filho do body
+   (body > *): o embrulho da pilha de avisos virava uma camada z=2 e prendia a
+   .ann-stack (z 94) lá dentro — qualquer coisa acima de 2 (a Central, menus)
+   cobria o aviso e o X não pegava clique. Sem caixa própria, a pilha fica na
+   camada que ela mesma pede. A janela grande (.ann-overlay) tem fixed+z
+   próprios e continua igual. */
+.ann-root:not(.ann-overlay) {
+  display: contents;
+}
 
 /* ───────────────────────── AVISO (pequeno) ───────────────────────── */
 
