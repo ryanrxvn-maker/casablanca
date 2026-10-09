@@ -37,7 +37,7 @@ export function CreatorBar({
         disabled={travado}
         title="Nova task"
         aria-label="Nova task"
-        className="pl-btn pl-btn--amber pl-btn--icon-start"
+        className="pl-btn pl-btn--primary pl-btn--icon-start"
         style={{ height: 46, paddingRight: 20 }}
       >
         <span className="pl-btn__ico" style={{ width: 34, height: 34 }}>
@@ -146,7 +146,7 @@ export function DocsBar({
           type="button"
           onClick={onImportarLink}
           disabled={importando || !link.trim()}
-          className="pl-btn pl-btn--cyan pl-btn--icon-end"
+          className="pl-btn pl-btn--primary pl-btn--icon-end"
           style={{ height: 48 }}
         >
           {importando ? 'Lendo…' : 'Carregar tasks'}
