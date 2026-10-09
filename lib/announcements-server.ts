@@ -2,9 +2,12 @@ import {
   cleanAudience,
   isLive,
   readContent,
+  readMailLog,
   type AdminAnnouncement,
   type AnnKind,
   type AnnStats,
+  type Audience,
+  type MailLog,
 } from './announcements';
 
 /**
@@ -76,7 +79,22 @@ export function toAdminAnnouncement(r: AnnRow, stats?: AnnStats, now = Date.now(
     createdAt: iso(r.created_at) ?? r.created_at,
     updatedAt: iso(r.updated_at) ?? r.updated_at,
     stats: stats ?? ZERO,
+    mail: rawMailLog(r.audience),
   };
+}
+
+/**
+ * O registro do envio de e-mail mora no próprio `audience` (jsonb, sem
+ * migration nova) como `mailLog`. Só o servidor escreve: o cleanAudience
+ * descarta o campo vindo do painel, e quem grava público reanexa o atual.
+ */
+export function rawMailLog(audience: unknown): MailLog | null {
+  if (!audience || typeof audience !== 'object') return null;
+  return readMailLog((audience as Record<string, unknown>).mailLog);
+}
+
+export function audienceForDb(clean: Audience, mail: MailLog | null): Record<string, unknown> {
+  return mail ? { ...clean, mailLog: mail } : { ...clean };
 }
 
 export function toStats(r: Record<string, unknown>): AnnStats {

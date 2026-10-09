@@ -56,6 +56,8 @@ import { AnnouncementPreview } from '@/components/notifications/AnnouncementHost
 import { Btn, I, IconOnly, Menu, MenuItem, MenuSep, Modal, Segmented, SPRING, Tag } from './kit';
 import { accent, betaProTools, fmtDateTime, type Accent, type AdminUser } from './model';
 import { AnnouncementSeen } from './AnnouncementSeen';
+import { canResume, EmailMiniature, EmailPreview, EmailPreviewModal, EmailToggle, MailStatusTag, mailMode, mailSentence, TemplatePicker } from './AnnouncementEmail';
+import { EMAIL_TEMPLATE_META, type EmailTemplate } from '@/lib/email-templates';
 
 /* ───────────────────────── Rascunho ───────────────────────── */
 
@@ -172,9 +174,13 @@ export function AnnouncementsStudio({
   const [formError, setFormError] = useState<string | null>(null);
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [confirmDel, setConfirmDel] = useState<AdminAnnouncement | null>(null);
+  // e-mail sai pra muita gente e não tem volta: confirma antes de mandar
+  const [confirmSend, setConfirmSend] = useState<null | { publish: boolean }>(null);
+  const [confirmAct, setConfirmAct] = useState<null | { a: AdminAnnouncement; action: 'activate' | 'republish' | 'send' }>(null);
+  const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const subOpen = useRef(false);
-  subOpen.current = !!confirmDel;
+  subOpen.current = !!confirmDel || !!confirmSend || !!confirmAct;
 
   useEffect(() => {
     savedDraft = draft;
@@ -258,21 +264,82 @@ export function AnnouncementsStudio({
 
   const content = draft.kind === 'aviso' ? draft.aviso : draft.promo;
   const editing = draft.id ? list?.find((a) => a.id === draft.id) ?? null : null;
+  /** modelo "E-mail" (só caixa de entrada) */
+  const isEmail = draft.audience.email === 'only';
+  /** envelope ligado num aviso/propaganda (tela + e-mail 1 vez por ativação) */
+  const emailOn = draft.audience.email === 'also';
+  const editingMode = editing ? mailMode(editing) : 'off';
 
-  async function save(publish: boolean) {
+  function pickModel(m: 'aviso' | 'propaganda' | 'email') {
+    if (m === 'email') {
+      set({
+        kind: 'propaganda',
+        popup: false,
+        audience: { ...draft.audience, email: 'only' },
+        promo: { ...draft.promo, mail: draft.promo.mail ?? { template: 'oferta', subject: '', preheader: '' } },
+      });
+      return;
+    }
+    set({
+      kind: m,
+      popup: isEmail ? true : draft.popup,
+      audience: { ...draft.audience, email: isEmail ? 'off' : (draft.audience.email ?? 'off') },
+      // ajustes do e-mail não acompanham a janela (o envelope usa o template automático)
+      promo: isEmail ? { ...draft.promo, mail: undefined } : draft.promo,
+    });
+  }
+
+  /** "Enviar teste pra mim": só pro admin logado, com [Teste]. Não salva nada. */
+  async function sendTest() {
     const clean = cleanContent(draft.kind, content);
     if (!clean.ok) {
       setFormError(clean.error);
       return;
     }
-    const endsAt = endsAtOf(draft);
+    const ends = endsAtOf(draft);
+    setTesting(true);
+    try {
+      const res = await fetch('/api/admin/announcements', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ test: true, kind: draft.kind, content: clean.value, audience: draft.audience, endsAt: ends === 'invalid' ? null : ends }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        flash('err', j.error || 'Não deu pra mandar o teste.');
+        return;
+      }
+      flash('ok', `Teste enviado pra ${j.to}. Confere a caixa de entrada (na primeira vez, olha o spam também).`, 6500);
+    } catch (e) {
+      flash('err', (e as Error).message || 'Falha de conexão.');
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function save(publish: boolean, confirmed = false) {
+    const clean = cleanContent(draft.kind, content);
+    if (!clean.ok) {
+      setFormError(clean.error);
+      return;
+    }
+    const endsAt = isEmail ? null : endsAtOf(draft);
     if (endsAt === 'invalid') {
       setFormError('Escolha uma data de término no futuro (ou deixe sem prazo).');
       return;
     }
     const goingLive = publish || draft.wasActive;
     if (goingLive && audienceIsEmpty(draft.audience)) {
-      setFormError('Escolha quem recebe antes de publicar.');
+      setFormError(isEmail ? 'Escolha quem recebe antes de enviar.' : 'Escolha quem recebe antes de publicar.');
+      return;
+    }
+    // Vai sair e-mail? (envio do modelo E-mail; publicar com envelope; ligar o
+    // envelope num aviso no ar; "mostrar de novo" com envelope) → confirma antes.
+    const sendsMail = isEmail
+      ? publish
+      : emailOn && (publish || (draft.wasActive && (editingMode !== 'also' || draft.republish)));
+    if (sendsMail && !confirmed) {
+      setConfirmSend({ publish });
       return;
     }
     setSaving(publish ? 'publish' : 'draft');
@@ -282,7 +349,15 @@ export function AnnouncementsStudio({
         res = await fetch('/api/admin/announcements', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ kind: draft.kind, content: clean.value, audience: draft.audience, popup: draft.popup, active: publish, endsAt }),
+          body: JSON.stringify({
+            kind: draft.kind,
+            content: clean.value,
+            audience: draft.audience,
+            popup: isEmail ? false : draft.popup,
+            active: isEmail ? false : publish,
+            send: isEmail && publish,
+            endsAt,
+          }),
         });
       } else {
         res = await fetch('/api/admin/announcements', {
@@ -303,7 +378,7 @@ export function AnnouncementsStudio({
           res = await fetch('/api/admin/announcements', {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ id: draft.id, action: 'activate' }),
+            body: JSON.stringify({ id: draft.id, action: isEmail ? 'send' : 'activate' }),
           });
         }
       }
@@ -312,14 +387,16 @@ export function AnnouncementsStudio({
         setFormError(j.error || 'Não deu pra salvar.');
         return;
       }
+      const mail = sendsMail ? mailSentence((j.item as AdminAnnouncement | undefined)?.mail ?? null) : null;
       const live = publish || draft.wasActive;
-      flash(
-        'ok',
-        live
+      if (isEmail) {
+        flash(publish ? (mail?.ok === false ? 'err' : 'ok') : 'ok', publish ? (mail?.text ?? 'E-mail enviado.') : 'Rascunho do e-mail salvo. Envie quando quiser na aba Enviados.', 7000);
+      } else {
+        const tela = live
           ? `${draft.kind === 'aviso' ? 'Aviso' : 'Propaganda'} no ar pra ${reach} ${reach === 1 ? 'conta' : 'contas'}${draft.audience.includeAdmins ? ' + admins' : ''}.`
-          : 'Rascunho salvo. Publique quando quiser na aba Enviados.',
-        5200,
-      );
+          : 'Rascunho salvo. Publique quando quiser na aba Enviados.';
+        flash(mail && !mail.ok ? 'err' : 'ok', mail ? `${tela} ${mail.text}` : tela, mail ? 7000 : 5200);
+      }
       setDraft(newDraft());
       savedDraft = null;
       setTab('sent');
@@ -332,7 +409,14 @@ export function AnnouncementsStudio({
     }
   }
 
-  async function act(a: AdminAnnouncement, action: 'activate' | 'pause' | 'republish') {
+  async function act(a: AdminAnnouncement, action: 'activate' | 'pause' | 'republish' | 'send' | 'resume', confirmed = false) {
+    const mode = mailMode(a);
+    // ação que manda e-mail pra todo mundo: confirma antes (resume só continua o que faltou)
+    const sendsMail = (action === 'send' && mode === 'only') || ((action === 'activate' || action === 'republish') && mode === 'also');
+    if (sendsMail && !confirmed) {
+      setConfirmAct({ a, action: action as 'activate' | 'republish' | 'send' });
+      return;
+    }
     setBusy(a.id);
     try {
       const res = await fetch('/api/admin/announcements', {
@@ -345,15 +429,17 @@ export function AnnouncementsStudio({
         flash('err', j.error || 'Não deu pra mudar o aviso.');
         return;
       }
-      flash(
-        'ok',
+      const mail = sendsMail || action === 'resume' ? mailSentence((j.item as AdminAnnouncement | undefined)?.mail ?? null) : null;
+      const tela =
         action === 'pause'
           ? 'Pausado. Sai da tela de todo mundo e continua no histórico de quem recebeu.'
           : action === 'activate'
             ? 'No ar. Quem está logado vê em até 30 segundos; quem entrar depois vê no login.'
-            : 'Pronto: a janela abre de novo pra quem já tinha fechado.',
-        5200,
-      );
+            : action === 'republish'
+              ? 'Pronto: a janela abre de novo pra quem já tinha fechado.'
+              : '';
+      const text = [tela, mail?.text].filter(Boolean).join(' ') || 'Pronto.';
+      flash(mail && !mail.ok ? 'err' : 'ok', text, mail ? 7000 : 5200);
       await load();
       void refreshNotifications({ force: true });
     } finally {
@@ -466,28 +552,41 @@ export function AnnouncementsStudio({
                   ) : null}
 
                   <Step n={1} title="Modelo">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <TemplateCard
-                        selected={draft.kind === 'aviso'}
-                        onClick={() => set({ kind: 'aviso' })}
+                        selected={draft.kind === 'aviso' && !isEmail}
+                        onClick={() => pickModel('aviso')}
                         title="Aviso"
-                        hint="Pequeno, no canto da tela. Recado rápido."
+                        hint="Pequeno, no canto da tela."
                         kind="aviso"
-                        disabled={!!draft.id && draft.kind !== 'aviso'}
+                        disabled={!!draft.id && (draft.kind !== 'aviso' || isEmail)}
                       />
                       <TemplateCard
-                        selected={draft.kind === 'propaganda'}
-                        onClick={() => set({ kind: 'propaganda' })}
+                        selected={draft.kind === 'propaganda' && !isEmail}
+                        onClick={() => pickModel('propaganda')}
                         title="Propaganda"
-                        hint="Grande, no meio da tela. Oferta e lançamento."
+                        hint="Grande, no meio da tela."
                         kind="propaganda"
-                        disabled={!!draft.id && draft.kind !== 'propaganda'}
+                        disabled={!!draft.id && (draft.kind !== 'propaganda' || isEmail)}
+                      />
+                      <TemplateCard
+                        selected={isEmail}
+                        onClick={() => pickModel('email')}
+                        title="E-mail"
+                        hint="Chega na caixa de entrada."
+                        kind="email"
+                        disabled={!!draft.id && !isEmail}
                       />
                     </div>
                   </Step>
 
                   <Step n={2} title="Conteúdo">
-                    {draft.kind === 'aviso' ? (
+                    {isEmail ? (
+                      <>
+                        <EmailFields c={draft.promo} set={setPromo} />
+                        <PromoFields c={draft.promo} set={setPromo} flash={flash} emailTemplate={draft.promo.mail?.template ?? 'oferta'} />
+                      </>
+                    ) : draft.kind === 'aviso' ? (
                       <AvisoFields c={draft.aviso} set={setAviso} />
                     ) : (
                       <PromoFields c={draft.promo} set={setPromo} flash={flash} />
@@ -518,6 +617,7 @@ export function AnnouncementsStudio({
                     />
                   </Step>
 
+                  {isEmail ? null : (
                   <Step n={4} title="Exibição">
                     <div className="grid grid-cols-2 gap-3">
                       <ModeCard
@@ -571,19 +671,20 @@ export function AnnouncementsStudio({
                           on={draft.republish}
                           onChange={(v) => set({ republish: v })}
                           label="Mostrar de novo pra quem já fechou"
-                          hint="Sem isso, a mudança aparece no próximo login de cada pessoa."
+                          hint={emailOn ? 'Sem isso, a mudança aparece no próximo login de cada pessoa. Com isso, o e-mail sai de novo também.' : 'Sem isso, a mudança aparece no próximo login de cada pessoa.'}
                         />
                       </div>
                     ) : null}
                   </Step>
+                  )}
                 </div>
 
                 {/* ═══ Prévia ═══ */}
                 <div className="min-h-0 border-t border-[rgb(var(--text)/0.07)] bg-[rgb(var(--text)/0.015)] px-5 py-5 md:px-6 lg:overflow-y-auto lg:border-l lg:border-t-0">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="font-tech text-[14.5px] font-semibold text-text">Prévia ao vivo</p>
-                      <p className="field-label text-[12.5px] text-text-muted">É exatamente o que o cliente vai ver.</p>
+                      <p className="font-tech text-[14.5px] font-semibold text-text">{isEmail ? 'Prévia do e-mail' : 'Prévia ao vivo'}</p>
+                      <p className="field-label text-[12.5px] text-text-muted">{isEmail ? 'É o e-mail que chega na caixa de entrada.' : 'É exatamente o que o cliente vai ver.'}</p>
                     </div>
                     <Segmented
                       size="sm"
@@ -595,7 +696,7 @@ export function AnnouncementsStudio({
                       ]}
                     />
                   </div>
-                  <Preview draft={draft} device={device} />
+                  {isEmail ? <EmailPreview kind={draft.kind} content={draft.promo} endsAt={null} device={device} /> : <Preview draft={draft} device={device} />}
                 </div>
               </div>
 
@@ -609,16 +710,37 @@ export function AnnouncementsStudio({
                     </span>
                   ) : (
                     <span className="text-text-muted">
-                      {audienceIsEmpty(draft.audience) ? 'Ninguém selecionado ainda.' : `Vai pra: ${audienceSummary(draft.audience)}`}
+                      {audienceIsEmpty(draft.audience)
+                        ? 'Ninguém selecionado ainda.'
+                        : `${isEmail ? 'E-mail pra' : 'Vai pra'}: ${audienceSummary(draft.audience)}${emailOn ? ' · também por e-mail' : ''}`}
                     </span>
                   )}
                 </div>
-                {draft.wasActive ? (
-                  <PrimaryBtn onClick={() => void save(false)} busy={saving !== null} disabled={dbMissing}>
-                    {saving ? 'Salvando' : 'Salvar alterações'}
-                  </PrimaryBtn>
+                {isEmail ? (
+                  <>
+                    <Btn onClick={() => void sendTest()} disabled={testing || saving !== null || dbMissing}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <I.mail size={14} />
+                        {testing ? 'Enviando teste' : 'Enviar teste pra mim'}
+                      </span>
+                    </Btn>
+                    <Btn onClick={() => void save(false)} disabled={saving !== null || dbMissing}>
+                      {saving === 'draft' ? 'Salvando' : draft.id ? 'Salvar' : 'Salvar rascunho'}
+                    </Btn>
+                    <PrimaryBtn onClick={() => void save(true)} busy={saving === 'publish'} disabled={saving !== null || dbMissing}>
+                      {saving === 'publish' ? 'Enviando' : editing?.activatedAt ? 'Enviar de novo' : 'Enviar e-mail'}
+                    </PrimaryBtn>
+                  </>
+                ) : draft.wasActive ? (
+                  <>
+                    <EmailToggle on={emailOn} onChange={(v) => setAudience({ email: v ? 'also' : 'off' })} disabled={saving !== null} />
+                    <PrimaryBtn onClick={() => void save(false)} busy={saving !== null} disabled={dbMissing}>
+                      {saving ? 'Salvando' : 'Salvar alterações'}
+                    </PrimaryBtn>
+                  </>
                 ) : (
                   <>
+                    <EmailToggle on={emailOn} onChange={(v) => setAudience({ email: v ? 'also' : 'off' })} disabled={saving !== null} />
                     <Btn onClick={() => void save(false)} disabled={saving !== null || dbMissing}>
                       {saving === 'draft' ? 'Salvando' : draft.id ? 'Salvar' : 'Salvar rascunho'}
                     </Btn>
@@ -638,6 +760,8 @@ export function AnnouncementsStudio({
               onReload={() => void load()}
               onToggle={(a) => void act(a, a.active ? 'pause' : 'activate')}
               onRepublish={(a) => void act(a, 'republish')}
+              onSend={(a) => void act(a, 'send')}
+              onResume={(a) => void act(a, 'resume')}
               onEdit={(a) => {
                 setDraft(draftFrom(a));
                 setTab('create');
@@ -665,6 +789,65 @@ export function AnnouncementsStudio({
             <Btn onClick={() => setConfirmDel(null)}>Cancelar</Btn>
             <Btn tone="danger" solid onClick={() => void doDelete(confirmDel)} disabled={busy === confirmDel.id}>
               {busy === confirmDel.id ? 'Excluindo' : 'Excluir de vez'}
+            </Btn>
+          </div>
+        </Modal>
+      ) : null}
+
+      {confirmSend ? (
+        <Modal onClose={() => setConfirmSend(null)} tone="violet">
+          <h3 className="font-tech text-[18px] font-semibold tracking-[-0.02em] text-text">
+            {isEmail ? (editing?.activatedAt ? 'Enviar o e-mail de novo?' : 'Enviar o e-mail agora?') : 'Publicar e mandar o e-mail?'}
+          </h3>
+          <p className="field-label mt-2 text-[14px] leading-relaxed text-text-muted">
+            Vai pra <b className="text-text">{reach} {reach === 1 ? 'conta' : 'contas'}{draft.audience.includeAdmins ? ' + admins' : ''}</b>: <b className="text-text">&ldquo;{isEmail ? draft.promo.mail?.subject || draft.promo.title : content.title}&rdquo;</b>. Depois de enviado não tem como desfazer; quem pediu pra não receber fica de fora.
+          </p>
+          {!isEmail ? <p className="field-label mt-2 text-[13px] leading-relaxed text-text-muted">A janela continua abrindo a cada login. O e-mail sai uma vez só nesta ativação.</p> : null}
+          <div className="mt-5 flex justify-end gap-2">
+            <Btn onClick={() => setConfirmSend(null)}>Cancelar</Btn>
+            <Btn
+              tone="violet"
+              solid
+              onClick={() => {
+                const p = confirmSend.publish;
+                setConfirmSend(null);
+                void save(p, true);
+              }}
+            >
+              Enviar agora
+            </Btn>
+          </div>
+        </Modal>
+      ) : null}
+
+      {confirmAct ? (
+        <Modal onClose={() => setConfirmAct(null)} tone="violet">
+          <h3 className="font-tech text-[18px] font-semibold tracking-[-0.02em] text-text">
+            {confirmAct.action === 'send' ? 'Enviar o e-mail de novo?' : confirmAct.action === 'activate' ? 'Ativar e mandar o e-mail?' : 'Mostrar de novo e mandar o e-mail?'}
+          </h3>
+          <p className="field-label mt-2 text-[14px] leading-relaxed text-text-muted">
+            {(() => {
+              const n = viewers.filter((v) => matchesAudience(confirmAct.a.audience, v)).length;
+              const c = confirmAct.a.content as PromoContent;
+              return (
+                <>
+                  Vai pra <b className="text-text">{n} {n === 1 ? 'conta' : 'contas'}{confirmAct.a.audience.includeAdmins ? ' + admins' : ''}</b>: <b className="text-text">&ldquo;{c.mail?.subject || confirmAct.a.content.title}&rdquo;</b>. É uma ativação nova, então o e-mail sai de novo pra todo mundo. Quem pediu pra não receber fica de fora.
+                </>
+              );
+            })()}
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Btn onClick={() => setConfirmAct(null)}>Cancelar</Btn>
+            <Btn
+              tone="violet"
+              solid
+              onClick={() => {
+                const { a, action } = confirmAct;
+                setConfirmAct(null);
+                void act(a, action, true);
+              }}
+            >
+              Enviar agora
             </Btn>
           </div>
         </Modal>
@@ -782,8 +965,22 @@ function CtaFields({ label, url, onChange }: { label: string; url: string; onCha
 
 const ART_LABEL: Record<PromoArt, string> = { tema: 'Imagem ou arte do tema', pilot: 'Pilot animado' };
 
-function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<PromoContent>) => void; flash: (k: 'ok' | 'err', m: string) => void }) {
+function PromoFields({
+  c,
+  set,
+  flash,
+  emailTemplate,
+}: {
+  c: PromoContent;
+  set: (p: Partial<PromoContent>) => void;
+  flash: (k: 'ok' | 'err', m: string) => void;
+  /** modelo E-mail: esconde o que o template escolhido não usa */
+  emailTemplate?: EmailTemplate;
+}) {
   const bullets = [...c.bullets, '', '', ''].slice(0, LIMITS.bullets);
+  const usaImagem = emailTemplate !== 'comunicado';
+  const usaDestaques = emailTemplate !== 'comunicado';
+  const usaPreco = !emailTemplate || emailTemplate === 'oferta';
   return (
     <div>
       <p className="field-label mb-2 text-[13px] text-text-muted">Cor</p>
@@ -818,6 +1015,8 @@ function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<Prom
         })}
       </div>
 
+      {usaImagem ? (
+      <>
       <p className="field-label mb-2 text-[13px] text-text-muted">Arte</p>
       <div className="mb-4 flex flex-wrap gap-2">
         {PROMO_ARTS.map((a) => {
@@ -845,11 +1044,15 @@ function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<Prom
 
       {c.art === 'pilot' ? (
         <p className="field-label -mt-1 mb-4 text-[12px] leading-relaxed text-text-muted">
-          A cena do Pilot entra no lugar da imagem, em cima do texto: o cérebro vira código e o código vira avatar em holograma, mexendo com o mouse.
+          {emailTemplate
+            ? 'No e-mail vai o quadro da cena do Pilot (PILOT cromado, cérebro e avatar em holograma) no topo.'
+            : 'A cena do Pilot entra no lugar da imagem, em cima do texto: o cérebro vira código e o código vira avatar em holograma, mexendo com o mouse.'}
         </p>
       ) : (
         <ImageField url={c.imageUrl} onChange={(imageUrl) => set({ imageUrl })} flash={flash} />
       )}
+      </>
+      ) : null}
 
       <div className="grid gap-x-3 sm:grid-cols-2">
         <Field label="Selo (opcional)" value={c.badge} max={LIMITS.promoBadge}>
@@ -862,6 +1065,7 @@ function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<Prom
       <Field label="Texto" value={c.body} max={LIMITS.promoBody}>
         <textarea className={INPUT + ' min-h-[76px] resize-y leading-relaxed'} value={c.body} maxLength={LIMITS.promoBody + 20} onChange={(e) => set({ body: e.target.value })} placeholder="Uma ou duas frases que fazem a pessoa querer clicar." />
       </Field>
+      {usaDestaques ? (
       <Field label="Destaques (até 3, opcional)">
         <div className="grid gap-2">
           {bullets.map((b, i) => (
@@ -884,6 +1088,8 @@ function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<Prom
           ))}
         </div>
       </Field>
+      ) : null}
+      {usaPreco ? (
       <div className="grid grid-cols-3 gap-x-3">
         <Field label="Preço de (opcional)">
           <input className={INPUT} value={c.priceOld} maxLength={LIMITS.price} onChange={(e) => set({ priceOld: e.target.value })} placeholder="R$ 97" />
@@ -895,7 +1101,40 @@ function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<Prom
           <input className={INPUT} value={c.priceNote} maxLength={LIMITS.priceNote} onChange={(e) => set({ priceNote: e.target.value })} placeholder="/mês" />
         </Field>
       </div>
+      ) : null}
       <CtaFields label={c.ctaLabel} url={c.ctaUrl} onChange={(p) => set(p)} />
+    </div>
+  );
+}
+
+/** Modelo E-mail: template, assunto e pré-texto (o resto do conteúdo é o da propaganda). */
+function EmailFields({ c, set }: { c: PromoContent; set: (p: Partial<PromoContent>) => void }) {
+  const m = c.mail ?? { template: 'oferta' as EmailTemplate, subject: '', preheader: '' };
+  const setMail = (p: Partial<NonNullable<PromoContent['mail']>>) => set({ mail: { ...m, ...p } });
+  return (
+    <div className="mb-5">
+      <p className="field-label mb-2 text-[13px] text-text-muted">Template</p>
+      <TemplatePicker value={m.template} onChange={(template) => setMail({ template })} color={THEME_META[c.theme].rgb} />
+      <div className="mt-4 grid gap-x-3 sm:grid-cols-2">
+        <Field label="Assunto" value={m.subject} max={LIMITS.mailSubject}>
+          <input
+            className={INPUT}
+            value={m.subject}
+            maxLength={LIMITS.mailSubject + 10}
+            onChange={(e) => setMail({ subject: e.target.value })}
+            placeholder={c.title ? 'Vazio = o título' : 'Ex.: Chegou o Pilot'}
+          />
+        </Field>
+        <Field label="Pré-texto (opcional)" value={m.preheader} max={LIMITS.mailPreheader}>
+          <input
+            className={INPUT}
+            value={m.preheader}
+            maxLength={LIMITS.mailPreheader + 10}
+            onChange={(e) => setMail({ preheader: e.target.value })}
+            placeholder="Aparece ao lado do assunto"
+          />
+        </Field>
+      </div>
     </div>
   );
 }
@@ -1028,7 +1267,7 @@ function TemplateCard({
   onClick: () => void;
   title: string;
   hint: string;
-  kind: AnnKind;
+  kind: AnnKind | 'email';
   disabled?: boolean;
 }) {
   return (
@@ -1045,7 +1284,7 @@ function TemplateCard({
       }}
     >
       <div className="overflow-hidden rounded-[14px]" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.06)' }}>
-        <Miniature kind={kind} />
+        {kind === 'email' ? <EmailMiniature /> : <Miniature kind={kind} />}
       </div>
       <div className="flex items-start justify-between gap-2 px-2 pb-1.5 pt-2.5">
         <div className="min-w-0">
@@ -1515,6 +1754,8 @@ function SentList({
   onReload,
   onToggle,
   onRepublish,
+  onSend,
+  onResume,
   onEdit,
   onDuplicate,
   onDelete,
@@ -1527,6 +1768,10 @@ function SentList({
   onReload: () => void;
   onToggle: (a: AdminAnnouncement) => void;
   onRepublish: (a: AdminAnnouncement) => void;
+  /** modelo E-mail: manda de novo (ativação nova) */
+  onSend: (a: AdminAnnouncement) => void;
+  /** continua o envio desta ativação (cota/erro) — não duplica */
+  onResume: (a: AdminAnnouncement) => void;
   onEdit: (a: AdminAnnouncement) => void;
   onDuplicate: (a: AdminAnnouncement) => void;
   onDelete: (a: AdminAnnouncement) => void;
@@ -1542,6 +1787,8 @@ function SentList({
   // Prévia: a mesma janela que o cliente vê (não grava nada, o botão não navega)
   const [preview, setPreview] = useState<NotifItem | null>(null);
   const closePreview = useCallback(() => setPreview(null), []);
+  const [mailPreview, setMailPreview] = useState<AdminAnnouncement | null>(null);
+  const closeMailPreview = useCallback(() => setMailPreview(null), []);
   if (seen) return <AnnouncementSeen a={seen} users={users} reach={seenReach} onBack={closeSeen} />;
 
   return (
@@ -1579,6 +1826,9 @@ function SentList({
             const meta = STATUS_META[st];
             const color = a.kind === 'aviso' ? TONE_META[(a.content as AvisoContent).tone].rgb : THEME_META[(a.content as PromoContent).theme].rgb;
             const reachNow = viewers.filter((v) => matchesAudience(a.audience, v)).length;
+            const mode = mailMode(a);
+            const only = mode === 'only';
+            const tpl = (a.content as PromoContent).mail?.template;
             return (
               <li
                 key={a.id}
@@ -1586,41 +1836,65 @@ function SentList({
                 style={{ background: 'rgb(var(--text) / 0.025)', boxShadow: `inset 0 0 0 1px ${a.live ? accent('lime', 0.22) : 'rgb(var(--text) / 0.07)'}` }}
               >
                 <span className="ann-tile !h-11 !w-11 !rounded-[13px]" style={{ ['--ann' as string]: color }}>
-                  {a.kind === 'aviso' ? <ToneIcon tone={(a.content as AvisoContent).tone} size={19} /> : <AnnIcon.megaphone size={19} />}
+                  {only ? <I.mail size={19} /> : a.kind === 'aviso' ? <ToneIcon tone={(a.content as AvisoContent).tone} size={19} /> : <AnnIcon.megaphone size={19} />}
                 </span>
 
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <p className="font-tech min-w-0 truncate text-[14.5px] font-semibold text-text">{a.content.title}</p>
-                    <Tag a={meta.a} dot={a.live}>
-                      {meta.label}
-                    </Tag>
+                    {only ? null : (
+                      <Tag a={meta.a} dot={a.live}>
+                        {meta.label}
+                      </Tag>
+                    )}
+                    <MailStatusTag a={a} />
                     {a.live && a.endsAt ? <span className="field-label text-[12px] text-text-muted">até {fmtDateTime(a.endsAt)}</span> : null}
                   </div>
                   <p className="field-label mt-1 truncate text-[12.5px] text-text-muted">
-                    {a.kind === 'aviso' ? 'Aviso' : 'Propaganda'} · {a.popup ? 'janela na tela' : 'só no sino'} · {audienceSummary(a.audience, { admins: false })}
+                    {only
+                      ? 'E-mail · ' + EMAIL_TEMPLATE_META[tpl ?? 'oferta'].label
+                      : (a.kind === 'aviso' ? 'Aviso' : 'Propaganda') + ' · ' + (a.popup ? 'janela na tela' : 'só no sino') + (mode === 'also' ? ' + e-mail' : '')}{' '}
+                    · {audienceSummary(a.audience, { admins: false })}
                     {users ? ` (${reachNow} ${reachNow === 1 ? 'conta' : 'contas'}${a.audience.includeAdmins ? ' + admins' : ''})` : a.audience.includeAdmins ? ' + admins' : ''} · criado {fmtDateTime(a.createdAt)}
                   </p>
                 </div>
 
                 <div className="col-span-2 flex items-center gap-4 md:col-span-1">
-                  <Metric label="Entregues" value={a.stats.delivered} title="Contas que já abriram o app depois da publicação e receberam (chega no próximo acesso de cada um)" />
-                  <Metric label="Lidas" value={a.stats.read} sub={pct(a.stats.read, a.stats.delivered)} title="Viram a janela ou abriram no sino" />
-                  <Metric label="Cliques" value={a.stats.clicked} sub={pct(a.stats.clicked, a.stats.delivered)} title="Clicaram no botão do aviso" />
+                  {only ? (
+                    <>
+                      <Metric label="Enviados" value={a.mail?.sent ?? 0} sub={a.mail ? 'de ' + a.mail.total : undefined} title={a.mail ? 'Enviado em ' + (fmtDateTime(a.mail.at) ?? '') : 'Ainda não enviado'} />
+                      <Metric label="Fora da lista" value={a.mail?.optOut ?? 0} title="Pediram pra não receber e-mail (ficaram de fora)" />
+                    </>
+                  ) : (
+                    <>
+                      <Metric label="Entregues" value={a.stats.delivered} title="Contas que já abriram o app depois da publicação e receberam (chega no próximo acesso de cada um)" />
+                      <Metric label="Lidas" value={a.stats.read} sub={pct(a.stats.read, a.stats.delivered)} title="Viram a janela ou abriram no sino" />
+                      <Metric label="Cliques" value={a.stats.clicked} sub={pct(a.stats.clicked, a.stats.delivered)} title="Clicaram no botão do aviso" />
+                    </>
+                  )}
                 </div>
 
                 <div className="col-span-2 flex items-center justify-end gap-2 md:col-span-1">
                   <IconOnly
-                    title="Ver como aparece pro cliente"
+                    title={only ? 'Ver o e-mail' : 'Ver como aparece pro cliente'}
                     onClick={() =>
-                      setPreview({ id: a.id, kind: a.kind, content: a.content, deliveredAt: new Date().toISOString(), readAt: null, clickedAt: null, live: a.live, activatedAt: a.activatedAt, endsAt: a.endsAt })
+                      only
+                        ? setMailPreview(a)
+                        : setPreview({ id: a.id, kind: a.kind, content: a.content, deliveredAt: new Date().toISOString(), readAt: null, clickedAt: null, live: a.live, activatedAt: a.activatedAt, endsAt: a.endsAt })
                     }
                   >
-                    <I.monitor size={16} />
+                    {only ? <I.mail size={16} /> : <I.monitor size={16} />}
                   </IconOnly>
-                  <IconOnly title="Quem viu: hora e quantas vezes cada conta viu" onClick={() => setSeenId(a.id)}>
-                    <I.eye size={16} />
-                  </IconOnly>
+                  {only ? null : (
+                    <IconOnly title="Quem viu: hora e quantas vezes cada conta viu" onClick={() => setSeenId(a.id)}>
+                      <I.eye size={16} />
+                    </IconOnly>
+                  )}
+                  {only ? (
+                    <Btn size="sm" tone="violet" onClick={() => onSend(a)} disabled={busy === a.id}>
+                      {busy === a.id ? 'Enviando' : a.activatedAt ? 'Enviar de novo' : 'Enviar'}
+                    </Btn>
+                  ) : (
                   <button
                     type="button"
                     role="switch"
@@ -1634,6 +1908,7 @@ function SentList({
                     <Switch on={a.active} busy={busy === a.id} />
                     {a.active ? 'Ativo' : 'Ativar'}
                   </button>
+                  )}
                   <Btn size="sm" onClick={() => onEdit(a)}>
                     Editar
                   </Btn>
@@ -1648,20 +1923,35 @@ function SentList({
       )}
 
       {preview ? <AnnouncementPreview key={preview.id} item={preview} onClose={closePreview} /> : null}
+      {mailPreview ? <EmailPreviewModal a={mailPreview} onClose={closeMailPreview} /> : null}
 
       {menu ? (
         <Menu anchor={menu.el} onClose={() => setMenu(null)} width={260} layer={85}>
-          <MenuItem
-            icon={<I.sync size={14} />}
-            disabled={!menu.a.active}
-            hint={menu.a.active ? 'A janela abre de novo pra quem fechou' : 'Ative antes'}
-            onClick={() => {
-              setMenu(null);
-              onRepublish(menu.a);
-            }}
-          >
-            Mostrar de novo pra todos
-          </MenuItem>
+          {canResume(menu.a) ? (
+            <MenuItem
+              icon={<I.mail size={14} />}
+              hint="Continua de onde parou (não duplica)"
+              onClick={() => {
+                setMenu(null);
+                onResume(menu.a);
+              }}
+            >
+              Tentar o resto do e-mail
+            </MenuItem>
+          ) : null}
+          {mailMode(menu.a) === 'only' ? null : (
+            <MenuItem
+              icon={<I.sync size={14} />}
+              disabled={!menu.a.active}
+              hint={menu.a.active ? (mailMode(menu.a) === 'also' ? 'A janela abre de novo e o e-mail sai de novo' : 'A janela abre de novo pra quem fechou') : 'Ative antes'}
+              onClick={() => {
+                setMenu(null);
+                onRepublish(menu.a);
+              }}
+            >
+              Mostrar de novo pra todos
+            </MenuItem>
+          )}
           <MenuItem
             icon={<I.copy size={14} />}
             onClick={() => {

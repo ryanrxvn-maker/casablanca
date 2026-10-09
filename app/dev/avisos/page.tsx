@@ -25,9 +25,11 @@ import {
   cleanContent,
   cleanEndsAt,
   isLive,
+  mailDoneFor,
   matchesAudience,
   popupKey,
   readContent,
+  readMailLog,
   seenFromInbox,
   shouldPopup,
   sortPopups,
@@ -159,6 +161,7 @@ function adminItem(a: Ann): AdminAnnouncement {
     endsAt: a.ends_at,
     createdAt: a.created_at,
     updatedAt: a.updated_at,
+    mail: readMailLog((a.audience as { mailLog?: unknown } | null)?.mailLog),
     stats: {
       delivered: rows.length + (a.active ? 37 : 12),
       read: rows.filter((r) => r.read_at).length + (a.active ? 21 : 9),
@@ -239,6 +242,28 @@ function userAction(body: { action: string; id?: string }) {
   return { ok: true };
 }
 
+/**
+ * Envio de e-mail da bancada: mesma REGRA do servidor (1 vez por ativação,
+ * pausado não manda, "Tentar o resto" continua), sem mandar e-mail de verdade.
+ * ?cota=N simula a cota do Resend acabando depois de N e-mails.
+ */
+let benchUsers: ReturnType<typeof mockUsers> = [];
+function fakeMail(a: Ann, force = false) {
+  const aud = (a.audience ?? {}) as { email?: string; mailLog?: unknown };
+  const mode = aud.email === 'also' || aud.email === 'only' ? aud.email : 'off';
+  if (mode === 'off' || !a.activated_at || (mode === 'also' && !a.active)) return;
+  const prev = readMailLog(aud.mailLog);
+  if (!force && mailDoneFor(prev, a.activated_at)) return;
+  const audience = cleanAudience(a.audience);
+  const total = benchUsers.filter((u) => u.is_active && matchesAudience(audience, { id: u.id, email: u.email, isAdmin: false, isActive: true, plan: u.plan as 'premium' | 'free', access: u.access as Viewer['access'], beta: false })).length;
+  const cota = Number(new URLSearchParams(location.search).get('cota')) || Infinity;
+  const ja = prev && prev.for && Date.parse(prev.for) === Date.parse(a.activated_at) ? prev.sent : 0;
+  const sent = Math.min(total, force ? total : Math.min(total, cota));
+  const falta = total - sent;
+  const log = { for: a.activated_at, total, sent: Math.max(sent, ja), failed: falta, optOut: 2, reason: falta ? 'quota' : null, message: falta ? 'Acabou a cota do plano do Resend: daily_quota_exceeded' : null, at: new Date().toISOString(), done: true };
+  a.audience = { ...(a.audience as object), mailLog: log };
+}
+
 function adminWrite(method: string, url: string, body: Record<string, unknown>) {
   const d = db();
   const stamp = new Date().toISOString();
@@ -248,19 +273,25 @@ function adminWrite(method: string, url: string, body: Record<string, unknown>) 
     if (!c.ok) return { status: 400, body: { error: c.error } };
     const endsAt = cleanEndsAt(body.endsAt);
     if (endsAt === undefined) return { status: 400, body: { error: 'Prazo inválido.' } };
+    if (body.test === true) return { status: 200, body: { ok: true, to: 'silas@autoedit.com' } };
+    const audience = cleanAudience(body.audience);
+    const only = audience.email === 'only';
+    const active = !only && body.active === true;
+    const send = only && body.send === true;
     const a: Ann = {
       id: crypto.randomUUID(),
       kind,
       content: c.value,
-      audience: cleanAudience(body.audience),
-      popup: body.popup !== false,
-      active: body.active === true,
-      activated_at: body.active === true ? stamp : null,
+      audience,
+      popup: only ? false : body.popup !== false,
+      active,
+      activated_at: active || send ? stamp : null,
       ends_at: endsAt,
       created_at: stamp,
       updated_at: stamp,
     };
     d.anns.unshift(a);
+    if (active || send) fakeMail(a);
     return { status: 200, body: { ok: true, item: adminItem(a) } };
   }
   if (method === 'DELETE') {
@@ -271,24 +302,40 @@ function adminWrite(method: string, url: string, body: Record<string, unknown>) 
   }
   const a = d.anns.find((x) => x.id === body.id);
   if (!a) return { status: 404, body: { error: 'Esse aviso não existe mais.' } };
+  const mode = (a.audience as { email?: string } | null)?.email ?? 'off';
   a.updated_at = stamp;
   if (body.action === 'activate') {
+    if (mode === 'only') return { status: 400, body: { error: 'E-mail não fica no ar no site: use "Enviar de novo".' } };
     a.active = true;
     a.activated_at = stamp;
     if (a.ends_at && Date.parse(a.ends_at) <= Date.now()) a.ends_at = null;
+    fakeMail(a);
   } else if (body.action === 'pause') a.active = false;
-  else if (body.action === 'republish') a.activated_at = stamp;
+  else if (body.action === 'republish') {
+    a.activated_at = stamp;
+    fakeMail(a);
+  } else if (body.action === 'send') {
+    a.activated_at = stamp;
+    a.active = false;
+    fakeMail(a);
+  } else if (body.action === 'resume') fakeMail(a, true);
   else if (body.action === 'update') {
     const kind = (body.kind as AnnKind) ?? a.kind;
     const c = cleanContent(kind, body.content);
     if (!c.ok) return { status: 400, body: { error: c.error } };
     a.kind = kind;
     a.content = c.value;
-    a.audience = cleanAudience(body.audience);
-    a.popup = body.popup !== false;
+    const before = mode;
+    const prevLog = (a.audience as { mailLog?: unknown } | null)?.mailLog;
+    const aud = cleanAudience(body.audience);
+    a.audience = prevLog ? { ...aud, mailLog: prevLog } : aud;
+    a.popup = mode === 'only' ? false : body.popup !== false;
     const e = cleanEndsAt(body.endsAt);
     if (e !== undefined) a.ends_at = e;
-    if (body.republish === true && a.active) a.activated_at = stamp;
+    if (body.republish === true && a.active) {
+      a.activated_at = stamp;
+      fakeMail(a);
+    } else if (a.active && aud.email === 'also' && before !== 'also') fakeMail(a);
   }
   return { status: 200, body: { ok: true, item: adminItem(a) } };
 }
@@ -410,6 +457,7 @@ function install() {
   const real = window.fetch.bind(window);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   const users = [...mockUsers(), ...viewerUsers()];
+  benchUsers = users;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const method = (init?.method ?? 'GET').toUpperCase();

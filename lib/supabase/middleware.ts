@@ -90,7 +90,10 @@ const ADMIN_ONLY_PREFIXES = [
 export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith('/api/')) {
+  // /api/email/sair: o "cancelar inscrição" de 1 clique do Gmail/Apple é um POST
+  // que vem do servidor do provedor, SEM Origin. A autorização ali é a
+  // assinatura HMAC do link (lib/email-optout.ts), não cookie — CSRF não se aplica.
+  if (pathname.startsWith('/api/') && pathname !== '/api/email/sair') {
     const originGuard = checkOrigin(request);
     if (originGuard) return originGuard;
   }

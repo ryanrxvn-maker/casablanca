@@ -14,6 +14,8 @@
  * novo e reativação abrem de novo sozinhos, sem relógio nem flag extra.
  */
 
+import { EMAIL_TEMPLATES, type EmailTemplate } from './email-templates';
+
 /* ───────────────────────── Modelos ───────────────────────── */
 
 export type AnnKind = 'aviso' | 'propaganda';
@@ -54,9 +56,70 @@ export type PromoContent = {
   ctaLabel: string;
   ctaUrl: string;
   imageUrl: string;
+  /** Ajustes do e-mail (modelo "E-mail" da central). Sem isso, template automático e assunto = título. */
+  mail?: MailSettings;
 };
 
 export type AnnContent = AvisoContent | PromoContent;
+
+/* ───────────────────────── E-mail ───────────────────────── */
+
+/** off = só na tela · also = tela + e-mail (1 vez por ativação) · only = só e-mail */
+export const EMAIL_MODES = ['off', 'also', 'only'] as const;
+export type EmailMode = (typeof EMAIL_MODES)[number];
+
+export type MailSettings = { template: EmailTemplate; subject: string; preheader: string };
+
+export type MailReason = 'quota' | 'erro' | 'sem_chave' | 'sem_destinatario';
+
+/** Resultado do envio da ATIVAÇÃO atual (o servidor grava; o painel mostra). */
+export type MailLog = {
+  /** activated_at da ativação que este envio cobre */
+  for: string | null;
+  total: number;
+  sent: number;
+  failed: number;
+  /** pediram pra não receber e-mail (ficaram de fora) */
+  optOut: number;
+  reason: MailReason | null;
+  message: string | null;
+  at: string;
+  /** terminou (com ou sem falha); false = em andamento */
+  done: boolean;
+};
+
+export function readMailLog(raw: unknown): MailLog | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const reasons: MailReason[] = ['quota', 'erro', 'sem_chave', 'sem_destinatario'];
+  return {
+    for: typeof r.for === 'string' ? r.for : null,
+    total: n(r.total),
+    sent: n(r.sent),
+    failed: n(r.failed),
+    optOut: n(r.optOut),
+    reason: reasons.includes(r.reason as MailReason) ? (r.reason as MailReason) : null,
+    message: typeof r.message === 'string' ? r.message.slice(0, 300) : null,
+    at: typeof r.at === 'string' ? r.at : new Date(0).toISOString(),
+    done: r.done !== false,
+  };
+}
+
+/** Modo de e-mail de um público vindo do banco (antigo sem o campo = off). */
+export function emailModeOf(a: { email?: unknown } | null | undefined): EmailMode {
+  return (EMAIL_MODES as readonly string[]).includes(a?.email as string) ? (a!.email as EmailMode) : 'off';
+}
+
+/**
+ * Esta ativação já teve e-mail? Regra do pedido: o e-mail sai UMA vez por
+ * ativação (o banner segue abrindo a cada login); desativar e ativar de novo
+ * gera ativação nova → e-mail de novo.
+ */
+export function mailDoneFor(log: MailLog | null, activatedAt: string | null): boolean {
+  if (!log || !activatedAt || !log.for) return false;
+  return Date.parse(log.for) === Date.parse(activatedAt) && log.done && !log.reason;
+}
 
 export const LIMITS = {
   avisoTitle: 70,
@@ -69,6 +132,8 @@ export const LIMITS = {
   price: 18,
   priceNote: 28,
   ctaLabel: 28,
+  mailSubject: 120,
+  mailPreheader: 160,
   url: 600,
   emails: 500,
 } as const;
@@ -281,7 +346,19 @@ export function cleanContent(kind: AnnKind, raw: unknown): CleanResult<AnnConten
       ctaLabel,
       ctaUrl,
       imageUrl,
+      ...(r.mail && typeof r.mail === 'object' ? { mail: cleanMail(r.mail, title) } : {}),
     },
+  };
+}
+
+/** Ajustes do e-mail: template conhecido, assunto (vazio = título) e pré-texto. */
+export function cleanMail(raw: unknown, title: string): MailSettings {
+  const m = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const template = (EMAIL_TEMPLATES as readonly string[]).includes(m.template as string) ? (m.template as EmailTemplate) : 'oferta';
+  return {
+    template,
+    subject: cleanLine(m.subject, LIMITS.mailSubject) || clampChars(title, LIMITS.mailSubject),
+    preheader: cleanLine(m.preheader, LIMITS.mailPreheader),
   };
 }
 
@@ -323,6 +400,8 @@ export type Audience = {
   segments: Segment[];
   emails: string[];
   includeAdmins: boolean;
+  /** canal de e-mail (ausente = off): ver EMAIL_MODES */
+  email?: EmailMode;
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -346,6 +425,7 @@ export function cleanAudience(raw: unknown): Audience {
     segments: segs.includes('all') ? ['all'] : SEGMENTS.filter((s) => segs.includes(s)),
     emails,
     includeAdmins: r.includeAdmins === true,
+    email: emailModeOf(r),
   };
 }
 
@@ -607,6 +687,8 @@ export type AdminAnnouncement = {
   createdAt: string;
   updatedAt: string;
   stats: AnnStats;
+  /** envio de e-mail da ativação atual (null = nunca saiu e-mail) */
+  mail: MailLog | null;
 };
 
 export type AnnStatus = 'live' | 'scheduled_end' | 'paused' | 'draft' | 'ended';

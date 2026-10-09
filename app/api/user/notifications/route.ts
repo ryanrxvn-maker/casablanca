@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
-import { classifyAccess } from '@/app/api/admin/_classify';
 import { rateLimit } from '@/lib/rate-limit';
-import { staticUnlocksForEmail, UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
+import { viewerFromProfile } from '@/lib/announcements-mail';
 import {
   addDismissedKey,
   cleanAudience,
@@ -53,7 +52,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
 
-const CATALOG = new Set(UNLOCKABLE_TOOLS.map((t) => t.path));
 const HISTORY_LIMIT = 120;
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
@@ -113,17 +111,8 @@ async function loadViewer(svc: ReturnType<typeof serviceClient>, who: Who): Prom
     p = (mid.data ?? null) as P | null;
   }
   if (!p) return null;
-  const { plan, access } = classifyAccess(p);
-  const unlocks = [...(Array.isArray(p.tool_unlocks) ? p.tool_unlocks : []), ...staticUnlocksForEmail(who.email)];
-  return {
-    id: who.userId,
-    email: who.email,
-    isAdmin: p.is_admin === true,
-    isActive: p.is_active === true,
-    plan,
-    access,
-    beta: unlocks.some((u) => CATALOG.has(u)),
-  };
+  // A MESMA regra do público do e-mail (lib/announcements-mail.ts).
+  return viewerFromProfile({ id: who.userId, ...p }, who.email);
 }
 
 function toItem(ann: AnnRow, row: Pick<InboxRow, 'delivered_at' | 'read_at' | 'clicked_at'>, now: number): NotifItem {
