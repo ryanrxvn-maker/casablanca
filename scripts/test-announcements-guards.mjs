@@ -77,3 +77,13 @@ test('"Quem viu": fechar grava a hora e o painel lê pela mesma regra, só do av
   assert.match(r, /from\('profiles'\)\.select\('id, email, name, is_admin'\)/, 'nome de quem recebeu vem do banco (o list-users não traz admin, e o aviso pode ir pra admins)');
   assert.match(ler('app/admin/_ui/AnnouncementsStudio.tsx'), /\[data-ann-seen\]/, 'Esc no "Quem viu" volta pra lista em vez de fechar a Central');
 });
+
+test('"Não quero mais receber": abrir o link não descadastra e o link do e-mail de teste não grava nada', () => {
+  const r = ler('app/api/email/sair/route.ts');
+  const get = r.split('export async function GET(')[1]?.split('export async function')[0] ?? '';
+  assert.doesNotMatch(get, /updateUserById|getUserById/, 'GET só mostra a página (antivírus de e-mail abre links sozinho)');
+  const post = r.split('export async function POST(')[1] ?? '';
+  assert.match(post, /verifyOptout\(u, t\)[\s\S]*u === TEST_OPTOUT_ID\) return page\('teste'\)[\s\S]*getUserById/, 'teste responde antes de tocar em conta');
+  assert.match(ler('lib/announcements-mail.ts'), /id: TEST_OPTOUT_ID/, 'o "Enviar teste pra mim" assina o link com a conta de teste');
+  assert.match(ler('lib/supabase/middleware.ts'), /pathname !== '\/api\/email\/sair'/, 'o 1 clique do Gmail vem sem Origin: só essa rota fica sem checar Origin');
+});

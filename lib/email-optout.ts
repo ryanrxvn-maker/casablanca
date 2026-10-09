@@ -3,10 +3,13 @@
  * só quem recebeu o e-mail consegue sair — e sem login. A preferência fica no
  * app_metadata da conta (Supabase Auth), sem tabela nova.
  *
- * Servidor apenas (node:crypto). Testado em lib/email-optout.test.ts.
+ * Servidor apenas (node:crypto). Testado em lib/email.test.ts.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+
+/** Conta do "Enviar teste pra mim": o link do rodapé funciona, mas não descadastra ninguém. */
+export const TEST_OPTOUT_ID = 'teste';
 
 function secret(): string | null {
   return process.env.EMAIL_OPTOUT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || null;

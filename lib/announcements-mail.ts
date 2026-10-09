@@ -18,7 +18,7 @@ import { staticUnlocksForEmail, UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
 import type { AnnContent, AnnKind, Audience, MailLog, MailReason, Viewer } from './announcements';
 import { batchKey, emailFromAnnouncement, firstName, pickRecipients, type Person, type Recipient } from './announcement-email';
 import { renderEmail } from './email-templates';
-import { optoutUrl } from './email-optout';
+import { TEST_OPTOUT_ID, optoutUrl } from './email-optout';
 
 type Svc = ReturnType<typeof serviceClient>;
 
@@ -161,7 +161,7 @@ export async function deliverMail(svc: Svc, job: MailJob, opts: { test?: { email
   const msg = emailFromAnnouncement({ kind: job.kind, content: job.content, endsAt: job.endsAt }, site);
   let recipients: Recipient[];
   if (opts.test) {
-    recipients = [{ id: 'teste', email: opts.test.email, name: opts.test.name }];
+    recipients = [{ id: TEST_OPTOUT_ID, email: opts.test.email, name: opts.test.name }];
   } else {
     const r = await listRecipients(svc, job.audience);
     recipients = r.list;

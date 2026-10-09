@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
-import { verifyOptout } from '@/lib/email-optout';
+import { TEST_OPTOUT_ID, verifyOptout } from '@/lib/email-optout';
 
 /**
  * /api/email/sair?u=<conta>&t=<assinatura> — "não quero mais receber" dos
@@ -13,12 +13,14 @@ import { verifyOptout } from '@/lib/email-optout';
  * Sem login: a assinatura HMAC prova que o link saiu do e-mail DESSA conta.
  * Por isso o middleware deixa este caminho sem checar Origin (o POST de 1
  * clique vem do servidor do provedor, sem Origin) — ver lib/supabase/middleware.ts.
+ * O e-mail de "Enviar teste pra mim" leva u=TEST_OPTOUT_ID: o botão mostra que o
+ * link funciona e não grava nada.
  */
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type View = 'confirmar' | 'saiu' | 'voltou' | 'invalido' | 'erro';
+type View = 'confirmar' | 'saiu' | 'voltou' | 'teste' | 'invalido' | 'erro';
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -38,6 +40,7 @@ function page(view: View, u = '', t = '', status = 200): NextResponse {
       form: { label: 'Voltar a receber', acao: 'voltar', primary: false },
     },
     voltou: { title: 'Bem-vindo de volta', text: 'Você volta a receber os e-mails de novidades e avisos do Auto Edit.' },
+    teste: { title: 'Link de teste funcionando', text: 'Este veio de um e-mail de teste, então nada foi alterado. No e-mail de verdade, a pessoa sai da lista aqui e pode voltar quando quiser.' },
     invalido: { title: 'Link inválido', text: 'Esse link não confere. Use o link do rodapé do e-mail que você recebeu.' },
     erro: { title: 'Não deu agora', text: 'Tivemos um problema pra salvar. Tente de novo em alguns minutos.' },
   };
@@ -46,8 +49,8 @@ function page(view: View, u = '', t = '', status = 200): NextResponse {
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><meta name="color-scheme" content="dark"><title>${esc(c.title)} · Auto Edit</title>
 <style>
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#09090b;color:#fff;font-family:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif}
-body{display:flex;align-items:center;justify-content:center;padding:24px 16px;background:radial-gradient(60% 50% at 50% 0%,rgba(162,145,224,.16),transparent 70%),#09090b}
+*{box-sizing:border-box}html,body{margin:0;background:#09090b;color:#fff;font-family:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif}
+body{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:radial-gradient(60% 50% at 50% 0%,rgba(162,145,224,.16),transparent 70%),#09090b}
 .card{width:100%;max-width:440px;padding:34px 30px 30px;border-radius:24px;background:#121217;border:1px solid #24242c;box-shadow:0 40px 90px -40px rgba(0,0,0,.9)}
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.02em;font-size:15px;margin-bottom:26px}
 .brand img{width:32px;height:32px}
@@ -85,6 +88,7 @@ export async function POST(req: Request) {
   if (!verifyOptout(u, t)) return page('invalido', '', '', 400);
   const form = await req.formData().catch(() => null);
   const voltar = form?.get('acao') === 'voltar';
+  if (u === TEST_OPTOUT_ID) return page('teste');
   try {
     const svc = serviceClient();
     const { data, error } = await svc.auth.admin.getUserById(u);
