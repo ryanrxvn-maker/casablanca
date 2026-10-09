@@ -47,28 +47,12 @@ import {
 import { readDurableRecords } from '@/lib/durable-records';
 import { getClickUpToken, getTask } from '@/lib/clickup-client';
 import { idDoBoardParaCanal, resolverCanaisDaTask } from '@/lib/pilot-canais';
-import {
-  IconAcelerador,
-  IconAudioSplit,
-  IconAutoBroll,
-  IconAutoCortes,
-  IconCamuflagem,
-  IconClickUpPilot,
-  IconCompressor,
-  IconCopySRT,
-  IconDecupageCopy,
-  IconDecupagem,
-  IconDownloader,
-  IconFakePass,
-  IconFamousHey,
-  IconHeyGenAuto,
-  IconLipsync,
-  IconLtxVideo,
-  IconNormalizador,
-  IconRemoverElementos,
-  IconSeparadorAudio,
-  IconTipografia,
-} from '@/components/ToolIcons';
+import { IconDownloader } from '@/components/ToolIcons';
+import { toolIcon } from './tool-icons';
+
+// O mapa ferramenta → ícone mora em ./tool-icons (leve: a notificação de
+// "concluído" usa em toda tela). Reexportado pra quem já importava daqui.
+export { toolIcon };
 
 /**
  * TIMELINE DO HISTÓRICO — o miolo compartilhado.
@@ -84,38 +68,12 @@ import {
  * repetindo o que a cor e o ícone já dizem.
  */
 
-const TOOL_ICON: Record<string, React.ReactNode> = {
-  'clickup-pilot': <IconClickUpPilot size={18} />,
-  'heygen-auto': <IconHeyGenAuto size={18} />,
-  'auto-broll': <IconAutoBroll size={18} />,
-  'auto-cortes': <IconAutoCortes size={18} />,
-  lipsync: <IconLipsync size={18} />,
-  decupagem: <IconDecupagem size={18} />,
-  'decupagem-copy': <IconDecupageCopy size={18} />,
-  'copy-srt': <IconCopySRT size={18} />,
-  tipografia: <IconTipografia size={18} />,
-  camuflagem: <IconCamuflagem size={18} />,
-  compressor: <IconCompressor size={18} />,
-  acelerador: <IconAcelerador size={18} />,
-  'audio-split': <IconAudioSplit size={18} />,
-  downloader: <IconDownloader size={18} />,
-  fakepass: <IconFakePass size={18} />,
-  'famous-hey': <IconFamousHey size={18} />,
-  'ltx-video': <IconLtxVideo size={18} />,
-  normalizador: <IconNormalizador size={18} />,
-  'remover-elementos': <IconRemoverElementos size={18} />,
-  'separador-audio': <IconSeparadorAudio size={18} />,
-};
-
 /** A janela de previews só entra no bundle quando alguém clica no olho. */
 const PreviewsDoDisparo = dynamic(
   () => import('./PreviewsDoDisparo').then((m) => m.PreviewsDoDisparo),
   { ssr: false },
 );
 
-export function toolIcon(tool: string): React.ReactNode {
-  return TOOL_ICON[canonicalTool(tool)] ?? <IconClickUpPilot size={18} />;
-}
 
 /** Estado do registro: vira COR (marca na lateral), nunca palavra. */
 const KIND_ACCENT: Record<string, string> = {

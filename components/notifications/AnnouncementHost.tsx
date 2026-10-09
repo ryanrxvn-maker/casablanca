@@ -19,8 +19,10 @@ import { createPortal } from 'react-dom';
 import { usePathname, useRouter } from 'next/navigation';
 import { internalPath, type AvisoContent, type NotifItem, type PromoContent } from '@/lib/announcements';
 import { dismissPopup, getNotificationsState, resetNotifications, startNotifications, useNotifications } from '@/lib/notifications-client';
+import { startDoneToasts, useDoneToasts } from '@/lib/done-toasts-client';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { createClient } from '@/lib/supabase/client';
+import { DoneToast } from './DoneToast';
 import { AvisoCard, PromoBanner } from './templates';
 
 const LEAVE_MS = 230;
@@ -40,8 +42,12 @@ export function useOpenLink() {
 
 export function AnnouncementHost() {
   const s = useNotifications();
+  const dones = useDoneToasts();
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
+
+  // "Concluído" das ferramentas (logHistory → autoedit:done): independe do sino.
+  useEffect(() => startDoneToasts(), []);
 
   useEffect(() => {
     setMounted(true);
@@ -58,20 +64,29 @@ export function AnnouncementHost() {
     return startNotifications();
   }, []);
 
-  if (!mounted || s.suppressed || s.status !== 'ready') return null;
+  if (!mounted) return null;
   // Troca de senha obrigatória não fica atrás de propaganda.
   if (pathname?.startsWith('/trocar-senha')) return null;
 
-  const promo = s.popups.find((p) => p.kind === 'propaganda') ?? null;
-  const avisos = promo ? [] : s.popups.filter((p) => p.kind === 'aviso').slice(0, 3);
+  // Avisos do admin: só com o sino pronto e fora da Central (suppressed).
+  const ready = !s.suppressed && s.status === 'ready';
+  const promo = ready ? (s.popups.find((p) => p.kind === 'propaganda') ?? null) : null;
+  const avisos = ready && !promo ? s.popups.filter((p) => p.kind === 'aviso').slice(0, 3) : [];
+  // "Concluído" aparece sempre (até sem a 038 ou com a Central aberta), mas
+  // espera a propaganda grande fechar — ficaria atrás do véu dela.
+  const concluidos = promo ? [] : dones;
+  if (!promo && !avisos.length && !concluidos.length) return null;
 
   return createPortal(
     <div className="ann-root">
       {promo ? (
         <PromoWindow key={`${promo.id}@${promo.activatedAt}`} item={promo} onFinish={(clicked) => void dismissPopup(promo, clicked)} />
       ) : null}
-      {avisos.length ? (
+      {avisos.length || concluidos.length ? (
         <div className="ann-stack" aria-label="Avisos">
+          {concluidos.map((t) => (
+            <DoneToast key={t.id} t={t} />
+          ))}
           {avisos.map((a) => (
             <AvisoToast key={`${a.id}@${a.activatedAt}`} item={a} />
           ))}

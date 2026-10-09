@@ -38,6 +38,22 @@ import {
   type Viewer,
 } from '@/lib/announcements';
 import { refreshNotifications, resetNotifications } from '@/lib/notifications-client';
+import { logHistory } from '@/lib/history';
+
+/** Conclusões de exemplo (uma por clique, em rodízio): sucesso, export, download e uma falha. */
+const CONCLUSOES: Array<Parameters<typeof logHistory>[0]> = [
+  { tool: 'normalizador', title: 'AD13 - MEMORIA.mp4 normalizado', meta: '-14 LUFS · pico -1 dB' },
+  { tool: 'tipografia', title: 'Letterings queimados em AD07.mp4' },
+  { tool: 'lipsync', title: 'avatar-ana.mp4 — lipsync pronto' },
+  { tool: 'fakepass', title: 'Print whatsapp exportado', kind: 'export' },
+  { tool: 'downloader', title: 'reels-tiktok-0921.mp4', kind: 'download' },
+  { tool: 'famous-hey', title: 'Geração falhou', kind: 'dispatch', meta: 'O HeyGen recusou o avatar' },
+];
+let conclusao = 0;
+function simularConclusao() {
+  const ev = CONCLUSOES[conclusao++ % CONCLUSOES.length];
+  logHistory({ ...ev, id: `bancada-${Date.now().toString(36)}-${conclusao}` });
+}
 
 type Ann = {
   id: string;
@@ -491,6 +507,11 @@ export default function DevAvisos() {
         <span className="opacity-40">|</span>
         <button type="button" onClick={relogin} className="rounded-full px-3 py-1" style={{ background: 'rgb(var(--text) / 0.06)' }}>
           Sair e entrar ({session})
+        </button>
+        <span className="opacity-40">|</span>
+        {/* chama o logHistory DE VERDADE: mesmo caminho de quando uma ferramenta termina */}
+        <button type="button" onClick={simularConclusao} className="rounded-full px-3 py-1" style={{ background: 'rgb(var(--lime) / 0.16)' }}>
+          Simular conclusão
         </button>
       </div>
     </div>

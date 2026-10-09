@@ -147,6 +147,54 @@
   margin-top: 14px;
 }
 
+/* ───────────────── Concluído (processo terminou numa ferramenta) ─────────────────
+   Mesmo cartão do aviso; o ícone da ferramenta é colorido, então o quadradinho
+   fica neutro e o status vem no selo (✓ verde / ✕ vermelho). A barrinha de
+   baixo é o relógio: só transform, pausa com o mouse em cima e com a aba
+   oculta (o JS segura o mesmo tempo). */
+.ann-tile--tool {
+  position: relative;
+  color: rgb(var(--text));
+  background: rgb(var(--text) / 0.05);
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--text) / 0.1),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+.ann-done__badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  color: #0a0a0c;
+  background: rgb(var(--ann));
+  box-shadow:
+    0 0 0 2px rgb(var(--bg-elev)),
+    0 4px 10px -2px rgb(var(--ann) / 0.6);
+}
+.ann-done__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgb(var(--ann) / 0.25), rgb(var(--ann)));
+  transform-origin: left center;
+  animation: ann-done-bar var(--done-ms, 8000ms) linear both;
+  pointer-events: none;
+}
+.ann-done[data-paused='on'] .ann-done__bar {
+  animation-play-state: paused;
+}
+@keyframes ann-done-bar {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 /* Botão com o ícone no próprio círculo (aviso: tom suave; propaganda: sólido) */
 .ann-cta {
   position: relative;

@@ -125,6 +125,10 @@ export function logHistory(ev: {
     events.unshift(novo);
     safeWrite(prune(events));
     window.dispatchEvent(new CustomEvent('autoedit:history'));
+    // Notificação de "concluído" no canto (lib/done-toasts-client.ts). Só
+    // evento NOVO: o duplicado acima (StrictMode/duplo disparo) não notifica,
+    // nem a captura automática de download (attachRefToRecent).
+    window.dispatchEvent(new CustomEvent('autoedit:done', { detail: novo }));
   } catch {
     /* nunca propaga */
   }
