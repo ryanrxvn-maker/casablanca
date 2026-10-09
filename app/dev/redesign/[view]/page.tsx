@@ -14,7 +14,6 @@ export default async function DesignView({params}:{params:{view:string}}) {
     calculadora: async () => (await import('@/app/tools/calculadora/page')).default,
     'famous-hey': async () => (await import('@/app/tools/famous-hey/page')).default,
     hub: async () => (await import('@/components/ToolsHub')).ToolsHub,
-    pilot: async () => (await import('@/app/tools/clickup-pilot/page')).default,
     decupagem: async () => (await import('@/app/tools/decupagem/page')).default,
     fakepass: async () => (await import('@/app/tools/fakepass/page')).default,
     tipografia: async () => (await import('@/app/tools/tipografia/page')).default,

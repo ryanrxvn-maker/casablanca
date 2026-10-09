@@ -217,29 +217,30 @@ export function LipsyncPreviewCard({
         // CLARO da pagina — o cabecalho ficava bege com o rotulo em lime
         // claro por cima (contraste 1.11, medido). Com base escura + a ilha,
         // o card fica igual nos dois temas.
-        // Pele 08.10 (.pl-take, app/pilot-skin.css): moldura grafite com
-        // bisel; o estado do take vira o ponto do cabeçalho e o tom do anel.
-        'dark-island lipsync-card-3d pl-take group relative flex flex-col overflow-hidden bg-bg-soft'
+        'dark-island lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border bg-bg-soft transition-all duration-300 ' +
+        (tone === 'ready'
+          ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-600/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(16,185,129,0.45),0_0_36px_-12px_rgba(16,185,129,0.35)] hover:border-emerald-500/70'
+          : tone === 'err'
+          ? 'border-red-500/40 bg-gradient-to-b from-red-500/[0.05] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(239,68,68,0.25)] hover:border-red-500/70'
+          : tone === 'wait'
+          ? 'border-amber-400/45 bg-gradient-to-b from-amber-400/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(251,191,36,0.25)] hover:border-amber-400/75'
+          : 'border-violet/30 bg-gradient-to-b from-violet/[0.03] to-bg-soft/40 hover:border-violet/60 hover:shadow-[0_16px_32px_-16px_rgba(167,139,250,0.45)]')
       }
-      data-tone={tone}
       style={{
         transform: 'perspective(1000px) rotateX(var(--rotX, 0deg)) rotateY(var(--rotY, 0deg)) translateZ(0)',
         transformStyle: 'preserve-3d',
       }}
     >
       {/* HEADER */}
-      <div className="relative z-10 flex items-center justify-between gap-2 px-3 pb-2 pt-2.5">
-        <span className="pl-take__label">
-          <i className="pl-take__dot" aria-hidden />
-          {take.label}
-        </span>
-        <span className="pl-take__pos">
-          {String(position).padStart(2, '0')}/{String(total).padStart(2, '0')}
+      <div className="relative z-10 flex items-center justify-between px-3 py-2">
+        <span className="mono text-[10px] font-bold uppercase tracking-[0.14em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+          <span className="text-lime">{take.label}</span>
+          <span className="text-text-dim"> · {String(position).padStart(2, '0')}/{String(total).padStart(2, '0')}</span>
         </span>
       </div>
 
       {/* BODY 9:16 (ou 16:9 quando o disparo foi deitado) */}
-      <div className={`pl-take__frame relative mx-2.5 mb-2.5 ${formato === '16:9' ? 'aspect-[16/9]' : 'aspect-[9/16]'} overflow-hidden bg-black`}>
+      <div className={`relative mx-3 mb-3 ${formato === '16:9' ? 'aspect-[16/9]' : 'aspect-[9/16]'} overflow-hidden rounded-[10px] border border-line bg-black`}>
         {videoUrl ? (
           <>
             <video
@@ -258,8 +259,11 @@ export function LipsyncPreviewCard({
               className="absolute inset-0 flex cursor-pointer items-center justify-center"
               aria-label="Assistir em tela maior"
             >
-              <span className="pl-take__play">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 3 }}>
+              <span
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 backdrop-blur-md transition-all duration-300 group-hover:scale-110 group-hover:bg-emerald-500/90"
+                style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+              >
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" className="text-white group-hover:text-black" style={{ marginLeft: 3 }}>
                   <path d="M8 5v14l11-7z" />
                 </svg>
               </span>
@@ -270,7 +274,7 @@ export function LipsyncPreviewCard({
                 onClick={(e) => { e.stopPropagation(); openExpanded(); }}
                 aria-label="Expandir"
                 title="Expandir"
-                className="pl-take__btn"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/65 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-white/70 hover:bg-black/85 active:scale-95"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
@@ -282,8 +286,7 @@ export function LipsyncPreviewCard({
                   onClick={(e) => { e.stopPropagation(); onEdit(); }}
                   aria-label="Editar script/voz e re-gerar"
                   title="Editar script/voz e re-gerar"
-                  className="pl-take__btn"
-                  data-tone="cyan"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/70 bg-cyan-500/90 text-white shadow-[0_4px_14px_rgba(34,211,238,0.45)] transition-all hover:scale-110 hover:bg-cyan-400 active:scale-95"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 20h9" />
@@ -297,8 +300,7 @@ export function LipsyncPreviewCard({
                 disabled={downloading}
                 aria-label="Baixar MP4"
                 title="Baixar MP4"
-                className="pl-take__btn"
-                data-tone="lime"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/70 bg-emerald-500/95 text-white shadow-[0_4px_14px_rgba(16,185,129,0.5)] transition-all hover:scale-110 hover:bg-emerald-400 active:scale-95 disabled:opacity-60"
               >
                 {downloading ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
@@ -471,7 +473,7 @@ export function LipsyncPreviewCard({
                 style={{ animation: 'lcHop 1.6s ease-in-out infinite' }}
               />
             </div>
-            <span className="pl-take__state relative z-10">
+            <span className="relative z-10 mono text-[9px] uppercase tracking-widest text-violet">
               {recuperando ? 'Recuperando do cache…'
                 : take.status === 'processing' ? 'Renderizando…'
                 : 'Na fila…'}
@@ -487,6 +489,7 @@ export function LipsyncPreviewCard({
       </div>
 
       <style jsx>{`
+        .lipsync-card-3d { will-change: transform; }
         @keyframes lcShimmer { 0%,100% { transform: translateX(-100%); } 50% { transform: translateX(100%); } }
         @keyframes lcHop {
           0%,100% { transform: translateY(0) scale(1) rotate(-3deg); }

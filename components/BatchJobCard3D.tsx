@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { lerEntradasDoZip, videosDoZip, abrirEntrada, temEscritaEmPasta, type ZipEntry } from '@/lib/zip-entries';
 
@@ -200,19 +200,93 @@ type Btn3DProps = {
   pulse?: boolean;
 };
 
+const PALETTE: Record<Btn3DColor, { ring: string; bg: string; text: string; glow: string; hoverGlow: string }> = {
+  lime: {
+    ring: 'border-lime/55',
+    bg: 'from-lime/25 via-lime/10 to-lime/[0.02]',
+    text: 'text-lime',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(190,242,100,0.45)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(190,242,100,0.7)]',
+  },
+  cyan: {
+    ring: 'border-cyan-400/55',
+    bg: 'from-cyan-400/25 via-cyan-400/10 to-cyan-400/[0.02]',
+    text: 'text-cyan-200',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.45)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(34,211,238,0.7)]',
+  },
+  fuchsia: {
+    ring: 'border-fuchsia-400/55',
+    bg: 'from-fuchsia-400/25 via-fuchsia-400/10 to-fuchsia-400/[0.02]',
+    text: 'text-fuchsia-200',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(217,70,239,0.45)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(217,70,239,0.7)]',
+  },
+  // ROXO do site (#a78bfa) — é o estado "painel de reinício aberto" deste card.
+  violet: {
+    ring: 'border-violet-400/60',
+    bg: 'from-violet-400/28 via-violet-400/12 to-violet-400/[0.03]',
+    text: 'text-violet-100',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_3px_10px_-3px_rgba(167,139,250,0.5)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_12px_26px_-6px_rgba(167,139,250,0.75)]',
+  },
+  amber: {
+    ring: 'border-amber-400/55',
+    bg: 'from-amber-400/25 via-amber-400/10 to-amber-400/[0.02]',
+    text: 'text-amber-200',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(251,191,36,0.45)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(251,191,36,0.7)]',
+  },
+  rose: {
+    ring: 'border-rose-400/55',
+    bg: 'from-rose-400/25 via-rose-400/10 to-rose-400/[0.02]',
+    text: 'text-rose-200',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(244,63,94,0.45)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(244,63,94,0.7)]',
+  },
+  neutral: {
+    ring: 'border-white/12',
+    bg: 'from-white/10 via-white/[0.04] to-transparent',
+    text: 'text-text-muted',
+    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
+    hoverGlow: 'hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_-6px_rgba(255,255,255,0.18)]',
+  },
+};
+
 export function Btn3D({ icon, color, title, disabled, onClick, href, download, pulse }: Btn3DProps) {
-  // Botão-instrumento (08.10, .pl-ibtn em app/pilot-skin.css): grafite com
-  // bisel, o ícone na cor da intenção, anel e brilho só no hover. Sem tooltip
-  // custom — title nativo (delay padrão do browser) + aria-label.
+  const p = PALETTE[color];
+  const base =
+    'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border bg-gradient-to-b will-change-transform transition-[transform,box-shadow,opacity] duration-200 ease-out';
+  const enabled = `${p.ring} ${p.bg} ${p.text} ${p.glow} ${p.hoverGlow} hover:-translate-y-0.5 hover:scale-[1.08] active:translate-y-0 active:scale-95`;
+  const dis = 'border-white/8 bg-white/[0.03] text-white/30 opacity-60 cursor-not-allowed shadow-none';
+
+  const ariaTitle = title;
+
   const inner = (
     <>
-      {pulse && !disabled ? <span className="pl-ibtn__pulse" aria-hidden /> : null}
+      {/* Highlight gradient top */}
+      <span
+        className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/15 to-transparent"
+        aria-hidden
+      />
+      {pulse && !disabled ? (
+        <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-current/40 animate-ping opacity-30" aria-hidden />
+      ) : null}
       <span className="relative flex items-center justify-center">{icon}</span>
+      {/* Sem tooltip custom — usamos native title (delay padrao do browser, sem
+       *  barra preta intrusiva embaixo do botao). aria-label cobre a11y. */}
     </>
   );
+
   if (href && !disabled) {
     return (
-      <a href={href} download={download} className="pl-ibtn group/btn3d" data-tone={color} style={{ width: 36, height: 36 }} title={title} aria-label={title}>
+      <a
+        href={href}
+        download={download}
+        className={`${base} ${enabled}`}
+        title={ariaTitle}
+        aria-label={ariaTitle}
+      >
         {inner}
       </a>
     );
@@ -222,11 +296,9 @@ export function Btn3D({ icon, color, title, disabled, onClick, href, download, p
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={title}
-      aria-label={title}
-      data-tone={color}
-      className="pl-ibtn group/btn3d"
-      style={{ width: 36, height: 36 }}
+      title={ariaTitle}
+      aria-label={ariaTitle}
+      className={`${base} ${disabled ? dis : enabled}`}
     >
       {inner}
     </button>
@@ -415,7 +487,7 @@ function classifyBanner(raw: string | undefined, phase: BatchJob3DPhase): MsgBan
     return {
       kind: 'quota',
       title: 'Limite diário do HeyGen atingido',
-      hint: 'Renova em até 24h. Depois clica em Retomar (⟳) que eu continuo sozinho. Não é erro do app.',
+      hint: 'Renova em até 24h — depois clica em Retomar (⟳) que eu continuo sozinho. Não é erro do app.',
     };
   }
   // ESPERANDO O HEYGEN — âmbar, nunca vermelho. O take está VIVO renderizando
@@ -446,7 +518,7 @@ function classifyBanner(raw: string | undefined, phase: BatchJob3DPhase): MsgBan
   return {
     kind: 'fail',
     title: toFriendlyMessage(t, 'Não deu pra concluir agora.'),
-    hint: 'Clica em Retomar (⟳). O que já ficou pronto está salvo.',
+    hint: 'Clica em Retomar (⟳) — o que já ficou pronto está salvo.',
   };
 }
 
@@ -505,10 +577,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     topPanel,
   } = props;
 
-  // Inclinação 3D: escrita direto no elemento (sem state). Antes era um
-  // setState a cada mousemove — o card inteiro, com os vídeos dos takes,
-  // re-renderizava a cada pixel que o mouse andava.
-  const tiltRef = useRef<HTMLDivElement | null>(null);
+  const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
   const [expanded, setExpanded] = useState(!defaultMinimized);
   const [resolvingDoc, setResolvingDoc] = useState(false);
   // Gravar N videos numa pasta leva segundos e o botao nao pode ficar mudo:
@@ -556,16 +625,32 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               : 'PÓS-PRODUÇÃO'
     : null;
   const effectiveLabel = statusLabel || (downloadBlocked
-    ? 'Incompleto · clica Retomar'
+    ? 'Incompleto — clica Retomar'
     : renderizando
-      ? `Renderizando ${takesPendentes} take${takesPendentes === 1 ? '' : 's'} · ainda não`
+      ? `Renderizando ${takesPendentes} take${takesPendentes === 1 ? '' : 's'} — ainda não`
       : foraDoPlano
-        ? `Plano mudou · ${takesForaDoPlano} take${takesForaDoPlano === 1 ? '' : 's'} precisa re-gerar`
+        ? `Plano mudou — ${takesForaDoPlano} take${takesForaDoPlano === 1 ? '' : 's'} precisa re-gerar`
       : montagemVelha
-        ? `Montagem desatualizada · ${dirtyPartsCount} take${dirtyPartsCount === 1 ? '' : 's'} mudou`
+        ? `Montagem desatualizada — ${dirtyPartsCount} take${dirtyPartsCount === 1 ? '' : 's'} mudou`
         : isPartialDone
           ? 'Pronto · pós-processo parcial'
           : postLabel || phaseInfo.label);
+  const ringColor =
+    showAsWarn ? 'border-amber-400/35'
+    : phase === 'done' ? 'border-lime/35'
+    : phase === 'failed' ? 'border-rose-400/35'
+    // Esperar o HeyGen é aviso âmbar, nunca o vermelho de falha.
+    : phase === 'waiting-heygen' || phase === 'recoverable' ? 'border-amber-400/35'
+    : isRunning ? 'border-fuchsia-400/30'
+    : 'border-white/8';
+  const bgGradient =
+    showAsWarn ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
+    : phase === 'done' ? 'from-lime/[0.07] via-lime/[0.02] to-transparent'
+    : phase === 'failed' ? 'from-rose-500/[0.07] via-rose-500/[0.02] to-transparent'
+    : phase === 'waiting-heygen' || phase === 'recoverable' ? 'from-amber-400/[0.07] via-amber-400/[0.02] to-transparent'
+    : isRunning ? 'from-fuchsia-500/[0.07] via-fuchsia-500/[0.02] to-transparent'
+    : 'from-white/[0.04] to-transparent';
+
   // Progress bar — 30% dispatch, 60% render, 10% download/post
   const dispatchPct = partsTotal > 0 ? partsDispatched / partsTotal : 0;
   const renderPct = partsDispatched > 0 ? partsRendered / partsDispatched : 0;
@@ -583,29 +668,19 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const barPct = Math.min(100, Math.max(3, totalPct));
 
   function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
-    const el = tiltRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    const rect = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
     const py = (e.clientY - rect.top) / rect.height;
-    // Range pequeno (~1.2deg) — sutil, nao desorienta
-    el.style.transition = 'transform 90ms ease-out';
-    el.style.transform = `perspective(1400px) rotateX(${((py - 0.5) * -1.2).toFixed(2)}deg) rotateY(${((px - 0.5) * 1.2).toFixed(2)}deg)`;
+    // Range pequeno (~1.5deg) — sutil, nao desorienta
+    setTilt({ x: (py - 0.5) * -1.5, y: (px - 0.5) * 1.5 });
   }
   function onMouseLeave() {
-    const el = tiltRef.current;
-    if (!el) return;
-    el.style.transition = 'transform 520ms cubic-bezier(0.32, 0.72, 0, 1)';
-    el.style.transform = '';
+    setTilt(null);
   }
 
-  // Faixa de estado à esquerda do card (lime pronto, âmbar aviso, rosa rodando…)
-  const estadoDoCard =
-    showAsWarn || phase === 'waiting-heygen' || phase === 'recoverable' ? 'warn'
-    : phase === 'done' ? 'ok'
-    : phase === 'failed' ? 'fail'
-    : isRunning ? 'run'
-    : 'idle';
+  const transform = tilt
+    ? `perspective(1200px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(0)`
+    : 'perspective(1200px) rotateX(0) rotateY(0) translateZ(0)';
 
   const friendlyMsg = humanizeMessage(message, phase);
   // Banner especial (limite diário / falha): curto, sem termo técnico, sempre
@@ -640,26 +715,35 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   return (
     <li className="list-none" id={`batch-card-${props.taskId}`}>
       <div
-        ref={tiltRef}
         onMouseMove={onMouseMove}
         onMouseLeave={onMouseLeave}
-        data-st={estadoDoCard}
-        className="pl-job"
+        style={{ transform, transition: tilt ? 'transform 60ms ease-out' : 'transform 240ms ease-out' }}
+        className={`relative overflow-hidden rounded-[16px] border ${ringColor} bg-gradient-to-br ${bgGradient} bg-bg-soft/40 p-3.5 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_8px_28px_-12px_rgba(0,0,0,0.5)]`}
       >
+        {/* Specular highlight (top-left) */}
+        <span
+          className="pointer-events-none absolute -inset-px rounded-[16px] bg-gradient-to-br from-white/[0.07] via-transparent to-transparent opacity-80"
+          aria-hidden
+        />
         {/* Conteúdo */}
         <div className="relative">
           {/* Header — nome + fase pill + elapsed + botoes 3D */}
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <PhasePill label={effectiveLabel} tone={showAsWarn ? 'warn' : phaseInfo.tone} icon={phaseInfo.icon} pulsing={isRunning} />
-              <h3 className="pl-job__title">{taskName}</h3>
+              <h3
+                className="truncate text-[13px] font-semibold text-white"
+                style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+              >
+                {taskName}
+              </h3>
               {channels && channels.length > 0 ? (
                 <span className="flex shrink-0 flex-wrap items-center gap-1">
                   {channels.map((ch, i) => (
                     <span
                       key={`${ch.label}-${i}`}
-                      className="pl-chan"
-                      style={{ backgroundColor: ch.color, color: chipTextColor(ch.color), height: 19, fontSize: 9 }}
+                      className="mono inline-flex items-center rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider"
+                      style={{ backgroundColor: ch.color, color: chipTextColor(ch.color) }}
                       title={`Canal: ${ch.label}`}
                     >
                       {ch.label}
@@ -746,8 +830,8 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   ))}
                 </span>
               ) : null}
-              <span className="pl-elapsed">
-                <IconClock size={11} />
+              <span className="mono inline-flex items-center gap-1 text-[10px] text-text-muted">
+                <IconClock size={10} />
                 <ElapsedClock elapsedMs={elapsedMs} startedAt={startedAt} live={elapsedLive} />
               </span>
             </div>
@@ -781,17 +865,17 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {(() => {
                 // TROCA DE ÁUDIO: sem doc — botao leva pra PASTA de output no Drive.
                 if (folderUrl) {
-                  const fClass = 'pl-ibtn group/btn3d h-9 w-9';
+                  const fClass = 'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]';
                   return (
                     <a
                       href={folderUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={fClass}
-                      data-tone="cyan"
                       title="Abrir a pasta do criativo no Drive (onde fica o AD original e o output)"
                       aria-label="Abrir pasta no Drive"
                     >
+                      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
                       <span className="relative"><IconFolder size={18} /></span>
                     </a>
                   );
@@ -803,7 +887,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   : 'Buscar e abrir doc da copy';
                 const canResolve = !!docUrl || !!resolveDocUrl;
                 if (!canResolve) return null;
-                const baseClass = 'pl-ibtn group/btn3d h-9 w-9 disabled:cursor-wait';
+                const baseClass = 'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow] disabled:opacity-50 disabled:cursor-wait disabled:hover:translate-y-0 disabled:hover:scale-100';
                 if (docUrl) {
                   // Caso comum: docUrl conhecido → anchor (zero delay).
                   return (
@@ -812,10 +896,10 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className={baseClass}
-                      data-tone="cyan"
                       title={tooltip}
                       aria-label={tooltip}
                     >
+                      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
                       <span className="relative"><IconGDocs size={18} /></span>
                     </a>
                   );
@@ -847,10 +931,10 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                     onClick={handleClick}
                     disabled={resolvingDoc}
                     className={baseClass}
-                    data-tone="cyan"
                     title={tooltip}
                     aria-label={tooltip}
                   >
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
                     <span className="relative">
                       {resolvingDoc ? (
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="animate-spin text-cyan-200" strokeLinecap="round" strokeLinejoin="round">
@@ -1174,21 +1258,21 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
-                className="pl-ibtn group/btn3d h-9 w-9"
-                data-tone="neutral"
-                data-on={expanded ? 'true' : undefined}
+                className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-fuchsia-400/45 bg-gradient-to-b from-fuchsia-400/20 via-fuchsia-400/8 to-transparent text-fuchsia-200 dark:text-fuchsia-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(217,70,239,0.35)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-fuchsia-400/65 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(217,70,239,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                style={{ color: 'currentColor' }}
                 title={expanded ? 'Recolher' : 'Expandir takes'}
                 aria-label={expanded ? 'Recolher' : 'Expandir'}
                 aria-expanded={expanded}
               >
-                <span className="relative"><IconChevron size={14} open={expanded} /></span>
+                <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                <span className="relative text-fuchsia-700 dark:text-fuchsia-100"><IconChevron size={14} open={expanded} /></span>
               </button>
             </div>
           </div>
 
           {/* Stats line — humanizada. So aparece quando expandido. */}
           {expanded ? (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-muted">
               <StatPill value={partsTotal} label="cortes" />
               <StatPill value={partsDispatched} label="enviados" highlight={phase === 'dispatching'} />
               <StatPill value={partsRendered} label="prontos" highlight={phase === 'rendering'} accent={partsRendered === partsTotal ? 'lime' : undefined} />
@@ -1199,7 +1283,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
            *  sem termo técnico, com hierarquia visual própria. */}
           {banner ? (
             <div
-              className={`mt-3 flex items-start gap-2.5 rounded-[14px] border px-3 py-2.5 ${
+              className={`mt-2.5 flex items-start gap-2.5 rounded-[12px] border px-3 py-2.5 ${
                 banner.kind !== 'fail'
                   ? 'border-amber-400/40 bg-gradient-to-br from-amber-400/[0.14] via-amber-400/[0.05] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
                   : 'border-rose-400/35 bg-gradient-to-br from-rose-500/[0.12] via-rose-500/[0.04] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
@@ -1228,9 +1312,9 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
            *  barrinha de carregamento animada carregando o processo". */}
           {showProgress ? (
             <div className="mt-2.5">
-              <div className="pl-meter">
+              <div className="relative h-[6px] w-full overflow-hidden rounded-full bg-white/[0.05] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
                 <div
-                  className={`pl-meter__fill bg-gradient-to-r ${phaseInfo.barFrom} ${phaseInfo.barTo}`}
+                  className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${phaseInfo.barFrom} ${phaseInfo.barTo} transition-[width] duration-500 ease-out`}
                   style={{ width: `${barPct}%` }}
                 >
                   {/* Shimmer */}
@@ -1240,14 +1324,14 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 </div>
               </div>
               {expanded ? (
-                <div className="mt-1.5 flex items-center justify-between">
-                  <span className="pl-label" style={{ fontSize: 11.5 }}>{friendlyMsg || phaseInfo.label}</span>
-                  <span className="pl-elapsed" style={{ height: 20 }}>{Math.round(barPct)}%</span>
+                <div className="mt-1 flex items-center justify-between text-[9px] text-text-muted/80">
+                  <span>{friendlyMsg || phaseInfo.label}</span>
+                  <span className="mono">{Math.round(barPct)}%</span>
                 </div>
               ) : null}
             </div>
           ) : expanded && friendlyMsg && !banner ? (
-            <div className="pl-label mt-2" style={{ fontSize: 11.5 }}>{friendlyMsg}</div>
+            <div className="mono mt-1.5 text-[10px] text-text-muted">{friendlyMsg}</div>
           ) : null}
 
           {/* PAINEL DO CARD (reiniciar disparo) — SEMPRE visível quando existe,
@@ -1274,15 +1358,6 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
 
 // ───────────────────────── Pill helpers ─────────────────────────
 
-/** Rótulo em frase: os rótulos de pós-produção ('REGULANDO VOZ', 'MONTANDO'…)
- *  ficam em caixa alta no código (os testes os procuram assim) e viram frase
- *  só na tela. Rótulo que já vem em frase passa intacto. */
-function emFrase(label: string): string {
-  if (!label || /[a-zà-ú]/.test(label)) return label;
-  const low = label.toLocaleLowerCase('pt-BR');
-  return low.charAt(0).toLocaleUpperCase('pt-BR') + low.slice(1);
-}
-
 function PhasePill({
   label,
   tone,
@@ -1294,12 +1369,23 @@ function PhasePill({
   icon: React.ReactNode;
   pulsing?: boolean;
 }) {
+  const toneClasses: Record<typeof tone, string> = {
+    idle: 'border-white/15 bg-white/[0.05] text-text-muted',
+    progress: 'border-fuchsia-400/40 bg-fuchsia-400/15 text-fuchsia-100',
+    success: 'border-lime/45 bg-lime/15 text-lime',
+    error: 'border-rose-400/45 bg-rose-400/15 text-rose-200',
+    warn: 'border-amber-400/45 bg-amber-400/15 text-amber-100',
+  };
   return (
-    <span className="pl-phase" data-tone={tone}>
-      {pulsing && tone === 'progress' ? <span className="pl-phase__ping" aria-hidden /> : null}
-      <span className="relative flex items-center gap-1.5">
+    <span
+      className={`label-tech relative inline-flex items-center gap-1 rounded-full border px-2.5 py-[3px] text-[9.5px] font-semibold uppercase tracking-[0.08em] ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
+    >
+      {pulsing && tone === 'progress' ? (
+        <span className="absolute inset-0 rounded-full border border-current/30 animate-ping opacity-40" aria-hidden />
+      ) : null}
+      <span className="relative flex items-center gap-1">
         {icon}
-        {emFrase(label)}
+        {label}
       </span>
     </span>
   );
@@ -1317,14 +1403,14 @@ function StatPill({
   accent?: 'lime' | 'cyan' | 'fuchsia';
 }) {
   const accentMap = {
-    lime: 'rgb(var(--lime))',
-    cyan: 'rgb(var(--cyan))',
-    fuchsia: 'rgb(var(--pink))',
+    lime: 'text-lime',
+    cyan: 'text-cyan-200',
+    fuchsia: 'text-fuchsia-200',
   } as const;
   return (
-    <span className="pl-stat" style={highlight ? { filter: 'brightness(1.15)' } : undefined}>
-      <b style={accent ? { color: accentMap[accent] } : undefined}>{value}</b>
-      <span>{label}</span>
+    <span className={`mono inline-flex items-baseline gap-1 ${highlight ? 'text-white' : ''}`}>
+      <strong className={`text-[12px] font-semibold ${accent ? accentMap[accent] : 'text-white/90'}`}>{value}</strong>
+      <span className="field-label text-[10.5px] text-text-muted">{label}</span>
     </span>
   );
 }

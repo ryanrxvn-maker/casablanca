@@ -52,28 +52,6 @@ test('Pilot não re-renderiza a PÁGINA inteira a cada segundo (relógio vive no
   assert.match(ler('components/BatchJobCard3D.tsx'), /function ElapsedClock\(/);
 });
 
-test('Pilot (pele 08.10): fumaça do fundo barata, nada de blur por cima dela, mouse sem re-render', () => {
-  const semComentario = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
-  const smoke = ler('components/pilot/PilotSmoke.tsx');
-  assert.match(smoke, /isCalm\(\)/, 'a fumaça para no modo descanso / aba oculta');
-  assert.match(smoke, /keepAliveRefs\(\) > 0 \? 15 : 30/, 'com disparo/montagem/render rodando a fumaça cai pra 15 quadros/s');
-  assert.match(smoke, /0\.3 : 0\.38/, 'a fumaça desenha em resolução reduzida');
-  // blur de vidro por cima de canvas animado = desfoque refeito a cada quadro
-  assert.doesNotMatch(semComentario(ler('app/pilot-skin.css')), /backdrop-filter/);
-  for (const f of ['components/pilot/PilotShell.tsx', 'components/BatchJobCard3D.tsx', 'components/PilotModeHub.tsx', 'app/tools/clickup-pilot/page.tsx']) {
-    assert.doesNotMatch(semComentario(ler(f)), /backdrop-blur|backdrop-filter/, `${f}: blur de vidro voltou por cima da fumaça`);
-  }
-  // inclinação do card por setState re-renderizava o card inteiro (com os
-  // vídeos dos takes) a cada pixel que o mouse andava
-  assert.doesNotMatch(ler('components/BatchJobCard3D.tsx'), /setTilt\(/);
-  // a pílula do visor anda por transform, não por `left`
-  assert.doesNotMatch(semComentario(ler('components/PilotModeHub.tsx')), /left:\s*`calc\(/);
-  // luz de borda: variável no PRÓPRIO elemento da luz, nunca no :root
-  const shell = ler('components/pilot/PilotShell.tsx');
-  assert.doesNotMatch(shell, /documentElement\.style/);
-  assert.match(shell, /spot\.style\.setProperty\('--x'/);
-});
-
 test('landing: animações do herói só com transform/opacity (clip-path/left/box-shadow repintavam a cada quadro)', () => {
   const src = ler('components/landing/v3/scenes.tsx');
   for (const nome of ['bc-wipe', 'bc-wipe-in', 'bc-line', 'tj-breathe']) {

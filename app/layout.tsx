@@ -11,7 +11,6 @@ import { ChunkGuard } from '@/components/ChunkGuard';
 import { FAKEPRINT_MODELOS } from '@/lib/numeros-do-site';
 import './globals.css';
 import './button-refinements.css';
-import './pilot-skin.css';
 
 // Original typefaces, served locally for consistent previews and builds.
 const display = localFont({ src: '../public/fonts/site-space-grotesk.woff2', variable: '--font-display', weight: '300 700', display: 'swap' });
