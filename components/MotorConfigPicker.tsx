@@ -93,7 +93,7 @@ export function MotorConfigPicker({
           type="button"
           onClick={() => setCollapsed(false)}
           disabled={locked}
-          className={`group/motor relative inline-flex h-9 items-center gap-2 rounded-full border px-3 transition-all duration-200 ${locked ? 'cursor-not-allowed opacity-70 grayscale-[0.12]' : 'hover:-translate-y-0.5 hover:scale-[1.03] active:translate-y-0 active:scale-[0.98]'} ${colorClasses[motorColor]}`}
+          className={`hw-motor group/motor relative inline-flex h-9 items-center gap-2 rounded-full border px-3 transition-all duration-200 ${locked ? 'cursor-not-allowed opacity-70 grayscale-[0.12]' : 'hover:-translate-y-0.5 hover:scale-[1.03] active:translate-y-0 active:scale-[0.98]'} ${colorClasses[motorColor]}`}
           title={locked ? `Avatar ${lockedMotor} fixado no Modo Economia` : 'Escolher motor de avatar (III / IV / V)'}
         >
           <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/20 to-transparent" aria-hidden />

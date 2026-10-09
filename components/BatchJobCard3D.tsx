@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { lerEntradasDoZip, videosDoZip, abrirEntrada, temEscritaEmPasta, type ZipEntry } from '@/lib/zip-entries';
 
@@ -283,7 +283,8 @@ export function Btn3D({ icon, color, title, disabled, onClick, href, download, p
       <a
         href={href}
         download={download}
-        className={`${base} ${enabled}`}
+        className={`hw-knob ${base} ${enabled}`}
+        data-tone={color}
         title={ariaTitle}
         aria-label={ariaTitle}
       >
@@ -298,7 +299,8 @@ export function Btn3D({ icon, color, title, disabled, onClick, href, download, p
       disabled={disabled}
       title={ariaTitle}
       aria-label={ariaTitle}
-      className={`${base} ${disabled ? dis : enabled}`}
+      data-tone={color}
+      className={`hw-knob ${base} ${disabled ? dis : enabled}`}
     >
       {inner}
     </button>
@@ -577,7 +579,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     topPanel,
   } = props;
 
-  const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
+  const tiltRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(!defaultMinimized);
   const [resolvingDoc, setResolvingDoc] = useState(false);
   // Gravar N videos numa pasta leva segundos e o botao nao pode ficar mudo:
@@ -668,19 +670,21 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const barPct = Math.min(100, Math.max(3, totalPct));
 
   function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
+    const el = tiltRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
     const py = (e.clientY - rect.top) / rect.height;
     // Range pequeno (~1.5deg) — sutil, nao desorienta
-    setTilt({ x: (py - 0.5) * -1.5, y: (px - 0.5) * 1.5 });
+    el.style.transition = 'transform 60ms ease-out';
+    el.style.transform = `perspective(1200px) rotateX(${((py - 0.5) * -1.5).toFixed(3)}deg) rotateY(${((px - 0.5) * 1.5).toFixed(3)}deg) translateZ(0)`;
   }
   function onMouseLeave() {
-    setTilt(null);
+    const el = tiltRef.current;
+    if (!el) return;
+    el.style.transition = 'transform 240ms ease-out';
+    el.style.transform = 'perspective(1200px) rotateX(0) rotateY(0) translateZ(0)';
   }
-
-  const transform = tilt
-    ? `perspective(1200px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) translateZ(0)`
-    : 'perspective(1200px) rotateX(0) rotateY(0) translateZ(0)';
 
   const friendlyMsg = humanizeMessage(message, phase);
   // Banner especial (limite diário / falha): curto, sem termo técnico, sempre
@@ -715,10 +719,11 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   return (
     <li className="list-none" id={`batch-card-${props.taskId}`}>
       <div
+        ref={tiltRef}
         onMouseMove={onMouseMove}
         onMouseLeave={onMouseLeave}
-        style={{ transform, transition: tilt ? 'transform 60ms ease-out' : 'transform 240ms ease-out' }}
-        className={`relative overflow-hidden rounded-[16px] border ${ringColor} bg-gradient-to-br ${bgGradient} bg-bg-soft/40 p-3.5 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_8px_28px_-12px_rgba(0,0,0,0.5)]`}
+        style={{ transform: 'perspective(1200px) rotateX(0) rotateY(0) translateZ(0)', transition: 'transform 240ms ease-out' }}
+        className={`hw-card relative overflow-hidden rounded-[16px] border ${ringColor} bg-gradient-to-br ${bgGradient} bg-bg-soft/40 p-3.5 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_8px_28px_-12px_rgba(0,0,0,0.5)]`}
       >
         {/* Specular highlight (top-left) */}
         <span
@@ -865,13 +870,14 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {(() => {
                 // TROCA DE ÁUDIO: sem doc — botao leva pra PASTA de output no Drive.
                 if (folderUrl) {
-                  const fClass = 'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]';
+                  const fClass = 'hw-knob group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]';
                   return (
                     <a
                       href={folderUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={fClass}
+                      data-tone="cyan"
                       title="Abrir a pasta do criativo no Drive (onde fica o AD original e o output)"
                       aria-label="Abrir pasta no Drive"
                     >
@@ -887,7 +893,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   : 'Buscar e abrir doc da copy';
                 const canResolve = !!docUrl || !!resolveDocUrl;
                 if (!canResolve) return null;
-                const baseClass = 'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow] disabled:opacity-50 disabled:cursor-wait disabled:hover:translate-y-0 disabled:hover:scale-100';
+                const baseClass = 'hw-knob group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow] disabled:opacity-50 disabled:cursor-wait disabled:hover:translate-y-0 disabled:hover:scale-100';
                 if (docUrl) {
                   // Caso comum: docUrl conhecido → anchor (zero delay).
                   return (
@@ -896,6 +902,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       target="_blank"
                       rel="noopener noreferrer"
                       className={baseClass}
+                      data-tone="cyan"
                       title={tooltip}
                       aria-label={tooltip}
                     >
@@ -931,6 +938,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                     onClick={handleClick}
                     disabled={resolvingDoc}
                     className={baseClass}
+                    data-tone="cyan"
                     title={tooltip}
                     aria-label={tooltip}
                   >
@@ -1258,7 +1266,8 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
-                className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-fuchsia-400/45 bg-gradient-to-b from-fuchsia-400/20 via-fuchsia-400/8 to-transparent text-fuchsia-200 dark:text-fuchsia-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(217,70,239,0.35)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-fuchsia-400/65 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(217,70,239,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                data-tone="fuchsia"
+                className="hw-knob group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-fuchsia-400/45 bg-gradient-to-b from-fuchsia-400/20 via-fuchsia-400/8 to-transparent text-fuchsia-200 dark:text-fuchsia-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(217,70,239,0.35)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-fuchsia-400/65 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(217,70,239,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
                 style={{ color: 'currentColor' }}
                 title={expanded ? 'Recolher' : 'Expandir takes'}
                 aria-label={expanded ? 'Recolher' : 'Expandir'}
@@ -1312,7 +1321,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
            *  barrinha de carregamento animada carregando o processo". */}
           {showProgress ? (
             <div className="mt-2.5">
-              <div className="relative h-[6px] w-full overflow-hidden rounded-full bg-white/[0.05] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
+              <div className="hw-meter relative h-[6px] w-full overflow-hidden rounded-full bg-white/[0.05] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
                 <div
                   className={`absolute inset-y-0 left-0 rounded-full bg-gradient-to-r ${phaseInfo.barFrom} ${phaseInfo.barTo} transition-[width] duration-500 ease-out`}
                   style={{ width: `${barPct}%` }}
@@ -1378,7 +1387,7 @@ function PhasePill({
   };
   return (
     <span
-      className={`label-tech relative inline-flex items-center gap-1 rounded-full border px-2.5 py-[3px] text-[9.5px] font-semibold uppercase tracking-[0.08em] ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
+      className={`hw-phase label-tech relative inline-flex items-center gap-1 rounded-full border px-2.5 py-[3px] text-[9.5px] font-semibold uppercase tracking-[0.08em] ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
     >
       {pulsing && tone === 'progress' ? (
         <span className="absolute inset-0 rounded-full border border-current/30 animate-ping opacity-40" aria-hidden />

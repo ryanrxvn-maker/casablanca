@@ -89,6 +89,7 @@ export function PilotModeHub({
     <section
       className="pmh relative mb-5 overflow-hidden rounded-[18px] p-3 md:p-4"
       style={{
+        ['--pmh' as string]: cor.rgb,
         background:
           'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.6), inset 0 1px 0 rgba(255,255,255,0.05)',
@@ -125,8 +126,9 @@ export function PilotModeHub({
           aria-hidden
           className="pmh-pill pointer-events-none absolute bottom-1.5 top-1.5 rounded-[11px]"
           style={{
-            left: `calc(${idx * pct}% + 6px)`,
+            left: '6px',
             width: `calc(${pct}% - 12px)`,
+            transform: `translateX(calc(${idx} * (100% + 12px)))`,
             background: cor.grad,
             boxShadow: `0 0 34px -8px rgba(${cor.rgb},0.8), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.22)`,
           }}
@@ -189,7 +191,7 @@ export function PilotModeHub({
       <style jsx>{`
         .pmh-pill {
           transition:
-            left 460ms cubic-bezier(0.34, 1.56, 0.44, 1),
+            transform 460ms cubic-bezier(0.34, 1.56, 0.44, 1),
             background 300ms ease,
             box-shadow 300ms ease;
         }
@@ -223,7 +225,7 @@ export function PilotModeHub({
         }
         @media (prefers-reduced-motion: reduce) {
           .pmh-pill {
-            transition: left 120ms linear !important;
+            transition: transform 120ms linear !important;
           }
           .pmh-seg,
           .pmh-seg:not(:disabled):hover,

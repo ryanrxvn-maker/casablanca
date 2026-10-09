@@ -128,7 +128,7 @@ export function CompactAvatarPicker({
         onClick={() => !disabled && setOpen((o) => !o)}
         disabled={disabled}
         className={
-          'group flex w-full items-center gap-2 rounded-[12px] border border-line-strong bg-bg-soft/40 px-2 py-1.5 text-left transition-all duration-300 hover:border-lime hover:bg-lime/5 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_24px_-12px_rgba(200,232,124,0.5)] disabled:opacity-50 ' +
+          'hw-pick group flex w-full items-center gap-2 rounded-[12px] border border-line-strong bg-bg-soft/40 px-2 py-1.5 text-left transition-all duration-300 hover:border-lime hover:bg-lime/5 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_24px_-12px_rgba(200,232,124,0.5)] disabled:opacity-50 ' +
           (selected ? 'border-lime/40 ' : '') +
           (open ? 'border-lime' : '')
         }

@@ -1,0 +1,574 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PILOT · ACABAMENTO HARDWARE (opção C escolhida pelo Silas, 09.10)
+   ---------------------------------------------------------------------------
+   Regra desta pele: NADA muda de lugar. O layout, a ordem, os textos e os
+   tamanhos são os do Pilot original; aqui só entra o MATERIAL:
+     • metal escovado nos painéis, chanfro de luz no topo e sombra embaixo;
+     • teclas com profundidade física (a lateral aparece embaixo e some
+       quando a tecla afunda no clique);
+     • botões redondos como knobs de metal, com ANEL DE LED aceso quando
+       ligado, na cor da função (as mesmas cores do original);
+     • etiquetas/contagens embutidas (rebaixadas) como visor de equipamento;
+     • a fumaça da landing atrás de tudo.
+   Tudo escopado em .pilot-hw (a raiz do ToolShell do Pilot): os mesmos
+   componentes usados no Histórico/Hey Auto continuam com o visual deles.
+   Os ganchos são classes hw-* ACRESCENTADAS aos elementos originais; o
+   !important vence os estilos inline originais sem precisar mexer neles.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pilot-hw {
+  --hw-brush: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+  --hw-panel: linear-gradient(180deg, #1d1d20, #141416);
+  --hw-card: linear-gradient(180deg, #1c1c20, #151517);
+  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.7), 0 0 0 1px #040405;
+  --hw-drop: 0 34px 70px -34px #000;
+  --hw-recess-bg: #0b0b0d;
+  --hw-recess: inset 0 2px 5px rgba(0, 0, 0, 0.8), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  --hw-key: linear-gradient(180deg, #2a2a2f, #1c1c20);
+  --hw-key-sh: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 1px 0 #000, 0 3px 0 #0b0b0d, 0 4px 8px rgba(0, 0, 0, 0.5);
+  --hw-key-down: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 0 #000;
+  --hw-knob: radial-gradient(circle at 38% 30%, #46464d, #1d1d21 62%);
+  --hw-knob-sh: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -2px 3px rgba(0, 0, 0, 0.6), 0 0 0 2px #0a0a0b, 0 0 0 3px rgba(255, 255, 255, 0.05), 0 3px 0 #050506, 0 6px 12px rgba(0, 0, 0, 0.5);
+  --hw-ink: #f2f2f4;
+  --hw-ink-2: #9a9aa3;
+}
+html[data-theme='light'] .pilot-hw {
+  --hw-brush: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.022) 0 1px, transparent 1px 3px);
+  --hw-panel: linear-gradient(180deg, #ecebe7, #dfded9);
+  --hw-card: linear-gradient(180deg, #f2f1ed, #e5e4df);
+  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.13);
+  --hw-drop: 0 30px 60px -36px rgba(40, 40, 30, 0.45);
+  --hw-recess-bg: #d2d1cb;
+  --hw-recess: inset 0 2px 4px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+  --hw-key: linear-gradient(180deg, #fcfbf8, #e7e6e1);
+  --hw-key-sh: inset 0 1px 0 #fff, 0 1px 0 rgba(0, 0, 0, 0.22), 0 3px 0 #b8b7b1, 0 4px 8px rgba(0, 0, 0, 0.15);
+  --hw-key-down: inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 1px 0 rgba(0, 0, 0, 0.22);
+  --hw-knob: radial-gradient(circle at 38% 30%, #ffffff, #d9d8d2 64%);
+  --hw-knob-sh: inset 0 1px 0 #fff, inset 0 -2px 3px rgba(0, 0, 0, 0.12), 0 0 0 2px rgba(0, 0, 0, 0.18), 0 3px 0 #b3b2ac, 0 6px 12px rgba(0, 0, 0, 0.15);
+  --hw-ink: #17171c;
+  --hw-ink-2: #55555e;
+}
+
+/* ── fumaça + saturação ───────────────────────────────────────────────────── */
+/* O saturate(.72) do <main> prendia a fumaça fixa na rolagem: no Pilot ele
+   sai do <main> e vai pra raiz do Pilot (o conteúdo fica igual ao resto do
+   site); a fumaça faz a própria dessaturação no shader. */
+html:not([data-theme='light']) main:has(.pilot-hw) {
+  filter: none;
+}
+html:not([data-theme='light']) .pilot-hw {
+  filter: saturate(0.72);
+}
+.hw-atmos {
+  position: fixed;
+  z-index: 0;
+  top: 56px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+}
+@media (min-width: 768px) {
+  .hw-atmos {
+    left: 84px;
+  }
+}
+.hw-atmos__smoke {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pilot-hw {
+  position: relative;
+  z-index: 1;
+}
+/* blur de vidro por cima da fumaça animada = desfoque refeito a cada quadro */
+.pilot-hw [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ── material base: painel de metal ───────────────────────────────────────── */
+.pilot-hw .tool-shell-panel,
+.pilot-hw .cp-command-center,
+.pilot-hw .cp-modes-bar,
+.pilot-hw .cp-filters-bar,
+.pilot-hw .hw-prod,
+.pilot-hw .ext-falta,
+.pilot-hw .plano-core {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-panel) !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+/* manchas de luz coloridas dos painéis: saem (o metal não brilha sozinho) */
+.pilot-hw :is(.cp-command-center, .cp-modes-bar, .cp-filters-bar) > div[aria-hidden].blur-3xl,
+.pilot-hw .pmh > span[aria-hidden].blur-3xl {
+  display: none;
+}
+
+/* ── herói ────────────────────────────────────────────────────────────────── */
+.pilot-hw .tool-hero {
+  border-color: transparent !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+.pilot-hw .tool-hero > div[aria-hidden] {
+  display: none;
+}
+.pilot-hw .tool-hero > div.relative {
+  background: var(--hw-brush), var(--hw-panel) !important;
+}
+.pilot-hw .tool-hero .rounded-full.border {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.pilot-hw .tool-hero .rounded-full.border > span {
+  animation: none !important;
+  background: #c8e87c !important;
+  box-shadow: 0 0 6px #c8e87c, 0 0 0 2px rgba(200, 232, 124, 0.2) !important;
+}
+.pilot-hw .tool-hero-icon {
+  animation: none !important;
+}
+.pilot-hw .tool-hero-icon > span:first-child {
+  display: none;
+}
+.pilot-hw .tool-hero-icon > span:last-child {
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+}
+
+/* ── visor de origem (Creator / Docs / ClickUp) ───────────────────────────── */
+.pilot-hw .pmh {
+  background: #111113 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+}
+html[data-theme='light'] .pilot-hw .pmh {
+  background: #dddcd6 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(0, 0, 0, 0.08) !important;
+}
+.pilot-hw .pmh-rail {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+/* teclas apagadas: a face aparece como tecla em relevo (dentro da célula,
+   sem mudar posição: é um pseudo-elemento) */
+.pilot-hw .pmh-seg[aria-checked='false']::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  border-radius: 10px;
+  background: var(--hw-key);
+  box-shadow: var(--hw-key-sh);
+  transition: filter 0.15s ease;
+}
+.pilot-hw .pmh-seg[aria-checked='false']:not(:disabled):hover::before {
+  filter: brightness(1.15);
+}
+/* tecla acesa: a pílula vira a tecla iluminada, apertada */
+.pilot-hw .pmh-pill {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    0 0 20px -3px rgba(var(--pmh, 240, 180, 58), 0.6) !important;
+}
+
+/* Nova task: tecla âmbar com lateral */
+.pilot-hw .pfb-plus {
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #6e4a08,
+    0 4px 0 #8a5d10,
+    0 5px 12px rgba(0, 0, 0, 0.5),
+    0 0 22px -6px rgba(240, 180, 58, 0.6) !important;
+}
+.pilot-hw .pfb-plus:not(:disabled):active {
+  transform: translateY(3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 0 #6e4a08 !important;
+}
+
+/* ── teclas genéricas ─────────────────────────────────────────────────────── */
+.pilot-hw .hw-key {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.15s ease !important;
+}
+.pilot-hw .hw-key:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  filter: brightness(1.12);
+}
+.pilot-hw .hw-key:active:not(:disabled) {
+  transform: translateY(2px) !important;
+  box-shadow: var(--hw-key-down) !important;
+}
+.pilot-hw .hw-key[data-on='true'] {
+  color: #ff8f8f !important;
+  box-shadow: var(--hw-key-sh), 0 0 0 1px rgba(255, 110, 110, 0.45) !important;
+}
+.pilot-hw .hw-key--lime,
+.pilot-hw .hw-key--lime:hover:not(:disabled) {
+  color: #13200a !important;
+  background: linear-gradient(180deg, #e6f6b0, #b4d064) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #3d4d14,
+    0 4px 0 #5a7020,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(200, 232, 124, 0.6) !important;
+}
+.pilot-hw .hw-key--amber,
+.pilot-hw .hw-key--amber:hover:not(:disabled) {
+  color: #2a1c00 !important;
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #6e4a08,
+    0 4px 0 #8a5d10,
+    0 5px 12px rgba(0, 0, 0, 0.5),
+    0 0 22px -6px rgba(240, 180, 58, 0.6) !important;
+}
+.pilot-hw .hw-key--cyan,
+.pilot-hw .hw-key--cyan:hover:not(:disabled) {
+  color: #04141b !important;
+  background: linear-gradient(180deg, #bdf0fa, #52c7dd) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #164f5c,
+    0 4px 0 #1f6f80,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(82, 199, 221, 0.6) !important;
+}
+.pilot-hw .hw-key--violet,
+.pilot-hw .hw-key--violet:hover:not(:disabled) {
+  color: #1d1030 !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, #e2d6ff, #ab8ff0) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #3a2470,
+    0 4px 0 #5b3ca8,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(160, 120, 255, 0.6) !important;
+}
+.pilot-hw :is(.hw-key--lime, .hw-key--amber, .hw-key--cyan, .hw-key--violet):active:not(:disabled) {
+  transform: translateY(3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(0, 0, 0, 0.6) !important;
+}
+.pilot-hw :is(.hw-key--lime, .hw-key--amber, .hw-key--cyan, .hw-key--violet):disabled {
+  filter: grayscale(0.4) brightness(0.75);
+}
+
+/* ── knobs (botões redondos com anel de LED) ──────────────────────────────── */
+.pilot-hw .hw-knob {
+  --c: 185 185 194;
+  color: rgb(var(--c)) !important;
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease !important;
+}
+.pilot-hw .hw-knob > span.pointer-events-none.absolute.inset-x-0 {
+  display: none;
+}
+.pilot-hw .hw-knob:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  filter: brightness(1.15);
+}
+.pilot-hw .hw-knob:active:not(:disabled) {
+  transform: translateY(2px) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.6),
+    0 0 0 2px #0a0a0b,
+    0 1px 0 #050506 !important;
+}
+.pilot-hw .hw-knob[data-on='true'] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.6),
+    0 0 0 2px #0a0a0b,
+    0 0 0 3.5px rgb(var(--c)),
+    0 0 16px rgb(var(--c) / 0.6),
+    0 3px 0 #050506 !important;
+}
+html[data-theme='light'] .pilot-hw .hw-knob[data-on='true'] {
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -2px 3px rgba(0, 0, 0, 0.12),
+    0 0 0 2px rgba(0, 0, 0, 0.18),
+    0 0 0 3.5px rgb(var(--c)),
+    0 0 14px rgb(var(--c) / 0.5),
+    0 3px 0 #b3b2ac !important;
+}
+.pilot-hw .hw-knob:disabled {
+  opacity: 0.4;
+  filter: none;
+  transform: none !important;
+}
+.pilot-hw .hw-knob[data-tone='lime'] { --c: 200 232 124; }
+.pilot-hw .hw-knob[data-tone='cyan'] { --c: 96 205 230; }
+.pilot-hw .hw-knob[data-tone='amber'] { --c: 246 192 74; }
+.pilot-hw .hw-knob[data-tone='fuchsia'] { --c: 232 150 226; }
+.pilot-hw .hw-knob[data-tone='rose'] { --c: 246 132 150; }
+.pilot-hw .hw-knob[data-tone='violet'] { --c: 180 160 250; }
+.pilot-hw .hw-knob[data-tone='orange'] { --c: 250 160 90; }
+.pilot-hw .hw-knob[data-tone='emerald'] { --c: 98 214 166; }
+.pilot-hw .hw-knob[data-tone='neutral'] { --c: 175 175 184; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='lime'] { --c: 88 116 28; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='cyan'] { --c: 18 116 146; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='amber'] { --c: 160 104 8; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='neutral'] { --c: 90 90 100; }
+/* as teclas de marca no meio da barra (Flow, StockFrame, Economia) viram
+   knobs também, mantendo o desenho de cada uma */
+.pilot-hw :is([data-flow-trigger], [data-stockframe-trigger]) {
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+}
+.pilot-hw [data-flow-trigger][data-enabled='true'],
+.pilot-hw [data-stockframe-trigger][aria-label^='StockFrame, ligado'] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.6),
+    0 0 0 2px #0a0a0b,
+    0 0 0 3.5px rgb(170 110 255),
+    0 0 16px rgba(170, 110, 255, 0.6),
+    0 3px 0 #050506 !important;
+}
+
+/* ── visores embutidos (contagens, etiquetas, LEDs) ───────────────────────── */
+.pilot-hw .hw-led,
+.pilot-hw .hw-count {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(200, 232, 124, 0.28) !important;
+}
+.pilot-hw .hw-status {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.pilot-hw .hw-phase {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.pilot-hw .hw-phase > span.animate-ping {
+  display: none;
+}
+.pilot-hw .hw-remover {
+  background: #120a0a !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase, .hw-remover) {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18) !important;
+}
+html[data-theme='light'] .pilot-hw .hw-remover {
+  background: #ecd6d6 !important;
+}
+
+/* ── lista de tasks ───────────────────────────────────────────────────────── */
+.pilot-hw .hw-row,
+.pilot-hw .hw-ana,
+.pilot-hw .hw-card,
+.pilot-hw .hw-foot {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer) !important;
+}
+.pilot-hw .hw-row:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.pilot-hw .hw-row[data-on='true'],
+.pilot-hw .hw-sel {
+  border-color: transparent !important;
+  background: linear-gradient(90deg, rgba(200, 232, 124, 0.07), transparent 55%), var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #c8e87c !important;
+}
+html[data-theme='light'] .pilot-hw .hw-row[data-on='true'],
+html[data-theme='light'] .pilot-hw .hw-sel {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #6d8a22 !important;
+}
+.pilot-hw .hw-check {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.pilot-hw .hw-check[data-on='true'] {
+  color: #13200a !important;
+  background: radial-gradient(circle at 40% 35%, #e5f6b0, #a9c75a) !important;
+  box-shadow: 0 0 10px rgba(200, 232, 124, 0.6), 0 0 0 2px #0a0a0b !important;
+}
+.pilot-hw .hw-sq {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+}
+.pilot-hw .hw-sq:active {
+  transform: translateY(2px);
+  box-shadow: var(--hw-key-down) !important;
+}
+
+/* filtros (Período / Prioridade) */
+.pilot-hw .hw-chip {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+}
+.pilot-hw .hw-chip:hover {
+  transform: translateY(-1px) !important;
+}
+.pilot-hw .hw-chip[data-on='true'] {
+  transform: translateY(2px) !important;
+  box-shadow: var(--hw-key-down), 0 0 0 1px rgba(200, 232, 124, 0.4), 0 0 14px -4px rgba(200, 232, 124, 0.6) !important;
+}
+
+/* ── em produção ──────────────────────────────────────────────────────────── */
+.pilot-hw .hw-card {
+  /* inclinação do card continua; só o material muda */
+  background: var(--hw-brush), var(--hw-card) !important;
+}
+.pilot-hw .hw-card > span.pointer-events-none.absolute:first-child {
+  display: none;
+}
+.pilot-hw .hw-meter {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* card de um take */
+.pilot-hw .hw-take {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer) !important;
+}
+.pilot-hw .hw-take[data-tone='ready'] {
+  box-shadow: var(--hw-chamfer), inset 0 2px 0 rgba(200, 232, 124, 0.85) !important;
+}
+.pilot-hw .hw-take[data-tone='err'] {
+  box-shadow: var(--hw-chamfer), inset 0 2px 0 rgba(246, 132, 150, 0.85) !important;
+}
+.pilot-hw .hw-take[data-tone='wait'] {
+  box-shadow: var(--hw-chamfer), inset 0 2px 0 rgba(246, 192, 74, 0.85) !important;
+}
+.pilot-hw .hw-tbtn {
+  border-color: transparent !important;
+  background: radial-gradient(circle at 38% 30%, #46464d, #18181b 64%) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 1.5px #0a0a0b, 0 2px 0 #050506 !important;
+}
+
+/* ── análise ──────────────────────────────────────────────────────────────── */
+.pilot-hw .hw-ana[data-st='ready'] {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #c8e87c !important;
+}
+.pilot-hw .hw-ana[data-st='partial'] {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #f0c04a !important;
+}
+.pilot-hw .hw-ana[data-st='error'] {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #f68496 !important;
+}
+.pilot-hw .section-eyebrow::before {
+  background: #c8e87c !important;
+  box-shadow: 0 0 6px #c8e87c !important;
+}
+.pilot-hw .hw-slot {
+  border-color: transparent !important;
+  background: #111113 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+}
+html[data-theme='light'] .pilot-hw .hw-slot {
+  background: #dddcd6 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1), inset 0 0 0 1px rgba(0, 0, 0, 0.07) !important;
+}
+.pilot-hw .hw-motor {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh), 0 0 0 1px rgba(160, 130, 255, 0.28) !important;
+}
+.pilot-hw .hw-motor > span.pointer-events-none {
+  display: none;
+}
+.pilot-hw .hw-seg {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.pilot-hw .hw-seg-it[data-on='true'] {
+  background: linear-gradient(180deg, #26303a, #1a2028) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 10px -2px rgba(96, 205, 230, 0.5), 0 0 0 1px rgba(96, 205, 230, 0.35) !important;
+}
+html[data-theme='light'] .pilot-hw .hw-seg-it[data-on='true'] {
+  background: linear-gradient(180deg, #f4fbfd, #dceff4) !important;
+}
+.pilot-hw .hw-pick {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.pilot-hw .btn-lapis {
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 #6e4a08, 0 3px 0 #8a5d10, 0 4px 10px rgba(0, 0, 0, 0.5) !important;
+}
+.pilot-hw .btn-lapis:active {
+  transform: translateY(2px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 0 #6e4a08 !important;
+}
+
+/* aviso da extensão: o tile vira tecla âmbar, o CTA também */
+.pilot-hw .ext-falta-tile {
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 #6e4a08, 0 3px 0 #8a5d10, 0 4px 10px rgba(0, 0, 0, 0.5) !important;
+}
+.pilot-hw .ext-falta-cta {
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 #6e4a08, 0 4px 0 #8a5d10, 0 5px 12px rgba(0, 0, 0, 0.5) !important;
+}
+.pilot-hw .ext-falta-cta:active {
+  transform: translateY(3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 0 #6e4a08 !important;
+}
+.pilot-hw .plano-shell {
+  background: none !important;
+  box-shadow: none !important;
+}
+.pilot-hw .plano-tile {
+  background: linear-gradient(180deg, #bdf0fa, #52c7dd) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 #164f5c, 0 3px 0 #1f6f80, 0 4px 10px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* modo descanso: enfeites infinitos param junto com o resto do site */
+html.ae-calm .pilot-hw .vc-btn::before {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pilot-hw :is(.hw-key, .hw-knob, .hw-row, .hw-chip, .pfb-plus) {
+    transition: none !important;
+  }
+}
+
+/* ícones com cor própria dentro do knob (a setinha de expandir vinha roxo escuro) */
+.pilot-hw .hw-knob > span.relative[class*="text-"] {
+  color: rgb(var(--c)) !important;
+}
+
+/* modo claro: textos que vinham brancos fixos no original */
+html[data-theme='light'] .pilot-hw .hw-key:not(.hw-key--lime):not(.hw-key--amber):not(.hw-key--cyan):not(.hw-key--violet):not([data-on='true']) {
+  color: #4a4a52 !important;
+}
+html[data-theme='light'] .pilot-hw .section-eyebrow {
+  color: #1f1f25;
+}

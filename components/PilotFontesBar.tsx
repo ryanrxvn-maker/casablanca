@@ -185,7 +185,7 @@ export function DocsBar({
             disabled={importando}
             spellCheck={false}
             aria-label="Link do Google Docs"
-            className="mono w-full rounded-[12px] bg-bg/40 py-3 pl-11 pr-4 text-[12.5px] text-text outline-none transition disabled:opacity-60"
+            className="hw-pick mono w-full rounded-[12px] bg-bg/40 py-3 pl-11 pr-4 text-[12.5px] text-text outline-none transition disabled:opacity-60"
             style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
             onFocus={(e) => {
               e.currentTarget.style.boxShadow = 'inset 0 0 0 1px rgba(34,211,238,0.7), 0 0 0 3px rgba(34,211,238,0.14)';
@@ -199,7 +199,7 @@ export function DocsBar({
           type="button"
           onClick={onImportarLink}
           disabled={importando || !link.trim()}
-          className="cp-load-cta group relative h-12 overflow-hidden rounded-[12px] px-5 text-[12.5px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-50"
+          className="hw-key hw-key--cyan cp-load-cta group relative h-12 overflow-hidden rounded-[12px] px-5 text-[12.5px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-50"
           style={{
             fontFamily: 'var(--font-tech)',
             background: 'linear-gradient(135deg, #7fe4f5 0%, #22d3ee 100%)',
@@ -224,7 +224,7 @@ export function DocsBar({
         <label
           title="Importar arquivo (.docx ou .txt). Também dá pra arrastar o arquivo aqui."
           className={
-            'flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] text-text-muted transition ' +
+            'hw-sq flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] text-text-muted transition ' +
             (importando ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:text-cyan-200')
           }
           style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}

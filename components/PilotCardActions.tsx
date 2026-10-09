@@ -122,7 +122,9 @@ export function PilotBtn3D({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${base} ${enabled} ${activeRing}`}
+        className={`hw-knob ${base} ${enabled} ${activeRing}`}
+        data-tone={color}
+        data-on={active ? 'true' : undefined}
         style={sizeStyle}
         title={title}
         aria-label={title}
@@ -139,8 +141,10 @@ export function PilotBtn3D({
       title={title}
       aria-label={title}
       aria-pressed={active}
+      data-tone={color}
+      data-on={active ? 'true' : undefined}
       style={sizeStyle}
-      className={`${base} ${disabled ? dis : enabled} ${activeRing}`}
+      className={`hw-knob ${base} ${disabled ? dis : enabled} ${activeRing}`}
     >
       {inner}
     </button>

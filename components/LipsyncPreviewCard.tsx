@@ -206,6 +206,7 @@ export function LipsyncPreviewCard({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={handleMouseLeave}
       onMouseMove={handleMouseMove}
+      data-tone={tone}
       className={
         // ⛔ `dark-island`: este card e' ESCURO POR DESIGN — e' a moldura de um
         // player de video, com texto branco e acentos claros por cima. No modo
@@ -217,7 +218,7 @@ export function LipsyncPreviewCard({
         // CLARO da pagina — o cabecalho ficava bege com o rotulo em lime
         // claro por cima (contraste 1.11, medido). Com base escura + a ilha,
         // o card fica igual nos dois temas.
-        'dark-island lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border bg-bg-soft transition-all duration-300 ' +
+        'hw-take dark-island lipsync-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border bg-bg-soft transition-all duration-300 ' +
         (tone === 'ready'
           ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-600/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(16,185,129,0.45),0_0_36px_-12px_rgba(16,185,129,0.35)] hover:border-emerald-500/70'
           : tone === 'err'
@@ -274,7 +275,7 @@ export function LipsyncPreviewCard({
                 onClick={(e) => { e.stopPropagation(); openExpanded(); }}
                 aria-label="Expandir"
                 title="Expandir"
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/65 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-white/70 hover:bg-black/85 active:scale-95"
+                className="hw-tbtn flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/65 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-white/70 hover:bg-black/85 active:scale-95"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
@@ -286,7 +287,7 @@ export function LipsyncPreviewCard({
                   onClick={(e) => { e.stopPropagation(); onEdit(); }}
                   aria-label="Editar script/voz e re-gerar"
                   title="Editar script/voz e re-gerar"
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/70 bg-cyan-500/90 text-white shadow-[0_4px_14px_rgba(34,211,238,0.45)] transition-all hover:scale-110 hover:bg-cyan-400 active:scale-95"
+                  className="hw-tbtn flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/70 bg-cyan-500/90 text-white shadow-[0_4px_14px_rgba(34,211,238,0.45)] transition-all hover:scale-110 hover:bg-cyan-400 active:scale-95"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 20h9" />
@@ -300,7 +301,7 @@ export function LipsyncPreviewCard({
                 disabled={downloading}
                 aria-label="Baixar MP4"
                 title="Baixar MP4"
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/70 bg-emerald-500/95 text-white shadow-[0_4px_14px_rgba(16,185,129,0.5)] transition-all hover:scale-110 hover:bg-emerald-400 active:scale-95 disabled:opacity-60"
+                className="hw-tbtn flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/70 bg-emerald-500/95 text-white shadow-[0_4px_14px_rgba(16,185,129,0.5)] transition-all hover:scale-110 hover:bg-emerald-400 active:scale-95 disabled:opacity-60"
               >
                 {downloading ? (
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">

@@ -52,6 +52,20 @@ test('Pilot não re-renderiza a PÁGINA inteira a cada segundo (relógio vive no
   assert.match(ler('components/BatchJobCard3D.tsx'), /function ElapsedClock\(/);
 });
 
+test('Pilot (acabamento Hardware 09.10): fumaça barata, nada de blur por cima dela, mouse sem re-render', () => {
+  const smoke = ler('components/pilot/PilotSmoke.tsx');
+  assert.match(smoke, /isCalm\(\)/, 'a fumaça para no modo descanso / aba oculta');
+  assert.match(smoke, /keepAliveRefs\(\) > 0 \? 15 : 30/, 'com disparo/montagem/render rodando a fumaça cai pra 15 quadros/s');
+  const css = ler('app/pilot-hw.css');
+  // blur de vidro por cima de canvas animado = desfoque refeito a cada quadro
+  assert.match(css, /\.pilot-hw \[class\*='backdrop-blur'\] \{[\s\S]*?backdrop-filter: none !important/);
+  // o card de disparo inclinava com setState a cada mousemove: o card inteiro,
+  // com os vídeos dos takes, re-renderizava por pixel que o mouse andava
+  assert.doesNotMatch(ler('components/BatchJobCard3D.tsx'), /setTilt\(/);
+  // a pílula do visor anda por transform, não por `left`
+  assert.doesNotMatch(ler('components/PilotModeHub.tsx'), /left 460ms/);
+});
+
 test('landing: animações do herói só com transform/opacity (clip-path/left/box-shadow repintavam a cada quadro)', () => {
   const src = ler('components/landing/v3/scenes.tsx');
   for (const nome of ['bc-wipe', 'bc-wipe-in', 'bc-line', 'tj-breathe']) {

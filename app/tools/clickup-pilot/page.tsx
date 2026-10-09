@@ -7,6 +7,7 @@ import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, respo
 import { createRecordWriter, readDurableRecord, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
+import { PilotSmoke } from '@/components/pilot/PilotSmoke';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { useAvisoContaModoImagem } from '@/components/ModoImagemContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -15208,7 +15209,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
   }
   return (
     <>
+      {/* Fumaça da landing atrás do Pilot (fixa, sem mexer em nada do layout). */}
+      <div className="hw-atmos" aria-hidden>
+        <PilotSmoke className="hw-atmos__smoke" />
+      </div>
       <ToolShell
+        className="pilot-hw"
         title="Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
         description="O cérebro do estúdio. A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com silêncios removidos e legenda em fila, sem você abrir uma aba sequer."
@@ -15560,7 +15566,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     type="button"
                     onClick={() => void loadPrimaryClickUpTasks()}
                     disabled={loadingTasks || (selectedEditor === ALL_EDITORS_ID && !authUser)}
-                    className="cp-load-cta group relative overflow-hidden rounded-[14px] border border-lime/60 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-70"
+                    className="hw-key hw-key--lime cp-load-cta group relative overflow-hidden rounded-[14px] border border-lime/60 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-70"
                     style={{
                       fontFamily: 'var(--font-tech)',
                       background:
@@ -15649,7 +15655,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         Tasks
                       </h2>
                       <span
-                        className="mono rounded-full border border-lime/45 bg-lime/10 px-2.5 py-0.5 text-[11px] font-bold text-lime"
+                        className="hw-count mono rounded-full border border-lime/45 bg-lime/10 px-2.5 py-0.5 text-[11px] font-bold text-lime"
                         style={{ boxShadow: '0 0 12px -4px rgba(200,232,124,0.45)' }}
                       >
                         {tasks.length}
@@ -15701,8 +15707,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               key={f.id}
                               type="button"
                               onClick={() => setDateFilter(f.id)}
+                              data-on={active}
                               className={
-                                'group relative overflow-hidden rounded-[12px] border px-4 py-2.5 transition-all duration-200 ' +
+                                'hw-chip group relative overflow-hidden rounded-[12px] border px-4 py-2.5 transition-all duration-200 ' +
                                 (active
                                   ? 'border-lime/65 bg-lime/12'
                                   : 'border-line-strong bg-bg/40 hover:border-lime/45 hover:-translate-y-[1px]')
@@ -15810,8 +15817,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               key={f.id}
                               type="button"
                               onClick={() => setPriorityFilter(f.id)}
+                              data-on={active}
                               className={
-                                'group flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ' +
+                                'hw-chip group flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ' +
                                 (active
                                   ? 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100'
                                   : 'border-line-strong text-text-muted hover:border-fuchsia-500/45 hover:text-white')
@@ -15903,8 +15911,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           <button
                             type="button"
                             onClick={() => toggleTaskSelected(t.id)}
+                            data-on={isChecked}
                             className={
-                              'group/task flex-1 rounded-[12px] border bg-gradient-to-br px-3.5 py-2.5 text-left transition-all duration-200 ' +
+                              'hw-row group/task flex-1 rounded-[12px] border bg-gradient-to-br px-3.5 py-2.5 text-left transition-all duration-200 ' +
                               (isChecked
                                 ? 'border-lime/75 from-lime/15 via-lime/[0.06] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_22px_-8px_rgba(200,232,124,0.55)]'
                                 : 'border-white/8 from-white/[0.04] via-white/[0.015] to-transparent hover:border-lime/45 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_20px_-10px_rgba(200,232,124,0.35)]')
@@ -15915,8 +15924,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               <div className="flex min-w-0 flex-1 items-center gap-2 flex-wrap">
                                 {/* CHECKMARK animado — feedback visual de selecao */}
                                 <span
+                                  data-on={isChecked}
                                   className={
-                                    'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ' +
+                                    'hw-check inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ' +
                                     (isChecked
                                       ? 'border-lime bg-lime text-black shadow-[0_0_10px_rgba(200,232,124,0.6)]'
                                       : 'border-white/25 bg-transparent text-transparent group-hover/task:border-lime/60')
@@ -16059,7 +16069,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               {/* LADO DIREITO: status pill maior + chevron */}
                               <div className="flex shrink-0 items-center gap-2">
                                 <span
-                                  className="mono rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
+                                  className="hw-status mono rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
                                   style={{
                                     backgroundColor: (t.status?.color || '#888') + '24',
                                     color: t.status?.color || '#888',
@@ -16085,7 +16095,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   onClick={() => setRenomeando({ id: t.id, valor: t.name })}
                                   title="Renomear a task (o AD do nome batiza os arquivos)"
                                   aria-label="Renomear task"
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-text-muted transition hover:text-amber-200"
+                                  className="hw-sq inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-text-muted transition hover:text-amber-200"
                                   style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
                                 >
                                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -16099,7 +16109,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 onClick={() => removerTaskLocal(t.id)}
                                 title="Remover esta task (só deste navegador)"
                                 aria-label="Remover task"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line/70 text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                                className="hw-sq inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line/70 text-text-muted transition hover:border-red-500/60 hover:text-red-300"
                               >
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                                   <path d="M18 6 6 18M6 6l12 12" />
@@ -16117,13 +16127,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                    *  dispatch view com avatares). User trabalha em batch sempre. */}
                   {selectedTaskIds.size > 0 ? (
                     <div
-                      className="sticky bottom-4 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-lime/55 bg-gradient-to-br from-lime/15 via-lime/[0.06] to-transparent p-3.5 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_42px_-12px_rgba(200,232,124,0.45)]"
+                      className="hw-sel sticky bottom-4 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-lime/55 bg-gradient-to-br from-lime/15 via-lime/[0.06] to-transparent p-3.5 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_42px_-12px_rgba(200,232,124,0.45)]"
                     >
                       <span
                         className="mono inline-flex items-center gap-2 text-[12px] font-bold tracking-tight text-foreground"
                         style={{ fontFamily: 'var(--font-tech)' }}
                       >
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-lime text-black shadow-[0_0_12px_rgba(200,232,124,0.7)]">
+                        <span data-on="true" className="hw-check inline-flex h-6 w-6 items-center justify-center rounded-full bg-lime text-black shadow-[0_0_12px_rgba(200,232,124,0.7)]">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                             <path d="m5 13 4 4L19 7" />
                           </svg>
@@ -16132,7 +16142,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         {(() => {
                           const ready = Array.from(selectedTaskIds).filter(isTaskDispatchable).length;
                           return ready > 0 ? (
-                            <span className="mono ml-1 rounded-full bg-lime/25 px-2 py-[2px] text-[10px] text-lime border border-lime/45">
+                            <span className="hw-led mono ml-1 rounded-full bg-lime/25 px-2 py-[2px] text-[10px] text-lime border border-lime/45">
                               {ready} pronta{ready === 1 ? '' : 's'}
                             </span>
                           ) : null;
@@ -16142,7 +16152,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         <button
                           type="button"
                           onClick={clearSelected}
-                          className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                          className="hw-key mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300"
                         >
                           Limpar
                         </button>
@@ -16150,7 +16160,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           type="button"
                           onClick={() => void analyzeSelected()}
                           disabled={analyzing}
-                          className="mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,232,124,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,232,124,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                          className="hw-key hw-key--lime mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,232,124,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,232,124,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                           style={{ fontFamily: 'var(--font-tech)' }}
                         >
                           {analyzing ? (
@@ -16179,7 +16189,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStatesVisiveis).length > 0 ? (
-                    <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
+                    <div className="hw-prod mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
                       <div className="label-tech mb-3 flex items-center justify-between text-[10px] tracking-widest text-fuchsia-200">
                         <span className="inline-flex items-center gap-2">
                           <span className="relative flex h-2 w-2">
@@ -16974,7 +16984,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           // neste card (briefing do avatar, indicações, botão de doc).
                           const ehCreator = modoDaTaskLocal(a.taskId) === 'creator';
                           return (
-                            <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
+                            <li key={a.taskId} data-st={a.status} className={`hw-ana rounded-[10px] border ${color} p-3 text-[11px]`}>
                               <div className="flex items-center justify-between gap-2">
                                 <span className="mono text-xs text-white flex items-center gap-2 flex-wrap">
                                   {sym} {displayName}
@@ -16995,7 +17005,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <button
                                     type="button"
                                     onClick={() => removeTaskFromAnalysis(a.taskId)}
-                                    className="mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
+                                    className="hw-remover mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
                                     title={ehCreator
                                       ? 'Apaga esta task do CREATOR: avatares e copy somem (só deste navegador).'
                                       : 'Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois.'}
@@ -17152,7 +17162,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           onClick={() => setDecupPopoverOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
                                           title="Intensidade do corte — quanto de silêncio manter nas bordas da fala. Menor = mais agressivo. O valor é fiel ao corte."
                                           aria-expanded={!!decupPopoverOpen[a.taskId]}
-                                          className="mono shrink-0 rounded-full border border-lime/45 bg-lime/10 px-2 py-1 text-[10px] font-bold leading-none text-lime transition hover:bg-lime/20"
+                                          className="hw-led mono shrink-0 rounded-full border border-lime/45 bg-lime/10 px-2 py-1 text-[10px] font-bold leading-none text-lime transition hover:bg-lime/20"
                                         >
                                           {getDecupIntensity(a.taskId).toFixed(2)}s
                                         </button>
@@ -18135,7 +18145,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               type="button"
                                               onClick={() => setVersoesPickerOpen((pp) => ({ ...pp, [a.taskId]: !pp[a.taskId] }))}
                                               aria-expanded={aberto}
-                                              className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                              data-on={total > 1}
+                                              className="hw-key group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
                                               style={
                                                 total > 1
                                                   ? {
@@ -18303,9 +18314,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         ? `${slot.role} · imagem do doc`
                                         : (slot.youtubeUrl ? `${slot.role} · YouTube` : `@${slot.username}.mp4`);
                                       return (
-                                        <div key={sIdx} className="hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]">
+                                        <div key={sIdx} className="hw-slot hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]">
                                           <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
-                                            <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
+                                            <span className="hw-led rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
                                             {ehCreator ? null : <span className="text-white/70">{refLabel}</span>}
                                             <span className="info-chip">{partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
@@ -19593,7 +19604,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     <button
                                       type="button"
                                       onClick={() => addManualRoleSlot(a.taskId)}
-                                      className="group relative mt-1 inline-flex items-center gap-2 self-start rounded-[12px] border border-lime/55 px-3.5 py-2 text-[10.5px] font-bold uppercase tracking-[0.16em] text-black transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
+                                      className="hw-key hw-key--lime group relative mt-1 inline-flex items-center gap-2 self-start rounded-[12px] border border-lime/55 px-3.5 py-2 text-[10.5px] font-bold uppercase tracking-[0.16em] text-black transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
                                       style={{
                                         fontFamily: 'var(--font-tech)',
                                         background: 'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
@@ -19775,7 +19786,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         );
                         if (readyIds.length === 0 && partialIds.length === 0) return null;
                         return (
-                          <div className="sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,232,124,0.4)] backdrop-blur">
+                          <div className="hw-foot sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,232,124,0.4)] backdrop-blur">
                             <span className="mono text-[11px] text-text-muted">
                               {readyIds.length > 0 ? (
                                 <span className="text-lime">✓ {readyIds.length} ready</span>
@@ -19793,7 +19804,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 type="button"
                                 onClick={startBatch}
                                 disabled={readyIds.length === 0}
-                                className="btn-primary disabled:opacity-40"
+                                className="hw-key hw-key--violet btn-primary disabled:opacity-40"
                                 title={readyIds.length === 0 ? 'Nenhuma task ready ainda' : 'Roda em background: TTS + upload + submit + poll + zip'}
                               >
                                 ▶ Iniciar {readyIds.length} task{readyIds.length === 1 ? '' : 's'} em background

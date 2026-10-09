@@ -15,6 +15,7 @@ export function ToolShell({
   eyebrow,
   hue,
   icon,
+  className,
   children,
 }: {
   title: string;
@@ -22,10 +23,13 @@ export function ToolShell({
   eyebrow?: string;
   hue?: string;
   icon?: React.ReactNode;
+  /** Classe extra na raiz (ex.: a pele própria de uma ferramenta). Não muda
+   *  o layout: o resto da casca é o mesmo pra todas. */
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="mx-auto w-full max-w-[1080px] px-5 md:px-8">
+    <div className={'mx-auto w-full max-w-[1080px] px-5 md:px-8' + (className ? ' ' + className : '')}>
       <ToolHero
         title={title}
         eyebrow={eyebrow}
@@ -33,7 +37,7 @@ export function ToolShell({
         hue={hue}
         icon={icon}
       />
-      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-7 backdrop-blur-sm">
+      <div className="tool-shell-panel mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-7 backdrop-blur-sm">
         {children}
       </div>
     </div>

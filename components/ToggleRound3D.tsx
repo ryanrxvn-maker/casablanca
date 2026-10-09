@@ -68,8 +68,10 @@ export function ToggleRound3D({
       title={title}
       disabled={disabled}
       onClick={() => onChange(!on)}
+      data-tone={on ? variant : 'neutral'}
+      data-on={on ? 'true' : undefined}
       className={
-        'group relative flex shrink-0 select-none items-center justify-center rounded-full border-2 ' +
+        'hw-knob group relative flex shrink-0 select-none items-center justify-center rounded-full border-2 ' +
         sizeClass + ' transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] ' +
         (on
           ? `${colors.border} ${colors.bg} ${colors.glow} ${colors.hover}`

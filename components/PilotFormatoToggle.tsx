@@ -22,7 +22,7 @@ export function PilotFormatoToggle({
     <div
       role="radiogroup"
       aria-label="Formato do vídeo no HeyGen"
-      className="inline-flex h-9 items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
+      className="hw-seg inline-flex h-9 items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
       title="Formato do vídeo gerado no HeyGen (vale pro próximo disparo)"
     >
       {FORMATOS.map((f) => {
@@ -35,9 +35,10 @@ export function PilotFormatoToggle({
             role="radio"
             aria-checked={ativo}
             onClick={() => { if (!ativo) onChange(f); }}
+            data-on={ativo}
             title={vertical ? 'Portrait — vertical 9:16 (1080x1920)' : 'Landscape — horizontal 16:9 (1920x1080)'}
             className={
-              'label-tech inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
+              'hw-seg-it label-tech inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
               (ativo
                 ? 'bg-gradient-to-b from-cyan-400/30 to-cyan-400/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_-2px_rgba(34,211,238,0.4)]'
                 : 'text-text-muted hover:text-white')
