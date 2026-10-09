@@ -10,10 +10,9 @@
  *    começando abaixo da barra do topo e ao lado do menu — nenhum blur de
  *    vidro fica por cima dela (blur sobre canvas animado = GPU refazendo o
  *    desfoque a cada quadro).
- *  • HERÓI (design system "Pilot Control", v2): sem caixa, o título fica na
- *    fumaça como na landing; faixa de topo igual à barra da landing (online,
- *    data, relógio ao vivo), cantos de visor e o espelho (rundown) 01–04 do
- *    fluxo: copy, avatar e voz, HeyGen, montado.
+ *  • HERÓI: título editorial, a frase de abertura em serifada, selo do ícone
+ *    em bisel duplo que inclina na direção do mouse e a régua do fluxo
+ *    (copy, avatar e voz, HeyGen, montado).
  *  • LUZ DE BORDA: o painel debaixo do cursor acende a borda onde o mouse
  *    está. Um listener só, no palco; as variáveis vão no PRÓPRIO elemento da
  *    luz (folha da árvore), nunca no :root nem no painel (lição de 05.10:
@@ -23,7 +22,7 @@
  * dentro de outro remonta a cada render — ver o PainelDeMontagem de 03.09).
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { PilotSmoke } from './PilotSmoke';
 
 /** Luz de borda de um painel. O painel precisa de `data-pl-spot` e
@@ -95,29 +94,84 @@ function useSpotlight(rootRef: React.RefObject<HTMLElement>) {
   }, [rootRef]);
 }
 
-/** Relógio da faixa do herói: componente folha (só ele re-renderiza por
- *  segundo) e só depois de montar — o servidor não sabe a hora do usuário. */
-function HeroClock() {
-  const [agora, setAgora] = useState<Date | null>(null);
+/** O selo do ícone inclina na direção do mouse (transform direto, sem state). */
+function useBadgeTilt(heroRef: React.RefObject<HTMLElement>, badgeRef: React.RefObject<HTMLElement>) {
   useEffect(() => {
-    setAgora(new Date());
-    const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') setAgora(new Date());
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, []);
-  if (!agora) return null;
-  const dia = agora.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const hora = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  return (
-    <>
-      <span className="pl-hero__date">{dia}</span>
-      <span className="pl-clock">{hora}</span>
-    </>
-  );
+    const hero = heroRef.current;
+    const badge = badgeRef.current;
+    if (!hero || !badge || !prefersPointerFx()) return;
+    let raf = 0;
+    let tx = 0, ty = 0, cx = 0, cy = 0;
+    const step = () => {
+      cx += (tx - cx) * 0.14;
+      cy += (ty - cy) * 0.14;
+      badge.style.transform = `perspective(700px) rotateX(${cy.toFixed(2)}deg) rotateY(${cx.toFixed(2)}deg)`;
+      raf = Math.abs(tx - cx) > 0.02 || Math.abs(ty - cy) > 0.02 ? requestAnimationFrame(step) : 0;
+    };
+    const kick = () => {
+      if (!raf) raf = requestAnimationFrame(step);
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const r = badge.getBoundingClientRect();
+      const dx = (e.clientX - (r.left + r.width / 2)) / Math.max(320, r.width * 4);
+      const dy = (e.clientY - (r.top + r.height / 2)) / Math.max(220, r.height * 3);
+      tx = Math.max(-1, Math.min(1, dx)) * 14;
+      ty = Math.max(-1, Math.min(1, dy)) * -12;
+      kick();
+    };
+    const onLeave = () => {
+      tx = 0;
+      ty = 0;
+      kick();
+    };
+    hero.addEventListener('pointermove', onMove, { passive: true });
+    hero.addEventListener('pointerleave', onLeave);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      hero.removeEventListener('pointermove', onMove);
+      hero.removeEventListener('pointerleave', onLeave);
+    };
+  }, [heroRef, badgeRef]);
 }
 
-const RUNDOWN = ['Copy', 'Avatar e voz', 'HeyGen', 'Montado'];
+const FLUXO: Array<{ rotulo: string; icone: ReactNode }> = [
+  {
+    rotulo: 'Copy',
+    icone: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5M9 13h6M9 17h4" />
+      </svg>
+    ),
+  },
+  {
+    rotulo: 'Avatar e voz',
+    icone: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" />
+      </svg>
+    ),
+  },
+  {
+    rotulo: 'HeyGen',
+    icone: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z" />
+      </svg>
+    ),
+  },
+  {
+    rotulo: 'Montado',
+    icone: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="5" width="18" height="14" rx="3" />
+        <path d="m10.5 9.5 4 2.5-4 2.5z" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+];
 
 function PilotHero({
   title,
@@ -132,41 +186,44 @@ function PilotHero({
   description?: string;
   icon?: ReactNode;
 }) {
+  const heroRef = useRef<HTMLElement | null>(null);
+  const badgeRef = useRef<HTMLDivElement | null>(null);
+  useBadgeTilt(heroRef, badgeRef);
   return (
-    <header className="pl-hero pl-rise" style={{ ['--i' as string]: 0 }}>
-      <div className="pl-hero__strip">
-        <span className="pl-hero__on">
-          <i className="pl-led" data-c="ok" aria-hidden />
-          Online
-        </span>
-        {eyebrow ? (
-          <>
-            <span className="pl-hero__sep" aria-hidden />
-            <span>{eyebrow}</span>
-          </>
-        ) : null}
-        <span className="ml-auto inline-flex items-center gap-3">
-          <HeroClock />
-        </span>
-      </div>
-      <div className="pl-hero__main">
-        <h1 className="pl-hero__title">{title}</h1>
+    <header ref={heroRef} className="pl-hero pl-rise" data-pl-spot style={{ ['--i' as string]: 0 }}>
+      <PlSpot />
+      <span className="pl-hero__light" aria-hidden />
+      <div className="pl-hero__in">
         <div className="pl-hero__copy">
+          {eyebrow ? (
+            <span className="pl-hero__eyebrow">
+              <i className="pl-livedot" aria-hidden />
+              {eyebrow}
+            </span>
+          ) : null}
+          <h1 className="pl-hero__title">{title}</h1>
           {lead ? <p className="pl-hero__lead">{lead}</p> : null}
           {description ? <p className="pl-hero__desc">{description}</p> : null}
         </div>
         {icon ? (
-          <div className="pl-hero__icon" aria-hidden>
-            {icon}
+          <div className="pl-hero__badge-wrap" aria-hidden>
+            <span className="pl-hero__halo" />
+            <div ref={badgeRef} className="pl-hero__badge">
+              <span className="pl-hero__badge-core">{icon}</span>
+            </div>
           </div>
         ) : null}
       </div>
-      <ol className="pl-rundown" aria-label="Como o Pilot trabalha">
-        {RUNDOWN.map((r, i) => (
-          <li key={r}>
-            <span className="pl-rundown__n">{String(i + 1).padStart(2, '0')}</span>
-            {r}
-            {i === RUNDOWN.length - 1 ? <i className="pl-led" data-c="ok" aria-hidden /> : null}
+      <ol className="pl-flow" aria-label="Como o Pilot trabalha">
+        {FLUXO.map((f, i) => (
+          <li key={f.rotulo} className="pl-flow__step" style={{ ['--i' as string]: i }}>
+            <span className="pl-flow__ico">{f.icone}</span>
+            <span className="pl-flow__txt">{f.rotulo}</span>
+            {i < FLUXO.length - 1 ? (
+              <span className="pl-flow__link" aria-hidden>
+                <i className="ae-ambient" />
+              </span>
+            ) : null}
           </li>
         ))}
       </ol>

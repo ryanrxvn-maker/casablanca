@@ -173,6 +173,17 @@ export type BatchJob3DProps = {
   channels?: Array<{ label: string; color: string }>;
 };
 
+/** Contraste de texto pra chip de canal (mesma regra do board no pilot). */
+function chipTextColor(hex: string): string {
+  const h = (hex || '').replace('#', '');
+  if (h.length < 6) return '#fff';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1a1a1a' : '#fff';
+}
+
 // ───────────────────────── Botão 3D icon-only ─────────────────────────
 
 type Btn3DColor = 'lime' | 'cyan' | 'fuchsia' | 'violet' | 'amber' | 'rose' | 'neutral';
@@ -648,7 +659,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                     <span
                       key={`${ch.label}-${i}`}
                       className="pl-chan"
-                      style={{ ['--sw' as string]: ch.color }}
+                      style={{ backgroundColor: ch.color, color: chipTextColor(ch.color), height: 19, fontSize: 9 }}
                       title={`Canal: ${ch.label}`}
                     >
                       {ch.label}
@@ -1187,13 +1198,27 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
           {/* BANNER especial (limite diário / falha) — sempre visível, curto,
            *  sem termo técnico, com hierarquia visual própria. */}
           {banner ? (
-            <div className="pl-banner" data-kind={banner.kind !== 'fail' ? 'wait' : 'fail'}>
-              <span className="pl-banner__ico">
-                {banner.kind !== 'fail' ? <IconHourglass size={12} /> : <IconAlert size={12} />}
+            <div
+              className={`mt-3 flex items-start gap-2.5 rounded-[14px] border px-3 py-2.5 ${
+                banner.kind !== 'fail'
+                  ? 'border-amber-400/40 bg-gradient-to-br from-amber-400/[0.14] via-amber-400/[0.05] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                  : 'border-rose-400/35 bg-gradient-to-br from-rose-500/[0.12] via-rose-500/[0.04] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+              }`}
+            >
+              <span
+                className={`mt-[1px] flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                  banner.kind !== 'fail' ? 'bg-amber-400/15 text-amber-300' : 'bg-rose-400/15 text-rose-300'
+                }`}
+              >
+                {banner.kind !== 'fail' ? <IconHourglass size={13} /> : <IconAlert size={13} />}
               </span>
               <div className="min-w-0">
-                <div className="pl-banner__t">{banner.title}</div>
-                {banner.hint ? <div className="pl-banner__h">{banner.hint}</div> : null}
+                <div className={`text-[11.5px] font-semibold leading-snug ${banner.kind !== 'fail' ? 'text-amber-100' : 'text-rose-100'}`}>
+                  {banner.title}
+                </div>
+                {banner.hint ? (
+                  <div className="mt-0.5 text-[10.5px] leading-snug text-text-muted">{banner.hint}</div>
+                ) : null}
               </div>
             </div>
           ) : null}

@@ -960,6 +960,18 @@ function shortHash(s: string): string {
  *  laranja, META azul, YOUTUBE/TIKTOK vermelho, etc).
  *  100% READ-ONLY: so leitura do que ja vem na listagem, nao escreve nada
  *  no ClickUp (respeita o GET-only do proxy). */
+/** Cor de texto legivel sobre um fundo solido (preto em cores claras,
+ *  branco em cores escuras/saturadas). */
+function channelTextColor(hex: string): string {
+  const h = (hex || '').replace('#', '');
+  if (h.length < 6) return '#ffffff';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62 ? '#1a1a1a' : '#ffffff';
+}
+
 /** Resolve o(s) canal(is) de uma task. Retorna [] se nao houver campo CANAL
  *  preenchido. Suporta drop_down (value = orderindex/id) e labels (multi). */
 function resolveChannels(task: ClickUpTask): Array<{ label: string; color: string }> {
@@ -15376,7 +15388,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     {modo === 'clickup' ? (
                     <a
                       href="/configuracoes/clickup-pilot"
-                      className={'pl-btn pl-btn--icon-end ' + (setupOK ? 'pl-btn--ghost' : 'pl-btn--primary')}
+                      className={'pl-btn pl-btn--icon-end ' + (setupOK ? 'pl-btn--ghost' : 'pl-btn--violet')}
                       style={setupOK ? { paddingRight: 6, height: 40 } : undefined}
                     >
                       {setupOK ? 'Configurar' : 'Configurar agora'}
@@ -15526,7 +15538,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     type="button"
                     onClick={() => void loadPrimaryClickUpTasks()}
                     disabled={loadingTasks || (selectedEditor === ALL_EDITORS_ID && !authUser)}
-                    className="cp-load-cta pl-btn pl-btn--primary pl-btn--icon-end"
+                    className="cp-load-cta pl-btn pl-btn--lime pl-btn--icon-end"
                     style={{ height: 48, paddingLeft: 20 }}
                   >
                     {loadingTasks
@@ -15596,7 +15608,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   {tasks.length > 0 ? (
                   <>
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
-                    <div className="pl-sechead flex-1">
+                    <div className="flex items-center gap-3">
                       <h2 className="pl-h2">Tasks</h2>
                       <span className="pl-count">{tasks.length}</span>
                     </div>
@@ -15712,7 +15724,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   </div>
                   </>
                   ) : null}
-                  <ul className="pl-list">
+                  <ul className="grid gap-2">
                     {tasks
                       .filter((t) => {
                         // Aplica filtros client-side
@@ -15906,7 +15918,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     key={`${ch.label}-${i}`}
                                     title={`Canal: ${ch.label}`}
                                     className="pl-chan"
-                                    style={{ ['--sw' as string]: ch.color }}
+                                    style={{
+                                      backgroundColor: ch.color,
+                                      color: channelTextColor(ch.color),
+                                    }}
                                   >
                                     {ch.label}
                                   </span>
@@ -15999,7 +16014,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           type="button"
                           onClick={() => void analyzeSelected()}
                           disabled={analyzing}
-                          className="pl-btn pl-btn--primary pl-btn--icon-end"
+                          className="pl-btn pl-btn--lime pl-btn--icon-end"
                           style={{ height: 44 }}
                         >
                           {analyzing ? 'Analisando…' : 'Start'}
@@ -16032,7 +16047,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         <span className="inline-flex items-center gap-3">
                           <span className="pl-prod__dot" aria-hidden />
                           <span className="pl-h3">Tasks em produção</span>
-                          <span className="pl-count">
+                          <span className="pl-count" style={{ color: 'rgb(var(--pink))', background: 'rgb(var(--pink) / 0.1)', boxShadow: 'inset 0 0 0 1px rgb(var(--pink) / 0.32)' }}>
                             {Object.keys(batchStatesVisiveis).length}
                           </span>
                         </span>
@@ -17013,8 +17028,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           onClick={() => setDecupPopoverOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
                                           title="Intensidade do corte — quanto de silêncio manter nas bordas da fala. Menor = mais agressivo. O valor é fiel ao corte."
                                           aria-expanded={!!decupPopoverOpen[a.taskId]}
-                                          className="pl-readout shrink-0 transition hover:brightness-125"
-                                          style={{ color: 'rgb(var(--ds-ok))', height: 28 }}
+                                          className="mono shrink-0 rounded-full border border-lime/45 bg-lime/10 px-2 py-1 text-[10px] font-bold leading-none text-lime transition hover:bg-lime/20"
                                         >
                                           {getDecupIntensity(a.taskId).toFixed(2)}s
                                         </button>
@@ -17981,7 +17995,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
                                         <span className="pl-h3">Avatares</span>
                                         <span className="pl-count" style={{ height: 20, minWidth: 22 }}>{a.roleSlots.length}</span>
-                                        <span className="pl-sub">selecione cada um e a voz</span>
+                                        <span className="pl-sub" style={{ fontSize: 15 }}>selecione cada um e a voz</span>
                                       </div>
                                       {/* + VERSOES (29.08) - o AD pode sair em ate 10 versoes,
                                           cada uma com o seu avatar por papel. A 1 e a de sempre
@@ -18219,11 +18233,18 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 type="button"
                                                 onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
                                                 className={caixasAbertas
-                                                  ? 'btn-lapis pl-ibtn'
+                                                  ? 'btn-lapis inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-black transition-all hover:-translate-y-[1px] active:translate-y-[1px]'
                                                   : 'btn-olho rounded-full px-2 py-0.5 text-[11px] active:translate-y-[1px]'}
-                                                data-tone={caixasAbertas ? 'amber' : undefined}
-                                                data-on={caixasAbertas && previewOpen[`${a.taskId}:${sIdx}`] ? 'true' : undefined}
-                                                style={caixasAbertas ? { width: 32, height: 32 } : undefined}
+                                                style={caixasAbertas
+                                                  ? {
+                                                      background: previewOpen[`${a.taskId}:${sIdx}`]
+                                                        ? 'linear-gradient(135deg, #fcd57a 0%, #f0b429 100%)'
+                                                        : 'linear-gradient(135deg, rgba(252,213,122,0.92) 0%, rgba(240,180,41,0.92) 100%)',
+                                                      boxShadow: previewOpen[`${a.taskId}:${sIdx}`]
+                                                        ? '0 0 26px -6px rgba(251,191,36,0.85), inset 0 0 0 1px rgba(255,255,255,0.35), inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -2px 0 rgba(0,0,0,0.22)'
+                                                        : '0 0 18px -8px rgba(251,191,36,0.6), inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                                                    }
+                                                  : undefined}
                                                 title={caixasAbertas
                                                   ? 'Escrever a copy deste avatar: hooks e body'
                                                   : 'Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)'}
@@ -19625,12 +19646,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 </span>
                               ) : null}
                               {partialIds.length > 0 ? (
-                                <>
-                                  <span className="pl-pill-amber">
-                                    {partialIds.length} pendente{partialIds.length === 1 ? '' : 's'}
-                                  </span>
-                                  <span className="pl-label">resolva acima pra incluir</span>
-                                </>
+                                <span className="pl-pill-amber">
+                                  {partialIds.length} pendente{partialIds.length === 1 ? '' : 's'}
+                                  <span className="opacity-70">· resolva acima pra incluir</span>
+                                </span>
                               ) : null}
                             </span>
                             <div className="flex flex-wrap items-center gap-2">
@@ -19641,7 +19660,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 type="button"
                                 onClick={startBatch}
                                 disabled={readyIds.length === 0}
-                                className="pl-btn pl-btn--primary pl-btn--icon-end"
+                                className="pl-btn pl-btn--violet pl-btn--icon-end"
                                 style={{ height: 46 }}
                                 title={readyIds.length === 0 ? 'Nenhuma task ready ainda' : 'Roda em background: TTS + upload + submit + poll + zip'}
                               >

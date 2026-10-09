@@ -6,7 +6,7 @@ import { FORMATOS, normalizarFormato, type FormatoVideo } from '@/lib/pilot-form
  * FORMATO DO DISPARO — a mesma escolha Portrait/Landscape do HeyGen, feita
  * aqui ANTES de disparar. 9:16 = portrait, 16:9 = landscape.
  *
- * Visual: o trilho segmentado do design system do Pilot (.pl-seg). A escolha vale pro PRÓXIMO
+ * Mesmo desenho do botão de motor (pílula 3D, h-9). A escolha vale pro PRÓXIMO
  * disparo desta task: um disparo em andamento já carimbou o formato dele e não
  * muda no meio — retomar/regerar take sempre seguem o formato do disparo.
  */
@@ -22,7 +22,7 @@ export function PilotFormatoToggle({
     <div
       role="radiogroup"
       aria-label="Formato do vídeo no HeyGen"
-      className="pl-seg"
+      className="inline-flex h-9 items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
       title="Formato do vídeo gerado no HeyGen (vale pro próximo disparo)"
     >
       {FORMATOS.map((f) => {
@@ -36,8 +36,12 @@ export function PilotFormatoToggle({
             aria-checked={ativo}
             onClick={() => { if (!ativo) onChange(f); }}
             title={vertical ? 'Portrait — vertical 9:16 (1080x1920)' : 'Landscape — horizontal 16:9 (1920x1080)'}
-            className="pl-seg__it"
-            style={{ fontFamily: 'var(--font-mono), monospace', fontSize: 11.5 }}
+            className={
+              'label-tech inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
+              (ativo
+                ? 'bg-gradient-to-b from-cyan-400/30 to-cyan-400/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_-2px_rgba(34,211,238,0.4)]'
+                : 'text-text-muted hover:text-white')
+            }
           >
             <svg
               width={vertical ? 9 : 14}

@@ -13,7 +13,6 @@
 import { notFound } from 'next/navigation';
 import { useState } from 'react';
 import { PilotShell, PlSpot } from '@/components/pilot/PilotShell';
-import { PilotDsSpecimen } from '@/components/pilot/PilotDsSpecimen';
 import { PilotModeHub } from '@/components/PilotModeHub';
 import { CreatorBar } from '@/components/PilotFontesBar';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
@@ -65,7 +64,7 @@ export default function PilotDesignBench() {
           <span className="inline-flex items-center gap-3">
             <span className="pl-prod__dot" aria-hidden />
             <span className="pl-h3">Tasks em produção</span>
-            <span className="pl-count">4</span>
+            <span className="pl-count" style={{ color: 'rgb(var(--pink))', background: 'rgb(var(--pink) / 0.1)', boxShadow: 'inset 0 0 0 1px rgb(var(--pink) / 0.32)' }}>4</span>
           </span>
         </div>
         <ul className="grid gap-3">
@@ -92,7 +91,7 @@ export default function PilotDesignBench() {
             defaultMinimized={false}
           >
             <div className="mb-2.5 flex items-center justify-between px-0.5">
-              <span className="pl-label"><b className="font-semibold" style={{ color: 'rgb(var(--ds-ink))' }}>Takes</b> · 4 de 5 prontos</span>
+              <span className="pl-label"><b className="font-semibold" style={{ color: 'rgb(var(--text))' }}>Takes</b> · 4 de 5 prontos</span>
             </div>
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
               {TAKES.map((t, i) => (
@@ -194,7 +193,7 @@ export default function PilotDesignBench() {
                 <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
                   <span className="pl-h3">Avatares</span>
                   <span className="pl-count" style={{ height: 20, minWidth: 22 }}>1</span>
-                  <span className="pl-sub">selecione cada um e a voz</span>
+                  <span className="pl-sub" style={{ fontSize: 15 }}>selecione cada um e a voz</span>
                 </div>
                 <button type="button" className="pl-btn pl-btn--ghost pl-btn--sm">Versões <span className="pl-btn__n" style={{ height: 18, minWidth: 20, fontSize: 10.5 }}>1</span></button>
               </div>
@@ -228,7 +227,7 @@ export default function PilotDesignBench() {
           <span className="flex flex-wrap items-center gap-2">
             <span className="pl-pill-lime">1 pronta pra disparar</span>
           </span>
-          <button type="button" className="pl-btn pl-btn--primary pl-btn--icon-end" style={{ height: 46 }}>
+          <button type="button" className="pl-btn pl-btn--violet pl-btn--icon-end" style={{ height: 46 }}>
             Iniciar 1 task em background
             <span className="pl-btn__ico" style={{ width: 34, height: 34 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M8 5.5v13l10.5-6.5z" /></svg>
@@ -236,7 +235,6 @@ export default function PilotDesignBench() {
           </button>
         </div>
       </div>
-      <PilotDsSpecimen />
     </PilotShell>
   );
 }
