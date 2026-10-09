@@ -50,7 +50,7 @@ console.log('\nGARANTIA — histórico por ferramenta:');
 
 // (B) rotas que NÃO são ferramenta de produzir arquivo
 {
-  for (const rota of ['historico', 'background', 'points', 'calculadora']) {
+  for (const rota of ['historico', 'background', 'points', 'calculadora', 'notificacoes']) {
     ok(historyToolForPath(`/tools/${rota}`) === null, `/tools/${rota} não ganha botão próprio`);
   }
 }
@@ -67,7 +67,7 @@ console.log('\nGARANTIA — histórico por ferramenta:');
 // (D) TODA ferramenta em app/tools está registrada (varre o disco de verdade)
 {
   const dir = path.join(__dirname, '..', 'app', 'tools');
-  const semHistorico = new Set(['historico', 'background', 'points', 'calculadora']);
+  const semHistorico = new Set(['historico', 'background', 'points', 'calculadora', 'notificacoes']);
   const rotas = fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !d.name.startsWith('_'))

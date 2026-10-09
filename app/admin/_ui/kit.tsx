@@ -411,11 +411,14 @@ export function Menu({
   onClose,
   children,
   width = 240,
+  layer = 70,
 }: {
   anchor: HTMLElement;
   onClose: () => void;
   children: React.ReactNode;
   width?: number;
+  /** z-index: acima de 80 quando o menu abre dentro de outra janela */
+  layer?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -453,8 +456,9 @@ export function Menu({
     <div
       ref={ref}
       role="menu"
-      className="dropdown-pop fixed z-[70] rounded-[16px] bg-bg-elev p-1.5"
+      className="dropdown-pop fixed rounded-[16px] bg-bg-elev p-1.5"
       style={{
+        zIndex: layer,
         top: pos?.top ?? -9999,
         left: pos?.left ?? -9999,
         width,

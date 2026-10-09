@@ -1,6 +1,7 @@
 'use client';
 
 import { Heartbeat } from '@/components/Heartbeat';
+import { AnnouncementHost } from '@/components/notifications/AnnouncementHost';
 import { DurableRecordsProvider } from '@/components/DurableRecordsProvider';
 import { PaymentBlockedBanner } from '@/components/PaymentBlockedBanner';
 import { RouteLoader } from '@/components/RouteLoader';
@@ -29,6 +30,7 @@ export default function ToolsLayout({
   return (
     <ToolsStateProvider>
       <Heartbeat />
+      <AnnouncementHost />
       <Sidebar />
       <SubSidebar />
       <ContentWrap>{children}</ContentWrap>

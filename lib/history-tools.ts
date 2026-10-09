@@ -180,7 +180,7 @@ export function historyToolLabel(id: string): string {
  * botão de histórico próprio: a página do histórico geral, o console interno
  * de tarefas, os pontos e a calculadora (que não gera entrega nenhuma).
  */
-const ROTAS_SEM_HISTORICO = new Set(['historico', 'background', 'points', 'calculadora']);
+const ROTAS_SEM_HISTORICO = new Set(['historico', 'background', 'points', 'calculadora', 'notificacoes']);
 
 /**
  * Ferramenta (canônica) de uma rota do app, ou null quando a rota não é uma

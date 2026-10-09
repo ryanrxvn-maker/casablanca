@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
 import { BarSeries, RankList } from './_ui/charts';
 import { Btn, Dot, I, Modal, Panel, Segmented, Shell, Skeleton, Stat, Tag } from './_ui/kit';
@@ -22,6 +23,9 @@ import {
   type Payment,
 } from './_ui/model';
 import { ProfileSheet, type ProfileTab } from './_ui/ProfileSheet';
+import { AnnouncementsStudio } from './_ui/AnnouncementsStudio';
+import { AnnIcon } from '@/components/notifications/templates';
+import type { AdminAnnouncement } from '@/lib/announcements';
 import { UserRow, type RowActions } from './_ui/UserRow';
 
 /**
@@ -35,6 +39,8 @@ import { UserRow, type RowActions } from './_ui/UserRow';
  *   vez. Cada linha abre o PERFIL COMPLETO (contato, plano, pagamentos,
  *   uso, histórico de IPs com aviso de acesso simultâneo).
  * • Ações destrutivas SEMPRE em 2 etapas (janela própria).
+ * • Avisos (09.10): botão no topo abre a Central de avisos (aviso pequeno ou
+ *   propaganda grande, filtro por Free/Premium/Pagantes/etc., prévia ao vivo).
  * • Métricas de comportamento contam SÓ clientes (filtrado na API).
  *
  * Desenho: kit em ./_ui (casca dupla, hairline, rótulo em sentença, cor só por
@@ -510,6 +516,24 @@ export default function AdminPage() {
     [],
   );
 
+  // ─── Avisos (central) ───
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [annLive, setAnnLive] = useState<number | null>(null);
+  const closeStudio = useCallback(() => setStudioOpen(false), []);
+  const onAnnList = useCallback((items: AdminAnnouncement[]) => setAnnLive(items.filter((a) => a.live).length), []);
+  useEffect(() => {
+    let off = false;
+    fetch('/api/admin/announcements', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!off && j && j.enabled !== false) onAnnList((j.items ?? []) as AdminAnnouncement[]);
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, [onAnnList]);
+
   // ─── Criar usuário ───
   const [createOpen, setCreateOpen] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -576,11 +600,39 @@ export default function AdminPage() {
             Clientes, receita e acessos em tempo real. Clique em qualquer cliente pra ver o perfil completo.
           </p>
         </div>
-        <button type="button" onClick={() => setCreateOpen((v) => !v)} className="btn-primary !h-11 !px-5 text-[13.5px]">
-          {createOpen ? <I.close size={15} /> : <I.plus size={15} />}
-          {createOpen ? 'Fechar' : 'Criar usuário'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setStudioOpen(true)}
+            className="group field-label inline-flex h-11 items-center gap-2.5 rounded-full bg-[rgb(var(--text)/0.05)] pl-1.5 pr-5 text-[13.5px] font-semibold text-text transition-[transform,background-color] duration-300 hover:bg-[rgb(var(--text)/0.09)] active:scale-[0.97]"
+            style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.1)', transitionTimingFunction: 'cubic-bezier(.32,.72,0,1)' }}
+            title="Avisos e propagandas na tela dos clientes"
+          >
+            <span
+              className="relative flex h-8 w-8 items-center justify-center rounded-full transition-transform duration-300 group-hover:-rotate-6 group-hover:scale-105"
+              style={{ color: accent('violet'), background: accent('violet', 0.14), boxShadow: `inset 0 0 0 1px ${accent('violet', 0.3)}`, transitionTimingFunction: 'cubic-bezier(.32,.72,0,1)' }}
+            >
+              <AnnIcon.megaphone size={16} />
+            </span>
+            Avisos
+            {annLive ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                style={{ color: accent('lime'), background: accent('lime', 0.12), boxShadow: `inset 0 0 0 1px ${accent('lime', 0.28)}` }}
+              >
+                <Dot a="lime" size={5} />
+                {annLive} no ar
+              </span>
+            ) : null}
+          </button>
+          <button type="button" onClick={() => setCreateOpen((v) => !v)} className="btn-primary !h-11 !px-5 text-[13.5px]">
+            {createOpen ? <I.close size={15} /> : <I.plus size={15} />}
+            {createOpen ? 'Fechar' : 'Criar usuário'}
+          </button>
+        </div>
       </header>
+
+      {studioOpen ? <AnnouncementsStudio users={users} onClose={closeStudio} flash={flash} onListChange={onAnnList} /> : null}
 
       {users && schema !== 'full' ? (
         <div role="alert" className="field-label mt-6 flex items-start gap-3 rounded-[16px] px-5 py-4 text-[13.5px] leading-relaxed" style={{ color: accent(schema === 'basic' ? 'danger' : 'amber'), background: accent(schema === 'basic' ? 'danger' : 'amber', 0.08), boxShadow: `inset 0 0 0 1px ${accent(schema === 'basic' ? 'danger' : 'amber', 0.25)}` }}>
@@ -1029,7 +1081,8 @@ export default function AdminPage() {
       ) : null}
 
       {/* ═══════ Aviso ═══════ */}
-      {toast ? (
+      {toast && typeof document !== 'undefined'
+        ? createPortal(
         <div
           role="status"
           className="toast-pop field-label fixed bottom-6 left-1/2 z-[90] flex max-w-[92vw] -translate-x-1/2 items-center gap-2.5 rounded-full bg-bg-elev px-5 py-3 text-[13.5px] font-semibold"
@@ -1040,8 +1093,10 @@ export default function AdminPage() {
         >
           <span style={{ color: toast.kind === 'ok' ? accent('lime') : accent('danger') }}>{toast.kind === 'ok' ? <I.check size={15} /> : <I.alert size={15} />}</span>
           {toast.msg}
-        </div>
-      ) : null}
+        </div>,
+            document.body,
+          )
+        : null}
 
       {/* ═══════ Confirmação (2ª etapa) ═══════ */}
       {confirmBox ? (

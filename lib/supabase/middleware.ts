@@ -49,6 +49,7 @@ const FREE_ALLOWED_PREFIXES = [
 const FREE_ALLOWED_TOOLS = [
   ...FREE_TOOL_PATHS,
   '/tools/historico', // histórico geral — todo tier vê o próprio trabalho
+  '/tools/notificacoes', // sino: avisos e propagandas chegam pra TODA conta
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
 const FREE_EXTRA_OK_PREFIXES = ['/planos'];

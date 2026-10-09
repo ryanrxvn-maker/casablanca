@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
 import { ClickUpPilotTokenSection } from '@/components/ClickUpPilotTokenSection';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { resetNotifications } from '@/lib/notifications-client';
 
 /**
  * /configuracoes — Conta.
@@ -114,6 +115,7 @@ export default function ConfiguracoesPage() {
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
+    resetNotifications();
     router.replace('/login');
     router.refresh();
   }

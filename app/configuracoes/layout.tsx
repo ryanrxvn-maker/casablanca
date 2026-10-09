@@ -1,4 +1,5 @@
 import { Heartbeat } from '@/components/Heartbeat';
+import { AnnouncementHost } from '@/components/notifications/AnnouncementHost';
 import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
@@ -15,6 +16,7 @@ export default function ConfiguracoesLayout({
   return (
     <>
       <Heartbeat />
+      <AnnouncementHost />
       <Sidebar />
       <div className="flex min-h-screen flex-col md:pl-[84px]">
         <TopBar />

@@ -6,16 +6,20 @@ import { CalculadoraButton } from './CalculadoraButton';
 import { ThemeToggle } from './ThemeToggle';
 import { GlobalSearchButton } from './GlobalSearch';
 import { HistoryButton } from './HistoryButton';
+import { NotificationsButton } from './notifications/NotificationsButton';
 
 /**
  * TopBar v5 — barra fina com título contextual + cluster enxuto.
  *
- *  ┌─ Título da rota ────────────────── [Pesquisar] [Calc · Histórico] ─┐
+ *  ┌─ Título da rota ──────────── [Pesquisar] [Sino · Calc · Histórico] ─┐
  *
  * Só três ações vivem aqui (pedido do dono, 10.07.26): busca global,
  * calculadora e o Histórico geral. O resto migrou: Pilot pra sidebar,
  * tarefas ao vivo e ZIPs de avatar são atalhos dentro do Histórico,
  * Pontos fica na sidebar (atalhos).
+ *
+ * 09.10: o sino de notificações (avisos e propagandas do admin) entra ao
+ * lado da calculadora, pra toda conta.
  */
 const TITLES: Record<string, string> = {
   '/tools': 'Início',
@@ -38,6 +42,7 @@ const TITLES: Record<string, string> = {
   '/tools/points': 'Pontos',
   '/tools/background': 'Tarefas em segundo plano',
   '/tools/historico': 'Histórico geral',
+  '/tools/notificacoes': 'Notificações',
   '/tools/controles': 'Botões e estados',
   '/tools/lipsync-history': 'Histórico de avatares',
   '/tools/clickup-pilot': 'ClickUp Pilot',
@@ -103,6 +108,8 @@ export function TopBar() {
         <div className="flex items-center gap-3">
           <GlobalSearchButton />
           <div className="topbar-cluster">
+            <NotificationsButton />
+            <span aria-hidden className="topbar-divider" />
             <CalculadoraButton />
             <span aria-hidden className="topbar-divider" />
             <HistoryButton />

@@ -192,6 +192,7 @@ const TOOL_LABELS: Record<string, string> = {
   'caixinha-pergunta': 'Caixinha de Pergunta',
   lipsync: 'Lipsync',
   historico: 'Histórico',
+  notificacoes: 'Notificações',
   tipografia: 'Tipografia',
   legendas: 'Legendas',
 };

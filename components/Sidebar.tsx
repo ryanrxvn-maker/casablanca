@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
 import { displayTierOf } from '@/lib/launch-flags';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
+import { resetNotifications } from '@/lib/notifications-client';
 import { DarkoLogo } from './DarkoLogo';
 
 type Profile = {
@@ -175,6 +176,7 @@ export function Sidebar({ currentPath }: { currentPath?: string } = {}) {
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
+    resetNotifications();
     router.replace('/login');
     router.refresh();
   }
