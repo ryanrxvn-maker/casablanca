@@ -66,6 +66,24 @@ test('Pilot (acabamento Hardware 09.10): fumaça barata, nada de blur por cima d
   assert.doesNotMatch(ler('components/PilotModeHub.tsx'), /left 460ms/);
 });
 
+test('Ferramentas (acabamento Hardware estendido 09.10): uma fumaça só, fora do <main>, sem blur por cima nem enfeite infinito', () => {
+  const layout = ler('app/tools/layout.tsx');
+  // a fumaça mora no layout (não reinicia o WebGL a cada ferramenta) e ANTES
+  // do <main>: o saturate do <main> prenderia o fixed na rolagem
+  assert.match(layout, /<ToolsHwAtmos[\s\S]*?<main className=\{/);
+  const atmos = ler('components/ToolsHwAtmos.tsx');
+  assert.match(atmos, /PilotSmoke/, 'mesma fumaça barata do Pilot (30/15 qps, para no descanso)');
+  // o Pilot tem pele e fumaça próprias: duas fumaças na mesma tela = GPU em dobro
+  assert.match(atmos, /!path\.startsWith\('\/tools\/clickup-pilot'\)/);
+  const css = ler('app/tools-hw.css');
+  assert.match(css, /\.tools-hw \[class\*='backdrop-blur'\]:not\(\[class\*='fixed'\]\) \{[\s\S]*?backdrop-filter: none !important/);
+  // a pele só troca material: nenhuma animação infinita nova (repinta 60x/s)
+  assert.doesNotMatch(css, /infinite/);
+  // e desliga as que vinham dos enfeites (anel do upload, brilho do Gerar)
+  assert.match(css, /\.dz-ring \{\s*display: none;/);
+  assert.match(css, /\.ultra-btn-sheen \{\s*display: none;/);
+});
+
 test('landing: animações do herói só com transform/opacity (clip-path/left/box-shadow repintavam a cada quadro)', () => {
   const src = ler('components/landing/v3/scenes.tsx');
   for (const nome of ['bc-wipe', 'bc-wipe-in', 'bc-line', 'tj-breathe']) {

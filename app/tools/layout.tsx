@@ -10,6 +10,8 @@ import { ToolGuideFab } from '@/components/ToolGuideFab';
 import { ToolHistoryFab } from '@/components/ToolHistoryFab';
 import { TopBar } from '@/components/TopBar';
 import { ToolsStateProvider } from '@/components/ToolsStateProvider';
+import { ToolsHwAtmos, toolsHwOn } from '@/components/ToolsHwAtmos';
+import { usePathname } from 'next/navigation';
 
 /**
  * Layout das ferramentas v4 — estilo HeyGen com sub-sidebar.
@@ -45,6 +47,7 @@ export default function ToolsLayout({
  */
 function ContentWrap({ children }: { children: React.ReactNode }) {
   const subActive = useSubSidebarActive();
+  const hw = toolsHwOn(usePathname());
   return (
     <div
       className={
@@ -52,9 +55,10 @@ function ContentWrap({ children }: { children: React.ReactNode }) {
         (subActive ? 'md:pl-[328px]' : 'md:pl-[84px]')
       }
     >
+      {hw ? <ToolsHwAtmos sub={subActive} /> : null}
       <TopBar />
       <PaymentBlockedBanner />
-      <main className="flex-1 pb-16 pt-6 md:pt-8"><DurableRecordsProvider>{children}</DurableRecordsProvider></main>
+      <main className={'flex-1 pb-16 pt-6 md:pt-8' + (hw ? ' tools-hw' : '')}><DurableRecordsProvider>{children}</DurableRecordsProvider></main>
     </div>
   );
 }

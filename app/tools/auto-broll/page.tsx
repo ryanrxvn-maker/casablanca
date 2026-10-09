@@ -678,7 +678,7 @@ function AutoBrollInner() {
         subtitle="Uma lista. Um clique. Dezenas de vídeos."
         glow="rgba(167,139,250,0.5)"
       />
-      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
+      <div className="tool-shell-panel mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="grid gap-5">
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>
         {/* Extension status */}

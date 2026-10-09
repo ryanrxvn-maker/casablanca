@@ -250,8 +250,9 @@ function Segmentos<T extends string>({
               type="button"
               onClick={() => onChange(o.id)}
               aria-pressed={ativo}
+              data-on={ativo}
               className={[
-                'rounded-[10px] border px-3 py-1.5 text-[12.5px] font-semibold transition-all duration-200',
+                'hw-chip rounded-[10px] border px-3 py-1.5 text-[12.5px] font-semibold transition-all duration-200',
                 'active:scale-[0.96]',
                 ativo
                   ? 'border-violet/60 bg-violet/15 text-text shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_6px_16px_-8px_rgba(167,139,250,0.8)]'

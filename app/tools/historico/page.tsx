@@ -118,7 +118,7 @@ export default function HistoricoPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/tools/background"
-            className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
+            className="hw-key inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             <span
@@ -200,14 +200,14 @@ export default function HistoricoPage() {
       {/* Timeline */}
       {filtered.length === 0 ? (
         <div
-          className="flex flex-col items-center gap-3 rounded-[20px] border border-line/60 px-6 py-16 text-center"
+          className="hw-tray flex flex-col items-center gap-3 rounded-[20px] border border-line/60 px-6 py-16 text-center"
           style={{
             background:
               'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.14)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <span
-            className="flex h-14 w-14 items-center justify-center rounded-[16px] border border-line-strong bg-bg/50"
+            className="hw-cap flex h-14 w-14 items-center justify-center rounded-[16px] border border-line-strong bg-bg/50"
             aria-hidden
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--text-dim))" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

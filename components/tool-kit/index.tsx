@@ -188,7 +188,7 @@ export function ToolStep({
         // transform final (translateY(0)) fica pra SEMPRE no computed style,
         // e transform em ancestral prende position:fixed/sticky do filho
         (still ? '' : 'tool-step overflow-hidden hover:-translate-y-[2px] ') +
-        'group relative rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:border-violet/35 hover:shadow-depth-2 md:p-7'
+        'hw-step group relative rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:border-violet/35 hover:shadow-depth-2 md:p-7'
       }
       style={{
         background:
@@ -211,7 +211,7 @@ export function ToolStep({
       <div className="relative">
         <div className="mb-4 flex items-center gap-3.5">
           <span
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border transition-transform duration-300 group-hover:scale-[1.06] group-hover:-rotate-3"
+            className="hw-step-ico flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border transition-transform duration-300 group-hover:scale-[1.06] group-hover:-rotate-3"
             style={{
               color: '#fff',
               borderColor: hue,
@@ -642,7 +642,7 @@ export function ToolSlider({
           {label}
         </label>
         <span
-          className="mono rounded-[8px] border border-violet/30 bg-violet/10 px-2 py-0.5 text-[11.5px] font-semibold text-violet"
+          className="hw-lcd mono rounded-[8px] border border-violet/30 bg-violet/10 px-2 py-0.5 text-[11.5px] font-semibold text-violet"
           style={{ fontFamily: 'var(--font-mono)' }}
         >
           {display ? display(value) : value}
@@ -798,7 +798,7 @@ export function ToolResultCard({
             </h3>
           </div>
           {meta ? (
-            <span className="mono rounded-[8px] border border-line bg-bg/50 px-2 py-0.5 text-[10.5px] text-text-muted">
+            <span className="hw-lcd mono rounded-[8px] border border-line bg-bg/50 px-2 py-0.5 text-[10.5px] text-text-muted">
               {meta}
             </span>
           ) : null}
@@ -832,7 +832,7 @@ export function ToolMetric({
         ? 'rgb(var(--pink))'
         : 'rgb(var(--violet))';
   return (
-    <div className="rounded-[14px] border border-line bg-bg-soft/50 px-4 py-3.5 shadow-depth-1 transition-transform duration-300 hover:-translate-y-[1px]">
+    <div className="hw-metric rounded-[14px] border border-line bg-bg-soft/50 px-4 py-3.5 shadow-depth-1 transition-transform duration-300 hover:-translate-y-[1px]">
       <div
         className="text-[22px] font-extrabold leading-none tracking-tight md:text-[26px]"
         style={{
