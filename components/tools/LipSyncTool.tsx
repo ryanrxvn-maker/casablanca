@@ -820,7 +820,7 @@ export default function LipSyncTool() {
       {/* WORKSPACE — 3 colunas */}
       <div className="grid gap-4 lg:grid-cols-[210px_1fr_360px]">
         {/* ─── COLUNA 1: VIDEO LIBRARY ─── */}
-        <div className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-3 space-y-2 max-h-[640px] overflow-y-auto">
+        <div className="hw-plate rounded-[18px] border border-line/60 bg-bg-soft/30 p-3 space-y-2 max-h-[640px] overflow-y-auto">
           <div className="flex items-center justify-between mb-1 px-1">
             <span
               className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"
@@ -837,9 +837,9 @@ export default function LipSyncTool() {
           <button
             type="button"
             onClick={() => videoInputRef.current?.click()}
-            className="group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition"
+            className="hw-bay group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-text-muted transition-transform duration-500 group-hover:scale-110">
+            <span className="hw-cap flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-text-muted transition-transform duration-500 group-hover:scale-110">
               <ImportIcon />
             </span>
             <div className="text-center px-2">
@@ -881,7 +881,7 @@ export default function LipSyncTool() {
         <PreviewStage selected={selected} flash={flash} />
 
         {/* ─── COLUNA 3: SIDE PANEL ─── */}
-        <aside className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-4 md:p-5 space-y-5">
+        <aside className="hw-plate rounded-[18px] border border-line/60 bg-bg-soft/30 p-4 md:p-5 space-y-5">
           {/* Header */}
           <div>
             <div
@@ -923,11 +923,11 @@ export default function LipSyncTool() {
               <button
                 type="button"
                 onClick={() => audioInputRef.current?.click()}
-                className="w-full rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 px-4 py-5 hover:border-violet/55 hover:bg-violet/[0.04] transition group"
+                className="hw-bay w-full rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 px-4 py-5 hover:border-violet/55 hover:bg-violet/[0.04] transition group"
               >
                 <div className="flex items-center gap-3">
                   <span
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-[20px] transition-transform group-hover:-rotate-6 group-hover:scale-110"
+                    className="hw-cap flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-[20px] transition-transform group-hover:-rotate-6 group-hover:scale-110"
                     style={{ boxShadow: '0 0 20px -4px rgba(167,139,250,0.45)' }}
                   >
                     🎙
@@ -998,7 +998,7 @@ export default function LipSyncTool() {
             type="button"
             onClick={handleGenerate}
             disabled={!selected || !audioFile || hasBlockingIssue}
-            className="ultra-btn group relative w-full overflow-hidden rounded-[16px] border border-fuchsia-400/55 px-5 py-4 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="ultra-btn hw-key hw-key--fuchsia group relative w-full overflow-hidden rounded-[16px] border border-fuchsia-400/55 px-5 py-4 transition disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               background:
                 'linear-gradient(135deg, rgba(232,121,249,0.25) 0%, rgba(167,139,250,0.25) 50%, rgba(103,232,249,0.20) 100%)',
@@ -1184,7 +1184,7 @@ function VideoThumb({
 /** Mostra SEMPRE a fonte (o vídeo enviado). Os resultados vão pros cards. */
 function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: boolean }) {
   return (
-    <div className="relative overflow-hidden rounded-[18px] border border-line/60 bg-bg-soft/30">
+    <div className="hw-tray relative overflow-hidden rounded-[18px] border border-line/60 bg-bg-soft/30">
       {/* Badge FONTE */}
       {selected && (
         <div className="absolute top-3 right-3 z-20">
@@ -1201,7 +1201,7 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
       {!selected ? (
         <div className="aspect-[3/4] md:aspect-[4/5] flex flex-col items-center justify-center gap-4 px-6 text-center">
           <div
-            className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-text-muted"
+            className="hw-cap flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-text-muted"
             style={{
               boxShadow: '0 0 36px -6px rgba(232,121,249,0.5), inset 0 1px 0 rgba(255,255,255,0.08)',
               animation: 'emptyPulse 3.5s ease-in-out infinite',
@@ -1285,7 +1285,7 @@ function Toggle3D({
 }) {
   const hint = on ? hintOn : hintOff;
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[14px] border border-line/60 bg-bg/30 px-3.5 py-2.5">
+    <div className="hw-tray flex items-center justify-between gap-3 rounded-[14px] border border-line/60 bg-bg/30 px-3.5 py-2.5">
       <div className="min-w-0">
         <div
           className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"

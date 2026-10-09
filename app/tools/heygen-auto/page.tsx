@@ -2811,7 +2811,7 @@ function HeyGenAutoInner() {
           subtitle="Lipsync no HeyGen em lote. Hoje é o Pilot quem dispara por aqui."
           glow="rgba(34,211,238,0.5)"
         />
-        <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
+        <div className="tool-shell-panel mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
           {/* Status da extensao */}
           {!extLoading ? (
             extStatus.connected ? (

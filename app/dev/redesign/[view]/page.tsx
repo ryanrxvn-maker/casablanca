@@ -27,6 +27,16 @@ export default async function DesignView({params}:{params:{view:string}}) {
     'copy-srt': async () => (await import('@/app/tools/copy-srt/page')).default,
     lipsync: async () => (await import('@/components/tools/LipSyncTool')).default,
     chaves: async () => (await import('@/app/configuracoes/api/page')).default,
+    'heygen-auto': async () => (await import('@/app/tools/heygen-auto/page')).default,
+    'auto-broll': async () => (await import('@/app/tools/auto-broll/page')).default,
+    'auto-cortes': async () => (await import('@/app/tools/auto-cortes/page')).default,
+    'separador-audio': async () => (await import('@/app/tools/separador-audio/page')).default,
+    'decupagem-copy': async () => (await import('@/app/tools/decupagem-copy/page')).default,
+    'remover-elementos': async () => (await import('@/components/tools/RemoverLegendaTool')).default,
+    'voice-test': async () => (await import('@/app/tools/voice-test/page')).default,
+    background: async () => (await import('@/app/tools/background/page')).default,
+    points: async () => (await import('@/app/tools/points/page')).default,
+    'caixinha-pergunta': async () => (await import('@/app/tools/caixinha-pergunta/page')).default,
   };
   if (!Object.hasOwn(views, params.view)) notFound();
   const Component = await views[params.view as keyof typeof views]();

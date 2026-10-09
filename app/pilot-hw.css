@@ -33,20 +33,25 @@
   --hw-ink-2: #9a9aa3;
 }
 html[data-theme='light'] .pilot-hw {
-  --hw-brush: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.022) 0 1px, transparent 1px 3px);
-  --hw-panel: linear-gradient(180deg, #ecebe7, #dfded9);
-  --hw-card: linear-gradient(180deg, #f2f1ed, #e5e4df);
-  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.13);
-  --hw-drop: 0 30px 60px -36px rgba(40, 40, 30, 0.45);
-  --hw-recess-bg: #d2d1cb;
-  --hw-recess: inset 0 2px 4px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.6);
-  --hw-key: linear-gradient(180deg, #fcfbf8, #e7e6e1);
-  --hw-key-sh: inset 0 1px 0 #fff, 0 1px 0 rgba(0, 0, 0, 0.22), 0 3px 0 #b8b7b1, 0 4px 8px rgba(0, 0, 0, 0.15);
-  --hw-key-down: inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 1px 0 rgba(0, 0, 0, 0.22);
-  --hw-knob: radial-gradient(circle at 38% 30%, #ffffff, #d9d8d2 64%);
-  --hw-knob-sh: inset 0 1px 0 #fff, inset 0 -2px 3px rgba(0, 0, 0, 0.12), 0 0 0 2px rgba(0, 0, 0, 0.18), 0 3px 0 #b3b2ac, 0 6px 12px rgba(0, 0, 0, 0.15);
+  /* alumínio anodizado: escovado visível, chanfro usinado (luz em cima,
+     sombra embaixo e um fio claro por fora) e teclas com lateral funda */
+  --hw-brush: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.032) 0 1px, transparent 1px 3px);
+  --hw-panel: linear-gradient(180deg, #f2f1ed 0%, #e4e3de 58%, #d9d8d2 100%);
+  --hw-card: linear-gradient(180deg, #f7f6f2, #e8e7e2);
+  --hw-chamfer: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.17), 0 1px 0 1px rgba(255, 255, 255, 0.55);
+  --hw-drop: 0 30px 60px -32px rgba(30, 30, 20, 0.5);
+  --hw-recess-bg: #cfcec8;
+  --hw-recess: inset 0 2px 4px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 0 rgba(255, 255, 255, 0.8);
+  --hw-key: linear-gradient(180deg, #fdfcf9, #e6e5e0);
+  --hw-key-sh: inset 0 1px 0 #fff, 0 1px 0 rgba(0, 0, 0, 0.28), 0 3px 0 #a9a8a2, 0 5px 10px rgba(0, 0, 0, 0.18);
+  --hw-key-down: inset 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(0, 0, 0, 0.25);
+  --hw-knob: radial-gradient(circle at 38% 30%, #ffffff, #d6d5cf 64%);
+  --hw-knob-sh: inset 0 1px 0 #fff, inset 0 -2px 3px rgba(0, 0, 0, 0.14), 0 0 0 2px rgba(0, 0, 0, 0.2), 0 3px 0 #a9a8a2, 0 6px 12px rgba(0, 0, 0, 0.16);
   --hw-ink: #17171c;
-  --hw-ink-2: #55555e;
+  --hw-ink-2: #4c4c55;
+  /* janela de LCD (visores) — escura também no claro, como em equipamento */
+  --hw-lcd: linear-gradient(180deg, #121316, #1b1c20);
+  --hw-lcd-sh: inset 0 1px 3px rgba(0, 0, 0, 0.9), inset 0 0 0 1px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 /* ── fumaça + saturação ───────────────────────────────────────────────────── */
@@ -56,7 +61,9 @@ html[data-theme='light'] .pilot-hw {
 html:not([data-theme='light']) main:has(.pilot-hw) {
   filter: none;
 }
-html:not([data-theme='light']) .pilot-hw {
+/* só no painel: o herói tem canvas animado, e filtro num ancestral dele
+   refiltraria a página inteira a cada quadro (a cor do herói vem do shader) */
+html:not([data-theme='light']) .pilot-hw > .tool-shell-panel {
   filter: saturate(0.72);
 }
 .hw-atmos {
@@ -107,39 +114,153 @@ html:not([data-theme='light']) .pilot-hw {
   display: none;
 }
 
-/* ── herói ────────────────────────────────────────────────────────────────── */
-.pilot-hw .tool-hero {
-  border-color: transparent !important;
-  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+/* ── herói: tela embutida no painel (PilotHero, 09.10) ─────────────────────
+   Sem copy: a cena WebGL (cérebro → código → avatar em holograma) e o nome em
+   cromado usinado. A tela é escura nos dois temas (é um visor); no claro só o
+   aro de alumínio muda. */
+@property --lx {
+  syntax: '<length-percentage>';
+  inherits: true;
+  initial-value: -30%;
 }
-.pilot-hw .tool-hero > div[aria-hidden] {
-  display: none;
+@property --ly {
+  syntax: '<length-percentage>';
+  inherits: true;
+  initial-value: 20%;
 }
-.pilot-hw .tool-hero > div.relative {
-  background: var(--hw-brush), var(--hw-panel) !important;
+.pilot-hero {
+  position: relative;
+  padding: 7px;
+  border-radius: 24px;
+  background: var(--hw-brush), var(--hw-panel);
+  box-shadow: var(--hw-chamfer), var(--hw-drop);
 }
-.pilot-hw .tool-hero .rounded-full.border {
-  border-color: transparent !important;
-  background: var(--hw-recess-bg) !important;
-  box-shadow: var(--hw-recess);
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+.pilot-hero__screen {
+  position: relative;
+  isolation: isolate;
+  height: 230px;
+  overflow: hidden;
+  border-radius: 17px;
+  background: #030407;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.07);
 }
-.pilot-hw .tool-hero .rounded-full.border > span {
-  animation: none !important;
-  background: #c8e87c !important;
-  box-shadow: 0 0 6px #c8e87c, 0 0 0 2px rgba(200, 232, 124, 0.2) !important;
+@media (min-width: 640px) {
+  .pilot-hero__screen { height: 290px; }
 }
-.pilot-hw .tool-hero-icon {
-  animation: none !important;
+@media (min-width: 1024px) {
+  .pilot-hero__screen { height: 340px; }
 }
-.pilot-hw .tool-hero-icon > span:first-child {
-  display: none;
+html[data-theme='light'] .pilot-hero__screen {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.9);
 }
-.pilot-hw .tool-hero-icon > span:last-child {
-  border-color: transparent !important;
-  background: var(--hw-knob) !important;
-  box-shadow: var(--hw-knob-sh) !important;
+.pilot-hero__gl {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+/* vidro da tela: reflexo diagonal que escorrega com o mouse + borda interna */
+.pilot-hero__glass {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 22%, transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 18%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05), inset 0 18px 40px -20px rgba(0, 0, 0, 0.9), inset 0 -30px 50px -30px rgba(0, 0, 0, 0.9);
+  transform: translate3d(calc(var(--par-x, 0) * -10px), 0, 0);
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.pilot-hero__brand {
+  position: absolute;
+  z-index: 3;
+  left: 5.2%;
+  top: 46%;
+  pointer-events: none;
+  transform: translate3d(calc(var(--par-x, 0) * 5px), calc(-50% + var(--par-y, 0) * 4px), 0);
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.pilot-hero__word {
+  position: relative;
+  margin: 0;
+  font-family: var(--font-pilot-word), var(--font-display), sans-serif;
+  font-weight: 400;
+  font-size: clamp(40px, 6.6vw, 74px);
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+  /* o chão da cena é vidro: o nome reflete nele */
+  -webkit-box-reflect: below 0.12em linear-gradient(transparent 52%, rgba(255, 255, 255, 0.16));
+  animation: pilotWordIn 1.2s cubic-bezier(0.16, 0.8, 0.2, 1) both;
+}
+.pilot-hero__word > span {
+  display: block;
+}
+.pilot-hero__word-depth,
+.pilot-hero__word-spec {
+  position: absolute;
+  inset: 0;
+}
+/* lateral usinada: degraus escuros + sombra de contato */
+.pilot-hero__word-depth {
+  color: transparent;
+  text-shadow:
+    0 1px 0 #4a4f57, 0 2px 0 #353940, 0 3px 0 #26292f, 0 4px 0 #1b1d21, 0 5px 0 #121316,
+    0 14px 26px rgba(0, 0, 0, 0.9), 0 0 42px rgba(200, 232, 124, 0.14);
+}
+/* face cromada: bandas de reflexo + escovado fino horizontal */
+.pilot-hero__word-face {
+  position: relative;
+  color: transparent;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.07) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #fdfdfe 0%, #e7ebef 28%, #a6aeb7 46%, #3c4149 50.5%, #6f7781 56%, #cfd5db 72%, #f6f8fa 86%, #9ba2aa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-stroke: 0.6px rgba(255, 255, 255, 0.3);
+}
+/* ponto de luz: segue o mouse; sem mouse, um brilho passa de tempos em tempos */
+.pilot-hero__word-spec {
+  color: transparent;
+  background: radial-gradient(circle 2.1em at var(--lx) var(--ly), #fff, rgba(226, 250, 182, 0.75) 26%, rgba(200, 232, 124, 0.22) 50%, transparent 72%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  mix-blend-mode: plus-lighter;
+  transition: --lx 0.16s linear, --ly 0.16s linear;
+  animation: pilotWordSheen 7s cubic-bezier(0.45, 0, 0.2, 1) 0.4s infinite;
+}
+.pilot-hero[data-pointer='on'] .pilot-hero__word-spec {
+  animation: none;
+}
+@keyframes pilotWordIn {
+  from { opacity: 0; transform: translate3d(-10px, 6px, 0) scale(0.985); filter: blur(8px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes pilotWordSheen {
+  0% { --lx: -30%; --ly: 10%; }
+  22% { --lx: 130%; --ly: 90%; }
+  100% { --lx: 130%; --ly: 90%; }
+}
+@media (max-width: 767px) {
+  .pilot-hero__brand {
+    left: 18px;
+    top: auto;
+    bottom: 26px;
+    transform: none;
+  }
+  .pilot-hero__word {
+    font-size: 34px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pilot-hero__word, .pilot-hero__word-spec { animation: none; }
+  .pilot-hero__glass, .pilot-hero__brand { transition: none; }
 }
 
 /* ── visor de origem (Creator / Docs / ClickUp) ───────────────────────────── */
@@ -332,6 +453,11 @@ html[data-theme='light'] .pilot-hw .hw-knob[data-tone='lime'] { --c: 88 116 28; 
 html[data-theme='light'] .pilot-hw .hw-knob[data-tone='cyan'] { --c: 18 116 146; }
 html[data-theme='light'] .pilot-hw .hw-knob[data-tone='amber'] { --c: 160 104 8; }
 html[data-theme='light'] .pilot-hw .hw-knob[data-tone='neutral'] { --c: 90 90 100; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='fuchsia'] { --c: 162 40 160; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='rose'] { --c: 190 40 70; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='violet'] { --c: 100 70 200; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='orange'] { --c: 190 90 20; }
+html[data-theme='light'] .pilot-hw .hw-knob[data-tone='emerald'] { --c: 10 120 90; }
 /* as teclas de marca no meio da barra (Flow, StockFrame, Economia) viram
    knobs também, mantendo o desenho de cada uma */
 .pilot-hw :is([data-flow-trigger], [data-stockframe-trigger]) {
@@ -372,11 +498,52 @@ html[data-theme='light'] .pilot-hw .hw-knob[data-tone='neutral'] { --c: 90 90 10
   background: #120a0a !important;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
 }
-html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase, .hw-remover) {
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18) !important;
+/* no claro os visores viram janela de LCD (corpo de alumínio, display
+   escuro): a cor de cada um volta a ser a ACESA do escuro, e o texto neutro
+   lá dentro fica claro (os tokens são redefinidos só dentro do visor) */
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) {
+  --text: 236 236 240;
+  --text-muted: 176 176 186;
+  --text-dim: 150 150 160;
+  --lime: 200 232 124;
+  --violet: 190 172 255;
+  --amber: 246 200 90;
+  --cyan: 120 215 235;
+  border-color: transparent !important;
+  background: var(--hw-lcd) !important;
+  box-shadow: var(--hw-lcd-sh) !important;
+}
+html[data-theme='light'] .pilot-hw .hw-led,
+html[data-theme='light'] .pilot-hw .hw-count {
+  box-shadow: var(--hw-lcd-sh), 0 0 0 1.5px rgba(109, 138, 34, 0.35) !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase):is([class*='text-fuchsia'], [class*='text-pink'], [class*='text-purple']),
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) :is([class*='text-fuchsia'], [class*='text-pink'], [class*='text-purple']) {
+  color: #f3b4fb !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase):is([class*='text-rose'], [class*='text-red']),
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) :is([class*='text-rose'], [class*='text-red']) {
+  color: #fda4af !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase):is([class*='text-amber'], [class*='text-yellow'], [class*='text-orange']),
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) :is([class*='text-amber'], [class*='text-yellow'], [class*='text-orange']) {
+  color: #fcd57a !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase):is([class*='text-cyan'], [class*='text-teal'], [class*='text-sky']),
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) :is([class*='text-cyan'], [class*='text-teal'], [class*='text-sky']) {
+  color: #8fe3f2 !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase):is([class*='text-violet'], [class*='text-indigo']),
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) :is([class*='text-violet'], [class*='text-indigo']) {
+  color: #c9b8ff !important;
+}
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase):is([class*='text-emerald'], [class*='text-green']),
+html[data-theme='light'] .pilot-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) :is([class*='text-emerald'], [class*='text-green']) {
+  color: #86efc4 !important;
 }
 html[data-theme='light'] .pilot-hw .hw-remover {
-  background: #ecd6d6 !important;
+  background: #f1d9d9 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18), 0 1px 0 rgba(255, 255, 255, 0.8) !important;
 }
 
 /* ── lista de tasks ───────────────────────────────────────────────────────── */
@@ -571,4 +738,38 @@ html[data-theme='light'] .pilot-hw .hw-key:not(.hw-key--lime):not(.hw-key--amber
 }
 html[data-theme='light'] .pilot-hw .section-eyebrow {
   color: #1f1f25;
+}
+
+/* ── modo claro: legibilidade ────────────────────────────────────────────────
+   O original foi desenhado no escuro: rótulos em tons -100/-300 (rosa, lima,
+   ciano...) somem no alumínio. Aqui cada um vira o MESMO matiz em tom escuro
+   (a cor continua dizendo o que é, só que dá pra ler). Fica de fora o que mora
+   em fundo escuro de verdade: visores LCD, herói, vídeos e ilhas escuras. */
+html[data-theme='light'] .pilot-hw :is([class*='text-lime-1'], [class*='text-lime-2'], [class*='text-lime-3'], .text-lime, [class*='text-lime/']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase, .hw-key--lime)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black'], .hw-key--lime) *) { color: #4f7a12 !important; }
+html[data-theme='light'] .pilot-hw :is([class*='text-fuchsia-1'], [class*='text-fuchsia-2'], [class*='text-fuchsia-3'], [class*='text-pink-1'], [class*='text-pink-2'], [class*='text-pink-3'], [class*='text-purple-1'], [class*='text-purple-2'], [class*='text-purple-3']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black']) *) { color: #9b1fa0 !important; }
+html[data-theme='light'] .pilot-hw :is([class*='text-rose-1'], [class*='text-rose-2'], [class*='text-rose-3'], [class*='text-red-1'], [class*='text-red-2'], [class*='text-red-3']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black']) *) { color: #b4183a !important; }
+html[data-theme='light'] .pilot-hw :is([class*='text-amber-1'], [class*='text-amber-2'], [class*='text-amber-3'], [class*='text-yellow-1'], [class*='text-yellow-2'], [class*='text-yellow-3'], [class*='text-orange-1'], [class*='text-orange-2'], [class*='text-orange-3']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase, .hw-key--amber)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black'], .hw-key--amber) *) { color: #9a5a06 !important; }
+html[data-theme='light'] .pilot-hw :is([class*='text-cyan-1'], [class*='text-cyan-2'], [class*='text-cyan-3'], [class*='text-teal-1'], [class*='text-teal-2'], [class*='text-teal-3'], [class*='text-sky-1'], [class*='text-sky-2'], [class*='text-sky-3']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase, .hw-key--cyan)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black'], .hw-key--cyan) *) { color: #0d6a82 !important; }
+html[data-theme='light'] .pilot-hw :is([class*='text-violet-1'], [class*='text-violet-2'], [class*='text-violet-3'], [class*='text-indigo-1'], [class*='text-indigo-2'], [class*='text-indigo-3']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase, .hw-key--violet)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black'], .hw-key--violet) *) { color: #5b34c4 !important; }
+html[data-theme='light'] .pilot-hw :is([class*='text-emerald-1'], [class*='text-emerald-2'], [class*='text-emerald-3'], [class*='text-green-1'], [class*='text-green-2'], [class*='text-green-3']):not(:is(.hw-led, .hw-count, .hw-status, .hw-phase)):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black']) *) { color: #08745a !important; }
+/* rótulo técnico cinza claro demais no alumínio */
+html[data-theme='light'] .pilot-hw :is(.text-text-dim, .text-text-muted):not(:is(.pilot-hero, .dark-island, .hw-led, .hw-count, .hw-status, .hw-phase, [class*='bg-black']) *) {
+  --text-dim: 92 92 102;
+  --text-muted: 64 64 72;
+}
+/* aviso "falta a extensão": título/texto vinham brancos fixos */
+html[data-theme='light'] .pilot-hw .ext-falta {
+  background: radial-gradient(120% 100% at 0% 0%, rgba(240, 180, 58, 0.18), transparent 58%), var(--hw-brush), var(--hw-card) !important;
+}
+html[data-theme='light'] .pilot-hw .ext-falta-titulo { color: #17171c; }
+html[data-theme='light'] .pilot-hw .ext-falta-texto { color: #4c4c55; }
+html[data-theme='light'] .pilot-hw .ext-falta-status { color: #8a5d10; }
+html[data-theme='light'] .pilot-hw .ext-falta-passos > summary { color: #8a5d10; }
+html[data-theme='light'] .pilot-hw .ext-falta-passos ol { color: #3a3a42; }
+/* o card de take é ilha escura no original (igual nos dois temas): no claro
+   ele continua escuro, como monitor embutido no console de alumínio */
+html[data-theme='light'] .pilot-hw .hw-take {
+  --hw-brush: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+  --hw-card: linear-gradient(180deg, #1c1c20, #151517);
+  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 0 1px rgba(255, 255, 255, 0.6);
 }

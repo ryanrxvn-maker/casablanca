@@ -442,7 +442,7 @@ export default function RemoverLegendaTool() {
 
       <div className="grid gap-4 lg:grid-cols-[210px_1fr_300px]">
         {/* BIBLIOTECA */}
-        <div className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-3 space-y-2 max-h-[640px] overflow-y-auto">
+        <div className="hw-plate rounded-[18px] border border-line/60 bg-bg-soft/30 p-3 space-y-2 max-h-[640px] overflow-y-auto">
           <div className="flex items-center justify-between mb-1 px-1">
             <span className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted">VÍDEOS</span>
             {videos.length > 0 && <span className="mono text-[10px] text-text-dim">{videos.length}</span>}
@@ -450,9 +450,9 @@ export default function RemoverLegendaTool() {
           <button
             type="button"
             onClick={() => videoInputRef.current?.click()}
-            className="group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition"
+            className="hw-bay group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition"
           >
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-text-muted text-[22px] transition-transform group-hover:scale-110">⬆</span>
+            <span className="hw-cap flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-text-muted text-[22px] transition-transform group-hover:scale-110">⬆</span>
             <div className="text-center px-2">
               <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>Subir vídeo</div>
               <div className="mono text-[9px] text-text-muted mt-0.5">arraste ou clique</div>
@@ -466,7 +466,7 @@ export default function RemoverLegendaTool() {
         </div>
 
         {/* PREVIEW */}
-        <div className="relative overflow-hidden rounded-[18px] border border-line/60 bg-bg-soft/30">
+        <div className="hw-tray relative overflow-hidden rounded-[18px] border border-line/60 bg-bg-soft/30">
           {selected ? (
             <div className="relative aspect-[3/4] md:aspect-[4/5] bg-black overflow-hidden">
               <video src={selected.url} muted loop autoPlay playsInline className="absolute inset-0 h-full w-full object-contain" />
@@ -493,7 +493,7 @@ export default function RemoverLegendaTool() {
         </div>
 
         {/* PAINEL */}
-        <aside className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-4 md:p-5 space-y-5">
+        <aside className="hw-plate rounded-[18px] border border-line/60 bg-bg-soft/30 p-4 md:p-5 space-y-5">
           <div>
             <div className="label-tech text-[10px] font-bold tracking-[0.22em] text-fuchsia-300">MODO AUTOMÁTICO</div>
             <h2 className="mt-1 text-[20px] font-extrabold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}>Smart Remover</h2>
@@ -514,7 +514,7 @@ export default function RemoverLegendaTool() {
             type="button"
             onClick={handleGenerate}
             disabled={!selected}
-            className="group relative w-full overflow-hidden rounded-[16px] border border-fuchsia-400/55 px-5 py-4 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="hw-key hw-key--fuchsia group relative w-full overflow-hidden rounded-[16px] border border-fuchsia-400/55 px-5 py-4 transition disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ background: 'linear-gradient(135deg, rgba(232,121,249,0.25) 0%, rgba(167,139,250,0.25) 50%, rgba(103,232,249,0.20) 100%)', boxShadow: '0 0 30px -4px rgba(232,121,249,0.55), inset 0 1px 0 rgba(255,255,255,0.12)' }}
           >
             <span className="relative flex items-center justify-center gap-3">

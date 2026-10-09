@@ -8,6 +8,7 @@ import { createRecordWriter, readDurableRecord, readDurableRecords, deleteDurabl
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { PilotSmoke } from '@/components/pilot/PilotSmoke';
+import { PilotHero } from '@/components/pilot/PilotHero';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { useAvisoContaModoImagem } from '@/components/ModoImagemContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -15215,6 +15216,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       </div>
       <ToolShell
         className="pilot-hw"
+        hero={<PilotHero />}
         title="Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
         description="O cérebro do estúdio. A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com silêncios removidos e legenda em fila, sem você abrir uma aba sequer."

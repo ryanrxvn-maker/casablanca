@@ -202,7 +202,7 @@ export default function CopySrtPage() {
         subtitle="Transforme seu texto em um arquivo SRT sincronizado com o áudio, palavra por palavra."
         glow="rgba(251,191,36,0.5)"
       />
-      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
+      <div className="tool-shell-panel mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">
         {/* /api/mind-ads/transcribe-srt tenta Groq e cai pra AssemblyAI —
             uma das duas basta. */}

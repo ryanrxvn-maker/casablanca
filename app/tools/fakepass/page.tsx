@@ -187,8 +187,9 @@ export default function FakePassPage() {
                     key={c.id}
                     type="button"
                     onClick={() => setCat(c.id)}
+                    data-on={active}
                     className={
-                      'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold transition-all duration-200 ' +
+                      'hw-chip inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold transition-all duration-200 ' +
                       (active
                         ? 'border-violet/60 bg-gradient-to-b from-violet/25 to-violet/10 text-white shadow-[0_0_18px_-8px_rgba(167,139,250,0.9)]'
                         : 'border-line-strong/70 text-text-muted hover:border-violet/50 hover:text-white')
@@ -222,8 +223,9 @@ export default function FakePassPage() {
                   key={m.id}
                   type="button"
                   onClick={() => setModelId(m.id)}
+                  data-on={active}
                   className={
-                    'group flex items-center gap-2.5 rounded-[13px] border p-2.5 text-left transition-all duration-200 active:scale-[0.98] ' +
+                    'hw-chip group flex items-center gap-2.5 rounded-[13px] border p-2.5 text-left transition-all duration-200 active:scale-[0.98] ' +
                     (active
                       ? 'border-violet/70 bg-violet/12 shadow-[0_0_22px_-9px_rgba(167,139,250,0.9)]'
                       : 'border-line-strong/60 bg-bg-soft/20 hover:border-violet/45 hover:bg-bg-soft/40')
@@ -263,7 +265,7 @@ export default function FakePassPage() {
           </fieldset>
 
           {model.usesPhone ? (
-            <div className="rounded-[16px] border border-line/60 bg-bg-soft/30 p-4">
+            <div className="hw-tray rounded-[16px] border border-line/60 bg-bg-soft/30 p-4">
               <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
                 Barra de status do celular
               </p>
@@ -303,7 +305,7 @@ export default function FakePassPage() {
 
         {/* Preview + export */}
         <div className="lg:sticky lg:top-6 lg:self-start">
-          <div className="rounded-[20px] border border-line/60 bg-bg-soft/40 p-4">
+          <div className="hw-plate rounded-[20px] border border-line/60 bg-bg-soft/40 p-4">
             <div className="mb-3 flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
                 Prévia
@@ -366,7 +368,7 @@ export default function FakePassPage() {
               type="button"
               onClick={baixar}
               disabled={gerando || lockedModel}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3.5 text-[14px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="hw-key hw-key--violet mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3.5 text-[14px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 fontFamily: 'var(--font-tech)',
                 background: 'linear-gradient(180deg,#a78bfa 0%,#6d4ee8 100%)',
@@ -390,7 +392,7 @@ export default function FakePassPage() {
             </p>
 
             {model.anim ? (
-              <div className="mt-4 flex flex-col gap-3 rounded-[14px] border border-line/60 bg-bg-soft/30 p-3.5">
+              <div className="hw-tray mt-4 flex flex-col gap-3 rounded-[14px] border border-line/60 bg-bg-soft/30 p-3.5">
                 <fieldset disabled={lockedModel}>
                 <RangeField
                   label="Duração do vídeo"
@@ -405,7 +407,7 @@ export default function FakePassPage() {
                   type="button"
                   onClick={baixarVideo}
                   disabled={gravandoVid || gerando || lockedModel}
-                  className="flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3 text-[13.5px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="hw-key hw-key--rose flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3 text-[13.5px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                   style={{
                     fontFamily: 'var(--font-tech)',
                     background: 'linear-gradient(180deg,#fb7185 0%,#e11d48 100%)',

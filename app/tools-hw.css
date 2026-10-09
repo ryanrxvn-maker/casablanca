@@ -1,0 +1,935 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   FERRAMENTAS · ACABAMENTO HARDWARE (o mesmo do Pilot, estendido em 09.10)
+   ---------------------------------------------------------------------------
+   A regra é a do Pilot: NADA muda de lugar. Layout, ordem, textos, tamanhos
+   e cores são os de cada ferramenta; aqui só entra o MATERIAL:
+     • metal escovado nos painéis e passos, chanfro de luz no topo;
+     • área de arquivo, campos e trilhos como baias REBAIXADAS no metal;
+     • escolhas e botões como teclas físicas que afundam no clique;
+     • valores (0.05s, 1.50x, 23) em visor embutido;
+     • a fumaça da landing atrás (components/ToolsHwAtmos.tsx).
+   Escopo: .tools-hw = o <main> das rotas /tools/* (menos o Pilot, que tem a
+   pele .pilot-hw). Mesmos tokens (--hw-*) e peças (hw-key, hw-knob, hw-led,
+   hw-pick, hw-take...) do Pilot, copiados logo abaixo.
+   Ganchos novos (só classes ACRESCENTADAS): hw-step, hw-step-ico, hw-lcd,
+   hw-metric (tool-kit) e hw-drop (BatchFileUpload).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── peças do Pilot, escopadas nas ferramentas ─────────────────────────────
+   Cópia fiel (gerada) das regras genéricas do app/pilot-hw.css: tokens, herói,
+   teclas, knobs, visores, linhas, cards de take, seletores. Fica duplicada DE
+   PROPÓSITO: a pele do Pilot evolui no arquivo dela sem mexer nas ferramentas
+   (e vice-versa). Os componentes que já carregam os ganchos (BatchJobCard3D,
+   LipsyncPreviewCard, MotorConfigPicker, Compact*Picker) vestem o mesmo
+   material aqui dentro. */
+.tools-hw {
+  --hw-brush: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+  --hw-panel: linear-gradient(180deg, #1d1d20, #141416);
+  --hw-card: linear-gradient(180deg, #1c1c20, #151517);
+  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.7), 0 0 0 1px #040405;
+  --hw-drop: 0 34px 70px -34px #000;
+  --hw-recess-bg: #0b0b0d;
+  --hw-recess: inset 0 2px 5px rgba(0, 0, 0, 0.8), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  --hw-key: linear-gradient(180deg, #2a2a2f, #1c1c20);
+  --hw-key-sh: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 1px 0 #000, 0 3px 0 #0b0b0d, 0 4px 8px rgba(0, 0, 0, 0.5);
+  --hw-key-down: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 0 #000;
+  --hw-knob: radial-gradient(circle at 38% 30%, #46464d, #1d1d21 62%);
+  --hw-knob-sh: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -2px 3px rgba(0, 0, 0, 0.6), 0 0 0 2px #0a0a0b, 0 0 0 3px rgba(255, 255, 255, 0.05), 0 3px 0 #050506, 0 6px 12px rgba(0, 0, 0, 0.5);
+  --hw-ink: #f2f2f4;
+  --hw-ink-2: #9a9aa3;
+}
+html[data-theme='light'] .tools-hw {
+  --hw-brush: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.022) 0 1px, transparent 1px 3px);
+  --hw-panel: linear-gradient(180deg, #ecebe7, #dfded9);
+  --hw-card: linear-gradient(180deg, #f2f1ed, #e5e4df);
+  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.13);
+  --hw-drop: 0 30px 60px -36px rgba(40, 40, 30, 0.45);
+  --hw-recess-bg: #d2d1cb;
+  --hw-recess: inset 0 2px 4px rgba(0, 0, 0, 0.18), inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+  --hw-key: linear-gradient(180deg, #fcfbf8, #e7e6e1);
+  --hw-key-sh: inset 0 1px 0 #fff, 0 1px 0 rgba(0, 0, 0, 0.22), 0 3px 0 #b8b7b1, 0 4px 8px rgba(0, 0, 0, 0.15);
+  --hw-key-down: inset 0 1px 3px rgba(0, 0, 0, 0.15), 0 1px 0 rgba(0, 0, 0, 0.22);
+  --hw-knob: radial-gradient(circle at 38% 30%, #ffffff, #d9d8d2 64%);
+  --hw-knob-sh: inset 0 1px 0 #fff, inset 0 -2px 3px rgba(0, 0, 0, 0.12), 0 0 0 2px rgba(0, 0, 0, 0.18), 0 3px 0 #b3b2ac, 0 6px 12px rgba(0, 0, 0, 0.15);
+  --hw-ink: #17171c;
+  --hw-ink-2: #55555e;
+}
+.tools-hw .tool-hero {
+  border-color: transparent !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+.tools-hw .tool-hero > div[aria-hidden] {
+  display: none;
+}
+.tools-hw .tool-hero > div.relative {
+  background: var(--hw-brush), var(--hw-panel) !important;
+}
+.tools-hw .tool-hero .rounded-full.border {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+.tools-hw .tool-hero .rounded-full.border > span {
+  animation: none !important;
+  background: #c8e87c !important;
+  box-shadow: 0 0 6px #c8e87c, 0 0 0 2px rgba(200, 232, 124, 0.2) !important;
+}
+.tools-hw .tool-hero-icon {
+  animation: none !important;
+}
+.tools-hw .tool-hero-icon > span:first-child {
+  display: none;
+}
+.tools-hw .tool-hero-icon > span:last-child {
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+}
+.tools-hw .hw-key {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.15s ease !important;
+}
+.tools-hw .hw-key:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  filter: brightness(1.12);
+}
+.tools-hw .hw-key:active:not(:disabled) {
+  transform: translateY(2px) !important;
+  box-shadow: var(--hw-key-down) !important;
+}
+.tools-hw .hw-key[data-on='true'] {
+  color: #ff8f8f !important;
+  box-shadow: var(--hw-key-sh), 0 0 0 1px rgba(255, 110, 110, 0.45) !important;
+}
+.tools-hw .hw-key--lime,
+.tools-hw .hw-key--lime:hover:not(:disabled) {
+  color: #13200a !important;
+  background: linear-gradient(180deg, #e6f6b0, #b4d064) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #3d4d14,
+    0 4px 0 #5a7020,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(200, 232, 124, 0.6) !important;
+}
+.tools-hw .hw-key--amber,
+.tools-hw .hw-key--amber:hover:not(:disabled) {
+  color: #2a1c00 !important;
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #6e4a08,
+    0 4px 0 #8a5d10,
+    0 5px 12px rgba(0, 0, 0, 0.5),
+    0 0 22px -6px rgba(240, 180, 58, 0.6) !important;
+}
+.tools-hw .hw-key--cyan,
+.tools-hw .hw-key--cyan:hover:not(:disabled) {
+  color: #04141b !important;
+  background: linear-gradient(180deg, #bdf0fa, #52c7dd) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #164f5c,
+    0 4px 0 #1f6f80,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(82, 199, 221, 0.6) !important;
+}
+.tools-hw .hw-key--violet,
+.tools-hw .hw-key--violet:hover:not(:disabled) {
+  color: #1d1030 !important;
+  border: 0 !important;
+  background: linear-gradient(180deg, #e2d6ff, #ab8ff0) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #3a2470,
+    0 4px 0 #5b3ca8,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(160, 120, 255, 0.6) !important;
+}
+.tools-hw :is(.hw-key--lime, .hw-key--amber, .hw-key--cyan, .hw-key--violet):active:not(:disabled) {
+  transform: translateY(3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(0, 0, 0, 0.6) !important;
+}
+.tools-hw :is(.hw-key--lime, .hw-key--amber, .hw-key--cyan, .hw-key--violet):disabled {
+  filter: grayscale(0.4) brightness(0.75);
+}
+.tools-hw .hw-knob {
+  --c: 185 185 194;
+  color: rgb(var(--c)) !important;
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease !important;
+}
+.tools-hw .hw-knob > span.pointer-events-none.absolute.inset-x-0 {
+  display: none;
+}
+.tools-hw .hw-knob:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  filter: brightness(1.15);
+}
+.tools-hw .hw-knob:active:not(:disabled) {
+  transform: translateY(2px) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.6),
+    0 0 0 2px #0a0a0b,
+    0 1px 0 #050506 !important;
+}
+.tools-hw .hw-knob[data-on='true'] {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.6),
+    0 0 0 2px #0a0a0b,
+    0 0 0 3.5px rgb(var(--c)),
+    0 0 16px rgb(var(--c) / 0.6),
+    0 3px 0 #050506 !important;
+}
+html[data-theme='light'] .tools-hw .hw-knob[data-on='true'] {
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -2px 3px rgba(0, 0, 0, 0.12),
+    0 0 0 2px rgba(0, 0, 0, 0.18),
+    0 0 0 3.5px rgb(var(--c)),
+    0 0 14px rgb(var(--c) / 0.5),
+    0 3px 0 #b3b2ac !important;
+}
+.tools-hw .hw-knob:disabled {
+  opacity: 0.4;
+  filter: none;
+  transform: none !important;
+}
+.tools-hw .hw-knob[data-tone='lime'] {
+  --c: 200 232 124;
+}
+.tools-hw .hw-knob[data-tone='cyan'] {
+  --c: 96 205 230;
+}
+.tools-hw .hw-knob[data-tone='amber'] {
+  --c: 246 192 74;
+}
+.tools-hw .hw-knob[data-tone='fuchsia'] {
+  --c: 232 150 226;
+}
+.tools-hw .hw-knob[data-tone='rose'] {
+  --c: 246 132 150;
+}
+.tools-hw .hw-knob[data-tone='violet'] {
+  --c: 180 160 250;
+}
+.tools-hw .hw-knob[data-tone='orange'] {
+  --c: 250 160 90;
+}
+.tools-hw .hw-knob[data-tone='emerald'] {
+  --c: 98 214 166;
+}
+.tools-hw .hw-knob[data-tone='neutral'] {
+  --c: 175 175 184;
+}
+html[data-theme='light'] .tools-hw .hw-knob[data-tone='lime'] {
+  --c: 88 116 28;
+}
+html[data-theme='light'] .tools-hw .hw-knob[data-tone='cyan'] {
+  --c: 18 116 146;
+}
+html[data-theme='light'] .tools-hw .hw-knob[data-tone='amber'] {
+  --c: 160 104 8;
+}
+html[data-theme='light'] .tools-hw .hw-knob[data-tone='neutral'] {
+  --c: 90 90 100;
+}
+.tools-hw .hw-led,
+.tools-hw .hw-count {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(200, 232, 124, 0.28) !important;
+}
+.tools-hw .hw-status {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.tools-hw .hw-phase {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.tools-hw .hw-phase > span.animate-ping {
+  display: none;
+}
+.tools-hw .hw-row,
+.tools-hw .hw-ana,
+.tools-hw .hw-card,
+.tools-hw .hw-foot {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer) !important;
+}
+.tools-hw .hw-row:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+.tools-hw .hw-row[data-on='true'],
+.tools-hw .hw-sel {
+  border-color: transparent !important;
+  background: linear-gradient(90deg, rgba(200, 232, 124, 0.07), transparent 55%), var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #c8e87c !important;
+}
+html[data-theme='light'] .tools-hw .hw-row[data-on='true'],
+html[data-theme='light'] .tools-hw .hw-sel {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #6d8a22 !important;
+}
+.tools-hw .hw-check {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.tools-hw .hw-check[data-on='true'] {
+  color: #13200a !important;
+  background: radial-gradient(circle at 40% 35%, #e5f6b0, #a9c75a) !important;
+  box-shadow: 0 0 10px rgba(200, 232, 124, 0.6), 0 0 0 2px #0a0a0b !important;
+}
+.tools-hw .hw-sq {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+}
+.tools-hw .hw-sq:active {
+  transform: translateY(2px);
+  box-shadow: var(--hw-key-down) !important;
+}
+.tools-hw .hw-chip {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+}
+.tools-hw .hw-chip:hover {
+  transform: translateY(-1px) !important;
+}
+.tools-hw .hw-chip[data-on='true'] {
+  transform: translateY(2px) !important;
+  box-shadow: var(--hw-key-down), 0 0 0 1px rgba(200, 232, 124, 0.4), 0 0 14px -4px rgba(200, 232, 124, 0.6) !important;
+}
+.tools-hw .hw-card {
+  background: var(--hw-brush), var(--hw-card) !important;
+}
+.tools-hw .hw-card > span.pointer-events-none.absolute:first-child {
+  display: none;
+}
+.tools-hw .hw-meter {
+  background: var(--hw-recess-bg) !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+.tools-hw .hw-take {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer) !important;
+}
+.tools-hw .hw-take[data-tone='ready'] {
+  box-shadow: var(--hw-chamfer), inset 0 2px 0 rgba(200, 232, 124, 0.85) !important;
+}
+.tools-hw .hw-take[data-tone='err'] {
+  box-shadow: var(--hw-chamfer), inset 0 2px 0 rgba(246, 132, 150, 0.85) !important;
+}
+.tools-hw .hw-take[data-tone='wait'] {
+  box-shadow: var(--hw-chamfer), inset 0 2px 0 rgba(246, 192, 74, 0.85) !important;
+}
+.tools-hw .hw-tbtn {
+  border-color: transparent !important;
+  background: radial-gradient(circle at 38% 30%, #46464d, #18181b 64%) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 0 0 1.5px #0a0a0b, 0 2px 0 #050506 !important;
+}
+.tools-hw .hw-ana[data-st='ready'] {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #c8e87c !important;
+}
+.tools-hw .hw-ana[data-st='partial'] {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #f0c04a !important;
+}
+.tools-hw .hw-ana[data-st='error'] {
+  box-shadow: var(--hw-chamfer), inset 3px 0 0 #f68496 !important;
+}
+.tools-hw .hw-slot {
+  border-color: transparent !important;
+  background: #111113 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+}
+html[data-theme='light'] .tools-hw .hw-slot {
+  background: #dddcd6 !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1), inset 0 0 0 1px rgba(0, 0, 0, 0.07) !important;
+}
+.tools-hw .hw-motor {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh), 0 0 0 1px rgba(160, 130, 255, 0.28) !important;
+}
+.tools-hw .hw-motor > span.pointer-events-none {
+  display: none;
+}
+.tools-hw .hw-seg {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.tools-hw .hw-seg-it[data-on='true'] {
+  background: linear-gradient(180deg, #26303a, #1a2028) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 10px -2px rgba(96, 205, 230, 0.5), 0 0 0 1px rgba(96, 205, 230, 0.35) !important;
+}
+html[data-theme='light'] .tools-hw .hw-seg-it[data-on='true'] {
+  background: linear-gradient(180deg, #f4fbfd, #dceff4) !important;
+}
+.tools-hw .hw-pick {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.tools-hw .btn-lapis {
+  background: linear-gradient(180deg, #ffe099, #f0b43a) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 0 #6e4a08, 0 3px 0 #8a5d10, 0 4px 10px rgba(0, 0, 0, 0.5) !important;
+}
+.tools-hw .btn-lapis:active {
+  transform: translateY(2px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 0 #6e4a08 !important;
+}
+.tools-hw .hw-knob > span.relative[class*="text-"] {
+  color: rgb(var(--c)) !important;
+}
+html[data-theme='light'] .tools-hw .hw-key:not(.hw-key--lime):not(.hw-key--amber):not(.hw-key--cyan):not(.hw-key--violet):not([data-on='true']) {
+  color: #4a4a52 !important;
+}
+html[data-theme='light'] .tools-hw :is(.hw-led, .hw-count, .hw-status, .hw-phase) {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* ── atmosfera ────────────────────────────────────────────────────────────── */
+/* position sem z-index: o conteúdo fica acima da fumaça fixa e os modais lá
+   dentro continuam na pilha da página (sem prender overlay embaixo do topo) */
+.tools-hw {
+  position: relative;
+}
+@media (min-width: 768px) {
+  .hw-atmos--sub {
+    left: 328px;
+  }
+}
+/* páginas que trazem um <main class="bg-bg"> próprio taparam a fumaça */
+.tools-hw main.bg-bg {
+  background-color: transparent !important;
+}
+/* blur de vidro por cima da fumaça animada = desfoque refeito a cada quadro
+   (os overlays fixos de modal continuam com o blur deles) */
+.tools-hw [class*='backdrop-blur']:not([class*='fixed']) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ── painéis ──────────────────────────────────────────────────────────────── */
+.tools-hw .tool-shell-panel {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-panel) !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+
+/* herói com vídeo (Hey Auto, Lipsync, Auto B-roll...): a tela ganha moldura
+   de metal, como um monitor embutido no painel */
+.tools-hw .hero-tool-card {
+  border-color: transparent !important;
+  box-shadow:
+    0 0 0 1px #040405,
+    0 0 0 5px #1b1b1e,
+    0 0 0 6px rgba(255, 255, 255, 0.07),
+    0 0 0 7px #040405,
+    var(--hw-drop) !important;
+}
+.tools-hw .hero-tool-eyebrow > span {
+  animation: none !important;
+}
+html[data-theme='light'] .tools-hw .hero-tool-card {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 0 5px #e4e3de,
+    0 0 0 6px rgba(255, 255, 255, 0.9),
+    0 0 0 7px rgba(0, 0, 0, 0.15),
+    var(--hw-drop) !important;
+}
+
+/* ── passos (ToolStep) ────────────────────────────────────────────────────── */
+.tools-hw .hw-step {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+/* módulo parafusado no painel: não flutua no hover */
+.tools-hw .hw-step:hover {
+  transform: none !important;
+}
+/* mancha de luz e barra de acento saem (o metal não brilha sozinho) */
+.tools-hw .hw-step > div[aria-hidden] {
+  display: none;
+}
+/* o ícone do passo vira tecla: mesma face e mesma cor, agora com lateral */
+.tools-hw .hw-step-ico {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.45),
+    0 1px 0 #000,
+    0 3px 0 #0b0b0d,
+    0 4px 8px rgba(0, 0, 0, 0.5) !important;
+}
+.tools-hw .hw-step:hover .hw-step-ico {
+  transform: none !important;
+}
+html[data-theme='light'] .tools-hw .hw-step-ico {
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.25),
+    0 1px 0 rgba(0, 0, 0, 0.3),
+    0 3px 0 #b8b7b1,
+    0 4px 8px rgba(0, 0, 0, 0.15) !important;
+}
+/* o filete do cabeçalho vira um friso gravado no metal */
+.tools-hw .hw-step .divider-grad {
+  opacity: 1 !important;
+  background: rgba(0, 0, 0, 0.55) !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+html[data-theme='light'] .tools-hw .hw-step .divider-grad {
+  background: rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* ── baia de arquivo (ToolDropzone + BatchFileUpload) ─────────────────────── */
+.tools-hw :is(.tool-dropzone, .hw-drop, .hw-bay) {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.tools-hw :is(.tool-dropzone, .hw-drop, .hw-bay):hover {
+  transform: none !important;
+  border-color: rgb(var(--violet) / 0.45) !important;
+}
+.tools-hw .hw-drop:hover {
+  border-color: rgb(200 232 124 / 0.45) !important;
+}
+/* soltando arquivo em cima: a baia acende na cor original */
+.tools-hw .hw-drop[class*='bg-lime'] {
+  border-color: #c8e87c !important;
+  background: rgb(200 232 124 / 0.08) !important;
+}
+html[data-theme='light'] .tools-hw :is(.tool-dropzone, .hw-drop, .hw-bay) {
+  border-color: rgba(0, 0, 0, 0.14) !important;
+}
+.tools-hw .tool-dropzone > div[aria-hidden],
+.tools-hw .tool-dropzone .dz-ring {
+  display: none;
+}
+.tools-hw .tool-dropzone .dz-corner {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+html[data-theme='light'] .tools-hw .tool-dropzone .dz-corner {
+  border-color: rgba(0, 0, 0, 0.18) !important;
+}
+/* o ícone de enviar vira um botão de metal no fundo da baia */
+.tools-hw .tool-dropzone .dropzone-icon {
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+}
+.tools-hw .tool-dropzone:hover .dropzone-icon {
+  transform: translateY(-1px) !important;
+}
+
+/* ── escolhas (ToolChoice): fileira de teclas ─────────────────────────────── */
+.tools-hw .ae-choice {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.15s ease !important;
+}
+.tools-hw .ae-choice:hover:not(:disabled) {
+  transform: translateY(-1px) !important;
+  filter: brightness(1.1);
+}
+.tools-hw .ae-choice:active:not(:disabled) {
+  transform: translateY(2px) !important;
+  box-shadow: var(--hw-key-down) !important;
+}
+/* tecla travada embaixo, com o violeta do original aceso por dentro */
+.tools-hw .ae-choice[aria-pressed='true'],
+.tools-hw .ae-choice[aria-pressed='true']:hover:not(:disabled) {
+  transform: translateY(2px) !important;
+  filter: none;
+  background: linear-gradient(180deg, rgb(var(--violet) / 0.17), rgb(var(--violet) / 0.05)), var(--hw-key) !important;
+  box-shadow:
+    var(--hw-key-down),
+    0 0 0 1px rgb(var(--violet) / 0.6),
+    0 0 18px -6px rgb(var(--violet) / 0.65) !important;
+}
+/* o selo de marcado vira LED */
+.tools-hw .ae-choice[aria-pressed='true'] > span[aria-hidden].absolute {
+  box-shadow:
+    0 0 0 2px #0a0a0b,
+    0 0 10px rgb(var(--violet) / 0.85) !important;
+}
+html[data-theme='light'] .tools-hw .ae-choice[aria-pressed='true'] > span[aria-hidden].absolute {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 8px rgb(var(--violet) / 0.6) !important;
+}
+.tools-hw .ae-choice:disabled {
+  box-shadow: var(--hw-key-down) !important;
+}
+
+/* ── trilhos (sliders) ────────────────────────────────────────────────────── */
+/* os de classe própria (vl-range, sn-range...) ficam como são */
+.tools-hw input[type='range']:not([class*='-range'])::-webkit-slider-runnable-track {
+  background:
+    linear-gradient(90deg, #7c3aed, #a78bfa, #c4b5fd) 0 0 / var(--range-fill, 0%) 100% no-repeat,
+    var(--hw-recess-bg);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.9),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.tools-hw input[type='range']:not([class*='-range'])::-webkit-slider-thumb {
+  width: 20px;
+  height: 20px;
+  margin-top: -7px;
+  border: 0;
+  background:
+    radial-gradient(circle, #d8ccff 0 2px, rgba(167, 139, 250, 0.9) 2.6px, transparent 3.6px),
+    radial-gradient(circle at 38% 30%, #5a5a62, #1d1d21 64%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.6),
+    0 0 0 1.5px #0a0a0b,
+    0 3px 6px rgba(0, 0, 0, 0.6),
+    0 0 12px -2px rgba(167, 139, 250, 0.55);
+}
+.tools-hw input[type='range']:not([class*='-range'])::-webkit-slider-thumb:hover,
+.tools-hw input[type='range']:not([class*='-range']):active::-webkit-slider-thumb {
+  transform: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.6),
+    0 0 0 1.5px #0a0a0b,
+    0 3px 6px rgba(0, 0, 0, 0.6),
+    0 0 16px -1px rgba(167, 139, 250, 0.8);
+}
+.tools-hw input[type='range']:not([class*='-range'])::-moz-range-track {
+  background: var(--hw-recess-bg);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+.tools-hw input[type='range']:not([class*='-range'])::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background:
+    radial-gradient(circle, #d8ccff 0 2px, rgba(167, 139, 250, 0.9) 2.6px, transparent 3.6px),
+    radial-gradient(circle at 38% 30%, #5a5a62, #1d1d21 64%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 0 0 1.5px #0a0a0b,
+    0 3px 6px rgba(0, 0, 0, 0.6);
+}
+html[data-theme='light'] .tools-hw input[type='range']:not([class*='-range'])::-webkit-slider-runnable-track {
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.25),
+    0 1px 0 rgba(255, 255, 255, 0.7);
+}
+html[data-theme='light'] .tools-hw input[type='range']:not([class*='-range'])::-webkit-slider-thumb {
+  background:
+    radial-gradient(circle, #7c3aed 0 2px, rgba(124, 58, 237, 0.85) 2.6px, transparent 3.6px),
+    radial-gradient(circle at 38% 30%, #ffffff, #d9d8d2 64%);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -2px 3px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.22),
+    0 3px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* ── visores (valor do slider, metas, métricas) ───────────────────────────── */
+.tools-hw .hw-lcd {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgb(var(--violet) / 0.28) !important;
+}
+.tools-hw .hw-lcd.text-violet {
+  text-shadow: 0 0 8px rgb(var(--violet) / 0.55);
+}
+.tools-hw .hw-metric {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.tools-hw .hw-metric:hover {
+  transform: none !important;
+}
+html[data-theme='light'] .tools-hw :is(.hw-lcd, .hw-metric) {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* ── resultado pronto ─────────────────────────────────────────────────────── */
+.tools-hw .result-card {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow:
+    var(--hw-chamfer),
+    inset 0 2px 0 rgba(200, 232, 124, 0.85),
+    var(--hw-drop) !important;
+}
+.tools-hw .result-card > div[aria-hidden] {
+  display: none;
+}
+
+/* ── botões ───────────────────────────────────────────────────────────────── */
+/* principal: tecla violeta com lateral (a mesma do Pilot). Os seletores
+   espelham os do button-refinements.css pra empatar especificidade e vencer
+   pela ordem, sem precisar de mais !important. */
+.tools-hw :is(.ae-button:not(.ae-button-secondary), .btn-primary, .btn-lime) {
+  color: #1d1030 !important;
+  border-color: transparent !important;
+  background: linear-gradient(180deg, #e2d6ff, #ab8ff0) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #3a2470,
+    0 4px 0 #5b3ca8,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(160, 120, 255, 0.6) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.15s ease !important;
+}
+.tools-hw :is(.ae-button:not(.ae-button-secondary), .btn-primary, .btn-lime):hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 1px 0 #3a2470,
+    0 5px 0 #5b3ca8,
+    0 7px 16px rgba(0, 0, 0, 0.5),
+    0 0 28px -6px rgba(160, 120, 255, 0.7) !important;
+}
+.tools-hw :is(.ae-button:not(.ae-button-secondary), .btn-primary, .btn-lime):active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 2px 4px rgba(0, 0, 0, 0.2),
+    0 1px 0 rgba(0, 0, 0, 0.6) !important;
+}
+/* tecla não tem brilho varrendo */
+.tools-hw :is(.ae-button, .btn-primary, .btn-lime)::after,
+.tools-hw :is(.btn-primary, .btn-lime)::before {
+  display: none !important;
+}
+/* desligada: a tecla continua lá, só apagada */
+.tools-hw :is(.ae-button:not(.ae-button-secondary), .btn-primary, .btn-lime):disabled {
+  opacity: 1;
+  filter: grayscale(0.55) brightness(0.62);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 1px 0 #3a2470,
+    0 4px 0 #3d2a6e !important;
+}
+/* secundário: tecla de metal neutra */
+.tools-hw :is(.ae-button-secondary, .btn-secondary) {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    filter 0.15s ease !important;
+}
+.tools-hw :is(.ae-button-secondary, .btn-secondary):hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+}
+.tools-hw :is(.ae-button-secondary, .btn-secondary):active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: var(--hw-key-down) !important;
+}
+.tools-hw :is(.ae-button-secondary, .btn-secondary):disabled {
+  box-shadow: var(--hw-key-down) !important;
+}
+
+/* ── campos: baias rebaixadas no metal ────────────────────────────────────── */
+/* campo "nu" que mora dentro de uma moldura (busca com ícone etc.) fica de
+   fora: quem vira baia é a moldura, não o input transparente lá dentro */
+.tools-hw
+  :is(
+    .input-field,
+    textarea,
+    select,
+    input:is([type='text'], [type='url'], [type='search'], [type='number'], [type='email'], [type='password'], :not([type]))
+  ):not([class*='bg-transparent']):not([class*='border-0']):not([class*='border-none']):not([class*='opacity-0']) {
+  border-color: rgba(255, 255, 255, 0.05) !important;
+  background-color: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.tools-hw
+  :is(
+    .input-field,
+    textarea,
+    select,
+    input:is([type='text'], [type='url'], [type='search'], [type='number'], [type='email'], [type='password'], :not([type]))
+  ):not([class*='bg-transparent']):not([class*='border-0']):not([class*='border-none']):not([class*='opacity-0']):focus {
+  border-color: rgb(var(--violet) / 0.55) !important;
+  box-shadow:
+    var(--hw-recess),
+    0 0 14px -4px rgb(var(--violet) / 0.55) !important;
+}
+html[data-theme='light'] .tools-hw
+  :is(
+    .input-field,
+    textarea,
+    select,
+    input:is([type='text'], [type='url'], [type='search'], [type='number'], [type='email'], [type='password'], :not([type]))
+  ):not([class*='bg-transparent']):not([class*='border-0']):not([class*='border-none']):not([class*='opacity-0']) {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  background-color: #e9e8e3 !important;
+}
+
+/* ── peças avulsas das ferramentas (ganchos acrescentados nos elementos) ──── */
+/* placa de metal: painel próprio de uma ferramenta */
+.tools-hw .hw-plate,
+.tools-hw .glass-panel {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+/* bandeja rebaixada: grupo de campos, prévia, lista vazia */
+.tools-hw .hw-tray {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+/* chips de filtro/modelo: a tecla travada acende no violeta das ferramentas
+   (no Pilot o aceso é lime, a cor dele) */
+.tools-hw .hw-chip[data-on='true'] {
+  background: linear-gradient(180deg, rgb(var(--violet) / 0.17), rgb(var(--violet) / 0.05)), var(--hw-key) !important;
+  box-shadow:
+    var(--hw-key-down),
+    0 0 0 1px rgb(var(--violet) / 0.6),
+    0 0 14px -4px rgb(var(--violet) / 0.6) !important;
+}
+.tools-hw .hw-chip:active:not(:disabled) {
+  transform: translateY(2px) !important;
+  box-shadow: var(--hw-key-down) !important;
+}
+/* ícone em ladrilho escuro (área de envio, palco vazio) vira tampa de metal */
+.tools-hw .hw-cap {
+  border-color: transparent !important;
+  background: var(--hw-knob) !important;
+  box-shadow: var(--hw-knob-sh) !important;
+}
+/* tecla fúcsia (Gerar do Lipsync): face funda o bastante pro texto branco */
+.tools-hw .hw-key--fuchsia,
+.tools-hw .hw-key--fuchsia:hover:not(:disabled) {
+  border-color: transparent !important;
+  background: linear-gradient(180deg, #ea8af8, #b538c8) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 0 #4d0f57,
+    0 4px 0 #6f1a7e,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(232, 121, 249, 0.6) !important;
+}
+.tools-hw .hw-key--fuchsia:active:not(:disabled) {
+  transform: translateY(3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 2px 4px rgba(0, 0, 0, 0.25), 0 1px 0 rgba(0, 0, 0, 0.6) !important;
+}
+.tools-hw .hw-key--fuchsia:disabled {
+  opacity: 1 !important;
+  filter: grayscale(0.55) brightness(0.55);
+}
+.tools-hw .ultra-btn-sheen {
+  display: none;
+}
+/* no claro a tecla desligada fica clara e apagada, não um bloco escuro */
+html[data-theme='light'] .tools-hw :is(.hw-key--fuchsia, .hw-key--rose, .hw-key--violet):disabled,
+html[data-theme='light'] .tools-hw :is(.ae-button:not(.ae-button-secondary), .btn-primary, .btn-lime):disabled {
+  opacity: 0.5 !important;
+  filter: grayscale(0.45);
+}
+/* tecla rosa (gravar vídeo) */
+.tools-hw .hw-key--rose,
+.tools-hw .hw-key--rose:hover:not(:disabled) {
+  color: #2a0710 !important;
+  background: linear-gradient(180deg, #ffc2cc, #f0607a) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 1px 0 #6e1424,
+    0 4px 0 #9a1f36,
+    0 5px 14px rgba(0, 0, 0, 0.5),
+    0 0 24px -6px rgba(244, 63, 94, 0.55) !important;
+}
+.tools-hw .hw-key--rose:active:not(:disabled) {
+  transform: translateY(3px) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(0, 0, 0, 0.6) !important;
+}
+.tools-hw .hw-key--rose:disabled {
+  filter: grayscale(0.4) brightness(0.75);
+}
+
+/* ── Histórico ────────────────────────────────────────────────────────────── */
+/* contadores num visor; filtros num painel; cada ferramenta uma tecla */
+.tools-hw .hist-faixa {
+  border-color: transparent !important;
+  background: var(--hw-recess-bg) !important;
+  box-shadow: var(--hw-recess) !important;
+}
+.tools-hw .hist-filtros-geral {
+  border-color: transparent !important;
+  background: var(--hw-brush), var(--hw-panel) !important;
+  box-shadow: var(--hw-chamfer), var(--hw-drop) !important;
+}
+.tools-hw .hist-chip {
+  border-color: transparent !important;
+  background: var(--hw-key) !important;
+  box-shadow: var(--hw-key-sh) !important;
+}
+.tools-hw .hist-chip:active {
+  transform: translateY(2px);
+  box-shadow: var(--hw-key-down) !important;
+}
+.tools-hw .hist-chip--on,
+.tools-hw .hist-chip--on:hover {
+  transform: translateY(2px);
+  background: linear-gradient(180deg, rgb(var(--violet) / 0.2), rgb(var(--violet) / 0.06)), var(--hw-key) !important;
+  box-shadow:
+    var(--hw-key-down),
+    0 0 0 1px rgb(var(--violet) / 0.6),
+    0 0 14px -4px rgb(var(--violet) / 0.6) !important;
+}
+/* cada entrega é uma placa (a cor da ferramenta continua na marca lateral) */
+.tools-hw .hist-row {
+  background: var(--hw-brush), var(--hw-card) !important;
+  box-shadow: var(--hw-chamfer) !important;
+}
+.tools-hw .hist-row:hover {
+  box-shadow:
+    var(--hw-chamfer),
+    0 0 0 1px color-mix(in srgb, var(--hist-accent) 30%, transparent),
+    0 16px 34px -20px #000 !important;
+}
+
+/* ── modo descanso / movimento reduzido ───────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .tools-hw :is(.ae-choice, .btn-primary, .btn-lime, .btn-secondary, .ae-button, .hw-step-ico) {
+    transition: none !important;
+  }
+}

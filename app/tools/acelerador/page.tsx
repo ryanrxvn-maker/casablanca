@@ -292,8 +292,9 @@ export default function AceleradorPage() {
                   type="button"
                   onClick={() => setSpeed(preset)}
                   disabled={processing}
+                  data-on={active}
                   className={
-                    'mono rounded-[8px] px-2.5 py-1 text-[11px] transition-all duration-150 disabled:opacity-40 ' +
+                    'hw-chip mono rounded-[8px] px-2.5 py-1 text-[11px] transition-all duration-150 disabled:opacity-40 ' +
                     (active
                       ? 'border border-violet/65 bg-violet/15 font-semibold text-white'
                       : 'border border-line-strong text-text-muted hover:border-violet hover:text-white')

@@ -566,7 +566,7 @@ function DecupagemCopyInner() {
         subtitle="IA lê a copy. Escolhe o take certo."
         glow="rgba(232,121,249,0.5)"
       />
-      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
+      <div className="tool-shell-panel mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">
         {/* provider 'auto': AssemblyAI primeiro, Groq de fallback — uma das
             duas basta. */}
