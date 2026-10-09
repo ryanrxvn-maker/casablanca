@@ -84,6 +84,21 @@ test('Ferramentas (acabamento Hardware estendido 09.10): uma fumaça só, fora d
   assert.match(css, /\.ultra-btn-sheen \{\s*display: none;/);
 });
 
+test('herói do Pilot (09.10): WebGL que dorme junto com o site, cérebro calculado em fatias, nada de filtro em volta do canvas', () => {
+  const eng = ler('components/pilot/pilot-hero-engine.ts');
+  assert.match(eng, /isCalm\(\)/, 'a cena para no modo descanso / aba oculta');
+  assert.match(eng, /keepAliveRefs\(\) > 0 \? 15 :/, 'com disparo/montagem/render rodando a cena cai pra 15 quadros/s');
+  assert.match(eng, /new IntersectionObserver/, 'fora da tela a cena para');
+  // o cérebro custa ~100 ms de CPU: calculado de uma vez travaria a abertura do Pilot
+  assert.match(eng, /function\* buildPoints\(/);
+  assert.match(eng, /performance\.now\(\) - t0 < 6/);
+  const css = ler('app/pilot-hw.css');
+  // filtro num ancestral do canvas = a página inteira refiltrada a cada quadro
+  assert.doesNotMatch(css, /html:not\(\[data-theme='light'\]\) \.pilot-hw \{\s*filter/);
+  assert.match(css, /\.pilot-hw > \.tool-shell-panel \{\s*filter: saturate/);
+  assert.match(ler('components/pilot/PilotHero.tsx'), /pilot-hero__word-spec ae-ambient/, 'o brilho do nome é enfeite infinito: pausa no descanso');
+});
+
 test('landing: animações do herói só com transform/opacity (clip-path/left/box-shadow repintavam a cada quadro)', () => {
   const src = ler('components/landing/v3/scenes.tsx');
   for (const nome of ['bc-wipe', 'bc-wipe-in', 'bc-line', 'tj-breathe']) {
