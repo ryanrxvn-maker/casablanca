@@ -307,19 +307,28 @@ function mockUsers() {
   });
 }
 
-/** As 4 contas de teste também entram na lista de contas do painel (pra o "Quem viu" mostrar nome e plano). */
+const viewerName = (v: Viewer) =>
+  v.isAdmin ? 'Silas (admin)' : v.id.startsWith('free') ? 'Ana (teste free)' : v.id.startsWith('pago') ? 'Bruno (teste pago)' : 'Carla (teste liberado)';
+
+/**
+ * As contas de teste CLIENTES entram na lista de contas do painel. A admin
+ * fica de fora, igual ao /api/admin/list-users de verdade (só is_admin=false):
+ * o nome dela chega pelo `people` do "Quem viu".
+ */
 function viewerUsers(): ReturnType<typeof mockUsers> {
   const base = mockUsers()[0];
-  return Object.values(VIEWERS).map((v) => ({
-    ...base,
-    id: v.id,
-    email: v.email ?? '',
-    name: v.isAdmin ? 'Silas (admin)' : v.id.startsWith('free') ? 'Ana (teste free)' : v.id.startsWith('pago') ? 'Bruno (teste pago)' : 'Carla (teste liberado)',
-    is_admin: v.isAdmin,
-    is_active: true,
-    plan: v.plan as (typeof base)['plan'],
-    access: v.access as (typeof base)['access'],
-  }));
+  return Object.values(VIEWERS)
+    .filter((v) => !v.isAdmin)
+    .map((v) => ({
+      ...base,
+      id: v.id,
+      email: v.email ?? '',
+      name: viewerName(v),
+      is_admin: false,
+      is_active: true,
+      plan: v.plan as (typeof base)['plan'],
+      access: v.access as (typeof base)['access'],
+    }));
 }
 
 /**
@@ -374,7 +383,8 @@ function fakeSeen(url: string, users: ReturnType<typeof mockUsers>) {
       );
     });
   }
-  return { status: 200, body: { enabled: true, activatedAt: act, popup: a.popup, rows } };
+  const people = Object.values(VIEWERS).map((v) => ({ id: v.id, email: v.email, name: viewerName(v), isAdmin: v.isAdmin }));
+  return { status: 200, body: { enabled: true, activatedAt: act, popup: a.popup, rows, people } };
 }
 
 let installed = false;

@@ -75,8 +75,19 @@ async function seenList(svc: ReturnType<typeof serviceClient>, id: string) {
     for (const r of page) rows.push(seenFromInbox(r.user_id, r, one.row.activated_at));
     if (page.length < SEEN_PAGE) break;
   }
+  // Nome/e-mail de quem recebeu: a lista de clientes do painel não traz admin
+  // (e o aviso pode ir pra admins). Em lotes pra URL do .in() não estourar.
+  const people: Array<{ id: string; email: string | null; name: string | null; isAdmin: boolean }> = [];
+  const ids = rows.map((r) => r.userId);
+  for (let i = 0; i < ids.length; i += 200) {
+    const res = await svc.from('profiles').select('id, email, name, is_admin').in('id', ids.slice(i, i + 200));
+    if (res.error) break; // sem nome ainda mostra a conta (pelo id); não derruba a tela
+    for (const p of (res.data ?? []) as Array<{ id: string; email: string | null; name: string | null; is_admin: boolean | null }>) {
+      people.push({ id: p.id, email: p.email, name: p.name, isAdmin: p.is_admin === true });
+    }
+  }
   return NextResponse.json(
-    { enabled: true, activatedAt: one.row.activated_at, popup: one.row.popup !== false, rows },
+    { enabled: true, activatedAt: one.row.activated_at, popup: one.row.popup !== false, rows, people },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }

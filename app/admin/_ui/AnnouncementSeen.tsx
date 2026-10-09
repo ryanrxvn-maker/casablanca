@@ -28,8 +28,12 @@ import { Btn, I, IconOnly, Segmented, SPRING, Tag } from './kit';
 import { accent, fmtDateShort, fmtDateTime, fmtTime, timeAgo, type AdminUser } from './model';
 
 type Filter = 'viram' | 'so' | 'nao';
-type Line = { id: string; user: AdminUser | null; seen: SeenRow | null };
-type Data = { rows: SeenRow[]; activatedAt: string | null; popup: boolean };
+/** Quem é a conta: da lista de clientes do painel, ou (admin, fora da lista) do próprio "Quem viu". */
+type Person = { email: string | null; name: string | null; isAdmin: boolean; plan: 'premium' | 'free' | null; lastSeenAt: string | null };
+type Line = { id: string; person: Person | null; seen: SeenRow | null };
+type Data = { rows: SeenRow[]; people: Map<string, Person>; activatedAt: string | null; popup: boolean };
+
+const fromUser = (u: AdminUser): Person => ({ email: u.email, name: u.name, isAdmin: u.is_admin, plan: u.plan, lastSeenAt: u.last_seen_at });
 
 const PAGE = 60;
 
@@ -39,11 +43,8 @@ const COLS =
 
 const short = (iso: string | null | undefined) => (iso ? `${fmtDateShort(iso)} · ${fmtTime(iso)}` : '—');
 const full = (iso: string | null | undefined) => (iso ? `${fmtDateTime(iso)} (${timeAgo(iso)})` : undefined);
-const norm = (s: string) =>
-  s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase();
+/** busca sem acento e sem caixa ("Íris" acha "iris") */
+const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 const at = (iso: string | null | undefined) => (iso ? Date.parse(iso) || 0 : 0);
 const pct = (part: number, total: number) => (total ? `${Math.round((part / total) * 100)}%` : '0%');
 
@@ -76,10 +77,19 @@ export function AnnouncementSeen({
     setError(null);
     try {
       const res = await fetch(`/api/admin/announcements?views=${encodeURIComponent(a.id)}`, { cache: 'no-store' });
-      const j = (await res.json().catch(() => ({}))) as { error?: string; enabled?: boolean; rows?: SeenRow[]; activatedAt?: string | null; popup?: boolean };
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        enabled?: boolean;
+        rows?: SeenRow[];
+        people?: Array<{ id: string; email: string | null; name: string | null; isAdmin: boolean }>;
+        activatedAt?: string | null;
+        popup?: boolean;
+      };
       if (!res.ok) throw new Error(j.error || 'Não deu pra carregar quem viu.');
       if (j.enabled === false) throw new Error('As tabelas de avisos ainda não existem no banco.');
-      setData({ rows: Array.isArray(j.rows) ? j.rows : [], activatedAt: j.activatedAt ?? null, popup: j.popup !== false });
+      const people = new Map<string, Person>();
+      for (const p of Array.isArray(j.people) ? j.people : []) people.set(p.id, { email: p.email, name: p.name, isAdmin: p.isAdmin, plan: null, lastSeenAt: null });
+      setData({ rows: Array.isArray(j.rows) ? j.rows : [], people, activatedAt: j.activatedAt ?? null, popup: j.popup !== false });
     } catch (e) {
       setError((e as Error).message || 'Não deu pra carregar quem viu.');
     } finally {
@@ -106,13 +116,17 @@ export function AnnouncementSeen({
   const groups = useMemo(() => {
     if (!data) return null;
     const got = new Set(data.rows.map((r) => r.userId));
-    const lines = data.rows.map((s): Line => ({ id: s.userId, user: byId.get(s.userId) ?? null, seen: s }));
+    const who = (id: string): Person | null => {
+      const u = byId.get(id);
+      return u ? fromUser(u) : (data.people.get(id) ?? null);
+    };
+    const lines = data.rows.map((s): Line => ({ id: s.userId, person: who(s.userId), seen: s }));
     const viram = lines.filter((l) => l.seen!.views.length > 0).sort((x, y) => at(y.seen!.lastAt) - at(x.seen!.lastAt));
     const so = lines.filter((l) => l.seen!.views.length === 0).sort((x, y) => at(y.seen!.deliveredAt) - at(x.seen!.deliveredAt));
     const nao = (reach ?? [])
       .filter((u) => !got.has(u.id))
-      .map((u): Line => ({ id: u.id, user: u, seen: null }))
-      .sort((x, y) => at(y.user!.last_seen_at) - at(x.user!.last_seen_at));
+      .map((u): Line => ({ id: u.id, person: fromUser(u), seen: null }))
+      .sort((x, y) => at(y.person!.lastSeenAt) - at(x.person!.lastSeenAt));
     return {
       viram,
       so,
@@ -140,7 +154,7 @@ export function AnnouncementSeen({
     const base = groups[tab];
     const q = norm(query.trim());
     if (!q) return base;
-    return base.filter((l) => norm(`${l.user?.email ?? ''} ${l.user?.name ?? ''}`).includes(q));
+    return base.filter((l) => norm(`${l.person?.email ?? ''} ${l.person?.name ?? ''}`).includes(q));
   }, [groups, tab, query]);
 
   const promo = a.kind === 'propaganda';
@@ -308,9 +322,9 @@ function Empty({ filter, query, popup }: { filter: Filter; query: string; popup:
   );
 }
 
-function Avatar({ user }: { user: AdminUser | null }) {
-  const letter = (user?.name || user?.email || '?').trim().charAt(0).toUpperCase();
-  const a = user?.is_admin ? 'lime' : 'violet';
+function Avatar({ person }: { person: Person | null }) {
+  const letter = (person?.name || person?.email || '?').trim().charAt(0).toUpperCase();
+  const a = person?.isAdmin ? 'lime' : 'violet';
   return (
     <span
       className="font-tech flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold"
@@ -322,19 +336,22 @@ function Avatar({ user }: { user: AdminUser | null }) {
   );
 }
 
-function PlanTag({ user }: { user: AdminUser | null }) {
-  if (!user) return null;
-  if (user.is_admin) return <Tag a="lime">Admin</Tag>;
-  return user.plan === 'premium' ? <Tag a="violet">Premium</Tag> : <Tag a="neutral">Free</Tag>;
+function PlanTag({ person }: { person: Person | null }) {
+  if (!person) return null;
+  if (person.isAdmin) return <Tag a="lime">Admin</Tag>;
+  if (!person.plan) return null;
+  return person.plan === 'premium' ? <Tag a="violet">Premium</Tag> : <Tag a="neutral">Free</Tag>;
 }
 
 function SeenLine({ line, popup, open, onToggle }: { line: Line; popup: boolean; open: boolean; onToggle: () => void }) {
-  const { user, seen } = line;
+  const { person, seen } = line;
   const n = seen?.views.length ?? 0;
   const expandable = !!seen && (n > 0 || !!seen.clickedAt || !!seen.deletedAt);
-  const email = user?.email ?? `Conta ${line.id.slice(0, 8)}`;
+  const email = person?.email ?? `Conta ${line.id.slice(0, 8)}`;
+  // o "·" só vem depois do selo de plano (é a única peça que aparece em toda largura)
+  const sep = person && (person.isAdmin || person.plan) ? '· ' : '';
   // curto de propósito: cabe ao lado do plano até no celular
-  const ago = user?.last_seen_at ? timeAgo(user.last_seen_at) : null;
+  const ago = person?.lastSeenAt ? timeAgo(person.lastSeenAt) : null;
   const status = !seen
     ? ago
       ? `acessou ${ago.includes('/') ? `em ${ago}` : ago}`
@@ -348,22 +365,23 @@ function SeenLine({ line, popup, open, onToggle }: { line: Line; popup: boolean;
   const row = (
     <>
       <span className="flex min-w-0 items-center gap-3">
-        <Avatar user={user} />
+        <Avatar person={person} />
         <span className="min-w-0">
           <span className="field-label block truncate text-[13px] font-medium text-text">{email}</span>
           <span className="field-label mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-text-muted">
             {/* no estreito o e-mail já identifica: fica plano · hora */}
-            {user?.name ? <span className="hidden truncate md:inline">{user.name}</span> : null}
-            <PlanTag user={user} />
+            {person?.name ? <span className="hidden truncate md:inline">{person.name}</span> : null}
+            <PlanTag person={person} />
             {status ? (
               <span className="truncate">
-                {user ? '· ' : ''}
+                {sep}
                 {status}
               </span>
             ) : null}
             {seen && n > 0 ? (
               <span className="shrink-0 md:hidden" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                · {short(seen.lastAt)}
+                {sep}
+                {short(seen.lastAt)}
               </span>
             ) : null}
           </span>

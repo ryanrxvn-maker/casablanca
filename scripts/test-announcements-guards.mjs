@@ -69,5 +69,6 @@ test('"Quem viu": fechar grava a hora e o painel lê pela mesma regra, só do av
   const r = ler('app/api/admin/announcements/route.ts');
   assert.match(r, /seenFromInbox\(/, '"Quem viu" usa a regra da lib (seenFromInbox)');
   assert.match(r, /\.eq\('announcement_id', id\)[\s\S]{0,120}\.range\(/, 'lê só o aviso pedido, paginado (sem o teto de 1000 linhas)');
+  assert.match(r, /from\('profiles'\)\.select\('id, email, name, is_admin'\)/, 'nome de quem recebeu vem do banco (o list-users não traz admin, e o aviso pode ir pra admins)');
   assert.match(ler('app/admin/_ui/AnnouncementsStudio.tsx'), /\[data-ann-seen\]/, 'Esc no "Quem viu" volta pra lista em vez de fechar a Central');
 });
