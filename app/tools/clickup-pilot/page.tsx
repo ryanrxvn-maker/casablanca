@@ -7,6 +7,7 @@ import { EVENTO_ABRIR_CARD, EVENTO_ACAO_FILA, lerIntencao, limparIntencao, respo
 import { createRecordWriter, readDurableRecord, readDurableRecords, deleteDurableRecords, durabilityStatus, RECORDS_EVENT } from '@/lib/durable-records';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
+import { PilotShell, PlSpot } from '@/components/pilot/PilotShell';
 import { HeyGenContaAviso } from '@/components/HeyGenContaAviso';
 import { useAvisoContaModoImagem } from '@/components/ModoImagemContaAviso';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -15208,11 +15209,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
   }
   return (
     <>
-      <ToolShell
+      <PilotShell
         title="Pilot"
-        eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
-        description="O cérebro do estúdio. A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com silêncios removidos e legenda em fila, sem você abrir uma aba sequer."
-        hue="rgba(200,232,124,0.45)"
+        eyebrow="Automação · Orquestrador"
+        lead="O cérebro do estúdio."
+        description="A copy pode vir do zero, de um Google Docs ou das tasks do ClickUp. O Pilot prepara avatar e voz, dispara no HeyGen e entrega o vídeo montado, com silêncios removidos e legenda em fila, sem você abrir uma aba sequer."
         icon={<IconClickUpPilot size={56} />}
       >
           {/* JANELA DE CLONAR VOZ (24.09) — aberta pelo botão-ícone do slot. */}
@@ -15296,32 +15297,26 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               ? 'Todos os editores'
               : editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?';
             return (
-              <div
-                className="cp-command-center mb-5 relative overflow-hidden rounded-[18px] border p-4 md:p-5"
-                style={{
-                  borderColor: setupOK ? 'rgba(200,232,124,0.35)' : 'rgba(232,121,249,0.35)',
-                  background:
-                    'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-                }}
-              >
+              <div className="cp-command-center pl-glass relative mb-6 overflow-hidden p-4 md:p-5" data-pl-spot>
+                <PlSpot />
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-50 blur-3xl"
+                  className="pointer-events-none absolute -right-20 -top-24 -z-[1] h-56 w-56 rounded-full"
                   style={{
-                    background: setupOK ? 'rgba(200,232,124,0.45)' : 'rgba(232,121,249,0.45)',
+                    background: setupOK
+                      ? 'radial-gradient(closest-side, rgb(var(--lime) / 0.2), transparent)'
+                      : 'radial-gradient(closest-side, rgb(var(--pink) / 0.2), transparent)',
                   }}
                 />
                 <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-3">
                     <div
-                      className={
-                        'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border ' +
-                        (setupOK ? 'border-lime/60 bg-lime/10' : 'border-fuchsia-500/60 bg-fuchsia-500/10')
-                      }
+                      className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px]"
                       style={{
+                        background: 'rgb(var(--bg) / 0.6)',
                         boxShadow: setupOK
-                          ? '0 0 22px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.1)'
-                          : '0 0 22px -6px rgba(232,121,249,0.55), inset 0 1px 0 rgba(255,255,255,0.1)',
+                          ? 'inset 0 0 0 1px rgb(var(--lime) / 0.45), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 26px -8px rgb(var(--lime) / 0.6)'
+                          : 'inset 0 0 0 1px rgb(var(--pink) / 0.45), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 26px -8px rgb(var(--pink) / 0.6)',
                       }}
                     >
                       <span className="relative flex h-2.5 w-2.5">
@@ -15345,18 +15340,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       </span>
                     </div>
                     <div className="min-w-0">
-                      <div
-                        className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-text-muted"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
+                      <div className="pl-label">
                         {setupOK
                           ? modo === 'clickup' ? 'Pilot Online · ClickUp' : modo === 'docs' ? 'Pilot Online · Docs' : 'Pilot Online · Creator'
                           : 'Pilot Offline'}
                       </div>
-                      <div
-                        className="mt-0.5 truncate text-[16px] font-bold tracking-tight text-white"
-                        style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
-                      >
+                      <div className="pl-h3 mt-1 truncate" style={{ fontSize: 17 }}>
                         {!setupOK
                           ? 'Configure pra começar'
                           : modo === 'clickup'
@@ -15365,7 +15354,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               ? (docAtivo?.nomeArquivo || (docAtivo?.docUrl ? 'Google Docs importado' : 'Nenhum doc importado'))
                               : 'Tasks criadas do zero'}
                       </div>
-                      <div className="mt-0.5 text-[11.5px] text-text-muted">
+                      <div className="pl-label mt-1">
                         {setupOK ? (
                           <>
                             {modo === 'clickup' ? (
@@ -15399,16 +15388,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     {modo === 'clickup' ? (
                     <a
                       href="/configuracoes/clickup-pilot"
-                      className={
-                        'group inline-flex items-center gap-2 rounded-[12px] border px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.16em] transition-all ' +
-                        (setupOK
-                          ? 'border-line-strong text-text-muted hover:border-lime hover:text-lime'
-                          : 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100 hover:bg-fuchsia-500/25')
-                      }
-                      style={{ fontFamily: 'var(--font-tech)' }}
+                      className={'pl-btn pl-btn--icon-end ' + (setupOK ? 'pl-btn--ghost' : 'pl-btn--violet')}
+                      style={setupOK ? { paddingRight: 6, height: 40 } : undefined}
                     >
                       {setupOK ? 'Configurar' : 'Configurar agora'}
-                      <span className="transition-transform group-hover:translate-x-1">→</span>
+                      <span className="pl-btn__ico" style={{ width: 28, height: 28 }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M5 12h14M13 6l6 6-6 6" />
+                        </svg>
+                      </span>
                     </a>
                     ) : null}
                   </div>
@@ -15454,11 +15442,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       o aviso some. */}
                   <span className="ext-falta-status">
                     <span className="ext-falta-radar" aria-hidden />
-                    {extVersaoPublicada ? extVersao ? `aguardando v${extVersaoPublicada}+` : `procurando a v${extVersaoPublicada}` : 'conferindo versão publicada'}
+                    {extVersaoPublicada ? extVersao ? `Aguardando v${extVersaoPublicada}+` : `Procurando a v${extVersaoPublicada}` : 'Conferindo versão publicada'}
                   </span>
                 </div>
                 <details className="ext-falta-passos">
-                  <summary>como instalar</summary>
+                  <summary>Como instalar</summary>
                   <ol>
                     <li>Descompacte o .zip numa pasta que você não vá apagar.</li>
                     <li>
@@ -15504,18 +15492,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               {/* Modos + Carregar tasks (UI principal enxuta). Só no modo
                   CLICKUP: a ação do CREATOR e do DOCS mora dentro do visor. */}
               {modo === 'clickup' ? (
-              <section
-                className="cp-modes-bar relative overflow-hidden rounded-[18px] border border-line/60 p-4 md:p-5"
-                style={{
-                  background:
-                    'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-                }}
-              >
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-35 blur-3xl"
-                  style={{ background: 'rgba(167,139,250,0.45)' }}
-                />
+              <section className="cp-modes-bar pl-glass relative overflow-hidden p-4 md:p-5" data-pl-spot>
+                <PlSpot />
                 {/* PAINEL "Modos de Geração" REMOVIDO (user pediu):
                  *  - Camuflagem agora eh PER-TASK (botao 3D na action bar do card)
                  *  - Only Magnific / More Magnific descontinuados (auto-broll
@@ -15541,8 +15519,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       disabled={loadingTasks && !switchingTeam}
                     />
                     {switchingTeam ? (
-                      <span className="mono text-[10px] uppercase tracking-widest text-violet-300">
-                        trocando…
+                      <span className="pl-label" style={{ color: 'rgb(var(--violet))' }}>
+                        Trocando…
                       </span>
                     ) : null}
                     {/* O seletor GLOBAL de idioma (PL/HUN/PT) saiu em 05.09: o
@@ -15560,45 +15538,32 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     type="button"
                     onClick={() => void loadPrimaryClickUpTasks()}
                     disabled={loadingTasks || (selectedEditor === ALL_EDITORS_ID && !authUser)}
-                    className="cp-load-cta group relative overflow-hidden rounded-[14px] border border-lime/60 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-70"
-                    style={{
-                      fontFamily: 'var(--font-tech)',
-                      background:
-                        'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
-                      boxShadow:
-                        '0 0 28px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
-                    }}
+                    className="cp-load-cta pl-btn pl-btn--lime pl-btn--icon-end"
+                    style={{ height: 48, paddingLeft: 20 }}
                   >
-                    <span className="relative z-10 flex items-center gap-2">
+                    {loadingTasks
+                      ? 'Carregando…'
+                      : selectedEditor === ALL_EDITORS_ID || (authUser && selectedEditor === String(authUser.id))
+                        ? 'Carregar minhas tasks'
+                        : 'Carregar tasks deste editor'}
+                    <span className="pl-btn__ico" style={{ width: 36, height: 36 }}>
                       {loadingTasks ? (
-                        <>
-                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
-                          Carregando…
-                        </>
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
                       ) : (
-                        <>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 12a9 9 0 1 1-9-9" />
-                            <path d="M21 3v6h-6" />
-                          </svg>
-                          {selectedEditor === ALL_EDITORS_ID || (authUser && selectedEditor === String(authUser.id))
-                            ? 'Carregar minhas tasks'
-                            : 'Carregar tasks deste editor'}
-                          <span className="transition-transform group-hover:translate-x-1">→</span>
-                        </>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M21 12a9 9 0 1 1-9-9" />
+                          <path d="M21 3v6h-6" />
+                        </svg>
                       )}
                     </span>
-                    <span
-                      aria-hidden
-                      className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 group-hover:translate-x-full"
-                    />
                   </button>
                   {selectedEditor === ALL_EDITORS_ID ? (
                     <button
                       type="button"
                       onClick={() => void loadAllEditorsTasks()}
                       disabled={loadingTasks}
-                      className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.12em] text-amber-100 transition hover:bg-amber-400/20 disabled:opacity-60"
+                      className="pl-btn pl-btn--ghost"
+                      style={{ height: 44, color: 'rgb(var(--amber))', boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.45)' }}
                     >
                       Carregar tasks de todos os editores
                     </button>
@@ -15623,10 +15588,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   />
                   <a
                     href="/configuracoes/clickup-pilot"
-                    className="mono inline-flex items-center gap-2 rounded-full border border-line-strong px-3.5 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+                    className="pl-btn pl-btn--ghost ml-auto"
                   >
                     Configurar workspace, editor e filtros
-                    <span>→</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
                   </a>
                 </div>
               </section>
@@ -15640,20 +15607,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                 <section>
                   {tasks.length > 0 ? (
                   <>
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1">
                     <div className="flex items-center gap-3">
-                      <h2
-                        className="text-[20px] font-extrabold tracking-tight text-white"
-                        style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
-                      >
-                        Tasks
-                      </h2>
-                      <span
-                        className="mono rounded-full border border-lime/45 bg-lime/10 px-2.5 py-0.5 text-[11px] font-bold text-lime"
-                        style={{ boxShadow: '0 0 12px -4px rgba(200,232,124,0.45)' }}
-                      >
-                        {tasks.length}
-                      </span>
+                      <h2 className="pl-h2">Tasks</h2>
+                      <span className="pl-count">{tasks.length}</span>
                     </div>
                     {/* Modo BATCH removido — click 1x na task analisa direto.
                      *  Estado bulkMode mantido por compat com handlers existentes
@@ -15662,178 +15619,107 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   {/* Filtros de periodo/prioridade sao do ClickUp: task local nao tem prazo nem prioridade. */}
                   {modo === 'clickup' ? (
                   <>
-                  {/* Filtros premium — Período + Prioridade + Data específica */}
-                  <div
-                    className="cp-filters-bar mb-4 relative overflow-hidden rounded-[16px] border border-line/60 p-4"
-                    style={{
-                      background:
-                        'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-                    }}
-                  >
-                    <div
-                      aria-hidden
-                      className="pointer-events-none absolute -left-12 -top-12 h-40 w-40 rounded-full opacity-40 blur-3xl"
-                      style={{ background: 'rgba(200,232,124,0.35)' }}
-                    />
-                    <div className="relative">
-                      <div className="mb-3 flex items-center gap-2">
-                        <span
-                          className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          Período
-                        </span>
-                        <span className="h-px flex-1 bg-gradient-to-r from-lime/30 via-line to-transparent" />
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          { id: 'all' as const, label: 'Todas' },
-                          { id: 'yesterday' as const, label: 'Ontem' },
-                          { id: 'today' as const, label: 'Hoje' },
-                          { id: 'tomorrow' as const, label: 'Amanhã' },
-                          { id: 'overdue' as const, label: 'Atrasadas' },
-                          { id: 'next7' as const, label: 'Próximos 7 dias' },
-                          { id: 'specific' as const, label: 'Data específica' },
-                        ]).map((f) => {
-                          const active = dateFilter === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              type="button"
-                              onClick={() => setDateFilter(f.id)}
-                              className={
-                                'group relative overflow-hidden rounded-[12px] border px-4 py-2.5 transition-all duration-200 ' +
-                                (active
-                                  ? 'border-lime/65 bg-lime/12'
-                                  : 'border-line-strong bg-bg/40 hover:border-lime/45 hover:-translate-y-[1px]')
-                              }
-                              style={
-                                active
-                                  ? { boxShadow: '0 0 22px -6px rgba(200,232,124,0.55)' }
-                                  : undefined
-                              }
-                            >
-                              <span
-                                className="text-[12px] font-bold tracking-tight text-white"
-                                style={{ fontFamily: 'var(--font-tech)' }}
-                              >
-                                {f.label}
-                              </span>
-                              {active ? (
-                                <span
-                                  aria-hidden
-                                  className="absolute right-2 top-2 inline-block h-1.5 w-1.5 rounded-full bg-lime"
-                                  style={{ boxShadow: '0 0 8px rgba(200,232,124,0.9)' }}
-                                />
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Date picker — aparece só se 'specific' selecionado */}
-                      {dateFilter === 'specific' ? (
-                        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-[12px] border border-lime/40 bg-lime/5 px-3 py-2.5">
-                          <span
-                            className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-lime"
-                            style={{ fontFamily: 'var(--font-tech)' }}
+                  {/* Filtros (08.10): dois trilhos segmentados no mesmo painel —
+                    * Período e Prioridade —, rótulo em frase, ativo com anel lime. */}
+                  <div className="cp-filters-bar pl-glass relative mb-5 grid items-center gap-x-5 gap-y-3 p-4 md:grid-cols-[88px_1fr]" data-pl-spot>
+                    <PlSpot />
+                    <span className="pl-label">Período</span>
+                    <div className="pl-seg">
+                      {([
+                        { id: 'all' as const, label: 'Todas' },
+                        { id: 'yesterday' as const, label: 'Ontem' },
+                        { id: 'today' as const, label: 'Hoje' },
+                        { id: 'tomorrow' as const, label: 'Amanhã' },
+                        { id: 'overdue' as const, label: 'Atrasadas' },
+                        { id: 'next7' as const, label: 'Próximos 7 dias' },
+                        { id: 'specific' as const, label: 'Data específica' },
+                      ]).map((f) => {
+                        const active = dateFilter === f.id;
+                        return (
+                          <button
+                            key={f.id}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setDateFilter(f.id)}
+                            className="pl-seg__it"
                           >
-                            Escolher data
-                          </span>
-                          <input
-                            type="date"
-                            value={specificDate}
-                            onChange={(e) => setSpecificDate(e.target.value)}
-                            className="rounded-[8px] border border-lime/40 bg-black/40 px-3 py-1.5 text-[12px] text-white mono outline-none focus:border-lime/70"
-                            style={{ colorScheme: 'dark' }}
-                          />
-                          {specificDate ? (
-                            <button
-                              type="button"
-                              onClick={() => setSpecificDate('')}
-                              className="mono rounded-full border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                            >
-                              ✕ limpar
-                            </button>
-                          ) : (
-                            <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
-                              ↑ escolha pra filtrar
-                            </span>
-                          )}
-                          <div className="ml-auto flex flex-wrap gap-1.5">
-                            {(() => {
-                              const fmt = (d: Date) => d.toISOString().slice(0, 10);
-                              const today = new Date();
-                              const presets = [-2, -3, -7, -14].map((delta) => {
-                                const d = new Date(today);
-                                d.setDate(today.getDate() + delta);
-                                return { date: fmt(d), label: `${Math.abs(delta)}d atrás` };
-                              });
-                              return presets.map((p) => (
-                                <button
-                                  key={p.date}
-                                  type="button"
-                                  onClick={() => setSpecificDate(p.date)}
-                                  className={
-                                    'mono rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-widest transition ' +
-                                    (specificDate === p.date
-                                      ? 'border-lime bg-lime/15 text-lime'
-                                      : 'border-line-strong text-text-muted hover:border-lime hover:text-lime')
-                                  }
-                                >
-                                  {p.label}
-                                </button>
-                              ));
-                            })()}
-                          </div>
-                        </div>
-                      ) : null}
+                            {active ? <i className="pl-seg__dot" aria-hidden /> : null}
+                            {f.label}
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                      <div className="mt-4 mb-3 flex items-center gap-2">
-                        <span
-                          className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-fuchsia-300"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          Prioridade
-                        </span>
-                        <span className="h-px flex-1 bg-gradient-to-r from-fuchsia-500/30 via-line to-transparent" />
+                    {/* Date picker — aparece só se 'specific' selecionado */}
+                    {dateFilter === 'specific' ? (
+                      <div className="flex flex-wrap items-center gap-2.5 md:col-start-2">
+                        <input
+                          type="date"
+                          value={specificDate}
+                          onChange={(e) => setSpecificDate(e.target.value)}
+                          aria-label="Escolher data"
+                          className="pl-input px-3.5"
+                          style={{ height: 40 }}
+                        />
+                        {specificDate ? (
+                          <button
+                            type="button"
+                            onClick={() => setSpecificDate('')}
+                            className="pl-btn pl-btn--ghost pl-btn--sm pl-btn--danger"
+                          >
+                            Limpar data
+                          </button>
+                        ) : (
+                          <span className="pl-label">Escolha uma data pra filtrar</span>
+                        )}
+                        <div className="pl-seg ml-auto">
+                          {(() => {
+                            const fmt = (d: Date) => d.toISOString().slice(0, 10);
+                            const today = new Date();
+                            const presets = [-2, -3, -7, -14].map((delta) => {
+                              const d = new Date(today);
+                              d.setDate(today.getDate() + delta);
+                              return { date: fmt(d), label: `${Math.abs(delta)}d atrás` };
+                            });
+                            return presets.map((p) => (
+                              <button
+                                key={p.date}
+                                type="button"
+                                aria-pressed={specificDate === p.date}
+                                onClick={() => setSpecificDate(p.date)}
+                                className="pl-seg__it"
+                                style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                              >
+                                {p.label}
+                              </button>
+                            ));
+                          })()}
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          { id: 'all' as const, label: 'Todas', dot: 'rgba(148,163,184,0.7)' },
-                          { id: 'urgent' as const, label: 'Urgente', dot: '#ef4444' },
-                          { id: 'high' as const, label: 'Alta', dot: '#f97316' },
-                        ]).map((f) => {
-                          const active = priorityFilter === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              type="button"
-                              onClick={() => setPriorityFilter(f.id)}
-                              className={
-                                'group flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ' +
-                                (active
-                                  ? 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100'
-                                  : 'border-line-strong text-text-muted hover:border-fuchsia-500/45 hover:text-white')
-                              }
-                              style={
-                                active
-                                  ? { boxShadow: '0 0 18px -6px rgba(236,72,153,0.55)', fontFamily: 'var(--font-tech)' }
-                                  : { fontFamily: 'var(--font-tech)' }
-                              }
-                            >
-                              <span
-                                className="inline-block h-2 w-2 rounded-full"
-                                style={{
-                                  background: f.dot,
-                                  boxShadow: active ? `0 0 8px ${f.dot}` : undefined,
-                                }}
-                              />
-                              {f.label}
-                            </button>
-                          );
-                        })}
-                      </div>
+                    ) : null}
+
+                    <span className="pl-label">Prioridade</span>
+                    <div className="pl-seg">
+                      {([
+                        { id: 'all' as const, label: 'Todas', dot: 'rgba(148,163,184,0.85)' },
+                        { id: 'urgent' as const, label: 'Urgente', dot: '#ef4444' },
+                        { id: 'high' as const, label: 'Alta', dot: '#f97316' },
+                      ]).map((f) => {
+                        const active = priorityFilter === f.id;
+                        return (
+                          <button
+                            key={f.id}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setPriorityFilter(f.id)}
+                            className="pl-seg__it"
+                            style={{ ['--dot' as string]: f.dot }}
+                          >
+                            <i className="pl-seg__dot" aria-hidden />
+                            {f.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                   </>
@@ -15903,26 +15789,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           <button
                             type="button"
                             onClick={() => toggleTaskSelected(t.id)}
-                            className={
-                              'group/task flex-1 rounded-[12px] border bg-gradient-to-br px-3.5 py-2.5 text-left transition-all duration-200 ' +
-                              (isChecked
-                                ? 'border-lime/75 from-lime/15 via-lime/[0.06] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_22px_-8px_rgba(200,232,124,0.55)]'
-                                : 'border-white/8 from-white/[0.04] via-white/[0.015] to-transparent hover:border-lime/45 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_20px_-10px_rgba(200,232,124,0.35)]')
-                            }
+                            aria-pressed={isChecked}
+                            data-on={isChecked}
+                            data-pl-spot
+                            className="pl-row group/task"
                           >
+                            <PlSpot />
                             <div className="flex items-center justify-between gap-3">
                               {/* LADO ESQUERDO: checkmark + nome + pills de meta */}
                               <div className="flex min-w-0 flex-1 items-center gap-2 flex-wrap">
                                 {/* CHECKMARK animado — feedback visual de selecao */}
-                                <span
-                                  className={
-                                    'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ' +
-                                    (isChecked
-                                      ? 'border-lime bg-lime text-black shadow-[0_0_10px_rgba(200,232,124,0.6)]'
-                                      : 'border-white/25 bg-transparent text-transparent group-hover/task:border-lime/60')
-                                  }
-                                  aria-hidden
-                                >
+                                <span className="pl-check" data-on={isChecked} aria-hidden>
                                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="m5 13 4 4L19 7" />
                                   </svg>
@@ -15946,12 +15823,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     style={{ fontFamily: 'var(--font-tech)', boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.7), 0 0 0 3px rgba(251,191,36,0.12)' }}
                                   />
                                 ) : (
-                                  <span
-                                    className="mono text-[13px] font-semibold text-white dark:text-white text-foreground truncate"
-                                    style={{ fontFamily: 'var(--font-tech)' }}
-                                  >
-                                    {t.name}
-                                  </span>
+                                  <span className="pl-row__name">{t.name}</span>
                                 )}
                                 {/* === BADGES separados por significado ===
                                     User: "ICONE É APENAS PRA INFORMAR QUE É URGENTE / ICONE AMARELO
@@ -15966,14 +15838,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 {/* SIBLINGS (Gs do mesmo grupo) */}
                                 {hasSiblings && gSuffix ? (
                                   <span
-                                    className="inline-flex h-6 items-center gap-1 rounded-md border border-violet-500/55 bg-violet-500/12 px-1.5 text-violet-600 dark:text-violet-300"
+                                    className="pl-flag pl-flag--violet gap-1"
                                     title={`Grupo: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
                                   >
                                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
                                       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                                     </svg>
-                                    <span className="text-[11.5px] font-bold leading-none tabular-nums">{siblingsAll.length}</span>
+                                    <span className="leading-none">{siblingsAll.length}</span>
                                   </span>
                                 ) : null}
                                 {/* ICONE PRIORIDADE — bg mais saturado + border + shadow pra
@@ -15981,9 +15853,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 {t.priority?.priority === 'urgent' ? (
                                   <span
                                     title="Prioridade urgente"
-                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-500/85 bg-red-500/25 text-red-700 shadow-[0_1px_3px_rgba(239,68,68,0.18)]"
+                                    className="pl-flag pl-flag--red"
                                   >
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                                       <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
                                       <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" />
                                     </svg>
@@ -15991,9 +15863,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 ) : t.priority?.priority === 'high' ? (
                                   <span
                                     title="Prioridade alta"
-                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/90 bg-amber-500/28 text-amber-700 shadow-[0_1px_3px_rgba(245,158,11,0.2)]"
+                                    className="pl-flag pl-flag--amber"
                                   >
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                                       <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
                                       <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" />
                                     </svg>
@@ -16016,7 +15888,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     return (
                                       <span
                                         title={`Atrasada ${daysAgo} dia${daysAgo === 1 ? '' : 's'}`}
-                                        className="inline-flex h-6 min-w-[26px] items-center justify-center rounded-md border border-red-500/85 bg-red-500/25 px-2 text-[13px] font-extrabold tabular-nums text-red-700 shadow-[0_1px_3px_rgba(239,68,68,0.18)]"
+                                        className="pl-flag pl-flag--red"
                                       >
                                         {daysAgo}
                                       </span>
@@ -16027,7 +15899,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     return (
                                       <span
                                         title="Vence hoje"
-                                        className="inline-flex h-6 items-center justify-center rounded-md border border-amber-500/90 bg-amber-500/28 px-2.5 text-[10.5px] font-extrabold uppercase tracking-wider text-amber-800 shadow-[0_1px_3px_rgba(245,158,11,0.2)]"
+                                        className="pl-flag pl-flag--amber pl-flag--word"
                                       >
                                         Hoje
                                       </span>
@@ -16045,11 +15917,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <span
                                     key={`${ch.label}-${i}`}
                                     title={`Canal: ${ch.label}`}
-                                    className="inline-flex h-6 items-center rounded-md px-2 text-[10.5px] font-extrabold uppercase leading-none tracking-wider shadow-[0_1px_3px_rgba(0,0,0,0.18)]"
+                                    className="pl-chan"
                                     style={{
                                       backgroundColor: ch.color,
                                       color: channelTextColor(ch.color),
-                                      border: `1px solid ${ch.color}`,
                                     }}
                                   >
                                     {ch.label}
@@ -16058,17 +15929,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               </div>
                               {/* LADO DIREITO: status pill maior + chevron */}
                               <div className="flex shrink-0 items-center gap-2">
-                                <span
-                                  className="mono rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
-                                  style={{
-                                    backgroundColor: (t.status?.color || '#888') + '24',
-                                    color: t.status?.color || '#888',
-                                    border: `1px solid ${(t.status?.color || '#888')}55`,
-                                  }}
-                                >
-                                  {t.status?.status}
-                                </span>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30 transition-transform group-hover/task:translate-x-0.5 group-hover/task:text-lime">
+                                {t.status?.status ? (
+                                  <span className="pl-status" style={{ ['--c' as string]: t.status?.color || '#8b8b96' }}>
+                                    {t.status.status.charAt(0).toUpperCase() + t.status.status.slice(1)}
+                                  </span>
+                                ) : null}
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="pl-row__chev">
                                   <path d="m9 18 6-6-6-6" />
                                 </svg>
                               </div>
@@ -16085,8 +15951,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   onClick={() => setRenomeando({ id: t.id, valor: t.name })}
                                   title="Renomear a task (o AD do nome batiza os arquivos)"
                                   aria-label="Renomear task"
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] text-text-muted transition hover:text-amber-200"
-                                  style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--line) / 0.7)' }}
+                                  data-tone="amber"
+                                  className="pl-ibtn"
+                                  style={{ width: 34, height: 34 }}
                                 >
                                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                                     <path d="M12 20h9" />
@@ -16099,7 +15966,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 onClick={() => removerTaskLocal(t.id)}
                                 title="Remover esta task (só deste navegador)"
                                 aria-label="Remover task"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line/70 text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                                data-tone="rose"
+                                className="pl-ibtn"
+                                style={{ width: 34, height: 34 }}
                               >
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                                   <path d="M18 6 6 18M6 6l12 12" />
@@ -16116,15 +15985,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                    *  START = analyzeSelected (puxa doc, parseia copy, prepara
                    *  dispatch view com avatares). User trabalha em batch sempre. */}
                   {selectedTaskIds.size > 0 ? (
-                    <div
-                      className="sticky bottom-4 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-lime/55 bg-gradient-to-br from-lime/15 via-lime/[0.06] to-transparent p-3.5 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_42px_-12px_rgba(200,232,124,0.45)]"
-                    >
-                      <span
-                        className="mono inline-flex items-center gap-2 text-[12px] font-bold tracking-tight text-foreground"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-lime text-black shadow-[0_0_12px_rgba(200,232,124,0.7)]">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <div className="pl-dock">
+                      <span className="pl-dock__txt">
+                        <span className="pl-check" data-on="true" aria-hidden style={{ width: 24, height: 24 }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                             <path d="m5 13 4 4L19 7" />
                           </svg>
                         </span>
@@ -16132,7 +15996,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         {(() => {
                           const ready = Array.from(selectedTaskIds).filter(isTaskDispatchable).length;
                           return ready > 0 ? (
-                            <span className="mono ml-1 rounded-full bg-lime/25 px-2 py-[2px] text-[10px] text-lime border border-lime/45">
+                            <span className="pl-pill-lime">
                               {ready} pronta{ready === 1 ? '' : 's'}
                             </span>
                           ) : null;
@@ -16142,7 +16006,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         <button
                           type="button"
                           onClick={clearSelected}
-                          className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                          className="pl-btn pl-btn--ghost pl-btn--danger"
                         >
                           Limpar
                         </button>
@@ -16150,25 +16014,23 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           type="button"
                           onClick={() => void analyzeSelected()}
                           disabled={analyzing}
-                          className="mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,232,124,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,232,124,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                          style={{ fontFamily: 'var(--font-tech)' }}
+                          className="pl-btn pl-btn--lime pl-btn--icon-end"
+                          style={{ height: 44 }}
                         >
-                          {analyzing ? (
-                            <>
+                          {analyzing ? 'Analisando…' : 'Start'}
+                          {!analyzing ? <span className="pl-btn__n">{selectedTaskIds.size}</span> : null}
+                          <span className="pl-btn__ico" style={{ width: 32, height: 32 }}>
+                            {analyzing ? (
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
                                 <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" /><path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
                                 <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
                               </svg>
-                              Analisando…
-                            </>
-                          ) : (
-                            <>
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                                <path d="M8 5v14l11-7z" />
+                            ) : (
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
+                                <path d="M8 5.5v13l10.5-6.5z" />
                               </svg>
-                              Start ({selectedTaskIds.size})
-                            </>
-                          )}
+                            )}
+                          </span>
                         </button>
                       </div>
                     </div>
@@ -16179,18 +16041,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStatesVisiveis).length > 0 ? (
-                    <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
-                      <div className="label-tech mb-3 flex items-center justify-between text-[10px] tracking-widest text-fuchsia-200">
-                        <span className="inline-flex items-center gap-2">
-                          <span className="relative flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
-                            <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-300" />
+                    <div className="pl-glass pl-prod" data-pl-spot>
+                      <PlSpot />
+                      <div className="pl-prod__head">
+                        <span className="inline-flex items-center gap-3">
+                          <span className="pl-prod__dot" aria-hidden />
+                          <span className="pl-h3">Tasks em produção</span>
+                          <span className="pl-count" style={{ color: 'rgb(var(--pink))', background: 'rgb(var(--pink) / 0.1)', boxShadow: 'inset 0 0 0 1px rgb(var(--pink) / 0.32)' }}>
+                            {Object.keys(batchStatesVisiveis).length}
                           </span>
-                          Tasks em produção · {Object.keys(batchStatesVisiveis).length}
                         </span>
                         {batchesEmOutrasEmpresas.length ? (
                           <span
-                            className="mono normal-case tracking-normal text-[10px] text-text-muted"
+                            className="pl-label"
                             title={batchesEmOutrasEmpresas.map((b) => b.taskName).join('\n')}
                           >
                             + {batchesEmOutrasEmpresas.length} rodando em outra empresa
@@ -16393,10 +16256,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                   );
                                 })() : null}
-                                <div className="mono mb-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
-                                  <span>Takes ({donePv}/{previews.length} prontos)</span>
+                                <div className="mb-2.5 flex items-center justify-between px-0.5">
+                                  <span className="pl-label">
+                                    <b className="font-semibold" style={{ color: 'rgb(var(--text))' }}>Takes</b> · {donePv} de {previews.length} prontos
+                                  </span>
                                 </div>
-                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                                   {previews.map((t, ti) => {
                                     const originalIdx = validIdxsFiltered[ti];
                                     const isRegenThis = !!regeneratingParts[chaveParte(b.taskId, t.label)];
@@ -16924,10 +16789,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     * "Carregar plano de cenas", que cria as tasks (14.09). */}
                   {Object.keys(taskAnalyses).length > 0 || modo === 'creator' ? (
                     <div className="mt-4">
-                      <div className="section-eyebrow mb-3 text-[11px]">
-                        Análise <span className="ml-1 font-semibold tracking-[0.14em] text-text-dim">— o que vai ser disparado</span>
+                      <div className="pl-sechead mb-4 px-1">
+                        <h2 className="pl-h2">Análise</h2>
+                        <span className="pl-sub">o que vai ser disparado</span>
                       </div>
-                      <ul className="grid gap-2">
+                      <ul className="grid gap-5">
                         {Object.values(taskAnalyses)
                           // ESCOPO (06.09): só cards do modo/empresa/doc atual — nada de
                           // análise do ClickUp sobrando na tela do CREATOR.
@@ -16974,10 +16840,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           // neste card (briefing do avatar, indicações, botão de doc).
                           const ehCreator = modoDaTaskLocal(a.taskId) === 'creator';
                           return (
-                            <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="mono text-xs text-white flex items-center gap-2 flex-wrap">
-                                  {sym} {displayName}
+                            <li
+                              key={a.taskId}
+                              className={`pl-ana-card ${color}`}
+                              data-st={a.status}
+                              data-pl-spot
+                            >
+                              <PlSpot />
+                              <div className="pl-ana-head">
+                                <span className="flex min-w-0 flex-wrap items-center gap-2.5">
+                                  <span className="pl-ana-sym" aria-hidden>{sym}</span>
+                                  <span className="pl-h3 truncate">{displayName}</span>
                                   {sharedSiblings.length > 0 ? (
                                     <span
                                       className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
@@ -16995,12 +16868,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <button
                                     type="button"
                                     onClick={() => removeTaskFromAnalysis(a.taskId)}
-                                    className="mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
+                                    className="pl-btn pl-btn--ghost pl-btn--sm pl-btn--danger"
                                     title={ehCreator
                                       ? 'Apaga esta task do CREATOR: avatares e copy somem (só deste navegador).'
                                       : 'Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois.'}
                                   >
-                                    × Remover
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+                                      <path d="M18 6 6 18M6 6l12 12" />
+                                    </svg>
+                                    Remover
                                   </button>
                                 </div>
                               </div>
@@ -17131,7 +17007,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   })()
                                 ) : !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
                                   // ═══ ACTION BAR 3D — botoes icon-only ═══
-                                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                  <div className="pl-toolbar shrink-0">
                                     {/* Tesoura (decupagem) toggle + INTENSIDADE.
                                         Tesoura liga/desliga (igual antes). Quando
                                         ON, aparece o chip com o valor do corte —
@@ -17165,7 +17041,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             onClick={() => setDecupPopoverOpen((p) => ({ ...p, [a.taskId]: false }))}
                                             aria-hidden
                                           />
-                                          <div className="absolute left-0 top-full z-40 mt-2 w-[264px] rounded-[14px] border border-lime/30 bg-bg/95 p-3.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur">
+                                          <div className="absolute left-0 top-full z-40 mt-2 w-[264px] rounded-[14px] border border-lime/30 bg-bg/95 p-3.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)]">
                                             <div className="mb-2.5 flex items-center justify-between">
                                               <span className="label-tech text-[10px] uppercase tracking-[0.16em] text-lime">
                                                 Intensidade do corte
@@ -18116,8 +17992,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   ) : (
                                   <div className="mt-1.5 grid gap-2">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
-                                        Avatares ({a.roleSlots.length}) — selecione cada um e a voz
+                                      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                                        <span className="pl-h3">Avatares</span>
+                                        <span className="pl-count" style={{ height: 20, minWidth: 22 }}>{a.roleSlots.length}</span>
+                                        <span className="pl-sub" style={{ fontSize: 15 }}>selecione cada um e a voz</span>
                                       </div>
                                       {/* + VERSOES (29.08) - o AD pode sair em ate 10 versoes,
                                           cada uma com o seu avatar por papel. A 1 e a de sempre
@@ -18135,35 +18013,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               type="button"
                                               onClick={() => setVersoesPickerOpen((pp) => ({ ...pp, [a.taskId]: !pp[a.taskId] }))}
                                               aria-expanded={aberto}
-                                              className="group inline-flex items-center gap-2 rounded-[12px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
-                                              style={
-                                                total > 1
-                                                  ? {
-                                                      fontFamily: 'var(--font-tech)',
-                                                      color: '#1a0505',
-                                                      borderColor: 'rgba(255,0,0,0.5)',
-                                                      background: 'linear-gradient(135deg, #ff6b6b 0%, #ff0000 100%)',
-                                                      boxShadow:
-                                                        '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(255,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.2)',
-                                                    }
-                                                  : {
-                                                      fontFamily: 'var(--font-tech)',
-                                                      color: 'rgba(255,255,255,0.55)',
-                                                      borderColor: 'rgba(255,255,255,0.12)',
-                                                      background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
-                                                      boxShadow: '0 2px 0 rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
-                                                    }
-                                              }
+                                              className={'pl-btn pl-btn--ghost pl-btn--sm' + (total > 1 ? ' pl-btn--hot' : '')}
                                               title="Quantas versoes este AD tem (1 a 10). Cada versao pode ter avatar (ou frame, no modo imagem) proprio; sem escolha propria, ela reaproveita a versao 1 sem gastar geracao."
                                             >
-                                              <span className="text-[12px] leading-none">+</span>
-                                              versões
-                                              <span
-                                                className={
-                                                  'rounded-full px-1.5 py-[1px] text-[8.5px] tracking-widest ' +
-                                                  (total > 1 ? 'bg-black/25 text-black/80' : 'bg-white/8 text-text-muted')
-                                                }
-                                              >
+                                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+                                                <path d="M12 5v14M5 12h14" />
+                                              </svg>
+                                              Versões
+                                              <span className="pl-btn__n" style={{ height: 18, minWidth: 20, fontSize: 10.5 }}>
                                                 {total}
                                               </span>
                                             </button>
@@ -18303,22 +18160,22 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         ? `${slot.role} · imagem do doc`
                                         : (slot.youtubeUrl ? `${slot.role} · YouTube` : `@${slot.username}.mp4`);
                                       return (
-                                        <div key={sIdx} className="hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]">
-                                          <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
-                                            <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
-                                            {ehCreator ? null : <span className="text-white/70">{refLabel}</span>}
+                                        <div key={sIdx} className="pl-slot">
+                                          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                            <span className="pl-role">{slot.role}</span>
+                                            {ehCreator ? null : <span className="pl-label" style={{ color: 'rgb(var(--text) / 0.72)' }}>{refLabel}</span>}
                                             <span className="info-chip">{partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
-                                              <span className="chip-alerta ml-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest">
-                                                <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                                              <span className="pl-chip-warn">
+                                                <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
                                                 Pendente
                                               </span>
                                             ) : slot.matchedBy === 'grupo' ? (
                                               <span
-                                                className="chip-violeta ml-1 inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest"
+                                                className="pl-chip-violet"
                                                 title="Mesmo avatar dos outros hooks deste AD — é o que permite reaproveitar o corpo já gerado. Trocar aqui vale só pra este hook."
                                               >
-                                                mesmo avatar do AD
+                                                Mesmo avatar do AD
                                               </span>
                                             ) : null}
                                             {/* BOTAO 3D: preview da copy que vai pro HeyGen deste avatar.
@@ -18406,10 +18263,15 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               <button
                                                 type="button"
                                                 onClick={() => removeRoleSlot(a.taskId, sIdx)}
-                                                className="rounded-full px-1.5 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
+                                                data-tone="rose"
+                                                className="pl-ibtn"
+                                                style={{ width: 30, height: 30 }}
                                                 title="Remover este slot"
+                                                aria-label="Remover este slot"
                                               >
-                                                ×
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+                                                  <path d="M18 6 6 18M6 6l12 12" />
+                                                </svg>
                                               </button>
                                             </div>
                                           </div>
@@ -18767,9 +18629,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </button>
                                                     ) : null}
                                                   </div>
-                                                  <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
-                                                    este é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
-                                                    edita pra corrigir leak, × pra remover, ou + pra acrescentar fala.
+                                                  <div className="pl-label mt-2" style={{ fontSize: 11.5 }}>
+                                                    Este é o texto EXATO que vai pro avatar: o que você editar aqui é o que dispara.
+                                                    Edita pra corrigir leak, × pra remover, ou + pra acrescentar fala.
                                                   </div>
                                                 </>
                                               )}
@@ -18777,7 +18639,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           ) : null}
                                           {/* ═══ PREVIEW AVATAR (thumb maior + info clean) ═══ */}
                                           {ehCreator ? null : (
-                                          <div className="mt-3 flex items-center gap-3 rounded-[14px] border border-white/8 bg-gradient-to-br from-white/[0.06] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                                          <div className="pl-brief mt-3 flex items-center gap-3 p-3">
                                             <div className="relative shrink-0">
                                               {briefingThumbUrl ? (
                                                 /* eslint-disable-next-line @next/next/no-img-element */
@@ -18847,7 +18709,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted"
                                                   title="O doc não tinha link clicável nesse arquivo NA HORA da análise (o card é um retrato daquele momento). Se o copy adicionou/corrigiu o link depois, re-analise a task (seleciona → Start) que ele entra sozinho."
                                                 >
-                                                  sem link
+                                                  Sem link
                                                 </span>
                                               )}
                                             </div>
@@ -18982,7 +18844,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   Voz
                                                   {slot.audioKey && !slot.imageMode ? (
                                                     <span className="font-normal normal-case tracking-normal text-text-muted">
-                                                      {slot.audioMirror ? '— voz alvo do Voice Mirror' : '— dorme: a voz é a do áudio'}
+                                                      {slot.audioMirror ? '· voz alvo do Voice Mirror' : '· dorme: a voz é a do áudio'}
                                                     </span>
                                                   ) : null}
                                                   <span className={`ml-auto normal-case tracking-normal ${slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted/70'}`}>
@@ -19593,31 +19455,32 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     <button
                                       type="button"
                                       onClick={() => addManualRoleSlot(a.taskId)}
-                                      className="group relative mt-1 inline-flex items-center gap-2 self-start rounded-[12px] border border-lime/55 px-3.5 py-2 text-[10.5px] font-bold uppercase tracking-[0.16em] text-black transition-all duration-200 hover:-translate-y-[1px] active:translate-y-[1px]"
-                                      style={{
-                                        fontFamily: 'var(--font-tech)',
-                                        background: 'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
-                                        boxShadow:
-                                          '0 3px 0 rgba(0,0,0,0.35), 0 0 20px -6px rgba(200,232,124,0.65), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -2px 0 rgba(0,0,0,0.2)',
-                                      }}
+                                      className="pl-add"
                                       title={
                                         a.roleSlots.length === 0
                                           ? 'Adiciona um avatar na mão — ele fala a copy inteira'
                                           : 'Adiciona outro avatar — aí você escolhe o que cada um fala'
                                       }
                                     >
-                                      <span className="text-[13px] leading-none">+</span>
+                                      <span className="pl-add__ico" aria-hidden>
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+                                          <path d="M12 5v14M5 12h14" />
+                                        </svg>
+                                      </span>
                                       {a.roleSlots.length === 0
                                         ? 'Adicionar avatar'
                                         : 'Adicionar outro avatar'}
                                     </button>
                                     {a.roleSlots.length === 1 && a.roleSlots[0]?.manual ? (
-                                      <div className="mono text-[9.5px] uppercase tracking-widest text-lime/80">
-                                        ✓ esse avatar fala a copy inteira ({(a.partTemplates || []).length} trechos)
+                                      <div className="pl-label flex items-center gap-1.5 px-1" style={{ color: 'rgb(var(--lime) / 0.85)' }}>
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                          <path d="m5 13 4 4L19 7" />
+                                        </svg>
+                                        Esse avatar fala a copy inteira ({(a.partTemplates || []).length} trechos)
                                       </div>
                                     ) : null}
                                     {a.roleSlots.length > 1 && a.roleSlots.some((s) => s.manual) ? (
-                                      <div className="mono text-[9.5px] normal-case tracking-normal text-text-muted">
+                                      <div className="pl-label px-1">
                                         Abra o 👁 de cada avatar pra escolher, trecho a trecho, quem fala o quê.
                                       </div>
                                     ) : null}
@@ -19775,14 +19638,18 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         );
                         if (readyIds.length === 0 && partialIds.length === 0) return null;
                         return (
-                          <div className="sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,232,124,0.4)] backdrop-blur">
-                            <span className="mono text-[11px] text-text-muted">
+                          <div className="pl-footbar">
+                            <span className="flex flex-wrap items-center gap-2">
                               {readyIds.length > 0 ? (
-                                <span className="text-lime">✓ {readyIds.length} ready</span>
+                                <span className="pl-pill-lime">
+                                  {readyIds.length} pronta{readyIds.length === 1 ? '' : 's'} pra disparar
+                                </span>
                               ) : null}
-                              {readyIds.length > 0 && partialIds.length > 0 ? <span className="text-text-muted"> · </span> : null}
                               {partialIds.length > 0 ? (
-                                <span className="text-yellow-300">⚠ {partialIds.length} pendente{partialIds.length === 1 ? '' : 's'} (resolva acima pra incluir)</span>
+                                <span className="pl-pill-amber">
+                                  {partialIds.length} pendente{partialIds.length === 1 ? '' : 's'}
+                                  <span className="opacity-70">· resolva acima pra incluir</span>
+                                </span>
                               ) : null}
                             </span>
                             <div className="flex flex-wrap items-center gap-2">
@@ -19793,10 +19660,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 type="button"
                                 onClick={startBatch}
                                 disabled={readyIds.length === 0}
-                                className="btn-primary disabled:opacity-40"
+                                className="pl-btn pl-btn--violet pl-btn--icon-end"
+                                style={{ height: 46 }}
                                 title={readyIds.length === 0 ? 'Nenhuma task ready ainda' : 'Roda em background: TTS + upload + submit + poll + zip'}
                               >
-                                ▶ Iniciar {readyIds.length} task{readyIds.length === 1 ? '' : 's'} em background
+                                Iniciar {readyIds.length} task{readyIds.length === 1 ? '' : 's'} em background
+                                <span className="pl-btn__ico" style={{ width: 34, height: 34 }}>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
+                                    <path d="M8 5.5v13l10.5-6.5z" />
+                                  </svg>
+                                </span>
                               </button>
                             </div>
                           </div>
@@ -20040,7 +19913,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               ) : null}
             </div>
           ) : null}
-      </ToolShell>
+      </PilotShell>
       {janelaDeFlow()}
       {janelaDeStockFrame()}
       {/* Modal pra editar 1 take e re-gerar so essa parte */}

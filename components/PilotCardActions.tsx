@@ -3,75 +3,17 @@
 import React from 'react';
 
 /**
- * PilotCardActions — botoes 3D icon-only pra o card de analise do
- * ClickUp Pilot. Familia visual coerente com BatchJobCard3D + tooltips
- * native (title=) sem barra preta.
+ * PilotCardActions — botoes icon-only do card de analise do ClickUp Pilot.
+ * Tooltips native (title=), sem barra preta.
  *
- * Cada botao tem:
- *  - Highlight gradient no topo (luz)
- *  - Lift+scale no hover
- *  - Active push no click
- *  - Color tinted por intent (lime, cyan, amber, fuchsia, rose, violet, neutral)
+ * Visual (08.10): "botão-instrumento" (.pl-ibtn, app/pilot-skin.css). Todos
+ * grafite com bisel; o ÍCONE carrega a cor da intenção e o anel/brilho só
+ * acende no hover e quando o botão está LIGADO (`active`). A barra de doze
+ * ações deixa de ser um arco-íris de bolas e vira um painel coerente em que o
+ * ligado salta à vista. Mesma API de antes (color, active, pulse, size, href).
  */
 
 export type PilotBtnColor = 'lime' | 'cyan' | 'amber' | 'fuchsia' | 'rose' | 'violet' | 'orange' | 'emerald' | 'neutral';
-
-const PALETTE: Record<PilotBtnColor, { ring: string; bg: string; text: string; glow: string }> = {
-  lime: {
-    ring: 'border-lime/55',
-    bg: 'from-lime/22 via-lime/10 to-lime/[0.02]',
-    text: 'text-lime',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(190,242,100,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(190,242,100,0.65)]',
-  },
-  cyan: {
-    ring: 'border-cyan-400/55',
-    bg: 'from-cyan-400/22 via-cyan-400/10 to-cyan-400/[0.02]',
-    text: 'text-cyan-200 dark:text-cyan-200',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(34,211,238,0.65)]',
-  },
-  amber: {
-    ring: 'border-amber-400/60',
-    bg: 'from-amber-400/22 via-amber-400/10 to-amber-400/[0.02]',
-    text: 'text-amber-700',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(251,191,36,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_12px_26px_-6px_rgba(251,191,36,0.65)]',
-  },
-  fuchsia: {
-    ring: 'border-fuchsia-400/55',
-    bg: 'from-fuchsia-400/22 via-fuchsia-400/10 to-fuchsia-400/[0.02]',
-    text: 'text-fuchsia-200',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(217,70,239,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(217,70,239,0.65)]',
-  },
-  rose: {
-    ring: 'border-rose-400/55',
-    bg: 'from-rose-400/20 via-rose-400/8 to-rose-400/[0.02]',
-    text: 'text-rose-300',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_3px_10px_-3px_rgba(244,63,94,0.35)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.26),0_12px_26px_-6px_rgba(244,63,94,0.6)]',
-  },
-  violet: {
-    ring: 'border-violet-400/55',
-    bg: 'from-violet-400/22 via-violet-400/10 to-violet-400/[0.02]',
-    text: 'text-violet-300',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(167,139,250,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(167,139,250,0.65)]',
-  },
-  orange: {
-    ring: 'border-orange-400/60',
-    bg: 'from-orange-400/22 via-orange-400/10 to-orange-400/[0.02]',
-    text: 'text-orange-300',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(251,146,60,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(251,146,60,0.65)]',
-  },
-  emerald: {
-    ring: 'border-emerald-400/55',
-    bg: 'from-emerald-400/22 via-emerald-400/10 to-emerald-400/[0.02]',
-    text: 'text-emerald-300',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(52,211,153,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_26px_-6px_rgba(52,211,153,0.65)]',
-  },
-  neutral: {
-    ring: 'border-white/12',
-    bg: 'from-white/10 via-white/[0.04] to-transparent',
-    text: 'text-text-muted',
-    glow: 'shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_-6px_rgba(255,255,255,0.18)]',
-  },
-};
 
 export function PilotBtn3D({
   icon,
@@ -89,29 +31,16 @@ export function PilotBtn3D({
   title: string;
   onClick?: () => void;
   disabled?: boolean;
-  /** Quando true, mostra outline forte (toggle ON state) */
+  /** Quando true, acende o anel na cor da intenção (toggle ON) */
   active?: boolean;
   href?: string;
   size?: number;
   pulse?: boolean;
 }) {
-  const p = PALETTE[color];
-  const base =
-    'group/pbtn relative inline-flex items-center justify-center rounded-full border bg-gradient-to-b will-change-transform transition-[transform,box-shadow,border-color] duration-200 ease-out';
-  const enabled = `${p.ring} ${p.bg} ${p.text} ${p.glow} hover:-translate-y-0.5 hover:scale-[1.08] active:translate-y-0 active:scale-95`;
-  const dis = 'border-white/8 bg-white/[0.03] text-white/30 opacity-60 cursor-not-allowed shadow-none';
-  const activeRing = active ? 'ring-2 ring-current/40 ring-offset-2 ring-offset-transparent' : '';
   const sizeStyle: React.CSSProperties = { height: size, width: size };
-
   const inner = (
     <>
-      <span
-        className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/15 to-transparent"
-        aria-hidden
-      />
-      {pulse && !disabled ? (
-        <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-current/40 animate-ping opacity-30" aria-hidden />
-      ) : null}
+      {pulse && !disabled ? <span className="pl-ibtn__pulse" aria-hidden /> : null}
       <span className="relative flex items-center justify-center">{icon}</span>
     </>
   );
@@ -122,7 +51,9 @@ export function PilotBtn3D({
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${base} ${enabled} ${activeRing}`}
+        className="pl-ibtn group/pbtn"
+        data-tone={color}
+        data-on={active ? 'true' : undefined}
         style={sizeStyle}
         title={title}
         aria-label={title}
@@ -139,8 +70,10 @@ export function PilotBtn3D({
       title={title}
       aria-label={title}
       aria-pressed={active}
+      data-tone={color}
+      data-on={active ? 'true' : undefined}
       style={sizeStyle}
-      className={`${base} ${disabled ? dis : enabled} ${activeRing}`}
+      className="pl-ibtn group/pbtn"
     >
       {inner}
     </button>
