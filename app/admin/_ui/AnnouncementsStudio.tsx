@@ -33,6 +33,7 @@ import {
   LIMITS,
   matchesAudience,
   normalizeEmail,
+  PROMO_ARTS,
   PROMO_THEMES,
   SEGMENT_META,
   SEGMENTS,
@@ -42,6 +43,7 @@ import {
   type AnnKind,
   type Audience,
   type AvisoContent,
+  type PromoArt,
   type PromoContent,
   type Segment,
   type Viewer,
@@ -774,6 +776,8 @@ function CtaFields({ label, url, onChange }: { label: string; url: string; onCha
   );
 }
 
+const ART_LABEL: Record<PromoArt, string> = { tema: 'Imagem ou arte do tema', pilot: 'Pilot animado' };
+
 function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<PromoContent>) => void; flash: (k: 'ok' | 'err', m: string) => void }) {
   const bullets = [...c.bullets, '', '', ''].slice(0, LIMITS.bullets);
   return (
@@ -810,7 +814,38 @@ function PromoFields({ c, set, flash }: { c: PromoContent; set: (p: Partial<Prom
         })}
       </div>
 
-      <ImageField url={c.imageUrl} onChange={(imageUrl) => set({ imageUrl })} flash={flash} />
+      <p className="field-label mb-2 text-[13px] text-text-muted">Arte</p>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {PROMO_ARTS.map((a) => {
+          const on = c.art === a;
+          return (
+            <button
+              key={a}
+              type="button"
+              onClick={() => set({ art: a })}
+              aria-pressed={on}
+              className="field-label inline-flex h-9 items-center rounded-full px-3.5 text-[12.5px] font-semibold transition-[background-color,box-shadow] duration-300"
+              style={{
+                ['--ann' as string]: THEME_META[c.theme].rgb,
+                color: on ? 'rgb(var(--text))' : 'rgb(var(--text-muted))',
+                background: on ? 'rgb(var(--ann) / 0.12)' : 'rgb(var(--text) / 0.04)',
+                boxShadow: `inset 0 0 0 1px ${on ? 'rgb(var(--ann) / 0.4)' : 'rgb(var(--text) / 0.08)'}`,
+                transitionTimingFunction: SPRING,
+              }}
+            >
+              {ART_LABEL[a]}
+            </button>
+          );
+        })}
+      </div>
+
+      {c.art === 'pilot' ? (
+        <p className="field-label -mt-1 mb-4 text-[12px] leading-relaxed text-text-muted">
+          A cena do Pilot entra no lugar da imagem, em cima do texto: o cérebro vira código e o código vira avatar em holograma, mexendo com o mouse.
+        </p>
+      ) : (
+        <ImageField url={c.imageUrl} onChange={(imageUrl) => set({ imageUrl })} flash={flash} />
+      )}
 
       <div className="grid gap-x-3 sm:grid-cols-2">
         <Field label="Selo (opcional)" value={c.badge} max={LIMITS.promoBadge}>

@@ -677,6 +677,91 @@
   }
 }
 
+/* ───────────────────────── Arte "Pilot animado" ─────────────────────────
+   A cena é o MESMO herói da página do Pilot (components/pilot/PilotHero +
+   app/pilot-hw.css). Aqui ele só ganha o material do aro (as variáveis --hw-*
+   moram no .pilot-hw da ferramenta) e uma altura proporcional à janela.
+   Todo o texto começa na mesma vertical da TINTA do "P" do lettering:
+   aro (8 de margem + 7 de borda) + 5,2% da tela (= left do .pilot-hero__brand)
+   + o respiro lateral do P no Michroma (0,09375em, medido na fonte).
+   --ann-pilot-word espelha o font-size do .pilot-hero__word (pilot-hw.css).
+   100cqw = largura do miolo (o .ann-promo é o container). */
+.ann-promo--pilot {
+  --hw-brush: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+  --hw-panel: linear-gradient(180deg, #1d1d20, #141416);
+  --hw-chamfer: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.7), 0 0 0 1px #040405;
+  --hw-drop: 0 18px 40px -26px #000;
+  --ann-pilot-h: clamp(210px, 33cqw, 312px);
+  --ann-pilot-word: clamp(40px, 6.6vw, 74px);
+  --ann-pilot-x: calc(15px + (100cqw - 30px) * 0.052 + var(--ann-pilot-word) * 0.09375);
+}
+.ann-promo--pilot .ann-promo__core {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+.ann-pilot {
+  position: relative;
+  margin: 8px 8px 0;
+}
+.ann-pilot .pilot-hero__screen {
+  height: var(--ann-pilot-h);
+}
+.ann-pilot__ph {
+  height: calc(var(--ann-pilot-h) + 14px);
+  border-radius: 24px;
+  background: var(--hw-brush), var(--hw-panel);
+  box-shadow: var(--hw-chamfer);
+}
+.ann-promo--pilot .ann-body {
+  padding: 28px var(--ann-pilot-x) 34px;
+}
+.ann-promo--pilot .ann-top {
+  padding-right: 0;
+}
+/* fechar sobre a cena: vidro escuro chapado (blur em cima de WebGL animado
+   = recomposição a cada quadro) */
+.ann-promo--pilot .ann-promo__x {
+  top: 20px;
+  right: 20px;
+  z-index: 4;
+  color: rgb(255 255 255 / 0.85);
+  background: rgb(6 6 8 / 0.62);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.14),
+    0 8px 20px -8px rgb(0 0 0 / 0.9);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.ann-promo--pilot .ann-promo__x:hover {
+  color: #fff;
+  background: rgb(6 6 8 / 0.8);
+}
+/* celular: o pilot-hw.css leva o nome pra left: 18px da tela, em 34px */
+@media (max-width: 767px) {
+  .ann-promo--pilot {
+    --ann-pilot-word: 34px;
+    --ann-pilot-x: calc(33px + var(--ann-pilot-word) * 0.09375);
+  }
+}
+/* janela estreita: a cena põe um avatar no canto de cima à direita, então o
+   fechar desce pro texto — centro na altura do selo (28 de respiro + 13 de
+   meio selo - 18 de meio botão) e borda direita na margem do texto */
+@container (max-width: 640px) {
+  .ann-promo--pilot .ann-promo__x {
+    top: calc(100% + 23px);
+    right: calc(var(--ann-pilot-x) - 8px);
+    background: rgb(255 255 255 / 0.05);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  }
+  .ann-promo--pilot .ann-promo__x:hover {
+    background: rgb(255 255 255 / 0.1);
+  }
+  .ann-promo--pilot .ann-top,
+  .ann-promo--pilot .ann-body:not(:has(.ann-top)) .ann-title {
+    padding-right: 46px;
+  }
+}
+
 /* ───────────────────────── Entrada / saída ───────────────────────── */
 
 @keyframes ann-in-right {

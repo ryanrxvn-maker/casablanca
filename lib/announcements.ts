@@ -24,6 +24,15 @@ export type AvisoTone = (typeof AVISO_TONES)[number];
 export const PROMO_THEMES = ['violeta', 'lima', 'ciano', 'ambar', 'rosa'] as const;
 export type PromoTheme = (typeof PROMO_THEMES)[number];
 
+/**
+ * Arte da janela grande: 'tema' = imagem enviada ou a arte do Auto Edit na
+ * cor; 'pilot' = a cena animada do herói do Pilot (cérebro que vira código e
+ * avatares em holograma), a mesma da página da ferramenta. Aviso antigo sem o
+ * campo cai em 'tema'.
+ */
+export const PROMO_ARTS = ['tema', 'pilot'] as const;
+export type PromoArt = (typeof PROMO_ARTS)[number];
+
 export type AvisoContent = {
   tone: AvisoTone;
   title: string;
@@ -34,6 +43,7 @@ export type AvisoContent = {
 
 export type PromoContent = {
   theme: PromoTheme;
+  art: PromoArt;
   badge: string;
   title: string;
   body: string;
@@ -204,6 +214,7 @@ export function emptyContent(kind: AnnKind): AnnContent {
   if (kind === 'aviso') return { tone: 'novidade', title: '', body: '', ctaLabel: '', ctaUrl: '' };
   return {
     theme: 'violeta',
+    art: 'tema',
     badge: '',
     title: '',
     body: '',
@@ -244,7 +255,9 @@ export function cleanContent(kind: AnnKind, raw: unknown): CleanResult<AnnConten
   const theme = (PROMO_THEMES as readonly string[]).includes(r.theme as string) ? (r.theme as PromoTheme) : 'violeta';
   const title = cleanLine(r.title, LIMITS.promoTitle);
   if (!title) return { ok: false, error: 'Escreva o título da propaganda.' };
-  const imageUrl = normalizeImage(r.imageUrl);
+  const art = (PROMO_ARTS as readonly string[]).includes(r.art as string) ? (r.art as PromoArt) : 'tema';
+  // Com a cena do Pilot a imagem não aparece: nem guarda nem barra link velho.
+  const imageUrl = art === 'pilot' ? '' : normalizeImage(r.imageUrl);
   if (imageUrl === null) return { ok: false, error: 'A imagem precisa ser um endereço https:// (ou envie um arquivo).' };
   const bullets = (Array.isArray(r.bullets) ? r.bullets : [])
     .map((b) => cleanLine(b, LIMITS.bullet))
@@ -257,6 +270,7 @@ export function cleanContent(kind: AnnKind, raw: unknown): CleanResult<AnnConten
     ok: true,
     value: {
       theme,
+      art,
       badge: cleanLine(r.badge, LIMITS.promoBadge),
       title,
       body: cleanText(r.body, LIMITS.promoBody),

@@ -15,6 +15,7 @@
  * Desenho no ./notifications.css (prefixo ann-).
  */
 
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
 import './notifications.css';
 import {
@@ -25,6 +26,17 @@ import {
   type AvisoTone,
   type PromoContent,
 } from '@/lib/announcements';
+
+/**
+ * Cena do herói do Pilot (arte "Pilot animado"): o MESMO componente da página
+ * da ferramenta. Carregado só quando uma propaganda com essa arte aparece, pra
+ * o motor WebGL não pesar nas outras telas; até chegar, fica o aro vazio do
+ * mesmo tamanho (nada pula).
+ */
+const PilotHero = dynamic(() => import('@/components/pilot/PilotHero').then((m) => m.PilotHero), {
+  ssr: false,
+  loading: () => <div className="ann-pilot__ph" />,
+});
 
 /* ───────────────────────── Ícones (traço fino) ───────────────────────── */
 
@@ -216,31 +228,44 @@ export function PromoBanner({
 }) {
   const [imgBroken, setImgBroken] = useState(false);
   useEffect(() => setImgBroken(false), [content.imageUrl]);
-  const showImage = !!content.imageUrl && !imgBroken;
+  // "Pilot animado": a cena do herói ocupa a largura toda em cima e o texto
+  // vem embaixo; o fechar fica sobre a cena e, sem botão principal, ele é a
+  // única ação (nada de "Agora não" sobrando).
+  const pilot = content.art === 'pilot';
+  const showImage = !pilot && !!content.imageUrl && !imgBroken;
+  const later = pilot && !content.ctaLabel ? undefined : onLater;
   const bullets = content.bullets.map((b) => b.trim()).filter(Boolean);
   const title = content.title || (placeholder ? 'Título da propaganda' : '');
   const body = content.body || (placeholder && !content.title ? 'Uma frase que faz a pessoa querer clicar.' : '');
+  const closeBtn = onClose ? (
+    <button type="button" className="ann-promo__x" onClick={onClose} aria-label="Fechar" title="Fechar">
+      <AnnIcon.close size={16} />
+    </button>
+  ) : null;
   return (
-    <div className="ann-promo dark-island" style={themeVar(content.theme)} data-anim={animate ? 'on' : 'off'}>
+    <div className={'ann-promo dark-island' + (pilot ? ' ann-promo--pilot' : '')} style={themeVar(content.theme)} data-anim={animate ? 'on' : 'off'}>
       <div className="ann-promo__core">
-        <div className="ann-media">
-          {showImage ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={content.imageUrl} alt="" decoding="async" onError={() => setImgBroken(true)} />
-              <div className="ann-media__scrim" />
-            </>
-          ) : (
-            <PromoArt animate={animate} />
-          )}
-        </div>
+        {pilot ? (
+          <div className="ann-pilot">
+            <PilotHero />
+            {closeBtn}
+          </div>
+        ) : (
+          <div className="ann-media">
+            {showImage ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={content.imageUrl} alt="" decoding="async" onError={() => setImgBroken(true)} />
+                <div className="ann-media__scrim" />
+              </>
+            ) : (
+              <PromoArt animate={animate} />
+            )}
+          </div>
+        )}
 
         <div className="ann-body">
-          {onClose ? (
-            <button type="button" className="ann-promo__x" onClick={onClose} aria-label="Fechar" title="Fechar">
-              <AnnIcon.close size={16} />
-            </button>
-          ) : null}
+          {pilot ? null : closeBtn}
 
           {content.badge || endsAt ? (
             <div className="ann-top ann-r ann-r1">
@@ -284,7 +309,7 @@ export function PromoBanner({
             </div>
           ) : null}
 
-          {content.ctaLabel || onLater ? (
+          {content.ctaLabel || later ? (
             <div className="ann-actions ann-r ann-r6">
               {content.ctaLabel ? (
                 <button type="button" className="ann-cta" onClick={onCta} tabIndex={onCta ? 0 : -1}>
@@ -294,8 +319,8 @@ export function PromoBanner({
                   </span>
                 </button>
               ) : null}
-              {onLater ? (
-                <button type="button" className="ann-later" onClick={onLater}>
+              {later ? (
+                <button type="button" className="ann-later" onClick={later}>
                   Agora não
                 </button>
               ) : null}
