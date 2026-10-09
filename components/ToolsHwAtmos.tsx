@@ -27,3 +27,18 @@ export function ToolsHwAtmos({ sub }: { sub: boolean }) {
     </div>
   );
 }
+
+/**
+ * Página inicial logada (/tools): a mesma fumaça da landing (vermelho →
+ * violeta), mais suave — o hub tem vídeo, banner e cards por cima e a fumaça
+ * é clima, não protagonista. O rastro do mouse acende em lilás (no Pilot, lime).
+ */
+const HUB_IGNITE = [0.86, 0.78, 1.0] as const;
+
+export function HubAtmos({ sub }: { sub: boolean }) {
+  return (
+    <div className={'hw-atmos' + (sub ? ' hw-atmos--sub' : '')} aria-hidden>
+      <PilotSmoke className="hw-atmos__smoke" strength={0.72} ignite={HUB_IGNITE} />
+    </div>
+  );
+}

@@ -99,6 +99,19 @@ test('herói do Pilot (09.10): WebGL que dorme junto com o site, cérebro calcul
   assert.match(ler('components/pilot/PilotHero.tsx'), /pilot-hero__word-spec ae-ambient/, 'o brilho do nome é enfeite infinito: pausa no descanso');
 });
 
+test('página inicial (09.10): fumaça única no layout e rodapé WebGL que só roda na tela, sem filtro em volta', () => {
+  const layout = ler('app/tools/layout.tsx');
+  assert.match(layout, /path === '\/tools' \? <HubAtmos/, 'a fumaça do hub mora no layout, fora do <main>');
+  const foot = ler('components/hub/HubFooter.tsx');
+  assert.match(foot, /isCalm\(\)/, 'o rodapé para no modo descanso / aba oculta');
+  assert.match(foot, /new IntersectionObserver/, 'o rodapé só desenha com ele na tela');
+  assert.match(foot, /1000 \/ 30/, '30 quadros/s');
+  // saturate no <main> com canvas animado dentro = página inteira refiltrada por quadro
+  const css = ler('app/globals.css');
+  assert.match(css, /main:has\(\.hub-root\) \{\s*filter: none;/);
+  assert.match(ler('components/ToolsHub.tsx'), /className="hub-root /);
+});
+
 test('landing: animações do herói só com transform/opacity (clip-path/left/box-shadow repintavam a cada quadro)', () => {
   const src = ler('components/landing/v3/scenes.tsx');
   for (const nome of ['bc-wipe', 'bc-wipe-in', 'bc-line', 'tj-breathe']) {

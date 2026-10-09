@@ -107,7 +107,17 @@ const PALETA: { a: RGB; b: RGB; ign: RGB } = {
   ign: [0.8, 0.93, 0.47],
 };
 
-function PilotSmokeImpl({ className = '' }: { className?: string }) {
+function PilotSmokeImpl({
+  className = '',
+  strength = 1,
+  ignite = PALETA.ign,
+}: {
+  className?: string;
+  /** multiplica a opacidade (a página inicial usa uma fumaça mais suave) */
+  strength?: number;
+  /** cor que acende no rastro do mouse (Pilot = lime) */
+  ignite?: RGB;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -157,7 +167,7 @@ function PilotSmokeImpl({ className = '' }: { className?: string }) {
     const uSat = gl.getUniformLocation(prog, 'u_sat');
     gl.uniform3fv(gl.getUniformLocation(prog, 'u_colA'), PALETA.a as unknown as number[]);
     gl.uniform3fv(gl.getUniformLocation(prog, 'u_colB'), PALETA.b as unknown as number[]);
-    gl.uniform3fv(gl.getUniformLocation(prog, 'u_ign'), PALETA.ign as unknown as number[]);
+    gl.uniform3fv(gl.getUniformLocation(prog, 'u_ign'), ignite as unknown as number[]);
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     const mouseOn = pointerFxAllowed();
@@ -195,7 +205,7 @@ function PilotSmokeImpl({ className = '' }: { className?: string }) {
       gl.uniform2f(uMouse, mx, my);
       gl.uniform2f(uTrail, trx, try_);
       gl.uniform1f(uEnergy, energy);
-      gl.uniform1f(uGain, light ? 0.55 : 1);
+      gl.uniform1f(uGain, (light ? 0.55 : 1) * strength);
       gl.uniform1f(uSat, light ? 1 : 0.72);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -262,6 +272,9 @@ function PilotSmokeImpl({ className = '' }: { className?: string }) {
       // NÃO descarta o contexto: no dev o React monta o efeito duas vezes e um
       // contexto perdido deixava o canvas pintando branco (lição da landing).
     };
+    // strength/ignite são fixos por uso (constantes de quem chama): recriar o
+    // WebGL por causa deles seria só custo
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

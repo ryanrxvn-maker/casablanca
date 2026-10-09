@@ -11,7 +11,7 @@ import { ToolGuideFab } from '@/components/ToolGuideFab';
 import { ToolHistoryFab } from '@/components/ToolHistoryFab';
 import { TopBar } from '@/components/TopBar';
 import { ToolsStateProvider } from '@/components/ToolsStateProvider';
-import { ToolsHwAtmos, toolsHwOn } from '@/components/ToolsHwAtmos';
+import { HubAtmos, ToolsHwAtmos, toolsHwOn } from '@/components/ToolsHwAtmos';
 import { usePathname } from 'next/navigation';
 
 /**
@@ -49,7 +49,8 @@ export default function ToolsLayout({
  */
 function ContentWrap({ children }: { children: React.ReactNode }) {
   const subActive = useSubSidebarActive();
-  const hw = toolsHwOn(usePathname());
+  const path = usePathname();
+  const hw = toolsHwOn(path);
   return (
     <div
       className={
@@ -58,6 +59,7 @@ function ContentWrap({ children }: { children: React.ReactNode }) {
       }
     >
       {hw ? <ToolsHwAtmos sub={subActive} /> : null}
+      {path === '/tools' ? <HubAtmos sub={subActive} /> : null}
       <TopBar />
       <PaymentBlockedBanner />
       <main className={'flex-1 pb-16 pt-6 md:pt-8' + (hw ? ' tools-hw' : '')}><DurableRecordsProvider>{children}</DurableRecordsProvider></main>

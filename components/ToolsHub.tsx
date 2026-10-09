@@ -36,6 +36,7 @@ import {
   IconRemoverElementos,
   IconSeparadorAudio,
 } from './ToolIcons';
+import { HubFooter } from '@/components/hub/HubFooter';
 
 /**
  * ToolsHub v3 — hub estilo HeyGen.
@@ -323,7 +324,8 @@ export function ToolsHub() {
   const greeting = greetingFor(new Date(), firstName);
 
   return (
-    <div className="mx-auto w-full max-w-[1100px] px-5 md:px-8">
+    <>
+    <div className="hub-root mx-auto w-full max-w-[1100px] px-5 md:px-8">
       {/* Flash de "ferramenta bloqueada" — mostra pra qualquer tier
           que tentou acessar algo que não pode. Inclui qual ferramenta
           foi bloqueada + qual plano libera. */}
@@ -422,22 +424,10 @@ export function ToolsHub() {
         </div>
       </section>
 
-      {/* Rodapé editorial */}
-      <section className="mt-20 mb-6 text-center">
-        <p className="display-subtle text-lg md:text-xl">
-          Ligue a fila e vá dormir.
-        </p>
-        <p className="mt-1 text-[13px] text-text-muted">
-          Auto Edit · {new Date().getFullYear()}
-        </p>
-        <p
-          className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-text-dim"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          DarkoCorporation
-        </p>
-      </section>
     </div>
+    {/* Rodapé (09.10): de ponta a ponta, com o nome feito de fumaça */}
+    <HubFooter />
+    </>
   );
 }
 

@@ -137,6 +137,19 @@ html:not([data-theme='light']) main {
 html:not([data-theme='light']) main:has(.tl-dock) {
   filter: none;
 }
+/* Página inicial (/tools, 09.10): o rodapé tem WebGL (o nome feito de
+   fumaça) — com o saturate no <main>, a página inteira seria refiltrada a
+   cada quadro dele. O filtro vai pro conteúdo do hub; o rodapé faz a própria
+   cor. position:relative põe o hub ACIMA da fumaça fixa do layout. */
+html:not([data-theme='light']) main:has(.hub-root) {
+  filter: none;
+}
+html:not([data-theme='light']) .hub-root {
+  filter: saturate(0.72);
+}
+.hub-root {
+  position: relative;
+}
 
 /* No CLARO os ícones cinza da sidebar somem (gray claro em fundo claro) →
    mais visíveis. NUNCA aplica no item ATIVO (.sb-icon-active) — esse fica
