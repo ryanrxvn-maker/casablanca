@@ -11,7 +11,8 @@
  * fumaça e acende as letras por onde passa; o fio de luz do topo acompanha o
  * cursor.
  *
- * Ilha escura nos dois temas (é um rodapé de vitrine, como o da landing).
+ * Escuro no tema escuro; no claro vira papel claro com o nome em TINTA
+ * colorida (luz não aparece em fundo claro), sombra macia e fio de vidro.
  *
  * Custo (regras de 05.10): 30 quadros/s e SÓ com o rodapé na tela, aba
  * visível e fora do modo descanso; resolução reduzida (fumaça é borrada);
@@ -36,6 +37,7 @@ uniform vec2 u_trail;
 uniform float u_energy;
 uniform sampler2D u_text;
 uniform vec4 u_mark; // retângulo do nome em px do canvas (x0, y0, x1, y1), y pra cima
+uniform float u_light; // tema claro: a fumaça vira TINTA (luz some em fundo claro)
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 p){
@@ -86,7 +88,10 @@ void main(){
 
   // dentro das letras: fumaça mais densa e acesa (o nome é feito dela)
   float txt = texture2D(u_text, uv).a * step(u_mark.y, gl_FragCoord.y);
-  vec2 px = 1.0 / u_res;
+  // efeitos de borda medidos pelo tamanho do nome (no celular ele é bem menor)
+  float U = max(0.35, (u_mark.w - u_mark.y) / 180.0);
+  vec2 px = U / u_res;
+  vec2 px1 = 1.0 / u_res;
   float halo = 0.0;
   for (int i = 0; i < 8; i++) {
     float an = float(i) * 0.7853982;
@@ -99,12 +104,34 @@ void main(){
   vec3 colIn = mix(tint * 1.1, vec3(0.98, 0.94, 1.0), clamp(dens * dens * 0.6 + infl * 0.6, 0.0, 0.9)) * (0.45 + 1.0 * dens + 1.3 * infl);
   float aIn = clamp(0.24 + 0.76 * dens + infl * 0.7, 0.0, 1.0) * mix(0.2, 1.0, down);
   // fio de luz na borda de cima de cada letra (vidro)
-  float topEdge = clamp(txt - texture2D(u_text, uv + vec2(0.0, px.y * 3.0)).a, 0.0, 1.0) * down;
+  float topEdge = clamp(txt - texture2D(u_text, uv + vec2(0.0, max(px.y * 3.0, px1.y * 1.5))).a, 0.0, 1.0) * down;
   // aro de luz em volta das letras
   float rim = clamp(halo - txt, 0.0, 1.0) * (0.25 + 0.75 * down);
 
-  vec3 col = mix(colOut * aOut, colIn * aIn, txt) + vio * rim * (0.22 + 0.9 * infl) + vec3(1.0, 0.95, 1.0) * topEdge * (0.35 + 0.6 * infl);
-  float a = clamp(mix(aOut, aIn, txt) + rim * (0.14 + 0.5 * infl) + topEdge * 0.35, 0.0, 1.0);
+  vec3 col;
+  float a;
+  if (u_light < 0.5) {
+    col = mix(colOut * aOut, colIn * aIn, txt) + vio * rim * (0.22 + 0.9 * infl) + vec3(1.0, 0.95, 1.0) * topEdge * (0.35 + 0.6 * infl);
+    a = clamp(mix(aOut, aIn, txt) + rim * (0.14 + 0.5 * infl) + topEdge * 0.35, 0.0, 1.0);
+  } else {
+    // claro: as mesmas cores em tom de tinta, sombra macia embaixo das letras
+    // e fio de vidro branco em cima; o mouse deixa a tinta mais viva
+    vec3 ink = mix(vec3(0.8, 0.17, 0.2), vec3(0.38, 0.21, 0.88), clamp(uv.x * 1.15 + (q.x - 0.5) * 0.8, 0.0, 1.0));
+    float aO = clamp(sOut * 0.26 + infl * sOut * 0.4, 0.0, 0.42);
+    vec3 cI = mix(ink * 0.5, ink * 1.12, dens);
+    cI = mix(cI, mix(ink, vec3(1.0, 0.42, 0.72), 0.32) * 1.15, clamp(infl * 0.85, 0.0, 0.85));
+    float aI = clamp(0.52 + 0.48 * dens + infl * 0.3, 0.0, 1.0) * mix(0.22, 1.0, down);
+    float sh = 0.0;
+    for (int i = 0; i < 8; i++) {
+      float an = float(i) * 0.7853982;
+      sh += texture2D(u_text, uv + vec2(-2.0 * px.x, 9.0 * px.y) + vec2(cos(an), sin(an)) * px * 7.0).a;
+    }
+    sh = sh / 8.0 * step(u_mark.y, gl_FragCoord.y) * (1.0 - txt) * down * 0.24;
+    float edge = topEdge * 0.75;
+    float glow = rim * infl * 0.3;
+    col = mix(ink * aO, cI * aI, txt) + vec3(0.16, 0.08, 0.28) * sh + vec3(1.0) * edge + ink * glow;
+    a = clamp(mix(aO, aI, txt) + sh + edge + glow, 0.0, 1.0);
+  }
   gl_FragColor = vec4(min(col, vec3(a)), a);
 }
 `;
@@ -153,7 +180,7 @@ function useFooterSmoke(
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const U = (n: string) => gl.getUniformLocation(prog, n);
-    const uRes = U('u_res'), uTime = U('u_time'), uMouse = U('u_mouse'), uTrail = U('u_trail'), uEnergy = U('u_energy'), uMark = U('u_mark');
+    const uRes = U('u_res'), uTime = U('u_time'), uMouse = U('u_mouse'), uTrail = U('u_trail'), uEnergy = U('u_energy'), uMark = U('u_mark'), uLight = U('u_light');
     gl.uniform1i(U('u_text'), 0);
 
     // o nome vira uma máscara (textura) no mesmo tamanho do canvas
@@ -222,6 +249,7 @@ function useFooterSmoke(
       gl.uniform2f(uTrail, trx, try_);
       gl.uniform1f(uEnergy, energy);
       gl.uniform4f(uMark, ...markPx);
+      gl.uniform1f(uLight, document.documentElement.getAttribute('data-theme') === 'light' ? 1 : 0);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.clearColor(0, 0, 0, 0);
@@ -280,7 +308,7 @@ function useFooterSmoke(
     });
     io.observe(canvas);
     const mo = new MutationObserver(wake);
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     document.addEventListener('visibilitychange', wake);
     reduced.addEventListener('change', wake);
     if (mouseOn) root.addEventListener('pointermove', onMove, { passive: true });
@@ -372,7 +400,7 @@ export function HubFooter() {
   };
 
   return (
-    <footer ref={rootRef} className="hf dark-island relative isolate -mb-16 mt-20 overflow-hidden md:mt-28">
+    <footer ref={rootRef} className="hf relative isolate -mb-16 mt-20 overflow-hidden md:mt-28">
       <span ref={lineRef} aria-hidden className="hf-line" />
       <canvas ref={canvasRef} aria-hidden className="hf-gl" />
 
@@ -380,9 +408,7 @@ export function HubFooter() {
         <div className="col-span-2 md:col-span-1">
           <div className="flex items-center gap-3">
             <DarkoLogo size={32} />
-            <span className="text-[24px] leading-none text-white" style={{ fontFamily: 'var(--font-serif)' }}>
-              Auto Edit
-            </span>
+            <span className="hf-brand">Auto Edit</span>
           </div>
           <p className="hf-motto mt-5">Ligue a fila e vá dormir.</p>
           <div className="mt-7 flex flex-wrap items-center gap-3">
@@ -439,7 +465,7 @@ export function HubFooter() {
 
       <div className="hf-bar relative">
         <div className="mx-auto flex max-w-[1100px] flex-col items-start justify-between gap-3 px-5 py-5 pr-24 md:flex-row md:items-center md:px-8 md:pr-28">
-          <p className="text-[12.5px] text-white/45">
+          <p className="hf-copy">
             Auto Edit © {new Date().getFullYear()} · <span className="hf-corp">DarkoCorporation</span>
           </p>
           <button ref={topRef} type="button" onClick={toTop} className="hf-top group">
@@ -459,10 +485,7 @@ export function HubFooter() {
             radial-gradient(70% 60% at 50% 115%, rgba(167, 139, 250, 0.12), transparent 70%),
             linear-gradient(180deg, rgba(9, 9, 11, 0) 0, #09090b 120px);
         }
-        /* no claro a página é clara: o rodapé entra como bloco escuro inteiro */
-        :global(html[data-theme='light']) .hf {
-          background: radial-gradient(70% 60% at 50% 115%, rgba(167, 139, 250, 0.12), transparent 70%), #09090b;
-        }
+
         .hf-line {
           position: absolute;
           inset: 0 0 auto 0;
@@ -497,6 +520,16 @@ export function HubFooter() {
           pointer-events: none;
           opacity: 0;
           transition: opacity 1.2s ease;
+        }
+        .hf-brand {
+          font-family: var(--font-serif);
+          font-size: 24px;
+          line-height: 1;
+          color: #fff;
+        }
+        .hf-copy {
+          font-size: 12.5px;
+          color: rgba(255, 255, 255, 0.45);
         }
         .hf-motto {
           max-width: 22ch;
@@ -636,6 +669,72 @@ export function HubFooter() {
         .hf-top:hover .hf-top-ico {
           transform: translateY(-2px);
           box-shadow: inset 0 0 0 1px rgba(196, 181, 253, 0.6), 0 0 18px rgba(196, 181, 253, 0.45);
+        }
+        /* ── tema claro: papel claro, tinta escura, a fumaça vira tinta colorida ── */
+        :global(html[data-theme='light']) .hf {
+          background:
+            radial-gradient(70% 60% at 50% 115%, rgba(139, 108, 250, 0.16), transparent 70%),
+            linear-gradient(180deg, rgba(250, 249, 246, 0) 0, rgba(250, 249, 246, 0.6) 140px, rgba(247, 246, 242, 0.92) 100%);
+        }
+        :global(html[data-theme='light']) .hf-line {
+          background: linear-gradient(90deg, transparent, rgba(200, 50, 45, 0.55) 25%, rgba(110, 80, 230, 0.6) 60%, transparent);
+          box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+        }
+        :global(html[data-theme='light']) .hf-line::after {
+          background: radial-gradient(closest-side, #6d4dff, rgba(125, 92, 255, 0.55) 40%, transparent);
+          filter: drop-shadow(0 0 8px rgba(109, 77, 255, 0.55));
+        }
+        :global(html[data-theme='light']) .hf-brand {
+          color: #15151a;
+        }
+        :global(html[data-theme='light']) .hf-motto {
+          color: rgba(21, 21, 26, 0.78);
+        }
+        :global(html[data-theme='light']) .hf-pill {
+          color: #26262c;
+          background: rgba(255, 255, 255, 0.7);
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+        }
+        :global(html[data-theme='light']) .hf-pill:hover {
+          color: #0b0b0e;
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.24), 0 12px 28px -14px rgba(109, 77, 255, 0.55);
+        }
+        :global(html[data-theme='light']) .hf-col-title {
+          color: rgba(21, 21, 26, 0.5);
+        }
+        :global(html[data-theme='light'] .hf-link) {
+          color: rgba(21, 21, 26, 0.74);
+        }
+        :global(html[data-theme='light'] .hf-link:hover) {
+          color: #0b0b0e;
+        }
+        :global(html[data-theme='light']) .hf-word {
+          color: rgba(21, 21, 26, 0.1);
+        }
+        :global(html[data-theme='light']) .hf[data-gl='on'] .hf-word {
+          color: transparent;
+        }
+        :global(html[data-theme='light']) .hf-bar {
+          border-top-color: rgba(0, 0, 0, 0.1);
+          background: rgba(255, 255, 255, 0.5);
+        }
+        :global(html[data-theme='light']) .hf-copy {
+          color: rgba(21, 21, 26, 0.58);
+        }
+        :global(html[data-theme='light']) .hf-corp {
+          color: rgba(21, 21, 26, 0.45);
+        }
+        :global(html[data-theme='light']) .hf-top {
+          color: rgba(21, 21, 26, 0.64);
+        }
+        :global(html[data-theme='light']) .hf-top:hover {
+          color: #0b0b0e;
+        }
+        :global(html[data-theme='light']) .hf-top-ico {
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+        }
+        :global(html[data-theme='light']) .hf-top:hover .hf-top-ico {
+          box-shadow: inset 0 0 0 1px rgba(109, 77, 255, 0.55), 0 0 16px rgba(109, 77, 255, 0.3);
         }
         @media (prefers-reduced-motion: reduce) {
           .hf-line::after,
