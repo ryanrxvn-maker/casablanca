@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import AdminPage from '@/app/admin/page';
 import NotificacoesPage from '@/app/tools/notificacoes/page';
 import { TopBar } from '@/components/TopBar';
+import { ToolsHwAtmos } from '@/components/ToolsHwAtmos';
 import { AnnouncementHost } from '@/components/notifications/AnnouncementHost';
 import {
   addDismissedKey,
@@ -382,7 +383,9 @@ export default function DevAvisos() {
     <div className="min-h-screen bg-bg">
       <AnnouncementHost />
       <TopBar />
-      <main className="pb-28 pt-6 md:pt-8">{view === 'admin' ? <AdminPage /> : <NotificacoesPage />}</main>
+      {/* /tools/* em produção veste a pele Hardware + fumaça (app/tools/layout.tsx) */}
+      {view === 'notificacoes' ? <ToolsHwAtmos sub={false} /> : null}
+      <main className={'pb-28 pt-6 md:pt-8' + (view === 'notificacoes' ? ' tools-hw' : '')}>{view === 'admin' ? <AdminPage /> : <NotificacoesPage />}</main>
       <div
         className="field-label fixed bottom-4 left-1/2 z-[70] flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-full bg-bg-elev px-3 py-2 text-[12.5px] text-text"
         style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.12), 0 20px 40px -16px rgb(0 0 0 / 0.7)' }}
