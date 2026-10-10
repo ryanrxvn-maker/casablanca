@@ -838,19 +838,36 @@ export function AnnouncementsStudio({
       {confirmAct ? (
         <Modal onClose={() => setConfirmAct(null)} tone="violet">
           <h3 className="font-tech text-[18px] font-semibold tracking-[-0.02em] text-text">
-            {confirmAct.action === 'send' ? 'Enviar o e-mail de novo?' : confirmAct.action === 'activate' ? 'Ativar e mandar o e-mail?' : 'Mostrar de novo e mandar o e-mail?'}
+            {confirmAct.action === 'send'
+              ? confirmAct.a.activatedAt
+                ? 'Enviar o e-mail de novo?'
+                : 'Enviar o e-mail agora?'
+              : confirmAct.action === 'activate'
+                ? 'Ativar e mandar o e-mail?'
+                : 'Mostrar de novo e mandar o e-mail?'}
           </h3>
-          <p className="field-label mt-2 text-[14px] leading-relaxed text-text-muted">
-            {(() => {
-              const n = viewers.filter((v) => matchesAudience(confirmAct.a.audience, v)).length;
-              const c = confirmAct.a.content as PromoContent;
-              return (
-                <>
-                  Vai pra <b className="text-text">{n} {n === 1 ? 'conta' : 'contas'}{confirmAct.a.audience.includeAdmins ? ' + admins' : ''}</b>: <b className="text-text">&ldquo;{c.mail?.subject || confirmAct.a.content.title}&rdquo;</b>. É uma ativação nova, então o e-mail sai de novo pra todo mundo. Quem pediu pra não receber fica de fora.
-                </>
-              );
-            })()}
-          </p>
+          {(() => {
+            const n = viewers.filter((v) => matchesAudience(confirmAct.a.audience, v)).length;
+            const c = confirmAct.a.content as PromoContent;
+            // 1º envio do modelo E-mail não é "de novo"
+            const first = confirmAct.action === 'send' && !confirmAct.a.activatedAt;
+            return (
+              <>
+                <p className="field-label mt-2 text-[14px] leading-relaxed text-text-muted">
+                  Vai pra <b className="text-text">{n} {n === 1 ? 'conta' : 'contas'}{confirmAct.a.audience.includeAdmins ? ' + admins' : ''}</b>: <b className="text-text">&ldquo;{c.mail?.subject || confirmAct.a.content.title}&rdquo;</b>.{' '}
+                  {first ? 'Depois de enviado não tem como desfazer.' : 'É uma ativação nova, então o e-mail sai de novo pra todo mundo.'} Quem pediu pra não receber fica de fora.
+                </p>
+                {lastQuota && n > roomToday(lastQuota) ? (
+                  <p
+                    className="field-label mt-3 rounded-xl px-3 py-2 text-[13px] leading-relaxed text-text"
+                    style={{ background: accent('amber', 0.08), boxShadow: `inset 0 0 0 1px ${accent('amber', 0.25)}` }}
+                  >
+                    Resend no plano grátis: hoje cabem cerca de {roomToday(lastQuota)} e-mails ({FREE_RESERVE} ficam guardados pros códigos de cadastro). Os outros você manda com &ldquo;Tentar o resto do e-mail&rdquo; depois das 21h, sem repetir ninguém.
+                  </p>
+                ) : null}
+              </>
+            );
+          })()}
           <div className="mt-5 flex justify-end gap-2">
             <Btn onClick={() => setConfirmAct(null)}>Cancelar</Btn>
             <Btn

@@ -136,6 +136,38 @@ export function batchKey(annId: string, activatedAt: string, slice: Pick<Recipie
 export const FREE_DAILY = 100;
 export const FREE_RESERVE = 20;
 
+/** Dia da cota do Resend (vira à meia-noite UTC = 21h de Brasília). */
+export function utcDay(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : '';
+}
+
+/**
+ * Uso do dia ESTIMADO depois de um lote. O cabeçalho x-resend-daily-quota
+ * ATRASA (10.10: dizia 88 com 228 já aceitos — a trava confiou nele e a cota
+ * do dia estourou, travando os códigos de cadastro até as 21h). Então a conta
+ * é nossa: nunca menos que o estimado antes + o que acabou de ser aceito.
+ * Sem estimativa do mesmo dia, supõe que o cabeçalho ainda NÃO contou este lote.
+ *   header null = não veio cabeçalho (rede) → segue a estimativa;
+ *   header.daily null = plano sem limite diário (pago) → sem limite.
+ */
+export function nextQuota(
+  before: { daily: number | null; monthly: number | null; at: string } | null,
+  header: { daily: number | null; monthly: number | null; at: string } | null,
+  accepted: number,
+  now: string,
+): { daily: number | null; monthly: number | null; at: string } | null {
+  const same = before && utcDay(before.at) === utcDay(now) ? before : null;
+  if (!header) {
+    if (!same || same.daily === null) return same ? { ...same, at: now } : null;
+    return { daily: same.daily + accepted, monthly: same.monthly === null ? null : same.monthly + accepted, at: now };
+  }
+  const monthly = header.monthly === null ? null : Math.max(header.monthly, (same?.monthly ?? header.monthly) + accepted);
+  if (header.daily === null) return { daily: null, monthly, at: now };
+  const daily = Math.max(header.daily, (same?.daily ?? header.daily) + accepted);
+  return { daily, monthly, at: now };
+}
+
 /** Quantos ainda dá pra mandar hoje sem comer a reserva (sem limite diário = Infinity). */
 export function roomToday(quota: { daily: number | null } | null): number {
   if (!quota || quota.daily === null) return Infinity;

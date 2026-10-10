@@ -47,33 +47,58 @@ function svcFalso(rows: Row[], sairam: string[] = []) {
 /* ─── Resend falso ─── */
 const resend = {
   plano: 'gratis' as 'gratis' | 'pago',
+  /** uso REAL do dia */
   hoje: 0,
   mes: 0,
+  /**
+   * O contador do Resend ATRASA (10.10 em produção: cabeçalho dizia 88 com
+   * 228 aceitos, e a cota também só barrou depois). `atraso` = quantas
+   * chamadas o número visto (cabeçalho E bloqueio) fica pra trás do real.
+   */
+  atraso: 0,
+  inicio: 0,
+  depois: [] as number[],
   chaves: new Map<string, string>(),
   recebidos: new Map<string, number>(),
   lotes: [] as number[],
   falharProximo: null as null | { status: number; name: string; message: string },
-  reset(plano: 'gratis' | 'pago', hoje = 0) {
+  reset(plano: 'gratis' | 'pago', hoje = 0, atraso = 0) {
     this.plano = plano;
     this.hoje = hoje;
+    this.inicio = hoje;
+    this.depois = [];
+    this.atraso = atraso;
     this.mes = 0;
     this.chaves.clear();
     this.recebidos.clear();
     this.lotes = [];
     this.falharProximo = null;
   },
+  /** o número que o Resend MOSTRA (e usa pra barrar), com atraso */
+  visto(): number {
+    const i = this.depois.length - 1 - this.atraso;
+    return i >= 0 ? this.depois[i] : this.inicio;
+  },
   /** virou o dia (meia-noite UTC) e passaram 24 h: cota zera e as chaves vencem */
   novoDia() {
     this.hoje = 0;
+    this.inicio = 0;
+    this.depois = [];
     this.chaves.clear();
   },
 };
-const cab = () => ({ 'x-resend-monthly-quota': String(resend.mes), ...(resend.plano === 'gratis' ? { 'x-resend-daily-quota': String(resend.hoje) } : {}) });
+const cab = () => ({ 'x-resend-monthly-quota': String(resend.mes), ...(resend.plano === 'gratis' ? { 'x-resend-daily-quota': String(resend.visto()) } : {}) });
+/** o registro guardado "envelhece" um dia (a estimativa do dia anterior não vale mais) */
+const ontem = (l: MailLog): MailLog => ({ ...l, quota: l.quota && { ...l.quota, at: '2000-01-01T12:00:00.000Z' } });
 globalThis.fetch = (async (_url: string, init: { body: string; headers: Record<string, string> }) => {
   const corpo = init.body;
   const lote = JSON.parse(corpo) as Array<{ to: string[]; headers: Record<string, string>; subject: string }>;
   const chave = init.headers['Idempotency-Key'] ?? null;
-  const resp = (status: number, j: unknown) => new Response(JSON.stringify(j), { status, headers: cab() });
+  // cada chamada registra o uso real depois dela; cabeçalho/bloqueio leem com atraso
+  const resp = (status: number, j: unknown) => {
+    resend.depois.push(resend.hoje);
+    return new Response(JSON.stringify(j), { status, headers: cab() });
+  };
   if (resend.falharProximo) {
     const f = resend.falharProximo;
     resend.falharProximo = null;
@@ -82,7 +107,7 @@ globalThis.fetch = (async (_url: string, init: { body: string; headers: Record<s
   if (chave && resend.chaves.has(chave)) {
     return resend.chaves.get(chave) === corpo ? resp(200, { data: [] }) : resp(409, { name: 'invalid_idempotent_request', message: 'mesma chave, corpo diferente' });
   }
-  if (resend.plano === 'gratis' && resend.hoje + lote.length > FREE_DAILY) return resp(429, { name: 'daily_quota_exceeded', message: 'You have reached your daily email sending quota.' });
+  if (resend.plano === 'gratis' && resend.visto() + lote.length > FREE_DAILY) return resp(429, { name: 'daily_quota_exceeded', message: 'You have reached your daily email sending quota.' });
   for (const e of lote) resend.recebidos.set(e.to[0], (resend.recebidos.get(e.to[0]) ?? 0) + 1);
   resend.hoje += lote.length;
   resend.mes += lote.length;
@@ -111,31 +136,47 @@ async function main() {
     ok(log.sent === 459 && log.total === 459 && log.optOut === 1 && log.done && !log.reason, `todo mundo recebeu menos quem saiu da lista (${log.sent}/${log.total}, fora ${log.optOut})`);
     ok(resend.recebidos.size === 459 && repetidos() === 0 && !resend.recebidos.has('pessoa3@exemplo.com'), 'ninguém repetido, quem saiu não recebe');
     ok(Math.max(...resend.lotes) <= 100, 'lotes de no máximo 100');
-    ok(log.quota?.daily === null && log.quota?.monthly === 459, 'cota lida: sem limite diário (pago), uso do mês');
+    ok(log.quota?.daily === null && (log.quota?.monthly ?? 0) >= 459, 'cota lida: sem limite diário (pago), uso do mês');
     const de_novo = await deliverMail(svcFalso(rows, ['u0003']), job(), { prev: log });
     ok(de_novo.sent === 459 && !de_novo.reason && repetidos() === 0 && resend.recebidos.size === 459, '"Tentar o resto" depois de tudo enviado não manda nada de novo');
     const dobro = await Promise.all([deliverMail(svcFalso(rows), job('outro')), deliverMail(svcFalso(rows), job('outro'))]);
     ok(dobro.every((l) => !l.reason) && [...resend.recebidos.values()].every((n) => n <= 2) && resend.recebidos.get('pessoa3@exemplo.com') === 1, 'clique duplo (2 rodadas juntas do mesmo aviso) não duplica: mesma chave de lote');
   }
 
-  console.log('plano grátis: guarda a reserva dos códigos de cadastro e continua nos dias seguintes sem repetir');
+  console.log('plano grátis com o contador ATRASADO (como em produção 10.10): guarda a reserva e continua nos dias seguintes sem repetir');
   {
-    resend.reset('gratis', 7); // 7 códigos de cadastro já saíram hoje
+    resend.reset('gratis', 7, 3); // 7 códigos de cadastro já saíram hoje; o Resend mostra/barra 3 chamadas atrasado
     const rows = contas(230);
     let log: MailLog = await deliverMail(svcFalso(rows), job());
     ok(log.reason === 'quota' && /Plano grátis do Resend/.test(log.message ?? ''), 'para por cota com a frase do plano grátis');
-    ok(resend.hoje === FREE_DAILY - FREE_RESERVE, `parou com ${resend.hoje} usados hoje: sobram ${FREE_DAILY - resend.hoje} pros códigos de cadastro`);
-    ok(log.sent === FREE_DAILY - FREE_RESERVE - 7 && log.failed === 230 - log.sent && !!log.cursor, `mandou ${log.sent}, registrou ${log.failed} faltando e o marcador`);
-    const cadastroAinda = resend.hoje + 1 <= FREE_DAILY;
-    ok(cadastroAinda, 'código de cadastro de quem entrar depois ainda sai hoje');
+    ok(resend.hoje <= FREE_DAILY - FREE_RESERVE, `uso REAL parou em ${resend.hoje}: sobram ${FREE_DAILY - resend.hoje} pros códigos de cadastro (o contador atrasado mostrava ${resend.visto()})`);
+    ok(log.sent === resend.hoje - 7 && log.failed === 230 - log.sent && !!log.cursor, `mandou ${log.sent}, registrou ${log.failed} faltando e o marcador`);
+    ok((log.quota?.daily ?? 0) >= resend.hoje, `a estimativa guardada (${log.quota?.daily}) nunca fica abaixo do uso real (${resend.hoje})`);
+    const antes = resend.hoje;
+    log = await deliverMail(svcFalso(rows), job(), { prev: log }); // "Tentar o resto" logo em seguida, contador ainda atrasado
+    ok(log.reason === 'quota' && resend.hoje - antes <= 1 && resend.hoje <= FREE_DAILY - FREE_RESERVE + 1, `"Tentar o resto" no mesmo dia: no máximo a sonda de 1 (saíram ${resend.hoje - antes})`);
     let dias = 1;
+    let dentro = true;
     while (log.reason === 'quota' && dias < 10) {
       resend.novoDia(); // chaves de idempotência venceram: só o marcador protege
-      log = await deliverMail(svcFalso(rows), job(), { prev: log });
+      log = await deliverMail(svcFalso(rows), job(), { prev: ontem(log) });
+      if (resend.hoje > FREE_DAILY - FREE_RESERVE) dentro = false;
       dias++;
     }
+    ok(dentro, `todo dia o uso real ficou em até ${FREE_DAILY - FREE_RESERVE} (reserva intacta)`);
     ok(!log.reason && log.done && log.sent === 230 && log.total === 230, `terminou em ${dias} dias: ${log.sent}/${log.total}`);
     ok(resend.recebidos.size === 230 && repetidos() === 0, 'cada pessoa recebeu EXATAMENTE 1 vez, mesmo com as chaves vencidas');
+  }
+
+  console.log('assinou o plano pago no meio do dia: "Tentar o resto" manda o resto na hora');
+  {
+    resend.reset('gratis', 0, 3);
+    const rows = contas(150);
+    let log = await deliverMail(svcFalso(rows), job('upgrade'));
+    ok(log.reason === 'quota' && resend.hoje <= FREE_DAILY - FREE_RESERVE, 'grátis: parou guardando a reserva');
+    resend.plano = 'pago';
+    log = await deliverMail(svcFalso(rows), job('upgrade'), { prev: log });
+    ok(!log.reason && log.done && log.sent === 150 && resend.recebidos.size === 150 && repetidos() === 0, 'pago: terminou na mesma hora, sem repetir ninguém');
   }
 
   console.log('cota já no limite da reserva: nem começa em massa');
@@ -179,7 +220,7 @@ async function main() {
     resend.reset('gratis', 12);
     const t = await deliverMail(svcFalso(contas(5)), job(), { test: { email: 'admin@exemplo.com', name: 'Silas' } });
     ok(t.sent === 1 && resend.recebidos.get('admin@exemplo.com') === 1 && resend.recebidos.size === 1, 'só o admin recebe');
-    ok(t.quota?.daily === 13 && t.quota?.monthly === 1, 'devolve a cota lida (o painel mostra o plano antes do disparo)');
+    ok((t.quota?.daily ?? 0) >= 13 && (t.quota?.monthly ?? 0) >= 1, 'devolve a cota (nunca abaixo do real) — o painel mostra o plano antes do disparo');
   }
 
   if (falhas) {

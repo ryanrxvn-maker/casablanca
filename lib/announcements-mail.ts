@@ -27,6 +27,7 @@ import {
   FREE_DAILY,
   FREE_RESERVE,
   nextBatchSize,
+  nextQuota,
   pickRecipients,
   roomToday,
   type Person,
@@ -266,11 +267,12 @@ export async function deliverMail(
     let result: BatchResult = { ok: false, reason: 'retry', message: '' };
     for (let attempt = 0; attempt < 4; attempt++) {
       result = await postBatch(key, payload, idem);
-      if (result.quota) base.quota = result.quota;
       if (result.ok || result.reason !== 'retry') break;
       await sleep(result.waitMs ?? 1200);
     }
     probed = true;
+    // conta própria + cabeçalho (o cabeçalho atrasa): ver nextQuota
+    base.quota = nextQuota(base.quota, result.quota ?? null, result.ok ? slice.length : 0, new Date().toISOString());
     if (result.ok || (!result.ok && result.already)) {
       base.sent += slice.length;
       base.cursor = slice[slice.length - 1].key || base.cursor;
