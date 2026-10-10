@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { ToolShell } from '@/components/ToolShell';
 import { HeyGenConectar } from '@/components/HeyGenConectar';
+import { AulaVideo } from '@/components/AulaVideo';
 import { FriendlyError, toFriendlyMessage } from '@/lib/friendly-error';
 import { DA_CHAVE } from '@/lib/key-errors';
 
@@ -263,6 +264,9 @@ export default function ApiKeysPage() {
               ← Voltar pra Configurações
             </Link>
           </div>
+
+          {/* Aula em vídeo: o passo a passo de cada chave */}
+          <AulaVideo path="/configuracoes/api" className="mb-6 max-w-[640px]" />
 
           {error ? (
             <div

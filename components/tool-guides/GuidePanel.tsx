@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { GUIDES } from './guides';
+import { AulaVideo } from '@/components/AulaVideo';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 
 /**
@@ -96,6 +97,8 @@ export function GuidePanel({
 
         {/* Passos */}
         <div className="guide-card__scroll px-6 pt-5 md:px-7">
+          {/* Aula em vídeo (YouTube não listado) — primeiro, e o passo a passo logo abaixo */}
+          <AulaVideo path={path} className="mb-7" />
           <ol className="flex flex-col gap-7">
             {guide.steps.map((step, i) => (
               <li key={i} className="flex gap-4">

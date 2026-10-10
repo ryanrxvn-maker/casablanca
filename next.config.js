@@ -120,7 +120,8 @@ const nextConfig = {
               "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://unpkg.com https://cdn.jsdelivr.net https://storage.googleapis.com https://api.stripe.com http://localhost:* http://127.0.0.1:*",
               "worker-src 'self' blob:",
               "child-src 'self' blob:",
-              "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+              // youtube-nocookie = aulas em vídeo do "Como usar" (components/AulaVideo.tsx).
+              "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.youtube-nocookie.com",
               "manifest-src 'self'",
             ].join('; '),
           },
