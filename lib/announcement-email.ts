@@ -69,8 +69,20 @@ export function autoTemplate(kind: AnnKind, content: AnnContent): EmailTemplate 
 
 /* ───────────────────────── Quem recebe ───────────────────────── */
 
-export type Recipient = { id: string; email: string; name: string | null };
+/** `key` = posição fixa na fila (ordem de cadastro) — é o que o marcador de envio guarda. */
+export type Recipient = { id: string; email: string; name: string | null; key: string };
 export type Person = { viewer: Viewer; name: string | null; createdAt: string };
+
+/** Chave de ordem que compara como texto: data de cadastro (ms, 15 dígitos) + id. */
+export function orderKey(createdAt: string, id: string): string {
+  const ms = Math.max(0, Date.parse(createdAt) || 0);
+  return `${String(ms).padStart(15, '0')}|${id}`;
+}
+
+/** Quem ainda não recebeu nesta ativação: tudo DEPOIS do marcador. */
+export function afterCursor(list: Recipient[], cursor: string | null): Recipient[] {
+  return cursor ? list.filter((r) => r.key > cursor) : list;
+}
 
 /**
  * Mesma regra de público da janela (matchesAudience: conta ativa, plano,
@@ -92,7 +104,7 @@ export function pickRecipients(people: Person[], audience: Audience, optOut: Set
     }
     if (seen.has(email)) continue;
     seen.add(email);
-    list.push({ id: p.viewer.id, email, name: p.name });
+    list.push({ id: p.viewer.id, email, name: p.name, key: orderKey(p.createdAt, p.viewer.id) });
   }
   return { list, optOut: out };
 }
@@ -104,9 +116,39 @@ export function firstName(name: string | null | undefined): string | null {
   return n.charAt(0).toUpperCase() + n.slice(1).toLowerCase();
 }
 
-/** Chave de idempotência de um lote: repetir o envio da MESMA ativação não duplica e-mail. */
-export function batchKey(annId: string, activatedAt: string, index: number): string {
-  return `ann-${annId}-${Date.parse(activatedAt) || 0}-${index}`;
+/**
+ * Chave de idempotência de um lote = aviso + ativação + quem está nele (1º e
+ * último). Clique duplo / duas abas montam o MESMO lote a partir do mesmo
+ * marcador → mesma chave → o Resend não manda duas vezes (vale 24 h; depois
+ * disso quem protege é o marcador).
+ */
+export function batchKey(annId: string, activatedAt: string, slice: Pick<Recipient, 'id'>[]): string {
+  const first = slice[0]?.id ?? '';
+  const last = slice[slice.length - 1]?.id ?? '';
+  return `ann-${annId}-${Date.parse(activatedAt) || 0}-${first}-${last}-${slice.length}`;
+}
+
+/**
+ * Plano grátis do Resend: 100 e-mails por dia, e a cota é a MESMA dos códigos
+ * de cadastro e de senha. O disparo para guardando FREE_RESERVE pro dia —
+ * senão quem se cadastra depois fica sem código até a meia-noite UTC.
+ */
+export const FREE_DAILY = 100;
+export const FREE_RESERVE = 20;
+
+/** Quantos ainda dá pra mandar hoje sem comer a reserva (sem limite diário = Infinity). */
+export function roomToday(quota: { daily: number | null } | null): number {
+  if (!quota || quota.daily === null) return Infinity;
+  return Math.max(0, FREE_DAILY - FREE_RESERVE - quota.daily);
+}
+
+/**
+ * Tamanho do próximo lote: o 1º de cada rodada leva 1 pessoa (lê a cota nos
+ * cabeçalhos antes de mandar em massa); depois, até `max`, sem passar da folga.
+ */
+export function nextBatchSize(probed: boolean, room: number, max = 100): number {
+  if (!probed) return Math.min(1, room);
+  return Math.max(0, Math.min(max, room));
 }
 
 function excerpt(s: string, max = 140): string {

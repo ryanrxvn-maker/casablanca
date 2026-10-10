@@ -86,7 +86,30 @@ export type MailLog = {
   at: string;
   /** terminou (com ou sem falha); false = em andamento */
   done: boolean;
+  /**
+   * Até quem já foi (chave de ordem do último destinatário entregue ao Resend).
+   * "Tentar o resto" continua DEPOIS dele — a chave de idempotência do Resend
+   * vence em 24 h, então retomar no dia seguinte sem isto mandaria de novo.
+   */
+  cursor: string | null;
+  /** cota lida no último envio (cabeçalhos do Resend) */
+  quota: MailQuota | null;
 };
+
+/**
+ * Cota do Resend lida nos cabeçalhos da resposta (valores = JÁ USADOS).
+ * `daily` só vem no plano grátis — e essa cota é a MESMA dos e-mails de
+ * código de cadastro/senha.
+ */
+export type MailQuota = { daily: number | null; monthly: number | null; at: string };
+
+export function readMailQuota(raw: unknown): MailQuota | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+  const q = { daily: n(r.daily), monthly: n(r.monthly), at: typeof r.at === 'string' ? r.at : new Date(0).toISOString() };
+  return q.daily === null && q.monthly === null ? null : q;
+}
 
 export function readMailLog(raw: unknown): MailLog | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -94,6 +117,8 @@ export function readMailLog(raw: unknown): MailLog | null {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   const reasons: MailReason[] = ['quota', 'erro', 'sem_chave', 'sem_destinatario'];
   return {
+    cursor: typeof r.cursor === 'string' && r.cursor.length <= 80 ? r.cursor : null,
+    quota: readMailQuota(r.quota),
     for: typeof r.for === 'string' ? r.for : null,
     total: n(r.total),
     sent: n(r.sent),
