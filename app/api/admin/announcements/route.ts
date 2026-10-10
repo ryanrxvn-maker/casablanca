@@ -79,9 +79,11 @@ async function mailIfDue(svc: ReturnType<typeof serviceClient>, row: AnnRow, for
   const mode = emailModeOf(row.audience as { email?: unknown });
   if (mode === 'off' || !row.activated_at) return row;
   if (mode === 'also' && !row.active) return row;
-  if (!force && mailDoneFor(rawMailLog(row.audience), row.activated_at)) return row;
+  const prev = rawMailLog(row.audience);
+  if (!force && mailDoneFor(prev, row.activated_at)) return row;
   const a = toAdminAnnouncement(row);
-  const log = await deliverMail(svc, { id: row.id, kind: a.kind, content: a.content, endsAt: a.endsAt, activatedAt: row.activated_at, audience: a.audience });
+  // prev da mesma ativação = continua depois do marcador (nunca repete quem já recebeu)
+  const log = await deliverMail(svc, { id: row.id, kind: a.kind, content: a.content, endsAt: a.endsAt, activatedAt: row.activated_at, audience: a.audience }, { prev });
   return (await writeMailLog(svc, row.id, log)) ?? row;
 }
 
@@ -184,7 +186,8 @@ export async function POST(req: Request) {
         { test: me },
       );
       if (log.reason) return jsonError(log.message || 'Não deu pra mandar o teste.', 502);
-      return NextResponse.json({ ok: true, to: me.email });
+      // cota lida na resposta do Resend: mostra o plano antes do disparo de verdade
+      return NextResponse.json({ ok: true, to: me.email, quota: log.quota });
     }
 
     // Modelo "E-mail": nunca vira janela no site (fora do ar, sem popup).

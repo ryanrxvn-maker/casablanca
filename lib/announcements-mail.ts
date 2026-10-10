@@ -5,18 +5,33 @@
  *
  *   • público = mesma regra da janela (viewerFromProfile + matchesAudience);
  *   • 1 e-mail por pessoa, com "Oi, Nome" e o link de saída DELA;
- *   • lotes de 100 no Resend com chave de idempotência `ann-<id>-<ativação>-<n>`:
- *     repetir o envio da mesma ativação (clique duplo, "Tentar o resto") não
- *     duplica e-mail — o Resend devolve o lote já enviado;
- *   • limite de taxa (429) → espera e tenta de novo; cota do plano acabou →
- *     para limpo e registra quanto faltou (o "Tentar o resto" continua dali).
+ *   • fila em ordem de cadastro + MARCADOR (mailLog.cursor) de até quem já
+ *     foi: "Tentar o resto" continua dali, mesmo dias depois, sem repetir;
+ *   • lotes de até 100 com chave de idempotência por aviso+ativação+quem está
+ *     no lote: clique duplo / duas abas não duplicam (vale 24 h no Resend);
+ *   • cota lida nos cabeçalhos: no plano grátis (100/dia, a MESMA cota dos
+ *     códigos de cadastro) para guardando a reserva do dia;
+ *   • limite de taxa (429) → espera e tenta de novo; cota acabou ou erro →
+ *     para limpo e registra quanto faltou.
  */
 
 import { classifyAccess } from '@/app/api/admin/_classify';
 import type { serviceClient } from '@/app/api/admin/_helpers';
 import { staticUnlocksForEmail, UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
-import type { AnnContent, AnnKind, Audience, MailLog, MailReason, Viewer } from './announcements';
-import { batchKey, emailFromAnnouncement, firstName, pickRecipients, type Person, type Recipient } from './announcement-email';
+import type { AnnContent, AnnKind, Audience, MailLog, MailQuota, MailReason, Viewer } from './announcements';
+import {
+  afterCursor,
+  batchKey,
+  emailFromAnnouncement,
+  firstName,
+  FREE_DAILY,
+  FREE_RESERVE,
+  nextBatchSize,
+  pickRecipients,
+  roomToday,
+  type Person,
+  type Recipient,
+} from './announcement-email';
 import { renderEmail } from './email-templates';
 import { TEST_OPTOUT_ID, optoutUrl } from './email-optout';
 
@@ -103,7 +118,19 @@ export async function listRecipients(svc: Svc, audience: Audience): Promise<{ li
 
 /* ───────────────────────── Resend ───────────────────────── */
 
-type BatchResult = { ok: true } | { ok: false; reason: MailReason | 'retry'; message: string; waitMs?: number; already?: boolean };
+type BatchResult = ({ ok: true } | { ok: false; reason: MailReason | 'retry'; message: string; waitMs?: number; already?: boolean }) & { quota?: MailQuota | null };
+
+/** x-resend-daily-quota / x-resend-monthly-quota = JÁ usados (o diário só existe no plano grátis). */
+function quotaFrom(res: Response): MailQuota | null {
+  const num = (h: string) => {
+    const v = res.headers.get(h);
+    const n = v === null || v.trim() === '' ? NaN : Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  };
+  const daily = num('x-resend-daily-quota');
+  const monthly = num('x-resend-monthly-quota');
+  return daily === null && monthly === null ? null : { daily, monthly, at: new Date().toISOString() };
+}
 
 async function postBatch(key: string, payload: unknown[], idem: string | null): Promise<BatchResult> {
   let res: Response;
@@ -120,13 +147,15 @@ async function postBatch(key: string, payload: unknown[], idem: string | null): 
   } catch (e) {
     return { ok: false, reason: 'retry', message: (e as Error).message || 'rede', waitMs: 1500 };
   }
-  if (res.ok) return { ok: true };
+  const quota = quotaFrom(res);
+  if (res.ok) return { ok: true, quota };
   const j = (await res.json().catch(() => ({}))) as { name?: string; message?: string };
   const name = j.name ?? '';
   const message = (j.message || `HTTP ${res.status}`).slice(0, 240);
-  if (res.status === 409 && name === 'invalid_idempotent_request') return { ok: false, reason: 'erro', message, already: true };
+  // mesma chave, corpo diferente = esse lote JÁ saiu (com o texto de antes)
+  if (res.status === 409 && name === 'invalid_idempotent_request') return { ok: false, reason: 'erro', message, already: true, quota };
   if (res.status === 409) return { ok: false, reason: 'retry', message, waitMs: 1200 };
-  if (res.status === 429 && /quota/i.test(name + message)) return { ok: false, reason: 'quota', message };
+  if (res.status === 429 && /quota/i.test(name + message)) return { ok: false, reason: 'quota', message, quota };
   if (res.status === 429) {
     const after = Number(res.headers.get('retry-after'));
     return { ok: false, reason: 'retry', message, waitMs: Number.isFinite(after) && after > 0 ? after * 1000 : 1200 };
@@ -147,13 +176,43 @@ export type MailJob = {
   audience: Audience;
 };
 
+/** Frase da parada por reserva do plano grátis (o painel mostra igual). */
+export function reserveMessage(quota: MailQuota | null): string {
+  const used = quota?.daily ?? 0;
+  return `Plano grátis do Resend: ${used} de ${FREE_DAILY} e-mails do dia já usados. Parei guardando ${FREE_RESERVE} pros códigos de cadastro e senha; a cota volta às 21h (Brasília).`;
+}
+
 /**
  * Envia (ou continua) o e-mail de uma ativação. Devolve o registro pra gravar
- * no audience.mailLog. `test` = só pro admin, com "[Teste]" e sem idempotência.
+ * no audience.mailLog.
+ *   • `prev` da MESMA ativação → continua DEPOIS do marcador (nunca repete
+ *     quem já recebeu, mesmo dias depois);
+ *   • o 1º lote de cada rodada leva 1 pessoa: lê a cota nos cabeçalhos antes
+ *     de mandar em massa; no plano grátis para guardando a reserva do dia;
+ *   • lote com erro PARA a rodada sem avançar o marcador ("Tentar o resto"
+ *     tenta de novo dali — nada se perde calado);
+ *   • `test` = só pro admin, com "[Teste]" e sem idempotência.
  */
-export async function deliverMail(svc: Svc, job: MailJob, opts: { test?: { email: string; name: string | null } } = {}): Promise<MailLog> {
+export async function deliverMail(
+  svc: Svc,
+  job: MailJob,
+  opts: { test?: { email: string; name: string | null }; prev?: MailLog | null } = {},
+): Promise<MailLog> {
   const at = new Date().toISOString();
-  const base: MailLog = { for: job.activatedAt, total: 0, sent: 0, failed: 0, optOut: 0, reason: null, message: null, at, done: true };
+  const prev = !opts.test && opts.prev?.for && Date.parse(opts.prev.for) === Date.parse(job.activatedAt) ? opts.prev : null;
+  const base: MailLog = {
+    for: job.activatedAt,
+    total: 0,
+    sent: prev?.sent ?? 0,
+    failed: 0,
+    optOut: 0,
+    reason: null,
+    message: null,
+    at,
+    done: true,
+    cursor: prev?.cursor ?? null,
+    quota: prev?.quota ?? null,
+  };
   const key = process.env.RESEND_API_KEY;
   if (!key) return { ...base, reason: 'sem_chave', message: 'RESEND_API_KEY não está configurada.' };
 
@@ -161,22 +220,33 @@ export async function deliverMail(svc: Svc, job: MailJob, opts: { test?: { email
   const msg = emailFromAnnouncement({ kind: job.kind, content: job.content, endsAt: job.endsAt }, site);
   let recipients: Recipient[];
   if (opts.test) {
-    recipients = [{ id: TEST_OPTOUT_ID, email: opts.test.email, name: opts.test.name }];
+    recipients = [{ id: TEST_OPTOUT_ID, email: opts.test.email, name: opts.test.name, key: '' }];
   } else {
     const r = await listRecipients(svc, job.audience);
-    recipients = r.list;
+    recipients = afterCursor(r.list, base.cursor);
     base.optOut = r.optOut;
   }
-  base.total = recipients.length;
-  if (!recipients.length) return { ...base, reason: 'sem_destinatario', message: 'Ninguém do público tem e-mail pra receber.' };
+  base.total = base.sent + recipients.length;
+  if (!recipients.length) {
+    // retomada de algo que já tinha ido inteiro: fecha sem erro
+    return base.sent ? base : { ...base, reason: 'sem_destinatario', message: 'Ninguém do público tem e-mail pra receber.' };
+  }
 
   const from = fromAddress();
   const started = Date.now();
-  for (let i = 0; i * MAIL_BATCH < recipients.length; i++) {
+  let probed = false;
+  let pos = 0;
+  while (pos < recipients.length) {
     if (Date.now() - started > BUDGET_MS) {
       return { ...base, done: false, message: 'Passou do tempo de uma chamada: use "Tentar o resto" pra continuar (não duplica).' };
     }
-    const slice = recipients.slice(i * MAIL_BATCH, (i + 1) * MAIL_BATCH);
+    // a cota guardada de outra rodada pode ser de ontem: só vale depois da sonda
+    const size = nextBatchSize(probed, probed ? roomToday(base.quota) : Infinity, MAIL_BATCH);
+    if (size === 0) {
+      base.failed = recipients.length - pos;
+      return { ...base, reason: 'quota', message: reserveMessage(base.quota) };
+    }
+    const slice = recipients.slice(pos, pos + size);
     const payload = slice.map((r) => {
       const unsubscribe = optoutUrl(site, r.id);
       const { html, text } = renderEmail(msg, { siteUrl: site, unsubscribeUrl: unsubscribe, firstName: firstName(r.name) });
@@ -192,24 +262,27 @@ export async function deliverMail(svc: Svc, job: MailJob, opts: { test?: { email
         },
       };
     });
-    const idem = opts.test ? null : batchKey(job.id, job.activatedAt, i);
+    const idem = opts.test ? null : batchKey(job.id, job.activatedAt, slice);
     let result: BatchResult = { ok: false, reason: 'retry', message: '' };
     for (let attempt = 0; attempt < 4; attempt++) {
       result = await postBatch(key, payload, idem);
+      if (result.quota) base.quota = result.quota;
       if (result.ok || result.reason !== 'retry') break;
       await sleep(result.waitMs ?? 1200);
     }
+    probed = true;
     if (result.ok || (!result.ok && result.already)) {
       base.sent += slice.length;
+      base.cursor = slice[slice.length - 1].key || base.cursor;
     } else if (result.reason === 'quota') {
-      base.failed += recipients.length - i * MAIL_BATCH;
-      return { ...base, reason: 'quota', message: `Acabou a cota do plano do Resend: ${result.message}` };
+      base.failed = recipients.length - pos;
+      return { ...base, reason: 'quota', message: base.quota?.daily != null ? reserveMessage(base.quota) : `Acabou a cota do plano do Resend: ${result.message}` };
     } else {
-      base.failed += slice.length;
-      base.reason = 'erro';
-      base.message = result.message || 'Falha no envio.';
+      base.failed = recipients.length - pos;
+      return { ...base, reason: 'erro', message: result.message || 'Falha no envio.' };
     }
-    if ((i + 1) * MAIL_BATCH < recipients.length) await sleep(GAP_MS);
+    pos += slice.length;
+    if (pos < recipients.length) await sleep(GAP_MS);
   }
   return base;
 }
