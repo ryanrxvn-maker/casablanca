@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { isToolInMaintenance } from '@/lib/maintenance';
+import { useMaintenance } from '@/lib/maintenance-client';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
 import { tierAllowsTool, useTier, useUserEmail } from '@/lib/use-tier';
 import {
@@ -81,6 +82,8 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
   // Antes: getUser() de rede + query de profiles a cada montagem — os itens
   // internos "pulavam" na lista ~0,5 s depois. A trava real é do middleware.
   const isAdmin = tier === 'admin';
+  // Manutenção ao vivo (painel "Ferramentas" do /admin).
+  const maintSnap = useMaintenance();
   const userEmail = useUserEmail() ?? null;
 
   const inTools = TOOL_PATHS.some(
@@ -127,8 +130,8 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
           {items.map((it, i) => {
             const active =
               pathname === it.href || pathname.startsWith(it.href + '/');
-            const inMaint = isToolInMaintenance(it.href);
-            const blocked = inMaint && !isAdmin; // não-admin não acessa
+            const inMaint = isToolInMaintenance(it.href, maintSnap);
+            const blocked = inMaint && !isAdmin && !maintSnap?.canBypass; // não-admin não acessa
             const locked = !tierAllowsTool(tier, it.href) && !emailUnlocksPath(userEmail, it.href);
             const rowCls =
               'group relative flex items-center gap-3 rounded-[12px] border px-3 py-2.5 transition-all duration-300 ' +

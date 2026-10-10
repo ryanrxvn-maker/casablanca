@@ -30,6 +30,9 @@ import { ProfileSheet, type ProfileTab } from './_ui/ProfileSheet';
 import { AnnouncementsStudio } from './_ui/AnnouncementsStudio';
 import { AnnIcon } from '@/components/notifications/templates';
 import type { AdminAnnouncement } from '@/lib/announcements';
+import { ToolsCenter } from './_ui/ToolsCenter';
+import { WrenchGlyph } from '@/components/MaintenanceFlash';
+import { activeMaintenance, type ToolsConfig } from '@/lib/maintenance';
 import { CancelTag, UserRow, type RowActions } from './_ui/UserRow';
 
 /**
@@ -714,6 +717,23 @@ export default function AdminPage() {
     };
   }, [onAnnList]);
 
+  // ─── Ferramentas (manutenção) ───
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsMaint, setToolsMaint] = useState<number | null>(null);
+  const closeTools = useCallback(() => setToolsOpen(false), []);
+  useEffect(() => {
+    let off = false;
+    fetch('/api/admin/tools-status', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!off && j?.cfg) setToolsMaint(Object.keys(activeMaintenance(j.cfg as ToolsConfig)).length);
+      })
+      .catch(() => {});
+    return () => {
+      off = true;
+    };
+  }, []);
+
   // ─── Criar usuário ───
   const [createOpen, setCreateOpen] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -806,6 +826,35 @@ export default function AdminPage() {
               </span>
             ) : null}
           </button>
+          <button
+            type="button"
+            onClick={() => setToolsOpen(true)}
+            className="group field-label inline-flex h-11 items-center gap-2.5 rounded-full bg-[rgb(var(--text)/0.05)] pl-1.5 pr-5 text-[13.5px] font-semibold text-text transition-[transform,background-color] duration-300 hover:bg-[rgb(var(--text)/0.09)] active:scale-[0.97]"
+            style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.1)', transitionTimingFunction: 'cubic-bezier(.32,.72,0,1)' }}
+            title="Ferramentas: manutenção e quem entra"
+          >
+            <span
+              className="relative flex h-8 w-8 items-center justify-center rounded-full transition-transform duration-300 group-hover:rotate-12 group-hover:scale-105"
+              style={{
+                color: accent(toolsMaint ? 'amber' : 'cyan'),
+                background: accent(toolsMaint ? 'amber' : 'cyan', 0.14),
+                boxShadow: `inset 0 0 0 1px ${accent(toolsMaint ? 'amber' : 'cyan', 0.3)}`,
+                transitionTimingFunction: 'cubic-bezier(.32,.72,0,1)',
+              }}
+            >
+              <WrenchGlyph size={15} />
+            </span>
+            Ferramentas
+            {toolsMaint ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11.5px] font-semibold"
+                style={{ color: accent('amber'), background: accent('amber', 0.12), boxShadow: `inset 0 0 0 1px ${accent('amber', 0.28)}` }}
+              >
+                <Dot a="amber" size={5} />
+                {toolsMaint} em manutenção
+              </span>
+            ) : null}
+          </button>
           <button type="button" onClick={() => setCreateOpen((v) => !v)} className="btn-primary !h-11 !px-5 text-[13.5px]">
             {createOpen ? <I.close size={15} /> : <I.plus size={15} />}
             {createOpen ? 'Fechar' : 'Criar usuário'}
@@ -814,6 +863,7 @@ export default function AdminPage() {
       </header>
 
       {studioOpen ? <AnnouncementsStudio users={users} onClose={closeStudio} flash={flash} onListChange={onAnnList} /> : null}
+      {toolsOpen ? <ToolsCenter users={users} onClose={closeTools} flash={flash} onCountChange={setToolsMaint} /> : null}
 
       {users && schema !== 'full' ? (
         <div role="alert" className="field-label mt-6 flex items-start gap-3 rounded-[16px] px-5 py-4 text-[13.5px] leading-relaxed" style={{ color: accent(schema === 'basic' ? 'danger' : 'amber'), background: accent(schema === 'basic' ? 'danger' : 'amber', 0.08), boxShadow: `inset 0 0 0 1px ${accent(schema === 'basic' ? 'danger' : 'amber', 0.25)}` }}>
