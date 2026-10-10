@@ -118,6 +118,13 @@ export default function AssinaturaPage() {
   const [confirmRefundNow, setConfirmRefundNow] = useState(false);
   const [editCard, setEditCard] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Erro NÃO pode sair na mesma caixa verde do sucesso: "Falha na operação"
+  // em verde parece "cancelado com sucesso" (o cliente acha que cancelou).
+  const [toastErr, setToastErr] = useState(false);
+  const showToast = (msg: string | null, err = false) => {
+    setToast(msg);
+    setToastErr(err);
+  };
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
 
@@ -148,7 +155,7 @@ export default function AssinaturaPage() {
 
   async function act(action: 'cancel' | 'reactivate', keepAccess = false) {
     setBusy(true);
-    setToast(null);
+    showToast(null);
     try {
       const res = await fetch('/api/billing/cancel', {
         method: 'POST',
@@ -162,30 +169,35 @@ export default function AssinaturaPage() {
         access_until?: string | null;
       };
       if (!res.ok) {
-        setToast(j.error || 'Falha na operação.');
+        showToast(
+          (j.error || 'Não deu pra concluir.') + ' Nada foi alterado na sua assinatura — tente de novo.',
+          true,
+        );
         return;
       }
       setConfirmCancel(false);
       setConfirmRefundNow(false);
       if (j.mode === 'refunded') {
-        setToast(
+        showToast(
           `Pronto: assinatura cancelada e ${brl(j.refunded ?? 0)} devolvidos no seu cartão. ` +
             'O estorno aparece na fatura em até 10 dias úteis, conforme o seu banco.',
         );
         await refreshTier().catch(() => {});
       } else if (j.mode === 'scheduled') {
-        setToast(
+        showToast(
           j.access_until
             ? `Cancelamento feito. Você mantém o acesso até ${new Date(j.access_until).toLocaleDateString('pt-BR')} e não haverá nova cobrança.`
             : 'Cancelamento feito. Você mantém o acesso até o fim do período pago e não haverá nova cobrança.',
         );
       } else if (j.mode === 'ended') {
-        setToast('Assinatura encerrada. Nenhuma nova cobrança será feita.');
+        showToast('Assinatura encerrada. Nenhuma nova cobrança será feita.');
         await refreshTier().catch(() => {});
       } else {
-        setToast('Assinatura reativada. Sua renovação volta ao normal.');
+        showToast('Assinatura reativada. Sua renovação volta ao normal.');
       }
       await load();
+    } catch {
+      showToast('Sem conexão agora. Nada foi alterado na sua assinatura — tente de novo.', true);
     } finally {
       setBusy(false);
     }
@@ -195,7 +207,7 @@ export default function AssinaturaPage() {
   async function retryPayment() {
     setRetrying(true);
     setRetryError(null);
-    setToast(null);
+    showToast(null);
     try {
       const res = await fetch('/api/billing/retry-payment', { method: 'POST' });
       const j = (await res.json().catch(() => ({}))) as {
@@ -206,7 +218,7 @@ export default function AssinaturaPage() {
         code?: string;
       };
       if (res.ok && j.ok) {
-        setToast(
+        showToast(
           j.paid
             ? 'Pagamento aprovado! Seu acesso Premium voltou agora.'
             : 'Tudo certo — sua assinatura já está em dia e o acesso está liberado.',
@@ -327,7 +339,15 @@ export default function AssinaturaPage() {
             ) : null}
           </div>
           {toast ? (
-            <div className="rounded-[12px] border border-lime/40 bg-lime/10 px-4 py-3 text-[13px] text-lime">
+            <div
+              role={toastErr ? 'alert' : 'status'}
+              className={
+                'rounded-[12px] border px-4 py-3 text-[13px] ' +
+                (toastErr
+                  ? 'border-rose-400/50 bg-rose-500/10 text-rose-100'
+                  : 'border-lime/40 bg-lime/10 text-lime')
+              }
+            >
               {toast}
             </div>
           ) : null}
@@ -537,10 +557,10 @@ export default function AssinaturaPage() {
                       if (pendingPayment) {
                         // Cartão novo salvo com cobrança pendente → já tenta
                         // cobrar nele, sem o cliente precisar de outro clique.
-                        setToast('Cartão atualizado — tentando a cobrança nele agora…');
+                        showToast('Cartão atualizado — tentando a cobrança nele agora…');
                         void retryPayment();
                       } else {
-                        setToast('Cartão atualizado com sucesso.');
+                        showToast('Cartão atualizado com sucesso.');
                       }
                       load();
                     }}
@@ -600,9 +620,10 @@ export default function AssinaturaPage() {
                     type="button"
                     onClick={() => act('reactivate')}
                     disabled={busy}
-                    className="btn-primary"
+                    className="btn-ghost"
+                    title="Desfaz o cancelamento: a assinatura volta a renovar"
                   >
-                    {busy ? 'Aguarde…' : 'Reativar assinatura'}
+                    {busy ? 'Aguarde…' : 'Desfazer cancelamento'}
                   </button>
                   {refundable && !confirmRefundNow ? (
                     <button
@@ -714,7 +735,15 @@ export default function AssinaturaPage() {
           </div>
 
           {toast ? (
-            <div className="rounded-[12px] border border-lime/40 bg-lime/10 px-4 py-3 text-[13px] text-lime">
+            <div
+              role={toastErr ? 'alert' : 'status'}
+              className={
+                'rounded-[12px] border px-4 py-3 text-[13px] ' +
+                (toastErr
+                  ? 'border-rose-400/50 bg-rose-500/10 text-rose-100'
+                  : 'border-lime/40 bg-lime/10 text-lime')
+              }
+            >
               {toast}
             </div>
           ) : null}

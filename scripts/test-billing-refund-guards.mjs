@@ -56,3 +56,16 @@ test('painel admin lista os cancelamentos e oferece reembolsar', () => {
   assert.match(admin, /fetch\(`\/api\/admin\/refund-cancel\?userId=/);
   assert.match(admin, /key: 'canceled', label: 'Cancelaram'/);
 });
+
+test('cliente não confunde erro com sucesso nem desfaz o cancelamento sem querer', () => {
+  assert.match(page, /toastErr\s*\?\s*'border-rose-400\/50/, 'erro em vermelho, não na caixa verde do sucesso');
+  assert.match(page, /Nada foi alterado na sua assinatura/);
+  assert.match(page, /className="btn-ghost"\s*title="Desfaz o cancelamento/, '"Desfazer cancelamento" não pode ser o botão principal');
+  assert.match(cancel, /Cliente desfez o cancelamento/, 'dono é avisado quando alguém reativa');
+});
+
+test('admin vê o histórico real do Stripe (de onde veio cada ação)', () => {
+  const hist = readFileSync('app/api/admin/stripe-history/route.ts', 'utf8');
+  assert.match(hist, /key\.startsWith\('stripe-node-retry-'\)/);
+  assert.match(readFileSync('app/admin/_ui/ProfileSheet.tsx', 'utf8'), /<StripeHistory userId=\{p\.id\} \/>/);
+});

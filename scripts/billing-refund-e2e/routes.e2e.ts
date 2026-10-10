@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { getStripe } from '@/lib/stripe';
 import { POST as cancelPOST } from '@/app/api/billing/cancel/route';
 import { GET as subGET } from '@/app/api/billing/subscription/route';
+import { GET as historyGET } from '@/app/api/admin/stripe-history/route';
 
 const g = globalThis as unknown as {
   __user: { id: string; email: string } | null;
@@ -114,6 +115,22 @@ async function main() {
   const s2 = await stripe.subscriptions.retrieve(sub2.id);
   assert.equal(s2.cancel_at_period_end, false);
   ok('reativar desfaz o agendamento');
+
+  // Histórico do admin: os eventos do Stripe mostram o pedido e o "desfazer", vindos do site.
+  type H = { items: Array<{ label: string; source: string }> };
+  let hist: H = { items: [] };
+  for (let i = 0; i < 10; i++) {
+    hist = (await (await historyGET(new Request(`http://x/api/admin/stripe-history?userId=${c.id}`))).json()) as H;
+    if (hist.items.some((x) => x.label.startsWith('Desfez'))) break;
+    await new Promise((r) => setTimeout(r, 1500)); // evento leva um instante pra aparecer na listagem
+  }
+  const has = (label: string, source?: string) =>
+    hist.items.some((x) => x.label.startsWith(label) && (!source || x.source === source));
+  assert.ok(has('Pediu o cancelamento', 'site'), JSON.stringify(hist.items));
+  assert.ok(has('Desfez o cancelamento', 'site'), JSON.stringify(hist.items));
+  assert.ok(has('Cobrança paga'));
+  assert.ok(has('Reembolso'));
+  ok('histórico do Stripe no admin mostra "pediu o cancelamento" e "desfez", ambos "pelo site"');
   await stripe.subscriptions.cancel(sub2.id);
 
   // D) sem login

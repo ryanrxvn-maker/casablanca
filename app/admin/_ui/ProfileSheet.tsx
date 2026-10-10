@@ -361,6 +361,67 @@ export function ProfileSheet({
 
 /* ═════════════════════ Blocos ═════════════════════ */
 
+/* ───────────── Histórico no Stripe (eventos reais, 30 dias) ───────────── */
+
+type StripeHistoryItem = {
+  id: string;
+  at: string;
+  label: string;
+  detail: string | null;
+  source: 'site' | 'automatico' | 'stripe';
+  tone: 'lime' | 'amber' | 'danger' | 'cyan' | 'neutral';
+};
+
+const SOURCE_LABEL: Record<StripeHistoryItem['source'], string> = {
+  site: 'pelo site',
+  automatico: 'automático do Stripe',
+  stripe: 'painel do Stripe',
+};
+
+/** O que de fato aconteceu com a assinatura — responde "eu cancelei" com prova. */
+function StripeHistory({ userId }: { userId: string }) {
+  const [items, setItems] = useState<StripeHistoryItem[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/admin/stripe-history?userId=${encodeURIComponent(userId)}`, { cache: 'no-store' })
+      .then(async (r) => {
+        const j = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (!r.ok) setErr(j.error || 'Não deu pra ler o Stripe.');
+        else setItems((j.items ?? []) as StripeHistoryItem[]);
+      })
+      .catch(() => alive && setErr('Sem conexão com o Stripe agora.'));
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
+
+  return (
+    <Section title="Histórico no Stripe" hint="Eventos reais dos últimos 30 dias: cobrança, pedido de cancelamento, reativação, reembolso">
+      {err ? (
+        <Empty>{err}</Empty>
+      ) : !items ? (
+        <Skeleton className="h-24" />
+      ) : items.length ? (
+        <ol className="overflow-hidden rounded-[16px]" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.08)' }}>
+          {items.map((it) => (
+            <li key={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[rgb(var(--text)/0.06)] px-4 py-3 first:border-t-0">
+              <Tag a={it.tone === 'neutral' ? 'neutral' : it.tone}>{it.label}</Tag>
+              {it.detail ? <span className="field-label text-[13px] text-text">{it.detail}</span> : null}
+              <span className="field-label ml-auto text-[12px] text-text-muted">
+                {fmtDateTime(it.at)} · {SOURCE_LABEL[it.source]}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <Empty>Nenhum evento de cobrança ou cancelamento nos últimos 30 dias.</Empty>
+      )}
+    </Section>
+  );
+}
+
 function Section({ title, hint, right, children }: { title: string; hint?: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="mb-8 last:mb-0">
@@ -1013,6 +1074,8 @@ const TabPagamentos = memo(function TabPagamentos({ data }: { data: ProfileData 
           <Empty>Nenhuma mudança de plano feita pelo painel.</Empty>
         )}
       </Section>
+
+      {p.stripe_customer_id ? <StripeHistory userId={p.id} /> : null}
 
       {p.stripe_customer_id || p.stripe_subscription_id ? (
         <Section title="Stripe">

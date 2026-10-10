@@ -4,6 +4,7 @@ import { serviceClient } from '@/app/api/admin/_helpers';
 import { getStripe } from '@/lib/stripe';
 import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
 import { rateLimit } from '@/lib/rate-limit';
+import { notifyOwner } from '@/lib/notify';
 import {
   cancelSubscriptionNow,
   checkRefund,
@@ -149,6 +150,12 @@ export async function POST(req: Request) {
         );
       }
       const updated = await stripe.subscriptions.update(subId, { cancel_at_period_end: false });
+      // O dono fica sabendo: um "desfazer" por engano é o que faz o cliente
+      // jurar que cancelou com a assinatura ativa no Stripe.
+      await notifyOwner(
+        '🔁 Cliente desfez o cancelamento',
+        `<p><b>Cliente:</b> ${email ?? user.id}<br>A assinatura ${subId} voltou a renovar normalmente.</p>`,
+      ).catch(() => {});
       return NextResponse.json({
         ok: true,
         mode: 'reactivated',
