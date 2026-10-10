@@ -33,6 +33,8 @@ const ETAPAS = [
   { tsc: "lib/history-tools.ts lib/help-chat.ts lib/help-chat.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2021,dom", run: [".test-tmp/help-chat.test.js"] },
   // painel admin (07.10): coluna ausente em produção derrubou o plano de todos pra Free, calado
   { run: ["scripts/test-admin-guards.mjs"] },
+  // cancelamento (09.10): 7 dias = reembolso automático (1 vez só, nunca 2×); depois = acesso até a próxima cobrança
+  { run: ["scripts/test-billing-refund-guards.mjs"] },
   // avisos e propagandas (09.10): audiência por plano, janela a cada login, links seguros + ligações (sino, layouts, rota por conta)
   { tsx: ["lib/announcements.test.ts"] },
   { run: ["scripts/test-announcements-guards.mjs"] },

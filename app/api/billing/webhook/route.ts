@@ -217,6 +217,41 @@ async function notifyOrphan(
   ).catch(() => {});
 }
 
+/** O profile já foi marcado como reembolsado (cancelamento com devolução)? */
+async function isRefundedProfile(
+  svc: ReturnType<typeof serviceClient>,
+  userId: string,
+): Promise<boolean> {
+  const { data } = await svc
+    .from('profiles')
+    .select('subscription_status')
+    .eq('id', userId)
+    .maybeSingle();
+  return (data as { subscription_status?: string | null } | null)?.subscription_status === 'refunded';
+}
+
+/** PaymentIntent de uma fatura. Na 'dahlia' saiu do topo da fatura e mora em
+ *  InvoicePayments; sem isso o comprovante ficava sem o id do pagamento e o
+ *  charge.refunded não achava a linha pra marcar como reembolsada. */
+async function invoicePaymentIntentId(invoice: InvoiceLike): Promise<string | null> {
+  const top =
+    typeof invoice.payment_intent === 'string'
+      ? invoice.payment_intent
+      : invoice.payment_intent?.id ?? null;
+  if (top) return top;
+  if (!invoice.id) return null;
+  try {
+    const list = await getStripe().invoicePayments.list({ invoice: invoice.id, status: 'paid', limit: 3 });
+    for (const ip of list.data) {
+      const ref = ip.payment?.payment_intent;
+      if (ref) return typeof ref === 'string' ? ref : ref.id;
+    }
+  } catch {
+    /* best-effort */
+  }
+  return null;
+}
+
 /** Aplica no profile o estado atual da assinatura. */
 async function applySubscription(sub: SubLike) {
   const planRaw = sub.metadata?.plan ?? '';
@@ -279,6 +314,9 @@ async function applySubscription(sub: SubLike) {
   } else if (TERMINAL_STATUS.has(status)) {
     patch.subscription_plan = null;
     patch.tier = 'free';
+    // Encerrada por reembolso (cancelamento em até 7 dias): mantém o rótulo
+    // 'refunded' — 'canceled' esconderia do painel que o dinheiro voltou.
+    if (await isRefundedProfile(svc, userId)) patch.subscription_status = 'refunded';
   }
 
   await writeProfile(svc, userId, patch, `applySubscription(${status})`, sub.id);
@@ -288,10 +326,7 @@ async function applySubscription(sub: SubLike) {
 async function recordInvoice(invoice: InvoiceLike, sub: SubLike) {
   const userId = sub.metadata?.userId;
   if (!userId) return;
-  const piId =
-    typeof invoice.payment_intent === 'string'
-      ? invoice.payment_intent
-      : invoice.payment_intent?.id ?? null;
+  const piId = await invoicePaymentIntentId(invoice);
 
   await serviceClient()
     .from('payments')
@@ -502,7 +537,21 @@ export async function POST(req: Request) {
         break;
       }
       case 'customer.subscription.updated': {
-        await applySubscription(event.data.object as SubLike);
+        // Lê o estado ATUAL no Stripe em vez do retrato do evento: o Stripe
+        // não garante ordem, e um 'updated' antigo (status active) chegando
+        // depois do cancelamento com reembolso devolveria o Premium.
+        const evSub = event.data.object as SubLike;
+        let fresh: SubLike = evSub;
+        try {
+          fresh = (await stripe.subscriptions.retrieve(evSub.id)) as SubLike;
+          if (!fresh.metadata?.userId && evSub.metadata?.userId) {
+            fresh.metadata = { ...evSub.metadata, ...fresh.metadata };
+          }
+        } catch (err) {
+          const code = (err as { code?: string }).code;
+          if (code !== 'resource_missing') throw err; // 500 → o Stripe re-tenta
+        }
+        await applySubscription(fresh);
         break;
       }
       case 'invoice.payment_failed': {
@@ -529,11 +578,27 @@ export async function POST(req: Request) {
           subscription_plan: null,
           tier: 'free',
         };
+        // Quem foi reembolsado continua 'refunded' (só tier/plano caem).
+        const keepRefunded = { subscription_plan: null, tier: 'free' };
         const del = userId
-          ? await svc.from('profiles').update(patch).eq('id', userId)
+          ? await svc
+              .from('profiles')
+              .update((await isRefundedProfile(svc, userId)) ? keepRefunded : patch)
+              .eq('id', userId)
           : customerId
-            ? await svc.from('profiles').update(patch).eq('stripe_customer_id', customerId)
+            ? await svc
+                .from('profiles')
+                .update(patch)
+                .eq('stripe_customer_id', customerId)
+                .or('subscription_status.is.null,subscription_status.neq.refunded')
             : { error: null };
+        if (!del.error && !userId && customerId) {
+          await svc
+            .from('profiles')
+            .update(keepRefunded)
+            .eq('stripe_customer_id', customerId)
+            .eq('subscription_status', 'refunded');
+        }
         if (del.error) {
           // Falhou rebaixar → 500 pro Stripe re-tentar (idempotente).
           console.error('[billing webhook] downgrade (deleted) falhou', del.error);
@@ -564,6 +629,25 @@ export async function POST(req: Request) {
         const svc = serviceClient();
         if (piId) {
           await svc.from('payments').update({ status: 'refunded' }).eq('stripe_payment_intent', piId);
+          // Comprovante de ASSINATURA é gravado pela fatura (e, antes de
+          // 09.10, sem o id do pagamento): acha a fatura desse pagamento.
+          try {
+            const ips = await stripe.invoicePayments.list({
+              payment: { type: 'payment_intent', payment_intent: piId },
+              limit: 3,
+            });
+            for (const ip of ips.data) {
+              const inv = typeof ip.invoice === 'string' ? ip.invoice : ip.invoice?.id;
+              if (inv) {
+                await svc
+                  .from('payments')
+                  .update({ status: 'refunded', stripe_payment_intent: piId })
+                  .eq('stripe_checkout_session', inv);
+              }
+            }
+          } catch {
+            /* best-effort: o cancelamento com reembolso já marca direto */
+          }
         }
         if (customerId) {
           const subs = await stripe.subscriptions.list({

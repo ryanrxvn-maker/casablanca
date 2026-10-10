@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { getStripe } from '@/lib/stripe';
 import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
+import { checkRefund, type RefundCheck } from '@/lib/billing-refund';
 
 /**
  * GET /api/billing/subscription
@@ -11,7 +12,33 @@ import { findLiveStripeSubscription } from '@/lib/billing-reconcile';
  * Dados da assinatura do usuário logado pra a tela nativa "Minha assinatura":
  * plano, valor, próxima cobrança, cartão, status (incl. cancelamento agendado)
  * e histórico de faturas (com link do comprovante). Só leitura.
+ *
+ * `refund` diz ANTES do clique o que o cancelamento faz (política 09.10):
+ * dentro dos 7 dias da última cobrança → devolve o valor e encerra na hora;
+ * fora → só desliga a renovação. O POST /api/billing/cancel recalcula na hora
+ * (a tela pode estar aberta há horas) — isto aqui é só pra explicar.
  */
+
+type RefundInfo = {
+  eligible: boolean;
+  reason: string | null;
+  amount: number;
+  paid_at: number | null; // unix (s)
+  deadline: number | null; // unix (s)
+  refunded_amount: number;
+};
+
+function refundInfo(c: RefundCheck): RefundInfo {
+  const ch = c.charge;
+  return {
+    eligible: c.eligible,
+    reason: c.eligible ? null : c.reason,
+    amount: ch?.amount ?? 0,
+    paid_at: ch ? Math.floor(ch.paidAt / 1000) : null,
+    deadline: ch ? Math.floor(ch.refundDeadline / 1000) : null,
+    refunded_amount: ch?.amountRefunded ?? 0,
+  };
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,7 +61,7 @@ export async function GET() {
     const svc = serviceClient();
     const { data: profile } = await svc
       .from('profiles')
-      .select('stripe_customer_id, stripe_subscription_id, subscription_status, tier')
+      .select('stripe_customer_id, stripe_subscription_id, subscription_status, subscription_plan, current_period_end, tier')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -42,6 +69,8 @@ export async function GET() {
       stripe_customer_id?: string | null;
       stripe_subscription_id?: string | null;
       subscription_status?: string | null;
+      subscription_plan?: string | null;
+      current_period_end?: string | null;
       tier?: string | null;
     } | null;
 
@@ -70,6 +99,28 @@ export async function GET() {
     }
 
     if (!subId) {
+      // Plano ANUAL (pagamento único): não é cortesia — mostra o que foi
+      // pago, até quando vale e se ainda dá pra desistir com reembolso.
+      if (p?.subscription_status === 'paid' && customerId) {
+        let refund: RefundInfo | null = null;
+        try {
+          refund = refundInfo(
+            await checkRefund({ userId: user.id, email: user.email ?? null, customerId, subId: null }),
+          );
+        } catch {
+          /* sem prévia de reembolso agora */
+        }
+        return NextResponse.json({
+          subscription: null,
+          one_time: {
+            plan: p.subscription_plan ?? p.tier ?? null,
+            access_until: p.current_period_end ?? null,
+          },
+          refund,
+          tier: p?.tier ?? 'free',
+          status: p.subscription_status,
+        });
+      }
       // Agora sim: sem assinatura em lugar NENHUM (cortesia ou free).
       return NextResponse.json({
         subscription: null,
@@ -119,7 +170,17 @@ export async function GET() {
       }));
     }
 
+    let refund: RefundInfo | null = null;
+    try {
+      refund = refundInfo(
+        await checkRefund({ userId: user.id, email: user.email ?? null, customerId, subId: sub.id }),
+      );
+    } catch {
+      /* sem prévia de reembolso agora — o POST decide de qualquer jeito */
+    }
+
     return NextResponse.json({
+      refund,
       subscription: {
         id: sub.id,
         status: sub.status,
@@ -128,8 +189,13 @@ export async function GET() {
         amount: price?.unit_amount ?? null,
         currency: price?.currency ?? 'brl',
         interval: price?.recurring?.interval ?? null,
-        current_period_end: sub.current_period_end ?? null,
-        cancel_at_period_end: sub.cancel_at_period_end ?? false,
+        current_period_end:
+          sub.cancel_at ??
+          (sub.items?.data?.[0] as { current_period_end?: number } | undefined)?.current_period_end ??
+          sub.current_period_end ??
+          null,
+        cancel_at_period_end: (sub.cancel_at_period_end ?? false) || !!sub.cancel_at,
+        ended_at: sub.ended_at ?? sub.canceled_at ?? null,
         card,
       },
       invoices,

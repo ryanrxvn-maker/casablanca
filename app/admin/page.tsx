@@ -6,19 +6,23 @@ import { UNLOCKABLE_TOOLS } from '@/lib/tool-unlocks';
 import { BarSeries, RankList } from './_ui/charts';
 import { Btn, Dot, I, Modal, Panel, Segmented, Shell, Skeleton, Stat, Tag } from './_ui/kit';
 import {
+  CANCEL_META,
   CATALOG_PATHS,
   accent,
   betaProTools,
   brl,
+  cancelApplies,
   dayLabel,
   fmtDate,
   fmtDateShort,
+  fmtDateTime,
   fmtTime,
   isOnline,
   isUsingTool,
   toolLabel,
   type Accent,
   type AdminUser,
+  type CancelRow,
   type Dash,
   type Payment,
 } from './_ui/model';
@@ -26,7 +30,7 @@ import { ProfileSheet, type ProfileTab } from './_ui/ProfileSheet';
 import { AnnouncementsStudio } from './_ui/AnnouncementsStudio';
 import { AnnIcon } from '@/components/notifications/templates';
 import type { AdminAnnouncement } from '@/lib/announcements';
-import { UserRow, type RowActions } from './_ui/UserRow';
+import { CancelTag, UserRow, type RowActions } from './_ui/UserRow';
 
 /**
  * /admin — O painel do dono. ÚNICO dashboard (o /admin/dashboard redireciona
@@ -41,13 +45,17 @@ import { UserRow, type RowActions } from './_ui/UserRow';
  * • Ações destrutivas SEMPRE em 2 etapas (janela própria).
  * • Avisos (09.10): botão no topo abre a Central de avisos (aviso pequeno ou
  *   propaganda grande, filtro por Free/Premium/Pagantes/etc., prévia ao vivo).
+ * • Cancelamentos (09.10): lista lida do Stripe (agendado / reembolsado /
+ *   encerrado), selo na linha do cliente, filtro "Cancelaram" e a ação
+ *   "Cancelar e reembolsar" (prévia do valor e da data antes do clique).
  * • Métricas de comportamento contam SÓ clientes (filtrado na API).
  *
  * Desenho: kit em ./_ui (casca dupla, hairline, rótulo em sentença, cor só por
  * token, legível no claro e no escuro). Nada animando em loop.
  */
 
-type FilterKey = 'all' | 'online' | 'paid' | 'pending' | 'granted' | 'free' | 'beta' | 'inactive' | 'anomaly' | 'concurrent';
+type FilterKey = 'all' | 'online' | 'paid' | 'pending' | 'granted' | 'free' | 'beta' | 'inactive' | 'anomaly' | 'concurrent' | 'canceled';
+type CancelFilter = 'all' | 'scheduled' | 'refunded' | 'ended';
 type Period = 'today' | 'week' | 'month' | 'all';
 type SortKey = 'recent' | 'seen' | 'name';
 
@@ -120,6 +128,31 @@ export default function AdminPage() {
       /* métrica secundária */
     }
   }, []);
+
+  // Cancelamentos — direto do Stripe (o banco não sabe do agendado).
+  const [cancels, setCancels] = useState<CancelRow[] | null>(null);
+  const [cancelsErr, setCancelsErr] = useState<string | null>(null);
+  const [cancelFilter, setCancelFilter] = useState<CancelFilter>('all');
+  const loadCancels = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/cancellations', { cache: 'no-store' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCancelsErr(j.error || 'Não deu pra ler os cancelamentos no Stripe.');
+        return;
+      }
+      setCancelsErr(null);
+      setCancels((j.rows ?? []) as CancelRow[]);
+    } catch {
+      setCancelsErr('Sem conexão com o Stripe agora.');
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCancels();
+    const t = setInterval(() => document.visibilityState === 'visible' && loadCancels(), 120_000);
+    return () => clearInterval(t);
+  }, [loadCancels]);
 
   useEffect(() => {
     load();
@@ -203,6 +236,29 @@ export default function AdminPage() {
     };
   }, [dash, period]);
 
+  // ─── Cancelamentos por conta (a linha mais recente de cada uma) ───
+  const cancelByUser = useMemo(() => {
+    const m = new Map<string, CancelRow>();
+    for (const c of cancels ?? []) if (c.user_id && !m.has(c.user_id)) m.set(c.user_id, c);
+    return m;
+  }, [cancels]);
+  const userById = useMemo(() => {
+    const m = new Map<string, AdminUser>();
+    for (const u of users ?? []) m.set(u.id, u);
+    return m;
+  }, [users]);
+  const canceledCount = useMemo(
+    () => (users ?? []).filter((u) => cancelApplies(cancelByUser.get(u.id), u)).length,
+    [users, cancelByUser],
+  );
+  const cancelRows = useMemo(() => {
+    const list = cancels ?? [];
+    if (cancelFilter === 'scheduled') return list.filter((c) => c.kind === 'scheduled');
+    if (cancelFilter === 'refunded') return list.filter((c) => c.kind === 'refunded' || c.kind === 'refund');
+    if (cancelFilter === 'ended') return list.filter((c) => c.kind === 'ended');
+    return list;
+  }, [cancels, cancelFilter]);
+
   // ─── Filtro + busca + ordem ───
   const visible = useMemo(() => {
     let list = users ?? [];
@@ -216,6 +272,7 @@ export default function AdminPage() {
       case 'pending': list = list.filter((u) => u.access === 'pending'); break;
       case 'anomaly': list = list.filter((u) => u.access === 'anomaly'); break;
       case 'concurrent': list = list.filter((u) => (u.concurrent_30d ?? 0) > 0); break;
+      case 'canceled': list = list.filter((u) => cancelApplies(cancelByUser.get(u.id), u)); break;
     }
     const query = q.trim().toLowerCase();
     if (query) {
@@ -235,7 +292,7 @@ export default function AdminPage() {
     else if (sort === 'seen') list.sort((a, b) => at(b.last_seen_at) - at(a.last_seen_at));
     else list.sort((a, b) => (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? '', 'pt-BR'));
     return list;
-  }, [users, filter, q, sort, now]);
+  }, [users, filter, q, sort, now, cancelByUser]);
 
   useEffect(() => setLimit(PAGE), [filter, q, sort]);
 
@@ -245,7 +302,9 @@ export default function AdminPage() {
   const afterAction = useCallback(async () => {
     await load();
     setProfileNonce((n) => n + 1);
-  }, [load]);
+    void loadCancels();
+    void loadDash();
+  }, [load, loadCancels, loadDash]);
 
   /** Confirmação em 2 ETAPAS: nada destrutivo acontece em 1 clique. */
   const [confirmBox, setConfirmBox] = useState<{
@@ -415,6 +474,125 @@ export default function AdminPage() {
     }
   }
 
+  // ─── Cancelar / reembolsar (assinatura no Stripe) ───
+  type CancelPreview = {
+    email: string | null;
+    subscription: { id: string; status: string; live: boolean; cancel_scheduled: boolean; period_end: string | null } | null;
+    one_time: boolean;
+    eligible_by_policy: boolean;
+    block_text: string | null;
+    charge: { amount: number; refunded: number; paid_at: string; deadline: string; kind: string } | null;
+  };
+
+  async function askCancelSub(u: AdminUser, mode: 'refund_now' | 'at_period_end') {
+    setBusyId(u.id);
+    let pv: CancelPreview;
+    try {
+      const res = await fetch(`/api/admin/refund-cancel?userId=${encodeURIComponent(u.id)}`, { cache: 'no-store' });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        flash('err', j.error || 'Falha ao ler o Stripe.', 6000);
+        return;
+      }
+      pv = j as CancelPreview;
+    } catch (e) {
+      flash('err', (e as Error).message || 'Falha de conexão.');
+      return;
+    } finally {
+      setBusyId(null);
+    }
+    const who = u.email || u.name || 'Cliente';
+
+    const post = async () => {
+      setBusyId(u.id);
+      try {
+        const res = await fetch('/api/admin/refund-cancel', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ userId: u.id, mode }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok) {
+          flash('err', [j.error, j.detail].filter(Boolean).join(' — ') || 'Falha no Stripe.', 8000);
+          return;
+        }
+        if (j.mode === 'refunded') {
+          flash(
+            'ok',
+            j.already_refunded
+              ? `${who}: assinatura encerrada (o valor já tinha sido devolvido). Premium removido.`
+              : `${who}: ${brl(j.refunded)} devolvidos no cartão, assinatura encerrada e Premium removido.`,
+            7000,
+          );
+        } else {
+          flash('ok', `${who}: renovação desligada. Acesso até ${fmtDate(j.access_until) ?? 'o fim do período'}, sem nova cobrança.`, 7000);
+        }
+        await afterAction();
+      } catch (e) {
+        flash('err', (e as Error).message || 'Erro inesperado.');
+      } finally {
+        setBusyId(null);
+      }
+    };
+
+    if (mode === 'at_period_end') {
+      if (!pv.subscription?.live) {
+        flash('err', `${who} não tem assinatura viva no Stripe.`);
+        return;
+      }
+      if (pv.subscription.cancel_scheduled) {
+        flash('ok', `${who} já está com o cancelamento agendado: acesso até ${fmtDate(pv.subscription.period_end) ?? 'o fim do período'}.`);
+        return;
+      }
+      setConfirmBox({
+        title: 'Cancelar no fim do período?',
+        tone: 'amber',
+        confirmLabel: 'Sim, desligar a renovação',
+        body: (
+          <>
+            <b className="text-text">{who}</b> continua Premium até{' '}
+            <b className="text-text">{fmtDate(pv.subscription.period_end) ?? 'o fim do período'}</b> e não é cobrado de novo.
+            Sem reembolso.
+          </>
+        ),
+        run: post,
+      });
+      return;
+    }
+
+    const c = pv.charge;
+    if (!c || c.amount <= 0) {
+      flash('err', `Não achei uma cobrança paga de ${who} pra devolver.`);
+      return;
+    }
+    const remaining = Math.max(0, c.amount - c.refunded);
+    setConfirmBox({
+      title: remaining > 0 ? `Devolver ${brl(remaining)} e cancelar?` : 'Encerrar a assinatura?',
+      tone: 'danger',
+      confirmLabel: remaining > 0 ? `Sim, devolver ${brl(remaining)}` : 'Sim, encerrar agora',
+      body: (
+        <>
+          <b className="text-text">{who}</b> pagou <b className="text-text">{brl(c.amount)}</b> em {fmtDateTime(c.paid_at)}.{' '}
+          {remaining <= 0 ? (
+            <>Esse valor já foi devolvido; falta só encerrar a assinatura e tirar o Premium.</>
+          ) : pv.eligible_by_policy ? (
+            <>
+              Está dentro dos 7 dias (até {fmtDateTime(c.deadline)}), então é o reembolso que a política garante.
+            </>
+          ) : (
+            <>
+              <b style={{ color: accent('amber') }}>Fora da regra automática</b>: {pv.block_text}. Você está devolvendo por decisão própria.
+            </>
+          )}
+          <br />
+          <br />
+          {remaining > 0 ? 'O valor volta pro cartão, ' : ''}a assinatura é encerrada no Stripe agora e o Premium cai na hora. Não tem como desfazer.
+        </>
+      ),
+      run: post,
+    });
+  }
+
   // ─── Beta Pro ───
   const [betaModal, setBetaModal] = useState<{ user: AdminUser; sel: Set<string>; saving: boolean } | null>(null);
 
@@ -502,6 +680,7 @@ export default function AdminPage() {
     toggle: toggleActive,
     remove: askDelete,
     reconcile,
+    cancelSub: askCancelSub,
   };
   const actions = useMemo<RowActions>(
     () => ({
@@ -512,6 +691,7 @@ export default function AdminPage() {
       toggle: (u) => impl.current.toggle(u),
       remove: (u) => impl.current.remove(u),
       reconcile: (u) => impl.current.reconcile(u),
+      cancelSub: (u, m) => impl.current.cancelSub(u, m),
     }),
     [],
   );
@@ -578,6 +758,7 @@ export default function AdminPage() {
     { key: 'concurrent', label: 'Acesso simultâneo', count: stats.concurrent, a: 'danger', hide: stats.concurrent === 0 },
     { key: 'inactive', label: 'Desativados', count: stats.inactive, a: 'danger', hide: stats.inactive === 0 },
     { key: 'pending', label: 'Pagamento pendente', count: stats.pending, a: 'amber', hide: stats.pending === 0 },
+    { key: 'canceled', label: 'Cancelaram', count: canceledCount, a: 'amber', hide: canceledCount === 0 },
     { key: 'anomaly', label: 'Sem origem', count: stats.anomaly, a: 'danger', hide: stats.anomaly === 0 },
   ];
 
@@ -792,6 +973,113 @@ export default function AdminPage() {
         </Panel>
       </div>
 
+      {/* ═══════ Cancelamentos ═══════ */}
+      <div className="mt-6">
+        <Panel
+          title="Cancelamentos"
+          hint="Direto do Stripe: quem pediu pra cancelar, até quando tem acesso e quem foi reembolsado"
+          right={
+            <Segmented
+              size="sm"
+              value={cancelFilter}
+              onChange={setCancelFilter}
+              activeTone="amber"
+              options={[
+                { value: 'all', label: `Todos ${cancels ? cancels.length : ''}`.trim() },
+                { value: 'scheduled', label: `Agendados ${cancels ? cancels.filter((c) => c.kind === 'scheduled').length : ''}`.trim() },
+                { value: 'refunded', label: `Reembolsados ${cancels ? cancels.filter((c) => c.kind === 'refunded' || c.kind === 'refund').length : ''}`.trim() },
+                { value: 'ended', label: `Encerrados ${cancels ? cancels.filter((c) => c.kind === 'ended').length : ''}`.trim() },
+              ]}
+            />
+          }
+        >
+          {cancelsErr && !cancels ? (
+            <div className="field-label rounded-[14px] p-4 text-[13px]" style={{ color: accent('danger'), background: accent('danger', 0.08) }}>
+              {cancelsErr}
+            </div>
+          ) : !cancels ? (
+            <Skeleton className="h-[140px]" />
+          ) : cancelRows.length ? (
+            <div className="max-h-[360px] overflow-auto rounded-[16px]" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+              <table className="w-full min-w-[760px] text-left">
+                <thead className="sticky top-0 z-[1] bg-bg-soft">
+                  <tr className="field-label text-[12px] text-text-muted">
+                    <th className="px-4 py-3 font-medium">Cliente</th>
+                    <th className="px-4 py-3 font-medium">Situação</th>
+                    <th className="px-4 py-3 font-medium">Pediu em</th>
+                    <th className="px-4 py-3 font-medium">Acesso</th>
+                    <th className="px-4 py-3 font-medium">Reembolso</th>
+                    <th className="px-4 py-3 text-right font-medium">Ação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cancelRows.map((c) => {
+                    const owner = c.user_id ? userById.get(c.user_id) : undefined;
+                    const meta = CANCEL_META[c.kind];
+                    return (
+                      <tr key={c.key} className="border-t border-[rgb(var(--text)/0.06)] text-[13.5px] transition-colors hover:bg-[rgb(var(--text)/0.025)]">
+                        <td className="max-w-[260px] px-4 py-3">
+                          {owner ? (
+                            <button type="button" onClick={() => openProfile(owner, 'pagamentos')} className="block max-w-full truncate text-left font-medium text-text underline-offset-4 hover:underline" title="Abrir perfil">
+                              {owner.name || c.email || owner.email}
+                            </button>
+                          ) : (
+                            <span className="block truncate text-text" title="Sem conta no app com esse cliente do Stripe">{c.email || c.customer_id || 'Sem email'}</span>
+                          )}
+                          {owner && (owner.name || '') !== '' ? (
+                            <span className="field-label block truncate text-[12px] text-text-muted">{c.email || owner.email}</span>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="flex flex-col items-start gap-1">
+                            <CancelTag c={c} />
+                            {c.comment ? (
+                              <span className="field-label max-w-[240px] truncate text-[11.5px] text-text-muted" title={c.comment}>
+                                {c.comment}
+                              </span>
+                            ) : c.reason === 'payment_failed' ? (
+                              <span className="field-label text-[11.5px] text-text-muted">Pagamento recusado</span>
+                            ) : c.reason === 'payment_disputed' ? (
+                              <span className="field-label text-[11.5px] text-text-muted">Contestação no banco</span>
+                            ) : null}
+                          </span>
+                        </td>
+                        <td className="field-label whitespace-nowrap px-4 py-3 text-text-muted">{fmtDate(c.requested_at) ?? '—'}</td>
+                        <td className="field-label whitespace-nowrap px-4 py-3 text-text-muted">
+                          {c.kind === 'scheduled' ? (
+                            <span style={{ color: accent('amber') }}>até {fmtDate(c.access_until) ?? '—'}</span>
+                          ) : c.access_until ? (
+                            <>encerrou {fmtDate(c.access_until)}</>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="font-tech whitespace-nowrap px-4 py-3 font-semibold" style={{ color: c.refunded_amount ? accent('danger') : 'rgb(var(--text-muted))', fontVariantNumeric: 'tabular-nums' }}>
+                          {c.refunded_amount ? brl(c.refunded_amount) : 'Sem reembolso'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {c.kind === 'scheduled' && owner ? (
+                            <Btn size="sm" tone="danger" onClick={() => askCancelSub(owner, 'refund_now')} disabled={busyId === owner.id} title={meta.label}>
+                              Reembolsar
+                            </Btn>
+                          ) : (
+                            <span className="field-label text-[12.5px] text-text-muted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="field-label rounded-[16px] py-7 text-center text-[13.5px] text-text-muted" style={{ boxShadow: 'inset 0 0 0 1px rgb(var(--text) / 0.07)' }}>
+              {cancelFilter === 'all' ? 'Ninguém cancelou ainda.' : 'Nenhum cancelamento nesse filtro.'}
+            </div>
+          )}
+        </Panel>
+      </div>
+
       {/* ═══════ Crescimento + engajamento ═══════ */}
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
         <Panel title="Novos cadastros" hint="Por dia, últimos 30 dias (só clientes)">
@@ -916,7 +1204,10 @@ export default function AdminPage() {
 
             <ul className="border-t border-[rgb(var(--text)/0.07)] [&>li+li]:border-t [&>li+li]:border-[rgb(var(--text)/0.06)]">
               {users && shown.length > 0 ? (
-                shown.map((u) => <UserRow key={u.id} u={u} now={now} busy={busyId === u.id} actions={actions} />)
+                shown.map((u) => {
+                  const c = cancelByUser.get(u.id);
+                  return <UserRow key={u.id} u={u} now={now} busy={busyId === u.id} actions={actions} cancel={cancelApplies(c, u) ? c : undefined} />;
+                })
               ) : !users ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <li key={i} className="flex items-center gap-4 px-5 py-4">
@@ -1077,6 +1368,7 @@ export default function AdminPage() {
           actions={actions}
           blockEsc={!!confirmBox || !!betaModal || !!resetModal}
           onClose={() => setProfile(null)}
+          cancel={cancelApplies(cancelByUser.get(profileUser.id), profileUser) ? cancelByUser.get(profileUser.id) : undefined}
         />
       ) : null}
 

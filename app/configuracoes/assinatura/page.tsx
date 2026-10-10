@@ -13,6 +13,10 @@ import { refreshTier } from '@/lib/use-tier';
  * /configuracoes/assinatura — gestão de assinatura 100% nativa (sem portal
  * externo / sem marca de terceiros). Mostra plano, valor, próxima cobrança,
  * cartão, status e histórico de faturas; cancela/reativa direto na nossa API.
+ *
+ * Cancelamento (política 09.10): até 7 dias da última cobrança → devolve o
+ * valor inteiro e o Premium acaba na hora; depois disso → sem reembolso, acesso
+ * até a próxima data de cobrança. A tela diz qual dos dois ANTES do clique.
  */
 
 type Sub = {
@@ -25,7 +29,16 @@ type Sub = {
   interval: string | null;
   current_period_end: number | null;
   cancel_at_period_end: boolean;
+  ended_at?: number | null;
   card: { brand: string; last4: string; exp_month: number; exp_year: number } | null;
+};
+type Refund = {
+  eligible: boolean;
+  reason: string | null;
+  amount: number;
+  paid_at: number | null;
+  deadline: number | null;
+  refunded_amount: number;
 };
 type Invoice = {
   id: string;
@@ -35,7 +48,13 @@ type Invoice = {
   status: string | null;
   url: string | null;
 };
-type Data = { subscription: Sub | null; invoices?: Invoice[]; tier: string };
+type Data = {
+  subscription: Sub | null;
+  invoices?: Invoice[];
+  tier: string;
+  refund?: Refund | null;
+  one_time?: { plan: string | null; access_until: string | null } | null;
+};
 
 const brl = (c: number) =>
   (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -45,6 +64,35 @@ const dateFmt = (unix: number) =>
     month: 'long',
     year: 'numeric',
   });
+
+const dateTimeFmt = (unix: number) =>
+  new Date(unix * 1000).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+/** Por que NÃO há reembolso automático (frase pro cliente). */
+function noRefundText(r: Refund | null | undefined): string {
+  if (!r) return 'o prazo de 7 dias para reembolso já passou';
+  switch (r.reason) {
+    case 'window_passed':
+      return r.paid_at
+        ? `a garantia de 7 dias da cobrança de ${dateTimeFmt(r.paid_at)} já terminou`
+        : 'o prazo de 7 dias para reembolso já passou';
+    case 'used_before':
+      return 'o reembolso automático de 7 dias já foi usado nesta conta — se precisar, fale com o suporte';
+    case 'already_refunded':
+      return 'a última cobrança já foi reembolsada';
+    case 'free_charge':
+      return 'a última cobrança foi de R$ 0,00';
+    case 'disputed':
+      return 'a cobrança está em contestação no seu banco';
+    default:
+      return 'não há cobrança recente para devolver';
+  }
+}
 
 const PLAN_HUE: Record<string, string> = {
   pro: '#c084fc',
@@ -57,6 +105,7 @@ const STATUS_LABEL: Record<string, string> = {
   past_due: 'Pagamento pendente',
   unpaid: 'Pagamento em atraso',
   canceled: 'Cancelada',
+  incomplete_expired: 'Expirada',
   admin_grant: 'Cortesia',
 };
 
@@ -66,6 +115,7 @@ export default function AssinaturaPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRefundNow, setConfirmRefundNow] = useState(false);
   const [editCard, setEditCard] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -96,26 +146,45 @@ export default function AssinaturaPage() {
     });
   }, [load, router]);
 
-  async function act(action: 'cancel' | 'reactivate') {
+  async function act(action: 'cancel' | 'reactivate', keepAccess = false) {
     setBusy(true);
     setToast(null);
     try {
       const res = await fetch('/api/billing/cancel', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, keepAccess }),
       });
-      const j = await res.json().catch(() => ({}));
+      const j = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        mode?: 'refunded' | 'scheduled' | 'ended' | 'reactivated';
+        refunded?: number;
+        access_until?: string | null;
+      };
       if (!res.ok) {
         setToast(j.error || 'Falha na operação.');
         return;
       }
       setConfirmCancel(false);
-      setToast(
-        action === 'cancel'
-          ? 'Assinatura cancelada. Você mantém o acesso até o fim do período pago.'
-          : 'Assinatura reativada. Sua renovação volta ao normal.',
-      );
+      setConfirmRefundNow(false);
+      if (j.mode === 'refunded') {
+        setToast(
+          `Pronto: assinatura cancelada e ${brl(j.refunded ?? 0)} devolvidos no seu cartão. ` +
+            'O estorno aparece na fatura em até 10 dias úteis, conforme o seu banco.',
+        );
+        await refreshTier().catch(() => {});
+      } else if (j.mode === 'scheduled') {
+        setToast(
+          j.access_until
+            ? `Cancelamento feito. Você mantém o acesso até ${new Date(j.access_until).toLocaleDateString('pt-BR')} e não haverá nova cobrança.`
+            : 'Cancelamento feito. Você mantém o acesso até o fim do período pago e não haverá nova cobrança.',
+        );
+      } else if (j.mode === 'ended') {
+        setToast('Assinatura encerrada. Nenhuma nova cobrança será feita.');
+        await refreshTier().catch(() => {});
+      } else {
+        setToast('Assinatura reativada. Sua renovação volta ao normal.');
+      }
       await load();
     } finally {
       setBusy(false);
@@ -159,7 +228,12 @@ export default function AssinaturaPage() {
   }
 
   const sub = data?.subscription ?? null;
-  const pendingPayment = !!sub && isPaymentBlocked(sub.status);
+  const refund = data?.refund ?? null;
+  const ended = !!sub && (sub.status === 'canceled' || sub.status === 'incomplete_expired');
+  const pendingPayment = !!sub && !ended && isPaymentBlocked(sub.status);
+  // Dentro dos 7 dias da última cobrança: cancelar devolve o valor.
+  const refundable = !!refund?.eligible && refund.amount > 0;
+  const refundedAmount = refund?.refunded_amount ?? 0;
   // Rótulo/cor de exibição: o tier interno 'basic' exibe PREMIUM; um Pro
   // legado vira BETA PRO (ciano). Valor, status e cobrança seguem 100% reais
   // do Stripe — só o nome de exibição muda.
@@ -197,6 +271,66 @@ export default function AssinaturaPage() {
       {loading ? (
         <div className="rounded-[16px] border border-line bg-bg-soft/60 p-8 text-center text-sm text-text-muted">
           <span className="loading-dots">Carregando</span>
+        </div>
+      ) : !sub && data?.one_time ? (
+        <div className="flex flex-col gap-5">
+          <div
+            className="rounded-[20px] border border-line/70 p-6 md:p-7"
+            style={{ background: 'linear-gradient(180deg,rgb(var(--bg-softer)),var(--card-deep))' }}
+          >
+            <div
+              className="text-[11px] font-bold uppercase tracking-[0.2em] text-violet"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Plano anual · pagamento único
+            </div>
+            <p className="mt-2 text-[14px] text-text-muted">
+              Não renova sozinho. Acesso Premium até{' '}
+              <strong className="text-white">
+                {data.one_time.access_until
+                  ? new Date(data.one_time.access_until).toLocaleDateString('pt-BR')
+                  : 'o fim do período'}
+              </strong>
+              .
+            </p>
+            {refundable ? (
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                {!confirmCancel ? (
+                  <button type="button" onClick={() => setConfirmCancel(true)} className="btn-ghost">
+                    Desistir e receber {brl(refund!.amount)}
+                  </button>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-rose-400/40 bg-rose-500/10 px-3 py-2">
+                    <span className="text-[13px] text-rose-100">
+                      Dentro dos 7 dias
+                      {refund?.deadline ? <> (até {dateTimeFmt(refund.deadline)})</> : null}: devolvemos{' '}
+                      {brl(refund!.amount)} e o Premium termina agora. Confirmar?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => act('cancel')}
+                      disabled={busy}
+                      className="rounded-full bg-rose-500 px-4 py-1.5 text-[12.5px] font-bold text-white hover:bg-rose-600"
+                    >
+                      {busy ? 'Reembolsando…' : 'Sim, desistir'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCancel(false)}
+                      className="text-[12.5px] text-text-muted hover:text-white"
+                    >
+                      Voltar
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+          {toast ? (
+            <div className="rounded-[12px] border border-lime/40 bg-lime/10 px-4 py-3 text-[13px] text-lime">
+              {toast}
+            </div>
+          ) : null}
         </div>
       ) : !sub ? (
         <div
@@ -364,14 +498,22 @@ export default function AssinaturaPage() {
                   </span>
                 </div>
               </div>
-              <StatusBadge sub={sub} hue={hue} />
+              <StatusBadge sub={sub} hue={hue} refunded={refundedAmount > 0} />
             </div>
 
             {/* Próxima cobrança / cancelamento */}
             <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <InfoRow
-                label={sub.cancel_at_period_end ? 'Acesso até' : 'Próxima cobrança'}
-                value={sub.current_period_end ? dateFmt(sub.current_period_end) : '—'}
+                label={ended ? 'Encerrada em' : sub.cancel_at_period_end ? 'Acesso até' : 'Próxima cobrança'}
+                value={
+                  ended
+                    ? sub.ended_at
+                      ? dateFmt(sub.ended_at)
+                      : '—'
+                    : sub.current_period_end
+                      ? dateFmt(sub.current_period_end)
+                      : '—'
+                }
               />
               <InfoRow
                 label="Forma de pagamento"
@@ -386,7 +528,7 @@ export default function AssinaturaPage() {
             </div>
 
             {/* Atualizar cartão (nativo, Elements) */}
-            <div className="mt-4">
+            <div className={ended ? 'hidden' : 'mt-4'}>
               {editCard ? (
                 <div className="rounded-[14px] border border-line/60 bg-black/20 p-4">
                   <CardUpdate
@@ -416,25 +558,85 @@ export default function AssinaturaPage() {
               )}
             </div>
 
-            {sub.cancel_at_period_end ? (
+            {ended ? (
+              <div className="mt-5 rounded-[12px] border border-line/60 bg-[rgb(var(--text)/0.04)] px-4 py-3 text-[13px] text-text-muted">
+                {refundedAmount > 0 ? (
+                  <>
+                    Assinatura cancelada com reembolso de{' '}
+                    <strong className="text-white">{brl(refundedAmount)}</strong>. O estorno aparece na
+                    fatura do cartão em até 10 dias úteis, conforme o seu banco.
+                  </>
+                ) : (
+                  <>Assinatura encerrada. Nenhuma nova cobrança será feita.</>
+                )}
+              </div>
+            ) : sub.cancel_at_period_end ? (
               <div className="mt-5 rounded-[12px] border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-[13px] text-amber-200">
                 Cancelamento agendado. Você continua com acesso até{' '}
-                <strong>{sub.current_period_end ? dateFmt(sub.current_period_end) : 'o fim do período'}</strong>.
-                Mudou de ideia?
+                <strong>{sub.current_period_end ? dateFmt(sub.current_period_end) : 'o fim do período'}</strong>{' '}
+                e não haverá nova cobrança.
+                {refundable ? (
+                  <>
+                    {' '}
+                    Ainda está dentro dos 7 dias da cobrança
+                    {refund?.deadline ? <> (até {dateTimeFmt(refund.deadline)})</> : null}: se preferir,
+                    cancele agora e receba <strong>{brl(refund!.amount)}</strong> de volta.
+                  </>
+                ) : (
+                  <> Mudou de ideia?</>
+                )}
               </div>
             ) : null}
 
             {/* Ações */}
             <div className="mt-6 flex flex-wrap items-center gap-3">
-              {sub.cancel_at_period_end ? (
-                <button
-                  type="button"
-                  onClick={() => act('reactivate')}
-                  disabled={busy}
-                  className="btn-primary"
-                >
-                  {busy ? 'Reativando…' : 'Reativar assinatura'}
-                </button>
+              {ended ? (
+                <Link href="/planos?upgrade=1" className="btn-primary">
+                  Assinar de novo
+                </Link>
+              ) : sub.cancel_at_period_end ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => act('reactivate')}
+                    disabled={busy}
+                    className="btn-primary"
+                  >
+                    {busy ? 'Aguarde…' : 'Reativar assinatura'}
+                  </button>
+                  {refundable && !confirmRefundNow ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRefundNow(true)}
+                      disabled={busy}
+                      className="btn-ghost"
+                    >
+                      Cancelar agora e receber {brl(refund!.amount)}
+                    </button>
+                  ) : null}
+                  {refundable && confirmRefundNow ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-rose-400/40 bg-rose-500/10 px-3 py-2">
+                      <span className="text-[13px] text-rose-100">
+                        Devolvemos {brl(refund!.amount)} no cartão e o Premium termina agora. Confirmar?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => act('cancel')}
+                        disabled={busy}
+                        className="rounded-full bg-rose-500 px-4 py-1.5 text-[12.5px] font-bold text-white hover:bg-rose-600"
+                      >
+                        {busy ? 'Reembolsando…' : 'Sim, cancelar e reembolsar'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRefundNow(false)}
+                        className="text-[12.5px] text-text-muted hover:text-white"
+                      >
+                        Voltar
+                      </button>
+                    </div>
+                  ) : null}
+                </>
               ) : !confirmCancel ? (
                 <button
                   type="button"
@@ -444,30 +646,70 @@ export default function AssinaturaPage() {
                   Cancelar assinatura
                 </button>
               ) : (
-                <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-rose-400/40 bg-rose-500/10 px-3 py-2">
-                  <span className="text-[13px] text-rose-100">
-                    Cancelar mesmo? Você mantém o acesso até o fim do período pago.
+                <div className="flex w-full flex-col gap-2.5 rounded-[12px] border border-rose-400/40 bg-rose-500/10 px-4 py-3">
+                  <span className="text-[13px] leading-relaxed text-rose-100">
+                    {pendingPayment ? (
+                      <>
+                        Cancelar mesmo? A assinatura é encerrada agora e paramos de tentar cobrar o
+                        cartão. Nenhuma nova cobrança será feita.
+                      </>
+                    ) : refundable ? (
+                      <>
+                        Você está dentro da garantia de 7 dias
+                        {refund?.deadline ? <> (até {dateTimeFmt(refund.deadline)})</> : null}. Ao cancelar
+                        agora, devolvemos <strong className="text-white">{brl(refund!.amount)}</strong> no seu
+                        cartão e o acesso Premium termina na hora.
+                      </>
+                    ) : (
+                      <>
+                        Cancelar mesmo? Você mantém o acesso até{' '}
+                        <strong className="text-white">
+                          {sub.current_period_end ? dateFmt(sub.current_period_end) : 'o fim do período pago'}
+                        </strong>{' '}
+                        e não haverá nova cobrança. Sem reembolso: {noRefundText(refund)}.
+                      </>
+                    )}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => act('cancel')}
-                    disabled={busy}
-                    className="rounded-full bg-rose-500 px-4 py-1.5 text-[12.5px] font-bold text-white hover:bg-rose-600"
-                  >
-                    {busy ? 'Cancelando…' : 'Sim, cancelar'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmCancel(false)}
-                    className="text-[12.5px] text-text-muted hover:text-white"
-                  >
-                    Voltar
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => act('cancel')}
+                      disabled={busy}
+                      className="rounded-full bg-rose-500 px-4 py-1.5 text-[12.5px] font-bold text-white hover:bg-rose-600"
+                    >
+                      {busy
+                        ? 'Cancelando…'
+                        : refundable && !pendingPayment
+                          ? 'Sim, cancelar e receber reembolso'
+                          : 'Sim, cancelar'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCancel(false)}
+                      className="text-[12.5px] text-text-muted hover:text-white"
+                    >
+                      Voltar
+                    </button>
+                  </div>
+                  {refundable && !pendingPayment ? (
+                    <button
+                      type="button"
+                      onClick={() => act('cancel', true)}
+                      disabled={busy}
+                      className="self-start text-left text-[12px] text-text-muted underline-offset-4 hover:text-white hover:underline"
+                    >
+                      Prefiro só desligar a renovação e usar até{' '}
+                      {sub.current_period_end ? dateFmt(sub.current_period_end) : 'o fim do período'}, sem
+                      reembolso
+                    </button>
+                  ) : null}
                 </div>
               )}
-              <Link href="/planos?upgrade=1" className="text-[13px] text-violet hover:text-white">
-                Trocar de plano
-              </Link>
+              {!ended ? (
+                <Link href="/planos?upgrade=1" className="text-[13px] text-violet hover:text-white">
+                  Trocar de plano
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -564,11 +806,15 @@ function PoweredByStripe() {
   );
 }
 
-function StatusBadge({ sub, hue }: { sub: Sub; hue: string }) {
-  const canceling = sub.cancel_at_period_end;
-  const pending = isPaymentBlocked(sub.status);
-  const label = canceling ? 'Cancela em breve' : STATUS_LABEL[sub.status] ?? sub.status;
-  const color = pending
+function StatusBadge({ sub, hue, refunded }: { sub: Sub; hue: string; refunded?: boolean }) {
+  const ended = sub.status === 'canceled' || sub.status === 'incomplete_expired';
+  const canceling = !ended && sub.cancel_at_period_end;
+  const pending = !ended && isPaymentBlocked(sub.status);
+  const label =
+    ended && refunded ? 'Reembolsada' : canceling ? 'Cancela em breve' : STATUS_LABEL[sub.status] ?? sub.status;
+  const color = ended
+    ? '#9c9ca6'
+    : pending
     ? '#fb7185'
     : canceling
       ? '#fbbf24'

@@ -46,9 +46,10 @@ import {
   type AccessEventRow,
   type AccessSessionRow,
   type AdminUser,
+  type CancelRow,
   type ProfileData,
 } from './model';
-import type { RowActions } from './UserRow';
+import { CancelTag, type RowActions } from './UserRow';
 
 export type ProfileTab = 'geral' | 'acessos' | 'uso' | 'pagamentos';
 
@@ -74,7 +75,9 @@ export function ProfileSheet({
   actions,
   blockEsc,
   onClose,
+  cancel,
 }: {
+  cancel?: CancelRow;
   user: AdminUser;
   tab: ProfileTab;
   onTab: (t: ProfileTab) => void;
@@ -182,6 +185,7 @@ export function ProfileSheet({
                     {user.name || 'Sem nome'}
                   </h2>
                   <Tag a={meta.accent} dot>{meta.label}</Tag>
+                  {cancel ? <CancelTag c={cancel} /> : null}
                   {!user.is_active ? <Tag a="danger">Conta desativada</Tag> : null}
                   {user.must_change_password ? <Tag a="amber">Senha provisória</Tag> : null}
                 </div>
@@ -248,14 +252,24 @@ export function ProfileSheet({
               <Btn size="sm" onClick={() => actions.reconcile(user)} disabled={busy} title="Lê o estado real no Stripe e aplica o plano">
                 <I.sync size={13} /> Sincronizar Stripe
               </Btn>
+              {user.access === 'paid' || user.access === 'pending' ? (
+                <Btn size="sm" tone="danger" onClick={() => actions.cancelSub(user, 'refund_now')} disabled={busy} title="Devolve a última cobrança, encerra a assinatura e tira o Premium agora (pede confirmação)">
+                  <I.receipt size={13} /> Cancelar e reembolsar
+                </Btn>
+              ) : null}
               <IconOnly title="Mais ações" onClick={(e) => setMenuAt(menuAt ? null : e.currentTarget)} disabled={busy}>
                 <I.dots size={16} />
               </IconOnly>
               {menuAt ? (
-                <Menu anchor={menuAt} onClose={() => setMenuAt(null)} width={236}>
+                <Menu anchor={menuAt} onClose={() => setMenuAt(null)} width={256}>
                   <MenuItem icon={<I.key size={14} />} onClick={() => { setMenuAt(null); actions.reset(user); }}>
                     Gerar senha provisória
                   </MenuItem>
+                  {user.access === 'paid' || user.access === 'pending' ? (
+                    <MenuItem icon={<I.clock size={14} />} onClick={() => { setMenuAt(null); actions.cancelSub(user, 'at_period_end'); }} hint="Sem reembolso; acesso até a próxima cobrança">
+                      Cancelar no fim do período
+                    </MenuItem>
+                  ) : null}
                   <MenuSep />
                   <MenuItem icon={<I.power size={14} />} onClick={() => { setMenuAt(null); actions.toggle(user); }}>
                     {user.is_active ? 'Desativar conta' : 'Reativar conta'}

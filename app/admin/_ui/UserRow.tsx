@@ -4,10 +4,13 @@ import { memo, useState } from 'react';
 import { Avatar, I, IconOnly, Menu, MenuItem, MenuSep, NestedBtn, Segmented, Tag } from './kit';
 import {
   ACCESS_META,
+  CANCEL_META,
   CATALOG_LABEL,
   accent,
   betaProTools,
+  brl,
   fmtDate,
+  fmtDateShort,
   fmtPhone,
   initials,
   isOnline,
@@ -15,6 +18,7 @@ import {
   timeAgo,
   toolLabel,
   type AdminUser,
+  type CancelRow,
 } from './model';
 
 export type RowActions = {
@@ -25,7 +29,29 @@ export type RowActions = {
   toggle: (u: AdminUser) => void;
   remove: (u: AdminUser) => void;
   reconcile: (u: AdminUser) => void;
+  /** refund_now = devolve a última cobrança e encerra; at_period_end = só desliga a renovação. */
+  cancelSub: (u: AdminUser, mode: 'refund_now' | 'at_period_end') => void;
 };
+
+/** Selo do cancelamento (vem do Stripe): agendado, reembolsado ou encerrado. */
+export function CancelTag({ c }: { c: CancelRow }) {
+  const meta = CANCEL_META[c.kind];
+  const text =
+    c.kind === 'scheduled'
+      ? `Cancela ${fmtDateShort(c.access_until) ?? 'no fim do período'}`
+      : c.refunded_amount > 0
+        ? `Reembolsado ${brl(c.refunded_amount)}`
+        : 'Cancelou';
+  const title =
+    c.kind === 'scheduled'
+      ? `Pediu pra cancelar em ${fmtDate(c.requested_at) ?? '—'} · acesso até ${fmtDate(c.access_until) ?? '—'} (sem nova cobrança)`
+      : `${meta.label}${c.requested_at ? ` em ${fmtDate(c.requested_at)}` : ''}`;
+  return (
+    <Tag a={meta.accent} title={title}>
+      {text}
+    </Tag>
+  );
+}
 
 /**
  * Uma linha da lista de clientes. Memo: só re-renderiza quando o usuário
@@ -37,11 +63,13 @@ export const UserRow = memo(function UserRow({
   now,
   busy,
   actions,
+  cancel,
 }: {
   u: AdminUser;
   now: number;
   busy: boolean;
   actions: RowActions;
+  cancel?: CancelRow;
 }) {
   const [menuAt, setMenuAt] = useState<HTMLElement | null>(null);
   const online = isOnline(u, now);
@@ -73,6 +101,7 @@ export const UserRow = memo(function UserRow({
                 {u.name || 'Sem nome'}
               </span>
               <Tag a={meta.accent}>{meta.short}</Tag>
+              {cancel ? <CancelTag c={cancel} /> : null}
               {beta.length > 0 ? (
                 <Tag a="violet" title={beta.map((p) => CATALOG_LABEL.get(p) ?? p).join(', ')}>
                   <I.bolt size={11} /> Beta Pro {beta.length}
@@ -150,6 +179,16 @@ export const UserRow = memo(function UserRow({
           <MenuItem icon={<I.sync size={14} />} onClick={() => { setMenuAt(null); actions.reconcile(u); }} hint="Lê o Stripe e aplica o plano real">
             Sincronizar com o Stripe
           </MenuItem>
+          {u.access === 'paid' || u.access === 'pending' ? (
+            <>
+              <MenuItem icon={<I.receipt size={14} />} tone="danger" onClick={() => { setMenuAt(null); actions.cancelSub(u, 'refund_now'); }} hint="Devolve a última cobrança e encerra agora">
+                Cancelar e reembolsar
+              </MenuItem>
+              <MenuItem icon={<I.clock size={14} />} onClick={() => { setMenuAt(null); actions.cancelSub(u, 'at_period_end'); }} hint="Sem reembolso; acesso até a próxima cobrança">
+                Cancelar no fim do período
+              </MenuItem>
+            </>
+          ) : null}
           <MenuItem icon={<I.globe size={14} />} onClick={() => { setMenuAt(null); actions.open(u, 'acessos'); }}>
             Histórico de IPs
           </MenuItem>

@@ -12,7 +12,7 @@ export const metadata = {
   alternates: { canonical: '/politica' },
 };
 
-const UPDATED = '29/05/2026';
+const UPDATED = '09/10/2026';
 
 export default function PoliticaPage() {
   return (
@@ -74,27 +74,38 @@ export default function PoliticaPage() {
 
           <Section title="3. Cancelamento — a qualquer momento">
             Você pode cancelar quando quiser, sem burocracia, em{' '}
-            <strong className="text-white">Configurações → Assinatura → Gerenciar</strong> (portal
-            seguro do nosso processador de pagamentos). Ao cancelar:
+            <strong className="text-white">Configurações → Assinatura → Cancelar assinatura</strong>.
+            O cancelamento vale na hora no nosso processador de pagamentos, e a tela mostra antes
+            do clique o que vai acontecer:
             <ul className="mt-3 list-disc pl-5">
               <li>Não há multa nem fidelidade.</li>
               <li>
-                Seu acesso <strong className="text-white">continua ativo até o fim do período já pago</strong>{' '}
-                (você não perde os dias/meses que já pagou).
+                <strong className="text-white">Até 7 dias depois da cobrança</strong>: devolvemos o
+                valor pago (item 4) e o acesso pago termina na hora.
               </li>
-              <li>Após esse período, não há novas cobranças.</li>
+              <li>
+                <strong className="text-white">Depois de 7 dias da cobrança</strong>: não há
+                reembolso, mas seu acesso{' '}
+                <strong className="text-white">continua ativo até a próxima data de cobrança</strong>{' '}
+                (você não perde os dias que já pagou).
+              </li>
+              <li>Em nenhum dos casos há novas cobranças.</li>
             </ul>
           </Section>
 
           <Section title="4. Reembolso — direito de arrependimento (7 dias)">
             Conforme o <strong className="text-white">Art. 49 do Código de Defesa do Consumidor</strong>,
             você tem até <strong className="text-white">7 (sete) dias corridos</strong> a partir da
-            primeira contratação para desistir e receber o{' '}
+            cobrança para desistir e receber o{' '}
             <strong className="text-white">reembolso integral</strong> do valor pago, sem precisar
-            justificar. Basta solicitar pelo suporte dentro desse prazo.
+            justificar. O reembolso é <strong className="text-white">automático</strong>: basta
+            cancelar dentro do prazo pela tela da assinatura (item 3), sem precisar falar com o
+            suporte. O valor volta para o mesmo cartão; o estorno aparece na fatura em até 10 dias
+            úteis, conforme o banco emissor.
             <p className="mt-3">
-              Após os 7 dias, não há reembolso proporcional de períodos já em uso,
-              mas você pode cancelar a renovação a qualquer momento (item 3).
+              O reembolso automático vale uma vez por cliente. Após os 7 dias, não há reembolso
+              proporcional de períodos já em uso, mas você pode cancelar a renovação a qualquer
+              momento (item 3).
             </p>
           </Section>
 

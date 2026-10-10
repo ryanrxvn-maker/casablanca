@@ -52,6 +52,40 @@ export type Payment = {
   created_at: string | null;
 };
 
+/** Uma linha de /api/admin/cancellations (lida do Stripe, ao vivo). */
+export type CancelRow = {
+  key: string;
+  kind: 'scheduled' | 'refunded' | 'ended' | 'refund';
+  user_id: string | null;
+  name: string | null;
+  email: string | null;
+  customer_id: string | null;
+  subscription_id: string | null;
+  plan: string | null;
+  amount: number | null;
+  started_at: string | null;
+  requested_at: string | null;
+  access_until: string | null;
+  refunded_amount: number;
+  refunded_at: string | null;
+  reason: string | null;
+  comment: string | null;
+};
+
+export const CANCEL_META: Record<CancelRow['kind'], { label: string; accent: Accent }> = {
+  scheduled: { label: 'Cancelamento agendado', accent: 'amber' },
+  refunded: { label: 'Cancelou e foi reembolsado', accent: 'danger' },
+  refund: { label: 'Reembolsado', accent: 'danger' },
+  ended: { label: 'Assinatura encerrada', accent: 'neutral' },
+};
+
+/** O cancelamento ainda vale pra essa conta? Encerrado/reembolsado de quem
+ *  voltou a pagar é passado — não marca a pessoa como "cancelou". */
+export function cancelApplies(c: CancelRow | undefined, u: Pick<AdminUser, 'access'>): c is CancelRow {
+  if (!c) return false;
+  return c.kind === 'scheduled' || u.access !== 'paid';
+}
+
 export type ConcurrencyAlert = {
   id: number;
   user_id: string;
