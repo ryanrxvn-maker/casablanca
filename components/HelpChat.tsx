@@ -2,18 +2,35 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { DarkoLogo } from './DarkoLogo';
+import { GUIDE_PATHS } from './tool-guides/routes';
 import {
+  HELP_CHAT_EVENT,
   HELP_TOPICS,
+  HOME_ARTICLES,
   MAX_DESCRICAO,
+  articleById,
+  articleView,
   buildSupportMessage,
   cleanText,
   detectTopic,
+  findArticle,
   followUpFor,
+  isGiveUp,
+  isGreeting,
+  isNo,
+  isThanks,
+  isYes,
   looksLikeEmail,
   toolFromPath,
+  topicById,
   whatsappUrl,
+  wordCount,
+  type ArticleView,
+  type HelpArticle,
+  type HelpArticleId,
   type HelpTopic,
   type HelpTopicId,
 } from '@/lib/help-chat';
@@ -23,21 +40,51 @@ import s from './HelpChat.module.css';
  * CHAT DE AJUDA (07.10) — substitui o botão verde do WhatsApp.
  *
  * Botão roxo no canto → mini chat com sugestões ("Problemas com a conta",
- * "Erro em alguma ferramenta"...). A pessoa conta o problema e o chat devolve
- * um botão que abre o WhatsApp do suporte com a mensagem JÁ ESCRITA: quem é
- * (nome + e-mail da conta), o que houve e em que página estava. O chat não
- * finge responder nada: atendimento é gente, no WhatsApp.
+ * "Erro em alguma ferramenta"...). O que é simples o próprio chat ensina
+ * (10.10): cancelar a assinatura, excluir a conta, recuperar a senha... com o
+ * passo a passo da tela real e um botão que leva pra ela. Depois de toda
+ * resposta ele PERGUNTA se a pessoa ainda precisa do suporte; se precisar (ou
+ * se for algo que só gente resolve), devolve um botão que abre o WhatsApp do
+ * suporte com a mensagem JÁ ESCRITA: quem é (nome + e-mail da conta), o
+ * assunto e o que houve.
+ *
+ * Outras telas abrem o chat com `openHelpChat('<resposta>')` (lib/help-chat).
  *
  * Montado no layout raiz (todas as páginas). O pulso do botão é enfeite →
  * `ae-ambient` (pausa no modo descanso, ver AmbientCalm).
  */
 
-type NewMsg = { kind: 'bot'; text: string } | { kind: 'user'; text: string } | { kind: 'cta'; message: string };
+type NewMsg =
+  | { kind: 'bot'; text: string }
+  | { kind: 'user'; text: string }
+  | { kind: 'cta'; message: string }
+  | { kind: 'answer'; title: string; view: ArticleView };
 type Msg = NewMsg & { id: number };
 
-type Chips = { kind: 'topics' } | { kind: 'quick'; items: string[] } | { kind: 'email' } | { kind: 'done' } | null;
+type Chips =
+  | { kind: 'topics' }
+  | { kind: 'items'; topic: HelpTopicId }
+  | { kind: 'quick'; items: string[]; skip?: boolean }
+  | { kind: 'email' }
+  | { kind: 'resolve'; article: HelpArticleId }
+  | { kind: 'request'; article: HelpArticleId }
+  | { kind: 'after' }
+  | { kind: 'done' }
+  | null;
 
-type Stage = 'topic' | 'describe' | 'email' | 'done';
+/** answer = acabou de ler uma resposta do chat e ainda não disse se resolveu */
+type Stage = 'topic' | 'describe' | 'answer' | 'email' | 'done';
+
+type Convo = {
+  topic: HelpTopicId | null;
+  /** resposta do chat que a pessoa leu: vira o Assunto se ela ainda precisar do suporte */
+  article: HelpArticleId | null;
+  description: string;
+  email: string | null;
+  path: string | null;
+  /** já pediu "me conta um pouco mais" uma vez */
+  vague: boolean;
+};
 
 type Identity = { logged: boolean; name: string | null; firstName: string | null; email: string | null };
 
@@ -45,12 +92,28 @@ const ANON: Identity = { logged: false, name: null, firstName: null, email: null
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// curtas de propósito: no celular (fonte 16px) a dica mais longa quebrava em
+// 2 linhas e o campo nascia com barra de rolagem
 const PLACEHOLDER: Record<Stage, string> = {
-  topic: 'Escreva sua dúvida ou problema...',
+  topic: 'Escreva sua dúvida...',
   describe: 'Conte o que aconteceu...',
+  answer: 'Ficou alguma dúvida?',
   email: 'seu@email.com',
-  done: 'Quer acrescentar algum detalhe?',
+  done: 'Algum detalhe a mais?',
 };
+
+const RESOLVED = 'Resolveu, obrigado!';
+const TO_SUPPORT = 'Falar com o suporte';
+const SKIP_DETAILS = 'Prefiro explicar no WhatsApp';
+
+const freshConvo = (email: string | null = null): Convo => ({
+  topic: null,
+  article: null,
+  description: '',
+  email,
+  path: null,
+  vague: false,
+});
 
 // ─── quem está pedindo ajuda ────────────────────────────────────────────────
 // Sessão local (instantânea: e-mail + nome do cadastro) e o nome do perfil,
@@ -195,6 +258,54 @@ function TopicIcon({ id }: { id: HelpTopicId }) {
   }
 }
 
+/** linha da lista: resposta que o chat dá (lâmpada) x pedido que vai pro suporte (balão) */
+function RowIcon({ kind }: { kind: 'answer' | 'support' }) {
+  return kind === 'answer' ? (
+    <LineIcon size={16}>
+      <path d="M9.4 17.6h5.2M10.2 20.4h3.6" />
+      <path d="M12 3.6a5.9 5.9 0 0 0-3.5 10.6c.6.5.9 1.1.9 1.8v.4h5.2V16c0-.7.3-1.3.9-1.8A5.9 5.9 0 0 0 12 3.6Z" />
+    </LineIcon>
+  ) : (
+    <LineIcon size={16}>
+      <path d="M20 11.6c0 3.7-3.6 6.6-8 6.6-.9 0-1.8-.1-2.6-.4L5.2 19.6l1.1-3.2C5 15.2 4 13.5 4 11.6 4 7.9 7.6 5 12 5s8 2.9 8 6.6Z" />
+    </LineIcon>
+  );
+}
+
+/** Texto do passo com o nome do botão "entre aspas" em destaque. */
+function rich(text: string): ReactNode {
+  const parts = text.split(/"([^"]+)"/);
+  return parts.map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : p));
+}
+
+// ─── cartão de resposta (o passo a passo que o chat ensina) ──────────────────
+
+function AnswerCard({ title, view, onLink }: { title: string; view: ArticleView; onLink: () => void }) {
+  return (
+    <div className={s.answer} data-testid="help-chat-answer">
+      <p className={s.answerTitle}>{title}</p>
+      {view.intro ? <p className={s.answerIntro}>{rich(view.intro)}</p> : null}
+      <ol className={s.steps}>
+        {view.steps.map((step, i) => (
+          <li key={i} className={s.step}>
+            <span className={s.stepNum} aria-hidden="true">
+              {i + 1}
+            </span>
+            <span className={s.stepText}>{rich(step)}</span>
+          </li>
+        ))}
+      </ol>
+      {view.note ? <p className={s.answerNote}>{rich(view.note)}</p> : null}
+      {view.link ? (
+        <Link href={view.link.href} className={s.answerLink} onClick={onLink} data-testid="help-chat-answer-link">
+          <span>{view.link.label}</span>
+          <LineIcon size={15} d="M7.5 16.5 16.5 7.5M9 7.5h7.5V15" />
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── cartão da mensagem pronta ──────────────────────────────────────────────
 
 function CtaCard({ message }: { message: string }) {
@@ -279,12 +390,7 @@ export function HelpChat() {
 
   const stageRef = useRef<Stage>('topic');
   const busyRef = useRef(false);
-  const convo = useRef<{ topic: HelpTopicId | null; description: string; email: string | null; path: string | null }>({
-    topic: null,
-    description: '',
-    email: null,
-    path: null,
-  });
+  const convo = useRef<Convo>(freshConvo());
   const run = useRef(0);
   const nextId = useRef(1);
   const greeted = useRef(false);
@@ -293,6 +399,8 @@ export function HelpChat() {
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** pedido de outra tela (openHelpChat): sempre a versão mais nova das funções abaixo */
+  const externalOpen = useRef<(article: HelpArticleId | null) => void>(() => {});
   const uid = useId();
   const panelId = `help-chat-${uid.replace(/:/g, '')}`;
   const titleId = `${panelId}-title`;
@@ -337,7 +445,53 @@ export function HelpChat() {
     }
   };
 
-  const greet = async () => {
+  /** Volta pra escolha de assunto, sem mais nada pendente na conversa. */
+  const idleTopics = (kind: 'topics' | 'after' = 'topics') => {
+    convo.current = freshConvo(convo.current.email);
+    setStage('topic');
+    setChips({ kind });
+    setBusyBoth(false);
+  };
+
+  /**
+   * Mostra o passo a passo de uma resposta e, logo depois, PERGUNTA se a
+   * pessoa ainda precisa do suporte (ou, num pedido que só a equipe conclui,
+   * se quer que o chat deixe o pedido pronto). Chamada com o chat ocupado.
+   */
+  const showArticle = async (a: HelpArticle, myRun: number, lead?: string) => {
+    setTyping(true);
+    const [ident] = await Promise.all([
+      Promise.race([loadIdentity(900), sleep(1600).then(() => null)]),
+      lead ? Promise.resolve() : sleep(380),
+    ]);
+    if (myRun !== run.current) return;
+    if (lead && !(await botSay([lead], myRun))) return;
+    setTyping(true);
+    await sleep(520);
+    if (myRun !== run.current) return;
+    setTyping(false);
+    convo.current = {
+      ...freshConvo(convo.current.email),
+      topic: a.topic,
+      article: a.id,
+      path: pathRef.current,
+    };
+    push({
+      kind: 'answer',
+      title: a.title,
+      view: articleView(a, { logged: !!ident?.logged, hasGuide: GUIDE_PATHS.has(pathRef.current || '') }),
+    });
+    await sleep(260);
+    const ask = a.request
+      ? 'Quer que eu deixe o pedido pronto pro suporte no WhatsApp?'
+      : 'Isso resolveu? Se ainda precisar, te levo pro nosso suporte no WhatsApp.';
+    if (!(await botSay([ask], myRun))) return;
+    setStage('answer');
+    setChips(a.request ? { kind: 'request', article: a.id } : { kind: 'resolve', article: a.id });
+    setBusyBoth(false);
+  };
+
+  const greet = async (article: HelpArticle | null = null) => {
     const myRun = ++run.current;
     greeted.current = true;
     setBusyBoth(true);
@@ -353,6 +507,11 @@ export function HelpChat() {
       text: ident?.firstName ? `Oi, ${ident.firstName}! Aqui é o suporte do Auto Edit.` : 'Oi! Aqui é o suporte do Auto Edit.',
     });
     await sleep(90);
+    if (article) {
+      // veio de um botão de outra tela: a pergunta já é conhecida
+      push({ kind: 'user', text: article.title });
+      return showArticle(article, myRun);
+    }
     if (!(await botSay(['Como posso te ajudar? Escolha um assunto abaixo ou escreva com suas palavras.'], myRun))) return;
     setStage('topic');
     setChips({ kind: 'topics' });
@@ -367,12 +526,16 @@ export function HelpChat() {
       name: ident.name,
       email: ident.email || c.email,
       topic: c.topic,
+      article: c.article,
       description: c.description,
       pathname: c.path ?? pathRef.current,
     });
+    const pedido = !!articleById(c.article)?.request;
     const lines = update
       ? ['Acrescentei isso na mensagem. Ela ficou assim:']
-      : ['Prontinho! Deixei sua mensagem pronta pro nosso suporte.', 'Toque no botão abaixo: o WhatsApp abre com ela já escrita, é só enviar.'];
+      : pedido
+        ? ['Prontinho! Deixei o seu pedido pronto pro nosso suporte.', 'Toque no botão abaixo: o WhatsApp abre com ele já escrito, é só enviar.']
+        : ['Prontinho! Deixei sua mensagem pronta pro nosso suporte.', 'Toque no botão abaixo: o WhatsApp abre com ela já escrita, é só enviar.'];
     if (!(await botSay(lines, myRun))) return;
     const id = nextId.current++;
     const prevCta = update ? lastCta.current : null;
@@ -397,41 +560,130 @@ export function HelpChat() {
     await finish(myRun);
   };
 
-  const pickTopic = async (t: HelpTopic) => {
-    if (busyRef.current) return;
+  /** Começa uma ação do usuário: trava o chat e mostra o balão dele. */
+  const begin = (userText: string | null) => {
+    if (busyRef.current) return null;
     const myRun = run.current;
     setBusyBoth(true);
     setChips(null);
-    push({ kind: 'user', text: t.label });
+    if (userText) push({ kind: 'user', text: userText });
     setTyping(true);
-    convo.current.topic = t.id;
-    convo.current.path = pathRef.current;
+    return myRun;
+  };
+
+  const pickTopic = async (t: HelpTopic) => {
+    const myRun = begin(t.label);
+    if (myRun === null) return;
+    convo.current = { ...freshConvo(convo.current.email), topic: t.id, path: pathRef.current };
     if (!(await botSay([followUpFor(t.id, toolFromPath(pathRef.current))], myRun))) return;
     setStage('describe');
-    setChips({ kind: 'quick', items: t.rapidas });
+    setChips({ kind: 'items', topic: t.id });
     setBusyBoth(false);
     focusInput();
   };
 
+  const pickArticle = async (a: HelpArticle) => {
+    const myRun = begin(a.title);
+    if (myRun === null) return;
+    await showArticle(a, myRun);
+  };
+
+  /** "Resolveu, obrigado!" (ou um "valeu" digitado depois da resposta) */
+  const resolved = async (myRun: number) => {
+    if (!(await botSay(['Que bom que deu certo! Se precisar de mais alguma coisa, é só chamar.'], myRun))) return;
+    idleTopics('after');
+  };
+
+  /** Não resolveu: pede o relato (com sugestões) pra montar a mensagem do suporte. */
+  const toSupport = async (a: HelpArticle, myRun: number) => {
+    convo.current = { ...freshConvo(convo.current.email), topic: a.topic, article: a.id, path: pathRef.current };
+    if (!(await botSay(['Combinado! Me conta em poucas palavras o que está acontecendo, que eu deixo a mensagem pronta pro suporte.'], myRun))) return;
+    setStage('describe');
+    setChips({ kind: 'quick', items: a.stuck, skip: true });
+    setBusyBoth(false);
+    focusInput();
+  };
+
+  /** Pedido que só a equipe conclui (excluir a conta): vai direto pra mensagem pronta. */
+  const sendRequest = async (a: HelpArticle, myRun: number, extra = '') => {
+    convo.current = {
+      ...freshConvo(convo.current.email),
+      topic: a.topic,
+      article: a.id,
+      path: pathRef.current,
+      description: cleanText([a.request?.text ?? '', extra].filter(Boolean).join('\n')),
+    };
+    await afterDescription(myRun);
+  };
+
+  const changedMind = async (myRun: number) => {
+    if (!(await botSay(['Tudo certo, sua conta continua ativa. Posso te ajudar em mais alguma coisa?'], myRun))) return;
+    idleTopics('topics');
+  };
+
   const send = async (raw: string) => {
     const text = cleanText(raw);
-    if (!text || busyRef.current) return;
-    const myRun = run.current;
+    if (!text) return;
+    const myRun = begin(text);
+    if (myRun === null) return;
     setDraft('');
-    setBusyBoth(true);
-    setChips(null);
-    push({ kind: 'user', text });
-    setTyping(true);
     const c = convo.current;
     switch (stageRef.current) {
-      case 'topic':
+      case 'topic': {
+        if (isGreeting(text)) {
+          if (await botSay(['Oi! Me conta o que você precisa ou escolha um assunto abaixo.'], myRun)) idleTopics('topics');
+          return;
+        }
+        if (isThanks(text)) {
+          if (await botSay(['Por nada! Se precisar, é só chamar.'], myRun)) idleTopics('after');
+          return;
+        }
+        const a = findArticle(text);
+        if (a) return showArticle(a, myRun, 'Essa eu te explico por aqui:');
         c.topic = detectTopic(text);
+        if (!c.topic && !c.vague && wordCount(text) <= 3) {
+          // "ajuda", "preciso de ajuda": sem assunto não dá pra montar nada útil
+          c.vague = true;
+          if (await botSay(['Me conta um pouco mais pra eu te ajudar: o que está acontecendo?'], myRun)) {
+            setChips({ kind: 'topics' });
+            setBusyBoth(false);
+            focusInput();
+          }
+          return;
+        }
         c.description = text;
         c.path = pathRef.current;
         return afterDescription(myRun);
-      case 'describe':
+      }
+      case 'describe': {
+        // depois de escolher um assunto, a pergunta pode ter resposta pronta;
+        // depois do "Falar com o suporte" (c.article), o texto é o relato
+        const a = c.article ? null : findArticle(text);
+        if (a) return showArticle(a, myRun, 'Essa eu te explico por aqui:');
         c.description = text;
         return afterDescription(myRun);
+      }
+      case 'answer': {
+        const a = articleById(c.article);
+        if (!a) {
+          c.description = text;
+          return afterDescription(myRun);
+        }
+        if (a.request) {
+          if (isYes(text)) return sendRequest(a, myRun);
+          if (isNo(text) || isGiveUp(text)) return changedMind(myRun);
+          const other = findArticle(text);
+          if (other && other.id !== a.id) return showArticle(other, myRun, 'Essa eu te explico por aqui:');
+          return sendRequest(a, myRun, other ? '' : text);
+        }
+        if (isThanks(text) || isYes(text) || isGiveUp(text)) return resolved(myRun);
+        if (isNo(text)) return toSupport(a, myRun);
+        const other = findArticle(text);
+        if (other && other.id !== a.id) return showArticle(other, myRun, 'Essa eu te explico por aqui:');
+        // escreveu o que está acontecendo: já é o relato pro suporte
+        c.description = text;
+        return afterDescription(myRun);
+      }
       case 'email':
         if (looksLikeEmail(text)) {
           c.email = text.trim();
@@ -449,43 +701,46 @@ export function HelpChat() {
   };
 
   const skipEmail = async () => {
-    if (busyRef.current) return;
-    const myRun = run.current;
-    setBusyBoth(true);
-    setChips(null);
-    push({ kind: 'user', text: 'Pular' });
-    setTyping(true);
+    const myRun = begin('Pular');
+    if (myRun === null) return;
     await finish(myRun);
   };
 
-  const otherSubject = async () => {
-    if (busyRef.current) return;
-    const myRun = run.current;
-    setBusyBoth(true);
-    setChips(null);
-    push({ kind: 'user', text: 'Falar de outro assunto' });
-    setTyping(true);
-    convo.current = { topic: null, description: '', email: convo.current.email, path: null };
-    lastCta.current = null;
-    if (!(await botSay(['Claro! Sobre o que é dessa vez?'], myRun))) return;
-    setStage('topic');
-    setChips({ kind: 'topics' });
-    setBusyBoth(false);
+  const skipDetails = async () => {
+    const myRun = begin(SKIP_DETAILS);
+    if (myRun === null) return;
+    convo.current.description = '';
+    await afterDescription(myRun);
   };
 
-  const restart = () => {
+  const otherSubject = async (label: string) => {
+    const myRun = begin(label);
+    if (myRun === null) return;
+    convo.current = freshConvo(convo.current.email);
+    lastCta.current = null;
+    if (!(await botSay(['Claro! Sobre o que é dessa vez?'], myRun))) return;
+    idleTopics('topics');
+  };
+
+  const onChip = (label: string, action: (myRun: number) => Promise<void>) => {
+    const myRun = begin(label);
+    if (myRun === null) return;
+    void action(myRun);
+  };
+
+  const restart = (article: HelpArticle | null = null) => {
     run.current++;
     setMsgs([]);
     setChips(null);
     setTyping(false);
     setDraft('');
     setStage('topic');
-    convo.current = { topic: null, description: '', email: convo.current.email, path: null };
+    convo.current = freshConvo(convo.current.email);
     lastCta.current = null;
-    void greet();
+    void greet(article);
   };
 
-  const openChat = () => {
+  const openChat = (article: HelpArticle | null = null) => {
     setOpen(true);
     if (!everOpened) {
       setEverOpened(true);
@@ -494,8 +749,13 @@ export function HelpChat() {
     } else {
       setShown(true);
     }
-    if (!greeted.current) void greet();
-    setTimeout(focusInput, 320);
+    if (!greeted.current) void greet(article);
+    else if (article) {
+      // conversa no meio de uma fala do chat: recomeça já na resposta pedida
+      if (busyRef.current) restart(article);
+      else void pickArticle(article);
+    }
+    if (!article) setTimeout(focusInput, 320);
   };
 
   const closeChat = (refocus = true) => {
@@ -503,6 +763,18 @@ export function HelpChat() {
     setShown(false);
     if (refocus) fabRef.current?.focus({ preventScroll: true });
   };
+
+  externalOpen.current = (id) => openChat(articleById(id));
+
+  // outras telas abrem o chat (ex.: "Solicitar exclusão da conta" nas Configurações)
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const id = (e as CustomEvent<{ article?: HelpArticleId | null }>).detail?.article ?? null;
+      externalOpen.current(id);
+    };
+    window.addEventListener(HELP_CHAT_EVENT, onOpen);
+    return () => window.removeEventListener(HELP_CHAT_EVENT, onOpen);
+  }, []);
 
   // Esc fecha (só quando o foco está no chat, pra não brigar com outros modais)
   useEffect(() => {
@@ -530,7 +802,7 @@ export function HelpChat() {
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-  }, [draft]);
+  }, [draft, stage]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -539,8 +811,15 @@ export function HelpChat() {
     }
   };
 
+  /** Link do passo a passo: no celular o chat cobre a tela, então fecha pra pessoa ver a página. */
+  const onAnswerLink = () => {
+    if (window.matchMedia('(max-width: 640px)').matches) closeChat(false);
+  };
+
   const canSend = !busy && cleanText(draft).length > 0;
   const started = msgs.some((m) => m.kind === 'user');
+  const itemsTopic = chips?.kind === 'items' ? topicById(chips.topic) : null;
+  const chipArticle = chips?.kind === 'resolve' || chips?.kind === 'request' ? articleById(chips.article) : null;
 
   return (
     <>
@@ -569,7 +848,7 @@ export function HelpChat() {
               <button
                 type="button"
                 className={s.iconBtn}
-                onClick={restart}
+                onClick={() => restart()}
                 disabled={!started}
                 aria-label="Recomeçar conversa"
                 title="Recomeçar conversa"
@@ -594,6 +873,13 @@ export function HelpChat() {
                     </div>
                   );
                 }
+                if (m.kind === 'answer') {
+                  return (
+                    <div key={m.id} className={rowCls}>
+                      <AnswerCard title={m.title} view={m.view} onLink={onAnswerLink} />
+                    </div>
+                  );
+                }
                 return (
                   <div key={m.id} className={rowCls}>
                     <div className={`${s.bubble} ${m.kind === 'user' ? s.user : s.bot}`} data-from={m.kind}>
@@ -614,21 +900,84 @@ export function HelpChat() {
               ) : null}
 
               {chips?.kind === 'topics' ? (
-                <div className={s.topics} data-testid="help-chat-topics">
-                  {HELP_TOPICS.map((t, i) => (
+                <>
+                  <div className={s.topics} data-testid="help-chat-topics">
+                    {HELP_TOPICS.map((t, i) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={s.topic}
+                        style={{ animationDelay: `${i * 60}ms` }}
+                        onClick={() => void pickTopic(t)}
+                      >
+                        <span className={s.topicIcon}>
+                          <TopicIcon id={t.id} />
+                        </span>
+                        <span className={s.topicLabel}>{t.label}</span>
+                        <span className={s.chev}>
+                          <LineIcon size={16} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className={s.popular} data-testid="help-chat-popular">
+                    <span className={s.popularLabel}>Mais procurados</span>
+                    <div className={s.popularChips}>
+                      {HOME_ARTICLES.map((id, i) => {
+                        const a = articleById(id)!;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className={s.chip}
+                            style={{ animationDelay: `${240 + i * 50}ms` }}
+                            onClick={() => void pickArticle(a)}
+                          >
+                            {a.title}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {itemsTopic ? (
+                <div className={s.faq} data-testid="help-chat-faq">
+                  {itemsTopic.artigos.map((id, i) => {
+                    const a = articleById(id)!;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={s.faqRow}
+                        style={{ animationDelay: `${i * 40}ms` }}
+                        onClick={() => void pickArticle(a)}
+                      >
+                        <span className={s.faqIcon}>
+                          <RowIcon kind="answer" />
+                        </span>
+                        <span className={s.faqLabel}>{a.title}</span>
+                        <span className={s.chev}>
+                          <LineIcon size={15} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {itemsTopic.rapidas.map((q, i) => (
                     <button
-                      key={t.id}
+                      key={q}
                       type="button"
-                      className={s.topic}
-                      style={{ animationDelay: `${i * 60}ms` }}
-                      onClick={() => void pickTopic(t)}
+                      className={s.faqRow}
+                      style={{ animationDelay: `${(itemsTopic.artigos.length + i) * 40}ms` }}
+                      onClick={() => void send(q)}
                     >
-                      <span className={s.topicIcon}>
-                        <TopicIcon id={t.id} />
+                      <span className={s.faqIcon}>
+                        <RowIcon kind="support" />
                       </span>
-                      <span className={s.topicLabel}>{t.label}</span>
+                      <span className={s.faqLabel}>{q}</span>
                       <span className={s.chev}>
-                        <LineIcon size={16} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+                        <LineIcon size={15} d="m9.5 6.5 5.5 5.5-5.5 5.5" />
                       </span>
                     </button>
                   ))}
@@ -642,6 +991,52 @@ export function HelpChat() {
                       {q}
                     </button>
                   ))}
+                  {chips.skip ? (
+                    <button
+                      type="button"
+                      className={`${s.chip} ${s.chipWa}`}
+                      style={{ animationDelay: `${chips.items.length * 50}ms` }}
+                      onClick={() => void skipDetails()}
+                    >
+                      <WhatsGlyph size={14} />
+                      {SKIP_DETAILS}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {chips?.kind === 'resolve' && chipArticle ? (
+                <div className={s.quick} data-testid="help-chat-resolve">
+                  <button type="button" className={s.chip} onClick={() => onChip(RESOLVED, resolved)}>
+                    {RESOLVED}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${s.chip} ${s.chipWa}`}
+                    style={{ animationDelay: '50ms' }}
+                    onClick={() => onChip(TO_SUPPORT, (r) => toSupport(chipArticle, r))}
+                    data-testid="help-chat-to-support"
+                  >
+                    <WhatsGlyph size={14} />
+                    {TO_SUPPORT}
+                  </button>
+                </div>
+              ) : null}
+
+              {chips?.kind === 'request' && chipArticle?.request ? (
+                <div className={s.quick} data-testid="help-chat-request">
+                  <button type="button" className={s.chip} onClick={() => onChip('Mudei de ideia', changedMind)}>
+                    Mudei de ideia
+                  </button>
+                  <button
+                    type="button"
+                    className={`${s.chip} ${s.chipWa}`}
+                    style={{ animationDelay: '50ms' }}
+                    onClick={() => onChip(chipArticle.request!.button, (r) => sendRequest(chipArticle, r))}
+                  >
+                    <WhatsGlyph size={14} />
+                    {chipArticle.request.button}
+                  </button>
                 </div>
               ) : null}
 
@@ -653,9 +1048,17 @@ export function HelpChat() {
                 </div>
               ) : null}
 
+              {chips?.kind === 'after' ? (
+                <div className={s.quick}>
+                  <button type="button" className={s.chip} onClick={() => void otherSubject('Tenho outra dúvida')}>
+                    Tenho outra dúvida
+                  </button>
+                </div>
+              ) : null}
+
               {chips?.kind === 'done' ? (
                 <div className={s.quick}>
-                  <button type="button" className={s.chip} onClick={() => void otherSubject()}>
+                  <button type="button" className={s.chip} onClick={() => void otherSubject('Falar de outro assunto')}>
                     Falar de outro assunto
                   </button>
                 </div>

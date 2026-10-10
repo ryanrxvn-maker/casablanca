@@ -7,6 +7,7 @@ import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSectio
 import { ClickUpPilotTokenSection } from '@/components/ClickUpPilotTokenSection';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { resetNotifications } from '@/lib/notifications-client';
+import { openHelpChat } from '@/lib/help-chat';
 
 /**
  * /configuracoes — Conta.
@@ -28,7 +29,6 @@ export default function ConfiguracoesPage() {
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
   const [passBusy, setPassBusy] = useState(false);
-  const [deleteBusy, setDeleteBusy] = useState(false);
   const [toast, setToast] = useState<
     { kind: 'ok' | 'err'; msg: string } | null
   >(null);
@@ -120,23 +120,16 @@ export default function ConfiguracoesPage() {
     router.refresh();
   }
 
-  async function handleDeleteAccount() {
-    const confirmed = window.confirm(
-      'Tem certeza? Depois que o suporte concluir a exclusão, não tem volta.',
+  // Link com âncora (#senha, #email... o chat de ajuda manda pra cá): a página
+  // abre em "Carregando", então o navegador não acha a seção. Rola quando ela existe.
+  useEffect(() => {
+    if (loading) return;
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (!id) return;
+    requestAnimationFrame(() =>
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
     );
-    if (!confirmed) return;
-    const typed = window.prompt('Digite "DELETAR" pra confirmar:');
-    if (typed !== 'DELETAR') return;
-    setDeleteBusy(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-      flash('ok', 'Pedido registrado e sessão encerrada. Confirme a exclusão com o suporte no WhatsApp.');
-      setTimeout(() => router.replace('/login'), 2200);
-    } finally {
-      setDeleteBusy(false);
-    }
-  }
+  }, [loading]);
 
   if (loading) {
     return (
@@ -488,16 +481,19 @@ export default function ConfiguracoesPage() {
                   ZONA DE PERIGO
                 </div>
                 <p className="text-sm text-text-muted">
-                  Encerra sua sessão e abre o pedido de exclusão da conta.
-                  A remoção dos dados é concluída pelo suporte — a gente
-                  confirma com você pelo WhatsApp.
+                  A exclusão é feita pelo suporte: você manda o pedido pelo
+                  chat de ajuda, a equipe confirma com você no WhatsApp e apaga
+                  a conta e os dados. Depois disso, não tem volta.
                 </p>
+                {/* Abre o chat de ajuda já na resposta "Excluir minha conta", que
+                    ensina a cancelar a assinatura antes e deixa o pedido pronto
+                    no WhatsApp (antes este botão só deslogava e dizia "pedido
+                    registrado" sem registrar nada). */}
                 <button
-                  onClick={handleDeleteAccount}
-                  className="mt-4 rounded-[12px] border border-red-500/50 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={deleteBusy}
+                  onClick={() => openHelpChat('excluir-conta')}
+                  className="mt-4 rounded-[12px] border border-red-500/50 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
                 >
-                  {deleteBusy ? <span className="loading-dots">Processando</span> : 'Solicitar exclusão da conta'}
+                  Solicitar exclusão da conta
                 </button>
               </div>
             </section>

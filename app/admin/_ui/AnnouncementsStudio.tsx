@@ -35,6 +35,7 @@ import {
   normalizeEmail,
   PROMO_ARTS,
   PROMO_THEMES,
+  readMailQuota,
   SEGMENT_META,
   SEGMENTS,
   THEME_META,
@@ -43,12 +44,14 @@ import {
   type AnnKind,
   type Audience,
   type AvisoContent,
+  type MailQuota,
   type NotifItem,
   type PromoArt,
   type PromoContent,
   type Segment,
   type Viewer,
 } from '@/lib/announcements';
+import { FREE_RESERVE, roomToday } from '@/lib/announcement-email';
 import { refreshNotifications, suppressPopups } from '@/lib/notifications-client';
 import { travarScrollDaPagina } from '@/lib/trava-scroll';
 import { AnnIcon, AvisoCard, PromoBanner, ToneIcon } from '@/components/notifications/templates';
@@ -56,7 +59,7 @@ import { AnnouncementPreview } from '@/components/notifications/AnnouncementHost
 import { Btn, I, IconOnly, Menu, MenuItem, MenuSep, Modal, Segmented, SPRING, Tag } from './kit';
 import { accent, betaProTools, fmtDateTime, type Accent, type AdminUser } from './model';
 import { AnnouncementSeen } from './AnnouncementSeen';
-import { canResume, EmailMiniature, EmailPreview, EmailPreviewModal, EmailToggle, MailStatusTag, mailMode, mailSentence, TemplatePicker } from './AnnouncementEmail';
+import { canResume, EmailMiniature, EmailPreview, EmailPreviewModal, EmailToggle, MailStatusTag, mailMode, mailSentence, quotaSentence, TemplatePicker } from './AnnouncementEmail';
 import { EMAIL_TEMPLATE_META, type EmailTemplate } from '@/lib/email-templates';
 
 /* ───────────────────────── Rascunho ───────────────────────── */
@@ -178,6 +181,8 @@ export function AnnouncementsStudio({
   const [confirmSend, setConfirmSend] = useState<null | { publish: boolean }>(null);
   const [confirmAct, setConfirmAct] = useState<null | { a: AdminAnnouncement; action: 'activate' | 'republish' | 'send' }>(null);
   const [testing, setTesting] = useState(false);
+  // cota do Resend lida no último teste: a confirmação avisa se não cabe tudo hoje
+  const [lastQuota, setLastQuota] = useState<MailQuota | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const subOpen = useRef(false);
   subOpen.current = !!confirmDel || !!confirmSend || !!confirmAct;
@@ -309,7 +314,9 @@ export function AnnouncementsStudio({
         flash('err', j.error || 'Não deu pra mandar o teste.');
         return;
       }
-      flash('ok', `Teste enviado pra ${j.to}. Confere a caixa de entrada (na primeira vez, olha o spam também).`, 6500);
+      const quota = readMailQuota(j.quota);
+      setLastQuota(quota);
+      flash('ok', `Teste enviado pra ${j.to}. Confere a caixa de entrada (na primeira vez, olha o spam também).${quota ? ' ' + quotaSentence(quota) : ''}`, quota ? 11000 : 6500);
     } catch (e) {
       flash('err', (e as Error).message || 'Falha de conexão.');
     } finally {
@@ -803,6 +810,14 @@ export function AnnouncementsStudio({
             Vai pra <b className="text-text">{reach} {reach === 1 ? 'conta' : 'contas'}{draft.audience.includeAdmins ? ' + admins' : ''}</b>: <b className="text-text">&ldquo;{isEmail ? draft.promo.mail?.subject || draft.promo.title : content.title}&rdquo;</b>. Depois de enviado não tem como desfazer; quem pediu pra não receber fica de fora.
           </p>
           {!isEmail ? <p className="field-label mt-2 text-[13px] leading-relaxed text-text-muted">A janela continua abrindo a cada login. O e-mail sai uma vez só nesta ativação.</p> : null}
+          {lastQuota && reach > roomToday(lastQuota) ? (
+            <p
+              className="field-label mt-3 rounded-xl px-3 py-2 text-[13px] leading-relaxed text-text"
+              style={{ background: accent('amber', 0.08), boxShadow: `inset 0 0 0 1px ${accent('amber', 0.25)}` }}
+            >
+              Resend no plano grátis: hoje cabem cerca de {roomToday(lastQuota)} e-mails ({FREE_RESERVE} ficam guardados pros códigos de cadastro). Os outros você manda com &ldquo;Tentar o resto do e-mail&rdquo; depois das 21h, sem repetir ninguém.
+            </p>
+          ) : null}
           <div className="mt-5 flex justify-end gap-2">
             <Btn onClick={() => setConfirmSend(null)}>Cancelar</Btn>
             <Btn

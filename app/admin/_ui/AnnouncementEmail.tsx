@@ -13,9 +13,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { emailFromAnnouncement } from '@/lib/announcement-email';
+import { emailFromAnnouncement, FREE_DAILY, FREE_RESERVE, roomToday } from '@/lib/announcement-email';
 import { EMAIL_TEMPLATE_META, EMAIL_TEMPLATES, renderEmail, type EmailTemplate } from '@/lib/email-templates';
-import type { AdminAnnouncement, AnnContent, AnnKind, EmailMode, MailLog } from '@/lib/announcements';
+import type { AdminAnnouncement, AnnContent, AnnKind, EmailMode, MailLog, MailQuota } from '@/lib/announcements';
 import { I, Segmented, SPRING, Tag } from './kit';
 import { accent, fmtDateTime } from './model';
 
@@ -261,10 +261,23 @@ export function mailSentence(m: MailLog | null): { ok: boolean; text: string } |
   if (m.reason === 'sem_chave') return { ok: false, text: 'E-mail não saiu: falta a chave do Resend no servidor.' };
   if (m.reason === 'sem_destinatario') return { ok: false, text: 'E-mail não saiu: ninguém do público tem e-mail pra receber.' };
   const fora = m.optOut ? ` (${m.optOut} ${m.optOut === 1 ? 'pediu' : 'pediram'} pra não receber)` : '';
-  if (m.reason === 'quota') return { ok: false, text: `E-mail parou em ${m.sent} de ${m.total}: acabou a cota do plano do Resend. Use "Tentar o resto do e-mail" depois — não duplica.` };
+  if (m.reason === 'quota') {
+    const why = m.message && m.message.startsWith('Plano grátis') ? m.message : 'Acabou a cota do plano do Resend.';
+    return { ok: false, text: `E-mail parou em ${m.sent} de ${m.total}. ${why} Depois, "Tentar o resto do e-mail" continua de onde parou, sem repetir ninguém.` };
+  }
   if (m.reason === 'erro') return { ok: false, text: `E-mail: ${m.sent} de ${m.total} enviados. Falha: ${m.message ?? 'erro no envio'}.` };
   if (!m.done) return { ok: false, text: `E-mail: ${m.sent} de ${m.total} até agora. Use "Tentar o resto do e-mail" pra continuar.` };
   return { ok: true, text: `E-mail enviado pra ${m.sent} ${m.sent === 1 ? 'conta' : 'contas'}${fora}.` };
+}
+
+/** Plano do Resend lido no último envio (cabeçalhos): aparece depois do "Enviar teste pra mim". */
+export function quotaSentence(q: MailQuota | null | undefined): string {
+  if (!q) return '';
+  if (q.daily !== null) {
+    const room = roomToday(q);
+    return `Resend no plano grátis: ${q.daily} de ${FREE_DAILY} e-mails do dia já usados — cabem mais ${room} hoje (${FREE_RESERVE} ficam guardados pros códigos de cadastro).`;
+  }
+  return `Resend sem limite por dia${q.monthly !== null ? ` (${q.monthly} e-mails no mês até agora)` : ''}.`;
 }
 
 export function MailStatusTag({ a }: { a: AdminAnnouncement }) {

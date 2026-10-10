@@ -6,9 +6,23 @@
  */
 import { readFileSync } from 'node:fs';
 import { renderEmail, EMAIL_TEMPLATES, type EmailMessage } from './email-templates';
-import { absoluteUrl, autoTemplate, batchKey, emailFromAnnouncement, firstName, pickRecipients, type Person } from './announcement-email';
+import {
+  absoluteUrl,
+  afterCursor,
+  autoTemplate,
+  batchKey,
+  emailFromAnnouncement,
+  firstName,
+  FREE_DAILY,
+  FREE_RESERVE,
+  nextBatchSize,
+  orderKey,
+  pickRecipients,
+  roomToday,
+  type Person,
+} from './announcement-email';
 import { optoutToken, optoutUrl, verifyOptout } from './email-optout';
-import { cleanAudience, cleanContent, emptyContent, mailDoneFor, readMailLog, type PromoContent, type Viewer } from './announcements';
+import { cleanAudience, cleanContent, emptyContent, mailDoneFor, readMailLog, readMailQuota, type PromoContent, type Viewer } from './announcements';
 
 let falhas = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -98,8 +112,27 @@ console.log('quem recebe');
   const comAdmin = pickRecipients(people, cleanAudience({ segments: ['all'], includeAdmins: true }), new Set());
   ok(comAdmin.list.some((r) => r.id === 'h') && comAdmin.list.some((r) => r.id === 'e'), '"todos + admins" inclui pago e admin');
   ok(firstName('Ana Maria Souza') === 'Ana' && firstName('JOÃO') === 'João' && firstName('x@y.com') === null && firstName('') === null, 'primeiro nome pra saudação (e-mail no campo de nome não vira "Oi, x@y.com")');
-  ok(batchKey('id1', '2026-10-09T15:13:49.870Z', 2) === `ann-id1-${Date.parse('2026-10-09T15:13:49.870Z')}-2`, 'chave do lote = aviso + ativação + número (repetir não duplica)');
-  ok(batchKey('id1', '2026-10-09T15:13:49.87+00:00', 2) === batchKey('id1', '2026-10-09T15:13:49.870Z', 2), 'mesma ativação em formatos de data diferentes = mesma chave');
+  const lote = [{ id: 'a' }, { id: 'x' }, { id: 'b' }];
+  ok(batchKey('id1', '2026-10-09T15:13:49.870Z', lote) === `ann-id1-${Date.parse('2026-10-09T15:13:49.870Z')}-a-b-3`, 'chave do lote = aviso + ativação + quem está nele (repetir o mesmo lote não duplica)');
+  ok(batchKey('id1', '2026-10-09T15:13:49.87+00:00', lote) === batchKey('id1', '2026-10-09T15:13:49.870Z', lote), 'mesma ativação em formatos de data diferentes = mesma chave');
+  ok(batchKey('id1', '2026-10-09T15:13:49.870Z', lote).length <= 256, 'chave cabe no limite do Resend (256)');
+  ok(free.list[0].key < free.list[1].key && free.list[0].key === orderKey('2026-01-01T00:00:00Z', 'a'), 'cada destinatário tem chave de ordem crescente (cadastro + id)');
+  ok(afterCursor(comAdmin.list, comAdmin.list[2].key).map((r) => r.id).join() === comAdmin.list.slice(3).map((r) => r.id).join(), 'retomada = só quem vem DEPOIS do marcador');
+  ok(afterCursor(comAdmin.list, null).length === comAdmin.list.length, 'sem marcador = todo mundo');
+  ok(orderKey('2026-01-01T00:00:00Z', 'z') < orderKey('2026-01-01T00:00:00.001Z', 'a'), 'ordem pela data primeiro, id desempata');
+}
+
+console.log('cota do Resend');
+{
+  ok(roomToday(null) === Infinity && roomToday({ daily: null }) === Infinity, 'plano pago (sem cabeçalho diário) = sem limite do dia');
+  ok(roomToday({ daily: 7 }) === FREE_DAILY - FREE_RESERVE - 7 && roomToday({ daily: 95 }) === 0, `plano grátis: folga = ${FREE_DAILY} − reserva de ${FREE_RESERVE} − usados`);
+  ok(nextBatchSize(false, Infinity) === 1 && nextBatchSize(true, Infinity) === 100 && nextBatchSize(true, 37) === 37 && nextBatchSize(true, 0) === 0, 'sonda de 1, depois até 100 sem passar da folga');
+  const l = readMailLog({ for: 'x', total: 1, sent: 1, cursor: '000001|a', quota: { daily: 3, monthly: 9, at: 'y' } });
+  ok(l?.cursor === '000001|a' && l?.quota?.daily === 3 && l?.quota?.monthly === 9, 'registro guarda marcador e cota');
+  const antigo = readMailLog({ for: 'x', total: 1, sent: 1 });
+  ok(antigo?.cursor === null && antigo?.quota === null, 'registro antigo (sem os campos) lê como vazio');
+  ok(readMailQuota({ daily: -1, monthly: 'x' }) === null && readMailQuota({ daily: null, monthly: 4 })?.daily === null, 'cota inválida não vira número');
+  ok(readMailLog({ cursor: 'x'.repeat(200) })?.cursor === null, 'marcador absurdo é descartado');
 }
 
 console.log('sair da lista');
@@ -139,16 +172,19 @@ console.log('fiação');
     const blk = patch.slice(patch.indexOf(a), patch.indexOf('} else if', patch.indexOf(a) + 5));
     ok(/mailAfter = 'due'/.test(blk), `${a.replace("action === ", '')} manda o e-mail da ativação (se ainda não saiu)`);
   }
-  ok(/mailAfter = 'force'/.test(patch.slice(patch.indexOf("action === 'resume'"))), 'resume continua (não duplica: idempotência por lote)');
+  ok(/mailAfter = 'force'/.test(patch.slice(patch.indexOf("action === 'resume'"))), 'resume continua (não duplica: marcador + idempotência por lote)');
   ok(/if \(mode === 'only'\) return jsonError\('E-mail não fica no ar no site/.test(patch), 'modelo E-mail nunca vira janela no site');
-  ok(/mailDoneFor\(rawMailLog\(row\.audience\), row\.activated_at\)/.test(r), 'regra "1 vez por ativação" na rota');
+  ok(/const prev = rawMailLog\(row\.audience\);\s*if \(!force && mailDoneFor\(prev, row\.activated_at\)\)/.test(r), 'regra "1 vez por ativação" na rota');
+  ok(/deliverMail\(svc, \{ id: row\.id,[^)]*\}, \{ prev \}\)/.test(r), 'retomada passa o registro anterior (continua depois do marcador)');
+  ok(/return NextResponse\.json\(\{ ok: true, to: me\.email, quota: log\.quota \}\)/.test(r), 'teste devolve a cota lida (plano do Resend antes do disparo)');
   ok(/audienceForDb\(audience, rawMailLog\(cur\.row\.audience\)\)/.test(r), 'editar o público não apaga o registro do envio');
   const post = r.slice(r.indexOf('export async function POST('), r.indexOf('export async function PATCH('));
   ok(/body\.test === true[\s\S]*?\{ test: me \}/.test(post) && !/writeMailLog/.test(post.slice(post.indexOf('body.test === true'), post.indexOf('// Modelo "E-mail"'))), 'teste vai só pro admin e não grava nada');
 
   const mail = ler('lib/announcements-mail.ts');
   ok(/'List-Unsubscribe': `<\$\{unsubscribe\}>`/.test(mail) && /'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'/.test(mail), 'cabeçalho de "cancelar inscrição" de 1 clique (Gmail/Apple)');
-  ok(/'Idempotency-Key': idem/.test(mail) && /batchKey\(job\.id, job\.activatedAt, i\)/.test(mail), 'lotes com chave de idempotência por ativação');
+  ok(/'Idempotency-Key': idem/.test(mail) && /batchKey\(job\.id, job\.activatedAt, slice\)/.test(mail), 'lotes com chave de idempotência por ativação + quem está no lote');
+  ok(/afterCursor\(r\.list, base\.cursor\)/.test(mail) && /base\.cursor = slice\[slice\.length - 1\]\.key/.test(mail), 'marcador: continua depois de quem já foi e avança só com lote aceito');
 
   const sair = ler('app/api/email/sair/route.ts');
   const get = sair.slice(sair.indexOf('export async function GET('), sair.indexOf('export async function POST('));
