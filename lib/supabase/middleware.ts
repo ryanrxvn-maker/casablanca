@@ -3,6 +3,13 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
+import { loadToolsConfig } from '@/lib/maintenance-store';
+
+/** Ferramenta em manutenção pra este email? Lê o estado do painel (cacheado). */
+async function maintenanceBlocks(pathname: string, email: string | null | undefined): Promise<boolean> {
+  const { cfg } = await loadToolsConfig();
+  return isToolInMaintenance(pathname, cfg) && !canBypassMaintenance(email, cfg);
+}
 import { emailUnlocksPath, pathUnlockedByList } from '@/lib/tool-unlocks';
 import { FREE_TOOL_PATHS } from '@/lib/free-tools';
 
@@ -385,7 +392,9 @@ export async function updateSession(request: NextRequest) {
     // Quem chega aqui numa ferramenta em manutenção é Pro/Admin. Bloqueia
     // TODOS menos admin e emails do allowlist (clientes de confiança, ex.:
     // Elder). Free/Basic já foram pra /planos acima. Defesa real server-side.
-    if (!isAdmin && !canBypassMaintenance(user.email) && isToolInMaintenance(pathname)) {
+    // 10.10: o estado vem do painel "Ferramentas" do /admin (arquivo no
+    // Storage, cache de 15 s). Admin nem consulta: nunca é barrado.
+    if (!isAdmin && pathname.startsWith('/tools/') && (await maintenanceBlocks(pathname, user.email))) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
       url.searchParams.set('maintenance', '1');

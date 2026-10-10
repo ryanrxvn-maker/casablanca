@@ -16,9 +16,11 @@ import {
   FREE_DAILY,
   FREE_RESERVE,
   nextBatchSize,
+  nextQuota,
   orderKey,
   pickRecipients,
   roomToday,
+  utcDay,
   type Person,
 } from './announcement-email';
 import { optoutToken, optoutUrl, verifyOptout } from './email-optout';
@@ -133,6 +135,15 @@ console.log('cota do Resend');
   ok(antigo?.cursor === null && antigo?.quota === null, 'registro antigo (sem os campos) lê como vazio');
   ok(readMailQuota({ daily: -1, monthly: 'x' }) === null && readMailQuota({ daily: null, monthly: 4 })?.daily === null, 'cota inválida não vira número');
   ok(readMailLog({ cursor: 'x'.repeat(200) })?.cursor === null, 'marcador absurdo é descartado');
+  const T = '2026-10-10T16:41:20.000Z';
+  const h = (daily: number | null, monthly: number | null = 0) => ({ daily, monthly, at: T });
+  ok(nextQuota({ daily: 4, monthly: 4, at: T }, h(3), 76, T)?.daily === 80, 'contador do Resend ATRASADO (mostra 3): a estimativa soma o que foi aceito (4 + 76 = 80)');
+  ok(nextQuota(null, h(3), 1, T)?.daily === 4, 'sem estimativa do dia: supõe que o cabeçalho ainda não contou a sonda');
+  ok(nextQuota({ daily: 10, monthly: 10, at: T }, h(150), 0, T)?.daily === 150, 'cabeçalho maior que a estimativa vence');
+  ok(nextQuota({ daily: 80, monthly: 80, at: '2026-10-09T23:00:00.000Z' }, h(0), 1, T)?.daily === 1, 'estimativa de ONTEM (UTC) não vale: o dia virou');
+  ok(nextQuota({ daily: 80, monthly: 80, at: T }, h(null, 300), 50, T)?.daily === null, 'virou plano pago (sem cabeçalho diário) = sem limite');
+  ok(nextQuota({ daily: 70, monthly: 70, at: T }, null, 5, T)?.daily === 75 && nextQuota(null, null, 5, T) === null, 'sem cabeçalho (rede) segue a própria conta');
+  ok(utcDay('2026-10-10T23:59:59.000Z') !== utcDay('2026-10-11T00:00:00.000Z'), 'dia da cota vira à meia-noite UTC');
 }
 
 console.log('sair da lista');

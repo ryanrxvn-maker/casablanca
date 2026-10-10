@@ -7,7 +7,9 @@ import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
 import { emailUnlocksPath } from '@/lib/tool-unlocks';
-import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
+import { isToolInMaintenance } from '@/lib/maintenance';
+import { useMaintenance } from '@/lib/maintenance-client';
+import { MaintenanceFlash } from '@/components/MaintenanceFlash';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 import { HeroSlideBg } from './HeroSlideBg';
 import { TipoShowcase } from './TipoShowcase';
@@ -272,7 +274,9 @@ export function ToolsHub() {
   const lockedNeed = (params.get('need') as 'basic' | 'pro' | 'admin' | null) || null;
   const [isAdmin, setIsAdmin] = useState(false);
   const [firstName, setFirstName] = useState<string>('');
-  const [maintBypass, setMaintBypass] = useState(false);
+  // Estado vivo do painel "Ferramentas" do /admin (null = ainda chegando: vale o padrão).
+  const maintSnap = useMaintenance();
+  const maintFlash = params.get('maintenance') === '1';
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -284,7 +288,6 @@ export function ToolsHub() {
         const uid = u.user?.id;
         if (!uid) return;
         if (!cancelled) {
-          setMaintBypass(canBypassMaintenance(u.user?.email));
           setUserEmail(u.user?.email ?? null);
         }
         const { data } = await supabase
@@ -315,9 +318,9 @@ export function ToolsHub() {
   // Manutenção: admin acessa (modo 'admin'); emails liberados (ex.: Elder)
   // acessam normal (undefined); o resto é bloqueado.
   const maintOf = (href: string): MaintMode => {
-    if (!isToolInMaintenance(href)) return undefined;
+    if (!isToolInMaintenance(href, maintSnap)) return undefined;
     if (isAdmin) return 'admin';
-    if (maintBypass) return undefined;
+    if (maintSnap?.canBypass) return undefined;
     return 'blocked';
   };
 
@@ -332,6 +335,8 @@ export function ToolsHub() {
       {lockedFlash ? (
         <LockedFlash from={lockedFrom} need={lockedNeed} tier={tier} />
       ) : null}
+      {/* Manutenção: o middleware manda pra cá com ?maintenance=1&from=... */}
+      {maintFlash && !lockedFlash ? <MaintenanceFlash from={lockedFrom} /> : null}
 
       {/* Saudação + descrição */}
       <section className="mb-8 animate-fade-in-up">
@@ -2610,7 +2615,7 @@ function FeaturedCard({
         </Link>
       )}
       {/* Selo de manutenção FORA do card (overflow-hidden cortaria o mini-card). */}
-      {maint ? <MaintenanceBadge mode={maint} className="right-4 top-4" /> : null}
+      {maint ? <MaintenanceBadge mode={maint} href={entry.href} className="right-4 top-4" /> : null}
     </div>
   );
 }
@@ -2800,7 +2805,7 @@ function ToolCard({
     return (
       <div className="relative">
         {vcard}
-        <MaintenanceBadge mode={maint} className="right-3 top-3" />
+        <MaintenanceBadge mode={maint} href={entry.href} className="right-3 top-3" />
       </div>
     );
   }
@@ -2893,7 +2898,7 @@ function ToolCard({
   return (
     <div className="relative">
       {card}
-      <MaintenanceBadge mode={maint} className="right-3 top-3" />
+      <MaintenanceBadge mode={maint} href={entry.href} className="right-3 top-3" />
     </div>
   );
 }

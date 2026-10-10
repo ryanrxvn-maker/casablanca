@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import { maintenanceOf, whenLabel } from '@/lib/maintenance';
+import { useMaintenance } from '@/lib/maintenance-client';
 
 /**
  * Selo de manutenção que fica SOBRE o card da ferramenta. Ao passar o mouse
@@ -34,10 +36,15 @@ function WrenchIcon({ size = 13 }: { size?: number }) {
 export function MaintenanceBadge({
   mode = 'blocked',
   className = 'right-3 top-3',
+  href,
 }: {
   mode?: 'blocked' | 'admin';
   className?: string;
+  /** Rota da ferramenta: puxa o recado e a previsão que o admin escreveu no painel. */
+  href?: string;
 }) {
+  const snap = useMaintenance();
+  const info = href ? maintenanceOf(href, snap) : null;
   return (
     <span className={'group/maint pointer-events-auto absolute z-30 ' + className}>
       {/* ── Ícone de aviso ── */}
@@ -90,9 +97,16 @@ export function MaintenanceBadge({
               style={{ color: 'rgba(255,255,255,0.72)' }}
             >
               {mode === 'admin'
-                ? 'Indisponível pros clientes agora. Você acessa porque é admin — use pra testar antes de liberar.'
-                : 'Estamos dando um ajuste rápido nesta ferramenta. Ela volta já. 🛠️'}
+                ? info?.message
+                  ? `Recado pros clientes: ${info.message}`
+                  : 'Indisponível pros clientes agora. Você acessa porque é admin: use pra testar antes de liberar.'
+                : info?.message || 'Estamos dando um ajuste rápido nesta ferramenta. Ela volta já.'}
             </span>
+            {info?.until ? (
+              <span className="mt-2 block text-[11.5px] font-semibold" style={{ color: '#fcd34d' }}>
+                Previsão de volta: {whenLabel(info.until)}
+              </span>
+            ) : null}
           </span>
         </span>
       </span>

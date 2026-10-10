@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { isPaidExpired, isPaymentBlocked } from '@/lib/plan-prices';
-import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
+import { maintenanceOf, canBypassMaintenance } from '@/lib/maintenance';
+import { loadToolsConfig } from '@/lib/maintenance-store';
 import { cliMachineIdentity } from '@/lib/cli-auth';
 import { emailUnlocksAnyTool, pathUnlockedByList } from '@/lib/tool-unlocks';
 
@@ -184,15 +185,21 @@ export async function requireToolAccess(
 ): Promise<TierGate> {
   const gate = await requireTier(min);
   if (!gate.ok) return gate;
-  if (
-    isToolInMaintenance(toolPath) &&
-    !gate.isAdmin &&
-    !canBypassMaintenance(gate.email)
-  ) {
+  if (gate.isAdmin) return gate;
+  // Estado do painel "Ferramentas" do /admin (cache de 15 s, nunca derruba).
+  const { cfg } = await loadToolsConfig();
+  const maint = maintenanceOf(toolPath, cfg);
+  if (maint && !canBypassMaintenance(gate.email, cfg)) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'Ferramenta em manutenção. Acesso liberado em breve.', code: 'maintenance' },
+        {
+          error: maint.message
+            ? `Ferramenta em manutenção. ${maint.message}`
+            : 'Ferramenta em manutenção. Acesso liberado em breve.',
+          code: 'maintenance',
+          until: maint.until,
+        },
         { status: 503 },
       ),
     };
