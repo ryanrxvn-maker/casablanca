@@ -398,23 +398,23 @@ async function fetchTikTok(
     });
     if (!r.ok) {
       console.error('[downloader-core] tikwm HTTP', r.status);
-      return { error: 'o servico do TikTok nao respondeu agora. Tenta de novo em instantes.' };
+      return { error: 'o serviço do TikTok não respondeu agora. Tenta de novo em instantes.' };
     }
     const j = (await r.json()) as { code?: number; msg?: string; data?: any };
     if (j.code !== 0 || !j.data) {
       console.error('[downloader-core] tikwm sem dados:', j.msg);
-      return { error: 'nao achei esse video no TikTok — ele pode ser privado ou ter sido removido. Confere o link no navegador.' };
+      return { error: 'não achei esse vídeo no TikTok — ele pode ser privado ou ter sido removido. Confere o link no navegador.' };
     }
     data = j.data;
   } catch (e) {
     console.error('[downloader-core] tikwm falhou:', e);
-    return { error: 'a conexao com o TikTok falhou. Confere a internet e tenta de novo.' };
+    return { error: 'a conexão com o TikTok falhou. Confere a internet e tenta de novo.' };
   }
   const videoUrl =
     (data.hdplay as string) ||
     (data.play as string) ||
     (data.wmplay as string);
-  if (!videoUrl) return { error: 'esse post do TikTok nao tem video pra baixar.' };
+  if (!videoUrl) return { error: 'esse post do TikTok não tem vídeo pra baixar.' };
   const title = (data.title as string) || (data.id as string) || 'tiktok';
 
   if (mode === 'video') {
@@ -434,11 +434,11 @@ async function fetchTikTok(
     });
   } catch (e) {
     console.error('[downloader-core] tiktok midia falhou:', e);
-    return { error: 'a conexao caiu no meio do download. Tenta de novo.' };
+    return { error: 'a conexão caiu no meio do download. Tenta de novo.' };
   }
   if (!vr.ok) {
     console.error('[downloader-core] tiktok midia HTTP', vr.status);
-    return { error: 'o TikTok nao entregou o arquivo agora. Tenta de novo em instantes.' };
+    return { error: 'o TikTok não entregou o arquivo agora. Tenta de novo em instantes.' };
   }
   const buf = Buffer.from(await vr.arrayBuffer());
   if (buf.length < 1024)
@@ -453,7 +453,7 @@ async function fetchTikTok(
       : ['-y', '-i', srcPath, '-vn', '-b:a', '192k', outPath];
   const { code } = await run(await resolveFfmpeg(), ffArgs, workDir);
   if (code !== 0)
-    return { error: 'nao consegui converter o audio agora. Tenta de novo — se repetir, baixa como video.' };
+    return { error: 'não consegui converter o áudio agora. Tenta de novo — se repetir, baixa como vídeo.' };
   return { file: outPath, name: safeName(title, ext) };
 }
 
@@ -506,9 +506,12 @@ async function ytDlpArgs(
   if (provider === 'pinterest')
     return [...base, '-f', 'b/bv*+ba/best', '--merge-output-format', 'mp4'];
   const v = [...base, '--merge-output-format', 'mp4', '-f', 'bv*+ba/b'];
+  // H.264 primeiro (10.10): sem isso o yt-dlp escolhe AV1, que nem todo
+  // editor/PC abre bem (Premiere antigo, player do Windows sem extensão). A
+  // resolução continua mandando: só troca o formato quando há as duas opções.
   v.push(
     '-S',
-    quality !== 'best' ? `res:${quality},ext:mp4:m4a` : 'ext:mp4:m4a',
+    quality !== 'best' ? `res:${quality},vcodec:h264,ext:mp4:m4a` : 'res,vcodec:h264,ext:mp4:m4a',
   );
   return v;
 }
@@ -523,20 +526,20 @@ function friendlyYtDlpFail(stderr: string): string {
   if (/(not a bot|confirm.*bot|http error 403|forbidden)/.test(m))
     return 'o site recusou o acesso automático a este vídeo. Abra o link no navegador e tente novamente mais tarde.';
   if (/(private|login|sign in|logged.?in|members.?only|subscriber|only available for registered)/.test(m))
-    return 'esse video e privado ou exige login — so da pra baixar conteudo publico. Confere o link no navegador.';
+    return 'esse vídeo é privado ou exige login — só dá pra baixar conteúdo público. Confere o link no navegador.';
   if (/(age.?restrict|confirm your age|18\+)/.test(m))
-    return 'esse video tem restricao de idade e o site nao libera o download direto.';
+    return 'esse vídeo tem restrição de idade e o site não libera o download direto.';
   if (/(unavailable|removed|terminated|deleted|does not exist|no longer available|404)/.test(m))
-    return 'esse video nao esta mais disponivel (foi removido ou saiu do ar). Confere o link no navegador.';
+    return 'esse vídeo não está mais disponível (foi removido ou saiu do ar). Confere o link no navegador.';
   if (/(unsupported url|is not a valid url)/.test(m))
-    return 'esse link nao parece ser de um video. Confere se copiou o link certo.';
+    return 'esse link não parece ser de um vídeo. Confere se copiou o link certo.';
   if (/ffmpeg (is )?not (found|installed)/.test(m))
-    return 'um componente do Motor sumiu deste computador (provavelmente o antivirus). Reinstala o Motor na pagina do Downloader (passo 1) que ele volta a funcionar.';
+    return 'um componente do Motor sumiu deste computador (provavelmente o antivírus). Reinstala o Motor na página do Downloader (passo 1) que ele volta a funcionar.';
   if (/(429|too many request|rate.?limit)/.test(m))
     return 'o site limitou os downloads agora (muitos pedidos seguidos). Espera alguns minutos e tenta de novo.';
   if (/(timed?.?out|timeout|connection|network|getaddrinfo|resolve host|unreachable)/.test(m))
-    return 'a conexao falhou no meio do download. Confere a internet e tenta de novo.';
-  return 'nao consegui baixar esse link agora. Confere se o video esta publico e tenta de novo em instantes.';
+    return 'a conexão falhou no meio do download. Confere a internet e tenta de novo.';
+  return 'não consegui baixar esse link agora. Confere se o vídeo está público e tenta de novo em instantes.';
 }
 
 function extractorNeedsUpdate(stderr: string): boolean {
@@ -557,7 +560,7 @@ async function fetchYtDlp(
     return {
       code: 'YTDLP_MISSING',
       error:
-        'o componente que baixa os videos nao foi encontrado. Reinstala o Motor na pagina do Downloader (passo 1) — leva 1 minuto e volta a funcionar.',
+        'o componente que baixa os vídeos não foi encontrado. Reinstala o Motor na página do Downloader (passo 1) — leva 1 minuto e volta a funcionar.',
     };
   const refArgs = referer ? ['--add-header', `Referer:${referer}`] : [];
   const args = [
@@ -569,7 +572,7 @@ async function fetchYtDlp(
   // teto generoso: video grande conclui (ex.: 30+min), mas processo
   // realmente travado morre. --socket-timeout ja corta stalls de rede.
   let result = await run(tool.cmd, args, workDir, 1_500_000, signal);
-  if (signal?.aborted) return { error: 'rota substituida por uma midia direta do Pinterest.' };
+  if (signal?.aborted) return { error: 'rota substituída por uma mídia direta do Pinterest.' };
   // Atualizar antes de cada pedido prendia o cliente numa chamada de rede
   // sem relação com o arquivo. Tenta com o extrator atual; só diante de um
   // sinal real de mudança do site atualiza e repete uma vez.
@@ -664,9 +667,9 @@ async function fetchPinterestPage(url: string): Promise<string | null> {
 
 async function fetchPinterestImage(url: string, workDir: string, pageHtml?: string | null): Promise<Built> {
   const html = pageHtml ?? await fetchPinterestPage(url);
-  if (!html) return { error: 'nao consegui abrir esse pin agora. Confere a internet e tenta de novo.' };
+  if (!html) return { error: 'não consegui abrir esse pin agora. Confere a internet e tenta de novo.' };
   const candidates = pinterestImageCandidates(html);
-  if (!candidates.length) return { error: 'esse pin nao entregou uma imagem ou video publico.' };
+  if (!candidates.length) return { error: 'esse pin não entregou uma imagem ou vídeo público.' };
   const pinId = new URL(url).pathname.match(/\/pin\/(?:[^/]*--)?(\d+)/i)?.[1] || 'imagem';
 
   for (const candidate of candidates) {
@@ -696,7 +699,7 @@ async function fetchPinterestImage(url: string, workDir: string, pageHtml?: stri
       console.error('[downloader-core] candidato de imagem do Pinterest falhou:', error);
     }
   }
-  return { error: 'o Pinterest nao entregou uma imagem valida para esse pin.' };
+  return { error: 'o Pinterest não entregou uma imagem válida para esse pin.' };
 }
 
 const TUBE_RE =
@@ -877,7 +880,7 @@ async function fetchAdult(
   // Devolve o motivo (ja amigavel) da primeira tentativa — e o mais
   // representativo. Detalhe tecnico de headless/embed fica no console.
   console.error('[downloader-core] +18 esgotou fallbacks para', url);
-  return { error: `esse site nao liberou o video (pode exigir login ou assinatura). ${native.error}`, code: native.code };
+  return { error: `esse site não liberou o vídeo (pode exigir login ou assinatura). ${native.error}`, code: native.code };
 }
 
 // --------------------------- API publica ---------------------------
@@ -922,7 +925,7 @@ export async function processDownload(
   const adult = input.adult === true;
 
   if (!url || !URL_RE.test(url))
-    return { ok: false, status: 400, error: 'URL invalida.' };
+    return { ok: false, status: 400, error: 'URL inválida.' };
   let host: string;
   try {
     host = new URL(url).hostname;
@@ -932,7 +935,7 @@ export async function processDownload(
       url = clean.toString();
     }
   } catch {
-    return { ok: false, status: 400, error: 'URL invalida.' };
+    return { ok: false, status: 400, error: 'URL inválida.' };
   }
   const provider = classify(host);
   if (!provider)
@@ -940,16 +943,16 @@ export async function processDownload(
       ok: false,
       status: 400,
       error:
-        'Dominio nao suportado. Use YouTube, Instagram, TikTok, Pinterest (ou +18).',
+        'Domínio não suportado. Use YouTube, Instagram, TikTok, Pinterest (ou +18).',
     };
   if (provider === 'adult' && !adult)
     return {
       ok: false,
       status: 400,
-      error: 'Conteudo +18: ative o modo +18.',
+      error: 'Conteúdo +18: ative o modo +18.',
     };
   if (!['video', 'audio-mp3', 'audio-wav'].includes(mode))
-    return { ok: false, status: 400, error: 'Modo invalido.' };
+    return { ok: false, status: 400, error: 'Modo inválido.' };
   if (!['1080', '720', '480', 'best'].includes(quality))
     return { ok: false, status: 400, error: 'Qualidade inválida.' };
 
@@ -1007,7 +1010,7 @@ export async function processDownload(
       return {
         ok: false,
         status: 502,
-        error: 'Falha no download. ' + built.error,
+        error: 'Falha no download. ' + built.error.charAt(0).toUpperCase() + built.error.slice(1),
         code: built.code,
       };
     }

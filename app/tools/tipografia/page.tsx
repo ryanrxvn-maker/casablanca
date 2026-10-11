@@ -21,12 +21,18 @@ import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { downloadBlob } from '@/lib/audio-engine';
 import { formatBytes, formatTime } from '@/lib/utils';
 import {
-  cancelFFmpeg,
+  cancelarMotorSeDono,
   extractAudioForTranscription,
-  isCancellationError,
   probeVideoMetadata,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { runFfmpegExclusive, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
+
+/** Dono desta ferramenta na fila do motor (o Cancelar daqui não derruba outra). */
+const DONO = 'tipografia';
+/** Flag do Cancelar fora do componente: separa "o cliente cancelou" de falha (10.10). */
+const legenda = { cancelado: false };
 import {
   ToolHero,
   ToolStep,
@@ -965,8 +971,10 @@ function TipografiaInner() {
   }
 
   function handleCancel() {
+    legenda.cancelado = true;
     abortRef.current?.abort();
-    cancelFFmpeg();
+    // Só derruba o motor se for a vez DESTA ferramenta (não mata outra).
+    cancelarMotorSeDono(DONO);
   }
 
   // arquivo que subiu sem passar pela fila (fluxo antigo / F5) vira fila de 1
@@ -1074,16 +1082,28 @@ function TipografiaInner() {
     setError(null);
     setResult(null);
     setPhase('transcribing');
+    legenda.cancelado = false;
+    // A aba não congela em segundo plano enquanto transcreve (10.10).
+    acquireKeepAlive();
     try {
       setStage('Extraindo áudio do vídeo...');
       setProgress(0.05);
-      const audio = await extractAudioForTranscription(
-        file,
-        {
-          onStage: (s) => setStage(s),
-          onProgress: (p: FFProgress) => setProgress(p.ratio * 0.45),
+      // Na FILA GLOBAL do motor (10.10): outra ferramenta rodando junto não
+      // troca nem apaga o arquivo desta etapa.
+      const audio = await runFfmpegExclusive(
+        () => {
+          if (legenda.cancelado) throw new Error('CANCELLED_BY_USER');
+          return extractAudioForTranscription(
+            file,
+            {
+              onStage: (s) => setStage(s),
+              onProgress: (p: FFProgress) => setProgress(p.ratio * 0.45),
+            },
+            duration ?? undefined,
+          );
         },
-        duration ?? undefined,
+        DONO,
+        () => setStage(MSG_NA_FILA),
       );
       audioRef.current = audio;
       if (audio.size > 4_400_000) {
@@ -1155,7 +1175,8 @@ function TipografiaInner() {
       setRestored(false);
     } catch (e) {
       console.error(e);
-      if (isCancellationError(e) || (e as Error)?.name === 'AbortError') {
+      // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+      if (legenda.cancelado || (e as Error)?.name === 'AbortError') {
         setStage('Cancelado por você.');
         setError(null);
       } else {
@@ -1165,6 +1186,7 @@ function TipografiaInner() {
       setProgress(null);
       setPhase('idle');
     } finally {
+      releaseKeepAlive();
       abortRef.current = null;
     }
   }
@@ -1176,8 +1198,12 @@ function TipografiaInner() {
     setResult(null);
     setPhase('rendering');
     abortRef.current = new AbortController();
+    legenda.cancelado = false;
+    // A aba não congela em segundo plano enquanto renderiza (10.10).
+    acquireKeepAlive();
     try {
       const out = await renderTypographyVideo({
+        dono: DONO,
         file,
         blocks,
         preset,
@@ -1229,7 +1255,8 @@ function TipografiaInner() {
       setPhase('ready');
     } catch (e) {
       console.error(e);
-      if (isCancellationError(e) || (e as Error)?.name === 'AbortError') {
+      // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+      if (legenda.cancelado || (e as Error)?.name === 'AbortError') {
         setStage('Cancelado por você.');
         setError(null);
       } else {
@@ -1239,6 +1266,7 @@ function TipografiaInner() {
       setProgress(null);
       setPhase('ready');
     } finally {
+      releaseKeepAlive();
       abortRef.current = null;
     }
   }

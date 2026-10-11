@@ -337,6 +337,9 @@ export type Disponibilidade = {
   zipKeys: Set<string>;
   vaultInfo: { files: number; bytes: number } | null;
   refresh: () => void;
+  /** false até a PRIMEIRA conferência terminar (10.10): antes disso o botão
+   *  dizia "expirou do navegador" num arquivo gerado minutos atrás. */
+  pronto: boolean;
 };
 
 /**
@@ -348,6 +351,7 @@ export function useDisponibilidade(ativo: boolean, chavesZip: string[] = []): Di
   const [vaultKeys, setVaultKeys] = useState<Set<string>>(new Set());
   const [zipKeys, setZipKeys] = useState<Set<string>>(new Set());
   const [vaultInfo, setVaultInfo] = useState<{ files: number; bytes: number } | null>(null);
+  const [pronto, setPronto] = useState(false);
   const emVoo = useRef(false);
   // As chaves mudam a cada render da lista; o ref evita refazer a consulta por
   // identidade de array (e evita recriar o refresh, que reinicia o efeito).
@@ -372,6 +376,7 @@ export function useDisponibilidade(ativo: boolean, chavesZip: string[] = []): Di
         const achadas = await zipKeysExistentes(chavesRef.current);
         setZipKeys(achadas);
       } catch {}
+      setPronto(true);
       emVoo.current = false;
     })();
   }, []);
@@ -384,7 +389,7 @@ export function useDisponibilidade(ativo: boolean, chavesZip: string[] = []): Di
     return () => clearTimeout(t);
   }, [ativo, refresh, assinatura]);
 
-  return { vaultKeys, zipKeys, vaultInfo, refresh };
+  return { vaultKeys, zipKeys, vaultInfo, refresh, pronto };
 }
 
 /**
@@ -942,6 +947,8 @@ export function HistoryTimeline({
                           ? vivo?.ativo
                             ? 'O arquivo aparece aqui quando a montagem terminar'
                             : 'Esse registro não guardou arquivo pra baixar'
+                          : estado === 'gone' && !disponibilidade.pronto
+                            ? 'Conferindo se o arquivo ainda está guardado…'
                           : estado === 'gone'
                             ? `${alvo.name} expirou do navegador (7 dias)`
                             : estado === 'remote'

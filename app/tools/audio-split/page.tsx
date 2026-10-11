@@ -19,6 +19,7 @@ import {
   splitByParagraphs,
 } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
+import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 import { formatTime } from '@/lib/utils';
 
 type OutputPart = {
@@ -114,23 +115,33 @@ export default function AudioSplitPage() {
 
   async function downloadZip() {
     if (parts.length === 0) return;
+    if (!zipCabeNoNavegador(parts.map((p) => p.blob.size))) {
+      setError(MSG_ZIP_GRANDE);
+      return;
+    }
     setStatus('Montando ZIP...');
     const base = baseName(file?.name);
-    const zip = await buildZip(
-      parts.map((p) => ({
-        name: partFileName(base, p.index),
-        data: p.blob,
-      })),
-    );
-    setStatus(null);
-    await downloadBlob(zip, base + '_split.zip');
+    try {
+      const zip = await buildZip(
+        parts.map((p) => ({
+          name: partFileName(base, p.index),
+          data: p.blob,
+        })),
+      );
+      await downloadBlob(zip, base + '_split.zip');
+    } catch (e) {
+      console.error('[audio-split] zip', e);
+      setError(MSG_ZIP_FALHOU);
+    } finally {
+      setStatus(null);
+    }
   }
 
   return (
     <ToolShell
       title="Dividir Voz"
       eyebrow="ÁUDIO"
-      description="Divida áudios e vídeos em trechos usando as pausas da fala como pontos de corte."
+      description="Divida a fala de um áudio ou vídeo em trechos, cortando nas pausas. As partes saem em áudio (WAV)."
       hue={HUE}
       icon={<IconAudioSplit size={56} />}
     >
@@ -144,10 +155,11 @@ export default function AudioSplitPage() {
               setFile(f);
             }}
             hint="MP3, WAV, MP4, WEBM ou OGG"
+            disabled={processing}
           />
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepScissors size={18} />} title="Critério de divisão" hint="Defina como as pausas serão usadas para separar os trechos." hue={HUE}>
+        <ToolStep n={2} icon={<IconStepScissors size={18} />} title="Como a divisão é feita" hint="Automática: não precisa ajustar nada." hue={HUE}>
           <div className="rounded-[12px] border border-line bg-bg/40 px-4 py-3 text-xs text-text-muted leading-relaxed">
             Procura as pausas mais longas e quebra em partes equilibradas
             (~4 partes por minuto de fala). Pra remover silêncios use a{' '}

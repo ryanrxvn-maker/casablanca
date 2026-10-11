@@ -23,12 +23,14 @@ import {
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
 import {
-  cancelFFmpeg,
+  cancelarMotorSeDono,
   extractAudioAs,
   extractStereoAudioForTranscription,
-  isCancellationError,
   muxAudioIntoVideo,
 } from '@/lib/ffmpeg-worker';
+import { entrarNaFila, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
+import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 import { CancelButton } from '@/components/CancelButton';
 import { ToolStep, ToolChoice, ToolSlider, ToolAction } from '@/components/tool-kit';
 
@@ -83,6 +85,9 @@ type Pair = {
   // MODO MUDO: quando o par foi processado sem WHITE (só silêncio pra IA),
   // o veredito usa este campo no lugar de `downmixes`.
   muteDownmixes?: MuteDownmix[];
+  /** Formato em que ESTE resultado saiu (10.10): trocar o seletor depois não
+   *  pode mudar a extensão do arquivo pronto. */
+  outFormat?: OutFormat;
 };
 
 function newPair(): Pair {
@@ -108,7 +113,18 @@ type DecloakItem = {
   // Verificação do re-camuflado (só no modo trocar WHITE).
   guard?: 'checking' | VerifyVerdict;
   downmixes?: DownmixResult[];
+  /** Ajustes usados NESTE resultado (10.10) — nome/rótulo não mudam se o
+   *  cliente mexer nos seletores depois. */
+  outFormat?: OutFormat;
+  layer?: DescamuflarLayer;
+  swap?: boolean;
 };
+
+/** Dono desta ferramenta na fila do motor (o Cancelar daqui não derruba outra). */
+const DONO = 'camuflagem';
+/** Flag do Cancelar fora do componente (sobrevive a sair e voltar da página). */
+const lote = { cancelado: false };
+const ERRO_CANCELADO = 'CANCELLED_BY_USER';
 
 function newDecloak(): DecloakItem {
   return { id: crypto.randomUUID(), file: null, status: 'idle' };
@@ -168,6 +184,7 @@ export default function CamuflagemPage() {
     'camuflagem:decloaking',
     false,
   );
+  const [zipMsg, setZipMsg] = useToolState<string | null>('camuflagem:zipMsg', null);
 
   function updatePair(id: string, patch: Partial<Pair>) {
     setPairs((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -194,120 +211,150 @@ export default function CamuflagemPage() {
     );
     if (ready.length === 0) return;
     setProcessingAll(true);
+    lote.cancelado = false;
+    setZipMsg(null);
+    const fmt = format;
+    // A aba não congela em segundo plano enquanto processa (10.10).
+    acquireKeepAlive();
 
-    for (const pair of ready) {
-      try {
-        updatePair(pair.id, {
-          status: 'processing',
-          errorMsg: undefined,
-          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando áudio...',
-          guard: undefined,
-          whiteScore: undefined,
-          blackScore: undefined,
-          downmixes: undefined,
-          muteDownmixes: undefined,
-          transcript: undefined,
-          transcriptErr: undefined,
-        });
-        if (format === 'mp4' && !isVideoFile(pair.black)) {
-          throw new FriendlyError(
-            'Para sair em MP4, o áudio original precisa ser um arquivo de vídeo.',
-          );
-        }
-
-        // Camufla -> codifica no formato pedido (MP3/MP4 com settings
-        // robustos pra inversão de fase sobreviver ao codec lossy).
-        updatePair(pair.id, {
-          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando áudio...',
-        });
-        const wav = await camuflar({
-          black: pair.black!,
-          white: muteMode ? undefined : pair.white!,
-          volumePercent: volume,
-          mute: muteMode,
-        });
-
-        let out: Blob;
-        if (format === 'wav') {
-          out = wav;
-        } else if (format === 'mp3') {
-          updatePair(pair.id, { stage: 'Convertendo para MP3 320k...' });
-          out = await extractAudioAs(
-            wav,
-            'mp3',
-            { onStage: (s) => updatePair(pair.id, { stage: s }) },
-            true,
-          );
-        } else {
-          updatePair(pair.id, { stage: 'Embutindo o áudio no vídeo...' });
-          out = await muxAudioIntoVideo(
-            pair.black!,
-            wav,
-            { onStage: (s) => updatePair(pair.id, { stage: s }) },
-            true,
-          );
-        }
-
-        // GARANTIA HONESTA: decodifica o ARQUIVO REAL e mede o que CADA
-        // tipo de IA escuta. No modo mudo confere se a soma/média zerou
-        // (silêncio); no modo normal, se o PIOR caso ainda escuta o WHITE.
-        updatePair(pair.id, {
-          stage: muteMode
-            ? `Verificando se a IA escuta silêncio no ${format.toUpperCase()} real...`
-            : `Verificando o que cada IA escuta no ${format.toUpperCase()} real...`,
-          guard: 'checking',
-        });
-
-        const url = URL.createObjectURL(out);
-        if (muteMode) {
-          const vm = await verifyMute({ result: out });
+    try {
+      for (const pair of ready) {
+        if (lote.cancelado) break;
+        let sair: (() => void) | null = null;
+        try {
+          // Um par por vez na FILA GLOBAL do motor (10.10): duas ferramentas
+          // juntas no mesmo motor chegaram a trocar arquivo entre si.
+          sair = await entrarNaFila(DONO, () => updatePair(pair.id, { status: 'processing', stage: MSG_NA_FILA }));
+          if (lote.cancelado) throw new Error(ERRO_CANCELADO);
           updatePair(pair.id, {
-            status: 'done',
-            resultBlob: out,
-            resultUrl: url,
-            stage: undefined,
-            guard: vm.verdict,
-            muteDownmixes: vm.downmixes,
+            status: 'processing',
+            errorMsg: undefined,
+            stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando áudio...',
+            guard: undefined,
+            whiteScore: undefined,
+            blackScore: undefined,
+            downmixes: undefined,
+            muteDownmixes: undefined,
+            transcript: undefined,
+            transcriptErr: undefined,
           });
-        } else {
-          const v = await verifyCamouflage({
-            result: out,
-            white: pair.white!,
+          if (fmt === 'mp4' && !isVideoFile(pair.black)) {
+            throw new FriendlyError(
+              'Para sair em MP4, o áudio original precisa ser um arquivo de vídeo.',
+            );
+          }
+
+          // Camufla -> codifica no formato pedido (MP3/MP4 com settings
+          // robustos pra inversão de fase sobreviver ao codec lossy).
+          updatePair(pair.id, {
+            stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando áudio...',
+          });
+          const wav = await camuflar({
             black: pair.black!,
+            white: muteMode ? undefined : pair.white!,
+            volumePercent: volume,
+            mute: muteMode,
           });
+          // Cancelar vale entre as etapas (10.10): na saída WAV o processamento
+          // não passa pelo motor de vídeo e o botão não fazia efeito nenhum.
+          if (lote.cancelado) throw new Error(ERRO_CANCELADO);
+
+          let out: Blob;
+          if (fmt === 'wav') {
+            out = wav;
+          } else if (fmt === 'mp3') {
+            updatePair(pair.id, { stage: 'Convertendo para MP3 320k...' });
+            out = await extractAudioAs(
+              wav,
+              'mp3',
+              { onStage: (s) => updatePair(pair.id, { stage: s }) },
+              true,
+            );
+          } else {
+            updatePair(pair.id, { stage: 'Embutindo o áudio no vídeo...' });
+            out = await muxAudioIntoVideo(
+              pair.black!,
+              wav,
+              { onStage: (s) => updatePair(pair.id, { stage: s }) },
+              true,
+            );
+          }
+
+          // GARANTIA HONESTA: decodifica o ARQUIVO REAL e mede o que CADA
+          // tipo de IA escuta. No modo mudo confere se a soma/média zerou
+          // (silêncio); no modo normal, se o PIOR caso ainda escuta o WHITE.
           updatePair(pair.id, {
-            status: 'done',
-            resultBlob: out,
-            resultUrl: url,
-            stage: undefined,
-            guard: v.verdict,
-            whiteScore: v.whiteScore,
-            blackScore: v.blackScore,
-            downmixes: v.downmixes,
+            stage: muteMode
+              ? `Verificando se a IA escuta silêncio no ${fmt.toUpperCase()} real...`
+              : `Verificando o que cada IA escuta no ${fmt.toUpperCase()} real...`,
+            guard: 'checking',
           });
-        }
-        logHistory({ tool: 'camuflagem', title: `${pair.black?.name ?? 'áudio'} camuflado` });
-      } catch (e) {
-        console.error(e);
-        if (isCancellationError(e)) {
+          if (lote.cancelado) throw new Error(ERRO_CANCELADO);
+
+          const url = URL.createObjectURL(out);
+          if (muteMode) {
+            const vm = await verifyMute({ result: out });
+            updatePair(pair.id, {
+              status: 'done',
+              resultBlob: out,
+              resultUrl: url,
+              stage: undefined,
+              guard: vm.verdict,
+              muteDownmixes: vm.downmixes,
+              outFormat: fmt,
+            });
+          } else {
+            const v = await verifyCamouflage({
+              result: out,
+              white: pair.white!,
+              black: pair.black!,
+            });
+            updatePair(pair.id, {
+              status: 'done',
+              resultBlob: out,
+              resultUrl: url,
+              stage: undefined,
+              guard: v.verdict,
+              whiteScore: v.whiteScore,
+              blackScore: v.blackScore,
+              downmixes: v.downmixes,
+              outFormat: fmt,
+            });
+          }
+          logHistory({ tool: 'camuflagem', title: `${pair.black?.name ?? 'áudio'} camuflado` });
+        } catch (e) {
+          console.error(e);
+          // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+          if (lote.cancelado) {
+            updatePair(pair.id, {
+              status: 'error',
+              errorMsg: 'Cancelado por você.',
+              stage: undefined,
+            });
+            break;
+          }
           updatePair(pair.id, {
             status: 'error',
-            errorMsg: 'Cancelado por você.',
+            errorMsg: toFriendlyMessage(
+              e,
+              'Não consegui camuflar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou pesado demais.',
+            ),
             stage: undefined,
           });
-          break;
+        } finally {
+          sair?.();
         }
-        updatePair(pair.id, {
-          status: 'error',
-          errorMsg: toFriendlyMessage(
-            e,
-            'Não consegui camuflar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou pesado demais.',
-          ),
-          stage: undefined,
-        });
       }
+    } finally {
+      releaseKeepAlive();
+      setProcessingAll(false);
     }
-    setProcessingAll(false);
+  }
+
+  function cancelar() {
+    lote.cancelado = true;
+    // Só derruba o motor se for a vez DESTA ferramenta (não mata outra).
+    cancelarMotorSeDono(DONO);
   }
 
   // TRANSCREVER: reproduz o pipeline da IA-alvo escolhida sobre o ARQUIVO
@@ -363,22 +410,32 @@ export default function CamuflagemPage() {
   async function downloadOne(pair: Pair) {
     if (!pair.resultBlob) return;
     const base = baseName(pair.black?.name ?? 'par');
-    await downloadBlob(pair.resultBlob, base + '_camuflado.' + format);
+    await downloadBlob(pair.resultBlob, base + '_camuflado.' + (pair.outFormat ?? format));
   }
 
   async function downloadAllZip() {
     const done = pairs.filter((p) => p.resultBlob);
     if (done.length === 0) return;
-    const zip = await buildZip(
-      done.map((p, i) => ({
-        name:
-          baseName(p.black?.name ?? 'par-' + (i + 1)) +
-          '_camuflado.' +
-          format,
-        data: p.resultBlob!,
-      })),
-    );
-    await downloadBlob(zip, 'camuflagem.zip');
+    if (!zipCabeNoNavegador(done.map((p) => p.resultBlob!.size))) {
+      setZipMsg(MSG_ZIP_GRANDE);
+      return;
+    }
+    try {
+      const zip = await buildZip(
+        done.map((p, i) => ({
+          name:
+            baseName(p.black?.name ?? 'par-' + (i + 1)) +
+            '_camuflado.' +
+            (p.outFormat ?? format),
+          data: p.resultBlob!,
+        })),
+      );
+      await downloadBlob(zip, 'camuflagem.zip');
+      setZipMsg(null);
+    } catch (e) {
+      console.error('[camuflagem] zip', e);
+      setZipMsg(MSG_ZIP_FALHOU);
+    }
   }
 
   // ----- DESCAMUFLAR --------------------------------------------------------
@@ -408,67 +465,121 @@ export default function CamuflagemPage() {
     );
     if (ready.length === 0) return;
     setDecloaking(true);
-    for (const it of ready) {
-      try {
-        updateDecloak(it.id, {
-          status: 'processing',
-          errorMsg: undefined,
-          stage: 'Desfazendo camuflagem...',
-          guard: undefined,
-          downmixes: undefined,
-        });
-        if (decloakFormat === 'mp4' && !isVideoFile(it.file)) {
-          throw new Error(
-            'Para sair em MP4, o arquivo camuflado precisa ser um video.',
-          );
-        }
+    lote.cancelado = false;
+    // Ajustes do momento do clique (10.10): o resultado guarda os seus.
+    const fmt = decloakFormat;
+    const layer = decloakLayer;
+    const swap = decloakSwapWhite;
+    acquireKeepAlive();
+    try {
+      for (const it of ready) {
+        if (lote.cancelado) break;
+        let sair: (() => void) | null = null;
+        try {
+          sair = await entrarNaFila(DONO, () => updateDecloak(it.id, { status: 'processing', stage: MSG_NA_FILA }));
+          if (lote.cancelado) throw new Error(ERRO_CANCELADO);
+          updateDecloak(it.id, {
+            status: 'processing',
+            errorMsg: undefined,
+            stage: 'Desfazendo camuflagem...',
+            guard: undefined,
+            downmixes: undefined,
+          });
+          if (fmt === 'mp4' && !isVideoFile(it.file)) {
+            throw new Error(
+              'Para sair em MP4, o arquivo camuflado precisa ser um video.',
+            );
+          }
 
-        // MODO TROCAR WHITE: recupera o BLACK por baixo, remove o WHITE antigo
-        // e re-camufla o BLACK com o novo WHITE enviado.
-        if (decloakSwapWhite) {
-          updateDecloak(it.id, { stage: 'Recuperando o áudio original...' });
-          const { wav: blackWav } = await descamuflar({
+          // MODO TROCAR WHITE: recupera o BLACK por baixo, remove o WHITE antigo
+          // e re-camufla o BLACK com o novo WHITE enviado.
+          if (swap) {
+            updateDecloak(it.id, { stage: 'Recuperando o áudio original...' });
+            const { wav: blackWav } = await descamuflar({
+              file: it.file!,
+              layer: 'public',
+            });
+
+            updateDecloak(it.id, { stage: 'Embutindo o novo escondido...' });
+            const camWav = await camuflar({
+              black: blackWav,
+              white: it.whiteSwap!,
+              volumePercent: volume,
+            });
+
+            if (lote.cancelado) throw new Error(ERRO_CANCELADO);
+            let out: Blob;
+            if (fmt === 'wav') {
+              out = camWav;
+            } else if (fmt === 'mp3') {
+              updateDecloak(it.id, { stage: 'Convertendo para MP3 320k...' });
+              out = await extractAudioAs(
+                camWav,
+                'mp3',
+                { onStage: (s) => updateDecloak(it.id, { stage: s }) },
+                true,
+              );
+            } else {
+              updateDecloak(it.id, { stage: 'Embutindo o áudio no vídeo...' });
+              out = await muxAudioIntoVideo(
+                it.file!,
+                camWav,
+                { onStage: (s) => updateDecloak(it.id, { stage: s }) },
+                true,
+              );
+            }
+
+            updateDecloak(it.id, {
+              stage: 'Verificando o novo escondido...',
+              guard: 'checking',
+            });
+            const v = await verifyCamouflage({
+              result: out,
+              white: it.whiteSwap!,
+              black: blackWav,
+            });
+
+            const url = URL.createObjectURL(out);
+            updateDecloak(it.id, {
+              status: 'done',
+              resultBlob: out,
+              resultUrl: url,
+              stage: undefined,
+              wasStereo: true,
+              guard: v.verdict,
+              downmixes: v.downmixes,
+              outFormat: fmt,
+              layer,
+              swap,
+            });
+            logHistory({ tool: 'camuflagem', title: `${it.file?.name ?? 'áudio'} descamuflado` });
+            continue;
+          }
+
+          const { wav, wasStereo } = await descamuflar({
             file: it.file!,
-            layer: 'public',
+            layer,
           });
+          if (lote.cancelado) throw new Error(ERRO_CANCELADO);
 
-          updateDecloak(it.id, { stage: 'Embutindo o novo escondido...' });
-          const camWav = await camuflar({
-            black: blackWav,
-            white: it.whiteSwap!,
-            volumePercent: volume,
-          });
-
-          let out: Blob;
-          if (decloakFormat === 'wav') {
-            out = camWav;
-          } else if (decloakFormat === 'mp3') {
+          let out: Blob = wav;
+          if (fmt === 'mp3') {
             updateDecloak(it.id, { stage: 'Convertendo para MP3 320k...' });
             out = await extractAudioAs(
-              camWav,
+              wav,
               'mp3',
               { onStage: (s) => updateDecloak(it.id, { stage: s }) },
               true,
             );
-          } else {
+          } else if (fmt === 'mp4') {
             updateDecloak(it.id, { stage: 'Embutindo o áudio no vídeo...' });
             out = await muxAudioIntoVideo(
               it.file!,
-              camWav,
+              wav,
               { onStage: (s) => updateDecloak(it.id, { stage: s }) },
               true,
             );
           }
-
-          updateDecloak(it.id, {
-            stage: 'Verificando o novo escondido...',
-            guard: 'checking',
-          });
-          const v = await verifyCamouflage({
-            result: out,
-            white: it.whiteSwap!,
-            black: blackWav,
-          });
 
           const url = URL.createObjectURL(out);
           updateDecloak(it.id, {
@@ -476,79 +587,52 @@ export default function CamuflagemPage() {
             resultBlob: out,
             resultUrl: url,
             stage: undefined,
-            wasStereo: true,
-            guard: v.verdict,
-            downmixes: v.downmixes,
+            wasStereo,
+            outFormat: fmt,
+            layer,
+            swap,
           });
           logHistory({ tool: 'camuflagem', title: `${it.file?.name ?? 'áudio'} descamuflado` });
-          continue;
-        }
-
-        const { wav, wasStereo } = await descamuflar({
-          file: it.file!,
-          layer: decloakLayer,
-        });
-
-        let out: Blob = wav;
-        if (decloakFormat === 'mp3') {
-          updateDecloak(it.id, { stage: 'Convertendo para MP3 320k...' });
-          out = await extractAudioAs(
-            wav,
-            'mp3',
-            { onStage: (s) => updateDecloak(it.id, { stage: s }) },
-            true,
-          );
-        } else if (decloakFormat === 'mp4') {
-          updateDecloak(it.id, { stage: 'Embutindo o áudio no vídeo...' });
-          out = await muxAudioIntoVideo(
-            it.file!,
-            wav,
-            { onStage: (s) => updateDecloak(it.id, { stage: s }) },
-            true,
-          );
-        }
-
-        const url = URL.createObjectURL(out);
-        updateDecloak(it.id, {
-          status: 'done',
-          resultBlob: out,
-          resultUrl: url,
-          stage: undefined,
-          wasStereo,
-        });
-        logHistory({ tool: 'camuflagem', title: `${it.file?.name ?? 'áudio'} descamuflado` });
-      } catch (e) {
-        console.error(e);
-        if (isCancellationError(e)) {
+        } catch (e) {
+          console.error(e);
+          // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+          if (lote.cancelado) {
+            updateDecloak(it.id, {
+              status: 'error',
+              errorMsg: 'Cancelado por você.',
+              stage: undefined,
+            });
+            break;
+          }
           updateDecloak(it.id, {
             status: 'error',
-            errorMsg: 'Cancelado por você.',
+            errorMsg: toFriendlyMessage(
+              e,
+              'Não consegui descamuflar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido.',
+            ),
             stage: undefined,
           });
-          break;
+        } finally {
+          sair?.();
         }
-        updateDecloak(it.id, {
-          status: 'error',
-          errorMsg: toFriendlyMessage(
-            e,
-            'Não consegui descamuflar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido.',
-          ),
-          stage: undefined,
-        });
       }
+    } finally {
+      releaseKeepAlive();
+      setDecloaking(false);
     }
-    setDecloaking(false);
   }
 
   async function downloadDecloak(it: DecloakItem) {
     if (!it.resultBlob) return;
     const base = baseName(it.file?.name ?? 'arquivo');
-    const suffix = decloakSwapWhite
+    const swap = it.swap ?? decloakSwapWhite;
+    const layer = it.layer ?? decloakLayer;
+    const suffix = swap
       ? 'escondido-trocado'
-      : decloakLayer === 'public'
+      : layer === 'public'
         ? 'original'
         : 'escondido';
-    await downloadBlob(it.resultBlob, `${base}_${suffix}.${decloakFormat}`);
+    await downloadBlob(it.resultBlob, `${base}_${suffix}.${it.outFormat ?? decloakFormat}`);
   }
 
   const doneCount = pairs.filter((p) => p.status === 'done').length;
@@ -805,7 +889,7 @@ export default function CamuflagemPage() {
 
               {pair.status === 'done' && pair.resultUrl ? (
                 <div className="mt-3 flex flex-col gap-2">
-                  {format === 'mp4' ? (
+                  {(pair.outFormat ?? format) === 'mp4' ? (
                     <video
                       src={pair.resultUrl}
                       controls
@@ -1048,7 +1132,7 @@ export default function CamuflagemPage() {
                       onClick={() => downloadOne(pair)}
                       className="btn-ghost !py-1 text-xs"
                     >
-                      Baixar {format.toUpperCase()}
+                      Baixar {(pair.outFormat ?? format).toUpperCase()}
                     </button>
                   </div>
 
@@ -1118,7 +1202,7 @@ export default function CamuflagemPage() {
               + Adicionar par ({pairs.length}/10)
             </button>
             {processingAll ? (
-              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+              <CancelButton onClick={cancelar} label="Cancelar processamento" />
             ) : (
               <ToolAction
                 onClick={processAll}
@@ -1137,6 +1221,11 @@ export default function CamuflagemPage() {
               </button>
             ) : null}
           </div>
+          {zipMsg ? (
+            <p role="status" className="mt-3 rounded-[10px] border border-amber-400/35 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+              {zipMsg}
+            </p>
+          ) : null}
         </ToolStep>
         </>
         ) : (
@@ -1282,7 +1371,7 @@ export default function CamuflagemPage() {
 
               {it.status === 'done' && it.resultUrl ? (
                 <div className="mt-3 flex flex-col gap-2">
-                  {decloakFormat === 'mp4' ? (
+                  {(it.outFormat ?? decloakFormat) === 'mp4' ? (
                     <video
                       src={it.resultUrl}
                       controls
@@ -1292,15 +1381,15 @@ export default function CamuflagemPage() {
                     <AudioPlayer
                       src={it.resultUrl}
                       label={
-                        decloakSwapWhite
+                        (it.swap ?? decloakSwapWhite)
                           ? 'Re-camuflado com o novo escondido'
-                          : decloakLayer === 'public'
+                          : (it.layer ?? decloakLayer) === 'public'
                             ? 'Áudio original recuperado'
                             : 'Áudio escondido extraído'
                       }
                     />
                   )}
-                  {!decloakSwapWhite && it.wasStereo === false ? (
+                  {!(it.swap ?? decloakSwapWhite) && it.wasStereo === false ? (
                     <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-300">
                       Arquivo era mono (sem inversão de fase) — não havia camada
                       pra separar; devolvido o próprio áudio.
@@ -1308,12 +1397,12 @@ export default function CamuflagemPage() {
                   ) : null}
 
                   {/* Veredito do re-camuflado (modo trocar WHITE). */}
-                  {decloakSwapWhite && it.guard === 'checking' ? (
+                  {(it.swap ?? decloakSwapWhite) && it.guard === 'checking' ? (
                     <div className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-xs text-text-muted">
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-lime border-t-transparent" />
                       Verificando o novo escondido no arquivo real...
                     </div>
-                  ) : decloakSwapWhite &&
+                  ) : (it.swap ?? decloakSwapWhite) &&
                     (it.guard === 'ok' || it.guard === 'fail') ? (
                     (() => {
                       const ev = effectiveVerdict(it.downmixes, 'platforms');
@@ -1341,7 +1430,7 @@ export default function CamuflagemPage() {
                       onClick={() => downloadDecloak(it)}
                       className="btn-ghost !py-1 text-xs"
                     >
-                      Baixar {decloakFormat.toUpperCase()}
+                      Baixar {(it.outFormat ?? decloakFormat).toUpperCase()}
                     </button>
                   </div>
                 </div>
@@ -1359,7 +1448,7 @@ export default function CamuflagemPage() {
               + Adicionar arquivo ({decloakItems.length}/10)
             </button>
             {decloaking ? (
-              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+              <CancelButton onClick={cancelar} label="Cancelar processamento" />
             ) : (
               <ToolAction
                 onClick={processDecloak}

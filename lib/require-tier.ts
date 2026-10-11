@@ -63,7 +63,8 @@ export async function requireTier(
     if (!user) {
       return {
         ok: false,
-        response: NextResponse.json({ error: 'Não autenticado.' }, { status: 401 }),
+        // Texto que o cliente lê quando a sessão expira (10.10: era "Não autenticado.").
+        response: NextResponse.json({ error: 'Sua sessão expirou. Entre na sua conta de novo e tente outra vez.' }, { status: 401 }),
       };
     }
 
@@ -90,7 +91,7 @@ export async function requireTier(
       return {
         ok: false,
         response: NextResponse.json(
-          { error: 'Falha ao validar plano.', detail: error.message.slice(0, 300) },
+          { error: 'Não consegui conferir seu plano agora. Tente de novo em instantes.', detail: error.message.slice(0, 300) },
           { status: 500 },
         ),
       };

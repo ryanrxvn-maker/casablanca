@@ -396,7 +396,7 @@ export function ToolDropzone({
           </div>
         </div>
       ) : (
-        <div className="relative flex items-center gap-3 px-5 py-4">
+        <div className="relative flex flex-wrap items-center gap-3 px-5 py-4">
           <span
             className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-violet/45 bg-violet/10"
             style={{ boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 20px -4px ${hue}` }}
@@ -421,8 +421,10 @@ export function ToolDropzone({
               </svg>
             </span>
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[13.5px] font-semibold text-text">
+          {/* min-w: em card estreito os botões descem de linha em vez de
+              esmagar o nome do arquivo (10.10: aparecia só "l…"). */}
+          <div className="min-w-[9rem] flex-1">
+            <div className="truncate text-[13.5px] font-semibold text-text" title={file.name}>
               {file.name}
             </div>
             <div className="mono text-[11px] text-text-muted">

@@ -42,9 +42,79 @@ export function esperaEstourou(esperouMs: number, tetoMs: number = ESPERA_MAX_MS
   return esperouMs > tetoMs;
 }
 
-export function runFfmpegExclusive<T>(fn: () => Promise<T>): Promise<T> {
+/**
+ * DONO da vez (10.10). Cada ferramenta passa um `dono` ('normalizador',
+ * 'mixer'...) ao entrar na fila. Serve pro botão Cancelar de UMA ferramenta não
+ * derrubar a outra: o cancelamento mata o motor inteiro (cancelFFmpeg), então a
+ * ferramenta só pode matá-lo quando é ELA que está usando o motor agora.
+ * Auditoria 10.10: o Cancelar do Mixer cancelou o lote do Normalizador.
+ */
+let _donoAtual: string | null = null;
+let _ocupados = 0;
+
+/** Aviso pro cliente quando a ferramenta espera outra terminar (texto simples). */
+export const MSG_NA_FILA = 'Na fila: outra ferramenta está processando agora. Começa assim que ela terminar.';
+
+/** Quem está usando o motor agora (null = ninguém ou operação sem dono). */
+export function donoDoMotor(): string | null {
+  return _donoAtual;
+}
+
+/** true se tem alguma operação rodando OU esperando na fila. */
+export function motorOcupado(): boolean {
+  return _ocupados > 0;
+}
+
+/**
+ * Quem está ESPERANDO a vez (10.10). O Cancelar de uma ferramenta que ainda
+ * está na fila não tinha efeito nenhum até a outra terminar — a tela seguia
+ * "Na fila…" depois do clique. Agora quem desiste sai da fila na hora.
+ */
+type Espera = { dono: string | null; desistiu: boolean; desistir: () => void };
+const _esperando = new Set<Espera>();
+
+/** Erro de quem desistiu da fila (mesmo texto do cancelamento do motor). */
+const DESISTIU_DA_FILA = 'CANCELLED_BY_USER';
+
+/**
+ * Tira da fila as operações desse dono que AINDA NÃO começaram: elas falham na
+ * hora com cancelamento e, quando chegaria a vez delas, a fila só pula. Não
+ * mexe em nada que já esteja rodando nem em outro dono. Devolve quantas saíram.
+ */
+export function desistirDaFila(dono: string): number {
+  let n = 0;
+  for (const e of Array.from(_esperando)) {
+    if (e.dono !== dono) continue;
+    _esperando.delete(e);
+    e.desistir();
+    n++;
+  }
+  return n;
+}
+
+export function runFfmpegExclusive<T>(
+  fn: () => Promise<T>,
+  dono?: string,
+  /** Chamado UMA vez quando a operação vai esperar outra terminar (pra UI avisar). */
+  aoEsperar?: () => void,
+): Promise<T> {
   const entrou = Date.now();
+  if (_ocupados > 0) {
+    try { aoEsperar?.(); } catch { /* aviso de UI nunca derruba a fila */ }
+  }
+  _ocupados++;
+  let rejeitarEspera: (e: Error) => void = () => {};
+  const desistencia = new Promise<never>((_, rej) => { rejeitarEspera = rej; });
+  const espera: Espera = {
+    dono: dono ?? null,
+    desistiu: false,
+    desistir: () => { espera.desistiu = true; rejeitarEspera(new Error(DESISTIU_DA_FILA)); },
+  };
+  _esperando.add(espera);
   const run = _chain.then(() => {
+    _esperando.delete(espera);
+    // Desistiu enquanto esperava: a vez é pulada (fn nem começa).
+    if (espera.desistiu) throw new Error(DESISTIU_DA_FILA);
     const esperou = Date.now() - entrou;
     if (esperaEstourou(esperou)) {
       throw new Error(
@@ -52,11 +122,34 @@ export function runFfmpegExclusive<T>(fn: () => Promise<T>): Promise<T> {
           'provável aninhamento de runFfmpegExclusive (deadlock).',
       );
     }
+    _donoAtual = dono ?? null;
     return fn();
   });
+  const solta = () => {
+    _ocupados = Math.max(0, _ocupados - 1);
+    if (_donoAtual === (dono ?? null)) _donoAtual = null;
+  };
   _chain = run.then(
-    () => undefined,
-    () => undefined,
+    () => { solta(); return undefined; },
+    () => { solta(); return undefined; },
   );
-  return run;
+  // Quem desistiu na fila recebe o cancelamento NA HORA (não espera a vez).
+  return Promise.race([run, desistencia]);
+}
+
+/**
+ * Pega a VEZ na fila e devolve a função que a solta (10.10). Pra ferramentas
+ * cujo item é um bloco grande de código: `const sair = await entrarNaFila(...)`
+ * e `try { ... } finally { sair(); }`. Mesma fila e mesmas regras de
+ * `runFfmpegExclusive` — inclusive não aninhar.
+ */
+export function entrarNaFila(dono?: string, aoEsperar?: () => void): Promise<() => void> {
+  return new Promise<() => void>((entrou, falhou) => {
+    let sair: () => void = () => {};
+    const liberado = new Promise<void>((r) => { sair = () => r(); });
+    runFfmpegExclusive(() => {
+      entrou(sair);
+      return liberado;
+    }, dono, aoEsperar).catch(falhou);
+  });
 }

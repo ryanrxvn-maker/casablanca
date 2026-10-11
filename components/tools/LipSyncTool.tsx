@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { logHistory } from '@/lib/history';
+import { useToolState } from '@/components/ToolsStateProvider';
+import { entrarNaFila } from '@/lib/ffmpeg-serial';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { createClient } from '@/lib/supabase/client';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
@@ -251,6 +254,20 @@ function isActive(s: JobStatus): boolean {
   return s !== 'done' && s !== 'error';
 }
 
+/**
+ * Memória dos disparos FORA do componente (10.10). Antes tudo vivia no estado
+ * da tela: trocar de ferramenta no menu (ou F5) sumia com os cards, a geração
+ * seguia no servidor gastando crédito e o resultado se perdia. Agora a fila
+ * fica no estado compartilhado das ferramentas (useToolState) e os dados de
+ * cada disparo (arquivos de entrada e trechos já gerados) ficam aqui.
+ */
+let jobSeq = 0;
+const jobInputs = new Map<string, { faceFile: File; audioSrc: File; audioMs: number; cleanOn: boolean }>();
+/** Trechos já gerados por disparo: o "Tentar de novo" refaz só o que faltou. */
+const trechosProntos = new Map<string, Blob[]>();
+/** Dono do lipsync na fila do motor de vídeo (preparo e costura). */
+const DONO = 'lipsync';
+
 /** Corre uma promise contra um timeout (ms). Usado pra etapas de ffmpeg
  *  não pendurarem o disparo — se estourar, o chamador faz fallback. */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -283,35 +300,33 @@ function jobTakeStatus(s: JobStatus): LipsyncTake['status'] {
 }
 
 export default function LipSyncTool() {
-  // Library de videos uploadados
-  const [videos, setVideos] = useState<VideoItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string>('');
+  // Library de videos uploadados — estado compartilhado (sobrevive a trocar de
+  // ferramenta e voltar; 10.10).
+  const [videos, setVideos] = useToolState<VideoItem[]>('lipsync:videos', []);
+  const [selectedId, setSelectedId] = useToolState<string>('lipsync:selected', '');
 
   // Audio
-  const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [audioPreview, setAudioPreview] = useState<string>('');
-  const [audioDur, setAudioDur] = useState<number>(0);
+  const [audioFile, setAudioFile] = useToolState<File | null>('lipsync:audio', null);
+  const [audioPreview, setAudioPreview] = useToolState<string>('lipsync:audioUrl', '');
+  const [audioDur, setAudioDur] = useToolState<number>('lipsync:audioDur', 0);
 
   // Fila de disparos (cada um vira um card embaixo)
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useToolState<Job[]>('lipsync:jobs', []);
   const [formError, setFormError] = useState<string>('');
   /** Duração (ms) do áudio que passou do teto de 6 min; null = dentro do teto. */
-  const [audioLongoMs, setAudioLongoMs] = useState<number | null>(null);
+  const [audioLongoMs, setAudioLongoMs] = useToolState<number | null>('lipsync:audioLongo', null);
   const [flash, setFlash] = useState<boolean>(false); // toast "enviado ↓"
 
   // Limpar áudio (pré-produção do áudio: highpass + normalização de volume).
   // Ligado por padrão, mas OPCIONAL: às vezes o ruído faz parte do natural
   // do áudio e o usuário quer mandar o áudio ORIGINAL, sem mexer.
-  const [cleanAudioOn, setCleanAudioOn] = useState<boolean>(true);
+  const [cleanAudioOn, setCleanAudioOn] = useToolState<boolean>('lipsync:clean', true);
 
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
-  const jobSeqRef = useRef<number>(0);
-  /** Inputs capturados por job (id → arquivos+config) — permite RE-RODAR o
-   *  mesmo disparo: auto-retry transparente + botão "Tentar de novo" no card. */
-  const jobInputsRef = useRef<
-    Map<string, { faceFile: File; audioSrc: File; audioMs: number; cleanOn: boolean }>
-  >(new Map());
+  // Inputs capturados por job (id → arquivos+config) — permite RE-RODAR o
+  // mesmo disparo: auto-retry transparente + botão "Tentar de novo" no card.
+  // Ficam em `jobInputs` (fora do componente) pra sobreviver a sair da tela.
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selected = videos.find((v) => v.id === selectedId) ?? null;
@@ -555,6 +570,9 @@ export default function LipSyncTool() {
   async function runJob(
     id: string, faceFile: File, audioSrc: File, audioMs: number, cleanOn: boolean, attempt = 1,
   ) {
+    // A aba não congela em segundo plano enquanto gera (10.10): a consulta do
+    // andamento e a costura rodam aqui na página.
+    acquireKeepAlive();
     try {
       const {
         prepareFaceForAudio, splitVideoToVideo, cleanAudioMp3, extractAudioMp3, splitAudioChunks, concatLipVideos,
@@ -571,51 +589,58 @@ export default function LipSyncTool() {
       //        limpeza — tom intacto, só menor).
       //    Em QUALQUER falha cai pra extração crua; nunca trava o disparo.
       patchJob(id, { status: 'pre' });
-      const AUDIO_PASSTHROUGH_MAX = 44 * 1024 * 1024;
-      const audioPrep: Promise<File> = (async (): Promise<File> => {
-        try {
-          if (cleanOn) return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
-          if (audioSrc.type.startsWith('audio/') && audioSrc.size <= AUDIO_PASSTHROUGH_MAX) return audioSrc;
-          return await withTimeout(extractAudioMp3(audioSrc), 90_000);
-        } catch {
-          // Fallback universal: extrai sem limpar (jamais sobe o container gigante).
+      // Preparo na FILA GLOBAL do motor de vídeo (10.10): outra ferramenta
+      // processando junto não derruba nem troca arquivo deste preparo.
+      const sairPreparo = await entrarNaFila(DONO);
+      let pairs: { face: File; audio: File; ms: number }[];
+      try {
+        const AUDIO_PASSTHROUGH_MAX = 44 * 1024 * 1024;
+        const audioPrep: Promise<File> = (async (): Promise<File> => {
           try {
+            if (cleanOn) return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
+            if (audioSrc.type.startsWith('audio/') && audioSrc.size <= AUDIO_PASSTHROUGH_MAX) return audioSrc;
             return await withTimeout(extractAudioMp3(audioSrc), 90_000);
           } catch {
-            return audioSrc; // último recurso — uploadPublic ainda guarda o tamanho
+            // Fallback universal: extrai sem limpar (jamais sobe o container gigante).
+            try {
+              return await withTimeout(extractAudioMp3(audioSrc), 90_000);
+            } catch {
+              return audioSrc; // último recurso — uploadPublic ainda guarda o tamanho
+            }
           }
-        }
-      })();
-      // 2. DIVISÃO (invisível pro cliente). O motor tem teto de TEMPO por
-      //    geração (~180s) e o upload tem teto de TAMANHO — rosto E áudio
-      //    respeitam os dois, sempre:
-      //    • áudio curto → UMA geração; o rosto sobe nativo, ou só o pedaço
-      //      que a fala usa, ou comprimido (prepareFaceForAudio);
-      //    • áudio longo + rosto do mesmo tamanho (video to video) → rosto E
-      //      áudio divididos nos MESMOS pontos, trecho i com trecho i;
-      //    • áudio longo + rosto curto (clipe de loop) → o mesmo rosto em
-      //      todo trecho, como sempre foi.
-      const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
-      let pairs: { face: File; audio: File; ms: number }[];
-      if (!needChunk) {
-        const [face, cleanAudio] = await Promise.all([prepareFaceForAudio(faceFile, audioMs / 1000), audioPrep]);
-        pairs = [{ face, audio: cleanAudio, ms: audioMs }];
-      } else {
-        const cleanAudio = await audioPrep;
-        const v2v = await splitVideoToVideo(faceFile, cleanAudio, audioMs / 1000);
-        if (v2v) {
-          pairs = v2v;
+        })();
+        // 2. DIVISÃO (invisível pro cliente). O motor tem teto de TEMPO por
+        //    geração (~180s) e o upload tem teto de TAMANHO — rosto E áudio
+        //    respeitam os dois, sempre:
+        //    • áudio curto → UMA geração; o rosto sobe nativo, ou só o pedaço
+        //      que a fala usa, ou comprimido (prepareFaceForAudio);
+        //    • áudio longo + rosto do mesmo tamanho (video to video) → rosto E
+        //      áudio divididos nos MESMOS pontos, trecho i com trecho i;
+        //    • áudio longo + rosto curto (clipe de loop) → o mesmo rosto em
+        //      todo trecho, como sempre foi.
+        const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
+        if (!needChunk) {
+          const [face, cleanAudio] = await Promise.all([prepareFaceForAudio(faceFile, audioMs / 1000), audioPrep]);
+          pairs = [{ face, audio: cleanAudio, ms: audioMs }];
         } else {
-          const audioChunks = await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC);
-          const msList: number[] = [];
-          for (const chunk of audioChunks) {
-            msList.push(
-              Math.round((await measureMediaDuration(chunk)) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs),
-            );
+          const cleanAudio = await audioPrep;
+          const v2v = await splitVideoToVideo(faceFile, cleanAudio, audioMs / 1000);
+          if (v2v) {
+            pairs = v2v;
+          } else {
+            const audioChunks = await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC);
+            const msList: number[] = [];
+            for (const chunk of audioChunks) {
+              msList.push(
+                Math.round((await measureMediaDuration(chunk)) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs),
+              );
+            }
+            const face = await prepareFaceForAudio(faceFile, Math.max(...msList) / 1000);
+            pairs = audioChunks.map((audio, i) => ({ face, audio, ms: msList[i] }));
           }
-          const face = await prepareFaceForAudio(faceFile, Math.max(...msList) / 1000);
-          pairs = audioChunks.map((audio, i) => ({ face, audio, ms: msList[i] }));
         }
+      } finally {
+        sairPreparo();
       }
       bumpFloor(id, 14);
       const n = pairs.length;
@@ -634,9 +659,17 @@ export default function LipSyncTool() {
       bumpFloor(id, 24);
 
       // 4. Gera trecho a trecho, em SÉRIE (anti-throttle + 1 render por vez).
+      //    Trecho que JÁ saiu numa tentativa anterior é reaproveitado (10.10):
+      //    o "Tentar de novo" gerava todos de novo — tempo e crédito em dobro.
       patchJob(id, { status: 'generating' });
-      const outBlobs: Blob[] = new Array(n);
+      const anteriores = trechosProntos.get(id);
+      const outBlobs: Blob[] = anteriores && anteriores.length === n ? anteriores : new Array(n);
+      trechosProntos.set(id, outBlobs);
       for (let i = 0; i < n; i++) {
+        if (outBlobs[i]) {
+          bumpFloor(id, 26 + Math.round(((i + 1) / n) * 62));
+          continue;
+        }
         const faceUrl = await faceUrlOf(pairs[i].face);
         outBlobs[i] = await generateOne(faceUrl, pairs[i].audio, pairs[i].ms, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
         bumpFloor(id, 26 + Math.round(((i + 1) / n) * 62)); // marco REAL por trecho → até ~88
@@ -647,13 +680,25 @@ export default function LipSyncTool() {
       if (n > 1) {
         patchJob(id, { status: 'concat' });
         bumpFloor(id, 92);
-        finalBlob = await concatLipVideos(outBlobs);
+        const sairCostura = await entrarNaFila(DONO);
+        try {
+          finalBlob = await concatLipVideos(outBlobs);
+        } finally {
+          sairCostura();
+        }
       } else {
         finalBlob = outBlobs[0];
       }
 
+      trechosProntos.delete(id);
       patchJob(id, { status: 'done', percent: 100, videoUrl: URL.createObjectURL(finalBlob) });
       logHistory({ tool: 'lipsync', title: `${faceFile.name} — lipsync pronto` });
+      // Guarda o MP4 no Histórico na hora em que fica pronto (10.10): antes só
+      // ia se o cliente clicasse em Baixar — quem saía da tela perdia o vídeo.
+      const label = jobsLabel(id);
+      void import('@/lib/history-vault')
+        .then((v) => v.captureArtifact(finalBlob, `lipsync_${label}.mp4`, 'lipsync'))
+        .catch(() => { /* guardar nunca derruba a entrega */ });
     } catch (err) {
       // AUTO-RETRY 1x se a falha foi TRANSITÓRIA (rede/upload/storage) e mesmo
       // assim furou todas as tentativas internas — o card volta pra "na fila" e
@@ -665,13 +710,21 @@ export default function LipSyncTool() {
         return runJob(id, faceFile, audioSrc, audioMs, cleanOn, attempt + 1);
       }
       patchJob(id, { status: 'error', error: semMarca(errMsg(err) || 'Algo deu errado.') });
+    } finally {
+      releaseKeepAlive();
     }
+  }
+
+  /** Rótulo do card ("LipSync 03") pelo id — usado no nome do arquivo guardado. */
+  function jobsLabel(id: string): string {
+    const m = /-(\d+)$/.exec(id);
+    return 'LipSync_' + (m ? m[1].padStart(2, '0') : '01');
   }
 
   /** Re-roda um disparo que falhou, com os MESMOS inputs capturados (botão no
    *  card de falha). Garante recuperação em 1 clique pra qualquer erro. */
   function retryJob(id: string) {
-    const inp = jobInputsRef.current.get(id);
+    const inp = jobInputs.get(id);
     if (!inp) return;
     patchJob(id, { status: 'queued', percent: 6, floor: 6, error: null, videoUrl: null });
     void runJob(id, inp.faceFile, inp.audioSrc, inp.audioMs, inp.cleanOn);
@@ -709,7 +762,8 @@ export default function LipSyncTool() {
     const audioSrc = audioFile;
     const ms = audioMs;
     const doClean = cleanAudioOn; // snapshot — toggle pode mudar depois
-    const num = (jobSeqRef.current += 1);
+    jobSeq = Math.max(jobSeq, ...jobs.map((j) => j.num)) + 1;
+    const num = jobSeq;
     const id = `job-${Date.now()}-${num}`;
     const label = `LipSync ${String(num).padStart(2, '0')}`;
     // Estimativa de tempo total → barra de progresso previsível (preenche
@@ -731,7 +785,7 @@ export default function LipSyncTool() {
     flashTimer.current = setTimeout(() => setFlash(false), 2600);
 
     // Guarda os inputs pra permitir re-rodar (auto-retry + botão no card).
-    jobInputsRef.current.set(id, { faceFile, audioSrc, audioMs: ms, cleanOn: doClean });
+    jobInputs.set(id, { faceFile, audioSrc, audioMs: ms, cleanOn: doClean });
 
     // Roda em background — sem await: a UI segue livre.
     void runJob(id, faceFile, audioSrc, ms, doClean);
@@ -743,7 +797,8 @@ export default function LipSyncTool() {
       prev.forEach((j) => {
         if (!isActive(j.status)) {
           if (j.videoUrl) URL.revokeObjectURL(j.videoUrl);
-          jobInputsRef.current.delete(j.id); // libera os File refs do job removido
+          jobInputs.delete(j.id); // libera os File refs do job removido
+          trechosProntos.delete(j.id);
         }
       });
       return prev.filter((j) => isActive(j.status));
@@ -793,16 +848,24 @@ export default function LipSyncTool() {
     return () => clearInterval(t);
   }, [hasActiveJob]);
 
-  /* ─── Cleanup ─── */
+  /* ─── Cleanup ───
+     Sair da tela NÃO revoga mais os vídeos/áudio nem os resultados (10.10):
+     eles continuam no estado compartilhado e voltam quando o cliente volta.
+     São soltos em "Limpar formulário" / "Limpar prontos" / remover vídeo. */
   useEffect(() => {
     return () => {
-      videos.forEach((v) => URL.revokeObjectURL(v.url));
-      if (audioPreview) URL.revokeObjectURL(audioPreview);
-      jobs.forEach((j) => j.videoUrl && URL.revokeObjectURL(j.videoUrl));
       if (flashTimer.current) clearTimeout(flashTimer.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* F5/fechar a aba com geração em andamento perde o resultado: o navegador
+     pergunta antes (10.10). */
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [hasActiveJob]);
 
   const totalNum = jobs.length ? Math.max(...jobs.map((j) => j.num)) : 0;
 
@@ -811,7 +874,7 @@ export default function LipSyncTool() {
       <ToolHeroVideo
         src="/cards/lipsync.mp4"
         poster="/cards/lipsync.jpg"
-        eyebrow="Ferramenta Pro"
+        eyebrow="Ferramenta Premium"
         title="Lipsync Video to Video"
         subtitle="Sincronize os movimentos da boca com seu áudio. Adicione o vídeo, escolha a fala e acompanhe a geração."
         glow="rgba(232,121,249,0.55)"
@@ -1201,7 +1264,7 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
       {!selected ? (
         <div className="aspect-[3/4] md:aspect-[4/5] flex flex-col items-center justify-center gap-4 px-6 text-center">
           <div
-            className="hw-cap flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-text-muted"
+            className="ae-ambient hw-cap flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-text-muted"
             style={{
               boxShadow: '0 0 36px -6px rgba(232,121,249,0.5), inset 0 1px 0 rgba(255,255,255,0.08)',
               animation: 'emptyPulse 3.5s ease-in-out infinite',
@@ -1305,9 +1368,9 @@ function Toggle3D({
         className={'tg3d ' + (on ? 'is-on' : 'is-off')}
       >
         <span className="tg3d-track" aria-hidden>
-          <span className="tg3d-glow" />
+          <span className="tg3d-glow ae-ambient" />
           <span className="tg3d-knob">
-            <span className="tg3d-spark">✦</span>
+            <span className="tg3d-spark ae-ambient">✦</span>
           </span>
         </span>
         <style jsx>{`
@@ -1420,7 +1483,7 @@ function AudioMiniPlayer({
             return (
               <span
                 key={i}
-                className="block w-[3px] rounded-full bg-gradient-to-t from-violet to-fuchsia-300"
+                className="ae-ambient block w-[3px] rounded-full bg-gradient-to-t from-violet to-fuchsia-300"
                 style={{
                   height: `${h}px`,
                   opacity: 0.4 + (i % 3) * 0.2,

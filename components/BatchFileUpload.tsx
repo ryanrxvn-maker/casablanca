@@ -26,6 +26,9 @@ export function BatchFileUpload({
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Aviso do que NÃO entrou (10.10). Antes era descartado em silêncio: o
+  // cliente soltava um arquivo e "nada acontecia".
+  const [aviso, setAviso] = useState<string | null>(null);
 
   /** O seletor de arquivos respeita `accept`, mas o DRAG & DROP não — um .txt
    *  ou arquivo de 0 bytes solto aqui ia direto pro processamento e estourava
@@ -48,8 +51,24 @@ export function BatchFileUpload({
   function merge(incoming: File[]) {
     const map = new Map<string, File>();
     for (const f of value) map.set(f.name + ':' + f.size, f);
-    for (const f of incoming) { if (matchesAccept(f)) map.set(f.name + ':' + f.size, f); }
-    onChange(Array.from(map.values()).slice(0, max));
+    const recusados: File[] = [];
+    let novos = 0;
+    for (const f of incoming) {
+      if (!matchesAccept(f)) { recusados.push(f); continue; }
+      const k = f.name + ':' + f.size;
+      // Mesmo arquivo de novo: mantém o que já estava (não troca a identidade
+      // dele — o resultado pronto continua valendo).
+      if (map.has(k)) continue;
+      map.set(k, f);
+      novos++;
+    }
+    const lista = Array.from(map.values());
+    const deFora = Math.max(0, lista.length - max);
+    setAviso(textoDoAviso(recusados, deFora, max));
+    // Nada novo entrou: não mexe na lista (10.10 — antes soltar um arquivo
+    // recusado apagava os resultados prontos da ferramenta).
+    if (novos === 0) return;
+    onChange(lista.slice(0, max));
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -111,6 +130,12 @@ export function BatchFileUpload({
         </div>
       </div>
 
+      {aviso ? (
+        <p role="status" className="rounded-[10px] border border-amber-400/35 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+          {aviso}
+        </p>
+      ) : null}
+
       {value.length > 0 ? (
         <div className="flex flex-col gap-1 rounded-[12px] border border-line bg-bg/50 p-3">
           <div className="flex items-center justify-between pb-2 text-xs text-text-muted">
@@ -121,7 +146,7 @@ export function BatchFileUpload({
             {!disabled ? (
               <button
                 type="button"
-                onClick={() => onChange([])}
+                onClick={() => { setAviso(null); onChange([]); }}
                 className="text-xs text-red-300 hover:text-red-400"
               >
                 Limpar tudo
@@ -161,4 +186,24 @@ export function BatchFileUpload({
       ) : null}
     </div>
   );
+}
+
+/** Texto simples do que ficou de fora (sem termo técnico). */
+function textoDoAviso(recusados: File[], deFora: number, max: number): string | null {
+  const partes: string[] = [];
+  const vazios = recusados.filter((f) => f.size === 0);
+  const tipo = recusados.filter((f) => f.size > 0);
+  const nomes = (fs: File[]) => fs.slice(0, 3).map((f) => f.name).join(', ') + (fs.length > 3 ? '…' : '');
+  if (tipo.length) {
+    partes.push(
+      `${tipo.length === 1 ? '1 arquivo não entrou' : `${tipo.length} arquivos não entraram`} porque esse tipo de arquivo não é aceito aqui (${nomes(tipo)}). Confira os formatos aceitos acima.`,
+    );
+  }
+  if (vazios.length) {
+    partes.push(`${vazios.length === 1 ? '1 arquivo estava vazio' : `${vazios.length} arquivos estavam vazios`} e não entrou (${nomes(vazios)}).`);
+  }
+  if (deFora > 0) {
+    partes.push(`O limite é ${max} arquivos por vez — ${deFora === 1 ? '1 ficou' : `${deFora} ficaram`} de fora.`);
+  }
+  return partes.length ? partes.join(' ') : null;
 }

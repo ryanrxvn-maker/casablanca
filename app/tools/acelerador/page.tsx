@@ -7,18 +7,19 @@ import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
-  cancelFFmpeg,
-  isCancellationError,
+  cancelarMotorSeDono,
   speedUpAudio,
   speedUpVideo,
   extractAudioAs,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
-import { runFfmpegExclusive } from '@/lib/ffmpeg-serial';
+import { runFfmpegExclusive, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
+import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 import { ToolStep, ToolChoice, ToolSlider, ToolAction } from '@/components/tool-kit';
 import { IconAcelerador, IconStepFiles, IconStepSpeed, IconStepFormat } from '@/components/ToolIcons';
 
@@ -44,6 +45,15 @@ type Job = {
 };
 
 const MAX_BATCH = 20;
+
+/** Dono deste lote na fila do motor (o Cancelar daqui não derruba outra ferramenta). */
+const DONO = 'mixer';
+/**
+ * Flag do Cancelar FORA do componente (10.10): sobrevive a sair e voltar da
+ * página no meio do lote, e separa "o cliente cancelou" de "o motor caiu"
+ * (travamento/memória também chegam como erro de "terminate/abort").
+ */
+const lote = { cancelado: false };
 
 function isVideo(f: File) {
   return f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(f.name);
@@ -101,9 +111,12 @@ export default function AceleradorPage() {
 
   function setFilesSafe(next: File[]) {
     if (processing) return;
-    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
-    setJobs([]);
-    setFiles(next.slice(0, MAX_BATCH));
+    // Mantém os resultados de quem CONTINUA na lista (10.10).
+    const ficam = next.slice(0, MAX_BATCH);
+    const ids = new Set(ficam.map((f) => f.name + ':' + f.size + ':' + f.lastModified));
+    jobs.forEach((j) => { if (!ids.has(j.id) && j.resultUrl) URL.revokeObjectURL(j.resultUrl); });
+    setJobs(jobs.filter((j) => ids.has(j.id)));
+    setFiles(ficam);
   }
 
   function updateJob(id: string, patch: Partial<Job>) {
@@ -116,6 +129,8 @@ export default function AceleradorPage() {
       updateJob(job.id, { progress: Math.round(p.ratio * 100) });
     const onStage = (s: string) =>
       setStageMsg(`Item ${i + 1}/${total}: ${job.file.name} — ${s}`);
+    // Etapa visível do começo ao fim (10.10: ficava "Preparando lote..." o tempo todo).
+    onStage(speed < 1 ? 'desacelerando…' : 'acelerando…');
 
     if (fmt === 'mp4') {
       const blob = await speedUpVideo(job.file, speed, { onProgress, onStage });
@@ -124,9 +139,9 @@ export default function AceleradorPage() {
     // Audio output (mp3 ou wav)
     if (isVideo(job.file)) {
       // Primeiro extrai audio no formato, depois acelera
-      onStage('Extraindo audio...');
+      onStage('Extraindo o áudio...');
       const audio = await extractAudioAs(job.file, fmt, { onStage });
-      onStage('Acelerando audio...');
+      onStage(speed < 1 ? 'Desacelerando o áudio...' : 'Acelerando o áudio...');
       const out = await speedUpAudio(audio, speed, fmt, { onProgress, onStage });
       return finish(job, out);
     }
@@ -162,24 +177,43 @@ export default function AceleradorPage() {
 
   async function processAll() {
     if (files.length === 0 || processing) return;
+    lote.cancelado = false;
     setProcessing(true);
     setStageMsg('Preparando lote...');
-    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
-    const initial = files.map(makeJob);
-    setJobs(initial);
+    // Reaproveita o que já ficou pronto com a MESMA velocidade e formato (10.10).
+    const prontos = new Map(
+      jobs
+        .filter((j) => j.state === 'done' && j.speed === speed && j.format === format)
+        .map((j) => [j.id, j] as const),
+    );
+    jobs.forEach((j) => { if (!prontos.has(j.id) && j.resultUrl) URL.revokeObjectURL(j.resultUrl); });
+    const lista = files.map((f) => prontos.get(f.name + ':' + f.size + ':' + f.lastModified) ?? makeJob(f));
+    setJobs(lista);
+    const initial = lista.filter((j) => j.state !== 'done');
+    // A aba não congela em segundo plano enquanto processa (10.10).
+    acquireKeepAlive();
 
     try {
       for (let i = 0; i < initial.length; i++) {
         const job = initial[i];
+        if (lote.cancelado) break;
         updateJob(job.id, { state: 'running', progress: 0 });
         try {
           // FILA GLOBAL do ffmpeg-wasm: o worker é um singleton compartilhado
           // com Remover Silêncios/Camuflagem/etc — sem a fila, um cancel/timeout da
           // outra ferramenta matava ESTE job com "called FFmpeg.terminate()".
-          await runFfmpegExclusive(() => processOne(job, i, initial.length));
+          await runFfmpegExclusive(
+            () => {
+              if (lote.cancelado) throw new Error('CANCELLED_BY_USER');
+              return processOne(job, i, initial.length);
+            },
+            DONO,
+            () => setStageMsg(MSG_NA_FILA),
+          );
         } catch (e) {
           console.error('[acelerador]', job.file.name, e);
-          if (isCancellationError(e)) {
+          // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+          if (lote.cancelado) {
             updateJob(job.id, { state: 'error', error: 'Cancelado por você.' });
             initial.slice(i + 1).forEach((rest) => {
               updateJob(rest.id, { state: 'error', error: 'Cancelado por você.' });
@@ -192,10 +226,17 @@ export default function AceleradorPage() {
           });
         }
       }
-      setStageMsg('Lote finalizado.');
+      setStageMsg(lote.cancelado ? 'Cancelado.' : 'Lote finalizado.');
     } finally {
+      releaseKeepAlive();
       setProcessing(false);
     }
+  }
+
+  function cancelar() {
+    lote.cancelado = true;
+    // Só derruba o motor se for a vez DESTE lote (não mata outra ferramenta).
+    cancelarMotorSeDono(DONO);
   }
 
   function suffixTag(s: number) {
@@ -216,6 +257,10 @@ export default function AceleradorPage() {
   async function downloadZip() {
     const done = jobs.filter((j) => j.state === 'done' && j.resultBlob);
     if (done.length === 0) return;
+    if (!zipCabeNoNavegador(done.map((j) => j.resultBlob!.size))) {
+      setStageMsg(MSG_ZIP_GRANDE);
+      return;
+    }
     setZipping(true);
     try {
       const zip = await buildZip(
@@ -225,6 +270,9 @@ export default function AceleradorPage() {
         })),
       );
       await downloadBlob(zip, 'mixer_' + suffixTag(done[0].speed ?? speed) + '.zip');
+    } catch (e) {
+      console.error('[acelerador] zip', e);
+      setStageMsg(MSG_ZIP_FALHOU);
     } finally {
       setZipping(false);
     }
@@ -245,7 +293,7 @@ export default function AceleradorPage() {
     <ToolShell
       title="Mixer de Velocidade"
       eyebrow="VÍDEO / ÁUDIO"
-      description="Acelere ou desacelere vídeos e áudios com controle sobre a velocidade e o tom da voz."
+      description="Acelere ou desacelere vídeos e áudios mantendo o tom natural da voz."
       hue={HUE}
       icon={<IconAcelerador size={56} />}
     >
@@ -332,7 +380,7 @@ export default function AceleradorPage() {
         <ToolStep n={4} title={processing ? `${actionLabel}…` : actionLabel} hue={HUE}>
           <div className="flex flex-wrap gap-3">
             {processing ? (
-              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+              <CancelButton onClick={cancelar} label="Cancelar processamento" />
             ) : (
               <ToolAction
                 onClick={processAll}

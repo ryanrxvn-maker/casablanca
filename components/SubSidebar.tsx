@@ -111,7 +111,7 @@ export function SubSidebar({ currentPath }: { currentPath?: string } = {}) {
           style={{ fontFamily: 'var(--font-tech)', color: meta.dot }}
         >
           <span
-            className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full"
+            className="ae-ambient inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full"
             style={{ background: meta.dot, boxShadow: `0 0 10px ${meta.dot}` }}
           />
           {meta.eyebrow}

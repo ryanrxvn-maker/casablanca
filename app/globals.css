@@ -2276,6 +2276,37 @@ html[data-theme='light'] .hist-fab__btn {
 html[data-theme='light'] .hist-fab__label {
   color: #0f766e;
 }
+/* "Como usar" no tema claro (10.10): era o bloco escuro do tema escuro no
+   meio da tela clara. Mesmo tratamento do Histórico, em roxo. */
+html[data-theme='light'] .guide-fab__btn {
+  border-color: rgba(124, 58, 237, 0.35);
+  background:
+    radial-gradient(120% 120% at 50% 12%, rgba(167, 139, 250, 0.22), transparent 60%),
+    linear-gradient(160deg, #ffffff 0%, #f3effc 100%);
+  color: #6d28d9;
+}
+html[data-theme='light'] .guide-fab__btn:hover {
+  color: #5b21b6;
+  border-color: rgba(124, 58, 237, 0.6);
+}
+/* Lettering: no claro a luz vira tinta (o degradê lilás sumia no fundo claro). */
+html[data-theme='light'] .guide-fab__label {
+  background-image: linear-gradient(
+    100deg,
+    #6d28d9 0%,
+    #a78bfa 28%,
+    #5b21b6 52%,
+    #7c3aed 76%,
+    #6d28d9 100%
+  );
+  filter: none;
+}
+html[data-theme='light'] .guide-fab__dot {
+  color: #ffffff;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.95),
+    0 4px 10px -3px rgba(139, 92, 246, 0.5);
+}
 
 /* Gaveta — abre pela direita, por cima da ferramenta, sem tirar o usuario
    de onde ele esta'. Em telas estreitas vira folha de largura cheia. */
@@ -2320,6 +2351,82 @@ html[data-theme='light'] .hist-fab__label {
   .hist-drawer {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* JANELA ESTREITA (10.10): com o navegador em meia tela os botões "Como usar"
+   e "Histórico" (78px + rótulo) ficavam POR CIMA do conteúdo da ferramenta.
+   Abaixo de 1280px viram botões só de ícone, colados na borda, e a área da
+   ferramenta ganha um respiro à direita pra eles não cobrirem nada. */
+@media (max-width: 1279px) {
+  .guide-fab,
+  .hist-fab {
+    right: 10px !important;
+  }
+  .guide-fab__btn,
+  .hist-fab__btn {
+    height: 46px;
+    width: 46px;
+    border-radius: 14px;
+  }
+  .guide-fab__btn svg,
+  .hist-fab__btn svg {
+    width: 22px;
+    height: 22px;
+  }
+  .guide-fab__dot,
+  .hist-fab__dot {
+    top: -5px;
+    right: -5px;
+    height: 18px;
+    width: 18px;
+    font-size: 11px;
+  }
+  .guide-fab__label,
+  .hist-fab__label {
+    display: none;
+  }
+  /* Histórico logo abaixo do "Como usar" (os dois compactos). */
+  .guide-fab ~ .hist-fab {
+    top: 148px !important;
+  }
+  /* botão 46px + 10px da borda + 8px de folga (medido: com 52px o card
+     encostava 4px embaixo do botão em 1100px) */
+  main.tools-hw {
+    padding-right: 64px;
+  }
+}
+/* NOTEBOOK (1280–1639px, 10.10): os botões grandes (78px + "COMO USAR",
+   ~96px a 28px da borda) cobriam a ponta direita dos cartões da ferramenta
+   — medido em 1440px: 81px por baixo do botão, em cima do ícone do título.
+   O botão continua grande; a área da ferramenta para antes dele. */
+@media (min-width: 1280px) and (max-width: 1639px) {
+  main.tools-hw {
+    padding-right: 104px;
+  }
+}
+/* Celular: botões menores e mais colados, pra não espremer a ferramenta. */
+@media (max-width: 767px) {
+  .guide-fab,
+  .hist-fab {
+    right: 6px !important;
+  }
+  .guide-fab__btn,
+  .hist-fab__btn {
+    height: 40px;
+    width: 40px;
+    border-radius: 12px;
+  }
+  .guide-fab__btn svg,
+  .hist-fab__btn svg {
+    width: 20px;
+    height: 20px;
+  }
+  .guide-fab ~ .hist-fab {
+    top: 140px !important;
+  }
+  main.tools-hw {
+    padding-right: 52px;
   }
 }
 

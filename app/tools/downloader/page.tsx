@@ -5,6 +5,7 @@ import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory, syncDownloaderHistoryJobs, type DownloaderHistoryJob } from '@/lib/history';
 import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
+import { ajustarTextoDoMotor } from '@/lib/texto-do-motor';
 import { createClient } from '@/lib/supabase/client';
 import { useUserEmail } from '@/lib/use-tier';
 import { macMotorLiberado } from '@/lib/mac-motor-beta';
@@ -955,7 +956,7 @@ export default function DownloaderPage() {
                             </>
                           ) : null}
                         </div>
-                        {j.error && <p role="alert" className="mt-2 whitespace-normal break-words text-xs leading-relaxed text-red-300">{j.error}</p>}
+                        {j.error && <p role="alert" className="mt-2 whitespace-normal break-words text-xs leading-relaxed text-red-300">{ajustarTextoDoMotor(j.error)}</p>}
                       </div>
                       <span
                         className={`mono shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${

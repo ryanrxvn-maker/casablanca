@@ -58,6 +58,12 @@ export function toFriendlyMessage(
   if (/(watchdog|travad|travou|timeout|timed out|sem progresso)/.test(m)) {
     return 'Ficou sem resposta por muito tempo e foi interrompido por segurança. Tente de novo — o que já ficou pronto está salvo.';
   }
+  // Processamento derrubado no meio SEM o cliente ter cancelado (10.10). As
+  // ferramentas só chegam aqui depois de conferir a própria flag de Cancelar —
+  // antes, isto aparecia como "Cancelado por você." pra quem não cancelou nada.
+  if (/(called ffmpeg\.terminate|aborted\()/.test(m)) {
+    return 'O processamento parou no meio. Tente de novo — se repetir, use um arquivo menor ou feche outras abas.';
+  }
   // Armazenamento local bloqueado por outra aba.
   if (/(indexeddb|bloqueado por outra aba)/.test(m)) {
     return 'Outra aba do AutoEdit estava usando o armazenamento. Feche abas duplicadas do app e tente de novo.';

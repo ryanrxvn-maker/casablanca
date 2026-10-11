@@ -1491,6 +1491,8 @@ export async function renderTypographyVideo(opts: {
    * roda DIRETO (a exclusividade já está garantida por quem chamou).
    */
   ffmpegJaExclusivo?: boolean;
+  /** Dono na fila do motor (10.10): o Cancelar da ferramenta só derruba o motor na vez dela. */
+  dono?: string;
   /**
    * MIXER DE VELOCIDADE (08.10): o vídeo sai `velocidade` vezes mais rápido
    * (ou mais lento) pelo encoder de HARDWARE — o quadro do instante t de
@@ -1853,7 +1855,7 @@ export async function renderTypographyVideo(opts: {
       const vOnly = videoOnly;
       // Quem já tem o lock roda direto; quem não tem, entra na fila.
       const comLock = <R,>(f: () => Promise<R>): Promise<R> =>
-        ffmpegJaExclusivo ? f() : runFfmpegExclusive(f);
+        ffmpegJaExclusivo ? f() : runFfmpegExclusive(f, opts.dono);
       const tentarAudio = () =>
         comLock(async () => {
           const wav = opts.audioSubstituto

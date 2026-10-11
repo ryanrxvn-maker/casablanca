@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { logHistory } from '@/lib/history';
 import { toFriendlyMessage } from '@/lib/friendly-error';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -27,11 +27,10 @@ import {
 } from '@/lib/audio-engine';
 import { planSpeechCut } from '@/lib/speech-detect';
 import {
-  cancelFFmpeg,
+  cancelarMotorSeDono,
   concatDecupChunks,
   cutVideoSegments,
   extractAudioAs,
-  isCancellationError,
   prepareVoiceForDecupagem,
   splitMediaForChunks,
 } from '@/lib/ffmpeg-worker';
@@ -40,6 +39,8 @@ import { DecupAuditBadge, type DecupAudit } from '@/components/DecupAuditBadge';
 import { formatTime } from '@/lib/utils';
 import { useTier } from '@/lib/use-tier';
 import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
+import { entrarNaFila, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
+import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 
 type OutputKind = 'video' | 'audio';
 type AudioFmt = 'wav' | 'mp3';
@@ -83,6 +84,16 @@ type QueueItem = {
 };
 
 const MAX_QUEUE = 10;
+
+/** Dono desta ferramenta na fila do motor (o Cancelar daqui não derruba outra). */
+const DONO = 'decupagem';
+/**
+ * Estado do LAÇO fora do componente (10.10). A fila passou a sobreviver a
+ * trocar de ferramenta (antes um clique no menu apagava a fila e os arquivos
+ * prontos); o laço que está rodando e o botão Cancelar da tela nova precisam
+ * enxergar as MESMAS flags.
+ */
+const laco = { rodando: false, cancelado: false };
 
 // Teto de tamanho. A decupagem roda 100% no NAVEGADOR — custo zero de
 // servidor. O ffmpeg-wasm tem heap de ~2GB, então arquivo acima de 200MB é
@@ -454,33 +465,27 @@ export default function DecupagemPage() {
   const tier = useTier();
   const isFree = tier === 'free';
 
-  // FILA de até 10 arquivos. useState (File não serializa pra persistir).
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const cancelRef = useRef(false);
+  // FILA de até 10 arquivos. No estado compartilhado das ferramentas (10.10):
+  // sobrevive a trocar de ferramenta e voltar (fica em memória — F5 continua
+  // com o aviso de "sair mesmo?", porque arquivo não dá pra guardar no disco).
+  const [queue, setQueue] = useToolState<QueueItem[]>('decupagem:queue', []);
 
   // Configs GLOBAIS (aplicam a todos os arquivos da fila) — persistem.
   const [keepSilence, setKeepSilence] = useToolState<number>('decupagem:keepSilence', 0.05);
   const [outputKind, setOutputKind] = useToolState<OutputKind>('decupagem:outputKind', 'video');
   const [audioFormat, setAudioFormat] = useToolState<AudioFmt>('decupagem:audioFormat', 'mp3');
-  const [processing, setProcessing] = useState(false);
+  const [processing, setProcessing] = useToolState<boolean>('decupagem:processing', false);
   // Guard SÍNCRONO contra duplo disparo: `processing` (state) só atualiza no
   // re-render — dois cliques rápidos entravam juntos e processavam a fila 2x
   // em paralelo (colisão de nomes no FS do ffmpeg-wasm = saída corrompida).
-  const processingRef = useRef(false);
-
-  // Espelho da fila pra revogar os Object URLs no unmount. Navegação SPA não
-  // descarrega o documento — sem isso, cada visita à ferramenta vazava os
-  // blobs dos resultados prontos (centenas de MB presos até fechar a aba).
-  const queueRef = useRef<QueueItem[]>(queue);
-  queueRef.current = queue;
-  useEffect(
-    () => () => {
-      queueRef.current.forEach((q) => {
-        if (q.result && 'url' in q.result) URL.revokeObjectURL(q.result.url);
-      });
-    },
-    [],
-  );
+  // Fica em `laco.rodando` (fora do componente) pra valer também depois de
+  // sair e voltar da página.
+  //
+  // Os endereços dos resultados NÃO são revogados ao sair da página (10.10):
+  // a fila continua viva no estado compartilhado. Eles são soltos ao remover
+  // o item ou limpar a fila.
+  const [zipando, setZipando] = useState(false);
+  const [zipMsg, setZipMsg] = useState<string | null>(null);
 
   // Fila NÃO sobrevive a F5 (File não serializa — e persistir 10×1,5GB no IDB
   // travaria o Chrome, ver lição do zip-store). Então enquanto PROCESSA, um
@@ -648,7 +653,7 @@ export default function DecupagemPage() {
     let newDur = 0;
     let audit: DecupAudit | undefined;
     for (let i = 0; i < n; i++) {
-      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
+      if (laco.cancelado) throw new Error('CANCELLED_BY_USER');
       const prefix = n > 1 ? `Parte ${i + 1}/${n} — ` : '';
       const base = 0.05 + (i / n) * 0.9;
       const span = 0.9 / n;
@@ -726,13 +731,13 @@ export default function DecupagemPage() {
 
   // Processa a FILA — 1 por vez (sequencial).
   async function processQueue() {
-    if (processingRef.current) return;
+    if (laco.rodando) return;
     // Tier ainda resolvendo (1º load da sessão): não dispara — sem isso um
     // free podia sair com VÍDEO (que é só de pago) e vice-versa. O botão já
     // fica desabilitado; este é o cinto de segurança.
     if (tier === null) return;
-    processingRef.current = true;
-    cancelRef.current = false;
+    laco.rodando = true;
+    laco.cancelado = false;
     setProcessing(true);
     // Aba não congela em background durante a fila (mesmo motor do Pilot) — e a
     // sessão de áudio ativa segura o Windows acordado numa fila de madrugada.
@@ -743,7 +748,7 @@ export default function DecupagemPage() {
     import('jszip').catch(() => { /* sem ZIP, downloads individuais seguem */ });
     try {
       for (const item of queue) {
-        if (cancelRef.current) break;
+        if (laco.cancelado) break;
         if (item.status === 'done') continue; // já processado, pula
         if (!isAcceptedMedia(item.file)) {
           // Formato inválido é permanente — nunca re-tenta.
@@ -756,7 +761,12 @@ export default function DecupagemPage() {
           continue;
         }
         patchItem(item.id, { status: 'processing', stage: 'Iniciando...', progress: null, error: undefined });
+        let sair: (() => void) | null = null;
         try {
+          // Um arquivo por vez na FILA GLOBAL do motor (10.10): outra
+          // ferramenta rodando junto não troca nem apaga arquivo desta.
+          sair = await entrarNaFila(DONO, () => patchItem(item.id, { stage: MSG_NA_FILA }));
+          if (laco.cancelado) throw new Error('CANCELLED_BY_USER');
           const result = await processOne(
             item,
             (s) => patchItem(item.id, { stage: s }),
@@ -774,9 +784,9 @@ export default function DecupagemPage() {
         } catch (e) {
           // Só trata como cancelamento se o USER cancelou de fato. Um crash
           // do wasm (OOM/watchdog) também rejeita com "abort"/"terminate" —
-          // sem checar cancelRef, o erro sumia em silêncio: o item voltava
+          // sem checar o Cancelar, o erro sumia em silêncio: o item voltava
           // pra 'pending' e a fila parava sem mostrar nada.
-          if (isCancellationError(e) && cancelRef.current) {
+          if (laco.cancelado) {
             patchItem(item.id, { status: 'pending', stage: undefined, progress: null });
             break;
           }
@@ -786,18 +796,21 @@ export default function DecupagemPage() {
             stage: undefined,
             progress: null,
           });
+        } finally {
+          sair?.();
         }
       }
     } finally {
       releaseKeepAlive();
-      processingRef.current = false;
+      laco.rodando = false;
       setProcessing(false);
     }
   }
 
   function cancelAll() {
-    cancelRef.current = true;
-    cancelFFmpeg();
+    laco.cancelado = true;
+    // Só derruba o motor se for a vez DESTA ferramenta (não mata outra).
+    cancelarMotorSeDono(DONO);
   }
 
   async function downloadOne(item: QueueItem) {
@@ -810,23 +823,36 @@ export default function DecupagemPage() {
 
   async function downloadAll() {
     const done = queue.filter((q) => q.result) as Array<QueueItem & { result: Result }>;
-    if (done.length === 0) return;
-    const JSZip = (await import('jszip')).default;
-    const zip = new JSZip();
-    const used = new Set<string>();
-    for (const q of done) {
-      const r = q.result;
-      const ext = r.kind === 'video' ? 'mp4' : r.format;
-      let name = `${baseName(q.file.name)}_decupado.${ext}`;
-      let i = 2;
-      while (used.has(name)) { name = `${baseName(q.file.name)}_decupado_${i++}.${ext}`; }
-      used.add(name);
-      // MP4/MP3 já são comprimidos — DEFLATE neles só queima CPU pra ganhar
-      // ~0%. STORE junta direto; WAV (PCM cru) segue no DEFLATE global.
-      zip.file(name, r.blob, ext === 'wav' ? undefined : { compression: 'STORE' });
+    if (done.length === 0 || zipando) return;
+    if (!zipCabeNoNavegador(done.map((q) => q.result.blob.size))) {
+      setZipMsg(MSG_ZIP_GRANDE);
+      return;
     }
-    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-    await downloadBlob(blob, `decupagem_${done.length}_arquivos.zip`);
+    setZipMsg(null);
+    setZipando(true);
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      const used = new Set<string>();
+      for (const q of done) {
+        const r = q.result;
+        const ext = r.kind === 'video' ? 'mp4' : r.format;
+        let name = `${baseName(q.file.name)}_decupado.${ext}`;
+        let i = 2;
+        while (used.has(name)) { name = `${baseName(q.file.name)}_decupado_${i++}.${ext}`; }
+        used.add(name);
+        // MP4/MP3 já são comprimidos — DEFLATE neles só queima CPU pra ganhar
+        // ~0%. STORE junta direto; WAV (PCM cru) segue no DEFLATE global.
+        zip.file(name, r.blob, ext === 'wav' ? undefined : { compression: 'STORE' });
+      }
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      await downloadBlob(blob, `decupagem_${done.length}_arquivos.zip`);
+    } catch (e) {
+      console.error('[decupagem] zip', e);
+      setZipMsg(MSG_ZIP_FALHOU);
+    } finally {
+      setZipando(false);
+    }
   }
 
   const doneCount = queue.filter((q) => q.status === 'done').length;
@@ -941,14 +967,20 @@ export default function DecupagemPage() {
             </ToolAction>
           )}
           {zippableCount >= 2 ? (
-            <button type="button" onClick={downloadAll} className="btn-lime !py-2.5 text-xs" disabled={processing}>
-              ↓ Baixar todos (ZIP)
+            <button type="button" onClick={downloadAll} className="btn-lime !py-2.5 text-xs" disabled={processing || zipando}>
+              {zipando ? 'Juntando…' : '↓ Baixar todos (ZIP)'}
             </button>
           ) : null}
           <button type="button" onClick={clearQueue} className="btn-ghost" disabled={processing || queue.length === 0}>
             Limpar fila
           </button>
         </div>
+
+        {zipMsg ? (
+          <p role="status" className="rounded-[10px] border border-amber-400/35 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+            {zipMsg}
+          </p>
+        ) : null}
 
         {/* PREVIEW de TODOS os arquivos prontos */}
         {doneCount > 0 ? (

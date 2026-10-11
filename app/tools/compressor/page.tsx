@@ -26,12 +26,14 @@ import { toFriendlyMessage } from '@/lib/friendly-error';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
+import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 
 type Resolution = 'original' | '1080' | '720' | '480';
 
 /* Metadados ficam num cache module-scope pra não disparar re-renders.
    Chave estável entre tabs: nome + size + lastModified. */
-const metaCache = new Map<string, { durationSec: number; height: number }>();
+const metaCache = new Map<string, { durationSec: number; height: number; width?: number }>();
 function metaKey(f: File) {
   return f.name + ':' + f.size + ':' + f.lastModified;
 }
@@ -55,7 +57,18 @@ type Job = {
    *  crf23 como "_crf30" (nome mentindo sobre o conteúdo). */
   crf?: number;
   resolution?: Resolution;
+  /** true = o vídeo já estava bem compactado: entregamos o ORIGINAL (10.10). */
+  keptOriginal?: boolean;
 };
+
+/**
+ * Estado do LOTE fora do componente (10.10). Sair da página no meio do lote
+ * desmontava a tela e o Cancelar da tela nova não alcançava o laço antigo; e o
+ * desmontar destruía o pool no meio do encode ("Cancelado por você." pra quem
+ * não cancelou). Agora o lote segue em segundo plano e o pool só é desligado no
+ * fim, se a tela não estiver aberta.
+ */
+const lote = { cancelado: false, telaAberta: false };
 
 /** TETO de processamento simultâneo (UI mostra "até 5"). O tamanho REAL do
  *  pool respeita a RAM/CPU da máquina (recommendedPoolSize) — 5 fixos
@@ -145,6 +158,7 @@ export default function CompressorPage() {
           metaCache.set(metaKey(f), {
             durationSec: meta?.durationSec ?? 0,
             height: meta?.height ?? 0,
+            width: meta?.width ?? 0,
           });
         }),
       );
@@ -233,10 +247,15 @@ export default function CompressorPage() {
         ? `${tooBig.length === 1 ? 'Arquivo recusado' : `${tooBig.length} arquivos recusados`} por passar de ${formatBytes(COMPRESS_MAX_INPUT_BYTES)}: ${tooBig.map((f) => `${f.name} (${formatBytes(f.size)})`).join(', ')}. O Compressor aceita até 2 GB por vídeo.`
         : null,
     );
-    // Limpa resultados anteriores
-    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
-    setJobs([]);
-    setFiles(ok.slice(0, MAX_BATCH));
+    // Mantém os resultados dos arquivos que CONTINUAM na lista (10.10: antes
+    // adicionar mais um vídeo apagava todos os resultados ainda não baixados).
+    const ficam = ok.slice(0, MAX_BATCH);
+    const ids = new Set(ficam.map((f) => f.name + ':' + f.size + ':' + f.lastModified));
+    jobs.forEach((j) => {
+      if (!ids.has(j.id) && j.resultUrl) URL.revokeObjectURL(j.resultUrl);
+    });
+    setJobs(jobs.filter((j) => ids.has(j.id)));
+    setFiles(ficam);
   }
 
   function updateJob(id: string, patch: Partial<Job>) {
@@ -245,8 +264,13 @@ export default function CompressorPage() {
 
   /* Cancela tudo, mata pool e libera estado. */
   function handleCancel() {
+    lote.cancelado = true;
     cancelledRef.current = true;
     destroyFFmpegPool();
+    // Os que ainda estavam na fila também saem dela (antes ficavam "na fila" pra sempre).
+    setJobs((prev) => prev.map((j) => (j.state === 'queued' || j.state === 'running'
+      ? { ...j, state: 'error', error: 'Cancelado por você.' }
+      : j)));
     setProcessing(false);
     setStageMsg('Cancelado.');
   }
@@ -285,9 +309,23 @@ export default function CompressorPage() {
     const pool = getFFmpegPool(effectivePoolSize());
     const t0 = performance.now();
     updateJob(job.id, { state: 'running', progress: 0 });
-    const ff = await pool.acquire();
+    let ff: Awaited<ReturnType<typeof pool.acquire>>;
     try {
-      if (cancelledRef.current) throw new Error('CANCELLED_BY_USER');
+      ff = await pool.acquire();
+    } catch (e) {
+      // Cancelar com vídeo esperando vaga: a espera é cancelada junto (10.10).
+      // Sem Cancelar, a falha aqui é o motor que não carregou — e o cliente
+      // via "Cancelado por você." sem ter clicado em nada.
+      updateJob(job.id, {
+        state: 'error',
+        error: lote.cancelado
+          ? 'Cancelado por você.'
+          : toFriendlyMessage(e, 'Não consegui iniciar o motor de compressão. Confira sua internet e tente de novo.'),
+      });
+      return;
+    }
+    try {
+      if (lote.cancelado) throw new Error('CANCELLED_BY_USER');
       const runOpts = {
         onProgress: (p: FFProgress) =>
           updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
@@ -303,26 +341,38 @@ export default function CompressorPage() {
             // uma). Num lote de vários arquivos grandes o pool se auto-regula.
             { ...runOpts, pool, chunkConcurrency: effectivePoolSize() },
           )
-        : await compressVideoOn(ff, job.file, { crf, resolution }, runOpts);
-      const url = URL.createObjectURL(blob);
+        : await compressVideoOn(ff, job.file, { crf, resolution, durationSec: meta?.durationSec }, runOpts);
+      // Vídeo que já vinha leve pode não ficar menor. No tamanho Original, a
+      // regra é simples: se não diminuiu, entrega o PRÓPRIO arquivo — nunca um
+      // maior (10.10: 1,7 MB virava 6 MB e a tela dizia "-258% menor").
+      // Vale também pra 1080p/720p/480p quando o vídeo já é desse tamanho ou
+      // menor (nada a reduzir na resolução — ex.: 720p com "1080p" marcado).
+      const ladoMenor = meta && meta.width && meta.height ? Math.min(meta.width, meta.height) : 0;
+      const semReduzirResolucao = resolution === 'original' || (ladoMenor > 0 && ladoMenor <= Number(resolution));
+      const keptOriginal = semReduzirResolucao && blob.size >= job.file.size * 0.98;
+      const finalBlob: Blob = keptOriginal ? job.file : blob;
+      const url = URL.createObjectURL(finalBlob);
       const elapsedMs = performance.now() - t0;
       updateJob(job.id, {
         state: 'done',
         progress: 100,
-        resultBlob: blob,
+        resultBlob: finalBlob,
         resultUrl: url,
-        resultSize: blob.size,
+        resultSize: finalBlob.size,
         elapsedMs,
         crf,
         resolution,
+        keptOriginal,
       });
       logHistory({
         tool: 'compressor',
         title: `${job.file.name} comprimido`,
-        meta: `${(job.file.size / 1048576).toFixed(1)}MB → ${(blob.size / 1048576).toFixed(1)}MB`,
+        meta: keptOriginal
+          ? 'já estava compactado — mantido o original'
+          : `${(job.file.size / 1048576).toFixed(1)}MB → ${(finalBlob.size / 1048576).toFixed(1)}MB`,
       });
       // Recalibra pelo PRIMEIRO job concluído (mais robusto que média).
-      if (job.estimatedSize > 0) {
+      if (job.estimatedSize > 0 && !keptOriginal) {
         const ratio = blob.size / job.estimatedSize;
         // Atualiza só se erro >5% — evita oscilar à toa
         if (Math.abs(ratio - 1) > 0.05) {
@@ -331,7 +381,9 @@ export default function CompressorPage() {
         }
       }
     } catch (e) {
-      if (isCancellationError(e) || cancelledRef.current) {
+      // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+      // Travamento/falta de memória também chegam como "terminate/abort".
+      if (lote.cancelado) {
         updateJob(job.id, { state: 'error', error: 'Cancelado por você.' });
       } else {
         // eslint-disable-next-line no-console
@@ -349,24 +401,36 @@ export default function CompressorPage() {
   async function processAll() {
     if (files.length === 0 || processing) return;
     cancelledRef.current = false;
+    lote.cancelado = false;
     setProcessing(true);
     setStageMsg(`Aquecendo motor (até ${effectivePoolSize()} simultâneos)…`);
 
-    // Limpa URLs antigas
-    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
-    const initial = files.map((f) => makeJob(f, estimateOne(f)));
-    setJobs(initial);
+    // Reaproveita o que JÁ ficou pronto com os mesmos ajustes (10.10): adicionar
+    // um vídeo e clicar de novo não recomprime os que já estavam prontos.
+    const prontos = new Map(
+      jobs
+        .filter((j) => j.state === 'done' && j.crf === crf && j.resolution === resolution)
+        .map((j) => [j.id, j] as const),
+    );
+    jobs.forEach((j) => {
+      if (!prontos.has(j.id) && j.resultUrl) URL.revokeObjectURL(j.resultUrl);
+    });
+    const lista = files.map((f) => prontos.get(f.name + ':' + f.size + ':' + f.lastModified) ?? makeJob(f, estimateOne(f)));
+    setJobs(lista);
+    const initial = lista.filter((j) => j.state !== 'done');
 
     const total = initial.length;
     let dispatched = 0;
     let completed = 0;
+    // A aba não congela em segundo plano enquanto comprime (10.10).
+    acquireKeepAlive();
 
     /* Worker que pega o próximo job da fila enquanto houver. Quando
        libera, dispara o próximo automaticamente (pool já reusa
        instância). É exatamente o "auto-fill" que o usuário pediu. */
     const worker = async () => {
       while (true) {
-        if (cancelledRef.current) break;
+        if (lote.cancelado) break;
         const idx = dispatched++;
         if (idx >= initial.length) break;
         const job = initial[idx];
@@ -384,16 +448,25 @@ export default function CompressorPage() {
 
     try {
       await Promise.all(workers);
-      if (!cancelledRef.current) setStageMsg(`Concluído · ${total}/${total}`);
+      if (!lote.cancelado) setStageMsg(total ? `Concluído · ${total}/${total}` : 'Todos os vídeos já estavam prontos.');
     } finally {
+      releaseKeepAlive();
       setProcessing(false);
+      // Saiu da página no meio: o lote terminou em segundo plano — agora sim
+      // libera a memória do pool.
+      if (!lote.telaAberta) destroyFFmpegPool();
     }
   }
 
-  /* Limpa o pool quando o usuário sai da página. */
+  /* Sair da página NÃO mata o lote em andamento (10.10). O pool só é
+     desligado aqui se nada estiver rodando; senão, no fim do lote. */
+  const processingRef = useRef(processing);
+  processingRef.current = processing;
   useEffect(() => {
+    lote.telaAberta = true;
     return () => {
-      destroyFFmpegPool();
+      lote.telaAberta = false;
+      if (!processingRef.current) destroyFFmpegPool();
     };
   }, []);
 
@@ -414,26 +487,37 @@ export default function CompressorPage() {
     return jRes === 'original' ? 'crf' + jCrf : jRes + 'p_crf' + jCrf;
   }
 
+  /** Nome do arquivo baixado. Original mantido = o nome e a extensão dele. */
+  function jobFileName(j: Job): string {
+    if (j.keptOriginal) return j.file.name;
+    return baseName(j.file.name) + '_' + jobSuffix(j) + '.mp4';
+  }
+
   async function downloadOne(job: Job) {
     if (!job.resultBlob) return;
-    await downloadBlob(
-      job.resultBlob,
-      baseName(job.file.name) + '_' + jobSuffix(job) + '.mp4',
-    );
+    await downloadBlob(job.resultBlob, jobFileName(job));
   }
 
   async function downloadZip() {
     const done = jobs.filter((j) => j.state === 'done' && j.resultBlob);
     if (done.length === 0) return;
+    // Lote grande demais pra juntar no navegador: avisa em vez de travar (10.10).
+    if (!zipCabeNoNavegador(done.map((j) => j.resultBlob!.size))) {
+      setStageMsg(MSG_ZIP_GRANDE);
+      return;
+    }
     setZipping(true);
     try {
       const zip = await buildZip(
         done.map((j) => ({
-          name: baseName(j.file.name) + '_' + jobSuffix(j) + '.mp4',
+          name: jobFileName(j),
           data: j.resultBlob!,
         })),
       );
       await downloadBlob(zip, 'compressor_' + jobSuffix(done[0]) + '.zip');
+    } catch (e) {
+      console.error('[compressor] zip', e);
+      setStageMsg(MSG_ZIP_FALHOU);
     } finally {
       setZipping(false);
     }
@@ -441,7 +525,7 @@ export default function CompressorPage() {
 
   /* Precisão da estimate até agora (mostrado discreto na UI). */
   const estimateAccuracy = useMemo(() => {
-    const done = jobs.filter((j) => j.state === 'done' && j.estimatedSize > 0);
+    const done = jobs.filter((j) => j.state === 'done' && j.estimatedSize > 0 && !j.keptOriginal);
     if (done.length === 0) return null;
     const errs = done.map((j) =>
       Math.abs((j.resultSize ?? 0) - j.estimatedSize) / Math.max(1, j.estimatedSize),
@@ -640,6 +724,14 @@ function SavingsBar({
   accuracy: number | null;
 }) {
   const pctSaved = Math.max(0, Math.round((1 - output / input) * 100));
+  if (output >= input) {
+    // Nada a economizar (todos já vinham compactados). Antes: "NaN undefined".
+    return (
+      <div className="mt-3 rounded-[12px] border border-line bg-bg-soft/40 px-4 py-3 text-[12px] text-text-muted">
+        Esses vídeos já estavam bem compactados — não havia o que reduzir sem perder qualidade.
+      </div>
+    );
+  }
   return (
     <div className="mt-3 rounded-[12px] border border-lime/30 bg-lime/[0.04] px-4 py-3">
       <div className="flex items-center justify-between gap-3">
@@ -739,6 +831,7 @@ function JobRow({
   const actual = job.resultSize ?? 0;
   const inputBytes = job.file.size;
   const pctSaved = actual > 0 ? Math.round((1 - actual / inputBytes) * 100) : 0;
+  const ficouMaior = actual > inputBytes;
   const predictedPctSaved = predicted > 0
     ? Math.round((1 - predicted / inputBytes) * 100)
     : 0;
@@ -792,11 +885,23 @@ function JobRow({
       {job.state === 'done' ? (
         <div className="mt-2 flex items-center justify-between text-xs text-text-muted">
           <span>
-            <span className="mono">{formatBytes(inputBytes)}</span>{' '}
-            →{' '}
-            <span className="mono text-lime">{formatBytes(actual)}</span>{' '}
-            (<span className="mono text-lime">{pctSaved}%</span> menor)
-            {predicted > 0 ? (
+            {job.keptOriginal ? (
+              <span className="text-text">Já estava bem compactado — mantivemos o arquivo original.</span>
+            ) : (
+              <>
+                <span className="mono">{formatBytes(inputBytes)}</span>{' '}
+                →{' '}
+                <span className={'mono ' + (ficouMaior ? 'text-amber-300' : 'text-lime')}>{formatBytes(actual)}</span>{' '}
+                {ficouMaior && Math.round((actual / inputBytes - 1) * 100) === 0 ? (
+                  <>(praticamente o mesmo tamanho)</>
+                ) : ficouMaior ? (
+                  <>(<span className="mono text-amber-300">{Math.round((actual / inputBytes - 1) * 100)}%</span> maior)</>
+                ) : (
+                  <>(<span className="mono text-lime">{pctSaved}%</span> menor)</>
+                )}
+              </>
+            )}
+            {predicted > 0 && !job.keptOriginal ? (
               <span className="mono ml-2 text-text-dim" title="Erro da previsão vs real">
                 · prev. {formatBytes(predicted)} (
                 {actual > predicted

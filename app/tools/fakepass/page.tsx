@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 import { logHistory } from '@/lib/history';
 import {
   uiFont,
@@ -56,12 +57,25 @@ export default function FakePassPage() {
   const [accessAttempt, setAccessAttempt] = useState(0);
   const [modelId, setModelId] = useToolState<string>('fakepass:model', MODELS[0].id);
   const [cat, setCat] = useToolState<string>('fakepass:cat', 'story');
-  const [status, setStatus] = useState<StatusCfg>(defaultStatus);
+  // Barra de status e o que foi digitado em cada modelo ficam no estado
+  // compartilhado das ferramentas (10.10): trocar de ferramenta e voltar não
+  // apaga mais o trabalho. Um rascunho vai pro navegador pra sobreviver ao F5.
+  const [status, setStatus] = useToolState<StatusCfg>('fakepass:status', defaultStatus);
   // Estado de cada modelo, isolado por id (trocar de modelo não perde o que
   // você digitou no anterior).
-  const [states, setStates] = useState<Record<string, any>>(() =>
-    Object.fromEntries(MODELS.map((m) => [m.id, m.defaultState])),
-  );
+  const [states, setStates] = useToolState<Record<string, any>>('fakepass:states', estadoPadraoDosModelos());
+  // O rascunho do F5 entra DEPOIS de montar (o servidor desenha o padrão; trocar
+  // na primeira pintura daria diferença entre servidor e navegador).
+  useEffect(() => {
+    if (rascunhoAplicado) return;
+    rascunhoAplicado = true;
+    setStates((prev) => aplicarRascunho(prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const t = window.setTimeout(() => salvarRascunho(states), 600);
+    return () => window.clearTimeout(t);
+  }, [states]);
   const [gerando, setGerando] = useState(false);
   const [gravandoVid, setGravandoVid] = useState(false);
   const [vidMsg, setVidMsg] = useState('');
@@ -137,6 +151,8 @@ export default function FakePassPage() {
     if (!node || gravandoVid || lockedModel) return;
     setGravandoVid(true);
     setVidMsg(`Renderizando ${vidSecs} segundos de animação…`);
+    // A aba não congela em segundo plano enquanto grava (10.10).
+    acquireKeepAlive();
     try {
       const { recordStageVideo } = await import('./video-export');
       const { blob, ext } = await recordStageVideo(node, { seconds: vidSecs, targetW: dims.exportW, refW: dims.stageW });
@@ -146,8 +162,9 @@ export default function FakePassPage() {
       logHistory({ tool: 'fakepass', kind: 'export', title: `Vídeo ${model.id} exportado` });
     } catch (err) {
       console.error('[fakepass] vídeo falhou', err);
-      setVidMsg('Não consegui gravar o vídeo agora — o PNG continua disponível. No Chrome funciona.');
+      setVidMsg('Não consegui gravar o vídeo agora — o PNG continua disponível. Tente de novo; se repetir, use o Chrome atualizado.');
     } finally {
+      releaseKeepAlive();
       setGravandoVid(false);
     }
   };
@@ -462,4 +479,70 @@ function IconFakePass({ size = 56 }: { size?: number }) {
 
 function LockIcon({ size = 16 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>;
+}
+
+/* ─── Rascunho dos modelos (10.10) ─────────────────────────────────────────
+   Só texto e escolhas sobrevivem ao F5: um modelo com foto/vídeo enviado
+   (endereço temporário do navegador ou imagem pesada) não vai pro rascunho —
+   no F5 ele volta ao padrão em vez de abrir quebrado. Trocar de ferramenta e
+   voltar preserva TUDO (o estado fica em memória). */
+const RASCUNHO_KEY = 'fakepass:rascunho:v1';
+let padraoCache: Record<string, any> | null = null;
+/** true depois que o rascunho foi aplicado NESTA carga da página. */
+let rascunhoAplicado = false;
+
+function temMidiaVolatil(v: unknown, prof = 0): boolean {
+  if (typeof v === 'string') return v.startsWith('blob:') || (v.startsWith('data:') && v.length > 300_000);
+  if (prof > 8 || !v || typeof v !== 'object') return false;
+  if (Array.isArray(v)) return v.some((x) => temMidiaVolatil(x, prof + 1));
+  return Object.values(v as Record<string, unknown>).some((x) => temMidiaVolatil(x, prof + 1));
+}
+
+function estadoPadraoDosModelos(): Record<string, any> {
+  if (!padraoCache) padraoCache = Object.fromEntries(MODELS.map((m) => [m.id, m.defaultState]));
+  return padraoCache;
+}
+
+/** Junta o rascunho salvo por cima do estado atual, modelo a modelo. */
+function aplicarRascunho(atual: Record<string, any>): Record<string, any> {
+  try {
+    const raw = window.sessionStorage.getItem(RASCUNHO_KEY);
+    const salvo = raw ? JSON.parse(raw) : null;
+    if (!salvo || typeof salvo !== 'object') return atual;
+    const out: Record<string, any> = { ...atual };
+    for (const m of MODELS) {
+      const sv = salvo[m.id];
+      const def = m.defaultState as Record<string, unknown> | null;
+      if (!sv || typeof sv !== 'object' || !def || typeof def !== 'object') continue;
+      const junto: Record<string, unknown> = { ...def };
+      for (const k of Object.keys(def)) {
+        if (!(k in sv)) continue;
+        const a = def[k];
+        const b = sv[k];
+        // Só aceita o salvo se tiver o MESMO formato do padrão atual (um
+        // deploy novo que muda o modelo não abre a tela quebrada).
+        if (typeof a !== typeof b || Array.isArray(a) !== Array.isArray(b) || (a === null) !== (b === null)) continue;
+        junto[k] = b;
+      }
+      out[m.id] = junto;
+    }
+    return out;
+  } catch {
+    /* rascunho ilegível ou armazenamento bloqueado: segue como está */
+    return atual;
+  }
+}
+
+function salvarRascunho(states: Record<string, any>) {
+  try {
+    const fora: Record<string, unknown> = {};
+    for (const [id, st] of Object.entries(states)) {
+      if (!temMidiaVolatil(st)) fora[id] = st;
+    }
+    const json = JSON.stringify(fora);
+    if (json.length > 2_000_000) return;
+    window.sessionStorage.setItem(RASCUNHO_KEY, json);
+  } catch {
+    /* sem espaço/bloqueado: o rascunho é só conveniência */
+  }
 }

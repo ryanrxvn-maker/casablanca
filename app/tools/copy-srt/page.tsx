@@ -12,12 +12,13 @@ import { estimateDecupagemCopy } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
-  cancelFFmpeg,
+  cancelarMotorSeDono,
   extractAudioForTranscription,
-  isCancellationError,
   probeVideoMetadata,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { runFfmpegExclusive, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 import { formatBytes, formatTime } from '@/lib/utils';
 import {
   ToolStep,
@@ -40,6 +41,17 @@ const MAX_FILE_BYTES = 800 * 1024 * 1024;
 const MAX_DURATION_SEC = 60 * 60;
 const HUE = 'rgba(167,139,250,0.45)';
 
+/** Dono desta ferramenta na fila do motor (o Cancelar daqui não derruba outra). */
+const DONO = 'copy-srt';
+/** Flag do Cancelar fora do componente: separa "o cliente cancelou" de falha. */
+const envio = { cancelado: false };
+
+/** Arrastar e soltar não respeita o filtro do seletor: confere aqui (10.10). */
+function pareceMidia(f: File): boolean {
+  if (f.type.startsWith('audio/') || f.type.startsWith('video/')) return true;
+  return /\.(mp3|wav|m4a|aac|ogg|opus|flac|mp4|mov|webm|mkv|avi)$/i.test(f.name);
+}
+
 export default function CopySrtPage() {
   const [file, setFile] = useToolState<File | null>('copysrt:file', null);
   const [copyText, setCopyText] = useToolState<string>('copysrt:copy', '');
@@ -61,8 +73,10 @@ export default function CopySrtPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   function handleCancel() {
+    envio.cancelado = true;
     abortRef.current?.abort();
-    cancelFFmpeg();
+    // Só derruba o motor se for a vez DESTA ferramenta (não mata outra).
+    cancelarMotorSeDono(DONO);
   }
 
   useEffect(() => {
@@ -83,6 +97,9 @@ export default function CopySrtPage() {
 
   const validation = useMemo(() => {
     if (!file) return null;
+    if (!pareceMidia(file)) {
+      return 'Esse arquivo não é áudio nem vídeo. Use MP3, WAV, MP4, MOV ou WEBM.';
+    }
     if (file.size > MAX_FILE_BYTES) {
       return `Arquivo de ${formatBytes(file.size)} excede o limite de 800MB.`;
     }
@@ -111,13 +128,29 @@ export default function CopySrtPage() {
     }
     reset();
     setProcessing(true);
+    envio.cancelado = false;
+    // A aba não congela em segundo plano enquanto processa (10.10).
+    acquireKeepAlive();
     try {
       setStage('Extraindo áudio...');
       setProgress(0.1);
-      const audio = await extractAudioForTranscription(file, {
-        onStage: (s) => setStage(s),
-        onProgress: (p: FFProgress) => setProgress(p.ratio * 0.3),
-      });
+      // Na FILA GLOBAL do motor (10.10) e COM a duração: sem ela todo áudio
+      // acima de ~8 min estourava o envio, apesar de a tela prometer 60 min.
+      const audio = await runFfmpegExclusive(
+        () => {
+          if (envio.cancelado) throw new Error('CANCELLED_BY_USER');
+          return extractAudioForTranscription(
+            file,
+            {
+              onStage: (s) => setStage(s),
+              onProgress: (p: FFProgress) => setProgress(p.ratio * 0.3),
+            },
+            duration ?? undefined,
+          );
+        },
+        DONO,
+        () => setStage(MSG_NA_FILA),
+      );
 
       if (audio.size > 4_400_000) {
         throw new FriendlyError(
@@ -164,7 +197,8 @@ export default function CopySrtPage() {
       setProgress(null);
     } catch (e) {
       console.error(e);
-      if (isCancellationError(e) || (e as Error)?.name === 'AbortError') {
+      // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+      if (envio.cancelado || (e as Error)?.name === 'AbortError') {
         setStage('Cancelado por você.');
         setError(null);
       } else {
@@ -173,6 +207,7 @@ export default function CopySrtPage() {
       }
       setProgress(null);
     } finally {
+      releaseKeepAlive();
       setProcessing(false);
       abortRef.current = null;
     }

@@ -10,8 +10,8 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
   cancelFFmpeg,
+  cancelarMotorSeDono,
   extractReportPcm,
-  isCancellationError,
   normalizeVolume,
   type NormalizeEngineInfo,
   type NormalizeOutFormat,
@@ -21,6 +21,9 @@ import { buildAudioReport, type AudioReport } from '@/lib/audio-report';
 import { NormalizeReport } from '@/components/NormalizeReport';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
+import { runFfmpegExclusive, MSG_NA_FILA } from '@/lib/ffmpeg-serial';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
+import { zipCabeNoNavegador, MSG_ZIP_GRANDE, MSG_ZIP_FALHOU } from '@/lib/zip-limite';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
 import { IconNormalizador, IconStepFiles, IconStepFormat } from '@/components/ToolIcons';
 
@@ -60,9 +63,17 @@ type Job = {
   /** O que o motor decidiu (denoise, ganho, reforço extremo). */
   engine: NormalizeEngineInfo | null;
   error: string | null;
+  /** Formato em que ESTE resultado saiu (10.10): trocar o seletor depois não
+   *  pode mudar a extensão do arquivo já pronto (baixava MP3 com nome .wav). */
+  output?: NormalizeOutFormat;
 };
 
 const MAX_BATCH = 10;
+
+/** Dono deste lote na fila do motor (o Cancelar daqui não derruba outra ferramenta). */
+const DONO = 'normalizador';
+/** Flag do Cancelar fora do componente (sobrevive a sair e voltar da página). */
+const lote = { cancelado: false };
 
 function isVideoFile(f: File | null) {
   if (!f) return false;
@@ -126,9 +137,12 @@ export default function NormalizadorPage() {
 
   function setFilesSafe(next: File[]) {
     if (processing) return;
-    jobs.forEach(revokeJobUrls);
-    setJobs([]);
-    setFiles(next.slice(0, MAX_BATCH));
+    // Mantém os resultados de quem CONTINUA na lista (10.10).
+    const ficam = next.slice(0, MAX_BATCH);
+    const ids = new Set(ficam.map((f) => f.name + ':' + f.size + ':' + f.lastModified));
+    jobs.forEach((j) => { if (!ids.has(j.id)) revokeJobUrls(j); });
+    setJobs(jobs.filter((j) => ids.has(j.id)));
+    setFiles(ficam);
   }
 
   function updateJob(id: string, patch: Partial<Job>) {
@@ -137,99 +151,116 @@ export default function NormalizadorPage() {
 
   async function processAll() {
     if (files.length === 0 || processing) return;
+    lote.cancelado = false;
     setProcessing(true);
     setStageMsg('Preparando lote...');
-    jobs.forEach(revokeJobUrls);
-    const initial = files.map(makeJob);
-    setJobs(initial);
+    // Reaproveita o que já ficou pronto no MESMO formato (10.10).
+    const prontos = new Map(
+      jobs.filter((j) => j.state === 'done' && j.output === output).map((j) => [j.id, j] as const),
+    );
+    jobs.forEach((j) => { if (!prontos.has(j.id)) revokeJobUrls(j); });
+    const lista = files.map((f) => prontos.get(f.name + ':' + f.size + ':' + f.lastModified) ?? makeJob(f));
+    setJobs(lista);
+    const initial = lista.filter((j) => j.state !== 'done');
+    const outNow = output;
+    // A aba não congela em segundo plano enquanto processa (10.10).
+    acquireKeepAlive();
 
     try {
       for (let i = 0; i < initial.length; i++) {
         const job = initial[i];
+        if (lote.cancelado) break;
         updateJob(job.id, { state: 'running', progress: 0 });
         try {
-          // Objeto mutável (não `let`) pro TS não estreitar o tipo pra null —
-          // o callback preenche durante o processamento.
-          const engineRef: { info: NormalizeEngineInfo | null } = { info: null };
-          const runOpts = {
-            onProgress: (p: FFProgress) =>
-              updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
-            onStage: (s: string) =>
-              setStageMsg(`Item ${i + 1}/${initial.length}: ${job.file.name} — ${s}`),
-          };
-          let blob: Blob;
-          try {
-            blob = await normalizeVolume(
-              job.file,
-              { output, onEngineInfo: (info) => { engineRef.info = info; } },
-              runOpts,
-            );
-          } catch (firstErr) {
-            if (isCancellationError(firstErr)) throw firstErr;
-            // Instância WASM pode ter sido envenenada por um exec abortado
-            // (ex.: "memory access out of bounds" no meio do lote). Zera e
-            // tenta UMA vez com instância limpa antes de marcar erro.
-            console.warn('[normalizador] job falhou, tentando de novo com instância limpa:', firstErr);
-            cancelFFmpeg();
-            setStageMsg(`Item ${i + 1}/${initial.length}: ${job.file.name} — reiniciando motor...`);
-            blob = await normalizeVolume(
-              job.file,
-              { output, onEngineInfo: (info) => { engineRef.info = info; } },
-              runOpts,
-            );
-          }
-          const url = URL.createObjectURL(blob);
+          // Um arquivo por vez na FILA GLOBAL do motor (10.10): rodando junto
+          // com outra ferramenta, o Normalizador chegou a entregar o vídeo dela.
+          const cancelouNoRelatorio = await runFfmpegExclusive(async () => {
+            if (lote.cancelado) throw new Error('CANCELLED_BY_USER');
+            // Objeto mutável (não `let`) pro TS não estreitar o tipo pra null —
+            // o callback preenche durante o processamento.
+            const engineRef: { info: NormalizeEngineInfo | null } = { info: null };
+            const runOpts = {
+              onProgress: (p: FFProgress) =>
+                updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
+              onStage: (s: string) =>
+                setStageMsg(`Item ${i + 1}/${initial.length}: ${job.file.name} — ${s}`),
+            };
+            let blob: Blob;
+            try {
+              blob = await normalizeVolume(
+                job.file,
+                { output: outNow, onEngineInfo: (info) => { engineRef.info = info; } },
+                runOpts,
+              );
+            } catch (firstErr) {
+              if (lote.cancelado) throw firstErr;
+              // Instância WASM pode ter sido envenenada por um exec abortado
+              // (ex.: "memory access out of bounds" no meio do lote). Zera e
+              // tenta UMA vez com instância limpa antes de marcar erro.
+              console.warn('[normalizador] job falhou, tentando de novo com instância limpa:', firstErr);
+              cancelFFmpeg();
+              setStageMsg(`Item ${i + 1}/${initial.length}: ${job.file.name} — tentando de novo…`);
+              blob = await normalizeVolume(
+                job.file,
+                { output: outNow, onEngineInfo: (info) => { engineRef.info = info; } },
+                runOpts,
+              );
+            }
+            const url = URL.createObjectURL(blob);
 
-          // Relatório antes × depois: mede o ORIGINAL e o RESULTADO de
-          // verdade (EBU R128 + envelope). Não-fatal: se falhar, o card sai
-          // sem gráfico — o resultado normalizado NUNCA é descartado por
-          // causa do relatório.
-          let report: JobReport | null = null;
-          let cancelledDuringReport = false;
-          try {
-            setStageMsg(
-              `Item ${i + 1}/${initial.length}: ${job.file.name} — medindo antes × depois...`,
-            );
-            const rawBefore = await extractReportPcm(job.file);
-            const beforeRep = buildAudioReport(
-              rawBefore.pcm,
-              rawBefore.sampleRate,
-              rawBefore.loudnorm,
-            );
-            const rawAfter = await extractReportPcm(blob);
-            const afterRep = buildAudioReport(
-              rawAfter.pcm,
-              rawAfter.sampleRate,
-              rawAfter.loudnorm,
-            );
-            report = { before: beforeRep, after: afterRep };
-          } catch (reportErr) {
-            if (isCancellationError(reportErr)) cancelledDuringReport = true;
-            else console.warn('[normalizador] relatório falhou:', reportErr);
-          }
+            // Relatório antes × depois: mede o ORIGINAL e o RESULTADO de
+            // verdade (EBU R128 + envelope). Não-fatal: se falhar, o card sai
+            // sem gráfico — o resultado normalizado NUNCA é descartado por
+            // causa do relatório.
+            let report: JobReport | null = null;
+            let cancelledDuringReport = false;
+            try {
+              setStageMsg(
+                `Item ${i + 1}/${initial.length}: ${job.file.name} — medindo antes × depois...`,
+              );
+              const rawBefore = await extractReportPcm(job.file);
+              const beforeRep = buildAudioReport(
+                rawBefore.pcm,
+                rawBefore.sampleRate,
+                rawBefore.loudnorm,
+              );
+              const rawAfter = await extractReportPcm(blob);
+              const afterRep = buildAudioReport(
+                rawAfter.pcm,
+                rawAfter.sampleRate,
+                rawAfter.loudnorm,
+              );
+              report = { before: beforeRep, after: afterRep };
+            } catch (reportErr) {
+              if (lote.cancelado) cancelledDuringReport = true;
+              else console.warn('[normalizador] relatório falhou:', reportErr);
+            }
 
-          updateJob(job.id, {
-            state: 'done',
-            progress: 100,
-            resultBlob: blob,
-            resultUrl: url,
-            beforeUrl: URL.createObjectURL(job.file),
-            report,
-            engine: engineRef.info,
-          });
-          logHistory({ tool: 'normalizador', title: `${job.file.name} normalizado` });
-
-          if (cancelledDuringReport) {
+            updateJob(job.id, {
+              state: 'done',
+              progress: 100,
+              resultBlob: blob,
+              resultUrl: url,
+              beforeUrl: URL.createObjectURL(job.file),
+              report,
+              engine: engineRef.info,
+              output: outNow,
+            });
+            logHistory({ tool: 'normalizador', title: `${job.file.name} normalizado` });
+            return cancelledDuringReport;
+          }, DONO, () => setStageMsg(MSG_NA_FILA));
+          if (cancelouNoRelatorio) {
             // Cancelou durante a medição: o resultado deste job está OK
             // (fica como done, só sem gráfico); os próximos param.
             initial.slice(i + 1).forEach((rest) => {
               updateJob(rest.id, { state: 'error', error: 'Cancelado por você.' });
             });
-            break;
           }
+          if (lote.cancelado) break;
         } catch (e) {
           console.error('[normalizador]', job.file.name, e);
-          if (isCancellationError(e)) {
+          // Só é "Cancelado por você." se o cliente clicou em Cancelar (10.10).
+          if (lote.cancelado) {
             updateJob(job.id, { state: 'error', error: 'Cancelado por você.' });
             initial.slice(i + 1).forEach((rest) => {
               updateJob(rest.id, { state: 'error', error: 'Cancelado por você.' });
@@ -245,32 +276,49 @@ export default function NormalizadorPage() {
           });
         }
       }
-      setStageMsg('Lote finalizado.');
+      setStageMsg(lote.cancelado ? 'Cancelado.' : 'Lote finalizado.');
     } finally {
+      releaseKeepAlive();
       setProcessing(false);
     }
   }
+
+  function cancelar() {
+    lote.cancelado = true;
+    // Só derruba o motor se for a vez DESTE lote (não mata outra ferramenta).
+    cancelarMotorSeDono(DONO);
+  }
+
+  /** Formato REAL do resultado (o do processamento, não o do seletor agora). */
+  const formatoDe = (j: Job): NormalizeOutFormat => j.output ?? output;
 
   async function downloadOne(job: Job) {
     if (!job.resultBlob) return;
     await downloadBlob(
       job.resultBlob,
-      baseName(job.file.name) + '_normalizado.' + output,
+      baseName(job.file.name) + '_normalizado.' + formatoDe(job),
     );
   }
 
   async function downloadZip() {
     const done = jobs.filter((j) => j.state === 'done' && j.resultBlob);
     if (done.length === 0) return;
+    if (!zipCabeNoNavegador(done.map((j) => j.resultBlob!.size))) {
+      setStageMsg(MSG_ZIP_GRANDE);
+      return;
+    }
     setZipping(true);
     try {
       const zip = await buildZip(
         done.map((j) => ({
-          name: baseName(j.file.name) + '_normalizado.' + output,
+          name: baseName(j.file.name) + '_normalizado.' + formatoDe(j),
           data: j.resultBlob!,
         })),
       );
       await downloadBlob(zip, 'normalizado.zip');
+    } catch (e) {
+      console.error('[normalizador] zip', e);
+      setStageMsg(MSG_ZIP_FALHOU);
     } finally {
       setZipping(false);
     }
@@ -323,7 +371,7 @@ export default function NormalizadorPage() {
         <ToolStep n={3} title={processing ? 'Normalizando…' : 'Normalizar'} hue={HUE}>
           <div className="flex flex-wrap gap-3">
             {processing ? (
-              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+              <CancelButton onClick={cancelar} label="Cancelar processamento" />
             ) : (
               <ToolAction onClick={processAll} disabled={files.length === 0}>
                 {`Normalizar ${files.length || ''}`.trim()}
@@ -413,7 +461,7 @@ export default function NormalizadorPage() {
                 ) : null}
                 {j.state === 'done' && j.resultUrl ? (
                   <div className="mt-3 flex flex-col gap-2.5">
-                    {output === 'mp4' ? (
+                    {formatoDe(j) === 'mp4' ? (
                       <video
                         src={j.resultUrl}
                         controls
@@ -428,7 +476,7 @@ export default function NormalizadorPage() {
                         afterUrl={j.resultUrl}
                         engine={j.engine}
                       />
-                    ) : output !== 'mp4' ? (
+                    ) : formatoDe(j) !== 'mp4' ? (
                       <AudioPlayer src={j.resultUrl} label="Resultado" />
                     ) : null}
                     <div className="flex justify-end">
@@ -436,7 +484,7 @@ export default function NormalizadorPage() {
                         onClick={() => downloadOne(j)}
                         className="btn-ghost !py-1 !px-2 text-xs"
                       >
-                        Baixar {output.toUpperCase()}
+                        Baixar {formatoDe(j).toUpperCase()}
                       </button>
                     </div>
                   </div>

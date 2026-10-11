@@ -19,6 +19,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 import { filtroDeEnquadramento, type FormatoVideo } from './pilot-formato';
+import { donoDoMotor, desistirDaFila } from './ffmpeg-serial';
 
 export type FFProgress = { ratio: number; time: number };
 export type FFLog = (line: string) => void;
@@ -120,6 +121,22 @@ export function cancelFFmpeg(): void {
 }
 
 /**
+ * Cancela SÓ se o motor estiver trabalhando pra quem pediu (10.10). O botão
+ * Cancelar de uma ferramenta chamava cancelFFmpeg() direto e derrubava o que
+ * OUTRA ferramenta estava processando (auditoria: o Cancelar do Mixer cancelou
+ * o Normalizador). Com a fila global (runFfmpegExclusive com dono), cada
+ * ferramenta só mata o motor na vez dela; fora da vez, o próprio laço da
+ * ferramenta vê a flag de cancelamento e para antes de começar o próximo item.
+ */
+export function cancelarMotorSeDono(dono: string): boolean {
+  // O que essa ferramenta ainda tinha ESPERANDO na fila sai na hora (10.10).
+  desistirDaFila(dono);
+  if (donoDoMotor() !== dono) return false;
+  cancelFFmpeg();
+  return true;
+}
+
+/**
  * Sentinel pro caller saber que a falha foi cancelamento (nao bug).
  */
 export const CANCELLED_ERROR = 'CANCELLED_BY_USER';
@@ -166,9 +183,14 @@ export function attachExecWatchdog(ff: FFmpeg, onKilled?: () => void): void {
     let poll: ReturnType<typeof setInterval> | undefined;
     let hardTo: ReturnType<typeof setTimeout> | undefined;
     const kill = (rej: (e: Error) => void, msg: string) => {
+      // REJEITA ANTES de matar (10.10). O terminate() rejeita o exec com
+      // "called FFmpeg.terminate()" na hora; se ele vier primeiro, o
+      // Promise.race abaixo entrega ESSE erro — e toda ferramenta lê
+      // "terminate" como "o usuário cancelou". Rejeitando antes, quem chega
+      // ao chamador é a mensagem do vigia ("travado"), que vira o aviso certo.
+      rej(new Error(msg));
       try { ff.terminate(); } catch { /* ignora */ }
       onKilled?.();
-      rej(new Error(msg));
     };
     const watchdog = new Promise<number>((_, rej) => {
       // Gatilho PRIMÁRIO: silêncio total de progresso = worker travado → mata rápido.
@@ -237,6 +259,40 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
 }
 
 /**
+ * Instância NOVA (fora do singleton) com o MESMO núcleo e o MESMO cache das
+ * outras ferramentas — usada pelo pool do Compressor (10.10). Antes o pool
+ * baixava outra versão do núcleo (0.12.6, ~30 MB, sem cache próprio) só pra ele.
+ * Os endereços do núcleo são reaproveitados entre as instâncias do pool.
+ */
+// Guarda a PROMESSA: instâncias criadas ao mesmo tempo (o pool sobe várias de
+// uma vez) dividem o mesmo núcleo em vez de montar uma cópia de 32 MB cada.
+let poolCoreUrls: Promise<{ coreURL: string; wasmURL: string }> | null = null;
+export async function criarInstanciaFFmpeg(): Promise<FFmpeg> {
+  for (let i = 0; i < CDNS.length; i++) {
+    const baseURL = CDNS[i];
+    let ff: FFmpeg | null = null;
+    try {
+      if (!poolCoreUrls || i > 0) {
+        poolCoreUrls = Promise.all([
+          cachedBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+          cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        ]).then(([coreURL, wasmURL]) => ({ coreURL, wasmURL }));
+      }
+      const urls = await poolCoreUrls;
+      ff = new FFmpeg();
+      const classWorkerURL = new URL(FFMPEG_CLASS_WORKER_URL, window.location.origin).href;
+      await withTimeout(ff.load({ ...urls, classWorkerURL }), LOAD_TIMEOUT_MS, 'Timeout ao carregar FFmpeg');
+      return ff;
+    } catch (err) {
+      try { ff?.terminate(); } catch { /* ignora */ }
+      poolCoreUrls = null;
+      console.warn(`[ffmpeg-pool] CDN ${i + 1} falhou:`, err);
+    }
+  }
+  throw new Error('Não consegui iniciar o motor de compressão. Confira sua internet e tente de novo.');
+}
+
+/**
  * Retorna true se o browser suporta WebAssembly (minimo para FFmpeg rodar).
  */
 export function isFFmpegSupported(): boolean {
@@ -271,6 +327,44 @@ async function execOrThrow(ff: FFmpeg, args: string[], ctx: string): Promise<voi
   if (rc !== 0) throw new Error(`ffmpeg falhou (rc=${rc}) em ${ctx}`);
 }
 
+/**
+ * Nome ÚNICO no disco virtual do motor (10.10). Antes vários helpers usavam
+ * nomes fixos ('in.mp4'/'out.mp4') na instância compartilhada: com duas
+ * ferramentas rodando ao mesmo tempo, uma lia/apagava o arquivo da outra —
+ * na auditoria o Normalizador ENTREGOU o vídeo do Mixer. Com nome único por
+ * chamada isso não acontece mais, mesmo se alguém furar a fila global.
+ */
+function nomeUnico(prefixo: string, ext: string): string {
+  return `${prefixo}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}.${ext}`;
+}
+
+/**
+ * Filtro de resolução pelo LADO MENOR (10.10). "1080p" num vídeo em pé
+ * 1080x1920 continua 1080x1920 (antes fixava a ALTURA e saía 608x1080), e
+ * vídeo menor que o alvo nunca é ampliado. setsar=1 evita pixel "esticado".
+ */
+export function filtroResolucao(res: '1080' | '720' | '480'): string {
+  return `scale='if(gt(iw,ih),-2,trunc(min(${res},iw)/2)*2)':'if(gt(iw,ih),trunc(min(${res},ih)/2)*2,-2)':flags=fast_bilinear,setsar=1`;
+}
+
+/**
+ * Teto de taxa do vídeo (kbps) pelo PRÓPRIO arquivo de entrada (10.10). Sem
+ * isto o encode rápido em qualidade fixa deixava vídeo já leve (download de
+ * rede social, celular) até 3x MAIOR. Com o teto a saída nunca passa da taxa
+ * de entrada; num arquivo pesado o teto nem encosta (a compressão normal fica
+ * bem abaixo dele). `fator` > 1 quando o vídeo é acelerado (mesma imagem em
+ * menos tempo). null = sem dado pra calcular (segue sem teto, como antes).
+ */
+export function tetoDeTaxaKbps(inputBytes: number, durationSec: number, fator = 1): number | null {
+  if (!(durationSec > 0) || !(inputBytes > 0)) return null;
+  const totalKbps = (inputBytes * 8) / durationSec / 1000;
+  return Math.max(250, Math.round(totalKbps * fator - 128));
+}
+
+function argsDeTeto(kbps: number | null): string[] {
+  return kbps ? ['-maxrate', `${kbps}k`, '-bufsize', `${kbps * 2}k`] : [];
+}
+
 function atempoChain(speed: number): string {
   const s = Math.max(0.5, Math.min(4, speed));
   if (s <= 2) return `atempo=${s.toFixed(3)}`;
@@ -284,13 +378,16 @@ export async function speedUpVideo(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.mp4';
+  const inputName = nomeUnico('vel_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('vel_out', 'mp4');
 
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
+    // Teto de taxa pelo arquivo de entrada (10.10): acelerar um vídeo leve
+    // deixava o arquivo 2-3x maior (1,75 MB -> 4,2 MB na auditoria).
+    const teto = tetoDeTaxaKbps(file.size, await readDurationFromLogs(ff, inputName), Math.max(1, speed));
     // Mesma estrategia do Compressor: ultrafast + x264-params agressivos.
     // Aceleracao ja descarta frames implicitamente (PTS/speed), entao a perda
     // de eficiencia do encoder importa pouco e o ganho de tempo e enorme.
@@ -304,6 +401,7 @@ export async function speedUpVideo(
       '-preset', 'ultrafast',
       '-tune', 'fastdecode',
       '-crf', '23',
+      ...argsDeTeto(teto),
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
@@ -442,7 +540,7 @@ export async function compressVideo(
 export async function compressVideoOn(
   ff: FFmpeg,
   file: Blob,
-  params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
+  params: { crf: number; resolution: 'original' | '1080' | '720' | '480'; durationSec?: number },
   opts: RunOptions = {},
 ): Promise<Blob> {
   const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -453,11 +551,14 @@ export async function compressVideoOn(
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
+    const dur = params.durationSec && params.durationSec > 0
+      ? params.durationSec
+      : await readDurationFromLogs(ff, inputName);
     const args: string[] = ['-i', inputName];
     if (params.resolution !== 'original') {
       // fast_bilinear é ~30-40% mais rápido que o scaler default; perda
       // visual em downscale (1080→720→480) é imperceptível.
-      args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
+      args.push('-vf', filtroResolucao(params.resolution));
     }
     // ENCODE: preset ultrafast + x264-params agressivos pra wasm.
     args.push(
@@ -465,6 +566,7 @@ export async function compressVideoOn(
       '-preset', 'ultrafast',
       '-tune', 'fastdecode',
       '-crf', String(params.crf),
+      ...argsDeTeto(tetoDeTaxaKbps(file.size, dur)),
       '-g', '120',
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
@@ -537,16 +639,17 @@ export function planCompressChunks(durationSec: number, chunkSec = COMPRESS_CHUN
   return out;
 }
 
-function compressVideoArgs(params: { crf: number; resolution: 'original' | '1080' | '720' | '480' }): string[] {
+function compressVideoArgs(params: { crf: number; resolution: 'original' | '1080' | '720' | '480' }, tetoKbps: number | null = null): string[] {
   const args: string[] = [];
   if (params.resolution !== 'original') {
-    args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
+    args.push('-vf', filtroResolucao(params.resolution));
   }
   args.push(
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
     '-tune', 'fastdecode',
     '-crf', String(params.crf),
+    ...argsDeTeto(tetoKbps),
     '-g', '120',
     '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
     '-pix_fmt', 'yuv420p',
@@ -666,7 +769,7 @@ export async function compressVideoChunked(
     audioProg = 1; report();
 
     // 4) partes de vídeo em paralelo
-    const vArgs = compressVideoArgs(params);
+    const vArgs = compressVideoArgs(params, tetoDeTaxaKbps(file.size, durationSec));
     const encodeChunk = async (inst: FFmpeg, inPath: string, i: number): Promise<Blob> => {
       const [start, dur] = chunks[i];
       const outName = `part_${uniq}_${i}.ts`;
@@ -765,8 +868,8 @@ export async function speedUpAudio(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp3');
-  const outputName = 'out.' + format;
+  const inputName = nomeUnico('aud_in', guessExt(file, 'mp3'));
+  const outputName = nomeUnico('aud_out', format);
 
   const progressHandler = wireProgress(ff, opts.onProgress);
 
@@ -803,8 +906,8 @@ export async function extractAudioAs(
   robust = false,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.' + format;
+  const inputName = nomeUnico('ext_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('ext_out', format);
 
   const progressHandler = wireProgress(ff, opts.onProgress);
 
@@ -935,7 +1038,7 @@ export function estimateCompressedSize(params: {
  */
 export function probeVideoMetadata(
   file: Blob,
-): Promise<{ durationSec: number; height: number } | null> {
+): Promise<{ durationSec: number; height: number; width?: number } | null> {
   return new Promise((resolve) => {
     if (typeof document === 'undefined') return resolve(null);
     const url = URL.createObjectURL(file);
@@ -959,8 +1062,9 @@ export function probeVideoMetadata(
     video.onloadedmetadata = () => {
       const dur = isFinite(video.duration) ? video.duration : 0;
       const h = video.videoHeight || 0;
+      const w = video.videoWidth || 0;
       cleanup();
-      resolve({ durationSec: dur, height: h });
+      resolve({ durationSec: dur, height: h, width: w });
     };
     video.onerror = () => {
       cleanup();
@@ -995,9 +1099,9 @@ export async function muxAudioIntoVideo(
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const videoExt = guessExt(video, 'mp4');
   const audioExt = guessExt(audio, 'wav');
-  const videoName = 'vin.' + videoExt;
-  const audioName = 'ain.' + audioExt;
-  const outputName = 'out.mp4';
+  const videoName = nomeUnico('mux_vin', videoExt);
+  const audioName = nomeUnico('mux_ain', audioExt);
+  const outputName = nomeUnico('mux_out', 'mp4');
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
@@ -1055,7 +1159,9 @@ export async function cutVideoSegments(
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const ext = guessExt(file, 'mp4');
-  const inputName = 'in.' + ext;
+  const inputName = nomeUnico('cut_in', ext);
+  const finalName = nomeUnico('cut_out', 'mp4');
+  const tagLote = nomeUnico('cut_batch', 'x').slice(0, -2);
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   // Roda UMA passada de filter_complex pra um subconjunto de segmentos →
@@ -1102,20 +1208,20 @@ export async function cutVideoSegments(
 
     // Caminho rápido: poucos segmentos → 1 passada só (comportamento antigo).
     if (segments.length <= MAX_SEGMENTS_PER_PASS) {
-      await cutBatch(segments, 'out.mp4');
-      const data = await ff.readFile('out.mp4');
-      await safeDelete(ff, 'out.mp4');
+      await cutBatch(segments, finalName);
+      const data = await ff.readFile(finalName);
+      await safeDelete(ff, finalName);
       assertValidMp4(data as Uint8Array, 'vídeo decupado');
       return toBlob(data, 'video/mp4');
     }
 
     // Caminho em batches: divide em grupos de MAX_SEGMENTS_PER_PASS.
     const numBatches = Math.ceil(segments.length / MAX_SEGMENTS_PER_PASS);
-    opts.onStage?.(`Decupando ${segments.length} segmentos em ${numBatches} lotes (anti-estouro de memória)...`);
+    opts.onStage?.(`Cortando os silêncios em ${numBatches} partes...`);
     for (let b = 0; b < numBatches; b++) {
       const slice = segments.slice(b * MAX_SEGMENTS_PER_PASS, (b + 1) * MAX_SEGMENTS_PER_PASS);
-      const outName = `cut_batch_${String(b).padStart(2, '0')}.mp4`;
-      opts.onStage?.(`Decupando lote ${b + 1}/${numBatches} (${slice.length} segmentos)...`);
+      const outName = `${tagLote}_${String(b).padStart(2, '0')}.mp4`;
+      opts.onStage?.(`Cortando os silêncios (parte ${b + 1}/${numBatches})...`);
       await cutBatch(slice, outName);
       batchOutputs.push(outName);
     }
@@ -1126,10 +1232,10 @@ export async function cutVideoSegments(
 
     // Concatena os sub-vídeos via concat demuxer. Como cada batch saiu com
     // codec/SR/dimensões idênticos (mesmo encode), o -c copy junta sem dor.
-    const listName = 'cut_concat_list.txt';
+    const listName = nomeUnico('cut_concat_list', 'txt');
     const list = batchOutputs.map((n) => `file '${n}'`).join('\n');
     await ff.writeFile(listName, new TextEncoder().encode(list));
-    opts.onStage?.(`Juntando ${numBatches} lotes decupados...`);
+    opts.onStage?.('Juntando as partes...');
     await execOrThrow(ff, [
       '-fflags', '+genpts',
       '-f', 'concat',
@@ -1138,17 +1244,18 @@ export async function cutVideoSegments(
       '-c', 'copy',
       '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
-      'out.mp4',
+      finalName,
     ], 'junção dos lotes decupados');
-    const data = await ff.readFile('out.mp4');
+    const data = await ff.readFile(finalName);
     await safeDelete(ff, listName);
-    await safeDelete(ff, 'out.mp4');
+    await safeDelete(ff, finalName);
     assertValidMp4(data as Uint8Array, 'vídeo decupado');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
     for (const n of batchOutputs) await safeDelete(ff, n);
+    await safeDelete(ff, finalName);
   }
 }
 
@@ -1306,7 +1413,7 @@ export async function splitMediaForChunks(
       return [new File([file], `decup_chunk_000.${srcExt}`, { type: file.type || undefined })];
     }
 
-    opts.onStage?.(`Dividindo em ${times.length + 1} partes (sem re-encode)...`);
+    opts.onStage?.(`Dividindo em ${times.length + 1} partes...`);
     const rc = await ff.exec([
       '-i', inputPath,
       '-map', '0:v?', '-map', '0:a?', '-dn', '-sn',
@@ -1740,7 +1847,9 @@ export function pickTranscribeBitrateKbps(durationSec?: number): number {
   if (!durationSec || durationSec <= 0) return 64;
   const maxBps = (TRANSCRIBE_AUDIO_BUDGET_BYTES * 8) / durationSec;
   const kbps = Math.floor(maxBps / 1000);
-  return Math.max(12, Math.min(64, kbps));
+  // Piso 8 kbps (10.10): com 12 o áudio acima de ~42 min estourava o envio
+  // mesmo com a duração certa. Opus 'voip' a 8k ainda é inteligível pra fala.
+  return Math.max(8, Math.min(64, kbps));
 }
 
 export async function extractAudioForTranscription(
@@ -1749,21 +1858,24 @@ export async function extractAudioForTranscription(
   durationSec?: number,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.opus';
+  const inputName = nomeUnico('tr_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('tr_out', 'opus');
   const progressHandler = wireProgress(ff, opts.onProgress);
-
-  // Bitrate adaptativo: maximiza a qualidade sem estourar o limite do servidor.
-  const kbps = pickTranscribeBitrateKbps(durationSec);
-  // Acima de ~24k vale o modo 'audio' (preserva timbre/consoantes); abaixo, o
-  // 'voip' e' mais inteligivel no bitrate baixo.
-  const application = kbps >= 24 ? 'audio' : 'voip';
 
   try {
     opts.onStage?.('Carregando...');
     await ff.writeFile(inputName, await fetchFile(file));
 
-    opts.onStage?.(`Extraindo audio (${kbps}kbps) pra transcricao...`);
+    // Bitrate adaptativo: maximiza a qualidade sem estourar o limite do servidor.
+    // Sem a duração do chamador (10.10: o Gerador de SRT não passava e TODO
+    // áudio acima de ~8 min estourava o envio), lê do próprio arquivo.
+    const dur = durationSec && durationSec > 0 ? durationSec : await readDurationFromLogs(ff, inputName);
+    const kbps = pickTranscribeBitrateKbps(dur);
+    // Acima de ~24k vale o modo 'audio' (preserva timbre/consoantes); abaixo, o
+    // 'voip' e' mais inteligivel no bitrate baixo.
+    const application = kbps >= 24 ? 'audio' : 'voip';
+
+    opts.onStage?.('Preparando o áudio pra transcrever...');
     await execOrThrow(ff, [
       '-i', inputName,
       '-vn',
@@ -1798,8 +1910,8 @@ export async function extractAudioForDiarization(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out_diar.opus';
+  const inputName = nomeUnico('dia_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('dia_out', 'opus');
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
@@ -1840,8 +1952,8 @@ export async function extractStereoAudioForTranscription(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.opus';
+  const inputName = nomeUnico('st_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('st_out', 'opus');
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
@@ -2527,8 +2639,8 @@ export async function normalizeVolume(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.' + params.output;
+  const inputName = nomeUnico('norm_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('norm_out', params.output);
 
   try {
     opts.onStage?.('Carregando arquivo...');
@@ -2696,7 +2808,7 @@ export async function normalizeVolume(
           } catch (e) {
             if (isCancellationError(e)) throw e;
             // Stream de vídeo incompatível com mp4 (ex.: webm/vp9). Reencoda.
-            opts.onStage?.('Stream incompatível — remontando vídeo (2/2)...');
+            opts.onStage?.('Ajustando o vídeo (2/2)...');
             await safeDelete(ff, outputName);
             await execStrict([
               '-i', inputName,
@@ -2840,8 +2952,8 @@ export async function extractReportPcm(
   opts: RunOptions = {},
 ): Promise<ReportPcm> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
-  const inputName = 'rep_in.' + guessExt(file, 'mp4');
-  const outputName = 'rep_out.pcm';
+  const inputName = nomeUnico('rep_in', guessExt(file, 'mp4'));
+  const outputName = nomeUnico('rep_out', 'pcm');
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));

@@ -114,12 +114,12 @@ export function ToolHeroVideo({
         />
 
         {/* Detalhes vivos */}
-        <div className="hero-bloom absolute inset-0" />
+        <div className="hero-bloom ae-ambient absolute inset-0" />
         <div className="hero-sweep-wrap absolute inset-0 overflow-hidden">
-          <div className="hero-sweep" />
+          <div className="hero-sweep ae-ambient" />
         </div>
         <HeroParticles count={16} />
-        <div className="hero-vignette absolute inset-0" />
+        <div className="hero-vignette ae-ambient absolute inset-0" />
 
         {/* Scrim pra legibilidade do lettering (esquerda + base) */}
         <div
