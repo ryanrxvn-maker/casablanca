@@ -24,6 +24,10 @@ import {
  * - nomes de botões/campos IDÊNTICOS aos da UI real (conferidos no código);
  * - NUNCA prometer o que a ferramenta não faz — a entrega descrita é a
  *   entrega real (ex.: Hey Auto/Pilot entregam o MP4 montado, não "3 ZIPs");
+ * - ferramenta COM aula em vídeo (lib/aulas-video.ts): os passos seguem a aula
+ *   — mesma ordem, mesmos nomes e números que o vídeo fala (pedido do dono em
+ *   10.10.26: o passo a passo não pode divergir do vídeo). O que a aula não
+ *   mostra (modos secundários, avisos, limites) vai nas dicas;
  * - cobrir os modos secundários também (Descamuflar, modo mudo, Retomar...);
  * - sem marcadores sobre os prints: o print imita a UI e fala por si.
  *
@@ -53,23 +57,29 @@ export const GUIDES: Record<string, ToolGuide> = {
       'Corta os silêncios em lote e devolve cada arquivo limpo — vídeo vira vídeo, áudio vira áudio.',
     steps: [
       {
-        title: 'Solte os arquivos na fila',
-        text: 'No card "Solta os arquivos (até 10)", arraste seus vídeos ou áudios — ou clique na área pra abrir o seletor. Aceita MP3, WAV, MP4, WEBM e MOV, até 800 MB cada, e pode misturar vídeo com áudio na mesma fila. Cada arquivo vira um item numerado com o tamanho e o status "na fila". O contador embaixo da área mostra quantos já entraram (ex.: "3/10 na fila"). Entrou arquivo errado? O "×" ao lado do item tira ele da fila.',
+        title: 'Adicione seus arquivos',
+        text: 'No card "Adicione seus arquivos (até 10)", arraste os arquivos ou clique na área pra escolher. São até 10, em MP3, WAV, MP4, WEBM ou MOV, com até 800 MB cada.',
+        visual: (
+          <Shot label="Remover Silêncios · arquivos">
+            <MDrop label="Selecione ou arraste seus arquivos" sub="Selecione um ou mais arquivos. 3/10 na fila." />
+          </Shot>
+        ),
+      },
+      {
+        title: 'Confira a fila',
+        text: 'Cada arquivo entra na fila com o tipo ("Vídeo" ou "Áudio") e o tamanho. Entrou o arquivo errado? O "×" ao lado dele tira ele da fila.',
         visual: (
           <Shot label="Remover Silêncios · fila">
             <MStack>
-              <MDrop
-                label="Arraste ou clique pra subir"
-                sub="Arraste vários ou clique. 3/10 na fila."
-              />
-              <MQueueItem name="ad-hook-03.mp4" status="na fila" pct={0} />
+              <MQueueItem name="depoimento-cliente.mp4" status="Vídeo · 2.2 MB · na fila" pct={0} />
+              <MQueueItem name="musica-de-fundo.mp3" status="Áudio · 1.3 MB · na fila" pct={0} />
             </MStack>
           </Shot>
         ),
       },
       {
         title: 'Escolha o formato de saída',
-        text: 'No card "Formato de saída", as três opções ficam lado a lado: "MP4" (o vídeo volta já cortado), "MP3" (só o áudio, leve — serve pra quase tudo) e "WAV" (só o áudio, sem compressão — ideal se ainda vai passar por outra etapa de edição). A escolha vale pra fila inteira; com MP3 ou WAV, dos vídeos sai só a trilha de voz limpa. O MP4 só fica liberado quando a fila tem apenas vídeos: entrou um arquivo de áudio, ele aparece apagado ("Só com vídeos na fila") e a saída é em MP3 ou WAV. No plano grátis a saída é sempre em áudio — o MP4 aparece com cadeado, é recurso das contas pagas.',
+        text: 'No card "Formato de saída": "MP4" devolve o vídeo já cortado; "MP3" e "WAV" devolvem só o áudio.',
         visual: (
           <Shot label="Remover Silêncios · formato de saída">
             <MRow>
@@ -81,47 +91,73 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Calibre quanto de silêncio manter',
-        text: 'O card "Quanto de silêncio manter?" controla o ritmo do corte com o controle "Tolerância de silêncio" (de 0.01s a 0.5s). Puxando pra esquerda, as pausas somem quase por completo — corte seco, estilo anúncio. Puxando pra direita, a fala respira mais natural. Na dúvida, deixe no padrão (0.05s): remove o tempo morto preservando uma pausa curta e confortável entre as frases.',
+        title: 'Ajuste quanto de silêncio manter',
+        text: 'No card "Quanto de silêncio manter?", use o controle "Tolerância de silêncio": pra esquerda, o corte fica mais seco; pra direita, a fala respira mais. Na dúvida, deixe no padrão (0.05s).',
         visual: (
-          <Shot label="Remover Silêncios · ajuste">
+          <Shot label="Remover Silêncios · tolerância">
             <MSlider label="Tolerância de silêncio" pct={10} val="0.05s" />
           </Shot>
         ),
       },
       {
-        title: 'Decupe a fila e acompanhe',
-        text: 'Clique em "Decupar fila (N)". Os arquivos processam um por vez, na ordem, e cada item mostra a fase em tempo real: "Analisando...", "Regulando a voz...", "Cortando silêncios...", "Gerando arquivo...". Precisa parar? "Cancelar fila" interrompe sem perder o que já ficou pronto — depois o botão vira "Continuar fila (N restantes)" e retoma de onde parou.',
+        title: 'Clique em Decupar fila',
+        text: 'Clique em "Decupar fila (N)". Os arquivos rodam um por vez, direto no seu navegador.',
         visual: (
-          <Shot label="Remover Silêncios · processando">
+          <Shot label="Remover Silêncios · decupar">
+            <MBtn tone="lime">Decupar fila (2)</MBtn>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Veja a duração de antes e de depois',
+        text: 'Na fila, cada arquivo pronto mostra a duração de antes e a de depois (ex.: "0:26 → 0:15") e quanto encolheu (ex.: "−41%").',
+        visual: (
+          <Shot label="Remover Silêncios · fila pronta">
             <MStack>
-              <MBtn tone="lime">Decupar fila (3)</MBtn>
-              <MQueueItem name="ad-hook-03.mp4" status="Cortando silêncios..." pct={64} />
-              <MQueueItem name="body-parte2.mp3" status="na fila" pct={0} />
+              <MQueueItem name="depoimento-cliente.mp4" status="0:26 → 0:15 · −41%" pct={100} tone="lime" />
+              <MQueueItem name="aula-gravada.mp4" status="0:35 → 0:20 · −43%" pct={100} tone="lime" />
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Confira o resultado e baixe',
-        text: 'Cada arquivo pronto ganha um card "PRONTO" com player de preview e três métricas: "Original", "Após remoção de silêncios" e "Redução" (ex.: −31%). Ouça o começo e um trecho do meio pra confirmar que o corte ficou no ritmo que você queria. Baixe cada arquivo pelo botão "Baixar MP4/MP3/WAV" do card (sai nomeado como "_decupado") ou, com 2 ou mais prontos, use "↓ Baixar todos (ZIP)" pra pegar tudo de uma vez.',
+        title: 'Confira o resultado e a auditoria do corte',
+        text: 'Embaixo, cada arquivo ganha um card "Pronto" com quanto ficou mais curto (ex.: "−41% mais curto"), a duração "Original" e "Sem silêncio", e quanto silêncio saiu (ex.: "−0:10 de silêncio removido"). Logo abaixo, a "Auditoria do corte" confere se nenhuma palavra foi cortada — e mostra "Nenhuma palavra cortada".',
         visual: (
           <Shot label="Remover Silêncios · resultado">
             <MStack>
-              <MQueueItem name="ad-hook-03_decupado.mp4" status="PRONTO · −31%" pct={100} tone="lime" />
               <MRow>
-                <MBtn tone="lime">Baixar MP4</MBtn>
-                <MBtn tone="ghost">↓ Baixar todos (ZIP)</MBtn>
+                <MChip tone="lime">Pronto</MChip>
+                <MChip tone="lime">−41% mais curto</MChip>
               </MRow>
+              <MRow>
+                <MField label="Original" value="0:26" />
+                <MField label="Sem silêncio" value="0:15" />
+              </MRow>
+              <MChip tone="lime">Nenhuma palavra cortada · Auditoria do corte</MChip>
             </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Dê o play e baixe',
+        text: 'Dê o play no preview do card pra conferir. Depois, baixe um por um pelo "Baixar MP4" (ou "Baixar MP3"/"Baixar WAV") de cada card — ou todos de uma vez com "↓ Baixar todos (ZIP)".',
+        visual: (
+          <Shot label="Remover Silêncios · download">
+            <MRow>
+              <MBtn tone="lime">Baixar MP4</MBtn>
+              <MBtn tone="ghost">↓ Baixar todos (ZIP)</MBtn>
+            </MRow>
           </Shot>
         ),
       },
     ],
     tips: [
-      'O volume da voz é regulado automaticamente antes do corte ("Regulando a voz") — dois locutores gravados em volumes diferentes saem no mesmo patamar.',
-      'O corte protege o ataque das palavras: nenhuma sílaba é comida no início nem no fim das frases.',
-      'Tudo roda no seu navegador — nada sobe pra servidor. Arquivos grandes (acima de 200 MB) são divididos em partes automaticamente, processados parte a parte ("Parte 2/4 — Cortando silêncios...") e juntados num arquivo só no final.',
+      'Com um arquivo de áudio na fila, o MP4 fica bloqueado ("Só com vídeos na fila") e a saída é em MP3 ou WAV. No plano grátis a saída é sempre em áudio — o MP4 aparece com cadeado.',
+      'Precisa parar? "Cancelar fila" interrompe sem perder o que já ficou pronto; depois o botão vira "Continuar fila (N restantes)".',
+      'O volume da voz é regulado antes do corte — dois locutores gravados em volumes diferentes saem no mesmo patamar.',
+      'Tudo roda no seu navegador — nada sobe pra servidor. Arquivos grandes são divididos em partes automaticamente e juntados num arquivo só no final.',
+      'O arquivo baixado sai com "_decupado" no nome.',
       'Apareceu "Não consegui detectar a fala"? Diminua a tolerância de silêncio e rode de novo.',
     ],
   },
@@ -133,8 +169,8 @@ export const GUIDES: Record<string, ToolGuide> = {
     size: 'large',
     steps: [
       {
-        title: 'Entenda os dois modos: Camuflar e Descamuflar',
-        text: 'No topo da ferramenta tem um seletor com dois modos. "Camuflar" junta dois áudios num arquivo só: o ORIGINAL (o que o público realmente ouve) e o ESCONDIDO (o que a transcrição automática da plataforma vai ler no lugar). "Descamuflar" faz o caminho inverso: recebe um arquivo já camuflado e separa as camadas de volta. Os passos 2 a 5 são do modo Camuflar; os passos 6 e 7, do Descamuflar.',
+        title: 'Abra no modo Camuflar',
+        text: 'No seletor do topo, deixe em "Camuflar".',
         visual: (
           <Shot label="Camuflagem · modo">
             <MRow>
@@ -145,8 +181,29 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
+        title: 'Monte o par: original + escondido',
+        text: 'No card "Original + escondido", cada par tem dois arquivos. Primeiro, o "Áudio original": é o que toca, o que as pessoas ouvem. Depois, o "Áudio escondido": é o que a transcrição vai ler no lugar. Ele pode ser mais curto — o resultado fica com a duração do original.',
+        visual: (
+          <Shot label="Camuflagem · par 1">
+            <MRow>
+              <MField label="Áudio original" value="criativo-v3.mp4" grow />
+              <MField label="Áudio escondido" value="texto-neutro.mp3" grow />
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Mais vídeos? Mais pares',
+        text: 'Tem mais vídeos? Use "+ Adicionar par" — são até 10 pares.',
+        visual: (
+          <Shot label="Camuflagem · pares">
+            <MBtn tone="ghost">+ Adicionar par (1/10)</MBtn>
+          </Shot>
+        ),
+      },
+      {
         title: 'Ajuste a intensidade',
-        text: 'O controle "Volume da camuflagem" vai de 5% a 100% e começa em 30%. Intensidade maior segura melhor a transcrição, mas pode deixar rastros audíveis em fone de ouvido; menor é imperceptível, mas pode não cobrir todos os trechos. Comece no padrão — o selo do passo 5 diz na hora se precisou de mais.',
+        text: 'No card "Intensidade", o "Volume da camuflagem": quanto maior, mais difícil de detectar. Comece nos 30% do padrão.',
         visual: (
           <Shot label="Camuflagem · intensidade">
             <MSlider label="Volume da camuflagem" pct={30} val="30%" />
@@ -154,84 +211,64 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Escolha o formato de saída',
-        text: 'No card "Formato de saída": "MP4" mantém o vídeo original e troca só a trilha de áudio pela versão camuflada (precisa que o arquivo original seja um vídeo); "MP3" e "WAV" entregam só o áudio. O padrão é WAV.',
+        title: 'Escolha a saída',
+        text: 'No card "Formato de saída": "MP4" mantém o vídeo e troca só o áudio; "MP3" e "WAV" entregam só o som.',
         visual: (
           <Shot label="Camuflagem · formato">
             <MRow>
-              <MChip tone="dim">MP4</MChip>
+              <MChip tone="violet">MP4</MChip>
               <MChip tone="dim">MP3</MChip>
-              <MChip tone="violet">WAV</MChip>
+              <MChip tone="dim">WAV</MChip>
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Envie os pares Original + escondido',
-        text: 'No card "Original + escondido", suba o "Áudio original" (o que toca no vídeo — pode ser o próprio MP4) e o "Áudio escondido" (o que a IA vai transcrever). O escondido pode ser mais curto que o original: o resultado mantém a duração do original. Dá pra processar até 10 pares de uma vez com "+ Adicionar par (N/10)". Existe ainda o MODO MUDO (botão de alto-falante no canto do card): com ele ligado você não sobe escondido nenhum — o público ouve o original normalmente e a IA escuta silêncio.',
+        title: 'Clique em Processar tudo',
+        text: 'Clique em "Processar tudo".',
         visual: (
-          <Shot label="Camuflagem · arquivos">
+          <Shot label="Camuflagem · processar">
+            <MBtn tone="primary">Processar tudo</MBtn>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Confira o selo',
+        text: 'Pronto o arquivo, a ferramenta escuta o resultado do jeito que as plataformas escutam e dá o veredito em selos. Selo verde: camuflado. Veio "NÃO CAMUFLADO"? Suba a intensidade e processe de novo.',
+        visual: (
+          <Shot label="Camuflagem · veredito">
+            <MStack>
+              <MChip tone="lime">Camuflado pra TikTok / Kwai / YouTube / Meta</MChip>
+              <MChip tone="amber">Não camuflado → suba a intensidade</MChip>
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Baixe',
+        text: 'Aí é só baixar: um por um ("Baixar MP4/MP3/WAV") ou tudo em "Baixar ZIP (N)".',
+      },
+      {
+        title: 'Descamuflar: o caminho inverso',
+        text: 'O modo "Descamuflar" faz o caminho inverso: separa as camadas de volta. Em "O que recuperar", escolha "Áudio original" ou "Áudio escondido", suba os arquivos camuflados e clique em "Descamuflar tudo".',
+        visual: (
+          <Shot label="Camuflagem · descamuflar">
             <MRow>
-              <div className="flex-1">
-                <MDrop label="Áudio original" sub="o que toca no vídeo" />
-              </div>
-              <div className="flex-1">
-                <MDrop label="Áudio escondido" sub="o que a IA vai ler" />
-              </div>
+              <MChip tone="violet">Áudio original</MChip>
+              <MChip tone="dim">Áudio escondido</MChip>
+              <MBtn tone="primary">Descamuflar tudo</MBtn>
             </MRow>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Processe e confie no selo',
-        text: 'Clique em "Processar tudo". Depois de camuflar, a ferramenta verifica sozinha o arquivo final do mesmo jeito que as IAs das plataformas escutam, e mostra o veredito por plataforma: selo verde "CAMUFLADO PRA TIKTOK / KWAI / YOUTUBE / META" significa que essas IAs escutam o áudio escondido — pode publicar. Veio "NÃO CAMUFLADO"? Suba a intensidade e processe de novo. O botão de transcrever no card mostra o texto exato que a IA leu, pra você conferir com os próprios olhos. Baixe cada resultado ("Baixar MP4/MP3/WAV") ou tudo junto com "Baixar ZIP (N)". Nunca publique sem o selo verde.',
-        visual: (
-          <Shot label="Camuflagem · validação">
-            <MStack>
-              <MChip tone="lime">CAMUFLADO ✓ · TIKTOK · KWAI · YOUTUBE · META</MChip>
-              <MRow>
-                <MBtn tone="lime">Baixar WAV</MBtn>
-                <MBtn tone="ghost">Baixar ZIP (3)</MBtn>
-              </MRow>
-            </MStack>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Descamuflar: recupere qualquer camada',
-        text: 'Troque pro modo "Descamuflar" no seletor do topo. No card "O que recuperar", escolha: "Áudio original" devolve a voz limpa que o público ouvia (remove a camada escondida); "Áudio escondido" extrai a trilha que estava embutida pra IA — útil pra conferir o que tinha dentro de um arquivo camuflado. Suba os arquivos no card "Arquivos camuflados" (até 10, com "+ Adicionar arquivo") e clique em "Descamuflar tudo". Cada resultado sai com player pra ouvir e botão de download — nomeado "_original" ou "_escondido", conforme o que você recuperou.',
-        visual: (
-          <Shot label="Descamuflar · o que recuperar">
-            <MStack>
-              <MRow>
-                <MBtn tone="primary">Áudio original</MBtn>
-                <MBtn tone="dark">Áudio escondido</MBtn>
-              </MRow>
-              <MDrop label="Arquivo camuflado" sub="áudio ou vídeo estéreo já camuflado" />
-              <MBtn tone="lime">Descamuflar tudo</MBtn>
-            </MStack>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Troque o escondido sem regravar nada',
-        text: 'Ainda no modo Descamuflar, o botão "Trocar áudio escondido" (no canto do card de arquivos) ativa a troca direta: você sobe o arquivo camuflado + um "Novo áudio escondido", ajusta a "Intensidade do novo escondido" e clica em "Trocar escondido e camuflar". A ferramenta recupera o áudio original, descarta o escondido antigo e embute o novo no lugar — validando no final ("NOVO ESCONDIDO EMBUTIDO"). O download sai como "_escondido-trocado".',
-        visual: (
-          <Shot label="Descamuflar · trocar escondido">
-            <MStack>
-              <MToggle on label="Trocar áudio escondido" />
-              <MDrop label="Novo áudio escondido" sub="entra no lugar do antigo" />
-              <MBtn tone="primary">Trocar escondido e camuflar</MBtn>
-            </MStack>
           </Shot>
         ),
       },
     ],
     tips: [
-      'O selo é medido no arquivo real, depois de pronto — não é estimativa. Se ficou verde, é porque a transcrição devolveu o áudio escondido.',
-      'A camuflagem funciona em áudio estéreo. Arquivo mono não tem camada pra separar — no Descamuflar a ferramenta avisa e devolve o áudio como está.',
-      'A camuflagem mira a transcrição automática das plataformas. Não existe garantia universal contra todo detector — por isso o selo existe: valide sempre antes de publicar.',
-      'A verificação usa Transcrição, e aqui é a chave do AssemblyAI especificamente (a Groq não separa os canais) — se estiver faltando, o banner "Chave pendente" aponta direto pro botão "Configurar →".',
+      'Nunca publique sem o selo verde: ele é medido no arquivo real, depois de pronto — não é estimativa. O botão "Transcrever (ouvir como a IA)" mostra o texto exato que a IA leu.',
+      'Pra sair em MP4, o áudio original precisa ser um arquivo de vídeo.',
+      'Modo mudo (botão de alto-falante no card dos pares): camufla sem áudio escondido — o público ouve o original e a IA escuta silêncio.',
+      'No Descamuflar, o "Trocar áudio escondido" sobe um novo escondido no lugar do antigo, mantendo o áudio original.',
+      'A camuflagem funciona em áudio estéreo; arquivo mono não tem camada pra separar.',
+      'A conferência do selo usa a chave do AssemblyAI (a do Groq não serve pra conferir). Sem ela, a camuflagem funciona — só a conferência fica desligada.',
     ],
   },
 
@@ -240,77 +277,79 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Baixa vídeos, áudios e imagens do YouTube, Instagram, TikTok e Pinterest.',
     steps: [
       {
-        title: 'Instale o Motor + a Extensão (uma vez só)',
-        text: 'O Downloader usa duas peças que você instala uma única vez: o Motor (card "Passo 01 — Instalar o Motor", que faz o download pesado no seu próprio computador) e a Extensão do Chrome (card "Passo 02 — Baixar Extensão"). O passo 01 muda sozinho conforme o seu sistema: no Windows é um .exe de 1 clique — se aparecer a tela azul do SmartScreen, clique em "Mais informações" e depois "Executar assim mesmo"; no Mac é um comando que você copia e cola no Terminal (Command + Espaço, escreva "Terminal"), que instala e no fim testa a si mesmo. O bloco "Instruções detalhadas" mostra cada passo. Quando tudo estiver certo, o card mostra o ponto verde com "Auto Edit · Downloader" e o selo "✓ motor online".',
+        title: 'Entenda as duas peças',
+        text: 'O Downloader usa duas peças, instaladas uma vez só: a extensão, um complemento do Chrome, e o Motor, um programinha que faz o download no seu computador. As duas ficam no card "Sua conexão".',
+      },
+      {
+        title: 'Baixe e extraia a extensão',
+        text: 'Clique em "Baixar extensão": o arquivo ZIP vai pra sua pasta de Downloads. Clique nele com o botão direito, em "Extrair tudo" e depois em "Extrair".',
         visual: (
-          <Shot label="Downloader · setup">
-            <MStack>
-              <MRow>
-                <MBtn tone="primary">Instalar o Motor</MBtn>
-                <MBtn tone="ghost">Baixar Extensão</MBtn>
-              </MRow>
-              <MRow>
-                <MChip tone="lime">AUTO EDIT · DOWNLOADER</MChip>
-                <MChip tone="lime">✓ MOTOR ONLINE</MChip>
-              </MRow>
-            </MStack>
+          <Shot label="Downloader · sua conexão">
+            <MRow>
+              <MBtn tone="primary">Baixar extensão</MBtn>
+              <MBtn tone="ghost">Instalar Motor</MBtn>
+            </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Cole os links',
-        text: 'Um link por linha, quantos quiser — o contador "Detectados" mostra quantos links válidos a ferramenta reconheceu. Pode misturar plataformas na mesma leva: um Reel do Instagram, um vídeo do YouTube, um TikTok e um pin do Pinterest descem juntos. Links encurtados (pin.it, vm.tiktok) funcionam normalmente.',
+        title: 'Carregue a extensão no Chrome',
+        text: 'No Chrome, abra o menu dos três pontinhos → "Extensões" → "Gerenciar extensões" e ligue o "Modo do desenvolvedor", no canto de cima. Clique em "Carregar sem compactação" e escolha a pasta que você extraiu. Pronto: a extensão aparece na lista.',
         visual: (
-          <Shot label="Downloader · links">
-            <MStack>
-              <MField value="https://youtube.com/watch?v=..." />
-              <MField value="https://www.instagram.com/reel/..." />
-              <MField value="https://pin.it/..." />
-              <MChip tone="dim">DETECTADOS · 3 LINKS</MChip>
-            </MStack>
+          <Shot label="Chrome · extensões">
+            <MRow>
+              <MToggle on label="Modo do desenvolvedor" />
+              <MBtn tone="ghost">Carregar sem compactação</MBtn>
+            </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Escolha formato e qualidade',
-        text: 'No card "Formato": "Vídeo" (arquivo completo), "Áudio MP3" ou "Áudio WAV" (só o som, extraído do vídeo). Escolhendo Vídeo, aparece a linha "Qualidade": 1080p, 720p, 480p ou Máxima. A escolha vale pra leva inteira — se precisar de formatos diferentes, rode em duas levas. Imagens (como pins do Pinterest) baixam direto como mídia, sem precisar escolher nada.',
+        title: 'Instale o Motor',
+        text: 'Clique em "Instalar Motor", abra o arquivo que baixou e espere a janela confirmar a instalação.',
+      },
+      {
+        title: 'Verifique a conexão',
+        text: 'Volte pro Downloader e clique em "Verificar conexão". Tudo verde — "Tudo pronto para baixar": pode usar.',
         visual: (
-          <Shot label="Downloader · formato">
-            <MStack>
-              <MRow>
-                <MChip tone="violet">VÍDEO</MChip>
-                <MChip tone="dim">ÁUDIO MP3</MChip>
-                <MChip tone="dim">ÁUDIO WAV</MChip>
-              </MRow>
-              <MRow>
-                <MChip tone="violet">1080P</MChip>
-                <MChip tone="dim">720P</MChip>
-                <MChip tone="dim">480P</MChip>
-                <MChip tone="dim">MÁXIMA</MChip>
-              </MRow>
-            </MStack>
+          <Shot label="Downloader · conexão">
+            <MRow>
+              <MChip tone="lime">Tudo pronto para baixar</MChip>
+              <MBtn tone="ghost">Verificar conexão</MBtn>
+            </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Baixe e acompanhe cada link',
-        text: 'Clique em "Baixar N arquivos". Cada link vira um card com a plataforma detectada e o status ao vivo: "fila" → "localizando" → porcentagem baixando → "ok". Vários links baixam em paralelo, com download acelerado. Os arquivos caem na sua pasta de Downloads com nome limpo. Um link que falhar mostra "erro" no próprio card — os outros seguem normalmente.',
+        title: 'Baixe direto do vídeo',
+        text: 'Abra um vídeo no YouTube: o botão de baixar aparece no canto da tela. Um clique… e o vídeo vai direto pra sua pasta de Downloads. No Instagram é igual: abra o Reels e clique no botão. Funciona também no TikTok, no Pinterest e em sites +18.',
+      },
+      {
+        title: 'Vários de uma vez',
+        text: 'Cole os links no card "Links", um por linha, escolha o "Formato" e a "Qualidade" e clique em "Baixar N arquivos".',
         visual: (
-          <Shot label="Downloader · baixando">
+          <Shot label="Downloader · vários links">
             <MStack>
-              <MBtn tone="lime">Baixar 3 arquivos</MBtn>
-              <MQueueItem name="reel-cliente.mp4 · Instagram" status="62%" pct={62} />
-              <MQueueItem name="video-ref.mp4 · YouTube" status="ok" pct={100} tone="lime" />
+              <MField label="Links" value="https://www.youtube.com/watch?v=…" />
+              <MRow>
+                <MChip tone="violet">Vídeo</MChip>
+                <MChip tone="dim">Áudio MP3</MChip>
+                <MChip tone="dim">Áudio WAV</MChip>
+                <MChip tone="violet">1080p</MChip>
+                <MBtn tone="primary">Baixar 3 arquivos</MBtn>
+              </MRow>
             </MStack>
           </Shot>
         ),
       },
     ],
     tips: [
+      'Baixe só o que você tem direito de usar. Links privados exigem login na plataforma.',
+      'No Windows, se aparecer a tela azul do SmartScreen ao abrir o Motor, clique em "Mais informações" e depois "Executar assim mesmo". Se o instalador não abrir, use a "versão ZIP" no mesmo card.',
+      'No Mac, o Motor está em teste fechado: o Instagram (pela extensão) e o TikTok em vídeo funcionam sem ele; YouTube e Pinterest precisam do Motor.',
+      'Apareceu "Extensão conectada. Abra o Motor."? Abra o "Auto Edit Downloader" no menu Iniciar e clique em "Verificar conexão" de novo.',
+      'Pra colar links de sites +18 na lista, ligue o botão "+18" do card de links.',
       'TikTok sai sem marca d’água e em HD; Pinterest baixa a mídia direta.',
-      'Apareceu "Motor desconectado"? No Windows, abra o atalho "Auto Edit Downloader" no menu Iniciar; no Mac, rode de novo o comando do passo 01 no Terminal (ele reinstala por cima sem bagunçar nada). Depois clique em "↻ Verificar de novo" — a página re-testa sozinha a cada 5 segundos.',
-      'Antivírus bloqueou o instalador no Windows? Use o botão "↓ Baixar versão ZIP (alternativa)" no mesmo card. No Mac isso não acontece: o comando do Terminal não passa pela trava do Gatekeeper.',
-      'Links privados exigem login na plataforma. Baixe apenas conteúdo que você tem direito de usar.',
     ],
   },
 
@@ -319,64 +358,81 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Reduz o peso dos vídeos sem perda visível — com previsão de tamanho antes de processar.',
     steps: [
       {
-        title: 'Solte os vídeos',
-        text: 'No card "Solta os vídeos", arraste até 20 arquivos MP4, WEBM ou MOV, de até 2 GB cada (esta ferramenta é só pra vídeo; arquivo maior é recusado na hora, com aviso). Até 5 comprimem ao mesmo tempo; os demais aguardam a vez sozinhos. Assim que os arquivos entram, o topo mostra as métricas do lote: "Arquivos", "Entrada" (peso total), "Duração" e "Previsão" — o tamanho estimado da saída com o ajuste atual.',
+        title: 'Adicione seus vídeos',
+        text: 'No card "Adicione seus vídeos", arraste ou clique. São até 20 arquivos, MP4, MOV ou WEBM, com até 2 GB cada.',
         visual: (
-          <Shot label="Compressor · fila">
-            <MStack>
-              <MDrop label="Arraste ou clique pra subir" sub="MP4, WEBM ou MOV — até 20 por lote" />
-              <MRow>
-                <MChip tone="dim">ENTRADA · 312 MB</MChip>
-                <MChip tone="violet">PREVISÃO · ~118 MB</MChip>
-              </MRow>
-            </MStack>
+          <Shot label="Compressor · vídeos">
+            <MDrop label="Adicione seus vídeos" sub="Até 20 arquivos · MP4, WEBM ou MOV · até 2 GB cada" />
           </Shot>
         ),
       },
       {
-        title: 'Ajuste a qualidade olhando a previsão',
-        text: 'O controle "CRF" vai de 18 (alta qualidade) a 35 (menor arquivo) — padrão 23. A cada movimento do controle, a métrica "Previsão" e a linha "prev." de cada vídeo recalculam na hora, então você acerta o alvo sem tentativa e erro: precisa caber num limite de upload? Vá subindo o CRF até a previsão bater. Pra vídeo publicado em rede social, dá pra comprimir bastante sem diferença visível.',
+        title: 'Leia o resumo',
+        text: 'O resumo mostra quantos "Arquivos", o tamanho ("Entrada"), a "Duração"… e a "Previsão" de quanto vai sobrar.',
         visual: (
-          <Shot label="Compressor · qualidade">
-            <MSlider label="CRF" pct={30} val="23" />
-          </Shot>
-        ),
-      },
-      {
-        title: 'Escolha a resolução',
-        text: 'No card "Resolução": "Original" preserva o tamanho exato do quadro; "1080p", "720p" ou "480p" reduzem a resolução e cortam ainda mais o peso. Pra feed e stories, 1080p é mais que suficiente.',
-        visual: (
-          <Shot label="Compressor · resolução">
+          <Shot label="Compressor · resumo">
             <MRow>
-              <MChip tone="violet">ORIGINAL</MChip>
-              <MChip tone="dim">1080P</MChip>
-              <MChip tone="dim">720P</MChip>
-              <MChip tone="dim">480P</MChip>
+              <MField label="Arquivos" value="3" />
+              <MField label="Entrada" value="141.5 MB" />
+              <MField label="Duração" value="1min 15s" />
+              <MField label="Previsão" value="~86.8 MB" />
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Comprima e compare o real com o previsto',
-        text: 'Clique em "Comprimir N vídeos". Durante o processo, os chips mostram o pool ao vivo: "Rodando · n/5", "Fila" e "Concluídos". Cada vídeo pronto exibe a comparação completa — tamanho de entrada → saída, a redução em % e quão perto a previsão chegou do resultado real — e a barra "Você economizou" soma o total do lote. Baixe um a um pelo "Baixar" de cada card ou tudo junto com "Baixar ZIP (N)".',
+        title: 'Ajuste a qualidade',
+        text: 'No card "Qualidade", o controle "Compressão": pra esquerda ("Alta qualidade"), imagem mais fiel; pra direita ("Menor arquivo"), arquivo menor. A previsão muda na hora, enquanto você arrasta. Na dúvida, fique no 23, o padrão.',
+        visual: (
+          <Shot label="Compressor · qualidade">
+            <MSlider label="Compressão" pct={29} val="23" />
+          </Shot>
+        ),
+      },
+      {
+        title: 'Quer reduzir mais? Baixe a resolução',
+        text: 'No card "Resolução", escolha "1080p", "720p" ou "480p" ("Original" mantém o tamanho do quadro).',
+        visual: (
+          <Shot label="Compressor · resolução">
+            <MRow>
+              <MChip tone="dim">Original</MChip>
+              <MChip tone="violet">1080p</MChip>
+              <MChip tone="dim">720p</MChip>
+              <MChip tone="dim">480p</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Clique em Comprimir',
+        text: 'Clique em "Comprimir N vídeos". Até cinco vídeos rodam ao mesmo tempo.',
+        visual: (
+          <Shot label="Compressor · comprimir">
+            <MBtn tone="primary">Comprimir 3 vídeos</MBtn>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Compare o antes e o depois',
+        text: 'Cada vídeo mostra o tamanho de antes, o de depois e quanto encolheu. No final, "Você economizou" mostra o total.',
         visual: (
           <Shot label="Compressor · resultado">
             <MStack>
-              <MRow>
-                <MChip tone="violet">RODANDO · 3/5</MChip>
-                <MChip tone="dim">FILA · 2</MChip>
-                <MChip tone="lime">CONCLUÍDOS · 4</MChip>
-              </MRow>
-              <MQueueItem name="criativo-final.mp4" status="62% menor" pct={100} tone="lime" />
-              <MBtn tone="lime">Baixar ZIP (4)</MBtn>
+              <MQueueItem name="depoimento-cliente.mp4" status="47.5 MB → 10.3 MB · 78% menor" pct={100} tone="lime" />
+              <MChip tone="lime">Você economizou</MChip>
             </MStack>
           </Shot>
         ),
+      },
+      {
+        title: 'Baixe',
+        text: 'Baixe um por um ("Baixar") ou todos de uma vez com "Baixar ZIP (N)".',
       },
     ],
     tips: [
       'A saída é sempre MP4, independente do formato de entrada.',
       'Tudo roda no seu navegador — os vídeos não sobem pra nenhum servidor.',
+      'O número do controle "Compressão" vai de 18 (alta qualidade) a 35 (menor arquivo). Precisa caber num limite de upload? Vá subindo até a previsão bater.',
     ],
   },
 
@@ -385,8 +441,8 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Quebra um áudio longo em partes, cortando apenas nas pausas — sem partir frase.',
     steps: [
       {
-        title: 'Envie o arquivo',
-        text: 'Um arquivo por vez: MP3, WAV, MP4, WEBM ou OGG. Se você subir um vídeo, a ferramenta aproveita só a trilha de áudio e descarta a imagem.',
+        title: 'Suba o arquivo',
+        text: 'No card "Áudio ou vídeo", suba o arquivo: MP3, WAV, MP4, WEBM ou OGG.',
         visual: (
           <Shot label="Dividir Voz · arquivo">
             <MDrop label="Selecione ou arraste um arquivo" sub="MP3, WAV, MP4, WEBM ou OGG" />
@@ -394,26 +450,46 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Entenda onde a ferramenta corta',
-        text: 'A divisão procura as pausas mais longas da fala e quebra em partes equilibradas — cerca de 4 partes por minuto de fala, nunca no meio de uma frase. Por isso as partes saem com durações diferentes entre si: o corte respeita o ritmo de quem fala, não um relógio. Importante: esta ferramenta DIVIDE o áudio; ela não remove silêncios — pra isso, use a Remover Silêncios (a própria tela indica o caminho).',
+        title: 'Entenda o critério',
+        text: 'O "Critério de divisão" é automático: ele procura as pausas mais longas da fala e divide em partes equilibradas, mais ou menos quatro por minuto. O corte acontece sempre numa pausa, nunca no meio de uma palavra.',
       },
       {
-        title: 'Processe, ouça e baixe',
-        text: 'Clique em "Processar" e acompanhe o status ("Carregando...", "Dividindo...", "Gerando arquivos..."). O resultado lista cada parte numerada com duração e player próprio — ouça o fim de uma e o começo da seguinte pra conferir a emenda. Baixe cada parte pelo "Baixar" (saem como parte1.wav, parte2.wav...) ou pegue tudo com "Baixar ZIP".',
+        title: 'Clique em Processar',
+        text: 'Clique em "Processar". Pronto: ele mostra quantas partes saíram.',
         visual: (
-          <Shot label="Dividir Voz · resultado">
+          <Shot label="Dividir Voz · processar">
+            <MRow>
+              <MBtn tone="primary">Processar</MBtn>
+              <MChip tone="lime">5 partes · Pausas detectadas</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Ouça cada parte',
+        text: 'Cada parte tem a duração e um player pra você ouvir antes de baixar.',
+        visual: (
+          <Shot label="Dividir Voz · partes">
             <MStack>
-              <MQueueItem name="Parte 1 · 0:19" status="pronta" pct={100} tone="lime" />
-              <MQueueItem name="Parte 2 · 0:22" status="pronta" pct={100} tone="lime" />
-              <MBtn tone="lime">Baixar ZIP</MBtn>
+              <MQueueItem name="Parte 1 · 0:12" status="Baixar" pct={100} tone="lime" />
+              <MQueueItem name="Parte 2 · 0:15" status="Baixar" pct={100} tone="lime" />
             </MStack>
           </Shot>
         ),
       },
+      {
+        title: 'Baixe',
+        text: 'Baixe só a que precisa ("Baixar") ou todas de uma vez com "Baixar ZIP".',
+      },
+      {
+        title: 'Quer tirar os silêncios?',
+        text: 'Se o que você quer é tirar os silêncios, e não dividir, use o Remover Silêncios.',
+      },
     ],
     tips: [
-      'As partes saem sempre em WAV — qualidade máxima pra próxima etapa do fluxo.',
+      'As partes saem sempre em WAV (parte1.wav, parte2.wav...) — qualidade máxima pra próxima etapa.',
       'Partes com durações diferentes entre si é o comportamento certo: o corte segue as pausas reais da fala.',
+      'Subiu um vídeo? A ferramenta aproveita só a trilha de áudio.',
     ],
   },
 
@@ -422,49 +498,61 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Acelera ou desacelera vídeo e áudio em lote, sem a voz ficar robótica.',
     steps: [
       {
-        title: 'Solte os arquivos',
-        text: 'Até 20 vídeos ou áudios na mesma fila (MP3, WAV, MP4, WEBM ou MOV) — todos vão sair na velocidade que você definir no próximo passo.',
+        title: 'Adicione os arquivos',
+        text: 'No card "Arquivos", adicione vídeo ou áudio: até 20 por vez (MP3, WAV, MP4, WEBM ou MOV).',
         visual: (
-          <Shot label="Mixer · fila">
-            <MDrop label="Selecione ou arraste arquivos" sub="MP3, WAV, MP4, WEBM ou MOV — até 20 por lote" />
+          <Shot label="Mixer · arquivos">
+            <MDrop label="Arraste ou clique pra subir" sub="Até 20 · MP3, WAV, MP4, WEBM ou MOV" />
           </Shot>
         ),
       },
       {
         title: 'Defina a velocidade',
-        text: 'Arraste o controle entre 0.5x (metade) e 3.0x (o triplo), ou toque num atalho pronto: 0.75x, 0.85x, 1.00x, 1.25x, 1.50x ou 2.00x. O tom da voz é corrigido automaticamente — em 1.5x a fala fica mais rápida mas continua soando humana, sem efeito "esquilo". Pra dar ritmo num anúncio sem chamar atenção, 1.25x é o atalho que costuma passar despercebido. Repare: em 1.00x o botão de processar fica desativado — não há o que mudar.',
+        text: 'No card "Velocidade", arraste de 0.5x até 3x… ou use os atalhos, como 1.25x, 1.5x e 2x. Acima de 1, acelera; abaixo, desacelera. E o tom da voz não muda.',
         visual: (
           <Shot label="Mixer · velocidade">
             <MStack>
-              <MSlider label="Acelerando" pct={40} val="1.50x" />
+              <MSlider label="Velocidade" pct={40} val="1.50x" />
               <MRow>
-                <MChip tone="dim">0.75x</MChip>
-                <MChip tone="dim">0.85x</MChip>
-                <MChip tone="dim">1.00x</MChip>
-                <MChip tone="violet">1.25x</MChip>
-                <MChip tone="dim">1.50x</MChip>
-                <MChip tone="dim">2.00x</MChip>
+                <MChip tone="dim">1.25x</MChip>
+                <MChip tone="violet">1.5x</MChip>
+                <MChip tone="dim">2x</MChip>
               </MRow>
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Escolha o formato de saída',
-        text: 'No card "Formato de saída": "MP4" (vídeo), "MP3" ou "WAV" (áudio). Se a fila só tiver arquivos de áudio, o MP4 desativa sozinho — é o esperado. E se a fila for de vídeos mas você escolher saída de áudio, a imagem é descartada e sai só o som acelerado (a tela avisa).',
-      },
-      {
-        title: 'Processe e baixe',
-        text: 'O botão principal acompanha o ajuste: "Acelerar N" acima de 1x, "Desacelerar N" abaixo. Cada item mostra a porcentagem ao vivo e, pronto, libera o próprio "Baixar" — o arquivo sai com a velocidade no nome (ex.: "_1.5x"). No fim, "Baixar ZIP (N)" pega tudo de uma vez.',
+        title: 'Escolha a saída',
+        text: 'No card "Formato de saída": MP4 mantém o vídeo; MP3 e WAV, só o áudio. Com um áudio na fila, o MP4 fica bloqueado.',
         visual: (
-          <Shot label="Mixer · processar">
-            <MStack>
-              <MBtn tone="lime">Acelerar 3</MBtn>
-              <MQueueItem name="ad-final_1.5x.mp4" status="OK" pct={100} tone="lime" />
-            </MStack>
+          <Shot label="Mixer · formato de saída">
+            <MRow>
+              <MChip tone="violet">MP4</MChip>
+              <MChip tone="dim">MP3</MChip>
+              <MChip tone="dim">WAV</MChip>
+            </MRow>
           </Shot>
         ),
       },
+      {
+        title: 'Clique em Acelerar',
+        text: 'Clique em "Acelerar N" (abaixo de 1x, o botão vira "Desacelerar N").',
+        visual: (
+          <Shot label="Mixer · processar">
+            <MBtn tone="primary">Acelerar 3</MBtn>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Baixe',
+        text: 'Cada arquivo sai com a velocidade no nome (ex.: "_1.5x"). Baixe um por um ("Baixar") ou todos com "Baixar ZIP (N)".',
+      },
+    ],
+    tips: [
+      'Os atalhos são 0.75x, 0.85x, 1.00x, 1.25x, 1.5x e 2x. Em 1.00x o arquivo sairia igual ao original — por isso o botão só ativa quando a velocidade muda.',
+      'Com vídeo na fila e saída em MP3/WAV, a imagem é descartada e só o áudio acelerado é exportado (a tela avisa).',
+      'Pra dar ritmo num anúncio sem chamar atenção, 1.25x costuma passar despercebido.',
     ],
   },
 
@@ -473,82 +561,89 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Prints e stickers de redes sociais, telejornais e sites de notícia — fiéis aos originais.',
     steps: [
       {
-        title: 'Escolha o modelo',
-        text: 'Os modelos ficam em dois grupos. "Redes sociais": Stickers de Story (Caixinha de Pergunta, Enquete, Quiz, Slider de Emoji, Contagem Regressiva, Localização, Menção), Conversas (Instagram DM e WhatsApp), Posts (Post do Instagram, Tweet / X, Comentários), Notificações (tela de bloqueio iPhone/Android) e Lives (Live do TikTok e Live do Instagram, com comentários e reações animadas). "Notícias & TV": Telejornais por emissora (CNN, BBC, Fox News, GloboNews, CNN Brasil, Record News e outras) e Sites de notícia (G1, Folha, UOL, BBC, Reuters e mais). Clique no card do modelo pra abrir os controles dele.',
+        title: 'Escolha o tipo',
+        text: 'Escolha o tipo de print: Stickers de Story, Conversas, Posts, Notificações, Lives, Reuniões, Telejornais e Sites de notícia. Clique no card do modelo pra abrir os campos dele.',
         visual: (
-          <Shot label="FakePrint · categorias">
+          <Shot label="FakePrint · tipos">
             <MRow>
-              <MChip tone="violet">STICKERS DE STORY</MChip>
-              <MChip tone="dim">CONVERSAS</MChip>
-              <MChip tone="dim">POSTS</MChip>
-              <MChip tone="dim">NOTIFICAÇÕES</MChip>
-              <MChip tone="dim">LIVES</MChip>
-              <MChip tone="dim">TELEJORNAIS</MChip>
-              <MChip tone="dim">SITES DE NOTÍCIA</MChip>
+              <MChip tone="dim">Stickers de Story</MChip>
+              <MChip tone="violet">Conversas</MChip>
+              <MChip tone="dim">Posts</MChip>
+              <MChip tone="dim">Lives</MChip>
+              <MChip tone="dim">Telejornais</MChip>
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Preencha os campos do modelo',
-        text: 'Cada modelo mostra só os campos que ele usa — nomes, textos, fotos, curtidas, horários — e a "Prévia" do lado direito atualiza a cada tecla: o que você vê é exatamente o que sai no PNG. Nas Conversas, cada linha do campo vira uma mensagem; comece a linha com ">" pra mensagem ser sua (lado direito) e escreva "audio 0:07" pra virar um balão de áudio. Nos Comentários, o formato é "usuário: texto", com ✓ no fim do nome pra selo de verificado.',
+        title: 'Monte a conversa (ex.: WhatsApp)',
+        text: 'Em Conversas, abra o WhatsApp. Preencha o "Nome" do contato, o "Status"… e a "Conversa": cada mensagem pode ser texto, áudio, imagem (foto) ou vídeo, e você escolhe quem fala — "Eu" ou "Contato". A "Prévia" atualiza a cada tecla.',
         visual: (
-          <Shot label="FakePrint · conversa">
+          <Shot label="FakePrint · WhatsApp">
             <MStack>
-              <MField label="Nome" value="Dra. Helena" />
-              <MField label="Conversa" value="> essa linha é a sua mensagem" />
+              <MRow>
+                <MField label="Nome" value="Dra. Ana" grow />
+                <MField label="Status" value="online" grow />
+              </MRow>
+              <MRow>
+                <MChip tone="violet">Eu</MChip>
+                <MChip tone="dim">Contato</MChip>
+                <MChip tone="dim">Texto</MChip>
+                <MChip tone="dim">Áudio</MChip>
+                <MChip tone="dim">Imagem</MChip>
+                <MChip tone="dim">Vídeo</MChip>
+              </MRow>
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Ajuste a barra de status do celular',
-        text: 'Nos modelos que simulam a tela do celular, o bloco "Barra de status do celular" é o detalhe que separa um print convincente de um print óbvio: escolha iPhone ou Android, acerte a "Hora" pra bater com a história do criativo, e ajuste "Operadora", "Sinal", rede (5G/4G/LTE), "Wi-Fi", "Bateria" e até o indicador de "Carregando". Uma bateria em 63% às 21:47 conta uma história; 100% às 9:00 conta outra.',
+        title: 'Ajuste a barra do celular',
+        text: 'O detalhe que convence: no bloco "Barra de status do celular", escolha iPhone ou Android e acerte a hora, a bateria e o sinal.',
         visual: (
           <Shot label="FakePrint · barra de status">
             <MRow>
-              <MChip tone="violet">IPHONE</MChip>
+              <MChip tone="violet">iPhone</MChip>
+              <MChip tone="dim">Android</MChip>
               <MField label="Hora" value="21:47" />
-              <MField label="Operadora" value="Vivo" />
               <MField label="Bateria" value="63%" />
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Telejornal ou site? Monte a cena',
-        text: 'Os modelos de TV têm "Formato" (16:9 pra TV ou 9:16 pra Reels — os dois exportam em alta), "Layout da cena" (1, 2 ou 3 quadros, ou Repórter) e o "Fundo": a opção "Tela verde" gera o cenário em chroma key, pronto pra você encaixar qualquer imagem ou vídeo por trás dos gráficos no editor. Manchete, tag do assunto, hora, local e ticker são todos editáveis. E além do PNG, os telejornais também têm "Exportar vídeo (.webm)": o gráfico sai VIVO — relógio rodando, ticker deslizando e a bolinha do "ao vivo" pulsando (3 a 15 segundos) — pronto pra sobrepor no editor. Nos sites de notícia funciona igual: manchete, linha de apoio, autor e primeiro parágrafo, com a imagem principal também podendo sair em tela verde.',
+        title: 'Baixe o PNG',
+        text: 'Clique em "Baixar PNG": a imagem sai em alta, pronta pro seu vídeo.',
         visual: (
-          <Shot label="FakePrint · telejornal">
-            <MRow>
-              <MChip tone="dim">16:9 (TV)</MChip>
-              <MChip tone="violet">9:16 (REELS)</MChip>
-              <MChip tone="lime">TELA VERDE</MChip>
-            </MRow>
+          <Shot label="FakePrint · download">
+            <MBtn tone="lime">Baixar PNG</MBtn>
           </Shot>
         ),
       },
       {
-        title: 'Live? Dá pra exportar em vídeo',
-        text: 'Nas Lives (TikTok e Instagram) a prévia é animada: as reações sobem e os comentários rolam sozinhos. Preencha as visualizações, os comentários (um por linha, "usuário: mensagem"), a foto de perfil e a cor do selo. Além do PNG, o botão "Exportar vídeo (.webm)" grava a animação (escolha de 3 a 15 segundos) — e com o "Fundo verde (chroma key)" ligado é só sobrepor no editor e remover o verde: a live anima por cima do seu criativo.',
+        title: 'Telejornal',
+        text: 'Em Telejornais, escolha o canal, escreva a "Manchete" e o texto da faixa ("Sub-manchete").',
+        visual: (
+          <Shot label="FakePrint · telejornal">
+            <MStack>
+              <MField label="Manchete" value="Nova regra muda o preço da conta de luz" />
+              <MField label="Sub-manchete" value="Entenda o que muda a partir de novembro" />
+            </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Site de notícia',
+        text: 'Em Sites de notícia, é a matéria inteira: título ("Manchete"), linha fina ("Linha de apoio"), foto ("Imagem principal") e data ("Quando").',
+      },
+      {
+        title: 'Live? Exporte em vídeo',
+        text: 'Nas Lives, a prévia é animada: dá pra "Exportar vídeo" com fundo verde (em "Fundo", escolha "Chroma key"), pra sobrepor no seu criativo.',
         visual: (
           <Shot label="FakePrint · live">
             <MRow>
-              <MChip tone="violet">LIVE DO TIKTOK</MChip>
-              <MChip tone="dim">LIVE DO INSTAGRAM</MChip>
-              <MChip tone="lime">EXPORTAR VÍDEO (.WEBM)</MChip>
-            </MRow>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Baixe o PNG em alta',
-        text: 'Confira a prévia uma última vez e clique em "Baixar PNG". A imagem sai em alta resolução — 1080px na maioria dos modelos, mais nos formatos largos (Tweet, sites e telejornais 16:9) — nítida o bastante pra ser ampliada dentro de um vídeo sem serrilhar.',
-        visual: (
-          <Shot label="FakePrint · export">
-            <MRow>
-              <MBtn tone="lime">Baixar PNG</MBtn>
-              <MChip tone="dim">ALTA RESOLUÇÃO · PRONTA PRA POSTAR</MChip>
+              <MChip tone="violet">Chroma key</MChip>
+              <MBtn tone="primary">Exportar vídeo</MBtn>
             </MRow>
           </Shot>
         ),
@@ -556,6 +651,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     ],
     tips: [
       'Os emojis saem no estilo do aparelho escolhido: Apple no iPhone, Google no Android — igual ao print real.',
+      'Os telejornais também exportam em vídeo (relógio e ticker animados) e têm "Formato" 16:9, 9:16 ou 4:5, "Layout da cena" e fundo "Tela verde" pra encaixar sua imagem por trás.',
       'No modelo Bem Estar (entrevista) dá pra escolher 1 ou 2 pessoas no quadro.',
     ],
   },
@@ -673,52 +769,70 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Sua copy vira legenda com os tempos extraídos do áudio — palavra por palavra.',
     steps: [
       {
-        title: 'Envie o áudio ou vídeo',
-        text: 'Solte o arquivo na área de upload — MP3, WAV, MP4, MOV ou WEBM, até 800 MB e 60 minutos. Assim que entra, a página mostra o "Tamanho" e a "Duração" detectados. Vídeo funciona igual áudio: a trilha sonora é extraída sozinha.',
+        title: 'Entenda o SRT',
+        text: 'SRT é o arquivo de legenda: cada frase com o momento exato em que aparece e some. Os editores de vídeo, como o CapCut e o Premiere, leem esse arquivo.',
+      },
+      {
+        title: 'Suba o áudio ou o vídeo',
+        text: 'No card "Áudio ou vídeo", suba o arquivo: MP3, WAV, MP4, MOV ou WEBM, até 800 MB e 60 minutos.',
         visual: (
           <Shot label="Gerador de SRT · arquivo">
-            <MDrop label="Arraste ou clique pra subir" sub="MP3, WAV, MP4, MOV, WEBM — até 800MB e 60min" />
+            <MDrop label="Áudio ou vídeo" sub="MP3, WAV, MP4, MOV ou WEBM · até 800 MB e 60 minutos" />
           </Shot>
         ),
       },
       {
-        title: 'Cole o texto da copy',
-        text: 'O campo "Texto da copy" é o conteúdo exato que vai virar o SRT — a ferramenta não reescreve nada: o texto das legendas é o seu, e só os TEMPOS vêm do áudio. Por isso, cole a copy como ela foi narrada de verdade. O contador de caracteres ajuda a conferir se veio tudo.',
+        title: 'Cole a copy exatamente como foi narrada',
+        text: 'No campo "Texto da copy", cole a copy exatamente como foi narrada. O texto da legenda é o seu: a ferramenta não reescreve nada — só os tempos vêm do áudio.',
         visual: (
           <Shot label="Gerador de SRT · copy">
-            <MField value="Cole aqui o texto da copy. O SRT sai com este texto exato + os tempos do áudio." />
+            <MField label="Texto da copy" value="Você sabia que o seu metabolismo muda depois dos 40…" />
           </Shot>
         ),
       },
       {
-        title: 'Gere e confira o resultado',
-        text: 'Clique em "Gerar SRT" e acompanhe as fases ("Extraindo audio..." → "Transcrevendo e alinhando a copy..."). A ferramenta escuta o áudio, casa cada palavra da copy com o momento exato em que foi dita e monta os blocos de legenda nesse ritmo real. O card "SRT gerado" mostra o número de legendas e o conteúdo completo pra você revisar na tela antes de baixar com "Baixar .SRT".',
+        title: 'Gere o SRT',
+        text: 'Clique em "Gerar SRT". A ferramenta casa cada palavra com o momento exato em que foi dita e monta os blocos no ritmo da fala.',
+        visual: (
+          <Shot label="Gerador de SRT · gerar">
+            <MBtn tone="primary">Gerar SRT</MBtn>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Confira e baixe o arquivo',
+        text: 'O card "SRT gerado" mostra as legendas pra você conferir. Baixe com "Baixar .SRT".',
         visual: (
           <Shot label="Gerador de SRT · resultado">
+            <MBtn tone="lime">Baixar .SRT</MBtn>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Importe no CapCut',
+        text: 'No CapCut, abra o projeto com esse áudio, clique em "Texto", depois em "Legendas locais", e em "Importar arquivo" escolha o .srt. A legenda entra na linha do tempo já no ritmo da voz — daí é só escolher o estilo.',
+        visual: (
+          <Shot label="CapCut · Texto">
             <MRow>
-              <MBtn tone="primary">Gerar SRT</MBtn>
-              <MChip tone="lime">LEGENDAS · 42</MChip>
-              <MBtn tone="lime">Baixar .SRT</MBtn>
+              <MChip tone="dim">Texto</MChip>
+              <MChip tone="violet">Legendas locais</MChip>
+              <MBtn tone="ghost">Importar arquivo</MBtn>
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Importe no CapCut do jeito certo',
-        text: 'No CapCut Desktop ou Web, vá em "Texto → Legendas → Importar arquivo" e escolha o .srt. Importando por esse caminho, os modelos, estilos e animações de legenda do CapCut funcionam em cima do seu SRT — inclusive o "Aplicar a todas". Não arraste o .srt direto pra timeline nem importe como mídia: aí ele vira texto avulso e perde os recursos de legenda. No celular o CapCut não importa legenda; use o Desktop ou o Web.',
-        visual: (
-          <Shot label="CapCut · caminho">
-            <MRow>
-              <MChip tone="dim">TEXTO</MChip>
-              <MChip tone="dim">LEGENDAS</MChip>
-              <MChip tone="violet">IMPORTAR ARQUIVO</MChip>
-            </MRow>
-          </Shot>
-        ),
+        title: 'No Premiere, o mesmo arquivo',
+        text: 'No Premiere é o mesmo .srt: vá em "Arquivo" → "Importar", escolha o arquivo e arraste pra linha do tempo.',
+      },
+      {
+        title: 'Chave de transcrição (só na primeira vez)',
+        text: 'Na primeira vez, a ferramenta pede a sua chave de transcrição: você cadastra uma vez só, em Configurações → Chaves de IA, e pronto.',
       },
     ],
     tips: [
-      'A ferramenta usa Transcrição, e basta UMA chave: AssemblyAI OU Groq, em Configurações → API. Faltando as duas, o banner "Chave pendente" aponta o caminho ("Configurar →").',
+      'Basta UMA chave de transcrição: AssemblyAI OU Groq. Faltando as duas, o banner "Chave pendente" aponta o caminho ("Configurar →").',
+      'No CapCut, importe sempre por "Legendas locais": assim os modelos, estilos e animações de legenda funcionam em cima do seu SRT (inclusive o "Aplicar a todas"). Arrastando o .srt direto pra timeline ele vira texto avulso. No celular o CapCut não importa legenda — use o Desktop ou o Web.',
       'Áudio muito longo pode passar do limite do servidor — se acontecer, divida em partes menores e gere um SRT por parte.',
     ],
   },
@@ -728,62 +842,76 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'A fala do vídeo vira legenda animada profissional, no tempo exato do áudio — e sai queimada no MP4.',
     steps: [
       {
-        title: 'Envie o vídeo',
-        text: 'Solte o arquivo na área de upload — MP4, MOV ou WEBM, até 800 MB e 20 minutos. A página mostra o tamanho e a duração detectados. O vídeo não sai do seu navegador: só o áudio comprimido sobe pra transcrição.',
+        title: 'Suba o vídeo',
+        text: 'Abra as Legendas Automáticas e suba o vídeo: MP4, MOV ou WEBM, até 800 MB e 20 minutos.',
         visual: (
           <Shot label="Legendas · vídeo">
-            <MDrop label="Arraste ou clique pra subir" sub="MP4, MOV, WEBM — até 800MB e 20min" />
+            <MDrop label="Arraste ou clique pra subir" sub="MP4, MOV ou WEBM · até 800 MB e 20 min" />
           </Shot>
         ),
       },
       {
-        title: 'Gere as legendas automáticas',
-        text: 'Escolha o idioma da fala (ou "Detectar") e clique em "Gerar legendas". A ferramenta transcreve palavra por palavra e monta os blocos no ritmo da fala — como a legenda automática do CapCut, só que já com timing word-level pras animações baterem certinho.',
+        title: 'Gere as legendas',
+        text: 'Escolha o idioma da fala — ou deixe em "Identificar automaticamente" — e clique em "Gerar legendas". A ferramenta transcreve palavra por palavra e divide a legenda em blocos, os pedaços que aparecem na tela, no ritmo da fala.',
         visual: (
           <Shot label="Legendas · transcrição">
             <MRow>
-              <MChip tone="violet">PORTUGUÊS</MChip>
+              <MChip tone="violet">Identificar automaticamente</MChip>
               <MBtn tone="primary">Gerar legendas</MBtn>
-              <MChip tone="lime">PALAVRAS · 214</MChip>
             </MRow>
           </Shot>
         ),
       },
       {
-        title: 'Escolha o modelo e edite',
-        text: 'A galeria tem centenas de modelos de legenda animada (karaokê, glitch, neon, bounce, máquina de escrever...) com preview ao vivo — o que você vê no player é EXATAMENTE o que sai no MP4. Ajuste tamanho, altura na tela, cores e ritmo dos blocos. Na lista de blocos dá pra corrigir texto, dividir, juntar, ajustar o tempo e clicar numa palavra pra pintá-la na cor de destaque.',
+        title: 'Escolha o modelo na galeria',
+        text: 'A galeria tem centenas de modelos, e o player mostra a legenda animada do jeito que vai sair. Quer algo discreto? Escolha uma legenda simples, limpa.',
+      },
+      {
+        title: 'Ligue o Destaque automático',
+        text: 'Quer dinâmica? Com o "Destaque automático", a palavra forte de cada bloco ganha destaque sozinha.',
         visual: (
-          <Shot label="Legendas · editor">
-            <MRow>
-              <MChip tone="violet">KARAOKÊ</MChip>
-              <MChip tone="dim">GLITCH</MChip>
-              <MChip tone="dim">NEON</MChip>
-              <MChip tone="dim">BOUNCE</MChip>
-            </MRow>
+          <Shot label="Legendas · destaque">
+            <MToggle on label="Destaque automático" />
           </Shot>
         ),
       },
       {
-        title: 'Renderize — o download vem sozinho',
-        text: 'Clique em "Renderizar vídeo". O render roda no SEU navegador, acelerado por hardware (o áudio original volta no final) — bem mais rápido que o vídeo em tempo real. Deixe a aba aberta até o fim: quando terminar, o MP4 baixa automaticamente. Se o navegador segurar o download, o card do resultado tem o "Baixar de novo".',
+        title: 'Use os Templates',
+        text: 'O segredo dos criativos: em "Templates", você aplica de uma vez um estilo de legenda no gancho (o comecinho do vídeo) e outro no resto.',
+      },
+      {
+        title: 'Ligue a Linha única',
+        text: 'Com a "Linha única" ligada, o bloco nunca quebra em duas linhas: a frase seguinte entra no próximo bloco.',
+        visual: (
+          <Shot label="Legendas · linha única">
+            <MToggle on label="Linha única" />
+          </Shot>
+        ),
+      },
+      {
+        title: 'Adicione uma Headline',
+        text: '"Headline" é um texto fixo na tela: você arrasta pra onde quiser e escolhe quando entra e quando sai.',
+      },
+      {
+        title: 'Corrija pela copy',
+        text: 'O mais importante: em "Corrigir pela copy", cole o texto que foi narrado — as palavras que a transcrição errou se corrigem sozinhas, sem mexer no tempo.',
+      },
+      {
+        title: 'Renderize o vídeo',
+        text: 'Tudo certo? Clique em "Renderizar vídeo". Roda no seu navegador, e o MP4 baixa sozinho no final.',
         visual: (
           <Shot label="Legendas · render">
-            <MRow>
-              <MBtn tone="primary">Renderizar vídeo</MBtn>
-              <MBtn tone="lime">Baixar de novo</MBtn>
-            </MRow>
+            <MBtn tone="lime">Renderizar vídeo</MBtn>
           </Shot>
         ),
       },
     ],
     tips: [
-      'A transcrição precisa de UMA chave só: AssemblyAI OU Groq, em Configurações → API. Qualquer uma das duas faz a legenda inteira — se você já tem o AssemblyAI configurado, não precisa criar conta na Groq. Com as duas salvas, o AutoEdit usa a Groq (mais barata) e cai pro AssemblyAI se ela falhar. Faltando as duas, o banner "Chave pendente" aponta o caminho ("Configurar →").',
-      'O render local precisa de Chrome ou Edge atualizados no computador (WebCodecs). Não feche a aba durante o render.',
+      'A transcrição precisa de UMA chave só: AssemblyAI OU Groq, em Configurações → Chaves de IA. Faltando as duas, o banner "Chave pendente" aponta o caminho ("Configurar →").',
+      'O render local precisa de Chrome ou Edge atualizados no computador. Não feche a aba durante o render; se o navegador segurar o download, use o "Baixar de novo".',
       'F5 no meio da edição não perde nada: selecionando o MESMO arquivo de novo, a edição anterior é restaurada.',
       'Trocar o "Ritmo dos blocos" remonta tudo a partir da transcrição — faça isso ANTES de corrigir textos na lista.',
-      'Com a legenda selecionada, clique numa palavra e arraste pra marcar um trecho: cor, caixa, tamanho e fonte agem só nele (estilo CapCut).',
-      'O cadeado 🔒 na lista congela um bloco — o "aplicar a todas" não mexe mais nele.',
-      'Na timeline, o scroll do mouse dá zoom ancorado no cursor; a agulha vermelha arrasta pra navegar.',
+      'Na lista de blocos dá pra corrigir texto, dividir, juntar, ajustar o tempo e clicar numa palavra pra pintá-la na cor de destaque. O cadeado 🔒 congela um bloco — o "aplicar a todas" não mexe mais nele.',
     ],
   },
 
@@ -980,62 +1108,54 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Suba o vídeo do rosto',
-        text: 'Na coluna "VÍDEOS" à esquerda, clique em "Subir vídeo" (até 300 MB por arquivo). Pode subir vários e escolher qual usar — o selecionado aparece no preview central, sempre marcado como FONTE. Escolha um take com o rosto inteiro e estável, de frente ou levemente de lado, sem mãos passando na boca. A tela avisa sozinha: vídeo com menos de 2 segundos de rosto é bloqueado, e resolução baixa gera um alerta (os dentes podem sair menos nítidos).',
+        text: 'Na coluna "VÍDEOS", à esquerda, clique em "Subir vídeo" (até 300 MB). Ele aparece no centro, marcado como "FONTE".',
         visual: (
-          <Shot label="Lipsync · entrada">
+          <Shot label="Lipsync · vídeos">
             <MRow>
-              <div className="flex-1">
-                <MDrop label="Subir vídeo" sub="arraste ou clique · até 300MB" />
-              </div>
-              <div className="flex-1">
-                <MDrop label="Subir áudio ou vídeo" sub="mp3, wav, m4a ou mp4 (extrai áudio)" />
-              </div>
+              <MBtn tone="ghost">Subir vídeo</MBtn>
+              <MChip tone="violet">◇ Fonte</MChip>
             </MRow>
           </Shot>
         ),
       },
       {
+        title: 'A regra número um',
+        text: 'Rosto de frente, bem iluminado, sem mão na boca.',
+      },
+      {
         title: 'Suba o áudio novo',
-        text: 'No painel "Configure e gera", o campo "Áudio" recebe a fala que o rosto vai passar a dizer — MP3, WAV, M4A ou até um MP4 (a ferramenta extrai o áudio sozinha). Limite: 6 minutos de áudio por lipsync, que é o tamanho do vídeo gerado (áudio maior? corte em partes e gere uma de cada vez). O botão "Limpar áudio" vem LIGADO e tira ruído e sujeira antes do lipsync — desligue só se o seu áudio já for tratado. Voz limpa, sem música por cima, rende a sincronia mais precisa.',
+        text: 'Em "Configure e gere", suba o áudio: a fala nova que esse rosto vai dizer. MP3, WAV, M4A ou até um MP4, com até 6 minutos. O "Limpar áudio" vem ligado e tira o ruído antes da sincronia.',
         visual: (
-          <Shot label="Lipsync · configuração">
-            <MStack>
+          <Shot label="Lipsync · configure e gere">
+            <MRow>
+              <MField label="Áudio" value="fala-nova.mp3" grow />
               <MToggle on label="Limpar áudio" />
-              <MBtn tone="primary">▶ Gerar</MBtn>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Clique em Gerar',
+        text: 'Clique em "Gerar". O pedido vira um card em "MEUS LIPSYNCS", com a porcentagem ao vivo. Leva alguns minutos — e dá pra disparar outros enquanto espera.',
+        visual: (
+          <Shot label="Lipsync · meus lipsyncs">
+            <MStack>
+              <MBtn tone="primary">Gerar</MBtn>
+              <MQueueItem name="LipSync 01" status="Renderizando… 42%" pct={42} />
             </MStack>
           </Shot>
         ),
       },
       {
-        title: 'Gere e acompanhe em "Meus LipSyncs"',
-        text: 'Clique em "Gerar". O disparo vira um card na seção "MEUS LIPSYNCS" ("LipSync 01", "LipSync 02"...), passando por "Na fila…" e "Renderizando…" com a porcentagem ao vivo. O formulário fica livre na hora — pode disparar vários em sequência e até navegar pra outras ferramentas: os cards continuam atualizando. Renderização de lipsync leva alguns minutos; é normal.',
-        visual: (
-          <Shot label="Lipsync · fila">
-            <MStack>
-              <MQueueItem name="LipSync 01" status="Renderizando…" pct={58} />
-              <MQueueItem name="LipSync 02" status="Na fila…" pct={0} />
-            </MStack>
-          </Shot>
-        ),
-      },
-      {
-        title: 'Baixe o MP4 e confira',
-        text: 'No card pronto, o botão de download baixa o vídeo final como MP4 (dá pra expandir pra tela cheia antes, pelo ícone do card, e baixar por lá com "Baixar MP4"). Confira os primeiros segundos e um trecho do meio: se a boca escorregar em algum ponto, geralmente é movimento brusco no vídeo original — vale trocar o take de entrada. Deu falha? "↻ Tentar de novo" re-roda com os mesmos arquivos.',
-        visual: (
-          <Shot label="Lipsync · entrega">
-            <MStack>
-              <MQueueItem name="LipSync 01" status="pronto" pct={100} tone="lime" />
-              <MBtn tone="lime">Baixar MP4</MBtn>
-            </MStack>
-          </Shot>
-        ),
+        title: 'Baixe o MP4',
+        text: 'Ficou pronto? Baixe o MP4 pelo card.',
       },
     ],
     tips: [
-      'Rosto frontal e centralizado, sem mão na boca — é a regra número 1.',
-      'Iluminação uniforme ajuda mais que resolução alta (luz lateral cria sombra que engana a sincronia).',
-      '720p ou mais deixa a boca nítida; mesma pessoa e mesma língua do áudio dão o resultado mais natural.',
-      'O preview central mostra sempre a FONTE — o resultado aparece nos cards de "Meus LipSyncs", embaixo.',
+      'Use sempre vídeos que você tem autorização pra usar.',
+      'Iluminação uniforme ajuda mais que resolução alta (luz lateral cria sombra que engana a sincronia). 720p ou mais deixa a boca nítida.',
+      'Vídeo com menos de 2 segundos de rosto é bloqueado; áudio acima de 6 minutos precisa ser dividido em partes.',
+      'O preview central mostra sempre a FONTE — o resultado aparece nos cards de "Meus LipSyncs". Deu falha? "↻ Tentar de novo" re-roda com os mesmos arquivos.',
     ],
   },
 
@@ -1186,19 +1306,19 @@ export const GUIDES: Record<string, ToolGuide> = {
     tagline: 'Duas ou mais vozes em volumes diferentes saem no mesmo nível — e o chiado de fundo vai embora.',
     steps: [
       {
-        title: 'Solte os arquivos',
-        text: 'Até 10 por lote — MP3, WAV, MP4, WEBM ou MOV. O caso clássico: dois locutores gravaram em volumes diferentes e precisam sair no mesmo patamar pra edição não denunciar.',
+        title: 'Adicione os arquivos',
+        text: 'No card "Arquivos", adicione até 10, de vídeo ou de áudio (MP3, WAV, MP4, WEBM ou MOV).',
         visual: (
-          <Shot label="Normalizador de Áudio · arquivos">
-            <MDrop label="Selecione ou arraste arquivos" sub="MP3, WAV, MP4, WEBM ou MOV — até 10 por lote" />
+          <Shot label="Normalizador · arquivos">
+            <MDrop label="Arraste ou clique pra subir" sub="Até 10 · MP3, WAV, MP4, WEBM ou MOV" />
           </Shot>
         ),
       },
       {
-        title: 'Escolha o formato de saída',
-        text: 'No card "Formato de saída": "MP4" mantém o vídeo e normaliza só a trilha de áudio; "MP3" e "WAV" entregam só o som (se a entrada for vídeo, a imagem é descartada — a tela avisa). Se houver áudio puro no lote, o MP4 desativa sozinho.',
+        title: 'Escolha a saída',
+        text: 'No card "Formato de saída": MP4 mantém o vídeo e trata só a trilha de áudio; MP3 e WAV, só o som. Com um áudio na fila, o MP4 fica bloqueado.',
         visual: (
-          <Shot label="Normalizador de Áudio · formato">
+          <Shot label="Normalizador · formato de saída">
             <MRow>
               <MChip tone="violet">MP4</MChip>
               <MChip tone="dim">MP3</MChip>
@@ -1208,36 +1328,49 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Normalize',
-        text: 'Clique em "Normalizar N". Cada arquivo passa por duas fases (limpeza de ruído + análise, depois normalização) e o banner mostra qual item está rodando. Se a voz oscila MUITO (um trecho sussurrado, outro gritado), o motor detecta sozinho e reforça o nivelamento — sem inflar o ruído das pausas. No fim, todas as vozes saem no mesmo nível, sem estouro nos picos e com o chiado atenuado.',
+        title: 'Clique em Normalizar',
+        text: 'Clique em "Normalizar N". Ele limpa o ruído, analisa a voz… e nivela tudo, sem estourar os picos.',
         visual: (
-          <Shot label="Normalizador de Áudio · fila">
-            <MStack>
-              <MQueueItem name="locutor-a_normalizado.mp3" status="OK" pct={100} tone="lime" />
-              <MQueueItem name="locutor-b.mp3" status="44%" pct={44} />
-            </MStack>
+          <Shot label="Normalizador · processar">
+            <MBtn tone="primary">Normalizar 2</MBtn>
           </Shot>
         ),
       },
       {
-        title: 'Confira o relatório antes × depois e baixe',
-        text: 'Cada arquivo pronto ganha um relatório: a ONDA SONORA antes (cinza) e depois (verde-água) na mesma escala; a CURVA DE VOLUME DA VOZ, com o "antes" oscilando e o "depois" reto dentro da faixa nivelada (passe o mouse pra ler os dois valores em qualquer ponto); as MÉTRICAS medidas de verdade no resultado — volume médio, oscilação da voz, pico e ruído de fundo, cada uma antes → depois; e o player "Comparar de ouvido", que troca ANTES/DEPOIS no mesmo ponto do áudio. Depois baixe por arquivo ("Baixar MP4/MP3/WAV" — sai nomeado "_normalizado") ou tudo com "Baixar ZIP (N)".',
+        title: 'Leia o relatório',
+        text: 'O relatório mostra o antes e o depois: a "Onda sonora"… e a "Curva de volume da voz", agora reta. E os números: "Volume médio", "Oscilação da voz", "Pico" e "Ruído de fundo".',
         visual: (
-          <Shot label="Normalizador de Áudio · relatório">
-            <MStack>
-              <MRow>
-                <MChip tone="dim">Oscilação ±12.6</MChip>
-                <MChip tone="lime">→ ±6.9 dB · −45%</MChip>
-              </MRow>
-              <MRow>
-                <MChip tone="dim">ANTES</MChip>
-                <MChip tone="violet">DEPOIS</MChip>
-              </MRow>
-              <MBtn tone="lime">Baixar ZIP (2)</MBtn>
-            </MStack>
+          <Shot label="Normalizador · relatório">
+            <MRow>
+              <MField label="Volume médio" value="−24 → −16" />
+              <MField label="Oscilação da voz" value="−62%" />
+              <MField label="Pico" value="protegido" />
+              <MField label="Ruído de fundo" value="−18 dB" />
+            </MRow>
           </Shot>
         ),
       },
+      {
+        title: 'Compare de ouvido',
+        text: 'Quer ouvir a diferença? No "Comparar de ouvido", alterne entre o antes e o depois.',
+        visual: (
+          <Shot label="Normalizador · comparar">
+            <MRow>
+              <MChip tone="dim">Antes</MChip>
+              <MChip tone="violet">Depois</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Baixe',
+        text: 'Baixe cada arquivo ("Baixar MP4/MP3/WAV") ou todos com "Baixar ZIP (N)". O nome sai com "_normalizado" no final.',
+      },
+    ],
+    tips: [
+      'O caso clássico: dois locutores gravaram em volumes diferentes e precisam sair no mesmo patamar pra edição não denunciar.',
+      'Se a voz oscila MUITO (um trecho sussurrado, outro gritado), o motor reforça o nivelamento sozinho — sem inflar o ruído das pausas.',
+      'Com vídeo na fila e saída em MP3/WAV, a imagem é descartada e sai só o áudio normalizado.',
     ],
   },
 

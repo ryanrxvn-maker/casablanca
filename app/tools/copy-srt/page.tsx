@@ -393,7 +393,7 @@ export default function CopySrtPage() {
                 <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
                   O arquivo já está no formato certo. O segredo é o{' '}
                   <span className="font-semibold text-white">caminho de importação</span> —
-                  pelo menu de Legendas, nunca arrastando pra timeline.
+                  pelo menu Legendas locais, nunca arrastando pra timeline.
                 </p>
                 <ol className="mt-3 space-y-1.5 text-[12.5px] leading-relaxed text-white/85">
                   <li>
@@ -403,7 +403,7 @@ export default function CopySrtPage() {
                   </li>
                   <li>
                     <span className="mono text-amber-300">2.</span> Vá em{' '}
-                    <span className="font-semibold text-white">Texto → Legendas</span> e clique em{' '}
+                    <span className="font-semibold text-white">Texto → Legendas locais</span> e clique em{' '}
                     <span className="font-semibold text-white">Importar arquivo</span>.
                   </li>
                   <li>
