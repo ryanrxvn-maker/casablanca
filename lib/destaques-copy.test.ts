@@ -41,7 +41,8 @@ ok(!/600_000/.test(lip), 'o teto antigo de 10 min saiu');
 ok(/até 6 minutos de vídeo por vez/.test(lipCopy), 'copy diz 6 minutos por vez');
 ok(/· até 6 min</.test(lip), 'campo de áudio mostra "até 6 min"');
 ok(!/limpeza|limpo|ruído/i.test(lipCopy), 'copy NÃO fala da limpeza de áudio');
-ok(/Limite: 6 minutos de áudio por lipsync/.test(guia) && !/Limite: 10 minutos/.test(guia), 'guia diz 6 minutos');
+const guiaLip = bloco(guia, "'/tools/lipsync': {", "'/tools/ltx-video'");
+ok(/M4A ou até um MP4, com até 6 minutos/.test(guiaLip) && !/10 minutos/.test(guiaLip), 'guia diz 6 minutos (como a aula em vídeo)');
 
 console.log('destaques: Legendas');
 const legCopy = bloco(hub, 'const DETALHES_LEGENDAS', '};');
